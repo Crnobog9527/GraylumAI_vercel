@@ -17,6 +17,18 @@ describe('research user API', () => {
       a: actor, p_card: id, p: { selected: ['a'], additions: ['猫'] },
     });
   });
+  it('confirms a 10-keyword card: 4 kept options plus 6 additions pass, 11 additions never reach the database', async () => {
+    const client = db({ cardId: id, confirmationId: other, kind: 'keywords', items: [] });
+    const additions = Array.from({ length: 6 }, (_, i) => `词${i}`);
+    await confirmResearchCard(client, actor, { cardId: id, selected: ['a', 'b', 'c', 'd'], additions });
+    expect(client.rpc).toHaveBeenCalledWith('research_card_confirm', {
+      a: actor, p_card: id, p: { selected: ['a', 'b', 'c', 'd'], additions },
+    });
+    client.rpc.mockClear();
+    await expect(confirmResearchCard(client, actor, { cardId: id, selected: [],
+      additions: Array.from({ length: 11 }, (_, i) => `词${i}`) })).rejects.toThrow();
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
   it.each([21, 40])('reads and confirms keywords with %i Unicode code points', async length => {
     const text = '🐈'.repeat(length);
     const client = db([{ cardId: id, kind: 'keywords', options: [{ id: 'a', text }],

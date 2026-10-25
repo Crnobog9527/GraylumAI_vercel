@@ -18,7 +18,8 @@ const uniqueBy = <T>(items: T[], key: (item: T) => string) => new Set(items.map(
 
 export const researchToolArgs = {
   propose_keywords: z.object({
-    keywords: z.array(keyword).min(3).max(5).refine(items => uniqueBy(items, item => item.toLowerCase()), 'Duplicate keyword'),
+    // BENCHMARK-COVERAGE (Owner 2026-10-23): 6–10 keywords, at least 3; research_card_create checks the same range.
+    keywords: z.array(keyword).min(3).max(10).refine(items => uniqueBy(items, item => item.toLowerCase()), 'Duplicate keyword'),
   }).strict(),
   benchmark_discover: z.union([
     z.object({
@@ -56,7 +57,8 @@ export type ResearchToolArgs<T extends ResearchToolName> = z.infer<typeof resear
 
 const PRIVACY = 'Send only keywords, public links or public account names; never personal details or conversation text.';
 export const RESEARCH_TOOL_DESCRIPTIONS: Record<ResearchToolName, string> = {
-  propose_keywords: 'Show the user a keyword selection card (3-5 keywords) before any benchmark search. Free.',
+  propose_keywords: 'Show the user a keyword selection card (aim for 6-10, at least 3: the niche term, synonyms, related terms, '
+    + 'the target market\'s language) before any benchmark search. Free.',
   benchmark_discover: 'Find benchmark candidates for a keyword card the user confirmed (keywordConfirmationId from ' +
     `hostTurnContext.research.cards). To continue, call again with the same confirmation and platforms. ${PRIVACY}`,
   social_search: `Search recent public posts on one platform by keyword. ${PRIVACY}`,

@@ -15,7 +15,8 @@ export const confirmationInput = z.object({
   cardId: id,
   selected: z.array(optionId).max(24),
   edits: z.record(optionId, keyword).optional(),
-  additions: z.array(keyword).max(5).optional(),
+  // A keyword card takes up to 10 keywords (BENCHMARK-COVERAGE 0356); additions alone may fill it.
+  additions: z.array(keyword).max(10).optional(),
 }).strict();
 export const refreshInput = z.object({
   sessionId: id,
@@ -141,6 +142,8 @@ const benchmark = z.object({
   postsPerWeek: count, lastPublishedAt: z.string().nullable(), postsAnalyzed: z.number().int().min(0),
   category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(), qualified: z.boolean(),
   excluded: z.string().nullable(), fetchedAt: z.string(),
+  // BENCHMARK-COVERAGE (0357): share of the fetched posts on the confirmed niche; a label only. Absent before 0357.
+  topicRelevance: z.number().min(0).max(1).nullable().optional(),
   refs: z.object({ followers: refList, medianViews: refList, engagementRate: refList, postsPerWeek: refList,
     lastPublishedAt: refList }),
 });

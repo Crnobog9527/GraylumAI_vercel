@@ -9,7 +9,7 @@ import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
 import { BLOG_INDEX, BLOG_POSTS } from './blog';
 import { COMPARED_ON, compareHans, compareTw } from './compare';
 import { FEATURES, FEATURES_HUB } from './features';
-import { SIGNUP_CTA_HREF } from './shared';
+import { SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW } from './shared';
 import { ZH_TW_GLOSSARY } from './zh-tw/glossary';
 import { ZH_TW_HUB } from './zh-tw/hub';
 import { ZH_TW_IG_JINGYING } from './zh-tw/ig-jingying';
@@ -40,7 +40,7 @@ const ARTICLES: ArticleContent[] = [
 ];
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
-const LOGIN_LINKS = new Set(['/login', SIGNUP_CTA_HREF]);
+const LOGIN_LINKS = new Set(['/login', SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW]);
 // The public Simplified home page, "/" since the /app move (site-chrome SIMPLIFIED_HOME_HREF).
 const TEMPORARY_PUBLIC_LINKS = new Set([SIMPLIFIED_HOME_HREF]);
 const PAGE_PATHS = new Set(PUBLIC_PAGES.map(page => page.path));

@@ -23,7 +23,8 @@ export const recoverySchema = z.object({
 export const localSchema = z.object({
   remaining: count, manualReview: count, errors: z.array(z.string().regex(/^[A-Z0-9_]{1,64}$/)).max(100),
 }).strict();
-export const storageSchema = z.object({ complete: z.boolean(), remaining: count, manualReview: count }).strict();
+export const storageSchema = z.object({ complete: z.boolean(), remaining: count, manualReview: count,
+  errorCode: z.string().regex(/^ERASURE_[A-Z0-9_]{1,55}$/).optional() }).strict();
 export const storageReadySchema = z.object({ ready: z.boolean() }).strict();
 export const beginSchema = z.object({
   ready: z.boolean(), alreadyDeleted: z.boolean(), started: z.boolean(), claimed: z.boolean(), requestId: z.string().uuid(),

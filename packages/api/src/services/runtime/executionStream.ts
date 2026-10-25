@@ -9,7 +9,7 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import type {RuntimeProgress} from './progress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import type {RuntimeBudget} from './budget';
-import {loadStagingPolicy,loadStagingRecoveryPolicy} from './stagingPolicy';
+import {loadStagingRecoveryPolicy,realPolicyCheck,type RealPolicyCheck} from './stagingPolicy';
 import {realRuntimeClosed,realRuntimeEnvironment} from './productionEnvironment';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 import {stagingTransport} from './stagingTransport';
@@ -40,6 +40,9 @@ export type OriginalExecutionHost={
  authorization?:string|null;maintenanceEndpoint?:string;
  /** A streaming route shares one fence between its yields and the executor (libraryVisibility.ts). */
  visibility?:ExecutionVisibility;
+ /** DB-PERF PR-5a: the route already ran loadStagingPolicy for this request (stagingPolicy.ts realPolicyCheck);
+  * its outcome is used instead of loading the same policy a second time. */
+ policyChecked?:RealPolicyCheck;
 };
 
 /** Runs or recovers one admitted execution under its original frozen policy.
@@ -65,8 +68,10 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }
    const retained=['cancelled','cost_pending'].includes(result.state);
    const reason=retained?await retainedOutputReason(host.admin,host.actorId,executionId):null;
-   // Capture and retained-output reads may overlap a deletion commit.
-   await visible();
+   // Capture and retained-output reads may overlap a deletion commit. A streaming route (host.visibility) shows the
+   // result only after its own check right before yielding it, with no write in between (DB-PERF PR-2A): that check
+   // is this one, moved to the moment the result is shown. The non-streaming routes return here, so they check here.
+   if(!host.visibility)await visible();
    return retained?{...result,...(reason?{unavailable:reason}:{})}:withClaimNotice(result);
   };
   const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});
@@ -98,9 +103,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
     ...base,endpoint:host.maintenanceEndpoint,activateSkill,
     callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
-  let policyFailure:unknown;
-  try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch(cause){
-   policyFailure=cause;
+  const checked=host.policyChecked??await realPolicyCheck(host.admin,host.actorId);
+  if(!checked.ok){
+   const policyFailure=checked.failure;
    const closed=await closeWaiting();if(closed)return closed;
    const observed=await host.admin.rpc('runtime_execution',{
     p_actor_id:host.actorId,p_execution_id:executionId,p_action:'read',
@@ -152,9 +157,24 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   // even if a later test window is now selected in the host environment.
   const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
   const adapter=stagingTransport(host.admin,original,host.budget);
-  return outcome(await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
+  const result=await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
    resumePricing:policies=>admitPricing(host.admin,policies),
-   callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,realRuntimeEnvironment(process.env)).calls}).execute(executionId,publicProgress,resume)));
+   callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,realRuntimeEnvironment(process.env)).calls}).execute(executionId,publicProgress,resume));
+  return outcome(resume?await endClosedResume(host,executionId,result):result);
+}
+
+/**
+ * A waiting round whose frozen test window or model no longer admits it can never resume (staging 2026-10-24: the
+ * window was switched while the organizer waited, and every new message stayed blocked by it). When its reply was
+ * already saved and shown, the round ends without the organizer: the delivered reply keeps its charge and the step
+ * that never ran costs nothing (runtime_cancel settles known calls only). Without a saved reply it keeps waiting.
+ */
+export async function endClosedResume(host:OriginalExecutionHost,executionId:string,result:AgentTurnOutcome):Promise<AgentTurnOutcome>{
+ if(!(result as {resumeClosed?:true}).resumeClosed||!result.body)return result;
+ const ended=await host.admin.rpc('runtime_cancel',{p_actor_id:host.actorId,p_execution_id:executionId});
+ if(ended.error)stagingRpcFailure(ended.error);
+ logger.warn('api','runtime_resume_closed_ended',{executionId,state:ended.data?.state});
+ return {state:ended.data.state,body:result.body,resumeClosed:true};
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';result:OriginalExecutionOutcome};

@@ -11,7 +11,9 @@ import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
 import {testIdentityGuard,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
-import {REPLY_LANGUAGE_INSTRUCTIONS} from './primaryInstructions';
+import {replySettingInstructions} from './replyLanguage';
+// New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
+const DEFAULT_REPLY_RULE=replySettingInstructions('zh-Hans');
 const skill='Pinned skill 正文';
 // MODEL-IDENTITY-GUARD: the switch defaults on, so the brand identity leads the frozen system text.
 const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
@@ -94,7 +96,7 @@ it('ordinary role is never marked even on Anthropic with a write price',async()=
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
  const instructions=brand+skill+'\n'+host();
  // The executor appends the reply-language rule (SKILL-I18N-HOOK); admission sizes it as well.
- const oldLimit=Buffer.byteLength(JSON.stringify({instructions:instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+ const oldLimit=Buffer.byteLength(JSON.stringify({instructions:instructions+DEFAULT_REPLY_RULE,
   messages:[{role:'user',content:'user facts'}]}))+1024;
  const f=fixture('anthropic/test','2.5',true,oldLimit);
  await expect(f.service.prepare(f.input)).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');

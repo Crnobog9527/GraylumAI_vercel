@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
+import {rowFor,rowsFor,type ConfigurationRows} from './settingsRows';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {StagingAccessError,stagingRpcFailure,type StagingFailure} from './stagingErrors';
 import {sourceToolBytes} from './sourceRuntimeTool';
@@ -51,12 +52,13 @@ export function normalizeLibraryReferences(items:ReferenceInput|undefined):Libra
  * have no read_source. The caller already dropped an empty list, so old clients' stored requests (and replays) match.
  */
 export async function admitLibraryReferences(admin:SupabaseClient,request:{references?:ReferenceInput;selection:{kind:string}},
- host:{opcTurnToken?:string;reportGeneration?:unknown}):Promise<LibraryReference[]>{
+ host:{opcTurnToken?:string;reportGeneration?:unknown},configuration?:Promise<ConfigurationRows>):Promise<LibraryReference[]>{
  if(!request.references?.length)return [];
  const references=normalizeLibraryReferences(request.references);
  if(host.opcTurnToken||host.reportGeneration||request.selection.kind==='organizer')
   throw new StagingAccessError('LIB_REFERENCE_UNSUPPORTED');
- const setting=await admin.from('system_settings').select('value').eq('key',LIBRARY_AGENT_READ_KEY).maybeSingle();
+ const setting=configuration?rowFor(await configuration,LIBRARY_AGENT_READ_KEY)
+  :await admin.from('system_settings').select('value').eq('key',LIBRARY_AGENT_READ_KEY).maybeSingle();
  if(setting.error)stagingRpcFailure(setting.error);
  const value=setting.data?.value;
  if(value!==true&&value!=='true')throw new StagingAccessError('LIB_REFERENCE_DISABLED');
@@ -64,9 +66,11 @@ export async function admitLibraryReferences(admin:SupabaseClient,request:{refer
 }
 
 /** Whether this free chat turn may search the user's library: both server switches on and a plain free conversation. */
-export async function admitLibraryRetrieval(admin:SupabaseClient,real:boolean,kind:string,notFreeChat:unknown[]):Promise<boolean>{
+export async function admitLibraryRetrieval(admin:SupabaseClient,real:boolean,kind:string,notFreeChat:unknown[],
+ configuration?:Promise<ConfigurationRows>):Promise<boolean>{
  if(!real||kind!=='ordinary'||notFreeChat.some(Boolean))return false;
- const rows=await admin.from('system_settings').select('key,value').in('key',[LIBRARY_AGENT_READ_KEY,LIBRARY_RETRIEVAL_KEY]);
+ const rows=configuration?rowsFor(await configuration,[LIBRARY_AGENT_READ_KEY,LIBRARY_RETRIEVAL_KEY])
+  :await admin.from('system_settings').select('key,value').in('key',[LIBRARY_AGENT_READ_KEY,LIBRARY_RETRIEVAL_KEY]);
  if(rows.error)stagingRpcFailure(rows.error);
  const on=(key:string)=>{const value=(rows.data??[]).find(row=>row.key===key)?.value;return value===true||value==='true';};
  return on(LIBRARY_AGENT_READ_KEY)&&on(LIBRARY_RETRIEVAL_KEY);

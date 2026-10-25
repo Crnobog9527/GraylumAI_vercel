@@ -5,7 +5,7 @@
  */
 
 import type { ArticleContent } from '../../article';
-import { SIGNUP_CTA_HREF } from '../shared';
+import { SIGNUP_CTA_HREF_ZH_TW } from '../shared';
 
 // Taiwan hub page, "the second home page" (SEO_GEO_SPEC 3.3 and appendix B): core word 自媒體, answers
 // 自媒體是什麼. The 自媒體經營 family belongs to /zh-tw/zimeiti-jingying, so this page does not target it.
@@ -29,7 +29,7 @@ export const ZH_TW_HUB: ArticleContent = {
   cta: {
     label: '免費開始定位診斷',
     description: '不知道該經營什麼帳號？AI 教練會一步步問你的興趣、經驗和想服務的人，幫你整理出適合的帳號定位和目標受眾。註冊後即可免費開始。',
-    href: SIGNUP_CTA_HREF,
+    href: SIGNUP_CTA_HREF_ZH_TW,
   },
   sections: [
     {

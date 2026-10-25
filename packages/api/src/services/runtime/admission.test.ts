@@ -44,7 +44,7 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
  });
  const admin={rpc,from:(table:string)=>{
   let selected='';const q={select:()=>q,eq:(_key:string,id:string)=>{selected=id;return q;},in:async()=>({data:table==='ai_models'?models:[{key:'v3_summary_model_id',value:organizerId},{key:'v3_summary_max_tokens',value:'2048'}],error:null}),single:async()=>{modelReads++;return {data:models.find(m=>m.id===selected),error:null};}};
-  expect(['ai_models','system_settings']).toContain(table);return q;
+  expect(['ai_models','system_settings','profiles']).toContain(table);return q;
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const quotes=models.map(m=>({modelId:m.id,provider:'openrouter',account:'test',model:m.model_id,protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:4096,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}));

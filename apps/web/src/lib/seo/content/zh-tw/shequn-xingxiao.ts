@@ -5,7 +5,7 @@
  */
 
 import type { ArticleContent } from '../../article';
-import { SIGNUP_CTA_HREF } from '../shared';
+import { SIGNUP_CTA_HREF_ZH_TW } from '../shared';
 import { ZH_TW_CRUMB } from './links';
 
 // Target: 社群行銷 (SEO_GEO_SPEC appendix B).
@@ -29,7 +29,7 @@ export const ZH_TW_SHEQUN_XINGXIAO: ArticleContent = {
   cta: {
     label: '免費開始定位診斷',
     description: '社群行銷的第一步是講清楚「你是誰、為誰服務」。AI 教練會透過對話幫你整理品牌定位和目標受眾，再往下規劃內容。註冊後即可免費開始。',
-    href: SIGNUP_CTA_HREF,
+    href: SIGNUP_CTA_HREF_ZH_TW,
   },
   sections: [
     {

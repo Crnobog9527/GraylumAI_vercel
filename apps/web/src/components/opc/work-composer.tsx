@@ -121,6 +121,13 @@ export function useFreeConversation(options:{withReferences?:boolean}={}){
  function setReferences(next:LibraryReference[]){setStoredReferences(next);
   try{if(next.length)sessionStorage.setItem(NEW_TASK_REFERENCES,JSON.stringify(next));else sessionStorage.removeItem(NEW_TASK_REFERENCES);}
   catch{/* The box still holds them for this send. */}}
+ // First-message compare (FUSION-COMPARE): the same idempotent start `send` makes, without sending. Its request id is the one `send` uses,
+ // so comparing and then sending on this page is one conversation, never two.
+ async function ensureSession():Promise<string>{
+  request.current ||= crypto.randomUUID();
+  const result=await start.mutateAsync({requestId:request.current,scope:{kind:'positioning_draft'}});
+  return result.sessionId as string;
+ }
  async function send(input:string,moduleId=''){
   if(!input.trim()||start.isPending)return;setError('');
   request.current ||= crypto.randomUUID();
@@ -136,5 +143,5 @@ export function useFreeConversation(options:{withReferences?:boolean}={}){
    location.assign('/app/runtime?session='+result.sessionId+'&request='+sendId);
   }catch(cause){setError(workspaceErrorMessage(cause as Parameters<typeof workspaceErrorMessage>[0])+' 输入已保留；再次发送会恢复同一次开始请求。');}
  }
- return {send,busy:start.isPending,error,references,setReferences};
+ return {send,ensureSession,busy:start.isPending,error,references,setReferences};
 }
