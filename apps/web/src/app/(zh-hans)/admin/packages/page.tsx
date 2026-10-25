@@ -413,8 +413,6 @@ export default function AdminPackagesPage() {
     const data = {
       name,
       level: planFormData.level,
-      monthlyPrice,
-      yearlyPrice,
       monthlyCredits,
       yearlyCredits,
       monthlyBonusCredits,
@@ -434,6 +432,7 @@ export default function AdminPackagesPage() {
     } else {
       createMembershipPlan.mutate({
         ...data,
+        monthlyPrice, yearlyPrice,
         stripeMonthlyPriceId: stripeMonthlyPriceId || undefined,
         stripeYearlyPriceId: stripeYearlyPriceId || undefined,
       });
@@ -1166,12 +1165,12 @@ export default function AdminPackagesPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>月付价格 (USD)</Label>
+                  <Label style={{ color: 'var(--text-secondary)' }}>月付价格 (USD){editingPlan ? '（只读，改价走迁移）' : ''}</Label>
                   <Input
                     data-testid="membership-plan-monthly-price-input"
                     type="number"
                     step="0.01"
-                    value={planFormData.monthlyPrice}
+                    value={planFormData.monthlyPrice} disabled={Boolean(editingPlan)}
                     onChange={(e) => setPlanFormData({ ...planFormData, monthlyPrice: e.target.value })}
                     placeholder="如：9.9"
                     className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
@@ -1179,12 +1178,12 @@ export default function AdminPackagesPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>年付价格 (USD)</Label>
+                  <Label style={{ color: 'var(--text-secondary)' }}>年付价格 (USD){editingPlan ? '（只读，改价走迁移）' : ''}</Label>
                   <Input
                     data-testid="membership-plan-yearly-price-input"
                     type="number"
                     step="0.01"
-                    value={planFormData.yearlyPrice}
+                    value={planFormData.yearlyPrice} disabled={Boolean(editingPlan)}
                     onChange={(e) => setPlanFormData({ ...planFormData, yearlyPrice: e.target.value })}
                     placeholder="如：99"
                     className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
