@@ -63,7 +63,15 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
           for await (const event of events) {
             if (event.type === 'delta') setLive(old => ({ ...old, [column.column]: { text: (old[column.column]?.text ?? '') + event.text, streaming: true } }));
           }
-        } catch (cause) { setError(compareErrorText(cause)); }
+        } catch (cause) {
+          // Stopping closes the column's run in the database while its request is still reading: the request then fails as a
+          // side effect of the user's own stop. That is not an error to show; any other failure still is.
+          const after = (await view.refetch()).data as View | undefined;
+          const own = after?.columns.find(item => item.column === column.column);
+          const stoppedByUser = after?.state === 'stopped' || own?.call?.verdict === 'user_stopped'
+            || (own !== undefined && columnPhase(own, after?.state ?? 'running') === 'stopped');
+          if (!stoppedByUser) setError(compareErrorText(cause));
+        }
         finally {
           setLive(old => ({ ...old, [column.column]: { text: old[column.column]?.text ?? '', streaming: false } }));
           // The column may still be undispatched (the server released its claim after a failure before anything was sent):
