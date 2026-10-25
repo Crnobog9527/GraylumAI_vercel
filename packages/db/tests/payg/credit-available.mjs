@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// MAINT-P4 (0399): credit_available is the one formula for spendable credits; bill2_payg_claim and atomic_pre_deduct
+// MAINT-P4 (0391): credit_available is the one formula for spendable credits; bill2_payg_claim and atomic_pre_deduct
 // both call it. Each hold kind is covered on the claim and pre-deduct paths by quarantine.mjs and refund-hold.mjs;
 // these cases check the shared value, the two spots where the old copies differed (dispute-frozen grants), a repeated
 // claim and two concurrent claims against held credits.

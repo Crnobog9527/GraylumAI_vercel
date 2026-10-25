@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // MAINT-P4 (audit A4): the credits a user may spend are computed in one place, credit_available. A spend path that
-// adds the holds itself again (as atomic_pre_deduct and bill2_payg_claim each did before 0399) could miss the next
+// adds the holds itself again (as atomic_pre_deduct and bill2_payg_claim each did before 0391) could miss the next
 // kind of hold and let it be spent. Reads the generated function files, which CI requires to equal the build.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
