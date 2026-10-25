@@ -7,6 +7,7 @@ import { useCreditsBalance } from '@/hooks/use-credits';
 import { accountDisplayName, membershipText } from '@/lib/account-presentation';
 import styles from './home.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
+import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import { HOME_STEP_LABELS, HOME_STEPS } from './home-steps';
 import { startEntryHref, type StartMode } from './positioning/start-entry';
 
@@ -26,7 +27,7 @@ export default function HomePage(){
  const hasStrategy=accounts.some(account=>account.strategyDraftId);
  const name=accountDisplayName(profile);
  return <div className={styles.home}>
-  <header className={styles.header}><Link href="/app" className={styles.brand}><img src="/graylum-logo.png" alt=""/>Graylum</Link><nav aria-label="全局导航"><Link href="/app" aria-current="page">首页</Link><Link href="/app/positioning">对话</Link><Link href="/app/profile">个人中心</Link></nav><div className={styles.headerEnd}><Link href="/app/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/app/profile" aria-label="个人中心" className={styles.avatar}>{(name??'我').slice(0,1)}</Link></div></header>
+  <header className={styles.header}><Link href="/app" className={styles.brand}><img src="/graylum-logo.png" alt=""/>Graylum</Link><nav aria-label="全局导航"><Link href="/app" aria-current="page">首页</Link><Link href="/app/positioning">对话</Link><Link href="/app/profile">个人中心</Link></nav><div className={styles.headerEnd}><LanguageSwitch className={styles.language}/><Link href="/app/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/app/profile" aria-label="个人中心" className={styles.avatar}>{(name??'我').slice(0,1)}</Link></div></header>
   <main className={styles.page}>
    <section className={styles.account}><div><strong>{name?`欢迎回来，${name}`:'欢迎回来'}</strong><span>{membershipText(profile)}</span></div><Link href="/app/profile?tab=subscription">账户与积分 →</Link></section>
    <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>

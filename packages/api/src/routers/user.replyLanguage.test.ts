@@ -63,7 +63,7 @@ describe('reply language setting (CHAT-LANGUAGE)', () => {
     const t = setup(null);
     const smuggled = { language: 'en', id: 'user-2', profileId: 'user-2', credits: 99999, role: 'admin', nickname: 'x' };
     await expect(t.caller.setReplyLanguage(smuggled as never)).resolves.toEqual({ language: 'en' });
-    await expect(t.caller.applyEntryReplyLanguage(smuggled as never)).resolves.toEqual({ language: 'en' });
+    await expect(t.caller.applyEntryReplyLanguage(smuggled as never)).resolves.toEqual({ language: 'en', previous: 'en' });
     expect(t.writes.map(w => Object.keys(w.value))).toEqual([['reply_language'], ['reply_language']]);
     expect(t.targets).toEqual(['user-1', 'user-1']);
   });
@@ -71,16 +71,16 @@ describe('reply language setting (CHAT-LANGUAGE)', () => {
   it('refuses a language outside the three choices before writing anything', async () => {
     const t = setup(null);
     await expect(t.caller.setReplyLanguage({ language: 'fr' as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(t.caller.applyEntryReplyLanguage({ language: 'zh-Hans' as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(t.caller.applyEntryReplyLanguage({ language: 'fr' as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(t.writes).toEqual([]);
   });
 
-  it('the sign-up entry language applies only while none was ever chosen, and never overrides a choice', async () => {
+  it('the public page language always wins, even over an earlier choice, and reports what it replaced (Owner 2026-10-25)', async () => {
     const fresh = setup(null);
-    await expect(fresh.caller.applyEntryReplyLanguage({ language: 'zh-Hant' })).resolves.toEqual({ language: 'zh-Hant' });
-    expect(fresh.writes).toEqual([{ value: { reply_language: 'zh-Hant' }, onlyWhenNull: true }]);
-    const chosen = setup('zh-Hans');
-    await expect(chosen.caller.applyEntryReplyLanguage({ language: 'zh-Hant' })).resolves.toEqual({ language: 'zh-Hans' });
+    await expect(fresh.caller.applyEntryReplyLanguage({ language: 'zh-Hant' })).resolves.toEqual({ language: 'zh-Hant', previous: 'zh-Hans' });
+    expect(fresh.writes).toEqual([{ value: { reply_language: 'zh-Hant' }, onlyWhenNull: false }]);
+    const chosen = setup('en');
+    await expect(chosen.caller.applyEntryReplyLanguage({ language: 'zh-Hans' })).resolves.toEqual({ language: 'zh-Hans', previous: 'en' });
     expect(chosen.row.reply_language).toBe('zh-Hans');
   });
 

@@ -25,6 +25,7 @@ import {
  RailWorkThread,
 } from './rail-view';
 import { useAccountDiscussion } from './use-account-discussion';
+import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import styles from './workspace-frame.module.css';
 
 type Item = {workItemId:string;sessionId:string;title:string;chatName?:string;uiRevision?:number;pinned?:boolean;archived?:boolean;deleted?:boolean;brief:string|null;day:string;revision:number;contentType?:string;lastActivityAt?:string};
@@ -203,7 +204,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  }
 
  return <div className={styles.workspace}>
-  <GlobalHeader area={area} onOpenNav={()=>setMobileNav(true)}/>
+  <GlobalHeader area={area} onOpenNav={()=>setMobileNav(true)} end={<LanguageSwitch/>}/>
   {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={()=>setNoticeOpen(false)}/>}
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
    <RailView area={area} returnParam={returnParam} dataReview={publishMonitor.data?.ownData===true} onCloseMobile={()=>setMobileNav(false)}>

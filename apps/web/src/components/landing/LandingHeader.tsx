@@ -7,8 +7,9 @@ import { resolveSiteName } from '@/lib/site-config';
 
 // Relative on the server and in the browser alike, so hydration matches the server HTML. On the
 // public site the proxy forwards these paths to the app domain; elsewhere the current host serves them.
-const LOGIN_HREF = '/login';
-const SIGNUP_HREF = '/login?action=signup';
+// The landing page is Simplified Chinese: signing in from it sets the AI reply language to Simplified (CHAT-LANGUAGE).
+const LOGIN_HREF = '/login?lang=zh-Hans';
+const SIGNUP_HREF = '/login?action=signup&lang=zh-Hans';
 
 const NAV_LINKS = [
   { label: '它怎么工作', href: '/#how-it-works' },
