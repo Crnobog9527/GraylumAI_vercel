@@ -3,7 +3,8 @@
 import { z } from 'zod';
 import type { RuntimeTool } from './runner';
 import { admitSubcalls, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_DESCRIPTIONS, researchToolArgs, subcallNeed,
-  type ResearchToolName } from '../research/tools/schemas';
+  declaredResearchParameters, undeclaredResearchToolArgs, withoutNulls, type ResearchToolName } from '../research/tools/schemas';
+import { SOCIAL_PLATFORMS } from '../research/vendors/types';
 import { statusForOutcome, toolEnvelope } from '../research/tools/envelope';
 import { selectRoute, type ResearchToolsConfig } from '../research/vendors/config';
 import { parallelModeFor } from '../research/vendors/parallel';
@@ -21,8 +22,11 @@ const savedWebResult = z.object({
 });
 
 // SDK requires object parameters; the authoritative strict union is parsed before execution.
-const discoveryParameters = z.object({ keywordConfirmationId: z.string().uuid().optional(),
+const undeclaredDiscoveryParameters = z.object({ keywordConfirmationId: z.string().uuid().optional(),
   platforms: z.array(z.string()).optional(), discoveryId: z.string().uuid().optional() }).strict();
+/** ARCH-FIX C1: the platforms are named, so no string the model sees is unbounded; nullable keeps the limits (schemas.ts). */
+const discoveryParameters = z.object({ keywordConfirmationId: z.string().uuid().nullable(),
+  platforms: z.array(z.enum(SOCIAL_PLATFORMS)).min(1).max(2).nullable(), discoveryId: z.string().uuid().nullable() }).strict();
 /** RT-3b PR-3: a mentor turn has one research slot; the reply after the result ends the turn (terminalReplyGuard). */
 const ONE_CALL = 'At most one research tool call per reply; then answer from its result.';
 /** CHAT-AUTO-CONTEXT C: a free chat reply may look up a few different things (plan §2.3.2). */
@@ -33,12 +37,19 @@ const ACCOUNT_SOURCE = ' Only an account from the user\'s benchmark table (read_
 export const researchToolDescription = (name: ResearchToolName, freeChat = false): string =>
   `${RESEARCH_TOOL_DESCRIPTIONS[name]} ${freeChat ? FREE_CHAT_CALLS : ONE_CALL}${freeChat && name === 'social_account' ? ACCOUNT_SOURCE : ''}`;
 /** web_search without a frozen advanced route offers only the fast mode, so the one research call cannot miss (#1029 P2). */
-const fastSearchParameters = researchToolArgs.web_search.extend({ mode: z.enum(['fast']).default('fast') }).strict();
-/** The parameters the model sees for one research tool (admission sizes the request with them). */
-export const researchToolParameters = (name: ResearchToolName, fastSearchOnly = false): z.ZodObject<z.ZodRawShape> =>
-  name === 'benchmark_discover' ? discoveryParameters
-    : name === 'web_search' && fastSearchOnly ? fastSearchParameters as unknown as z.ZodObject<z.ZodRawShape>
-      : researchToolArgs[name] as z.ZodObject<z.ZodRawShape>;
+const fastSearchParameters = (args: typeof undeclaredResearchToolArgs) =>
+  args.web_search.extend({ mode: z.enum(['fast']).default('fast') }).strict();
+/**
+ * The parameters the model sees for one research tool (admission sizes the request with them). `declaredLimits`
+ * (ARCH-FIX C1, frozen as FrozenResearchTurn.toolLimits) carries every length limit; a turn frozen before it keeps the
+ * parameters it was admitted with, so a replay sends the same bytes.
+ */
+export const researchToolParameters = (name: ResearchToolName, fastSearchOnly = false, declaredLimits = true): z.ZodObject<z.ZodRawShape> => {
+  const args = (declaredLimits ? declaredResearchParameters : undeclaredResearchToolArgs) as typeof undeclaredResearchToolArgs;
+  return name === 'benchmark_discover' ? declaredLimits ? discoveryParameters : undeclaredDiscoveryParameters
+    : name === 'web_search' && fastSearchOnly ? fastSearchParameters(args) as unknown as z.ZodObject<z.ZodRawShape>
+      : args[name] as z.ZodObject<z.ZodRawShape>;
+};
 /**
  * What the model gets when its arguments fail a tool's schema (staging 2026-10-24: a 42-character keyword).
  * Without it the Agents SDK throws, the whole paid turn fails and its replay fails the same way.
@@ -55,6 +66,8 @@ export interface ResearchToolOptions {
   freeChat?: { accounts: AccountSources };
   /** Subcalls this answer already made (saved before a pause or restart), so a resumed answer never gets a fresh round. */
   usedSubcalls?: () => Promise<number>;
+  /** Whether the frozen turn declared the length limits to the model (FrozenResearchTurn.toolLimits); default yes. */
+  declaredLimits?: boolean;
 }
 
 /** `names`: the tools this turn froze (RT-3b PR-3); the PR-1 default offers the whole positioning set. */
@@ -64,9 +77,12 @@ export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly R
   let calls = 0;
   const freeChat = options.freeChat;
   const make = (name: ResearchToolName): RuntimeTool => ({
-    name, description: researchToolDescription(name, Boolean(freeChat)), parameters: researchToolParameters(name, fastSearchOnly(ctx.config)),
+    name, description: researchToolDescription(name, Boolean(freeChat)), parameters: researchToolParameters(name, fastSearchOnly(ctx.config),
+      options.declaredLimits ?? true),
     invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true,
-    async execute(raw, callId) {
+    async execute(offered, callId) {
+      // A turn with declared limits offers nullable optional fields; the tool runs, saves and shows them as not given.
+      const raw = withoutNulls(offered) as Record<string, unknown>;
       // Replayed calls of a resumed answer run through here again, so this count is rebuilt in order.
       if (freeChat && ++calls > FREE_CHAT_RESEARCH_CALLS) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });
       const parsed = researchToolArgs[name].safeParse(raw);
