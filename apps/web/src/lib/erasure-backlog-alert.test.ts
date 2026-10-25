@@ -183,6 +183,18 @@ it('counts failing library cleanup runs newest first, stopping at the first succ
   expect(sentry.captureMessage).not.toHaveBeenCalled();
 });
 
+it('six failing runs still alert when the backlog read itself is what fails', async () => {
+  const down = fakeLibraryClient(null, Array(6).fill('error'));
+  expect(await checkLibraryBacklog(down.client as never, now)).toBe('error');
+  expect(console.warn).toHaveBeenCalledWith('[erasure-alert] LIBRARY_CLEANUP_BACKLOG_UNAVAILABLE');
+  expect(sentry.captureMessage).toHaveBeenLastCalledWith('LIBRARY_CLEANUP_BACKLOG', expect.objectContaining({
+    level: 'error', extra: { pending: 0, overdue: 0, oldestHours: 0, failingRuns: 6 },
+  }));
+  sentry.captureMessage.mockClear();
+  expect(await checkLibraryBacklog(fakeLibraryClient(null, ['error', 'error']).client as never, now)).toBeNull();
+  expect(sentry.captureMessage).not.toHaveBeenCalled();
+});
+
 it('a failed run-history read never hides the backlog alert', async () => {
   const { client } = fakeLibraryClient({ pending: 5000, overdue: 0, oldestDeletedAt: ago(60_000) }, null);
   expect(await checkLibraryBacklog(client as never, now)).toBe('fatal');

@@ -113,7 +113,12 @@ export async function checkLibraryBacklog(client: SupabaseClient, now = Date.now
         return 0;
       }),
     ]);
-    if (error || !data) throw new Error('LIBRARY_BACKLOG_UNAVAILABLE');
+    // The two signals are independent: cleanup itself calls the backlog RPC, so a failing RPC is exactly what makes
+    // runs fail. Keep the failing-runs alert when only the backlog read is down.
+    if (error || !data) {
+      console.warn('[erasure-alert] LIBRARY_CLEANUP_BACKLOG_UNAVAILABLE');
+      return failingRuns >= LIBRARY_FAILING_RUNS ? reportLibraryBacklog({ failingRuns }, now) : null;
+    }
     return reportLibraryBacklog({
       ...(data as { pending?: number; overdue?: number; oldestDeletedAt?: string | null }), failingRuns,
     }, now);
