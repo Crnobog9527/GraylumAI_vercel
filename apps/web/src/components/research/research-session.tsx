@@ -213,6 +213,12 @@ export function ResearchSessionPanel({ settledTurns, onSend, continuation = null
   const disabledNow = useRef(props.disabled);
   disabledNow.current = props.disabled;
   const checking = useRef(new Set<string>());
+  // The confirmation below may still be in flight when the user leaves this step or page: a panel that is gone sends nothing.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => {
     if (decision !== "send" || !toSend || !autoContinue) return;
     if (continuation) { // the stream's own signal comes from this very turn: nothing can have outdated it
@@ -224,6 +230,7 @@ export function ResearchSessionPanel({ settledTurns, onSend, continuation = null
     checking.current.add(toSend.executionId);
     void utils.research.unfinishedRound.fetch({ sessionId }, { staleTime: 0 }).catch(() => null).then(fresh => {
       checking.current.delete(toSend.executionId);
+      if (!mounted.current) return;
       const confirmed = storedUnfinishedRound(fresh);
       if (!confirmed || confirmed.executionId !== toSend.executionId) return;
       const seen = roundCounts(autoContinue.sentPerRound, confirmed);

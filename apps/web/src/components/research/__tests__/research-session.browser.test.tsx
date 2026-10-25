@@ -414,3 +414,42 @@ it("never sends a cached stored round the host no longer reports, and sends one 
     await page.close();
   }
 }, 60000);
+
+// Review P2 (#1421): the confirmation read right before sending may still be in flight when the user leaves this step or page.
+it("sends nothing once the panel is gone, even if the host's confirmation arrives afterwards", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    const stored = { discoveryId: "d1", executionId: "exec-leaving", replies: 2 };
+    let hold: Promise<void> | null = null;
+    let release!: () => void;
+    await page.route("**/*", async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' });
+      if (url.pathname.endsWith("/research.unfinishedRound")) {
+        if (hold) await hold;
+        return route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data: stored } }) });
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data: { items: [] } } }) });
+    });
+    await page.addInitScript(() => { (window as unknown as { startBusy: boolean }).startBusy = true; });
+    await page.goto("http://research.test/");
+    await page.addScriptTag({ content: code });
+    await page.waitForFunction(() => typeof (window as unknown as { emit?: unknown }).emit === "function");
+    const sent = () => page.evaluate(() => (window as unknown as { sent: unknown[] }).sent);
+    const win = (name: "setBusy" | "setShown", value: boolean) =>
+      page.evaluate(([n, v]) => (window as unknown as Record<string, (b: boolean) => void>)[n as string]!(v as boolean), [name, value] as const);
+    await page.waitForTimeout(500); // the stored round is read and cached while the conversation is busy
+    hold = new Promise<void>(resolve => { release = resolve; });
+    await win("setBusy", false); // the panel now asks the host again before it sends: that answer is held back
+    await page.waitForTimeout(300);
+    await win("setShown", false); // the user leaves this step (the panel unmounts) before the answer arrives
+    release();
+    await page.waitForTimeout(700);
+    expect(await sent()).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally {
+    await page.close();
+  }
+}, 60000);
