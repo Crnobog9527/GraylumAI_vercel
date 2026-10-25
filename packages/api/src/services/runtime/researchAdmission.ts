@@ -23,14 +23,14 @@ import type { SettingsRead } from './newWorkGate';
 import type { HostTurnContext } from './hostTurn';
 import { researchHost } from './researchHostContext';
 import { FREE_CHAT_RESEARCH, frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE,
-  RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION,
+  RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TOOL_LIMITS, RESEARCH_TURN_VERSION,
   type FrozenResearchTurn } from './researchTurn';
 
 /** Serialized tool definitions as the SDK sends them; the full request is checked again before dispatch. */
-export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false, freeChat = false): number {
+export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false, freeChat = false, declaredLimits = true): number {
   return Buffer.byteLength(JSON.stringify(names.map(name => ({ type: 'function', function: { name,
     description: researchToolDescription(name, freeChat), strict: true,
-    parameters: z.toJSONSchema(researchToolParameters(name, fastOnly)) } }))));
+    parameters: z.toJSONSchema(researchToolParameters(name, fastOnly, declaredLimits)) } }))));
 }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -163,6 +163,7 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     verifiedPlatforms: config.verifiedPlatforms.filter(platform => used.some(({ entry }) => entry.platform === platform)),
     benchmarkPlatforms: fetchable, routes: used.map(({ entry }) => entry),
     discoverSubcalls: Math.min(config.limits.discoverSubcalls, subcalls), recentGrowth: config.recentGrowth,
+    toolLimits: RESEARCH_TOOL_LIMITS,
   });
   return { research, tools, policies: used.map(({ policy }) => policy) };
 }
@@ -199,7 +200,7 @@ function admitGeneral(input: ResearchAdmissionInput, revision: number, config: R
     vendors: RESEARCH_VENDORS.filter(name => used.some(({ entry }) => entry.vendor === name)),
     verifiedPlatforms: social.filter(platform => used.some(({ entry }) => entry.platform === platform)),
     benchmarkPlatforms: [], routes: used.map(({ entry }) => entry), discoverSubcalls: 1, freeChat: FREE_CHAT_RESEARCH,
-    recentGrowth: config.recentGrowth,
+    recentGrowth: config.recentGrowth, toolLimits: RESEARCH_TOOL_LIMITS,
   });
   return { research, tools, policies: used.map(({ policy }) => policy) };
 }
