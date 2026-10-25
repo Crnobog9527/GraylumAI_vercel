@@ -15,7 +15,9 @@ const creditCaps = vi.hoisted(() => [] as Array<number | undefined>);
 const usdCaps = vi.hoisted(() => [] as Array<string | undefined>);
 const memberCapsSeen = vi.hoisted(() => [] as unknown[]);
 const priceRise = vi.hoisted(() => ({ phase: '', code: 'FUSION_ESTIMATE_EXCEEDED' }));
-const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
+const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string; instructions?: string }>);
+// The reviewing user's profile language (Owner 2026-10-24); null means none set.
+const profile = vi.hoisted(() => ({ replyLanguage: null as string | null }));
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
 const db = vi.hoisted(() => ({ review: null as Record<string, unknown> | null, calls: [] as Call[], outputs: new Map<string, string>(),
   savedAt: new Map<string, string>(),
@@ -32,7 +34,7 @@ vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import
   resolveReviewSkill: async () => ({ skillId: '00000000-0000-4000-8000-0000000000c1', revisionId: '00000000-0000-4000-8000-0000000000c2', packageHash: 'a'.repeat(64) }),
   readReviewSkill: async () => ({ reviewer: 'review', summary: 'summarize', rubric: 'rubric' }) }));
 vi.mock('./admission', async original => ({ ...(await original<typeof import('./admission')>()),
-  admitFusionGroup: async (input: { requestId: string; members: Array<{ modelId: string; phase: string; request: { input: string } }>;
+  admitFusionGroup: async (input: { requestId: string; members: Array<{ modelId: string; phase: string; request: { input: string; instructions?: string } }>;
     outputTokens: { opinion: number; summary: number }; maxCredits?: number; maxUsd?: string; memberCaps?: unknown }) => {
     caps.push(input.outputTokens);
     creditCaps.push(input.maxCredits);
@@ -44,7 +46,7 @@ vi.mock('./admission', async original => ({ ...(await original<typeof import('./
     if (existing) return { ...existing, replayed: true };
     const group = { groupId: randomUUID(), runs: input.members.map((m, index) => ({ runId: randomUUID(), index, phase: m.phase,
       body: m.request.input, call: { model: m.modelId } })) };
-    requests.push(...input.members.map(m => ({ modelId: m.modelId, phase: m.phase, input: m.request.input })));
+    requests.push(...input.members.map(m => ({ modelId: m.modelId, phase: m.phase, input: m.request.input, instructions: m.request.instructions })));
     db.groups.set(input.requestId, group);
     return { ...group, replayed: false };
   },
@@ -88,6 +90,7 @@ vi.mock('./reviewRecord', async original => {
 import { reviewFlow } from './review';
 import { summaryRequest } from './reviewPrompts';
 import { DECISIONS } from './hostChecks';
+import { reviewerRequest, reviewLanguageRule, reviewLocale } from './reviewPrompts';
 
 const sections = ['定位', '结语'];
 const original = '## 定位\n原定位\n## 结语\n原结语';
@@ -98,6 +101,10 @@ const admin = { rpc: async (name: string, args: Record<string, unknown>) => {
     return { data: body ? { body, savedAt: db.savedAt.get(String(args.p_call_id)) } : null, error: null }; }
   if (name === 'fusion_call_verdict') { const call = db.calls.find(c => c.callId === args.p_call_id)!; call.verdict = String(args.p_verdict); return { data: call.verdict, error: null }; }
   throw new Error('unexpected ' + name);
+}, from: (table: string) => {
+  if (table !== 'profiles') throw new Error('unexpected ' + table);
+  const q = { select: () => q, eq: () => q, single: async () => ({ data: { reply_language: profile.replyLanguage }, error: null }) };
+  return q;
 } } as unknown as SupabaseClient;
 const opinion = (severity: string | null, verdict: 'keep' | 'change' = 'keep', debate: boolean | string[] = false) => JSON.stringify({
   decisions: DECISIONS.map(decision => ({ decision, strongestCase: '最强理由', strongestAlternative: '最强替代', verdict, basis: '依据' })),
@@ -141,7 +148,7 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
 }
 
 describe('review flow', () => {
-  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; memberCapsSeen.length = 0; priceRise.phase = ''; priceRise.code = 'FUSION_ESTIMATE_EXCEEDED'; });
+  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; profile.replyLanguage = null; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; memberCapsSeen.length = 0; priceRise.phase = ''; priceRise.code = 'FUSION_ESTIMATE_EXCEEDED'; });
 
   it('estimates the fixed price without creating anything, and refuses a start at another price than the user agreed to', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
@@ -194,6 +201,29 @@ describe('review flow', () => {
     expect(summary.decisions[0].views.map((v: { reviewer: string }) => v.reviewer)).toEqual(['A', 'B', 'C']);
     expect(requests.find(r => r.phase === 'fusion_summary')!.input).not.toContain(ids.reviewers[0]);
     expect((await t.flow.continue(String(db.review!.reviewId))).calls).toEqual([]);
+  });
+
+  it('freezes the profile language at start: every phase writes for the user in it, even after the setting changes', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    profile.replyLanguage = 'en';
+    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    expect(started.config).toMatchObject({ replyLocale: 'en' });
+    await t.runAll();
+    profile.replyLanguage = 'zh-Hant';
+    await t.runAll();
+    const reviewer = reviewLanguageRule('en', 'reviewer'), summary = reviewLanguageRule('en', 'summary');
+    expect(reviewer).toContain('the user set their language to English.');
+    expect(requests.filter(r => r.phase === 'fusion_review').map(r => r.instructions!.endsWith(reviewer))).toEqual([true, true, true]);
+    expect(requests.find(r => r.phase === 'fusion_summary')!.instructions!.endsWith(summary)).toBe(true);
+    expect(summary).toContain('The revised report keeps the language it is written in');
+  });
+
+  it('a review started before the setting (no language in its config) sends no language rule', () => {
+    const context = { report: original, materials: {}, sections, maxCharacters: 12000 };
+    expect(reviewerRequest({ reviewer: 'review', summary: 'summarize', rubric: 'rubric' }, context).instructions).not.toContain('Language (host rule)');
+    expect(reviewLocale({ estimateUsd: '1' })).toEqual({});
+    expect(reviewLocale({ replyLocale: 'fr' })).toEqual({});
+    expect(reviewLocale({ replyLocale: 'zh-Hant' })).toEqual({ replyLocale: 'zh-Hant' });
   });
 
   it('with a split over a key decision: a debate round where each reviewer sees the others, then one summary', async () => {

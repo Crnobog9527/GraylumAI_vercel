@@ -17,6 +17,7 @@ import {reasoningPolicy} from './reasoningPolicy';
 import {frozenResearchTurn} from './researchTurn';
 import {GENERAL_RESEARCH_TOOLS,POSITIONING_RESEARCH_TOOLS,RESEARCH_TOOL_NAMES} from '../research/tools/names';
 import {MAX_SKILL_LOADS_PER_TURN,skillCatalog} from './skillCatalog';
+import {FROZEN_REPLY_SETTINGS} from './replyLanguage';
 /** Library documents the user referenced with @: each the caller's own document at the version they chose. */
 export const libraryReferences=z.array(z.object({documentId:z.string().uuid(),version:z.number().int().positive()}).strict())
  .min(1).max(5).refine(items=>new Set(items.map(item=>item.documentId.toLowerCase())).size===items.length,'LIB_REFERENCE_INVALID');
@@ -53,8 +54,9 @@ export const runtimeContext=z.object({
   input:z.string().max(24000).optional()}).strict().optional(),
  // POSITIONING-GATE: Decisions was unavailable; the primary model carries the fallback rule.
  positioningGate:z.literal('fallback-v1').optional(),
- // SKILL-I18N-HOOK: the primary call carries the reply-language rule (absent on contexts admitted before it).
- replyLanguage:z.literal('reply-language-v1').optional(),
+ // SKILL-I18N-HOOK: the primary call carries the reply-language rule (absent on contexts admitted before it);
+ // v1 follows the user's messages, v2 the language set in the profile (Owner 2026-10-24).
+ replyLanguage:z.enum(['reply-language-v1',...FROZEN_REPLY_SETTINGS]).optional(),
  // REPORT-VISUAL PR-3: free conversations told to read a strategy report directly (absent on contexts admitted before it).
  weeklyReview:z.object({id:z.string().uuid(),token:z.string().uuid(),maxCostUsd:z.string()}).strict().optional(),
  ownPosts:z.literal(true).optional(),

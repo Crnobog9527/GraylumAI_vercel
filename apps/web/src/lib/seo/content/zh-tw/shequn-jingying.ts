@@ -5,7 +5,7 @@
  */
 
 import type { ArticleContent } from '../../article';
-import { SIGNUP_CTA_HREF } from '../shared';
+import { SIGNUP_CTA_HREF_ZH_TW } from '../shared';
 import { ZH_TW_CRUMB } from './links';
 
 // Target: 社群經營 (SEO_GEO_SPEC appendix B).
@@ -29,7 +29,7 @@ export const ZH_TW_SHEQUN_JINGYING: ArticleContent = {
   cta: {
     label: '免費開始定位診斷',
     description: '社群要經營得起來，先要知道它是為誰而存在。AI 教練會透過對話幫你釐清主題和目標受眾，再規劃內容方向。註冊後即可免費開始。',
-    href: SIGNUP_CTA_HREF,
+    href: SIGNUP_CTA_HREF_ZH_TW,
   },
   sections: [
     {

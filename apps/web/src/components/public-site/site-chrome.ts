@@ -8,7 +8,10 @@ import type { SiteLocale } from '@/lib/seo/site';
 
 // Header and footer wording per language. Login and sign-up stay at the root (SEO_GEO_SPEC section 2);
 // every host serves them.
-export { SIGNUP_CTA_HREF as SIGNUP_HREF } from '@/lib/seo/content/shared';
+import { SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW } from '@/lib/seo/content/shared';
+
+/** The header's sign-up link: Traditional Chinese pages say where the visitor came from (CHAT-LANGUAGE). */
+export const SIGNUP_HREFS: Record<SiteLocale, string> = { 'zh-Hans': SIGNUP_CTA_HREF, 'zh-TW': SIGNUP_CTA_HREF_ZH_TW };
 export const LOGIN_HREF = '/login';
 
 // Since the /app move (E1, SEO_GEO_SPEC section 15) "/" is the public home page on every host, so visible

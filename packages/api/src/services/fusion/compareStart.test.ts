@@ -43,7 +43,7 @@ const refusePositioning = (): never => { throw new Error('POSITIONING_REQUIRED')
 const rateLimit = vi.fn();
 const deps = (): CompareDeps => ({ admin, actorId: id(50), refusePositioning, decisionsKey: async () => 'k', classify, rateLimit });
 const parts = (patch: Partial<CompareParts> = {}): CompareParts => ({ skill: null, positioningFallback: false, history: [], workspace: [],
-  references: [], question: '哪个更好？', ...patch });
+  references: [], question: '哪个更好？', replyLocale: 'zh-Hans', ...patch });
 const choice = (patch: Partial<CompareParts> = {}) => ({ sessionId: id(61), historyRevision: 4, modelIds: [id(1), id(2)], parts: parts(patch), materialRevision: '0:none' });
 const shown = { credits: 20, columns: [{ modelId: id(1), credits: 10, usd: '0.01' }, { modelId: id(2), credits: 10, usd: '0.01' }] };
 const start = (patch: Partial<CompareParts> = {}, extra: Record<string, unknown> = {}) =>
@@ -398,5 +398,12 @@ describe('compare start: the request identity binds the frozen context (review f
     expect(await hashOf({ materialRevision: '9:other' })).not.toBe(base);
     expect(await hashOf({}, { workspace: [{ sourceVersionId: id(77), kind: 'positioning', body: 'b' }] })).not.toBe(base);
     expect(await hashOf({}, { history: [{ role: 'user', text: 'earlier' }] })).not.toBe(base);
+  });
+  it('does not change with the reply language: a retry after the user changed it still finds the frozen group', async () => {
+    const base = await hashOf();
+    expect(await hashOf({}, { replyLocale: 'en' })).toBe(base);
+    expect(await hashOf({}, { replyLocale: 'zh-Hant' })).toBe(base);
+    s.rpcs.length = 0; s.begin = fresh({ created: false, gateVerdict: 'allow', groupId: id(70), state: 'running' });
+    await expect(start({ replyLocale: 'en' })).resolves.toMatchObject({ state: 'claimed', compareId: id(90) });
   });
 });
