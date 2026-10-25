@@ -136,7 +136,7 @@ describe('POST /api/upload HTTP boundary', () => {
       'ticket_upload_finish', 'remove', 'list', 'ticket_upload_finish:absent']);
     const path = f.bucket.upload.mock.calls[0][0];
     expect(f.bucket.remove).toHaveBeenCalledExactlyOnceWith([path]);
-    const { p_bytes: _bytes, ...identity } = f.rpc.mock.calls[0][1];
-    expect(f.rpc.mock.calls[2][1]).toEqual({ ...identity, p_absent: true });
+    const begun = f.rpc.mock.calls[0][1];
+    expect(f.rpc.mock.calls[2][1]).toEqual({ p_profile_id: begun.p_profile_id, p_upload_id: begun.p_upload_id, p_absent: true });
   });
 });
