@@ -168,6 +168,12 @@ try {
     const probe = ok(psql(`BEGIN;CREATE TABLE public.erasure_coverage_probe(actor_id uuid);\n${
       read('packages/db/tests/erasure-coverage-audit.sql')}\nROLLBACK;`), 'erasure coverage probe');
     if (!/^erasure_coverage_probe\|owner_table_not_wired\|$/m.test(probe)) report.failed ??= { step: 'erasure-coverage-audit probe' };
+    // 0393: it must also see an unreviewed table that references a Runtime session account erasure deletes.
+    const runtimeProbe = ok(psql(`BEGIN;CREATE TABLE public.erasure_runtime_probe(session_id uuid REFERENCES public.runtime_sessions(id));\n${
+      read('packages/db/tests/erasure-coverage-audit.sql')}\nROLLBACK;`), 'erasure runtime reference probe');
+    if (!/^erasure_runtime_probe\|runtime_ref_not_reviewed\|erasure_runtime_probe_session_id_fkey$/m.test(runtimeProbe)) {
+      report.failed ??= { step: 'erasure-coverage-audit runtime probe' };
+    }
     if (option('--out')) writeFileSync(option('--out'), JSON.stringify({ groups: local, objects: localDetail }, null, 1));
     if (option('--staging')) {
       report.comparison = compare(local, localDetail, JSON.parse(readFileSync(option('--staging'), 'utf8')),
