@@ -10,6 +10,11 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 const STOP_LOSS_DELIVERY_CAP_MS = 12_000;
 const RUNTIME_RECOVERY_JOB_KEY = 'runtime_recovery';
+// The route limit is 60 s = stop-loss cap 12 s + recovery 45 s; the two run-record writes share the rest.
+const RUN_RECORD_CAP_MS = 1_500;
+/** A run-record write that has not answered in time is given up (null), never waited for. */
+const capped = <T>(write: Promise<T>) => Promise.race([write.catch(() => null),
+  new Promise<null>(resolve => setTimeout(() => resolve(null), RUN_RECORD_CAP_MS))]);
 
 export async function GET(request: Request) {
   const unauthorized = validateCronRequest(request, 'runtime-recovery');
@@ -23,10 +28,9 @@ export async function GET(request: Request) {
   // delivery failures are kept on the alert rows.
   await Promise.race([deliverStopLossAlerts(db), new Promise(resolve => setTimeout(resolve, STOP_LOSS_DELIVERY_CAP_MS))]);
   // Line D1: every run leaves counts in scheduled_job_runs. A failed record never blocks the recovery itself.
-  const runId = await startScheduledJobRun({ supabase: db, jobKey: RUNTIME_RECOVERY_JOB_KEY, triggerSource: 'cron' })
-    .catch(() => null);
+  const runId = await capped(startScheduledJobRun({ supabase: db, jobKey: RUNTIME_RECOVERY_JOB_KEY, triggerSource: 'cron' }));
   const finish = (status: 'success' | 'error', summary: Record<string, unknown>, error?: string) => runId
-    ? finishScheduledJobRun({ supabase: db, runId, status, summary, error }).catch(() => undefined) : undefined;
+    ? capped(finishScheduledJobRun({ supabase: db, runId, status, summary, error })) : undefined;
   let response: NextResponse;
   try {
     const summary = await runAutomaticFinancialRecovery(db);

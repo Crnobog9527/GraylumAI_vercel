@@ -90,3 +90,15 @@ it('still recovers when the run record cannot be written', async () => {
   expect(mocks.recover).toHaveBeenCalledOnce();
   expect(mocks.finish).not.toHaveBeenCalled();
 });
+
+it('gives up a run-record write that does not answer, so the recovery keeps its budget', async () => {
+  vi.useFakeTimers();
+  try {
+    mocks.start.mockReturnValue(new Promise(() => {}));
+    const pending = GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await pending).status).toBe(200);
+    expect(mocks.recover).toHaveBeenCalledOnce();
+    expect(mocks.finish).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
