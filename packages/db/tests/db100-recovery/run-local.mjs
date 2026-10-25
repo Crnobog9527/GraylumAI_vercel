@@ -42,6 +42,23 @@ try{
   assert.ok(after[name].pages<before[name].pages*0.8,`${name}: pages ${after[name].pages} not below 80% of ${before[name].pages}`);
   report.checks.push(`${name}: same result (${listed} listed), pages per call ${Math.round(before[name].pages)} -> ${Math.round(after[name].pages)}`);
  }
+ // C7 ledger guard: content_erasure_ledger_owned (0201 text comparison) vs the uuid version, same answers, far fewer pages.
+
+ const legacyLedger=read('packages/db/migrations/0201_content_erasure.sql').match(/CREATE OR REPLACE FUNCTION public\.content_erasure_ledger_owned[\s\S]*?\n\$\$;/)[0];
+ await db.query(read('packages/db/tests/db100-recovery/ledger-cases.sql'));
+ const ledger=async()=>{
+  const answers=(await db.query('SELECT content_erasure_ledger_owned(j) a FROM cases')).rows.map(row=>row.a);
+  const plan=(await db.query(`EXPLAIN (ANALYZE,BUFFERS,TIMING OFF,FORMAT JSON) SELECT sum(CASE WHEN content_erasure_ledger_owned(jsonb_build_object('user_id','00000000-0000-4000-8000-000000000005','bill2_run_id',gen_random_uuid(),'id',gen_random_uuid()::text)) THEN 1 ELSE 0 END) FROM generate_series(1,5) g`)).rows[0]['QUERY PLAN'][0].Plan;
+  return {answers,pages:(plan['Shared Hit Blocks']+plan['Shared Read Blocks'])/5};
+ };
+ await db.query(legacyLedger);await db.query('DROP INDEX IF EXISTS public.bill2_runs_content_deleted_actor;ANALYZE bill2_runs');
+ const ledgerBefore=await ledger();
+ await db.query(migration);await db.query('ANALYZE bill2_runs');
+ const ledgerAfter=await ledger();
+ assert.ok(ledgerBefore.answers.filter(Boolean).length>0&&ledgerBefore.answers.some(a=>!a),'ledger fixture needs both answers');
+ assert.deepEqual(ledgerAfter.answers,ledgerBefore.answers,'ledger ownership answers changed');
+ assert.ok(ledgerAfter.pages<ledgerBefore.pages*0.1,`ledger pages ${ledgerAfter.pages} vs ${ledgerBefore.pages}`);
+ report.checks.push(`content_erasure_ledger_owned: same ${ledgerBefore.answers.length} answers, pages per call ${Math.round(ledgerBefore.pages)} -> ${Math.round(ledgerAfter.pages)}`);
  // C7: with 80000 tool calls the per-execution lookups use the primary key and the own-post scan its partial
  // index; no extra index is needed (the 138-row staging table is read by seq scan because it is one page).
  const planOf=async sql=>JSON.stringify((await db.query(`EXPLAIN (FORMAT JSON) ${sql}`)).rows[0]['QUERY PLAN']);

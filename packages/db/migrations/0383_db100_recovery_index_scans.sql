@@ -7,16 +7,25 @@
 --  * bill2_runs_recovery_open: runs that are not settled/refunded, or a user-stopped run still waiting for its cancel
 --    (exactly the rows runtime_pending_financial_batch can list; all other branches of its WHERE need one of them).
 --  * runtime_executions_open_created: executions in a state runtime_stale_charged_rounds looks at (created_at order).
+--  * bill2_runs_content_deleted_actor: runs whose content was erased, by account (the ledger guard below only needs those).
 --  * runtime_sessions_active_execution: sessions with a live execution (the only ones interrupted recovery needs).
 -- runtime_interrupted_recovery changes only its list branch: the same joins and filters as 0379, driven from the
 -- sessions that have an active execution (OFFSET 0 keeps that order). The locked per-execution branch is untouched.
 -- The two stale-round functions and runtime_pending_financial_batch keep their definitions; the indexes are enough.
+-- Ledger guard (C7, found by line P): content_erasure_ledger_owned (0201) compared bill2_runs ids as text
+-- (r.actor_id::text = ...), so every ledger row written by service_role (credit_transactions, billing_history,
+-- token_stats, ai_usage_logs) scanned all of bill2_runs. It now compares uuids, so the primary key, pre_deduct_id and
+-- actor indexes apply. content_erasure_uuid() accepts only the canonical lower-case uuid text, which is exactly the
+-- set of strings that equal some uuid::text; any other text (upper case, malformed, NULL) matched nothing before and
+-- still matches nothing, and never raises.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 CREATE INDEX IF NOT EXISTS bill2_runs_recovery_open ON public.bill2_runs (id)
  WHERE state NOT IN ('settled','refunded') OR (paused_reason='user_stop' AND cancel_requested);
 CREATE INDEX IF NOT EXISTS runtime_executions_open_created ON public.runtime_executions (created_at, id)
  WHERE state IN ('prepared','running','interrupted','cost_pending','waiting_resume','waiting_credits');
+CREATE INDEX IF NOT EXISTS bill2_runs_content_deleted_actor ON public.bill2_runs (actor_id)
+ WHERE content_deleted_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS runtime_sessions_active_execution ON public.runtime_sessions (active_execution)
  WHERE active_execution IS NOT NULL;
 CREATE OR REPLACE FUNCTION public.runtime_interrupted_recovery(
@@ -116,4 +125,18 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.runtime_interrupted_recovery(uuid,uuid,bigint,integer) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.runtime_interrupted_recovery(uuid,uuid,bigint,integer) TO service_role;
+CREATE OR REPLACE FUNCTION public.content_erasure_uuid(value text)
+RETURNS uuid LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path=public,pg_temp AS $$
+ SELECT CASE WHEN value ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN value::uuid END
+$$;
+REVOKE ALL ON FUNCTION public.content_erasure_uuid(text) FROM PUBLIC,anon,authenticated,service_role;
+CREATE OR REPLACE FUNCTION public.content_erasure_ledger_owned(j jsonb)
+RETURNS boolean LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+ SELECT EXISTS(SELECT 1 FROM bill2_runs r WHERE r.actor_id=content_erasure_uuid(j->>'user_id') AND r.content_deleted_at IS NOT NULL
+  AND (r.id=content_erasure_uuid(j->>'bill2_run_id') OR r.pre_deduct_id=content_erasure_uuid(j->>'id')
+   OR r.id=content_erasure_uuid(j#>>'{metadata,usage,runId}') OR r.id=content_erasure_uuid(j#>>'{metadata,runId}')
+   OR r.pre_deduct_id=content_erasure_uuid(j#>>'{metadata,preDeductId}')))
+;
+$$;
+REVOKE ALL ON FUNCTION public.content_erasure_ledger_owned(jsonb) FROM PUBLIC,anon,authenticated,service_role;
 COMMIT;

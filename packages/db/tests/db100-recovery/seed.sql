@@ -40,3 +40,5 @@ UPDATE bill2_calls c SET selected_cost_usd=NULL,settled_at=NULL,state='dispatche
 -- the pending-lookup calls were sent an hour ago, so their 24-hour recovery window is open
 UPDATE bill2_calls SET created_at=now()-interval '1 hour',dispatched_at=now()-interval '1 hour'
  WHERE state='dispatched' AND selected_cost_usd IS NULL AND run_id IN (SELECT id FROM bill2_runs WHERE state IN ('cost_pending','unknown'));
+-- erased runs for the ledger guard (content_erasure_ledger_owned)
+UPDATE bill2_runs SET content_deleted_at=now() WHERE id IN (SELECT id FROM bill2_runs WHERE state='settled' ORDER BY created_at LIMIT 30);
