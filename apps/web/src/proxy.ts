@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { TRPC_MAX_BATCH_CALLS, trpcCallCount } from '@/lib/trpcBatchLimit';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
@@ -60,6 +61,7 @@ const PUBLIC_PRICING_ENTRY_PATHS = [
 // 需要速率限制的 API 路径
 const RATE_LIMITED_PATHS = [
   '/api/trpc',
+  '/api/upload', // Ticket attachment uploads (ARCH-FIX A1).
 ];
 
 export function normalizeHostname(hostname: string): string {
@@ -120,6 +122,13 @@ function createLoginRedirect(request: NextRequest): NextResponse {
 // 判断是否需要速率限制
 function needsRateLimit(pathname: string): boolean {
   return RATE_LIMITED_PATHS.some(path => pathname.startsWith(path));
+}
+
+// A bearer token or a Supabase session cookie (sb-<ref>-auth-token, possibly chunked). Not verified here:
+// a forged one only moves the caller to the wider per-IP guard, and the API still checks the login.
+function carriesLogin(request: NextRequest): boolean {
+  return /^Bearer \S/.test(request.headers.get('authorization') ?? '')
+    || request.cookies.getAll().some(({ name }) => /^sb-.+-auth-token(\.\d+)?$/.test(name));
 }
 
 function isMaintenanceBypassPath(pathname: string): boolean {
@@ -264,8 +273,11 @@ export async function proxy(request: NextRequest) {
   // ========================================
   // 速率限制检查 (API 路径)
   // ========================================
+  if (trpcCallCount(pathname, request.nextUrl.searchParams) > TRPC_MAX_BATCH_CALLS) {
+    return NextResponse.json({ error: 'Bad Request', message: `一次最多 ${TRPC_MAX_BATCH_CALLS} 个请求` }, { status: 400 });
+  }
   if (needsRateLimit(pathname)) {
-    const result = await checkRateLimit(getClientIP(request), 'ip');
+    const result = await checkRateLimit(getClientIP(request), carriesLogin(request) ? 'ip_session' : 'ip');
     if (result.reason === 'unavailable') return createRateLimitUnavailableResponse();
     if (!result.success) {
       const retryAfter = result.retryAfter ?? 60;
