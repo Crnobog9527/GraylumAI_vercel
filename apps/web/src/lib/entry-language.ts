@@ -67,3 +67,10 @@ export function entryLanguageNotice(applied: { language: ReplyLocale; previous: 
     ? '按你进入的页面设置。可在右上角「语言」修改。'
     : `已按你进入的页面，从${REPLY_LOCALE_LABELS[from]}改为${current}。可在右上角「语言」修改。` };
 }
+
+/** The `entry_notice=<from>.<to>` the server adds after saving a public page's language itself (lib/entry-language-server). */
+export function parseEntryNotice(value: string | null): { language: ReplyLocale; previous: ReplyLocale } | null {
+  const [from, to, extra] = (value ?? '').split('.');
+  const previous = entryLocaleHint(from), language = entryLocaleHint(to);
+  return previous && language && extra === undefined ? { language, previous } : null;
+}

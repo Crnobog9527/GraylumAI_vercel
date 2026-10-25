@@ -104,7 +104,7 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.39.0",
     "ajv": "8.18.0",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.9",
     "js-tiktoken": "1.0.21",
     "openai": "7.15.0",
     "pino": "^10.4.0",

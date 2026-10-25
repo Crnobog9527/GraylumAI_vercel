@@ -139,7 +139,7 @@ it('sizes candidates with the workspace read_source description the executor wil
  const instructions=withPrimaryAddenda(withBrandIdentity(skill.instructions,true),{workspaceContext:true,network:'deny',
   replyLanguage:probe.context.replyLanguage,workspaceGuide:probe.context.workspaceGuide});
  expect(probe.context.workspaceGuide).toBe('strategy-read-v1');
- expect(probe.context.replyLanguage).toBe('reply-language-v2-zh-Hans');
+ expect(probe.context.replyLanguage).toBe('reply-language-v3-zh-Hans');
  const required=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:input}]}))+1024+
   sourceToolBytes(['read_source'],true)+(probe.context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
  expect((await admit(required)).context.matching.candidates).toHaveLength(1);
@@ -207,7 +207,8 @@ it('R4: a host mentor turn shares its single read slot with the user\'s earlier 
 });
 
 it('R4: drops only the history read when its larger reserve does not fit, keeping the Skill file',async()=>{
- const f=fixture();skill.instructions='S'.repeat(13000);
+ // 165 bytes less than before the v3 reply-language rule (CHAT-LANGUAGE 2026-10-25), which admission sizes too.
+ const f=fixture();skill.instructions='S'.repeat(12835);
  const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:32000,
   hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input),context=runtimeContext.parse(admitted.context);
  expect(context.tools).toEqual(['ask_question','read_skill_file']);expect(context.historyRead).toBeUndefined();
