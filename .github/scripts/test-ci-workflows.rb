@@ -13,13 +13,12 @@ class CIWorkflowsTest < Minitest::Test
   end
   GATES = {'lint-check'=>['Lint & Type Check','lint-and-type'], 'typecheck'=>['TypeScript Check','lint-and-type'],
            'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration',
-                                        'CONTRACTS_RESULT'=>'ci-contracts','LEDGER_RESULT'=>'migration-ledger'}],
+                                        'DB_SUITES_RESULT'=>'db-suites','CONTRACTS_RESULT'=>'ci-contracts','LEDGER_RESULT'=>'migration-ledger'}],
            'security-unit-tests'=>['Security Unit Tests',{'WORK_RESULT'=>'test','CONTRACTS_RESULT'=>'ci-contracts',
                                                           'LEDGER_RESULT'=>'migration-ledger'}],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
   INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
                       'node packages/db/tests/payg/run-runtime.mjs --ci',
-                      'node packages/db/tests/run-local-suites.mjs --ci',
                       'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
                       'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql'].freeze
   def test_required_context_names_unique
@@ -73,6 +72,26 @@ class CIWorkflowsTest < Minitest::Test
       source = File.read(File.expand_path("../packages/db/tests/#{runner}", ROOT), encoding: "UTF-8")
       refute_match(/postgres:\d|postgrest:v|gotrue:v/, source, runner)
     end
+  end
+  def test_db_suites_worker_runs_every_shard_after_images_without_secrets
+    job = @ci.fetch('jobs').fetch('db-suites')
+    assert_equal false, job.fetch('strategy').fetch('fail-fast')
+    shards = job.fetch('strategy').fetch('matrix').fetch('shard')
+    assert_equal (1..shards.length).to_a, shards
+    assert_operator job.fetch('timeout-minutes'), :<=, 30
+    steps = job.fetch('steps')
+    runs = steps.map { |step| step['run'] }.compact
+    command = "node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/#{shards.length}"
+    assert_equal 1, runs.count(command)
+    pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
+    refute_nil pull
+    assert_operator pull, :<, steps.index { |step| step['run'] == command }
+    steps.each do |step|
+      refute step.key?('if'), step['name']
+      refute step.key?('continue-on-error'), step['name']
+      refute step.key?('env'), step['name']
+    end
+    refute @ci.fetch('jobs').fetch('integration').fetch('steps').any? { |step| step['run'].to_s.include?('run-local-suites') }
   end
   def test_scans_always_and_no_event_path_filters
     %w[audit workflow-policy secret-scan code-scan].each do |id|
@@ -190,7 +209,7 @@ class CIWorkflowsTest < Minitest::Test
   end
 
   def test_store_cache_never_replaces_frozen_install
-    %w[lint-and-type test build-and-e2e integration].each do |id|
+    %w[lint-and-type test build-and-e2e integration db-suites].each do |id|
       steps = @ci.fetch('jobs').fetch(id).fetch('steps')
       pnpm = steps.index { |step| step['name'] == 'Setup pnpm' }
       node = steps.index { |step| step['name'] == 'Setup Node.js' }
