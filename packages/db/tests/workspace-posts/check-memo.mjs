@@ -21,10 +21,16 @@ export async function checkMemoCases({c,report}){
  assert.deepEqual(sessions.filter(s=>JSON.stringify(s.memo)!==JSON.stringify(s.original)),[]);
  const hidden=turns.filter(t=>t.original===false).length;
  // Every actor: the free conversation list.
- const lists=await rows(`SELECT p.id,opc_free_conversations(p.id) memo,opc_free_conversations_before_memo(p.id) original
+ // The list keeps its function; its scope lines are the only change, so the original is rebuilt without them.
+ const listDef=await one("SELECT pg_get_functiondef('public.opc_free_conversations(uuid)'::regprocedure) v");
+ assert.ok(listDef.includes('-- DB-PERF PR-7b-B memo scope'));
+ await c.query(listDef.replace('public.opc_free_conversations(','public.opc_free_conversations_check_original(')
+  .replace(/ memo_opened:=runtime_check_memo_open\(\);\n/,'').replace(/ PERFORM runtime_check_memo_close\(memo_opened\);\n/,''));
+ const lists=await rows(`SELECT p.id,opc_free_conversations(p.id) memo,opc_free_conversations_check_original(p.id) original
   FROM profiles p WHERE EXISTS(SELECT 1 FROM runtime_sessions s WHERE s.actor_id=p.id)
    AND p.status='active' AND p.is_deleted='false' ORDER BY p.id`);
  assert.deepEqual(lists.filter(l=>JSON.stringify(l.memo)!==JSON.stringify(l.original)),[]);
+ await c.query('DROP FUNCTION public.opc_free_conversations_check_original(uuid)');
  // The scope is closed after every call: nothing leaks into the next statement.
  assert.equal(await one("SELECT coalesce(current_setting('graylum.check_call',true),'') v"),'');
  assert.equal(await one("SELECT coalesce(current_setting('graylum.check_memo',true),'') v"),'');

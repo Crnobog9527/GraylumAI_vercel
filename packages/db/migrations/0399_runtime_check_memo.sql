@@ -23,8 +23,8 @@
 -- caller now goes through the wrapper; outside a scope the wrapper only forwards.
 --
 -- Repeatable: each rename is skipped once done and the wrappers use CREATE OR REPLACE.
--- Rollback: drop the wrappers and helpers, rename every *_before_memo back to its original name and restore its grant
--- (opc_free_conversations: service_role); no data changes.
+-- Rollback: drop the wrappers and helpers, rename every *_before_memo back to its original name, and remove the two
+-- marked scope lines from opc_free_conversations; no data changes.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.runtime_check_memo_open() RETURNS boolean
@@ -71,8 +71,6 @@ DO $rename$ BEGIN
   ALTER FUNCTION public.runtime_history_available(uuid) RENAME TO runtime_history_available_before_memo; END IF;
  IF to_regprocedure('public.runtime_history_availability_before_memo(uuid[])') IS NULL THEN
   ALTER FUNCTION public.runtime_history_availability(uuid[]) RENAME TO runtime_history_availability_before_memo; END IF;
- IF to_regprocedure('public.opc_free_conversations_before_memo(uuid)') IS NULL THEN
-  ALTER FUNCTION public.opc_free_conversations(uuid) RENAME TO opc_free_conversations_before_memo; END IF;
 END $rename$;
 
 -- Memoized sub-checks: same name, arguments, return type and volatility as the original.
@@ -141,25 +139,41 @@ BEGIN
  RETURN QUERY SELECT r.execution_id,r.available FROM runtime_history_availability_before_memo(p_execution_ids) r;
  PERFORM runtime_check_memo_close(opened);
 END $$;
-CREATE OR REPLACE FUNCTION public.opc_free_conversations(p_actor_id uuid) RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE opened boolean:=runtime_check_memo_open();result jsonb;
+-- The list keeps its own function: earlier migrations (0348, 0398) patch it by its text and are re-run on the final
+-- schema, so its body gets the two scope lines in place instead of being renamed behind a wrapper.
+DO $list$ DECLARE d text;a1 text;a2 text;
 BEGIN
- result:=opc_free_conversations_before_memo(p_actor_id);
- PERFORM runtime_check_memo_close(opened);
- RETURN result;
-END $$;
+ d:=pg_get_functiondef('public.opc_free_conversations(uuid)'::regprocedure);
+ IF position('-- DB-PERF PR-7b-B memo scope' IN d)=0 THEN
+  a1:=$a$DECLARE conversations jsonb;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+$a$;
+  a2:=$a$ RETURN conversations;
+$a$;
+  IF array_length(string_to_array(d,a1),1)<>2 OR array_length(string_to_array(d,a2),1)<>2 THEN
+   RAISE EXCEPTION 'DB_PERF_CHECK_MEMO_LIST_MISMATCH'; END IF;
+  d:=replace(d,a1,$b$DECLARE conversations jsonb;memo_opened boolean;
+BEGIN
+ -- DB-PERF PR-7b-B memo scope: identical permission sub-checks of this list are evaluated once (0399).
+ memo_opened:=runtime_check_memo_open();
+ PERFORM bill2_actor(p_actor_id);
+$b$);
+  d:=replace(d,a2,$b$ PERFORM runtime_check_memo_close(memo_opened);
+ RETURN conversations;
+$b$);
+  EXECUTE d;
+ END IF;
+END $list$;
 
--- Same callers as before: nothing new becomes callable by clients; the list keeps its service_role grant.
+-- Same callers as before: nothing new becomes callable by clients (the list's own grant is untouched).
 DO $grants$ DECLARE fn regprocedure; BEGIN
  FOREACH fn IN ARRAY ARRAY['public.runtime_check_memo_open()','public.runtime_check_memo_close(boolean)',
   'public.runtime_check_memo_get(text)','public.runtime_check_memo_put(text,text)',
   'public.bill2_scope_allowed(uuid,jsonb)','public.opc_source_allowed(uuid,uuid)',
   'public.opc_business_context(uuid,uuid,uuid)','public.artifact_evidence_allowed(uuid,jsonb)',
-  'public.runtime_history_available(uuid)','public.runtime_history_availability(uuid[])',
-  'public.opc_free_conversations(uuid)','public.opc_free_conversations_before_memo(uuid)']::regprocedure[] LOOP
+  'public.runtime_history_available(uuid)','public.runtime_history_availability(uuid[])']::regprocedure[] LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',fn);
  END LOOP;
- GRANT EXECUTE ON FUNCTION public.opc_free_conversations(uuid) TO service_role;
 END $grants$;
 COMMIT;
