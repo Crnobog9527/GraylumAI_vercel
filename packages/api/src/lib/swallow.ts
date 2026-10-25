@@ -14,7 +14,7 @@ export function logSwallowed(label: string, error: unknown, context: LogContext 
   logger.warn(category, label, { ...rest, code: errorCode(error), swallowed: true });
 }
 
-/** `promise`, or `fallback` when it rejects, with the failure logged: use instead of `.catch(() => fallback)`. */
+/** `promise`, or `fallback` when it rejects, with the failure logged: use instead of a bare catch that returns a fallback. */
 export function swallow<T, F>(label: string, promise: PromiseLike<T>, fallback: F,
   context?: LogContext & { category?: LogCategory }): Promise<T | F> {
   return Promise.resolve(promise).then(value => value, (error: unknown) => {
