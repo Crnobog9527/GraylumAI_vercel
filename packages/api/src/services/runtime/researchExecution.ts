@@ -23,6 +23,7 @@ import type { RuntimeTool } from './runner';
 import type { SessionRpc } from './session';
 import { readBillingRpc } from '../bill2/readRetry';
 import { MIN_MODEL_DISPATCH_MS, type RuntimeBudget } from './budget';
+import { DEFAULT_TIMEOUT_MS } from '../research/vendors/http';
 
 const runCalls = z.object({ calls: z.array(z.object({ id: z.string().uuid(), sequence: z.number().int().positive(),
   providerId: z.string().nullable() }).passthrough()) }).passthrough();
@@ -45,6 +46,17 @@ const LOOKUP_MS = 30_000;
 /** Whether this invocation can still afford one slow paid lookup and the model reply after it (no budget: no limit). */
 export function lookupTimeLeft(budget: Pick<RuntimeBudget, 'assertCanStart'> | undefined): boolean {
   try { budget?.assertCanStart(MIN_MODEL_DISPATCH_MS + LOOKUP_MS); return true; } catch { return false; }
+}
+
+/** A supplier request shorter than this is not sent: it would rarely answer and may still be charged. */
+export const MIN_SUPPLIER_MS = 10_000;
+/**
+ * ARCH-FIX C1: how long one supplier request may wait — the vendor default (60s), cut to what the round has left after
+ * the reply's own minimum, so a slow supplier cannot run the round past its limit (no budget: the vendor default).
+ */
+export function supplierTimeout(budget: Pick<RuntimeBudget, 'remainingWork'> | undefined): number {
+  if (!budget) return DEFAULT_TIMEOUT_MS;
+  return Math.max(0, Math.min(DEFAULT_TIMEOUT_MS, Math.floor(budget.remainingWork() - MIN_MODEL_DISPATCH_MS)));
 }
 
 export function researchExecution(input: {
@@ -112,7 +124,8 @@ export function researchExecution(input: {
       // A recovery replay cannot create a supplier request or BILL2 claim, so it must not consume live quota.
       ...(execution.live && input.callGate ? { callGate: input.callGate } : {}),
       newId: () => { throw new Error('RESEARCH_OPERATION_ID_REQUIRED'); },
-      beforeSend: async () => input.canSend(),
+      beforeSend: async () => input.canSend() && supplierTimeout(input.budget) >= MIN_SUPPLIER_MS,
+      timeoutMs: () => supplierTimeout(input.budget),
       ...(input.now ? { now: input.now } : {}),
     },
   };
@@ -147,7 +160,8 @@ export function researchExecution(input: {
     // After a confirmed erasure the tool call ends the turn instead of handing a result to the model.
     // A pause ends the turn at the subcall's slot; the resumed turn runs this tool call again.
     // A free chat reply counts what it already spent (CHAT-AUTO-CONTEXT C); the mentor turn keeps its single-call round.
-    tools: researchRuntimeTools(ctx, names, freeChat ? { usedSubcalls, freeChat } : {}).map(tool => ({ ...tool, async execute(args, callId) {
+    tools: researchRuntimeTools(ctx, names, { ...freeChat ? { usedSubcalls, freeChat } : {}, declaredLimits: Boolean(research.toolLimits) })
+      .map(tool => ({ ...tool, async execute(args, callId) {
       let result;
       try { result = await tool.execute(args, callId); }
       catch (error) {
@@ -159,7 +173,8 @@ export function researchExecution(input: {
       input.onSubcallSettled?.();
       return result;
     } })),
-    definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config), Boolean(research.freeChat)), reserve: research.reserve,
+    definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config), Boolean(research.freeChat), Boolean(research.toolLimits)),
+    reserve: research.reserve,
     claimedSubcall: sequence => claimedSubcalls.has(sequence),
     async isSubcall(sequence) {
       const call = (await readCalls()).find(item => item.sequence === sequence);

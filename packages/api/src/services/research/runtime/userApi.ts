@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { RESEARCH_TOOL_NAMES, researchToolArgs } from '../tools/schemas';
+import { RESEARCH_TOOL_NAMES, undeclaredResearchToolArgs } from '../tools/schemas';
 import { publicHttpUrl } from '../vendors/http';
 import { SOCIAL_KINDS, SOCIAL_PLATFORMS } from '../vendors/types';
 
@@ -70,7 +70,8 @@ const toolMetadata = z.object({ toolName: z.enum(RESEARCH_TOOL_NAMES).nullable()
 function metadata(value: unknown) {
   const row = parse(toolMetadata, value);
   if (!row.toolName) return { toolName: null, args: null };
-  const args = researchToolArgs[row.toolName].safeParse(row.args);
+  // The earlier checks (characters counted) accept every saved call, including those of turns admitted before ARCH-FIX C1.
+  const args = undeclaredResearchToolArgs[row.toolName].safeParse(row.args);
   // Validation must not invent omitted default arguments in the historical record.
   const original = row.args as Record<string, unknown> | null;
   return { toolName: row.toolName, args: args.success && original

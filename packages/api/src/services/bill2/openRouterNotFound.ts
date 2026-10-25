@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { parseExactJson } from './decimal';
+import { openRouterObservationBytes } from './openRouterEvidence';
 import { unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 
 export type RejectionRecovery = { attempt: number; claimedAt: string; queryCount?: number; queryTimes?: string[]; queryOutcomes?: string[] };
@@ -19,8 +20,8 @@ export function openRouterNotFound(observation: TransportObservation, identity: 
     ![200, 404].includes(observation.httpStatus) || !observation.complete || observation.transportIssue ||
     observation.generationId !== undefined || observation.stream || observation.rawBodyEncoding) return null;
   try {
-    const bytes = Buffer.from(observation.rawBodyBase64, 'base64');
-    if (bytes.length > 65536 || bytes.toString('base64') !== observation.rawBodyBase64) return null;
+    const bytes = openRouterObservationBytes(observation);
+    if (bytes.length > 65536) return null;
     const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (raw !== observation.rawBody) return null;
     parseExactJson(raw, 65536);

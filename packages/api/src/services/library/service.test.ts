@@ -150,3 +150,11 @@ it('does not return a download link after concurrent deletion',async()=>{
   vi.mocked(storage.signRead).mockImplementation(async()=>{deleted=true;return 'must-not-escape';});
   await expect(libraryService(client,a,storage).signedUrl(id,false)).rejects.toThrow('LIBRARY_NOT_FOUND');
 });
+
+it('lists without cleaning up: the cron and the write paths do that (ARCH-FIX A1)', async () => {
+  const library = libraryService(client, a, storage);
+  await library.list();
+  await library.list(undefined, { createdAt: '2026-10-25T00:00:00Z', id });
+  expect(rpc.mock.calls.map(c => c[0])).toEqual(['library_list', 'library_list_page']);
+  expect(storage.remove).not.toHaveBeenCalled();
+});

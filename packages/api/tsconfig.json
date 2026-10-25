@@ -36,7 +36,6 @@
     "src/services/__tests__/refund1bConsumedAmount.test.ts",
     "src/services/__tests__/stripe.test.ts",
     "src/services/__tests__/stripeFulfillment.test.ts",
-    "src/services/__tests__/stripeWebhookRoute.test.ts",
     "src/services/__tests__/subscriptionCreditGrants.test.ts",
     "src/services/__tests__/ticketAutoClose.test.ts",
     "src/services/__tests__/workbench.integration.ts",

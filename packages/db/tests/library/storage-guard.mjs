@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// ARCH-FIX B1: a signed library upload URL must stop writing once the account is closed (0371).
+// ARCH-FIX B1: a signed library upload URL must stop writing once the account is closed (0376).
 // Storage writes one storage.objects row per object; these cases insert that row the way Storage does.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
