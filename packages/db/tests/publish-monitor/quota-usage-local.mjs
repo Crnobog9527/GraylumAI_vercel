@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only PUBLISH-MONITOR (0378) verification: the read-only publish count of the current billing period.
+// Local-only PUBLISH-MONITOR (0380) verification: the read-only publish count of the current billing period.
 // Run: node packages/db/tests/publish-monitor/quota-usage-local.mjs --local-only
 import assert from 'node:assert/strict';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
-const migrationPath = 'packages/db/migrations/0378_publish_monitor_quota_usage.sql';
+const migrationPath = 'packages/db/migrations/0380_publish_monitor_quota_usage.sql';
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0378', checks: [] };
+const report = { build: db.build, migration: '0380', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const svc = async (sql, args = []) => {
   await c.query('SET ROLE service_role');
@@ -22,7 +22,7 @@ try {
   const before = await v(catalogSql);
   await c.query(read(migrationPath));
   assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0378 reapplication preserves the complete catalog');
+  report.checks.push('0380 reapplication preserves the complete catalog');
 
   const fn = 'publish_monitor_quota_usage()';
   for (const role of ['anon', 'authenticated']) assert.equal(await v('SELECT has_function_privilege($1,$2,\'EXECUTE\') v', [role, fn]), false, role);

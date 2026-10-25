@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
 /**
- * PUBLISH-MONITOR: the Post for Me billing period's publish count (migration 0378), read for the admin page and the
+ * PUBLISH-MONITOR: the Post for Me billing period's publish count (migration 0380), read for the admin page and the
  * 80% / full alerts. One count is one platform that was delivered, the same unit Post for Me bills; only numbers and the
  * period's dates leave the database.
  */
