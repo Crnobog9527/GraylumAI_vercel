@@ -138,7 +138,8 @@ export async function walletMembershipCases({ admin, service, connect }) {
     const old = await one(admin, 'SELECT entitlement_start,entitlement_end FROM payment_orders WHERE id=$1', [initial.id]);
     assert.deepEqual(old, source, 'source term remains unchanged');
     await assert.rejects(() => renew(user, next, plan, cycle, first.subscriptionId), /TRANSITION_DENIED/, 'stale source cannot overlap paid renewal');
-    const queued = delivered[0].v.subscriptionId;
+    // MAINT-P1b: the concurrent delivery that lost returns {duplicate:true} without ids; take the one that delivered.
+    const queued = delivered.find(r => r.v.duplicate === false).v.subscriptionId;
     await assert.rejects(() => renew(user, 'card', plan, cycle, queued), /TRANSITION_DENIED/, 'card cannot enter wallet renewal');
     await assert.rejects(() => renew(user, next, plan === pro ? gold : pro, cycle, queued), /TRANSITION_DENIED/, 'no tier change in ordinary renewal');
     const second = await renew(user, method, plan, 'monthly', queued);
