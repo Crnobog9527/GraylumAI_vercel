@@ -2,7 +2,7 @@
 import {OWN_POSTS_INSTRUCTIONS} from './workspacePosts';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 import type {VoiceProfile} from '../voice/profile';
-import {frozenReplyLocale,replySettingInstructions} from './replyLanguage';
+import {frozenReplyRule} from './replyLanguage';
 export {readReplySetting} from './replyLanguage';
 /** The system instruction of an ordinary free conversation turn without a Skill. Admission and the FUSION-COMPARE columns
  * (which must start from the same text) both read it from here. */
@@ -57,8 +57,7 @@ export const REPLY_LANGUAGE_INSTRUCTIONS=
  * setting, the set language (replyLanguage.ts) after it, nothing for any other value. */
 export function replyLanguageText(frozen?:string):string {
   if(frozen===REPLY_LANGUAGE)return REPLY_LANGUAGE_INSTRUCTIONS;
-  const locale=frozenReplyLocale(frozen);
-  return locale?replySettingInstructions(locale):'';
+  return frozenReplyRule(frozen)??'';
 }
 /** LIB-4b: the user referenced library documents with @ in this message (frozen as libraryReferences). */
 export const LIBRARY_INSTRUCTIONS=

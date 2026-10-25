@@ -15,7 +15,8 @@ type Evidence = { model: string | null; streamed: boolean; executionState: strin
   calls: number; outputTokens: number; savedReplyChars: number; lastActivityAt: string | null; lastFinishReason: string | null };
 /** Known limit (Owner 2026-10-13, option B): content beyond capacity leaves no server trace, so the operator decides. */
 export const CAPACITY_RULE = '超出内容容量（用户材料过长）的回合不应补偿；用户反馈过内容太长时不要补偿。';
-const stateLabels: Readonly<Record<string, string>> = { prepared: '未开始', running: '进行中', interrupted: '中断', cost_pending: '费用已核实、未收口' };
+const stateLabels: Readonly<Record<string, string>> = { prepared: '未开始', running: '进行中', interrupted: '中断', cost_pending: '费用已核实、未收口',
+  waiting_resume: '暂停等继续', waiting_credits: '暂停等充值' };
 
 /** Content-free review facts; a streamed round that produced output may already have been seen. */
 export function reviewCaution(evidence: Evidence): string | null {
