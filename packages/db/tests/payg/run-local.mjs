@@ -36,6 +36,7 @@ import {researchRuntimeCases} from './research-runtime.mjs';
 import {researchRuntimeReadCases} from './research-runtime-reads.mjs';
 import {researchRuntimeWiringCases} from './research-runtime-wiring.mjs';
 import {imageCases} from './image.mjs';
+import {payloadInlineCases} from './payload-inline.mjs';
 import {productionCases,productionFusionCases,productionToolCases} from './production.mjs';
 
 const development = process.argv.slice(2).join(' ')==='--local-only --development';
@@ -152,6 +153,7 @@ try {
   await researchRuntimeReadCases({db,report,createFixture});
   await researchRuntimeWiringCases({db,report,createFixture});
   await imageCases({db,report,createFixture,claim,receipt});
+  await payloadInlineCases({db,Client,connectionString,report,createFixture});
   // Last: marks this database as production and pauses enabled windows until it restores them.
   await productionCases({db,Client,connectionString,report,claim});
   await productionToolCases({db,report,claim});
