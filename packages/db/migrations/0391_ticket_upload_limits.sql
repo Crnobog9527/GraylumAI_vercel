@@ -6,7 +6,8 @@
 --    profile's prefix (storage.objects rows with their recorded size) plus admissions still in flight (their declared
 --    size, kept on the intent), so no new usage table is needed. The existing profile FOR UPDATE serializes admissions.
 --    The old two-argument call stays valid during deployment: the size defaults to the 5 MB maximum.
--- 2. ticket_attachment_orphans(limit) lists attachments older than 24 hours that no ticket or ticket reply refers to,
+-- 2. ticket_attachment_orphans(limit) lists attachments older than 24 hours that no ticket or ticket reply refers to
+--    (by object name, or by an older full Storage URL that points into the bucket),
 --    with no live upload intent and no account erasure in progress (erasure removes and proves its own objects).
 --    The daily cron removes them through the Storage API; SQL never deletes Storage rows.
 -- Repeatable: IF NOT EXISTS column, DROP IF EXISTS of the replaced signature, CREATE OR REPLACE.
@@ -51,10 +52,14 @@ GRANT EXECUTE ON FUNCTION public.ticket_upload_begin(uuid,uuid,bigint) TO servic
 
 CREATE OR REPLACE FUNCTION public.ticket_attachment_orphans(p_limit integer DEFAULT 100)
 RETURNS text[] LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
-  WITH referenced AS (
-    SELECT value AS name FROM tickets t,jsonb_array_elements_text(t.attachments) WHERE jsonb_typeof(t.attachments)='array'
+  WITH raw AS (
+    SELECT value AS ref FROM tickets t,jsonb_array_elements_text(t.attachments) WHERE jsonb_typeof(t.attachments)='array'
     UNION
     SELECT value FROM ticket_replies r,jsonb_array_elements_text(r.attachments) WHERE jsonb_typeof(r.attachments)='array'
+  ), referenced AS (
+    -- Older rows may hold a full Storage URL (.../ticket-attachments/<name>?...): its object name counts as referenced.
+    SELECT CASE WHEN ref ~ '^https?://' THEN split_part(substring(ref FROM '/ticket-attachments/(.*)$'),'?',1)
+      ELSE ref END AS name FROM raw
   )
   SELECT coalesce(array_agg(name ORDER BY created_at),'{}') FROM (
     SELECT o.name,o.created_at FROM storage.objects o

@@ -66,13 +66,19 @@ export async function verifyTicketLimits(admin, service) {
     VALUES($1,'t','d','other',$2) RETURNING id`, [e, JSON.stringify([onTicket])])).rows[0].id;
   await admin.query(`INSERT INTO ticket_replies(ticket_id,user_id,content,is_admin,attachments)
     VALUES($1,$2,'r',true,$3)`, [ticket, e, JSON.stringify([onReply])]);
+  // Older rows can hold a full Storage URL (public or signed, with a query string) instead of the object name.
+  const onLegacyUrl = await stored(e, { age: '30 hours' });
+  const onSignedUrl = await stored(e, { age: '30 hours' });
+  await admin.query(`INSERT INTO tickets(user_id,title,description,category,attachments) VALUES($1,'t2','d','other',$2)`,
+    [e, JSON.stringify([`https://example.supabase.co/storage/v1/object/public/ticket-attachments/${onLegacyUrl}`,
+      `https://example.supabase.co/storage/v1/object/sign/ticket-attachments/${onSignedUrl}?token=x`])]);
   const f = await actor();
   const erasing = await stored(f, { age: '30 hours' });
   await admin.query(`INSERT INTO account_erasure_requests(profile_id,request_id,executor_token,confirmed_at)
     VALUES($1,$2,$3,clock_timestamp())`, [f, randomUUID(), randomUUID()]);
   const listed = (await service.query('SELECT ticket_attachment_orphans(1000) v')).rows[0].v;
   assert.ok(listed.includes(orphan));
-  for (const kept of [recent, onTicket, onReply, intent, erasing]) assert.ok(!listed.includes(kept), kept);
+  for (const kept of [recent, onTicket, onReply, onLegacyUrl, onSignedUrl, intent, erasing]) assert.ok(!listed.includes(kept), kept);
   assert.equal((await service.query('SELECT cardinality(ticket_attachment_orphans(1)) n')).rows[0].n, 1);
 
   // Privileges: service role only.
@@ -81,5 +87,5 @@ export async function verifyTicketLimits(admin, service) {
   await refused(() => begin(a, 1), 'permission denied');
   await service.query('SET ROLE service_role');
   console.log('PASS: ticket upload limits (size, legacy call, 20/day, 50MB/day, 10/minute, closed account)'
-    + ' and orphan list (age, ticket/reply references, open intent, erasure, limit, privileges)');
+    + ' and orphan list (age, ticket/reply references, legacy URL references, open intent, erasure, limit, privileges)');
 }
