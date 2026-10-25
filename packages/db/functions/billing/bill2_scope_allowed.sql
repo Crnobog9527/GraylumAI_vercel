@@ -4,14 +4,15 @@
 -- bill2_scope_allowed(uuid,jsonb)
 CREATE OR REPLACE FUNCTION public.bill2_scope_allowed(a uuid, s jsonb)
  RETURNS boolean
- LANGUAGE sql
+ LANGUAGE plpgsql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
- SELECT CASE WHEN s->>'kind'='library_document' THEN
-  (SELECT array_agg(x ORDER BY x) FROM jsonb_object_keys(s) x)=ARRAY['documentId','kind']
-  AND coalesce(s->>'documentId','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-  AND EXISTS(SELECT 1 FROM library_documents d WHERE d.id=(s->>'documentId')::uuid AND d.actor_id=a
-   AND d.kind='document' AND d.format IN ('pdf','docx') AND d.status IN ('processing','ready') AND d.deleted_at IS NULL)
- ELSE bill2_scope_allowed_before_library(a,s) END
-$function$;
+DECLARE k text:=md5('bill2_scope_allowed|'||coalesce(a::text,'')||'|'||coalesce(s::text,''));hit text;result boolean;
+BEGIN
+ hit:=runtime_check_memo_get(k);
+ IF hit IS NOT NULL THEN RETURN CASE hit WHEN 'n' THEN NULL ELSE hit::boolean END; END IF;
+ result:=bill2_scope_allowed_before_memo(a,s);
+ PERFORM runtime_check_memo_put(k,coalesce(result::text,'n'));
+ RETURN result;
+END $function$;

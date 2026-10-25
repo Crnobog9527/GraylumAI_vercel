@@ -25,7 +25,10 @@ BEGIN
   RETURN jsonb_build_object('state','already_compensated','runId',b.id,'executionId',e.id,'actorId',e.actor_id,
    'executionState',e.state,'compensatedCredits',b.compensation_credits);
  END IF;
- IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested OR b.paused_reason IS NOT NULL
+ -- 0382: a paused round qualifies only while it still waits for the user and never saved a reply.
+ IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested
+  OR (b.paused_reason IS NOT NULL AND NOT (e.state IN ('waiting_resume','waiting_credits') AND b.paused_reason IN ('http_budget','insufficient_credits')
+   AND e.primary_result IS NULL AND e.result IS NULL))
   -- 0284: content beyond capacity is user-side and never refunded.
   OR coalesce(e.failure_code,'') IN ('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY')
   OR NOT EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
@@ -33,7 +36,8 @@ BEGIN
   OR (b.runtime_dispatch_deadline IS NOT NULL AND b.runtime_dispatch_deadline>=clock_timestamp())
   OR EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id AND greatest(c.created_at,
    coalesce(c.dispatched_at,c.created_at),coalesce(c.settled_at,c.created_at))>=p_cutoff)
-  OR e.state NOT IN ('prepared','running','interrupted','cost_pending') OR e.created_at>=p_cutoff
+  OR e.state NOT IN ('prepared','running','interrupted','cost_pending','waiting_resume','waiting_credits')
+  OR e.created_at>=p_cutoff
   OR EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id
    AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND NOT c.provider_rejected)
   OR NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id

@@ -15,6 +15,15 @@ BEGIN
     OR OLD.financial_projection_version IS NOT NULL THEN
     RAISE EXCEPTION 'BILL2_IMMUTABLE_EVIDENCE';
   END IF;
+  -- ARCH-FIX G2: once, a due receipt loses only its raw output; no other column changes.
+  IF NEW.raw_scrubbed_at IS DISTINCT FROM OLD.raw_scrubbed_at THEN
+    IF OLD.raw_scrubbed_at IS NOT NULL OR NEW.raw_scrubbed_at IS NULL OR NOT bill2_receipt_raw_due(OLD)
+      OR (to_jsonb(NEW) - ARRAY['payload', 'raw_scrubbed_at']) IS DISTINCT FROM (to_jsonb(OLD) - ARRAY['payload', 'raw_scrubbed_at'])
+      OR NEW.payload IS DISTINCT FROM bill2_receipt_raw_scrub(OLD.payload) THEN
+      RAISE EXCEPTION 'BILL2_IMMUTABLE_EVIDENCE';
+    END IF;
+    RETURN NEW;
+  END IF;
   SELECT * INTO c FROM bill2_calls WHERE id = OLD.call_id;
   SELECT * INTO r FROM bill2_runs WHERE id = c.run_id;
   IF NOT coalesce(content_erasure_financial_allowed(r.actor_id, coalesce(r.pre_deduct_id, r.id)), false) THEN

@@ -46,12 +46,17 @@ BEGIN
      ORDER BY c.sequence DESC,rec.created_at DESC,rec.id DESC LIMIT 1) last_finish_reason
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   -- cost_pending: receipt recovery settled the last unknown call but the round was never closed.
-  WHERE e.state IN ('prepared','running','interrupted','cost_pending') AND e.created_at<p_cutoff
+  -- 0382 (Owner 2026-10-25 "暂停回合选 A"): a round paused for the user (continue or top up) whose charged step
+  -- never delivered a reply is refunded by the same rule once it has been quiet for 24 hours.
+  WHERE (e.state IN ('prepared','running','interrupted','cost_pending') OR (e.state IN ('waiting_resume','waiting_credits') AND r.paused_reason IN ('http_budget','insufficient_credits')
+    AND e.primary_result IS NULL AND e.result IS NULL))
+   AND e.created_at<p_cutoff
    AND (p_created_since IS NULL OR e.created_at>=p_created_since)
    AND r.contract_version='bill2.v2' AND NOT r.closed AND NOT r.cancel_requested
    -- Any pause (user stop, insufficient credits, a resumable HTTP budget) is user-side or
    -- resumable, never a Graylum failure to refund. Erased accounts belong to erasure recovery.
-   AND r.paused_reason IS NULL
+   AND (r.paused_reason IS NULL OR (e.state IN ('waiting_resume','waiting_credits') AND r.paused_reason IN ('http_budget','insufficient_credits')
+     AND e.primary_result IS NULL AND e.result IS NULL))
    -- 0284: content beyond capacity (user material too long) is not refunded (Owner 2026-10-12).
    AND coalesce(e.failure_code,'') NOT IN ('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY')
    AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
