@@ -337,3 +337,62 @@ it('RUNTIME: the recovery job and an operator refunding the same round at once r
   expect(['compensated', 'already_compensated']).toContain(operator.state);
   expect(await ledger(round)).toMatchObject({ credits: 100, ledger: 100, compensations: 1, run_state: 'refunded' });
 }, 60000);
+
+/**
+ * 0398 (Owner 2026-10-25 "暂停回合选 A"): a round paused for the user whose charged step delivered no reply.
+ * `reply` keeps the saved primary reply (an organizer waiting after its answer), which is never refunded.
+ */
+async function pausedRound(ageMs: number, state: 'waiting_resume' | 'waiting_credits', reply = false) {
+  const round = await chargedOpenRound(ageMs);
+  await db.query(`update runtime_executions set state=$2${reply ? '' : ',primary_result=null'} where id=$1`, [round.executionId, state]);
+  await db.query('update bill2_runs set paused_reason=$2 where id=$1',
+    [round.runId, state === 'waiting_credits' ? 'insufficient_credits' : 'http_budget']);
+  await db.query('update runtime_sessions set active_execution=null where id=$1', [round.sessionId]);
+  return round;
+}
+
+it.each(['waiting_resume', 'waiting_credits'] as const)(
+  'RUNTIME: a paused round that delivered no reply is refunded after 24 hours and cannot be replayed for free (%s)', async state => {
+    const round = await pausedRound(2 * STALE_ROUND_AGE_MS, state);
+    expect((await ledger(round)).credits).toBe(97);
+    const report = await reported();
+    expect(report.rounds.find(item => item.runId === round.runId)).toMatchObject({ chargedCredits: 3,
+      evidence: { executionState: state, savedReplyChars: 0 } });
+    expect(await compensateStaleRound(service, round.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+    expect(await ledger(round)).toMatchObject({ credits: 100, ledger: 100, compensations: 1, run_state: 'refunded', closed: true,
+      execution_state: 'cancelled', active_execution: null });
+    // Repeated: the same outcome, no second refund.
+    const refunded = await ledger(round);
+    expect(await compensateStaleRound(service, round.runId)).toMatchObject({ state: 'already_compensated', compensatedCredits: 3 });
+    expect(await ledger(round)).toEqual(refunded);
+    // A later "continue" finds the round closed: nothing is replayed free, nothing charged; the user starts a new round.
+    const run = (await db.query('select runtime_cursor cursor,runtime_epoch epoch from bill2_runs where id=$1', [round.runId])).rows[0];
+    await expect(round.host.execute(round.executionId, undefined, { executionId: round.executionId, cursor: run.cursor, epoch: run.epoch }))
+      .rejects.toThrow();
+    expect(await ledger(round)).toEqual(refunded);
+  }, 60000);
+
+it('RUNTIME: two concurrent compensations of a paused round refund once', async () => {
+  const round = await pausedRound(2 * STALE_ROUND_AGE_MS, 'waiting_resume');
+  const cutoff = new Date(Date.now() - STALE_ROUND_AGE_MS).toISOString();
+  const call = (client: pg.Client) => client.query('select public.runtime_stale_round_compensate($1,$2) value', [round.runId, cutoff])
+    .then(result => result.rows[0].value);
+  const race = await overlap(db, connectionString, 'select id from runtime_sessions where id=$1 for update', [round.sessionId], call, call);
+  expect(race.value).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+  expect(race.other).toMatchObject({ ok: true, value: { state: 'already_compensated', compensatedCredits: 3 } });
+  expect(await ledger(round)).toMatchObject({ credits: 100, ledger: 100, compensations: 1 });
+}, 60000);
+
+it('RUNTIME: a paused round with a delivered reply, a recent pause or a user stop is never refunded', async () => {
+  const delivered = await pausedRound(2 * STALE_ROUND_AGE_MS, 'waiting_credits', true);
+  const recent = await pausedRound(STALE_ROUND_AGE_MS / 2, 'waiting_resume');
+  const stopped = await pausedRound(2 * STALE_ROUND_AGE_MS, 'waiting_resume');
+  await db.query("update bill2_runs set paused_reason='user_stop' where id=$1", [stopped.runId]);
+  const reportIds = ids(await reported());
+  for (const round of [delivered, recent, stopped]) {
+    expect(reportIds).not.toContain(round.runId);
+    const before = await ledger(round);
+    await expect(compensateStaleRound(service, round.runId)).rejects.toThrow('STALE_ROUND_NOT_ELIGIBLE');
+    expect(await ledger(round)).toEqual(before);
+  }
+}, 60000);
