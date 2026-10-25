@@ -208,12 +208,31 @@ export function ResearchSessionPanel({ settledTurns, onSend, continuation = null
   const counts = autoContinue ? roundCounts(autoContinue.sentPerRound, stored) : null;
   const decision = autoContinue && counts
     ? autoContinueDecision(toSend, autoContinue.sentFor, counts, props.disabled) : "none";
+  // A stored round may have been cached while the panel waited, and the user may have sent something else since: ask the host
+  // again right before sending, and only send the turn it still reports and while the conversation still takes a message.
+  const disabledNow = useRef(props.disabled);
+  disabledNow.current = props.disabled;
+  const checking = useRef(new Set<string>());
   useEffect(() => {
     if (decision !== "send" || !toSend || !autoContinue) return;
-    autoContinue.consume(toSend, counts?.get(toSend.discoveryId) ?? 0);
-    void onSend(AUTO_CONTINUE_INPUT);
+    if (continuation) { // the stream's own signal comes from this very turn: nothing can have outdated it
+      autoContinue.consume(toSend, counts?.get(toSend.discoveryId) ?? 0);
+      void onSend(AUTO_CONTINUE_INPUT);
+      return;
+    }
+    if (checking.current.has(toSend.executionId)) return;
+    checking.current.add(toSend.executionId);
+    void utils.research.unfinishedRound.fetch({ sessionId }, { staleTime: 0 }).catch(() => null).then(fresh => {
+      checking.current.delete(toSend.executionId);
+      const confirmed = storedUnfinishedRound(fresh);
+      if (!confirmed || confirmed.executionId !== toSend.executionId) return;
+      const seen = roundCounts(autoContinue.sentPerRound, confirmed);
+      if (autoContinueDecision(toSend, autoContinue.sentFor, seen, disabledNow.current) !== "send") return;
+      autoContinue.consume(toSend, seen.get(toSend.discoveryId) ?? 0);
+      void onSend(AUTO_CONTINUE_INPUT);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `counts` is derived from the other inputs
-  }, [decision, toSend, autoContinue, onSend]);
+  }, [decision, toSend, continuation, autoContinue, onSend, sessionId, utils]);
   const batch = autoContinue?.batch ?? 0;
   useEffect(() => {
     if (seen.current === settledTurns) return;

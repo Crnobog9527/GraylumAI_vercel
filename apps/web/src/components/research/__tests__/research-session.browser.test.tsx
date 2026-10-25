@@ -43,7 +43,7 @@ beforeAll(async () => {
           function Conversation(){
             const research=useResearchCalls(${JSON.stringify(SESSION)});
             const [settled,setSettled]=React.useState(0);
-            const [busy,setBusy]=React.useState(false);
+            const [busy,setBusy]=React.useState(Boolean(window.startBusy));
             const [shown,setShown]=React.useState(true);
             window.setBusy=setBusy;
             window.setShown=setShown;
@@ -368,6 +368,47 @@ it("after a reload, continues the round the host stored once, never twice for on
     await page.evaluate(() => (window as unknown as { settle: () => void }).settle());
     await page.waitForTimeout(400);
     expect(await sent()).toHaveLength(3);
+    expect(errors).toEqual([]);
+  } finally {
+    await page.close();
+  }
+}, 60000);
+
+// Review P1 (#1421): a stored round cached while the panel waited must not send once the host has moved on (the user said
+// something else in another step): the page asks the host again right before it sends.
+it("never sends a cached stored round the host no longer reports, and sends one it still reports", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    let stored: unknown = { discoveryId: "d1", executionId: "exec-cached", replies: 2 };
+    await page.route("**/*", async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' });
+      if (url.pathname.endsWith("/research.unfinishedRound")) {
+        return route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data: stored } }) });
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data: { items: [] } } }) });
+    });
+    // The conversation is busy from the start, so the stored round is read and cached but cannot be sent yet.
+    await page.addInitScript(() => { (window as unknown as { startBusy: boolean }).startBusy = true; });
+    await page.goto("http://research.test/");
+    await page.addScriptTag({ content: code });
+    await page.waitForFunction(() => typeof (window as unknown as { emit?: unknown }).emit === "function");
+    const sent = () => page.evaluate(() => (window as unknown as { sent: unknown[] }).sent);
+    const setBusy = (value: boolean) => page.evaluate(v => (window as unknown as { setBusy: (b: boolean) => void }).setBusy(v), value);
+    await page.waitForTimeout(500);
+    // Meanwhile the user sent something else: the host no longer reports the round, but this page's cache still does.
+    stored = null;
+    await setBusy(false);
+    await page.waitForTimeout(700);
+    expect(await sent()).toEqual([]);
+    // A round the host still reports is sent once, after asking again.
+    stored = { discoveryId: "d1", executionId: "exec-live-now", replies: 2 };
+    await page.evaluate(() => (window as unknown as { settle: () => void }).settle());
+    await page.waitForFunction(() => (window as unknown as { sent: unknown[] }).sent.length === 1);
+    await page.waitForTimeout(500);
+    expect(await sent()).toEqual(["继续搜索对标账号"]);
     expect(errors).toEqual([]);
   } finally {
     await page.close();
