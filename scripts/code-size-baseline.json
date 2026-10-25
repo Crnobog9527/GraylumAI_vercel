@@ -41,7 +41,7 @@
   "apps/web/src/components/opc/workspace-frame.tsx": {"longLines":33},
   "apps/web/src/components/profile/PersonalInfoCard.tsx": {"lines":785,"longLines":3},
   "apps/web/src/components/profile/ProfileSidebar.tsx": {"longLines":2},
-  "apps/web/src/components/profile/TicketsPanel.tsx": {"lines":922,"longLines":6},
+  "apps/web/src/components/profile/TicketsPanel.tsx": {"lines":858,"longLines":6},
   "apps/web/src/components/ui/alert-dialog.tsx": {"longLines":1},
   "apps/web/src/components/ui/badge.tsx": {"longLines":1},
   "apps/web/src/components/ui/button.tsx": {"longLines":1},

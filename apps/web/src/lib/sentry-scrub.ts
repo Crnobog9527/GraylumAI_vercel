@@ -34,6 +34,7 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility',
   'register', 'release-subscription-credits',
   'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'scan-check', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'social-monitor', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'upload', 'users',
+  'ticket-attachments-cleanup',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
   // Style samples D, E, G to O (PUBLIC-SITE, /landing/preview/d … /o), removed with the samples.
   'd', 'e', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { logClientDevError } from '@/lib/client-log';
-import { createClient } from '@/lib/supabase';
+import { useTicketAttachments } from '@/hooks/use-ticket-attachments';
 
 interface MockUser {
   email?: string;
@@ -41,12 +41,6 @@ interface TicketReply {
   is_admin_reply: boolean;
   attachments?: string[];
   created_date: string;
-}
-
-interface PendingAttachment {
-  name: string;
-  path: string;
-  previewUrl: string;
 }
 
 const categoryOptions = [
@@ -570,8 +564,7 @@ const CreateTicketForm = memo(function CreateTicketForm({
     description: '',
     category: 'technical_support'
   });
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const { attachments, uploading, uploadError, handleFileUpload, removeAttachment } = useTicketAttachments();
 
   // tRPC mutation for creating ticket
   const createMutation = trpc.ticket.createTicket.useMutation({
@@ -582,64 +575,6 @@ const CreateTicketForm = memo(function CreateTicketForm({
       logClientDevError('Failed to create ticket');
     },
   });
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-
-    setUploading(true);
-    try {
-      // 获取 auth token
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        logClientDevError('Not authenticated');
-        return;
-      }
-
-      for (const file of files) {
-        if (!file.type.startsWith('image/')) {
-          continue;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-          continue;
-        }
-
-        // 上传文件到服务器
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: formData,
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const previewUrl = URL.createObjectURL(file);
-          setAttachments(prev => [...prev, { name: file.name, path: data.path, previewUrl }]);
-        } else {
-          logClientDevError('Upload failed', { status: response.status });
-        }
-      }
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments(prev => {
-      const target = prev[index];
-      if (target) {
-        URL.revokeObjectURL(target.previewUrl);
-      }
-
-      return prev.filter((_, i) => i !== index);
-    });
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -759,6 +694,7 @@ const CreateTicketForm = memo(function CreateTicketForm({
               </span>
             </label>
           </div>
+          {uploadError && <p className="mt-2 text-sm" style={{ color: 'var(--error)' }}>{uploadError}</p>}
 
           {attachments.length > 0 && (
             <div className="mt-3 space-y-2">

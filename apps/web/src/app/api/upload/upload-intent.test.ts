@@ -34,6 +34,18 @@ describe('ticket upload intent', () => {
     expect(f.bucket.remove).toHaveBeenCalledExactlyOnceWith([path]);
     expect(f.bucket.list).toHaveBeenCalledExactlyOnceWith(actor, { search: `${uploadId}.png`, limit: 2 });
   });
+  it('declares the byte size at admission', async () => {
+    const f = setup(); await uploadWithIntent(f.input);
+    expect(f.rpc).toHaveBeenNthCalledWith(1, 'ticket_upload_begin', { p_profile_id: actor, p_upload_id: uploadId, p_bytes: 1 });
+  });
+  it.each([
+    ['UPLOAD_RATE_LIMITED', '一分钟'], ['UPLOAD_DAILY_COUNT', '20 个'], ['UPLOAD_DAILY_BYTES', '50MB'],
+  ])('per-user limit %s is a 429 with a readable message and never uploads', async (code, text) => {
+    const f = setup(); f.rpc.mockResolvedValueOnce({ data: null, error: { message: code } } as never);
+    const result = await uploadWithIntent(f.input);
+    expect(result.status).toBe(429); expect(JSON.stringify(result)).toContain(text);
+    expect(f.bucket.upload).not.toHaveBeenCalled(); expect(f.rpc).toHaveBeenCalledTimes(1);
+  });
   it.each([{ admitted: false }, {}, null])('denied or malformed begin never uploads: %j', async data => {
     const f = setup(); f.rpc.mockResolvedValueOnce({ data, error: null } as never);
     expect((await uploadWithIntent(f.input)).status).toBe(503); expect(f.bucket.upload).not.toHaveBeenCalled();
@@ -78,7 +90,7 @@ describe('ticket upload intent', () => {
   });
   it.each([
     { profileId: '../other' }, { uploadId: '../file.png' }, { mime: 'text/html' },
-    { body: new Uint8Array(5 * 1024 * 1024 + 1) }, { timeoutMs: 0 },
+    { body: new Uint8Array(5 * 1024 * 1024 + 1) }, { body: new Uint8Array(0) }, { timeoutMs: 0 },
   ])('rejects invalid parameters before all I/O', async patch => {
     const f = setup(); expect((await uploadWithIntent({ ...f.input, ...patch })).status).toBe(400);
     expect(f.rpc).not.toHaveBeenCalled(); expect(f.bucket.upload).not.toHaveBeenCalled();
