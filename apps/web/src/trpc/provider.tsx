@@ -11,6 +11,7 @@ import { UnauthorizedNotice } from '@/components/auth/UnauthorizedNotice';
 import { createSessionRefresher } from '@/lib/session-refresh';
 import { sessionRefreshLink } from '@/trpc/session-refresh-link';
 import { trpcLinkKind } from '@/trpc/link-routing';
+import { TRPC_MAX_BATCH_CALLS } from '@/lib/trpcBatchLimit';
 import { toast } from 'sonner';
 import { isProfileArchivedError, PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { PROFILE_BUSINESSES_KEY } from '@/components/opc/profile-archive/profile-archive-api';
@@ -94,6 +95,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   const [trpcClient] = useState(() => {
     const options = {
       url: '/api/trpc',
+      maxItems: TRPC_MAX_BATCH_CALLS, // The proxy rejects larger batches (ARCH-FIX A1).
       async headers() {
         const token =
           accessTokenRef.current ??
