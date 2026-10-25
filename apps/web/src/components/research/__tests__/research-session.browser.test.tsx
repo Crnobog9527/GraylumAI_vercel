@@ -298,3 +298,78 @@ it("continues an unfinished discovery once for the user, not after a stop, and n
     await page.close();
   }
 }, 60000);
+
+// A reload or a lost connection mid-round drops the stream's signal; the host's stored unfinished round (`research.unfinishedRound`)
+// takes its place (#1308 staging 10-25: the page was reloaded while the round ran and the user was left to type "继续").
+it("after a reload, continues the round the host stored once, never twice for one turn, and stops at the limit", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    let stored: unknown = { discoveryId: "d1", executionId: "exec-before-reload", replies: 2 };
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    await page.route("**/*", async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' });
+      if (url.pathname.endsWith("/research.unfinishedRound")) {
+        await gate;
+        return route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data: stored } }) });
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data: { items: [] } } }) });
+    });
+    await page.goto("http://research.test/");
+    await page.addScriptTag({ content: code });
+    await page.waitForFunction(() => typeof (window as unknown as { emit?: unknown }).emit === "function");
+    const sent = () => page.evaluate(() => (window as unknown as { sent: unknown[] }).sent);
+    const setBusy = (value: boolean) => page.evaluate(v => (window as unknown as { setBusy: (b: boolean) => void }).setBusy(v), value);
+    // The reply that stopped the round is still being written: nothing is sent until the conversation takes a message.
+    await setBusy(true);
+    release();
+    await page.waitForTimeout(400);
+    expect(await sent()).toEqual([]);
+    await setBusy(false);
+    await page.waitForFunction(() => (window as unknown as { sent: unknown[] }).sent.length === 1);
+    expect(await sent()).toEqual(["继续搜索对标账号"]);
+    // The host counted two replies before the reload: the reply this sent is the third batch.
+    await setBusy(true);
+    await ui(page.getByText("正在扩大搜索，第 3 批")).toBeVisible();
+    await setBusy(false);
+    // Switching steps remounts the panel: the same turn is never sent again.
+    await page.evaluate(() => (window as unknown as { setShown: (b: boolean) => void }).setShown(false));
+    await page.evaluate(() => (window as unknown as { setShown: (b: boolean) => void }).setShown(true));
+    await page.waitForTimeout(400);
+    expect(await sent()).toEqual(["继续搜索对标账号"]);
+    // The continuation's own turn ran out again: the host now names that turn, and it is sent once more.
+    stored = { discoveryId: "d1", executionId: "exec-second", replies: 3 };
+    await page.evaluate(() => (window as unknown as { settle: () => void }).settle());
+    await page.waitForFunction(() => (window as unknown as { sent: unknown[] }).sent.length === 2);
+    await page.waitForTimeout(400);
+    expect(await sent()).toEqual(["继续搜索对标账号", "继续搜索对标账号"]);
+    // The live signal and the stored round name the same turn: still once.
+    stored = { discoveryId: "d2", executionId: "exec-1", replies: 2 };
+    await page.evaluate(() => {
+      const w = window as unknown as { emit: (e: unknown) => void; settle: () => void };
+      w.emit({ type: "research_continue", discoveryId: "d2" });
+      w.emit({ type: "result", result: { state: "completed", completeness: "complete" } });
+      w.settle();
+    });
+    await page.waitForFunction(() => (window as unknown as { sent: unknown[] }).sent.length === 3);
+    await page.waitForTimeout(500);
+    expect(await sent()).toHaveLength(3);
+    // A round already past the limit is not continued by reloading: the user replies "继续" themselves.
+    stored = { discoveryId: "d3", executionId: "exec-late", replies: 7 };
+    await page.evaluate(() => (window as unknown as { settle: () => void }).settle());
+    await ui(page.getByText("已经自动接着搜了 6 次")).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await sent()).toHaveLength(3);
+    // No stored round (or one the host no longer reports): nothing is sent.
+    stored = null;
+    await page.evaluate(() => (window as unknown as { settle: () => void }).settle());
+    await page.waitForTimeout(400);
+    expect(await sent()).toHaveLength(3);
+    expect(errors).toEqual([]);
+  } finally {
+    await page.close();
+  }
+}, 60000);
