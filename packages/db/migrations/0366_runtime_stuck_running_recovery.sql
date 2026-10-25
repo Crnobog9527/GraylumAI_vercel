@@ -16,6 +16,9 @@ DECLARE e runtime_executions;s runtime_sessions;r bill2_runs;items jsonb;ended j
  stamp timestamptz:=clock_timestamp();cutoff timestamptz:=stamp-interval '300 seconds';
  -- A running owner is gone once its dispatch lease (265 s) has expired by more than the rest of the 300 s function limit.
  owner_gone timestamptz:=stamp-interval '60 seconds';
+ -- A round that already saved its reply is first left to ownerLostRecovery.ts (every minute, 20 per run), which turns it
+ -- into a resumable wait that shows the reply; only one it could not hand back for 15 minutes is released here.
+ reply_grace timestamptz:=stamp-interval '15 minutes';
 BEGIN
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 20 THEN
   RAISE EXCEPTION 'RUNTIME_RECOVERY_BATCH_LIMIT_INVALID' USING ERRCODE='22023';
@@ -28,7 +31,8 @@ BEGIN
    FROM runtime_executions ex JOIN runtime_sessions sess ON sess.id=ex.session_id AND sess.actor_id=ex.actor_id
    JOIN bill2_runs br ON br.id=ex.billing_run_id AND br.actor_id=ex.actor_id AND br.session_ref=sess.id
    WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id) AND sess.active_execution=ex.id
-    AND (ex.state='interrupted' OR (ex.state='running' AND br.runtime_dispatch_deadline<=owner_gone))
+    AND (ex.state='interrupted' OR (ex.state='running' AND br.runtime_dispatch_deadline<=
+     CASE WHEN ex.primary_result IS NULL THEN owner_gone ELSE reply_grace END))
     AND ex.result IS NULL AND ex.failure_code IS NULL
     AND ex.content_deleted_at IS NULL AND ex.created_at<=cutoff
     AND br.contract_version='bill2.v2' AND br.runtime_epoch>0 AND NOT br.closed
@@ -59,7 +63,8 @@ BEGIN
   RETURN jsonb_build_object('state',e.state);
  END IF;
  IF s.active_execution IS DISTINCT FROM e.id OR e.state NOT IN ('interrupted','running')
-  OR (e.state='running' AND (r.runtime_dispatch_deadline IS NULL OR r.runtime_dispatch_deadline>owner_gone))
+  OR (e.state='running' AND (r.runtime_dispatch_deadline IS NULL OR r.runtime_dispatch_deadline>
+   CASE WHEN e.primary_result IS NULL THEN owner_gone ELSE reply_grace END))
   OR e.result IS NOT NULL
   OR e.failure_code IS NOT NULL OR e.content_deleted_at IS NOT NULL OR e.created_at>cutoff
   OR r.closed OR r.cancel_requested OR r.conflict OR r.paused_reason IS NOT NULL

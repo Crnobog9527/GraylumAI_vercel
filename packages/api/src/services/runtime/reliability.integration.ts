@@ -262,6 +262,32 @@ it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
   } finally { await f.close(); }
 }, 60000);
 
+// 0366 review: a running round that already saved its reply is first left to the reply recovery (ownerLostRecovery.ts);
+// interrupted recovery releases it only once that has not handed it back for 15 minutes.
+it.each(['5 minutes', '20 minutes'] as const)('RUNTIME: a running round with a saved reply waits for the reply recovery (lease %s ago)',
+  async lease => {
+    const f = await fixture();
+    try {
+      await f.interrupted();
+      expect((await f.db.query('select primary_result is not null saved from runtime_executions where id=$1',
+        [f.admitted.executionId])).rows[0].saved).toBe(true);
+      await f.db.query("update runtime_executions set state='running',created_at=now()-interval '30 minutes' where id=$1",
+        [f.admitted.executionId]);
+      await f.db.query(`update bill2_calls set created_at=now()-interval '30 minutes',dispatched_at=now()-interval '30 minutes'
+        where run_id=$1`, [f.admitted.runId]);
+      await f.db.query('update bill2_runs set runtime_dispatch_deadline=now()-$2::interval where id=$1', [f.admitted.runId, lease]);
+      const result = await recoverInterruptedExecutions({ database: f.admin, actorId: f.actor, budget: erasureFinancialBudget(55_000) });
+      if (lease === '5 minutes') {
+        expect(result).toMatchObject({ selected: 0, failed: 0 });
+        expect(await f.snapshot()).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId, closed: false });
+      } else {
+        expect(result).toMatchObject({ selected: 1, processed: 1, failed: 0 });
+        expect(await f.snapshot()).toMatchObject({ execution_state: 'interrupted', active_execution: null, closed: false,
+          credits: 94, reserved: 0 });
+      }
+    } finally { await f.close(); }
+  }, 60000);
+
 it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails'])
 ('RUNTIME: reliability finalize normal/ambiguous transaction %s', async mode => {
   const f = await fixture();
