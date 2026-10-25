@@ -37,7 +37,9 @@ try {
     '-e','POSTGRES_DB=payg','-e','POSTGRES_HOST_AUTH_METHOD=trust',POSTGRES_IMAGE]));
   let ready = false;
   for (let i=0;i<300&&!ready;i++) {
-    ready = docker(['exec',name,'pg_isready','-U','postgres','-d','payg']).status===0;
+    // TCP, not the unix socket: the image's init phase runs a temporary socket-only server that is then stopped,
+    // so a socket check can pass before the real server exists (CI saw "starting up" / missing socket).
+    ready = docker(['exec',name,'pg_isready','-h','127.0.0.1','-U','postgres','-d','payg']).status===0;
     if (!ready) await new Promise(resolve=>setTimeout(resolve,200));
   }
   assert.ok(ready,'local PostgreSQL ready');
