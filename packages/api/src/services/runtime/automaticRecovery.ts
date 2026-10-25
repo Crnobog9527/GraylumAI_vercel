@@ -5,7 +5,7 @@ import {denyNewCalls} from './newWorkGate';
 import { z } from 'zod';
 import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../bill2/service';
 import { boundedFinancialDatabase, erasureFinancialBudget } from '../accountErasure/financialRecovery';
-import type { RuntimeBudget } from './budget';
+import { createRuntimeBudget, type RuntimeBudget } from './budget';
 import { stagingTransport } from './stagingTransport';
 import type { StagingPolicy } from './stagingPolicy';
 import { autoCompensateStaleRounds, type StaleRoundAutoClose } from './staleChargedRounds';
@@ -15,6 +15,9 @@ import { logger } from '../../lib/logger';
 
 export const AUTOMATIC_RECOVERY_LOOKUP_MS = 2_000;
 export const ADMISSION_RECOVERY_MS = 8_000;
+/** Line D2: the whole repair an admission may wait for when an earlier round still holds the session. */
+export const ADMISSION_REPAIR_MS = 2_000;
+const ADMISSION_REPAIR_STEP_MS = 500;
 // 45s so stop-loss delivery (bounded to ~12s in the cron route) fits in the 60s route limit.
 export const CRON_RECOVERY_MS = 45_000;
 export const RECOVERY_BATCH_SIZE = 20;
@@ -108,4 +111,29 @@ export async function runAutomaticFinancialRecovery(admin: SupabaseClient, actor
   // No time left even to read the report: not knowing is a failure, so a recovery backlog cannot starve refunds silently.
   return { ...summary, staleRounds: canStart() ? await autoCompensateStaleRounds(database, { canStart })
     : { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 1, credits: 0, manualReview: 0, deferred: 0 } };
+}
+
+/** A hard deadline with no reserve: the repair below stops sending requests at it and aborts what is still open. */
+function repairBudget(ms: number, now = () => performance.now()): RuntimeBudget {
+  const base = createRuntimeBudget(now);
+  const deadline = now() + ms;
+  return { ...base, workDeadline: deadline, persistenceDeadline: deadline, remainingPersistence: () => deadline - now(),
+    assertCanPersist(duration = 0) { if (now() + duration >= deadline) throw new Error('RUNTIME_REPAIR_BUDGET'); },
+    assertCanStart(duration = 0) { if (now() + duration >= deadline) throw new Error('RUNTIME_REPAIR_BUDGET'); },
+    modelCallTimeout() { throw new Error('RUNTIME_DISPATCH_DISABLED'); } };
+}
+
+/**
+ * Line D2 (architecture audit 2026-10-25): an admission refused because an earlier round of this actor still holds
+ * the session runs this once, then retries. It is the scheduled interrupted recovery limited to this actor and to
+ * ADMISSION_REPAIR_MS, so a round whose owner is already gone is closed now instead of at the next minute. It never
+ * dispatches, never refunds early and never touches another actor; SQL keeps every lease and fence check.
+ * Returns whether a round was processed (closed, released or found still pending), so a retry is worth trying.
+ */
+export async function repairActorRounds(admin: SupabaseClient, actorId: string, ms = ADMISSION_REPAIR_MS): Promise<boolean> {
+  const budget = repairBudget(ms);
+  const summary = await recoverInterruptedExecutions({ database: boundedFinancialDatabase(admin, budget), budget, actorId,
+    stepMs: ADMISSION_REPAIR_STEP_MS });
+  logger.info('api', 'runtime_admission_repair', { ...summary, actorScoped: true });
+  return summary.processed > 0;
 }

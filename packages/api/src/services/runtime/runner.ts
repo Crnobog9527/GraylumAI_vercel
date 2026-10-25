@@ -13,16 +13,24 @@ export type RuntimeTool = {
   name: string; description: string; execute: (arguments_: Record<string, unknown>, callId: string) => Promise<string>;
   /** Defaults to the original optional `query` string used by every older tool. */
   parameters?: z.ZodObject<z.ZodRawShape>;
-  /** When set, invalid arguments or a failed execution become this tool result
-   * instead of failing the run. Unset (every older tool) keeps failing it. */
+  /** The tool result for arguments that fail `parameters` (default INVALID_TOOL_ARGUMENTS). Unless invalidInputOnly,
+   * a failed execution becomes this result too instead of failing the run. */
   invalidResult?: string;
   /** Only arguments that fail the schema become invalidResult; a failed execution (a credit pause, a database fault)
-   * still fails the run as before. */
+   * still fails the run as before. Without invalidResult this is every tool's behaviour (ARCH-FIX C1). */
   invalidInputOnly?: boolean;
   /** A cap of the tool's own: once it returns false the tool is no longer offered to the model. */
   enabled?: () => boolean;
 };
 const defaultToolParameters=z.object({query:z.string().max(2000).optional()}).strict();
+/**
+ * ARCH-FIX C1: what the model gets when its arguments fail a tool's schema. Nothing ran, so the paid turn goes on: the
+ * model corrects the call or answers without it (staging 2026-10-24, a 42-character keyword failed a whole turn). The
+ * same arguments give the same text on replay; repeated invalid calls stay bounded by maxTurns (and the billing call limit).
+ */
+export const INVALID_TOOL_ARGUMENTS=JSON.stringify({status:'not_confirmed',reason:'INVALID_ARGUMENTS',
+  nextStep:'The arguments did not match this tool\'s parameters, so nothing ran. Correct them and call the tool again, '+
+   'or answer without it.'});
 export type RuntimeRunnerInput = {
   model: string; instructions: string; input: string; session: Session;
   maxOutputTokens: number; maxTurns: number;
@@ -189,9 +197,11 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   let toolCalls=0;
   const tools=input.tools.map(t=>tool({name:t.name,description:t.description,
     isEnabled:()=>(t.enabled?.()??true)&&(!(input.libraryRetrieval||input.research?.freeChat)||input.maxToolCalls===undefined||toolCalls<input.maxToolCalls),
-    parameters:t.parameters??defaultToolParameters,errorFunction:t.invalidResult===undefined?null:(_context,error)=>{
-      if(t.invalidInputOnly&&!(error instanceof ModelBehaviorError))throw error;
-      return t.invalidResult!;},
+    parameters:t.parameters??defaultToolParameters,errorFunction:(_context,error)=>{
+      // A failed execution still fails the run; only a tool with its own catch-all result (ask_question) answers it.
+      if(t.invalidResult!==undefined&&!t.invalidInputOnly)return t.invalidResult;
+      if(!(error instanceof ModelBehaviorError))throw error;
+      return t.invalidResult??INVALID_TOOL_ARGUMENTS;},
     execute:async(args,_context,details)=>{
       const callId=details?.toolCall?.callId;
       if(!callId)throw new Error('RUNTIME_TOOL_ID_REQUIRED');

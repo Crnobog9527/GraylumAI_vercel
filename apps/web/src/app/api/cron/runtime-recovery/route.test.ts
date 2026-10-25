@@ -1,11 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), notice: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), notice: vi.fn(), start: vi.fn(), finish: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/runtime/automaticRecovery', () => ({ runAutomaticFinancialRecovery: mocks.recover }));
 vi.mock('@repo/api/src/services/runtime/stopLossNotify', () => ({ deliverStopLossAlerts: mocks.notice }));
+vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start, finishScheduledJobRun: mocks.finish }));
 import { GET } from './route';
 afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
@@ -15,6 +16,8 @@ beforeEach(() => {
   mocks.create.mockReturnValue({ synthetic: true });
   mocks.recover.mockResolvedValue({ selected: 1, processed: 1, settled: 1, pending: 0, failed: 0 });
   mocks.notice.mockResolvedValue({ outcome: 'none', alerts: 0 });
+  mocks.start.mockResolvedValue('run-1');
+  mocks.finish.mockResolvedValue(undefined);
 });
 it('denies unauthenticated cron before inventory or provider work', async () => {
   mocks.auth.mockReturnValue(new Response('Unauthorized', { status: 401 }));
@@ -66,4 +69,36 @@ it('mails stop-loss alerts before recovery, bounded, and even when recovery fail
   mocks.recover.mockRejectedValue(new Error('synthetic'));
   expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(500);
   expect(mocks.notice).toHaveBeenCalledTimes(2);
+});
+
+// Line D1: each run leaves its counts in scheduled_job_runs; recording never blocks or fails the recovery.
+it('records every run with its counts, success or failure', async () => {
+  await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
+  expect(mocks.start).toHaveBeenCalledWith({ supabase: { synthetic: true }, jobKey: 'runtime_recovery', triggerSource: 'cron' });
+  expect(mocks.finish).toHaveBeenCalledWith({ supabase: { synthetic: true }, runId: 'run-1', status: 'success',
+    summary: { selected: 1, processed: 1, settled: 1, pending: 0, failed: 0 }, error: undefined });
+  mocks.finish.mockClear();
+  mocks.recover.mockRejectedValue(new Error('synthetic private diagnostic'));
+  await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
+  expect(mocks.finish).toHaveBeenCalledWith({ supabase: { synthetic: true }, runId: 'run-1', status: 'error', summary: {},
+    error: 'RUNTIME_RECOVERY_FAILED' });
+});
+it('still recovers when the run record cannot be written', async () => {
+  mocks.start.mockRejectedValue(new Error('Failed to start scheduled job run'));
+  const response = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
+  expect(response.status).toBe(200);
+  expect(mocks.recover).toHaveBeenCalledOnce();
+  expect(mocks.finish).not.toHaveBeenCalled();
+});
+
+it('gives up a run-record write that does not answer, so the recovery keeps its budget', async () => {
+  vi.useFakeTimers();
+  try {
+    mocks.start.mockReturnValue(new Promise(() => {}));
+    const pending = GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await pending).status).toBe(200);
+    expect(mocks.recover).toHaveBeenCalledOnce();
+    expect(mocks.finish).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
 });

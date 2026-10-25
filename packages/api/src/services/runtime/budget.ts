@@ -20,6 +20,8 @@ export function createRuntimeBudget(now:()=>number=()=>performance.now(),persist
   // AC-0c: this invocation's reuse of Auth's own verdict (see authReuse.ts).
   auth:createAuthReuse(now),
   remainingPersistence:()=>persistenceDeadline-now(),
+  /** Work time left before the reply must stop (ms); research caps a supplier request with it. */
+  remainingWork:()=>workDeadline-now(),
   modelCallTimeout(maximum:number){
    const remaining=Math.floor(workDeadline-now());
    if(remaining<MIN_MODEL_DISPATCH_MS)throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');

@@ -55,6 +55,27 @@ export async function checkMemoCases({c,report}){
   assert.equal(await one(counted)-after,1,'a closed call keeps nothing');
  }finally{await c.query('ROLLBACK');}
  report.checks.push('a repeated identical sub-check runs once inside a call, every time outside one, and nothing survives the call');
+ // Error paths: an error inside a scope rolls the scope back with its subtransaction or transaction, so nothing reaches
+ // the next statement or the next transaction on this (pooled) connection.
+ const memoState=async()=>(await rows(`SELECT coalesce(current_setting('graylum.check_call',true),'') call,
+  coalesce(current_setting('graylum.check_memo',true),'') memo`))[0];
+ await c.query('BEGIN');
+ try{
+  await c.query('SAVEPOINT memo_error');
+  await c.query("SELECT runtime_check_memo_open(),runtime_check_memo_put('k','v')");
+  assert.notEqual((await memoState()).call,'');
+  await assert.rejects(c.query("SELECT runtime_check_memo_put('k2','v2'), 1/0"));
+  await c.query('ROLLBACK TO SAVEPOINT memo_error');
+  assert.deepEqual(await memoState(),{call:'',memo:''},'a caught error clears the scope with its subtransaction');
+ }finally{await c.query('ROLLBACK');}
+ await c.query('BEGIN');
+ await c.query("SELECT runtime_check_memo_open(),runtime_check_memo_put('k','v')");
+ await assert.rejects(c.query('SELECT 1/0'));
+ await c.query('ROLLBACK');
+ assert.deepEqual(await memoState(),{call:'',memo:''},'an uncaught error clears the scope with its transaction');
+ await c.query("SELECT runtime_check_memo_open(),runtime_check_memo_put('k','v')");
+ assert.deepEqual(await memoState(),{call:'',memo:''},'a scope left open by a committed statement does not reach the next one');
+ report.checks.push('an error inside a scope (caught or not) and the end of a transaction leave nothing for the next statement or transaction');
  // A change made between two calls is seen by the next call (no cross-call reuse).
  await c.query('BEGIN');
  try{

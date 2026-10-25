@@ -37,10 +37,33 @@ export function clearEntryLanguage(): void {
   try { storage()?.removeItem(KEY); } catch { /* storage unavailable */ }
 }
 
-/** What the app says after applying it: which language AI replies now use, and what it replaced. */
-export function entryLanguageNotice(applied: { language: ReplyLocale; previous: ReplyLocale }): { title: string; description: string } {
-  const now = REPLY_LOCALE_LABELS[applied.language];
-  return { title: `AI 回复语言：${now}`, description: applied.previous === applied.language
+const CHANGE_KEY = 'graylum.entry-language.change';
+/** How long a change just made still explains a repeat that finds nothing to change. */
+export const ENTRY_CHANGE_WINDOW_MS = 60 * 1000;
+
+/**
+ * What the app says after applying it: which language AI replies now use, and what it replaced. Coming from a page under
+ * another root layout (the Traditional Chinese site), the browser opens the app address once inside that page and then
+ * loads it again as a new page, so the language is applied twice: the first time records the change, which the page that
+ * stays then shows (the repeat finds nothing to change).
+ */
+export function entryLanguageNotice(applied: { language: ReplyLocale; previous: ReplyLocale }, now = Date.now()):
+  { title: string; description: string } {
+  let from = applied.previous;
+  try {
+    if (applied.previous !== applied.language) {
+      storage()?.setItem(CHANGE_KEY, JSON.stringify({ from: applied.previous, to: applied.language, at: now }));
+    } else {
+      const raw = storage()?.getItem(CHANGE_KEY);
+      const change = raw ? JSON.parse(raw) as { from?: unknown; to?: unknown; at?: unknown } : null;
+      const recent = change && change.to === applied.language && typeof change.at === 'number' && now - change.at >= 0
+        && now - change.at < ENTRY_CHANGE_WINDOW_MS;
+      const earlier = recent ? entryLocaleHint(typeof change.from === 'string' ? change.from : null) : null;
+      if (earlier) from = earlier;
+    }
+  } catch { /* storage unavailable: describe this application alone */ }
+  const current = REPLY_LOCALE_LABELS[applied.language];
+  return { title: `AI 回复语言：${current}`, description: from === applied.language
     ? '按你进入的页面设置。可在右上角「语言」修改。'
-    : `已按你进入的页面，从${REPLY_LOCALE_LABELS[applied.previous]}改为${now}。可在右上角「语言」修改。` };
+    : `已按你进入的页面，从${REPLY_LOCALE_LABELS[from]}改为${current}。可在右上角「语言」修改。` };
 }

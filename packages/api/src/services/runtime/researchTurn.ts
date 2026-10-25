@@ -17,6 +17,8 @@ export const PRODUCTION_RESEARCH_ACCOUNT = 'research-production';
 /** CHAT-AUTO-CONTEXT C (Owner 2026-10-17, question 1 A): a free chat reply may make up to this many research calls. */
 export const FREE_CHAT_RESEARCH_CALLS = 3;
 export const FREE_CHAT_RESEARCH = 'free-chat-v1';
+/** ARCH-FIX C1: the research tool parameters this turn offers declare every length limit (researchToolParameters). */
+export const RESEARCH_TOOL_LIMITS = 'declared-limits-v1';
 
 const route = z.object({
   platform: z.enum([...SOCIAL_PLATFORMS, 'web']),
@@ -40,6 +42,8 @@ export const frozenResearchTurn = z.object({
   discoverSubcalls: z.number().int().min(1).max(RUN_MAX_CALLS - 1),
   /** CHAT-AUTO-CONTEXT C: the general research tools of a free chat (absent: a positioning mentor turn). */
   freeChat: z.literal(FREE_CHAT_RESEARCH).optional(),
+  /** Absent on a turn admitted before ARCH-FIX C1: it keeps the parameters it was offered, so a replay sends the same bytes. */
+  toolLimits: z.literal(RESEARCH_TOOL_LIMITS).optional(),
   recentGrowth: z.object({
     maxFirstPostAgeDays: z.number().int().min(1).max(365),
     minViewsToFollowers: z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,4})?$/),
