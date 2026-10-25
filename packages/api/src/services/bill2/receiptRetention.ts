@@ -5,7 +5,7 @@ import { finishScheduledJobRun, startScheduledJobRun } from '../scheduledJobRuns
 
 /**
  * ARCH-FIX G2 (Owner 2026-10-25: raw output 30 days, billing fields 3 years). Daily, inside billing-reconcile:
- * receipts older than 30 days on finished runs lose only their raw provider output (0390). Billing fields,
+ * receipts older than 30 days on finished runs lose only their raw provider output (0374). Billing fields,
  * hashes and ids stay. Each batch is one short transaction; whatever is left is picked up the next day.
  */
 export const RECEIPT_RETENTION_JOB_KEY = 'receipt_raw_retention';

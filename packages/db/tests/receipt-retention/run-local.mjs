@@ -25,7 +25,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0390_receipt_raw_retention.sql';
+const migrationPath='packages/db/migrations/0374_receipt_raw_retention.sql';
 const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
@@ -47,8 +47,8 @@ try {
  ok(sql(migration));
  const finalCatalog=snapshot();
  ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0390 preserves complete catalog');
- report.checks.push('0390 applied twice after current staging; complete catalog unchanged');
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0374 preserves complete catalog');
+ report.checks.push('0374 applied twice after current staging; complete catalog unchanged');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
