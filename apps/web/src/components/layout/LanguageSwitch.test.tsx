@@ -43,10 +43,11 @@ describe('top-bar language switch (CHAT-LANGUAGE, Owner 2026-10-25)', () => {
     expect(html).toContain('aria-label="语言：繁體中文"');
     expect(html).toContain('data-value="zh-Hant"');
     for (const label of ['简体中文', '繁體中文', 'English']) expect(html).toContain(label);
-    expect(html).toContain('目前只影响 AI 回复语言');
+    // The profile card's explanations live here now, in one small line (Owner 2026-10-25).
+    expect(html).toContain('只影响 AI 回复语言，界面仍是简体中文；对话里明确要别的语言时那一次按你说的，改完从下一条回复起生效。');
   });
 
-  it('saves the same setting as the profile card, and ignores the current or an unknown value', () => {
+  it('saves the setting, and ignores the current or an unknown value', () => {
     renderToStaticMarkup(<LanguageSwitch />);
     state.onValueChange!('zh-Hans');
     state.onValueChange!('fr');

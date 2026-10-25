@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { POSTGRES_IMAGE } from './v3/images.mjs';
 import { buildFromFiles, buildPlan, installPgCronStub } from './baseline/build-from-files.mjs';
+import { compareSnapshots, renderSnapshots, snapshotSql, writeSnapshots } from './baseline/function-snapshots.mjs';
 
 const args = process.argv.slice(2);
 const usage = 'Usage: node packages/db/tests/run-db-baseline-replay.mjs --local-only|--ci [--write-built]'
@@ -141,6 +142,7 @@ try {
       + 'SELECT jsonb_object_agg(k, d ORDER BY k) FROM grouped;';
     const localDetail = JSON.parse(ok(psql(detailSql), 'Local detail'));
     report.groups = Object.keys(local).length;
+    const functionFiles = renderSnapshots(JSON.parse(ok(psql(snapshotSql()), 'Function snapshots')));
     if (option('--query')) report.query = psql(option('--query')).stdout.trim().split('\n');
     // DATA-ERASURE §6: every table a signed-in client can reach carries account_open_required
     // (checked on the database exactly as the files built it, before any re-apply below).
@@ -174,9 +176,16 @@ try {
         objects: builtObjects(localDetail),
       }, null, 1)}\n`);
       report.builtFingerprint = 'written';
+      writeSnapshots(root, functionFiles);
+      report.functionSnapshots = `written (${Object.keys(functionFiles).length} files)`;
     } else {
       report.builtDifferences = compareBuilt(localDetail, readJson(BUILT));
       if (report.builtDifferences.length > 0) report.failed ??= { step: 'built fingerprint (run with --write-built and commit)' };
+      // ARCH-FIX H1: packages/db/functions/ must equal the function definitions of this build.
+      report.functionSnapshotDifferences = compareSnapshots(root, functionFiles);
+      if (report.functionSnapshotDifferences.length > 0) {
+        report.failed ??= { step: 'function snapshots (run with --write-built and commit packages/db/functions)' };
+      }
     }
     // The convergence migration must be a no-op once its target state is reached (as on staging).
     const convergence = 'packages/db/migrations/0148_db_baseline_convergence.sql';
