@@ -339,7 +339,7 @@ it('RUNTIME: the recovery job and an operator refunding the same round at once r
 }, 60000);
 
 /**
- * 0398 (Owner 2026-10-25 "暂停回合选 A"): a round paused for the user whose charged step delivered no reply.
+ * 0382 (Owner 2026-10-25 "暂停回合选 A"): a round paused for the user whose charged step delivered no reply.
  * `reply` keeps the saved primary reply (an organizer waiting after its answer), which is never refunded.
  */
 async function pausedRound(ageMs: number, state: 'waiting_resume' | 'waiting_credits', reply = false) {

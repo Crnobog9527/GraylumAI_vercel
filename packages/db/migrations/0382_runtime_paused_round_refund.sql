@@ -45,7 +45,7 @@ BEGIN
      ORDER BY c.sequence DESC,rec.created_at DESC,rec.id DESC LIMIT 1) last_finish_reason
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   -- cost_pending: receipt recovery settled the last unknown call but the round was never closed.
-  -- 0398 (Owner 2026-10-25 "暂停回合选 A"): a round paused for the user (continue or top up) whose charged step
+  -- 0382 (Owner 2026-10-25 "暂停回合选 A"): a round paused for the user (continue or top up) whose charged step
   -- never delivered a reply is refunded by the same rule once it has been quiet for 24 hours.
   WHERE (e.state IN ('prepared','running','interrupted','cost_pending') OR (e.state IN ('waiting_resume','waiting_credits') AND r.paused_reason IN ('http_budget','insufficient_credits')
     AND e.primary_result IS NULL AND e.result IS NULL))
@@ -100,7 +100,7 @@ BEGIN
   RETURN jsonb_build_object('state','already_compensated','runId',b.id,'executionId',e.id,'actorId',e.actor_id,
    'executionState',e.state,'compensatedCredits',b.compensation_credits);
  END IF;
- -- 0398: a paused round qualifies only while it still waits for the user and never saved a reply.
+ -- 0382: a paused round qualifies only while it still waits for the user and never saved a reply.
  IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested
   OR (b.paused_reason IS NOT NULL AND NOT (e.state IN ('waiting_resume','waiting_credits') AND b.paused_reason IN ('http_budget','insufficient_credits')
    AND e.primary_result IS NULL AND e.result IS NULL))
