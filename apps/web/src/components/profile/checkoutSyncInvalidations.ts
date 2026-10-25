@@ -19,6 +19,9 @@ export type PostCheckoutInvalidationUtils = {
     getBalance: InvalidateQuery;
     getCreditsSummary: InvalidateQuery;
   };
+  runtime: {
+    choices: InvalidateQuery;
+  };
   payments: {
     methodMembership: InvalidateQuery;
     getMembershipEligibilityMatrix: InvalidateQuery;
@@ -31,6 +34,8 @@ export function invalidatePostCheckoutMembershipQueries(utils: PostCheckoutInval
     utils.user.getUserProfile.invalidate(),
     // Credit packs unlock from this level; a stale `free` would keep a new member locked out.
     utils.user.getEntitlements.invalidate(),
+    // Visible Skills depend on the membership level; runtime.choices is cached for minutes (DB-100).
+    utils.runtime.choices.invalidate(),
     utils.credits.getBalance.invalidate(),
     utils.credits.getCreditsSummary.invalidate(),
     utils.payments.methodMembership.invalidate(),

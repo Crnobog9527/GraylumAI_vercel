@@ -115,7 +115,7 @@ export function AppHeader() {
 
       <div className="h-full max-w-[1400px] mx-auto px-6 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/app" className="flex items-center gap-3 group">
+        <Link prefetch={false} href="/app" className="flex items-center gap-3 group">
           <img
             src="/graylum-logo.svg"
             alt=""
@@ -141,7 +141,7 @@ export function AppHeader() {
             const Icon = item.icon;
 
             return (
-              <Link key={item.href} href={item.href}>
+              <Link prefetch={false} key={item.href} href={item.href}>
                 <Button
                   variant="ghost"
                   className="h-10 gap-2 rounded-xl px-4 transition-colors duration-200"
@@ -164,7 +164,7 @@ export function AppHeader() {
           <LanguageSwitch className="border" />
           {/* Credits badge with warning styles */}
           {creditsRechargeAction.available ? (
-          <Link href={creditsRechargeAction.href} className="hidden sm:block">
+          <Link prefetch={false} href={creditsRechargeAction.href} className="hidden sm:block">
             <div
               className="flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 transition-opacity duration-200 hover:opacity-90"
               style={{
@@ -251,7 +251,7 @@ export function AppHeader() {
                 border: '1px solid var(--border-primary)'
               }}
             >
-              <Link href="/app/profile">
+              <Link prefetch={false} href="/app/profile">
                 <DropdownMenuItem
                   className="gap-2 rounded-lg cursor-pointer"
                   style={{ color: 'var(--text-secondary)' }}
@@ -261,7 +261,7 @@ export function AppHeader() {
                 </DropdownMenuItem>
               </Link>
               {creditsRechargeAction.available && (
-                <Link href={creditsRechargeAction.href}>
+                <Link prefetch={false} href={creditsRechargeAction.href}>
                   <DropdownMenuItem
                     className="gap-2 rounded-lg cursor-pointer"
                     style={{ color: 'var(--text-secondary)' }}
@@ -271,7 +271,7 @@ export function AppHeader() {
                   </DropdownMenuItem>
                 </Link>
               )}
-              <Link href={profileTabHref('security')}>
+              <Link prefetch={false} href={profileTabHref('security')}>
                 <DropdownMenuItem
                   className="gap-2 rounded-lg cursor-pointer"
                   style={{ color: 'var(--text-secondary)' }}
@@ -283,7 +283,7 @@ export function AppHeader() {
               {isAdmin && (
                 <>
                   <DropdownMenuSeparator style={{ background: 'var(--border-primary)' }} />
-                  <Link href="/admin">
+                  <Link prefetch={false} href="/admin">
                     <DropdownMenuItem
                       className="gap-2 rounded-lg cursor-pointer"
                       style={{ color: 'var(--color-primary)' }}

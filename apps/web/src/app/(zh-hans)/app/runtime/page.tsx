@@ -31,6 +31,7 @@ import {
 } from '@/components/opc/composer-references';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
+import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import {
  OUTPUT_TRUNCATED_NOTICE, definiteRefusal, definiteRefusalNotice, gateStopNotices, rememberGateStop, userStopIds,
  isLibrarySourceDeleted, libraryReferenceRefusal,
@@ -107,7 +108,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  function updateReferences(next:LibraryReference[]){setReferences(next);if(sessionId)saveDraftReferences(localStorage,sessionId,next);}
  useEffect(()=>{setStoredModule(sessionId?localStorage.getItem('opc-runtime-skill:'+sessionId)??'':'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
- const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
+ const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined,{staleTime:RUNTIME_CHOICES_STALE_MS});
  const viewPolling=useRuntimeViewPolling();
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),...viewPolling.options});
  const router=useRouter();
