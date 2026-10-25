@@ -5,8 +5,9 @@
  */
 
 import type Stripe from 'stripe';
+import { getStripeClient } from '../stripe';
 import { isDeepStrictEqual } from 'node:util';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const providerState = vi.hoisted(() => ({
   invoice: vi.fn(), subscription: vi.fn(), checkout: vi.fn(), price: vi.fn(),
@@ -5273,13 +5274,45 @@ describe('stripe fulfillment helpers', () => {
 
 });
 
-// Several tests import the web webhook route on demand. Its first, uncached transform can take
-// longer than the default 5s test timeout (observed 8.5s), so load it once with its own budget.
-beforeAll(async () => { await import('../../../../../apps/web/src/app/api/stripe/webhook/route'); }, 60_000);
+// ARCH-FIX F2 closed the webhook's legacy fallback, but these functions still serve other callers
+// (payments.syncCheckoutSession). The tests below keep exercising them with exactly the calls that fallback made.
+async function legacyWebhook(supabase: Parameters<typeof realSyncSubscriptionState>[0], event: Stripe.Event) {
+  switch (event.type) {
+    case 'checkout.session.completed': {
+      const session = await realUpsertPaymentOrderBySession(supabase, event.data.object, { eventType: event.type });
+      if (session.mode === 'payment' && session.payment_status === 'paid') await fulfillCreditPackageOrder(supabase, session);
+      if (session.mode === 'subscription' && session.payment_status === 'paid') {
+        await realFulfillPaidMembershipCheckoutSession(supabase, getStripeClient(), session);
+      }
+      return;
+    }
+    case 'checkout.session.async_payment_succeeded':
+      await fulfillCreditPackageOrder(supabase, await realUpsertPaymentOrderBySession(supabase, event.data.object, { eventType: event.type }));
+      return;
+    case 'checkout.session.async_payment_failed':
+      await realUpsertPaymentOrderBySession(supabase, event.data.object, { orderStatus: 'failed', eventType: event.type });
+      return;
+    case 'checkout.session.expired':
+      await realUpsertPaymentOrderBySession(supabase, event.data.object, { orderStatus: 'expired', eventType: event.type });
+      return;
+    case 'invoice.payment_succeeded': case 'invoice.paid':
+      await realFulfillMembershipInvoice(supabase, event.data.object);
+      return;
+    case 'invoice.payment_failed':
+      await realMarkMembershipInvoicePaymentFailed(supabase, event.data.object);
+      return;
+    case 'refund.created': case 'refund.updated': case 'refund.failed': case 'charge.refund.updated': case 'charge.refunded':
+      await reconcileSubscriptionRefundFromStripeWebhook(supabase, event);
+      return;
+    case 'customer.subscription.created': case 'customer.subscription.updated': case 'customer.subscription.deleted':
+      await realSyncSubscriptionState(supabase, event.data.object);
+      return;
+    default:
+  }
+}
 
 describe('PAY-1 card and Alipay fulfillment compatibility', () => {
   it.each(['card', 'alipay'])('completed-paid %s replay and later async success commit credits only once', async (method) => {
-    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
     const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
       payment_provider_refs: [],
       payment_orders: [{ id: '10000000-0000-4000-8000-000000000031', stripe_checkout_session_id: 'cs_test_pay1', fulfilled_at: null, status: 'pending', metadata: {} }],
@@ -5305,14 +5338,13 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
     };
     providerState.checkout.mockResolvedValue({ object: 'checkout.session', livemode: false, ...session });
     for (const type of ['checkout.session.completed', 'checkout.session.completed', 'checkout.session.async_payment_succeeded']) {
-      await handleStripeWebhookEvent(supabase as any, { type, data: { object: session } } as any);
+      await legacyWebhook(supabase as any, { type, data: { object: session } } as any);
     }
     expect(rpc.mock.calls.filter(([name]) => name === 'atomic_fulfill_credit_package')).toHaveLength(3);
     expect(tables.credit_transactions).toEqual([{ id: 'txn-pay1', amount: 100 }]);
     expect(tables.payment_orders[0]).toMatchObject({ status: 'completed', metadata: { grantedCredits: 100, paymentIntentId: 'pi_test_pay1' } });
   });
   it.each(['checkout.session.completed', 'checkout.session.async_payment_failed', 'checkout.session.async_payment_succeeded'])('unpaid %s does not fulfill', async (type) => {
-    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
     const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
       payment_provider_refs: [],
       payment_orders: [{ id: '10000000-0000-4000-8000-000000000031', stripe_checkout_session_id: 'cs_test_pay1', fulfilled_at: null, status: 'pending', metadata: {} }],
@@ -5325,7 +5357,7 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
     seedPaymentCommonFixture(tables);
     const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
     providerState.checkout.mockResolvedValue({ id: 'cs_test_pay1', object: 'checkout.session', livemode: false, mode: 'payment', payment_status: 'unpaid', metadata: { userId: 'user-pay1', itemId: 'package-pay1', itemType: 'credit_package' } });
-    await handleStripeWebhookEvent(supabase as any, { type, data: { object: {
+    await legacyWebhook(supabase as any, { type, data: { object: {
       id: 'cs_test_pay1', mode: 'payment', payment_status: 'unpaid', metadata: { userId: 'user-pay1', itemId: 'package-pay1', itemType: 'credit_package' },
     } } } as any);
     expect(rpc.mock.calls.map(([name]) => name)).toEqual(['pay_common_record_checkout']);
@@ -5392,7 +5424,6 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
 
   describe.each(['sync', 'webhook'] as const)('Portal cancellation through %s', (entryPoint) => {
     it.each(cancellationCases)('$name preserves paid rights and annual releases', async ({ legacy, cancelAt, expected }) => {
-      const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
       const { tables, rpc, supabase } = makeCancellationFixture();
       const before = structuredClone(tables);
       const subscription = {
@@ -5404,7 +5435,7 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
       if (entryPoint === 'sync') {
         await syncSubscriptionState(supabase, subscription);
       } else {
-        await handleStripeWebhookEvent(supabase as any, {
+        await legacyWebhook(supabase as any, {
           type: 'customer.subscription.updated', data: { object: subscription },
         } as Stripe.Event);
       }
@@ -5444,13 +5475,12 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
   });
 
   it.each(['customer.subscription.updated', 'customer.subscription.deleted'])('%s still downgrades an actually canceled subscription', async (type) => {
-    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
     const { tables, rpc, supabase } = makeCancellationFixture();
     const grantsBefore = structuredClone(tables.subscription_credit_grants);
     providerState.subscription.mockResolvedValue({ object: 'subscription', livemode: false, metadata: { userId: 'user-pay1' },
       id: 'sub_pay1', status: 'canceled', cancel_at_period_end: false, cancel_at: paidTermEnd,
       items: { data: [{ current_period_start: paidTermStart, current_period_end: paidTermEnd }] } });
-    await handleStripeWebhookEvent(supabase as any, { type, data: { object: {
+    await legacyWebhook(supabase as any, { type, data: { object: {
       id: 'sub_pay1', status: 'canceled', cancel_at_period_end: false, cancel_at: paidTermEnd,
       items: { data: [{ current_period_start: paidTermStart, current_period_end: paidTermEnd }] },
     } } } as Stripe.Event);
@@ -5493,7 +5523,6 @@ describe('PAY-1 early refund delivery', () => {
 
 describe('PAY-1 refund waits for committed credit fulfillment', () => {
   it.each(['card', 'alipay'])('defers a bound %s refund after failed fulfillment, then reconciles after checkout retry', async (method) => {
-    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
     const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
       payment_provider_refs: [],
       payment_orders: [{ id: '10000000-0000-4000-8000-000000000032', item_type: 'credit_package', amount_total: 1000, stripe_checkout_session_id: 'cs_bound', fulfilled_at: null, status: 'pending', metadata: {} }],
@@ -5527,14 +5556,14 @@ describe('PAY-1 refund waits for committed credit fulfillment', () => {
       id: 're_bound', status: 'succeeded', amount: 1000, currency: 'usd', payment_intent: 'pi_bound',
       metadata: { checkoutSessionId: 'cs_bound' },
     } } as any;
-    await expect(handleStripeWebhookEvent(supabase, checkoutEvent)).rejects.toMatchObject({ stage: 'fulfill_credit_package_rpc' });
+    await expect(legacyWebhook(supabase, checkoutEvent)).rejects.toMatchObject({ stage: 'fulfill_credit_package_rpc' });
     expect(tables.payment_orders[0]).toMatchObject({ fulfilled_at: null, metadata: { paymentIntentId: 'pi_bound' } });
     await expect(reconcileStripeRefund(supabase, refundInput)).rejects.toMatchObject({ stage: 'refund_order_unfulfilled' });
     expect(rpc.mock.calls.map(([name]) => name)).toEqual(['pay_common_record_checkout', 'atomic_fulfill_credit_package']);
     failFulfillment = false;
-    await handleStripeWebhookEvent(supabase, checkoutEvent);
+    await legacyWebhook(supabase, checkoutEvent);
     await expect(reconcileStripeRefund(supabase, refundInput)).resolves.toMatchObject({ reconciled: true });
-    await handleStripeWebhookEvent(supabase, checkoutEvent);
+    await legacyWebhook(supabase, checkoutEvent);
     expect(rpc.mock.calls.map(([name]) => name)).toEqual([
       'pay_common_record_checkout', 'atomic_fulfill_credit_package', 'pay_common_record_checkout',
       'atomic_fulfill_credit_package', 'atomic_reconcile_stripe_refund', 'pay_common_record_checkout', 'atomic_fulfill_credit_package',

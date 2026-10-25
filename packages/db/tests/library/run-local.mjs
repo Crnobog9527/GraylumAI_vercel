@@ -11,6 +11,8 @@ import { verifyErasure } from './erasure.mjs';
 import { verifyReadyUsage } from './ready-usage.mjs';
 import { verifySearch } from './search.mjs';
 import { verifyRecognition } from './recognition.mjs';
+import { verifyStorageGuard } from './storage-guard.mjs';
+import { verifyTicketLimits } from './ticket-limits.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -65,6 +67,15 @@ try {
   const beforeSearchRepeat = catalog();
   sql(search);
   assert.equal(catalog(), beforeSearchRepeat, '0244 repeat must not change schema/permissions');
+  const guard = readFileSync(resolve(root, 'packages/db/migrations/0376_library_storage_write_guard.sql'), 'utf8');
+  const triggers = () => sql("SELECT string_agg(tgname,',') FROM pg_trigger WHERE tgrelid='storage.objects'::regclass");
+  const beforeGuardRepeat = [catalog(), triggers()];
+  sql(guard);
+  assert.deepEqual([catalog(), triggers()], beforeGuardRepeat, '0376 repeat must not change schema/permissions/triggers');
+  const limits = readFileSync(resolve(root, 'packages/db/migrations/0381_ticket_upload_limits.sql'), 'utf8');
+  const beforeLimitsRepeat = catalog();
+  sql(limits);
+  assert.equal(catalog(), beforeLimitsRepeat, '0381 repeat must not change schema/permissions');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });
@@ -200,11 +211,13 @@ try {
   await verifyReadyUsage(admin, one);
   await verifySearch(admin, one);
   await verifyRecognition(admin, one, two);
+  await verifyStorageGuard(admin, one, connect);
+  await verifyTicketLimits(admin, one);
   console.log(JSON.stringify({result:'PASS',steps:report.passed,newMigrationRepeated:true,
     cases:['default-off','concurrent-quota-barrier','idempotent-no-new-token','cross-user-denial','actual-size',
       'atomic-publication','downgrade-read-delete','delete-private-fields','delete-publish-denial','live-token-hold',
       'late-object-resets-proof','two-absence-release','domain-erasure-proof','anonymous-authenticated-denied',
-      'raw-service-table-denied','disabled-banned-retention','stale-expiry-publication','live-expiry-recheck','ticket-upload-regression','closed-account','private-bucket-policy','ready-actual-usage','filename-search']}));
+      'raw-service-table-denied','disabled-banned-retention','stale-expiry-publication','live-expiry-recheck','ticket-upload-regression','closed-account','private-bucket-policy','ready-actual-usage','filename-search','storage-write-guard','ticket-upload-limits','ticket-orphans']}));
   console.log('NOT_RUN: real staging Storage (local SQL and transport mocks do not prove provider behavior)');
 } finally {
   await Promise.all(clients.map(c=>c.end()));

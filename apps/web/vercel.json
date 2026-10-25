@@ -35,6 +35,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron/ticket-attachments-cleanup",
+      "schedule": "30 3 * * *"
+    },
+    {
       "path": "/api/cron/billing-reconcile",
       "schedule": "0 4 * * *"
     },

@@ -20,8 +20,10 @@ export type WaffoRefund = { id: string; paymentId: string; ticketId: string | nu
   amount: { amount: string; currency: string }; pspAmountDetails: { amount: string; currency: string };
   orderMerchantExternalId: string | null; refundTicketMerchantExternalId: string | null; createdAt: string };
 export type WaffoRefundTicket = { id: string; subjectId: string; status: string; refundTicketMerchantExternalId: string | null };
-export type WaffoChargeback = { id: string; paymentId: string; storeId: string; orderId: string | null;
-  status: string; testMode: boolean; amount: { amount: string | null; currency: string | null } | null; createdAt: string };
+export type WaffoChargeback = { id: string; paymentId: string | null; storeId: string; orderId: string | null;
+  status: string; testMode: boolean; amount: { amount: string | null; currency: string | null } | null; createdAt: string;
+  /** Waffo's response deadline ("Expire Date"); only the store-wide list reads it. */
+  expiryDateTime?: string | null };
 export type WaffoOneTimeOrder = { id: string; storeId: string; status: string; testMode: boolean; orderMerchantExternalId: string | null };
 export type WaffoOperationsClient = Omit<WaffoTestClient, 'mode'> & { mode: 'test' | 'live';
   findOneTimeOrders: (orderId: string, deadline?: number) => Promise<WaffoOneTimeOrder[]>;
@@ -33,6 +35,7 @@ export type WaffoOperationsClient = Omit<WaffoTestClient, 'mode'> & { mode: 'tes
   findRefundTickets: (reference: string) => Promise<WaffoRefundTicket[]>;
   hasChargeback: (paymentId: string) => Promise<boolean>;
   readChargebacks: (paymentId: string, deadline?: number) => Promise<WaffoChargeback[]>;
+  listChargebacks: (deadline?: number) => Promise<WaffoChargeback[]>;
   findRefunds: (input: { paymentId: string; reference?: string }) => Promise<WaffoRefund[]>;
 };
 export function createWaffoOperationsClient(config: {
@@ -173,6 +176,24 @@ export function createWaffoOperationsClient(config: {
       }
       throw new Error('PAY_WAFFO_RECONCILIATION_REQUIRED');
     },
+    // Waffo sends no chargeback webhook (2026-10-10 answer): the daily job reads this store's whole list.
+    async listChargebacks(deadline = Date.now() + 20_000) {
+      const rows: WaffoChargeback[] = [];
+      for (let offset = 0; offset < 2000; offset += PAGE) {
+        if (Date.now() >= deadline) throw new Error('PAY_WAFFO_RECONCILIATION_REQUIRED');
+        const data = await post('/v1/graphql', { query: `query($store: String!, $test: Boolean!) {
+          chargebacks(filter: { storeId: { eq: $store }, testMode: { eq: $test } }, limit: ${PAGE}, offset: ${offset}) {
+            id paymentId storeId orderId status testMode amount { amount currency } createdAt expiryDateTime }
+        }`, variables: { store: config.storeId, test: config.mode === 'test' } });
+        const page = z.array(chargebackSchema).max(PAGE).parse(data.chargebacks);
+        if (page.some(row => row.storeId !== config.storeId || row.testMode !== (config.mode === 'test'))) {
+          throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+        }
+        rows.push(...page);
+        if (page.length < PAGE) return rows;
+      }
+      throw new Error('PAY_WAFFO_RECONCILIATION_REQUIRED');
+    },
     async hasChargeback(paymentId) {
       if (!/^PAY_[A-Za-z0-9]+$/.test(paymentId)) throw new Error('PAY_WAFFO_REFUND_INVALID');
       const data = await post('/v1/graphql', { query: `query($payment: String!, $store: String!, $test: Boolean!) {
@@ -260,11 +281,11 @@ const refundSchema = z.object({ id: z.string(), paymentId: z.string(), ticketId:
 
 const oneTimeOrderSchema = z.object({ id: z.string(), storeId: z.string(), status: z.string(), testMode: z.boolean(),
   orderMerchantExternalId: z.string().nullable() });
-const chargebackSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9_:-]{1,160}$/), paymentId: z.string(), storeId: z.string(),
+const chargebackSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9_:-]{1,160}$/), paymentId: z.string().nullable(), storeId: z.string(),
   orderId: z.string().nullable(), status: z.string(), testMode: z.boolean(),
   amount: z.object({ amount: z.string().nullish().transform(value => value ?? null),
     currency: z.string().nullish().transform(value => value ?? null) }).nullish().transform(value => value ?? null),
-  createdAt: z.string().datetime() });
+  createdAt: z.string().datetime(), expiryDateTime: z.string().nullish() });
 
 export function createWaffoTestOperationsClient(config: {
   merchant: string; merchantId: string; storeId: string; privateKey: string; deadline?: number;

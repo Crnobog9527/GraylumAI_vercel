@@ -14,7 +14,7 @@ export type OpenRouterIdentity = {provider:'openrouter';account:string;model:str
  * with an independent allocation bound and hashes over original provider bytes. */
 export function decodeOpenRouterStreamObservation(observation:TransportObservation):Buffer {
  const limit=observation.stream?OPENROUTER_STREAM_BYTE_LIMIT:OPENROUTER_RESPONSE_BYTE_LIMIT;
- const encoded=observation.rawBodyBase64;
+ const encoded=observation.rawBodyBase64??'';
  if(observation.rawBodyOmitted||encoded.length>Math.ceil((limit+2048)/3)*4||
    encoded.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw new Error('invalid_stream_encoding');
  const packed=Buffer.from(encoded,'base64');
@@ -27,6 +27,21 @@ export function decodeOpenRouterStreamObservation(observation:TransportObservati
    !/^[a-f0-9]{64}$/.test(observation.sourceHash)||
    (observation.complete&&(observation.observedByteLength!==bytes.length||observation.sourceHash!==hash)))throw new Error('invalid_stream_encoding');
  return bytes;
+}
+/** Exact provider bytes of any observation shape. Since ARCH-FIX G1 a small exact-text
+ * body carries only rawBody; older observations and non-text bytes carry rawBodyBase64. */
+export function openRouterObservationBytes(observation:TransportObservation):Buffer {
+ if(observation.rawBodyEncoding==='gzip-base64')return decodeOpenRouterStreamObservation(observation);
+ if(observation.rawBodyBase64===undefined)return Buffer.from(observation.rawBody,'utf8');
+ const bytes=Buffer.from(observation.rawBodyBase64,'base64');
+ if(bytes.toString('base64')!==observation.rawBodyBase64)throw new Error('invalid_body_encoding');
+ return bytes;
+}
+/** A small exact-text body is stored once, as the receipt's own rawBody (verifiable
+ * against transport.sourceHash); the transport keeps everything else. */
+export function openRouterReceiptTransport(observation:TransportObservation) {
+ if(observation.rawBodyEncoding||observation.rawBodyBase64!==undefined)return observation;
+ const {rawBody:stored,...transport}=observation;void stored;return transport;
 }
 // PostgreSQL jsonb adds spaces and expands exponent-form numbers. Count every
 // colon/comma (even in strings) and reserve 400 bytes per finite JS number plus
@@ -86,8 +101,11 @@ function canonicalUsage(data: Record<string, unknown>, source: 'response' | 'loo
 function projectOpenRouterEvidence(observation:TransportObservation, identity:OpenRouterIdentity, source:'response'|'lookup', expectedProviderId?:string) {
   const base={...identity,providerId:null as string|null,cost:null as string|null,currency:'USD',final:false,coverage:'request_total',
     source,sourceHash:observation.rawBodyEncoding==='gzip-base64'?observation.sourceHash:
-     createHash('sha256').update(Buffer.from(observation.rawBodyBase64,'base64')).digest('hex'),
-    observedAt:new Date().toISOString(),rawBody:observation.rawBody,transport:observation,usage:null as Record<string,unknown>|null};
+     createHash('sha256').update(observation.rawBodyBase64===undefined?Buffer.from(observation.rawBody,'utf8')
+      :Buffer.from(observation.rawBodyBase64,'base64')).digest('hex'),
+    // Every non-gzip path below keeps rawBody equal to observation.rawBody, so the transport need not repeat it.
+    observedAt:new Date().toISOString(),rawBody:observation.rawBody,transport:openRouterReceiptTransport(observation),
+    usage:null as Record<string,unknown>|null};
   const diagnostic=(reason:string)=>({...base,evidenceKind:'transport_observation' as const,rejectedReason:reason});
   if(validGenerationId(observation.generationId))base.providerId=observation.generationId;
   const mismatch=()=>({...base,providerId:null,rejectedReason:'identity_or_response_mismatch'});

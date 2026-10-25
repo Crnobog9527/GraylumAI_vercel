@@ -372,6 +372,16 @@ describe('积分记录只列实际变动（Owner 2026-10-25）', () => {
     expect(isHiddenFromCreditRecords(row)).toBe(hidden);
   });
 
+  it('actualOnly lists carry no running balance, because the ledger balance includes reservations the list hides', async () => {
+    const row = { id: 't1', user_id: 'user-1', type: 'deduction', ledger_type: 'spend', amount: -2, balance_after: 6393, created_at: '2026-10-25T04:00:00Z' };
+    const supabase = { from(table: string) {
+      return table === 'profiles' ? createProfileSupabase('user').from(table) : createCreditTransactionsSupabase([row], null, []).from(table);
+    } };
+    const caller = createCreditsCaller({ role: 'user', supabase });
+    expect((await caller.getCreditTransactions({ limit: 50, actualOnly: true })).items[0].balance_after).toBeNull();
+    expect((await caller.getCreditTransactions({ limit: 50 })).items[0].balance_after).toBe(6393);
+  });
+
   it('filters in the database only when asked, so the page and its count are after filtering', async () => {
     const filters: string[] = [];
     const supabase = { from(table: string) {
