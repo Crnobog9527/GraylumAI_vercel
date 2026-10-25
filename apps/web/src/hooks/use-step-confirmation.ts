@@ -193,6 +193,12 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     return isConfirmStepEnvelope(parsed) ? { kind: "valid", envelope: parsed, raw } : { kind: "malformed", raw };
   }
 
+  /** The envelope is kept from the first request to the last: while this tab sends it, it is not an unfinished one. */
+  function displayState(stepId: string): "none" | "running" | "valid" | "malformed" {
+    const kind = envelopeState(stepId).kind;
+    return kind === "valid" && confirming ? "running" : kind;
+  }
+
   async function recoverMalformed(stepId: string) {
     const state = envelopeState(stepId);
     if (state.kind !== "malformed") return;
@@ -334,7 +340,7 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
   }
 
   return {
-    confirming, review, envelopeState, recoverMalformed, open, confirmNow, setDeferred, submit,
+    confirming, review, envelopeState, displayState, recoverMalformed, open, confirmNow, setDeferred, submit,
     noteEdit: (fieldId: string, value: FieldValue) =>
       setReview(old => old ? { ...old, edits: { ...old.edits, [fieldId]: value } } : old),
     close: () => { reviewRead.current++; setReview(null); },
