@@ -3349,7 +3349,7 @@
   "fn:bill2_unit_multiplier(jsonb)": "81cd301f190a",
   "fn:bill2_usage_total(uuid,text)": "8adc72892fab",
   "fn:billing_provider_prices_swap(text,text)": "eae751e56fdb",
-  "fn:billing_reconcile_day(timestamp with time zone,timestamp with time zone)": "eefd8e64819c",
+  "fn:billing_reconcile_day(timestamp with time zone,timestamp with time zone)": "ba779e3df404",
   "fn:claim_daily_checkin(uuid)": "f94e1da5309b",
   "fn:content_erasure_artifact_readable(uuid,uuid)": "da7d8e80dc10",
   "fn:content_erasure_capture_copy(jsonb,jsonb)": "b8320654d942",

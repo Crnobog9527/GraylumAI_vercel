@@ -33,6 +33,23 @@ export async function reconcileCases({db,report,createFixture,claim,receipt}) {
   assert.ok(clean.calls.settledCalls>0,'the window has settled calls');
   assert.deepEqual([clean.calls.mismatched,clean.sources.mismatched],[0,0],JSON.stringify({calls:clean.calls,sources:clean.sources}));
 
+  // A period ended between the hold and the settlement: the unreturned period credits are recorded on the settle row,
+  // so the call's ledger nets more than its charge and is still balanced (no false alarm).
+  for (const ending of ['terminated','reversed']) {
+    const e = await createFixture(db,{credits:200});
+    const g2 = await period(db,e.actor);
+    const held = await claim(db,e,1,true);
+    if (ending==='terminated') await db.query('UPDATE user_subscriptions SET credit_release_terminated_at=now() WHERE user_id=$1',[e.actor]);
+    else await db.query("UPDATE subscription_credit_grants SET status='reversed' WHERE id=$1",[g2]);
+    await receipt(db,e,held,'0.001',{inputTokens:1000,outputTokens:0});
+    await db.query('SELECT bill2_finalize($1,$2)',[e.actor,e.run]);
+    const intercepted = (await db.query(`SELECT coalesce(sum((metadata->>'refundInterceptedRestoration')::int),0)::int n FROM billing_history
+      WHERE operation_type IN ('settle','refund') AND metadata->>'preDeductId'=(SELECT pre_deduct_id::text FROM bill2_calls WHERE id=$1)`,[held.id])).rows[0].n;
+    assert.ok(intercepted>0,ending+': the period credits were intercepted');
+    const d = await day(db);
+    assert.deepEqual([d.calls.mismatched,d.sources.mismatched],[0,0],ending+' '+JSON.stringify({calls:d.calls,sources:d.sources}));
+  }
+
   // More rows than one API read returns (1000): every row is counted.
   const before = await day(db);
   const actor = randomUUID();

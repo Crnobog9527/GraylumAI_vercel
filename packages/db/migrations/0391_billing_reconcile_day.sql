@@ -11,7 +11,8 @@
 --     completed payment orders count/amount, billing settle + abort_settle sum); credit_transactions stays paged in
 --     the app, so its spend/top-up classification is unchanged;
 --   * calls: every call settled in the window whose ledger rows (bill2_call_id) do not sum to -charged_delta plus its
---     compensation (reserve -H, release +H, spend -charged_delta, compensation +restored; staging 10-25: 0 of 2522);
+--     compensation, plus any period credits the settlement could not return (reserve -H, release +restored+charge,
+--     spend -charge, compensation +restored; refundInterceptedRestoration; staging 10-25: 0 of 2522);
 --   * sources: for accounts active in the window, every credit pack whose consumed_amount differs from its applied
 --     credit_source_entries, and every subscription grant whose consumed_amount differs from its current-period share
 --     in billing_history (pre_deduct amountToPeriod, settle/abort_settle periodConsumedDelta, refund amountToPeriod
@@ -40,8 +41,15 @@ BEGIN
   ||(SELECT jsonb_build_object('completedPaymentOrders',count(*),'completedPaymentAmount',coalesce(sum(amount_total),0))
     FROM payment_orders WHERE status='completed' AND created_at>=p_start AND created_at<p_end);
 
- WITH c AS (SELECT id,coalesce(charged_delta,0)-coalesce(compensation_credits,0) owed FROM bill2_calls
+ -- A grant reversed or a subscription ended between the hold and the settlement keeps its unreturned period credits:
+ -- the settle/refund row records them (refundInterceptedRestoration), and the call's ledger nets that much more.
+ WITH s AS (SELECT id,pre_deduct_id,charged_delta,compensation_credits FROM bill2_calls
    WHERE settled_at>=p_start AND settled_at<p_end),
+ i AS (SELECT b.metadata->>'preDeductId' pid,sum((b.metadata->>'refundInterceptedRestoration')::int) n FROM billing_history b
+   WHERE b.operation_type IN ('settle','refund','abort_settle') AND b.metadata->>'refundInterceptedRestoration' ~ '^[0-9]{1,9}$'
+    AND b.metadata->>'preDeductId' IN (SELECT pre_deduct_id::text FROM s) GROUP BY 1),
+ c AS (SELECT s.id,coalesce(s.charged_delta,0)+coalesce(i.n,0)-coalesce(s.compensation_credits,0) owed
+   FROM s LEFT JOIN i ON i.pid=s.pre_deduct_id::text),
  bad AS (SELECT c.id FROM c LEFT JOIN LATERAL (SELECT sum(t.amount) net FROM credit_transactions t WHERE t.bill2_call_id=c.id) l ON true
    WHERE coalesce(l.net,0)<>-c.owed)
  SELECT jsonb_build_object('settledCalls',(SELECT count(*) FROM c),'mismatched',(SELECT count(*) FROM bad),
