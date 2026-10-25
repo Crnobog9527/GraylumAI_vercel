@@ -24,10 +24,11 @@ export const keptCause = (name: string, error: { message?: unknown }, report: un
  * If nothing was repaired or the retry is refused again, the original refusal stands and the user sees today's message.
  */
 export async function admitWithRepair<T>(admin: SupabaseClient, actorId: string, admit: () => Promise<T>,
-  repair: typeof repairActorRounds = repairActorRounds): Promise<T> {
+  repair?: typeof repairActorRounds): Promise<T> {
   try { return await admit(); }
   catch (error) {
-    if (!sessionBusy(error) || !await repair(admin, actorId)) throw error;
+    // The recovery is resolved only on this path, so an admission that is not refused this way never loads it.
+    if (!sessionBusy(error) || !await (repair ?? repairActorRounds)(admin, actorId)) throw error;
     return admit();
   }
 }
