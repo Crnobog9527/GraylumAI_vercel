@@ -11,10 +11,9 @@ export async function register() {
     const { validateEnvOnStartup } = await import("@repo/api/src/lib/envValidator");
     const envResult = validateEnvOnStartup();
     if (!envResult.valid) {
-      Sentry.captureMessage("env_validation_failed", {
-        level: "error",
-        extra: { environment: envResult.environment, errors: envResult.errors },
-      });
+      // Fixed code plus variable names only: the Sentry scrubber drops free text and values.
+      const variables = [...new Set(envResult.errors.flatMap((error) => error.match(/\b[A-Z][A-Z0-9_]{3,}\b/g) ?? []))];
+      Sentry.captureMessage("ENV_VALIDATION_FAILED", { level: "error", extra: { variables } });
     }
   }
 

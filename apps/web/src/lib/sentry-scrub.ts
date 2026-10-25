@@ -11,7 +11,7 @@ type AnyRecord = Record<string, unknown>;
 
 /** Domains whose stable error codes the application emits (e.g. `ACCOUNT_ERASURE_FAILED`). */
 const CODE_PREFIXES = ['ACCOUNT', 'AGENT', 'ARTIFACT', 'AUTH', 'BILL2', 'BILLING', 'CAPTURE', 'CONTENT', 'CREDIT',
-  'DATA_USE', 'ERASURE', 'EXPERT_CONSULT', 'LIBRARY', 'MODEL', 'OPC', 'OPENING_GRANT', 'PAY', 'PAYG', 'PUBLISH_MONITOR', 'RATE_LIMIT', 'REPORT', 'RESEARCH',
+  'DATA_USE', 'ENV', 'ERASURE', 'EXPERT_CONSULT', 'LIBRARY', 'MODEL', 'OPC', 'OPENING_GRANT', 'PAY', 'PAYG', 'PUBLISH_MONITOR', 'RATE_LIMIT', 'REPORT', 'RESEARCH',
   'RUNTIME', 'SKILL', 'STRIPE', 'WAFFO'];
 const ERROR_CODE = new RegExp(`^(?:${CODE_PREFIXES.join('|')})_[A-Z0-9_]{2,60}(?=$|[:\\s])`);
 
@@ -161,7 +161,17 @@ const ALERT_COUNTS: Readonly<Record<string, readonly string[]>> = {
   PUBLISH_MONITOR_QUOTA_NEAR: ['limit', 'used', 'reserved'],
   PUBLISH_MONITOR_QUOTA_FULL: ['limit', 'used', 'reserved'],
 };
+// ENV_VALIDATION_FAILED (instrumentation.ts) may keep the names of the misconfigured environment variables (never values).
+const ALERT_VARIABLE_CODE = 'ENV_VALIDATION_FAILED';
+const VARIABLE_NAME = /^[A-Z][A-Z0-9_]{1,63}$/;
 function scrubAlertCounts(event: ErrorEvent, out: ErrorEvent) {
+  if (event.message === ALERT_VARIABLE_CODE) {
+    out.fingerprint = [ALERT_VARIABLE_CODE];
+    const names = event.extra?.variables;
+    const kept = (Array.isArray(names) ? names : []).filter((n): n is string => typeof n === 'string' && VARIABLE_NAME.test(n)).slice(0, 60);
+    if (kept.length > 0) out.extra = { variables: kept };
+    return;
+  }
   const keys = event.message && Object.hasOwn(ALERT_COUNTS, event.message) ? ALERT_COUNTS[event.message] : undefined;
   if (!keys) return;
   out.fingerprint = [event.message as string];
