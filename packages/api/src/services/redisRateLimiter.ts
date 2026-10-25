@@ -409,3 +409,32 @@ export async function checkVendorRateLimit(key: string, limit: number, window: '
     return false;
   }
 }
+
+/**
+ * Per-minute counter under a fixed prefix (ARCH-FIX A1 procedure limits). Same deadline and
+ * fail-closed rule as checkRateLimit: when Redis cannot answer, the call is refused as 'unavailable'.
+ */
+const minuteLimiters = new Map<string, Ratelimit>();
+export async function checkMinuteRateLimit(prefix: string, identifier: string, limit: number): Promise<RateLimitResult> {
+  try {
+    if (!prefix || !identifier || !Number.isSafeInteger(limit) || limit < 1) throw new Error('INVALID_MINUTE_LIMIT');
+    const id = `${prefix}:${limit}`;
+    let limiter = minuteLimiters.get(id);
+    if (!limiter) {
+      limiter = new Ratelimit({
+        redis: getRedis(), limiter: Ratelimit.slidingWindow(limit, '1 m'),
+        prefix: `graylum:ratelimit:${prefix}:`, analytics: false, timeout: 0,
+      });
+      minuteLimiters.set(id, limiter);
+    }
+    const result = await limitWithDeadline(limiter, identifier);
+    return {
+      success: result.success, limit: result.limit, remaining: result.remaining, reset: result.reset,
+      retryAfter: result.success ? undefined : Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)),
+      reason: result.success ? undefined : 'rate_limited',
+    };
+  } catch {
+    logger.error('security', 'minute_rate_limit_unavailable_denying_request', { prefix });
+    return { success: false, limit: 0, remaining: 0, reset: Date.now() + 60_000, retryAfter: 60, reason: 'unavailable' };
+  }
+}
