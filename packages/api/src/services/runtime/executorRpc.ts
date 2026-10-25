@@ -2,7 +2,6 @@
 import {resolvePostSource} from './workspacePosts';
 import {assertPath} from '../skills/loader';
 import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
-import {mentorHistoryParameters} from './mentorHistory';
 import {READ_HISTORY_TOOL} from './agentTools';
 import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
@@ -185,18 +184,22 @@ export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>
     let researches=Boolean(researchTool);
     if(researchTool?.parameters)try{researches=researchTool.parameters.safeParse(
       JSON.parse(String(message?.tool_calls?.[0]?.function?.arguments))).success;}catch{researches=false;}
+    // ARCH-FIX C1: arguments that fail the tool's schema run nothing; the model is told (INVALID_TOOL_ARGUMENTS) and the
+    // call uses up the turn's one read, so the next response is the reply. A malformed call or an unsafe path still fails.
     let invalidFileArguments=false;
-    if(readsFile){try{
-      const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
-      assertPath(path);
-      invalidFileArguments=Buffer.from(path).toString('utf8')!==path||call.type!=='function'||
-        typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||call.id.includes('\0')||
-        Buffer.from(call.id).toString('utf8')!==call.id;
-     }catch{invalidFileArguments=true;}}
-    if(readsHistory){try{
-      const call=message!.tool_calls![0]!;mentorHistoryParameters.parse(JSON.parse(call.function!.arguments!));
+    if(readsFile||readsHistory){try{
+      const call=message!.tool_calls![0]!;
       invalidFileArguments=call.type!=='function'||typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||
         call.id.includes('\0')||Buffer.from(call.id).toString('utf8')!==call.id;
+      let parsed:unknown;
+      try{parsed=JSON.parse(call.function!.arguments!);}catch{parsed=undefined;}
+      if(readsFile){
+        const args=skillFileParameters.safeParse(parsed);
+        if(args.success){
+          assertPath(args.data.path);
+          invalidFileArguments||=Buffer.from(args.data.path).toString('utf8')!==args.data.path;
+        }
+      }
      }catch{invalidFileArguments=true;}}
     const oversized=(readsFile||readsHistory)&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
     if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested,allowsHistory&&!fileRequested,

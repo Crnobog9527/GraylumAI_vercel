@@ -11,6 +11,7 @@ import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESE
 import { MIN_SUPPLIER_MS, supplierTimeout } from './researchExecution';
 import { createRuntimeBudget, MIN_MODEL_DISPATCH_MS } from './budget';
 import { mentorHistoryTool } from './mentorHistory';
+import { terminalReplyGuard } from './executorRpc';
 import { loadSkillTool } from './loadSkillTool';
 import { skillFileTool } from './skillFile';
 import { RESEARCH_TOOL_NAMES, type ResearchToolName } from '../research/tools/schemas';
@@ -153,6 +154,54 @@ describe('invalid tool arguments go back to the model (runner default)', () => {
     const first = await run([skillFileTool(vi.fn())], [call('read_skill_file', { path: '' }), reply({ content: 'ok' })]);
     const replay = await run([skillFileTool(vi.fn())], [call('read_skill_file', { path: '' }), reply({ content: 'ok' })]);
     expect(JSON.stringify(replay.requests)).toBe(JSON.stringify(first.requests));
+  });
+});
+
+describe('a mentor turn answers invalid read arguments instead of failing (terminalReplyGuard)', () => {
+  // A positioning mentor turn: one Skill file or history read, then the reply; the guard sees each response first.
+  const mentorRun = (tool: RuntimeTool, responses: string[]) => {
+    const failed = vi.fn();
+    const guard = terminalReplyGuard(true, false, failed, true, true);
+    const guarded = responses.map(response => () => { guard(JSON.parse(response)); return response; });
+    return { failed, result: (async () => {
+      const requests: Wire[] = [];
+      let output: string | Error;
+      try {
+        output = await runRuntime({ model: 'm', instructions: 'i', input: 'hi', maxOutputTokens: 100, maxTurns: 2, session: session as never,
+          persistSession: false, selectHistory: async (history: unknown[], incoming: unknown[]) => [...history, ...incoming], tools: [tool],
+          exchange: async (_sequence: number, body: string) => { requests.push(JSON.parse(body)); return guarded.shift()!(); },
+        } as never);
+      } catch (error) { output = error as Error; }
+      return { requests, output };
+    })() };
+  };
+  for (const [name, tool, args] of [
+    ['read_skill_file', skillFileTool, { path: 'p'.repeat(241) }],
+    ['read_history', mentorHistoryTool, { query: 'x'.repeat(65) }],
+  ] as const) {
+    it(`${name}: the guard lets it through, the model is told and the reply completes the turn`, async () => {
+      const execute = vi.fn(async () => 'ran');
+      const { failed, result } = mentorRun(tool(execute), [call(name, args), reply({ content: 'answered' })]);
+      const { requests, output } = await result;
+      expect(output).toBe('answered');
+      expect(failed).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+      expect(lastToolResult(requests[1]!)).toContain('INVALID_ARGUMENTS');
+    });
+  }
+  it('the invalid call uses up the turn\'s one read: a second read still ends the turn', () => {
+    const failed = vi.fn();
+    const guard = terminalReplyGuard(true, false, failed, true, true);
+    expect(() => guard(JSON.parse(call('read_skill_file', '{"path":')))).not.toThrow();
+    expect(() => guard(JSON.parse(call('read_history', { query: null }, 'c2')))).toThrow('RUNTIME_TERMINAL_REPLY');
+    expect(failed).toHaveBeenCalledOnce();
+  });
+  it('an unsafe path or a malformed call still fails the turn', () => {
+    for (const response of [call('read_skill_file', { path: '../secret.md' }), call('read_history', { query: null }, '')]) {
+      const failed = vi.fn();
+      expect(() => terminalReplyGuard(true, false, failed, true, true)(JSON.parse(response))).toThrow('RUNTIME_TERMINAL_REPLY');
+      expect(failed).toHaveBeenCalledOnce();
+    }
   });
 });
 
