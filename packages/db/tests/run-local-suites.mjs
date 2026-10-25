@@ -3,8 +3,9 @@
 // PostgreSQL container (packages/db/tests/<dir>/*run-local*.mjs). Every suite found is run, one after
 // another, unless it is listed in local-suites-excluded.json (reason + date; the list may only shrink,
 // see scripts/tests/local-suites.test.mjs). A new suite is therefore in CI the day it is added.
-// Usage: node packages/db/tests/run-local-suites.mjs --ci | --local-only [--list] [--only <dir[,dir]>] [--jobs N]
-// Each suite is started with the same flag (--ci / --local-only) and must accept it.
+// Usage: node packages/db/tests/run-local-suites.mjs --ci | --local-only [--list] [--only <dir[,dir]>] [--jobs N] [--shard K/N]
+// Each suite is started with the same flag (--ci / --local-only) and must accept it. --shard K/N keeps every
+// N-th suite starting at the K-th, so CI can spread the suites over N parallel jobs (each runs its own share).
 import { spawn } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -34,8 +35,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : null;
   const excluded = loadExcluded().suites;
+  const [shard, shards] = args.includes('--shard') ? args[args.indexOf('--shard') + 1].split('/').map(Number) : [1, 1];
+  if (!(shards >= 1 && shard >= 1 && shard <= shards)) throw new Error('--shard must be K/N with 1 <= K <= N');
   const suites = discoverSuites().filter(suite => !(suite in excluded)
-    && (!only || only.includes(suite.split('/')[0]) || only.includes(suite)));
+    && (!only || only.includes(suite.split('/')[0]) || only.includes(suite)))
+    .filter((_, index) => index % shards === shard - 1);
   if (args.includes('--list')) {
     console.log(suites.join('\n'));
   } else {
