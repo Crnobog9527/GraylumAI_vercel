@@ -187,7 +187,7 @@ it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'ca
   } finally { await f.close(); }
 }, 60000);
 
-// 0366: a request that dies without marking its execution interrupted (a killed function, or a database fault in its own
+// 0370: a request that dies without marking its execution interrupted (a killed function, or a database fault in its own
 // error path) leaves it running. Once its dispatch lease is over 60 s past, interrupted recovery closes it too.
 it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
 ('RUNTIME: a running execution whose owner died is recovered once its lease is gone (%s)', async mode => {
@@ -264,7 +264,7 @@ it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
   } finally { await f.close(); }
 }, 60000);
 
-// 0366 review: a running round that already saved its reply is first left to the reply recovery (ownerLostRecovery.ts);
+// 0370 review: a running round that already saved its reply is first left to the reply recovery (ownerLostRecovery.ts);
 // interrupted recovery releases it only once that has not handed it back for 15 minutes.
 it.each(['5 minutes', '20 minutes'] as const)('RUNTIME: a running round with a saved reply waits for the reply recovery (lease %s ago)',
   async lease => {
