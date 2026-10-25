@@ -22,6 +22,7 @@
     "./src/types/billing": "./src/types/billing.ts",
     "./src/services/publishMonitor/connectFlow": "./src/services/publishMonitor/connectFlow.ts",
     "./src/services/publishMonitor/socialMonitorJob": "./src/services/publishMonitor/socialMonitorJob.ts",
+    "./src/services/publishMonitor/quota": "./src/services/publishMonitor/quota.ts",
     "./src/services/publishMonitor/webhook": "./src/services/publishMonitor/webhook.ts",
     "./src/services/publishMonitor/secrets": "./src/services/publishMonitor/secrets.ts",
     "./src/services/publishMonitor/manualImport": "./src/services/publishMonitor/manualImport.ts",
