@@ -103,3 +103,24 @@ export function useRuntimeViewStreaming(
   useEffect(() => { latest.current = refetch; });
   useEffect(() => { markRuntimeViewStreaming(polling.streaming, streaming, () => enabled && latest.current()); }, [streaming, enabled, polling.streaming]);
 }
+
+/** A turn that was progressing is not any more (finished, paused or stopped). */
+export function turnSettled(was: string | null, now: string | null): boolean {
+  return Boolean(was && !now);
+}
+
+/**
+ * Calls `onSettled` when a turn this view showed as progressing is no longer progressing. A turn another
+ * tab started or one resumed after a reload finishes without this page's stream, so nothing else re-reads
+ * the balance that was shown while credits were held for it.
+ */
+export function useRuntimeViewSettled(view: RuntimeViewPollData, onSettled: () => void) {
+  const was = useRef<string | null>(null);
+  const latest = useRef(onSettled);
+  useEffect(() => { latest.current = onSettled; });
+  const now = progressingExecution(view);
+  useEffect(() => {
+    if (turnSettled(was.current, now)) latest.current();
+    was.current = now;
+  }, [now]);
+}

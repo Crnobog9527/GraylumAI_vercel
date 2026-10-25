@@ -41,7 +41,7 @@ import { ENDED_NOTICE, GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtim
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
-import { useRuntimeViewBusy, useRuntimeViewPolling, useRuntimeViewStreaming } from '@/lib/runtime-view-poll';
+import { useRuntimeViewBusy, useRuntimeViewPolling, useRuntimeViewSettled, useRuntimeViewStreaming } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, placeCompareCards, useCompareThread } from '@/components/fusion-compare/CompareThread';
@@ -141,6 +141,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const outgoingUnseen=Boolean(outgoing&&!(view.data?.executions as Array<{executionId:string}>|undefined)?.some(e=>e.executionId===outgoing.executionId));
  useRuntimeViewBusy(viewPolling,busy||outgoingUnseen,view.refetch,Boolean(sessionId));
  // DB-PERF 5b: no timed reads while this page's stream is open and the view lists its execution; its close reads once.
+ useRuntimeViewSettled(view.data,()=>void utils.credits.getBalance.invalidate());
  useRuntimeViewStreaming(viewPolling,runner.streaming?runner.reply?.executionId??null:null,()=>view.refetch({cancelRefetch:false}),Boolean(sessionId));
  const ordinary=choices.data?.models[0]?.id??'';
  const moduleSelection=requestedModule||storedModule;
