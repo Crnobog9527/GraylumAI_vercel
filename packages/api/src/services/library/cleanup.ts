@@ -96,7 +96,7 @@ export async function runLibraryCleanup(client: SupabaseClient) {
     const page = await storage.scan('', typeof cursor === 'string' ? cursor : undefined);
     const orphanResult = await cleanupOrphanPage(client, storage, page, started);
     const { orphans, unknownPaths, complete } = orphanResult;
-    // The upload write guard (0371) lives on Supabase's storage.objects; report it if a platform change removed it.
+    // The upload write guard (0376) lives on Supabase's storage.objects; report it if a platform change removed it.
     const storageGuard = await libraryRpc<boolean>(client, 'library_storage_guard_present', {});
     if (storageGuard !== true) logger.error('system', 'library_storage_guard_missing');
     const summary = { ...result, orphans, unknownPaths, storageGuard, scanCursor: complete ? page.cursor : (cursor ?? null) };

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- ARCH-FIX B1 (number 0371 assigned by the controller). A library upload is a signed URL the browser
+-- ARCH-FIX B1 (number 0376 assigned by the controller). A library upload is a signed URL the browser
 -- writes straight into Storage, and nothing checked the account at the moment of the write: the 10-25 erasure drill
 -- wrote to four unfinished upload URLs after closing the account and every write returned 200, leaving the objects for
 -- the orphan sweep. Storage records every object as a row in storage.objects, including signed uploads, so the check now
