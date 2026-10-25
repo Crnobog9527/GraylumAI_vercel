@@ -65,6 +65,14 @@ Master Plan 第 7.1 节标注列只按第 7.0 节写"完成"和"阻塞"；"还�
 7. **PROMPT-CACHE-HISTORY**：历史缓存的实际省钱数据是否上线后用正式数据补算。
 8. Owner 自己的操作：三家供应商硬上限、Waffo 拒付邮件（E5）、真实输入法试几分钟（UI-A）、资料库识别测速（LIB-DOCS）。
 
+## 4.1 Owner 2026-10-26 的决定（已写入 Master Plan 第 2.1 节）
+
+第 4 节 1–7 项 Owner 已拍板，落实后：
+- 标"完成"：LEGACY-CLOSE、PROMPT-CACHE-HISTORY、STAGING-HOST-CLEANUP（不含 Waffo 沙盒回调，随 PAY-FAILOVER 切换演练核对）。
+- 缩小范围：UI-FINISH 上线前只验必经页面，留在"只差验收"。
+- 拆出上线后新任务：CONTENT-CONVERSATION-2、ANALYTICS-GA4（标"阻塞：上线后再做"）；原任务只剩上线前部分的验收。
+- PAYWALL：降级后超额档案延后到上线后，原任务只剩验收。
+
 ## 5. 四批核对明细
 
 以下是四批只读核对的原始表格（依据列里的 PR 和评论可直接点开复核）。
