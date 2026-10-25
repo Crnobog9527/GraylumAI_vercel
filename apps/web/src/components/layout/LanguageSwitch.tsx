@@ -12,8 +12,9 @@ import { trpc } from '@/trpc/client';
 const SHORT = { 'zh-Hans': '简', 'zh-Hant': '繁', en: 'EN' } as const;
 
 /**
- * CHAT-LANGUAGE (Owner 2026-10-25): the language switch on the right of the signed-in top bars. It saves the same setting as
- * the profile card; the interface itself stays in Simplified Chinese for now, which the menu says.
+ * CHAT-LANGUAGE (Owner 2026-10-25): the language switch on the right of the signed-in top bars, the only place the AI reply
+ * language is changed ("在顶部导航栏的右边有语言切换就可以了"). The interface itself stays in Simplified Chinese for now,
+ * which the menu says in one line, with what the setting does.
  */
 export function LanguageSwitch({ className }: { className?: string }) {
   const profile = trpc.user.getUserProfile.useQuery();
@@ -37,7 +38,9 @@ export function LanguageSwitch({ className }: { className?: string }) {
             <DropdownMenuRadioItem key={locale} value={locale} disabled={saving}>{REPLY_LOCALE_LABELS[locale]}</DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-        <p className="px-2 pb-1 pt-2 text-xs opacity-70">目前只影响 AI 回复语言，网站界面仍是简体中文。</p>
+        <p className="px-2 pb-1 pt-2 text-xs leading-snug opacity-70">
+          只影响 AI 回复语言，界面仍是简体中文；对话里明确要别的语言时那一次按你说的，改完从下一条回复起生效。
+        </p>
         {failed && <p role="alert" className="px-2 pb-1 text-xs" style={{ color: 'var(--color-error)' }}>没有保存成功，请稍后再试。</p>}
       </DropdownMenuContent>
     </DropdownMenu>
