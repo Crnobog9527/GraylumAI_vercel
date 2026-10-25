@@ -82,11 +82,14 @@ export async function cleanupOrphanPage(client: SupabaseClient, storage: Library
   return { orphans, unknownPaths: page.paths.length - paths.length, complete };
 }
 
+// REL-1 core 7 (6) drill (#1420): the batch, not the 35 s budget, bounds throughput. Staging took about 9 s per 50 rows,
+// so 100 (the most library_cleanup_candidates allows) keeps the budget's margin and doubles what clears within 24 hours.
+export const LIBRARY_CRON_BATCH = 100;
 export async function runLibraryCleanup(client: SupabaseClient) {
   const started = Date.now();
   const runId = await startScheduledJobRun({ supabase: client, jobKey: 'library_cleanup', triggerSource: 'cron' });
   try {
-    const result = await cleanupLibrary(client);
+    const result = await cleanupLibrary(client, { limit: LIBRARY_CRON_BATCH });
     // Persist only the storage continuation, never signed URLs, names or content.
     const previous = await client.from('scheduled_job_runs').select('summary').eq('job_key', 'library_cleanup')
       .neq('id', runId).not('finished_at', 'is', null).order('started_at', { ascending: false }).limit(1).maybeSingle();

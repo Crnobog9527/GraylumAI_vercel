@@ -156,7 +156,7 @@ function scrubCommon(event: Event): Event {
 // Fixed-code alerts (erasure-backlog-alert.ts, publish-monitor-alert.ts) may keep these counts: non-negative integers only,
 // no ids or text, and only when the message is exactly that code.
 const ALERT_COUNTS: Readonly<Record<string, readonly string[]>> = {
-  LIBRARY_CLEANUP_BACKLOG: ['pending', 'overdue', 'oldestHours'],
+  LIBRARY_CLEANUP_BACKLOG: ['pending', 'overdue', 'oldestHours', 'failingRuns'],
   ERASURE_BACKLOG: ['open', 'over12h', 'over20h', 'oldestHours'],
   // PUBLISH-MONITOR: the Post for Me plan's publish count (publish-monitor-alert.ts); three integers, nothing else.
   PUBLISH_MONITOR_QUOTA_NEAR: ['limit', 'used', 'reserved'],
