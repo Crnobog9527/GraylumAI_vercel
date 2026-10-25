@@ -117,7 +117,7 @@ export const runtimeRouter=router({
  reportStart:procedure.input(reportStart.extend({acceptedCredits:z.number().int().positive().optional()})).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
  // The fixed price (0295) is shown on the button; null when it cannot be read (the button then shows no number).
- reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await swallow('report_switch_read_failed',reportEnabled(ctx.supabaseAdmin!),false),
+ reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!),
   priceCredits:await swallow('report_price_read_failed',reportPrice(ctx.supabaseAdmin!),null)})),
  // Saved reports stay discoverable whatever the switch or membership is now.
  reportLatest:maintenanceProcedure.input(reportLocate).query(({ctx,input})=>reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,

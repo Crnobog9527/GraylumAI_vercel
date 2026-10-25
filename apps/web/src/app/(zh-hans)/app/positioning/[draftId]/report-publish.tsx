@@ -13,6 +13,9 @@ export const REPORT_FLOW_TEXT = {
   next: "下一步是生成完整报告：点下方「生成完整报告」，报告写完后核对、需要时修改，点「定稿」后成为正式定位；之后会单独问你是否生成第一周选题。",
   footnote: "所有步骤确认后生成完整报告，报告定稿后保存为正式定位；生成选题将在下一步单独确认。",
   /** The server's report switch is off (or unknown): no 生成完整报告 entry is shown, so none is promised. */
+  /** The switch read has not come back yet, or failed: say neither "open" nor "closed". */
+  loading: "正在确认完整报告是否可用…",
+  failed: "暂时无法确认完整报告是否可用，请刷新页面重试；已确认的内容都会保留。",
   unavailable: "这个定位流程要先生成完整报告并定稿，才能成为正式定位；完整报告暂未开放，已确认的内容都会保留。",
 } as const;
 
@@ -22,7 +25,9 @@ export const REPORT_FLOW_TEXT = {
  */
 export function ReportFlowNotice({ kind }: { kind: "next" | "footnote" }) {
   const available = trpc.runtime.reportAvailable.useQuery(undefined, { staleTime: 60_000 });
-  return <>{available.data?.enabled === true ? REPORT_FLOW_TEXT[kind] : REPORT_FLOW_TEXT.unavailable}</>;
+  if (available.isError) return <>{REPORT_FLOW_TEXT.failed}</>;
+  if (!available.data) return <>{REPORT_FLOW_TEXT.loading}</>;
+  return <>{available.data.enabled === true ? REPORT_FLOW_TEXT[kind] : REPORT_FLOW_TEXT.unavailable}</>;
 }
 
 /** The footer line under the publish actions: the old wording for a flow without a report. */
