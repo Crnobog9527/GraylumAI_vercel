@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- ARCH-FIX B1 (placeholder number; the controller assigns the final one). A library upload is a signed URL the browser
+-- ARCH-FIX B1 (number 0371 assigned by the controller). A library upload is a signed URL the browser
 -- writes straight into Storage, and nothing checked the account at the moment of the write: the 10-25 erasure drill
 -- wrote to four unfinished upload URLs after closing the account and every write returned 200, leaving the objects for
 -- the orphan sweep. Storage records every object as a row in storage.objects, including signed uploads, so the check now
@@ -14,7 +14,7 @@
 -- Deletes and in-place metadata updates are not checked: cleanup and erasure must always be able to remove objects.
 -- Repeatable: CREATE OR REPLACE, and the trigger is created only when missing.
 -- Rollback (as the table owner): DROP TRIGGER library_storage_write_guard ON storage.objects; DROP FUNCTION
--- public.library_storage_write_guard(); no data changes.
+-- public.library_storage_guard_present(), public.library_storage_write_guard(); no data changes.
 BEGIN;
 CREATE OR REPLACE FUNCTION public.library_storage_write_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -48,4 +48,14 @@ DO $t$ BEGIN
    FOR EACH ROW EXECUTE FUNCTION public.library_storage_write_guard();
  END IF;
 END $t$;
+-- Supabase owns storage.objects; a platform change that rebuilt the table would silently drop the trigger. The
+-- 5-minute library cleanup asks this every run and records an error run (and a log line) when it is missing.
+CREATE OR REPLACE FUNCTION public.library_storage_guard_present() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='storage.objects'::regclass
+  AND tgname='library_storage_write_guard' AND tgenabled<>'D'
+  AND tgfoid='public.library_storage_write_guard()'::regprocedure);
+$$;
+REVOKE ALL ON FUNCTION public.library_storage_guard_present() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.library_storage_guard_present() TO service_role;
 COMMIT;

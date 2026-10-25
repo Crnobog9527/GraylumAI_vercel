@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({ list: { data: undefined as unknown, isLoading:
 vi.mock('@/trpc/client', () => ({ trpc: {
   opc: { businesses: { useQuery: () => state.list } },
   publishMonitor: { addAccount: { useMutation: () => ({ error: null, isPending: false, mutate: vi.fn() }) } } } }));
-import { ADD_PLATFORMS, AddAccountForm, eligibleProfiles } from './AddAccountForm';
+import { ADD_PLATFORMS, AddAccountForm, eligibleProfiles, profileLabels } from './AddAccountForm';
 import { dataErrorMessage } from './labels';
 
 const profile = (businessId: string, name: string, extra: Record<string, unknown> = {}) =>
@@ -15,7 +15,7 @@ beforeEach(() => { state.list = { data: [], isLoading: false, error: null }; });
 it('only live profiles with a confirmed positioning are offered (archived and unconfirmed ones are not)', () => {
   expect(eligibleProfiles([profile('a', '甲'), profile('b', '乙', { isArchived: true }),
     profile('c', '丙', { currentSourceVersionId: null }), profile('d', '')]))
-    .toEqual([{ businessId: 'a', name: '甲' }, { businessId: 'd', name: '未命名定位档案' }]);
+    .toEqual([{ businessId: 'a', name: '甲', createdAt: '' }, { businessId: 'd', name: '未命名定位档案', createdAt: '' }]);
   expect(eligibleProfiles(undefined)).toEqual([]);
 });
 
@@ -44,4 +44,16 @@ it('every refusal of the database has its own readable text', () => {
     'PUBLISH_MONITOR_ACCOUNT_EXISTS_ELSEWHERE', 'PUBLISH_MONITOR_BUSINESS_NOT_FOUND']) {
     expect(dataErrorMessage(code)).not.toBe('暂时读不到，请稍后重试。');
   }
+});
+
+it('profiles with the same name are told apart by creation date, and by a short code when the date matches too', () => {
+  const p = (businessId: string, name: string, createdAt: string) => ({ businessId, name, createdAt });
+  const labels = profileLabels([p('2d23c4ff-0000', '未命名业务', '2026-10-03T17:23:49Z'), p('b861f81a-0000', '未命名业务', '2026-10-09T17:09:58Z'),
+    p('aaaa1111-0000', '独一份', '2026-10-01T00:00:00Z')]);
+  expect(labels.get('2d23c4ff-0000')).toBe('未命名业务（创建于 2026-10-03）');
+  expect(labels.get('b861f81a-0000')).toBe('未命名业务（创建于 2026-10-09）');
+  expect(labels.get('aaaa1111-0000')).toBe('独一份');
+  const same = profileLabels([p('abcd0000', '乙', '2026-10-03T01:00:00Z'), p('ef010000', '乙', '2026-10-03T09:00:00Z')]);
+  expect(same.get('abcd0000')).toBe('乙（创建于 2026-10-03 #abcd）');
+  expect(same.get('ef010000')).toBe('乙（创建于 2026-10-03 #ef01）');
 });

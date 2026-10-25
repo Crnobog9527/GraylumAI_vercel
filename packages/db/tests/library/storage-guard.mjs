@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// ARCH-FIX B1: a signed library upload URL must stop writing once the account is closed (0390).
+// ARCH-FIX B1: a signed library upload URL must stop writing once the account is closed (0371).
 // Storage writes one storage.objects row per object; these cases insert that row the way Storage does.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -100,6 +100,13 @@ export async function verifyStorageGuard(admin, service, connect) {
   await admin.query('UPDATE profiles SET credits=credits+1 WHERE id=$1', [g]);
   await admin.query('RESET lock_timeout');
   await third.query('COMMIT');
+  // Presence check used by the library cleanup cron: true now, false once the trigger is disabled.
+  const present = async () => (await service.query('SELECT library_storage_guard_present() v')).rows[0].v;
+  assert.equal(await present(), true);
+  await admin.query('ALTER TABLE storage.objects DISABLE TRIGGER library_storage_write_guard');
+  assert.equal(await present(), false);
+  await admin.query('ALTER TABLE storage.objects ENABLE TRIGGER library_storage_write_guard');
+  assert.equal(await present(), true);
   console.log('PASS: library storage write guard (open, unknown path, other bucket, erasure drill, closing facts,'
-    + ' deleted/ready/expired documents, text path, rename, delete, erasure race, credit updates not blocked)');
+    + ' deleted/ready/expired documents, text path, rename, delete, erasure race, credit updates not blocked, presence check)');
 }
