@@ -123,8 +123,8 @@ export async function stripeMpAnnualRefundCases({admin,service,connect}) {
  assert.equal((await one('SELECT credits FROM profiles WHERE id=$1',[issued.user],admin)).credits,0);
  const card=await buyer('gold','standard','card');await done(card,await claim(card,await approve(card)));
  const used=await buyer();
- await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,counts_as_spend,balance_before,balance_after)
-  VALUES($1,-1,'deduction','spend',true,3480,3479)`,[used.user]);
+ await admin.query(`INSERT INTO credit_transactions(idempotency_key,user_id,amount,type,ledger_type,counts_as_spend,balance_before,balance_after)
+  VALUES('fixture:'||gen_random_uuid(),$1,-1,'deduction','spend',true,3480,3479)`,[used.user]);
  await assert.rejects(()=>approve(used),/CONSUMPTION_OR_UNKNOWN/);
  const late=await buyer('pro','standard','card_cn',8);await assert.rejects(()=>approve(late),/PAY_REFUND_WINDOW/);
  const pending=await buyer();let pi=await claim(pending,await approve(pending));

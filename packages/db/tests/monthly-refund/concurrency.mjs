@@ -27,7 +27,7 @@ export async function runConcurrency({db,Client,connectionString,report}) {
    if(!locked)await new Promise(resolve=>setTimeout(resolve,10));
   }
   assert.equal(locked,true);
-  await other.query("insert into credit_transactions(user_id,amount,type,ledger_type,counts_as_spend) values($1,-1,'deduction','spend',true)",[next.f.user]);
+  await other.query("insert into credit_transactions(idempotency_key,user_id,amount,type,ledger_type,counts_as_spend) values('fixture:'||gen_random_uuid(),$1,-1,'deduction','spend',true)",[next.f.user]);
   await other.query('update profiles set credits=credits-1 where id=$1',[next.f.user]);await other.query('commit');
   const blocked=await waiting;assert.match(blocked.error?.message??'',/CONSUMPTION/);
   // Closure wins the same profile lock; approved financial identity must remain pending.

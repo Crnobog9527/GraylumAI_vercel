@@ -64,9 +64,13 @@ function permissionScopedClient(rows: Record<string, Record<string, unknown>[]> 
   const selections: Array<{ table: string; columns: string[] }> = [];
   const client = {
     async rpc(name: string) {
-      expect(name).toBe('research_billing_summary');
+      expect(['research_billing_summary', 'billing_reconcile_day']).toContain(name);
+      const empty = name === 'research_billing_summary' ? { count: 0, credits: 0 } : {
+        tokenStatsCount: 0, tokenStatsCredits: 0, webSearchCount: 0, successfulAiRequests: 0, settleCredits: 0,
+        completedPaymentOrders: 0, completedPaymentAmount: 0, calls: { settledCalls: 0, mismatched: 0, sample: [] },
+        sources: { mismatched: 0, sample: [] }, entries: { unattributed: 0, notApplied: 0 } };
       return {
-        data: deniedTable === name ? null : { count: 0, credits: 0 },
+        data: deniedTable === name ? null : empty,
         error: deniedTable === name ? { code: '42501', message: 'permission denied for research summary' } : null,
       };
     },
@@ -177,7 +181,7 @@ describe('BILL-1 column SELECT permission contract', () => {
     expect(result.summary.purchaseCredits).toBe(400);
   });
 
-  it.each(['billing_history', 'credit_transactions', 'research_billing_summary'])('does not suppress daily permission errors on %s', async (table) => {
+  it.each(['billing_reconcile_day', 'credit_transactions', 'research_billing_summary'])('does not suppress daily permission errors on %s', async (table) => {
     const { client } = permissionScopedClient({}, table);
     await expect(runDailyBillingReconciliation(client)).rejects.toMatchObject({ code: '42501' });
   });

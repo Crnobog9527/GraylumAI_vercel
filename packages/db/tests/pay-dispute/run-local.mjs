@@ -320,8 +320,8 @@ try {
  await withdraw(ops,heldRefund);
  await quoteRefund();
  await c.query('BEGIN');
- await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type)
-  VALUES($1,-1,'deduction','adjustment','unknown_fixture','payment_order')`,[refundUser]);
+ await c.query(`INSERT INTO credit_transactions(idempotency_key,user_id,amount,type,ledger_type,reason_code,source_type)
+  VALUES('fixture:'||gen_random_uuid(),$1,-1,'deduction','adjustment','unknown_fixture','payment_order')`,[refundUser]);
  await assert.rejects(quoteRefund,/PAY_REFUND_CONSUMPTION_OR_UNKNOWN/);await c.query('ROLLBACK');
  const refreshed=await approveRefund();
  await v('SELECT pay_common_package_refund_claim($1,$2,$3,$4) v',[ops,refundPack.order,refreshed.id,cash]);

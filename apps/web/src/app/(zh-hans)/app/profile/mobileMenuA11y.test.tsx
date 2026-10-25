@@ -48,7 +48,6 @@ vi.mock('@/components/profile/PersonalInfoCard', () => ({
   QuickActionsCard: () => null,
 }));
 vi.mock('@/components/founder/FounderProfileCard', () => ({ FounderProfileCard: () => null }));
-vi.mock('@/components/profile/ReplyLanguageCard', () => ({ ReplyLanguageCard: () => null }));
 vi.mock('@/components/profile/SubscriptionCard', () => ({ SubscriptionCard: () => <p>subscription-card</p>, CreditStatsCard: () => null }));
 vi.mock('@/components/profile/BillingRecordsCard', () => ({ default: () => null }));
 vi.mock('@/components/profile/CreditRecordsCard', () => ({ CreditRecordsCard: () => null }));
