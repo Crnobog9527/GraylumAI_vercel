@@ -120,13 +120,25 @@ describe('stripe webhook route', () => {
   // ARCH-FIX F2: the legacy fulfillment fallback is closed. An event no current handler claims changes no credits.
   it.each(['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.expired',
     'checkout.session.async_payment_failed', 'invoice.paid', 'invoice.payment_succeeded', 'invoice.payment_failed',
-    'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted',
-    'refund.created', 'refund.updated', 'refund.failed', 'charge.refund.updated', 'charge.refunded', 'customer.created'])(
+    'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'customer.created'])(
     'acknowledges an unclaimed %s without the legacy fulfillment path', async (type) => {
       await expect(handleStripeWebhookEvent({} as never, { type, data: { object: { id: 'obj_legacy',
         mode: 'subscription', payment_status: 'paid' } } } as Stripe.Event)).resolves.toBeUndefined();
       Object.values(stripeFulfillmentMocks).forEach(mock => expect(mock).not.toHaveBeenCalled());
       expect(alertMocks.logServerWarn).toHaveBeenCalledExactlyOnceWith('billing', 'stripe_webhook_unclaimed', { eventType: type });
+    });
+  // Refunds are not legacy fulfillment: approved credit-pack refund results and ordinary wallet-pack external refunds
+  // still reconcile here after the card handler declines, and a failure stays retryable.
+  it.each(['refund.created', 'refund.updated', 'refund.failed', 'charge.refund.updated', 'charge.refunded'])(
+    'reconciles an unclaimed %s through the refund reconciler', async (type) => {
+      const event = { type, data: { object: { id: type === 'charge.refunded' ? 'ch_pack' : 're_pack' } } } as Stripe.Event;
+      await handleStripeWebhookEvent({} as never, event);
+      expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook).toHaveBeenCalledExactlyOnceWith({}, event);
+      expect(alertMocks.logServerWarn).not.toHaveBeenCalled();
+      stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook.mockRejectedValueOnce(new Error('retry webhook'));
+      await expect(handleStripeWebhookEvent({} as never, event)).rejects.toThrow('retry webhook');
+      [stripeFulfillmentMocks.upsertPaymentOrderBySession, stripeFulfillmentMocks.fulfillMembershipInvoice,
+        stripeFulfillmentMocks.syncSubscriptionState].forEach(mock => expect(mock).not.toHaveBeenCalled());
     });
 
   it('passes the verified asynchronous failure event into wallet reconciliation', async () => {

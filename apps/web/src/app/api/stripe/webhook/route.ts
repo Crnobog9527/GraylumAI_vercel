@@ -5,6 +5,7 @@
  */
 
 import { createServiceRoleSupabaseClient, getStripeClient, getStripeWebhookSecret } from '@repo/api/src/services/stripe';
+import { reconcileSubscriptionRefundFromStripeWebhook } from '@repo/api/src/services/stripeFulfillment';
 import { reportPaymentEvidenceConflict } from '@/lib/payment-alert.mjs';
 import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from '@repo/api/src/services/payments/stripeWebhookError';
 import { recoverMethodCheckout } from '@repo/api/src/services/payments/walletWebhook';
@@ -47,14 +48,17 @@ export async function handleStripeWebhookEvent(
     // PAY-STRIPE-MP card orders: external refunds are recorded on the card order.
     const input = event.type === 'charge.refunded' ? { chargeId: event.data.object.id } : { refundId: event.data.object.id };
     if (await handleCardRefund(supabase, getStripeClient(), input, () => reportPaymentEvidenceConflict(event.type))) return;
+    // Still current, not legacy fulfillment: approved credit-pack refund results and ordinary wallet-pack external refunds.
+    await reconcileSubscriptionRefundFromStripeWebhook(supabase, event);
+    return;
   }
   if (event.type.startsWith('charge.dispute.')) {
     await handlePaymentDispute(supabase, getStripeClient(), event, reportPaymentDispute);
     return;
   }
-  // ARCH-FIX F2: the legacy Stripe fulfillment fallback is closed. Orders created before PAY-STRIPE-MP (10-12) exist only as
-  // staging test data; production starts from a new database. An event no current handler claims changes no credits:
-  // it is logged and acknowledged so Stripe stops retrying. stripeFulfillment.ts and its tables stay for other callers.
+  // ARCH-FIX F2: the legacy checkout/invoice/subscription fulfillment fallback is closed. Orders created before PAY-STRIPE-MP
+  // (10-12) exist only as staging test data; production starts from a new database. An event no current handler claims
+  // changes no credits: it is logged and acknowledged so Stripe stops retrying. stripeFulfillment.ts stays for other callers.
   logServerWarn('billing', 'stripe_webhook_unclaimed', { eventType: event.type });
 }
 

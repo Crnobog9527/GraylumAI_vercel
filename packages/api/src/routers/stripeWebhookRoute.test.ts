@@ -109,12 +109,41 @@ describe('stripe webhook route with the legacy fallback closed (ARCH-FIX F2)', (
   });
 
   const legacyFulfillment = () => [routeMocks.fulfillCreditPackageOrder, routeMocks.fulfillMembershipInvoice,
-    routeMocks.markMembershipInvoicePaymentFailed, routeMocks.reconcileSubscriptionRefundFromStripeWebhook,
-    routeMocks.syncSubscriptionState, routeMocks.upsertPaymentOrderBySession];
+    routeMocks.markMembershipInvoicePaymentFailed, routeMocks.syncSubscriptionState, routeMocks.upsertPaymentOrderBySession];
 
   it.each([
     ['charge.refunded', { id: 'ch_test_refunded', object: 'charge' }],
+    ['charge.refund.updated', { id: 're_test_charge_refund_updated', object: 'refund' }],
     ['refund.created', { id: 're_test_created', object: 'refund' }],
+    ['refund.updated', { id: 're_test_updated', object: 'refund' }],
+    ['refund.failed', { id: 're_test_failed', object: 'refund' }],
+  ] as const)('reconciles an unclaimed %s with the full event through the refund reconciler', async (eventType, object) => {
+    const event = { id: `evt_test_${eventType.replaceAll('.', '_')}`, type: eventType, data: { object } };
+    routeMocks.constructEvent.mockReturnValue(event);
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.reconcileSubscriptionRefundFromStripeWebhook).toHaveBeenCalledWith(routeMocks.supabaseClient, event);
+    expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+    expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+    expect(routeMocks.logServerWarn).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 and logs when the refund reconciler fails, so Stripe retries', async () => {
+    routeMocks.constructEvent.mockReturnValue({ id: 'evt_test_refund_reconcile_failure', type: 'refund.created',
+      data: { object: { id: 're_test_reconcile_failure' } } });
+    routeMocks.reconcileSubscriptionRefundFromStripeWebhook.mockRejectedValueOnce(new Error('rpc failure'));
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(500);
+    expect(routeMocks.logServerError).toHaveBeenCalledWith('billing', 'stripe_webhook_handler_failed',
+      { eventType: 'refund.created', code: 'PAY_COMMON_WEBHOOK_HANDLER_FAILED' });
+  });
+
+  it.each([
     ['invoice.payment_succeeded', { id: 'in_test_legacy', object: 'invoice' }],
     ['invoice.payment_failed', { id: 'in_test_legacy_failed', object: 'invoice' }],
     ['customer.subscription.updated', { id: 'sub_test_legacy', object: 'subscription', status: 'active' }],
