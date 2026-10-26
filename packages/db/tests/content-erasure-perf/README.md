@@ -6,7 +6,7 @@
 
 ```sh
 node packages/db/tests/content-erasure-perf/verify.mjs --local-only
-# 负例：恢复上一版完整函数，必须在 2 秒性能断言处失败
+# 负例：恢复上一版完整函数，必须在"身份解析次数"断言处失败（ERASURE_PERF_TOO_MANY_PARSES）
 node packages/db/tests/content-erasure-perf/verify.mjs --local-only --before-fix
 ```
 
@@ -19,8 +19,12 @@ fixture、`fixture.sql` 和 `assertions.sql`，复用这次建库，不额外启
 1 个调用、1 个回执、1 积分扣费，以及必须保留的确认报告。
 偏斜账号分布用于覆盖测试账号积累很多历史的情况，避免平均分布掩盖逐行重复查询。
 
-断言同时覆盖：≤2 秒、五种原绑定匹配与原定义等价、未标记/其他账号/坏 UUID 不匹配、
+断言同时覆盖：一次删除的身份解析次数 ≤ 10 万（结构性断言，和机器快慢无关；耗时只作为 NOTICE 输出）、五种原绑定匹配与原定义等价、未标记/其他账号/坏 UUID 不匹配、
 重复删除、报告保留、无关内容逐字不变、余额和运行结算事实/积分账本条数与合计不变。
+
+## 性能保护为什么是解析次数
+
+原来的 2 秒墙钟断言在 GitHub runner 上偶发超过（2129 ms），而本机新函数约 1.1 秒、旧函数约 3 秒，余量太小。现在改为数一次删除里 `content_erasure_uuid` 被调用的次数（`track_functions` 加 `pg_stat_xact_user_functions`，同一事务内可读）：新函数约 5.0 万次，旧函数约 107 万次，同样的数据每次都完全相同。上限 10 万次，保留 2 倍余量，且旧函数会超出 10 倍而失败；`verify.mjs --before-fix` 用来证明这一点。墙钟耗时仍打印，8 秒的 `statement_timeout` 仍在作为最外层保护。
 
 ## 已定位的慢点和结果
 
