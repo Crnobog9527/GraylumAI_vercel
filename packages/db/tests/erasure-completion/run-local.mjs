@@ -17,6 +17,7 @@ import {runLeaves} from './leaves.mjs';
 import {runOwnedRuntimePrune} from './owned-runtime-prune.mjs';
 import {runOwnedSessionPrune} from './owned-session-prune.mjs';
 import {runResearchRetained} from './research-retained.mjs';
+import {runPruneDiagnostics} from './prune-diagnostics.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {startRedisDouble} from './redis-double.mjs';
 
@@ -78,7 +79,8 @@ try {
  assert.equal(report.build.failed,null);
  // The optimization is built through the canonical migration chain; repeat its final version too.
  const optimized=snapshot();
- for(const file of ['0333_erasure_prune_owned_runtime.sql','0355_erasure_prune_session_tables.sql'])
+ // 0395 patches the 0355 text, so it is replayed after it.
+ for(const file of ['0333_erasure_prune_owned_runtime.sql','0355_erasure_prune_session_tables.sql','0395_erasure_prune_error_codes.sql'])
   ok(sql(read('packages/db/migrations/'+file)));
  assert.deepEqual(snapshot(),optimized,'runtime owner optimizations repeat without catalog drift');
  const require=createRequire(resolve(root,'packages/api/package.json'));
@@ -121,6 +123,7 @@ try {
  await runOwnedSessionPrune(client,report);
  await runOwnedRuntimePrune(client,report);
  await runResearchRetained(client,report);
+ await runPruneDiagnostics(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
  const {processAccountErasure}=await import(module('processor'));
  await runProcessor(client,processAccountErasure,report);
