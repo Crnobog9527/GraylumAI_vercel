@@ -50,6 +50,9 @@ jobs:
       - name: Check code pattern ratchet
         run: node scripts/check-pattern-ratchet.mjs
 
+      - name: Check new migrations rewrite functions whole
+        run: node scripts/check-function-patches.mjs
+
       - name: Check no Skill source in public repository
         run: node scripts/check-no-skill-source.mjs
 
