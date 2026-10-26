@@ -38,7 +38,8 @@ import {
  runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
-import { ENDED_NOTICE, GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from './runtime-notices';
+import { ENDED_NOTICE, GUIDE_HELD_NOTICE, isOpenTurn, runtimeModeSubtitle, runtimeTailNotices, runtimeTurnNotices, stopWithRecord,
+  type RuntimeTurn } from './runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
@@ -408,8 +409,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   currentScriptId={currentScript?.id} saved={saved.data} libraryHref={'/app/library?item='+workItem.workItemId+'&return='+sessionId}/></ContentEditor>)
   :results.data?.length?<SessionResultsPanel sessionId={sessionId} items={results.data}/>:undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
   <RuntimeHeader title={workItem?.title??'工作对话'}
-   subtitle={workItem?undefined:(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试'
-    :(choices.data?.mode??view.data?.mode)==='production'?undefined:'本地模拟体验'}
+   subtitle={workItem?undefined:runtimeModeSubtitle(choices.data?.mode??view.data?.mode)}
    meta={workItem?{platform:workItem.platform,account:workItem.account,infoHref:'/app/library?item='+workItem.workItemId+'&return='+sessionId,
     showExpand:!panelOpen,onExpand:()=>setPanelOpen(true)}:undefined}
    action={!sessionId&&requestedModule?<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)}

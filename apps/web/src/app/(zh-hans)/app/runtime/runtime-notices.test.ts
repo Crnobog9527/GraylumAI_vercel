@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
-import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from "./runtime-notices";
+import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeModeSubtitle, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from "./runtime-notices";
 
 const turn = (extra: Partial<RuntimeTurn> = {}): RuntimeTurn => ({
   executionId: "e1", state: "completed", primaryBody: null, organizerComplete: null, needsTask: false, unavailableReason: null, ...extra,
@@ -288,5 +288,17 @@ describe("stopWithRecord", () => {
     const storage = store();
     expect(await stopWithRecord(at(storage), fail, view({ state: "running", billing: { cancelRequested: false } }))).toBe(true);
     expect(storage.getItem(key)).toBeNull();
+  });
+});
+
+describe("runtimeModeSubtitle", () => {
+  // REL-1: real users saw 本地模拟体验 flash on every open of the chat page, before choices/view returned.
+  it("shows nothing while the mode has not come back, and for production", () => {
+    expect(runtimeModeSubtitle(undefined)).toBeUndefined();
+    expect(runtimeModeSubtitle("production")).toBeUndefined();
+  });
+  it("names only the modes that are known to be non-production", () => {
+    expect(runtimeModeSubtitle("isolated")).toBe("本地模拟体验");
+    expect(runtimeModeSubtitle("staging_test")).toBe("Staging 真实对话测试");
   });
 });
