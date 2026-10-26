@@ -124,6 +124,7 @@ async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof cre
       const procedurePaths = parseTrpcProcedurePaths(req.nextUrl.pathname);
 
       if (!isTrpcRequestAllowedDuringMaintenance(procedurePaths)) {
+        logServerError('api', 'trpc_service_unavailable', { reasonCode: 'MAINTENANCE' });
         return new Response(
           JSON.stringify({
             error: {
@@ -146,6 +147,15 @@ async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof cre
     endpoint: '/api/trpc',
     req,
     router: appRouter,
+    onError: ({ error, path }) => {
+      if (error.code !== 'SERVICE_UNAVAILABLE') return;
+      const procedure = path && /^[a-zA-Z][a-zA-Z0-9.]{0,160}$/.test(path) ? path : 'unknown';
+      logServerError('api', 'trpc_service_unavailable', {
+        procedure,
+        reasonCode: 'retryAfter' in error ? 'RATE_LIMIT_BACKEND_UNAVAILABLE'
+          : error.message === 'CONTENT_ERASURE_UNAVAILABLE' ? 'CONTENT_ERASURE_UNAVAILABLE' : 'PROCEDURE_UNAVAILABLE',
+      });
+    },
     createContext: () => createTRPCContext({
       headers: req.headers,
       runtimeBudget,

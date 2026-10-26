@@ -2,6 +2,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { scheduleErasureManifestSync } from './offdbManifest';
+import { logger } from '../../lib/logger';
+import { currentRequestTiming } from '../runtime/timing';
 
 export const contentTarget = z.object({
   kind: z.enum(['answer', 'session', 'artifact', 'content']),
@@ -36,9 +38,22 @@ const failures = {
   CONTENT_ERASURE_PREVIEW_CHANGED: 'CONFLICT',
   CONTENT_ERASURE_BUSY: 'CONFLICT',
 } as const;
-function fail(error: { code?: string; message?: string } | null): never {
+type FailureContext = { operation: string; sessionId?: string; reasonCode?: string };
+function fail(error: { code?: string; message?: string } | null,
+  context: FailureContext = { operation: 'content_erasure' }): never {
   const name = error?.message as keyof typeof failures;
   if (name && name in failures) throw new TRPCError({ code: failures[name], message: name });
+  const databaseCode = error?.code && /^[A-Z0-9]{5}$/.test(error.code) ? error.code : undefined;
+  const reasonCode = context.reasonCode ?? (databaseCode === '57014' ? 'DATABASE_TIMEOUT'
+    : databaseCode === '55P03' || databaseCode === '40P01' ? 'DATABASE_LOCKED'
+    : databaseCode?.startsWith('08') ? 'DATABASE_CONNECTION'
+    : databaseCode === 'P0001' ? 'DATABASE_REJECTED' : 'DATABASE_ERROR');
+  logger.error('api', 'content_erasure_unavailable', { ...context, reasonCode, databaseCode });
+  // PostgREST received the database's statement cancellation: the RPC transaction rolled back.
+  // Unlike a lost response or a transport timeout, this has a known outcome and must not auto-retry.
+  if (databaseCode === '57014' && context.operation === 'conversation_mark') {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'CONTENT_ERASURE_TIMEOUT' });
+  }
   // Neither database text nor an error cause carrying private content is exposed.
   throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'CONTENT_ERASURE_UNAVAILABLE' });
 }
@@ -74,16 +89,30 @@ export const conversationTarget = z.object({ sessionId: z.string().uuid() }).str
  */
 export async function eraseConversation(database: Database | null | undefined, actorId: string,
   input: z.infer<typeof conversationTarget>) {
-  if (!database) fail(null);
   const { sessionId } = conversationTarget.parse(input);
-  const response = await database.rpc('content_erasure_mark_session', { a: actorId, target: sessionId });
-  if (response.error) fail(response.error);
-  const parsed = confirmationResult.safeParse(response.data);
-  if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null);
-  // The mark recorded the deletion in the database outbox (0227); push it off-database now,
-  // best effort, like every other confirmed deletion (backup-restore replay runbook).
-  scheduleErasureManifestSync(database);
-  return parsed.data;
+  const context = { operation: 'conversation_mark', sessionId };
+  if (!database) fail(null, { ...context, reasonCode: 'DATABASE_UNCONFIGURED' });
+  const finish = currentRequestTiming()?.enter('host');
+  logger.info('api', 'conversation_erasure_started', context);
+  try {
+    let response;
+    try {
+      response = await database.rpc('content_erasure_mark_session', { a: actorId, target: sessionId });
+    } catch {
+      fail(null, { ...context, reasonCode: 'TRANSPORT_FAILURE' });
+    }
+    if (response.error) fail(response.error, context);
+    const parsed = confirmationResult.safeParse(response.data);
+    if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') {
+      fail(null, { ...context, reasonCode: 'INVALID_RESPONSE' });
+    }
+    // The mark recorded the deletion in the database outbox (0227); push it off-database now,
+    // best effort, like every other confirmed deletion (backup-restore replay runbook).
+    scheduleErasureManifestSync(database);
+    return parsed.data;
+  } finally {
+    finish?.();
+  }
 }
 /**
  * Physical cleanup of a marked conversation: the unchanged content_erasure_confirm on its
@@ -92,13 +121,14 @@ export async function eraseConversation(database: Database | null | undefined, a
  */
 export async function cleanUpConversation(database: Database | null | undefined, actorId: string,
   input: z.infer<typeof conversationTarget>) {
-  if (!database) fail(null);
   const { sessionId } = conversationTarget.parse(input);
+  const context = { operation: 'conversation_cleanup', sessionId };
+  if (!database) fail(null, { ...context, reasonCode: 'DATABASE_UNCONFIGURED' });
   const response = await database.rpc('content_erasure_confirm', { a: actorId, k: 'session', target: sessionId, expected_hash: null });
   if (response.error?.message === 'CONTENT_ERASURE_BUSY') return { cleaned: false, reviewRequired: false };
-  if (response.error) fail(response.error);
+  if (response.error) fail(response.error, context);
   const parsed = confirmationResult.safeParse(response.data);
-  if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null);
+  if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null, { ...context, reasonCode: 'INVALID_RESPONSE' });
   // Unresolved money on the deleted conversation is reported here, as the confirm call used to.
   return { cleaned: true, reviewRequired: parsed.data.status === 'review_required' };
 }
