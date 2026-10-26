@@ -426,8 +426,11 @@ export default function AdminPackagesPage() {
       updateMembershipPlan.mutate({
         id: editingPlan.id,
         ...data,
-        stripeMonthlyPriceId: stripeMonthlyPriceId || null,
-        stripeYearlyPriceId: stripeYearlyPriceId || null,
+        // Resubmitting an unchanged price id makes the server re-verify it against Stripe, which can fail a plain rename.
+        ...(stripeMonthlyPriceId !== (editingPlan.stripe_monthly_price_id ?? '')
+          ? { stripeMonthlyPriceId: stripeMonthlyPriceId || null } : {}),
+        ...(stripeYearlyPriceId !== (editingPlan.stripe_yearly_price_id ?? '')
+          ? { stripeYearlyPriceId: stripeYearlyPriceId || null } : {}),
       });
     } else {
       createMembershipPlan.mutate({
