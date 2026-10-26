@@ -2,6 +2,7 @@
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import {renewalReplayCases} from './renewal-replay.mjs';
 export async function membershipCases({c,v,profile,receive,withdraw,ops,report}) {
  const facts=async user=>{await c.query('SET ROLE service_role');try{return await v('SELECT pay_common_membership_facts($1) v',[user]);}finally{await c.query('RESET ROLE');}};
  const member=async(start,end,cycle='monthly')=>{
@@ -218,5 +219,6 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
  assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[held.user]),100);
  assert.equal(await v('SELECT cancel_at_period_end v FROM user_subscriptions WHERE id=$1',[held.sub]),'true');
  report.checks.push('monthly refund failure during dispute: source and balance remain frozen; stop survives restore and withdrawal');
+ await renewalReplayCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd});
 
 }
