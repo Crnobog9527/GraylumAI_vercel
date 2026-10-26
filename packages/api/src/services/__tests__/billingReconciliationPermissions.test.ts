@@ -97,6 +97,7 @@ function permissionScopedClient(rows: Record<string, Record<string, unknown>[]> 
         gte: () => builder,
         range: () => builder,
         order: () => builder,
+        gt: () => builder,
         lt: async () => result(),
         limit: async () => result(),
         maybeSingle: async () => ({ data: { value: '2026-01-01T00:00:00.000Z' }, error: null }),
