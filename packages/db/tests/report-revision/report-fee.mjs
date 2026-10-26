@@ -77,12 +77,68 @@ export async function runReportFee({db,Client,connectionString,report}) {
   assert.equal(Number((await db.query('SELECT count(*) v FROM ai_usage_logs WHERE bill2_call_id=$1',[c.id])).rows[0].v),1);
   assert.equal((await service(db,'report_fee_settle',f.actor,ok.id)).state,'held','a running report keeps its price held');
   await finish(db,ok.id,'completed',{body:completeBody,completeness:'complete'});
+  assert.equal((await fee(db,ok.id)).state,'charged','complete report charges before polling');
   const charged = await service(db,'report_fee_settle',f.actor,ok.id);
   assert.deepEqual({state:charged.state,charged:charged.chargedCredits},{state:'charged',charged:PRICE});
   assert.deepEqual(await service(db,'report_fee_settle',f.actor,ok.id),charged,'settling again changes nothing');
   assert.equal(await wallet(db,f.actor),5000-PRICE,'exactly the price is charged');
   await balanced(db,f.actor,'complete');
   report.checks.push('report price: 500 held at admission, the call settles at zero with its real cost, 500 charged once for a complete report');
+
+  // The actual stop RPC must commit the refund, even if no report.status follows it.
+  const stopped = await execution(db,f);
+  const stoppedHeld = await wallet(db,f.actor);
+  assert.equal((await service(db,'runtime_cancel',f.actor,stopped.id)).state,'cancelled');
+  assert.equal((await fee(db,stopped.id)).state,'refunded','stop settles the fee inside its transaction');
+  assert.equal(await wallet(db,f.actor),stoppedHeld+PRICE,'stop refunds 500 immediately');
+  await service(db,'runtime_cancel',f.actor,stopped.id);
+  assert.equal(await wallet(db,f.actor),stoppedHeld+PRICE,'repeated stop cannot refund twice');
+
+  // Host failure cancellation takes the same terminal-state path.
+  const failed = await execution(db,f);
+  const failedHeld = await wallet(db,f.actor);
+  await service(db,'runtime_cancel_with_code',f.actor,failed.id,'PROVIDER_UNAVAILABLE');
+  assert.equal((await fee(db,failed.id)).state,'refunded','failure refunds without polling');
+  assert.equal(await wallet(db,f.actor),failedHeld+PRICE);
+
+  // Keep the stop transaction open while a duplicate stop, status settlement and cron overlap it.
+  const concurrent = await execution(db,f);
+  const concurrentHeld = await wallet(db,f.actor);
+  const contenders = Array.from({length:3},()=>new Client({connectionString}));
+  await Promise.all(contenders.map(c=>c.connect()));
+  try {
+    await db.query('BEGIN');
+    await service(db,'runtime_cancel',f.actor,concurrent.id);
+    assert.equal((await fee(db,concurrent.id)).state,'refunded','refund is atomic with stop');
+    const pending = Promise.all([
+      service(contenders[0],'runtime_cancel',f.actor,concurrent.id),
+      service(contenders[1],'report_fee_settle',f.actor,concurrent.id),
+      service(contenders[2],'report_fee_settle_due',100),
+    ]);
+    await db.query('COMMIT');
+    await pending;
+  } finally {
+    await db.query('ROLLBACK');
+    await Promise.all(contenders.map(c=>c.end()));
+  }
+  assert.equal(await wallet(db,f.actor),concurrentHeld+PRICE,'concurrent stop/status/cron refund exactly once');
+  assert.equal(Number((await db.query(`SELECT count(*) n FROM credit_transactions
+    WHERE idempotency_key=$1`,['report:'+concurrent.id+':release'])).rows[0].n),1);
+  await balanced(db,f.actor,'immediate cancellation');
+  report.checks.push('stop and host failure immediately refund 500; duplicate stop, status and daily settlement race refunds once');
+
+  // A conservation failure rolls back both the execution transition and the money movement.
+  const corrupt = await execution(db,f);
+  const corruptHeld = await wallet(db,f.actor);
+  await db.query('UPDATE report_fees SET credits=credits+1 WHERE execution_id=$1',[corrupt.id]);
+  await assert.rejects(service(db,'runtime_cancel',f.actor,corrupt.id),/REPORT_FEE_CONSERVATION/);
+  assert.equal((await fee(db,corrupt.id)).state,'held');
+  assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',[corrupt.id])).rows[0].state,'running');
+  assert.equal(await wallet(db,f.actor),corruptHeld,'failed settlement does not partially refund');
+  await db.query('UPDATE report_fees SET credits=credits-1 WHERE execution_id=$1',[corrupt.id]);
+  await service(db,'runtime_cancel',f.actor,corrupt.id);
+  assert.equal(await wallet(db,f.actor),corruptHeld+PRICE);
+  report.checks.push('REPORT_FEE_CONSERVATION rolls back stop and refund together; corrected retry refunds once');
 
   // Not complete: cut off, structure incomplete, stopped, cancelled or empty refunds in full.
   for (const [state,result] of [['completed',{body:'## One\nCut off',completeness:'length_limit'}],
@@ -91,6 +147,8 @@ export async function runReportFee({db,Client,connectionString,report}) {
     const before = await wallet(db,f.actor);
     const x = await execution(db,f);
     await finish(db,x.id,state,result);
+    assert.equal((await fee(db,x.id)).state,'refunded','ended report refunds before any status read');
+    assert.equal(await wallet(db,f.actor),before,'immediate refund without polling');
     const v = await service(db,'report_fee_settle',f.actor,x.id);
     assert.deepEqual({state:v.state,charged:v.chargedCredits},{state:'refunded',charged:0},JSON.stringify(result));
     assert.equal(await wallet(db,f.actor),before,'refunded in full');
@@ -119,6 +177,34 @@ export async function runReportFee({db,Client,connectionString,report}) {
   assert.equal(await wallet(db,f.actor),refundedBalance,'repeat recovery does not refund twice');
   await balanced(db,f.actor,'interrupted recovery report refund');
   report.checks.push('interrupted recovery: incomplete report refunds 500 once and frees its Session without a model call');
+
+  // Preserve 0295 while supplier costs are pending: complete reports charge; unfinished ones stay held.
+  const pendingComplete = await execution(db,f);
+  await finish(db,pendingComplete.id,'cost_pending',{body:completeBody,completeness:'complete'});
+  assert.equal((await fee(db,pendingComplete.id)).state,'charged');
+  const pendingIncomplete = await execution(db,f);
+  const pendingHeld = await wallet(db,f.actor);
+  await finish(db,pendingIncomplete.id,'cost_pending',null);
+  assert.equal((await fee(db,pendingIncomplete.id)).state,'held');
+  await finish(db,pendingIncomplete.id,'cancelled',null);
+  assert.equal((await fee(db,pendingIncomplete.id)).state,'refunded');
+  assert.equal(await wallet(db,f.actor),pendingHeld+PRICE);
+  report.checks.push('cost_pending preserves 0295: complete charges, unfinished stays held until terminal cancellation');
+
+  // Exercise the documented rollback: remove only the hook, keep fees/ledger, use the old status fallback.
+  await db.query('BEGIN');
+  try {
+    await db.query('DROP TRIGGER report_fee_terminal_settlement ON public.runtime_executions');
+    await db.query('DROP FUNCTION public.report_fee_terminal_settlement()');
+    const fallback = await execution(db,f);
+    const fallbackHeld = await wallet(db,f.actor);
+    await service(db,'runtime_cancel',f.actor,fallback.id);
+    assert.equal((await fee(db,fallback.id)).state,'held');
+    assert.equal((await service(db,'report_fee_settle',f.actor,fallback.id)).state,'refunded');
+    assert.equal(await wallet(db,f.actor),fallbackHeld+PRICE);
+    await balanced(db,f.actor,'rollback fallback');
+  } finally { await db.query('ROLLBACK'); }
+  report.checks.push('rollback removes only the new hook; old status settlement refunds without losing fee or ledger data');
 
   // Admission refused below the price plus the call's own hold: nothing held.
   const poor = await seed(db);
@@ -151,18 +237,18 @@ export async function runReportFee({db,Client,connectionString,report}) {
   const firstReport = await execution(db,dup,undefined,false,sameRound);
   await assert.rejects(execution(db,dup,undefined,false,sameRound),/REPORT_ALREADY_EXISTS/,'a report still going');
   assert.equal(await wallet(db,dup.actor),5000-PRICE,'nothing more held');
-  // Terminal and complete, price not settled yet: still blocks (the window between finishing and the status read).
+  // Terminal and complete: blocks another admission even before any status read.
   const sameRound2 = randomUUID();
   const unsettled = await execution(db,dup,undefined,false,sameRound2);
   await finish(db,unsettled.id,'completed',{body:completeBody,completeness:'complete'});
-  await assert.rejects(execution(db,dup,undefined,false,sameRound2),/REPORT_ALREADY_EXISTS/,'a complete report not yet settled');
+  await assert.rejects(execution(db,dup,undefined,false,sameRound2),/REPORT_ALREADY_EXISTS/,'a complete report before status read');
   await finish(db,firstReport.id,'completed',{body:'## One\nCut off',completeness:'length_limit'});
   await service(db,'report_fee_settle',dup.actor,firstReport.id);
   const retry = await execution(db,dup,undefined,false,sameRound);
   await finish(db,retry.id,'completed',{body:completeBody,completeness:'complete'});
   await service(db,'report_fee_settle',dup.actor,retry.id);
   await assert.rejects(execution(db,dup,undefined,false,sameRound),/REPORT_ALREADY_EXISTS/,'a charged complete report');
-  // The unsettled complete report of the other round still holds its price; the retry of the first round paid once.
+  // The complete report of the other round and the retry of the first round each paid once.
   await service(db,'report_fee_settle',dup.actor,unsettled.id);
   assert.equal(await wallet(db,dup.actor),5000-2*PRICE,'each round paid once, nothing more');
   report.checks.push('report price: a second admission for a round with a going or charged report is refused with nothing held; a retry after a refunded one pays once');
@@ -221,7 +307,10 @@ export async function runReportFee({db,Client,connectionString,report}) {
   const job = await seed(db);
   await setBalance(db,job.actor,5000);
   const jobEnded = await execution(db,job);
-  await finish(db,jobEnded.id,'cancelled',null);
+  // Simulate a legacy row that ended before the immediate-settlement migration. Local fixture only.
+  await db.query('SET session_replication_role=replica');
+  try { await finish(db,jobEnded.id,'cancelled',null); }
+  finally { await db.query('SET session_replication_role=origin'); }
   const stuck = await execution(db,job);
   await db.query(`UPDATE report_fees SET created_at=now()-interval '4 days' WHERE execution_id=$1`,[stuck.id]);
   await rpc(db,'bill2_cancel',job.actor,stuck.run.run);
