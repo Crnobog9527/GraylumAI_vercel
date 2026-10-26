@@ -46,3 +46,13 @@
 ## 交接
 
 实现、本地先红后绿及空库建库完成，最终 CI 和独立复核以 PR 回执为准。尚未应用 staging，浏览器真实模型验收未运行；由总控安排预算与上线后验证。
+
+## 合并前同步与反向锁序验证（2026-10-26）
+
+已 merge 最新 staging（包含 0396，未 rebase/强推）；确认 staging 最大迁移号 0396，0397 全仓唯一。重新执行 `--write-built`：385/385 步及 316 次迁移重复验证通过，函数全文与指纹重新生成；结果与合并后的已提交文件一致，没有新的快照差异。0396 的指纹更新已包含在 merge 提交中。最终 CI/机器人复审回执见 PR。
+
+实际存在 profile-first 路径：`content_erasure_confirm` 先 `profiles FOR SHARE NOWAIT`，再对 session/execution/run 使用 `FOR UPDATE NOWAIT`；随后调用 `runtime_financial_recovery(...,true)`，可把运行中的报告结束为 cancelled/completed。它和新触发器的 execution → profile 方向相反，但后续锁全部不等待，竞争时返回可重试的 `CONTENT_ERASURE_BUSY`（55P03），不会构成互相等待的死锁环。
+
+新增测试在删除的首个 profile 锁后暂停，让另一个连接把报告改为 cancelled；通过 `pg_blocking_pids` 证明新触发器已持有 execution、正在等待该 profile。再调用真实删除 RPC，必须得到 55P03，而非死锁 40P01 或超时 57014。释放删除事务后，执行结束并退款一次；随后重试真实删除，另一笔仍运行的报告经财务恢复进入 cancelled 并退款，余额与账本一致。测试位于已有 report-revision 套件，继续由现有 CI 数据库行为检查执行。
+
+这一轮不需要修改触发器或旧结算函数；现有 NOWAIT 已提供避免反向锁等待的措施。迁移上库和 staging 实际验证仍由总控执行。

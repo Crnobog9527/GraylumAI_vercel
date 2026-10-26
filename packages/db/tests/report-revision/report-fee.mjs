@@ -149,6 +149,68 @@ export async function runReportFee({db,Client,connectionString,report}) {
   await balanced(db,f.actor,'immediate cancellation');
   report.checks.push('stop and host failure immediately refund 500; duplicate stop, status and daily settlement race refunds once');
 
+  // content_erasure_confirm takes profile FOR SHARE before session/execution, then ends reports via
+  // runtime_financial_recovery. Its NOWAIT locks must break the inversion with the terminal trigger.
+  // Pause deletion immediately after its first lock; let a terminal UPDATE own execution and wait
+  // for that profile; then enter the real deletion RPC (not a hand-written copy of its second lock).
+  const inverse = await seed(db);
+  await setBalance(db,inverse.actor,5000);
+  const inverseReport = await execution(db,inverse);
+  const inverseSibling = await execution(db,inverse);
+  // Bind both disposable fixture runs as real runtime admission does; deletion will use financial recovery.
+  await db.query('SET session_replication_role=replica');
+  try {
+    await db.query('UPDATE bill2_runs SET session_ref=$1 WHERE id=ANY($2::uuid[])',
+      [inverse.session,[inverseReport.run.run,inverseSibling.run.run]]);
+  } finally { await db.query('SET session_replication_role=origin'); }
+  const inverseHeld = await wallet(db,inverse.actor);
+  const lockClients = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all(lockClients.map(c=>c.connect()));
+  let terminal;
+  try {
+    for (const c of lockClients) await c.query("SET statement_timeout='5s'");
+    const profilePid = (await lockClients[0].query('SELECT pg_backend_pid() pid')).rows[0].pid;
+    const terminalPid = (await lockClients[1].query('SELECT pg_backend_pid() pid')).rows[0].pid;
+    await lockClients[0].query('BEGIN');
+    await lockClients[0].query('SELECT id FROM profiles WHERE id=$1 FOR SHARE',[inverse.actor]);
+    terminal = finish(lockClients[1],inverseReport.id,'cancelled',null)
+      .then(()=>({ok:true}),error=>({ok:false,code:error.code,message:error.message}));
+    let blocked = false;
+    for (let i=0;i<100&&!blocked;i++) {
+      blocked = (await db.query('SELECT $1::int=ANY(pg_blocking_pids($2::int)) blocked',
+        [profilePid,terminalPid])).rows[0].blocked;
+      if (!blocked) await new Promise(resolve=>setTimeout(resolve,25));
+    }
+    assert.ok(blocked,'terminal UPDATE owns execution while its trigger waits on the deletion profile lock');
+    await lockClients[0].query('SAVEPOINT deletion_attempt');
+    await assert.rejects(erase(lockClients[0],inverse,'artifact',inverse.project),error=>{
+      assert.equal(error.code,'55P03','deletion must fail fast, never deadlock (40P01) or time out (57014)');
+      assert.match(error.message,/CONTENT_ERASURE_BUSY/);
+      return true;
+    });
+    await lockClients[0].query('ROLLBACK TO SAVEPOINT deletion_attempt');
+    await lockClients[0].query('ROLLBACK');
+    assert.deepEqual(await terminal,{ok:true},'releasing deletion profile lets the terminal trigger finish');
+    assert.equal((await fee(db,inverseReport.id)).state,'refunded');
+    assert.equal(await wallet(db,inverse.actor),inverseHeld+PRICE);
+    // The ordinary retry now runs the entire profile-first deletion/financial-recovery path successfully.
+    // A second still-running report proves this real path also moves an execution to cancelled.
+    assert.equal((await fee(db,inverseSibling.id)).state,'held');
+    assert.equal((await erase(lockClients[0],inverse,'artifact',inverse.project)).status,'deleted');
+    assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',
+      [inverseSibling.id])).rows[0].state,'cancelled');
+    assert.equal((await fee(db,inverseSibling.id)).state,'refunded');
+  } finally {
+    await lockClients[0].query('ROLLBACK');
+    await terminal;
+    await Promise.all(lockClients.map(c=>c.end()));
+  }
+  assert.equal(await wallet(db,inverse.actor),5000,'profile-first deletion retry cannot refund twice');
+  assert.equal(Number((await db.query(`SELECT count(*) n FROM credit_transactions WHERE idempotency_key=$1`,
+    ['report:'+inverseReport.id+':release'])).rows[0].n),1);
+  await balanced(db,inverse.actor,'profile-first deletion versus terminal trigger');
+  report.checks.push('profile-first content deletion versus terminal trigger: actual lock inversion yields retryable 55P03, no deadlock, retry succeeds and refunds once');
+
   // A conservation failure rolls back both the execution transition and the money movement.
   const corrupt = await execution(db,f);
   const corruptHeld = await wallet(db,f.actor);
