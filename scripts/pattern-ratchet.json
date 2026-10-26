@@ -19,7 +19,7 @@
       ],
       "regex": "\\.from\\('system_settings'\\)",
       "count": "files",
-      "max": 50
+      "max": 49
     },
     {
       "id": "process-env-direct-read",

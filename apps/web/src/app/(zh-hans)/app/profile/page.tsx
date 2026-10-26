@@ -245,10 +245,8 @@ function ProfilePageContent() {
                 />
                 <UsageStatsCard user={effectiveUser} />
                 <QuickActionsCard
-                  user={effectiveUser}
                   onNavigateToTickets={handleNavigateToCreateTicket}
                   onNavigateToSecurity={handleNavigateToSecurity}
-                  onUserUpdate={handleUserUpdate}
                 />
               </>
             )}

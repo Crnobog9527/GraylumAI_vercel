@@ -3,7 +3,6 @@
 import { it, expect } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import { adminRouter } from './admin';
-import { checkinRouter } from './checkin';
 import { settingsRouter } from './settings';
 import { userRouter } from './user';
 
@@ -50,8 +49,6 @@ it('S1-FIX-1: user nickname save, server-side email sync, banner and check-in se
 
   const banner = await settingsRouter.createCaller(context(owner, process.env.S1F1_OWNER_JWT!)).getBannerAnnouncement();
   expect(banner).toMatchObject({ title: 'live', description: 'fixture' });
-  const status = await checkinRouter.createCaller(context(owner, process.env.S1F1_OWNER_JWT!)).getCheckinStatus();
-  expect(status.cycleRewards[1]).toBe(7);
 });
 
 it('S1-FIX-1: admin users, audit history, transactions and announcements through service_role', async () => {

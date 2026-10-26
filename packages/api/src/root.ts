@@ -25,7 +25,6 @@ import { modelRouter } from './routers/model';
 import { modelReasoningRouter } from './routers/modelReasoning';
 import { modelPricingRouter } from './routers/modelPricing';
 import { billingReportRouter } from './routers/billingReport';
-import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
 import { diagnosticsRouter } from './routers/diagnostics';
@@ -73,7 +72,6 @@ export const appRouter = router({
   paymentDisputes: paymentDisputesRouter,
   researchTools: researchToolsRouter,
   research: researchRouter,
-  checkin: checkinRouter,
   admin: adminRouter,
   adminStaleRounds: adminStaleRoundsRouter,
   modules: modulesRouter,
