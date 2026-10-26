@@ -117,20 +117,23 @@ export async function runReportFee({db,Client,connectionString,report}) {
     await db.query('BEGIN');
     await service(db,'runtime_cancel',f.actor,concurrent.id);
     assert.equal((await fee(db,concurrent.id)).state,'refunded','refund is atomic with stop');
+    const daily = rpc(contenders[2],'report_fee_settle_due',100);
     pending = Promise.allSettled([
       rpc(contenders[0],'runtime_cancel',f.actor,concurrent.id),
       rpc(contenders[1],'report_fee_settle',f.actor,concurrent.id),
-      rpc(contenders[2],'report_fee_settle_due',100),
+      daily,
     ]);
-    // Prove all three RPCs have reached the database and are waiting on this open stop transaction.
+    // The concurrent cron sees the pre-commit running state, so it correctly selects no due fee.
+    assert.equal(await daily,0,'cron cannot settle an uncommitted stop');
+    // Prove duplicate stop and status have reached the database and wait on this open transaction.
     // Do not rely on Promise scheduling: SET ROLE or network latency can otherwise serialize the test.
     let blocked = 0;
-    for (let i=0;i<100&&blocked<3;i++) {
+    for (let i=0;i<100&&blocked<2;i++) {
       blocked = Number((await db.query(`SELECT count(*) n FROM unnest($1::int[]) pid
-        WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,[contenderPids])).rows[0].n);
-      if (blocked<3) await new Promise(resolve=>setTimeout(resolve,25));
+        WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,[contenderPids.slice(0,2)])).rows[0].n);
+      if (blocked<2) await new Promise(resolve=>setTimeout(resolve,25));
     }
-    assert.equal(blocked,3,'duplicate stop, report.status settlement and daily job all overlap the stop lock');
+    assert.equal(blocked,2,'duplicate stop and report.status settlement both wait on the stop lock');
     await db.query('COMMIT');
     const outcomes = await pending;
     assert.ok(outcomes.every(x=>x.status==='fulfilled'),JSON.stringify(outcomes));
@@ -139,6 +142,7 @@ export async function runReportFee({db,Client,connectionString,report}) {
     await pending;
     await Promise.all(contenders.map(c=>c.end()));
   }
+  assert.equal(await service(db,'report_fee_settle_due',100),0,'post-commit cron sees an already settled fee');
   assert.equal(await wallet(db,f.actor),concurrentHeld+PRICE,'concurrent stop/status/cron refund exactly once');
   assert.equal(Number((await db.query(`SELECT count(*) n FROM credit_transactions
     WHERE idempotency_key=$1`,['report:'+concurrent.id+':release'])).rows[0].n),1);
