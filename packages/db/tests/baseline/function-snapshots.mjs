@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// ARCH-FIX H1: the current full definition of every billing, runtime and erasure function, kept as
+// ARCH-FIX H1: the current full definition of every public function (Owner 2026-10-26: all of them), kept as
 // files in packages/db/functions/<group>/<function name>.sql. The files are exported from the
 // database built from repository files (run-db-baseline-replay.mjs), never copied from staging, and
 // CI requires them to equal that build. A PR that changes one of these functions regenerates them
@@ -8,7 +8,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { dirname, resolve } from 'node:path';
 
 export const FUNCTIONS_DIR = 'packages/db/functions';
-// group directory -> function-name pattern (anchored, POSIX regex on pg_proc.proname)
+// group directory -> function-name pattern (anchored, POSIX regex on pg_proc.proname). The first matching group wins;
+// a function no pattern matches goes to OTHER, so every public function has a file.
+export const OTHER = 'other';
 export const GROUPS = {
   billing: '^(bill2_|atomic_|credit_)',
   runtime: '^runtime_',
@@ -23,12 +25,16 @@ export const GROUPS = {
   voice: '^voice_',
 };
 
-export const snapshotSql = () => `SELECT coalesce(jsonb_agg(jsonb_build_object('group', g.key, 'name', p.proname,
-  'signature', p.oid::regprocedure::text, 'def', pg_get_functiondef(p.oid)) ORDER BY g.key, p.proname, p.oid::regprocedure::text), '[]')
-FROM pg_proc p
-JOIN (VALUES ${Object.entries(GROUPS).map(([key, pattern]) => `('${key}', '${pattern}')`).join(', ')}) g(key, pattern)
-  ON p.proname ~ g.pattern
-WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p');`;
+const groupOf = () => `CASE ${Object.entries(GROUPS).map(([key, pattern]) => `WHEN p.proname ~ '${pattern}' THEN '${key}'`).join(' ')}
+  ELSE '${OTHER}' END`;
+
+// Functions that belong to an extension are the extension's, not the repository's, and are left out.
+export const snapshotSql = () => `SELECT coalesce(jsonb_agg(jsonb_build_object('group', f.grp, 'name', f.proname,
+  'signature', f.signature, 'def', f.def) ORDER BY f.grp, f.proname, f.signature), '[]')
+FROM (SELECT ${groupOf()} AS grp, p.proname, p.oid::regprocedure::text AS signature, pg_get_functiondef(p.oid) AS def
+  FROM pg_proc p
+  WHERE p.pronamespace = 'public'::regnamespace AND p.prokind IN ('f', 'p')
+    AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')) f;`;
 
 // rows from snapshotSql() -> { 'billing/bill2_x.sql': text }; overloads share one file, ordered by signature.
 export function renderSnapshots(rows) {

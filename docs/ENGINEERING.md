@@ -41,6 +41,9 @@
 | `scripts` | 仓库工具和 CI 检查；测试在 `scripts/tests` |
 | `docs/launch` | 产品规划和已锁定的产品决策（Master Plan） |
 
+本机开发：主仓库的 `apps/web/.env.local` 指向正式库，任何 Agent 都不许用它起本机服务或跑测试
+（2026-10-25 发现）。
+
 ## 3. 代码大小与格式
 
 硬限制由 CI 自动检查（"Lint & Type Check"）：
@@ -143,6 +146,27 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 快照文件并与本机建库比对，不连接远程数据库。正式建库的整段 SQL 执行、平台设置和
 建库后比对要求见 [REL-1 注意事项](runbooks/STAGING_REPRODUCIBILITY.md#rel-1-file-built-release-database)。
 
+#### 迁移和代码的上线顺序
+
+迁移改了数据格式、而已部署的旧代码读不懂新格式时，先合并并部署能同时读新旧两种格式的代码，
+部署成功后再上迁移；不能先上迁移再等部署（2026-10-25 #1349 事故后定）。
+
+#### 改已有数据库函数的写法
+
+（Owner 2026-10-26 批准的规则变更。）`packages/db/functions/` 存着每个 `public` 函数在全部迁移之后的
+当前全文。改一个已有函数时：
+
+1. 从 `packages/db/functions/<分组>/<函数名>.sql` 拷出它的当前全文，整段修改；
+2. 在新迁移里用 `CREATE OR REPLACE FUNCTION` 写出修改后的完整定义。需要确认 staging 上的旧版本
+   就是这份全文时，可以先用 `md5(pg_get_functiondef(...))` 比对，不一致就报错停止；
+3. 禁止在迁移里读出函数文本再改写：`pg_get_functiondef` 或 `prosrc` 配合 `replace`、`regexp_replace`、
+   `overlay`、`position`、`strpos` 之类的文本补丁，包括写成 `pg_temp` 辅助函数的补丁。CI 的
+   `node scripts/check-function-patches.mjs` 拦截 0398 起的新迁移；0397 及以前的老迁移不追究；
+4. 迁移开头的注释写清：新旧代码能否兼容、能否重复执行、出问题怎么恢复；
+5. 运行 `node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built`，把重新生成的
+   `packages/db/functions/` 和 `built-fingerprint.json` 一起提交。任何带迁移的 PR 都要这样做；合并冲突时
+   先解决迁移冲突，再重新生成，不手工合并这些文件。
+
 ## 6. AI 与 Agent 功能
 
 以下原则来自 [Master Plan v12](launch/MASTER_PLAN.md) 第 3、4 节（延续已锁定的
@@ -159,6 +183,9 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 - 多模型（Fusion）由 Graylum 自己并行调用，不使用 OpenRouter 的 `openrouter/` 元模型。
   具体做法见 Master Plan 第 4 节和 `docs/launch/tasks/FUSION.md`。
 - 不用关键词或正则表达式判断用户意图来代替模型判断。
+- 能用代码确定完成的步骤（复制、拼接、比对差异、计数、校验、格式化、沿用字段、去重分组）一律用代码做；
+  模型只做判断和写作，只输出增量（Owner 2026-10-20："能使用硬编码解决的问题，就不要全靠大模型自己的
+  智能和 token 来解决。"）。
 
 另外，用户资料、附件和检索到的内容对模型来说是数据，不是指令。
 
@@ -197,6 +224,11 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
   原来的写法。修 bug 时先写一个能复现问题的测试。
 - 运行时或界面改动还需要浏览器验证；数据库、权限、支付等改动的验证要求见 AGENTS.md
   第 4 节。
+- 往 CI 加测试或测试套件时，PR 描述写明加入后该 job 的实测总时长，离 30 分钟上限至少留 8 分钟；
+  不够就拆成并行 job。不许调大超时时间：调大超时算放宽 CI，要 Owner 批准（2026-10-26 #1404 教训）。
+- 作为门槛的检查（代码大小、类型检查、测试等）不能接管道或用别的方式吞掉失败（例如接 `| tail`
+  后再提交推送）：要单独运行看退出码，或者用 `set -o pipefail`。检查没过不能提交推送
+  （2026-10-13 #900 教训）。
 
 ## 8. 文档同步
 
