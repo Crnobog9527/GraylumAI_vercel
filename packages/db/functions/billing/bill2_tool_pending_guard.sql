@@ -11,6 +11,8 @@ DECLARE c bill2_calls;
 BEGIN
   SELECT * INTO c FROM bill2_calls WHERE id=p_call_id;
   IF c.call_kind<>'tool' OR c.supplier_cost_state IS DISTINCT FROM 'pending' THEN RETURN;END IF;
+  -- DB-PERF 0398: the staging test window row before (201,1), as claim and dispatch take them.
+  PERFORM 1 FROM runtime_test_windows w JOIN bill2_runs r ON r.test_window_id=w.id WHERE r.id=c.run_id FOR KEY SHARE OF w;
   -- DB-PERF 0362 guard lock: count and flag one guard at a time.
   PERFORM pg_advisory_xact_lock(201,1);
   IF (SELECT count(*) FROM bill2_calls x WHERE x.call_kind='tool' AND x.model=c.model
