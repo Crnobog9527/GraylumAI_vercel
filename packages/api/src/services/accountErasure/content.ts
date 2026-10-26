@@ -43,7 +43,7 @@ function fail(error: { code?: string; message?: string } | null,
   context: FailureContext = { operation: 'content_erasure' }): never {
   const name = error?.message as keyof typeof failures;
   if (name && name in failures) throw new TRPCError({ code: failures[name], message: name });
-  const databaseCode = error?.code && /^[A-Z0-9]{5}$/.test(error.code) ? error.code : undefined;
+  const databaseCode = error?.code && /^(?:[A-Z0-9]{5}|PGRST[0-9]{3})$/.test(error.code) ? error.code : undefined;
   const reasonCode = context.reasonCode ?? (databaseCode === '57014' ? 'DATABASE_TIMEOUT'
     : databaseCode === '55P03' || databaseCode === '40P01' ? 'DATABASE_LOCKED'
     : databaseCode?.startsWith('08') ? 'DATABASE_CONNECTION'

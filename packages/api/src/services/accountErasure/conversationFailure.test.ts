@@ -13,7 +13,7 @@ const sessionId='00000000-0000-4000-8000-000000000002';
 beforeEach(()=>vi.clearAllMocks());
 it.each([
  ['55P03','DATABASE_LOCKED'],['P0001','DATABASE_REJECTED'],
- ['08006','DATABASE_CONNECTION'],['XX000','DATABASE_ERROR'],
+ ['08006','DATABASE_CONNECTION'],['XX000','DATABASE_ERROR'],['PGRST003','DATABASE_ERROR'],
 ])('records the reason for database refusal %s without private error text',async(code,reasonCode)=>{
  const db={rpc:vi.fn().mockResolvedValue({data:null,error:{code,message:'PRIVATE_DATABASE_CONTENT'}})};
  await expect(eraseConversation(db,actor,{sessionId})).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE'});
