@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {isEmailVerified} from '../../lib/auth';
 import {aggregateCredits,decimal} from '../bill2/decimal';
+import {openRouterCallBound} from '../bill2/openRouterPolicy';
 import type {FrozenRun,FrozenPaygRun} from '../bill2/service';
 
 export type WeeklyReview={id:string;token:string;maxCostUsd:string};
@@ -17,13 +18,23 @@ export async function admissionActor(user:SupabaseClient,admin:SupabaseClient,re
  return r.data.actorId;
 }
 /** Reuse BILL2's run budget and per-call freeze. A small cap lowers calls; never raises it or adds hidden calls. */
-export function capReviewAdmission(context:{maxTurns:number;maxToolCalls:number;ownPosts?:boolean;weeklyReview?:WeeklyReview},
+export function capReviewAdmission(context:{maxTurns:number;maxToolCalls:number;ownPosts?:boolean;weeklyReview?:WeeklyReview;
+ maxOutputTokens?:number;purposeBudget?:{inputBytes:number}},
  billing:FrozenRun|FrozenPaygRun,review?:WeeklyReview){
  if(!review)return;
  if(!context.ownPosts||billing.contractVersion!=='bill2.v2')throw new Error('PUBLISH_MONITOR_REVIEW_UNAVAILABLE');
- const upper=billing.callPolicy.reduce((n,p)=>decimal(p.upperUsd)>n?decimal(p.upperUsd):n,0n);
+ // Keep the approved window quote intact. PAYG prices the final request; this run reserves the
+ // largest permitted review request, including the same frozen template and safety overhead.
+ const upper=billing.callPolicy.reduce((maximum,p)=>{
+  if(!p.payg||!p.providerLimits||!context.purposeBudget||!context.maxOutputTokens)
+   throw new Error('PUBLISH_MONITOR_REVIEW_UNAVAILABLE');
+  const bytes=Math.min(context.purposeBudget.inputBytes,p.inputLimit,p.payg.maxBytes);
+  const output=Math.min(context.maxOutputTokens,p.outputLimit);
+  const bound=decimal(openRouterCallBound(p.providerLimits,output,bytes+p.payg.templateTokens+p.payg.marginTokens).upperUsd);
+  return bound>maximum?bound:maximum;
+ },0n);
  if(upper<=0n)throw new Error('PUBLISH_MONITOR_REVIEW_UNAVAILABLE');
- const count=Math.min(billing.limits.maxCalls,Number(decimal(review.maxCostUsd)/upper));
+ const count=Math.min(3,context.maxTurns,billing.limits.maxCalls,Number(decimal(review.maxCostUsd)/upper));
  // One source read and a final answer. The prompt addresses the fixed Gold window directly, so no index round is needed.
  if(count<2)throw new Error('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW');
  const total=upper*BigInt(count),cost=String(total/1_000_000_000_000n)+'.'+String(total%1_000_000_000_000n).padStart(12,'0');
