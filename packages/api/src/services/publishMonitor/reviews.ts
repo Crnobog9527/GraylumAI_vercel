@@ -40,7 +40,10 @@ export async function prepareReview(db:SupabaseClient,c:ReviewClaim,env:Record<s
   await step(db,c,'skip','DISABLED');return null;
  }
  if(observed.executionId)return observed.executionId;
- if(!c.modelId||Number(c.maxCostUsd)<=0){await step(db,c,'skip','CONFIGURATION_REQUIRED');return null;}
+ if(!c.modelId||Number(c.maxCostUsd)<=0){
+  logger.warn('billing','weekly_review_configuration_refused',{reviewId:c.id,code:'PUBLISH_MONITOR_REVIEW_UNAVAILABLE'});
+  await step(db,c,'skip','CONFIGURATION_REQUIRED');return null;
+ }
  try{
   const real=await loadStagingPolicy(db,c.actorId,env);
   const admission=runtimeAdmissionService(db,db,{real,paygHost:true,purposeBudgets:true,account:'runtime-local',
@@ -56,6 +59,7 @@ export async function prepareReview(db:SupabaseClient,c:ReviewClaim,env:Record<s
   const code=error instanceof Error?error.message:'';
   const balance=BALANCE_CODES.some(value=>code.includes(value));
   if(!balance&&!CONFIGURATION_CODES.includes(code))throw error;
+  if(!balance)logger.warn('billing','weekly_review_configuration_refused',{reviewId:c.id,code});
   // Definite pre-admission refusals end the period; an outage/ambiguous response retains its original id and accounting.
   await step(db,c,'skip',balance?'BALANCE_LOW':'CONFIGURATION_REQUIRED');return null;
  }

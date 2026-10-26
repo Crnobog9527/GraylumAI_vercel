@@ -2,15 +2,33 @@
 import {it,expect,vi} from 'vitest';
 import {admissionActor,capReviewAdmission} from './reviewAdmission';
 const review={id:'11111111-1111-4111-8111-111111111111',token:'22222222-2222-4222-8222-222222222222',maxCostUsd:'0.005'};
-it('caps native BILL2 calls and budget in exact decimals before any claim or paid request',()=>{
- const context={maxTurns:6,maxToolCalls:5,ownPosts:true};
- const billing={contractVersion:'bill2.v2',sourceHash:'old',callPolicy:[{upperUsd:'0.001'}],
-  rules:{creditsPerUsd:'100',multiplier:'6'},limits:{maxCalls:6,costUsd:'0.006',maxPreDeduct:4}};
- capReviewAdmission(context,billing as never,review);
- expect(context).toMatchObject({maxTurns:5,maxToolCalls:4,weeklyReview:review});
- expect(billing.limits).toMatchObject({maxCalls:5,costUsd:'0.005000000000',maxPreDeduct:3});
+const policy=(requestUsd='0.001')=>({upperUsd:'9',inputLimit:196608,outputLimit:32768,
+ providerLimits:{providerSlug:'synthetic',contextTokens:1000000,promptUsdPerMillion:'0',completionUsdPerMillion:'0',requestUsd},
+ payg:{maxBytes:196608,templateTokens:4096,marginTokens:4096}});
+const context=()=>({maxTurns:6,maxToolCalls:5,ownPosts:true,maxOutputTokens:1000,purposeBudget:{inputBytes:32000}});
+it('caps review calls at three and freezes the exact bounded request budget before any paid request',()=>{
+ const ctx=context();
+ const billing={contractVersion:'bill2.v2',sourceHash:'old',callPolicy:[policy()],
+  rules:{creditsPerUsd:'100',multiplier:'6'},limits:{maxCalls:6,costUsd:'54',maxPreDeduct:32400}};
+ capReviewAdmission(ctx,billing as never,review);
+ expect(ctx).toMatchObject({maxTurns:3,maxToolCalls:2,weeklyReview:review});
+ expect(billing.limits).toMatchObject({maxCalls:3,costUsd:'0.003000000000',maxPreDeduct:2});
  expect(billing.sourceHash).not.toBe('old');
- expect(()=>capReviewAdmission(context,billing as never,{...review,maxCostUsd:'0.001'})).toThrow('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW');
+ expect(()=>capReviewAdmission(ctx,billing as never,{...review,maxCostUsd:'0.001'})).toThrow('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW');
+});
+it('a rejected cap leaves the budget, context and approved prices untouched',()=>{
+ const ctx=context();const billing={contractVersion:'bill2.v2',sourceHash:'old',callPolicy:[policy('0.2')],
+  rules:{creditsPerUsd:'100',multiplier:'6'},limits:{maxCalls:3,costUsd:'27',maxPreDeduct:16200}};
+ const original=structuredClone({ctx,billing});
+ expect(()=>capReviewAdmission(ctx,billing as never,{...review,maxCostUsd:'0.30'})).toThrow('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW');
+ expect({ctx,billing}).toEqual(original);
+});
+it('requires the frozen input, output and PAYG overhead rather than inventing a cheaper quote',()=>{
+ const billing={contractVersion:'bill2.v2',callPolicy:[policy()]};
+ for(const ctx of [{...context(),purposeBudget:undefined},{...context(),maxOutputTokens:undefined}])
+  expect(()=>capReviewAdmission(ctx,billing as never,review)).toThrow('PUBLISH_MONITOR_REVIEW_UNAVAILABLE');
+ expect(()=>capReviewAdmission(context(),{...billing,callPolicy:[{...policy(),payg:undefined}]} as never,review))
+  .toThrow('PUBLISH_MONITOR_REVIEW_UNAVAILABLE');
 });
 it('ordinary authentication stays required; a service review must own an allowed SQL lease',async()=>{
  const auth={auth:{getUser:vi.fn(async()=>({data:{user:null},error:null}))}};
@@ -21,23 +39,4 @@ it('ordinary authentication stays required; a service review must own an allowed
  rpc.mockResolvedValue({data:{allowed:true,actorId:'actor'},error:null});
  expect(await admissionActor(auth as never,{rpc} as never,review)).toBe('actor');
  expect(auth.auth.getUser).toHaveBeenCalledTimes(1);
-});
-
-// Read-only staging investigation, 2026-10-26: the fixed review cap is compared with
-// the approved per-call ceiling, not the expected receipt or the 1000-token host default.
-it.each([
- {model:'Sonnet',upperUsd:'2.827680000000',minimum:'5.655360000000'},
- {model:'Luna',upperUsd:'0.265572000000',minimum:'0.531144000000'},
-])('$model needs two frozen call ceilings before weekly admission',({upperUsd,minimum})=>{
- const context={maxTurns:3,maxToolCalls:2,ownPosts:true};
- const billing={contractVersion:'bill2.v2',sourceHash:'original',callPolicy:[{upperUsd}],
-  rules:{creditsPerUsd:'100',multiplier:'6'},limits:{maxCalls:3,costUsd:'9',maxPreDeduct:5400}};
- const original=structuredClone(billing);
- expect(()=>capReviewAdmission(context,billing as never,{...review,maxCostUsd:'0.30'}))
-  .toThrow('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW');
- expect(billing).toEqual(original);
- expect(context).toEqual({maxTurns:3,maxToolCalls:2,ownPosts:true});
- capReviewAdmission(context,billing as never,{...review,maxCostUsd:minimum});
- expect(billing.limits).toMatchObject({maxCalls:2,costUsd:minimum});
- expect(context).toMatchObject({maxTurns:2,maxToolCalls:1});
 });

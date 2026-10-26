@@ -1,5 +1,7 @@
 # PUBLISH-MONITOR 每周自动复盘跳过排查（2026-10-26）
 
+> 后续修复：本页保留当时旧实现的只读排查记录；提高预算/换模型的建议已被 Owner 保持0.30的明确要求取代。新实现及总控重跑步骤见 [复盘上限修复](PUBLISH-MONITOR-review-cap-fix-20261026.md)。
+
 ## 结论
 
 当前 staging 配置会被 `PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW` 拒绝，然后被汇总为 `CONFIGURATION_REQUIRED`。
