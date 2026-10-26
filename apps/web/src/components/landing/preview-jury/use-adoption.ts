@@ -4,7 +4,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AdoptChoice, AdoptProposed, AdoptRecorded, DetailSection, JuryDetail } from './jury-events';
 import {
-  adoptErrorLabel, choosable, chosenCount, isComplete, mockConfirm, mockPropose, needsConfirm, recordedState, setConfirmed, setUse, toChoices, unconfirmedSections,
+  adoptErrorLabel, choosable, chosenCount, isComplete, mockConfirm, mockPropose, needsConfirm, recordedState, setConfirmed, setUse, toChoices,
+  unconfirmedSections,
   type Use,
 } from './jury-adopt';
 import { useDraftChoices } from './use-draft-choices';
