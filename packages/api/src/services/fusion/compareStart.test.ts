@@ -14,7 +14,7 @@ vi.mock('./compareAdmission', async original => ({ ...(await original<typeof imp
   buildCompareColumns: async (input: { modelIds: string[]; request: { instructions: string } }) => {
     s.requests.push(input.request);
     return { columns: input.modelIds.map((modelId, index) => ({ index, modelId, upperCredits: s.credits, upperUsd: '0.01' })), tooLarge: s.tooLarge,
-      totalCredits: s.credits * input.modelIds.length, totalUsd: s.usd };
+      totalCredits: s.credits * input.modelIds.length, totalUsd: s.usd, rules: { creditsPerUsd: '100' } };
   },
   replayCompareGroup: async () => { s.probes += 1; if (s.replayError) throw s.replayError; return s.existing; },
   admitCompareGroup: async (input: { request: { instructions: string }; shown: unknown }) => { s.admitCalls.push(input); if (s.admitError) throw s.admitError;
@@ -234,6 +234,18 @@ describe('compare start: nothing paid happens for a request that can be refused 
     expect(await estimateCompare(deps(), choice())).toMatchObject({ overBudget: false });
     s.budget = null; // enabling requires a budget; a missing one never means "unlimited"
     await expect(start()).rejects.toThrow('FUSION_BUDGET_EXCEEDED');
+  });
+  it('caps what the user pays, not only what the models cost: credits over budget × 100 are refused (Owner 2026-10-26)', async () => {
+    s.budget = '5'; s.usd = decimal('1.7'); // Graylum's cost is well under $5, but at ×3 the user would pay 502 credits
+    s.credits = 251;
+    expect(await estimateCompare(deps(), choice())).toMatchObject({ credits: 502, overBudget: true });
+    await expect(start({}, { shown: { credits: 502, columns: shown.columns.map(column => ({ ...column, credits: 251 })) } }))
+      .rejects.toThrow('FUSION_BUDGET_EXCEEDED');
+    expect(classify).not.toHaveBeenCalled(); expect(names()).not.toContain('fusion_compare_claim');
+    s.credits = 250; // exactly $5 of credits is allowed
+    expect(await estimateCompare(deps(), choice())).toMatchObject({ credits: 500, overBudget: false });
+    s.usd = decimal('5.01'); // the cost bound stays a backstop and never loosens
+    expect(await estimateCompare(deps(), choice())).toMatchObject({ overBudget: true });
   });
   it('checks the whole quote the user was shown before anything is recorded: count, order, per-column credits and cost', async () => {
     const forged: Array<[string, Record<string, unknown>]> = [

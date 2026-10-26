@@ -33,7 +33,7 @@
 | `launch_baseline_at` | 字符串 | B5 | 必须写 | 建库后、第一笔真钱前写当时时间。staging 的值是 staging 的起点，正式不复制 |
 | `runtime_rate_limits` | 对象（`admissionPerMinute`、`admissionPer24Hours`、`callsPerMinute`、`callsPer24Hours`、`stopNewCalls`、`version`） | B6 | 第一次改时由函数补齐缺省 | 正式：消息 10/分钟、200/天，调用 30/分钟、600/天，`stopNewCalls`=开。**staging 调用上限是压测用的 120/3000、`stopNewCalls` 关，正式不复制** |
 | `runtime_stop_loss` | 对象（`userDailyUsd`、`siteDailyUsd`、`siteAlertUsd`、`providerBalanceAlertUsd`、`notificationChannel`、`revision`、`version`） | P4（建库后后台填） | 金额为空 | Owner 自己在后台"成本止损"页填金额。**staging 五个金额和通知渠道全是空的**（所以 staging 从没发过止损告警，见第 3 部分） |
-| `fusion_settings` | 对象（`compare`、`review`、`version`） | B7 | 必须写 | 对比：允许 Sonnet/Gemini Flash/Sol/Opus、默认三个、`minModels`=2、`answerOutputTokens`=8192、`maxBudgetUsd`=3.5（staging 已是这个结构，允许 4 个、最少 2 个）。评审团：第三位评审用 **Gemini 4 Argon**（Owner 2026-10-25）。所有模型 uuid 换正式库的 |
+| `fusion_settings` | 对象（`compare`、`review`、`version`） | B7 | 必须写 | 对比：允许 Sonnet/Gemini Flash/Sol/Opus、默认三个、`minModels`=2、`answerOutputTokens`=8192、`maxBudgetUsd`=5（用户付费上限，Owner 2026-10-26；staging 已是这个结构，允许 4 个、最少 2 个）。评审团：第三位评审用 **Gemini 4 Argon**（Owner 2026-10-25）。所有模型 uuid 换正式库的 |
 | `chat_research_tools_enabled` | 布尔 | B7 | 必须写 | 正式 true（核心 11） |
 | `research_tools_config` | 对象（`vendors` 三家、`verifiedPlatforms`、`benchmarkPlatforms`、`limits`、`routes`、`recentGrowth`、`revision` 等） | B7 | 必须写 | 三家 `enabled` 且 `hardCapAttested`（P4 设好硬上限后才勾）。**`hardCapAttested` 里记的是 staging 管理员和时间，正式不复制**，由正式管理员重新勾 |
 | `billing_provider_prices` | 字符串 | B7 | 迁移只建写入函数 | 正式：K12 手工刷新一次 TikHub 价格，之后靠每日刷新；不从 staging 复制（价格有 7 天有效期） |

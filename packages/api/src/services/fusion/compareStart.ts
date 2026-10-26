@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PositioningClassifier } from '../runtime/positioningGate';
-import { decimal } from '../bill2/decimal';
+import { decimal, DECIMAL_SCALE } from '../bill2/decimal';
 import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, compareRpc, replayCompareGroup,
   type CompareAdmitted } from './compareAdmission';
 import { judgeCompareGate, readCompareGate, staticCompareGate } from './compareGate';
@@ -41,6 +41,16 @@ const sha = (value: unknown) => createHash('sha256').update(JSON.stringify(value
  * requests, so what the user sees is never below what a start can hold. */
 const upperRequest = (parts: CompareParts) => compareRequest({ ...parts, positioningFallback: true });
 
+/** The single-compare budget caps what the user pays (Owner 2026-10-26: "对比模型限制指的是用户付的钱，并且限额调到 5 美元。"):
+ * the columns' frozen credit bounds may not exceed the budget in credits (1 USD = the window's creditsPerUsd). Graylum's own
+ * cost bound stays capped by the same amount as a backstop, so the check never loosens. A missing budget is never "unlimited". */
+function overCompareBudget(built: { totalUsd: bigint; totalCredits: number; rules: { creditsPerUsd: string } },
+  budgetUsd: string | null) {
+  if (!budgetUsd) return true;
+  const budgetCredits = decimal(budgetUsd) * decimal(built.rules.creditsPerUsd) / (DECIMAL_SCALE * DECIMAL_SCALE);
+  return built.totalUsd > decimal(budgetUsd) || BigInt(built.totalCredits) > budgetCredits;
+}
+
 export async function estimateCompare(deps: CompareDeps, choice: CompareChoice): Promise<CompareEstimate> {
   assertNoReferences(choice.parts);
   const settings = await assertCompareAllowed(deps.admin, deps.actorId, choice.modelIds);
@@ -49,7 +59,7 @@ export async function estimateCompare(deps: CompareDeps, choice: CompareChoice):
   const { refundCapReached } = staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
   const built = await buildCompareColumns({ admin: deps.admin, actorId: deps.actorId, modelIds: choice.modelIds,
     request: upperRequest(choice.parts), answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
-  const overBudget = !settings.maxBudgetUsd || built.totalUsd > decimal(settings.maxBudgetUsd);
+  const overBudget = overCompareBudget(built, settings.maxBudgetUsd);
   return { credits: built.totalCredits, tooLarge: built.tooLarge, refundCapReached, overBudget,
     columns: built.columns.map(column => ({ modelId: column.modelId, credits: column.upperCredits, usd: column.upperUsd })) };
 }
@@ -152,7 +162,7 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
         request: compareRequest({ ...choice.parts, positioningFallback: gate.gated && !gate.capped }),
         answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
       if (sized.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
-      if (!settings.maxBudgetUsd || sized.totalUsd > decimal(settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
+      if (overCompareBudget(sized, settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
       assertQuoteCovers(sized.columns, choice.shown);
     } catch (error) {
       await endQuietly(compareId);

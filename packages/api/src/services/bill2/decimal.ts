@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 const SCALE = 1_000_000_000_000n;
+/** The fixed-point scale of decimal(): 12 fractional digits. */
+export const DECIMAL_SCALE = SCALE;
 export function decimal(value: unknown): bigint {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/.test(value)) {
     throw new Error('BILL2_INVALID_DECIMAL');
