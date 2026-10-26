@@ -44,6 +44,7 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     await db.query(read('0383_credit_grant_quarantine.sql')); // restore the shared quarantine check (ARCH-FIX E1)
     await db.query(read('0387_bill2_payload_read_once.sql')); // restore the DB-100 C2 single payload read
     await db.query(read('0391_credit_available.sql')); // restore the shared available-credits formula (MAINT-P4)
+    await db.query(read('0398_test_window_settlement_order.sql')); // restore the DB-PERF round-3 window-before-(201,1) order
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);

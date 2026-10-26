@@ -11,6 +11,8 @@ BEGIN
  IF (NEW.budget_conflict OR NEW.metering_missing OR NEW.metering_exit) AND NEW.metering_review_audit_id IS NULL
   AND (TG_OP='INSERT' OR NOT ((OLD.budget_conflict OR OLD.metering_missing OR OLD.metering_exit)
    AND OLD.metering_review_audit_id IS NULL)) THEN
+  -- DB-PERF 0398: the staging test window row before (201,1), as claim and dispatch take them.
+  PERFORM 1 FROM runtime_test_windows w JOIN bill2_runs r ON r.test_window_id=w.id WHERE r.id=NEW.run_id FOR KEY SHARE OF w;
   PERFORM pg_advisory_xact_lock(201,1);
  END IF;
  RETURN NEW;

@@ -11,6 +11,8 @@ AS $function$
 BEGIN
  IF NEW.reason_code<>'bill2_release' THEN RETURN NEW;END IF;
  IF TG_WHEN='BEFORE' THEN
+  -- DB-PERF 0398: the staging test window row before (201,1), as claim and dispatch take them.
+  PERFORM 1 FROM runtime_test_windows w JOIN bill2_runs r ON r.test_window_id=w.id WHERE r.id=NEW.bill2_run_id FOR KEY SHARE OF w;
   PERFORM pg_advisory_xact_lock(201,1);
   RETURN NEW;
  END IF;

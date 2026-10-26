@@ -157,6 +157,39 @@ export async function concurrencyCases({db,Client,connectionString,report,create
     assert.deepEqual(triggers,['runtime_a_test_dispatch_guard','runtime_stop_loss_call_guard']);
     report.checks.push('DB-PERF: dispatch takes the test window row before the stop-loss key, the same order as claim (no deadlock cycle)');
 
+    // DB-PERF 0398: a settlement takes (201,1) exclusive (bill2_release ledger row, or a metering flag) and then updates
+    // its bill2_runs row again, whose test_window_id foreign key check locks the window row FOR KEY SHARE. A claim holds
+    // the window row and waits for (201,1) shared: the opposite order. A settlement waiting for the window row must not
+    // already hold (201,1), for both the plain release path and the metering-flag path.
+    for (const [label,usage] of [['release',{inputTokens:10,outputTokens:0}],['metering flag',{inputTokens:1000,outputTokens:0}]]) {
+      const settling = await createFixture(db,{empirical:true});
+      const settleCall = await claim(db,settling,1,true);
+      const recordPid = (await writers[1].query('SELECT pg_backend_pid() pid')).rows[0].pid;
+      const holderPid = (await writers[0].query('SELECT pg_backend_pid() pid')).rows[0].pid;
+      await writers[0].query('BEGIN');
+      let recorded;
+      try {
+        await writers[0].query('SELECT id FROM runtime_test_windows WHERE id=$1 FOR UPDATE',[settling.payload.testWindowId]);
+        recorded = receipt(writers[1],settling,settleCall,'0.001',usage).then(value=>({ok:true,value}),error=>({ok:false,error}));
+        let blocked=false;
+        for(let i=0;i<200&&!blocked;i++) {
+          blocked=(await db.query('SELECT $1 = ANY(pg_blocking_pids($2)) b',[holderPid,recordPid])).rows[0].b===true;
+          if(!blocked) await new Promise(resolve=>setTimeout(resolve,10));
+        }
+        assert.equal(blocked,true,`settlement (${label}) must wait for the test window row`);
+        await db.query('BEGIN');
+        const exclusive = (await db.query('SELECT pg_try_advisory_xact_lock(201,1) got')).rows[0].got;
+        await db.query('ROLLBACK');
+        assert.equal(exclusive,true,`a settlement (${label}) waiting for the window row must not already hold the stop-loss key`);
+      } finally {
+        await writers[0].query('ROLLBACK');
+        const done = await recorded;
+        assert.equal(done?.ok,true,String(done?.error));
+      }
+      await conserved(db,settling);
+    }
+    report.checks.push('DB-PERF: a settlement takes the test window row before the stop-loss key on the release and metering-flag paths');
+
     const cancelling = await createFixture(db);
     const pending = await claim(db,cancelling,1,true);
     await Promise.all([
