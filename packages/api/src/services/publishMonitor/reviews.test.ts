@@ -22,6 +22,36 @@ it('recovery finds the original execution and never re-admits or changes the req
  expect(await prepareReview(d as never,c,{})).toBe('original');expect(m.prepare).not.toHaveBeenCalled();
  expect(m.policy).not.toHaveBeenCalled();
 });
+it('a timed-out interrupted review closes its original run and skips the period without another admission or dispatch',async()=>{
+ const d={rpc:vi.fn<(name:string,args:Record<string,unknown>)=>Promise<unknown>>(async name=>({data:name==='runtime_cancel'
+  ?{state:'cancelled'}:{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null}))};
+ expect(await prepareReview(d as never,c,{})).toBe(null);
+ expect(d.rpc).toHaveBeenCalledWith('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:'original'});
+ expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({
+  p_id:c.id,p_token:c.token,p_action:'skip',p_reason:'RUNTIME_INTERRUPTED'}));
+ expect(m.prepare).not.toHaveBeenCalled();expect(m.execute).not.toHaveBeenCalled();expect(m.policy).not.toHaveBeenCalled();
+});
+it('a timed-out pre-admission review frees its period without inventing a billing run',async()=>{
+ const d=db({allowed:true,executionId:null,state:null,expired:true});
+ expect(await prepareReview(d as never,c,{})).toBe(null);
+ expect(d.rpc.mock.calls.some(([name])=>name==='runtime_cancel')).toBe(false);
+ expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_reason:'RUNTIME_INTERRUPTED'}));
+ expect(m.prepare).not.toHaveBeenCalled();
+});
+it('an ambiguous cancellation retains the original claim for retry instead of claiming settlement',async()=>{
+ const d={rpc:vi.fn(async(name:string)=>name==='runtime_cancel'?{data:null,error:{code:'08006'}}
+  :{data:{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null})};
+ await expect(prepareReview(d as never,c,{})).rejects.toThrow('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
+ expect(d.rpc.mock.calls.some(([name])=>name==='publish_monitor_review_step')).toBe(true);
+ expect(d.rpc).toHaveBeenCalledTimes(2);expect(m.prepare).not.toHaveBeenCalled();
+});
+it('completion winning the expiry race is observed as completed rather than overwritten as skipped',async()=>{
+ const d={rpc:vi.fn<(name:string,args:Record<string,unknown>)=>Promise<unknown>>(async name=>({data:name==='runtime_cancel'?{state:'completed'}
+  :{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null}))};
+ expect(await prepareReview(d as never,c,{})).toBe(null);
+ expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_action:'observe'}));
+ expect(d.rpc.mock.calls.some(([,args])=>(args as {p_action?:string})?.p_action==='skip')).toBe(false);
+});
 it('a new admission uses the frozen request, session, model and review cap',async()=>{
  const d=db({allowed:true,executionId:null,state:null});
  expect(await prepareReview(d as never,c,{})).toBe('existing');

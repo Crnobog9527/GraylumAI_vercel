@@ -26,7 +26,7 @@ export const REVIEW_PROMPT='请为我生成本周作品复盘。先用 read_sour
 async function step(db:SupabaseClient,c:ReviewClaim,action:string,reason?:string){
  const r=await db.rpc('publish_monitor_review_step',{p_id:c.id,p_token:c.token,p_action:action,p_reason:reason??null});
  if(r.error)throw new Error('PUBLISH_MONITOR_REVIEW_STEP_FAILED');
- return r.data as {allowed:boolean;actorId:string;executionId:string|null;state:string|null};
+ return r.data as {allowed:boolean;actorId:string;executionId:string|null;state:string|null;expired?:boolean};
 }
 const BALANCE_CODES=['BILL2_INSUFFICIENT_CREDITS','RUNTIME_WAITING_CREDITS','PUBLISH_MONITOR_BALANCE_LOW'];
 const CONFIGURATION_CODES=['PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW','PUBLISH_MONITOR_REVIEW_UNAVAILABLE',
@@ -35,6 +35,18 @@ const CONFIGURATION_CODES=['PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW','PUBLISH_MONITOR
 export async function prepareReview(db:SupabaseClient,c:ReviewClaim,env:Record<string,string|undefined>){
  const observed=await step(db,c,'observe');
  if(observed.state==='completed'||observed.state==='cancelled'||observed.state==='failed')return null;
+ if(observed.expired){
+  // No user is present to resume a scheduled review. Keep the original run and let native BILL2
+  // settle known usage, refund undispatched holds and retain genuinely unknown costs for recovery.
+  if(observed.executionId){
+   const cancelled=await db.rpc('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:observed.executionId});
+   if(cancelled.error)throw new Error('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
+   if((cancelled.data as {state?:string}|null)?.state==='completed'){
+    await step(db,c,'observe');return null;
+   }
+  }
+  await step(db,c,'skip','RUNTIME_INTERRUPTED');return null;
+ }
  if(!observed.allowed){
   if(observed.executionId)await db.rpc('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:observed.executionId});
   await step(db,c,'skip','DISABLED');return null;
