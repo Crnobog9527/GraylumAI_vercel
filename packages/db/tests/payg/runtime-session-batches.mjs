@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {rpc} from '../erasure-b2a/cases.mjs';
-// DB-PERF 0400 (PR-6 A): append_batches writes consecutive Session batches in one owner call, with the same result as
+// DB-PERF 0402 (PR-6 A): append_batches writes consecutive Session batches in one owner call, with the same result as
 // one append per batch; each batch keeps the single-append replay, conflict, order and size rules; all or nothing.
 export async function runtimeSessionBatchCases({db,report,setup}) {
   const user={role:'user',content:'synthetic batch question'};
@@ -25,7 +25,7 @@ export async function runtimeSessionBatchCases({db,report,setup}) {
   assert.equal(await owner(many,{action:'append_batches',items:[[user],[reply]],batch:0}),null);
   assert.deepEqual(await state(many),await state(single));
   assert.equal(Number((await state(many)).revision),2);
-  report.checks.push('DB-PERF 0400: append_batches saves the same batches, history and Session revision as one append per batch');
+  report.checks.push('DB-PERF 0402: append_batches saves the same batches, history and Session revision as one append per batch');
 
   // An identical repeat (lost acknowledgement) is a replay; a later single append continues the order.
   const before=await state(many);
@@ -33,7 +33,7 @@ export async function runtimeSessionBatchCases({db,report,setup}) {
   assert.deepEqual(await state(many),before);
   await owner(many,{action:'append',items:[extra],batch:2});
   assert.equal((await state(many)).batches.length,3);
-  report.checks.push('DB-PERF 0400: a repeated append_batches is a replay; later single appends continue the batch order');
+  report.checks.push('DB-PERF 0402: a repeated append_batches is a replay; later single appends continue the batch order');
 
   // A different batch conflicts and nothing of the call is saved; a gap is refused; sizes are bounded.
   const mixed=await setup();await freeze(mixed);
@@ -48,7 +48,7 @@ export async function runtimeSessionBatchCases({db,report,setup}) {
   // The saved first batch plus new ones in one call: replay of batch 0, then batch 1 written.
   await owner(mixed,{action:'append_batches',items:[[user],[reply]],batch:0});
   assert.deepEqual((await state(mixed)).batches.map(b=>b.batch),[0,1]);
-  report.checks.push('DB-PERF 0400: append_batches conflict, gap, empty and oversize calls save nothing; a saved prefix replays');
+  report.checks.push('DB-PERF 0402: append_batches conflict, gap, empty and oversize calls save nothing; a saved prefix replays');
 
   // Closed rounds and other actors are refused exactly like append.
   const closed=await setup();await freeze(closed);
@@ -57,5 +57,5 @@ export async function runtimeSessionBatchCases({db,report,setup}) {
   await assert.rejects(rpc(db,'runtime_session_items',closed.actor,closed.session,closed.execution,'append_batches',JSON.stringify([[user]]),null,0),/RUNTIME_SESSION_CLOSED/);
   const other=await setup();
   await assert.rejects(rpc(db,'runtime_session_items',other.actor,many.session,many.execution,'append_batches',JSON.stringify([[user]]),null,3),/RUNTIME_SESSION_DENIED|BILL2/);
-  report.checks.push('DB-PERF 0400: append_batches refuses closed rounds and other actors like append');
+  report.checks.push('DB-PERF 0402: append_batches refuses closed rounds and other actors like append');
 }

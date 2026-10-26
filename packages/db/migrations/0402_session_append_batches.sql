@@ -101,7 +101,7 @@ BEGIN
  ELSIF p_action IN ('append','append_batches') THEN
   IF EXISTS(SELECT 1 FROM bill2_runs WHERE id=e.billing_run_id AND (cancel_requested OR closed)) THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
   IF s.active_execution IS DISTINCT FROM e.id OR e.state IN ('completed','cancelled') THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
-  -- DB-PERF 0400: append_batches writes consecutive batches p_batch, p_batch+1, ... after one set of checks;
+  -- DB-PERF 0402: append_batches writes consecutive batches p_batch, p_batch+1, ... after one set of checks;
   -- each batch keeps the single-append rules (replay of an identical saved batch, conflict, order, 128 items).
   IF p_action='append' THEN batches:=jsonb_build_array(p_items);
   ELSIF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items) NOT BETWEEN 1 AND 32 THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH';
