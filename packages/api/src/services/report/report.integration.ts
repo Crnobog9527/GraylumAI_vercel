@@ -335,9 +335,13 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         if (scenario === 'length') {
           const call = (await db.query('select charged_delta,theoretical_delta,nominal_source from bill2_calls where run_id=$1', [admitted.runId])).rows[0];
           expect(call).toEqual({ charged_delta: 0, theoretical_delta: '2', nominal_source: 'fixed_fee' });
-          // The 500 price is still held until the page reads the ended report (or the daily job runs).
-          expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(500);
+          // 0397: the ended, truncated report refunds before any report.status call.
+          expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
         }
+        const immediateFee = (await db.query(
+          'select state,charged_credits from report_fees where execution_id=$1', [admitted.executionId])).rows[0];
+        expect(immediateFee).toEqual(scenario === 'length'
+          ? { state: 'refunded', charged_credits: 0 } : { state: 'charged', charged_credits: 500 });
         await run().execute(admitted.executionId); expect(real ? requests.length : calls).toBe(1);
         const counts = (await db.query(`select (select count(*)::int from runtime_session_history where execution_id=$1) history,
           (select count(*)::int from runtime_session_batches where execution_id=$1) batches,
@@ -354,7 +358,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
         const read = await service.status(admitted.executionId);
         expect(read.body).toContain('Report body'); expect(read.candidate).toBe(scenario !== 'length');
-        // Fixed price (0295): reading the ended report settles it once: a complete report pays 500, a cut-off one is refunded.
+        // Reading the ended report is idempotent: 0397 already charged the complete report or refunded the cut-off one.
         expect(read.fee).toMatchObject(scenario === 'length' ? { state: 'refunded', chargedCredits: 0 } : { state: 'charged', chargedCredits: 500 });
         if (!waiting) expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits)
           .toBe(scenario === 'length' ? 1000 : 500);
