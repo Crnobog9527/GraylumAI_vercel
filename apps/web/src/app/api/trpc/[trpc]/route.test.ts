@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {afterEach,it,expect,vi} from 'vitest';
 import type {NextRequest} from 'next/server';
-const mocks=vi.hoisted(()=>({context:vi.fn(),handle:vi.fn(),auth:vi.fn(),admin:vi.fn()}));
+const mocks=vi.hoisted(()=>({context:vi.fn(),handle:vi.fn(),auth:vi.fn(),admin:vi.fn(),log:vi.fn()}));
 vi.mock('@trpc/server/adapters/fetch',()=>({fetchRequestHandler:mocks.handle}));
 vi.mock('@repo/api/src/trpc',async importOriginal=>({...await importOriginal<Record<string,unknown>>(),createTRPCContext:mocks.context}));
+vi.mock('@/lib/server-log',()=>({logServerError:mocks.log}));
 vi.mock('@repo/api/src/root',()=>({appRouter:{}}));
 vi.mock('@supabase/ssr',()=>({createServerClient:mocks.auth}));
 vi.mock('@supabase/supabase-js',()=>({createClient:mocks.admin}));
@@ -85,4 +86,24 @@ it('DB-PERF PR-5a: reads the maintenance switch at most once per two seconds; a 
  now+=1_100;
  expect((await POST(req())).status).toBe(503);
  expect(reads).toHaveBeenCalledTimes(4);
+});
+
+it('logs every tRPC 503 with the rejecting layer and no private error text',async()=>{
+ const {TRPCError}=await import('@trpc/server');
+ vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY','SYNTHETIC');
+ vi.spyOn(Date,'now').mockReturnValue(20_000_000_000_000);
+ mocks.auth.mockReturnValue({auth:{getUser:async()=>({data:{user:{id:'synthetic'}}})}});
+ mocks.admin.mockReturnValue({from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{value:false},error:null})})})})});
+ mocks.handle.mockImplementation(async({onError})=>{
+  expect(onError).toBeTypeOf('function');
+  onError({path:'account.conversationErasure',error:new TRPCError({code:'SERVICE_UNAVAILABLE',message:'PRIVATE database body'})});
+  return new Response('refused',{status:503});
+ });
+ const req={url:'http://localhost/api/trpc/account.conversationErasure',nextUrl:{pathname:'/api/trpc/account.conversationErasure'},
+  headers:new Headers(),cookies:{getAll:()=>[]}} as unknown as NextRequest;
+ expect((await POST(req)).status).toBe(503);
+ expect(mocks.log).toHaveBeenCalledWith('api','trpc_service_unavailable',{
+  procedure:'account.conversationErasure',reasonCode:'PROCEDURE_UNAVAILABLE',
+ });
+ expect(JSON.stringify(mocks.log.mock.calls)).not.toContain('PRIVATE');
 });
