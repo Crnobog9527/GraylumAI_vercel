@@ -7,6 +7,7 @@ import {executionVisibility} from '../services/runtime/libraryVisibility';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
 import {reportPrice} from '../services/report/fees';
 import {reportStart} from '../services/report/contract';
+import {reportPreflight,reportPreflightInput} from '../services/report/preflight';
 import {readNativeRuntimeViewWithWorkItems} from '../services/runtime/nativeView';
 import {withWorkItems} from '../services/runtime/workItems';
 import {resumeInput} from '../services/runtime/paygRuntime';
@@ -119,6 +120,8 @@ export const runtimeRouter=router({
  // The fixed price (0295) is shown on the button; null when it cannot be read (the button then shows no number).
  reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!),
   priceCredits:await swallow('report_price_read_failed',reportPrice(ctx.supabaseAdmin!),null)})),
+ reportPreflight:maintenanceProcedure.input(reportPreflightInput).query(({ctx,input})=>
+  reportPreflight(ctx.userScopedSupabase,ctx.supabaseAdmin!,input)),
  // Saved reports stay discoverable whatever the switch or membership is now.
  reportLatest:maintenanceProcedure.input(reportLocate).query(({ctx,input})=>reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,
   {account:'read-only',costPerCall:'0',...BILLING_UNIT_POLICY,
