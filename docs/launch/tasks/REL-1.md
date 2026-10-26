@@ -60,7 +60,7 @@
 | 11 | 自由对话研究工具 | ① 4 个场景真实调用并逐条扣费；② 删除整段对话后研究证据被清；③ TikHub 价格每日刷新和到期告警已上线；④ 三家供应商硬上限已设、后台勾"已设硬上限" | [#1264](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1264) 验收；[#1294](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1294)（0346） | ① PASS；② 等 #1292；③ #1294 在途；④ Owner 设 | 研究工具/对标窗口；Codex；Owner |
 | 12 | 成果夹 + 付费墙曝光 | ① 成果夹保存、查看、重复保存不重复；② 选题窗口里的成果（第 11 步）；③ 付费墙曝光事件 `paywall_view` 发出（GA4 上线后第一周才定，不发不挡上线，但要记录结果） | [#1268](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1268)、[#1269](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1269)、[#1288](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1288)、[#1255](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1255) | ① PASS；② 待补验；③ 未核实 | Codex |
 
-**2026-10-26 逐个定性**：44 个实施中任务的结论和每个核心项还差什么见 [REL-1-TASK-AUDIT-2026-10-26](REL-1-TASK-AUDIT-2026-10-26.md)（上表“现状”栏截至 10-24 晚）。
+**2026-10-26 晚验收证据全量核对**（以它为准，上表"现状"栏已过时）：见 [REL-1-TASK-AUDIT-2026-10-26 第 6 节](REL-1-TASK-AUDIT-2026-10-26.md#6-2026-10-26-晚验收证据全量核对取代第-2-节的还差判断)。**2026-10-26 逐个定性**：44 个实施中任务的结论和每个核心项还差什么见 [REL-1-TASK-AUDIT-2026-10-26](REL-1-TASK-AUDIT-2026-10-26.md)（上表“现状”栏截至 10-24 晚）。
 
 **验收排队建议**（Codex 一次只能跑一个浏览器任务）：最难、最可能再失败的先跑——兜底 B → 对比合并轮 → LOAD-SKILL + 文风 →
 一键发布不真发 7 步 → 注销浏览器部分 → 付款和注册 → 评审团剩余项 → 成果夹第 11 步。
