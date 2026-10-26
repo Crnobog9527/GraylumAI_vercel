@@ -5,7 +5,7 @@ CREATE SCHEMA erasure_perf_test;
 CREATE TABLE erasure_perf_test.target (fixture jsonb NOT NULL);
 INSERT INTO erasure_perf_test.target SELECT runtime_perf_test.seed(26, true);
 DO $$
-DECLARE f jsonb; base jsonb; p uuid:=gen_random_uuid(); r uuid:=gen_random_uuid(); d opc_drafts;
+DECLARE f jsonb; base jsonb; p uuid:=gen_random_uuid(); r uuid:=gen_random_uuid(); d opc_drafts; b record; c jsonb;
 BEGIN
  SELECT fixture INTO f FROM erasure_perf_test.target;
  base:=d7_test.artifacts((f->>'actor')::uuid);
@@ -17,12 +17,23 @@ BEGIN
   '{"s":{"valid":true,"body":"KEEP_CONFIRMED_STRATEGY","information":{}}}' FROM artifact_rounds WHERE id=d.round_id;
  INSERT INTO artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)
  VALUES(gen_random_uuid(),p,r,1,'{"body":"KEEP_SAVED_REPORT"}',repeat('e',64),'[]');
- INSERT INTO opc_drafts(draft_id,actor_id,project_id,round_id,session_id,request_id,registration,mode)
- VALUES((f->>'draft')::uuid,d.actor_id,p,r,(f->>'session')::uuid,gen_random_uuid(),d.registration,'mentor');
+ FOR b IN SELECT id,actor_id FROM bill2_runs WHERE session_ref=(f->>'session')::uuid LOOP
+  c:=bill2_claim(b.actor_id,b.id,1,jsonb_build_object('provider','fixture','account','sandbox',
+   'model','perf-'||(f->>'model'),'protocol','fixture-cost-v1','phase','reply','requestHash',repeat('b',64),
+   'upperUsd','0.005','inputLimit',1000,'outputLimit',1000,'automaticRetry',false,'hiddenTools',false,'lookupSupported',true));
+  PERFORM bill2_dispatch(b.actor_id,b.id,(c->>'id')::uuid,(c->>'dispatchToken')::uuid);
+  PERFORM bill2_record(b.actor_id,b.id,(c->>'id')::uuid,jsonb_build_object('provider','fixture','account','sandbox',
+   'model','perf-'||(f->>'model'),'protocol','fixture-cost-v1','providerId','fixture-'||(c->>'id'),
+   'source','response','sourceHash',repeat('c',64),'observedAt','2026-10-26T00:00:00.000Z',
+   'coverage','request_total','final',true,'cost','0.001','currency','USD','rawBody','ERASE_PRIVATE_RECEIPT',
+   'usage',jsonb_build_object('inputTokens',10,'outputTokens',10)));
+ END LOOP;
  PERFORM bill2_close(actor_id,id,'delivered',jsonb_build_object('kind','usable_result',
   'evidenceRef','local-performance-fixture','evidenceHash',repeat('a',64)))
   FROM bill2_runs WHERE session_ref=(f->>'session')::uuid;
  PERFORM bill2_finalize(actor_id,id) FROM bill2_runs WHERE session_ref=(f->>'session')::uuid;
+ INSERT INTO opc_drafts(draft_id,actor_id,project_id,round_id,session_id,request_id,registration,mode)
+ VALUES((f->>'draft')::uuid,d.actor_id,p,r,(f->>'session')::uuid,gen_random_uuid(),d.registration,'mentor');
 END $$;
 -- Most rows belong to other accounts; some belong to an independent conversation of the deleting account.
 CREATE TABLE erasure_perf_test.actors AS
