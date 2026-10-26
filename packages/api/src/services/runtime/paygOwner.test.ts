@@ -48,3 +48,11 @@ it.each(['runtime_financial_recovery', 'runtime_response', 'bill2_record'])(
     await f.owner.rpc(name, args);
     expect(f.database.rpc).toHaveBeenCalledWith(name, args);
   });
+it('carries a multi-batch Session write under the owner epoch', async () => {
+  const f = fixture();
+  const session = new PostgresSession(f.owner, { actorId: id, sessionId: id, executionId: id });
+  await session.addItemBatches([[{ role: 'user', content: 'q' }], [{ role: 'user', content: 'r' }]]);
+  expect(f.database.rpc).toHaveBeenLastCalledWith('runtime_execution', { p_actor_id: id, p_execution_id: id,
+    p_action: 'owner_session', p_result: { epoch: 7, value: { action: 'append_batches',
+      items: [[{ role: 'user', content: 'q' }], [{ role: 'user', content: 'r' }]], limit: null, batch: 0 } } });
+});

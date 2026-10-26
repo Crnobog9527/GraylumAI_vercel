@@ -2,10 +2,12 @@
 -- Run after fixture.sql in the disposable file-built database, never against a remote database.
 BEGIN;
 SET LOCAL statement_timeout='8s';
+-- Count function calls in this transaction (pg_stat_xact_user_functions): the guard below does not depend on machine speed.
+SET LOCAL track_functions='all';
 DO $$
 DECLARE f jsonb; a uuid; sid uuid; run_id uuid; pre uuid; other uuid; response jsonb;
  started timestamptz; elapsed numeric; before_money jsonb; after_money jsonb; before_other text; after_other text;
- sample jsonb; subject jsonb; key text; expected boolean; actual boolean;
+ sample jsonb; subject jsonb; key text; expected boolean; actual boolean; uuid_parses bigint;
 BEGIN
  SELECT fixture INTO f FROM erasure_perf_test.target;
  a:=(f->>'actor')::uuid; sid:=(f->>'session')::uuid;
@@ -38,7 +40,16 @@ BEGIN
  response:=content_erasure_mark_session(a,sid);
  elapsed:=extract(epoch FROM clock_timestamp()-started)*1000;
  RAISE NOTICE 'DATA-ERASURE: 26 completed executions, 3000+ runs, 15000+ ledger rows: % ms',round(elapsed,2);
- IF elapsed>2000 THEN RAISE EXCEPTION 'ERASURE_PERF_OVER_2_SECONDS: % ms',round(elapsed,2); END IF;
+ -- Structural guard (replaces a 2 s wall-clock limit that failed on slow CI runners at about 2.1 s): the number of
+ -- identity parses (content_erasure_uuid calls) made by one deletion. The fixed lookup parses each ledger row's
+ -- identities once, about 50 thousand calls here; the previous lookup parsed them again for every candidate run,
+ -- about 1.07 million. The count is the same on every run and every machine; a limit of 100 thousand keeps a 2x
+ -- margin over the fixed lookup and fails the previous lookup by a factor of 10. The elapsed time stays in the NOTICE.
+ PERFORM pg_stat_force_next_flush();
+ SELECT coalesce(sum(calls),0) INTO uuid_parses FROM pg_stat_xact_user_functions WHERE funcname='content_erasure_uuid';
+ RAISE NOTICE 'DATA-ERASURE: % identity parses in one deletion',uuid_parses;
+ IF uuid_parses>100000 THEN RAISE EXCEPTION 'ERASURE_PERF_TOO_MANY_PARSES: %',uuid_parses; END IF;
+ IF uuid_parses=0 THEN RAISE EXCEPTION 'ERASURE_PERF_GUARD_NOT_MEASURING'; END IF;
  IF response->>'status'<>'deleted' OR (response->>'financialReviewCount')::int<>0
   OR NOT EXISTS(SELECT 1 FROM runtime_sessions WHERE id=sid AND content_deleted_at IS NOT NULL AND erased_at IS NOT NULL)
   OR EXISTS(SELECT 1 FROM runtime_executions WHERE session_id=sid AND (payload IS NOT NULL OR result IS NOT NULL)) THEN

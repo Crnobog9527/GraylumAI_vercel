@@ -9,6 +9,7 @@ CREATE OR REPLACE FUNCTION public.runtime_session_items(p_actor_id uuid, p_sessi
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE s runtime_sessions;e runtime_executions;b runtime_session_batches;n integer;answer jsonb;selected bigint[];omitted_notice boolean:=false;
+ batches jsonb;cur jsonb;nb integer;
 BEGIN
  -- D7 read boundary
  PERFORM content_erasure_runtime_check(p_actor_id,p_execution_id);
@@ -82,21 +83,29 @@ BEGIN
   INSERT INTO runtime_history_dependencies(execution_id,dependency_id)
    SELECT DISTINCT e.id,h.execution_id FROM runtime_session_history h WHERE h.session_id=s.id AND h.revision=ANY(selected);
   RETURN to_jsonb(selected);
- ELSIF p_action='append' THEN
+ ELSIF p_action IN ('append','append_batches') THEN
   IF EXISTS(SELECT 1 FROM bill2_runs WHERE id=e.billing_run_id AND (cancel_requested OR closed)) THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
   IF s.active_execution IS DISTINCT FROM e.id OR e.state IN ('completed','cancelled') THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
-  IF p_batch IS NULL OR p_batch<0 OR jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items)>128 THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH';END IF;
-  SELECT * INTO b FROM runtime_session_batches WHERE execution_id=e.id AND batch=p_batch;
-  IF b.execution_id IS NOT NULL THEN
-   IF b.items IS DISTINCT FROM p_items THEN RAISE EXCEPTION 'RUNTIME_SESSION_CONFLICT';END IF;
-   RETURN 'null'::jsonb;
-  END IF;
-  IF p_batch<>(SELECT count(*) FROM runtime_session_batches WHERE execution_id=e.id) THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH_ORDER';END IF;
-  n:=jsonb_array_length(p_items);
-  INSERT INTO runtime_session_batches VALUES(s.id,e.id,p_batch,p_items,s.revision,s.revision+n);
-  INSERT INTO runtime_session_history(session_id,revision,execution_id,item,internal_control)
-   SELECT s.id,s.revision+ordinality,e.id,value,(e.payload ? 'matching' AND p_batch=0) FROM jsonb_array_elements(p_items) WITH ORDINALITY;
-  UPDATE runtime_sessions SET revision=revision+n WHERE id=s.id;
+  -- DB-PERF 0402: append_batches writes consecutive batches p_batch, p_batch+1, ... after one set of checks;
+  -- each batch keeps the single-append rules (replay of an identical saved batch, conflict, order, 128 items).
+  IF p_action='append' THEN batches:=jsonb_build_array(p_items);
+  ELSIF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items) NOT BETWEEN 1 AND 32 THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH';
+  ELSE batches:=p_items;END IF;
+  FOR i IN 0..jsonb_array_length(batches)-1 LOOP
+   cur:=batches->i;nb:=p_batch+i;
+   IF p_batch IS NULL OR p_batch<0 OR jsonb_typeof(cur) IS DISTINCT FROM 'array' OR jsonb_array_length(cur)>128 THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH';END IF;
+   SELECT * INTO b FROM runtime_session_batches WHERE execution_id=e.id AND batch=nb;
+   IF b.execution_id IS NOT NULL THEN
+    IF b.items IS DISTINCT FROM cur THEN RAISE EXCEPTION 'RUNTIME_SESSION_CONFLICT';END IF;
+    CONTINUE;
+   END IF;
+   IF nb<>(SELECT count(*) FROM runtime_session_batches WHERE execution_id=e.id) THEN RAISE EXCEPTION 'RUNTIME_SESSION_BATCH_ORDER';END IF;
+   n:=jsonb_array_length(cur);
+   INSERT INTO runtime_session_batches VALUES(s.id,e.id,nb,cur,s.revision,s.revision+n);
+   INSERT INTO runtime_session_history(session_id,revision,execution_id,item,internal_control)
+    SELECT s.id,s.revision+ordinality,e.id,value,(e.payload ? 'matching' AND nb=0) FROM jsonb_array_elements(cur) WITH ORDINALITY;
+   UPDATE runtime_sessions SET revision=revision+n WHERE id=s.id RETURNING * INTO s;
+  END LOOP;
   RETURN 'null'::jsonb;
  END IF;
  RAISE EXCEPTION 'RUNTIME_SESSION_ACTION';

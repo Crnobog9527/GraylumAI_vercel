@@ -15,7 +15,7 @@ export function paygOwnerDatabase(database: SessionRpc, binding: {
       action = String(args.p_action);
       value = args.p_result ?? null;
     } else if (name === 'runtime_cancel') action = 'owner_cancel';
-    else if (name === 'runtime_session_items' && ['freeze', 'append'].includes(String(args.p_action))) {
+    else if (name === 'runtime_session_items' && ['freeze', 'append', 'append_batches'].includes(String(args.p_action))) {
       action = 'owner_session';
       value = { action: args.p_action, items: args.p_items ?? null,
         limit: args.p_limit ?? null, batch: args.p_batch ?? null };

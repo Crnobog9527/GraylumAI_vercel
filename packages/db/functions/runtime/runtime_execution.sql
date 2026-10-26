@@ -126,7 +126,7 @@ BEGIN
   IF p_action='owner_cancel' THEN
    RETURN runtime_cancel(p_actor_id,e.id);
   ELSIF p_action='owner_session' THEN
-   IF coalesce(p_result->>'action','') NOT IN ('freeze','append') THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+   IF coalesce(p_result->>'action','') NOT IN ('freeze','append','append_batches') THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
    RETURN runtime_session_items(p_actor_id,s.id,e.id,p_result->>'action',nullif(p_result->'items','null'::jsonb),
     (p_result->>'limit')::int,(p_result->>'batch')::int);
   ELSE
