@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { ReactNode, Ref } from 'react';
+import { useRef, type ReactNode, type Ref } from 'react';
 import { ArrowUp, Box, FileText, Plus, Search, X } from 'lucide-react';
 import Link from 'next/link';
+import { useMenuPlacement } from './menu-placement';
 import styles from './work-composer.module.css';
 
 /**
@@ -70,11 +71,15 @@ export function SkillMenuView({query,onQuery,onClose,status,skills,hint,onPick}:
  hint:string;
  onPick?:(moduleId:string)=>void;
 }){
- return <div className={styles.skillMenu} role="dialog" aria-label="使用技能"><div className={styles.skillHead}><strong>使用技能</strong>
+ const menuRef=useRef<HTMLDivElement>(null),listRef=useRef<HTMLDivElement>(null);
+ useMenuPlacement(menuRef,listRef);
+ return <div ref={menuRef} className={styles.skillMenu} role="dialog" aria-label="使用技能">
+  <div className={styles.skillHead}><strong>使用技能</strong>
   <button type="button" aria-label="关闭技能菜单" onClick={onClose}><X size={16}/></button></div>
   <label className={styles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={query}
    onChange={event=>onQuery?.(event.target.value)}/></label>
-  <div className={styles.skillList}>{status??<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>onPick?.(skill.moduleId)}>
+  <div ref={listRef} className={styles.skillList}>
+   {status??<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>onPick?.(skill.moduleId)}>
    <span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong><small>{hint}</small></span></button>)}
    {!skills.length&&<p>没有匹配的可用技能</p>}</>}</div>
   <div className={styles.skillFoot}><Link href="/app/workbench/marketplace">浏览功能广场</Link></div></div>;
