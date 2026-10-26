@@ -58,7 +58,7 @@ function RoundReportEntry(props: Props) {
   const enabled = props.confirmed && available.data?.enabled === true && typeof available.data.priceCredits === 'number' && !saved;
   const locate = { sessionId: props.sessionId, projectId: props.projectId, roundId: props.roundId };
   const preflight = trpc.runtime.reportPreflight.useQuery(locate, { enabled, staleTime: 0, retry: 1 });
-  const canGenerate = enabled && !preflight.isError && preflight.data?.canGenerate === true;
+  const canGenerate = enabled && !preflight.isFetching && !preflight.isError && preflight.data?.canGenerate === true;
   const choose = trpc.research.chooseShortfall.useMutation();
   const utils = trpc.useUtils();
   const report = useReportGen({ ...props, canGenerate: canGenerate, price: available.data?.priceCredits });
@@ -76,7 +76,8 @@ function RoundReportEntry(props: Props) {
   }, [report.status]);
   // The jury (FUSION-REVIEW) sits next to it: it reviews the report of the formal version, whatever this entry shows.
   const jury = <JuryEntry draftId={props.draftId} report={props.report} busy={props.busy} />;
-  const benchmarkGate = <ReportBenchmarkGate value={preflight.isError ? undefined : preflight.data} failed={preflight.isError}
+  const benchmarkGate = <ReportBenchmarkGate value={preflight.isError || preflight.isFetching ? undefined : preflight.data}
+      failed={preflight.isError && !preflight.isFetching}
       busy={props.busy || choose.isPending} onRetry={() => void preflight.refetch()} onChoose={async choice => {
         const card = preflight.data?.card;
         if (!card) return;

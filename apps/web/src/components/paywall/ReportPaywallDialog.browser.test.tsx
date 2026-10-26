@@ -28,7 +28,9 @@ beforeAll(async () => {
       runtime: {reportAvailable: {useQuery: () => q({enabled: true, priceCredits: 500})},
         reportPreflight: {useQuery: () => {
           const [data,setData]=useState(window.preflight ?? {canGenerate:true,qualified:3,required:3,rounds:2,card:null});
-          return {...q(data),refetch:async()=>{setData(window.preflight);return {data:window.preflight};}};
+          const [isFetching,setFetching]=useState(false);
+          window.setPreflightFetching=setFetching;window.setPreflightData=setData;
+          return {...q(data),isFetching,refetch:async()=>{setData(window.preflight);return {data:window.preflight};}};
         }}},
       research: {chooseShortfall: {useMutation: () => ({isPending:false,mutateAsync:async input=>{
         window.shortfallChoices=(window.shortfallChoices ?? []).concat([input]);
@@ -165,6 +167,29 @@ for (const width of [1280, 390]) it(`resolves a two-benchmark shortfall before o
     expect(await page.evaluate(() => (window as unknown as { starts?: number }).starts)).toBe(1);
     expect(await page.evaluate(() => (window as unknown as { shortfallChoices: unknown[] }).shortfallChoices))
       .toEqual([{ cardId: 'shortfall-1', choice: 'generate' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('removes an old charge confirmation while benchmark eligibility is being refreshed', async () => {
+  const { page, errors } = await open({ report: { executionId: null, offer: 'start' } }, 1280, false);
+  try {
+    await page.getByRole('button', { name: '生成完整报告（500 积分）' }).click();
+    await page.getByRole('dialog', { name: '完整运营策略报告' })
+      .getByRole('button', { name: '生成完整报告（500 积分）' }).click();
+    await browserExpect(page.getByRole('group', { name: '确认扣费' })).toBeVisible();
+    await page.evaluate(() => (window as unknown as { setPreflightFetching: (value: boolean) => void }).setPreflightFetching(true));
+    await browserExpect(page.getByText('正在确认对标条件…')).toBeVisible();
+    await browserExpect(page.getByRole('group', { name: '确认扣费' })).toHaveCount(0);
+    await browserExpect(page.getByRole('button', { name: /500/ })).toHaveCount(0);
+    await page.evaluate(() => {
+      const target = window as unknown as { setPreflightFetching: (value: boolean) => void; setPreflightData: (value: unknown) => void };
+      target.setPreflightData({ canGenerate: false, qualified: 2, required: 3, rounds: 1, card: null });
+      target.setPreflightFetching(false);
+    });
+    await browserExpect(page.getByRole('region', { name: '报告生成条件' })).toContainText('目前有 2 个合格对标');
+    await browserExpect(page.getByRole('button', { name: /500/ })).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { starts?: number }).starts ?? 0)).toBe(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

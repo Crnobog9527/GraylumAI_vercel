@@ -5,7 +5,7 @@ const saved = "11111111-2222-4333-8444-555555555555";
 const state = vi.hoisted(() => ({
   available: undefined as unknown, availableInput: [] as unknown[], statusInput: [] as unknown[],
   latest: { isSuccess: true, isError: false, data: { executionId: null as string | null } } as Record<string, unknown>,
-  status: undefined as unknown, preflight: undefined as unknown, preflightError: false,
+  status: undefined as unknown, preflight: undefined as unknown, preflightError: false, preflightFetching: false,
 }));
 vi.mock("@/trpc/client", () => {
   const mutation = () => ({ mutateAsync: vi.fn(), isPending: false });
@@ -17,7 +17,7 @@ vi.mock("@/trpc/client", () => {
         state.availableInput.push(options.enabled);
         return { data: options.enabled ? state.available : undefined };
       } },
-      reportPreflight: { useQuery: () => ({ data: state.preflight, isError: state.preflightError }) },
+      reportPreflight: { useQuery: () => ({ data: state.preflight, isError: state.preflightError, isFetching: state.preflightFetching }) },
       reportLatest: { useQuery: () => ({ ...state.latest, refetch: vi.fn() }) },
       reportStatus: { useQuery: (input: { executionId: string }, options: { enabled: boolean }) => {
         state.statusInput.push(options.enabled ? input.executionId : null);
@@ -44,6 +44,7 @@ beforeEach(() => {
   state.available = { enabled: true, priceCredits: 500 };
   state.preflight = { canGenerate: true, qualified: 3, required: 3, rounds: 2, card: null };
   state.preflightError = false;
+  state.preflightFetching = false;
   state.availableInput = [];
   state.statusInput = [];
   state.latest = { isSuccess: true, isError: false, data: { executionId: null } };
@@ -106,6 +107,12 @@ it("does not reuse a stale passing eligibility after its read failed", () => {
   expect(html).toContain("暂时无法确认对标条件");
   expect(html).not.toContain("500");
 });
+it("waits for a pending refresh instead of offering a price from an old passing eligibility", () => {
+  state.preflightFetching = true;
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed />);
+  expect(html).toContain("正在确认对标条件");
+  expect(html).not.toContain("500");
+});
 it("does not offer the shortfall generate choice after every qualified account was lost", () => {
   state.preflight = { canGenerate: false, qualified: 0, required: 3, rounds: 2,
     card: { cardId: "choice", required: 3, offeredQualified: 2, offeredRounds: 2, choice: null, chosenQualified: null } };
@@ -135,6 +142,13 @@ it("keeps an incomplete report readable and explains why another paid generation
   expect(html).toContain("完整运营策略报告");
   expect(html).toContain("目前有 2 个合格对标");
   expect(html).not.toContain("500");
+});
+it("keeps an existing report entry readable while its next-generation eligibility refreshes", () => {
+  existing();
+  state.preflightFetching = true;
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed />);
+  expect(html).toContain("完整运营策略报告");
+  expect(html).not.toContain("生成完整报告（500 积分）");
 });
 it("finds the saved report from the server with no local record (cleared storage or another device)", () => {
   existing();
