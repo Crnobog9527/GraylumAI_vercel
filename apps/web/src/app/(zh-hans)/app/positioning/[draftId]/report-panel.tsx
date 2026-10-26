@@ -13,6 +13,7 @@ import {
   reportActionLabel, reportAutoOpen, reportFeeText, reportUnfinished, reportView,
 } from "./report-gen";
 import { ReportExport } from "./report-export-button";
+import { ReportChargeAction } from "./report-charge-confirm";
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
@@ -161,11 +162,8 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
             : !report.executionId && savedBody
               ? <ReportExport saved={{ body: savedBody, strategy: savedStrategy }} /> : null)}
           {report.offer && !savedBody && !report.refusal?.hideEntry && (
-            <div className={resultStyles.consentActions}>
-              <Button disabled={busy} onClick={report.offer === "start" ? report.start : report.restart}>
-                {reportActionLabel(report.offer === "start" ? REPORT_ACTION.start : REPORT_ACTION.retry, price)}
-              </Button>
-            </div>
+            <ReportChargeAction key={report.offer} retry={report.offer !== "start"} price={price} busy={busy}
+              onStart={report.offer === "start" ? report.start : report.restart} />
           )}
         </ReportWithOutline>
       </div>
