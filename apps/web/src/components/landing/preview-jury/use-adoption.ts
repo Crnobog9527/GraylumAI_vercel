@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AdoptChoice, AdoptProposed, AdoptRecorded, DetailSection, JuryDetail } from './jury-events';
 import {
-  adoptErrorLabel, choosable, chosenCount, isComplete, mockConfirm, mockPropose, needsConfirm, recordedState, setConfirmed, setUse, toChoices,
+  adoptErrorLabel, choosable, chosenCount, isComplete, mockConfirm, mockPropose, needsConfirm, recordedState, setConfirmed, setUse, toChoices, unconfirmedSections,
   type Use,
 } from './jury-adopt';
 import { useDraftChoices } from './use-draft-choices';
@@ -91,6 +91,7 @@ export function useAdoption(detail: JuryDetail, actions: AdoptActions = MOCK_ADO
     state: shown, proposal, result, error, later, busy,
     total: choosable(sections).length,
     done: chosenCount(shown, sections),
+    unconfirmed: result ? [] : unconfirmedSections(shown, sections),
     locked: Boolean(result || proposal),
     use: (section: string, use: Use) => { setState(value => setUse(value, sections, section, use)); setError(null); },
     setConfirmed: (section: string, confirmed: boolean) => setState(value => setConfirmed(value, section, confirmed)),

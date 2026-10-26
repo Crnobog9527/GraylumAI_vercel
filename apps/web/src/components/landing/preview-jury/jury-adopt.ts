@@ -44,6 +44,10 @@ export function needsConfirm(section: DetailSection, state: ChoiceState): boolea
   return section.wordingOnly && state[section.section]?.use === 'revised' && !state[section.section]?.confirmed;
 }
 
+/** Chapters whose revision is picked but still lacks the "no fact changed" tick: not counted as chosen yet. */
+export const unconfirmedSections = (state: ChoiceState, sections: readonly DetailSection[]) =>
+  choosable(sections).filter(item => needsConfirm(item, state)).map(item => item.section);
+
 export function chosenCount(state: ChoiceState, sections: readonly DetailSection[]): number {
   return choosable(sections).filter(item => state[item.section]?.use && !needsConfirm(item, state)).length;
 }
