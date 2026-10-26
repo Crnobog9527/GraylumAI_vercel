@@ -14,29 +14,38 @@ import {
  * (the AI never writes here); editing adds a version; deleting removes one result, never the reply.
  */
 /** Under a completed reply: confirm type, title and the exact text before saving. */
-export function SaveReplyButton({ sessionId, executionId, reply, savedItems }: {
-  sessionId: string; executionId: string; reply: string; savedItems: readonly SessionResultItem[];
+export function SaveReplyButton({ sessionId, executionId, reply, savedItems, onOpenResults }: {
+  sessionId: string; executionId: string; reply: string; savedItems: readonly SessionResultItem[]; onOpenResults?(): void;
 }) {
   const utils = trpc.useUtils();
   const save = trpc.opc.sessionResultSave.useMutation();
   const [open, setOpen] = useState(false), [type, setType] = useState<ResultType>('body');
   const [title, setTitle] = useState(''), [text, setText] = useState(reply), [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
   async function confirm() {
     const problem = saveProblem(reply, text, savedItems, executionId);
     if (problem) { setError(problem); return; }
-    setError('');
+    setError(''); setSaved('');
     try {
-      await save.mutateAsync({ sessionId, executionId, requestId: await saveRequestId(executionId, type, text),
+      const result = await save.mutateAsync({ sessionId, executionId, requestId: await saveRequestId(executionId, type, text),
         resultType: type, title: title.trim() || null, excerpt: text === reply ? null : text });
       setOpen(false);
+      setSaved(savedNotice(type, title.trim() || (result as Partial<SessionResultItem> | undefined)?.title || ''));
     } catch (cause) { setError(resultErrorText(cause)); }
     finally { await utils.opc.sessionResults.invalidate({ sessionId }); }
   }
   const reopen = () => { setText(reply); setError(''); if (savedItems[0]) setType(savedItems[0].resultType); setOpen(true); };
-  if (!open) return <div className="mt-2"><Button variant="outline" size="sm" onClick={reopen}>
-    {savedItems.length ? '再存一段到成果夹' : '保存到成果夹'}</Button></div>;
+  if (!open) return <div className="mt-2 space-y-1"><Button variant="outline" size="sm" onClick={reopen}>
+    {savedItems.length ? '再存一段到成果夹' : '保存到成果夹'}</Button>
+    {saved && <p role="status" className="text-xs text-[var(--text-secondary)]">{saved}
+      {onOpenResults && <Button size="sm" variant="link" onClick={onOpenResults}>查看成果夹</Button>}</p>}</div>;
   return <SaveReplyForm type={type} title={title} text={text} error={error} pending={save.isPending}
     onType={setType} onTitle={setTitle} onText={setText} onConfirm={() => void confirm()} onCancel={() => setOpen(false)}/>;
+}
+
+/** Saving closes the form, so say what was saved and where it lives. */
+export function savedNotice(type: ResultType, title: string) {
+  return `已保存到成果夹：${RESULT_TYPE_LABEL[type]}${title ? `「${title}」` : ''}。可在右侧「本对话成果夹」查看。`;
 }
 
 export function SaveReplyForm(props: {

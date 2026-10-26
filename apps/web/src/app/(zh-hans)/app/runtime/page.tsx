@@ -440,7 +440,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      {/* Only a reply shown exactly as stored can be saved: the server keeps verbatim text, never a reformatted list. */}
      {freeChat&&results.data&&e.state==='completed'&&e.contentAvailable&&(e.body??e.primaryBody)&&
       displayReply(e.input,e.body??e.primaryBody)===(e.body??e.primaryBody)&&
-      <SaveReplyButton sessionId={sessionId} executionId={e.executionId} reply={(e.body??e.primaryBody)!}
+      <SaveReplyButton sessionId={sessionId} executionId={e.executionId} reply={(e.body??e.primaryBody)!} onOpenResults={()=>setPanelOpen(true)}
        savedItems={results.data.filter(result=>result.sourceExecutionId===e.executionId)}/>}
      <LiveReplyText text={liveReplyText(runner.reply,e.executionId,e)}/>
      <ChatNoticeList notices={compare.adoptedExecutions.has(e.executionId)?[]:[...compareNotices(e),...withResumeStop(payg.turnNotices(e,busy),
