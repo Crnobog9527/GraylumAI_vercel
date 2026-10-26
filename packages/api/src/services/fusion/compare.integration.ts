@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import pg from 'pg';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { authoritativeBilling, type BillingRpc } from '../bill2/service';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
@@ -10,7 +10,7 @@ import { createRuntimeBudget } from '../runtime/budget';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { adoptCompare } from './compareAdopt';
-import { compareRpc } from './compareAdmission';
+import { compareRpc, replayCompareGroup } from './compareAdmission';
 import { streamCompareColumn, type ColumnEvent } from './compareColumn';
 import { loadCompareChoice } from './compareLoad';
 import { estimateCompare, startCompare, type CompareDeps } from './compareStart';
@@ -82,7 +82,7 @@ async function begin(actor: string, session: string, question: string, requestId
   return { requestId, choice, shown, started: await startCompare(deps(actor), { ...choice, requestId, shown }) };
 }
 const read = (actor: string, compareId: string) => compareRpc<{ state: string; chargedCredits: number;
-  columns: Array<{ column: number; body: string | null; billing: { chargedCredits: number | null } }> }>(admin, 'fusion_compare_read',
+  columns: Array<{ column: number; runId: string; body: string | null; billing: { chargedCredits: number | null } }> }>(admin, 'fusion_compare_read',
   { p_actor_id: actor, p_compare_id: compareId });
 
 beforeAll(async () => {
@@ -276,4 +276,70 @@ it.runIf(staging)('RUNTIME: compare settlement that fails stays held and unsettl
   expect(await wallet(f.actor)).toBe(1000 - column0 - column1);
   // The slot is free again.
   expect((await begin(f.actor, f.session, '下一次对比')).started.state).toBe('claimed');
+});
+
+
+it.runIf(staging)('RUNTIME: stopped compare waits for late usage and its actual ledger records match exactly once', async () => {
+  const f = await member();
+  const { started, requestId } = await begin(f.actor, f.session, '已派发后停止');
+  if (started.state === 'processing') throw new Error('unexpected');
+  const group = await replayCompareGroup(admin, f.actor, requestId, f.session);
+  const run = group!.runs.find(item => item.index === 0)!;
+  const callId = (await db.query('select id from bill2_calls where run_id=$1', [run.runId])).rows[0].id;
+  let release!: () => void;
+  let entered!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const sent = new Promise<void>(resolve => { entered = resolve; });
+  const slowAdapter = openRouterAdapter({ credential: async () => syntheticKey, transport: async () => {
+    entered();
+    await held;
+    const id = 'gen-compare-stop-' + randomUUID();
+    return new Response(stream(run.call.model, id), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
+  } });
+  const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => f.actor,
+    adapter: slowAdapter, budget: createRuntimeBudget() });
+  expect(await billing.rotatePrepared(run.runId, callId, run.call)).toBe(true);
+  const dispatched = billing.dispatchOnce(callId, run.body);
+  await sent;
+  const stop = () => compareRpc(admin, 'fusion_compare_stop', {
+    p_actor_id: f.actor, p_compare_id: started.compareId, p_run_id: null });
+  try {
+    await Promise.all([stop(), stop()]);
+    const pending = await read(f.actor, started.compareId);
+    expect(pending.columns[0]!.billing).toMatchObject({ closed: true, state: 'cost_pending', chargedCredits: 0 });
+    expect(pending.columns[1]!.billing).toMatchObject({ closed: true, state: 'refunded', chargedCredits: 0 });
+  } finally { release(); }
+  await dispatched;
+  await Promise.all([billing.finalizeRun(run.runId), billing.finalizeRun(run.runId)]);
+  await stop();
+  const view = await read(f.actor, started.compareId);
+  const charged = view.columns[0]!.billing.chargedCredits!;
+  expect(charged).toBeGreaterThan(0);
+  expect(view.columns[0]!.body).toBeNull();
+  expect(view.columns[1]!.billing.chargedCredits).toBe(0);
+  expect(view.chargedCredits).toBe(charged);
+  expect(await wallet(f.actor)).toBe(1000 - charged);
+  const ledger = (await db.query(`select amount,ledger_type,reason_code,bill2_run_id from credit_transactions
+    where bill2_run_id=any($1::uuid[])`, [view.columns.map(c => c.runId)])).rows;
+  expect(-ledger.reduce((sum, row) => sum + Number(row.amount), 0)).toBe(charged);
+  expect(ledger.filter(row => row.ledger_type === 'spend' && Number(row.amount) < 0)).toHaveLength(1);
+
+  // Same PostgREST filters as the profile, under the user's real row-level permissions.
+  const head = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ role: 'authenticated', sub: f.actor,
+    exp: Math.floor(Date.now() / 1000) + 300 })).toString('base64url');
+  const token = head + '.' + body + '.' + createHmac('sha256', process.env.V3_LOCAL_JWT_SECRET!)
+    .update(head + '.' + body).digest('base64url');
+  const user = createClient(process.env.V3_LOCAL_REST!, token, { auth: { persistSession: false } });
+  const { ACTUAL_LEDGER_FILTERS } = await import('../../routers/credits');
+  let query = user.from('credit_transactions').select('amount,ledger_type,reason_code', { count: 'exact' })
+    .eq('user_id', f.actor).neq('ledger_type', 'grant').order('created_at', { ascending: false }).limit(51);
+  for (const filter of ACTUAL_LEDGER_FILTERS) query = query.or(filter);
+  const records = await query;
+  expect(records.error).toBeNull();
+  expect(records.count).toBe(1);
+  expect(records.data).toEqual([{ amount: -charged, ledger_type: 'spend', reason_code: 'bill2_spend' }]);
+  const denied = await user.from('credit_transactions').select('amount').neq('user_id', f.actor);
+  expect(denied.error).toBeNull();
+  expect(denied.data).toEqual([]);
 });

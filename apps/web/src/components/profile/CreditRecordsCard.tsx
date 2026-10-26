@@ -4,7 +4,7 @@ import { memo, useMemo } from 'react';
 import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, Loader2 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { CREDITS_SUMMARY_QUERY_OPTIONS } from './creditsSummaryQuery';
-import { SummaryStatValue } from './SummaryRetry';
+import { SummaryRetryButton, SummaryStatValue } from './SummaryRetry';
 import { TransactionSearchCharges } from '@/components/research/transaction-search-charges';
 import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import {
@@ -150,7 +150,9 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
   const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' }, CREDITS_SUMMARY_QUERY_OPTIONS);
 
   // 从 API 获取交易记录
-  const { data: transactionsData, isLoading: isLoadingTx } = trpc.credits.getCreditTransactions.useQuery({ limit: 50, actualOnly: true });
+  const records = trpc.credits.getCreditTransactions.useQuery(
+    { limit: 50, actualOnly: true }, CREDITS_SUMMARY_QUERY_OPTIONS);
+  const { data: transactionsData, isLoading: isLoadingTx } = records;
 
   // 转换 API 数据为组件所需格式
   const transactions: Transaction[] = useMemo(() => {
@@ -286,6 +288,11 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
           </div>
+        ) : records.isError ? (
+          <div role="alert" className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
+            <p>积分记录暂时无法读取，请重试。</p>
+            <SummaryRetryButton query={records} />
+          </div>
         ) : transactions.length === 0 ? (
           <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
             暂无交易记录
@@ -354,7 +361,9 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         )}
 
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mt-8 pt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
-          <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>共 {transactions.length} 条记录</span>
+          {!isLoadingTx && !records.isError && <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+            共 {transactions.length} 条记录
+          </span>}
         </div>
       </div>
     </>

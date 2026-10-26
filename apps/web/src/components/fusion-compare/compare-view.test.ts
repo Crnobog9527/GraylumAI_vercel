@@ -36,19 +36,19 @@ describe('column phases (§3.5, §4.4)', () => {
   it('reads the three outcomes and the waiting states from the server view', () => {
     expect(columnPhase(column(), 'running')).toBe('queued');
     expect(columnPhase(column({}, { dispatched: true }), 'running')).toBe('pending');
-    const closed = { reservedCredits: 9, chargedCredits: 3, closed: true };
+    const closed = { reservedCredits: 9, chargedCredits: 3, state: 'settled', closed: true };
     expect(columnPhase(column({ body: '答', billing: closed }, { dispatched: true, verdict: 'usable' }), 'finished')).toBe('done');
     expect(columnPhase(column({ body: '答', billing: closed }, { dispatched: true }), 'finished')).toBe('done'); // saved, verdict not yet written
     // An answer or verdict whose settlement failed or whose cost is pending is not final: held credits, no adoption yet. A usable
     // answer says so as "积分结算中" (settling); any other verdict stays "结果待核对" (pending).
     expect(columnPhase(column({ body: '答' }, { dispatched: true, verdict: 'usable' }), 'running')).toBe('settling');
     expect(columnPhase(column({}, { dispatched: true, verdict: 'no_delivery' }), 'running')).toBe('pending');
-    expect(columnPhase(column({ billing: { closed: true } }, { dispatched: true, verdict: 'no_delivery' }), 'finished')).toBe('failed');
-    expect(columnPhase(column({ billing: { closed: true } }), 'stopped')).toBe('stopped');
+    expect(columnPhase(column({ billing: { state: 'refunded', closed: true } }, { dispatched: true, verdict: 'no_delivery' }), 'finished')).toBe('failed');
+    expect(columnPhase(column({ billing: { state: 'refunded', closed: true } }), 'stopped')).toBe('stopped');
   });
   it('shows the hold kept for an unknown result, nothing once the run is closed', () => {
     expect(heldCredits(column({}, { dispatched: true }))).toBe(9);
-    expect(heldCredits(column({ billing: { reservedCredits: 9, chargedCredits: 3, closed: true } }))).toBe(0);
+    expect(heldCredits(column({ billing: { reservedCredits: 9, chargedCredits: 3, state: 'settled', closed: true } }))).toBe(0);
   });
 });
 
@@ -75,10 +75,10 @@ describe('which failures spend the start request id', () => {
   });
 });
 
-import { allSettled, stoppedLabel } from './compare-view';
+import { allSettled, chargedCredits, stoppedLabel, totalChargedCredits } from './compare-view';
 describe('a stopped column is never called free when it was charged', () => {
   const stopped = (charged: number | null): ReadColumn => ({ column: 0, runId: 'r', modelId: 'm', body: null,
-    billing: { reservedCredits: 9, chargedCredits: charged, closed: true }, call: { callId: 'c', state: 'settled', dispatched: true, verdict: 'user_stopped' } });
+    billing: { reservedCredits: 9, chargedCredits: charged, state: 'settled', closed: true }, call: { callId: 'c', state: 'settled', dispatched: true, verdict: 'user_stopped' } });
   it('user_stopped is a stop, with wording that follows what was charged', () => {
     expect(columnPhase(stopped(4), 'stopped')).toBe('stopped');
     // Closed billing is what makes a stop final; before that its hold is still held.
@@ -87,7 +87,7 @@ describe('a stopped column is never called free when it was charged', () => {
     expect(heldCredits(open)).toBe(9);
     expect(allSettled([stopped(4), open])).toBe(false);
     expect(allSettled([stopped(4), stopped(0)])).toBe(true);
-    expect(stoppedLabel(stopped(4))).toBe('已停止，按已生成的部分计费 4 积分');
+    expect(stoppedLabel(stopped(4))).toBe('已停止，按已生成部分计费 4 积分');
     expect(stoppedLabel(stopped(0))).toBe('已停止，不收费');
     expect(stoppedLabel(stopped(null))).toBe('已停止，不收费');
   });
@@ -109,4 +109,31 @@ describe('a compare this tab started stays visible while the list is unreadable'
     expect(withStarted([card('a', 'finished')], [card('a', 'running')])).toEqual([card('a', 'finished')]);
     expect(withStarted([card('b', 'finished')], [card('a', 'running')]).map(c => c.compareId)).toEqual(['b', 'a']);
   });
+});
+
+// Real BILL2 cancellation closes dispatch immediately; provider settlement can arrive later.
+describe('stop waits for financial settlement, not just dispatch closure', () => {
+  const waiting = (): ReadColumn => column({ billing: { state: 'cost_pending', closed: true,
+    reservedCredits: 64, chargedCredits: 0, outcome: 'cancelled' } }, { dispatched: true, verdict: null });
+  it('keeps polling and the full hold while a stopped column awaits its receipt', () => {
+    expect(columnPhase(waiting(), 'stopped')).toBe('pending');
+    expect(allSettled([waiting()])).toBe(false);
+    expect(heldCredits(waiting())).toBe(64);
+  });
+  it('a stopped column with known usage is charged even when no body was saved', () => {
+    const settled = waiting();
+    settled.billing = { ...settled.billing, state: 'settled', chargedCredits: 10 };
+    settled.call!.verdict = 'user_stopped';
+    expect(allSettled([settled])).toBe(true);
+    expect(columnPhase(settled, 'stopped')).toBe('stopped');
+    expect(stoppedLabel(settled)).toContain('10 积分');
+  });
+});
+
+
+it('column charges and the total use the ledger net after compensation', () => {
+  const first = column({ billing: { state: 'settled', closed: true, chargedCredits: 10, netChargedCredits: 7 } });
+  const second = column({ billing: { state: 'settled', closed: true, chargedCredits: 10, netChargedCredits: 10 } });
+  expect(chargedCredits(first)).toBe(7);
+  expect(totalChargedCredits([first, second])).toBe(17);
 });
