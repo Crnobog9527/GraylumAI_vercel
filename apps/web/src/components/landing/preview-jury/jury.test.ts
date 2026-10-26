@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/(zh-hans)/landing/preview/jury/page';
 import {
-  ADOPT_ERROR_LABEL, choosable, firstSentence, isComplete, keyPoints, linkedGroup, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices, type ChoiceState,
+  ADOPT_ERROR_LABEL, choosable, firstSentence, isComplete, keyPoints, linkedGroup, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices, unconfirmedSections, type ChoiceState,
 } from './jury-adopt';
 import {
   DEFAULT_SEAT_NAMES, resolveSeatNames, SAMPLE_PANEL, SEAT_NAME_MAX, summarize, type JuryEvent,
@@ -265,6 +265,18 @@ describe('chapter-by-chapter choice', () => {
     state = setConfirmed(state, wording!.section, true);
     expect(needsConfirm(wording!, state)).toBe(false);
     expect(needsConfirm(wording!, setUse({}, sections, wording!.section, 'original'))).toBe(false);
+  });
+
+  it('names the chapter that is picked but not yet confirmed, so "5/6" is explained (B10B-08)', () => {
+    let state: ChoiceState = {};
+    for (const item of choosable(sections)) state = setUse(state, sections, item.section, 'revised');
+    const waiting = unconfirmedSections(state, sections);
+    expect(waiting).toEqual(choosable(sections).filter(item => item.wordingOnly).map(item => item.section));
+    expect(waiting.length).toBeGreaterThan(0);
+    expect(isComplete(state, sections)).toBe(false);
+    for (const name of waiting) state = setConfirmed(state, name, true);
+    expect(unconfirmedSections(state, sections)).toEqual([]);
+    expect(isComplete(state, sections)).toBe(true);
   });
 
   it('is complete only when every changed chapter is chosen, and builds the adopt request from it', () => {

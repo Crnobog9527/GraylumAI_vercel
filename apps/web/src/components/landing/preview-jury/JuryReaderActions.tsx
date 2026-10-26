@@ -11,7 +11,7 @@ import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 /** The bar that stays at the bottom while choosing: how many chapters are chosen, later, and confirm. */
 export function ChoiceBar({ adoption }: { adoption: Adoption }) {
-  const { done, total, error, later } = adoption;
+  const { done, total, error, later, unconfirmed } = adoption;
   return (
     <div className={styles.bar}>
       <span className={styles.count} data-complete={done === total}>已选 {done}/{total}</span>
@@ -20,6 +20,7 @@ export function ChoiceBar({ adoption }: { adoption: Adoption }) {
         <button type="button" className={styles.primary} onClick={adoption.propose} aria-disabled={done < total}
           disabled={adoption.busy}>确认</button>
       </div>
+      {unconfirmed.length > 0 ? <p className={styles.error}>{unconfirmed.join('、')}选了修订版，还要勾选「确认这一章只改了表述」才算选完。</p> : null}
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {later ? <p className={styles.later}><Clock3 size={14} aria-hidden="true" />已选的章节会保存在这台设备上；你可以先去改草稿，回来接着选。</p> : null}
     </div>

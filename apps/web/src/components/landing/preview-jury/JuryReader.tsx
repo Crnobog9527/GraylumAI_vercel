@@ -161,14 +161,15 @@ function Toc({ chapters, adoption, failed, progress, onJump, onNext }: {
       <ol>
         {chapters.map(chapter => {
           const flagged = Boolean(chapter.section?.changed || chapter.issues.length > 0);
-          const chosen = Boolean(adoption?.state[chapter.title]?.use);
+          const waiting = Boolean(adoption?.unconfirmed.includes(chapter.title));
+          const chosen = Boolean(adoption?.state[chapter.title]?.use) && !waiting;
           return (
             <li key={chapter.title} data-flagged={flagged}>
               <button type="button" onClick={() => onJump(chapter.title)}>
                 <span className={styles.tocTitle}>{chapter.title}</span>
                 {flagged && adoption ? (
                   <span className={cn(styles.tocState, chosen && styles.tocChosen)}>
-                    {chosen ? <Check size={12} aria-hidden="true" /> : <Circle size={10} aria-hidden="true" />}{chosen ? '已选' : '未选'}
+                    {chosen ? <Check size={12} aria-hidden="true" /> : <Circle size={10} aria-hidden="true" />}{chosen ? '已选' : waiting ? '待确认' : '未选'}
                   </span>
                 ) : flagged ? <span className={styles.tocState}>有意见</span> : null}
               </button>
