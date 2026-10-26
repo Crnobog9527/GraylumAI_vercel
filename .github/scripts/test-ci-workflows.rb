@@ -247,6 +247,81 @@ class CIWorkflowsTest < Minitest::Test
     end
   end
 
+  # MAINT-P1: the digest-pinned service images are cached as archives. A cache never skips a check: the job still
+  # loads or pulls all three images (same bounded retry on a miss) before any suite runs, and nothing is conditional.
+  def test_pinned_service_images_cache_never_changes_what_is_tested
+    repository = File.expand_path('..', ROOT)
+    images = File.read("#{repository}/packages/db/tests/v3/images.mjs", encoding: 'UTF-8').scan(/^export const \w+ = "([^"]*)";$/).flatten
+    %w[integration db-suites].each do |id|
+      steps = @ci.fetch('jobs').fetch(id).fetch('steps')
+      key = steps.index { |step| step['id'] == 'service-images' }
+      cache = steps.index { |step| step['id'] == 'service-images-cache' }
+      pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
+      refute_nil key; refute_nil cache; refute_nil pull
+      assert_operator key, :<, cache
+      assert_operator cache, :<, pull
+      assert_match(/\Aactions\/cache@[0-9a-f]{40}\z/, steps[cache].fetch("uses"))
+      assert_equal '${{ runner.temp }}/service-images', steps[cache].fetch('with').fetch('path')
+      assert_equal 'service-images-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.service-images.outputs.key }}', steps[cache].fetch('with').fetch('key')
+      refute steps[cache].fetch('with').key?('restore-keys'), 'only the exact digest key may restore images'
+      assert_includes steps[key].fetch('run'), 'packages/db/tests/v3/images.mjs'
+      assert_includes steps[pull].fetch('run'), 'for attempt in 1 2 3 4 5'
+      assert_includes steps[pull].fetch('run'), 'docker pull --quiet "$image"'
+    end
+    steps = @ci.fetch('jobs').fetch('integration').fetch('steps')
+    key_step = steps.find { |step| step['id'] == 'service-images' }
+    pull_step = steps.find { |step| step['name'] == 'Pull pinned service images' }
+    Dir.mktmpdir('service-images-') do |dir|
+      out, err, status = Open3.capture3({'GITHUB_OUTPUT'=>"#{dir}/output"}, 'bash', '-c', key_step.fetch('run'), chdir: repository)
+      assert status.success?, out + err
+      assert_match(/\Akey=[0-9a-f]{64}\n\z/, File.read("#{dir}/output"))
+      # Fake docker: records every call; behavior is chosen per case.
+      bin = "#{dir}/bin"; FileUtils.mkdir_p(bin)
+      File.write("#{bin}/docker", <<~SH)
+        #!/bin/sh
+        echo "$*" >> "$LOG"
+        case "$1" in
+          load) [ "$LOAD_OK" = 1 ] && exit 0 || exit 1 ;;
+          image) [ "$INSPECT_OK" = 1 ] && exit 0 || exit 1 ;;
+          pull) [ "$PULL_OK" = 1 ] && exit 0 || exit 1 ;;
+          save) shift; [ "$1" = --output ] && printf archive > "$2"; exit 0 ;;
+        esac
+      SH
+      File.write("#{bin}/sleep", "#!/bin/sh\nexit 0\n")
+      FileUtils.chmod(0755, ["#{bin}/docker", "#{bin}/sleep"])
+      run = lambda do |cached, load_ok, inspect_ok, pull_ok|
+        temp = "#{dir}/temp#{rand(1_000_000)}"; FileUtils.mkdir_p("#{temp}/service-images")
+        3.times { |n| File.write("#{temp}/service-images/#{n + 1}.tar", 'cached') } if cached
+        log = "#{temp}/log"
+        env = {'PATH'=>"#{bin}:#{ENV.fetch('PATH')}", 'RUNNER_TEMP'=>temp, 'LOG'=>log,
+               'LOAD_OK'=>load_ok, 'INSPECT_OK'=>inspect_ok, 'PULL_OK'=>pull_ok}
+        out, err, status = Open3.capture3(env, 'bash', '-c', pull_step.fetch('run'), chdir: repository)
+        [status.success?, File.exist?(log) ? File.readlines(log).map(&:strip) : [], out + err, temp]
+      end
+      # Cache hit whose images resolve by digest: loaded, never pulled, nothing saved.
+      ok, calls, = run.call(true, '1', '1', '0')
+      assert ok
+      assert_equal 3, calls.count { |c| c.start_with?('load ') }
+      assert_empty calls.select { |c| c.start_with?('pull ') || c.start_with?('save ') }
+      # Cache hit whose images do not resolve by digest: pulled with the original path, then saved again.
+      ok, calls, = run.call(true, '1', '0', '1')
+      assert ok
+      images.each { |image| assert_includes calls, "pull --quiet #{image}" }
+      assert_equal 3, calls.count { |c| c.start_with?('save ') }
+      # Miss: every digest-pinned image is pulled and archived.
+      ok, calls, _, temp = run.call(false, '0', '0', '1')
+      assert ok
+      images.each { |image| assert_includes calls, "pull --quiet #{image}" }
+      assert_equal 3, Dir["#{temp}/service-images/*.tar"].length
+      # A registry that never answers still fails the job after five tries per image: nothing is skipped.
+      ok, calls, out, = run.call(false, '0', '0', '0')
+      refute ok
+      assert_equal 5, calls.count { |c| c.start_with?('pull ') }
+      assert_includes out, 'Failed to pull'
+    end
+  end
+
+
   def test_migration_ledger_runs_in_its_own_unskippable_worker
     ledger = 'CI safeguard — check migration ledger'
     jobs = @ci.fetch('jobs')
