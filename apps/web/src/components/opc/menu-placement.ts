@@ -40,8 +40,9 @@ function visibleBand(from: HTMLElement | null): { top: number; bottom: number } 
   return { top, bottom };
 }
 
-/** Keeps the menu in `menu` fully inside the visible area around its anchor (the offset parent), on mount and on resize. */
-export function useMenuPlacement(menu: RefObject<HTMLElement | null>, list: RefObject<HTMLElement | null>) {
+/** Keeps the menu in `menu` fully inside the visible area around its anchor (the offset parent), on mount, on resize and whenever
+ * `contentKey` changes (the list finished loading or the filter changed, so the menu got taller or shorter). */
+export function useMenuPlacement(menu: RefObject<HTMLElement | null>, list: RefObject<HTMLElement | null>, contentKey: string) {
   useEffect(() => {
     const apply = () => {
       const element = menu.current, scroller = list.current, anchor = element?.offsetParent as HTMLElement | null;
@@ -58,5 +59,5 @@ export function useMenuPlacement(menu: RefObject<HTMLElement | null>, list: RefO
     apply();
     window.addEventListener('resize', apply);
     return () => window.removeEventListener('resize', apply);
-  }, [menu, list]);
+  }, [menu, list, contentKey]);
 }

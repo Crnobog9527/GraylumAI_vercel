@@ -72,7 +72,7 @@ export function SkillMenuView({query,onQuery,onClose,status,skills,hint,onPick}:
  onPick?:(moduleId:string)=>void;
 }){
  const menuRef=useRef<HTMLDivElement>(null),listRef=useRef<HTMLDivElement>(null);
- useMenuPlacement(menuRef,listRef);
+ useMenuPlacement(menuRef,listRef,(status?'status':'list')+':'+skills.length);
  return <div ref={menuRef} className={styles.skillMenu} role="dialog" aria-label="使用技能">
   <div className={styles.skillHead}><strong>使用技能</strong>
   <button type="button" aria-label="关闭技能菜单" onClick={onClose}><X size={16}/></button></div>

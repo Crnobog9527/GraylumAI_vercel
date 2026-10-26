@@ -31,12 +31,13 @@ beforeAll(async () => {
         const skills=Array.from({length:12},(_, i)=>({moduleId:'m'+i,name:'技能 '+i}));
         window.picked=[];
         // The home page: a header, then a work panel that clips its overflow, with the box near the middle of it.
-        function Page(){return React.createElement('div',{style:{height:'100dvh',display:'flex',flexDirection:'column'}},
+        // The first open: skills are still loading (a short menu), then the full list replaces the status.
+        function Page(){const [loaded,setLoaded]=React.useState(!window.loadLater);window.finishLoading=()=>setLoaded(true);return React.createElement('div',{style:{height:'100dvh',display:'flex',flexDirection:'column'}},
           React.createElement('header',{style:{height:100,flex:'none'}},'头部'),
           React.createElement('main',{style:{flex:1,minHeight:0,overflow:'hidden',position:'relative',paddingTop:200}},
             React.createElement('div',{className:styles.menuAnchor,style:{width:34,marginLeft:40}},
               React.createElement('button',{type:'button'},'技能'),
-              React.createElement(SkillMenuView,{query:'',skills,hint:'加载到本对话',onPick:id=>window.picked.push(id)}))));}
+              React.createElement(SkillMenuView,{query:'',skills:loaded?skills:[],status:loaded?undefined:'正在读取技能…',hint:'加载到本对话',onPick:id=>window.picked.push(id)}))));}
         createRoot(document.getElementById('root')).render(React.createElement(Page));`;
     } }],
     build: { write: false, minify: false, lib: { entry, name: 'SkillMenuTest', formats: ['iife'] } },
@@ -50,7 +51,8 @@ beforeAll(async () => {
 }, 90000);
 afterAll(async () => { await browser?.close(); });
 
-it.each([[1280, 800], [1280, 900], [375, 812]])('every Skill row can be reached at %ix%i', async (width, height) => {
+it.each([[1280, 800, false], [1280, 900, false], [375, 812, false], [1280, 900, true]])(
+  'every Skill row can be reached at %ix%i (list loaded after opening: %s)', async (width, height, loadLater) => {
   const page = await browser.newPage({ viewport: { width, height } });
   try {
     const errors: string[] = [];
@@ -58,9 +60,12 @@ it.each([[1280, 800], [1280, 900], [375, 812]])('every Skill row can be reached 
     await page.route('**/*', route => route.abort());
     await page.setContent('<style>body{margin:0}</style><div id="root"></div>');
     await page.addStyleTag({ content: css });
+    await page.evaluate(later => { (window as unknown as { loadLater: boolean }).loadLater = later; }, loadLater);
     await page.addScriptTag({ content: code });
     const menu = page.getByRole('dialog', { name: '使用技能' });
     await menu.waitFor();
+    if (loadLater) await page.evaluate(() => (window as unknown as { finishLoading: () => void }).finishLoading());
+    await page.getByRole('button', { name: /^技能 0\b/ }).waitFor();
     // The menu lies inside the visible work panel (below the 100px header, above the viewport bottom).
     const box = await menu.boundingBox();
     expect(errors).toEqual([]);
