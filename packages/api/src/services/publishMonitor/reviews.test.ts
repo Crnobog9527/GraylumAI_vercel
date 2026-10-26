@@ -52,6 +52,14 @@ it('completion winning the expiry race is observed as completed rather than over
  expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_action:'observe'}));
  expect(d.rpc.mock.calls.some(([,args])=>(args as {p_action?:string})?.p_action==='skip')).toBe(false);
 });
+it('a deferred callback that crosses the deadline closes the original run before loading or dispatching a model',async()=>{
+ const d={rpc:vi.fn<(name:string,args:Record<string,unknown>)=>Promise<unknown>>(async name=>({data:name==='runtime_cancel'
+  ?{state:'cancelled'}:{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null}))};
+ await advanceReview(d as never,c,'original',{},createRuntimeBudget(()=>0));
+ expect(d.rpc).toHaveBeenCalledWith('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:'original'});
+ expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_reason:'RUNTIME_INTERRUPTED'}));
+ expect(m.executor).not.toHaveBeenCalled();expect(m.policy).not.toHaveBeenCalled();
+});
 it('a new admission uses the frozen request, session, model and review cap',async()=>{
  const d=db({allowed:true,executionId:null,state:null});
  expect(await prepareReview(d as never,c,{})).toBe('existing');

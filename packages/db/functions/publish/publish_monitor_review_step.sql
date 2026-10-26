@@ -29,5 +29,11 @@ BEGIN
    finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
  ELSIF p_action NOT IN ('authorize','observe') THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID';END IF;
  RETURN jsonb_build_object('allowed',allowed,'actorId',r.actor_id,'executionId',x.id,'state',x.state,
-  'sessionId',r.runtime_session_id,'requestId',r.runtime_request_id,'modelId',r.model_id,'maxCostUsd',r.max_cost_usd::text);
+  'sessionId',r.runtime_session_id,'requestId',r.runtime_request_id,'modelId',r.model_id,'maxCostUsd',r.max_cost_usd::text,
+  -- A scheduler-owned review has no user present to resume it. A live dispatch still owns its lease.
+  -- Return only a deadline decision here: cancellation takes the native session/run locks in a separate RPC,
+  -- never while holding this review row (admission uses session -> review).
+  'expired',r.created_at<=clock_timestamp()-interval '15 minutes' AND x.result IS NULL
+   AND NOT EXISTS(SELECT 1 FROM bill2_runs b WHERE b.id=x.billing_run_id AND NOT b.closed
+    AND b.runtime_dispatch_deadline>clock_timestamp()));
 END $function$;
