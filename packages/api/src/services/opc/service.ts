@@ -19,12 +19,12 @@ import { runtimeAdmissionService } from "../runtime/admission";
 import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
 import { isOpeningInput, openingRequestId, questionTask } from "./questions";
-import { agentTurnInstructions, OPENING_EXTRACTION_RULE, researchOpeningInstructions } from "./agentTurnPrompt";
+import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import { ORGANIZER_INSTRUCTIONS } from "./organizerPrompt";
 import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenInformation} from './captureContext';
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
-import {existingPositioningInstructions} from './existingPositioning';
+import {positioningMentorInstructions} from './existingPositioning';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
@@ -204,7 +204,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         : undefined;
       const additionalInstructions = v.purpose === "mentor"
         // R15: mode comes from the actor-scoped draft; the whole string stays the stable cache prefix.
-        ? agentTurnInstructions() + researchOpeningInstructions(hostTurnContext!) + existingPositioningInstructions(d.mode, hostTurnContext!) +
+        ? positioningMentorInstructions(d.mode, hostTurnContext!) +
           (stepSummary ? "\n" + STEP_SUMMARY_INSTRUCTIONS : "")
         : (v.purpose === "step" ? STEP_ENVELOPE_INSTRUCTION : "") + instruction +
           (v.purpose !== "plan" ? directive : "") + "Current workflow step: " + v.stepId +

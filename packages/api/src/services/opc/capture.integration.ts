@@ -1313,10 +1313,11 @@ it('RUNTIME: R15 manual opening asks for existing positioning; mentor drafts kee
     const opened = await f.service.prepareStep(request);
     const payload = await frozenPayload(opened.executionId);
     expect(payload.hostTurnContext.opening).toBe(true);
-    expect(payload.instructions).toContain(agentTurnInstructions());
+    expect(payload.instructions).toContain(agentTurnInstructions(mode === 'manual' ? 'existing_positioning' : 'standard'));
     if (mode === 'manual') {
       expect(payload.instructions).toContain(R15_INTAKE);
       expect(payload.instructions).toContain(R15_REVIEW);
+      expect(payload.instructions).not.toContain("Open this step's discussion naturally from known material");
     } else {
       expect(payload.instructions).not.toContain(R15_REVIEW);
     }

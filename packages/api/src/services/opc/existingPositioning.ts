@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {HostTurnContext} from '../runtime/hostTurn';
+import {agentTurnInstructions, researchOpeningInstructions} from './agentTurnPrompt';
 
 const REVIEW = [
   'Existing-positioning entry: review the supplied positioning, do not restart the interview.',
@@ -18,11 +19,21 @@ const INTAKE = [
  * Use the complete composed string for both additionalInstructions and stableAdditionalInstructions.
  * This does not write fields, grant confirmation, select a Skill or create a second session.
  */
-export function existingPositioningInstructions(mode: unknown, host: HostTurnContext): string {
-  if (mode !== 'manual') return '';
+function isExistingPositioningIntake(mode: unknown, host: HostTurnContext): boolean {
+  if (mode !== 'manual') return false;
   const hasMaterial = host.checklist.some(step => step.fields.some(field =>
     field.status !== 'missing' || Boolean(field.value?.trim()) || field.valueOmitted || field.hasPendingSuggestion));
-  const intake = host.opening && host.stepId === host.checklist[0]?.id && !hasMaterial &&
+  return host.opening && host.stepId === host.checklist[0]?.id && !hasMaterial &&
     !host.confirmation?.stepConfirmed && !host.confirmation?.stepReady && !host.updatedFieldIds;
-  return '\n' + REVIEW + (intake ? '\n' + INTAKE : '');
+}
+export function existingPositioningInstructions(mode: unknown, host: HostTurnContext): string {
+  if (mode !== 'manual') return '';
+  return '\n' + REVIEW + (isExistingPositioningIntake(mode, host) ? '\n' + INTAKE : '');
+}
+
+/** Select one opening policy before composing the frozen instructions; appending an intake
+ * override to the ordinary interview opening leaves the model with two competing asks. */
+export function positioningMentorInstructions(mode: unknown, host: HostTurnContext): string {
+  return agentTurnInstructions(isExistingPositioningIntake(mode, host) ? 'existing_positioning' : 'standard') +
+    researchOpeningInstructions(host) + existingPositioningInstructions(mode, host);
 }

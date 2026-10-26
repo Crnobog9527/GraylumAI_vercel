@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect, it} from 'vitest';
 import {captureHostContext, captureOrganizerInput} from './captureContext';
-import {existingPositioningInstructions} from './existingPositioning';
+import {existingPositioningInstructions, positioningMentorInstructions} from './existingPositioning';
 import {agentTurnInstructions} from './agentTurnPrompt';
 import {freezeHostPromptCache} from '../runtime/promptCache';
 import type {HostTurnContext} from '../runtime/hostTurn';
@@ -62,17 +62,17 @@ it('does not turn a checklist event into an intake request', () => {
   host.updatedFieldIds = ['goal'];
   expect(prompt(host)).not.toContain('ask the user to paste or describe');
 });
-it('preserves the stable prefix and fits the existing purpose-budget instruction allocation', () => {
-  const stable = agentTurnInstructions();
-  const complete = stable + prompt(context());
-  expect(complete.startsWith(stable)).toBe(true);
+it('selects import intake without the ordinary opening and fits the existing purpose budget', () => {
+  const complete = positioningMentorInstructions('manual', context());
+  expect(complete).toContain(prompt(context()));
+  expect(complete).not.toContain("Open this step's discussion naturally from known material");
   // Requires configured runtime_purpose_budgets: the legacy 8000-character fallback is too small (see AGENT_CORE_R15.md).
   expect(Buffer.byteLength(complete)).toBeLessThan(64000);
   expect(prompt(context()).length).toBeLessThan(1000);
 });
 
 it.each([true, false])('keeps the existing cache contract for opening=%s', opening => {
-  const additionalInstructions = agentTurnInstructions() + prompt(context(opening));
+  const additionalInstructions = positioningMentorInstructions('manual', context(opening));
   const skill = 'Pinned Skill';
   const instructions = skill + '\n' + additionalInstructions;
   const input = {real: true, role: 'skill', model: 'anthropic/test', cacheWriteUsdPerMillion: '2.5',
