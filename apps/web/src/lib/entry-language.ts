@@ -52,20 +52,44 @@ export function entryLanguageNotice(applied: { language: ReplyLocale; previous: 
   let from = applied.previous;
   try {
     if (applied.previous !== applied.language) {
-      storage()?.setItem(CHANGE_KEY, JSON.stringify({ from: applied.previous, to: applied.language, at: now }));
+      storage()?.setItem(CHANGE_KEY, JSON.stringify({ from: applied.previous, to: applied.language, at: now, shows: 1 }));
     } else {
-      const raw = storage()?.getItem(CHANGE_KEY);
-      const change = raw ? JSON.parse(raw) as { from?: unknown; to?: unknown; at?: unknown } : null;
-      const recent = change && change.to === applied.language && typeof change.at === 'number' && now - change.at >= 0
-        && now - change.at < ENTRY_CHANGE_WINDOW_MS;
-      const earlier = recent ? entryLocaleHint(typeof change.from === 'string' ? change.from : null) : null;
+      const earlier = recentChange(applied.language, now)?.from ?? null;
       if (earlier) from = earlier;
     }
   } catch { /* storage unavailable: describe this application alone */ }
-  const current = REPLY_LOCALE_LABELS[applied.language];
-  return { title: `AI 回复语言：${current}`, description: from === applied.language
+  return noticeText(from, applied.language);
+}
+
+function noticeText(from: ReplyLocale, language: ReplyLocale) {
+  const current = REPLY_LOCALE_LABELS[language];
+  return { title: `AI 回复语言：${current}`, description: from === language
     ? '按你进入的页面设置。可在右上角「语言」修改。'
     : `已按你进入的页面，从${REPLY_LOCALE_LABELS[from]}改为${current}。可在右上角「语言」修改。` };
+}
+
+/** The change recorded within the last minute (to `language` when given), or null. */
+function recentChange(language: ReplyLocale | null, now: number) {
+  const raw = storage()?.getItem(CHANGE_KEY);
+  const change = raw ? JSON.parse(raw) as { from?: unknown; to?: unknown; at?: unknown; shows?: unknown } : null;
+  if (!change || typeof change.at !== 'number' || now - change.at < 0 || now - change.at >= ENTRY_CHANGE_WINDOW_MS) return null;
+  const from = entryLocaleHint(typeof change.from === 'string' ? change.from : null);
+  const to = entryLocaleHint(typeof change.to === 'string' ? change.to : null);
+  return from && to && (!language || to === language) ? { from, to, at: change.at, shows: typeof change.shows === 'number' ? change.shows : 1 } : null;
+}
+
+/**
+ * The page that stays after the two loads (see above) may find nothing to apply: when the server already saved the language
+ * (`entry_notice`) or the first load finished applying it, the first load's notice died with that page. So a document that has
+ * not announced anything itself repeats a change made within the last minute, once: the second load. Null otherwise.
+ */
+export function repeatedEntryNotice(now = Date.now()): { title: string; description: string } | null {
+  try {
+    const change = recentChange(null, now);
+    if (!change || change.shows >= 2) return null;
+    storage()?.setItem(CHANGE_KEY, JSON.stringify({ from: change.from, to: change.to, at: change.at, shows: 2 }));
+    return noticeText(change.from, change.to);
+  } catch { return null; }
 }
 
 /** The `entry_notice=<from>.<to>` the server adds after saving a public page's language itself (lib/entry-language-server). */

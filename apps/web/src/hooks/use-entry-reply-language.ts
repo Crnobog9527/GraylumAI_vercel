@@ -4,7 +4,9 @@
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { usePathname } from 'next/navigation';
-import { clearEntryLanguage, entryLanguageNotice, parseEntryNotice, pendingEntryLanguage, rememberEntryLanguage } from '@/lib/entry-language';
+import {
+  clearEntryLanguage, entryLanguageNotice, parseEntryNotice, pendingEntryLanguage, rememberEntryLanguage, repeatedEntryNotice,
+} from '@/lib/entry-language';
 import { createClient } from '@/lib/supabase';
 import { trpc } from '@/trpc/client';
 
@@ -20,6 +22,8 @@ function dropParam(name: string) {
 
 // One application at a time: a navigation while the first one runs must not apply (and announce) it twice.
 let applying = false;
+// This document has announced a language change: the repeat of an earlier one (the second load) is for documents that have not.
+let announced = false;
 
 /** Keeps the language a public page's login or sign-up link carried, and applies it (see lib/entry-language.ts) once the user
  * is signed in, then says which language AI replies now use. Checked again on every navigation, because a password sign-in
@@ -39,6 +43,7 @@ export function useEntryReplyLanguage() {
         clearEntryLanguage();
         void utils.user.getUserProfile.invalidate();
         const notice = entryLanguageNotice(saved);
+        announced = true;
         toast.success(notice.title, { description: notice.description });
         return;
       }
@@ -46,6 +51,11 @@ export function useEntryReplyLanguage() {
     // Kept in the address until applied: a reload on the way between the two sites must not lose it.
     rememberEntryLanguage(params.get('entry_lang'));
     const language = pendingEntryLanguage();
+    if (!language && !announced) {
+      // The first load's notice died with it (a new root layout reloads the page): this load says it once more.
+      const repeat = repeatedEntryNotice();
+      if (repeat) { announced = true; toast.success(repeat.title, { description: repeat.description }); }
+    }
     if (!language || applying) return;
     let live = true, mine = false;
     createClient().auth.getSession()
@@ -57,6 +67,7 @@ export function useEntryReplyLanguage() {
         dropParam('entry_lang');
         await utils.user.getUserProfile.invalidate();
         const notice = entryLanguageNotice(applied);
+        announced = true;
         toast.success(notice.title, { description: notice.description });
       })
       // Kept for the next page: a failed attempt is retried there while the hint is still fresh.
