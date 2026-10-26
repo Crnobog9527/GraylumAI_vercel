@@ -35,7 +35,7 @@ describe('compare stop billing in a real browser (synthetic, no paid calls)', ()
       export const trpc = { useUtils: () => utils, fusionCompare: {
         read: { useQuery: (_input, options) => useQuery({ ...options, queryKey: ['compare'], queryFn: async () => {
           s.reads++;
-          if (s.stopped && ++s.stopReads >= 2) s.view = s.final;
+          if (s.stopped && ++s.stopReads >= 2) { s.view = s.final; s.records = s.finalRecords; }
           return structuredClone(s.view);
         } }) },
         stop: { useMutation: options => { const m = useMutation({ ...options, mutationFn: async () => {
@@ -111,8 +111,9 @@ describe('compare stop billing in a real browser (synthetic, no paid calls)', ()
     const pending = { state: 'stopped', chargedCredits: 10, columns: [finished, column(1, 'cost_pending', 0, null)] };
     // Deliberately stale aggregate: the visible sum must come from the same snapshot as its columns.
     const final = { state: 'stopped', chargedCredits: 10, columns: [finished, column(1, 'settled', 10, 'user_stopped')] };
-    const page = await open({ view: { state: 'running', columns: [finished, column(1, 'dispatched', 0, null)] }, pending, final });
+    const page = await open({ view: { state: 'running', columns: [finished, column(1, 'dispatched', 0, null)] }, pending, final, records: [], finalRecords: rows });
     try {
+      await ui(page.getByText('共 0 条记录', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: '全部停止', exact: true }).click();
       await ui(page.getByRole('article', { name: 'GPT', exact: true })).toContainText('暂时冻结 64 积分');
       await ui(page.getByText('本次对比共扣', { exact: false })).toHaveCount(0);
