@@ -142,13 +142,11 @@ it('P1 regression: after the migration a signed-in user still updates their own 
   const direct = await session.from('profiles').update({ nickname: '直接改' }).eq('id', user.id).select('nickname');
   expect(direct.error).toBeNull();
   expect(direct.data).toEqual([{ nickname: '直接改' }]);
-  // Open accounts keep both RPC paths: own JWT and service_role.
-  const checkin = await session.rpc('claim_daily_checkin', { p_user_id: user.id });
-  expect(checkin.error).toBeNull();
-  expect(checkin.data).toMatchObject([{ already_claimed: false, reward_credits: 5 }]);
-  expect(await creditsOf(user.id)).toBe(45);
-  const serviceCheckin = await admin.rpc('claim_daily_checkin', { p_user_id: user.id });
-  expect(serviceCheckin.data).toMatchObject([{ already_claimed: true }]);
+  // Daily check-in was retired (0396): the RPC is gone for both paths and credits do not move.
+  const creditsBefore = await creditsOf(user.id);
+  expect((await session.rpc('claim_daily_checkin', { p_user_id: user.id })).error).not.toBeNull();
+  expect((await admin.rpc('claim_daily_checkin', { p_user_id: user.id })).error).not.toBeNull();
+  expect(await creditsOf(user.id)).toBe(creditsBefore);
   const { error: convoError } = await session.from('conversations')
     .insert({ user_id: user.id, title: 'Synthetic PR-A conversation' }).select('id').single();
   expect(convoError).toBeNull();
@@ -190,10 +188,9 @@ it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and clie
   expect(refresh.error).not.toBeNull();
   await expect(signIn(owner.email)).rejects.toBeTruthy();
   await expect(account.erasurePreview()).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'ACCOUNT_CLOSED: 账号已注销' });
-  // SECURITY DEFINER RPCs bypass RLS, so they check closure themselves (P2).
-  const checkinClosed = await session.rpc('claim_daily_checkin', { p_user_id: owner.id });
-  expect(checkinClosed.error?.message).toBe('ACCOUNT_CLOSED');
-  expect((await admin.rpc('claim_daily_checkin', { p_user_id: owner.id })).error?.message).toBe('ACCOUNT_CLOSED');
+  // The retired check-in RPC cannot be called by a closed account either, and credits stay put.
+  expect((await session.rpc('claim_daily_checkin', { p_user_id: owner.id })).error).not.toBeNull();
+  expect((await admin.rpc('claim_daily_checkin', { p_user_id: owner.id })).error).not.toBeNull();
   expect(await creditsOf(owner.id)).toBe(40);
   expect((await admin.from('conversations').select('is_deleted').eq('id', convo?.id).single()).data)
     .toEqual({ is_deleted: 'false' });
