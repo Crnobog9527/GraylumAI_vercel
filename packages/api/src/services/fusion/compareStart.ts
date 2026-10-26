@@ -2,8 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PositioningClassifier } from '../runtime/positioningGate';
-import { decimal } from '../bill2/decimal';
-import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, compareRpc, replayCompareGroup,
+import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, compareRpc, overCompareBudget, replayCompareGroup,
   type CompareAdmitted } from './compareAdmission';
 import { judgeCompareGate, readCompareGate, staticCompareGate } from './compareGate';
 import { compareRequest, snapshotHash, workspaceDependencies, type CompareParts } from './compareSnapshot';
@@ -49,7 +48,7 @@ export async function estimateCompare(deps: CompareDeps, choice: CompareChoice):
   const { refundCapReached } = staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
   const built = await buildCompareColumns({ admin: deps.admin, actorId: deps.actorId, modelIds: choice.modelIds,
     request: upperRequest(choice.parts), answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
-  const overBudget = !settings.maxBudgetUsd || built.totalUsd > decimal(settings.maxBudgetUsd);
+  const overBudget = overCompareBudget(built, settings.maxBudgetUsd);
   return { credits: built.totalCredits, tooLarge: built.tooLarge, refundCapReached, overBudget,
     columns: built.columns.map(column => ({ modelId: column.modelId, credits: column.upperCredits, usd: column.upperUsd })) };
 }
@@ -152,7 +151,7 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
         request: compareRequest({ ...choice.parts, positioningFallback: gate.gated && !gate.capped }),
         answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
       if (sized.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
-      if (!settings.maxBudgetUsd || sized.totalUsd > decimal(settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
+      if (overCompareBudget(sized, settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
       assertQuoteCovers(sized.columns, choice.shown);
     } catch (error) {
       await endQuietly(compareId);

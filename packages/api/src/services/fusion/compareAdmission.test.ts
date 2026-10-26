@@ -189,6 +189,14 @@ describe('compare group admission', () => {
       .rejects.toThrow('FUSION_COMPARE_PRICE_CHANGED'); // provider cost above the shown bound
     expect(state.rpcs.filter(call => call.name === 'fusion_group_admit' && (call.args.p_runs as unknown[]).length > 0)).toHaveLength(0);
   });
+  it('re-checks the user-paid budget at the final admission: a budget lowered after the quote holds nothing (Owner 2026-10-26)', async () => {
+    state.replies.set('fusion_group_admit', reply(false));
+    state.compare = { ...state.compare, maxBudgetUsd: '0.29' }; // 29 credits at 100/USD; the three columns need 30
+    await expect(admit()).rejects.toThrow('FUSION_BUDGET_EXCEEDED');
+    expect(state.rpcs.filter(call => call.name === 'fusion_group_admit' && (call.args.p_runs as unknown[]).length > 0)).toHaveLength(0);
+    state.compare = { ...state.compare, maxBudgetUsd: '0.3' }; // exactly 30 credits is within the budget
+    await expect(admit()).resolves.toMatchObject({ replayed: false });
+  });
   it('refuses the whole compare when any chosen model cannot take the request', async () => {
     state.tooLarge.add(models[2]!);
     await expect(admit()).rejects.toThrow('FUSION_COMPARE_INPUT_TOO_LARGE');
