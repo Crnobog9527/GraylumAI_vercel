@@ -21,12 +21,22 @@ BEGIN
   OR r.lease_expires_at<=clock_timestamp() THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_LEASE_LOST';END IF;
  allowed:=publish_monitor_review_allowed(r.actor_id) AND r.created_at>=(SELECT auto_review_enabled_at
   FROM social_monitor_settings WHERE actor_id=r.actor_id);
- SELECT * INTO x FROM runtime_executions WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id;
+ IF p_action='skip' THEN
+  -- Serialize the terminal decision with a result commit. Native admission locks session -> review,
+  -- so never wait for its execution row while owning the review: a busy owner makes this RPC retry.
+  SELECT * INTO x FROM runtime_executions WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id FOR UPDATE NOWAIT;
+ ELSE
+  SELECT * INTO x FROM runtime_executions WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id;
+ END IF;
  IF x.id IS NOT NULL THEN
   UPDATE social_review_runs SET runtime_execution_id=x.id,bill2_run_id=x.billing_run_id WHERE id=r.id;
  END IF;
- IF p_action='observe' AND x.state='completed' THEN
+ IF p_action IN ('observe','skip') AND x.state='completed' THEN
   UPDATE social_review_runs SET status='completed',finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
+ ELSIF p_action='skip' AND x.result IS NOT NULL THEN
+  -- The owner completed after expiry was observed, but billing can still be cost_pending.
+  -- Keep the original claim so native financial recovery and the next observe can publish it.
+  RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'executionId',x.id,'state',x.state,'expired',false);
  ELSIF p_action='skip' OR p_action='observe' AND x.state IN ('cancelled','failed') THEN
   -- An unknown financial outcome keeps the claim: existing Runtime recovery owns the held credits.
   IF x.id IS NOT NULL AND NOT coalesce((SELECT closed FROM bill2_runs WHERE id=x.billing_run_id),false) THEN
@@ -62,6 +72,7 @@ BEGIN
     (SELECT t.result->'review' FROM runtime_tool_calls t WHERE t.execution_id=x.id AND t.result->>'kind'='my_posts'
      AND t.result->>'window_days'='90' AND runtime_workspace_posts_visible(a,t.result) ORDER BY (t.result->>'window_days')::int DESC,t.call_id DESC LIMIT 1) END,
    'notice',CASE WHEN r.status='completed' THEN '本周复盘已生成'
+    WHEN r.status='claimed' AND x.result IS NOT NULL AND x.state='cost_pending' THEN '本周复盘已生成，费用正在核对。'
     WHEN r.skip_reason='BALANCE_LOW' THEN '余额不足，未复盘'
     WHEN r.skip_reason='RUNTIME_INTERRUPTED' THEN CASE
      WHEN b.id IS NULL OR b.state IN ('settled','refunded')

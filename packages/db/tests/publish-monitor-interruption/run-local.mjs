@@ -141,6 +141,64 @@ try{
  pendingHistory=(await rpc(c,'publish_monitor_reviews',unknown.actor)).find(r=>r.id===unknown.review.id);
  assert.match(pendingHistory.notice,/实际结算/);
  report.checks.push('unknown costs show interruption plus financial reconciliation; a late native receipt settles once and updates the notice');
+ // The result may commit after expiry was observed but before native cancellation gets its locks.
+ const saved=await fixture();
+ await rpc(c,'runtime_execution',saved.actor,saved.execution,'owner_session',
+  {epoch:saved.epoch,value:{action:'freeze',items:[]}});
+ await debit(saved);
+ const late=await rpc(c,'bill2_claim',saved.actor,saved.run,2,{...saved.claimPayload,runtimeEpoch:saved.epoch});
+ await rpc(c,'bill2_dispatch',saved.actor,saved.run,late.id,late.dispatchToken);
+ const tool={callId:'saved-review-data',name:'read_source',arguments:{query:'my_posts:90'}};
+ await rpc(c,'runtime_execution',saved.actor,saved.execution,'owner_tool',
+  {epoch:saved.epoch,value:{...tool,action:'claim',result:null}});
+ await rpc(c,'runtime_execution',saved.actor,saved.execution,'owner_tool',
+  {epoch:saved.epoch,value:{...tool,action:'complete',result:{kind:'my_posts',status:'available',window_days:90,
+   dependencies:[],review:{rows:[{views:12}]}}}});
+ await rpc(c,'runtime_execution',saved.actor,saved.execution,'owner_session',
+  {epoch:saved.epoch,value:{action:'append',items:[{role:'assistant',content:'KEEP_GENERATED_REVIEW'}],batch:0}});
+ await stale(saved);
+ assert.equal((await step(saved.review,'observe')).expired,true);
+ const completed=await rpc(c,'runtime_execution',saved.actor,saved.execution,'complete',
+  {epoch:saved.epoch,value:{kind:'usable_result',body:'KEEP_GENERATED_REVIEW',
+   evidenceRef:saved.execution,evidenceHash:'a'.repeat(64)}});
+ assert.equal(completed.state,'cost_pending');
+ assert.equal((await rpc(c,'runtime_cancel',saved.actor,saved.execution)).state,'cost_pending');
+ const pendingMoney=await ledger(saved);
+ const guarded=await step(saved.review,'skip','RUNTIME_INTERRUPTED');
+ assert.equal(guarded.state,'cost_pending');
+ assert.equal(await one('SELECT status v FROM social_review_runs WHERE id=$1',[saved.review.id]),'claimed',
+  'saved output awaiting costs must remain on the normal completion path, never permanently skipped');
+ assert.match((await rpc(c,'publish_monitor_reviews',saved.actor)).find(r=>r.id===saved.review.id).notice,/已生成，费用正在核对/);
+ assert.deepEqual(await ledger(saved),pendingMoney);
+ assert.equal((await step(saved.review,'observe')).expired,false);
+ report.checks.push('a real completion winning expiry with unsettled costs preserves its claimed review and original money facts');
+ await receipt(c,saved,late,'0.001');
+ assert.equal((await rpc(c,'runtime_financial_recovery',saved.actor,saved.execution,true)).state,'completed');
+ // The financial worker can also finish between cancel's response and the final review transaction.
+ await step(saved.review,'skip','RUNTIME_INTERRUPTED');
+ const savedHistory=(await rpc(c,'publish_monitor_reviews',saved.actor)).find(r=>r.id===saved.review.id);
+ assert.equal(savedHistory.status,'completed');assert.equal(savedHistory.body,'KEEP_GENERATED_REVIEW');
+ assert.deepEqual(savedHistory.tables,{rows:[{views:12}]});
+ const savedMoney=await ledger(saved);assert.equal(savedMoney.balance,990);assert.equal(savedMoney.sum,990);
+ assert.equal(savedMoney.charged,10);assert.equal(savedMoney.spends,2);
+ await receipt(c,saved,late,'0.001');await rpc(c,'runtime_financial_recovery',saved.actor,saved.execution,true);
+ assert.deepEqual(await ledger(saved),savedMoney);
+ report.checks.push('late receipt recovery makes the paid saved report visible; completion beats skip and replay never charges twice');
+ // Finalization must not read an execution row while its owner is still committing it.
+ const busy=await fixture();await debit(busy);await stale(busy);
+ await rpc(c,'runtime_cancel',busy.actor,busy.execution);
+ const params=c.connectionParameters;
+ const writer=new c.constructor({connectionString:`postgres://postgres@127.0.0.1:${params.port}/${params.database}`});
+ await writer.connect();
+ try{
+  await writer.query('BEGIN');
+  await writer.query('SELECT id FROM runtime_executions WHERE id=$1 FOR UPDATE',[busy.execution]);
+  await assert.rejects(step(busy.review,'skip','RUNTIME_INTERRUPTED'),error=>error.code==='55P03');
+  assert.equal(await one('SELECT status v FROM social_review_runs WHERE id=$1',[busy.review.id]),'claimed');
+ }finally{await writer.query('ROLLBACK');await writer.end();}
+ await step(busy.review,'skip','RUNTIME_INTERRUPTED');
+ assert.equal(await one('SELECT status v FROM social_review_runs WHERE id=$1',[busy.review.id]),'skipped');
+ report.checks.push('a concurrent result writer makes skip retry without waiting; retry terminates only the empty result');
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
  const before=await one(catalog);await c.query(migration);await c.query(migration);assert.deepEqual(await one(catalog),before);

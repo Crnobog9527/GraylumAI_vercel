@@ -19,6 +19,7 @@ BEGIN
     (SELECT t.result->'review' FROM runtime_tool_calls t WHERE t.execution_id=x.id AND t.result->>'kind'='my_posts'
      AND t.result->>'window_days'='90' AND runtime_workspace_posts_visible(a,t.result) ORDER BY (t.result->>'window_days')::int DESC,t.call_id DESC LIMIT 1) END,
    'notice',CASE WHEN r.status='completed' THEN '本周复盘已生成'
+    WHEN r.status='claimed' AND x.result IS NOT NULL AND x.state='cost_pending' THEN '本周复盘已生成，费用正在核对。'
     WHEN r.skip_reason='BALANCE_LOW' THEN '余额不足，未复盘'
     WHEN r.skip_reason='RUNTIME_INTERRUPTED' THEN CASE
      WHEN b.id IS NULL OR b.state IN ('settled','refunded')
