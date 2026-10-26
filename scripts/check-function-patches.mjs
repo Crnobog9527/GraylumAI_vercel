@@ -41,7 +41,35 @@ export function withoutFunctionBodies(sql) {
   }
 }
 
-const withoutLineComments = sql => sql.replace(/--[^\n]*/g, '');
+/**
+ * Removes `--` comments but keeps string literals whole, so a `--` inside a string ('%-- patched%', $m$…$m$) does not
+ * hide the SQL after it. Single-quoted strings and named dollar-quoted strings count as literals; a bare `$$` is code
+ * (a DO block), where comments are still removed.
+ */
+export function withoutLineComments(sql) {
+  let out = '';
+  for (let i = 0; i < sql.length;) {
+    if (sql[i] === '-' && sql[i + 1] === '-') {
+      while (i < sql.length && sql[i] !== '\n') i += 1;
+    } else if (sql[i] === "'") {
+      let end = i + 1;
+      while (end < sql.length && !(sql[end] === "'" && sql[end + 1] !== "'")) end += sql[end] === "'" ? 2 : 1;
+      out += sql.slice(i, end + 1);
+      i = end + 1;
+    } else {
+      const tag = /^\$[A-Za-z_][A-Za-z_0-9]*\$/.exec(sql.slice(i, i + 64))?.[0];
+      const end = tag ? sql.indexOf(tag, i + tag.length) : -1;
+      if (tag && end >= 0) {
+        out += sql.slice(i, end + tag.length);
+        i = end + tag.length;
+      } else {
+        out += sql[i];
+        i += 1;
+      }
+    }
+  }
+  return out;
+}
 
 /** True when the migration reads a function's text and edits it as text. */
 export function patchesFunctionText(sql) {

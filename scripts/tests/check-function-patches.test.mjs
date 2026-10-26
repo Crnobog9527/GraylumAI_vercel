@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { FIRST_CHECKED, findPatches, migrationNumber, patchesFunctionText, withoutFunctionBodies } from '../check-function-patches.mjs';
+import { FIRST_CHECKED, findPatches, withoutLineComments, migrationNumber, patchesFunctionText, withoutFunctionBodies } from '../check-function-patches.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const old = name => readFile(path.join(repositoryRoot, 'packages/db/migrations', name), 'utf8');
@@ -58,6 +58,16 @@ test('checks migrations from FIRST_CHECKED on and leaves older ones alone', () =
   assert.equal(migrationNumber('README.md'), null);
   const files = new Map([['0397_old.sql', PATCH], ['0398_new.sql', PATCH], ['0399_whole.sql', GUARDED]]);
   assert.deepEqual(findPatches(files), ['0398_new.sql']);
+});
+
+test('a -- inside a string literal does not hide the patch after it', () => {
+  assert.equal(patchesFunctionText(`DO $$ DECLARE source text := pg_get_functiondef('public.f()'::regprocedure);
+BEGIN IF source NOT LIKE '%-- patched%' THEN EXECUTE replace(source, 'RETURN 1', 'RETURN 2'); END IF; END $$;`), true);
+  assert.equal(patchesFunctionText(`DO $$ DECLARE source text := pg_get_functiondef('public.f()'::regprocedure);
+BEGIN IF source NOT LIKE $m$%-- patched%$m$ THEN EXECUTE replace(source, 'a', 'b'); END IF; END $$;`), true);
+  assert.equal(patchesFunctionText(`DO $$ DECLARE source text := pg_get_functiondef('f()'::regprocedure);
+BEGIN IF position('it''s -- x' IN source) = 0 THEN EXECUTE replace(source, 'a', 'b'); END IF; END $$;`), true);
+  assert.equal(withoutLineComments("SELECT 1; -- replace(x)\nSELECT '--';"), "SELECT 1; \nSELECT '--';");
 });
 
 test('flags a patch helper written as a function', () => {
