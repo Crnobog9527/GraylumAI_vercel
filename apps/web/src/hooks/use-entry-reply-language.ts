@@ -20,6 +20,14 @@ function dropParam(name: string) {
   window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
 }
 
+/** Said after the current commit: this hook mounts before the Toaster (RootDocument), whose subscription is made by its own
+ * effect in the same commit, and a toast sent before that is dropped (the notice for an address that already carries
+ * entry_notice is sent synchronously, so it never showed). */
+function announce(notice: { title: string; description: string }) {
+  announced = true;
+  setTimeout(() => toast.success(notice.title, { description: notice.description }), 0);
+}
+
 // One application at a time: a navigation while the first one runs must not apply (and announce) it twice.
 let applying = false;
 // This document has announced a language change: the repeat of an earlier one (the second load) is for documents that have not.
@@ -43,8 +51,7 @@ export function useEntryReplyLanguage() {
         clearEntryLanguage();
         void utils.user.getUserProfile.invalidate();
         const notice = entryLanguageNotice(saved);
-        announced = true;
-        toast.success(notice.title, { description: notice.description });
+        announce(notice);
         return;
       }
     }
@@ -54,7 +61,7 @@ export function useEntryReplyLanguage() {
     if (!language && !announced) {
       // The first load's notice died with it (a new root layout reloads the page): this load says it once more.
       const repeat = repeatedEntryNotice();
-      if (repeat) { announced = true; toast.success(repeat.title, { description: repeat.description }); }
+      if (repeat) announce(repeat);
     }
     if (!language || applying) return;
     let live = true, mine = false;
@@ -67,8 +74,7 @@ export function useEntryReplyLanguage() {
         dropParam('entry_lang');
         await utils.user.getUserProfile.invalidate();
         const notice = entryLanguageNotice(applied);
-        announced = true;
-        toast.success(notice.title, { description: notice.description });
+        announce(notice);
       })
       // Kept for the next page: a failed attempt is retried there while the hint is still fresh.
       .catch(() => undefined)
