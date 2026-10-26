@@ -20,7 +20,9 @@ DO $$ BEGIN
     RAISE EXCEPTION 'pack values/types differ'; END IF;
   IF EXISTS (SELECT 1 FROM membership_plans WHERE stripe_monthly_price_id IS NOT NULL OR stripe_yearly_price_id IS NOT NULL)
     OR EXISTS (SELECT 1 FROM credit_packages WHERE stripe_price_id IS NOT NULL)
-    OR EXISTS (SELECT 1 FROM payment_provider_refs) OR EXISTS (SELECT 1 FROM profiles) THEN
+    OR EXISTS (SELECT 1 FROM payment_provider_refs)
+    OR (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM profiles p)
+      IS DISTINCT FROM (SELECT value FROM seed_identities_before) THEN
     RAISE EXCEPTION 'seed created identity/provider mapping'; END IF;
   IF NOT coalesce((model_identity_guard_config()->>'enabled')::boolean,false) THEN
     RAISE EXCEPTION 'identity guard default not enabled'; END IF;

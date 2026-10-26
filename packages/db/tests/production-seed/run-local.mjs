@@ -85,6 +85,8 @@ END $$;`;
 const cases = [
   `CREATE TEMP TABLE seed_schema_before AS ${objects};`,
   `CREATE TEMP TABLE seed_empty_before AS ${state};`,
+  // Historical migrations may seed diagnostic rows; this seed must neither add nor change identities.
+  `CREATE TEMP TABLE seed_identities_before AS SELECT jsonb_agg(to_jsonb(p) ORDER BY id) AS value FROM profiles p;`,
   // On the genuinely empty file-built catalog, the committed template fails before all writes.
   fail(seed, 'PRODUCTION_SEED_REPLACE_REQUIRED: %'),
   unchanged('seed_empty_before'),
