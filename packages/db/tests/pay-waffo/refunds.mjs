@@ -115,22 +115,33 @@ export async function refundCases({ admin, service, connect }) {
   const one = await connect(), two = await connect();
   await one.query('SET ROLE service_role'); await two.query('SET ROLE service_role');
   await admin.query('BEGIN');
-  await admin.query('SELECT 1 FROM profiles WHERE id=$1 FOR UPDATE',[target.user]);
+  const locked = await admin.query('SELECT ctid::text tid FROM profiles WHERE id=$1 FOR UPDATE',[target.user]);
+  const [page,tuple] = locked.rows[0].tid.slice(1,-1).split(',').map(Number);
   const concurrent = [run(one,target),run(two,target)];
   let blocked = false;
-  // MAINT-P1b: wait until both sessions are queued on the lock, at most 10 s (was a fixed 100 x 10 ms = 1 s that
-  // CI load could miss). The assertion below is unchanged. Owner approved: "同意把 pay-waffo 退款测试的锁等待改成最多 10 秒的条件等待".
+  // pg_stat_activity caches query/state in this open transaction. pg_locks is live:
+  // one refund owns this tuple lock but waits for admin's transaction; the other
+  // refund queues on that exact tuple behind it. Either connection may arrive first.
   for (const deadline = Date.now() + 10000; Date.now() < deadline;) {
-    const waiting = await admin.query(`SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock'
-      AND query LIKE 'SELECT * FROM pay_waffo_atomic_refund_termination_clawback_fresh%'`);
-    if (waiting.rows[0].n===2) { blocked=true; break; }
+    const waiting = await admin.query(`SELECT EXISTS (
+      SELECT 1 FROM pg_locks barrier
+      JOIN pg_locks first_wait ON first_wait.locktype='transactionid'
+        AND first_wait.transactionid=barrier.transactionid AND NOT first_wait.granted
+        AND first_wait.mode='ShareLock' AND first_wait.pid=ANY($2::int[])
+      JOIN pg_locks first_tuple ON first_tuple.pid=first_wait.pid
+        AND first_tuple.locktype='tuple' AND first_tuple.relation='public.profiles'::regclass
+        AND first_tuple.page=$3 AND first_tuple.tuple=$4
+        AND first_tuple.mode='AccessExclusiveLock' AND first_tuple.granted
+      JOIN pg_locks second_wait ON second_wait.locktype='tuple'
+        AND second_wait.database=first_tuple.database AND second_wait.relation=first_tuple.relation
+        AND second_wait.page=first_tuple.page AND second_wait.tuple=first_tuple.tuple
+        AND second_wait.pid=ANY($2::int[]) AND second_wait.pid<>first_wait.pid
+        AND second_wait.mode='AccessExclusiveLock' AND NOT second_wait.granted
+      WHERE barrier.pid=$1 AND barrier.locktype='transactionid'
+        AND barrier.mode='ExclusiveLock' AND barrier.granted
+    ) AS blocked`,[admin.processID,[one.processID,two.processID],page,tuple]);
+    if (waiting.rows[0].blocked) { blocked=true; break; }
     await new Promise(resolve=>setTimeout(resolve,10));
-  }
-  if (!blocked) {
-    const observer = await connect();
-    const state = await observer.query(`SELECT pid,state,wait_event_type,wait_event,pg_blocking_pids(pid) blockers
-      FROM pg_stat_activity WHERE pid=ANY($1::int[])`,[[one.processID,two.processID]]);
-    console.error('refund barrier live state',JSON.stringify(state.rows));
   }
   assert.ok(blocked,'two real refund sessions wait on the profile barrier');
   await admin.query('UPDATE subscription_credit_grants SET consumed_amount=30 WHERE id=$1',[target.grant]);
