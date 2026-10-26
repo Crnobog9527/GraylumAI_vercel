@@ -131,7 +131,7 @@ try {
       S1F1_ANON_JWT: jwt('anon'),
     },
   });
-  console.log('PASS S1-FIX-1: real user/settings/checkin/admin routers against local PostgREST');
+  console.log('PASS S1-FIX-1: real user/settings/admin routers against local PostgREST');
   const afterOperations = rows();
   apply(rollback);
   assert.deepEqual(snapshot(), before, 'exact baseline ACL and policies restored');

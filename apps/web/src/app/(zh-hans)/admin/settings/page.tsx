@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { trpc } from '@/trpc/client';
 import {
-  Save, RefreshCw, Settings, CreditCard, Gift, Sliders, Crown,
+  Save, RefreshCw, Settings, CreditCard, Sliders, Crown,
   AlertTriangle, MessageSquare
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
@@ -55,21 +55,12 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   v3_summary_model_id: { value: '', type: 'string', label: '步骤成果整理模型', description: '独立于用户对话模型；仅负责整理成果。未配置或不可用时保留原成果，不改用主力模型。' },
   v3_summary_max_tokens: { value: '2048', type: 'number', label: '整理输出上限（tokens）', description: '128–4096；约束整理模型的单次输出。过小可能无法生成完整成果。' },
   search_surcharge_credits: { value: '', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的积分；留空 = 未配置：联网搜索和研究不可用' },
-
-  // Checkin (6项)
-  checkin_day1: { value: '5', type: 'number', label: '签到第1天', description: '第1天签到奖励积分' },
-  checkin_day2: { value: '10', type: 'number', label: '签到第2天', description: '第2天签到奖励积分' },
-  checkin_day3: { value: '15', type: 'number', label: '签到第3天', description: '第3天签到奖励积分' },
-  checkin_day4: { value: '20', type: 'number', label: '签到第4天', description: '第4天签到奖励积分' },
-  checkin_day5: { value: '25', type: 'number', label: '签到第5天', description: '第5天签到奖励积分（之后重置）' },
-  checkin_monthly_bonus: { value: '50', type: 'number', label: '月度全勤奖', description: '当月签到满30天额外奖励' },
 };
 
 // 设置分组
 const settingGroups = {
   general: ['site_name', 'support_email', 'maintenance_mode'],
   billing: ['new_user_credits', 'report_fixed_price_credits', 'billing_credits_per_usd', 'billing_token_price_multiplier'],
-  checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
   experience: ['home_show_onboarding', 'home_show_featured_modules'],
   features: ['primary_model_id', 'v3_summary_model_id', 'v3_summary_max_tokens', 'search_surcharge_credits', 'max_input_characters'],
 };
@@ -272,10 +263,6 @@ export default function AdminSettingsPage() {
             <CreditCard className="h-4 w-4" />
             积分计费
           </TabsTrigger>
-          <TabsTrigger value="checkin" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
-            <Gift className="h-4 w-4" />
-            签到福利
-          </TabsTrigger>
           <TabsTrigger value="experience" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <MessageSquare className="h-4 w-4" />
             页面体验
@@ -364,21 +351,6 @@ export default function AdminSettingsPage() {
                 </p>
                 {renderSettingGroup(['first_purchase_bonus_percent'])}
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Checkin Tab */}
-        <TabsContent value="checkin">
-          <Card data-testid="admin-settings-checkin-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-            <CardHeader>
-              <CardTitle style={{ color: 'var(--text-primary)' }}>签到系统</CardTitle>
-              <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                配置每日签到奖励（5天一循环）
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {renderSettingGroup(settingGroups.checkin)}
             </CardContent>
           </Card>
         </TabsContent>

@@ -3,16 +3,9 @@
 import { memo, useEffect, useState } from 'react';
 import {
   Pencil, Crown, Coins, Plus, RefreshCw, Key, Headphones,
-  Loader2, Check, X, MessageCircle, CalendarCheck
+  Loader2, Check, X, MessageCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
 import { summaryStat } from './summaryStat';
 import { CREDITS_SUMMARY_QUERY_OPTIONS, SummaryRetryButton } from './SummaryRetry';
@@ -390,125 +383,23 @@ export const UsageStatsCard = memo(function UsageStatsCard({ user }: { user: Moc
 
 // 快捷操作卡片
 export const QuickActionsCard = memo(function QuickActionsCard({
-  user,
   onNavigateToTickets,
   onNavigateToSecurity,
-  onUserUpdate,
 }: {
-  user: MockUser;
   onNavigateToTickets?: () => void;
   onNavigateToSecurity?: () => void;
-  onUserUpdate?: (user: MockUser) => void;
 }) {
-  const utils = trpc.useUtils();
-  const [checkinDialogOpen, setCheckinDialogOpen] = useState(false);
-  const [checkinFeedback, setCheckinFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
-  const { data: checkinStatus, isLoading: isCheckinLoading } =
-    trpc.checkin.getCheckinStatus.useQuery(undefined, {
-      refetchOnWindowFocus: false,
-    });
-  const claimCheckinMutation = trpc.checkin.claimDailyCheckin.useMutation({
-    onSuccess: async (result) => {
-      await Promise.all([
-        utils.checkin.getCheckinStatus.invalidate(),
-        utils.credits.getBalance.invalidate(),
-        utils.credits.getCreditTransactions.invalidate(),
-        utils.credits.getCreditsSummary.invalidate(),
-        utils.user.getUserProfile.invalidate(),
-        utils.user.getUserUsageStats.invalidate(),
-      ]);
-
-      if (result.alreadyClaimed) {
-        setCheckinFeedback({ tone: 'success', text: '今天的签到奖励已经领取过了。' });
-        return;
-      }
-
-      if (result.totalReward > 0) {
-        onUserUpdate?.({
-          ...user,
-          credits: (user?.credits ?? 0) + result.totalReward,
-        });
-      }
-
-      const bonusText = result.monthlyBonusCredits > 0
-        ? `，其中包含月度全勤奖 ${result.monthlyBonusCredits} 积分`
-        : '';
-
-      setCheckinFeedback({
-        tone: 'success',
-        text: `签到成功，获得 ${result.totalReward} 积分${bonusText}。`,
-      });
-    },
-  });
-  const handleClaimCheckin = async () => {
-    setCheckinFeedback(null);
-
-    try {
-      await claimCheckinMutation.mutateAsync();
-    } catch (error) {
-      setCheckinFeedback({
-        tone: 'error',
-        text: getSafeErrorMessage(error, '签到失败，请稍后重试。'),
-      });
-    }
-  };
-
   return (
-    <>
-      <div
-        className="rounded-2xl p-6"
-        style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-primary)',
-          contain: 'layout paint',
-        }}
-      >
-        <h3 className="font-semibold mb-6" style={{ color: 'var(--text-primary)' }}>快捷操作</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* 每日签到 */}
-        <div
-          className="p-4 rounded-xl cursor-pointer transition-[border-color,box-shadow,transform] duration-200 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
-          data-testid="profile-checkin-card"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border-primary)'
-          }}
-          onClick={() => {
-            setCheckinFeedback(null);
-            setCheckinDialogOpen(true);
-          }}
-        >
-          <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
-            style={{ background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.24)' }}
-          >
-            <CalendarCheck className="h-5 w-5" style={{ color: '#38bdf8' }} />
-          </div>
-          <h4 className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>每日签到</h4>
-          <p className="text-sm mb-3 min-h-[40px]" style={{ color: 'var(--text-tertiary)' }}>
-            {isCheckinLoading
-              ? '正在读取今日签到状态...'
-              : checkinStatus?.hasCheckedInToday
-                ? `今天已领取 ${checkinStatus.todayRewardCredits} 积分`
-                : `今天可领取 ${checkinStatus?.nextRewardCredits ?? 0} 积分`}
-          </p>
-          <div
-            className="inline-block text-xs px-2 py-0.5 rounded mb-3"
-            style={{
-              background: checkinStatus?.hasCheckedInToday ? 'rgba(34, 197, 94, 0.1)' : 'rgba(56, 189, 248, 0.12)',
-              color: checkinStatus?.hasCheckedInToday ? 'var(--success)' : '#38bdf8',
-            }}
-          >
-            {checkinStatus?.hasCheckedInToday
-              ? `本月 ${checkinStatus.monthlyCheckinCount} 天`
-              : `第 ${checkinStatus?.currentCycleDay ?? 1} 天奖励`}
-          </div>
-          <div className="text-sm font-medium flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>
-            {checkinStatus?.hasCheckedInToday ? '查看进度' : '立即签到'}
-            <span>→</span>
-          </div>
-        </div>
-
+    <div
+      className="rounded-2xl p-6"
+      style={{
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border-primary)',
+        contain: 'layout paint',
+      }}
+    >
+      <h3 className="font-semibold mb-6" style={{ color: 'var(--text-primary)' }}>快捷操作</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* 账户安全 */}
         <div
           className="p-4 rounded-xl cursor-pointer transition-[border-color,box-shadow,transform] duration-200 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
@@ -559,142 +450,6 @@ export const QuickActionsCard = memo(function QuickActionsCard({
           </div>
         </div>
       </div>
-      </div>
-
-      <Dialog open={checkinDialogOpen} onOpenChange={setCheckinDialogOpen}>
-        <DialogContent
-          data-testid="profile-checkin-dialog"
-          className="border"
-          style={{
-            background: 'var(--bg-secondary)',
-            borderColor: 'var(--border-primary)',
-            color: 'var(--text-primary)',
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <CalendarCheck className="h-5 w-5" style={{ color: '#38bdf8' }} />
-              每日签到
-            </DialogTitle>
-            <DialogDescription style={{ color: 'var(--text-tertiary)' }}>
-              连续签到按 5 天一循环发放奖励，本月签到满 30 天还可额外获得全勤奖。
-            </DialogDescription>
-          </DialogHeader>
-
-          {isCheckinLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
-            </div>
-          ) : checkinStatus ? (
-            <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <div className="rounded-xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                  <div className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>今日状态</div>
-                  <div className="text-lg font-semibold" style={{ color: checkinStatus.hasCheckedInToday ? 'var(--success)' : '#38bdf8' }}>
-                    {checkinStatus.hasCheckedInToday ? '已签到' : '待领取'}
-                  </div>
-                </div>
-                <div className="rounded-xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                  <div className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>循环进度</div>
-                  <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-                    第 {checkinStatus.currentCycleDay} 天
-                  </div>
-                </div>
-                <div className="rounded-xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                  <div className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>本月签到</div>
-                  <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-                    {checkinStatus.monthlyCheckinCount} / 30
-                  </div>
-                </div>
-                <div className="rounded-xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                  <div className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>月度全勤奖</div>
-                  <div className="text-lg font-semibold" style={{ color: 'var(--color-primary)' }}>
-                    +{checkinStatus.monthlyBonusCredits}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                <div className="mb-3 flex items-center justify-between">
-                  <h4 className="font-medium" style={{ color: 'var(--text-primary)' }}>5 天签到奖励</h4>
-                  <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                    距全勤奖还差 {checkinStatus.daysUntilMonthlyBonus} 天
-                  </span>
-                </div>
-                <div className="grid grid-cols-5 gap-2">
-                  {Object.entries(checkinStatus.cycleRewards).map(([day, reward]) => {
-                    const dayNumber = Number(day);
-                    const isCurrent = dayNumber === checkinStatus.currentCycleDay;
-
-                    return (
-                      <div
-                        key={day}
-                        className="rounded-xl px-3 py-3 text-center"
-                        style={{
-                          background: isCurrent ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255,255,255,0.03)',
-                          border: isCurrent ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid var(--border-primary)',
-                        }}
-                      >
-                        <div className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>第 {day} 天</div>
-                        <div className="font-semibold" style={{ color: isCurrent ? '#38bdf8' : 'var(--text-primary)' }}>
-                          +{reward}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="rounded-2xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                  {checkinStatus.hasCheckedInToday
-                    ? `今天已到账 ${checkinStatus.todayRewardCredits} 积分。明天签到将进入第 ${checkinStatus.nextCycleDay} 天奖励。`
-                    : `今天签到可领取 ${checkinStatus.nextRewardCredits} 积分。完成本次签到后，本月进度将达到 ${checkinStatus.monthlyCheckinCount + 1} / 30。`}
-                </div>
-              </div>
-
-              {checkinFeedback && (
-                <div
-                  data-testid="profile-checkin-feedback"
-                  className="rounded-xl px-4 py-3 text-sm"
-                  style={{
-                    background: checkinFeedback.tone === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                    color: checkinFeedback.tone === 'success' ? '#86efac' : '#fca5a5',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                  }}
-                >
-                  {checkinFeedback.text}
-                </div>
-              )}
-
-              <Button
-                type="button"
-                data-testid="checkin-claim-button"
-                onClick={handleClaimCheckin}
-                disabled={checkinStatus.hasCheckedInToday || claimCheckinMutation.isPending}
-                className="w-full"
-                style={{
-                  background: checkinStatus.hasCheckedInToday
-                    ? 'rgba(255,255,255,0.08)'
-                    : 'linear-gradient(135deg, #38bdf8 0%, var(--color-primary) 100%)',
-                  color: checkinStatus.hasCheckedInToday ? 'var(--text-tertiary)' : 'var(--bg-primary)',
-                }}
-              >
-                {claimCheckinMutation.isPending
-                  ? '签到中...'
-                  : checkinStatus.hasCheckedInToday
-                    ? '今日已签到'
-                    : `立即签到并领取 +${checkinStatus.nextRewardCredits} 积分`}
-              </Button>
-            </div>
-          ) : (
-            <p className="py-8 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              暂时无法加载签到信息，请稍后重试。
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
-
-    </>
+    </div>
   );
 });

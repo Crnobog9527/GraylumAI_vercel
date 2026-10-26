@@ -149,58 +149,36 @@ test.describe('User Extended Flows', () => {
     }
   });
 
-  test('should expose a real daily check-in flow from the profile quick actions area', async ({ page }, testInfo) => {
+  test('should not offer daily check-in on the profile page (removed 2026-10-26)', async ({ page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    let actual = 'Daily check-in dialog rendered and handled';
+    let actual = 'Profile shows no check-in entry and the check-in procedure is gone';
 
     try {
-      steps.push('Open /profile and locate the daily check-in quick action');
+      steps.push('Open /profile and confirm the quick actions have no daily check-in card');
       await gotoWithBypass(page, '/app/profile');
-      const checkinCard = page.getByTestId('profile-checkin-card');
-      await expect(checkinCard).toBeVisible({ timeout: 10000 });
+      await expect(page.getByText('快捷操作')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('profile-checkin-card')).toHaveCount(0);
+      await expect(page.getByText('每日签到')).toHaveCount(0);
 
-      steps.push('Open the daily check-in dialog');
-      await checkinCard.click();
-      const dialog = page.getByTestId('profile-checkin-dialog');
-      await expect(dialog).toBeVisible({ timeout: 10000 });
-      await expect(dialog.getByText('每日签到')).toBeVisible({ timeout: 10000 });
-
-      const claimButton = page.getByTestId('checkin-claim-button');
-      const buttonLabel = (await claimButton.textContent())?.trim() ?? '';
-
-      if (buttonLabel.includes('今日已签到')) {
-        steps.push('Verify the dialog shows the already-claimed state for today');
-        await expect(claimButton).toBeDisabled();
-      } else {
-        steps.push('Claim the daily reward and verify the success feedback');
-        const claimResponsePromise = page.waitForResponse(
-          (response) =>
-            response.url().includes('/api/trpc/checkin.claimDailyCheckin') &&
-            response.request().method() === 'POST',
-          { timeout: 15000 },
-        );
-        await claimButton.click();
-        const claimResponse = await claimResponsePromise;
-        expect(claimResponse.status()).toBe(200);
-        await expect(page.getByTestId('profile-checkin-feedback')).toContainText('签到成功', { timeout: 10000 });
-        await expect(claimButton).toHaveText('今日已签到', { timeout: 10000 });
-      }
+      steps.push('Call the old check-in procedure directly and expect it to be missing');
+      const response = await page.request.post('/api/trpc/checkin.claimDailyCheckin', { data: {} });
+      expect(response.status()).toBe(404);
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
     } catch (error) {
-      actual = error instanceof Error ? error.message : 'Unknown daily check-in flow failure';
+      actual = error instanceof Error ? error.message : 'Unknown check-in removal failure';
       monitor.addAssertionIssue(actual, 'P1');
       throw error;
     } finally {
       await writeFlowAudit(
         testInfo,
         {
-          title: 'profile-daily-checkin',
+          title: 'profile-daily-checkin-removed',
           role: 'user',
           route: '/app/profile',
-          expected: 'Authenticated users can open the daily check-in dialog and either claim today’s reward or see that it has already been claimed.',
+          expected: 'Daily check-in was removed (Owner 2026-10-26): no profile entry, and the old procedure returns 404.',
         },
         actual,
         steps,
