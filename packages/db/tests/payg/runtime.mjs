@@ -7,6 +7,7 @@ import {runtimeOwnerCases} from './runtime-owner.mjs';
 import {runtimeExhaustedCases} from './runtime-exhausted.mjs';
 import {runtimeErasureCases} from './runtime-erasure.mjs';
 import {runtimeReadVerifiedCases} from './runtime-read-verified.mjs';
+import {runtimeSessionBatchCases} from './runtime-session-batches.mjs';
 export async function runtimeCases({db,Client,connectionString,report}) {
   async function setup(extraContext={},maxCalls=8) {
     const f=await createFixture(db,{credits:0,threshold:1});
@@ -23,6 +24,7 @@ export async function runtimeCases({db,Client,connectionString,report}) {
   await runtimeOwnerCases({db,Client,connectionString,report,setup});
   await runtimeErasureCases({db,report,setup});
   await runtimeReadVerifiedCases({db,report,setup});
+  await runtimeSessionBatchCases({db,report,setup});
   const lost=await setup();
   await db.query("UPDATE bill2_runs SET runtime_dispatch_deadline=clock_timestamp()-interval '1 second' WHERE id=$1",[lost.run]);
   const recoverable=await rpc(db,'runtime_execution',lost.actor,lost.execution,'read',null);

@@ -139,3 +139,30 @@ it('projects oversized standalone reasoning but never discards a tool continuati
   await expect(bad.session.finish('answer', false)).rejects.toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
   expect(bad.saved).toEqual([]);
 });
+// DB-PERF (PR-6 A): the batches held until success are saved in one call when the inner Session can, in order.
+it('saves all held batches in one call, then later organizer writes one by one', async () => {
+  const calls: Array<{ kind: string; batches: AgentInputItem[][] }> = [];
+  const inner = { getSessionId: async () => 'synthetic', getItems: async () => [], popItem: async () => undefined, clearSession: async () => {},
+    addItems: async (items: AgentInputItem[]) => { calls.push({ kind: 'one', batches: [items] }); },
+    addItemBatches: async (batches: AgentInputItem[][]) => { calls.push({ kind: 'many', batches }); } };
+  const session = new NativeSession(inner);
+  await session.addItems([{ role: 'user', content: 'question' }]);
+  await session.addItems([{ role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'draft' }] }]);
+  await session.finish('saved', false);
+  expect(calls).toEqual([{ kind: 'many', batches: [[{ role: 'user', content: 'question' }],
+    [{ role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'saved' }] }]] }]);
+  await session.addItems([{ role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'organizer' }] }]);
+  expect(calls.map(c => c.kind)).toEqual(['many', 'one']);
+});
+it('retries a lost multi-batch acknowledgement with the same batches', async () => {
+  const sent: AgentInputItem[][][] = [];let lose = true;
+  const inner = { getSessionId: async () => 'synthetic', getItems: async () => [], popItem: async () => undefined, clearSession: async () => {},
+    addItems: async () => { throw new Error('single append not expected'); },
+    addItemBatches: async (batches: AgentInputItem[][]) => { sent.push(structuredClone(batches)); if (lose) { lose = false; throw new Error('lost'); } } };
+  const session = new NativeSession(inner);
+  await session.addItems([{ role: 'user', content: 'question' }]);
+  await session.addItems([{ role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'draft' }] }]);
+  await expect(session.finish('saved', false)).rejects.toThrow('lost');
+  await session.finish('changed after lost response', false);
+  expect(sent).toHaveLength(2);expect(sent[1]).toEqual(sent[0]);
+});

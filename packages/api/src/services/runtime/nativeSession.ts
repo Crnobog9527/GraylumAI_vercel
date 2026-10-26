@@ -107,6 +107,12 @@ export class NativeSession implements Session {
   async finish(authoritativeBody: string, agentTurn: boolean, rewrite = true): Promise<void> {
     if (this.finished) return;
     if (!this.projected) this.projected = this.project(authoritativeBody, agentTurn, rewrite);
+    // DB-PERF: the held batches are saved in one call (one transaction) when the inner Session can.
+    const batched = (this.inner as Session & { addItemBatches?: (batches: AgentInputItem[][]) => Promise<void> }).addItemBatches;
+    if (batched && this.projected.length - this.appended > 1) {
+      await batched.call(this.inner, this.projected.slice(this.appended));
+      this.appended = this.projected.length;
+    }
     while (this.appended < this.projected.length) {
       await this.inner.addItems(this.projected[this.appended]!);
       this.appended++;
