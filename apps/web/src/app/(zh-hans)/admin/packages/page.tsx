@@ -425,12 +425,9 @@ export default function AdminPackagesPage() {
     if (editingPlan) {
       updateMembershipPlan.mutate({
         id: editingPlan.id,
-        ...data,
-        // Resubmitting an unchanged price id makes the server re-verify it against Stripe, which can fail a plain rename.
-        ...(stripeMonthlyPriceId !== (editingPlan.stripe_monthly_price_id ?? '')
-          ? { stripeMonthlyPriceId: stripeMonthlyPriceId || null } : {}),
-        ...(stripeYearlyPriceId !== (editingPlan.stripe_yearly_price_id ?? '')
-          ? { stripeYearlyPriceId: stripeYearlyPriceId || null } : {}),
+        ...data, // unchanged Stripe price ids are not resubmitted: the server re-verifies them and could fail a rename
+        ...(stripeMonthlyPriceId !== (editingPlan.stripe_monthly_price_id ?? '') && { stripeMonthlyPriceId: stripeMonthlyPriceId || null }),
+        ...(stripeYearlyPriceId !== (editingPlan.stripe_yearly_price_id ?? '') && { stripeYearlyPriceId: stripeYearlyPriceId || null }),
       });
     } else {
       createMembershipPlan.mutate({
