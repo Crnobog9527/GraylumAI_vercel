@@ -14,7 +14,9 @@ BEGIN
   OR EXISTS(SELECT 1 FROM unnest(p_codes) c WHERE c IS NULL OR c!~'^[A-Z0-9_]{1,64}$') THEN
   RAISE EXCEPTION 'ERASURE_EXECUTOR_INVALID';
  END IF;
- UPDATE account_erasure_requests SET executor_error_codes=p_codes,
+ UPDATE account_erasure_requests SET executor_error_codes=p_codes||ARRAY(SELECT c FROM unnest(executor_error_codes) c
+  -- 0395 prune diagnostics: this round's database-side codes survive the processor's list
+  WHERE left(c,14)='ERASURE_PRUNE_' AND c<>ALL(p_codes)),
   auth_delete_dispatch_ready=CASE WHEN p_release AND p_auth_not_dispatched
    AND auth_delete_claim_token=p_token AND auth_delete_started_at IS NOT NULL AND auth_deleted_at IS NULL
    THEN true ELSE auth_delete_dispatch_ready END,

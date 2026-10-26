@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.account_erasure_prune_business(p_profile_id uu
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t text; item record; n integer; removed integer:=0; legacy_evidence boolean;
+DECLARE t text; item record; n integer; removed integer:=0; legacy_evidence boolean; failed text[]:='{}'; code text;
 BEGIN
  PERFORM account_erasure_assert_closed(p_profile_id);
  IF p_limit IS NULL OR p_limit<1 OR p_limit>100 THEN RAISE EXCEPTION 'ERASURE_BATCH_LIMIT_INVALID'; END IF;
@@ -93,11 +93,21 @@ BEGIN
    BEGIN
     EXECUTE format('DELETE FROM public.%I WHERE ctid=$1',t) USING item.row_tid;
     GET DIAGNOSTICS n=ROW_COUNT;removed:=removed+n;
-   EXCEPTION WHEN foreign_key_violation OR check_violation OR lock_not_available THEN
-    -- A retained financial parent or a shared dependency stays. No cascade/trigger bypass.
-    NULL;
+   -- A retained financial parent or a shared dependency stays. No cascade/trigger bypass.
+   EXCEPTION WHEN foreign_key_violation OR check_violation THEN
+    -- 0395 prune diagnostics
+    code:='ERASURE_PRUNE_'||SQLSTATE||'_'||upper(t);
+    IF cardinality(failed)<5 AND code<>ALL(failed) THEN failed:=failed||code; END IF;
+   WHEN lock_not_available THEN
+    NULL; -- another writer holds the row; the next round retries it
    END;
   END LOOP;
  END LOOP;
+ -- 0395: a failed delete while business work remains is why the request cannot finish; report it on this
+ -- executor round (executor_finish keeps it). Review codes and completion are unchanged.
+ IF cardinality(failed)>0 AND account_erasure_business_remaining(p_profile_id)>0 THEN
+  UPDATE account_erasure_requests SET executor_error_codes=executor_error_codes||ARRAY(SELECT c FROM unnest(failed) c
+   WHERE c<>ALL(executor_error_codes)) WHERE profile_id=p_profile_id;
+ END IF;
  RETURN removed;
 END $function$;
