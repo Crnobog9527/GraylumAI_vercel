@@ -68,6 +68,11 @@ function noticeText(from: ReplyLocale, language: ReplyLocale) {
     : `已按你进入的页面，从${REPLY_LOCALE_LABELS[from]}改为${current}。可在右上角「语言」修改。` };
 }
 
+/** The user chose a language themselves: an entry change recorded before that no longer describes the setting. */
+export function clearEntryChange(): void {
+  try { storage()?.removeItem(CHANGE_KEY); } catch { /* storage unavailable */ }
+}
+
 /** The change recorded within the last minute (to `language` when given), or null. */
 function recentChange(language: ReplyLocale | null, now: number) {
   const raw = storage()?.getItem(CHANGE_KEY);

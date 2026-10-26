@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearEntryLanguage, ENTRY_CHANGE_WINDOW_MS, ENTRY_LANGUAGE_TTL_MS, entryLanguageNotice, parseEntryNotice, pendingEntryLanguage, rememberEntryLanguage,
-  repeatedEntryNotice } from './entry-language';
+  repeatedEntryNotice, clearEntryChange } from './entry-language';
 import { SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW } from './seo/content/shared';
 
 function stubStorage() {
@@ -84,6 +84,13 @@ describe('public page entry language (CHAT-LANGUAGE, Owner 2026-10-25)', () => {
       description: '已按你进入的页面，从简体中文改为繁體中文。可在右上角「语言」修改。' });
     // Only once more, and the window is not extended by repeating.
     expect(repeatedEntryNotice(4000)).toBeNull();
+  });
+
+  it('does not repeat a change the user has since overridden with the language switch', () => {
+    stubStorage();
+    entryLanguageNotice({ language: 'zh-Hans', previous: 'en' }, 1000);
+    clearEntryChange();
+    expect(repeatedEntryNotice(2000)).toBeNull();
   });
 
   it('does not repeat a change after the window, or when storage is blocked', () => {
