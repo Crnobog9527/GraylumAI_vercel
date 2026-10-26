@@ -15,8 +15,8 @@ DO $test$ BEGIN
 END $test$;
 ROLLBACK;
 BEGIN;
-INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,is_current)
-VALUES('stripe','local-only','test','price','local-only-pack','30000000-0000-4000-8000-000000000001',true);
+INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,billing_cycle,is_current)
+VALUES('stripe','local-only','test','price','local-only-pack','30000000-0000-4000-8000-000000000001','one_time',true);
 UPDATE credit_packages SET price=1000 WHERE id='30000000-0000-4000-8000-000000000001';
 DO $test$ BEGIN
   BEGIN __FILLED_SEED__
