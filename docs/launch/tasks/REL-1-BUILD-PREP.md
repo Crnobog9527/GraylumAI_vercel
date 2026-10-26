@@ -40,7 +40,7 @@
 | `billing_payg_start_thresholds` | 对象（`thresholds`、`version`） | B7 | 必须写 | 照 staging 结构；数值以冻结版本设计为准 |
 | `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`library_scan_recognition_enabled` | 布尔 | B7 | 必须写 | 正式 true（核心 4） |
 | `library_upload_enabled` | 布尔 | B7 | 迁移写入 false | 正式改 true |
-| `chat_my_posts_enabled` | 布尔 | B7 | 迁移写入 false | **staging 是 false**。REL-1 B7 列了它但没写取值；正式开不开随作品复盘（核心 10 ⑤）定，待总控定（见第 4 部分问题 6） |
+| `chat_my_posts_enabled` | 布尔 | B7 | 迁移写入 false | 正式 JSON 布尔 `true`（总控 2026-10-26 定：随作品复盘上线开放，Master Plan 2.1 Owner 10-26 决定）。staging 10-26 已改为 `true` 供验收 |
 | `publish_monitor_enabled` | 布尔 | B7 | 缺省关 | 正式 JSON 布尔 `true` |
 | `publish_monitor_review_enabled`、`_review_model_id`、`_review_max_usd` | 布尔 / null / 字符串 | B7 | 迁移写入 false / null / "0" | 正式 true、正式库的模型 uuid、`"0.30"`。**staging 是关着的**（复盘只验过关闭态） |
 | `publish_monitor_publish_platforms` | 数组（staging 空） | B7 | 缺省空 | 正式按第 7 节 E1 的 9 个平台 |
@@ -270,7 +270,7 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 3. **`support_email` 会公开显示**：REL-1 B11 说它和页面显示的客服邮箱"是两回事"，但代码里关于我们、无障碍、博客、维护页、登录页都读这个值。填一个只收告警的私人邮箱会被公开。建议 B11 改写，邮箱由 Owner 选。
 4. **套餐和积分包怎么写入正式库没说清**：空库没有这几行；Owner 10-25 定了"会员价格后台改只读、改价走迁移"。B3 要写明用哪份 SQL（建议照 staging 种子文件结构另出正式版，总控审核）。
 5. **4 个写作 Skill 只有 2 个在 staging 发布过**：分镜、剪辑建议从没在 staging 发布和验收，B7 却要在正式勾"使用用户文风"。要么先在 staging 发布验收，要么 Owner 确认这两个上线时不发。
-6. **`chat_my_posts_enabled`**：staging 是关的，REL-1 B7 列了但没写取值。
+6. **`chat_my_posts_enabled`**：~~staging 是关的，REL-1 B7 列了但没写取值。~~ 已定（10-26）：正式 `true`，见第 1 部分。
 7. **`v3_summary_max_tokens`**：staging 4096、缺省 2048，正式取哪个没有记录。
 8. **`Qwen3.8 Max`** 在 staging 启用但没有任何引用，名字前多一个空格；正式建议不导入。
 9. **REL-1 日期过期**：第 1.1 节还写"目标 11-06"，第 2 节标题和正文还是"冻结 10-28"；Owner 10-26 已改为 11-10 冻结、11-15 上线。
@@ -279,3 +279,6 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 12. **staging 的止损金额全是空的**：止损告警在 staging 从没真正发过一封，正式第一次发信就是上线后。建议冒烟日 K10 用一个很低的告警线真实触发一次再改回。
 13. **REL-1 第 3.6 节说钱包"六个会员产品、七个价格"**，staging 当前有效的一次性会员价格是 6 条（标准月/年各 2、创始 1、Gold 首月 1）。以 S4 脚本输出为准，B5 读回时核对。
 14. **`publish_monitor_publish_listed` staging 也没打开**：一键发布在付费墙和价格页的展示从没在 staging 看过，正式打开前要先在 staging 看一次。
+15. **Vercel 网站统计和速度统计要在正式项目打开**（10-26 第十一批发现）：代码已接 `@vercel/analytics` 和 `@vercel/speed-insights`，但项目没在 Vercel 后台开 Web Analytics 时 `/_vercel/insights/script.js` 返回 404、控制台报错，统计不上报（Owner 10-13 决定用 Vercel Web Analytics 看总量和中国大陆）。staging 10-26 已由 Owner 开启 Web Analytics（Speed Insights 早已开）。正式：Owner 在正式项目的 Analytics、Speed Insights 两页点开启，之后的第一次部署才生效；冒烟日确认两个脚本都返回 200。
+16. **钱包到期提醒的真实发信没在 staging 验过**（PAY-NOTIFY，10-26）：提醒只发到账户本人登录邮箱，且必须在 `PAYMENT_NOTICE_TEST_RECIPIENTS` 名单里；只有每天 03:00 UTC 的定时任务发信；staging 没有 7 天内到期的微信/支付宝年付单。10-26 只核对现有一条 founder_ended 提醒的去向。上线前演练：用一个登录邮箱在名单里的测试账号、一张 7 天内到期的钱包年付单，等定时任务发出并读回 `payment_notices`（state=sent）。
+17. **一键发布的平台名单 staging 是空的**（`publish_monitor_publish_platforms`）：只有名单里的平台在页面上开放发布。Owner 在场授权 X/YouTube 那次验收前，总控先在 staging 写 `["x","youtube"]`；正式按第 7 节 E1 的平台写。

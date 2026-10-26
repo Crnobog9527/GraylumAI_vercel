@@ -13,6 +13,7 @@ import {sourceToolBytes} from './sourceRuntimeTool';
 import {openRouterRequestBody,STREAMING_FORMATS} from './providerRequest';
 import {frozenReasoningFields} from './reasoningPolicy';
 import {openRouterBound} from '../bill2/openRouterPolicy';
+import {FREE_CHAT_POSITIONING_REDIRECT} from './primaryInstructions';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
 vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
@@ -418,6 +419,8 @@ it('free chat freezes a Skill catalog with load_skill on the primary model; ment
  const base=fixture();
  const plain=runtimeContext.parse((await freeChat(base).prepare({...base.input,organizeAfter:false})).context);
  expect(plain).not.toHaveProperty('skillCatalog');
+ // REL-1 core 4③: free chat points a redo of the positioning to its own page instead of interviewing the user.
+ expect(plain.instructions).toContain(FREE_CHAT_POSITIONING_REDIRECT);
  catalogState.value={text:'\n\nAvailable Skills: script-writer',reserveBytes:1200,
   frozen:{skillCatalog:[entry],maxSkillLoads:2,skillCatalogMaxBytes:8000}};
  try{
@@ -434,6 +437,7 @@ it('free chat freezes a Skill catalog with load_skill on the primary model; ment
   const mentor=fixture();
   const mentorContext=runtimeContext.parse((await mentor.service.prepare({...mentor.input,organizeAfter:false})).context);
   expect(mentorContext).not.toHaveProperty('skillCatalog');expect(mentorContext.tools).not.toContain('load_skill');
+  expect(mentorContext.instructions).not.toContain('Host rule (positioning page)');
  }finally{catalogState.value=undefined;}
 });
 
