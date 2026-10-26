@@ -106,19 +106,37 @@ export async function runReportFee({db,Client,connectionString,report}) {
   const concurrentHeld = await wallet(db,f.actor);
   const contenders = Array.from({length:3},()=>new Client({connectionString}));
   await Promise.all(contenders.map(c=>c.connect()));
+  const contenderPids = await Promise.all(contenders.map(async c=>{
+    const pid = (await c.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+    await c.query('SET ROLE service_role');
+    await c.query("SET statement_timeout='10s'");
+    return pid;
+  }));
+  let pending;
   try {
     await db.query('BEGIN');
     await service(db,'runtime_cancel',f.actor,concurrent.id);
     assert.equal((await fee(db,concurrent.id)).state,'refunded','refund is atomic with stop');
-    const pending = Promise.all([
-      service(contenders[0],'runtime_cancel',f.actor,concurrent.id),
-      service(contenders[1],'report_fee_settle',f.actor,concurrent.id),
-      service(contenders[2],'report_fee_settle_due',100),
+    pending = Promise.allSettled([
+      rpc(contenders[0],'runtime_cancel',f.actor,concurrent.id),
+      rpc(contenders[1],'report_fee_settle',f.actor,concurrent.id),
+      rpc(contenders[2],'report_fee_settle_due',100),
     ]);
+    // Prove all three RPCs have reached the database and are waiting on this open stop transaction.
+    // Do not rely on Promise scheduling: SET ROLE or network latency can otherwise serialize the test.
+    let blocked = 0;
+    for (let i=0;i<100&&blocked<3;i++) {
+      blocked = Number((await db.query(`SELECT count(*) n FROM unnest($1::int[]) pid
+        WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,[contenderPids])).rows[0].n);
+      if (blocked<3) await new Promise(resolve=>setTimeout(resolve,25));
+    }
+    assert.equal(blocked,3,'duplicate stop, report.status settlement and daily job all overlap the stop lock');
     await db.query('COMMIT');
-    await pending;
+    const outcomes = await pending;
+    assert.ok(outcomes.every(x=>x.status==='fulfilled'),JSON.stringify(outcomes));
   } finally {
     await db.query('ROLLBACK');
+    await pending;
     await Promise.all(contenders.map(c=>c.end()));
   }
   assert.equal(await wallet(db,f.actor),concurrentHeld+PRICE,'concurrent stop/status/cron refund exactly once');
@@ -289,7 +307,11 @@ export async function runReportFee({db,Client,connectionString,report}) {
   const rc = await seed(db);
   await setBalance(db,rc.actor,5000);
   const ended = await execution(db,rc,undefined,false);
-  await finish(db,ended.id,'cancelled',null);
+  // Historical held terminal fee: the automatic hook must not pre-settle this deletion/cron race.
+  await db.query('SET session_replication_role=replica');
+  try { await finish(db,ended.id,'cancelled',null); }
+  finally { await db.query('SET session_replication_role=origin'); }
+  assert.equal((await fee(db,ended.id)).state,'held','legacy deletion/cron race starts with an unsettled fee');
   const racers = [new Client({connectionString}),new Client({connectionString})];
   await Promise.all(racers.map(x=>x.connect()));
   try {
