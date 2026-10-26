@@ -17,6 +17,14 @@ const root=resolve(import.meta.dirname,'../../../..');
 const read=path=>readFileSync(resolve(root,path),'utf8');
 const laterMigrations=number=>readdirSync(resolve(root,'packages/db/migrations'))
   .filter(file=>/^\d{4}_.*\.sql$/.test(file)&&Number(file.slice(0,4))>number).sort();
+// 0385 also patches claim_daily_checkin, which 0396 retired; a replay on the finished database skips that one patch.
+const replayable=file=>{
+  const text=read('packages/db/migrations/'+file);
+  if(!file.startsWith('0385_'))return text;
+  const checkinPatch=/SELECT pg_temp\.e3_patch\('public\.claim_daily_checkin\(uuid\)',[\s\S]*?\$r\$\);\n/;
+  assert.ok(checkinPatch.test(text),'0385 still carries the check-in patch this replay removes');
+  return text.replace(checkinPatch,'');
+};
 const run=(args,input)=>{
   const r=spawnSync('docker',args,{input,encoding:'utf8',timeout:300000,maxBuffer:32*1024*1024});
   if(r.status!==0||r.error) throw Error(r.stderr||String(r.error));
@@ -166,7 +174,7 @@ try {
   assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
   sql(read(walletMigration));
   // Forward-fix every later extension too; 0335 intentionally extends the same wallet functions.
-  for(const file of laterMigrations(330))sql(read('packages/db/migrations/'+file));
+  for(const file of laterMigrations(330))sql(replayable(file));
   assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');
   cases.push('wallet-migration-interruption-atomic','wallet-migration-repeat-acl-unchanged','wallet-recovery-preserves-paid-data');
   sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
@@ -183,7 +191,7 @@ try {
   sql(read('packages/db/migrations/0324_paywall_profile_archive.sql'));
   sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
   sql(read('packages/db/migrations/0383_credit_grant_quarantine.sql')); // ARCH-FIX E1 patches atomic_pre_deduct
-  sql(read('packages/db/migrations/0385_billing_ledger_constraints.sql')); // ARCH-FIX E3 patches atomic_pre_deduct
+  sql(replayable('0385_billing_ledger_constraints.sql')); // ARCH-FIX E3 patches atomic_pre_deduct
   sql(read('packages/db/migrations/0391_credit_available.sql')); // MAINT-P4 replaces atomic_pre_deduct's hold formula
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');

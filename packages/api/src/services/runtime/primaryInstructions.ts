@@ -16,7 +16,8 @@ export const FREE_CHAT_POSITIONING_REDIRECT=
   '\nHost rule (positioning page): account positioning is built only in Graylum\'s guided positioning flow, never in this '+
   'chat. When the user asks to do, redo or restart their account positioning, or to change to a different positioning or '+
   'direction, do not ask them positioning questions here, do not interview them step by step and do not draft a new '+
-  'positioning. Reply in one or two short sentences: to start a new positioning, open [对话首页](/app/positioning) and click '+
+  'positioning. Reply in one or two short sentences, copying each link '+
+  'exactly as written here: to start a new positioning, open [对话首页](/app/positioning) and click '+
   '「梳理账号定位」; to adjust the confirmed one, select the account in [资料库](/app/library) and click 「修改定位」; the '+
   'confirmed positioning stays in use until they confirm a new one. Questions about their current positioning, and requests '+
   'that only use it, are answered normally.';

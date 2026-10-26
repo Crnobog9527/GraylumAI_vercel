@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import type { ReplyLocale } from '@repo/api/src/shared/replyLanguage';
+import { clearEntryChange } from '@/lib/entry-language';
 import { trpc } from '@/trpc/client';
 
 /**
@@ -14,7 +15,7 @@ export function useSetReplyLanguage(current: ReplyLocale | undefined) {
   const [failed, setFailed] = useState(false);
   const save = trpc.user.setReplyLanguage.useMutation({
     onMutate: () => setFailed(false),
-    onSuccess: () => utils.user.getUserProfile.invalidate(),
+    onSuccess: () => { clearEntryChange(); return utils.user.getUserProfile.invalidate(); },
     onError: () => setFailed(true),
   });
   const shown = save.isPending && save.variables ? save.variables.language : current;

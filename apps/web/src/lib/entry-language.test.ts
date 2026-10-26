@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearEntryLanguage, ENTRY_CHANGE_WINDOW_MS, ENTRY_LANGUAGE_TTL_MS, entryLanguageNotice, parseEntryNotice, pendingEntryLanguage, rememberEntryLanguage } from './entry-language';
+import { clearEntryLanguage, ENTRY_CHANGE_WINDOW_MS, ENTRY_LANGUAGE_TTL_MS, entryLanguageNotice, parseEntryNotice, pendingEntryLanguage, rememberEntryLanguage,
+  repeatedEntryNotice, clearEntryChange } from './entry-language';
 import { SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW } from './seo/content/shared';
 
 function stubStorage() {
@@ -71,6 +72,33 @@ describe('public page entry language (CHAT-LANGUAGE, Owner 2026-10-25)', () => {
     expect(entryLanguageNotice({ language: 'en', previous: 'en' }, 3000).description).toBe('按你进入的页面设置。可在右上角「语言」修改。');
     expect(entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hant' }, 1000 + ENTRY_CHANGE_WINDOW_MS).description)
       .toBe('按你进入的页面设置。可在右上角「语言」修改。');
+  });
+
+  it('the page that stays after the reload repeats a change whose first notice died with the replaced page (zh-tw entry, 10-26)', () => {
+    stubStorage();
+    expect(repeatedEntryNotice(1000)).toBeNull();
+    // First load: the server already saved the language (entry_notice), the notice is shown, then the page is replaced.
+    entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hans' }, 1000);
+    // Second load finds no parameter and nothing pending to apply: it says it once more, naming the original change.
+    expect(repeatedEntryNotice(3000)).toEqual({ title: 'AI 回复语言：繁體中文',
+      description: '已按你进入的页面，从简体中文改为繁體中文。可在右上角「语言」修改。' });
+    // Only once more, and the window is not extended by repeating.
+    expect(repeatedEntryNotice(4000)).toBeNull();
+  });
+
+  it('does not repeat a change the user has since overridden with the language switch', () => {
+    stubStorage();
+    entryLanguageNotice({ language: 'zh-Hans', previous: 'en' }, 1000);
+    clearEntryChange();
+    expect(repeatedEntryNotice(2000)).toBeNull();
+  });
+
+  it('does not repeat a change after the window, or when storage is blocked', () => {
+    stubStorage();
+    entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hans' }, 1000);
+    expect(repeatedEntryNotice(1000 + ENTRY_CHANGE_WINDOW_MS)).toBeNull();
+    vi.stubGlobal('window', { get localStorage(): Storage { throw new Error('blocked'); } });
+    expect(repeatedEntryNotice(1500)).toBeNull();
   });
 
   it('describes the application alone when storage is blocked', () => {
