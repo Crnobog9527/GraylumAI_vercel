@@ -542,17 +542,23 @@ function createReadinessAuditSupabase(
             throw new Error('column profiles.updated_at does not exist');
           }
           if (table === 'profiles') expect(columns).toBe('id, credits, created_at');
-          return {
+          // Keyset pages in id order, like PostgREST: order('id') + gt('id', after) + limit, capped by the server.
+          let after: string | null = null;
+          const page = {
+            order: () => page,
+            gt: (_column: string, value: string) => { after = value; return page; },
             limit: async (limit: number) => {
-              const allRows = tables[table] ?? [];
+              const allRows = [...(tables[table] ?? [])].sort((a, b) => String(a.id ?? '').localeCompare(String(b.id ?? '')));
               const serverCap = serverCaps[table] ?? limit;
+              const rest = after === null ? allRows : allRows.filter((row) => String(row.id ?? '') > (after as string));
               return {
-                data: allRows.slice(0, Math.min(limit, serverCap)),
+                data: rest.slice(0, Math.min(limit, serverCap)),
                 count: exactCounts[table] ?? allRows.length,
                 error: null,
               };
             },
           };
+          return page;
         },
       };
     },

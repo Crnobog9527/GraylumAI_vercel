@@ -11,6 +11,18 @@ import {
 import { getDueAnnualGrantPeriods } from './subscriptionCreditGrants';
 import { readDailyBillingCreditSources } from './dailyBillingCreditSources';
 import { readDailyBillingTotals } from './dailyBillingTotals';
+import {
+  DEFAULT_READINESS_ROW_LIMIT,
+  readLimitedRows,
+  type ProfileRow,
+  type CreditTransactionRow,
+  type PaymentOrderRow,
+  type SubscriptionCreditGrantRow,
+  type SubscriptionRow,
+  type MembershipPlanRow,
+  type BillingHistoryRow,
+  type BillingReadinessRows,
+} from './billingReadinessRows';
 
 export interface BillingReconciliationSummary {
   successfulAiRequests: number;
@@ -99,113 +111,7 @@ export interface BillingReadinessAuditOptions {
   launchBaselineAt?: Date;
 }
 
-type ProfileRow = {
-  id?: string | null;
-  credits?: number | string | null;
-  created_at?: string | null;
-};
-
-type CreditTransactionRow = {
-  id?: string | null;
-  user_id?: string | null;
-  amount?: number | string | null;
-  type?: string | null;
-  ledger_type?: string | null;
-  reason_code?: string | null;
-  counts_as_spend?: boolean | null;
-  source_type?: string | null;
-  source_order_id?: string | null;
-  grant_period_key?: string | null;
-  idempotency_key?: string | null;
-  balance_before?: number | string | null;
-  balance_after?: number | string | null;
-  metadata?: unknown;
-  created_at?: string | null;
-};
-
-type PaymentOrderRow = {
-  id?: string | null;
-  user_id?: string | null;
-  item_type?: string | null;
-  mode?: string | null;
-  status?: string | null;
-  payment_status?: string | null;
-  amount_total?: number | string | null;
-  fulfilled_at?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  stripe_subscription_id?: string | null;
-  stripe_invoice_id?: string | null;
-  metadata?: unknown;
-};
-
-type SubscriptionCreditGrantRow = {
-  id?: string | null;
-  user_id?: string | null;
-  stripe_subscription_id?: string | null;
-  stripe_invoice_id?: string | null;
-  billing_cycle?: string | null;
-  grant_type?: string | null;
-  grant_period_key?: string | null;
-  period_index?: number | string | null;
-  total_periods?: number | string | null;
-  credits_granted?: number | string | null;
-  consumed_amount?: number | string | null;
-  accounting_state?: string | null;
-  status?: string | null;
-  idempotency_key?: string | null;
-  credit_transaction_id?: string | null;
-  metadata?: unknown;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type SubscriptionRow = {
-  id?: string | null;
-  user_id?: string | null;
-  membership_plan_id?: string | null;
-  stripe_subscription_id?: string | null;
-  status?: string | null;
-  cancel_at_period_end?: string | boolean | null;
-  billing_cycle?: string | null;
-  current_period_start?: string | null;
-  current_period_end?: string | null;
-  credit_release_terminated_at?: string | null;
-  credit_release_terminated_reason?: string | null;
-  credit_release_terminated_event_id?: string | null;
-  credit_release_terminated_period_key?: string | null;
-  metadata?: unknown;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type MembershipPlanRow = {
-  id?: string | null;
-  yearly_credits?: number | string | null;
-};
-
-type BillingHistoryRow = {
-  id?: string | null;
-  user_id?: string | null;
-  operation_type?: string | null;
-  amount?: number | string | null;
-  metadata?: unknown;
-  created_at?: string | null;
-};
-
-type BillingReadinessRows = {
-  billingHistory?: BillingHistoryRow[];
-  profiles: ProfileRow[];
-  creditTransactions: CreditTransactionRow[];
-  paymentOrders: PaymentOrderRow[];
-  subscriptionCreditGrants: SubscriptionCreditGrantRow[];
-  subscriptions: SubscriptionRow[];
-  membershipPlans?: MembershipPlanRow[];
-  truncatedTables?: string[];
-};
-
 const DEFAULT_READINESS_PENDING_MAX_AGE_HOURS = 48;
-const DEFAULT_READINESS_ROW_LIMIT = 5000;
 const CANONICAL_PAYMENT_ORDER_STATUS_SET = new Set<string>(PAYMENT_ORDER_STATUSES);
 const LEGACY_PAYMENT_ORDER_STATUS_SET = new Set<string>(['cancelled', 'partial_refunded']);
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<string>(['active', 'trialing']);
@@ -357,6 +263,36 @@ function hasPendingSubscriptionGrantReversal(value: unknown): boolean {
   return normalizeText(asRecord(value).reversalStatus) === 'pending';
 }
 
+/**
+ * The current payment model's refund records (REL-1 2026-10-26: every current refund was reported as unaudited because
+ * only the legacy Stripe keys were read): an approved refund (monthly, wallet, Waffo) ends with refund_approval.status
+ * 'succeeded' (0253, PAY-FAILOVER); a refund made outside Graylum, or a test-clock close, records the provider refund id
+ * in metadata.stripeExternalRefund (0247), including the partial and pack states that go to review; a test-clock close
+ * (0329) records its refunds in stripeTestClockClose.
+ */
+const EXTERNAL_REFUND_STATES = new Set<string>(['refunded', 'partial_review', 'pack_review']);
+function hasCurrentRefundRecord(order: PaymentOrderRow) {
+  const metadata = asRecord(order.metadata);
+  const external = asRecord(metadata.stripeExternalRefund);
+  // A test-clock close (0329) keeps the provider refunds in stripeTestClockClose.refunds instead of lastRefundId.
+  const clockRefunds = asRecord(metadata.stripeTestClockClose).refunds;
+  const clockRefunded = external.neverFulfilled === true && Array.isArray(clockRefunds)
+    && clockRefunds.length > 0 && clockRefunds.every((refund) => typeof asRecord(refund).id === 'string');
+  return normalizeText(asRecord(order.refund_approval).status) === 'succeeded'
+    || ((typeof external.lastRefundId === 'string' || clockRefunded) && EXTERNAL_REFUND_STATES.has(normalizeText(external.state)));
+}
+
+/** A current-model order is one without the legacy Stripe subscription id: its grants and ledger rows carry the order. */
+function isCurrentModelOrder(order: PaymentOrderRow) {
+  return !order.stripe_subscription_id?.trim();
+}
+
+/** Current-model grant period keys are `payment:<order id>:<period>` (pay_waffo_grant_period). */
+function grantOrderId(grantPeriodKey: string | null | undefined) {
+  const match = /^payment:([0-9a-f-]{36}):\d+$/i.exec(grantPeriodKey?.trim() ?? '');
+  return match ? match[1]!.toLowerCase() : null;
+}
+
 function hasRefundAuditMetadata(order: PaymentOrderRow) {
   const metadata = asRecord(order.metadata);
   const subscriptionGrantReversal = metadata.subscriptionCreditGrantReversal;
@@ -365,7 +301,8 @@ function hasRefundAuditMetadata(order: PaymentOrderRow) {
   }
 
   return (
-    hasGenericRefundAuditSignal(metadata.stripeRefundReconciliation)
+    hasCurrentRefundRecord(order)
+    || hasGenericRefundAuditSignal(metadata.stripeRefundReconciliation)
     || hasSubscriptionGrantReversalAuditSignal(subscriptionGrantReversal)
     || hasGenericRefundAuditSignal(metadata.stripeRefundWebhookAudit)
     || hasGenericRefundAuditSignal(metadata.refundReconciliation)
@@ -460,6 +397,19 @@ function isMembershipSubscriptionOrder(order: PaymentOrderRow) {
   );
 }
 
+/**
+ * A subscription that will charge the user again: active (or awaiting payment), not stopping at period end, release not
+ * terminated. Two of these for one user is a double charge. The current model keeps a stopping or refunded subscription
+ * entitled until its period ends next to the one that replaced it (upgrade overlap 0322, repurchase after a refund 0328),
+ * which is not one (REL-1 2026-10-26).
+ */
+function isRenewingSubscription(row: SubscriptionRow, now: Date) {
+  return isActiveSubscription(row, now)
+    && (ACTIVE_SUBSCRIPTION_STATUSES.has(normalizeText(row.status)) || PAYMENT_ATTENTION_SUBSCRIPTION_STATUSES.has(normalizeText(row.status)))
+    && !(row.cancel_at_period_end === true || row.cancel_at_period_end === 'true')
+    && !row.credit_release_terminated_at;
+}
+
 function isActiveSubscription(row: SubscriptionRow, now: Date) {
   const status = normalizeText(row.status);
   if (ACTIVE_SUBSCRIPTION_STATUSES.has(status)) {
@@ -546,28 +496,6 @@ function addDuplicateIdempotencyFindings<T>(
       metadata: { idempotencyKey: metadata.key, scope: metadata.scope, count: duplicates.length },
     });
   }
-}
-
-async function readLimitedRows<T>(
-  supabase: SupabaseClient,
-  table: string,
-  columns: string,
-  rowLimit: number,
-): Promise<{ rows: T[]; truncated: boolean }> {
-  const result = await supabase
-    .from(table)
-    .select(columns, { count: 'exact' })
-    .limit(rowLimit + 1);
-
-  if (result.error) throw result.error;
-
-  const fetchedRows = (result.data ?? []) as T[];
-  const rows = fetchedRows.slice(0, rowLimit);
-  const exactCount = typeof result.count === 'number' ? result.count : null;
-  return {
-    rows,
-    truncated: fetchedRows.length > rowLimit || (exactCount !== null && exactCount > rows.length),
-  };
 }
 
 function emptyReadinessSummary(): BillingReadinessSummary {
@@ -1119,6 +1047,13 @@ export function buildBillingEngineV15ReadinessAudit(
     }
   }
 
+  // Ledger rows of each order, for the current-model refund termination check.
+  const orderLedger = new Map<string, CreditTransactionRow[]>();
+  for (const transaction of rows.creditTransactions) {
+    const orderId = transaction.source_order_id?.toLowerCase();
+    if (orderId) orderLedger.set(orderId, [...(orderLedger.get(orderId) ?? []), transaction]);
+  }
+
   for (const order of rows.paymentOrders) {
     const rawStatus = getRawPaymentOrderStatus(order.status);
     const normalizedStatus = normalizePaymentOrderStatus(order.status);
@@ -1188,7 +1123,34 @@ export function buildBillingEngineV15ReadinessAudit(
       REFUNDED_PAYMENT_ORDER_STATUSES.has(normalizeText(order.status))
       || REFUNDED_PAYMENT_ORDER_STATUSES.has(normalizeText(order.payment_status))
     );
-    if (options.launchBaselineAt && isMembershipSubscriptionOrder(order) && isRefundedOrder) {
+    if (options.launchBaselineAt && isMembershipSubscriptionOrder(order) && isRefundedOrder && isCurrentModelOrder(order)) {
+      // Current model: releases follow the order, so a fully refunded order must have every grant of it reversed and no
+      // grant credited after its last refund clawback. A partial refund stays a review case (its record is checked above).
+      if (normalizeText(order.status) === 'refunded' || normalizeText(order.payment_status) === 'refunded') {
+        const orderId = order.id?.toLowerCase() ?? '';
+        const liveGrants = rows.subscriptionCreditGrants.filter((grant) => (
+          grantOrderId(grant.grant_period_key) === orderId && normalizeText(grant.status) === 'granted'));
+        const ledger = (orderLedger.get(orderId) ?? []);
+        const lastClawback = Math.max(-Infinity, ...ledger.filter((entry) => entry.reason_code === 'refund_clawback')
+          .map((entry) => getCreatedAtMs(entry) ?? -Infinity));
+        const lateGrants = ledger.filter((entry) => normalizeCreditLedgerType(entry) === 'grant'
+          && toInteger(entry.amount) > 0 && (getCreatedAtMs(entry) ?? Infinity) > lastClawback);
+        if (liveGrants.length > 0 || lateGrants.length > 0) {
+          addFinding(findings, {
+            code: 'refund_termination_gap',
+            severity: 'error',
+            message: 'Refunded subscription order still has live grants or a grant after its refund',
+            entityType: 'payment_orders',
+            entityId: order.id ?? undefined,
+            metadata: {
+              subscriptionRowId: order.subscription_id ?? null,
+              liveGrantIds: liveGrants.map((grant) => grant.id ?? null),
+              lateGrantTransactionIds: lateGrants.map((entry) => entry.id ?? null),
+            },
+          });
+        }
+      }
+    } else if (options.launchBaselineAt && isMembershipSubscriptionOrder(order) && isRefundedOrder) {
       const subscriptionId = order.stripe_subscription_id?.trim();
       const matchingSubscription = subscriptionId
         ? rows.subscriptions.find((subscription) => (
@@ -1292,14 +1254,20 @@ export function buildBillingEngineV15ReadinessAudit(
         const transactionGrantPeriodKey = transaction.grant_period_key?.trim() ?? '';
         const grantUserId = grant.user_id?.trim() ?? '';
         const transactionUserId = transaction.user_id?.trim() ?? '';
+        // Current model (pay_waffo_grant_period): the ledger row is a `topup_purchase` of the same order, without its own
+        // period key; the grant's `payment:<order>:<period>` key names that order (REL-1 2026-10-26).
+        const grantOrder = grantOrderId(grantPeriodKey);
+        const currentModelGrant = transactionReasonCode === 'topup_purchase' && grantOrder !== null
+          && transaction.source_order_id?.toLowerCase() === grantOrder && !transactionGrantPeriodKey
+          && ['monthly_invoice', 'annual_monthly_release'].includes(grant.grant_type ?? '');
         if (
           transactionAmount !== grantCredits
           || transactionLedgerType !== 'grant'
           || transaction.counts_as_spend === true
-          || !(transactionReasonCode === 'subscription_grant'
+          || !(currentModelGrant || transactionReasonCode === 'subscription_grant'
             || (transactionReasonCode === 'monthly_invoice' && grant.grant_type === 'monthly_invoice' && grant.billing_cycle === 'monthly')
             || (transactionReasonCode === 'annual_monthly_release' && grant.grant_type === 'annual_monthly_release' && grant.billing_cycle === 'yearly'))
-          || (grantPeriodKey && transactionGrantPeriodKey !== grantPeriodKey)
+          || (grantPeriodKey && !currentModelGrant && transactionGrantPeriodKey !== grantPeriodKey)
           || (grantUserId && transactionUserId !== grantUserId)
         ) {
           addFinding(findings, {
@@ -1420,7 +1388,7 @@ export function buildBillingEngineV15ReadinessAudit(
 
   const activeSubscriptionsByUser = new Map<string, SubscriptionRow[]>();
   for (const subscription of rows.subscriptions) {
-    if (!subscription.user_id || !isActiveSubscription(subscription, now)) {
+    if (!subscription.user_id || !isRenewingSubscription(subscription, now)) {
       continue;
     }
 
@@ -1438,7 +1406,7 @@ export function buildBillingEngineV15ReadinessAudit(
     addFinding(findings, {
       code: 'duplicate_active_subscription',
       severity: 'error',
-      message: `User has ${subscriptions.length} active Stripe-managed subscription rows`,
+      message: `User has ${subscriptions.length} renewing subscription rows`,
       entityType: 'user_subscriptions',
       entityId: userId,
       metadata: {
@@ -1707,7 +1675,7 @@ export async function runBillingEngineV15ReadinessAudit(
     readLimitedRows<PaymentOrderRow>(
       supabase,
       'payment_orders',
-      'id, user_id, item_type, mode, status, payment_status, amount_total, fulfilled_at, created_at, updated_at, stripe_subscription_id, stripe_invoice_id, metadata',
+      'id, user_id, item_type, mode, status, payment_status, amount_total, fulfilled_at, created_at, updated_at, stripe_subscription_id, stripe_invoice_id, metadata, subscription_id, refund_approval',
       rowLimit,
     ),
     readLimitedRows<SubscriptionCreditGrantRow>(
