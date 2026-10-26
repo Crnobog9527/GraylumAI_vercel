@@ -4,9 +4,18 @@
 
 const SAFE_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
-/** Only absolute http(s) and mailto links survive; everything else is dropped. */
+/**
+ * The in-app pages a host rule may point the user to (positioning entry, library, voice tab): exactly these paths, nothing
+ * else relative. A model cannot make a reply link anywhere else on the site (REL-1: the positioning redirect's link was
+ * dropped to plain text because every relative link was).
+ */
+const APP_PATHS = new Set(["/app/positioning", "/app/library", "/app/library?tab=voice"]);
+export const isAppMessageHref = (href: string) => APP_PATHS.has(href);
+
+/** Absolute http(s) and mailto links and the fixed in-app paths survive; everything else is dropped. */
 export function safeMessageHref(url: string): string {
   const trimmed = url.trim();
+  if (APP_PATHS.has(trimmed)) return trimmed;
   try {
     const parsed = new URL(trimmed);
     return SAFE_PROTOCOLS.has(parsed.protocol) ? trimmed : "";
