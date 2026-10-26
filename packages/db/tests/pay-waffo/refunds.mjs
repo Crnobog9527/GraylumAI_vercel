@@ -126,6 +126,12 @@ export async function refundCases({ admin, service, connect }) {
     if (waiting.rows[0].n===2) { blocked=true; break; }
     await new Promise(resolve=>setTimeout(resolve,10));
   }
+  if (!blocked) {
+    const observer = await connect();
+    const state = await observer.query(`SELECT pid,state,wait_event_type,wait_event,pg_blocking_pids(pid) blockers
+      FROM pg_stat_activity WHERE pid=ANY($1::int[])`,[[one.processID,two.processID]]);
+    console.error('refund barrier live state',JSON.stringify(state.rows));
+  }
   assert.ok(blocked,'two real refund sessions wait on the profile barrier');
   await admin.query('UPDATE subscription_credit_grants SET consumed_amount=30 WHERE id=$1',[target.grant]);
   await admin.query('UPDATE profiles SET credits=190 WHERE id=$1',[target.user]);
