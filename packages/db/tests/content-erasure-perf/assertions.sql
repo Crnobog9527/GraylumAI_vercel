@@ -16,7 +16,7 @@ BEGIN
   OR (SELECT count(*) FROM runtime_session_history)<7000
   OR (SELECT count(*) FROM runtime_executions WHERE session_id=sid)<>26
   OR (SELECT count(*) FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id WHERE r.session_ref=sid)<>26
-  OR EXISTS(SELECT 1 FROM bill2_runs WHERE session_ref=sid AND (state<>'settled' OR NOT closed OR charged<>1)) THEN
+  OR EXISTS(SELECT 1 FROM bill2_runs WHERE session_ref=sid AND (state<>'settled' OR NOT closed OR charged IS DISTINCT FROM 1)) THEN
   RAISE EXCEPTION 'ERASURE_PERF_FIXTURE_TOO_SMALL';
  END IF;
  SELECT jsonb_build_object('balance',(SELECT credits FROM profiles WHERE id=a),
@@ -49,7 +49,7 @@ BEGIN
   RAISE EXCEPTION 'SAVED_REPORT_LOST';
  END IF;
  IF EXISTS(SELECT 1 FROM bill2_receipts x JOIN bill2_calls c ON c.id=x.call_id JOIN bill2_runs r ON r.id=c.run_id
-  WHERE r.session_ref=sid AND (x.financial_projection_version<>1 OR x.payload::text LIKE '%ERASE_PRIVATE_RECEIPT%')) THEN
+  WHERE r.session_ref=sid AND (x.financial_projection_version IS DISTINCT FROM 1 OR x.payload::text LIKE '%ERASE_PRIVATE_RECEIPT%')) THEN
   RAISE EXCEPTION 'PRIVATE_RECEIPT_NOT_ERASED';
  END IF;
  -- All five identities match their original run, including pre-deduction IDs kept in ledger metadata.
