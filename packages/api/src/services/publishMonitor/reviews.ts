@@ -26,15 +26,30 @@ export const REVIEW_PROMPT='请为我生成本周作品复盘。先用 read_sour
 async function step(db:SupabaseClient,c:ReviewClaim,action:string,reason?:string){
  const r=await db.rpc('publish_monitor_review_step',{p_id:c.id,p_token:c.token,p_action:action,p_reason:reason??null});
  if(r.error)throw new Error('PUBLISH_MONITOR_REVIEW_STEP_FAILED');
- return r.data as {allowed:boolean;actorId:string;executionId:string|null;state:string|null};
+ return r.data as {allowed:boolean;actorId:string;executionId:string|null;state:string|null;expired?:boolean};
 }
 const BALANCE_CODES=['BILL2_INSUFFICIENT_CREDITS','RUNTIME_WAITING_CREDITS','PUBLISH_MONITOR_BALANCE_LOW'];
 const CONFIGURATION_CODES=['PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW','PUBLISH_MONITOR_REVIEW_UNAVAILABLE',
  'RUNTIME_STAGING_MODEL_DENIED','RUNTIME_STAGING_MODEL_NOT_APPROVED'];
+async function finishExpiredReview(db:SupabaseClient,c:ReviewClaim,executionId:string|null){
+ // No user is present to resume a scheduled review. Keep the original run and let native BILL2
+ // settle known usage, refund undispatched holds and retain genuinely unknown costs for recovery.
+ if(executionId){
+  const cancelled=await db.rpc('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:executionId});
+  if(cancelled.error)throw new Error('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
+  if((cancelled.data as {state?:string}|null)?.state==='completed'){
+   await step(db,c,'observe');return;
+  }
+ }
+ await step(db,c,'skip','RUNTIME_INTERRUPTED');
+}
 /** Prepare a stable request, or find the original one after a killed invocation; never invent a replacement id. */
 export async function prepareReview(db:SupabaseClient,c:ReviewClaim,env:Record<string,string|undefined>){
  const observed=await step(db,c,'observe');
  if(observed.state==='completed'||observed.state==='cancelled'||observed.state==='failed')return null;
+ if(observed.expired){
+  await finishExpiredReview(db,c,observed.executionId);return null;
+ }
  if(!observed.allowed){
   if(observed.executionId)await db.rpc('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:observed.executionId});
   await step(db,c,'skip','DISABLED');return null;
@@ -70,6 +85,7 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,executionId:
   // Next after() shares this HTTP invocation; preparing or deferring never resets its monotonic deadline.
   budget.modelCallTimeout(MIN_MODEL_DISPATCH_MS);
   const state=await step(db,c,'authorize');
+  if(state.expired){await finishExpiredReview(db,c,executionId);return;}
   const original=await loadStagingRecoveryPolicy(db,c.actorId,executionId,env);
   const executor=runtimeExecutor({database:db,actor:async()=>c.actorId,budget,adapter:stagingTransport(db,original,budget),
    resumePricing:policies=>admitPricing(db,policies),callGate:newWorkGate(db,runtimeGateEnvironment(original)).calls});
