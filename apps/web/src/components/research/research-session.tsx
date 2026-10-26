@@ -174,6 +174,7 @@ export function ResearchShortfallCard({ sessionId, disabled, onChosen }: {
     <ShortfallCardView card={card} disabled={disabled} onChoose={async choice => {
       const saved = await choose.mutateAsync({ cardId: card.cardId, choice });
       await utils.research.shortfall.invalidate({ sessionId });
+      await utils.runtime.reportPreflight.invalidate({ sessionId });
       onChosen?.(choice, saved.chosenQualified ?? card.offeredQualified);
     }}/>
   );
@@ -247,6 +248,7 @@ export function ResearchSessionPanel({ settledTurns, onSend, continuation = null
     void utils.research.cards.invalidate({ sessionId });
     void utils.research.benchmarks.invalidate({ sessionId });
     void utils.research.shortfall.invalidate({ sessionId });
+    void utils.runtime.reportPreflight.invalidate({ sessionId });
     void utils.research.unfinishedRound.invalidate({ sessionId });
   }, [settledTurns, sessionId, utils]);
   return (

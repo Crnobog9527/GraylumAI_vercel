@@ -28,6 +28,7 @@ import { useReportOutline } from "@/components/chat-display/use-report-outline";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
 import { REPORT_VIEW_TEXT } from "@/components/chat-display/report-view/report-text";
 import { savedFormalEditable, savedFormalReport, savedFormalStrategy, type FormalReport } from "./saved-report";
+import { ReportBenchmarkGate } from "./report-benchmark-gate";
 
 type Props = {
   draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
@@ -54,7 +55,12 @@ function RoundReportEntry(props: Props) {
   // A published round with a saved formal report (e.g. adopted from the jury) shows it; it never offers a new paid one.
   const saved = savedFormalReport(Boolean(props.published), props.report);
   // A new paid start needs the price on the button: without a readable price nothing is offered (and none would be accepted).
-  const canGenerate = props.confirmed && available.data?.enabled === true && typeof available.data.priceCredits === 'number' && !saved;
+  const enabled = props.confirmed && available.data?.enabled === true && typeof available.data.priceCredits === 'number' && !saved;
+  const locate = { sessionId: props.sessionId, projectId: props.projectId, roundId: props.roundId };
+  const preflight = trpc.runtime.reportPreflight.useQuery(locate, { enabled, staleTime: 0, retry: 1 });
+  const canGenerate = enabled && !preflight.isFetching && !preflight.isError && preflight.data?.canGenerate === true;
+  const choose = trpc.research.chooseShortfall.useMutation();
+  const utils = trpc.useUtils();
   const report = useReportGen({ ...props, canGenerate: canGenerate, price: available.data?.priceCredits });
   const [open, setOpen] = useState(false);
   // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving
@@ -70,6 +76,16 @@ function RoundReportEntry(props: Props) {
   }, [report.status]);
   // The jury (FUSION-REVIEW) sits next to it: it reviews the report of the formal version, whatever this entry shows.
   const jury = <JuryEntry draftId={props.draftId} report={props.report} busy={props.busy} />;
+  const benchmarkGate = <ReportBenchmarkGate value={preflight.isError || preflight.isFetching ? undefined : preflight.data}
+      failed={preflight.isError && !preflight.isFetching}
+      busy={props.busy || choose.isPending} onRetry={() => void preflight.refetch()} onChoose={async choice => {
+        const card = preflight.data?.card;
+        if (!card) return;
+        await choose.mutateAsync({ cardId: card.cardId, choice });
+        await utils.research.shortfall.invalidate({ sessionId: props.sessionId });
+        await preflight.refetch();
+      }} />;
+  if (!report.executionId && !saved && enabled && !canGenerate && !report.refusal?.hideEntry) return <>{jury}{benchmarkGate}</>;
   if (!report.executionId && !saved && (!canGenerate || report.refusal?.hideEntry)) return jury;
   return (
     <>
@@ -78,6 +94,7 @@ function RoundReportEntry(props: Props) {
           : report.executionId || saved ? REPORT_TITLE : reportActionLabel(REPORT_ACTION.start, available.data?.priceCredits)}
       </Button>
       {jury}
+      {enabled && !canGenerate && report.status && !reportUnfinished(report.status) && benchmarkGate}
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
         : <ReportDialog report={report} savedBody={report.executionId ? null : saved}
           savedStrategy={report.executionId ? null : savedFormalStrategy(props.report)} busy={props.busy}
