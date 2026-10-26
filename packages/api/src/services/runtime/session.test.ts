@@ -24,3 +24,14 @@ it('sends the older-history warning atomically with the exact frozen revisions',
  const items=await session.getItems();await session.freezeHistoryItems(items,true);
  expect(calls.at(-1)).toMatchObject({p_action:'freeze',p_items:{revisions:[7],historyOmitted:true}});
 });
+// DB-PERF (PR-6 A): consecutive batches in one call; the append ordinal continues after them.
+it('writes consecutive batches in one call and continues the batch ordinal',async()=>{
+ const calls:Array<Record<string,unknown>>=[];
+ const db={rpc:async(name:string,args:Record<string,unknown>)=>{calls.push({name,...args});return {data:null,error:null};}};
+ const id='10000000-0000-4000-8000-000000000001';
+ const session=new PostgresSession(db,{actorId:id,sessionId:id,executionId:id});
+ await session.addItemBatches([[{role:'user',content:'a'}],[{role:'user',content:'b'}]]);
+ await session.addItems([{role:'user',content:'c'}]);
+ expect(calls.map(c=>[c.p_action,c.p_batch,c.p_items])).toEqual([
+  ['append_batches',0,[[{role:'user',content:'a'}],[{role:'user',content:'b'}]]],['append',2,[{role:'user',content:'c'}]]]);
+});

@@ -19,12 +19,12 @@ export class PostgresSession implements Session {
   constructor(private readonly database: SessionRpc, binding: { actorId: string; sessionId: string; executionId: string }) {
     this.binding = Object.freeze(z.object({ actorId: uuid, sessionId: uuid, executionId: uuid }).strict().parse(binding));
   }
-  private async request(action: 'read' | 'append' | 'freeze',
-    items?: AgentInputItem[] | number[] | {revisions:number[];historyOmitted:true}, limit?: number): Promise<unknown> {
+  private async request(action: 'read' | 'append' | 'append_batches' | 'freeze',
+    items?: AgentInputItem[] | AgentInputItem[][] | number[] | {revisions:number[];historyOmitted:true}, limit?: number): Promise<unknown> {
     const response = await this.database.rpc('runtime_session_items', {
       p_actor_id: this.binding.actorId, p_session_id: this.binding.sessionId,
       p_execution_id: this.binding.executionId, p_action: action,
-      p_items: items ?? null, p_limit: limit ?? null, p_batch: action === 'append' ? this.batch : null,
+      p_items: items ?? null, p_limit: limit ?? null, p_batch: action === 'append' || action === 'append_batches' ? this.batch : null,
     });
     // Never expose a database/SDK error which may include private history.
     if (response.error) throw new Error('RUNTIME_SESSION_UNAVAILABLE');
@@ -61,6 +61,11 @@ export class PostgresSession implements Session {
   async addItems(items: AgentInputItem[]): Promise<void> {
     await this.request('append', items);
     this.batch++;
+  }
+  /** DB-PERF: consecutive SDK append batches in one database call (one transaction), from the current ordinal. */
+  async addItemBatches(batches: AgentInputItem[][]): Promise<void> {
+    await this.request('append_batches', batches);
+    this.batch += batches.length;
   }
   // Runtime context selection/organizing must retain originals. These SDK operations
   // are intentionally unsupported, preventing fallback clear-and-rebuild compaction.
