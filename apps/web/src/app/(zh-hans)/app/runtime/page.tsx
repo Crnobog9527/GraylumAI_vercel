@@ -38,7 +38,8 @@ import {
  runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
-import { ENDED_NOTICE, GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from './runtime-notices';
+import { ENDED_NOTICE, GUIDE_HELD_NOTICE, isOpenTurn, runtimeModeSubtitle, runtimeTailNotices, runtimeTurnNotices, stopWithRecord,
+  type RuntimeTurn } from './runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
@@ -126,6 +127,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const freeChat=Boolean(sessionId&&view.data?.scope?.kind==='positioning_draft');
  const results=trpc.opc.sessionResults.useQuery({sessionId},{enabled:freeChat,retry:false});
  const [panelOpen,setPanelOpen]=useState(true),[guiding,setGuiding]=useState(false);
+ const [revealResults,setRevealResults]=useState(0);
  const guidanceAttempt=useRef(false);
  const [typePending,setTypePending]=useState(false);
  const editItem=trpc.opc.editLibrary.useMutation();
@@ -402,12 +404,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const pendingOutgoing=outgoing&&!executions?.some(e=>e.executionId===outgoing.executionId)?outgoing:null;
  async function setType(value:string){if(!workItem)return;const key='opc-content-type:'+workItem.workItemId;try{await navigator.locks.request(key,async()=>{const raw=localStorage.getItem(key);const frozen=raw?JSON.parse(raw):{requestId:crypto.randomUUID(),target:'item' as const,targetId:workItem.workItemId,expectedRevision:workItem.revision,patch:{title:workItem.title,brief:workItem.brief??'',day:workItem.day,contentType:value}};localStorage.setItem(key,JSON.stringify(frozen));setTypePending(true);await editItem.mutateAsync(frozen);localStorage.removeItem(key);setTypePending(false);await library.refetch();});}catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_DENIED','OPC_LIBRARY_INVALID'].includes(code)){localStorage.setItem(key+':rejected',localStorage.getItem(key)??'');localStorage.removeItem(key);setTypePending(false);await library.refetch();setError('类型保存已明确拒绝，已读取当前版本，请重新确认。');}else setError('类型保存状态待核实；再次选择会恢复原请求，不会覆盖为另一类型。');}}
 
- return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<RuntimeTypePendingPanel/>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}><RuntimeResultsSection isVideo={isVideo} versions={versions}
+ return <WorkspaceFrame area="chat" revealRight={revealResults}
+  activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<RuntimeTypePendingPanel/>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}><RuntimeResultsSection isVideo={isVideo} versions={versions}
   currentScriptId={currentScript?.id} saved={saved.data} libraryHref={'/app/library?item='+workItem.workItemId+'&return='+sessionId}/></ContentEditor>)
   :results.data?.length?<SessionResultsPanel sessionId={sessionId} items={results.data}/>:undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
   <RuntimeHeader title={workItem?.title??'工作对话'}
-   subtitle={workItem?undefined:(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试'
-    :(choices.data?.mode??view.data?.mode)==='production'?undefined:'本地模拟体验'}
+   subtitle={workItem?undefined:runtimeModeSubtitle(choices.data?.mode??view.data?.mode)}
    meta={workItem?{platform:workItem.platform,account:workItem.account,infoHref:'/app/library?item='+workItem.workItemId+'&return='+sessionId,
     showExpand:!panelOpen,onExpand:()=>setPanelOpen(true)}:undefined}
    action={!sessionId&&requestedModule?<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)}
@@ -441,6 +443,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      {freeChat&&results.data&&e.state==='completed'&&e.contentAvailable&&(e.body??e.primaryBody)&&
       displayReply(e.input,e.body??e.primaryBody)===(e.body??e.primaryBody)&&
       <SaveReplyButton sessionId={sessionId} executionId={e.executionId} reply={(e.body??e.primaryBody)!}
+       onOpenResults={()=>{setPanelOpen(true);setRevealResults(count=>count+1);}}
        savedItems={results.data.filter(result=>result.sourceExecutionId===e.executionId)}/>}
      <LiveReplyText text={liveReplyText(runner.reply,e.executionId,e)}/>
      <ChatNoticeList notices={compare.adoptedExecutions.has(e.executionId)?[]:[...compareNotices(e),...withResumeStop(payg.turnNotices(e,busy),

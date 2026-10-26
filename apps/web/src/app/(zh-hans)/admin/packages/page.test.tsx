@@ -15,7 +15,7 @@ beforeAll(async () => {
   const source = fileURLToPath(new URL('./page.tsx', import.meta.url));
   const mock = `
     const plan = { id: 'plan-pro', name: 'Pro', level: 'pro', monthly_price: 990, yearly_price: 9900,
-      monthly_credits: 1500, yearly_credits: 20000, monthly_bonus_credits: 0, package_discount: 100,
+      stripe_monthly_price_id: 'price_m', stripe_yearly_price_id: 'price_y', monthly_credits: 1500, yearly_credits: 20000, monthly_bonus_credits: 0, package_discount: 100,
       max_context_messages: 20, features: [], is_active: 'true', sort_order: 1, created_at: '2026-01-01' };
     window.savedPlans = [];
     const mutation = { useMutation: (options) => ({ isPending: false, mutate: input => {
@@ -72,6 +72,14 @@ it('locks the tier when editing, keeps name editable, and allows choosing a tier
     expect(await page.evaluate('window.savedPlans[0]')).toMatchObject({ id: 'plan-pro', level: 'pro', name: 'Renamed' });
     expect(await page.evaluate('Object.keys(window.savedPlans[0])')).not.toContain('monthlyPrice');
     expect(await page.evaluate('Object.keys(window.savedPlans[0])')).not.toContain('yearlyPrice');
+    // An unchanged Stripe price id is not resubmitted (the server would re-verify it against Stripe and could fail a rename).
+    expect(await page.evaluate('Object.keys(window.savedPlans[0])')).not.toContain('stripeMonthlyPriceId');
+    expect(await page.evaluate('Object.keys(window.savedPlans[0])')).not.toContain('stripeYearlyPriceId');
+    await page.getByTestId('admin-membership-plan-edit-plan-pro').click();
+    await dialog.getByPlaceholder('price_xxx').first().fill('price_new');
+    await dialog.getByRole('button', { name: '保存', exact: true }).click();
+    expect(await page.evaluate('window.savedPlans[1]')).toMatchObject({ stripeMonthlyPriceId: 'price_new' });
+    expect(await page.evaluate('Object.keys(window.savedPlans[1])')).not.toContain('stripeYearlyPriceId');
     await page.getByRole('button', { name: '创建会员等级', exact: true }).click();
     await browserExpect(dialog.getByRole('combobox')).toBeEnabled();
     await browserExpect(dialog.getByTestId('membership-plan-monthly-price-input')).toBeEnabled();

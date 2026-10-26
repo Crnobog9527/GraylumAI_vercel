@@ -174,3 +174,9 @@ export function runtimeTailNotices(ctx: {
 export function isOpenTurn(state: string) {
   return open(state);
 }
+
+/** The header subtitle for the host mode. Nothing until a mode has come back: production users must never see 本地模拟体验
+ * flash while the first reads are in flight; it shows only for the local isolated host (REL-1). */
+export function runtimeModeSubtitle(mode: string | undefined): string | undefined {
+  return mode === 'staging_test' ? 'Staging 真实对话测试' : mode === 'isolated' ? '本地模拟体验' : undefined;
+}

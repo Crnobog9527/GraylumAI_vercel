@@ -2,7 +2,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { ResultCardView, SaveReplyForm } from './session-results';
+import { ResultCardView, SaveReplyForm, savedNotice } from './session-results';
 import type { SessionResultItem } from '@/lib/session-results';
 
 vi.mock('@/trpc/client', () => ({ trpc: {} }));
@@ -79,5 +79,10 @@ describe('session results panel', () => {
     expect(html).toContain('只能保存回复里的原文');
     button(tree, '确认保存').props.onClick?.();
     expect(handlers.onConfirm).toHaveBeenCalledOnce();
+  });
+
+  it('says what was saved and where after the form closes', () => {
+    expect(savedNotice('script', '早起口播稿')).toBe('已保存到成果夹：口播稿「早起口播稿」。可在右侧「本对话成果夹」查看。');
+    expect(savedNotice('script', '')).toBe('已保存到成果夹：口播稿。可在右侧「本对话成果夹」查看。');
   });
 });
