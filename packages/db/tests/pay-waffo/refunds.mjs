@@ -118,7 +118,9 @@ export async function refundCases({ admin, service, connect }) {
   await admin.query('SELECT 1 FROM profiles WHERE id=$1 FOR UPDATE',[target.user]);
   const concurrent = [run(one,target),run(two,target)];
   let blocked = false;
-  for (let i=0;i<100;i++) {
+  // MAINT-P1b: wait until both sessions are queued on the lock, at most 10 s (was a fixed 100 x 10 ms = 1 s that
+  // CI load could miss). The assertion below is unchanged. Owner approved: "同意把 pay-waffo 退款测试的锁等待改成最多 10 秒的条件等待".
+  for (const deadline = Date.now() + 10000; Date.now() < deadline;) {
     const waiting = await admin.query(`SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock'
       AND query LIKE 'SELECT * FROM pay_waffo_atomic_refund_termination_clawback_fresh%'`);
     if (waiting.rows[0].n===2) { blocked=true; break; }
