@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,VOICE_GUIDE,VOICE_GUIDES,WORKSPACE_STRATEGY_GUIDE,voiceAddendum,withPrimaryAddenda} from './primaryInstructions';
+import {FREE_CHAT_BASE_INSTRUCTIONS,FREE_CHAT_POSITIONING_REDIRECT,freeChatInstructions,REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,VOICE_GUIDE,VOICE_GUIDES,WORKSPACE_STRATEGY_GUIDE,voiceAddendum,withPrimaryAddenda} from './primaryInstructions';
 import {sourceToolBytes} from './sourceRuntimeTool';
 import {agentTurnInstructions} from '../opc/agentTurnPrompt';
 
@@ -126,3 +126,22 @@ describe('VOICE wording versions (acceptance step 8: the draft must not copy the
   });
 });
 
+
+// REL-1 core 4③ (Codex batch 10 B ③ step 5): "帮我重新做一次账号定位" in free chat read the positioning and then asked the
+// positioning questions itself. Free chat must send the user to the positioning entry instead.
+describe('free chat positioning redirect', () => {
+  it('sends a redo or change of positioning to its own page instead of interviewing in chat', () => {
+    expect(freeChatInstructions(true)).toBe(FREE_CHAT_BASE_INSTRUCTIONS+FREE_CHAT_POSITIONING_REDIRECT);
+    expect(FREE_CHAT_POSITIONING_REDIRECT).toContain('do, redo or restart their account positioning');
+    expect(FREE_CHAT_POSITIONING_REDIRECT).toContain('change to a different positioning or direction');
+    expect(FREE_CHAT_POSITIONING_REDIRECT).toContain('do not ask them positioning questions here');
+    expect(FREE_CHAT_POSITIONING_REDIRECT).toContain('[对话首页](/app/positioning)');
+    expect(FREE_CHAT_POSITIONING_REDIRECT).toContain('「梳理账号定位」');
+    expect(FREE_CHAT_POSITIONING_REDIRECT).toContain('「修改定位」');
+    // Questions about the current positioning stay ordinary answers.
+    expect(FREE_CHAT_POSITIONING_REDIRECT).toContain('Questions about their current positioning');
+  });
+  it('is left out where the positioning check or another host applies', () => {
+    expect(freeChatInstructions(false)).toBe(FREE_CHAT_BASE_INSTRUCTIONS);
+  });
+});

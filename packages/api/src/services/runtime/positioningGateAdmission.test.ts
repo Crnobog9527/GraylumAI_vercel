@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { OPENING_INPUT } from '../../shared/opcQuestions';
 import type { GateVerdict } from './positioningGate';
-import { REPLY_LANGUAGE_INSTRUCTIONS } from './primaryInstructions';
+import { FREE_CHAT_POSITIONING_REDIRECT, REPLY_LANGUAGE_INSTRUCTIONS } from './primaryInstructions';
 
 // POSITIONING-GATE PR2: admission-side checks. A refusal happens before runtime_admit, so nothing is reserved or charged.
 const mock = vi.hoisted(() => ({ redis: vi.fn(), recovery: vi.fn() }));
@@ -63,6 +63,11 @@ it('admits an allowed message of a user without a positioning, judged exactly on
   expect(f.classify).toHaveBeenCalledExactlyOnceWith({ text: f.input.input, apiKey: undefined });
   // Decisions sees only this message: the primary model keeps the fallback rule for contextual requests.
   expect(result.payload.positioningGate).toBe('fallback-v1');
+  // REL-1 core 4③: the positioning-page rule is for users who already have one; this user gets the fallback rule only.
+  expect(result.payload.instructions).not.toContain(FREE_CHAT_POSITIONING_REDIRECT);
+  const positioned = fixture({ positioned: true });
+  const admitted = await prepare(positioned) as { payload: Record<string, unknown> };
+  expect(admitted.payload.instructions).toContain(FREE_CHAT_POSITIONING_REDIRECT);
 });
 
 it('refuses a blocked message with the stable code before any execution or reservation', async () => {
@@ -123,11 +128,14 @@ it('judges each concurrent duplicate on its own and admits nothing when blocked'
 });
 
 it('sizes the frozen fallback rule at admission, so a turn that fits never fails later in the executor', async () => {
-  // Every non-mentor turn also carries the reply-language rule (SKILL-I18N-HOOK), sized the same way.
-  const policyFor = (f: ReturnType<typeof fixture>) => ({ ...f.policy, inputBytes: 6000 + REPLY_LANGUAGE_INSTRUCTIONS.length });
+  // Every non-mentor turn also carries the reply-language rule (SKILL-I18N-HOOK), sized the same way. A positioned user's free
+  // chat carries the positioning-page rule instead of the fallback (REL-1 core 4③); its budget gets those bytes back, so the
+  // fallback rule alone tells the two apart.
+  const policyFor = (f: ReturnType<typeof fixture>, positioned: boolean) => ({ ...f.policy,
+    inputBytes: 6000 + REPLY_LANGUAGE_INSTRUCTIONS.length + (positioned ? Buffer.byteLength(FREE_CHAT_POSITIONING_REDIRECT) : 0) });
   const admits = async (positioned: boolean, length: number) => {
     const f = fixture({ positioned });
-    try { await prepare(f, policyFor(f), { ...f.input, input: 'x'.repeat(length) }); return true; }
+    try { await prepare(f, policyFor(f, positioned), { ...f.input, input: 'x'.repeat(length) }); return true; }
     catch (error) { expect(error).toMatchObject({ reason: 'RUNTIME_INPUT_TOO_LONG' }); return false; }
   };
   // The longest message a positioned user (no rule) may send...

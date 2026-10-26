@@ -26,7 +26,7 @@ import {readOpenRouterKeyOrUnset} from '../models/openRouterKey';
 import {type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput, requestsHistoricalComparison } from './context';
 import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
-import { FREE_CHAT_BASE_INSTRUCTIONS, readReplySetting, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
+import { freeChatInstructions, readReplySetting, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
 import { admitVoice } from './voiceAdmission';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
@@ -201,7 +201,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    for(const source of input.sources)await query('runtime_source',{p_source:source});
    let organizerOutput:number|undefined;
    let organizerInstructions=policy.organizerInstructions ?? GENERIC_ORGANIZER_TEMPLATE;
-   let modelId:string,instructions=FREE_CHAT_BASE_INSTRUCTIONS;
+   const chatTurn=freeChatCatalogTurn({selection:input.selection,mentorStream,stepStream,hostTurnContext,report:policy.reportGeneration,
+    opcTurnToken:policy.opcTurnToken,scope:session.scope});let modelId:string,instructions=freeChatInstructions(chatTurn&&!gated);
    let skillChars=0;
    let skillFile:SkillFileBinding|undefined,skillFileReserve=0;
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined,chosenSource:ContentSourceKind|undefined;
@@ -348,8 +349,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
    const strategyGuide=workspaceContext&&fitsWith(workspaceStrategyReserve(maxCalls));
    const skillCatalog=await admitSkillCatalog(user,admin,{excludeSocial:gated,inputLimit,actor,maxCalls,fitsWith,
-    strategyReserve:strategyGuide?workspaceStrategyReserve:undefined,eligible:freeChatCatalogTurn({selection:input.selection,
-     mentorStream,stepStream,hostTurnContext,report:policy.reportGeneration,opcTurnToken:policy.opcTurnToken,scope:session.scope})});
+    strategyReserve:strategyGuide?workspaceStrategyReserve:undefined,eligible:chatTurn});
    if(skillCatalog){instructions+=skillCatalog.text;cb=skillCatalog.reserveBytes;maxCalls+=skillCatalog.frozen.maxSkillLoads;}
    // VOICE: a matched writing Skill may carry the voice too; every candidate is sized with it (never under-sized).
    if(voiceTurn&&candidates.length)voice=await admitVoice(admin,actorId,candidates.map(candidate=>candidate.moduleId));
