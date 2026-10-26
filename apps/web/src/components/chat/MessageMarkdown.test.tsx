@@ -53,11 +53,23 @@ describe("MessageMarkdown: safety", () => {
     "vbscript:msgbox(1)",
     "/relative/path",
     "//evil.example/x",
+    "/app/positioning/../admin",
+    "/app/positioning?next=//evil.example",
+    "/app/admin",
   ])("drops the unsafe or relative link %s and keeps its text", href => {
     const html = render(`[点这里](${href})`);
     expect(html).not.toContain("<a");
     expect(html).not.toMatch(/javascript|vbscript|data:|evil/i);
     expect(html).toContain("<span>点这里</span>");
+  });
+
+  // REL-1: the free-chat positioning redirect names these paths; they were dropped to plain text like any relative link.
+  it("renders the fixed in-app paths as same-tab links", () => {
+    const html = render("[对话首页](/app/positioning) [资料库](/app/library) [我的文风](/app/library?tab=voice)");
+    expect(html).toContain('<a href="/app/positioning">对话首页</a>');
+    expect(html).toContain('<a href="/app/library">资料库</a>');
+    expect(html).toContain('<a href="/app/library?tab=voice">我的文风</a>');
+    expect(html).not.toContain("_blank");
   });
 
   it("never renders raw HTML from the model", () => {
@@ -79,6 +91,8 @@ describe("MessageMarkdown: safety", () => {
     expect(safeMessageHref("mailto:a@example.com")).toBe("mailto:a@example.com");
     expect(safeMessageHref("ftp://a.example")).toBe("");
     expect(safeMessageHref("#top")).toBe("");
+    expect(safeMessageHref(" /app/positioning ")).toBe("/app/positioning");
+    expect(safeMessageHref("/app/positioning#x")).toBe("");
   });
 });
 

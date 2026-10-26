@@ -97,7 +97,7 @@ function CompareForm({ saved, maxModels, onSaved }: { saved: FusionSettingsValue
         <div className="space-y-1.5"><Label htmlFor="fusion-compare-tokens">每列回答上限（token，含思考）</Label>
           <Input id="fusion-compare-tokens" type="number" min={512} max={32768} value={compare.answerOutputTokens}
             onChange={event => set({ answerOutputTokens: Number(event.target.value) })} /></div>
-        <div className="space-y-1.5"><Label htmlFor="fusion-compare-budget">单次最高预算（美元）</Label>
+        <div className="space-y-1.5"><Label htmlFor="fusion-compare-budget">单次最高预算（用户付费，美元；按 1 美元 = 100 积分换算）</Label>
           <Input id="fusion-compare-budget" inputMode="decimal" value={compare.maxBudgetUsd ?? ''}
             onChange={event => set({ maxBudgetUsd: event.target.value.trim() || null })} /></div>
       </div>

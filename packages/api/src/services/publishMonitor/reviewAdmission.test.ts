@@ -22,3 +22,22 @@ it('ordinary authentication stays required; a service review must own an allowed
  expect(await admissionActor(auth as never,{rpc} as never,review)).toBe('actor');
  expect(auth.auth.getUser).toHaveBeenCalledTimes(1);
 });
+
+// Read-only staging investigation, 2026-10-26: the fixed review cap is compared with
+// the approved per-call ceiling, not the expected receipt or the 1000-token host default.
+it.each([
+ {model:'Sonnet',upperUsd:'2.827680000000',minimum:'5.655360000000'},
+ {model:'Luna',upperUsd:'0.265572000000',minimum:'0.531144000000'},
+])('$model needs two frozen call ceilings before weekly admission',({upperUsd,minimum})=>{
+ const context={maxTurns:3,maxToolCalls:2,ownPosts:true};
+ const billing={contractVersion:'bill2.v2',sourceHash:'original',callPolicy:[{upperUsd}],
+  rules:{creditsPerUsd:'100',multiplier:'6'},limits:{maxCalls:3,costUsd:'9',maxPreDeduct:5400}};
+ const original=structuredClone(billing);
+ expect(()=>capReviewAdmission(context,billing as never,{...review,maxCostUsd:'0.30'}))
+  .toThrow('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW');
+ expect(billing).toEqual(original);
+ expect(context).toEqual({maxTurns:3,maxToolCalls:2,ownPosts:true});
+ capReviewAdmission(context,billing as never,{...review,maxCostUsd:minimum});
+ expect(billing.limits).toMatchObject({maxCalls:2,costUsd:minimum});
+ expect(context).toMatchObject({maxTurns:2,maxToolCalls:1});
+});

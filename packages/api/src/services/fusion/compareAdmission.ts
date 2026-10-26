@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { frozenCallSchema, frozenPaygRunSchema, type BillingRpc, type FrozenCall, type FrozenPaygRun } from '../bill2/service';
-import { decimal } from '../bill2/decimal';
+import { decimal, DECIMAL_SCALE } from '../bill2/decimal';
 import { assertFusionEntitlement, readMembershipEntitlements } from '../membershipEntitlements';
 import { admissionDeadline } from '../runtime/admissionLimits';
 import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
@@ -150,6 +150,16 @@ export function assertQuoteCovers(columns: ReadonlyArray<Pick<CompareColumn, 'in
   }
 }
 
+/** The single-compare budget caps what the user pays (Owner 2026-10-26: "对比模型限制指的是用户付的钱，并且限额调到 5 美元。"):
+ * the columns' frozen credit bounds may not exceed the budget in credits (1 USD = the window's creditsPerUsd). Graylum's own
+ * cost bound stays capped by the same amount as a backstop, so the check never loosens. A missing budget is never "unlimited". */
+export function overCompareBudget(built: { totalUsd: bigint; totalCredits: number; rules: { creditsPerUsd: string } },
+  budgetUsd: string | null) {
+  if (!budgetUsd) return true;
+  const budgetCredits = decimal(budgetUsd) * decimal(built.rules.creditsPerUsd) / (DECIMAL_SCALE * DECIMAL_SCALE);
+  return built.totalUsd > decimal(budgetUsd) || BigInt(built.totalCredits) > budgetCredits;
+}
+
 /** Compare group admission (FUSION-COMPARE §3.1). The compare record must already exist with its positioning verdict
  * written (fusion_compare_begin / fusion_compare_gate): the database refuses a group otherwise. `shown` is what the user
  * agreed to: the group may not hold more, in credits or in provider cost, and no column more than its own shown bound. */
@@ -168,6 +178,8 @@ export async function admitCompareGroup(input: { admin: SupabaseClient; actorId:
   if (built.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
   // Prices or multipliers changed since the user saw the estimate: never hold more than the maximum shown.
   assertQuoteCovers(built.columns, input.shown);
+  // The budget may have been lowered since the quote: the group never holds more than it allows now.
+  if (overCompareBudget(built, settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
   const runs = await Promise.all(built.columns.map(async column => {
     const draftId = await compareRpc<string>(admin, 'bill2_create_draft', { p_actor_id: actorId });
     const context = { version: 'runtime.v1', network: 'deny', tools: [], sources: [],

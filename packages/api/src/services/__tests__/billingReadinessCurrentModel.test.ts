@@ -74,6 +74,25 @@ describe('current-model refunds', () => {
   });
 });
 
+describe('closed purchases', () => {
+  const pending = (extra: Record<string, unknown> = {}) => refundedOrder({ status: 'pending', payment_status: 'unpaid', fulfilled_at: null,
+    created_at: '2026-10-20T00:00:00.000Z', refund_approval: null, subscription_id: null, qualification_state: 'released',
+    purchase_closed_at: '2026-10-20T01:00:00.000Z', ...extra });
+  const none = { creditTransactions: [], subscriptionCreditGrants: [], profiles: [{ id: user, credits: 0 }] };
+  it('an unpaid order whose purchase attempt was closed (checkout expired or rejected) is not a stale pending order', () => {
+    expect(codes({ ...none, paymentOrders: [pending()] })).toEqual([]);
+  });
+  it('an unpaid order still open after 48 hours is reported, with or without the closed field', () => {
+    expect(codes({ ...none, paymentOrders: [pending({ purchase_closed_at: null, qualification_state: 'reserved' })] }))
+      .toContain('stale_pending_payment_order');
+    expect(codes({ ...none, paymentOrders: [pending({ purchase_closed_at: undefined, qualification_state: undefined })] }))
+      .toContain('stale_pending_payment_order');
+  });
+  it('a closed purchase that was nevertheless paid and not fulfilled is still reported', () => {
+    expect(codes({ ...none, paymentOrders: [pending({ payment_status: 'paid' })] })).toContain('payment_order_paid_unfulfilled');
+  });
+});
+
 describe('current-model grants', () => {
   const active = { paymentOrders: [], creditTransactions: [purchase()], profiles: [{ id: user, credits: 3480 }] };
   it('a grant written as a topup_purchase of the same order matches its ledger row', () => {

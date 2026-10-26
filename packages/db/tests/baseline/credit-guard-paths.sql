@@ -21,12 +21,26 @@ RESET ROLE;
 INSERT INTO guard_results SELECT 'ledger entry (opening grant, admin adjust) via service_role',
   credits = 90 FROM public.profiles WHERE id = '00000000-0000-4000-8000-00000000c001';
 
--- 2. Daily check-in: the authenticated user calls the SECURITY DEFINER RPC for themself.
-SET ROLE authenticated;
+-- 2. Daily check-in was retired (0396): no claim RPC remains and user_checkins is a read-only archive,
+-- so no path can grant check-in credits. An already recorded 'checkin' ledger row stays valid history.
+-- The later authenticated steps (6, 8) act as this user.
 SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-00000000c001","role":"authenticated"}', false);
-SELECT public.claim_daily_checkin('00000000-0000-4000-8000-00000000c001');
+CREATE TEMP TABLE checkin_write_denied(ok boolean);
+GRANT INSERT ON checkin_write_denied TO authenticated, service_role;
+SET ROLE service_role;
+DO $$
+BEGIN
+  INSERT INTO public.user_checkins (user_id, checkin_date, streak_day, reward_credits, month_key)
+    VALUES ('00000000-0000-4000-8000-00000000c001', current_date, 1, 5, to_char(current_date, 'YYYY-MM'));
+  INSERT INTO checkin_write_denied VALUES (false);
+EXCEPTION WHEN insufficient_privilege THEN INSERT INTO checkin_write_denied VALUES (true);
+END $$;
 RESET ROLE;
-INSERT INTO guard_results SELECT 'daily check-in as authenticated', credits > 90
+INSERT INTO public.credit_transactions (idempotency_key, user_id, amount, type, description)
+  VALUES ('checkin:history:c002', '00000000-0000-4000-8000-00000000c002', 0, 'checkin', '每日签到奖励（第1天）');
+INSERT INTO guard_results SELECT 'retired daily check-in: no claim RPC, archive read-only, history row kept',
+  to_regproc('public.claim_daily_checkin') IS NULL AND (SELECT bool_and(ok) FROM checkin_write_denied)
+  AND credits = 90 AND (SELECT count(*) = 1 FROM public.credit_transactions WHERE idempotency_key = 'checkin:history:c002')
   FROM public.profiles WHERE id = '00000000-0000-4000-8000-00000000c001';
 
 -- 3. BILL2 legacy pre-deduct (service_role) and settle/refund (called inside BILL2's definer chain).
