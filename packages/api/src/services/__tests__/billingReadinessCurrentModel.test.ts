@@ -14,7 +14,7 @@ const at = (minute: number) => new Date(Date.parse('2026-10-21T18:00:00.000Z') +
 type Rows = Parameters<typeof buildBillingEngineV15ReadinessAudit>[0];
 const purchase = (extra: Record<string, unknown> = {}) => ({ id: 'txn-grant', user_id: user, amount: 3480, type: 'purchase',
   ledger_type: 'grant', reason_code: 'topup_purchase', counts_as_spend: false, source_order_id: order, grant_period_key: null,
-  idempotency_key: `method-package:${order}`, balance_before: 0, balance_after: 3480, created_at: at(0), ...extra });
+  idempotency_key: `payment:${order}:01`, balance_before: 0, balance_after: 3480, created_at: at(0), ...extra });
 const clawback = { id: 'txn-clawback', user_id: user, amount: -3480, type: 'deduction', ledger_type: 'refund_clawback',
   reason_code: 'refund_clawback', counts_as_spend: false, source_order_id: order, idempotency_key: `pay-common:monthly-refund:${order}`,
   balance_before: 3480, balance_after: 0, created_at: at(5) };
@@ -78,6 +78,12 @@ describe('current-model grants', () => {
   const active = { paymentOrders: [], creditTransactions: [purchase()], profiles: [{ id: user, credits: 3480 }] };
   it('a grant written as a topup_purchase of the same order matches its ledger row', () => {
     expect(codes({ ...active, subscriptionCreditGrants: [grant('granted')] })).toEqual([]);
+  });
+  it('each period is matched to its own ledger row: a second period pointing at the first period\'s row mismatches', () => {
+    const second = grant('granted', { id: 'grant-2', grant_period_key: `payment:${order}:02`, period_index: 2,
+      idempotency_key: `grant:${order}:02` });
+    expect(codes({ ...active, subscriptionCreditGrants: [grant('granted'), second] }))
+      .toContain('subscription_grant_credit_transaction_mismatch');
   });
   it('a different amount or another order still mismatches', () => {
     expect(codes({ ...active, subscriptionCreditGrants: [grant('granted', { credits_granted: 3000 })] }))

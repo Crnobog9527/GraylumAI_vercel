@@ -11,6 +11,7 @@ import {
 import { getDueAnnualGrantPeriods } from './subscriptionCreditGrants';
 import { readDailyBillingCreditSources } from './dailyBillingCreditSources';
 import { readDailyBillingTotals } from './dailyBillingTotals';
+import { grantOrderId, hasCurrentRefundRecord, isCurrentModelOrder } from './billingReadinessCurrent';
 import {
   DEFAULT_READINESS_ROW_LIMIT,
   readLimitedRows,
@@ -261,36 +262,6 @@ function hasSubscriptionGrantReversalAuditSignal(value: unknown): boolean {
 
 function hasPendingSubscriptionGrantReversal(value: unknown): boolean {
   return normalizeText(asRecord(value).reversalStatus) === 'pending';
-}
-
-/**
- * The current payment model's refund records (REL-1 2026-10-26: every current refund was reported as unaudited because
- * only the legacy Stripe keys were read): an approved refund (monthly, wallet, Waffo) ends with refund_approval.status
- * 'succeeded' (0253, PAY-FAILOVER); a refund made outside Graylum, or a test-clock close, records the provider refund id
- * in metadata.stripeExternalRefund (0247), including the partial and pack states that go to review; a test-clock close
- * (0329) records its refunds in stripeTestClockClose.
- */
-const EXTERNAL_REFUND_STATES = new Set<string>(['refunded', 'partial_review', 'pack_review']);
-function hasCurrentRefundRecord(order: PaymentOrderRow) {
-  const metadata = asRecord(order.metadata);
-  const external = asRecord(metadata.stripeExternalRefund);
-  // A test-clock close (0329) keeps the provider refunds in stripeTestClockClose.refunds instead of lastRefundId.
-  const clockRefunds = asRecord(metadata.stripeTestClockClose).refunds;
-  const clockRefunded = external.neverFulfilled === true && Array.isArray(clockRefunds)
-    && clockRefunds.length > 0 && clockRefunds.every((refund) => typeof asRecord(refund).id === 'string');
-  return normalizeText(asRecord(order.refund_approval).status) === 'succeeded'
-    || ((typeof external.lastRefundId === 'string' || clockRefunded) && EXTERNAL_REFUND_STATES.has(normalizeText(external.state)));
-}
-
-/** A current-model order is one without the legacy Stripe subscription id: its grants and ledger rows carry the order. */
-function isCurrentModelOrder(order: PaymentOrderRow) {
-  return !order.stripe_subscription_id?.trim();
-}
-
-/** Current-model grant period keys are `payment:<order id>:<period>` (pay_waffo_grant_period). */
-function grantOrderId(grantPeriodKey: string | null | undefined) {
-  const match = /^payment:([0-9a-f-]{36}):\d+$/i.exec(grantPeriodKey?.trim() ?? '');
-  return match ? match[1]!.toLowerCase() : null;
 }
 
 function hasRefundAuditMetadata(order: PaymentOrderRow) {
@@ -1255,10 +1226,12 @@ export function buildBillingEngineV15ReadinessAudit(
         const grantUserId = grant.user_id?.trim() ?? '';
         const transactionUserId = transaction.user_id?.trim() ?? '';
         // Current model (pay_waffo_grant_period): the ledger row is a `topup_purchase` of the same order, without its own
-        // period key; the grant's `payment:<order>:<period>` key names that order (REL-1 2026-10-26).
+        // period key; its idempotency key is the grant's full `payment:<order>:<period>` key, so each period is matched to
+        // its own ledger row (REL-1 2026-10-26).
         const grantOrder = grantOrderId(grantPeriodKey);
         const currentModelGrant = transactionReasonCode === 'topup_purchase' && grantOrder !== null
           && transaction.source_order_id?.toLowerCase() === grantOrder && !transactionGrantPeriodKey
+          && transaction.idempotency_key?.trim() === grantPeriodKey
           && ['monthly_invoice', 'annual_monthly_release'].includes(grant.grant_type ?? '');
         if (
           transactionAmount !== grantCredits
