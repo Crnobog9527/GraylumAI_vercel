@@ -3356,7 +3356,7 @@
   "fn:content_erasure_confirm(uuid,text,uuid,text)": "c08f09fb2908",
   "fn:content_erasure_execution_guard()": "3adbedaaee4d",
   "fn:content_erasure_financial_allowed(uuid,uuid)": "3c6e64645a80",
-  "fn:content_erasure_ledger_owned(jsonb)": "72b7904f6d11",
+  "fn:content_erasure_ledger_owned(jsonb)": "bf02fa9069bf",
   "fn:content_erasure_mark_session(uuid,uuid)": "060a2de31f76",
   "fn:content_erasure_marker_guard()": "0202fde2876d",
   "fn:content_erasure_parent_guard()": "7440842c273b",
