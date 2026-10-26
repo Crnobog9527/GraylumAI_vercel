@@ -33,7 +33,7 @@
 
 ### 1.1 规则（Owner 2026-10-23 晚，Master Plan 第 2.1 节）
 
-1. **核心 12 项全部验收通过才上线。** 上线日不再固定 10-31，目标 11-06 前后；日期是估计不是承诺，
+1. **核心 12 项全部验收通过才上线。** 上线日 11-15、冻结 11-10（Owner 2026-10-26 改期，Master Plan 第 2.1 节；取代 11-06 / 10-28）；日期是估计不是承诺，
    总控每周三、周六向 Owner 汇报能否保住。
 2. **核心项不能用"关开关、对外隐藏"降级上线。** 赶不上就顺延上线日。唯一例外：Post for Me 正式项目或 TikHub 价格来不及时，
    **作品复盘**整体先关（只覆盖复盘的入口和扣费；一键发布不在例外内）。
@@ -71,9 +71,9 @@
 内容对话剩余 7 个 PR（不含成果夹和 LOAD-SKILL）、"一窗口一选题"提醒、整理纪要、首字速度优化、新一轮定位沿用上一轮对标
 （上线时每轮重新对标）、MODERATION（上线时继续暂缓）、MOBILE-UX、ANALYTICS-POSTHOG、GA4 方案。见第 5 节。
 
-## 2. 冻结（10-28）后的规则
+## 2. 冻结（11-10）后的规则
 
-冻结日 10-28（Owner 2026-10-23："放宽 25 号的冻结日期，调到 28 号去。"）。冻结不等于上线日：冻结之后一直到上线都按下面做。
+冻结日 11-10（Owner 2026-10-26 改期，见 Master Plan 第 2.1 节；原 10-28 已取代）。冻结不等于上线日：冻结之后一直到上线都按下面做。
 
 1. **冻结前要完成**：在途的迁移全部定号上库（10-24 晚已上库到 0342，待上库 0343–0351，下一个可用号 0352），
    冻结版本里没有重号、没有暂定号；核心 12 项需要的功能代码全部合并。
@@ -143,25 +143,25 @@
 
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
-| B1 | ★ Owner 批准 → 总控 | `Graylum_main` 从空库建库：平台前置 → `packages/db/baseline`（0000）→ 全部迁移（同名 bridge 紧挨在迁移前）；**每个文件整段交给服务端执行，不用 `psql -f`** | 只读抓指纹，和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 |
+| B1 | ★ Owner 批准 → 总控 | `Graylum_main` 从空库建库（按 Master Plan 第 2.1 节 2026-10-25 BASELINE-SQUASH：冻结后先做干净起点，三方一致才用；不一致退回下面的旧方式）：平台前置 → `packages/db/baseline`（0000）→ 全部迁移（同名 bridge 紧挨在迁移前）；**每个文件整段交给服务端执行，不用 `psql -f`** | 只读抓指纹，和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 |
 | B2 | ★ Owner 批准 → 总控 | 写正式库标记：`runtime_environment="production"`，读回 `runtime_production_database()` 为 true；正式库启用的测试窗口为 0（**绝不在 staging 写**） | 读回 |
 | B3 | ★ Owner 批准 → 总控 | 配置类数据：套餐（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，免费每月 0、每年 0）、积分包和会员折扣、`billing_credits_per_usd`=100、`billing_token_price_multiplier`=6、模型和线路（导入后在后台点"读取价格"，不从 staging 复制价格）、`runtime_purpose_budgets`、已发布的 Skill 和模块、输出上限 32768。不复制 staging 的测试账号、对话、订单、流水、沙盒编号、测试窗口 | 逐项读回 |
 | B3a | ★ Owner 确认 → 总控 | **首批创作 Skill 正式发布前，Owner 看过样例并单独确认**（Master Plan 第 2.1 节 2026-10-17：只豁免 staging 测试发布，正式版本仍须单独确认）。确认前这些 Skill 不在正式库发布（可以导入但保持未发布）；不能用"同意建库""同意上线"这类通用批准代替 | Owner 原话记在上线记录；正式后台 Skill 版本读回 |
 | B4 | ★ Owner 批准 → 总控 | 正式准入档案 `runtime_payg_production`（结构同 staging，去掉 windowId 和到期日；模型 id 字符串和线路可照抄取证，`ai_models` 的 uuid 要用正式库的）。**必须覆盖**：对话和报告模型（Claude、Gemini）；整理模型（`v3_summary_model_id` 指向 GPT-6 Luna）要有 `organizer` 用途、`serial-tools-v6-reasoning` 格式和报价（文风生成用它）；评审团三位评审和汇总；对比四个模型的 `fusion_compare` 用途和 `fusion-text-v1-stream` 格式；自由对话研究工具 `maxTools` ≥5、定位导师回合 ≥9；档案用途上限 9 | 读回；应急关闭写 `{"enabled":false}` |
 | B5 | ★ Owner 批准 → 总控 | 付款配置：`payment_terms_version`＝`{"version":"<已发布版本>"}`（对象）；Stripe 正式目录绑定写进 `payment_provider_refs`（第 3.6 节 S4 的 SQL，每个套餐/积分包/方式/周期恰好一条当前 live 映射）；`launch_baseline_at`（建库后、第一笔真钱前）；微信、支付宝 `annualVerified=true`（路由 `enabled` 仍关）；新购买渠道 `payment_method_routes.newPurchaseChannel` 缺省就是 `stripe`，读回即可（旧键 `payment_new_purchase_channel` 只剩后台旧面板读取，写不写不影响用户） | 逐个读回；会员页 `termsVersion` 不为空、可结账 |
 | B6 | ★ Owner 批准 → 总控 | 限流和停止：`runtime_rate_limits` 消息 10/分钟、200/天，调用 30/分钟、600/天，`stopNewCalls`＝开 | 读回 |
-| B7 | ★ Owner 批准 → 总控 | 功能配置（取值来自 Owner 已定的决定）：对比 `fusion_settings.compare`（允许 Sonnet/Gemini/Sol/Opus 的正式 uuid，默认 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，`minModels`=2，`answerOutputTokens`=8192，`maxBudgetUsd`=3.5）；Sol、Opus 的 `config.reasoning.purposes.interactive` 加低思考档；`allow_fusion_compare` 和评审团只给 Gold；研究工具 `chat_research_tools_enabled`、`research_tools_config`（三家供应商 `enabled` 且 `hardCapAttested`、已验证平台、每条回答子调用 ≤12）、`billing_provider_prices`（未过期）、`billing_payg_start_thresholds`；资料库 `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`chat_my_posts_enabled`、`library_upload_enabled`、`library_scan_recognition_enabled`；作品复盘 `publish_monitor_enabled`（JSON 布尔 `true`）、`_review_enabled`、`_review_model_id`、`_review_max_usd`=`"0.30"`；一键发布 `publish_monitor_publish_platforms`（名单见第 7 节 E1）、`publish_monitor_publish_quota`（条数和 Post for Me 套餐一致，不填就不能发布）、`publish_monitor_publish_listed`；P3 的独占项目确认后才打开孤儿清扫删除 `publish_monitor_orphan_sweep_delete`（默认只记录不删）；自由对话主力模型 `primary_model_id`（正式库 `ai_models` 的 uuid，且这个模型在 B4 准入档案里，不配则自由对话全部被拒）；写作 Skill `modules.uses_user_voice`（`short-video-script`、`post-and-article`、`video-storyboard`、`video-editing-guide`）；`model_identity_guard` 开 | B8 差异表 |
+| B7 | ★ Owner 批准 → 总控 | 功能配置（取值来自 Owner 已定的决定）：对比 `fusion_settings.compare`（允许 Sonnet/Gemini/Sol/Opus 的正式 uuid，默认 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，`minModels`=2，`answerOutputTokens`=8192，`maxBudgetUsd`=3.5）；Sol、Opus 的 `config.reasoning.purposes.interactive` 加低思考档；`allow_fusion_compare` 和评审团只给 Gold；研究工具 `chat_research_tools_enabled`、`research_tools_config`（三家供应商 `enabled` 且 `hardCapAttested`、已验证平台、每条回答子调用 ≤12）、`billing_provider_prices`（未过期）、`billing_payg_start_thresholds`；资料库 `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`chat_my_posts_enabled`、`library_upload_enabled`、`library_scan_recognition_enabled`；作品复盘 `publish_monitor_enabled`（JSON 布尔 `true`）、`_review_enabled`、`_review_model_id`、`_review_max_usd`=`"0.30"`；一键发布 `publish_monitor_publish_platforms`（名单见第 7 节 E1）、`publish_monitor_publish_quota`（条数和 Post for Me 套餐一致，不填就不能发布）、`publish_monitor_publish_listed`；P3 的独占项目确认后才打开孤儿清扫删除 `publish_monitor_orphan_sweep_delete`（默认只记录不删）；自由对话主力模型 `primary_model_id`（正式库 `ai_models` 的 uuid，且这个模型在 B4 准入档案里，不配则自由对话全部被拒）；定位报告开关 `runtime_report_generation`＝`{"enabled":true}`（空库没有迁移写它，不写则定位报告全部 REPORT_DISABLED）；写作 Skill `modules.uses_user_voice`（`short-video-script`、`post-and-article`、`video-storyboard`、`video-editing-guide`）；`model_identity_guard` 开 | B8 差异表 |
 | B8 | 总控（只读 staging，需批准读新库） | **种子配置全量核对**：列出 staging 全部 `system_settings` 键、套餐、积分包、模型、Skill 发布状态、`payment_provider_refs`，和新库逐项对照；每个差异补上或写明为什么不需要 | 差异表没有未处理项，附在执行记录 |
 | B9 | 总控（需批准只读） | Vault 已装、0259 已应用；没有"付款方式为空、未关闭、未付款"的旧路径订单；两个资料库桶私有、`storage.objects` / `storage.buckets` 上没有策略 | 只读 SQL |
 | B10 | ★ Owner 注册；授权 Owner 批准 → 总控 | Owner 在新项目注册自己的管理员账号，总控授予管理员角色 | 管理员能进后台、普通账号被拒 |
-| B11 | ★ Owner 操作 | 正式后台填密钥槽：`openrouter`、`postforme`、`postforme_webhook`（至少 16 位，和 Post for Me 一侧末 4 位一致）、`tikhub`、`parallel`、`firecrawl`、`resend`（付款提醒和止损告警共用）；后台"客服邮箱" `support_email` 填收止损告警和专家预约提醒的邮箱（和页面显示用的 `NEXT_PUBLIC_SUPPORT_EMAIL` 是两回事） | 每个槽位显示"后台已填写"（只看状态和末 4 位） |
+| B11 | ★ Owner 操作 | 正式后台填密钥槽：`openrouter`、`postforme`、`postforme_webhook`（至少 16 位，和 Post for Me 一侧末 4 位一致）、`tikhub`、`parallel`、`firecrawl`、`resend`（付款提醒和止损告警共用）；后台"客服邮箱" `support_email` 填收止损告警和专家预约提醒的邮箱；**注意它也会公开显示**在关于我们、无障碍、博客、维护页等页面，所以要填可以对外公开的客服邮箱（2026-10-26 建库准备核对更正） | 每个槽位显示"后台已填写"（只看状态和末 4 位） |
 
 ### 3.4 部署前：Vercel 正式变量（只对新部署生效）
 
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
 | V1 | ★ Owner 操作（新凭证） | 换成新项目：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL`、`EXPECTED_SUPABASE_PROJECT_REF`；Stripe 三件和 P2 的新 webhook 密钥；`OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`；`GA4_API_SECRET`（可选，GA4 上线后第一周再定，不设不影响业务） | 变量名清单读回（不读值） |
-| V2 | ★ Owner 批准 → 总控 | 非密钥：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV` / `NEXT_PUBLIC_APP_ENV`；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（此时 `stopNewCalls` 开着）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`（必须恰好是 `true`，后台付款路由此时仍关）；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`、`NEXT_PUBLIC_TERMLY_WEBSITE_UUID`、`NEXT_PUBLIC_COMPOSER_REFERENCES=on`、资料库三个 `NEXT_PUBLIC_LIBRARY_*` 开关（值照 staging）、`PAYMENT_NOTICE_FROM`、Sentry 几个变量。**`SITE_INDEXING` 这时不设成 `public`** | 变量名清单和本行对照 |
+| V2 | ★ Owner 批准 → 总控 | 非密钥：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV` / `NEXT_PUBLIC_APP_ENV`；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（此时 `stopNewCalls` 开着）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`（必须恰好是 `true`，后台付款路由此时仍关）；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`、`NEXT_PUBLIC_TERMLY_WEBSITE_UUID`、`NEXT_PUBLIC_COMPOSER_REFERENCES=on`、资料库三个 `NEXT_PUBLIC_LIBRARY_*` 开关（值照 staging）、`PAYMENT_NOTICE_FROM`、Sentry 几个变量（**`NEXT_PUBLIC_SENTRY_DSN` 必须有**，缺了所有告警静默；Sentry 正式项目要建 error/fatal 的通知规则，上线前做一次合成告警演练，见 [建库准备包](REL-1-BUILD-PREP.md) 第一天告警值守表）。**`SITE_INDEXING` 这时不设成 `public`** | 变量名清单和本行对照 |
 | V3 | 总控只读核对 | **不能设**：任何 `V3_RUNTIME_STAGING_*`（设了代码拒绝）、`WAFFO_TEST_*`、`E2E_*`、`LANDING_PREVIEW_FEATURES`、`ANTHROPIC_API_KEY`、`PAYMENT_NOTICE_TEST_RECIPIENTS`、`OPENROUTER_API_KEY`（只从后台槽位读）；也**不要**把 `EXPECTED_APP_HOST` 加进 Vercel——应用运行时不读它，只有本机就绪检查脚本读，总控在本机跑检查时设成 `www.graylum.com` | 变量名清单里没有这些 |
 | V4 | ★ Owner 操作 | 删除 Vercel 正式环境里过渡期的旧后备变量和不再需要的 E2E 测试凭证（OR-2 和 T-END 已合并，前提是 B11 的槽位都已填写） | 删除后发布、Webhook、三家搜索和模型调用都正常 |
 | M1 | ★ Owner 批准 → 总控 | 把冻结版本从 staging 合并到 `main`（**合并前就要拿到批准**，合并会自动触发正式部署）；Dependency Audit 在 `main` 的 CI 上通过，不新增豁免 | CI 全绿；部署连的是新库；站点仍暂停 |
