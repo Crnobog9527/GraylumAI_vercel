@@ -43,6 +43,8 @@ export type PaymentOrderRow = {
   /** Current model (PAY-STRIPE-MP / PAY-FAILOVER): the internal subscription and an approved refund's record. */
   subscription_id?: string | null;
   refund_approval?: unknown;
+  /** Set when the purchase attempt was closed (expired, rejected, never dispatched): nothing is outstanding. */
+  purchase_closed_at?: string | null;
 };
 
 export type SubscriptionCreditGrantRow = {

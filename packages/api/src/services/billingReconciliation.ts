@@ -1039,7 +1039,7 @@ export function buildBillingEngineV15ReadinessAudit(
       });
     }
 
-    if (normalizedStatus === 'pending' && !order.fulfilled_at && order.created_at) {
+    if (normalizedStatus === 'pending' && !order.fulfilled_at && !order.purchase_closed_at && order.created_at) {
       const createdAt = Date.parse(order.created_at);
       if (Number.isFinite(createdAt) && createdAt < stalePendingBeforeMs) {
         addFinding(findings, {
@@ -1648,7 +1648,7 @@ export async function runBillingEngineV15ReadinessAudit(
     readLimitedRows<PaymentOrderRow>(
       supabase,
       'payment_orders',
-      'id, user_id, item_type, mode, status, payment_status, amount_total, fulfilled_at, created_at, updated_at, stripe_subscription_id, stripe_invoice_id, metadata, subscription_id, refund_approval',
+      'id, user_id, item_type, mode, status, payment_status, amount_total, fulfilled_at, created_at, updated_at, stripe_subscription_id, stripe_invoice_id, metadata, subscription_id, refund_approval, purchase_closed_at',
       rowLimit,
     ),
     readLimitedRows<SubscriptionCreditGrantRow>(
