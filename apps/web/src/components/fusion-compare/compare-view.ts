@@ -68,37 +68,44 @@ export const isUpgradeRefusal = (error: unknown) => /FUSION_COMPARE_FORBIDDEN|FU
 
 /** One column as the read returns it (fusion_compare_read). */
 export type ReadColumn = { column: number; runId: string; modelId: string; body: string | null;
-  billing?: { state?: string; reservedCredits?: number | null; chargedCredits?: number | null; closed?: boolean; outcome?: string | null } | null;
+  billing?: { state?: string; reservedCredits?: number | null; chargedCredits?: number | null; closed?: boolean;
+    outcome?: string | null; netChargedCredits?: number | null } | null;
   call: { callId: string; state: string; dispatched: boolean; settled?: boolean; verdict: string | null; inFlight?: boolean } | null };
 export type ColumnPhase = 'queued' | 'streaming' | 'done' | 'failed' | 'pending' | 'settling' | 'stopped';
 
 /** What a column shows (§3.5, §4.4 three outcomes): an answer, a confirmed failure (free), a result being checked (its hold kept),
  * or stopped. `streaming` is only ever set by the page while its own request runs. */
 export function columnPhase(column: ReadColumn, compareState: string): ColumnPhase {
-  const closed = column.billing?.closed === true;
-  // Nothing is final until BILL2 closes the column's run: a saved answer or a verdict whose settlement failed or whose provider
+  const settled = billingSettled(column);
+  // Nothing is final until BILL2 settles the column's run: a saved answer or a verdict whose settlement failed or whose provider
   // cost is still pending keeps its hold (and recovery may still charge it), and adoption is refused for an unsettled call. So a
-  // dispatched column is `pending` until its billing closes, however terminal it looks. A usable answer whose run has not closed
+  // dispatched column is `pending` until its billing settles, even after dispatch is closed. A usable answer whose run has not settled
   // is `settling` ("积分结算中"): its result is known, only the settlement is outstanding (a failed one is finished by the daily
   // recovery), and it is not adoptable yet.
-  if (column.call?.dispatched && !closed) return column.call.verdict === 'usable' ? 'settling' : 'pending';
+  if (column.call?.dispatched && !settled) return column.call.verdict === 'usable' ? 'settling' : 'pending';
   if (column.call?.verdict === 'usable' || (column.body && column.call?.verdict === null)) return 'done';
   // A stop after dispatch settles at the known usage (it can charge); the card must not call it free (see stoppedLabel).
   if (column.call?.verdict === 'user_stopped') return 'stopped';
   if (column.call?.verdict) return 'failed';
-  if (closed) return column.call?.dispatched ? 'failed' : 'stopped';
+  if (settled) return column.call?.dispatched ? 'failed' : 'stopped';
   return compareState === 'stopped' ? 'stopped' : 'queued';
 }
 
 /** "待核对，暂时冻结 N 积分" (§4.4): the hold kept for a column whose result is unknown. */
-export const heldCredits = (column: ReadColumn) => column.billing?.closed ? 0
+export const billingSettled = (column: ReadColumn) => column.billing?.closed === true
+  && (column.billing.state === 'settled' || column.billing.state === 'refunded');
+export const heldCredits = (column: ReadColumn) => billingSettled(column) ? 0
   : Math.max(0, (column.billing?.reservedCredits ?? 0) - (column.billing?.chargedCredits ?? 0));
-export const chargedCredits = (column: ReadColumn) => column.billing?.chargedCredits ?? 0;
+export const chargedCredits = (column: ReadColumn) => column.billing?.netChargedCredits ?? column.billing?.chargedCredits ?? 0;
 
 /** The label of a stopped column: one stopped after dispatch is charged for what was already used, so it never says "free". */
 export const stoppedLabel = (column: ReadColumn) =>
-  chargedCredits(column) > 0 ? `已停止，按已生成的部分计费 ${chargedCredits(column)} 积分` : '已停止，不收费';
+  chargedCredits(column) > 0 ? `已停止，按已生成部分计费 ${chargedCredits(column)} 积分` : '已停止，不收费';
 
-/** The compare is over only when every column's billing has closed: a stopped compare may still hold credits for a dispatched
+/** The compare is over only when every column's billing has settled: a stopped compare may still hold credits for a dispatched
  * column whose cost is not confirmed, so its totals are not final yet. */
-export const allSettled = (columns: readonly ReadColumn[]) => columns.every(column => column.billing?.closed === true);
+export const allSettled = (columns: readonly ReadColumn[]) => columns.every(billingSettled);
+
+/** One snapshot for the displayed columns and total, including any recorded compensation. */
+export const totalChargedCredits = (columns: readonly ReadColumn[]) =>
+  columns.reduce((total, column) => total + chargedCredits(column), 0);

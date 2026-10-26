@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Square } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
-import { allSettled, chargedCredits, columnPhase, compareErrorText, heldCredits, stoppedLabel, type ColumnPhase, type ReadColumn } from './compare-view';
+import { allSettled, billingSettled, chargedCredits, totalChargedCredits, columnPhase, compareErrorText, heldCredits,
+  stoppedLabel, type ColumnPhase, type ReadColumn } from './compare-view';
 import styles from './compare.module.css';
 
 type View = { compareId: string; state: string; question?: string | null; chargedCredits?: number; columns: ReadColumn[];
@@ -36,6 +37,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
   const started = useRef(new Set<number>());
   const attempts = useRef(new Map<number, number>());
   const [retryTick, setRetryTick] = useState(0);
+  const refreshedBilling = useRef('');
   const adoptRequest = useRef<{ column: number; id: string } | null>(null);
   const streaming = Object.values(live).some(column => column.streaming);
   const view = trpc.fusionCompare.read.useQuery({ compareId }, {
@@ -48,6 +50,19 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
   const stop = trpc.fusionCompare.stop.useMutation({ onSettled: () => void view.refetch() });
   const adopt = trpc.fusionCompare.adopt.useMutation();
   const data = view.data as View | undefined;
+
+  // Settlement may finish after the stop mutation. Refresh the wallet and ledger for each new financial snapshot.
+  useEffect(() => {
+    if (!data) return;
+    const settled = data.columns.filter(billingSettled);
+    if (!settled.length) return;
+    const signature = JSON.stringify([compareId, settled.map(column => [column.runId, chargedCredits(column)])]);
+    if (refreshedBilling.current === signature) return;
+    refreshedBilling.current = signature;
+    void utils.credits.getBalance.invalidate();
+    void utils.credits.getCreditTransactions.invalidate();
+    void utils.credits.getCreditsSummary.invalidate();
+  }, [data, compareId, utils]);
 
   // Each column that has not been dispatched is asked for once by this tab; a reload asks again and the server answers
   // "already" for a column another request dispatched (it is then read, not streamed).
@@ -145,7 +160,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
           );
         })}
       </div>
-      {ended && <p className={styles.total}>本次对比共扣 {data.chargedCredits ?? 0} 积分（各列分别结算：没生成出回答的列不收费，开始生成后手动停止的按已用量计费）</p>}
+      {ended && <p className={styles.total}>本次对比共扣 {totalChargedCredits(data.columns)} 积分（各列分别结算：未产生用量的列不收费，手动停止的按已产生用量计费）</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
     </section>
   );
