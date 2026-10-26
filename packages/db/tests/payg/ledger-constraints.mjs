@@ -49,11 +49,10 @@ export async function ledgerConstraintCases({db,Client,connectionString,report})
   const keyed = (await db.query("SELECT * FROM atomic_apply_credit_ledger_entry($1,5,'addition','[Admin] local','admin_adjustment:e3')",[user])).rows[0];
   const replay = (await db.query("SELECT * FROM atomic_apply_credit_ledger_entry($1,5,'addition','[Admin] local','admin_adjustment:e3')",[user])).rows[0];
   assert.deepEqual([replay.is_idempotent,replay.transaction_id],[true,keyed.transaction_id],'a caller key stays idempotent');
+  // Check-in was retired (0396): the former keyless writer is gone; its keyed history rows stay valid.
+  assert.equal((await db.query("SELECT to_regproc('public.claim_daily_checkin') IS NULL gone")).rows[0].gone,true);
   const checkin = await profile(db,0);
-  await db.query('SELECT * FROM claim_daily_checkin($1)',[checkin]);
-  assert.equal((await db.query('SELECT * FROM claim_daily_checkin($1)',[checkin])).rows[0].already_claimed,true);
-  const rows = (await db.query("SELECT idempotency_key k FROM credit_transactions WHERE user_id=$1 AND type='checkin'",[checkin])).rows;
-  assert.equal(rows.length,1);
-  assert.match(rows[0].k,new RegExp(`^checkin:${checkin}:\\d{4}-\\d{2}-\\d{2}$`));
-  report.checks.push('E3: same request pre-deducts once (repeat and concurrent); duplicate request row refused; keyless ledger insert refused; check-in and admin entries carry keys');
+  await db.query(`INSERT INTO credit_transactions(idempotency_key,user_id,amount,type,description)
+    VALUES('checkin:'||$1::text||':2026-10-25',$1::uuid,5,'checkin','每日签到奖励（第1天）')`,[checkin]);
+  report.checks.push('E3: same request pre-deducts once (repeat and concurrent); duplicate request row refused; keyless ledger insert refused; admin entries carry keys; retired check-in RPC gone, keyed check-in history accepted');
 }
