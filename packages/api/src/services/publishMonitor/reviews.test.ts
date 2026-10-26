@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach,it,expect,vi} from 'vitest';
+import {logger} from '../../lib/logger';
 const m=vi.hoisted(()=>({prepare:vi.fn(),execute:vi.fn(),cancel:vi.fn(),policy:vi.fn(),settings:vi.fn(),executor:vi.fn()}));
 vi.mock('../runtime/admission',()=>({runtimeAdmissionService:()=>({prepare:m.prepare})}));
 vi.mock('../runtime/execute',()=>({runtimeExecutor:(options:unknown)=>{m.executor(options);return {execute:m.execute,cancel:m.cancel};}}));
@@ -113,9 +114,11 @@ it('terminal cap errors free a five-claim batch for later users without dispatch
  m.prepare.mockImplementation(async(input:{requestId:string})=>{
   const claim=claims.find(row=>row.requestId===input.requestId)!;
   // Actual admission validator: a positive frozen cap cannot buy the required two calls.
-  capReviewAdmission({maxTurns:6,maxToolCalls:5,ownPosts:true},{contractVersion:'bill2.v2',
+  capReviewAdmission({maxTurns:3,maxToolCalls:2,ownPosts:true,maxOutputTokens:1000,purposeBudget:{inputBytes:32000}},{contractVersion:'bill2.v2',
    sourceHash:'original',rules:{creditsPerUsd:'100',multiplier:'6'},
-   callPolicy:[{upperUsd:'0.1'}],limits:{maxCalls:6}} as never,{id:claim.id,token:claim.token,maxCostUsd:claim.maxCostUsd});
+   callPolicy:[{upperUsd:'9',inputLimit:196608,outputLimit:32768,
+    providerLimits:{providerSlug:'synthetic',contextTokens:1000000,promptUsdPerMillion:'0',completionUsdPerMillion:'0',requestUsd:'0.1'},
+    payg:{maxBytes:196608,templateTokens:4096,marginTokens:4096}}],limits:{maxCalls:6}} as never,{id:claim.id,token:claim.token,maxCostUsd:claim.maxCostUsd});
   return {executionId:'later-user'};
  });
  const defer=vi.fn(),options={env:{},defer,budget:createRuntimeBudget(()=>0)};
@@ -134,4 +137,15 @@ it.each(['PUBLISH_MONITOR_REVIEW_UNAVAILABLE','RUNTIME_STAGING_MODEL_DENIED','RU
  expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({
   p_action:'skip',p_reason:'CONFIGURATION_REQUIRED'}));
  expect(m.execute).not.toHaveBeenCalled();
+});
+
+it('configuration refusals log only the exact allowlisted code and reviewId',async()=>{
+ const log=vi.spyOn(logger,'warn').mockImplementation(()=>{});
+ try{
+  const d=db({allowed:true,executionId:null,state:null});
+  m.prepare.mockRejectedValueOnce(new Error('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW'));
+  expect(await prepareReview(d as never,c,{})).toBe(null);
+  expect(log).toHaveBeenCalledWith('billing','weekly_review_configuration_refused',{
+   reviewId:c.id,code:'PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW'});
+ }finally{log.mockRestore();}
 });

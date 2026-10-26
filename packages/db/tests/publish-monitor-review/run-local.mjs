@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {billingCases} from './billing.mjs';
+import {boundedBillingCases} from './bounded-billing.mjs';
 import {sourceDataCases} from './source-data.mjs';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
@@ -84,6 +85,7 @@ try{
  assert.deepEqual(await svc('SELECT publish_monitor_reviews($1) v',[pro]),[]);
  report.checks.push('history is owner scoped and skipped runs expose no invented body/table');
  await billingCases({c,report});
+ await boundedBillingCases({c,report});
  await sourceDataCases({c,report,gold,pro});
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
