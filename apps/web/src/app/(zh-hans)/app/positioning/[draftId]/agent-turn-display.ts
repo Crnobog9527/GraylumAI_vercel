@@ -177,12 +177,11 @@ export function reopenedTurn(source: Pick<MentorReplySource, "active" | "state" 
 /** A state notice shown under a mentor turn (inline notice), never as the message body. */
 export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boolean };
 
-/** "10/19 23:56 " in Beijing time, or nothing when the turn carries no time. */
+/** "10/19 23:56 " in the viewer's own time zone (browser local), or nothing when the turn carries no time. */
 function earlierRefusalTime(value: string | null | undefined): string {
   const at = value ? new Date(value) : null;
   if (!at || Number.isNaN(at.getTime())) return "";
-  const text = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
+  const text = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
   return `${text} `;
 }
 

@@ -253,7 +253,9 @@ it('does not let the older-history notice alone hide the tail progress notice', 
 });
 it('shows an older provider refusal as grey history with its time, and keeps the live warning for the newest turn',()=>{
  const old=mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected',earlier:true,createdAt:'2026-10-19T15:56:58.743Z'}));
- expect(old.notice).toEqual({tone:'status',text:'10/19 23:56 这一轮被服务方拒绝，当时没有扣积分。这是旧记录，与你刚才的操作无关。'});
+ // The time is the viewer's local time, so only its shape is fixed.
+ expect(old.notice?.tone).toBe('status');
+ expect(old.notice?.text).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2} 这一轮被服务方拒绝，当时没有扣积分。这是旧记录，与你刚才的操作无关。$/);
  expect(mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected',earlier:false,createdAt:'2026-10-19T15:56:58.743Z'})).notice)
   .toEqual({tone:'warning',text:PROVIDER_REJECTED_NOTICE});
  expect(mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected',earlier:true})).notice?.text).toContain('这一轮被服务方拒绝');
