@@ -37,8 +37,8 @@ docker(['image','inspect',POSTGRES_IMAGE]);
 const name='graylum-upgrade-'+randomUUID().slice(0,8);
 const sql=input=>docker(['exec','-i',name,'psql','-XqAt','-U','postgres','-d','upgrade',
   '-v','ON_ERROR_STOP=1','-f','/dev/stdin'],input);
-// 0391 checks the md5 of the claim it replaces; 0413 (DB-RW-A) later removed one row lock from that claim, so put the lock
-// back before 0391 is replayed on a finished database (the replay of 0413 after it removes it again).
+// 0391 checks the md5 of the claim it replaces; 0416 (DB-RW-A) later removed one row lock from that claim, so put the lock
+// back before 0391 is replayed on a finished database (the replay of 0416 after it removes it again).
 const restoreClaimThresholdLock=()=>{
   const claim=sql("SELECT pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure);");
   const locked=claim.replace("WHERE key='billing_payg_start_thresholds';","WHERE key='billing_payg_start_thresholds' FOR SHARE;");
@@ -204,7 +204,7 @@ try {
   sql(replayable('0385_billing_ledger_constraints.sql')); // ARCH-FIX E3 patches atomic_pre_deduct
   restoreClaimThresholdLock();
   sql(read('packages/db/migrations/0391_credit_available.sql')); // MAINT-P4 replaces atomic_pre_deduct's hold formula
-  sql(read('packages/db/migrations/0413_db_rw_a_shared_row_locks.sql')); // DB-RW-A removes shared row locks from claim, admit and the permission chain
+  sql(read('packages/db/migrations/0416_db_rw_a_shared_row_locks.sql')); // DB-RW-A removes shared row locks from claim, admit and the permission chain
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

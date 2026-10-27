@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// DB-RW-A (0413): the per-turn path takes no row lock on the rows every user shares (model, module, skill, skill revision, start-threshold setting). Counted on the database itself, not by time.
+// DB-RW-A (0416): the per-turn path takes no row lock on the rows every user shares (model, module, skill, skill revision, start-threshold setting). Counted on the database itself, not by time.
 import assert from 'node:assert/strict';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 import {createFixture,claim} from '../payg/fixture.mjs';

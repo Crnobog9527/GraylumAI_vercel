@@ -2190,7 +2190,9 @@ it('RUNTIME: historical revision admission and another Session dispatch never in
   const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Continue original history',instructions:'Ordinary',model:'runtime-m',maxOutputTokens:100,maxTurns:1,historyItems:2};
   const billing={...frozen,scope:s.scope,input:context};delete billing.moduleId;delete billing.skillId;delete billing.revisionId;
   const admitting=waiter.query('select runtime_admit($1,$2,$3,$4,$5) e',[actor,s.sessionId,randomUUID(),context,billing]).then(async r=>{await waiter.query('COMMIT');return {value:r.rows[0].e,error:null};},async error=>{await waiter.query('ROLLBACK');return {value:null,error};});
-  let blocked=false;for(let i=0;i<100;i++){const p=(await db.query('select pg_blocking_pids($1) p',[waiterPid])).rows[0].p;if(p.includes(holderPid)){blocked=true;break;}await new Promise(r=>setTimeout(r,20));}expect(blocked).toBe(true);
+  let blocked=false;for(let i=0;i<100;i++){const p=(await db.query('select pg_blocking_pids($1) p',[waiterPid])).rows[0].p;if(p.includes(holderPid)){blocked=true;break;}await new Promise(r=>setTimeout(r,20));}
+ // DB-RW-A (0416): admission takes no shared lock on the Skill revision any more, so it is not queued behind the dispatching Session; with neither waiting for the other there is no lock inversion to guard against.
+ expect(blocked).toBe(false);
   const dispatched=(await holder.query('select bill2_dispatch($1,$2,$3,$4) d',[actor,pending.runId,claim.id,claim.dispatchToken])).rows[0].d;expect(dispatched.dispatch).toBe(true);await holder.query('COMMIT');
   const admitted=await admitting;expect(admitted.error).toBeNull();expect(admitted.value).not.toBeNull();
   const history=(await db.query('select candidate_history from runtime_executions where id=$1',[admitted.value.executionId])).rows[0].candidate_history;
@@ -2253,17 +2255,19 @@ it('RUNTIME: opposite Skill history dependencies allow concurrent claim and disp
   expect((await db.query("select has_function_privilege('service_role','revoke_skill_revision(uuid,uuid)','execute') service,has_function_privilege('authenticated','revoke_skill_revision(uuid,uuid)','execute') browser")).rows[0]).toEqual({service:true,browser:false});
   await db.query("update profiles set role='admin' where id=$1",[actor]);
   const pids=await Promise.all(clients.map(async c=>(await c.query('select pg_backend_pid() p')).rows[0].p));
-  const waitForBlock=async(waiter:number,holder:number)=>{for(let i=0;i<100;i++){if((await db.query('select pg_blocking_pids($1) p',[waiter])).rows[0].p.includes(holder))return true;await new Promise(r=>setTimeout(r,20));}return false;};
   await clients[0].query("BEGIN; SET LOCAL lock_timeout='5s'");await clients[0].query('select runtime_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId]);
   await clients[1].query("BEGIN; SET LOCAL lock_timeout='5s'");
   const revoking=clients[1].query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]).then(async()=>{await clients[1].query('COMMIT');return null;},async error=>{await clients[1].query('ROLLBACK');return error;});
-  expect(await waitForBlock(pids[1],pids[0])).toBe(true);await clients[0].query('COMMIT');expect(await revoking).toBeNull();
+  // DB-RW-A (0416): the permission read holds no row lock on the revision, so the revoke is not queued behind it; once the revoke has committed every later read is refused.
+  expect(await revoking).toBeNull();await clients[0].query('COMMIT');
   await expect(db.query('select runtime_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId])).rejects.toThrow();
   // Reverse winner: the real revoke RPC itself holds the lock before a late reader.
   await clients[1].query("BEGIN; SET LOCAL lock_timeout='5s'");await clients[1].query('select revoke_skill_revision($1,$2)',[packB.revisionId,actor]);
   await clients[0].query("BEGIN; SET LOCAL lock_timeout='5s'");
   const late=clients[0].query('select runtime_direct_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId]).then(()=>null,error=>error);
-  expect(await waitForBlock(pids[0],pids[1])).toBe(true);await clients[1].query('COMMIT');expect(await late).not.toBeNull();await clients[0].query('ROLLBACK');
+  // The revoke has not committed, so the late reader still sees the revision as committed and is not queued; after the commit the same read is refused.
+  expect(await late).toBeNull();await clients[1].query('COMMIT');await clients[0].query('ROLLBACK');
+  await expect(db.query('select runtime_direct_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId])).rejects.toThrow();
   expect(posts).toBe(2);expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(54);
 
  }finally{await Promise.allSettled(clients.map(c=>c.query('ROLLBACK')));await Promise.all(clients.map(c=>c.end()));await new Promise<void>(r=>server.close(()=>r()));}

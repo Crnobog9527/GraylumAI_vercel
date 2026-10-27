@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- DB-RW-A (number 0413 assigned by the controller; design: db-rw-redesign-v1 section 9, PR-A).
+-- DB-RW-A (number 0416 assigned by the controller; design: db-rw-redesign-v1 section 9, PR-A).
 -- Row locks on rows every turn of every user shares are removed; no behaviour of any check changes, only what the checks lock.
 -- (The design note also asked for an index on runtime_executions(session_id); it already exists since 0321 as
 --  runtime_executions_session_created_idx on (session_id, created_at, id), and the plans of the turn-path statements use it.)
