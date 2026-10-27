@@ -3,7 +3,8 @@ import {beforeEach,expect,it,vi} from 'vitest';
 import {guardResearchAdmission,requiresBenchmarkResearch,researchInputHost} from './researchAdmissionGuard';
 import {stagingProcedureError} from './stagingErrors';
 import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
-import {RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE,RESEARCH_TOOLS_UNAVAILABLE_MESSAGE} from '../../shared/runtimeAdmissionMessages';
+import {RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE,RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY_MESSAGE,RESEARCH_TOOLS_LINK_UNAVAILABLE_MESSAGE,
+ RESEARCH_TOOLS_UNAVAILABLE_MESSAGE} from '../../shared/runtimeAdmissionMessages';
 const state=vi.hoisted(()=>({rejection:{reason:'CONFIG_DISABLED'} as ResearchAdmissionRejection,attached:false,required:undefined as unknown}));
 const warn=vi.hoisted(()=>vi.fn());
 vi.mock('../../lib/logger',()=>({logger:{warn,info:vi.fn(),error:vi.fn()}}));
@@ -76,12 +77,21 @@ const asStep=(f:ReturnType<typeof fixture>,step:'step-1'|'step-2'|'step-3',text?
  const host={stepId:step,checklist:[{id:step,fields:fields.map(id=>({id,value:''}))}]};
  Object.assign(f.input.context,{hostTurnContext:host});Object.assign(f.input,{userText:text});
 };
-it.each(['step-1','step-2','step-3'] as const)('%s: a turn with a profile link that cannot fit the tools is refused with no charge',async step=>{
+it.each([['step-1',false],['step-3',false],['step-2',true]] as const)('%s: a turn with a profile link that cannot fit the tools is refused with no charge',async(step,benchmark)=>{
  state.rejection={reason:'CONTEXT_CAPACITY'};const f=fixture();asStep(f,step,`帮我看看这个账号 ${link}`);
  const refusal=await guardResearchAdmission(f.input).catch(error=>error);
- expect(refusal.message).toBe('RESEARCH_TOOLS_CONTEXT_CAPACITY');
- expect(stagingProcedureError(refusal,'opc.mentorTurnStream')).toMatchObject({message:RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE});
+ expect(refusal.message).toBe(benchmark?'RESEARCH_TOOLS_CONTEXT_CAPACITY':'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY');
+ expect(stagingProcedureError(refusal,'opc.mentorTurnStream')).toMatchObject({message:benchmark?RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE
+  :RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY_MESSAGE});
  expect(f.insert).toHaveBeenCalledWith(expect.objectContaining({context:expect.objectContaining({required:true,reason:'CONTEXT_CAPACITY'})}));
+});
+it('a link turn refused because the tools are unavailable says the link check needs them, and is free',async()=>{
+ const f=fixture();asStep(f,'step-1',link);
+ const refusal=await guardResearchAdmission(f.input).catch(error=>error);
+ expect(refusal.message).toBe('RESEARCH_TOOLS_LINK_UNAVAILABLE');
+ const shown=stagingProcedureError(refusal,'opc.mentorTurnStream');
+ expect(shown).toMatchObject({code:'PRECONDITION_FAILED',message:RESEARCH_TOOLS_LINK_UNAVAILABLE_MESSAGE});
+ expect(shown.message).toContain('账号链接');expect(shown.message).toContain('未扣积分');expect(shown.message).not.toContain('搜索暂时不可用');
 });
 it('a link turn that fits is attached and asks only for the fetch tool outside a benchmark step',async()=>{
  state.attached=true;const f=fixture();asStep(f,'step-1',link);

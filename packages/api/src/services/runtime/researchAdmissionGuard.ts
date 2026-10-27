@@ -56,7 +56,8 @@ export async function guardResearchAdmission(input: GuardInput): Promise<boolean
     requiredTools: benchmarkStep ? benchmarkTools : required ? linkTools : undefined, onRejected: value => { rejection = value; }});
   if (attached) return true;
   await recordRejection(input, rejection, required);
-  if (required) throw new StagingAccessError(rejection.reason === 'CONTEXT_CAPACITY'
-    ? 'RESEARCH_TOOLS_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_UNAVAILABLE');
+  const capacity = rejection.reason === 'CONTEXT_CAPACITY';
+  if (benchmarkStep) throw new StagingAccessError(capacity ? 'RESEARCH_TOOLS_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_UNAVAILABLE');
+  if (required) throw new StagingAccessError(capacity ? 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_LINK_UNAVAILABLE');
   return false;
 }
