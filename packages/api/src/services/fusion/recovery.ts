@@ -13,6 +13,8 @@ const row = z.object({ actor_id: z.string().uuid(), run_id: z.string().uuid(), c
 type Summary = { success: boolean; scanned: number; cancelled: number; recovered: number; scrubbed: number; failed: number;
   /** Reviews whose saved, unjudged bodies were judged again before settlement. */
   rejudged: number;
+  /** Reviews paused for 24 hours that were ended (their unused fixed fee is refunded by the end-review settlement). */
+  endedPaused: number;
   /** Left for the next run when the time limit was reached. */
   deferred: number };
 const noTransport: BillingTransport = {
@@ -33,7 +35,7 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
    * still be streaming it (a lookup on a live call would use up its recovery attempts); one without a deadline waits for
    * the daily run. Unset (the daily run): every listed call. Undispatched calls past their deadline are never held back. */
   dispatchedGraceMs?: number } = {}): Promise<Summary> {
-  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0 };
+  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0, endedPaused: 0 };
   const now = options.now ?? Date.now;
   const limit = options.limit ?? 50;
   // The cron route has 60 seconds in total and runs other reconciliations alongside (#954 review).
@@ -45,6 +47,15 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // a lasting backlog below can never crowd it out; a review settled later in this run pauses on the next one.
   const paused = await bounded(admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' }));
   if (paused.error) summary.success = false;
+  // Owner 2026-10-27: a review paused for 24 hours is ended like the user's "end review" (same close and fee settlement),
+  // so the unused fixed fee comes back. Right after the pause step so a review paused a day ago is ended on this run.
+  const expired = await bounded(admin.rpc('fusion_review_end_paused', { p_idle: '24 hours', p_limit: 100 }));
+  const expiredResult = z.object({ ended: z.number().int(), failed: z.number().int() }).safeParse(expired.error ? undefined : expired.data);
+  if (!expiredResult.success) summary.success = false;
+  else {
+    summary.endedPaused += expiredResult.data.ended;
+    if (expiredResult.data.failed > 0) { summary.failed += expiredResult.data.failed; summary.success = false; }
+  }
   // Before settlement: a body saved but never judged (a crash between save and verdict) is judged again with
   // the frozen host check, so the deadline rule never bills a malformed body as unjudged_saved (§3.3, #954).
   // Judging a call removes it from the listing, so listing again reaches the calls behind it: keep going until a
