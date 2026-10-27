@@ -4,10 +4,11 @@ import {guardResearchAdmission,requiresBenchmarkResearch,researchInputHost} from
 import {stagingProcedureError} from './stagingErrors';
 import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
 import {RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE,RESEARCH_TOOLS_UNAVAILABLE_MESSAGE} from '../../shared/runtimeAdmissionMessages';
-const state=vi.hoisted(()=>({rejection:{reason:'CONFIG_DISABLED'} as ResearchAdmissionRejection,attached:false}));
+const state=vi.hoisted(()=>({rejection:{reason:'CONFIG_DISABLED'} as ResearchAdmissionRejection,attached:false,required:undefined as unknown}));
 const warn=vi.hoisted(()=>vi.fn());
 vi.mock('../../lib/logger',()=>({logger:{warn,info:vi.fn(),error:vi.fn()}}));
-vi.mock('./researchAdmission',()=>({attachResearchTurn:async(input:{onRejected:(value:ResearchAdmissionRejection)=>void})=>{
+vi.mock('./researchAdmission',()=>({attachResearchTurn:async(input:{requiredTools?:unknown;onRejected:(value:ResearchAdmissionRejection)=>void})=>{
+ state.required=input.requiredTools;
  if(!state.attached)input.onRejected(state.rejection);return state.attached;
 }}));
 const id='10000000-0000-4000-8000-000000000001';
@@ -23,7 +24,7 @@ function fixture(outcome:'ok'|'error'|'throw'='ok'){
   context:{input:secret,instructions:secret,hostTurnContext:host},billing:{contractVersion:'bill2.v2'}};
  return {input:input as unknown as Parameters<typeof guardResearchAdmission>[0],insert};
 }
-beforeEach(()=>{state.attached=false;state.rejection={reason:'CONFIG_DISABLED'};vi.clearAllMocks();});
+beforeEach(()=>{state.required=undefined;state.attached=false;state.rejection={reason:'CONFIG_DISABLED'};vi.clearAllMocks();});
 it.each(['ok','error','throw'] as const)('records only safe diagnostic metadata and still refuses without a paid fallback (log %s)',async outcome=>{
  const f=fixture(outcome);
  await expect(guardResearchAdmission(f.input)).rejects.toThrow('RESEARCH_TOOLS_UNAVAILABLE');
@@ -66,4 +67,32 @@ it('new projection preserves the existing host ceiling and leaves openings, summ
  expect(hostTurnContextSchema.safeParse(host).success).toBe(true);
  expect(researchInputHost(host,true)).toBe(host);
  expect(host).not.toHaveProperty('materialProjection');
+});
+
+// A pasted profile link asks for that account to be checked on any step: it needs benchmark_fetch as a benchmark step does.
+const link='https://www.tiktok.com/@solidstarts';
+const asStep=(f:ReturnType<typeof fixture>,step:'step-1'|'step-2'|'step-3',text?:string)=>{
+ const fields={'step-1':['goal','benchmarks'],'step-2':['feasibility','benchmark_findings'],'step-3':['positioning']}[step];
+ const host={stepId:step,checklist:[{id:step,fields:fields.map(id=>({id,value:''}))}]};
+ Object.assign(f.input.context,{hostTurnContext:host});Object.assign(f.input,{userText:text});
+};
+it.each(['step-1','step-2','step-3'] as const)('%s: a turn with a profile link that cannot fit the tools is refused with no charge',async step=>{
+ state.rejection={reason:'CONTEXT_CAPACITY'};const f=fixture();asStep(f,step,`帮我看看这个账号 ${link}`);
+ const refusal=await guardResearchAdmission(f.input).catch(error=>error);
+ expect(refusal.message).toBe('RESEARCH_TOOLS_CONTEXT_CAPACITY');
+ expect(stagingProcedureError(refusal,'opc.mentorTurnStream')).toMatchObject({message:RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE});
+ expect(f.insert).toHaveBeenCalledWith(expect.objectContaining({context:expect.objectContaining({required:true,reason:'CONTEXT_CAPACITY'})}));
+});
+it('a link turn that fits is attached and asks only for the fetch tool outside a benchmark step',async()=>{
+ state.attached=true;const f=fixture();asStep(f,'step-1',link);
+ await expect(guardResearchAdmission(f.input)).resolves.toBe(true);
+ expect(state.required).toEqual(['benchmark_fetch']);
+ asStep(f,'step-2',link);await guardResearchAdmission(f.input);
+ expect(state.required).toEqual(['propose_keywords','benchmark_discover','propose_more_candidates','benchmark_fetch']);
+});
+it.each([undefined,'继续找对标','@solidstarts 帮我看看','https://www.tiktok.com/@solidstarts/video/123','https://example.com/@a'])(
+ 'without a profile link (%s) a non-benchmark step behaves as before: no refusal',async text=>{
+ state.rejection={reason:'CONTEXT_CAPACITY'};const f=fixture();asStep(f,'step-1',text);
+ await expect(guardResearchAdmission(f.input)).resolves.toBe(false);expect(state.required).toBeUndefined();
+ expect(f.insert).toHaveBeenCalledWith(expect.objectContaining({context:expect.objectContaining({required:false})}));
 });
