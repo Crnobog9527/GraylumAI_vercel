@@ -21,7 +21,7 @@ async function accepted(request:unknown){
  await openRouterAdapter({credential,transport,allowWorkspaceRead:true}).dispatch({input},identity);
  expect(transport).toHaveBeenCalledTimes(1);expect(transport.mock.calls[0]?.[1]?.body).toBe(input);
 }
-async function denied(request:unknown,quote=identity){
+async function denied(request:unknown,quote:typeof identity=identity){
  const credential=vi.fn(),transport=vi.fn();
  await expect(openRouterAdapter({credential,transport,allowWorkspaceRead:true}).dispatch({input:JSON.stringify(request)},quote))
   .rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
@@ -45,12 +45,13 @@ it.each([
  make([{role:'system',content:[block('a'),{type:'text',text:'plain'},block('c')]},user]),
  make([{role:'system',content:[block('a'),{...block('b'),cache_control:{type:'ephemeral',ttl:'1h'}}]},user]),
  make([system,{role:'user',content:'q1'},history,{role:'user',content:'q2'},{role:'assistant',content:[block('x')]},user]),
-])('rejects marker violation %# before credentials and transport',denied);
+])('rejects marker violation %# before credentials and transport',request=>denied(request));
 it('rejects every marker for a model or quote that cannot carry one',async()=>{
  await denied({...make([system,{role:'user',content:'q1'},history,user]),model:'google/gemini'},{...identity,model:'google/gemini'});
- const withoutWrite={...limits,cacheWriteUsdPerMillion:undefined},q=openRouterBound(withoutWrite,100);
+ const withoutWrite:Partial<typeof limits>={...limits};delete withoutWrite.cacheWriteUsdPerMillion;
+ const q=openRouterBound(withoutWrite as typeof limits,100);
  await denied({...make([system,{role:'user',content:'q1'},history,user]),provider:q.routing},
-  {...identity,providerLimits:withoutWrite,upperUsd:q.upperUsd});
+  {...identity,providerLimits:withoutWrite as typeof limits,upperUsd:q.upperUsd});
 });
 it('counts markers anywhere in the messages, never above three',()=>{
  expect(cacheMarkerCount([system,{role:'user',content:'q1'},history,user])).toBe(3);

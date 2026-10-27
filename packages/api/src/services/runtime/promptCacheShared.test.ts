@@ -37,7 +37,7 @@ it('marks the shared prefix, the per-user tail and the last plain history messag
   {role:'system',content:[marked(frozen),marked(addenda)]},
   {role:'user',content:'第一问'},{role:'assistant',content:[marked('第一答')]},{role:'user',content:'第二问'},
  ]);
- const text=(request.messages[0]!.content as Array<{text:string}>).map(part=>part.text).join('');
+ const text=(request.messages[0]!.content as unknown as Array<{text:string}>).map(part=>part.text).join('');
  expect(text).toBe(system);
 });
 it('uses one marked block when the executor appended nothing, and no history marker on a first turn',()=>{
