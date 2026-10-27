@@ -92,5 +92,12 @@ BEGIN
    FROM billing_history x JOIN bill2_runs r ON r.session_ref=sid AND r.pre_deduct_id::text IN (x.id::text,x.metadata->>'preDeductId')
    CROSS JOIN generate_series(1,9) k WHERE x.user_id=a;
 END $$;
+-- DATA-ERASURE 0406: the deleting account's other conversation holds 60 saved scope materials of about 600 JSON nodes each
+-- (deleting one conversation tests every material of the account for references to it: staging 145 092 node visits).
+INSERT INTO runtime_scope_material(session_id,revision,request_id,request,content,content_hash)
+ SELECT a.session,g,gen_random_uuid(),jsonb_build_object('revision',g,'note','OTHER_MATERIAL_REQUEST'),
+  jsonb_build_object('brief','OTHER_MATERIAL','items',(SELECT jsonb_agg(jsonb_build_object('title','Synthetic '||k,'tags',jsonb_build_array('a','b','c'),
+    'ref',gen_random_uuid()::text)) FROM generate_series(1,100) k)),repeat('0',64)
+ FROM erasure_perf_test.actors a CROSS JOIN generate_series(1,60) g WHERE a.n=0;
 ANALYZE;
 COMMIT;

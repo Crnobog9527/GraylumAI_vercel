@@ -4,27 +4,15 @@
 -- content_erasure_references(jsonb,uuid[])
 CREATE OR REPLACE FUNCTION public.content_erasure_references(v jsonb, ids uuid[])
  RETURNS boolean
- LANGUAGE plpgsql
+ LANGUAGE sql
  IMMUTABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE x record;
-BEGIN
- IF cardinality(ids)=0 OR v IS NULL THEN RETURN false; END IF;
- IF jsonb_typeof(v)='object' THEN
-  FOR x IN SELECT * FROM jsonb_each(v) LOOP
-   IF x.key IN ('executionId','sourceExecutionId','sourceVersionId','sourceContentId','projectId',
-    'workItemId','roundId','conversationId','sessionId','dependencyId','source_message_id',
-    'sourceScriptId','contentId','draftId','accountProjectId')
-    AND lower(x.value#>>'{}')=ANY(ids::text[]) THEN RETURN true; END IF;
-   IF content_erasure_references(x.value,ids) THEN RETURN true; END IF;
-  END LOOP;
- ELSIF jsonb_typeof(v)='array' THEN
-  FOR x IN SELECT value FROM jsonb_array_elements(v) LOOP
-   IF content_erasure_references(x.value,ids) THEN RETURN true; END IF;
-  END LOOP;
- ELSIF jsonb_typeof(v)='string' AND ((v#>>'{}') IS JSON OBJECT OR (v#>>'{}') IS JSON ARRAY) THEN
-  RETURN content_erasure_references((v#>>'{}')::jsonb,ids);
- END IF;
- RETURN false;
-END $function$;
+ -- 0406: a reference is a string equal to one of the ids, so its text must appear in the value's text. One pass of a regular
+ -- expression over the text rules out nearly every value without walking its nodes. A value that contains a JSON escape
+ -- (a nested JSON string may spell an id with \u escapes) is always walked, so the answer is exactly the old one.
+ SELECT CASE WHEN ids IS NULL OR cardinality(ids)=0 OR v IS NULL THEN false
+  ELSE (position('\u' IN lower(v::text))>0
+    OR coalesce(lower(v::text) ~ (SELECT string_agg(i::text,'|') FROM unnest(ids) i),false))
+   AND content_erasure_references_walk(v,ids) END
+$function$;
