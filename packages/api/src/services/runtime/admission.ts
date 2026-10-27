@@ -7,7 +7,7 @@ import {type FrozenReport} from '../report/contract';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
-import {freezePromptCache,freezeHostPromptCache,freezeSharedCacheInto,promptCacheReserveBytes} from './promptCache';
+import {freezePromptCache,freezeHostPromptCache,freezeSharedCacheInto,freezeSharedPromptCache,promptCacheReserveBytes} from './promptCache';
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
 import {currentInputBytes} from './historySelection';
@@ -292,11 +292,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
      ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
-   const sharedCacheWrite=policy.real&&input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration&&
-    row.data.model_id.startsWith('anthropic/')?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined; // PROMPT-CACHE-ALL
-   let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,
-    model:row.data.model_id,instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
-    cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined});
+   const writePrice=policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined; // PROMPT-CACHE-ALL
+   const sharedCacheWrite=input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration&&
+    row.data.model_id.startsWith('anthropic/')?writePrice:undefined;
+   let promptCache=hostTurnContext?undefined:policy.reportGeneration?freezeSharedPromptCache({real:Boolean(policy.real),model:row.data.model_id,
+    instructions,prefixChars:skillChars,historyMarker:false,cacheWriteUsdPerMillion:writePrice})
+    :freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,instructions,skillChars,
+    stableAdditionalPrefix:policy.stableAdditionalInstructions,cacheWriteUsdPerMillion:writePrice});
    if(mentorStream&&!stepSummary&&!hostTurnContext?.cardContract)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
    const currentInput=runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext);
    const maxOutputTokens=outputCapacity(row.data,organizerOutput,
@@ -330,9 +332,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     catch(error){if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;}
    }
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
-    model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    instructions:instructions+replyRule,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
-    additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
+    model:row.data.model_id,cacheWriteUsdPerMillion:writePrice,instructions:instructions+replyRule,skillChars,
+    stableAdditionalPrefix:policy.stableAdditionalInstructions,additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
     historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
      currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
@@ -422,7 +423,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const realCalls=policy.real?.callPolicies.filter(c=>selectedIds.has(c.modelId));
    const costPerCall=realCalls?.reduce((upper,c)=>decimal(c.upperUsd)>decimal(upper)?c.upperUsd:upper,'0')??policy.costPerCall;
    const costUsd=Array.from({length:maxCalls},()=>costPerCall);
-   // Decimal aggregation returns credits; no floating-point money is persisted.
    const credits=aggregateCredits(costUsd,policy.creditsPerUsd,policy.multiplier);
    const total=decimal(costPerCall)*BigInt(maxCalls);
    const cost=(total/1_000_000_000_000n).toString()+'.'+(total%1_000_000_000_000n).toString().padStart(12,'0');
