@@ -223,7 +223,8 @@ type MentorContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: st
 /**
  * Owner 2026-10-17 ("同意 RT-6 输入上限选 A"): only a mentor turn that offers the research tools may use this input
  * ceiling; every other turn keeps its interactive budget. Raised from 112000 on 2026-10-27 (Owner: "把上限从 112,000 提到
- * 150,000"): the 112000 ceiling refused the tools on about 8% of step-1 turns (CONTEXT_CAPACITY). Organize stays 112000. Billing still follows the bytes actually sent.
+ * 150,000"): the 112000 ceiling refused the tools on about 8% of step-1 turns (CONTEXT_CAPACITY).
+ * Organize stays 112000. Billing still follows the bytes actually sent.
  */
 export const RESEARCH_TURN_INPUT_BYTES = RESEARCH_TURN_INPUT_CAP;
 /**
