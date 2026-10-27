@@ -117,6 +117,8 @@ it('RUNTIME: DB-RW PR-B a warm free-chat and Skill admission read the catalogs o
   expect((await chat()).catalog).toMatchObject({'rest/system_settings':1,'rest/ai_models':1,'rpc/catalog_versions_snapshot':0});
  }finally{
   await db.query("delete from system_settings where key='runtime_rw_v2'");
+  // Later cases in this file list every active module a user can see; this fixture must not add one.
+  await db.query('update modules set active=false where id=$1',[moduleId]);
   clearCatalogCache();
  }
 });
