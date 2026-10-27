@@ -30,8 +30,8 @@ async function setBalance(db,actor,credits) {
 }
 /** A report execution of the seeded session with a PAYG run, as runtime_admit creates it; the price hold is what the
  * 0295 admission hook runs (the hook itself is exercised end to end by report.integration.ts). */
-async function execution(db,f,billing={limits:{costUsd:'0.1'},rules:{creditsPerUsd:'1000',multiplier:'1'}},link=true,round=randomUUID()) {
-  const run = await createFixture(db,{actor:f.actor});
+async function execution(db,f,billing={limits:{costUsd:'0.1'},rules:{creditsPerUsd:'1000',multiplier:'1'}},link=true,round=randomUUID(),options={}) {
+  const run = await createFixture(db,{actor:f.actor,...options});
   const id = randomUUID();
   await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,billing_run_id)
     VALUES($1,$2,$3,$4,$5,0,'running',$6)`,[id,f.actor,f.session,randomUUID(),{reportGeneration:{...spec,projectId:f.project,roundId:round}},link?run.run:null]);
@@ -532,6 +532,29 @@ export async function runReportFee({db,Client,connectionString,report}) {
   await service(db,'runtime_financial_recovery',pendingActor.actor,pendingStop.id,true);
   assert.equal((await fee(db,pendingStop.id)).charged_credits,1,'recovery charges actual cost once known');
   await balanced(db,pendingActor.actor,'pending stop');
+  const cappedActor = await seed(db);
+  await setBalance(db,cappedActor.actor,10000);
+  for (let i=0;i<2;i++) {
+    const x = await execution(db,cappedActor);
+    await service(db,'report_stop',cappedActor.actor,x.id,null,false);
+  }
+  const capped = await execution(db,cappedActor,{limits:{costUsd:'0.01'},rules:{creditsPerUsd:'100000',multiplier:'2'}},
+    false,randomUUID(),{q:'100000',multiplier:'2'});
+  const capCall = await rpc(db,'bill2_claim',cappedActor.actor,capped.run.run,1,capped.run.claimPayload);
+  await rpc(db,'bill2_dispatch',cappedActor.actor,capped.run.run,capCall.id,capCall.dispatchToken);
+  await db.query('SET session_replication_role=replica');
+  try {
+    await db.query('UPDATE bill2_runs SET session_ref=$2 WHERE id=$1',[capped.run.run,cappedActor.session]);
+    await db.query('UPDATE runtime_executions SET billing_run_id=$2 WHERE id=$1',[capped.id,capped.run.run]);
+  } finally { await db.query('SET session_replication_role=origin'); }
+  await rpc(db,'bill2_record',cappedActor.actor,capped.run.run,capCall.id,{provider:capped.run.claimPayload.provider,
+    account:'sandbox',model:capped.run.claimPayload.model,protocol:capped.run.claimPayload.protocol,
+    providerId:'generation-'+capCall.id,source:'response',sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),
+    coverage:'request_total',final:true,cost:'0.004',currency:'USD',usage:{inputTokens:400,outputTokens:0}});
+  await service(db,'report_stop',cappedActor.actor,capped.id,null,true);
+  assert.equal((await fee(db,capped.id)).charged_credits,500,'800 credits of actual cost are capped at 500');
+  assert.equal(await wallet(db,cappedActor.actor),9500);
+  await balanced(db,cappedActor.actor,'capped stop');
   report.checks.push('report stop limit: two free stops, failure excluded, third stop requires confirmation and charges actual cost');
 
   // A report without a price (admitted before 0295) keeps per-call billing.
