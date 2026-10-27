@@ -54,6 +54,8 @@ export async function admissionCases({ admin, service, connect }) {
   await admin.query('BEGIN');
   await admin.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[lock]);
   const first=buy(one,a),second=buy(two,b);
+  // Handle the expected rejection before releasing the lock, regardless of which response arrives first.
+  const pendingResults=Promise.allSettled([first,second]);
   let blocked=false;
   for(let n=0;n<100;n++) {
     const pending=await admin.query("SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT o.* FROM pay_waffo_create_purchase%'");
@@ -62,7 +64,7 @@ export async function admissionCases({ admin, service, connect }) {
   }
   assert.ok(blocked,'both first-Gold admissions waited on the identity barrier');
   await admin.query('COMMIT');
-  const results=await Promise.allSettled([first,second]);
+  const results=await pendingResults;
   assert.equal(results.filter(r=>r.status==='fulfilled').length,1,results.map(r=>r.reason?.message).join(';'));
   assert.match(results.find(r=>r.status==='rejected').reason.message,/GOLD_FIRST_INELIGIBLE/);
   const order=results.find(r=>r.status==='fulfilled').value.rows[0];
@@ -104,6 +106,7 @@ export async function admissionCases({ admin, service, connect }) {
   await admin.query('BEGIN'); await admin.query('SELECT pg_advisory_xact_lock(7063,3)');
   const final1=buy(one,c,{method:'card',offer:'founder',cycle:'yearly',digest:'e'.repeat(64)});
   const final2=buy(two,d,{method:'alipay',offer:'founder',cycle:'yearly',digest:'f'.repeat(64)});
+  const pendingFinal=Promise.allSettled([final1,final2]);
   blocked=false;
   for(let n=0;n<100;n++) {
     const pending=await admin.query("SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT o.* FROM pay_waffo_create_purchase%'");
@@ -111,7 +114,7 @@ export async function admissionCases({ admin, service, connect }) {
     await new Promise(r=>setTimeout(r,10));
   }
   assert.ok(blocked); await admin.query('COMMIT');
-  const final=await Promise.allSettled([final1,final2]);
+  const final=await pendingFinal;
   assert.equal(final.filter(r=>r.status==='fulfilled').length,1,final.map(r=>r.reason?.message).join(';'));
   assert.match(final.find(r=>r.status==='rejected').reason.message,/FOUNDER_SOLD_OUT/);
   assert.equal((await admin.query("SELECT count(*)::int n FROM payment_orders WHERE offer_kind='founder'")).rows[0].n,50);
