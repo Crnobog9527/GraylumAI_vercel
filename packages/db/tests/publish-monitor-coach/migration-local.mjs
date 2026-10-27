@@ -203,6 +203,12 @@ try {
   assert.ok(pack.facts.some(f => Date.parse(f.postedAt) < Date.now() - 100 * 86_400_000));
   assert.equal(pack.experiments.length, 1); assert.equal(pack.diagnostics[0].openingText, '开头第一句');
   assert.equal(pack.facts.every(f => typeof f.title === 'string'), true);
+  const xhs = pack.followers.find(f => f.platform === 'xiaohongshu');
+  const truth = dataset.accounts.find(a => a.key === 'A').snapshots.filter(x => !x.postKey && x.platform === 'xiaohongshu');
+  assert.equal(xhs.points.length, truth.length); assert.equal(xhs.points.at(-1).value, truth.at(-1).metrics.followers);
+  assert.equal(pack.strategy, null);
+  const strategyPack = await svc('SELECT publish_monitor_review_pack_rows($1,$2,30) v', [gold, brandA]);
+  assert.deepEqual(strategyPack.strategy, { content: { pillars: ['干货教程', '日常记录', ' '] } });
   await assert.rejects(svc('SELECT publish_monitor_review_pack_rows($1,$2,30) v', [gold, businesses.A]), /BUSINESS_NOT_FOUND/);
   await assert.rejects(svc('SELECT publish_monitor_review_pack_rows($1,$2,0) v', [sim, businesses.A]), /INPUT_INVALID/);
   report.checks.push('pack rows return facts beyond 100 days, experiments and diagnostics for the owner brand only');

@@ -447,8 +447,20 @@ BEGIN
   'profile',(SELECT jsonb_build_object('strategyVersionId',p.strategy_version_id,'pillars',p.pillars,
     'pillarsSource',p.pillars_source,'pillarMixTarget',p.pillar_mix_target,'strategyCheckedAt',p.strategy_checked_at)
    FROM social_coach_profiles p WHERE p.actor_id=a AND p.business_id=p_business_id),
+  -- The confirmed report's strategy fields (same structure opc_strategy_data validates); the host trims them.
+  'strategy',(SELECT jsonb_object_agg(k,d->k) FROM social_coach_profiles p JOIN artifact_versions v ON v.id=p.strategy_version_id
+    CROSS JOIN LATERAL (SELECT opc_strategy_data(v.id)->'data' d) x
+    CROSS JOIN unnest(ARRAY['summary','goal','positioning','audience','accountKit','content','roadmap','funnel']) k
+   WHERE p.actor_id=a AND p.business_id=p_business_id AND x.d ? k),
   'accounts',coalesce((SELECT jsonb_agg(jsonb_build_object('projectId',o.project_id,'platform',o.platform,'stage',o.stage)
     ORDER BY o.platform) FROM opc_accounts o WHERE o.actor_id=a AND o.business_id=p_business_id AND o.erased_at IS NULL),'[]'),
+  -- Account-level follower snapshots (TikHub profiles only) inside the 100-day retention, for stage signals.
+  'followers',coalesce((SELECT jsonb_agg(jsonb_build_object('connectionId',c.id,'platform',c.platform,'source',c.source,
+    'points',(SELECT coalesce(jsonb_agg(jsonb_build_object('date',s.captured_on,'value',s.metrics->'followers') ORDER BY s.captured_on),'[]')
+     FROM social_metric_snapshots s WHERE s.connection_id=c.id AND s.post_id IS NULL AND s.metrics ? 'followers'
+      AND NOT ('followers'=ANY(s.missing_fields)))) ORDER BY c.platform)
+   FROM social_connections c WHERE c.actor_id=a AND c.business_id=p_business_id AND c.role='own'
+    AND c.status IN ('connected','reauth_required','quarantined')),'[]'),
   'facts',coalesce((SELECT jsonb_agg(jsonb_build_object('postId',f.post_id,'platform',f.platform,'postedAt',f.posted_at,
     'title',sp.title_excerpt,'url',sp.post_url,'pillarKey',f.pillar_key,'pillarSource',f.pillar_source,'formatTags',f.format_tags,
     'basis',f.settled_basis,'day7',f.day7,'day7On',f.day7_on,'day30',f.day30,'day30On',f.day30_on,
