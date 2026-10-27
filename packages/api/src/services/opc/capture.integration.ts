@@ -743,16 +743,19 @@ it.each(['capture-first', 'admit-first'].flatMap(order => [false, true].map(revo
       if (blocked || settled) break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
-    // DB-RW-A (0416): admission and capture take no shared lock on the model row any more, so a revoke that has not
-    // committed yet does not queue the other transaction (and cannot deadlock it): both complete and see the model as it
-    // was committed. A request made after the revoke has committed is refused (covered by the BILL2 integration test).
-    expect(blocked).toBe(false);
-    expect(settled).toBe(true);
+    // Shared authorization locks are compatible until the first transaction revokes.
+    expect(blocked).toBe(revoke);
+    if (!revoke) expect(settled).toBe(true);
     await first.query('commit');
     const result = await pending;
-    expect(result.error).toBeNull();
-    if (order === 'admit-first') expect(result.value!.rows[0].v.result).toBe('applied');
-    expect((await f.records()).rows).toHaveLength(1);
+    if (revoke && order === 'capture-first') {
+      expect(result.error).toMatchObject({ code: 'P0001', message: expect.stringMatching(/^BILL2_(CALL_POLICY|MODEL)_DENIED$/) });
+    }
+    else {
+      expect(result.error).toBeNull();
+      if (order === 'admit-first') expect(result.value!.rows[0].v.result).toBe(revoke ? 'unavailable' : 'applied');
+    }
+    expect((await f.records()).rows).toHaveLength(revoke && order === 'admit-first' ? 0 : 1);
   } finally { await first.query('rollback'); await first.end(); await second.end(); }
 }, 30000);
 

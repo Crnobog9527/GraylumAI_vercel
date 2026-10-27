@@ -82,7 +82,8 @@ BEGIN
  IF r.fusion_group_id IS NOT NULL AND current_setting('graylum.fusion_group_claim',true)=r.fusion_group_id::text THEN
   cfg:=jsonb_build_object('version','fusion-group-bound');l:=greatest(1,ceil(u*r.credits_per_usd*m_call));
  ELSE
- SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds';
+ IF runtime_rw_flag('sharedRowLocks') THEN SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds';
+ ELSE SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;END IF;
  IF jsonb_typeof(cfg->'version') IS DISTINCT FROM 'string' OR btrim(cfg->>'version')=''
   OR jsonb_typeof(cfg->'thresholds') IS DISTINCT FROM 'array' THEN
   RAISE EXCEPTION 'BILL2_START_THRESHOLD_UNCONFIGURED';

@@ -1,5 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// DB-RW-A (0416): the per-turn path takes no row lock on the rows every user shares (model, module, skill, skill revision, start-threshold setting). Counted on the database itself, not by time.
+// DB-RW-A (0416), behind the switch runtime_rw_v2.sharedRowLocks: with the switch off (the default) the turn path row-locks the
+// model, module, skill, skill revision and start-threshold rows exactly as before; with it on none of them is locked, an
+// administrator is not made to wait for an open turn, and a module that was deactivated is still refused. Counted on the
+// database itself, not by time.
 import assert from 'node:assert/strict';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 import {createFixture,claim} from '../payg/fixture.mjs';
@@ -10,6 +13,8 @@ const locked=async()=>one(`SELECT jsonb_build_object('ai_models',(SELECT count(*
   'modules',(SELECT count(*) FROM modules WHERE xmax::text=txid_current()::text),'skills',(SELECT count(*) FROM skills WHERE xmax::text=txid_current()::text),
   'skill_revisions',(SELECT count(*) FROM skill_revisions WHERE xmax::text=txid_current()::text),
   'thresholds',(SELECT count(*) FROM system_settings WHERE key='billing_payg_start_thresholds' AND xmax::text=txid_current()::text)) v`);
+const setSwitch=async on=>c.query(`INSERT INTO system_settings(key,value) VALUES('runtime_rw_v2',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+  [JSON.stringify(on===null?{}:{sharedRowLocks:on})]);
 try{
  await c.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
  await c.query(read('packages/db/tests/content-erasure/fixture.sql'));
@@ -20,38 +25,49 @@ try{
  const billing={...f.billing,moduleId:art.module,skillId:art.skill,revisionId:art.revision};
  await c.query("select set_config('request.jwt.claim.sub',$1,false)",[f.actor]);
  await c.query('ANALYZE');
- // 1. runtime_admit: shared catalog rows locked by the open admission.
- await c.query('BEGIN');
- let admitError=null;
- try{await one('select runtime_admit($1,$2,gen_random_uuid(),$3,$4) v',[f.actor,f.session,f.payload,billing]);}
- catch(e){admitError=e.message;}
- const rows=await locked();
- const relLocks=await one("SELECT jsonb_build_object('relation',count(*) FILTER (WHERE locktype='relation'),'nonFastPath',count(*) FILTER (WHERE locktype='relation' AND NOT fastpath)) v FROM pg_locks WHERE pid=pg_backend_pid()");
- await c.query('ROLLBACK');
- // Recorded for the next steps of DB-RW (the admission split must lower it); not asserted here.
- report.checks.push(`runtime_admit (${admitError??'ok'}): row locks on shared rows ${JSON.stringify(rows)}; relation locks held at the end of the admission ${JSON.stringify(relLocks)}`);
- // 2. bill2_payg_claim: the start-threshold setting row.
  const pf=await createFixture(c,{credits:1000,threshold:1});
- await c.query('BEGIN');
- await claim(c,pf);
- const claimRows=await locked();
- await c.query('ROLLBACK');
- report.checks.push(`bill2_payg_claim: row locks on shared rows ${JSON.stringify(claimRows)}`);
- // 3. The fixed state.
- for(const [table,n] of Object.entries(rows))assert.equal(n,0,`ROW_LOCK_ON_SHARED_ROW ${table} (admit)`);
- for(const [table,n] of Object.entries(claimRows))assert.equal(n,0,`ROW_LOCK_ON_SHARED_ROW ${table} (claim)`);
- assert.ok(admitError===null,admitError);
- // 4. An administrator can change those rows while a turn is open (the old locks made this wait for the turn).
- await c.query('BEGIN');
- await one('select runtime_admit($1,$2,gen_random_uuid(),$3,$4) v',[f.actor,f.session,f.payload,billing]);
- const peer=new c.constructor({host:'127.0.0.1',port:c.connectionParameters.port,database:c.connectionParameters.database,user:'postgres'});
- await peer.connect();
- try{
-  await peer.query("SET lock_timeout='1500ms'");
-  await peer.query('UPDATE modules SET title=title WHERE id=$1',[art.module]);
-  await peer.query('UPDATE skills SET status=status WHERE id=$1',[art.skill]);
-  await peer.query('UPDATE ai_models SET name=name WHERE id=$1',[f.model]);
- }finally{await peer.end();await c.query('ROLLBACK');}
- report.checks.push('while a turn is admitted and not yet committed, an administrator can update the model, module and skill rows without waiting');
+ const admitOpen=async()=>{ // an admission left open, and the shared rows it holds
+  await c.query('BEGIN');
+  let error=null;
+  try{await one('select runtime_admit($1,$2,gen_random_uuid(),$3,$4) v',[f.actor,f.session,f.payload,billing]);}catch(e){error=e.message;}
+  return {error,rows:await locked()};
+ };
+ const claimOpen=async()=>{await c.query('BEGIN');await claim(c,pf);return locked();};
+ const peerUpdates=async()=>{
+  const peer=new c.constructor({host:'127.0.0.1',port:c.connectionParameters.port,database:c.connectionParameters.database,user:'postgres'});
+  await peer.connect();
+  try{
+   await peer.query("SET lock_timeout='1500ms'");
+   await peer.query('UPDATE modules SET title=title WHERE id=$1',[art.module]);
+   await peer.query('UPDATE skills SET status=status WHERE id=$1',[art.skill]);
+   await peer.query('UPDATE ai_models SET name=name WHERE id=$1',[f.model]);
+   return 'not waiting';
+  }catch(e){return /lock timeout/.test(e.message)?'waits for the turn':e.message;}
+  finally{await peer.end();}
+ };
+ for(const mode of [null,false,true]) {
+  await setSwitch(mode);
+  const open=await admitOpen();
+  const waiting=await peerUpdates();
+  await c.query('ROLLBACK');
+  const claimRows=await claimOpen();await c.query('ROLLBACK');
+  report.checks.push(`switch ${mode===null?'absent':mode}: runtime_admit (${open.error??'ok'}) row locks ${JSON.stringify(open.rows)}; bill2_payg_claim row locks ${JSON.stringify(claimRows)}; an administrator updating those rows ${waiting}`);
+  assert.equal(open.error,null);
+  if(mode===true) {
+   for(const [table,n] of Object.entries(open.rows))assert.equal(n,0,`ROW_LOCK_ON_SHARED_ROW ${table} (admit, switch on)`);
+   for(const [table,n] of Object.entries(claimRows))assert.equal(n,0,`ROW_LOCK_ON_SHARED_ROW ${table} (claim, switch on)`);
+   assert.equal(waiting,'not waiting');
+  } else {
+   // Off (or absent): the locks of today, and the administrator waits.
+   assert.equal(open.rows.modules,1);assert.equal(open.rows.skills,1);assert.equal(open.rows.skill_revisions,1);
+   assert.equal(claimRows.ai_models,1);assert.equal(claimRows.thresholds,1);
+   assert.equal(waiting,'waits for the turn');
+  }
+  // Either way a deactivated module is refused by a new admission.
+  await c.query('UPDATE modules SET active=false WHERE id=$1',[art.module]);
+  await assert.rejects(one('select runtime_admit($1,$2,gen_random_uuid(),$3,$4) v',[f.actor,f.session,f.payload,billing]),/RUNTIME_SKILL_MODEL_DENIED/);
+  await c.query('UPDATE modules SET active=true WHERE id=$1',[art.module]);
+ }
+ report.checks.push('with the switch off or absent the locks and the waiting are unchanged; on, none is taken; in every mode a deactivated module is refused');
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

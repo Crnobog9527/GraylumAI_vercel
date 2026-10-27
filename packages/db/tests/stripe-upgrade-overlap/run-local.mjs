@@ -37,12 +37,15 @@ docker(['image','inspect',POSTGRES_IMAGE]);
 const name='graylum-upgrade-'+randomUUID().slice(0,8);
 const sql=input=>docker(['exec','-i',name,'psql','-XqAt','-U','postgres','-d','upgrade',
   '-v','ON_ERROR_STOP=1','-f','/dev/stdin'],input);
-// 0391 checks the md5 of the claim it replaces; 0416 (DB-RW-A) later removed one row lock from that claim, so put the lock
-// back before 0391 is replayed on a finished database (the replay of 0416 after it removes it again).
+// 0391 checks the md5 of the claim it replaces; 0416 (DB-RW-A) later turned one row lock of that claim into a switch, so put
+// the original single statement back before 0391 is replayed on a finished database (the replay of 0416 after it restores
+// the switch).
 const restoreClaimThresholdLock=()=>{
   const claim=sql("SELECT pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure);");
-  const locked=claim.replace("WHERE key='billing_payg_start_thresholds';","WHERE key='billing_payg_start_thresholds' FOR SHARE;");
-  if(locked!==claim)sql(locked+';');
+  const switched=" IF runtime_rw_flag('sharedRowLocks') THEN SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds';\n"
+    +" ELSE SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;END IF;\n";
+  const original=" SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;\n";
+  if(claim.includes(switched))sql(claim.replace(switched,original)+';');
 };
 const clients=[];
 try {

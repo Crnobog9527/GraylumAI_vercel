@@ -120,10 +120,17 @@ BEGIN
  -- Runtime requires the administrator model binding; legacy unbound BILL2
  -- callers keep their existing package authorization contract.
  IF p_billing->>'revisionId' IS NOT NULL THEN
-  PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
-   AND skill_id=(p_billing->>'skillId')::uuid AND active
-   AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
-     ELSE model_id END)=(p_billing->>'modelId')::uuid;
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid;
+  ELSE
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid FOR SHARE;
+  END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
  END IF;
  b:=bill2_prepare(p_actor_id,p_request_id,p_billing);

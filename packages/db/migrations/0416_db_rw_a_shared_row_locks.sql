@@ -1,30 +1,49 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- DB-RW-A (number 0416 assigned by the controller; design: db-rw-redesign-v1 section 9, PR-A).
--- Row locks on rows every turn of every user shares are removed; no behaviour of any check changes, only what the checks lock.
--- (The design note also asked for an index on runtime_executions(session_id); it already exists since 0321 as
---  runtime_executions_session_created_idx on (session_id, created_at, id), and the plans of the turn-path statements use it.)
--- Row locks removed: runtime_direct_billing_allowed_before_opc took
---     FOR SHARE on the model row (ai_models), the module row (modules), skills and skill_revisions, runtime_admit on the
---     module row again when it binds the Skill, and bill2_payg_claim on
---     the system_settings row of the start thresholds: 30 concurrent turns share-lock the same few rows, each lock is a
---     MultiXact member write, and each blocks an administrator's UPDATE until the turn commits. The checks themselves
---     stay (the same SELECTs still raise the same errors when the row is missing, inactive or revoked) and every later
---     step re-runs them: bill2_payg_claim and bill2_dispatch call runtime_billing_allowed again before any money moves,
---     so a module or revision deactivated between two steps stops the next step; the call that is already frozen keeps
---     the price and package hash it was frozen with. The threshold setting is read once per claim and its version string
---     is stored on the call (threshold_version), so a change between the read and the commit changes nothing that was used.
---     NOTE for the reviewer: the design note says the (201,1) advisory lock already orders settings writers against claims;
---     it does not for billing_payg_start_thresholds (runtime_stop_loss_settings_guard takes (201,1) only for
---     runtime_stop_loss and runtime_rate_limits). The reason to drop this lock is the one above, not (201,1).
--- Not changed on purpose: runtime_executions_own_posts and bill2_runs_recovery_open are partial indexes with their own
--- predicates (ownPosts executions, open runs), added by 0363 and 0388 for the library cleanup scope and the recovery jobs;
--- they are not copies of the primary key, so they stay.
+-- DB-RW-A (number 0416 assigned by the controller; design: db-rw-redesign-v1 section 9, PR-A). BEHIND A SWITCH, default off.
+-- The setting runtime_rw_v2 (system_settings, JSON) carries one boolean per step of the DB-RW redesign; this step's flag is
+-- sharedRowLocks. While it is absent or not true, every function below behaves exactly as before this migration (the
+-- FOR SHARE statements are still there, in the ELSE branch). With {"sharedRowLocks": true} the row locks on rows every turn
+-- of every user shares are not taken: the model row (ai_models), the module row (modules), skills, skill_revisions (in
+-- runtime_direct_billing_allowed_before_opc and, for the module, in runtime_admit) and the start-threshold setting row
+-- (bill2_payg_claim). The same SELECTs still raise the same errors when the row is missing, inactive or revoked, and every
+-- later step re-runs them: bill2_payg_claim and bill2_dispatch call runtime_billing_allowed again before any money moves,
+-- so a module or revision deactivated between two steps stops the next step; a call that is already frozen keeps the
+-- price and package hash it was frozen with. The threshold setting is read once per claim and its version string is stored
+-- on the call (threshold_version), so a change between the read and the commit changes nothing that was used.
+-- Why the flag is read inside the functions: a function-level switch needs no application deploy and no restart; the
+-- helper runtime_rw_flag reads the setting once per transaction (transaction-local setting graylum.rw.<name>).
+-- NOTE for the reviewer: the design note says the (201,1) advisory lock already orders settings writers against claims;
+-- it does not for billing_payg_start_thresholds (runtime_stop_loss_settings_guard takes (201,1) only for runtime_stop_loss
+-- and runtime_rate_limits). The reason to drop that lock is the one above, not (201,1).
+-- The design note also asked for an index on runtime_executions(session_id); it already exists since 0321 as
+-- runtime_executions_session_created_idx, so none is added. runtime_executions_own_posts and bill2_runs_recovery_open are
+-- partial indexes with their own predicates (0363, 0388), not copies of the primary key, so they stay.
 -- Compatibility: same signatures, results and privileges; old and new application code are interchangeable.
--- Repeatable: CREATE OR REPLACE only, no data or index change. Recovery: re-apply the three functions from
--- packages/db/functions as of 0409.
+-- Repeatable: CREATE OR REPLACE only. Recovery: set the flag to anything but true (or delete the key), or re-apply the
+-- three functions from packages/db/functions as of 0409.
 BEGIN;
 SET LOCAL lock_timeout='5s';
+
+CREATE OR REPLACE FUNCTION public.runtime_rw_flag(p_name text)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE v text;
+BEGIN
+ -- One read of the runtime_rw_v2 setting per transaction; a step is on only when its flag is the JSON boolean true.
+ v:=current_setting('graylum.rw.'||p_name,true);
+ IF v IS NULL OR v='' THEN
+  SELECT CASE WHEN jsonb_typeof(value)='object' AND value->p_name='true'::jsonb THEN 'on' ELSE 'off' END INTO v
+   FROM system_settings WHERE key='runtime_rw_v2';
+  v:=coalesce(v,'off');
+  PERFORM set_config('graylum.rw.'||p_name,v,true);
+ END IF;
+ RETURN v='on';
+END $function$;
+
 CREATE OR REPLACE FUNCTION public.bill2_payg_claim(a uuid, rid uuid, seq integer, p jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -105,7 +124,8 @@ BEGIN
  IF r.fusion_group_id IS NOT NULL AND current_setting('graylum.fusion_group_claim',true)=r.fusion_group_id::text THEN
   cfg:=jsonb_build_object('version','fusion-group-bound');l:=greatest(1,ceil(u*r.credits_per_usd*m_call));
  ELSE
- SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds';
+ IF runtime_rw_flag('sharedRowLocks') THEN SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds';
+ ELSE SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;END IF;
  IF jsonb_typeof(cfg->'version') IS DISTINCT FROM 'string' OR btrim(cfg->>'version')=''
   OR jsonb_typeof(cfg->'thresholds') IS DISTINCT FROM 'array' THEN
   RAISE EXCEPTION 'BILL2_START_THRESHOLD_UNCONFIGURED';
@@ -214,7 +234,11 @@ BEGIN
     OR entry->>'modelId'=p->>'modelId' THEN RAISE EXCEPTION 'BILL2_CALL_POLICY_DENIED';END IF;
    CONTINUE;
   END IF;
-  PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model' AND (provider=entry->>'provider' OR (p->>'mode' IN ('staging_test','production') AND entry->>'provider'='openrouter' AND provider IN ('openai','openrouter','anthropic'))) AND is_active='true';
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model' AND (provider=entry->>'provider' OR (p->>'mode' IN ('staging_test','production') AND entry->>'provider'='openrouter' AND provider IN ('openai','openrouter','anthropic'))) AND is_active='true';
+  ELSE
+   PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model' AND (provider=entry->>'provider' OR (p->>'mode' IN ('staging_test','production') AND entry->>'provider'='openrouter' AND provider IN ('openai','openrouter','anthropic'))) AND is_active='true' FOR SHARE;
+  END IF;
   IF NOT FOUND OR entry->>'protocol' IS DISTINCT FROM (CASE WHEN p->>'mode' IN ('staging_test','production') THEN 'openrouter-chat-v1' ELSE 'fixture-cost-v1' END) OR coalesce(length(entry->>'account'),0)=0
   OR coalesce((entry->>'inputLimit')::int,0) NOT BETWEEN 1 AND 1000000 OR coalesce((entry->>'outputLimit')::int,0) NOT BETWEEN 1 AND 1000000
   OR bill2_decimal(entry->'upperUsd')<=0 OR entry->'automaticRetry' IS DISTINCT FROM 'false'::jsonb OR entry->'hiddenTools' IS DISTINCT FROM 'false'::jsonb
@@ -236,19 +260,34 @@ BEGIN
   -- Scope ownership/account/source checks above are independent of the
   -- explicitly selected Skill; never replace its identity with the work owner.
   IF EXISTS(SELECT 1 FROM runtime_executions WHERE billing_run_id=p_run_id AND actor_id=a) THEN
-   PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND (
-    (NOT (p->'input' ? 'reportGeneration') AND model_id=(p->>'modelId')::uuid)
-    OR (p->'input' ? 'reportGeneration' AND EXISTS(
-     SELECT 1 FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
-     WHERE r.id=p_run_id AND r.actor_id=a AND e.actor_id=a AND r.payload=p
-      AND e.payload=p->'input' AND e.payload ? 'reportGeneration'))
-   );
+   IF runtime_rw_flag('sharedRowLocks') THEN
+    PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND (
+     (NOT (p->'input' ? 'reportGeneration') AND model_id=(p->>'modelId')::uuid)
+     OR (p->'input' ? 'reportGeneration' AND EXISTS(
+      SELECT 1 FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
+      WHERE r.id=p_run_id AND r.actor_id=a AND e.actor_id=a AND r.payload=p
+       AND e.payload=p->'input' AND e.payload ? 'reportGeneration'))
+    );
+   ELSE
+    PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND (
+     (NOT (p->'input' ? 'reportGeneration') AND model_id=(p->>'modelId')::uuid)
+     OR (p->'input' ? 'reportGeneration' AND EXISTS(
+      SELECT 1 FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
+      WHERE r.id=p_run_id AND r.actor_id=a AND e.actor_id=a AND r.payload=p
+       AND e.payload=p->'input' AND e.payload ? 'reportGeneration'))
+    ) FOR SHARE;
+   END IF;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
   ELSE
-   PERFORM id FROM modules WHERE id=m;
+   IF runtime_rw_flag('sharedRowLocks') THEN PERFORM id FROM modules WHERE id=m; ELSE PERFORM id FROM modules WHERE id=m FOR SHARE;END IF;
   END IF;
-  PERFORM id FROM skills WHERE id=k;
-  PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k;
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM skills WHERE id=k;
+   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k;
+  ELSE
+   PERFORM id FROM skills WHERE id=k FOR SHARE;
+   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
+  END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_REVISION_DENIED';END IF;
   PERFORM read_skill_package(a,m,k,rev,NULL,'');
  END IF;
@@ -261,10 +300,16 @@ BEGIN
     AND c->>'key'=e.match_result->>'key';
   IF chosen IS NOT NULL THEN
    m:=(chosen->>'moduleId')::uuid;k:=(chosen->>'skillId')::uuid;rev:=(chosen->>'revisionId')::uuid;
-   PERFORM id FROM modules WHERE id=m AND active AND model_id=(chosen->>'modelId')::uuid;
+   IF runtime_rw_flag('sharedRowLocks') THEN PERFORM id FROM modules WHERE id=m AND active AND model_id=(chosen->>'modelId')::uuid;
+   ELSE PERFORM id FROM modules WHERE id=m AND active AND model_id=(chosen->>'modelId')::uuid FOR SHARE;END IF;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_MATCH_REVOKED';END IF;
-   PERFORM id FROM skills WHERE id=k;
-   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k;
+   IF runtime_rw_flag('sharedRowLocks') THEN
+    PERFORM id FROM skills WHERE id=k;
+    PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k;
+   ELSE
+    PERFORM id FROM skills WHERE id=k FOR SHARE;
+    PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
+   END IF;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_MATCH_REVOKED';END IF;
    PERFORM read_skill_package(a,m,k,rev,chosen->>'packageHash','');
   END IF;
@@ -389,10 +434,17 @@ BEGIN
  -- Runtime requires the administrator model binding; legacy unbound BILL2
  -- callers keep their existing package authorization contract.
  IF p_billing->>'revisionId' IS NOT NULL THEN
-  PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
-   AND skill_id=(p_billing->>'skillId')::uuid AND active
-   AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
-     ELSE model_id END)=(p_billing->>'modelId')::uuid;
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid;
+  ELSE
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid FOR SHARE;
+  END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
  END IF;
  b:=bill2_prepare(p_actor_id,p_request_id,p_billing);
@@ -405,5 +457,7 @@ BEGIN
  IF p_payload ? 'reportGeneration' THEN PERFORM report_fee_hold(e,p_billing); END IF;
  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
 END $function$;
+
+REVOKE ALL ON FUNCTION public.runtime_rw_flag(text) FROM PUBLIC,anon,authenticated,service_role;
 
 COMMIT;
