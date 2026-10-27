@@ -116,7 +116,11 @@ try{
   const t5=turn(a5);t5.billing={...t5.billing,moduleId:art5.module,skillId:art5.skill,revisionId:art5.revision};
   const p5=await pre(a5,t5);
   await c.query('UPDATE modules SET active=false WHERE id=$1',[art5.module]);
-  assert.equal(await refused(()=>commit(a5,t5,p5)),'RUNTIME_SKILL_MODEL_DENIED','a module deactivated after the precheck is refused by the commit');
+  // With DB-RW-B (0419) the deactivation also moves the Skill catalog version, which the commit compares first; without the
+  // versions in the proof the commit's own module re-read refuses it as before.
+  const versioned=await one("select to_regprocedure('public.catalog_versions_snapshot()') is not null v");
+  assert.equal(await refused(()=>commit(a5,t5,p5)),versioned?'RUNTIME_ADMIT_STALE':'RUNTIME_SKILL_MODEL_DENIED','a module deactivated after the precheck is refused by the commit');
+  assert.equal(await refused(()=>commit(a5,t5,{...p5,catalogVersions:null})),'RUNTIME_SKILL_MODEL_DENIED','the commit re-reads the module itself');
   assert.equal(await one('select count(*)::int v from runtime_executions where request_id=$1',[t5.requestId]),0,'nothing was admitted');
  }
  //  - the entry guards of runtime_admit (archived business, erased conversation) are the commit's first statements too
@@ -126,8 +130,17 @@ try{
   assert.match(head,/opc_assert_business_writable/);assert.match(head,/CONTENT_ERASED/);assert.match(head,/bill2_actor/);
   report.checks.push('the commit starts with the same archived-business, erased-conversation and actor guards as runtime_admit');
  }
- //  - the catalog version moved (a stand-in for the DB-RW-B function, absent from this database)
- {
+ //  - the catalog version moved: the DB-RW-B function (0419) when this database has it, otherwise a stand-in
+ if(await one("select to_regprocedure('public.catalog_versions_snapshot()') is not null v")){
+  const a7=await account(),t7=turn(a7),p7=await pre(a7,t7);
+  assert.deepEqual(Object.keys(p7.catalogVersions).sort(),['enabled','models','settings','skills']);
+  await c.query("INSERT INTO system_settings(key,value) VALUES('rwc_settings_probe','1') ON CONFLICT(key) DO UPDATE SET value=to_jsonb(clock_timestamp())");
+  assert.equal((await commit(a7,t7,p7)).state,'prepared','a settings change alone does not stale a proof');
+  const a8=await account(),t8=turn(a8),p8=await pre(a8,t8);
+  await c.query('UPDATE ai_models SET max_tokens=coalesce(max_tokens,0)+1 WHERE id=$1',[a8.f.payload.modelId]);
+  assert.equal(await refused(()=>commit(a8,t8,p8)),'RUNTIME_ADMIT_STALE','a models/skills version change refuses the commit');
+  await c.query("DELETE FROM system_settings WHERE key='rwc_settings_probe'");
+ }else{
   await c.query(`CREATE TABLE IF NOT EXISTS rwc_catalog(name text primary key, version bigint)`);
   await c.query(`INSERT INTO rwc_catalog VALUES('skills',1),('models',1),('settings',1) ON CONFLICT DO NOTHING`);
   await c.query(`CREATE OR REPLACE FUNCTION public.catalog_versions_snapshot() RETURNS jsonb LANGUAGE sql STABLE AS $$ SELECT jsonb_object_agg(name,version) FROM rwc_catalog $$`);
