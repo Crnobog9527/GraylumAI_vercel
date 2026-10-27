@@ -136,7 +136,7 @@ export const SIMULATED_ACCOUNTS: AccountSpec[] = [
         expected: { verdict: 'inconclusive', reason: 'platform_shift' } },
     ],
     outages: [],
-    shifts: [{ platform: 'tiktok', fromDaysAgo: 70, effect: 0.5 }],
+    shifts: [{ platform: 'tiktok', fromDaysAgo: 70, effect: 0.4 }],
     stage: { initial: '1_10', transitions: [] },
   },
   {
