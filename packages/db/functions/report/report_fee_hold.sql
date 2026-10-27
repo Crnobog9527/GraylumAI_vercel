@@ -18,7 +18,7 @@ BEGIN
     WHERE x.session_id=e.session_id AND x.id<>e.id
       AND x.payload#>>'{reportGeneration,projectId}'=e.payload#>>'{reportGeneration,projectId}'
       AND x.payload#>>'{reportGeneration,roundId}'=e.payload#>>'{reportGeneration,roundId}'
-      AND (f.state='charged'
+      AND (f.state='charged' AND f.settle_reason IS DISTINCT FROM 'user_stop'
         OR (f.state='held' AND (x.state NOT IN ('completed','cancelled')
           OR (x.result->>'completeness'='complete' AND report_body_complete(x.result->>'body',x.payload->'reportGeneration')))))) THEN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS'; END IF;
