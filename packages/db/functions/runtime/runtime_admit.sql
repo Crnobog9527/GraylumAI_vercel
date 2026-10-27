@@ -112,9 +112,11 @@ BEGIN
     THEN least(1000,(p_payload->>'historyItems')::int)+128 ELSE 0 END
   ), availability AS MATERIALIZED (
    SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM bounded))
+  ), visible AS MATERIALIZED (
+   -- 0409: the own-post visibility test depends on the execution only, so it runs once per execution, not once per history row.
+   SELECT a.execution_id FROM availability a WHERE a.available AND runtime_workspace_posts_history_visible(a.execution_id)
   )
-  SELECT revision FROM bounded JOIN availability USING(execution_id)
-  WHERE available AND runtime_workspace_posts_history_visible(execution_id) ORDER BY revision);
+  SELECT revision FROM bounded JOIN visible USING(execution_id) ORDER BY revision);
  -- Runtime requires the administrator model binding; legacy unbound BILL2
  -- callers keep their existing package authorization contract.
  IF p_billing->>'revisionId' IS NOT NULL THEN
