@@ -202,6 +202,10 @@ try {
   const pack = await svc('SELECT publish_monitor_review_pack_rows($1,$2,30) v', [sim, businesses.A]);
   assert.ok(pack.facts.some(f => Date.parse(f.postedAt) < Date.now() - 100 * 86_400_000));
   assert.equal(pack.experiments.length, 1); assert.equal(pack.diagnostics[0].openingText, '开头第一句');
+  assert.equal(pack.diagnostics[0].dropSecond, null);
+  const recent = dataset.accounts.find(x => x.key === 'A').posts.filter(p => Date.parse(p.postedAt) > Date.now() - 7 * 86_400_000);
+  assert.equal(pack.recent.length, recent.length);
+  assert.ok(pack.recent.every(r => Date.parse(r.postedAt) > Date.now() - 14 * 86_400_000) && recent.length > 0);
   assert.equal(pack.facts.every(f => typeof f.title === 'string'), true);
   const xhs = pack.followers.find(f => f.platform === 'xiaohongshu');
   const truth = dataset.accounts.find(a => a.key === 'A').snapshots.filter(x => !x.postKey && x.platform === 'xiaohongshu');

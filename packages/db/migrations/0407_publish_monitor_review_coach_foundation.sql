@@ -467,12 +467,19 @@ BEGIN
     'importCumulative',f.import_cumulative,'importOn',f.import_on,'missing',f.missing_fields) ORDER BY f.posted_at DESC)
    FROM (SELECT * FROM social_post_facts WHERE actor_id=a AND business_id=p_business_id AND posted_at>=since
     ORDER BY posted_at DESC LIMIT 1500) f JOIN social_posts sp ON sp.id=f.post_id),'[]'),
+  -- Own posts of the last 14 days not settled yet: counted and listed as too new, never judged.
+  'recent',coalesce((SELECT jsonb_agg(jsonb_build_object('postId',sp.id,'platform',c.platform,'postedAt',sp.posted_at,
+    'title',sp.title_excerpt,'pillarKey',f.pillar_key) ORDER BY sp.posted_at DESC)
+   FROM social_posts sp JOIN social_connections c ON c.id=sp.connection_id AND c.role='own' AND c.business_id=p_business_id
+   LEFT JOIN social_post_facts f ON f.post_id=sp.id
+   WHERE sp.actor_id=a AND sp.posted_at>=clock_timestamp()-interval '14 days' AND (f.post_id IS NULL OR f.day7 IS NULL)
+    AND (f.post_id IS NULL OR f.import_cumulative IS NULL)),'[]'),
   'experiments',coalesce((SELECT jsonb_agg(to_jsonb(e)-'actor_id'-'business_id' ORDER BY e.created_at DESC)
    FROM (SELECT * FROM social_review_experiments WHERE actor_id=a AND business_id=p_business_id
     ORDER BY created_at DESC LIMIT 100) e),'[]'),
   'diagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('id',d.id,'postId',d.post_id,'platform',d.platform,
-    'source',d.source,'rates',d.rates,'openingText',d.opening_text,'videoSeconds',d.video_seconds,'capturedOn',d.captured_on,
-    'reviewRunId',d.review_run_id) ORDER BY d.captured_on DESC)
+    'source',d.source,'rates',d.rates,'openingText',d.opening_text,'videoSeconds',d.video_seconds,'dropSecond',d.drop_second,
+    'capturedOn',d.captured_on,'reviewRunId',d.review_run_id) ORDER BY d.captured_on DESC)
    FROM (SELECT * FROM social_post_diagnostics WHERE actor_id=a AND business_id=p_business_id
     AND captured_on>=(since AT TIME ZONE 'UTC')::date ORDER BY captured_on DESC LIMIT 30) d),'[]'));
 END $function$;
