@@ -129,6 +129,132 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     await gate(f);
   });
 
+  /**
+   * Mark the operations of one fetched account as what benchmark_fetch stores for a link the user pasted: the source and the
+   * accounts as the user wrote them (args), the canonical account the supplier was asked for and the platform's own route
+   * kinds (call; YouTube has no account_profile, it reads post_detail).
+   */
+  async function pasted(f,fetched,e,account,{kind='user_message',written=account,platform='tiktok'}={}) {
+    const kinds = platform==='youtube' ? ['post_detail','account_posts'] : ['account_profile','account_posts'];
+    for (const [op,dataKind] of [[fetched.profile,kinds[0]],[fetched.postOp,kinds[1]]])
+      await db.query(`UPDATE research_operations SET result=result||jsonb_build_object(
+        'args',jsonb_build_object('source',jsonb_build_object('kind',$1::text,'messageId',$2::text),
+          'accounts',jsonb_build_array(jsonb_build_object('account',$3::text,'platform',$7::text))),
+        'call',jsonb_build_object('dataKind',$4::text,'platform',$7::text,'query',$5::text)) WHERE id=$6`,
+      [kind,e,written,dataKind,account,op,platform]);
+  }
+  /**
+   * One answer in which the user pasted a link. `end`: "complete" finishes the fetch as succeeded; "failed" ends it as a
+   * failure; "paused" leaves it in progress with its operations done (a balance pause before the next page, resumed later
+   * with `complete()`).
+   */
+  async function pastedRound(f,{end='complete',kind='user_message',written,platform='tiktok',account=`p-${randomUUID().slice(0,6)}`}={}) {
+    const e = await answer(db,f);
+    const fetched = await fetchAccount(f,e,account,{...imitable,platform,deferFinish:true});
+    await pasted(f,fetched,e,account,{kind,written,platform});
+    if (end==='complete') await fetched.finish();
+    if (end==='failed') await rpc(db,'research_account_fetch_finish',f.actor,fetched.fetchId,fetched.attempt,'failed_charged',null);
+    return {e,account,fetched,complete:() => fetched.finish()};
+  }
+
+  await check('ROUNDS pasted-link verification is a round: two links answers, or one search plus one, offer the card', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    await pastedRound(f);
+    assert.equal((await state(f)).rounds,1);
+    await assert.rejects(offer(f,e),/RESEARCH_SHORTFALL_NOT_DUE/,'one pasted round is not enough');
+    await pastedRound(f);
+    assert.deepEqual([(await state(f)).rounds,(await state(f)).qualified],[2,2]);
+    const card = await offer(f,e);
+    assert.deepEqual([card.required,card.offeredQualified,card.offeredRounds],[3,2,2]);
+    await refused(gate(f));
+    await choose(f,card.cardId,'generate');
+    await gate(f);
+    const g = await seed(db), ge = await answer(db,g);
+    await round(g,ge);
+    await pastedRound(g);
+    assert.equal((await state(g)).rounds,2,'one keyword round plus one pasted round');
+    assert.equal((await offer(g,ge)).offeredRounds,2);
+  });
+
+  await check('ROUNDS a failed, refused or other-source verification is not a round; one answer counts once', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    await pastedRound(f,{end:'failed'});
+    await pastedRound(f,{kind:'candidate'});
+    await pastedRound(f,{kind:'refresh'});
+    assert.equal((await state(f)).rounds,0,'failed fetch, candidate and refresh sources count nothing');
+    // Two links verified in one answer are one round; the same answer holding a keyword round is not counted twice.
+    const two = await answer(db,f);
+    for (const name of ['one','two']) {
+      const account = `${name}-${randomUUID().slice(0,6)}`;
+      const fetched = await fetchAccount(f,two,account,{...imitable,deferFinish:true});
+      await pasted(f,fetched,two,account);
+      await fetched.finish();
+    }
+    assert.equal((await state(f)).rounds,1);
+    await round(f,two);
+    assert.equal((await state(f)).rounds,1,'the answer already holds a completed discovery');
+    await assert.rejects(offer(f,e),/RESEARCH_SHORTFALL_NOT_DUE/);
+    // Erasing the verifying answer takes its round away.
+    await erase(db,f,'answer',two);
+    assert.equal((await state(f)).rounds,0);
+  });
+
+  await check('ROUNDS a balance pause leaves no round until the whole verification completes, then it counts once', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    const paused = await pastedRound(f,{end:'paused'});
+    assert.equal((await state(f)).rounds,0,'profile and posts done, fetch still in progress');
+    await assert.rejects(offer(f,e),/RESEARCH_SHORTFALL_NOT_DUE/);
+    await paused.complete();
+    assert.equal((await state(f)).rounds,1,'resumed and completed');
+    await paused.complete();
+    assert.equal((await state(f)).rounds,1,'finishing again changes nothing');
+  });
+
+  await check('ROUNDS every platform with a benchmark route counts a completed pasted-link verification', async () => {
+    for (const platform of ['tiktok','x','bilibili','xiaohongshu','douyin','youtube','instagram']) {
+      const f = await seed(db);
+      await pastedRound(f,{platform,end:'paused'});
+      assert.equal((await state(f)).rounds,0,`${platform} paused`);
+      await pastedRound(f,{platform,end:'failed'});
+      assert.equal((await state(f)).rounds,0,`${platform} failed`);
+      const done = await pastedRound(f,{platform});
+      assert.equal((await state(f)).rounds,1,`${platform} completed`);
+      assert.ok(done.e);
+    }
+  });
+
+  await check('ROUNDS the user may have written the account as @Name, mixed case or a full profile link', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    await pastedRound(f,{account:'homeideas',written:'@HomeIdeas'});
+    await pastedRound(f,{account:'cozycook',written:'https://www.tiktok.com/@CozyCook?lang=en'});
+    assert.equal((await state(f)).rounds,2,'counted by what the supplier was asked for, not by how the link was written');
+    assert.equal((await offer(f,e)).offeredRounds,2);
+  });
+
+  await check('ROUNDS a refresh, failed or successful, or the "generate" choice never takes a round away', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    const first = await pastedRound(f), second = await pastedRound(f);
+    assert.equal((await state(f)).rounds,2);
+    const card = await offer(f,e);
+    await choose(f,card.cardId,'generate');
+    // A successful paid refresh of the first account: the fetch row moves to the refreshing answer.
+    const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok',first.account);
+    const refreshed = await fetchAccount(f,await answer(db,f),first.account,{...imitable,refresh:grant});
+    assert.equal((await db.query('SELECT state FROM research_account_fetches WHERE id=$1',[refreshed.fetchId])).rows[0].state,'succeeded');
+    assert.equal((await state(f)).rounds,2,'refresh success');
+    // Refreshes that fail or end unknown re-claim the row and change its state and answer.
+    for (const outcome of ['failed','unknown']) {
+      const again = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok',second.account);
+      const retry = await rpc(db,'research_account_fetch_claim',f.actor,f.session,await answer(db,f),'tiktok',second.account,again);
+      assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,retry.fetchId,retry.attempt),true);
+      await rpc(db,'research_account_fetch_finish',f.actor,retry.fetchId,retry.attempt,outcome,null);
+      assert.equal((await state(f)).rounds,2,`refresh ${outcome}`);
+    }
+    const after = (await state(f)).card;
+    assert.deepEqual([after.choice,after.chosenRounds],['generate',2],'the frozen choice is untouched');
+    await gate(f);
+  });
+
   await check('SHORTFALL 3 or more qualified: admitted as before, no card', async () => {
     const {f,e} = await session(3);
     await gate(f);
