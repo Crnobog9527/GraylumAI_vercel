@@ -221,6 +221,7 @@ export type MentorExecution = PaygViewFields & {
     request?: MentorRequest | null;
     unavailableReason?: string | null;
     historyOmitted?: boolean;
+    createdAt?: string | null;
     executionId: string;
     input: string | null;
     body: string | null;
