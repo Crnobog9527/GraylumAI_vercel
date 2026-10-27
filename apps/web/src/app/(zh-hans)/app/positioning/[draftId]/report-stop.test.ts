@@ -133,9 +133,10 @@ it("leaves the report running when the user declines a charge confirmation", asy
 it("keeps streamed text received while a stop confirmation is declined", () => {
   const initial = { ...startLiveReply(id), text: "一", points: 1, rev: 1 };
   const pending = liveReplyAfter(initial, id, { type: "textDelta", text: "二", offset: 1, rev: 1 })!;
-  const resumed = finishReportStop(pending, initial, "idle");
+  const frozen = { ...initial, stopped: true, stalled: true };
+  const resumed = finishReportStop(frozen, pending, "idle");
   const next = liveReplyAfter(resumed, id, { type: "textDelta", text: "三", offset: 2, rev: 1 });
   expect(next?.text).toBe("一二三");
   expect(next?.stalled).toBe(false);
-  expect(finishReportStop(pending, initial, "saving")?.text).toBe("一");
+  expect(finishReportStop(frozen, pending, "saving")?.text).toBe("一");
 });

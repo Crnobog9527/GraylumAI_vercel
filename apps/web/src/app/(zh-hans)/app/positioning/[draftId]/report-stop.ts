@@ -12,10 +12,10 @@ import { sendStop, stopFollowUpDelay, stopRequestFor, type StopRequest } from ".
  */
 export type ReportStopPhase = "idle" | "sending" | "saving" | "unconfirmed" | "settled";
 
-/** A declined confirmation keeps all progress; an accepted stop fixes the text shown at the click. */
-export function finishReportStop(current: LiveReply | null, clicked: LiveReply, phase: ReportStopPhase): LiveReply | null {
-  if (!current || current.executionId !== clicked.executionId || phase === "idle") return current;
-  return { ...clicked, stopped: true, stalled: true };
+/** Keep the frozen text after a stop; restore all buffered progress if confirmation is declined. */
+export function finishReportStop(current: LiveReply | null, buffered: LiveReply, phase: ReportStopPhase): LiveReply | null {
+  if (!current || current.executionId !== buffered.executionId || phase !== "idle") return current;
+  return buffered;
 }
 
 const FINAL = ["completed", "cancelled"];

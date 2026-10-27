@@ -63,6 +63,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const start = trpc.runtime.reportStart.useMutation();
   const cancel = trpc.runtime.cancel.useMutation();
   const [live, setLive] = useState<LiveReply | null>(null);
+  const stopBuffer = useRef<LiveReply | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const status = trpc.runtime.reportStatus.useQuery({ executionId: executionId ?? "" }, {
@@ -111,7 +112,11 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
       events = await utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL });
       const { result } = await readAgentTurn(events, {
         executionId: id,
-        onProgress: (execution, event) => setLive(old => liveReplyAfter(old, execution, event)),
+        onProgress: (execution, event) => {
+          if (stopBuffer.current?.executionId === execution)
+            stopBuffer.current = liveReplyAfter(stopBuffer.current, execution, event);
+          setLive(old => liveReplyAfter(old, execution, event));
+        },
         onFinished: () => void utils.credits.getBalance.invalidate(),
       });
       refuse(result);
@@ -181,8 +186,14 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   }), []);
   const stop = async () => {
     if (!live || live.stopped || (stopper.executionId() === live.executionId && stopper.phase() === "sending")) return;
+    stopBuffer.current = live;
+    setLive({ ...live, stopped: true, stalled: true });
     await stopper.stop(live);
-    setLive(current => finishReportStop(current, live, stopper.phase()));
+    const buffered = stopBuffer.current;
+    if (buffered?.executionId === live.executionId) {
+      stopBuffer.current = null;
+      setLive(current => finishReportStop(current, buffered, stopper.phase()));
+    }
   };
 
   return {
