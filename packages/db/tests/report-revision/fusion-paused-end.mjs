@@ -30,7 +30,7 @@ async function step(db,f) {
   return {run,group,items:JSON.stringify([{runId:run.run,sequence:1,payload:run.claimPayload}])};
 }
 const claim = (db,f,rv,s) => service(db,'fusion_review_claim',f.actor,rv.reviewId,1,'review',1,s.group,s.items);
-const endPaused = (db,idle='24 hours') => service(db,'fusion_review_end_paused',idle,100);
+const endPaused = (db,idle='24 hours',limit=100) => service(db,'fusion_review_end_paused',idle,limit);
 /** A gold member holding the fixed fee of a review that has been paused for `hours`. */
 async function paused(db,hours) {
   const f = await seed(db);
@@ -113,6 +113,27 @@ export async function runFusionPausedEnd({db,Client,connectionString,report}) {
   assert.equal(await wallet(db,saved.f.actor),saved.before-usage,'only the known usage is paid');
   assert.equal(await ledger(db,saved.f.actor),await wallet(db,saved.f.actor));
   report.checks.push('paused review with a saved, unjudged output is not ended until judged; then ended once with the verdict kept and the fee settled by the stop rule');
+
+  // Stuck reviews in front do not starve the ones behind: with a limit of 2, two reviews waiting for their unjudged output come
+  // first (older) and are skipped without taking a place, so the third is still ended; the skipped ones are reported.
+  const stuck = [];
+  for (let i=0;i<2;i++) {
+    const p = await paused(db,0);
+    const sp = await step(db,p.f);
+    const cp = (await claim(db,p.f,p.rv,sp)).calls[0];
+    assert.equal((await rpc(db,'bill2_dispatch',p.f.actor,sp.run.run,cp.id,cp.dispatchToken)).dispatch,true);
+    await record(db,p.f,sp,cp);
+    await rpc(db,'fusion_call_output_save',p.f.actor,cp.id,'{"issues":[]}');
+    await db.query("UPDATE fusion_reviews SET state='paused',updated_at=now()-interval '40 hours' WHERE id=$1",[p.rv.reviewId]);
+    stuck.push(p);
+  }
+  const behind = await paused(db,30);
+  const lim = await endPaused(db,'24 hours',2);
+  assert.equal(lim.ended,1,'the review behind two stuck ones is still ended');
+  assert.equal(lim.skipped,2,'the stuck ones are reported as skipped');
+  assert.equal(await state(db,behind.rv.reviewId),'interrupted');assert.equal(await wallet(db,behind.f.actor),behind.before);
+  for (const p of stuck) assert.equal(await state(db,p.rv.reviewId),'paused');
+  report.checks.push('paused review expiry: reviews skipped in front (unjudged output) take no place of the limit; the one behind is ended and the skipped are reported');
 
   // The boundary: the user continues at the moment the expiry runs. Whichever takes the review lock first wins, once.
   const clients = [new Client({connectionString}),new Client({connectionString})];

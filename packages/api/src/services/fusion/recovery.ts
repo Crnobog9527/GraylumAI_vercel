@@ -112,11 +112,17 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // function also skips a review that still has an unjudged output, and it is ended on a later run.
   if (now() + 10_000 <= stopAt) {
     const expired = await bounded(admin.rpc('fusion_review_end_paused', { p_idle: '24 hours', p_limit: 100 }));
-    const expiredResult = z.object({ ended: z.number().int(), failed: z.number().int() }).safeParse(expired.error ? undefined : expired.data);
+    const expiredResult = z.object({ ended: z.number().int(), failed: z.number().int(), skipped: z.number().int().default(0) }).safeParse(expired.error ? undefined : expired.data);
     if (!expiredResult.success) summary.success = false;
     else {
       summary.endedPaused += expiredResult.data.ended;
       if (expiredResult.data.failed > 0) { summary.failed += expiredResult.data.failed; summary.success = false; }
+      // Content-free counts only: a review that cannot be ended (failed) or keeps waiting (skipped) shows in the logs and in the
+      // run's success flag, so a stuck paused review is never silent.
+      if (expiredResult.data.failed > 0 || expiredResult.data.skipped > 0) {
+        logger.warn('billing', 'fusion_paused_review_not_ended',
+          { failed: expiredResult.data.failed, skipped: expiredResult.data.skipped });
+      }
     }
   }
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).

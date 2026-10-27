@@ -139,7 +139,7 @@ describe('Fusion daily recovery', () => {
   it('ends reviews paused for 24 hours only after saved, unjudged bodies were judged, and reports them', async () => {
     const compare = { actor_id: id(100), compare_id: id(300), call_id: id(400), run_id: id(401) };
     const a = admin([{ ...item(10, true, -60), call_id: id(400) }], { compareUnjudged: [compare],
-      endPaused: { data: { ended: 2, failed: 0 }, error: null } });
+      endPaused: { data: { ended: 2, failed: 0, skipped: 0 }, error: null } });
     const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
     expect(a.calls[0]).toBe('fusion_review_pause_idle:');
     expect(a.calls.findIndex(c => c.startsWith('verdict:'))).toBeGreaterThan(0);
