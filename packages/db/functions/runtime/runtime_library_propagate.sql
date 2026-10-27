@@ -58,22 +58,27 @@ BEGIN
   END;
  END LOOP;
  -- DB-PERF PR-7a own-post scope: the only executions runtime_workspace_posts_history_erased can be
- -- true for. Own-post executions (two partial indexes), then every execution depending on them (reverse index).
+ -- true for. Executions holding a my_posts result or an erased own-post read_source call (the check needs one of the two
+ -- in the lineage), then every execution depending on them (reverse index). DB-PERF 0403: an own-post execution without
+ -- such a call is not in the scope; the cheap pending tests below run before the check, which only sees what is left.
  posts_scope:=ARRAY(WITH RECURSIVE reach(id) AS (
    SELECT t.execution_id FROM runtime_tool_calls t WHERE t.result->>'kind'='my_posts'
    UNION SELECT ex.id FROM runtime_executions ex WHERE ex.payload->>'ownPosts'='true'
+    AND EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.name='read_source'
+     AND t.erased_at IS NOT NULL AND t.result IS NULL)
    UNION SELECT dep.execution_id FROM runtime_history_dependencies dep JOIN reach r ON dep.dependency_id=r.id
   ) SELECT id FROM reach);
  -- B2 pending own-post receipts: separate bounded batches; no connection transaction owns historical cleanup.
- FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN profiles p ON p.id=ex.actor_id
+ FOR target IN WITH pending AS MATERIALIZED (SELECT ex.id FROM runtime_executions ex
   WHERE ex.id=ANY(posts_scope) AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
-   AND runtime_workspace_posts_history_erased(ex.id)
    AND (EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.result->>'kind'='my_posts')
     OR EXISTS(SELECT 1 FROM runtime_session_history h WHERE h.execution_id=ex.id AND h.erased_at IS NULL
      AND h.item->>'role' IS DISTINCT FROM 'user')
     OR EXISTS(SELECT 1 FROM runtime_session_batches sb WHERE sb.execution_id=ex.id AND sb.erased_at IS NULL)
     OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id AND br.content_deleted_at IS NULL)
-    OR ex.state NOT IN ('completed','cancelled') AND ex.unavailable_reason IS NULL)
+    OR ex.state NOT IN ('completed','cancelled') AND ex.unavailable_reason IS NULL))
+  SELECT ex.id execution_id FROM pending pe JOIN runtime_executions ex ON ex.id=pe.id JOIN profiles p ON p.id=ex.actor_id
+  WHERE runtime_workspace_posts_history_erased(ex.id)
    AND (ex.billing_run_id IS NULL OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id FOR UPDATE SKIP LOCKED))
   ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,p SKIP LOCKED LOOP
   SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
@@ -89,11 +94,14 @@ BEGIN
   done:=done+1;
  END LOOP;
  -- Readiness and SKIP LOCKED are evaluated before LIMIT: open, untrusted or locked rows cannot starve later runs.
- FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
-  JOIN profiles p ON p.id=ex.actor_id
+ FOR target IN WITH pending AS MATERIALIZED (SELECT ex.id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
   WHERE ex.id=ANY(posts_scope) AND br.content_deleted_at IS NOT NULL AND br.closed
-   AND runtime_workspace_posts_history_erased(ex.id)
    AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
+   AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
+    WHERE c.run_id=br.id AND r.financial_projection_version IS NULL))
+  SELECT ex.id execution_id FROM pending pe JOIN runtime_executions ex ON ex.id=pe.id
+  JOIN bill2_runs br ON br.id=ex.billing_run_id JOIN profiles p ON p.id=ex.actor_id
+  WHERE runtime_workspace_posts_history_erased(ex.id)
    AND coalesce(content_erasure_financial_allowed(ex.actor_id,coalesce(br.pre_deduct_id,br.id)),false)
    AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
     WHERE c.run_id=br.id AND r.financial_projection_version IS NULL AND runtime_workspace_posts_receipt_ready(r.payload,c))
