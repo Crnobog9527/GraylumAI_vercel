@@ -159,6 +159,9 @@ export type MentorReplySource = {
   userStopPending?: boolean;
   /** The run's public billing view; `pausedReason: "user_stop"` marks a turn the user stopped. */
   billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
+  /** A newer turn follows this one, so its refusal is history, not the result of the last action. */
+  earlier?: boolean;
+  createdAt?: string | null;
   /** This execution owns the server execution slot. */
   active: boolean;
   busy: boolean;
@@ -174,6 +177,14 @@ export function reopenedTurn(source: Pick<MentorReplySource, "active" | "state" 
 /** A state notice shown under a mentor turn (inline notice), never as the message body. */
 export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boolean };
 
+/** "10/19 23:56 " in the viewer's own time zone (browser local), or nothing when the turn carries no time. */
+function earlierRefusalTime(value: string | null | undefined): string {
+  const at = value ? new Date(value) : null;
+  if (!at || Number.isNaN(at.getTime())) return "";
+  const text = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
+  return `${text} `;
+}
+
 function unavailableNotice(source: MentorReplySource): ReplyNotice {
   // A stopped turn is saving what was shown, never failed, until its result is final.
   if (stopSaving(source))
@@ -183,6 +194,8 @@ function unavailableNotice(source: MentorReplySource): ReplyNotice {
     return { tone: "status", text: STOPPED_EMPTY_NOTICE };
   if (source.state === "cost_pending" && !source.active)
     return { tone: "warning", text: "本次执行已停止，费用仍待核实，原记录和预扣已保留。你可以继续讨论当前问题。" };
+  if (source.state === "cancelled" && source.unavailableReason === "provider_rejected" && source.earlier)
+    return { tone: "status", text: `${earlierRefusalTime(source.createdAt)}这一轮被服务方拒绝，当时没有扣积分。这是旧记录，与你刚才的操作无关。` };
   if (source.state === "cancelled" && source.unavailableReason === "provider_rejected")
     return { tone: "warning", text: PROVIDER_REJECTED_NOTICE };
   if (source.state === "cancelled")
