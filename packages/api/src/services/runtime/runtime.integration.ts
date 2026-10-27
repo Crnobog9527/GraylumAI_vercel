@@ -2254,7 +2254,6 @@ it('RUNTIME: opposite Skill history dependencies allow concurrent claim and disp
   expect((await user.rpc('revoke_skill_revision',{p_revision_id:pack.revisionId,p_actor_id:actor})).error).not.toBeNull();
   expect((await db.query("select has_function_privilege('service_role','revoke_skill_revision(uuid,uuid)','execute') service,has_function_privilege('authenticated','revoke_skill_revision(uuid,uuid)','execute') browser")).rows[0]).toEqual({service:true,browser:false});
   await db.query("update profiles set role='admin' where id=$1",[actor]);
-  const pids=await Promise.all(clients.map(async c=>(await c.query('select pg_backend_pid() p')).rows[0].p));
   await clients[0].query("BEGIN; SET LOCAL lock_timeout='5s'");await clients[0].query('select runtime_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId]);
   await clients[1].query("BEGIN; SET LOCAL lock_timeout='5s'");
   const revoking=clients[1].query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]).then(async()=>{await clients[1].query('COMMIT');return null;},async error=>{await clients[1].query('ROLLBACK');return error;});
