@@ -131,26 +131,30 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
 
   /**
    * Mark the operations of one fetched account as what benchmark_fetch stores for a link the user pasted: the source and the
-   * accounts as the user wrote them (args), the canonical account the supplier was asked for (call).
+   * accounts as the user wrote them (args), the canonical account the supplier was asked for and the platform's own route
+   * kinds (call; YouTube has no account_profile, it reads post_detail).
    */
-  async function pasted(f,e,fetched,account,{kind='user_message',written=account}={}) {
-    for (const [op,dataKind] of [[fetched.profile,'account_profile'],[fetched.postOp,'account_posts']])
+  async function pasted(f,fetched,e,account,{kind='user_message',written=account,platform='tiktok'}={}) {
+    const kinds = platform==='youtube' ? ['post_detail','account_posts'] : ['account_profile','account_posts'];
+    for (const [op,dataKind] of [[fetched.profile,kinds[0]],[fetched.postOp,kinds[1]]])
       await db.query(`UPDATE research_operations SET result=result||jsonb_build_object(
         'args',jsonb_build_object('source',jsonb_build_object('kind',$1::text,'messageId',$2::text),
-          'accounts',jsonb_build_array(jsonb_build_object('account',$3::text,'platform','tiktok'))),
-        'call',jsonb_build_object('dataKind',$4::text,'platform','tiktok','query',$5::text)) WHERE id=$6`,
-      [kind,e,written,dataKind,account,op]);
+          'accounts',jsonb_build_array(jsonb_build_object('account',$3::text,'platform',$7::text))),
+        'call',jsonb_build_object('dataKind',$4::text,'platform',$7::text,'query',$5::text)) WHERE id=$6`,
+      [kind,e,written,dataKind,account,op,platform]);
   }
-  /** One answer in which the user pasted a link and it was verified, or its posts page failed (`ok` false). */
-  async function pastedRound(f,{ok=true,kind='user_message',written,account=`p-${randomUUID().slice(0,6)}`}={}) {
+  /**
+   * One answer in which the user pasted a link. `end`: "complete" finishes the fetch as succeeded; "failed" ends it as a
+   * failure; "paused" leaves it in progress with its operations done (a balance pause before the next page, resumed later
+   * with `complete()`).
+   */
+  async function pastedRound(f,{end='complete',kind='user_message',written,platform='tiktok',account=`p-${randomUUID().slice(0,6)}`}={}) {
     const e = await answer(db,f);
-    const fetched = await fetchAccount(f,e,account,imitable);
-    await pasted(f,e,fetched,account,{kind,written});
-    if (!ok) {
-      await db.query("UPDATE research_operations SET state='failed' WHERE id=$1",[fetched.postOp]);
-      await db.query("UPDATE research_account_fetches SET state='failed_charged',evidence=NULL WHERE id=$1",[fetched.fetchId]);
-    }
-    return {e,account,fetched};
+    const fetched = await fetchAccount(f,e,account,{...imitable,platform,deferFinish:true});
+    await pasted(f,fetched,e,account,{kind,written,platform});
+    if (end==='complete') await fetched.finish();
+    if (end==='failed') await rpc(db,'research_account_fetch_finish',f.actor,fetched.fetchId,fetched.attempt,'failed_charged',null);
+    return {e,account,fetched,complete:() => fetched.finish()};
   }
 
   await check('ROUNDS pasted-link verification is a round: two links answers, or one search plus one, offer the card', async () => {
@@ -174,7 +178,7 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
 
   await check('ROUNDS a failed, refused or other-source verification is not a round; one answer counts once', async () => {
     const f = await seed(db), e = await answer(db,f);
-    await pastedRound(f,{ok:false});
+    await pastedRound(f,{end:'failed'});
     await pastedRound(f,{kind:'candidate'});
     await pastedRound(f,{kind:'refresh'});
     assert.equal((await state(f)).rounds,0,'failed fetch, candidate and refresh sources count nothing');
@@ -182,7 +186,9 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     const two = await answer(db,f);
     for (const name of ['one','two']) {
       const account = `${name}-${randomUUID().slice(0,6)}`;
-      await pasted(f,two,await fetchAccount(f,two,account,imitable),account);
+      const fetched = await fetchAccount(f,two,account,{...imitable,deferFinish:true});
+      await pasted(f,fetched,two,account);
+      await fetched.finish();
     }
     assert.equal((await state(f)).rounds,1);
     await round(f,two);
@@ -191,6 +197,30 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     // Erasing the verifying answer takes its round away.
     await erase(db,f,'answer',two);
     assert.equal((await state(f)).rounds,0);
+  });
+
+  await check('ROUNDS a balance pause leaves no round until the whole verification completes, then it counts once', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    const paused = await pastedRound(f,{end:'paused'});
+    assert.equal((await state(f)).rounds,0,'profile and posts done, fetch still in progress');
+    await assert.rejects(offer(f,e),/RESEARCH_SHORTFALL_NOT_DUE/);
+    await paused.complete();
+    assert.equal((await state(f)).rounds,1,'resumed and completed');
+    await paused.complete();
+    assert.equal((await state(f)).rounds,1,'finishing again changes nothing');
+  });
+
+  await check('ROUNDS every platform with a benchmark route counts a completed pasted-link verification', async () => {
+    for (const platform of ['tiktok','x','bilibili','xiaohongshu','douyin','youtube','instagram']) {
+      const f = await seed(db);
+      await pastedRound(f,{platform,end:'paused'});
+      assert.equal((await state(f)).rounds,0,`${platform} paused`);
+      await pastedRound(f,{platform,end:'failed'});
+      assert.equal((await state(f)).rounds,0,`${platform} failed`);
+      const done = await pastedRound(f,{platform});
+      assert.equal((await state(f)).rounds,1,`${platform} completed`);
+      assert.ok(done.e);
+    }
   });
 
   await check('ROUNDS the user may have written the account as @Name, mixed case or a full profile link', async () => {

@@ -13,22 +13,10 @@ AS $function$
     JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
     WHERE d.actor_id=a AND d.session_id=s AND d.state='completed' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
   )::integer + (
-    SELECT count(DISTINCT x.id) FROM runtime_executions x
-    JOIN research_plans pp ON pp.execution_id=x.id AND pp.actor_id=a AND pp.session_id=s AND pp.erased_at IS NULL
-    JOIN research_operations prof ON prof.plan_id=pp.id AND prof.erased_at IS NULL AND prof.state='succeeded'
-      AND prof.result->'args'->'source'->>'kind'='user_message' AND prof.result->'call'->>'dataKind'='account_profile'
-    JOIN research_plans pq ON pq.execution_id=x.id AND pq.actor_id=a AND pq.session_id=s AND pq.erased_at IS NULL
-    JOIN research_operations posts ON posts.plan_id=pq.id AND posts.erased_at IS NULL AND posts.state='succeeded'
-      AND posts.result->'args'->'source'->>'kind'='user_message' AND posts.result->'call'->>'dataKind'='account_posts'
-      AND posts.result->'call'->>'platform'=prof.result->'call'->>'platform'
-      AND posts.result->'call'->>'query'=prof.result->'call'->>'query'
+    SELECT count(*) FROM runtime_executions x
     WHERE x.actor_id=a AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM research_plans pb
-        JOIN research_operations bad ON bad.plan_id=pb.id AND bad.erased_at IS NULL
-        WHERE pb.execution_id=x.id AND pb.actor_id=a AND pb.session_id=s AND pb.erased_at IS NULL
-          AND bad.state IS DISTINCT FROM 'succeeded'
-          AND bad.result->'call'->>'platform'=prof.result->'call'->>'platform'
-          AND bad.result->'call'->>'query'=prof.result->'call'->>'query')
+      AND EXISTS (SELECT 1 FROM research_account_fetches f
+        WHERE f.actor_id=a AND f.session_id=s AND x.id=ANY(f.pasted_executions))
       AND NOT EXISTS (SELECT 1 FROM research_discoveries d
         WHERE d.execution_id=x.id AND d.actor_id=a AND d.session_id=s AND d.state='completed')
   )::integer
