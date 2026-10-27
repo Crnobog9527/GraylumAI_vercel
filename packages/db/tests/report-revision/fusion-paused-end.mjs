@@ -46,6 +46,11 @@ async function paused(db,hours) {
   return {f,rv,before};
 }
 
+const record = (db,f,s,c) => rpc(db,'bill2_record',f.actor,s.run.run,c.id,{provider:s.run.claimPayload.provider,account:'sandbox',
+  model:s.run.claimPayload.model,protocol:s.run.claimPayload.protocol,providerId:'generation-'+c.id,source:'response',
+  sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
+  usage:{inputTokens:400,outputTokens:0}});
+
 export async function runFusionPausedEnd({db,Client,connectionString,report}) {
   await db.query(`INSERT INTO system_settings(key,value) VALUES('fusion_settings',$1::jsonb)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value`,[JSON.stringify({version:1,review:review,compare:{enabled:false}})]);
@@ -80,6 +85,34 @@ export async function runFusionPausedEnd({db,Client,connectionString,report}) {
   assert.equal((await endPaused(db)).ended,0,'a resumed review is not ended');
   assert.equal((await fee(db,resumed.rv.reviewId)).state,'held');
   report.checks.push('paused review resumed by a claim is not ended');
+
+  // A saved output that was never judged keeps the review paused: finalizing it now would mark the body unjudged_saved and
+  // bill it unchecked. After the verdict the next run ends the review and the call settles with its verdict.
+  const saved = await paused(db,0);
+  const ss = await step(db,saved.f);
+  const sc = (await claim(db,saved.f,saved.rv,ss)).calls[0];
+  assert.equal((await rpc(db,'bill2_dispatch',saved.f.actor,ss.run.run,sc.id,sc.dispatchToken)).dispatch,true);
+  await record(db,saved.f,ss,sc);
+  await rpc(db,'fusion_call_output_save',saved.f.actor,sc.id,'{"issues":[]}');
+  await db.query("UPDATE fusion_reviews SET state='paused',updated_at=now()-interval '25 hours' WHERE id=$1",[saved.rv.reviewId]);
+  assert.equal((await endPaused(db)).ended,0,'an unjudged saved output is not finalized by the expiry');
+  assert.equal(await state(db,saved.rv.reviewId),'paused');assert.equal((await fee(db,saved.rv.reviewId)).state,'held');
+  const open = (await db.query('SELECT fusion_verdict,settled_at FROM bill2_calls WHERE id=$1',[sc.id])).rows[0];
+  assert.equal(open.fusion_verdict,null);assert.equal(open.settled_at,null);
+  assert.equal((await db.query('SELECT count(*) v FROM fusion_review_unjudged(50) WHERE call_id=$1',[sc.id])).rows[0].v,'1','still listed for re-judging');
+  await rpc(db,'fusion_call_verdict',saved.f.actor,sc.id,'usable');
+  assert.equal((await endPaused(db)).ended,1,'judged, the review is ended on the next run');
+  const done = (await db.query('SELECT fusion_verdict,settled_at FROM bill2_calls WHERE id=$1',[sc.id])).rows[0];
+  assert.equal(done.fusion_verdict,'usable');assert.ok(done.settled_at,'the call settled with its verdict, not unjudged_saved');
+  assert.equal(await state(db,saved.rv.reviewId),'interrupted');
+  // The existing stop rule: the dispatched call pays its known usage (capped at the fixed price); the rest comes back.
+  const usage = Number((await db.query('SELECT theoretical_delta v FROM bill2_calls WHERE id=$1',[sc.id])).rows[0].v);
+  const charged = await fee(db,saved.rv.reviewId);
+  assert.ok(usage>=1&&usage<FEE);
+  assert.deepEqual({state:charged.state,charged:charged.charged_credits,reason:charged.settle_reason},{state:'charged',charged:usage,reason:'interrupted'});
+  assert.equal(await wallet(db,saved.f.actor),saved.before-usage,'only the known usage is paid');
+  assert.equal(await ledger(db,saved.f.actor),await wallet(db,saved.f.actor));
+  report.checks.push('paused review with a saved, unjudged output is not ended until judged; then ended once with the verdict kept and the fee settled by the stop rule');
 
   // The boundary: the user continues at the moment the expiry runs. Whichever takes the review lock first wins, once.
   const clients = [new Client({connectionString}),new Client({connectionString})];

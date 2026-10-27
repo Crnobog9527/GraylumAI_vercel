@@ -47,15 +47,6 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // a lasting backlog below can never crowd it out; a review settled later in this run pauses on the next one.
   const paused = await bounded(admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' }));
   if (paused.error) summary.success = false;
-  // Owner 2026-10-27: a review paused for 24 hours is ended like the user's "end review" (same close and fee settlement),
-  // so the unused fixed fee comes back. Right after the pause step so a review paused a day ago is ended on this run.
-  const expired = await bounded(admin.rpc('fusion_review_end_paused', { p_idle: '24 hours', p_limit: 100 }));
-  const expiredResult = z.object({ ended: z.number().int(), failed: z.number().int() }).safeParse(expired.error ? undefined : expired.data);
-  if (!expiredResult.success) summary.success = false;
-  else {
-    summary.endedPaused += expiredResult.data.ended;
-    if (expiredResult.data.failed > 0) { summary.failed += expiredResult.data.failed; summary.success = false; }
-  }
   // Before settlement: a body saved but never judged (a crash between save and verdict) is judged again with
   // the frozen host check, so the deadline rule never bills a malformed body as unjudged_saved (§3.3, #954).
   // Judging a call removes it from the listing, so listing again reaches the calls behind it: keep going until a
@@ -116,6 +107,18 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   }
   if (!compareDone) listedAll = false;
   if (listingFailed) summary.success = false;
+  // Owner 2026-10-27: a review paused for 24 hours is ended like the user's "end review" (same close and fee settlement),
+  // so the unused fixed fee comes back. After the re-judging above, so no saved body is finalized unjudged; the database
+  // function also skips a review that still has an unjudged output, and it is ended on a later run.
+  if (now() + 10_000 <= stopAt) {
+    const expired = await bounded(admin.rpc('fusion_review_end_paused', { p_idle: '24 hours', p_limit: 100 }));
+    const expiredResult = z.object({ ended: z.number().int(), failed: z.number().int() }).safeParse(expired.error ? undefined : expired.data);
+    if (!expiredResult.success) summary.success = false;
+    else {
+      summary.endedPaused += expiredResult.data.ended;
+      if (expiredResult.data.failed > 0) { summary.failed += expiredResult.data.failed; summary.success = false; }
+    }
+  }
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
   // Keep paging (each call bounded, stopping before the per-item reserve) so expired undispatched calls
   // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).

@@ -19,6 +19,11 @@ BEGIN
       -- are read again under the lock, because a claim may have resumed it (running, age restarted) since the listing.
       SELECT * INTO rv FROM fusion_reviews WHERE id=cand.id FOR UPDATE SKIP LOCKED;
       IF NOT FOUND OR rv.state<>'paused' OR rv.updated_at>clock_timestamp()-p_idle THEN CONTINUE; END IF;
+      IF EXISTS(SELECT 1 FROM jsonb_array_elements(rv.steps) x
+          JOIN bill2_runs br ON br.fusion_group_id=(x->>'groupId')::uuid AND br.actor_id=rv.actor_id
+          JOIN bill2_calls c ON c.run_id=br.id
+          WHERE c.fusion_verdict IS NULL AND c.settled_at IS NULL
+            AND EXISTS(SELECT 1 FROM fusion_call_outputs o WHERE o.call_id=c.id)) THEN CONTINUE; END IF;
       -- The user's "end review": cancels and finalizes the review's runs, then settles the fixed fee (charge what the stop
       -- rule says was delivered, release the rest) with the settlement's conservation check.
       PERFORM fusion_review_close(rv.actor_id,rv.id,'interrupted');

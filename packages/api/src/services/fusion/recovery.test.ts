@@ -136,10 +136,14 @@ describe('Fusion daily recovery', () => {
     expect(busy.calls[0]).toBe('fusion_review_pause_idle:');
     expect(summary.deferred).toBeGreaterThan(0);
   });
-  it('ends reviews paused for 24 hours right after the idle-pause step, and reports them', async () => {
-    const a = admin([], { endPaused: { data: { ended: 2, failed: 0 }, error: null } });
+  it('ends reviews paused for 24 hours only after saved, unjudged bodies were judged, and reports them', async () => {
+    const compare = { actor_id: id(100), compare_id: id(300), call_id: id(400), run_id: id(401) };
+    const a = admin([{ ...item(10, true, -60), call_id: id(400) }], { compareUnjudged: [compare],
+      endPaused: { data: { ended: 2, failed: 0 }, error: null } });
     const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
-    expect(a.calls.slice(0, 2)).toEqual(['fusion_review_pause_idle:', 'fusion_review_end_paused:']);
+    expect(a.calls[0]).toBe('fusion_review_pause_idle:');
+    expect(a.calls.findIndex(c => c.startsWith('verdict:'))).toBeGreaterThan(0);
+    expect(a.calls.findIndex(c => c.startsWith('fusion_review_end_paused'))).toBeGreaterThan(a.calls.findIndex(c => c.startsWith('verdict:')));
     expect(summary).toMatchObject({ endedPaused: 2, success: true });
   });
   it('flags the run when ending a paused review failed or the step errored, and still settles the rest', async () => {
