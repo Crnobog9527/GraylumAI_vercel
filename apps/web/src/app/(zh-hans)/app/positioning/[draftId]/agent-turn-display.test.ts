@@ -251,6 +251,13 @@ it('does not let the older-history notice alone hide the tail progress notice', 
   expect(showsTurnState(undefined)).toBe(false);
   expect(showsTurnState({ tone: 'warning', text: OUTPUT_TRUNCATED_NOTICE })).toBe(true);
 });
+it('shows an older provider refusal as grey history with its time, and keeps the live warning for the newest turn',()=>{
+ const old=mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected',earlier:true,createdAt:'2026-10-19T15:56:58.743Z'}));
+ expect(old.notice).toEqual({tone:'status',text:'10/19 23:56 这一轮被服务方拒绝，当时没有扣积分。这是旧记录，与你刚才的操作无关。'});
+ expect(mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected',earlier:false,createdAt:'2026-10-19T15:56:58.743Z'})).notice)
+  .toEqual({tone:'warning',text:PROVIDER_REJECTED_NOTICE});
+ expect(mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected',earlier:true})).notice?.text).toContain('这一轮被服务方拒绝');
+});
 it('keeps the provider refusal notice for a cancelled turn without a body after a reload', () => {
  expect(mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_rejected'})))
   .toEqual({text:'',card:null,notice:{tone:'warning',text:PROVIDER_REJECTED_NOTICE}});

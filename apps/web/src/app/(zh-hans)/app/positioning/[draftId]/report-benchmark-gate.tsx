@@ -23,7 +23,7 @@ export function ReportBenchmarkGate({ value, failed, busy, onRetry, onChoose }: 
   </div>;
   return <section aria-label="报告生成条件" className="grid gap-2 text-sm">
     <p>目前有 {value.qualified} 个合格对标，还未达到报告需要的 {value.required} 个。</p>
-    <p>可以换关键词继续找，或在对话里贴账号主页链接。</p>
+    <p>可以换关键词继续找，或在对话里贴账号主页链接。点下面的按钮后，在下方输入新的关键词或贴账号链接继续找。</p>
     <Button variant="outline" disabled={busy} onClick={focusReply}>继续找对标</Button>
     {value.qualified >= 1 && value.rounds >= 2 && value.card && !value.card.choice && value.card.required >= value.required
       ? <ShortfallCardView card={value.card} disabled={busy} onChoose={onChoose} />
