@@ -44,6 +44,7 @@ export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 /** Only the frozen context fields that decide the provider bytes. */
 export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStream?:string;tools:readonly string[];workspaceContext?:boolean;
+ hostTurnContext?:{opening:boolean};
  libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;research?:{freeChat?:string};skillCatalog?:readonly unknown[];
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
@@ -96,6 +97,10 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // New admissions freeze this format before hashing. Unmarked executions
  // keep their original bytes for replay; the runner enforces one tool/turn.
  if(format)delete original.parallel_tool_calls;
+ // PROMPT-CACHE-ALL (opening alignment, 总控 2026-10-27 决定 A): a host-opened mentor turn offers the same tool list as
+ // the turns after it, so its cached tools+system prefix is theirs, but may not call any (tool_choice only invalidates
+ // the messages part of Anthropic's cache). An opening frozen without tools (every earlier execution) keeps its bytes.
+ if(format===AGENT_TURN_REQUEST_FORMAT&&context.hostTurnContext?.opening&&requested.length)original.tool_choice='none';
  if(format==='serial-tools-v2'||format==='serial-tools-v6-reasoning'||streaming)normalizeOpenRouterHistory(original,historyToolNames(format));
  if(context.promptCache&&options.primaryDialogue&&phase!=='attached_organizer')
   applyPromptCache(original,context.promptCache,policy.model,policy.providerLimits.cacheWriteUsdPerMillion);

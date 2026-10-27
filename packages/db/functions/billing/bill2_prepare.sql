@@ -19,7 +19,9 @@ BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,105));
  SELECT * INTO r FROM bill2_runs WHERE actor_id=p_actor_id AND request_id=p_request_id FOR UPDATE;
  IF r.id IS NOT NULL THEN IF r.payload IS DISTINCT FROM p_payload THEN RAISE EXCEPTION 'BILL2_REQUEST_CONFLICT';END IF;RETURN bill2_public(r);END IF;
- PERFORM bill2_execution_allowed(p_actor_id,p_payload);
+ -- DB-RW-C: runtime_admit_commit has just been given a proof of this exact permission chain by runtime_admit_precheck
+ -- (same payload, same transaction), so it asks for it not to be walked a second time; every other caller still runs it.
+ IF coalesce(current_setting('graylum.admit_proved',true),'')<>'on' THEN PERFORM bill2_execution_allowed(p_actor_id,p_payload); END IF;
  IF coalesce(p_payload->>'contractVersion','') NOT IN ('bill2.v1','bill2.v2') OR p_payload->>'sessionRef' IS NOT NULL
  OR p_payload->>'operation' IS NULL OR p_payload->>'operation' NOT IN ('question','research','organize','plan','work')
  OR (p_payload->'scope'->>'kind'='positioning_draft' AND p_payload->>'operation'='work')

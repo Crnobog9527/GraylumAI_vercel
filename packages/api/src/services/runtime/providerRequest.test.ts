@@ -78,6 +78,18 @@ describe('Agent turn format',()=>{
  it('carries reasoning only on the primary dialogue call',()=>{
   expect(()=>body(request,agent(),'attached_organizer',false)).toThrow('RUNTIME_PROVIDER_BINDING_DENIED');
  });
+ it('PROMPT-CACHE-ALL: a host-opened turn that offers tools sends tool_choice none; the same bytes otherwise',()=>{
+  const opening=JSON.parse(body(request,agent({hostTurnContext:{opening:true}})));
+  expect(opening.tool_choice).toBe('none');
+  expect(opening.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['ask_question']);
+  const rest={...opening};delete rest.tool_choice;
+  expect(rest).toEqual(JSON.parse(body(request,agent({hostTurnContext:{opening:false}}))));
+  expect(JSON.parse(body(request,agent()))).not.toHaveProperty('tool_choice');
+  // An opening frozen without tools (every execution before the alignment) keeps its bytes.
+  const noTools=JSON.parse(request);noTools.tools=[];noTools.messages=noTools.messages.slice(0,2);
+  const bare=JSON.stringify(noTools);
+  expect(body(bare,agent({tools:[],hostTurnContext:{opening:true}}))).toBe(body(bare,agent({tools:[]})));
+ });
 });
 
 describe('MR-2 frozen reasoning binding',()=>{

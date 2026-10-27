@@ -35,6 +35,44 @@ it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[fals
  else{await promise;expect(frozen?.inputSelection).toBe('scope-projection-v1');expect(frozen?.providerRequestFormat).toBe(real?'serial-tools-v6-reasoning':undefined);expect(frozen?.reasoning).toEqual(real?{effort:'none'}:undefined);expect(frozen?.workspaceContext).toBe(code?undefined:true);expect(frozen?.scopeMaterial).toBeUndefined();expect(frozen?.sources).toEqual([]);}
 });
 
+// DB-RW-C: the two-step admission is behind runtime_rw_v2.admitSplit. Off or absent: exactly one runtime_admit call with the
+// frozen payload and billing, as before. On: the precheck, then the commit with the proof; a request already admitted is
+// returned from the precheck without a commit.
+it.each([
+ {setting:undefined,calls:['runtime_admit']},
+ {setting:{admitSplit:false},calls:['runtime_admit']},
+ {setting:{admitSplit:'true'},calls:['runtime_admit']},
+ {setting:{admitSplit:true},calls:['runtime_admit_precheck','runtime_admit_commit']},
+ {setting:{admitSplit:true},calls:['runtime_admit_precheck'],replay:true},
+])('admission chooses its database path from runtime_rw_v2 ($setting)',async({setting,calls,replay})=>{
+ const seen:Array<[string,Record<string,unknown>]>=[];
+ const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
+  if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId}},error:null};
+  if(name==='runtime_admission_replay')return {data:null,error:null};
+  if(name==='runtime_workspace_session')return {data:true,error:null};
+  if(name.startsWith('runtime_admit')){
+   seen.push([name,args]);
+   if(name==='runtime_admit_precheck')return {data:replay?{replay:{executionId:'old'}}:{version:1,binding:'b'},error:null};
+   return {data:{executionId:requestId},error:null};
+  }
+  throw new Error(name);
+ });
+ const models={in:async()=>({data:[{id:modelId,model_id:'test/model',config:configuredReasoning('test/model')}],error:null}),select:()=>models,eq:()=>models,single:async()=>({data:{id:modelId,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:32000,
+  config:configuredReasoning('test/model')},error:null})};
+ const settings={select:()=>settings,in:async()=>({data:[{id:modelId,model_id:'test/model',config:configuredReasoning('test/model')},...(setting===undefined?[]:[{key:'runtime_rw_v2',value:setting}])],error:null}),eq:()=>settings,
+  maybeSingle:async()=>({data:null,error:null})};
+ const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})}} as unknown as SupabaseClient;
+ const admin={rpc,from:(table:string)=>table==='system_settings'?settings:models} as unknown as SupabaseClient;
+ const admission=runtimeAdmissionService(user,admin,{workspaceContext:true,account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
+ const result=await admission.prepare({sessionId,requestId,input:'General travel tips',selection:{kind:'ordinary',modelId},network:'deny'});
+ expect(seen.map(([name])=>name)).toEqual(calls);
+ expect(result).toEqual(replay?{executionId:'old'}:{executionId:requestId});
+ const [, first]=seen[0]!;
+ expect(first).toMatchObject({p_session_id:sessionId,p_request_id:requestId,p_actor_id:actor});
+ expect(first.p_payload).toBeTruthy();expect(first.p_billing).toBeTruthy();
+ if(seen[1])expect(seen[1][1]).toMatchObject({...first,p_pre:{version:1,binding:'b'}});
+});
+
 it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorStream}))))('new admission preserves quote, protocol and replay (real=$real, mentor=$mentorStream)',async({real,mentorStream})=>{
  const organizerId='10000000-0000-4000-8000-000000000005';let frozen:any,billing:any,replay:any=null,modelReads=0;
  // Real mentor streaming requires saved administrator reasoning settings.
