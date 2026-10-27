@@ -73,10 +73,12 @@ describe('runtime.cancel',()=>{
   const caller=runtimeRouter.createCaller({headers:new Headers(),runtimeBudget:createRuntimeBudget(),user:{id,email:'fixture@example.test'},
    isEmailVerified:true,supabase:client,supabaseAuth:client,supabaseAdmin:client,hasSupabaseAdminPrivileges:true} as never);
   await caller.cancel({executionId:id,stopAt:5,source:'assistant',call:1});
-  expect(rpc).toHaveBeenLastCalledWith('runtime_execution',{p_actor_id:id,p_execution_id:id,p_action:'stop',
-   p_result:{stopAt:5,source:'assistant',call:1}});
+  expect(rpc).toHaveBeenLastCalledWith('report_stop',{p_actor_id:id,p_execution_id:id,p_confirmed:false,
+   p_stop:{stopAt:5,source:'assistant',call:1}});
   await caller.cancel({executionId:id});
-  expect(rpc).toHaveBeenLastCalledWith('runtime_cancel',{p_actor_id:id,p_execution_id:id});
+  expect(rpc).toHaveBeenLastCalledWith('report_stop',{p_actor_id:id,p_execution_id:id,p_confirmed:false,p_stop:null});
+  await caller.cancel({executionId:id,stopAt:5,confirmed:true});
+  expect(rpc).toHaveBeenLastCalledWith('report_stop',{p_actor_id:id,p_execution_id:id,p_confirmed:true,p_stop:{stopAt:5}});
   await expect(caller.cancel({executionId:id,stopAt:5,call:0})).rejects.toBeTruthy();
  });
 });
