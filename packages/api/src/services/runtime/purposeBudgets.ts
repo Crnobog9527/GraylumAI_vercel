@@ -8,6 +8,9 @@ export const PURPOSE_BUDGET_KEY = 'runtime_purpose_budgets';
 // Derived from full frozen payload measurements, including duplicated input,
 // attached organization and JSON escaping. See MENTOR-BUDGET.md.
 export const PURPOSE_INPUT_CAPS = { interactive: 90000, organize: 112000, report: 196608 } as const;
+// An interactive turn that offers the research tools is frozen with this larger ceiling (researchAdmission.ts); configured
+// budgets stay within PURPOSE_INPUT_CAPS. Frozen executions that carry 112000 stay valid.
+export const RESEARCH_TURN_INPUT_CAP = 150000;
 // 2 * 32768 * 8 serialized bytes + 8192 envelope bytes = 532480.
 // The second copy reserves reasoning duplicated in reasoning_details.
 // Shared with response and frame capacity without loading admission dependencies.
@@ -48,7 +51,7 @@ export type BudgetPurpose = keyof typeof PURPOSE_INPUT_CAPS;
 export const frozenPurposeBudget = z.object({
   purpose: z.enum(['interactive', 'organize', 'report']), inputBytes: z.number().int().positive().max(196608),
   historyItems: z.number().int().min(0).max(PURPOSE_HISTORY_CAP),
-}).strict().refine(value => value.inputBytes <= (value.purpose === 'report' ? 196608 : 112000),
+}).strict().refine(value => value.inputBytes <= (value.purpose === 'report' ? 196608 : value.purpose === 'organize' ? 112000 : RESEARCH_TURN_INPUT_CAP),
   { message: 'RUNTIME_PURPOSE_INPUT_LIMIT' });
 export async function readPurposeBudgets(db: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<PurposeBudgetsV2 | null> {
   const rows = configuration ? await configuration : undefined;

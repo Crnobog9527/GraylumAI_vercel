@@ -11,7 +11,7 @@ import {PLAIN_TEXT_STREAM,PROVIDER_REQUEST_FORMATS,plainTextStreamAllowed} from 
 import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
 import {MENTOR_HISTORY_VERSION,MENTOR_HISTORY_RESERVE_BYTES} from './mentorHistory';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
-import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
+import {frozenPurposeBudget,FROZEN_OUTPUT_CAP,PURPOSE_INPUT_CAPS} from './purposeBudgets';
 import {matchingPlan} from './matching';
 import {reasoningPolicy} from './reasoningPolicy';
 import {frozenResearchTurn} from './researchTurn';
@@ -81,6 +81,9 @@ export const runtimeContext=z.object({
    || context.historySelection || context.sources?.length || context.libraryReferences || context.libraryRetrieval
    || context.ownPosts || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
+ // Only a turn that offers the research tools may carry an interactive ceiling above the configured 90000.
+ if(context.purposeBudget?.purpose==='interactive'&&context.purposeBudget.inputBytes>PURPOSE_INPUT_CAPS.interactive&&!context.research)
+  ctx.addIssue({code:'custom',message:'RUNTIME_PURPOSE_INPUT_LIMIT'});
  // A research slot adds one tool call and the model call that reads its result (a card turn already has one tool call).
  const researchSlot=context.research?1:0;
  const researchTools=context.tools.filter(name=>(RESEARCH_TOOL_NAMES as readonly string[]).includes(name));
