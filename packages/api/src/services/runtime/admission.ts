@@ -10,7 +10,6 @@ import { createHash } from 'node:crypto';
 import {freezePromptCache,freezeHostPromptCache,freezeSharedCacheInto,freezeSharedPromptCache,promptCacheReserveBytes} from './promptCache';
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
-import {currentInputBytes} from './historySelection';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {admissionActor,capReviewAdmission,type WeeklyReview} from '../publishMonitor/reviewAdmission';
@@ -203,7 +202,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let organizerInstructions=policy.organizerInstructions ?? GENERIC_ORGANIZER_TEMPLATE;
    const chatTurn=!policy.weeklyReview&&freeChatCatalogTurn({selection:input.selection,mentorStream,stepStream,hostTurnContext,report:policy.reportGeneration,
     opcTurnToken:policy.opcTurnToken,scope:session.scope});let modelId:string,instructions=freeChatInstructions(chatTurn&&!gated);
-   let skillChars=0;
+   let skillChars=0,skillEntryChars=0; // skillEntryChars: PROMPT-CACHE-ALL, the SKILL.md boundary shared by every step
    let skillFile:SkillFileBinding|undefined,skillFileReserve=0;
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined,chosenSource:ContentSourceKind|undefined;
    let voiceFlagged=false;
@@ -224,8 +223,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     // Free chat (no workflow host resources): a non-positioning Skill also gets its steps' files and ordered guide (R8b).
     const activated=policy.skillResources?undefined
      :await activateFreeChatSkill(source,descriptor,{task:input.selection.task,maxContextBytes:inputBytes});
-    instructions=activated?.instructions
-     ??(await activateSkill(source,identityOf(descriptor),{resources:policy.skillResources,maxContextBytes:inputBytes})).forModel();
+    const loaded=activated?undefined:await activateSkill(source,identityOf(descriptor),{resources:policy.skillResources,maxContextBytes:inputBytes});
+    instructions=activated?.instructions??loaded!.forModel();skillEntryChars=loaded?.entryChars?.()??0;
     chosenSource=activated?.contentSource;
     skillChars=instructions.length;
     if(policy.skillFileRead&&mentorStream&&!isOpeningInput(input.input)&&policy.maxCalls-(organizeAfter?1:0)===2){
@@ -242,7 +241,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const brandIdentity=settingsRead.ok?settingsRead.identityGuard??true:true;
    if(brandIdentity){
     instructions=withBrandIdentity(instructions,true);
-    if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
+    if(skillChars){skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;if(skillEntryChars)skillEntryChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;}
    }
    // DB-PERF PR-3: pricing and the billing unit reuse this row (MODEL_ROW_COLUMNS) instead of reading the model again.
    const row=await admin.from('ai_models').select(MODEL_ROW_COLUMNS).eq('id',modelId).single();
@@ -334,8 +333,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
     model:row.data.model_id,cacheWriteUsdPerMillion:writePrice,instructions:instructions+replyRule,skillChars,
     stableAdditionalPrefix:policy.stableAdditionalInstructions,additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
-    historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
-     currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
+    // PROMPT-CACHE-ALL: the history marker no longer waits for a current message under currentReserveBytes (real turns
+    // never were); a fallback round only risks one rewrite of its history delta. The SKILL.md breakpoint spans steps.
+    historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input),skillPrefixChars:skillEntryChars});
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
    const workspaceContext=Boolean(policy.workspaceContext&&!policy.opcTurnToken&&!input.sources.length&&
     input.selection.kind!=='organizer')&&await readWorkspaceCapability(admin,await actor(),input.sessionId);

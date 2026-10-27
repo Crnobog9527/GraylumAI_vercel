@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {stepSummaryNoticeSchema} from '../../shared/opcStepSummary';
 import {stepConfirmationSchema} from '../../shared/opcStepConfirmation';
 import {GROUNDED_CARD_CONTRACT} from './groundedCard';
-import {HISTORY_MARKER_RESERVE_BYTES} from './promptCache';
+import {HISTORY_MARKER_RESERVE_BYTES,PROMPT_CACHE_V3_RESERVE_BYTES} from './promptCache';
 import {SOCIAL_PLATFORMS} from '../research/vendors/types';
 import {checklistMaterial} from './checklistMaterial';
 
@@ -71,14 +71,18 @@ export const hostTurnContextSchema = z.object({
 }).strict().refine(value => Buffer.byteLength(JSON.stringify(value)) <= HOST_TURN_MAX_BYTES);
 export type HostTurnContext = z.infer<typeof hostTurnContextSchema>;
 
+/** Marker bytes a new mentor turn reserves: two marked system blocks plus the history marker (never below the old 150). */
+export const HOST_MARKER_RESERVE_BYTES = Math.max(HISTORY_MARKER_RESERVE_BYTES + 1, PROMPT_CACHE_V3_RESERVE_BYTES);
 export const historySelectionSchema = z.object({
   version: z.literal('block-cut-v1'), blockRevisions: z.literal(16),
-  currentReserveBytes: z.number().int().positive().max(262144), markerReserveBytes: z.literal(150),
+  // 150: two markers (executions frozen before PROMPT-CACHE-ALL); the larger value: three (SKILL.md, system, history).
+  currentReserveBytes: z.number().int().positive().max(262144),
+  markerReserveBytes: z.union([z.literal(150), z.literal(HOST_MARKER_RESERVE_BYTES)]),
 }).strict();
 export type HistorySelection = z.infer<typeof historySelectionSchema>;
 export function freezeHistorySelection(): HistorySelection {
   return historySelectionSchema.parse({version: 'block-cut-v1', blockRevisions: 16,
-    currentReserveBytes: 8000, markerReserveBytes: HISTORY_MARKER_RESERVE_BYTES});
+    currentReserveBytes: 8000, markerReserveBytes: HOST_MARKER_RESERVE_BYTES});
 }
 export function hostTurnInput(input: string, scopeMaterial: unknown, hostTurnContext: HostTurnContext): string {
   return JSON.stringify({inputFormat: 'host-turn-v1', hostTurnContext,

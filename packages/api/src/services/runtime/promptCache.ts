@@ -15,7 +15,10 @@ const prefixShape = {
  */
 export const promptCachePolicy = z.discriminatedUnion('version', [
   z.object({version: z.literal('prompt-cache-v1'), ...prefixShape}).strict(),
-  z.object({version: z.literal('prompt-cache-v2'), ...prefixShape, historyMarker: z.boolean()}).strict(),
+  // skillPrefixChars (PROMPT-CACHE-ALL): a breakpoint after the brand text and SKILL.md section, which every step of the
+  // workflow shares; absent on executions frozen before it, which keep their two-marker bytes.
+  z.object({version: z.literal('prompt-cache-v2'), ...prefixShape, historyMarker: z.boolean(),
+    skillPrefixChars: z.number().int().positive().optional()}).strict(),
   z.object({version: z.literal('prompt-cache-v3'), ...prefixShape, historyMarker: z.boolean()}).strict(),
 ]);
 export type PromptCachePolicy = z.infer<typeof promptCachePolicy>;
@@ -122,6 +125,12 @@ export function applyPromptCache(request: {messages?: unknown}, cache: PromptCac
       }
     }
   }
+  const skillChars = cache.version === 'prompt-cache-v2' ? cache.skillPrefixChars : undefined;
+  if (skillChars !== undefined) {
+    if (skillChars >= cache.systemPrefixChars) throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');
+    first.content = blocks(first.content.slice(0, skillChars), first.content.slice(skillChars), true);
+    return;
+  }
   first.content = blocks(first.content.slice(0, cache.systemPrefixChars), first.content.slice(cache.systemPrefixChars),
     cache.version === 'prompt-cache-v3');
 }
@@ -129,10 +138,13 @@ export function applyPromptCache(request: {messages?: unknown}, cache: PromptCac
 /** New host structure and caching remain independent; rollback edits affect only
  * future freezes, never the v2 replay implementation above. */
 export function freezeHostPromptCache(input: Parameters<typeof freezePromptCache>[0] & {
-  mentor: boolean; additionalInstructions?: string; historyMarker: boolean;
+  mentor: boolean; additionalInstructions?: string; historyMarker: boolean; skillPrefixChars?: number;
 }): PromptCachePolicy | undefined {
   if (!input.mentor || input.additionalInstructions === undefined ||
       input.stableAdditionalPrefix !== input.additionalInstructions || !freezePromptCache(input)) return undefined;
+  // The SKILL.md breakpoint must end inside the Skill text (brand plus SKILL.md section), never past it.
+  const skill = input.skillPrefixChars !== undefined && input.skillPrefixChars > 0 && input.skillPrefixChars < input.skillChars
+    ? {skillPrefixChars: input.skillPrefixChars} : {};
   return promptCachePolicy.parse({version: 'prompt-cache-v2', systemPrefixChars: input.instructions.length,
-    systemPrefixSha256: sha256(input.instructions), historyMarker: input.historyMarker});
+    systemPrefixSha256: sha256(input.instructions), historyMarker: input.historyMarker, ...skill});
 }

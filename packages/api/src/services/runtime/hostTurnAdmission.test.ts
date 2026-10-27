@@ -8,7 +8,9 @@ import {openRouterBound} from '../bill2/openRouterPolicy';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX} from '../opc/agentTurnPrompt';
-import {freezeHistorySelection,HOST_TURN_DATA_NOTICE_V1,type HostTurnContext} from './hostTurn';
+import {freezeHistorySelection,HOST_MARKER_RESERVE_BYTES,HOST_TURN_DATA_NOTICE_V1,type HostTurnContext} from './hostTurn';
+import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
+const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
 import {runtimeScopeInput} from './context';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 import {withPrimaryAddenda} from './primaryInstructions';
@@ -21,7 +23,8 @@ vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 const skill='Pinned skill 正文';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
-vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
+const loaderMock=vi.hoisted(()=>({entryChars:0}));
+vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill,entryChars:()=>loaderMock.entryChars})}));
 vi.mock('./billingUnitAdmission',async original=>({
  ...(await original<typeof import('./billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
 }));
@@ -111,14 +114,30 @@ it.each(['no-price','different-model','cache-off'] as const)('host structure sur
  expect(context.historySelection).toEqual(freezeHistorySelection());
  expect(context.instructions).toContain('Fixed checklist rules');
 });
-it.each(['opening','comparison','fallback'] as const)('omits only history marker for %s',async mode=>{
+it.each(['opening','comparison','fallback'] as const)('omits the history marker only for an opening or comparison turn (%s)',async mode=>{
  const f=hostFixture();
  const input=mode==='opening'?OPENING_INPUT:mode==='comparison'?'compare previous version':'x'.repeat(13000);
  if(mode==='opening')f.policy.hostTurnContext={...hostState,opening:true};
  const result=await runtimeAdmissionService(f.user,f.admin,f.policy).prepare({...f.input,input});
- expect(result.context.promptCache).toMatchObject({version:'prompt-cache-v2',historyMarker:false});
+ // PROMPT-CACHE-ALL: a current message over currentReserveBytes (every real mentor turn) keeps its history marker.
+ expect(result.context.promptCache).toMatchObject({version:'prompt-cache-v2',historyMarker:mode==='fallback'});
+ expect(result.context.promptCache).not.toHaveProperty('skillPrefixChars');
 });
-it('rejects invalid or oversized host state before admit and reserves 150 even without caching',async()=>{
+it('PROMPT-CACHE-ALL: the SKILL.md boundary of the loaded Skill becomes a breakpoint shared by every step',async()=>{
+ loaderMock.entryChars=6;
+ try{
+  // The workflow host supplies this step's resources (opc/service.ts), so the Skill is loaded through activateSkill.
+  const f=hostFixture(),result=await runtimeAdmissionService(f.user,f.admin,{...f.policy,skillResources:['step.md']}).prepare(f.input);
+  const context=runtimeContext.parse(result.context),system=withPrimaryAddenda(context.instructions,context);
+  expect(context.promptCache).toMatchObject({version:'prompt-cache-v2',historyMarker:true,skillPrefixChars:brand.length+6});
+  const request={messages:[{role:'system',content:system},{role:'user',content:'earlier'},{role:'assistant',content:'reply'},{role:'user',content:'current'}]};
+  applyPromptCache(request,context.promptCache!,f.row.model_id,'2.5');
+  const mark=(text:string)=>({type:'text',text,cache_control:{type:'ephemeral'}});
+  expect(request.messages[0]!.content).toEqual([mark(brand+skill.slice(0,6)),mark(system.slice(brand.length+6))]);
+  expect(request.messages[2]!.content).toEqual([mark('reply')]);
+ }finally{loaderMock.entryChars=0;}
+});
+it('rejects invalid or oversized host state before admit and reserves the marker bytes even without caching',async()=>{
  const f=hostFixture();
  await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext:{...hostState,extra:true} as HostTurnContext})
   .prepare(f.input)).rejects.toThrow('RUNTIME_CONTEXT_INVALID');
@@ -135,13 +154,13 @@ it('uses identical marker reservation at the admission byte boundary with and wi
  // The executor appends the reply-language rule (SKILL-I18N-HOOK); admission sizes it as well.
  const edge=Buffer.byteLength(JSON.stringify({instructions:context.instructions+DEFAULT_REPLY_RULE,
   messages:[{role:'user',content:current}]}))+
-  askQuestionToolBytes(true)+150+1024;
+  askQuestionToolBytes(true)+HOST_MARKER_RESERVE_BYTES+1024;
  for(const enabled of [true,false])for(const delta of [0,-1]){
   const sample=hostFixture();
   const service=runtimeAdmissionService(sample.user,sample.admin,{...sample.policy,inputBytes:edge+delta,
    stableAdditionalInstructions:enabled?sample.policy.additionalInstructions:'disabled'});
   if(delta<0)await expect(service.prepare(sample.input)).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
-  else expect((await service.prepare(sample.input)).context.historySelection.markerReserveBytes).toBe(150);
+  else expect((await service.prepare(sample.input)).context.historySelection.markerReserveBytes).toBe(HOST_MARKER_RESERVE_BYTES);
  }
 });
 
@@ -157,7 +176,7 @@ it('keeps checklist values and update events outside the cached prefix and count
  expect(runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)).toContain('手填事实');
  const {askQuestionToolBytes}=await import('./agentTools');
  const edge=Buffer.byteLength(JSON.stringify({instructions:first.instructions+DEFAULT_REPLY_RULE,messages:[{role:'user',
-  content:runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)}]}))+askQuestionToolBytes(true)+150+1024;
+  content:runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)}]}))+askQuestionToolBytes(true)+HOST_MARKER_RESERVE_BYTES+1024;
  for(const delta of [0,-1]) {
   const sample=hostFixture();
   const prepare=()=>runtimeAdmissionService(sample.user,sample.admin,{...sample.policy,hostTurnContext:host,inputBytes:edge+delta})

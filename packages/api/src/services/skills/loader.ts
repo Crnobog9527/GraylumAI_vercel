@@ -235,10 +235,13 @@ export class LoadedSkill {
   #context: string;
   #records: readonly ResourceIdentity[];
   #public: PublicSkill;
-  constructor(context: string, records: ResourceIdentity[], projection: PublicSkill) {
-    this.#context = context; this.#records = records; this.#public = projection;
+  #entryChars: number;
+  constructor(context: string, records: ResourceIdentity[], projection: PublicSkill, entryChars = 0) {
+    this.#context = context; this.#records = records; this.#public = projection; this.#entryChars = entryChars;
   }
   forModel(): string { return this.#context; }
+  /** Characters of forModel() that end the SKILL.md section: shared by every step of a workflow (a cache breakpoint). */
+  entryChars(): number { return this.#entryChars; }
   resourceIdentities(): readonly ResourceIdentity[] { return this.#records.map(r => ({ ...r })); }
   toJSON(): PublicSkill { return { ...this.#public }; }
   [inspect.custom]() { return this.toJSON(); }
@@ -287,7 +290,10 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   const context = JSON.stringify({ skill: identityOf(p), resources: sections });
   if (Buffer.byteLength(context, 'utf8') > options.maxContextBytes) fail('CAPACITY_EXCEEDED');
   if (!batch) await enabled(source, p);
-  return new LoadedSkill(context, [...paths].map(path => ({ ...identityOf(p), path })), { packageId: p.packageId, revisionId: p.revisionId, ...metadata });
+  // PROMPT-CACHE-ALL: the text up to the end of the SKILL.md section is the same whatever resources follow it.
+  const entryChars = JSON.stringify({ skill: identityOf(p), resources: [sections[0]] }).length - 2;
+  return new LoadedSkill(context, [...paths].map(path => ({ ...identityOf(p), path })),
+    { packageId: p.packageId, revisionId: p.revisionId, ...metadata }, entryChars);
 }
 
 /** DB-PERF PR-4: several host-selected resources of one package, each at most maxBytes, with one checked batch read.
