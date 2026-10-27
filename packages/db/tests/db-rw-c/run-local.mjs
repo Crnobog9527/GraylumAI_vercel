@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // DB-RW-C: runtime_admit_precheck + runtime_admit_commit admit exactly what runtime_admit admits, refuse what it refuses,
-// refuse a stale or foreign proof, and hold fewer relation locks and walk the permission chain once instead of twice.
+// refuse a stale or foreign proof, and hold fewer relation locks; the permission chain is walked by the precheck, not under the commit's locks.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
@@ -48,12 +48,13 @@ try{
  assert.deepEqual(newState,oldState,'the two steps write exactly what runtime_admit writes');
  assert.ok(oldState.execution&&oldState.run&&oldState.activeIsThisExecution&&oldState.sessionRef,'the compared state is not empty');
  report.checks.push('precheck + commit write the same execution, billing run, session pointer and history window as runtime_admit');
- // 2. Fewer relation locks and one permission walk instead of two (counted on the database, not by time).
+ // 2. Fewer relation locks under the commit; the permission chain moved to the precheck (counted on the database, not by time).
  const counters=async(sql)=>{
   await c.query('BEGIN');await c.query("SET LOCAL track_functions='all'");
+  const walks=async()=>{await c.query('SELECT pg_stat_force_next_flush()');return Number(await one("SELECT coalesce(sum(calls),0) v FROM pg_stat_xact_user_functions WHERE funcname='runtime_billing_allowed'"));};
+  const before=await walks(); // calls of earlier statements of this session can still be pending: count only this one
   await sql();
-  await c.query('SELECT pg_stat_force_next_flush()');
-  const calls=Number(await one("SELECT coalesce(sum(calls),0) v FROM pg_stat_xact_user_functions WHERE funcname='runtime_billing_allowed'"));
+  const calls=await walks()-before;
   const locks=Number(await one("SELECT count(*) v FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='relation' AND relation IN (SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace)"));
   await c.query('ROLLBACK');return {calls,locks};
  };
@@ -64,8 +65,22 @@ try{
  commitCost=await counters(()=>commit(a3,t3,proof3));
  precheckCost=await counters(()=>pre(a3,t3));
  report.checks.push(`runtime_admit: ${oldCost.calls} permission walks, ${oldCost.locks} relation locks; commit: ${commitCost.calls} walks, ${commitCost.locks} locks; precheck: ${precheckCost.calls} walks, ${precheckCost.locks} locks`);
- assert.ok(commitCost.calls<oldCost.calls,'DB_RW_C_PERMISSION_CHAIN_WALKED_TWICE');
+ assert.equal(commitCost.calls,0,'DB_RW_C_COMMIT_WALKS_PERMISSION_CHAIN');
+ assert.equal(precheckCost.calls,oldCost.calls,'DB_RW_C_PRECHECK_MUST_WALK_THE_SAME_CHAIN');
  assert.ok(commitCost.locks<=oldCost.locks-30,`DB_RW_C_COMMIT_LOCKS_NOT_LOWER: ${commitCost.locks} vs ${oldCost.locks}`);
+ // 2b. A permission the chain refuses is refused by the precheck exactly as by runtime_admit (P1 review): the commit trusts the proof.
+ {
+  const a6=await account();
+  const attempt=(fn,a,t)=>refused(async()=>{await c.query('BEGIN');try{return await fn(a,t);}finally{await c.query('ROLLBACK');}});
+  assert.equal(await attempt(old,a6,turn(a6)),null,'the turn is admitted while every permission stands');
+  const bad=turn(a6);bad.billing={...bad.billing,callPolicy:[]};
+  const oldBad=await attempt(old,a6,bad),preBad=await attempt(pre,a6,bad);
+  assert.equal(oldBad,'BILL2_CALL_POLICY_REQUIRED');assert.equal(preBad,oldBad,'an invalid call policy is refused by the precheck with the same error');
+  await c.query('UPDATE bill2_drafts SET revoked=true WHERE actor_id=$1',[a6.f.actor]);
+  const oldRevoked=await attempt(old,a6,turn(a6)),preRevoked=await attempt(pre,a6,turn(a6));
+  assert.ok(oldRevoked,'runtime_admit refuses a revoked draft');assert.equal(preRevoked,oldRevoked,'the precheck refuses it with the same error');
+  report.checks.push(`permission refusals match: invalid call policy (${oldBad} / ${preBad}), revoked draft (${oldRevoked} / ${preRevoked})`);
+ }
  // 3. A proof that does not fit is refused.
  const a4=await account(),t4=turn(a4);
  const p4=await pre(a4,t4);

@@ -3958,7 +3958,7 @@
   "fn:runtime_admission_replay(uuid,uuid,jsonb)": "af59fe242bfa",
   "fn:runtime_admit(uuid,uuid,uuid,jsonb,jsonb)": "71cb40d4b2da",
   "fn:runtime_admit_commit(uuid,uuid,uuid,jsonb,jsonb,jsonb)": "868fcbd0d7cd",
-  "fn:runtime_admit_precheck(uuid,uuid,uuid,jsonb,jsonb)": "ad873a3de01c",
+  "fn:runtime_admit_precheck(uuid,uuid,uuid,jsonb,jsonb)": "6a750d9c86a2",
   "fn:runtime_admit_source_check(uuid,runtime_sessions,jsonb)": "e7eed968998b",
   "fn:runtime_billing_allowed(uuid,jsonb,uuid)": "38522b7c3f74",
   "fn:runtime_binding_guard()": "514f30beb706",

@@ -130,6 +130,9 @@ BEGIN
   END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
  END IF;
+ -- The permission chain, walked once here without any row lock; bill2_prepare skips it in the commit because this proof stands for it
+ -- (it is the call bill2_prepare makes with the same billing payload, so it refuses exactly what runtime_admit refuses).
+ PERFORM bill2_execution_allowed(p_actor_id,p_billing);
  -- The catalog version function belongs to another change (DB-RW-B); without it there is no catalog version to compare.
  IF to_regprocedure('public.catalog_versions_snapshot()') IS NOT NULL THEN EXECUTE 'SELECT public.catalog_versions_snapshot()' INTO snap; END IF;
  RETURN jsonb_build_object('version',1,'requestId',p_request_id,'binding',md5(p_payload::text||'|'||p_billing::text),

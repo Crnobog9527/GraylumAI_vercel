@@ -2,18 +2,19 @@
 -- All rights reserved. This code is proprietary and confidential.
 -- DB-RW-C (number 0418 assigned by the controller; design: db-rw-redesign-v1 section 3).
 -- runtime_admit proves "this turn may start" and writes the execution in one transaction: it walks the permission chain,
--- the context and source checks and the whole history window while it holds the session row lock, and then bill2_prepare
--- walks the same permission chain again (bill2_execution_allowed -> runtime_billing_allowed). With 8 backends busy, that
+-- the context and source checks and the whole history window while it holds the session row lock, and bill2_prepare walks
+-- the permission chain (bill2_execution_allowed -> runtime_billing_allowed) under the same locks. With 8 backends busy, that
 -- transaction holds ~150 relation locks for its whole duration and the lock manager becomes the queue.
 -- This migration ADDS a two-step path and leaves runtime_admit exactly as it is (the old path is the Node switch being off):
 --  * runtime_admit_precheck(...): the read-only part of runtime_admit, verbatim, without the session row lock and the two
---    advisory locks; it returns a proof {requestId, binding = md5 of payload and billing, sessionRevision, candidates,
+--    advisory locks, plus the permission chain bill2_prepare would walk (bill2_execution_allowed on the billing payload);
+--    it returns a proof {requestId, binding = md5 of payload and billing, sessionRevision, candidates,
 --    catalogVersions} or {replay: ...} when the request was already admitted. Same errors, same order, as runtime_admit.
 --  * runtime_admit_commit(..., p_pre): takes the locks of runtime_admit, replays the idempotency check, verifies the proof
 --    (same request, same payload+billing, session revision unchanged, catalog skills/models versions unchanged when the
 --    catalog version function exists), repeats the checks that depend on the session lock or a primary key (organizer
 --    pending, session busy, legacy run, Skill/model binding) and writes the execution with the proven history window.
---    bill2_prepare skips its second permission walk only when graylum.admit_proved is on, a transaction-local setting that
+--    bill2_prepare skips its permission walk (already done by the precheck) only when graylum.admit_proved is on, a transaction-local setting that
 --    only this function sets; any other caller of bill2_prepare still walks it. A proof that does not match, or a session
 --    that moved on between the two calls, raises RUNTIME_ADMIT_PRECHECK_INVALID / RUNTIME_ADMIT_STALE (the application
 --    re-runs the precheck once). Both functions are executable by service_role only, like runtime_admit.
@@ -154,6 +155,9 @@ BEGIN
   END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
  END IF;
+ -- The permission chain, walked once here without any row lock; bill2_prepare skips it in the commit because this proof stands for it
+ -- (it is the call bill2_prepare makes with the same billing payload, so it refuses exactly what runtime_admit refuses).
+ PERFORM bill2_execution_allowed(p_actor_id,p_billing);
  -- The catalog version function belongs to another change (DB-RW-B); without it there is no catalog version to compare.
  IF to_regprocedure('public.catalog_versions_snapshot()') IS NOT NULL THEN EXECUTE 'SELECT public.catalog_versions_snapshot()' INTO snap; END IF;
  RETURN jsonb_build_object('version',1,'requestId',p_request_id,'binding',md5(p_payload::text||'|'||p_billing::text),
