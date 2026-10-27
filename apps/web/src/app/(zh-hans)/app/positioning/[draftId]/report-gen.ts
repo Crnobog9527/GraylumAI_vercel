@@ -35,7 +35,10 @@ export type ReportFee = { credits: number; state: "held" | "charged" | "refunded
 export function reportFeeText(fee: ReportFee): string | null {
   if (!fee) return null;
   const n = fee.credits.toLocaleString("zh-CN");
-  if (fee.state === "charged") return `这份完整报告扣了 ${n} 积分。`;
+  if (fee.state === "charged" && fee.chargedCredits !== null) {
+    const actual = fee.chargedCredits.toLocaleString("zh-CN");
+    return `本次报告扣了 ${actual} 积分。`;
+  }
   if (fee.state === "refunded") return `没有生成出完整报告，${n} 积分已全额退回。可以重新生成，重新生成照收 ${n} 积分。`;
   return null;
 }

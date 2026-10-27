@@ -12,6 +12,17 @@ import { sendStop, stopFollowUpDelay, stopRequestFor, type StopRequest } from ".
  */
 export type ReportStopPhase = "idle" | "sending" | "saving" | "unconfirmed" | "settled";
 
+/** Keep the frozen text after a stop; restore all buffered progress if confirmation is declined. */
+export function finishReportStop(current: LiveReply | null, buffered: LiveReply, phase: ReportStopPhase): LiveReply | null {
+  if (!current || current.executionId !== buffered.executionId || phase !== "idle") return current;
+  return buffered;
+}
+
+/** An ambiguous stop can be retried, so keep its live stream buffer until a definite outcome. */
+export function reportStopBufferAfter(buffer: LiveReply, phase: ReportStopPhase) {
+  return { keep: phase === "unconfirmed" ? buffer : null, restore: phase === "idle" ? buffer : null };
+}
+
 const FINAL = ["completed", "cancelled"];
 
 export function reportStopController(deps: {
@@ -47,6 +58,7 @@ export function reportStopController(deps: {
     const outcome = await sendStop(sent, deps.cancel);
     // A late answer for an earlier execution's stop never changes the current one.
     if (request !== sent) return;
+    if (outcome === "declined") { request = null; chain++; set("idle"); return; }
     set(outcome === "unconfirmed" ? "unconfirmed" : outcome === "saving" ? "saving" : "settled");
     follow(++chain, 0);
   };

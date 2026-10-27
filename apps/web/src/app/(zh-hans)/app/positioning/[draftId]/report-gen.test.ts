@@ -196,7 +196,8 @@ describe("restoring and offering", () => {
     expect(reportActionLabel("生成完整报告", 500)).toBe("生成完整报告（500 积分）");
     expect(reportActionLabel("重新生成", 1200)).toBe("重新生成（1,200 积分）");
     expect(reportActionLabel("生成完整报告", null)).toBe("生成完整报告");
-    expect(reportFeeText({ credits: 500, state: "charged", chargedCredits: 500 })).toBe("这份完整报告扣了 500 积分。");
+    expect(reportFeeText({ credits: 500, state: "charged", chargedCredits: 500 })).toBe("本次报告扣了 500 积分。");
+    expect(reportFeeText({ credits: 500, state: "charged", chargedCredits: 189 })).toBe("本次报告扣了 189 积分。");
     expect(reportFeeText({ credits: 500, state: "refunded", chargedCredits: 0 })).toMatch(/^没有生成出完整报告，500 积分已全额退回。/);
     expect(reportFeeText({ credits: 500, state: "held", chargedCredits: null })).toBeNull();
     expect(reportFeeText(null)).toBeNull();
