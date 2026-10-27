@@ -4,7 +4,7 @@ import { trpc } from "@/trpc/client";
 import { usePaygResume } from "@/lib/use-payg-resume";
 import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
-import { reportStopController, type ReportStopPhase } from "./report-stop";
+import { finishReportStop, reportStopController, type ReportStopPhase } from "./report-stop";
 import { RecoveryTimers } from "./step-recovery";
 import {
   attachRetryDelay, generationOffer, needsReattach, newerRead, nextRequestId, readReportRecord, reportAttachable, reportProgressing, reportRecordKey,
@@ -180,12 +180,9 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     onChange: setStopPhase,
   }), []);
   const stop = async () => {
-    if (!live || live.stopped) return;
-    const frozen = { ...live, stopped: true, stalled: true };
-    setLive(frozen);
-    await stopper.stop(frozen);
-    if (stopper.phase() === "idle") setLive(current => current?.executionId === live.executionId
-      ? { ...current, stopped: live.stopped, stalled: live.stalled } : current);
+    if (!live || live.stopped || (stopper.executionId() === live.executionId && stopper.phase() === "sending")) return;
+    await stopper.stop(live);
+    setLive(current => finishReportStop(current, live, stopper.phase()));
   };
 
   return {

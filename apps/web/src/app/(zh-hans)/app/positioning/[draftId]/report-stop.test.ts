@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from "vitest";
-import { startLiveReply, type LiveReply } from "./agent-turn-display";
-import { reportStopController, type ReportStopPhase } from "./report-stop";
+import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
+import { finishReportStop, reportStopController, type ReportStopPhase } from "./report-stop";
 import { STOP_FOLLOW_UP_DELAYS_MS, type StopRequest } from "./stop-reply";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -128,4 +128,14 @@ it("leaves the report running when the user declines a charge confirmation", asy
   expect(s.stop.phase()).toBe("idle");
   await s.stop.stop({ ...reply, text: reply.text + "更多" });
   expect(s.cancel.mock.calls[1]![0].stopAt).toBe(Array.from(reply.text + "更多").length);
+});
+
+it("keeps streamed text received while a stop confirmation is declined", () => {
+  const initial = { ...startLiveReply(id), text: "一", points: 1, rev: 1 };
+  const pending = liveReplyAfter(initial, id, { type: "textDelta", text: "二", offset: 1, rev: 1 })!;
+  const resumed = finishReportStop(pending, initial, "idle");
+  const next = liveReplyAfter(resumed, id, { type: "textDelta", text: "三", offset: 2, rev: 1 });
+  expect(next?.text).toBe("一二三");
+  expect(next?.stalled).toBe(false);
+  expect(finishReportStop(pending, initial, "saving")?.text).toBe("一");
 });
