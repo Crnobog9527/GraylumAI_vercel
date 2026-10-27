@@ -7,12 +7,13 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const args = process.argv.slice(2);
-if (process.env.CI || !['--local-only', '--local-only --before-fix', '--local-only --before-0404'].includes(args.join(' '))) {
-  throw new Error('Usage: node packages/db/tests/content-erasure-perf/verify.mjs --local-only [--before-fix | --before-0404]');
+if (process.env.CI || !['--local-only', '--local-only --before-fix', '--local-only --before-0404', '--local-only --before-0406'].includes(args.join(' '))) {
+  throw new Error('Usage: node packages/db/tests/content-erasure-perf/verify.mjs --local-only [--before-fix | --before-0404 | --before-0406]');
 }
 const files = [
   ...(args.includes('--before-fix') ? ['content-erasure-perf/rollback.sql'] : []),
   ...(args.includes('--before-fix') || args.includes('--before-0404') ? ['content-erasure-perf/rollback-0404.sql'] : []),
+  ...(args.includes('--before-fix') || args.includes('--before-0406') ? ['content-erasure-perf/rollback-0406.sql'] : []),
   'runtime-view-perf/fixture.sql',
   'content-erasure/fixture.sql',
   'content-erasure-perf/fixture.sql',
