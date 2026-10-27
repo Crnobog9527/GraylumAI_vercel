@@ -129,20 +129,28 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     await gate(f);
   });
 
-  /** Mark the operations of one fetched account as what benchmark_fetch stores for a link the user pasted (args.source). */
-  async function pasted(f,e,fetched,account,kind='user_message') {
-    await db.query(`UPDATE research_operations SET result=result||jsonb_build_object('args',jsonb_build_object(
-      'source',jsonb_build_object('kind',$1::text,'messageId',$2::text),
-      'accounts',jsonb_build_array(jsonb_build_object('account',$3::text,'platform','tiktok')))) WHERE id=ANY($4::uuid[])`,
-    [kind,e,account,[fetched.postOp,fetched.profile]]);
+  /**
+   * Mark the operations of one fetched account as what benchmark_fetch stores for a link the user pasted: the source and the
+   * accounts as the user wrote them (args), the canonical account the supplier was asked for (call).
+   */
+  async function pasted(f,e,fetched,account,{kind='user_message',written=account}={}) {
+    for (const [op,dataKind] of [[fetched.profile,'account_profile'],[fetched.postOp,'account_posts']])
+      await db.query(`UPDATE research_operations SET result=result||jsonb_build_object(
+        'args',jsonb_build_object('source',jsonb_build_object('kind',$1::text,'messageId',$2::text),
+          'accounts',jsonb_build_array(jsonb_build_object('account',$3::text,'platform','tiktok'))),
+        'call',jsonb_build_object('dataKind',$4::text,'platform','tiktok','query',$5::text)) WHERE id=$6`,
+      [kind,e,written,dataKind,account,op]);
   }
-  /** One answer in which the user pasted a link and it was verified (`ok`) or not. */
-  async function pastedRound(f,ok=true,kind='user_message') {
-    const e = await answer(db,f), account = `p-${randomUUID().slice(0,6)}`;
+  /** One answer in which the user pasted a link and it was verified, or its posts page failed (`ok` false). */
+  async function pastedRound(f,{ok=true,kind='user_message',written,account=`p-${randomUUID().slice(0,6)}`}={}) {
+    const e = await answer(db,f);
     const fetched = await fetchAccount(f,e,account,imitable);
-    await pasted(f,e,fetched,account,kind);
-    if (!ok) await db.query("UPDATE research_account_fetches SET state='failed_charged',evidence=NULL WHERE id=$1",[fetched.fetchId]);
-    return e;
+    await pasted(f,e,fetched,account,{kind,written});
+    if (!ok) {
+      await db.query("UPDATE research_operations SET state='failed' WHERE id=$1",[fetched.postOp]);
+      await db.query("UPDATE research_account_fetches SET state='failed_charged',evidence=NULL WHERE id=$1",[fetched.fetchId]);
+    }
+    return {e,account,fetched};
   }
 
   await check('ROUNDS pasted-link verification is a round: two links answers, or one search plus one, offer the card', async () => {
@@ -166,15 +174,15 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
 
   await check('ROUNDS a failed, refused or other-source verification is not a round; one answer counts once', async () => {
     const f = await seed(db), e = await answer(db,f);
-    await pastedRound(f,false);
-    await pastedRound(f,true,'candidate');
-    await pastedRound(f,true,'refresh');
+    await pastedRound(f,{ok:false});
+    await pastedRound(f,{kind:'candidate'});
+    await pastedRound(f,{kind:'refresh'});
     assert.equal((await state(f)).rounds,0,'failed fetch, candidate and refresh sources count nothing');
     // Two links verified in one answer are one round; the same answer holding a keyword round is not counted twice.
     const two = await answer(db,f);
-    for (const account of ['one','two']) {
-      const fetched = await fetchAccount(f,two,`${account}-${randomUUID().slice(0,6)}`,imitable);
-      await pasted(f,two,fetched,(await db.query('SELECT account FROM research_account_fetches WHERE id=$1',[fetched.fetchId])).rows[0].account);
+    for (const name of ['one','two']) {
+      const account = `${name}-${randomUUID().slice(0,6)}`;
+      await pasted(f,two,await fetchAccount(f,two,account,imitable),account);
     }
     assert.equal((await state(f)).rounds,1);
     await round(f,two);
@@ -183,6 +191,38 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     // Erasing the verifying answer takes its round away.
     await erase(db,f,'answer',two);
     assert.equal((await state(f)).rounds,0);
+  });
+
+  await check('ROUNDS the user may have written the account as @Name, mixed case or a full profile link', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    await pastedRound(f,{account:'homeideas',written:'@HomeIdeas'});
+    await pastedRound(f,{account:'cozycook',written:'https://www.tiktok.com/@CozyCook?lang=en'});
+    assert.equal((await state(f)).rounds,2,'counted by what the supplier was asked for, not by how the link was written');
+    assert.equal((await offer(f,e)).offeredRounds,2);
+  });
+
+  await check('ROUNDS a refresh, failed or successful, or the "generate" choice never takes a round away', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    const first = await pastedRound(f), second = await pastedRound(f);
+    assert.equal((await state(f)).rounds,2);
+    const card = await offer(f,e);
+    await choose(f,card.cardId,'generate');
+    // A successful paid refresh of the first account: the fetch row moves to the refreshing answer.
+    const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok',first.account);
+    const refreshed = await fetchAccount(f,await answer(db,f),first.account,{...imitable,refresh:grant});
+    assert.equal((await db.query('SELECT state FROM research_account_fetches WHERE id=$1',[refreshed.fetchId])).rows[0].state,'succeeded');
+    assert.equal((await state(f)).rounds,2,'refresh success');
+    // Refreshes that fail or end unknown re-claim the row and change its state and answer.
+    for (const outcome of ['failed','unknown']) {
+      const again = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok',second.account);
+      const retry = await rpc(db,'research_account_fetch_claim',f.actor,f.session,await answer(db,f),'tiktok',second.account,again);
+      assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,retry.fetchId,retry.attempt),true);
+      await rpc(db,'research_account_fetch_finish',f.actor,retry.fetchId,retry.attempt,outcome,null);
+      assert.equal((await state(f)).rounds,2,`refresh ${outcome}`);
+    }
+    const after = (await state(f)).card;
+    assert.deepEqual([after.choice,after.chosenRounds],['generate',2],'the frozen choice is untouched');
+    await gate(f);
   });
 
   await check('SHORTFALL 3 or more qualified: admitted as before, no card', async () => {
