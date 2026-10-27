@@ -9,7 +9,7 @@ import {openRouterBound} from '../bill2/openRouterPolicy';
 import type {FrozenPaygRun} from '../bill2/service';
 import {RESEARCH_PHASE} from './researchTurn';
 import {RESEARCH_TURN_INPUT_BYTES,sentHostBytes} from './researchAdmission';
-import {hostTurnInput} from './hostTurn';
+import {HOST_MARKER_RESERVE_BYTES,hostTurnInput} from './hostTurn';
 import {DISABLED_RESEARCH_TOOLS,researchToolsConfigSchema} from '../research/vendors/config';
 import {tikhubRouteId} from '../research/vendors/tikhub';
 import {FIRECRAWL_ROUTE} from '../research/vendors/firecrawl';
@@ -164,7 +164,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  const measure=(context:ReturnType<typeof runtimeContext.parse>)=>Buffer.byteLength(JSON.stringify({
   instructions:context.instructions+DEFAULT_REPLY_RULE,
   messages:[{role:'user',content:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext)}],
- }))+groundedCardToolBytes()+150+1024;
+ }))+groundedCardToolBytes()+HOST_MARKER_RESERVE_BYTES+1024;
  // JSON escaping is part of the byte budget. All input stays within the existing 8000-character OPC limit.
  const baseline=await firstService.prepare({...first.input,input:'x'});
  const extra=90000-measure(runtimeContext.parse(baseline.context));
@@ -194,7 +194,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  // The old composition really fails; this is not a small fixture that passed even before the fix.
  const oldComposition=researchCapacity({instructions:context.instructions+DEFAULT_REPLY_RULE,
   currentInput:runtimeScopeInput(context.input,context.scopeMaterial,beforeHost),inputBudgetBytes:112000,
-  existingToolsBytes:groundedCardToolBytes()+150,researchToolsBytes:researchToolBytes(POSITIONING_RESEARCH_TOOLS,true),
+  existingToolsBytes:groundedCardToolBytes()+HOST_MARKER_RESERVE_BYTES,researchToolsBytes:researchToolBytes(POSITIONING_RESEARCH_TOOLS,true),
   researchHostDeltaBytes:0,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES});
  expect(oldComposition.deficitBytes).toBeGreaterThan(0);
 });
