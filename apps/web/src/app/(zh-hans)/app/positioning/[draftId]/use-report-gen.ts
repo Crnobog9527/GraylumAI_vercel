@@ -4,7 +4,7 @@ import { trpc } from "@/trpc/client";
 import { usePaygResume } from "@/lib/use-payg-resume";
 import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
-import { finishReportStop, reportStopController, type ReportStopPhase } from "./report-stop";
+import { finishReportStop, reportStopBufferAfter, reportStopController, type ReportStopPhase } from "./report-stop";
 import { RecoveryTimers } from "./step-recovery";
 import {
   attachRetryDelay, generationOffer, needsReattach, newerRead, nextRequestId, readReportRecord, reportAttachable, reportProgressing, reportRecordKey,
@@ -184,16 +184,30 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     schedule: (delay, callback) => timers.current?.schedule(delay, callback),
     onChange: setStopPhase,
   }), []);
+  useEffect(() => {
+    if (stopPhase === "settled" && stopBuffer.current?.executionId === stopper.executionId()) stopBuffer.current = null;
+  }, [stopPhase, stopper]);
+  const finishStop = (id: string) => {
+    const buffered = stopBuffer.current;
+    if (buffered?.executionId !== id) return;
+    const phase = stopper.phase();
+    const next = reportStopBufferAfter(buffered, phase);
+    stopBuffer.current = next.keep;
+    const restored = next.restore;
+    if (restored) setLive(current => finishReportStop(current, restored, phase));
+  };
   const stop = async () => {
     if (!live || live.stopped || (stopper.executionId() === live.executionId && stopper.phase() === "sending")) return;
     stopBuffer.current = live;
     setLive({ ...live, stopped: true, stalled: true });
     await stopper.stop(live);
-    const buffered = stopBuffer.current;
-    if (buffered?.executionId === live.executionId) {
-      stopBuffer.current = null;
-      setLive(current => finishReportStop(current, buffered, stopper.phase()));
-    }
+    finishStop(live.executionId);
+  };
+  const retryStop = async () => {
+    const id = stopper.executionId();
+    if (!id) return;
+    await stopper.retry();
+    finishStop(id);
   };
 
   return {
@@ -206,6 +220,6 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     stop: () => void stop(),
     /** The stop request was not confirmed: 停止 resends the same request. */
     stopUnconfirmed: stopPhase === "unconfirmed" && stopper.executionId() === executionId,
-    retryStop: () => void stopper.retry(),
+    retryStop: () => void retryStop(),
   };
 }

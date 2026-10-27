@@ -18,6 +18,11 @@ export function finishReportStop(current: LiveReply | null, buffered: LiveReply,
   return buffered;
 }
 
+/** An ambiguous stop can be retried, so keep its live stream buffer until a definite outcome. */
+export function reportStopBufferAfter(buffer: LiveReply, phase: ReportStopPhase) {
+  return { keep: phase === "unconfirmed" ? buffer : null, restore: phase === "idle" ? buffer : null };
+}
+
 const FINAL = ["completed", "cancelled"];
 
 export function reportStopController(deps: {

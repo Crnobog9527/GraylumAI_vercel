@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from "vitest";
 import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
-import { finishReportStop, reportStopController, type ReportStopPhase } from "./report-stop";
+import { finishReportStop, reportStopBufferAfter, reportStopController, type ReportStopPhase } from "./report-stop";
 import { STOP_FOLLOW_UP_DELAYS_MS, type StopRequest } from "./stop-reply";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -139,4 +139,19 @@ it("keeps streamed text received while a stop confirmation is declined", () => {
   expect(next?.text).toBe("一二三");
   expect(next?.stalled).toBe(false);
   expect(finishReportStop(frozen, pending, "saving")?.text).toBe("一");
+});
+
+it("keeps buffered text after an unconfirmed stop and restores it when retry is declined", async () => {
+  let first = true;
+  const s = setup(async () => {
+    if (first) { first = false; throw new Error("network"); }
+    return { state: "confirmation_declined" };
+  });
+  const buffer = { ...reply, text: reply.text + "继续", points: 9 };
+  await s.stop.stop(reply);
+  expect(s.stop.phase()).toBe("unconfirmed");
+  expect(reportStopBufferAfter(buffer, s.stop.phase())).toEqual({ keep: buffer, restore: null });
+  await s.stop.retry();
+  expect(s.stop.phase()).toBe("idle");
+  expect(reportStopBufferAfter(buffer, s.stop.phase())).toEqual({ keep: null, restore: buffer });
 });
