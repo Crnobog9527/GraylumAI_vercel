@@ -2,7 +2,11 @@
 -- REPORT-GEN: rolling user-stop allowance and actual-cost settlement.
 -- Old callers remain compatible and retain full refunds; new callers use report_stop.
 -- Repeatable: additive columns and indexes plus CREATE OR REPLACE functions.
--- Recovery: restore prior functions and callers, retaining all fee and ledger records; never reverse settled charges.
+-- Recovery: stop report admission and cancellation before rolling back the app. Keep these columns,
+-- fees and ledger entries. First resolve every held chargeable stop using its actual cost; the old
+-- settlement would otherwise refund it. Then restore the complete pre-0408 report_fee_hold and
+-- report_fee_settle_internal definitions from the preceding revision and remove report_stop.
+-- Already-settled charges must not be reversed by restoring code.
 BEGIN;
 ALTER TABLE public.report_fees ADD COLUMN IF NOT EXISTS user_stopped_at timestamptz;
 ALTER TABLE public.report_fees ADD COLUMN IF NOT EXISTS stop_chargeable boolean;
