@@ -16,11 +16,11 @@ export const LOW_VOLUME_PER_WEEK = 3;
 export const SHIFT_RATIO = 0.3;
 
 /**
- * Owner decisions still open (MASTER_PLAN 2.1, 2026-10-27 supplement, A-E). Kept here so the decision changes one value,
- * never the logic. Only B touches this module; A, C, D and E belong to the screenshot reader and billing (RC-2b, RC-3).
+ * Owner decisions A-E (2026-10-27, recorded in #1482). Only B touches this module; A, C, D and E belong to the screenshot
+ * reader and billing (RC-2b, RC-3).
  */
 export const COACH_PENDING = {
-  /** B: experiments allowed when basics fail. Recommended (not yet approved): at most 2, basics experiments only. */
+  /** B: when basics fail, still at most 2 experiments, basics practice only, recorded in the ledger. */
   basicsFailExperiments: 2,
 };
 
