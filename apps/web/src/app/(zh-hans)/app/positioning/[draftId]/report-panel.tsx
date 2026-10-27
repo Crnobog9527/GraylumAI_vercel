@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CHAT_ACTION, ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
@@ -127,7 +131,8 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   const working = report.starting || report.streaming;
   const body = report.live?.text || (view && (view.kind === "report" || view.kind === "progress") ? view.body : null) || savedBody;
   const notices: ChatNotice[] = [];
-  if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
+  if (report.stopConfirmation) notices.push({ id: "report-stop-confirming", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
+  else if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
   else if (report.live?.stopped) notices.push({ id: "report-stopping", tone: "status", busy: true, text: STOP_SAVING_NOTICE });
   else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true,
@@ -149,7 +154,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   const first = !report.executionId && !savedBody;
   return (
     <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
-      onKeyDown={event => { if (event.key === "Escape") close(); }}
+      onKeyDown={event => { if (event.key === "Escape" && !report.stopConfirmation) close(); }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div ref={card} className={`${resultStyles.consentCard} ${outline.chapters.length >= REPORT_OUTLINE_MIN_CHAPTERS ? "!max-w-5xl" : "!max-w-3xl"}`}>
         <header>
@@ -184,6 +189,18 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
           )}
         </ReportWithOutline>
       </div>
+      <AlertDialog open={report.stopConfirmation} onOpenChange={open => { if (!open) report.cancelStop(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认停止报告？</AlertDialogTitle>
+            <AlertDialogDescription>今天已停止过 2 次，本次将按已生成部分扣费（不超过 500 积分）</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={report.cancelStop}>继续生成</AlertDialogCancel>
+            <AlertDialogAction onClick={report.confirmStop}>确认停止</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
