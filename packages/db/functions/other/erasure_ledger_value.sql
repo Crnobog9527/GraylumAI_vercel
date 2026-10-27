@@ -18,8 +18,8 @@ BEGIN
  IF jsonb_typeof(shape)='object' THEN
   IF jsonb_typeof(v)<>'object' THEN RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE'; END IF;
   result:='{}';
-  FOR k,item IN SELECT * FROM jsonb_each(shape) LOOP
-   IF v ? k THEN result:=result||jsonb_build_object(k,erasure_ledger_value(v->k,item)); END IF;
+  FOR k,item IN SELECT s.key,s.value FROM jsonb_each(v) x JOIN jsonb_each(shape) s ON s.key=x.key LOOP
+   result:=result||jsonb_build_object(k,erasure_ledger_value(v->k,item));
   END LOOP;
   RETURN result;
  ELSIF jsonb_typeof(shape)='array' THEN
