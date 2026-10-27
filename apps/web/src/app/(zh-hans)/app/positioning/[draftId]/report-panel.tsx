@@ -67,6 +67,8 @@ function RoundReportEntry(props: Props) {
   const utils = trpc.useUtils();
   const report = useReportGen({ ...props, canGenerate: canGenerate, price: available.data?.priceCredits });
   const [open, setOpen] = useState(false);
+  // The user may close the report while the stop RPC is pending; its charge decision must stay visible.
+  useEffect(() => { if (report.stopConfirmation) setOpen(true); }, [report.stopConfirmation]);
   // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving
   // and coming back in this tab. A saved report of this round keeps its own dialog.
   const paywall = useReportPaywallMemory({ draftId: props.draftId, roundId: props.roundId,
