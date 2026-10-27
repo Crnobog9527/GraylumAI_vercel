@@ -13,13 +13,19 @@ function dollarQuote(json) {
   return `$sim$${text}$sim$::jsonb`;
 }
 
+/** Which generated dataset a connection holds; stored in its display hint so a different load can be refused. */
+export function datasetTag(dataset) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataset.asOf) || !Number.isSafeInteger(dataset.seed)) throw new Error('SIM_DATASET_INVALID');
+  return `${dataset.asOf} s${dataset.seed}`;
+}
+
 /** Rows one account loads into social_connections / social_posts / social_metric_snapshots. */
-export function loadable(account) {
+export function loadable(account, tag = '') {
   const posts = account.posts.filter(p => p.visibility !== 'not_imported');
   const connectedOn = Object.fromEntries(account.connections.map(c => [c.platform, c.connectedOn]));
   return {
     connections: account.connections.map(c => ({ platform: c.platform, source: c.source, connected_on: c.connectedOn,
-      hint: `${SIM_HINT}${account.key} ${c.platform} 模拟数据` })),
+      hint: `${SIM_HINT}${account.key} ${c.platform} ${tag}`.trim() })),
     posts: posts.map(p => ({ key: p.key, platform: p.platform, source: p.source, platform_post_id: p.platformPostId,
       posted_at: p.postedAt, posted_at_source: p.postedAtSource, title: p.title,
       created_at: p.visibility === 'daily' ? p.postedAt : `${connectedOn[p.platform]}T12:00:00Z` })),
@@ -34,6 +40,8 @@ export function loadable(account) {
  * @param businesses { A: businessId, ... } — each simulated account goes into one existing, positioned brand of the user;
  *   accounts not listed are skipped. A brand's platform account is reused when it exists, otherwise created with the
  *   product's own publish_monitor_account_add. A platform account that already has a live connection stops the load.
+ *   Loading the same dataset again adds nothing; simulated data from another dataset (other asOf or seed) in the
+ *   brand stops the load too, so rows of two generations never mix: remove it first.
  */
 export function seedSql(dataset, actorId, businesses) {
   if (!UUID.test(actorId)) throw new Error('SIM_ACTOR_INVALID');
@@ -43,18 +51,22 @@ export function seedSql(dataset, actorId, businesses) {
     const business = businesses[account.key];
     if (business === undefined) continue;
     if (!UUID.test(business)) throw new Error('SIM_BUSINESS_INVALID');
-    parts.push(accountSql(account, actorId, business));
+    parts.push(accountSql(account, actorId, business, datasetTag(dataset)));
   }
   parts.push('COMMIT;');
   return parts.join('\n');
 }
 
-function accountSql(account, actorId, businessId) {
+function accountSql(account, actorId, businessId, tag) {
   const short = actorId.slice(0, 8);
   return `DO $do$
-DECLARE a uuid:='${actorId}';b uuid:='${businessId}';d jsonb:=${dollarQuote(loadable(account))};
+DECLARE a uuid:='${actorId}';b uuid:='${businessId}';d jsonb:=${dollarQuote(loadable(account, tag))};
  c jsonb;acct uuid;conn uuid;ids jsonb:='{}';
 BEGIN
+ IF EXISTS(SELECT 1 FROM social_connections WHERE actor_id=a AND business_id=b AND display_hint LIKE '${SIM_HINT}%'
+  AND display_hint NOT IN (SELECT x->>'hint' FROM jsonb_array_elements(d->'connections') x)) THEN
+  RAISE EXCEPTION 'SIM_OTHER_DATASET_LOADED: remove the simulated data of this user first (seed.mjs remove)';
+ END IF;
  FOR c IN SELECT * FROM jsonb_array_elements(d->'connections') LOOP
   SELECT project_id INTO acct FROM opc_accounts WHERE actor_id=a AND business_id=b AND platform=c->>'platform'
    AND erased_at IS NULL ORDER BY project_id LIMIT 1;

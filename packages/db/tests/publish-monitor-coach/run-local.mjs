@@ -46,6 +46,14 @@ try {
   assert.deepEqual(await counts(actor), expected);
   report.checks.push('loading the same SQL again adds nothing');
 
+  // Another generation (next day, or another seed) reuses post IDs with other dates and values: refuse, never mix.
+  for (const next of [generateDataset({ asOf: '2026-01-02' }), generateDataset({ asOf: today, seed: 7 })]) {
+    await assert.rejects(c.query(seedSql(next, actor, businesses)), /SIM_OTHER_DATASET_LOADED/);
+    await c.query('ROLLBACK');
+    assert.deepEqual(await counts(actor), expected);
+  }
+  report.checks.push('a dataset with another asOf or seed is refused and leaves the loaded data unchanged');
+
   assert.equal(await svc('SELECT publish_monitor_snapshot_prune(50000) v'), 0);
   assert.equal(await svc('SELECT count(*)::int v FROM jsonb_array_elements(publish_monitor_refresh_claim(50,60))'), 0);
   assert.equal(await svc('SELECT count(*)::int v FROM jsonb_array_elements(publish_monitor_tikhub_claim(50,60))'), 0);
