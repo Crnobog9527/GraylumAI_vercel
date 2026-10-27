@@ -21,4 +21,9 @@ AS $function$
    AND (business_id IS NOT NULL OR target_account_project_id IS NOT NULL
     OR NOT (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL
      OR created_at>clock_timestamp()-interval '30 days')))
+ -- 0407: removed with their posts, review runs and brands (ON DELETE CASCADE); counted so erasure waits for them.
+ +(SELECT count(*) FROM social_post_facts WHERE actor_id=a)
+ +(SELECT count(*) FROM social_post_diagnostics WHERE actor_id=a)
+ +(SELECT count(*) FROM social_review_experiments WHERE actor_id=a)
+ +(SELECT count(*) FROM social_coach_profiles WHERE actor_id=a)
 $function$;
