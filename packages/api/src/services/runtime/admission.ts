@@ -463,7 +463,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit,modelRows});
    if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&
     await guardResearchAdmission({admin,real:policy.real,context,billing,settings,configuration,actorId,sessionId:input.sessionId,requestId:input.requestId,
-     capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,
+     userText:input.input,capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,
       currentInput,inputBudgetBytes:limitOf(bytes),existingToolsBytes:admissionToolBytes(Boolean(skillFile),historyRead),
       researchToolsBytes,researchHostDeltaBytes,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES}),
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))})

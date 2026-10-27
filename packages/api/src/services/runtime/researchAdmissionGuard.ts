@@ -6,6 +6,7 @@ import {attachResearchTurn} from './researchAdmission';
 import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
 import {hostTurnContextSchema, type HostTurnContext} from './hostTurn';
 import {StagingAccessError} from './stagingErrors';
+import {profileLinksIn} from '../research/tools/accountLinks';
 
 /** The published field contract (CONVERSATION_CAPTURE_WRITEBACK_V2_FIELDS), not a step number, title or user text. */
 export function requiresBenchmarkResearch(host: HostTurnContext | undefined): boolean {
@@ -18,10 +19,20 @@ export function researchInputHost(host: HostTurnContext | undefined, enabled: bo
   return hostTurnContextSchema.safeParse(projected).success ? projected : host;
 }
 const benchmarkTools = ['propose_keywords', 'benchmark_discover', 'propose_more_candidates', 'benchmark_fetch'] as const;
+/** Checking a pasted account needs only the fetch tool. */
+const linkTools = ['benchmark_fetch'] as const;
 type AttachInput = Parameters<typeof attachResearchTurn>[0];
 type GuardInput = Omit<AttachInput, 'billing' | 'onRejected' | 'requiredTools'> & {
   billing: FrozenRun | FrozenPaygRun; actorId: string; sessionId: string; requestId: string;
+  /** The user's own words this turn (not the framed model input). */
+  userText?: string;
 };
+/**
+ * A turn that carries a profile link asks for that account to be checked (benchmark_fetch, source user_message), on any
+ * step. It then needs the tools as much as a benchmark step does: refusing before any charge beats a paid reply that
+ * says "no tool". Same parser as authorizeBenchmarkFetch, so only whole profile links count.
+ */
+export const carriesAccountLink = (userText: string | undefined): boolean => Boolean(userText) && profileLinksIn(userText!).length > 0;
 
 /** Await the existing server-only log insert; a log outage still leaves the same sanitized event in platform logs. */
 async function recordRejection(input: GuardInput, rejection: ResearchAdmissionRejection, required: boolean) {
@@ -38,13 +49,15 @@ async function recordRejection(input: GuardInput, rejection: ResearchAdmissionRe
 
 /** Called before runtime_admit: refusal creates no execution/reservation and cannot start a paid model or supplier call. */
 export async function guardResearchAdmission(input: GuardInput): Promise<boolean> {
-  const required = requiresBenchmarkResearch(input.context.hostTurnContext);
+  const benchmarkStep = requiresBenchmarkResearch(input.context.hostTurnContext);
+  const required = benchmarkStep || carriesAccountLink(input.userText);
   let rejection: ResearchAdmissionRejection = {reason: 'BILLING_PROFILE_UNAVAILABLE'};
   const attached = input.billing.contractVersion === 'bill2.v2' && await attachResearchTurn({...input, billing: input.billing,
-    requiredTools: required ? benchmarkTools : undefined, onRejected: value => { rejection = value; }});
+    requiredTools: benchmarkStep ? benchmarkTools : required ? linkTools : undefined, onRejected: value => { rejection = value; }});
   if (attached) return true;
   await recordRejection(input, rejection, required);
-  if (required) throw new StagingAccessError(rejection.reason === 'CONTEXT_CAPACITY'
-    ? 'RESEARCH_TOOLS_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_UNAVAILABLE');
+  const capacity = rejection.reason === 'CONTEXT_CAPACITY';
+  if (benchmarkStep) throw new StagingAccessError(capacity ? 'RESEARCH_TOOLS_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_UNAVAILABLE');
+  if (required) throw new StagingAccessError(capacity ? 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_LINK_UNAVAILABLE');
   return false;
 }
