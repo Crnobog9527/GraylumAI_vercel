@@ -49,20 +49,29 @@ export async function admissionCases({ admin, service, connect }) {
   const a=await makeUser(),b=await makeUser();
   const one=await connect(),two=await connect();
   await one.query('SET ROLE service_role'); await two.query('SET ROLE service_role');
+  // pg_stat_activity can cache its first snapshot in admin's transaction; pg_locks is live.
+  const waitingOnBarrier=async()=> (await admin.query(`SELECT count(DISTINCT waiting.pid)::int n
+    FROM pg_locks held JOIN pg_locks waiting ON waiting.locktype=held.locktype
+      AND waiting.database=held.database AND waiting.classid=held.classid
+      AND waiting.objid=held.objid AND waiting.objsubid=held.objsubid
+    WHERE held.pid=$1 AND held.locktype='advisory' AND held.granted
+      AND waiting.pid=ANY($2::int[]) AND NOT waiting.granted`,
+  [admin.processID,[one.processID,two.processID]])).rows[0].n;
   // Hold the real identity lock, observe both database sessions waiting before release.
   const lock=`gold_purchase:test:email:test-v1:${'c'.repeat(64)}`;
   await admin.query('BEGIN');
   await admin.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[lock]);
   const first=buy(one,a),second=buy(two,b);
+  // Handle the expected rejection before releasing the lock, regardless of which response arrives first.
+  const pendingResults=Promise.allSettled([first,second]);
   let blocked=false;
   for(let n=0;n<100;n++) {
-    const pending=await admin.query("SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT o.* FROM pay_waffo_create_purchase%'");
-    if(pending.rows[0].n===2) {blocked=true;break;}
+    if(await waitingOnBarrier()===2) {blocked=true;break;}
     await new Promise(r=>setTimeout(r,10));
   }
   assert.ok(blocked,'both first-Gold admissions waited on the identity barrier');
   await admin.query('COMMIT');
-  const results=await Promise.allSettled([first,second]);
+  const results=await pendingResults;
   assert.equal(results.filter(r=>r.status==='fulfilled').length,1,results.map(r=>r.reason?.message).join(';'));
   assert.match(results.find(r=>r.status==='rejected').reason.message,/GOLD_FIRST_INELIGIBLE/);
   const order=results.find(r=>r.status==='fulfilled').value.rows[0];
@@ -104,14 +113,14 @@ export async function admissionCases({ admin, service, connect }) {
   await admin.query('BEGIN'); await admin.query('SELECT pg_advisory_xact_lock(7063,3)');
   const final1=buy(one,c,{method:'card',offer:'founder',cycle:'yearly',digest:'e'.repeat(64)});
   const final2=buy(two,d,{method:'alipay',offer:'founder',cycle:'yearly',digest:'f'.repeat(64)});
+  const pendingFinal=Promise.allSettled([final1,final2]);
   blocked=false;
   for(let n=0;n<100;n++) {
-    const pending=await admin.query("SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT o.* FROM pay_waffo_create_purchase%'");
-    if(pending.rows[0].n===2) {blocked=true;break;}
+    if(await waitingOnBarrier()===2) {blocked=true;break;}
     await new Promise(r=>setTimeout(r,10));
   }
   assert.ok(blocked); await admin.query('COMMIT');
-  const final=await Promise.allSettled([final1,final2]);
+  const final=await pendingFinal;
   assert.equal(final.filter(r=>r.status==='fulfilled').length,1,final.map(r=>r.reason?.message).join(';'));
   assert.match(final.find(r=>r.status==='rejected').reason.message,/FOUNDER_SOLD_OUT/);
   assert.equal((await admin.query("SELECT count(*)::int n FROM payment_orders WHERE offer_kind='founder'")).rows[0].n,50);
