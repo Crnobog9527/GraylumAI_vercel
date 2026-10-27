@@ -72,7 +72,7 @@ describe('free chat research admission',()=>{
   expect(context.tools).toEqual(['read_source','social_search','social_account','web_search','web_fetch']);
   expect(context).toMatchObject({maxTurns:9,maxToolCalls:8,sourceCalls:'first-call-v1',
    research:{freeChat:'free-chat-v1',subcalls:12,benchmarkPlatforms:[],verifiedPlatforms:['tiktok']},
-   purposeBudget:{purpose:'interactive',inputBytes:112000}});
+   purposeBudget:{purpose:'interactive',inputBytes:150000}});
   expect(context.instructions.endsWith(FREE_CHAT_RESEARCH_INSTRUCTIONS)).toBe(true);
   // 3 more model calls and 12 subcalls on the run; every offered route's price is frozen beside the model.
   expect(f.billing.limits.maxCalls).toBe(6+3+12);
@@ -95,7 +95,7 @@ describe('free chat research admission',()=>{
   const seen:Array<number|undefined>=[];
   expect(await attachFreeChatResearch({admin:f.admin,real:f.real,context:f.context,billing:f.billing,
    fits:(_extra,bytes)=>{seen.push(bytes);return false;}})).toBe(false);
-  expect(seen).toEqual([112000]);
+  expect(seen).toEqual([150000]);
   expect(f.context.tools).toEqual(['read_source']);
  });
 

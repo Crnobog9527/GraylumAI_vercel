@@ -17,6 +17,7 @@ import { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, type ResearchToolNa
 import { RESEARCH_VENDORS, type SocialPlatform } from '../research/vendors/types';
 import type { FrozenPaygRun } from '../bill2/service';
 import { freezePaygMessageBudget } from './paygMessageBudget';
+import { RESEARCH_TURN_INPUT_CAP } from './purposeBudgets';
 import { fastSearchOnly, researchToolDescription, researchToolParameters } from './researchRuntimeTool';
 import type { StagingPolicy } from './stagingPolicy';
 import type { SettingsRead } from './newWorkGate';
@@ -221,9 +222,10 @@ type MentorContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: st
   purposeBudget?: { purpose: string; inputBytes: number; historyItems: number }; hostTurnContext?: HostTurnContext };
 /**
  * Owner 2026-10-17 ("同意 RT-6 输入上限选 A"): only a mentor turn that offers the research tools may use this input
- * ceiling (the organize cap); every other turn keeps its interactive budget. Billing still follows the bytes actually sent.
+ * ceiling; every other turn keeps its interactive budget. Raised from 112000 on 2026-10-27 (Owner: "把上限从 112,000 提到
+ * 150,000"): the 112000 ceiling refused the tools on about 8% of step-1 turns (CONTEXT_CAPACITY). Organize stays 112000. Billing still follows the bytes actually sent.
  */
-export const RESEARCH_TURN_INPUT_BYTES = 112000;
+export const RESEARCH_TURN_INPUT_BYTES = RESEARCH_TURN_INPUT_CAP;
 /**
  * The host context's bytes as sent: hostTurnInput serializes it into the message content, and the request serializes that
  * string again (every quote and backslash escaped). The block's cost is the difference of this measure (#1070 review).

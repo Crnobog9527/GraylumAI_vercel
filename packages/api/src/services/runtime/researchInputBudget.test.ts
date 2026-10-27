@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// RT-6 (Owner 2026-10-17, "同意 RT-6 输入上限选 A"): only a mentor turn that offers the research tools gets the 112000-byte
+// RT-6 (Owner 2026-10-17, "同意 RT-6 输入上限选 A"): only a mentor turn that offers the research tools gets the 150000-byte
 // input ceiling; the real admission path decides with the raised ceiling and freezes it.
-import {expect,it,vi} from 'vitest';
+import {expect,it,vi,afterEach} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './runtimeContext';
@@ -26,6 +26,10 @@ const actor='10000000-0000-4000-8000-000000000001',modelId='10000000-0000-4000-8
 const revisionId='10000000-0000-4000-8000-000000000003',moduleId='10000000-0000-4000-8000-000000000004';
 const requestId='10000000-0000-4000-8000-000000000005';
 const now=Date.now(),day=86_400_000;
+// The model's own input limit: a small one stands for a model that cannot take the raised ceiling (the ceiling is a cap, not a promise).
+const model={limit:400000};
+const SMALL_MODEL_LIMIT=100100;
+afterEach(()=>{model.limit=400000;});
 const limits={providerSlug:'local',contextTokens:300000,promptUsdPerMillion:'1',completionUsdPerMillion:'2',requestUsd:'0'};
 const modelPolicy:FrozenPaygRun['callPolicy'][number]={modelId,model:'fixture/mentor',provider:'fixture',account:'local',
  protocol:'fixture-cost-v1',inputLimit:200000,outputLimit:100,upperUsd:openRouterBound(limits,100).upperUsd,providerLimits:limits,
@@ -68,7 +72,7 @@ function fixture(enabled:boolean,budgets=true,scopeMaterial?:unknown){
   if(name==='runtime_admit'){saved={context:args.p_payload,billing:args.p_billing};return {data:saved,error:null};}
   throw new Error(name);
  });
- const row={id:modelId,model_id:'fixture/mentor',is_active:'true',provider:'fixture',max_tokens:1000,input_limit:400000};
+ const row={id:modelId,model_id:'fixture/mentor',is_active:'true',provider:'fixture',max_tokens:1000,input_limit:model.limit};
  const admin={rpc,from:(table:string)=>{
   let key='';
   const query={insert:(row:unknown)=>({abortSignal:async()=>{logs.push(row);return {error:null};}}),select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async(_column:string,keys:string[])=>({data:table==='system_settings'
@@ -98,13 +102,14 @@ it('a research turn that would not fit the 90000-byte interactive budget is admi
  const context=await admit(true,75000);
  expect(context.research).toBeDefined();
  expect(context.purposeBudget).toMatchObject({purpose:'interactive',inputBytes:RESEARCH_TURN_INPUT_BYTES});
- expect(RESEARCH_TURN_INPUT_BYTES).toBe(112000);
+ expect(RESEARCH_TURN_INPUT_BYTES).toBe(150000);
 });
 
 it('every other turn keeps the interactive budget: switch off, or research that does not fit even the raised ceiling',async()=>{
  const off=await admit(false,75000);
  expect(off.research).toBeUndefined();
  expect(off.purposeBudget).toMatchObject({purpose:'interactive',inputBytes:90000});
+ model.limit=SMALL_MODEL_LIMIT;
  const tooLarge=await admit(true,84000);
  expect(tooLarge.research).toBeUndefined();
  expect(tooLarge.purposeBudget).toMatchObject({purpose:'interactive',inputBytes:90000});
@@ -125,6 +130,7 @@ it('with the switch on, the cards and benchmark table join the turn only togethe
   expect(attached.research).toBeDefined();
   expect(attached.hostTurnContext?.research?.cards).toEqual([{kind:'keywords',cardId:requestId,confirmationId:modelId,keywords:['家居收纳']}]);
   // Tools that cannot attach leave the ordinary turn exactly as it was: no block, no capacity refusal.
+  model.limit=SMALL_MODEL_LIMIT;
   const plain=await admit(true,84000);
   expect(plain.research).toBeUndefined();
   expect(plain.hostTurnContext?.research).toBeUndefined();
@@ -160,6 +166,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  const first=fixture(true,true,scopeMaterial);
  const firstHost=captureHostContext(steps,information,'first',false,undefined,{first:true});
  skill.text='S'.repeat(43000);
+ model.limit=SMALL_MODEL_LIMIT;
  const firstService=runtimeAdmissionService(first.user,first.admin,{...first.policy,hostTurnContext:firstHost});
  const measure=(context:ReturnType<typeof runtimeContext.parse>)=>Buffer.byteLength(JSON.stringify({
   instructions:context.instructions+DEFAULT_REPLY_RULE,
@@ -177,13 +184,14 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  expect(admittedFirst.context.research).toBeUndefined();
  // A fresh request in this same round, using the saved fields; no old session or historical linking.
  skill.text='S'.repeat(59133);
+ model.limit=400000;
  const next=fixture(true,true,scopeMaterial);
  const host=captureHostContext(steps,information,'research',false,undefined,{first:true});
  const admitted=await runtimeAdmissionService(next.user,next.admin,{...next.policy,hostTurnContext:host})
   .prepare({...next.input,input:'请给我关键词确认卡'});
  const context=runtimeContext.parse(admitted.context);
  expect(context.tools).toEqual(['ask_question',...POSITIONING_RESEARCH_TOOLS]);
- expect(context.purposeBudget?.inputBytes).toBe(112000);
+ expect(context.purposeBudget?.inputBytes).toBe(150000);
  expect(context.scopeMaterial).toEqual(original);
  expect(scopeMaterial).toEqual(original);
  expect(context.hostTurnContext?.materialProjection).toBe('checklist-dedup-v1');
@@ -201,6 +209,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
 
 it('a still-oversize required research turn records numeric components and creates no billable execution',async()=>{
  skill.text='S'.repeat(83000);
+ model.limit=SMALL_MODEL_LIMIT;
  const f=fixture(true);
  const host={stepId:'research',opening:false,checklist:[{id:'research',title:'Research',fields:[{
   id:'benchmark_findings',title:'Findings',required:true,role:'agent_proposal' as const,status:'missing' as const,protected:false}]}]};
