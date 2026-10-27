@@ -19,8 +19,8 @@ BEGIN
         result := result || jsonb_build_object(k, bill2_erasure_fields(item, shape->'$value'));
       END LOOP;
     ELSE
-      FOR k, spec IN SELECT * FROM jsonb_each(shape) LOOP
-        IF v ? k THEN result := result || jsonb_build_object(k, bill2_erasure_fields(v->k, spec)); END IF;
+      FOR k, spec IN SELECT s.key, s.value FROM jsonb_each(v) x JOIN jsonb_each(shape) s ON s.key = x.key LOOP
+        result := result || jsonb_build_object(k, bill2_erasure_fields(v->k, spec));
       END LOOP;
     END IF;
     RETURN result;

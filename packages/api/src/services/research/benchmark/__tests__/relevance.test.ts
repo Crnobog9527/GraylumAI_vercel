@@ -30,6 +30,22 @@ describe('topic relevance (BENCHMARK-COVERAGE §2.6)', () => {
     expect(topicRelevance(posts, ['hardanger'])).toEqual({ value: 0.05, matched: 1, analyzed: 20, level: 'low' });
   });
 
+  it('counts a Chinese phrase worded another way, but not one shared word or an unrelated title (BENCHMARK-COVERAGE)', () => {
+    const keywords = ['上班族快手晚餐', '15分钟晚餐', '工作日晚餐'];
+    // 打工人快手晚餐 shares 快手/手晚/晚餐 (3 of 6 pairs) with the first keyword; 15分钟晚餐 is named verbatim; 晚餐 recurs in
+    // all three keywords, so a title with it alone counts too.
+    const series = [post('打工人快手晚餐｜青椒小炒鸡肉片🍛'), post('打工人快手晚餐 | 菜多多韩式拌饭'), post('下班后15分钟晚餐搞定'),
+      post('打工人晚餐｜青椒肉丝🔥巨下饭'), post('一人食｜腊肠菌菇鸡腿饭')];
+    expect(topicRelevance(series, keywords)).toEqual({ value: 0.8, matched: 4, analyzed: 5, level: 'high' });
+    // Clickbait titles that never name the niche stay low, whatever the account really cooks.
+    const clickbait = [post('答应我！一定要试试这道菜！！', 'a'), post('分享300碗拌米饭🥣day222碗！', 'b'), post('好吃到破防😭求你们都去做！！', 'c')];
+    expect(topicRelevance(clickbait, keywords)).toMatchObject({ value: 0, level: 'low' });
+    // A pair counts alone only when two keywords share it; one short keyword stays verbatim.
+    expect(topicRelevance([post('今天吃晚饭')], ['晚餐'])).toMatchObject({ matched: 0 });
+    expect(topicRelevance([post('一人食｜腊肠饭')], ['上班族快手晚餐', '工作日晚餐'])).toMatchObject({ matched: 0 });
+    expect(topicRelevance([post('今天吃晚餐')], ['晚餐'])).toMatchObject({ matched: 1 });
+  });
+
   it('says nothing without keywords or titled posts (unknown, not "low")', () => {
     expect(topicRelevance([post('hardanger')], [])).toBeNull();
     expect(topicRelevance([post()], ['hardanger'])).toBeNull();

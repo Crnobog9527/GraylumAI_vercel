@@ -11,7 +11,10 @@ AS $function$
 DECLARE total bigint;calls jsonb;
 BEGIN
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN RAISE EXCEPTION 'BILL2_STUCK_CALLS_DENIED';END IF;
- SELECT count(*) INTO total FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id WHERE bill2_payg_call_stuck(c,r);
+ -- 0405: the conditions of bill2_payg_call_stuck that do not depend on the clock come first and use the partial index
+ -- bill2_calls_payg_unsettled, so only calls still waiting for a cost are examined; the predicate still decides each one.
+ SELECT count(*) INTO total FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id
+  WHERE c.call_kind='model' AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND c.selected_cost_usd IS NULL AND NOT c.provider_rejected AND r.state='cost_pending' AND bill2_payg_call_stuck(c,r);
  -- Content-free evidence only: statuses and reasons, never bodies or conversation text.
  SELECT coalesce(jsonb_agg(x ORDER BY x->>'dispatchedAt'),'[]') INTO calls FROM (
   SELECT jsonb_build_object('callId',c.id,'runId',r.id,'actorId',r.actor_id,'model',c.model,'phase',c.payload->>'phase',
@@ -21,7 +24,8 @@ BEGIN
      'httpStatus',CASE WHEN rc.payload#>>'{transport,httpStatus}' ~ '^[1-5][0-9]{2}$' THEN (rc.payload#>>'{transport,httpStatus}')::integer END,
      'rejectedReason',rc.payload->>'rejectedReason','observedAt',rc.created_at) ORDER BY rc.created_at),'[]')
     FROM bill2_receipts rc WHERE rc.call_id=c.id)) x
-  FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id WHERE bill2_payg_call_stuck(c,r)
+  FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id
+  WHERE c.call_kind='model' AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND c.selected_cost_usd IS NULL AND NOT c.provider_rejected AND r.state='cost_pending' AND bill2_payg_call_stuck(c,r)
   ORDER BY c.dispatched_at LIMIT p_limit) s;
  RETURN jsonb_build_object('total',total,'calls',calls);
 END $function$;

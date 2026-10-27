@@ -1,6 +1,87 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- Run after fixture.sql in the disposable file-built database, never against a remote database.
 BEGIN;
+-- References for 0406: the two helpers as they were (every node / every shape key walked). The new ones must return the
+-- same value, or fail the same way, for every input below.
+CREATE FUNCTION pg_temp.old_references(v jsonb, ids uuid[]) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $f$
+DECLARE x record;
+BEGIN
+ IF cardinality(ids)=0 OR v IS NULL THEN RETURN false; END IF;
+ IF jsonb_typeof(v)='object' THEN
+  FOR x IN SELECT * FROM jsonb_each(v) LOOP
+   IF x.key IN ('executionId','sourceExecutionId','sourceVersionId','sourceContentId','projectId',
+    'workItemId','roundId','conversationId','sessionId','dependencyId','source_message_id',
+    'sourceScriptId','contentId','draftId','accountProjectId')
+    AND lower(x.value#>>'{}')=ANY(ids::text[]) THEN RETURN true; END IF;
+   IF pg_temp.old_references(x.value,ids) THEN RETURN true; END IF;
+  END LOOP;
+ ELSIF jsonb_typeof(v)='array' THEN
+  FOR x IN SELECT value FROM jsonb_array_elements(v) LOOP
+   IF pg_temp.old_references(x.value,ids) THEN RETURN true; END IF;
+  END LOOP;
+ ELSIF jsonb_typeof(v)='string' AND ((v#>>'{}') IS JSON OBJECT OR (v#>>'{}') IS JSON ARRAY) THEN
+  RETURN pg_temp.old_references((v#>>'{}')::jsonb,ids);
+ END IF;
+ RETURN false;
+END $f$;
+CREATE FUNCTION pg_temp.gen(seed text, depth integer, ids text[]) RETURNS jsonb LANGUAGE plpgsql AS $f$
+DECLARE r integer:=('x'||substr(md5(seed),1,6))::bit(24)::integer; kind integer:=r%9; id text:=ids[1+(r/9)%array_length(ids,1)];
+ other text:=substr(md5(seed||'o'),1,8)||'-'||substr(md5(seed||'o'),9,4)||'-4'||substr(md5(seed||'o'),13,3)||'-8'||substr(md5(seed||'o'),16,3)||'-'||substr(md5(seed||'o'),19,12);
+ keys text[]:=ARRAY['executionId','sessionId','projectId','note','x','draftId','dependencyId','other','sourceVersionId'];
+ res jsonb:='{}'; arr jsonb:='[]'; i integer;
+BEGIN
+ IF depth>=3 THEN kind:=kind%4; END IF;
+ IF kind=0 THEN RETURN to_jsonb(id);
+ ELSIF kind=1 THEN RETURN to_jsonb(upper(id));
+ ELSIF kind=2 THEN RETURN to_jsonb(other);
+ ELSIF kind=3 THEN RETURN to_jsonb(r);
+ ELSIF kind=4 THEN
+  FOR i IN 1..3 LOOP res:=res||jsonb_build_object(keys[1+((r/7)+i*5)%9],pg_temp.gen(seed||'k'||i,depth+1,ids)); END LOOP; RETURN res;
+ ELSIF kind=5 THEN
+  FOR i IN 1..3 LOOP arr:=arr||jsonb_build_array(pg_temp.gen(seed||'a'||i,depth+1,ids)); END LOOP; RETURN arr;
+ ELSIF kind=6 THEN RETURN to_jsonb(jsonb_build_object('executionId',id)::text);
+ ELSIF kind=7 THEN RETURN to_jsonb(replace(jsonb_build_object('sessionId',id)::text,left(id,1),'\u00'||to_hex(ascii(left(id,1)))));
+ ELSE RETURN to_jsonb(jsonb_build_array(jsonb_build_object('projectId',other))::text);
+ END IF;
+END $f$;
+CREATE FUNCTION pg_temp.old_fields(v jsonb, shape jsonb) RETURNS jsonb LANGUAGE plpgsql AS $f$
+DECLARE result jsonb; k text; spec jsonb; item jsonb; typ text := shape #>> '{}'; s text := v #>> '{}';
+BEGIN
+  IF jsonb_typeof(shape) = 'object' THEN
+    IF jsonb_typeof(v) IS DISTINCT FROM 'object' THEN RAISE EXCEPTION 'BILL2_ERASURE_INVALID_FINANCIAL_FIELD'; END IF;
+    result := '{}';
+    IF shape ? '$map' THEN
+      FOR k, item IN SELECT * FROM jsonb_each(v) LOOP
+        PERFORM pg_temp.old_fields(to_jsonb(k), shape->'$map');
+        result := result || jsonb_build_object(k, pg_temp.old_fields(item, shape->'$value'));
+      END LOOP;
+    ELSE
+      FOR k, spec IN SELECT * FROM jsonb_each(shape) LOOP
+        IF v ? k THEN result := result || jsonb_build_object(k, pg_temp.old_fields(v->k, spec)); END IF;
+      END LOOP;
+    END IF;
+    RETURN result;
+  ELSIF jsonb_typeof(shape) = 'array' THEN
+    IF jsonb_typeof(v) IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'BILL2_ERASURE_INVALID_FINANCIAL_FIELD'; END IF;
+    result := '[]';
+    FOR item IN SELECT value FROM jsonb_array_elements(v) LOOP
+      result := result || jsonb_build_array(pg_temp.old_fields(item, shape->0));
+    END LOOP;
+    RETURN result;
+  END IF;
+  IF typ = 'boolean' AND jsonb_typeof(v) = 'boolean' THEN RETURN v; END IF;
+  IF typ = 'integer' AND jsonb_typeof(v) = 'number' AND s ~ '^(0|[1-9][0-9]*)$' THEN RETURN v; END IF;
+  IF jsonb_typeof(v) IS DISTINCT FROM 'string' THEN RAISE EXCEPTION 'BILL2_ERASURE_INVALID_FINANCIAL_FIELD'; END IF;
+  IF typ = 'id' AND length(s) > 0 THEN RETURN v; END IF;
+  IF typ = 'hash' AND s ~ '^[a-f0-9]{64}$' THEN RETURN v; END IF;
+  IF typ = 'uuid' AND s ~* '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$' THEN RETURN v; END IF;
+  IF typ = 'currency' AND s ~ '^[A-Z]{3}$' THEN RETURN v; END IF;
+  IF typ = 'decimal' THEN PERFORM bill2_decimal(v); RETURN v; END IF;
+  IF typ = 'timestamp' AND s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.+-]+(Z)?$' THEN
+    PERFORM s::timestamptz; RETURN v;
+  END IF;
+  RAISE EXCEPTION 'BILL2_ERASURE_INVALID_FINANCIAL_FIELD';
+END $f$;
 -- Reference for 0404: erasure_ledger_value as it was before (walks every key of the shape). The new one must return
 -- the same value, or fail, for every metadata object in the database and for the edge cases below.
 CREATE FUNCTION pg_temp.old_ledger_value(v jsonb, shape jsonb) RETURNS jsonb LANGUAGE plpgsql AS $f$
@@ -41,7 +122,7 @@ SET LOCAL track_functions='all';
 DO $$
 DECLARE f jsonb; a uuid; sid uuid; run_id uuid; pre uuid; other uuid; response jsonb;
  started timestamptz; elapsed numeric; before_money jsonb; after_money jsonb; before_other text; after_other text;
- sample jsonb; subject jsonb; key text; expected boolean; actual boolean; uuid_parses bigint; projections bigint; erased_rows bigint; owned_checks bigint;
+ sample jsonb; subject jsonb; key text; expected boolean; actual boolean; uuid_parses bigint; projections bigint; erased_rows bigint; owned_checks bigint; ref_calls bigint; fz jsonb; fids uuid[]; r1 text; r2 text; n_cases integer:=0;
  shape jsonb; bad bigint; md jsonb; one text; two text;
 BEGIN
  SELECT fixture INTO f FROM erasure_perf_test.target;
@@ -107,6 +188,42 @@ BEGIN
  -- the guard trigger per erased row, about 3200 here); the previous one tested every unerased row of the account (about 11200).
  IF owned_checks>erased_rows*5/2 THEN RAISE EXCEPTION 'ERASURE_PERF_LEDGER_SWEEP_TOO_WIDE: % for % rows',owned_checks,erased_rows; END IF;
  IF projections>erased_rows*3/2 THEN RAISE EXCEPTION 'ERASURE_PERF_TOO_MANY_PROJECTIONS: % for % rows',projections,erased_rows; END IF;
+ -- 0406: reference tests visit JSON nodes. The account's other conversation holds 60 materials of about 600 nodes (36000
+ -- nodes); the previous helper walked all of them (about 55000 calls with the rest of the account), the new one looks at each
+ -- value's text once and walks only values that name a deleted id.
+ SELECT coalesce(sum(calls),0) INTO ref_calls FROM pg_stat_xact_user_functions
+  WHERE funcname IN ('content_erasure_references','content_erasure_references_walk');
+ RAISE NOTICE 'DATA-ERASURE: % reference-helper calls',ref_calls;
+ IF ref_calls>15000 THEN RAISE EXCEPTION 'ERASURE_PERF_REFERENCE_WALK_TOO_WIDE: %',ref_calls; END IF;
+ IF ref_calls=0 THEN RAISE EXCEPTION 'ERASURE_PERF_REFERENCE_GUARD_NOT_MEASURING'; END IF;
+ -- content_erasure_references: same answer as the previous walker on 1500 generated documents (ids in the sixth to the
+ -- last position, upper-case ids, ids in nested JSON strings, nested strings that spell an id with unicode escapes).
+ fids:=ARRAY(SELECT ('00000000-0000-4000-8000-'||lpad(g::text,12,'0'))::uuid FROM generate_series(1,6) g);
+ FOR n_cases IN 1..1500 LOOP
+  fz:=pg_temp.gen('doc'||n_cases,0,ARRAY(SELECT x::text FROM unnest(fids) x));
+  IF content_erasure_references(fz,fids) IS DISTINCT FROM pg_temp.old_references(fz,fids) THEN
+   RAISE EXCEPTION 'REFERENCES_CHANGED: % %',fz,fids;
+  END IF;
+  IF pg_temp.old_references(fz,fids) THEN bad:=coalesce(bad,0)+1; END IF;
+ END LOOP;
+ IF bad NOT BETWEEN 100 AND 1400 THEN RAISE EXCEPTION 'REFERENCES_FUZZ_ONE_SIDED: %',bad; END IF;
+ IF content_erasure_references(NULL,fids) IS NOT FALSE OR content_erasure_references('{"executionId":"x"}',ARRAY[]::uuid[]) IS NOT FALSE
+  OR content_erasure_references('{"executionId":"00000000-0000-4000-8000-000000000001"}',ARRAY[NULL]::uuid[]) IS NOT FALSE
+  OR content_erasure_references('{"executionId":"00000000-0000-4000-8000-000000000001"}',fids) IS NOT TRUE THEN
+  RAISE EXCEPTION 'REFERENCES_EDGE_CHANGED';
+ END IF;
+ -- bill2_erasure_fields: same value, or the same error, as the previous definition for a typical shape and its mutations.
+ shape:='{"a":"id","n":"integer","c":{"d":"boolean","e":["uuid"],"t":"timestamp"},"m":{"$map":"id","$value":{"v":"decimal","h":"hash"}},"cur":"currency"}';
+ FOR md IN SELECT m FROM unnest(ARRAY[
+   '{"a":"x","n":3,"c":{"d":true,"e":["00000000-0000-4000-8000-000000000001"],"t":"2026-10-26T00:00:00Z"},"m":{"k":{"v":"0.5","h":"%s"}},"cur":"USD"}',
+   '{}','{"extra":1}','{"a":1}','{"a":""}','{"n":"3"}','{"n":3.5}','{"c":[]}','{"c":{"e":"x"}}','{"c":{"e":["bad"]}}','{"c":{"t":"yesterday"}}',
+   '{"m":{"k":{"v":"x"}}}','{"m":{"":{"v":"1"}}}','{"m":[]}','{"cur":"usd"}','{"cur":null}','{"c":{"d":"true"}}','{"c":{"d":false,"zzz":1}}',
+   '[]','"x"','null','{"a":"x","c":{"extra":{"deep":[1,2]}}}']::text[]) m0, LATERAL (SELECT replace(m0,'%s',repeat('a',64))::jsonb m) z LOOP
+  r1:=NULL;r2:=NULL;
+  BEGIN r1:=bill2_erasure_fields(md,shape)::text; EXCEPTION WHEN OTHERS THEN r1:='ERR '||SQLERRM; END;
+  BEGIN r2:=pg_temp.old_fields(md,shape)::text; EXCEPTION WHEN OTHERS THEN r2:='ERR '||SQLERRM; END;
+  IF r1 IS DISTINCT FROM r2 THEN RAISE EXCEPTION 'FIELDS_CHANGED: % -> % vs %',md,r1,r2; END IF;
+ END LOOP;
  -- Same result as the specification, row by row: every erased row has exactly the old projection of its original
  -- metadata, its text fields cleared, a stamp, and every other column unchanged; no other ledger row changed.
  SELECT count(*) INTO bad FROM ledger_before b JOIN (
