@@ -7,7 +7,7 @@ import {type FrozenReport} from '../report/contract';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
-import {freezePromptCache,freezeHostPromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {freezePromptCache,freezeHostPromptCache,freezeSharedCacheInto,promptCacheReserveBytes} from './promptCache';
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
 import {currentInputBytes} from './historySelection';
@@ -237,8 +237,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
       '\nHost extraction and write-safety contract (takes precedence):\n' + organizerInstructions;
     }
    }else({modelId,organizerOutput,instructions}=await organizerSelection(admin,session.dialogueModelId,Boolean(policy.real),modelConfiguration,configuration));
-   // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the single system message and is
-   // frozen with this admission; a Skill's cached prefix grows by the same fixed text.
+   // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the frozen system message; a Skill's cached prefix grows by the same text.
    const settingsRead=await settings;
    const brandIdentity=settingsRead.ok?settingsRead.identityGuard??true:true;
    if(brandIdentity){
@@ -257,9 +256,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
    const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
-   // The executor appends these rules (withPrimaryAddenda); admission sizes them too, so a fitting turn never fails later.
-   // VOICE: a chosen writing Skill carries the user's confirmed voice; the executor appends it, so it is sized here too.
-   // Not for host-built turns (mentor, report), whose prompt cache covers the whole system message.
+   // The executor appends these rules and a chosen writing Skill's voice (withPrimaryAddenda); admission sizes them too, so a
+   // fitting turn never fails later. Not for host-built turns (mentor, report), whose prompt cache covers the whole system message.
    const voiceTurn=!hostTurnContext&&!policy.reportGeneration&&!mentorStream&&!stepStream;
    let voice=voiceTurn&&voiceFlagged?await admitVoice(admin,actorId,[moduleId!],true):undefined;
    const {setting:replySetting,rule:replyRule}=await replyRead,positioningRule=replyRule+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
@@ -294,10 +292,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
      ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
-   let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({
-    real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
-    cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions});
+   const sharedCacheWrite=policy.real&&input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration&&
+    row.data.model_id.startsWith('anthropic/')?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined; // PROMPT-CACHE-ALL
+   let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,
+    model:row.data.model_id,instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
+    cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined});
    if(mentorStream&&!stepSummary&&!hostTurnContext?.cardContract)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
    const currentInput=runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext);
    const maxOutputTokens=outputCapacity(row.data,organizerOutput,
@@ -309,7 +308,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let libraryBytes=0,cb=0; // cb: bytes reserved for the Skill catalog's tool and loads
    const admissionToolBytes=(file:boolean,history=false,extra=0)=>libraryBytes+cb+extra+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+(history?mentorHistoryToolBytes()+Math.max(skillFileReserve,MENTOR_HISTORY_RESERVE_BYTES):skillFileReserve):0)+
-    (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+    (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache,sharedCacheWrite));
    const requireCapacity=(text:string,file:boolean,content=currentInput,history=false,extra=0,bytes?:number)=>selectRuntimeHistory([],[{role:'user',content}],
     {instructions:text,inputBytes:limitOf(bytes),historyItems:0,toolBytes:admissionToolBytes(file,history,extra)});
    const skillFileInstructions='\nYou may read at most one declared Skill file in this turn with read_skill_file, '+
@@ -355,7 +354,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(voiceTurn&&candidates.length)voice=await admitVoice(admin,actorId,candidates.map(candidate=>candidate.moduleId));
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
-     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
+     (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache,sharedCacheWrite)),
      instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext,strategyGuide),ownPosts,network:input.network,
       replyLanguage:replySetting,libraryReferences,libraryRetrieval,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),...(voice?{voice:{guide:voice.frozen.guide,profile:voice.profile}}:{})})});
@@ -470,6 +469,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ||freeChat&&!policy.weeklyReview&&await attachFreeChatResearch({admin,real:policy.real!,context,billing,configuration,
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,false,currentInput,false,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
+   freezeSharedCacheInto(context,billing,candidates.length?undefined:sharedCacheWrite);
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
    capReviewAdmission(context,billing,policy.weeklyReview);assertFrozenPayloads(context,billing);

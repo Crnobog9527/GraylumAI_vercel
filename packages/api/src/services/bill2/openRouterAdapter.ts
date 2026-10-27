@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
-import {cachedSystemContent,historyCacheIndex} from './cacheMessages';
+import {cacheMarkerCount,cachedSystemContent,historyCacheIndex} from './cacheMessages';
 import {ASK_QUESTION_ARGUMENT_LIMIT,toolArgumentLimit} from '../../shared/agentTurn';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_FRAME_BYTE_LIMIT} from './responseCapacity';
 import {gzipSync} from 'node:zlib';
@@ -173,14 +173,15 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    // The request after the last allowed tool round offers no tool at all: a call in its response is never valid.
    const answerOnly=Boolean(!agentTurn&&!sourceTurn&&options.allowWorkspaceRead&&Array.isArray(parsed?.messages)&&
     (parsed.tools===undefined||Array.isArray(parsed.tools)&&parsed.tools.length===0)&&parsed.messages.some((m:{role?:unknown})=>m?.role==='tool'));
-   const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,agentTurn&&
+   // PROMPT-CACHE-ALL: a free chat or compare request (plain history, allowWorkspaceRead) may mark one history message too.
+   const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,(agentTurn||Boolean(options.allowWorkspaceRead))&&
     identity.model.startsWith('anthropic/')&&identity.providerLimits.cacheWriteUsdPerMillion!==undefined):-1;
    // These routing constraints must already be in the frozen request bytes.
    if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&key!=='plugins'&&!((options.allowWorkspaceRead||agentTurn)&&key==='tools')) ||
      !webOffOnly(parsed) ||
      (parsed.tools!==undefined&&!agentTurn&&!workspaceTools.safeParse(parsed.tools).success) ||
      (agentTurn&&(parsed.parallel_tool_calls!==undefined||!Array.isArray(parsed.messages)||!agentHistoryPaired(parsed.messages))) ||
-     parsed.model!==identity.model || !((parsed.stream===false&&parsed.stream_options===undefined)||(parsed.stream===true&&JSON.stringify(parsed.stream_options)===JSON.stringify({include_usage:true}))) || parsed.store!==false || !Array.isArray(parsed.messages) ||
+     parsed.model!==identity.model || !((parsed.stream===false&&parsed.stream_options===undefined)||(parsed.stream===true&&JSON.stringify(parsed.stream_options)===JSON.stringify({include_usage:true}))) || parsed.store!==false || !Array.isArray(parsed.messages) || cacheMarkerCount(parsed.messages)>3 ||
      parsed.provider?.allow_fallbacks!==false || parsed.provider?.require_parameters!==true ||
      JSON.stringify(parsed.provider)!==JSON.stringify(quote.routing) ||
      !Number.isSafeInteger(parsed.max_tokens??parsed.max_completion_tokens) || (parsed.max_tokens??parsed.max_completion_tokens)<1 ||

@@ -89,11 +89,26 @@ it.each([
   expect((await runtimeAdmissionService(f.user,f.admin,policy).prepare(f.input)).context).not.toHaveProperty('promptCache');
  }else expect((await f.service.prepare(f.input)).context).not.toHaveProperty('promptCache');
 });
-it('ordinary role is never marked even on Anthropic with a write price',async()=>{
+it('PROMPT-CACHE-ALL: a real ordinary turn freezes its whole admission-time system text as the v3 shared prefix',async()=>{
  const f=fixture();
  const reasoning=configuredReasoning(f.row.model_id).reasoning;
  f.row.config.reasoning={...reasoning,catalog:reasoning.catalog!,route:reasoning.route!};
  const result=await f.service.prepare({...f.input,selection:{kind:'ordinary',modelId}});
+ const context=runtimeContext.parse(result.context);
+ expect(context.promptCache).toEqual({version:'prompt-cache-v3',systemPrefixChars:context.instructions.length,
+  systemPrefixSha256:createHash('sha256').update(context.instructions).digest('hex'),historyMarker:true});
+ expect(result.billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(result.context)).digest('hex'));
+ expect(await f.service.prepare({...f.input,selection:{kind:'ordinary',modelId}})).toEqual(result);
+});
+it.each([{model:'google/test',write:'2.5'},{model:'anthropic/test',write:undefined}])('ordinary turn stays unmarked when ineligible: %j',async ({model,write})=>{
+ const f=fixture(model,write);
+ const reasoning=configuredReasoning(f.row.model_id).reasoning;
+ f.row.config.reasoning={...reasoning,catalog:reasoning.catalog!,route:reasoning.route!};
+ const policy=write!==undefined?f.policy:{...f.policy,real:{...f.policy.real!,callPolicies:f.policy.real!.callPolicies.map(q=>{
+  const providerLimits={...q.providerLimits,cacheWriteUsdPerMillion:undefined};
+  return {...q,providerLimits,upperUsd:openRouterBound(providerLimits,100).upperUsd};
+ })}};
+ const result=await runtimeAdmissionService(f.user,f.admin,policy).prepare({...f.input,selection:{kind:'ordinary',modelId}});
  expect(result.context).not.toHaveProperty('promptCache');
 });
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
