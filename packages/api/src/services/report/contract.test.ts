@@ -33,7 +33,8 @@ it('accepts report input 196608 and legacy snapshots; rejects +1 and non-report 
   expect(PURPOSE_INPUT_CAPS.report).toBe(196608);
   expect(PURPOSE_INPUT_CAPS.interactive).toBe(90000);
   expect(frozenPurposeBudget.parse({ purpose: 'report', inputBytes: 196608, historyItems: 0 }).inputBytes).toBe(196608);
-  for (const [purpose, inputBytes] of [['report', 196609], ['interactive', 112001], ['organize', 112001]]) {
+  // The research turn's interactive ceiling is 150000 (RESEARCH_TURN_INPUT_CAP); nothing but report goes beyond it.
+  for (const [purpose, inputBytes] of [['report', 196609], ['interactive', 150001], ['organize', 112001]]) {
     expect(frozenPurposeBudget.safeParse({ purpose, inputBytes, historyItems: 0 }).success).toBe(false);
   }
   expect(frozenPurposeBudget.safeParse({ purpose: 'report', inputBytes: 90000, historyItems: 0 }).success).toBe(true);
