@@ -45,6 +45,7 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     await db.query(read('0387_bill2_payload_read_once.sql')); // restore the DB-100 C2 single payload read
     await db.query(read('0391_credit_available.sql')); // restore the shared available-credits formula (MAINT-P4)
     await db.query(read('0398_test_window_settlement_order.sql')); // restore the DB-PERF round-3 window-before-(201,1) order
+    await db.query(read('0416_db_rw_a_shared_row_locks.sql')); // restore the DB-RW-A claim with its switched start-threshold row lock
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);
