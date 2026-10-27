@@ -170,14 +170,26 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
 
   // 停止: one fixed request per page, resent on an unconfirmed answer, then a bounded status follow-up.
   const [stopPhase, setStopPhase] = useState<ReportStopPhase>("idle");
+  const [stopConfirmation, setStopConfirmation] = useState(false);
+  const stopAnswer = useRef<((confirmed: boolean) => void) | null>(null);
+  const answerStop = (confirmed: boolean) => {
+    const answer = stopAnswer.current;
+    stopAnswer.current = null;
+    setStopConfirmation(false);
+    answer?.(confirmed);
+  };
+  useEffect(() => () => { stopAnswer.current?.(false); stopAnswer.current = null; }, []);
   const latestStop = useRef({ cancel: cancel.mutateAsync, refetch: status.refetch });
   latestStop.current = { cancel: cancel.mutateAsync, refetch: status.refetch };
   const stopper = useMemo(() => reportStopController({
     cancel: async request => {
       const result = await latestStop.current.cancel(request);
       if (result?.state !== "confirmation_required") return result;
-      if (!window.confirm("今天已停止过 2 次，本次将按已生成部分扣费（不超过 500 积分）"))
-        return { state: "confirmation_declined" };
+      const confirmed = await new Promise<boolean>(resolve => {
+        stopAnswer.current = resolve;
+        setStopConfirmation(true);
+      });
+      if (!confirmed) return { state: "confirmation_declined" };
       return latestStop.current.cancel({ ...request, confirmed: true });
     },
     reread: async () => (await latestStop.current.refetch()).data?.state ?? null,
@@ -218,6 +230,9 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     start: () => void run("start"),
     restart: () => void run("restart"),
     stop: () => void stop(),
+    stopConfirmation,
+    confirmStop: () => answerStop(true),
+    cancelStop: () => answerStop(false),
     /** The stop request was not confirmed: 停止 resends the same request. */
     stopUnconfirmed: stopPhase === "unconfirmed" && stopper.executionId() === executionId,
     retryStop: () => void retryStop(),
