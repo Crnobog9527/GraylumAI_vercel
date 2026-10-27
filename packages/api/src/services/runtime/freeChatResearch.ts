@@ -3,7 +3,7 @@
 // reply may call the general research tools (social_search, social_account, web_search, web_fetch) up to three times,
 // without asking first, billed per subcall like the positioning tools. Admission decides once and freezes it with the run:
 // the admin switch, the research switches, vendor routes and prices (admitResearchTurn), three more tool rounds and model
-// calls, the subcall allowance, and the 112000-byte input ceiling of a research turn. Without any of these the reply
+// calls, the subcall allowance, and the 150000-byte input ceiling of a research turn. Without any of these the reply
 // carries no research tool at all; nothing here can refuse the turn itself.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { rowsFor, type ConfigurationRows } from './settingsRows';
