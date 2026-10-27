@@ -13,6 +13,8 @@ const row = z.object({ actor_id: z.string().uuid(), run_id: z.string().uuid(), c
 type Summary = { success: boolean; scanned: number; cancelled: number; recovered: number; scrubbed: number; failed: number;
   /** Reviews whose saved, unjudged bodies were judged again before settlement. */
   rejudged: number;
+  /** Reviews paused for 24 hours that were ended (their unused fixed fee is refunded by the end-review settlement). */
+  endedPaused: number;
   /** Left for the next run when the time limit was reached. */
   deferred: number };
 const noTransport: BillingTransport = {
@@ -33,7 +35,7 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
    * still be streaming it (a lookup on a live call would use up its recovery attempts); one without a deadline waits for
    * the daily run. Unset (the daily run): every listed call. Undispatched calls past their deadline are never held back. */
   dispatchedGraceMs?: number } = {}): Promise<Summary> {
-  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0 };
+  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0, endedPaused: 0 };
   const now = options.now ?? Date.now;
   const limit = options.limit ?? 50;
   // The cron route has 60 seconds in total and runs other reconciliations alongside (#954 review).
@@ -105,6 +107,25 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   }
   if (!compareDone) listedAll = false;
   if (listingFailed) summary.success = false;
+  // Owner 2026-10-27: a review paused for 24 hours is ended like the user's "end review" (same close and fee settlement),
+  // so the unused fixed fee comes back. After the re-judging above, so no saved body is finalized unjudged; the database
+  // function also skips a review that still has an unjudged output, and it is ended on a later run.
+  if (now() + 10_000 <= stopAt) {
+    const expired = await bounded(admin.rpc('fusion_review_end_paused', { p_idle: '24 hours', p_limit: 100 }));
+    const expiredResult = z.object({ ended: z.number().int(), failed: z.number().int(), skipped: z.number().int().default(0) })
+      .safeParse(expired.error ? undefined : expired.data);
+    if (!expiredResult.success) summary.success = false;
+    else {
+      summary.endedPaused += expiredResult.data.ended;
+      if (expiredResult.data.failed > 0) { summary.failed += expiredResult.data.failed; summary.success = false; }
+      // Content-free counts only: a review that cannot be ended (failed) or keeps waiting (skipped) shows in the logs and in the
+      // run's success flag, so a stuck paused review is never silent.
+      if (expiredResult.data.failed > 0 || expiredResult.data.skipped > 0) {
+        logger.warn('billing', 'fusion_paused_review_not_ended',
+          { failed: expiredResult.data.failed, skipped: expiredResult.data.skipped });
+      }
+    }
+  }
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
   // Keep paging (each call bounded, stopping before the per-item reserve) so expired undispatched calls
   // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).

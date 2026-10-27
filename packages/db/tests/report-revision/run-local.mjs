@@ -12,6 +12,7 @@ import {runCases} from './cases.mjs';
 import {runFusionReview} from './fusion-review.mjs';
 import {runFusionBackground} from './fusion-background.mjs';
 import {runFusionFee} from './fusion-fee.mjs';
+import {runFusionPausedEnd} from './fusion-paused-end.mjs';
 import {runReportFee} from './report-fee.mjs';
 const mode=process.argv.slice(2).join(' ');
 const development=mode==='--local-only --development';
@@ -76,6 +77,7 @@ try {
  await runFusionReview({db:client,Client,connectionString,report});
  await runFusionBackground({db:client,Client,connectionString,report});
  await runFusionFee({db:client,Client,connectionString,report});
+ await runFusionPausedEnd({db:client,Client,connectionString,report});
  await runReportFee({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
