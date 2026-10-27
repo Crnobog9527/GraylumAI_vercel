@@ -12,6 +12,7 @@ import {runCases} from './cases.mjs';
 import {runFusionReview} from './fusion-review.mjs';
 import {runFusionBackground} from './fusion-background.mjs';
 import {runFusionFee} from './fusion-fee.mjs';
+import {runFusionPausedEnd} from './fusion-paused-end.mjs';
 import {runReportFee} from './report-fee.mjs';
 const mode=process.argv.slice(2).join(' ');
 const development=mode==='--local-only --development';
@@ -38,7 +39,8 @@ const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packag
   'packages/db/migrations/0334_runtime_interrupted_recovery.sql',
   // 0383 patches 0294's review check and 0295's report hold (ARCH-FIX E1 shared quarantine check).
   'packages/db/migrations/0383_credit_grant_quarantine.sql',
-  'packages/db/migrations/0397_report_fee_terminal_settlement.sql'];
+  'packages/db/migrations/0397_report_fee_terminal_settlement.sql',
+  'packages/db/migrations/0412_report_stop_limit.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -75,6 +77,7 @@ try {
  await runFusionReview({db:client,Client,connectionString,report});
  await runFusionBackground({db:client,Client,connectionString,report});
  await runFusionFee({db:client,Client,connectionString,report});
+ await runFusionPausedEnd({db:client,Client,connectionString,report});
  await runReportFee({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');

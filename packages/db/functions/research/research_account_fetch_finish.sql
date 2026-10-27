@@ -78,4 +78,18 @@ BEGIN
   WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt AND (state='in_progress' OR (state='prepared' AND p_state='failed'));
   IF NOT FOUND AND NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt
     AND state=p_state AND evidence IS NOT DISTINCT FROM p_evidence) THEN RAISE EXCEPTION 'RESEARCH_FETCH_CONFLICT';END IF;
+  -- 0411: the whole verification of this account just completed (this is the only place a fetch ends as succeeded). When the
+  -- answer that ran it did so for links the user pasted (a succeeded supplier operation of that answer for this account, whose
+  -- source is user_message), keep that answer in pasted_executions. The list only ever grows: a later refresh re-claims the
+  -- row and moves its execution_id and state, but never takes this record away. research_benchmark_rounds counts it.
+  IF p_state='succeeded' THEN
+    UPDATE research_account_fetches u SET pasted_executions=array_append(u.pasted_executions,u.execution_id)
+    WHERE u.id=p_fetch AND u.actor_id=a AND u.attempt=p_attempt AND u.state='succeeded' AND u.execution_id IS NOT NULL
+      AND NOT (u.execution_id=ANY(u.pasted_executions))
+      AND EXISTS(SELECT 1 FROM research_plans p JOIN research_operations o ON o.plan_id=p.id
+        WHERE p.execution_id=u.execution_id AND p.actor_id=a AND p.session_id=u.session_id AND p.erased_at IS NULL
+          AND o.erased_at IS NULL AND o.state='succeeded' AND o.result->'args'->'source'->>'kind'='user_message'
+          AND o.result->'call'->>'platform'=u.platform
+          AND research_account_key(u.platform,o.result->'call'->>'query')=research_account_key(u.platform,u.account));
+  END IF;
 END $function$;

@@ -172,10 +172,11 @@ export const runtimeRouter=router({
  prepare:procedure.input(runtimeAdmission).mutation(({ctx,input})=>ctx.admission.prepare(input)),
  cancel:maintenanceProcedure.input(z.object({executionId:z.string().uuid(),
   stopAt:z.number().int().min(0).max(2147483647).optional(),source:z.enum(['assistant','message','final']).optional(),
-  call:z.number().int().min(1).max(999999999).optional()}).strict()).mutation(async({ctx,input})=>{
-  const r=await ctx.supabaseAdmin!.rpc(input.stopAt===undefined?'runtime_cancel':'runtime_execution',
-   {p_actor_id:ctx.user.id,p_execution_id:input.executionId,...(input.stopAt===undefined?{}:{p_action:'stop',
-    p_result:{stopAt:input.stopAt,...(input.source?{source:input.source}:{}),...(input.call?{call:input.call}:{})}})});
+  call:z.number().int().min(1).max(999999999).optional(),confirmed:z.boolean().optional()}).strict()).mutation(async({ctx,input})=>{
+  const r=await ctx.supabaseAdmin!.rpc('report_stop',
+   {p_actor_id:ctx.user.id,p_execution_id:input.executionId,p_confirmed:input.confirmed===true,
+    p_stop:input.stopAt===undefined?null:{stopAt:input.stopAt,...(input.source?{source:input.source}:{}),
+     ...(input.call?{call:input.call}:{})}});
   if(!r.error&&r.data?.state==='stopped_pending_result')return executeOriginalExecution({
    admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
    authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,

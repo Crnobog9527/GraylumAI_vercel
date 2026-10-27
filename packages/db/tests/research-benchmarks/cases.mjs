@@ -50,11 +50,11 @@ const post = (days,views,extra={}) => ({id:randomUUID(),publishedAt:new Date(Dat
 export async function runCases({db,Client,connectionString,report}) {
   const {accountMetrics,classifyAccount,qualifyFetchedAccount,suppliedWholeHistory} = await benchmarkCode();
   /** Supplier evidence → benchmark_fetch's own computation → the fetch cache, exactly as the tool does it. */
-  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish,complete=true,pages,pageId}) {
+  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish,complete=true,pages,pageId,platform='tiktok'}) {
     // As benchmark_fetch: claim and mark sent, then one subcall per kind under its stable operation id.
     // As benchmark_fetch: a later page's repeat of an earlier page's post is dropped (the profile counts distinct posts).
     if (pages) posts = pages.reduce((all,page)=>[...all,...page.filter(item=>!all.some(seen=>seen.id===item.id))],[]);
-    const claim = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e,'tiktok',account,refresh??null);
+    const claim = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e,platform,account,refresh??null);
     assert.equal(claim.claimed,true);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,claim.fetchId,claim.attempt),true);
     // The profile's own post count decides "whole history", as in production (complete: it reports exactly these).
@@ -74,12 +74,12 @@ export async function runCases({db,Client,connectionString,report}) {
     const now = new Date();
     const profileItem = {ref:profile+'#1',fields,missing:[]};
     const metrics = accountMetrics({profile:profileItem,posts:items,complete:suppliedWholeHistory(profileItem,items)},now);
-    let evidence = {platform:'tiktok',account,metrics,fetchedAt:now.toISOString(),
+    let evidence = {platform,account,metrics,fetchedAt:now.toISOString(),
       classification:qualifyFetchedAccount(metrics,classifyAccount(metrics,growth,now))};
     if (tamper) evidence = tamper(structuredClone(evidence));
     const finish = (client=db) => rpc(client,'research_account_fetch_finish',f.actor,claim.fetchId,claim.attempt,'succeeded',evidence);
     if (!deferFinish) await finish();
-    return {fetchId:claim.fetchId,evidence,postOp,profile,finish};
+    return {fetchId:claim.fetchId,attempt:claim.attempt,evidence,postOp,profile,finish};
   }
   const imitable = {followers:50000,posts:[post(2,9000),post(5,11000),post(9,10000)]};
   const failures = [];

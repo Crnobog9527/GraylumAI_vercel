@@ -140,7 +140,10 @@ export function stoppedCut(result: { stopped?: boolean; completeness?: string })
 export async function sendStop(request: StopRequest | null, cancel: (request: StopRequest) => Promise<unknown>) {
   if (!request) return null;
   try {
-    return stopStillSaving(await cancel(request)) ? "saving" as const : "settled" as const;
+    const result = await cancel(request);
+    if (result && typeof result === "object" && "state" in result && result.state === "confirmation_declined")
+      return "declined" as const;
+    return stopStillSaving(result) ? "saving" as const : "settled" as const;
   } catch {
     return "unconfirmed" as const;
   }
