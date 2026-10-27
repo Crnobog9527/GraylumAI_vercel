@@ -3976,7 +3976,7 @@
   "fn:runtime_history_available_before_memo(uuid)": "9e2bb0b08c8b",
   "fn:runtime_interrupt_capacity(uuid,uuid,bigint,text)": "1875e9ebe384",
   "fn:runtime_interrupted_recovery(uuid,uuid,bigint,integer)": "1dd4034976c8",
-  "fn:runtime_library_propagate(uuid,integer)": "c120a0811650",
+  "fn:runtime_library_propagate(uuid,integer)": "7880fb6068b3",
   "fn:runtime_library_read(uuid,uuid,text)": "a4215b8231dc",
   "fn:runtime_library_references_freeze()": "ec77142388c8",
   "fn:runtime_library_sources_gone(uuid,uuid[])": "77045a080c05",

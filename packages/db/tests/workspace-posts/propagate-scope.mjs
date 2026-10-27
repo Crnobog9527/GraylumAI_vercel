@@ -6,6 +6,8 @@ export async function propagateScopeCases({c,report}){
  const scope=`WITH RECURSIVE reach(id) AS (
    SELECT t.execution_id FROM runtime_tool_calls t WHERE t.result->>'kind'='my_posts'
    UNION SELECT ex.id FROM runtime_executions ex WHERE ex.payload->>'ownPosts'='true'
+    AND EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.name='read_source'
+     AND t.erased_at IS NOT NULL AND t.result IS NULL)
    UNION SELECT dep.execution_id FROM runtime_history_dependencies dep JOIN reach r ON dep.dependency_id=r.id
   ) SELECT id FROM reach`;
  // The scope is a necessary condition: on everything the suites above created (own posts, descendants through
