@@ -93,7 +93,7 @@ function ReviewCard({ review }: { review: Review }) {
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">{formatDay(review.periodStart)} 这一周</h3>
         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {review.status === 'claimed' ? '正在生成…' : review.notice ?? (review.status === 'skipped' ? '这一周没有复盘' : '')}</span>
+          {review.notice ?? (review.status === 'claimed' ? '正在生成…' : review.status === 'skipped' ? '这一周没有复盘' : '')}</span>
       </header>
       {review.body && <MessageMarkdown text={review.body} />}
       {weeks.length > 0 && (
