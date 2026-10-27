@@ -37,3 +37,14 @@ it('every real staging rejection fits the 150000 ceiling with at least 8 KB to s
  }
  expect(Math.max(...REJECTED_AT_112000_DEFICITS)+112000).toBe(116339);
 });
+
+it('an ordinary interactive turn stays at 90000: a ceiling above it needs the research block in the same context',async()=>{
+ const {runtimeContext}=await import('./runtimeContext');
+ const base={version:'runtime.v1',sdkVersion:'0.18.0',role:'skill',model:'fixture/m',input:'hi',instructions:'x',maxOutputTokens:100,
+  maxTurns:1,historyItems:0,tools:[],sources:[],network:'deny'};
+ const budget=(inputBytes:number)=>({...base,purposeBudget:{purpose:'interactive',inputBytes,historyItems:0}});
+ expect(runtimeContext.safeParse(budget(90000)).success).toBe(true);
+ const raised=runtimeContext.safeParse(budget(150000));
+ expect(raised.success).toBe(false);
+ expect(JSON.stringify(raised.error?.issues)).toContain('RUNTIME_PURPOSE_INPUT_LIMIT');
+});
