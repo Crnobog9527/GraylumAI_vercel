@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- DB-RW PR-B: catalog version numbers for the Node process cache (db-rw-redesign-v1 section 4).
+-- DB-RW PR-B (number 0414 assigned by the controller): catalog version numbers for the Node process cache (db-rw-redesign-v1 section 4).
 -- Slow-changing, administrator-written catalogs are read on every turn: system settings, the model catalog and the Skill
 -- catalog. A Node process may keep what it read in memory as long as the catalog has not changed since. This migration
 -- gives each catalog one version number that a trigger raises on every change of its tables:
