@@ -4,7 +4,7 @@
 -- Repeatable: additive columns and indexes plus CREATE OR REPLACE functions.
 -- Recovery: stop report admission and cancellation before rolling back the app. Keep these columns,
 -- fees and ledger entries. First resolve every held chargeable stop using its actual cost; the old
--- settlement would otherwise refund it. Then restore the complete pre-0408 report_fee_hold and
+-- settlement would otherwise refund it. Then restore the complete pre-0412 report_fee_hold and
 -- report_fee_settle_internal definitions from the preceding revision and remove report_stop.
 -- Already-settled charges must not be reversed by restoring code.
 BEGIN;
