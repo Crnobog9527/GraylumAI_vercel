@@ -16,7 +16,7 @@ AS $function$
 
 DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
  refs uuid[]; rounds uuid[]; chats uuid[]; research_ids uuid[]; research_plan_ids uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
- remaining bigint:=0; deleted boolean;
+ remaining bigint:=0; deleted boolean; deleted_runs text[]; deleted_pre text[];
 BEGIN
  PERFORM bill2_actor(a);
  -- Runtime writers use session -> execution -> run. NOWAIT prevents inverse
@@ -324,14 +324,25 @@ BEGIN
  UPDATE artifact_work_references SET creation_payload=NULL,source_hash=NULL,erased_at=stamp WHERE erased_at IS NULL AND
   (project_id=ANY(projects) OR source_version_id=ANY(versions));
  UPDATE artifact_projects SET work_title=NULL,account='erased:'||id,erased_at=stamp WHERE id=ANY(projects) AND erased_at IS NULL;
+ -- content_erasure_ledger_owned is true only for a row naming one of this account's content-deleted runs. Collect those
+ -- runs once and test each row's five identities against them with plain comparisons first, so the function (and the guard
+ -- trigger it feeds) only runs for rows that can be owned; ownership is still decided by content_erasure_ledger_owned.
+ deleted_runs:=ARRAY(SELECT r.id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL);
+ deleted_pre:=ARRAY(SELECT r.pre_deduct_id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL
+   AND r.pre_deduct_id IS NOT NULL);
  FOR row IN SELECT * FROM (VALUES
-  ('token_stats','metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('billing_history','reason=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('credit_transactions','description=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2')
+  ('token_stats','content_erased_at=$2'),
+  ('billing_history','reason=NULL,content_erased_at=$2'),
+  ('credit_transactions','description=NULL,content_erased_at=$2'),
+  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,content_erased_at=$2')
  ) x(tbl,assignment) LOOP
-  EXECUTE format('UPDATE public.%I t SET %s WHERE t.user_id=$1 AND t.content_erased_at IS NULL AND content_erasure_ledger_owned(to_jsonb(t))',
-   row.tbl,row.assignment) USING a,stamp;
+  EXECUTE format('WITH cand AS MATERIALIZED (SELECT t.ctid c FROM public.%1$I t CROSS JOIN LATERAL (SELECT to_jsonb(t) j) x
+    WHERE t.user_id=$1 AND t.content_erased_at IS NULL
+     AND ((x.j->>''bill2_run_id'')=ANY($3) OR (x.j#>>''{metadata,usage,runId}'')=ANY($3) OR (x.j#>>''{metadata,runId}'')=ANY($3)
+      OR (x.j->>''id'')=ANY($4) OR (x.j#>>''{metadata,preDeductId}'')=ANY($4))
+     AND content_erasure_ledger_owned(x.j))
+   UPDATE public.%1$I t SET %2$s FROM cand WHERE t.ctid=cand.c',
+   row.tbl,row.assignment) USING a,stamp,deleted_runs,deleted_pre;
  END LOOP;
  -- This status is about content. Unknown money remains on its original run.
  RETURN jsonb_build_object('kind',k,'id',target,'status',CASE WHEN remaining>0 THEN 'review_required' ELSE 'deleted' END,

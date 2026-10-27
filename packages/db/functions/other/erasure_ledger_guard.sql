@@ -43,7 +43,8 @@ BEGIN
  projected:=erasure_ledger_metadata(NEW.metadata);
  IF TG_OP='UPDATE' AND prior->>'content_erased_at' IS NULL
   AND incoming->>'content_erased_at' IS NOT NULL
-  AND projected IS DISTINCT FROM erasure_ledger_metadata(OLD.metadata) THEN
+  AND projected IS DISTINCT FROM (CASE WHEN OLD.metadata IS NOT DISTINCT FROM NEW.metadata THEN projected
+   ELSE erasure_ledger_metadata(OLD.metadata) END) THEN
   RAISE EXCEPTION 'ERASURE_LEDGER_EVIDENCE_CHANGED';
  END IF;
  incoming:=incoming||jsonb_build_object('metadata',projected,
