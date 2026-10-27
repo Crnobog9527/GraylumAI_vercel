@@ -121,3 +121,11 @@ it("a late answer for the first execution's stop does not change the second exec
   expect(s.stop.phase()).toBe("unconfirmed");
   expect(s.stop.executionId()).toBe(second);
 });
+
+it("leaves the report running when the user declines a charge confirmation", async () => {
+  const s = setup(async () => ({ state: "confirmation_declined" }));
+  await s.stop.stop(reply);
+  expect(s.stop.phase()).toBe("idle");
+  await s.stop.stop({ ...reply, text: reply.text + "更多" });
+  expect(s.cancel.mock.calls[1]![0].stopAt).toBe(Array.from(reply.text + "更多").length);
+});

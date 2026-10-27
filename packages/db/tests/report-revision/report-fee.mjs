@@ -414,6 +414,123 @@ export async function runReportFee({db,Client,connectionString,report}) {
   assert.equal(await wallet(db,job.actor),5000);
   report.checks.push('report price: the daily job settles ended executions and refunds a price stuck for 3 days');
 
+  // REPORT-GEN stop limit: the failure between user stops must not use a free stop.
+  const limit = await seed(db);
+  await setBalance(db,limit.actor,5000);
+  const one = await execution(db,limit);
+  await assert.rejects(service(db,'report_stop',randomUUID(),one.id,null,true),/DENIED/,'another user cannot stop the report');
+  assert.equal((await service(db,'report_stop',limit.actor,one.id,null,false)).state,'cancelled');
+  assert.equal((await fee(db,one.id)).charged_credits,0);
+  const failure = await execution(db,limit);
+  await service(db,'runtime_cancel_with_code',limit.actor,failure.id,'PROVIDER_UNAVAILABLE');
+  assert.equal((await fee(db,failure.id)).charged_credits,0);
+  const two = await execution(db,limit);
+  assert.equal((await service(db,'report_stop',limit.actor,two.id,null,false)).state,'cancelled');
+  assert.equal((await fee(db,two.id)).charged_credits,0);
+  const three = await execution(db,limit,undefined,false);
+  const call = await rpc(db,'bill2_claim',limit.actor,three.run.run,1,three.run.claimPayload);
+  await rpc(db,'bill2_dispatch',limit.actor,three.run.run,call.id,call.dispatchToken);
+  await db.query('SET session_replication_role=replica');
+  try {
+    await db.query('UPDATE bill2_runs SET session_ref=$2 WHERE id=$1',[three.run.run,limit.session]);
+    await db.query('UPDATE runtime_executions SET billing_run_id=$2 WHERE id=$1',[three.id,three.run.run]);
+  } finally { await db.query('SET session_replication_role=origin'); }
+  await rpc(db,'bill2_record',limit.actor,three.run.run,call.id,{provider:three.run.claimPayload.provider,
+    account:'sandbox',model:three.run.claimPayload.model,protocol:three.run.claimPayload.protocol,
+    providerId:'generation-'+call.id,source:'response',sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),
+    coverage:'request_total',final:true,cost:'0.0004',currency:'USD',usage:{inputTokens:400,outputTokens:0}});
+  assert.equal((await service(db,'report_stop',limit.actor,three.id,null,false)).state,'confirmation_required');
+  assert.equal((await fee(db,three.id)).state,'held');
+  await service(db,'report_stop',limit.actor,three.id,null,true);
+  assert.equal((await fee(db,three.id)).charged_credits,1,'third stop charges rounded actual cost');
+  assert.equal(await wallet(db,limit.actor),4999);
+  await balanced(db,limit.actor,'stop limit');
+  const round = (await db.query("SELECT payload#>>'{reportGeneration,roundId}' id FROM runtime_executions WHERE id=$1",[three.id])).rows[0].id;
+  const retryPartial = await execution(db,limit,undefined,true,round);
+  assert.equal((await fee(db,retryPartial.id)).state,'held','a partially charged stop permits another report');
+  const aged = await execution(db,limit);
+  await db.query("UPDATE report_fees SET user_stopped_at=clock_timestamp()-interval '24 hours' WHERE execution_id IN ($1,$2)",[one.id,two.id]);
+  assert.notEqual((await service(db,'report_stop',limit.actor,aged.id,null,false)).state,'confirmation_required',
+    'stops at least 24 hours old do not count');
+  const raceActor = await seed(db);
+  await setBalance(db,raceActor.actor,5000);
+  const prior = await execution(db,raceActor);
+  await service(db,'report_stop',raceActor.actor,prior.id,null,false);
+  const otherSession = randomUUID();
+  const otherDraft = await rpc(db,'bill2_create_draft',raceActor.actor);
+  await db.query(`INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload)
+    VALUES($1,$2,$3,$4,'{}')`,[otherSession,raceActor.actor,{kind:'positioning_draft',draftId:otherDraft},randomUUID()]);
+  const races = [await execution(db,raceActor),await execution(db,{...raceActor,session:otherSession})];
+  const workers = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all(workers.map(c=>c.connect()));
+  try {
+    const pids = await Promise.all(workers.map(async c=>{
+      const pid = (await c.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+      await c.query('SET ROLE service_role');
+      await c.query("SET statement_timeout='10s'");
+      return pid;
+    }));
+    await db.query('BEGIN');
+    let pendingRace;
+    let results;
+    try {
+      await db.query('SELECT id FROM profiles WHERE id=$1 FOR UPDATE',[raceActor.actor]);
+      pendingRace = Promise.all(workers.map((c,i)=>rpc(c,'report_stop',raceActor.actor,races[i].id,null,false)));
+      let blocked = 0;
+      for (let i=0;i<100 && blocked<2;i++) {
+        blocked = Number((await db.query(`SELECT count(*) n FROM unnest($1::int[]) pid
+          WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,[pids])).rows[0].n);
+        if (blocked<2) await new Promise(resolve=>setTimeout(resolve,25));
+      }
+      assert.equal(blocked,2,'both stops wait on the same user lock');
+      await db.query('COMMIT');
+      results = await pendingRace;
+    } catch (error) {
+      await db.query('ROLLBACK');
+      await pendingRace?.catch(()=>{});
+      throw error;
+    }
+    assert.equal(results.filter(x=>x.state==='confirmation_required').length,1,'concurrent stops cannot both be free');
+    const winner = results.findIndex(x=>x.state==='confirmation_required');
+    await rpc(workers[winner],'report_stop',raceActor.actor,races[winner].id,null,true);
+    assert.equal((await db.query('SELECT count(*)::int n FROM report_fees WHERE actor_id=$1 AND stop_chargeable',[raceActor.actor])).rows[0].n,1);
+  } finally { await Promise.all(workers.map(c=>c.end())); }
+  const pendingActor = await seed(db);
+  await setBalance(db,pendingActor.actor,5000);
+  for (let i=0;i<2;i++) {
+    const x = await execution(db,pendingActor);
+    await service(db,'report_stop',pendingActor.actor,x.id,null,false);
+  }
+  const pendingStop = await execution(db,pendingActor,undefined,false);
+  const pendingCall = await rpc(db,'bill2_claim',pendingActor.actor,pendingStop.run.run,1,pendingStop.run.claimPayload);
+  await rpc(db,'bill2_dispatch',pendingActor.actor,pendingStop.run.run,pendingCall.id,pendingCall.dispatchToken);
+  await db.query('SET session_replication_role=replica');
+  try {
+    await db.query('UPDATE bill2_runs SET session_ref=$2 WHERE id=$1',[pendingStop.run.run,pendingActor.session]);
+    await db.query('UPDATE runtime_executions SET billing_run_id=$2 WHERE id=$1',[pendingStop.id,pendingStop.run.run]);
+  } finally { await db.query('SET session_replication_role=origin'); }
+  const pendingResult = await service(db,'report_stop',pendingActor.actor,pendingStop.id,null,true);
+  assert.equal(pendingResult.state,'cost_pending');
+  assert.equal((await fee(db,pendingStop.id)).state,'held','unknown cost never refunds early');
+  await db.query('SELECT report_fee_settle_internal($1,true)',[pendingStop.id]);
+  assert.equal((await fee(db,pendingStop.id)).state,'held','deletion cannot refund an unknown-cost stop early');
+  // Fixture executions are inserted without admission's run/session binding; erasure validates it.
+  await db.query('SET session_replication_role=replica');
+  try { await db.query(`UPDATE bill2_runs b SET session_ref=e.session_id FROM runtime_executions e
+    WHERE e.actor_id=$1 AND e.billing_run_id=b.id AND b.session_ref IS NULL`,[pendingActor.actor]); }
+  finally { await db.query('SET session_replication_role=origin'); }
+  const erasedPending = await erase(db,pendingActor,'artifact',pendingActor.project);
+  assert.ok(['deleted','review_required'].includes(erasedPending.status));
+  assert.equal((await fee(db,pendingStop.id)).state,'held','content deletion preserves the pending stop charge');
+  await rpc(db,'bill2_record',pendingActor.actor,pendingStop.run.run,pendingCall.id,{provider:pendingStop.run.claimPayload.provider,
+    account:'sandbox',model:pendingStop.run.claimPayload.model,protocol:pendingStop.run.claimPayload.protocol,
+    providerId:'generation-'+pendingCall.id,source:'response',sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),
+    coverage:'request_total',final:true,cost:'0.0004',currency:'USD',usage:{inputTokens:400,outputTokens:0}});
+  await service(db,'runtime_financial_recovery',pendingActor.actor,pendingStop.id,true);
+  assert.equal((await fee(db,pendingStop.id)).charged_credits,1,'recovery charges actual cost once known');
+  await balanced(db,pendingActor.actor,'pending stop');
+  report.checks.push('report stop limit: two free stops, failure excluded, third stop requires confirmation and charges actual cost');
+
   // A report without a price (admitted before 0295) keeps per-call billing.
   const old = await createFixture(db,{actor:f.actor});
   const oc = await rpc(db,'bill2_claim',f.actor,old.run,1,old.claimPayload);
@@ -427,7 +544,8 @@ export async function runReportFee({db,Client,connectionString,report}) {
   for (const role of ['anon','authenticated']) {
     await db.query('SET ROLE '+role);
     try {
-      for (const sql of ['SELECT report_fee_settle($1,$1)','SELECT report_fee_settle_due(1)','SELECT report_fixed_price()'])
+      for (const sql of ['SELECT report_fee_settle($1,$1)','SELECT report_fee_settle_due(1)','SELECT report_fixed_price()',
+        'SELECT report_stop($1,$1,NULL,false)'])
         await assert.rejects(db.query(sql,sql.includes('$1')?[randomUUID()]:[]),/permission denied/,role+' '+sql);
     } finally { await db.query('RESET ROLE'); }
   }

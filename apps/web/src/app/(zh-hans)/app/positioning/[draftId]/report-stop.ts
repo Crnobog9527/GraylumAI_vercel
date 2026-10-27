@@ -47,6 +47,7 @@ export function reportStopController(deps: {
     const outcome = await sendStop(sent, deps.cancel);
     // A late answer for an earlier execution's stop never changes the current one.
     if (request !== sent) return;
+    if (outcome === "declined") { request = null; chain++; set("idle"); return; }
     set(outcome === "unconfirmed" ? "unconfirmed" : outcome === "saving" ? "saving" : "settled");
     follow(++chain, 0);
   };

@@ -168,7 +168,13 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const latestStop = useRef({ cancel: cancel.mutateAsync, refetch: status.refetch });
   latestStop.current = { cancel: cancel.mutateAsync, refetch: status.refetch };
   const stopper = useMemo(() => reportStopController({
-    cancel: request => latestStop.current.cancel(request),
+    cancel: async request => {
+      const result = await latestStop.current.cancel(request);
+      if (result?.state !== "confirmation_required") return result;
+      if (!window.confirm("今天已停止过 2 次，本次将按已生成部分扣费（不超过 500 积分）"))
+        return { state: "confirmation_declined" };
+      return latestStop.current.cancel({ ...request, confirmed: true });
+    },
     reread: async () => (await latestStop.current.refetch()).data?.state ?? null,
     schedule: (delay, callback) => timers.current?.schedule(delay, callback),
     onChange: setStopPhase,
@@ -178,6 +184,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const frozen = { ...live, stopped: true, stalled: true };
     setLive(frozen);
     await stopper.stop(frozen);
+    if (stopper.phase() === "idle") setLive(current => current?.executionId === live.executionId
+      ? { ...current, stopped: live.stopped, stalled: live.stalled } : current);
   };
 
   return {

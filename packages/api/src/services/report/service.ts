@@ -27,7 +27,7 @@ export const reportCodes = new Set(['OPC_BUSINESS_ARCHIVED', 'REPORT_DISABLED', 
 /**
  * A saved report execution blocks a new paid start while it is a complete report, or still going or waiting for
  * credits/resume. One that ended without a complete report (failed, cut off, stopped, empty) had its fixed price
- * refunded (0295), so a new start is allowed and pays the price again (Owner 2026-10-17 "重新生成照收全价").
+ * settled under the report stop policy, so a new start is allowed and pays the price again.
  */
 export function reportBlocksNewStart(saved: { state?: string; result?: { body?: string; completeness?: string } | null;
   context?: { reportGeneration?: unknown } }) {
@@ -163,7 +163,7 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
       if (!parsed.success) reportError(new Error('REPORT_EXECUTION_REQUIRED'));
       const report = parsed.data;
       const result = saved.result as { body?: string; completeness?: string } | null;
-      // The fixed price (0295) settles once the report ended: charged for a complete report, refunded otherwise.
+      // Settle the held report price using the terminal outcome and the user-stop policy.
       // Rollout: before 0295 the function does not exist (PGRST202); reports then show no price, as before.
       const settled = await admin.rpc('report_fee_settle', { p_actor_id: await actor(), p_execution_id: executionId });
       if (settled.error && settled.error.code !== 'PGRST202') reportError(settled.error);
