@@ -48,7 +48,8 @@ import {admissionDeadline,admittedOutputLimit,timedAdmission} from './admissionL
 import {freezeAdmissionPayg} from './admissionPayg';
 import {readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
-import {admitWithRepair,keptCause} from './admissionRepair';
+import {admitWithRepair,isAdmitFunction,keptCause} from './admissionRepair';
+import {admission} from './admitSplit';import {readRwV2} from './rwV2';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
@@ -124,8 +125,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
   if(r.error?.code==='P0001'&&r.error.message==='OPC_BUSINESS_ARCHIVED')throw new StagingAccessError('OPC_BUSINESS_ARCHIVED');
   if(r.error)throwIfContentBindingRefused(r.error);
-  if(name==='runtime_admit')throwLibraryRefusal(r.error);
-  if(name==='runtime_admit'&&r.error&&['P0001','PT400'].includes(r.error.code)&&
+  if(isAdmitFunction(name))throwLibraryRefusal(r.error);
+  if(isAdmitFunction(name)&&r.error&&['P0001','PT400'].includes(r.error.code)&&
    (['400: insufficient credits','insufficient credits'].includes(r.error.message)||
     /^积分不足: 需要 [0-9]+, 当前 [0-9]+$/.test(r.error.message)))
    throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
@@ -133,7 +134,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   if(r.error){
    if(policy.reportGeneration&&(r.error.message.startsWith('REPORT_')||
     ['OPC_CAPTURE_PENDING','RUNTIME_SKILL_MODEL_DENIED'].includes(r.error.message)))throw new Error(r.error.message);
-   if(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
+   if(isAdmitFunction(name)&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
    // Preserve SQL business/permission refusals; classify only operational failures.
    if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:keptCause(name,r.error,policy.reportGeneration)});
    stagingRpcFailure(r.error);
@@ -472,8 +473,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
    capReviewAdmission(context,billing,policy.weeklyReview);assertFrozenPayloads(context,billing);
-   const admit=()=>query('runtime_admit',{
-    p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});
+   const admit=admission(readRwV2(await configuration).admitSplit,query,input.sessionId,input.requestId,context,billing);
    try{
     try{return await admitWithRepair(admin,actorId,admit);}// D2: a session held by an earlier round is repaired once
     catch(error){

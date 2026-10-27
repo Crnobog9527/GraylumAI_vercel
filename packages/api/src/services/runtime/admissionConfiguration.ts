@@ -11,6 +11,7 @@ import {PURPOSE_BUDGET_KEY} from './purposeBudgets';
 import {SUMMARY_MODEL_SETTING, SUMMARY_OUTPUT_SETTING} from '../artifacts/summaryPolicy';
 import {LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY} from './libraryAdmission';
 import {OWN_POSTS_SWITCH} from './workspacePosts';
+import {RW_V2_KEY} from './rwV2';
 import {PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING} from './paygHostPolicy';
 import {BILLING_UNIT_SETTING_KEYS} from '../billingUnit';
 import {CHAT_RESEARCH_KEY} from './freeChatResearch';
@@ -34,7 +35,7 @@ export async function readAdmissionConfiguration(admin: SupabaseClient): Promise
       PURPOSE_BUDGET_KEY, SUMMARY_MODEL_SETTING, SUMMARY_OUTPUT_SETTING,
       LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY, OWN_POSTS_SWITCH, 'publish_monitor_enabled',
       PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier,
-      CHAT_RESEARCH_KEY, RESEARCH_THRESHOLDS_KEY, PROVIDER_PRICES_KEY,
+      CHAT_RESEARCH_KEY, RESEARCH_THRESHOLDS_KEY, PROVIDER_PRICES_KEY, RW_V2_KEY,
     ]));
   } catch (error) { return {data: null, error}; }
 }
