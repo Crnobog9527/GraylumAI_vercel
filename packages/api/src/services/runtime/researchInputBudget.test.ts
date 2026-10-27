@@ -115,6 +115,18 @@ it('every other turn keeps the interactive budget: switch off, or research that 
  expect(tooLarge.purposeBudget).toMatchObject({purpose:'interactive',inputBytes:90000});
 });
 
+it('an ordinary interactive turn (no research tools offered) is admitted at the configured 90000, never at the raised ceiling',async()=>{
+ // Research switch on and plenty of room, but the policy does not offer the tools: the budget is the one in runtime_purpose_budgets.
+ skill.text='步'.repeat(100);
+ const f=fixture(true);
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,researchTools:false}).prepare(f.input);
+ const context=runtimeContext.parse(admitted.context);
+ expect(context.research).toBeUndefined();
+ expect(context.purposeBudget).toMatchObject({purpose:'interactive',inputBytes:90000});
+ // And the same turn with the tools is the only one raised.
+ expect((await admit(true,100)).purposeBudget).toMatchObject({purpose:'interactive',inputBytes:RESEARCH_TURN_INPUT_BYTES});
+});
+
 it('a small research turn is frozen at the raised ceiling too, and without purpose budgets nothing is raised',async()=>{
  const small=await admit(true,300);
  expect(small.research).toBeDefined();
