@@ -476,10 +476,13 @@ export async function runReportFee({db,Client,connectionString,report}) {
     try {
       await db.query('SELECT id FROM profiles WHERE id=$1 FOR UPDATE',[raceActor.actor]);
       pendingRace = Promise.all(workers.map((c,i)=>rpc(c,'report_stop',raceActor.actor,races[i].id,null,false)));
+      void pendingRace.catch(()=>{});
       let blocked = 0;
       for (let i=0;i<100 && blocked<2;i++) {
-        blocked = Number((await db.query(`SELECT count(*) n FROM unnest($1::int[]) pid
-          WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,[pids])).rows[0].n);
+        blocked = Number((await db.query(`WITH RECURSIVE waits(root,pid) AS (
+          SELECT pid,pid FROM unnest($1::int[]) pid
+          UNION SELECT waits.root,unnest(pg_blocking_pids(waits.pid)) FROM waits)
+          SELECT count(DISTINCT root) n FROM waits WHERE pid=pg_backend_pid()`,[pids])).rows[0].n);
         if (blocked<2) await new Promise(resolve=>setTimeout(resolve,25));
       }
       assert.equal(blocked,2,'both stops wait on the same user lock');
