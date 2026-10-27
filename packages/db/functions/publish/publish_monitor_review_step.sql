@@ -27,6 +27,12 @@ BEGIN
  END IF;
  IF p_action IN ('observe','skip') AND x.state='completed' THEN
   UPDATE social_review_runs SET status='completed',finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
+  -- Only a completed strategy check consumes a stage change; a skipped one is scheduled again (Owner 2026-10-27).
+  IF r.cadence='quarterly' AND r.business_id IS NOT NULL THEN
+   UPDATE social_coach_profiles SET strategy_check_stages=(SELECT coalesce(jsonb_object_agg(project_id::text,stage),'{}')
+     FROM opc_accounts WHERE actor_id=r.actor_id AND business_id=r.business_id AND erased_at IS NULL),
+    strategy_checked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE actor_id=r.actor_id AND business_id=r.business_id;
+  END IF;
  ELSIF p_action='skip' AND x.result IS NOT NULL THEN
   -- The owner completed after expiry was observed, but billing can still be cost_pending.
   -- Keep the original claim so native financial recovery and the next observe can publish it.

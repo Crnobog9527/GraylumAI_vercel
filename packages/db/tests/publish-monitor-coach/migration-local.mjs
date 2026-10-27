@@ -138,12 +138,26 @@ try {
   await c.query("UPDATE opc_accounts SET stage='growing' WHERE business_id=$1", [weekly.businessId]);
   const [quarterly] = await claim();
   assert.equal(quarterly.cadence, 'quarterly'); assert.equal(quarterly.businessId, weekly.businessId);
-  const stages = await v('SELECT strategy_check_stages v FROM social_coach_profiles WHERE business_id=$1', [weekly.businessId]);
-  assert.ok(Object.values(stages).includes('growing'));
+  const stagesOf = () => v('SELECT strategy_check_stages v FROM social_coach_profiles WHERE business_id=$1', [weekly.businessId]);
+  // A skipped strategy check does not consume the stage change: it is scheduled again.
+  await step(quarterly, 'skip', 'BALANCE_LOW');
+  assert.ok(!Object.values(await stagesOf()).includes('growing'));
+  // A week later (the skip itself starts the next period, so its period key differs from the skipped one).
+  await c.query(`UPDATE social_review_runs SET finished_at=finished_at-interval '7 days 1 minute' WHERE actor_id=$1`, [gold]);
+  const [again] = await claim();
+  assert.equal(again.cadence, 'quarterly'); assert.equal(again.businessId, weekly.businessId);
+  // Completed: the stages seen are recorded and the next due review is no longer a strategy check.
+  await c.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state)
+   VALUES($1,$2,$3,'{}',0,'completed')`, [gold, again.sessionId, again.requestId]);
+  assert.equal((await step(again, 'observe')).state, 'completed');
+  assert.equal((await run(again.id)).status, 'completed');
+  assert.ok(Object.values(await stagesOf()).includes('growing'));
+  await c.query("UPDATE social_review_runs SET finished_at=now()-interval '8 days' WHERE actor_id=$1", [gold]);
+  assert.notEqual((await claim()).find(x => x.businessId === weekly.businessId)?.cadence, 'quarterly');
   await c.query('DELETE FROM social_review_runs WHERE actor_id=$1', [gold]);
   await c.query("UPDATE social_monitor_settings SET auto_review_enabled_at=now()-interval '100 days' WHERE actor_id=$1", [gold]);
   assert.equal((await claim())[0].cadence, 'quarterly');
-  report.checks.push('cadence: monthly after 28 days, quarterly after 91 days or an account stage change, weekly otherwise');
+  report.checks.push('cadence: monthly after 28 days, quarterly after 91 days or a stage change that only a completed check consumes');
   await coach(false);
   await c.query('DELETE FROM social_review_runs WHERE actor_id=$1', [gold]);
 

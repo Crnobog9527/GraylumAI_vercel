@@ -93,10 +93,6 @@ BEGIN
     CASE WHEN cap~'^(0|[1-9][0-9]{0,3})(\.[0-9]{1,6})?$' THEN cap::numeric ELSE 0 END)
    ON CONFLICT(actor_id,business_id,period_start,cadence) DO NOTHING RETURNING * INTO r;
    IF NOT FOUND THEN CONTINUE;END IF;
-   IF cad='quarterly' THEN
-    UPDATE social_coach_profiles SET strategy_check_stages=stages,strategy_checked_at=clock_timestamp(),
-     updated_at=clock_timestamp() WHERE actor_id=a AND business_id=biz;
-   END IF;
    session:=runtime_start(a,r.runtime_request_id,'{"scope":{"kind":"positioning_draft"}}');
    UPDATE social_review_runs SET runtime_session_id=(session->>'sessionId')::uuid WHERE id=r.id RETURNING * INTO r;
    out:=out||jsonb_build_array(publish_monitor_review_claim_item(r));

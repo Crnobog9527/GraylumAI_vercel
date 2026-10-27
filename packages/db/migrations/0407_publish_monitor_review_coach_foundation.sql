@@ -14,7 +14,8 @@
 --     attempts share the review's cost cap: the earlier attempt's known actual cost is subtracted, and an attempt
 --     whose cost is still unknown is not retried (BILL2 recovery owns it, as before).
 --   * publish_monitor_review_claim: unchanged unless system setting publish_monitor_coach_enabled is true; then one
---     review per brand, weekly / monthly (28 days) / quarterly (91 days or a stage change). The coach output carries
+--     review per brand, weekly / monthly (28 days) / quarterly (91 days or a stage change, recorded only when that
+--     check completes, so a skipped check is scheduled again). The coach output carries
 --     businessId, cadence and attempt, which only the coach-aware app (RC-3) accepts: turn the setting on after it.
 --   * publish_monitor_settle_facts(limit) and publish_monitor_review_pack_rows(actor, brand, weeks): database-only
 --     batch and one-round-trip read for the host-built review pack. Nothing calls them until RC-3.
@@ -282,10 +283,6 @@ BEGIN
     CASE WHEN cap~'^(0|[1-9][0-9]{0,3})(\.[0-9]{1,6})?$' THEN cap::numeric ELSE 0 END)
    ON CONFLICT(actor_id,business_id,period_start,cadence) DO NOTHING RETURNING * INTO r;
    IF NOT FOUND THEN CONTINUE;END IF;
-   IF cad='quarterly' THEN
-    UPDATE social_coach_profiles SET strategy_check_stages=stages,strategy_checked_at=clock_timestamp(),
-     updated_at=clock_timestamp() WHERE actor_id=a AND business_id=biz;
-   END IF;
    session:=runtime_start(a,r.runtime_request_id,'{"scope":{"kind":"positioning_draft"}}');
    UPDATE social_review_runs SET runtime_session_id=(session->>'sessionId')::uuid WHERE id=r.id RETURNING * INTO r;
    out:=out||jsonb_build_array(publish_monitor_review_claim_item(r));
@@ -334,6 +331,12 @@ BEGIN
  END IF;
  IF p_action IN ('observe','skip') AND x.state='completed' THEN
   UPDATE social_review_runs SET status='completed',finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
+  -- Only a completed strategy check consumes a stage change; a skipped one is scheduled again (Owner 2026-10-27).
+  IF r.cadence='quarterly' AND r.business_id IS NOT NULL THEN
+   UPDATE social_coach_profiles SET strategy_check_stages=(SELECT coalesce(jsonb_object_agg(project_id::text,stage),'{}')
+     FROM opc_accounts WHERE actor_id=r.actor_id AND business_id=r.business_id AND erased_at IS NULL),
+    strategy_checked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE actor_id=r.actor_id AND business_id=r.business_id;
+  END IF;
  ELSIF p_action='skip' AND x.result IS NOT NULL THEN
   -- The owner completed after expiry was observed, but billing can still be cost_pending.
   -- Keep the original claim so native financial recovery and the next observe can publish it.
