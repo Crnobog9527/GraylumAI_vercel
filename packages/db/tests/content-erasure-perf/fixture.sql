@@ -72,5 +72,12 @@ INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,sour
 INSERT INTO billing_history(user_id,operation_type,amount,reason,metadata)
  SELECT actor,'settle',1,'OTHER_BILLING_PRIVATE',jsonb_build_object('fixture',execution)
  FROM erasure_perf_test.background CROSS JOIN generate_series(1,3) j;
+-- DATA-ERASURE 0404: the deleting account also has older runs that another path (library cleanup, an earlier erasure
+-- step) already content-deleted, with their ledger rows still unerased: 60 runs, 900 billing_history rows. They are
+-- inserted before the runs are marked, so the ledger guard does not erase them on insert.
+INSERT INTO billing_history(user_id,operation_type,amount,reason,metadata)
+ SELECT actor,'settle',1,'OLDER_RUN_LEDGER',jsonb_build_object('runId',run,'fixture',execution)
+ FROM erasure_perf_test.background CROSS JOIN generate_series(1,15) WHERE n=0 AND i<=60;
+UPDATE bill2_runs SET content_deleted_at=now() WHERE id IN (SELECT run FROM erasure_perf_test.background WHERE n=0 AND i<=60);
 ANALYZE;
 COMMIT;

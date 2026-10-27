@@ -7,7 +7,7 @@ SET LOCAL track_functions='all';
 DO $$
 DECLARE f jsonb; a uuid; sid uuid; run_id uuid; pre uuid; other uuid; response jsonb;
  started timestamptz; elapsed numeric; before_money jsonb; after_money jsonb; before_other text; after_other text;
- sample jsonb; subject jsonb; key text; expected boolean; actual boolean; uuid_parses bigint;
+ sample jsonb; subject jsonb; key text; expected boolean; actual boolean; uuid_parses bigint; owned_checks bigint;
 BEGIN
  SELECT fixture INTO f FROM erasure_perf_test.target;
  a:=(f->>'actor')::uuid; sid:=(f->>'session')::uuid;
@@ -50,6 +50,24 @@ BEGIN
  RAISE NOTICE 'DATA-ERASURE: % identity parses in one deletion',uuid_parses;
  IF uuid_parses>100000 THEN RAISE EXCEPTION 'ERASURE_PERF_TOO_MANY_PARSES: %',uuid_parses; END IF;
  IF uuid_parses=0 THEN RAISE EXCEPTION 'ERASURE_PERF_GUARD_NOT_MEASURING'; END IF;
+ -- 0404: the ledger work of one conversation deletion follows that conversation's runs, not the account's ledger. This
+ -- account holds 5000+ credit_transactions, 3000+ billing_history rows and 60 older content-deleted runs with 900
+ -- unerased ledger rows; the previous statement tested every unerased row of the account (about 8200 calls here, about
+ -- 11000 with the guard), the fixed one tests the session's own 182 rows twice (about 1500 including the guard).
+ SELECT coalesce(sum(calls),0) INTO owned_checks FROM pg_stat_xact_user_functions WHERE funcname='content_erasure_ledger_owned';
+ RAISE NOTICE 'DATA-ERASURE: % ledger ownership checks in one deletion',owned_checks;
+ IF owned_checks>4000 THEN RAISE EXCEPTION 'ERASURE_PERF_LEDGER_SWEEP_TOO_WIDE: %',owned_checks; END IF;
+ IF owned_checks=0 THEN RAISE EXCEPTION 'ERASURE_PERF_LEDGER_GUARD_NOT_MEASURING'; END IF;
+ -- Every ledger row of the deleted session's runs is erased (and the session has some); the older runs' rows are not part of this deletion.
+ IF NOT EXISTS(SELECT 1 FROM credit_transactions t JOIN bill2_runs r ON r.id=t.bill2_run_id WHERE r.session_ref=sid AND t.content_erased_at IS NOT NULL)
+  OR EXISTS(SELECT 1 FROM credit_transactions t JOIN bill2_runs r ON r.id=t.bill2_run_id WHERE r.session_ref=sid AND t.content_erased_at IS NULL)
+  OR EXISTS(SELECT 1 FROM billing_history h JOIN bill2_runs r ON r.pre_deduct_id=h.id OR r.pre_deduct_id::text=h.metadata->>'preDeductId'
+   WHERE r.session_ref=sid AND h.content_erased_at IS NULL) THEN
+  RAISE EXCEPTION 'SESSION_LEDGER_NOT_ERASED';
+ END IF;
+ IF (SELECT count(*) FROM billing_history WHERE reason='OLDER_RUN_LEDGER' AND content_erased_at IS NULL)<>900 THEN
+  RAISE EXCEPTION 'OLDER_RUN_LEDGER_CHANGED';
+ END IF;
  IF response->>'status'<>'deleted' OR (response->>'financialReviewCount')::int<>0
   OR NOT EXISTS(SELECT 1 FROM runtime_sessions WHERE id=sid AND content_deleted_at IS NOT NULL AND erased_at IS NOT NULL)
   OR EXISTS(SELECT 1 FROM runtime_executions WHERE session_id=sid AND (payload IS NOT NULL OR result IS NOT NULL)) THEN

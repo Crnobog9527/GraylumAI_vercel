@@ -8,6 +8,8 @@
 node packages/db/tests/content-erasure-perf/verify.mjs --local-only
 # 负例：恢复上一版完整函数，必须在"身份解析次数"断言处失败（ERASURE_PERF_TOO_MANY_PARSES）
 node packages/db/tests/content-erasure-perf/verify.mjs --local-only --before-fix
+# 0404 的负例：只恢复上一版 content_erasure_confirm，必须在"账本归属检查次数"断言处失败（ERASURE_PERF_LEDGER_SWEEP_TOO_WIDE）
+node packages/db/tests/content-erasure-perf/verify.mjs --local-only --before-0404
 ```
 
 CI 在现有 `Integration — Empty-database build from files` 步骤通过 `--after` 加载两个已有
@@ -39,3 +41,12 @@ fixture、`fixture.sql` 和 `assertions.sql`，复用这次建库，不额外启
 这是本机相同总量及偏斜分布的复现，没有宣称复刻 staging 的准确 8 秒。未访问 staging
 查询计划；上库后仍需由总控核对实际耗时。本机迁移能重复执行；回退时执行 `rollback.sql`
 恢复之前的完整函数定义即可，没有数据格式变化或需要恢复的数据。
+
+## 0404：一个会话的账本清理只跟这个会话的运行有关
+
+2026-10-27 staging 第十八批 A1 删除长对话 8 秒超时（57014）。原因：`content_erasure_confirm` 最后一条语句对账号全部未清账本行逐行调
+`content_erasure_ledger_owned`，并清掉所有"属于任何已删内容的运行"的行，所以其他路径早就标过删除的旧运行越多，之后每次删一个会话越慢。
+现在先用不调函数的身份比对（同样的五个身份）选出本次删除的运行（会话自己的运行加 Fusion 运行）对应的账本行，再由
+`content_erasure_ledger_owned` 逐行确认。夹具里同账号另有 60 个已被其他路径标过删除的旧运行、900 条未清的 billing_history，
+断言：一次删除里 `content_erasure_ledger_owned` 调用 ≤ 4000（旧语句约 10166，新语句约千级以内，本机数值见 PR）；会话自己的账本行全部清掉；
+旧运行的行不属于这次删除，保持不变（它们在下次被写入时由 `erasure_ledger_guard` 清）。
