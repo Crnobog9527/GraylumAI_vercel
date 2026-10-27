@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- DB-PERF (number 0408 chosen by the executor after the controller's offer; 0407 is reserved for the review RC-1).
+-- DB-PERF (number 0409 assigned by the controller).
 -- Coach admission cost grows with the length of the conversation. 2026-10-27 A/B on staging, 30 coach users: accounts whose
 -- coach session holds 70-116 history rows spent 6-10 s in runtime_admit and failed 19-65% of turns (57014); 30 fresh accounts
 -- spent 2.2-2.6 s and failed 10-12%. runtime_admit picks the last historyItems+128 history rows (up to 228) and ran the
@@ -127,7 +127,7 @@ BEGIN
   ), availability AS MATERIALIZED (
    SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM bounded))
   ), visible AS MATERIALIZED (
-   -- 0408: the own-post visibility test depends on the execution only, so it runs once per execution, not once per history row.
+   -- 0409: the own-post visibility test depends on the execution only, so it runs once per execution, not once per history row.
    SELECT a.execution_id FROM availability a WHERE a.available AND runtime_workspace_posts_history_visible(a.execution_id)
   )
   SELECT revision FROM bounded JOIN visible USING(execution_id) ORDER BY revision);
@@ -192,7 +192,7 @@ BEGIN
   ), availability AS MATERIALIZED (
    SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM candidates))
   ), visible AS MATERIALIZED (
-   -- 0408: the own-post visibility test depends on the execution only: once per execution, not once per history row.
+   -- 0409: the own-post visibility test depends on the execution only: once per execution, not once per history row.
    SELECT a.execution_id FROM availability a WHERE a.available AND runtime_workspace_posts_history_visible(a.execution_id)
   )
   SELECT coalesce(jsonb_agg(item ORDER BY revision),'[]') INTO answer FROM (

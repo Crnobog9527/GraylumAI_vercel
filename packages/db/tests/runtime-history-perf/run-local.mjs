@@ -1,14 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// DB-PERF 0408: the own-post visibility test of the history window runs once per execution, not once per history row.
+// DB-PERF 0409: the own-post visibility test of the history window runs once per execution, not once per history row.
 // runtime_admit and runtime_session_items 'read' must keep exactly the rows they kept before. Counted by function calls,
 // not time, so a slow or fast machine gives the same answer.
 import assert from 'node:assert/strict';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
-const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
-const N=60;
-try{
- await c.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
+const one=async(sql,args=[])=>{try{return (await c.query(sql,args)).rows[0]?.v;}catch(e){e.message+=' @ '+sql.slice(0,60);throw e;}};
+async function scale(N){
+ await c.query("select set_config('request.jwt.claim.sub','',false)");
  const f=await one('select runtime_perf_test.seed($1,false) v',[N]);
  await c.query("select set_config('request.jwt.claim.sub',$1,false)",[f.actor]);
  // Two late executions drop out of the window for different reasons (every later execution depends on all earlier ones, so
@@ -25,18 +24,20 @@ try{
   WHERE available AND runtime_workspace_posts_history_visible(execution_id)`;
  const total=await one('SELECT count(*)::int v FROM runtime_session_history WHERE session_id=$1',[f.session]);
  const reference=await one(oldWindow,[f.session]);
- assert.ok(reference.length<total-10&&reference.length>=150,`some executions drop out of the window (${reference.length} of ${total})`);
+ assert.ok(reference.length<total-10&&reference.length>=(N-10)*5,`some executions drop out of the window (${reference.length} of ${total})`);
  const visibleCalls=`SELECT coalesce(pg_stat_get_xact_function_calls('public.runtime_workspace_posts_history_visible(uuid)'::regprocedure),0)::int v`;
  // runtime_admit
  await c.query('BEGIN');
  await c.query("SET LOCAL track_functions='all'");
  const before=await one(visibleCalls);
+ const t0=Date.now();
  const admitted=await one('select runtime_admit($1,$2,gen_random_uuid(),$3,$4) v',[f.actor,f.session,f.payload,f.billing]);
+ const admitMs=Date.now()-t0;
  const calls=await one(visibleCalls)-before;
  const candidate=await one('SELECT candidate_history v FROM runtime_executions WHERE id=$1',[admitted.executionId]);
  await c.query('ROLLBACK');
  assert.deepEqual(candidate.map(Number),reference.map(Number),'the admitted execution keeps exactly the rows the previous query kept');
- report.checks.push(`runtime_admit: ${candidate.length} rows kept of ${total}, own-post visibility test ran ${calls} times for ${N} executions`);
+ report.checks.push(`${N} executions / ${total} rows: runtime_admit kept ${candidate.length}, own-post visibility test ran ${calls} times, ${admitMs} ms`);
  assert.ok(calls>0,'RUNTIME_HISTORY_VISIBLE_GUARD_NOT_MEASURING');
  assert.ok(calls<=N,`RUNTIME_HISTORY_VISIBLE_PER_ROW: ${calls} calls for ${N} executions`);
  // runtime_session_items read (an execution that still has all its ancestors, so its window is long)
@@ -52,8 +53,13 @@ try{
  const calls2=await one(visibleCalls)-b2;
  await c.query('ROLLBACK');
  assert.deepEqual(items,readReference,'read returns exactly the rows the previous query returned, in the same order');
- assert.ok(items.length>=150&&items.length<total);
+ assert.ok(items.length>=5*(N-12)&&items.length<total);
  assert.ok(calls2>0&&calls2<=N,`RUNTIME_HISTORY_VISIBLE_PER_ROW (read): ${calls2}`);
- report.checks.push(`runtime_session_items read: ${items.length} rows, visibility test ran ${calls2} times`);
+ report.checks.push(`${N} executions: runtime_session_items read returned ${items.length} rows, visibility test ran ${calls2} times`);
+}
+try{
+ await c.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
+ // Sizes of an old coach account on staging: 20 to 46 executions, 68 to 116 history rows (5 rows per execution here).
+ for(const N of [20,46])await scale(N);
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

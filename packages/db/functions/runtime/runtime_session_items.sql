@@ -43,7 +43,7 @@ BEGIN
   ), availability AS MATERIALIZED (
    SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM candidates))
   ), visible AS MATERIALIZED (
-   -- 0408: the own-post visibility test depends on the execution only: once per execution, not once per history row.
+   -- 0409: the own-post visibility test depends on the execution only: once per execution, not once per history row.
    SELECT a.execution_id FROM availability a WHERE a.available AND runtime_workspace_posts_history_visible(a.execution_id)
   )
   SELECT coalesce(jsonb_agg(item ORDER BY revision),'[]') INTO answer FROM (
