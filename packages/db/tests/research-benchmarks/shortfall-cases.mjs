@@ -129,6 +129,62 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     await gate(f);
   });
 
+  /** Mark the operations of one fetched account as what benchmark_fetch stores for a link the user pasted (args.source). */
+  async function pasted(f,e,fetched,account,kind='user_message') {
+    await db.query(`UPDATE research_operations SET result=result||jsonb_build_object('args',jsonb_build_object(
+      'source',jsonb_build_object('kind',$1::text,'messageId',$2::text),
+      'accounts',jsonb_build_array(jsonb_build_object('account',$3::text,'platform','tiktok')))) WHERE id=ANY($4::uuid[])`,
+    [kind,e,account,[fetched.postOp,fetched.profile]]);
+  }
+  /** One answer in which the user pasted a link and it was verified (`ok`) or not. */
+  async function pastedRound(f,ok=true,kind='user_message') {
+    const e = await answer(db,f), account = `p-${randomUUID().slice(0,6)}`;
+    const fetched = await fetchAccount(f,e,account,imitable);
+    await pasted(f,e,fetched,account,kind);
+    if (!ok) await db.query("UPDATE research_account_fetches SET state='failed_charged',evidence=NULL WHERE id=$1",[fetched.fetchId]);
+    return e;
+  }
+
+  await check('ROUNDS pasted-link verification is a round: two links answers, or one search plus one, offer the card', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    await pastedRound(f);
+    assert.equal((await state(f)).rounds,1);
+    await assert.rejects(offer(f,e),/RESEARCH_SHORTFALL_NOT_DUE/,'one pasted round is not enough');
+    await pastedRound(f);
+    assert.deepEqual([(await state(f)).rounds,(await state(f)).qualified],[2,2]);
+    const card = await offer(f,e);
+    assert.deepEqual([card.required,card.offeredQualified,card.offeredRounds],[3,2,2]);
+    await refused(gate(f));
+    await choose(f,card.cardId,'generate');
+    await gate(f);
+    const g = await seed(db), ge = await answer(db,g);
+    await round(g,ge);
+    await pastedRound(g);
+    assert.equal((await state(g)).rounds,2,'one keyword round plus one pasted round');
+    assert.equal((await offer(g,ge)).offeredRounds,2);
+  });
+
+  await check('ROUNDS a failed, refused or other-source verification is not a round; one answer counts once', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    await pastedRound(f,false);
+    await pastedRound(f,true,'candidate');
+    await pastedRound(f,true,'refresh');
+    assert.equal((await state(f)).rounds,0,'failed fetch, candidate and refresh sources count nothing');
+    // Two links verified in one answer are one round; the same answer holding a keyword round is not counted twice.
+    const two = await answer(db,f);
+    for (const account of ['one','two']) {
+      const fetched = await fetchAccount(f,two,`${account}-${randomUUID().slice(0,6)}`,imitable);
+      await pasted(f,two,fetched,(await db.query('SELECT account FROM research_account_fetches WHERE id=$1',[fetched.fetchId])).rows[0].account);
+    }
+    assert.equal((await state(f)).rounds,1);
+    await round(f,two);
+    assert.equal((await state(f)).rounds,1,'the answer already holds a completed discovery');
+    await assert.rejects(offer(f,e),/RESEARCH_SHORTFALL_NOT_DUE/);
+    // Erasing the verifying answer takes its round away.
+    await erase(db,f,'answer',two);
+    assert.equal((await state(f)).rounds,0);
+  });
+
   await check('SHORTFALL 3 or more qualified: admitted as before, no card', async () => {
     const {f,e} = await session(3);
     await gate(f);

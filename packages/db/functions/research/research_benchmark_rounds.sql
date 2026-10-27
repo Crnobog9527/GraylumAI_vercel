@@ -8,7 +8,19 @@ CREATE OR REPLACE FUNCTION public.research_benchmark_rounds(a uuid, s uuid)
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  SELECT count(*)::integer FROM research_discoveries d
-  JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
-  WHERE d.actor_id=a AND d.session_id=s AND d.state='completed' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+  SELECT (
+    SELECT count(*) FROM research_discoveries d
+    JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE d.actor_id=a AND d.session_id=s AND d.state='completed' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+  )::integer + (
+    SELECT count(DISTINCT x.id) FROM runtime_executions x
+    JOIN research_plans p ON p.execution_id=x.id AND p.actor_id=a AND p.session_id=s AND p.erased_at IS NULL
+    JOIN research_operations o ON o.plan_id=p.id AND o.erased_at IS NULL AND o.state='succeeded'
+      AND o.result->'args'->'source'->>'kind'='user_message'
+    JOIN research_account_fetches f ON f.execution_id=x.id AND f.actor_id=a AND f.session_id=s AND f.state='succeeded'
+      AND o.result->'args'->'accounts' @> jsonb_build_array(jsonb_build_object('account',f.account,'platform',f.platform))
+    WHERE x.actor_id=a AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM research_discoveries d
+        WHERE d.execution_id=x.id AND d.actor_id=a AND d.session_id=s AND d.state='completed')
+  )::integer
 $function$;

@@ -27,6 +27,6 @@ export function ReportBenchmarkGate({ value, failed, busy, onRetry, onChoose }: 
     <Button variant="outline" disabled={busy} onClick={focusReply}>继续找对标</Button>
     {value.qualified >= 1 && value.rounds >= 2 && value.card && !value.card.choice && value.card.required >= value.required
       ? <ShortfallCardView card={value.card} disabled={busy} onChoose={onChoose} />
-      : <p>找过两轮仍不足时，可在对话里的选择卡确认用现有对标先生成；报告会注明样本不足。</p>}
+      : <p>找过两轮仍不足时（贴链接核对一次，也算一轮），可在对话里的选择卡确认用现有对标先生成；报告会注明样本不足。</p>}
   </section>;
 }
