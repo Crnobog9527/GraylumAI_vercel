@@ -42,10 +42,13 @@ BEGIN
    WHERE h.session_id=s.id AND h.revision=ANY(coalesce(e.selected_history,e.candidate_history)) AND NOT h.internal_control
   ), availability AS MATERIALIZED (
    SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM candidates))
+  ), visible AS MATERIALIZED (
+   -- 0408: the own-post visibility test depends on the execution only: once per execution, not once per history row.
+   SELECT a.execution_id FROM availability a WHERE a.available AND runtime_workspace_posts_history_visible(a.execution_id)
   )
   SELECT coalesce(jsonb_agg(item ORDER BY revision),'[]') INTO answer FROM (
    SELECT jsonb_build_object('revision',revision,'item',item) item,revision
-   FROM candidates JOIN availability USING(execution_id) WHERE available AND runtime_workspace_posts_history_visible(execution_id) ORDER BY revision DESC LIMIT p_limit
+   FROM candidates JOIN visible USING(execution_id) ORDER BY revision DESC LIMIT p_limit
   ) x;
   RETURN answer;
  ELSIF p_action='freeze' THEN
@@ -71,7 +74,9 @@ BEGIN
     SELECT h.execution_id FROM runtime_session_history h WHERE h.session_id=s.id AND h.revision=ANY(selected)
    ), availability AS MATERIALIZED (
     SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM candidates))
-   ) SELECT count(*) FROM candidates JOIN availability USING(execution_id) WHERE available AND runtime_workspace_posts_history_visible(execution_id))
+   ), visible AS MATERIALIZED (
+    SELECT a.execution_id FROM availability a WHERE a.available AND runtime_workspace_posts_history_visible(a.execution_id)
+   ) SELECT count(*) FROM candidates JOIN visible USING(execution_id))
    OR EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=e.billing_run_id AND payload->>'phase'<>'skill_matching')
   THEN RAISE EXCEPTION 'RUNTIME_HISTORY_SELECTION';END IF;
   IF omitted_notice AND (cardinality(selected)=0 OR cardinality(selected)>=cardinality(e.candidate_history)
