@@ -72,12 +72,25 @@ INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,sour
 INSERT INTO billing_history(user_id,operation_type,amount,reason,metadata)
  SELECT actor,'settle',1,'OTHER_BILLING_PRIVATE',jsonb_build_object('fixture',execution)
  FROM erasure_perf_test.background CROSS JOIN generate_series(1,3) j;
--- DATA-ERASURE 0404: the deleting account also has older runs that another path (library cleanup, an earlier erasure
--- step) already content-deleted, with their ledger rows still unerased: 60 runs, 900 billing_history rows. They are
--- inserted before the runs are marked, so the ledger guard does not erase them on insert.
-INSERT INTO billing_history(user_id,operation_type,amount,reason,metadata)
- SELECT actor,'settle',1,'OLDER_RUN_LEDGER',jsonb_build_object('runId',run,'fixture',execution)
- FROM erasure_perf_test.background CROSS JOIN generate_series(1,15) WHERE n=0 AND i<=60;
-UPDATE bill2_runs SET content_deleted_at=now() WHERE id IN (SELECT run FROM erasure_perf_test.background WHERE n=0 AND i<=60);
+-- DATA-ERASURE 0404: the deleted session's 26 runs also hold the ledger volume of a long PAYG conversation. Staging batch 18
+-- step A1 (8 s, 57014): 692 credit_transactions, 228 billing_history, 231 token_stats and 231 ai_usage_logs rows owned by
+-- the session's own runs, about 27/9/9/9 per run. Every ledger row of a session run is cloned until the run holds that
+-- many (token_stats and ai_usage_logs keep their one row per run: both tables constrain the scope of a row; clones carry the run identity in metadata, like the metered rows; they keep all real constraints and triggers).
+DO $$
+DECLARE f jsonb; a uuid; sid uuid; own text;
+BEGIN
+ SELECT fixture INTO f FROM erasure_perf_test.target;
+ a:=(f->>'actor')::uuid; sid:=(f->>'session')::uuid;
+ own:='x.user_id=$1 AND EXISTS(SELECT 1 FROM bill2_runs r WHERE r.session_ref=$2 AND (r.id::text IN (x.metadata->>''runId'',x.metadata#>>''{usage,runId}'')
+  OR r.pre_deduct_id::text IN (x.id::text,x.metadata->>''preDeductId'')))';
+ EXECUTE format($q$INSERT INTO credit_transactions SELECT (jsonb_populate_record(NULL::credit_transactions,to_jsonb(x)
+   ||jsonb_build_object('id',gen_random_uuid(),'idempotency_key',x.idempotency_key||':clone'||k,'bill2_run_id',NULL))).* FROM credit_transactions x
+   CROSS JOIN generate_series(1,12) k WHERE %s$q$,own) USING a,sid;
+ -- Terminal billing_history rows are unique per pre-deduction: clones name their run through metadata.runId instead.
+ INSERT INTO billing_history SELECT (jsonb_populate_record(NULL::billing_history,to_jsonb(x)||jsonb_build_object('id',gen_random_uuid(),
+   'metadata',(x.metadata-'preDeductId')||jsonb_build_object('runId',r.id,'requestId',gen_random_uuid())))).*
+   FROM billing_history x JOIN bill2_runs r ON r.session_ref=sid AND r.pre_deduct_id::text IN (x.id::text,x.metadata->>'preDeductId')
+   CROSS JOIN generate_series(1,9) k WHERE x.user_id=a;
+END $$;
 ANALYZE;
 COMMIT;

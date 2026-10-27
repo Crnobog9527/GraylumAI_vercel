@@ -8,7 +8,7 @@
 node packages/db/tests/content-erasure-perf/verify.mjs --local-only
 # 负例：恢复上一版完整函数，必须在"身份解析次数"断言处失败（ERASURE_PERF_TOO_MANY_PARSES）
 node packages/db/tests/content-erasure-perf/verify.mjs --local-only --before-fix
-# 0404 的负例：只恢复上一版 content_erasure_confirm，必须在"账本归属检查次数"断言处失败（ERASURE_PERF_LEDGER_SWEEP_TOO_WIDE）
+# 0404 的负例：只恢复 0404 改过的三个函数，必须在"元数据投影次数"断言处失败（ERASURE_PERF_TOO_MANY_PROJECTIONS）
 node packages/db/tests/content-erasure-perf/verify.mjs --local-only --before-0404
 ```
 
@@ -42,11 +42,17 @@ fixture、`fixture.sql` 和 `assertions.sql`，复用这次建库，不额外启
 查询计划；上库后仍需由总控核对实际耗时。本机迁移能重复执行；回退时执行 `rollback.sql`
 恢复之前的完整函数定义即可，没有数据格式变化或需要恢复的数据。
 
-## 0404：一个会话的账本清理只跟这个会话的运行有关
+## 0404：擦除一条账本行的单行成本
 
-2026-10-27 staging 第十八批 A1 删除长对话 8 秒超时（57014）。原因：`content_erasure_confirm` 最后一条语句对账号全部未清账本行逐行调
-`content_erasure_ledger_owned`，并清掉所有"属于任何已删内容的运行"的行，所以其他路径早就标过删除的旧运行越多，之后每次删一个会话越慢。
-现在先用不调函数的身份比对（同样的五个身份）选出本次删除的运行（会话自己的运行加 Fusion 运行）对应的账本行，再由
-`content_erasure_ledger_owned` 逐行确认。夹具里同账号另有 60 个已被其他路径标过删除的旧运行、900 条未清的 billing_history，
-断言：一次删除里 `content_erasure_ledger_owned` 调用 ≤ 4000（旧语句约 10166，新语句约千级以内，本机数值见 PR）；会话自己的账本行全部清掉；
-旧运行的行不属于这次删除，保持不变（它们在下次被写入时由 `erasure_ledger_guard` 清）。
+2026-10-27 staging 第十八批 A1 删除长对话 8 秒超时（57014）。staging 只读数据：这个会话自己的 26 个运行拥有 1382 条账本行
+（692 credit_transactions、228 billing_history、231 token_stats、231 ai_usage_logs），`erasure_ledger_guard` 恰好调了 1382 次：
+不是扫了整个账号，而是每擦一行都很贵：语句自己投影一次元数据，守卫触发器再投影 NEW 和 OLD 各一次（每行 3 次，每次递归
+`erasure_ledger_value` 遍历白名单形状的全部约 80 个键）。0404 让 `erasure_ledger_value` 只遍历值和形状共有的键、
+`content_erasure_confirm` 不再自己投影（守卫写同样的投影）、`erasure_ledger_guard` 在 OLD/NEW 元数据相同时只算一次，
+并让账本语句先用普通比较挑出命中账号已删内容运行的行，再调 `content_erasure_ledger_owned`。擦除结果不变。
+
+夹具：被删会话的 26 个运行各自补到约 40 条账本行（credit_transactions 约 1000、billing_history 约 520，另有 token_stats /
+ai_usage_logs 各 26，约 1590 行，比 staging 的 1382 略多），同账号另有 5000+ credit_transactions、3000+ billing_history。
+断言：一次删除里元数据投影次数 ≤ 擦除行数的 1.5 倍（旧 4758 = 3 倍，新 1586）；`content_erasure_ledger_owned` 调用 ≤ 擦除行数
+的 2.5 倍（旧 11174，新 3172）；每个被擦的行都等于"原元数据按旧实现投影"的结果、文本字段清空、其他列不变；`erasure_ledger_value`
+对库里全部元数据加若干边界值，与保留在测试里的旧实现返回相同的值或同样报错。本机耗时：旧 2346 ms，新 1057 ms。

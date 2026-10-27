@@ -1,13 +1,48 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- Run after fixture.sql in the disposable file-built database, never against a remote database.
 BEGIN;
+-- Reference for 0404: erasure_ledger_value as it was before (walks every key of the shape). The new one must return
+-- the same value, or fail, for every metadata object in the database and for the edge cases below.
+CREATE FUNCTION pg_temp.old_ledger_value(v jsonb, shape jsonb) RETURNS jsonb LANGUAGE plpgsql AS $f$
+DECLARE k text; item jsonb; result jsonb; typ text:=shape#>>'{}';
+BEGIN
+ IF v IS NULL OR v='null'::jsonb THEN RETURN v; END IF;
+ IF jsonb_typeof(shape)='object' AND shape ? '$enum' THEN
+  IF jsonb_typeof(v)='string' AND (shape->'$enum') @> jsonb_build_array(v) THEN RETURN v; END IF;
+  RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE';
+ END IF;
+ IF jsonb_typeof(shape)='object' THEN
+  IF jsonb_typeof(v)<>'object' THEN RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE'; END IF;
+  result:='{}';
+  FOR k,item IN SELECT * FROM jsonb_each(shape) LOOP
+   IF v ? k THEN result:=result||jsonb_build_object(k,pg_temp.old_ledger_value(v->k,item)); END IF;
+  END LOOP;
+  RETURN result;
+ ELSIF jsonb_typeof(shape)='array' THEN
+  IF jsonb_typeof(v)<>'array' THEN RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE'; END IF;
+  result:='[]';
+  FOR item IN SELECT value FROM jsonb_array_elements(v) LOOP
+   result:=result||jsonb_build_array(pg_temp.old_ledger_value(item,shape->0));
+  END LOOP;
+  RETURN result;
+ END IF;
+ IF typ='number' AND jsonb_typeof(v) IN ('number','string')
+  AND v#>>'{}' ~ '^-?[0-9]+(\.[0-9]+)?$' THEN RETURN v; END IF;
+ IF typ='delivery_failure_reason' AND v='"confirmed_delivery_failure"'::jsonb THEN RETURN v; END IF;
+ IF typ='boolean' AND jsonb_typeof(v)='boolean' THEN RETURN v; END IF;
+ IF typ='id' AND jsonb_typeof(v)='string' AND length(v#>>'{}')>0 THEN RETURN v; END IF;
+ RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE';
+END $f$;
+CREATE TEMP TABLE ledger_before ON COMMIT DROP AS
+ SELECT 'credit_transactions' tbl,x.id::text id,to_jsonb(x) j FROM credit_transactions x WHERE FALSE;
 SET LOCAL statement_timeout='8s';
 -- Count function calls in this transaction (pg_stat_xact_user_functions): the guard below does not depend on machine speed.
 SET LOCAL track_functions='all';
 DO $$
 DECLARE f jsonb; a uuid; sid uuid; run_id uuid; pre uuid; other uuid; response jsonb;
  started timestamptz; elapsed numeric; before_money jsonb; after_money jsonb; before_other text; after_other text;
- sample jsonb; subject jsonb; key text; expected boolean; actual boolean; uuid_parses bigint; owned_checks bigint;
+ sample jsonb; subject jsonb; key text; expected boolean; actual boolean; uuid_parses bigint; projections bigint; erased_rows bigint; owned_checks bigint;
+ shape jsonb; bad bigint; md jsonb; one text; two text;
 BEGIN
  SELECT fixture INTO f FROM erasure_perf_test.target;
  a:=(f->>'actor')::uuid; sid:=(f->>'session')::uuid;
@@ -36,6 +71,11 @@ BEGIN
  IF content_erasure_ledger_owned(jsonb_build_object('user_id',a,'bill2_run_id',run_id)) THEN
   RAISE EXCEPTION 'UNMARKED_LEDGER_MATCH';
  END IF;
+ -- Snapshot of every ledger row of the deleting account before the deletion (equivalence oracle below).
+ INSERT INTO ledger_before SELECT 'credit_transactions',id::text,to_jsonb(x) FROM credit_transactions x WHERE user_id=a;
+ INSERT INTO ledger_before SELECT 'billing_history',id::text,to_jsonb(x) FROM billing_history x WHERE user_id=a;
+ INSERT INTO ledger_before SELECT 'token_stats',id::text,to_jsonb(x) FROM token_stats x WHERE user_id=a;
+ INSERT INTO ledger_before SELECT 'ai_usage_logs',id::text,to_jsonb(x) FROM ai_usage_logs x WHERE user_id=a;
  started:=clock_timestamp();
  response:=content_erasure_mark_session(a,sid);
  elapsed:=extract(epoch FROM clock_timestamp()-started)*1000;
@@ -50,24 +90,50 @@ BEGIN
  RAISE NOTICE 'DATA-ERASURE: % identity parses in one deletion',uuid_parses;
  IF uuid_parses>100000 THEN RAISE EXCEPTION 'ERASURE_PERF_TOO_MANY_PARSES: %',uuid_parses; END IF;
  IF uuid_parses=0 THEN RAISE EXCEPTION 'ERASURE_PERF_GUARD_NOT_MEASURING'; END IF;
- -- 0404: the ledger work of one conversation deletion follows that conversation's runs, not the account's ledger. This
- -- account holds 5000+ credit_transactions, 3000+ billing_history rows and 60 older content-deleted runs with 900
- -- unerased ledger rows; the previous statement tested every unerased row of the account (about 8200 calls here, about
- -- 11000 with the guard), the fixed one tests the session's own 182 rows twice (about 1500 including the guard).
+ -- 0404: erasing a ledger row projects its metadata once. Before, the statement projected it, then erasure_ledger_guard
+ -- projected NEW and OLD again: three projections per row (about 4700 here), now one (about 1600, one per erased row).
+ SELECT count(*) INTO erased_rows FROM ledger_before b WHERE b.j->>'content_erased_at' IS NULL AND EXISTS(
+  SELECT 1 FROM (SELECT 'credit_transactions' tbl,id::text id,content_erased_at FROM credit_transactions WHERE user_id=a
+   UNION ALL SELECT 'billing_history',id::text,content_erased_at FROM billing_history WHERE user_id=a
+   UNION ALL SELECT 'token_stats',id::text,content_erased_at FROM token_stats WHERE user_id=a
+   UNION ALL SELECT 'ai_usage_logs',id::text,content_erased_at FROM ai_usage_logs WHERE user_id=a) n
+  WHERE n.tbl=b.tbl AND n.id=b.id AND n.content_erased_at IS NOT NULL);
+ SELECT coalesce(sum(calls),0) INTO projections FROM pg_stat_xact_user_functions WHERE funcname='erasure_ledger_metadata';
+ RAISE NOTICE 'DATA-ERASURE: % rows erased with % metadata projections',erased_rows,projections;
+ IF erased_rows<1500 THEN RAISE EXCEPTION 'ERASURE_PERF_LEDGER_FIXTURE_TOO_SMALL: %',erased_rows; END IF;
  SELECT coalesce(sum(calls),0) INTO owned_checks FROM pg_stat_xact_user_functions WHERE funcname='content_erasure_ledger_owned';
- RAISE NOTICE 'DATA-ERASURE: % ledger ownership checks in one deletion',owned_checks;
- IF owned_checks>4000 THEN RAISE EXCEPTION 'ERASURE_PERF_LEDGER_SWEEP_TOO_WIDE: %',owned_checks; END IF;
- IF owned_checks=0 THEN RAISE EXCEPTION 'ERASURE_PERF_LEDGER_GUARD_NOT_MEASURING'; END IF;
- -- Every ledger row of the deleted session's runs is erased (and the session has some); the older runs' rows are not part of this deletion.
- IF NOT EXISTS(SELECT 1 FROM credit_transactions t JOIN bill2_runs r ON r.id=t.bill2_run_id WHERE r.session_ref=sid AND t.content_erased_at IS NOT NULL)
-  OR EXISTS(SELECT 1 FROM credit_transactions t JOIN bill2_runs r ON r.id=t.bill2_run_id WHERE r.session_ref=sid AND t.content_erased_at IS NULL)
-  OR EXISTS(SELECT 1 FROM billing_history h JOIN bill2_runs r ON r.pre_deduct_id=h.id OR r.pre_deduct_id::text=h.metadata->>'preDeductId'
-   WHERE r.session_ref=sid AND h.content_erased_at IS NULL) THEN
-  RAISE EXCEPTION 'SESSION_LEDGER_NOT_ERASED';
- END IF;
- IF (SELECT count(*) FROM billing_history WHERE reason='OLDER_RUN_LEDGER' AND content_erased_at IS NULL)<>900 THEN
-  RAISE EXCEPTION 'OLDER_RUN_LEDGER_CHANGED';
- END IF;
+ RAISE NOTICE 'DATA-ERASURE: % ledger ownership checks',owned_checks;
+ -- The ledger statement tests ownership only for rows naming a content-deleted run of the account (one check there, one in
+ -- the guard trigger per erased row, about 3200 here); the previous one tested every unerased row of the account (about 11200).
+ IF owned_checks>erased_rows*5/2 THEN RAISE EXCEPTION 'ERASURE_PERF_LEDGER_SWEEP_TOO_WIDE: % for % rows',owned_checks,erased_rows; END IF;
+ IF projections>erased_rows*3/2 THEN RAISE EXCEPTION 'ERASURE_PERF_TOO_MANY_PROJECTIONS: % for % rows',projections,erased_rows; END IF;
+ -- Same result as the specification, row by row: every erased row has exactly the old projection of its original
+ -- metadata, its text fields cleared, a stamp, and every other column unchanged; no other ledger row changed.
+ SELECT count(*) INTO bad FROM ledger_before b JOIN (
+   SELECT 'credit_transactions' tbl,id::text id,to_jsonb(x) j FROM credit_transactions x WHERE user_id=a
+   UNION ALL SELECT 'billing_history',id::text,to_jsonb(x) FROM billing_history x WHERE user_id=a
+   UNION ALL SELECT 'token_stats',id::text,to_jsonb(x) FROM token_stats x WHERE user_id=a
+   UNION ALL SELECT 'ai_usage_logs',id::text,to_jsonb(x) FROM ai_usage_logs x WHERE user_id=a) n ON n.tbl=b.tbl AND n.id=b.id
+  WHERE CASE WHEN n.j->>'content_erased_at' IS NULL THEN n.j IS DISTINCT FROM b.j
+   ELSE (n.j-ARRAY['description','reason','error_message','ip_address','user_agent','metadata','content_erased_at'])
+     IS DISTINCT FROM (b.j-ARRAY['description','reason','error_message','ip_address','user_agent','metadata','content_erased_at'])
+    OR n.j->'metadata' IS DISTINCT FROM pg_temp.old_ledger_value(b.j->'metadata',
+     (SELECT (regexp_match(prosrc,'\$shape\$(.*)\$shape\$','s'))[1]::jsonb FROM pg_proc WHERE proname='erasure_ledger_metadata'))
+    OR coalesce(n.j->>'description','')<>'' OR coalesce(n.j->>'reason','')<>'' OR coalesce(n.j->>'error_message','')<>''
+    OR coalesce(n.j->>'ip_address','')<>'' OR coalesce(n.j->>'user_agent','')<>'' END;
+ IF bad>0 THEN RAISE EXCEPTION 'LEDGER_ERASURE_RESULT_CHANGED: % rows',bad; END IF;
+ -- erasure_ledger_value equals its previous definition for every metadata object in the database (valid or not) and edge cases.
+ SELECT (regexp_match(prosrc,'\$shape\$(.*)\$shape\$','s'))[1]::jsonb INTO shape FROM pg_proc WHERE proname='erasure_ledger_metadata';
+ FOR md IN SELECT DISTINCT m FROM (SELECT metadata m FROM credit_transactions UNION ALL SELECT metadata FROM billing_history
+   UNION ALL SELECT metadata FROM token_stats UNION ALL SELECT metadata FROM ai_usage_logs) s WHERE m IS NOT NULL
+   UNION SELECT e FROM unnest(ARRAY['{}','null','[]','"x"','{"runId":"r","extra":1,"usage":{"inputTokens":3,"other":"x"}}',
+    '{"runId":1}','{"usage":[]}','{"reversedGrantPeriodKeys":["a",1]}','{"reversedGrantPeriodKeys":["a","b"]}','{"balance_before":"12.5","x":{}}',
+    '{"aborted":"yes"}','{"timestamp":""}','{"consumedTokens":{"inputTokens":"1"}}']::jsonb[]) e LOOP
+  one:=NULL;two:=NULL;
+  BEGIN one:=erasure_ledger_value(md,shape)::text; EXCEPTION WHEN OTHERS THEN one:='ERR '||SQLERRM; END;
+  BEGIN two:=pg_temp.old_ledger_value(md,shape)::text; EXCEPTION WHEN OTHERS THEN two:='ERR '||SQLERRM; END;
+  IF one IS DISTINCT FROM two THEN RAISE EXCEPTION 'LEDGER_VALUE_CHANGED: % -> % vs %',md,one,two; END IF;
+ END LOOP;
  IF response->>'status'<>'deleted' OR (response->>'financialReviewCount')::int<>0
   OR NOT EXISTS(SELECT 1 FROM runtime_sessions WHERE id=sid AND content_deleted_at IS NOT NULL AND erased_at IS NOT NULL)
   OR EXISTS(SELECT 1 FROM runtime_executions WHERE session_id=sid AND (payload IS NOT NULL OR result IS NOT NULL)) THEN

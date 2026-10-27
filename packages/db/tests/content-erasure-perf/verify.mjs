@@ -12,7 +12,7 @@ if (process.env.CI || !['--local-only', '--local-only --before-fix', '--local-on
 }
 const files = [
   ...(args.includes('--before-fix') ? ['content-erasure-perf/rollback.sql'] : []),
-  ...(args.includes('--before-fix') || args.includes('--before-0404') ? ['content-erasure-perf/rollback-confirm.sql'] : []),
+  ...(args.includes('--before-fix') || args.includes('--before-0404') ? ['content-erasure-perf/rollback-0404.sql'] : []),
   'runtime-view-perf/fixture.sql',
   'content-erasure/fixture.sql',
   'content-erasure-perf/fixture.sql',

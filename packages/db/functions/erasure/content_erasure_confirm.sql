@@ -16,7 +16,7 @@ AS $function$
 
 DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
  refs uuid[]; rounds uuid[]; chats uuid[]; research_ids uuid[]; research_plan_ids uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
- remaining bigint:=0; deleted boolean; fusion_runs uuid[]:='{}'; touched_runs text[]; touched_pre text[];
+ remaining bigint:=0; deleted boolean; deleted_runs text[]; deleted_pre text[];
 BEGIN
  PERFORM bill2_actor(a);
  -- Runtime writers use session -> execution -> run. NOWAIT prevents inverse
@@ -141,7 +141,6 @@ BEGIN
   WHERE fc.actor_id=a AND content_erasure_references(fc.workspace_dependencies,refs) ORDER BY r.id FOR UPDATE OF r NOWAIT;
  FOR row IN SELECT r.id,r.closed FROM bill2_runs r JOIN fusion_compares fc ON fc.group_id=r.fusion_group_id
   WHERE fc.actor_id=a AND content_erasure_references(fc.workspace_dependencies,refs) ORDER BY r.id LOOP
-  fusion_runs:=fusion_runs||row.id;
   UPDATE bill2_runs SET content_deleted_at=stamp WHERE id=row.id AND content_deleted_at IS NULL;
   IF NOT row.closed THEN PERFORM bill2_cancel(a,row.id); END IF;
   PERFORM bill2_finalize(a,row.id);
@@ -178,7 +177,6 @@ BEGIN
  FOR row IN SELECT r.id,r.closed FROM bill2_runs r JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
   WHERE g.actor_id=a AND (g.source_session_id=ANY(sessions)
    OR g.source_session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects))) ORDER BY r.id LOOP
-  fusion_runs:=fusion_runs||row.id;
   UPDATE bill2_runs SET content_deleted_at=stamp WHERE id=row.id AND content_deleted_at IS NULL;
   IF NOT row.closed THEN PERFORM bill2_cancel(a,row.id); END IF;
   PERFORM bill2_finalize(a,row.id);
@@ -326,21 +324,17 @@ BEGIN
  UPDATE artifact_work_references SET creation_payload=NULL,source_hash=NULL,erased_at=stamp WHERE erased_at IS NULL AND
   (project_id=ANY(projects) OR source_version_id=ANY(versions));
  UPDATE artifact_projects SET work_title=NULL,account='erased:'||id,erased_at=stamp WHERE id=ANY(projects) AND erased_at IS NULL;
- -- DB-PERF 0404: erase the ledger rows of the runs this call content-deleted (the session's own runs and the Fusion
- -- runs above). The previous sweep tested every unerased ledger row of the account with content_erasure_ledger_owned, so
- -- one conversation's deletion cost grew with the account's whole ledger and with every older content-deleted run.
- -- The cheap identity filter below runs first (same five identities as content_erasure_ledger_owned, no function call);
- -- content_erasure_ledger_owned still decides each remaining row. Rows inserted or updated later for a content-deleted
- -- run are erased by erasure_ledger_guard, as before.
- touched_runs:=ARRAY(SELECT x::text FROM unnest(ARRAY(SELECT billing_run_id FROM runtime_executions
-   WHERE id=ANY(ids) AND billing_run_id IS NOT NULL)||fusion_runs) x);
- touched_pre:=ARRAY(SELECT r.pre_deduct_id::text FROM bill2_runs r WHERE r.actor_id=a AND r.id::text=ANY(touched_runs)
+ -- content_erasure_ledger_owned is true only for a row naming one of this account's content-deleted runs. Collect those
+ -- runs once and test each row's five identities against them with plain comparisons first, so the function (and the guard
+ -- trigger it feeds) only runs for rows that can be owned; ownership is still decided by content_erasure_ledger_owned.
+ deleted_runs:=ARRAY(SELECT r.id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL);
+ deleted_pre:=ARRAY(SELECT r.pre_deduct_id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL
    AND r.pre_deduct_id IS NOT NULL);
  FOR row IN SELECT * FROM (VALUES
-  ('token_stats','metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('billing_history','reason=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('credit_transactions','description=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2')
+  ('token_stats','content_erased_at=$2'),
+  ('billing_history','reason=NULL,content_erased_at=$2'),
+  ('credit_transactions','description=NULL,content_erased_at=$2'),
+  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,content_erased_at=$2')
  ) x(tbl,assignment) LOOP
   EXECUTE format('WITH cand AS MATERIALIZED (SELECT t.ctid c FROM public.%1$I t CROSS JOIN LATERAL (SELECT to_jsonb(t) j) x
     WHERE t.user_id=$1 AND t.content_erased_at IS NULL
@@ -348,7 +342,7 @@ BEGIN
       OR (x.j->>''id'')=ANY($4) OR (x.j#>>''{metadata,preDeductId}'')=ANY($4))
      AND content_erasure_ledger_owned(x.j))
    UPDATE public.%1$I t SET %2$s FROM cand WHERE t.ctid=cand.c',
-   row.tbl,row.assignment) USING a,stamp,touched_runs,touched_pre;
+   row.tbl,row.assignment) USING a,stamp,deleted_runs,deleted_pre;
  END LOOP;
  -- This status is about content. Unknown money remains on its original run.
  RETURN jsonb_build_object('kind',k,'id',target,'status',CASE WHEN remaining>0 THEN 'review_required' ELSE 'deleted' END,

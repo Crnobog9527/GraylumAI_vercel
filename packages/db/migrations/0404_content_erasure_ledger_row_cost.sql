@@ -1,4 +1,121 @@
--- Content_erasure_confirm as of 0403 (before 0404), for verify.mjs --before-fix.
+-- Copyright (c) 2026 Grayscale Luminary LLC.
+-- All rights reserved. This code is proprietary and confidential.
+-- DATA-ERASURE / DB-PERF (number 0404 assigned by the controller): the per-row cost of erasing ledger rows.
+-- 2026-10-27 staging, Codex batch 18 step A1: deleting one long conversation (26 runs) took 8 s and timed out (57014,
+-- HTTP 412). Read-only staging counts for that account: 1382 ledger rows owned by the session's own runs (692
+-- credit_transactions, 228 billing_history, 231 token_stats, 231 ai_usage_logs) and 1382 erasure_ledger_guard calls: the
+-- deletion does not scan the account, each erased row is simply expensive (about 5 ms on the Micro database):
+--  - content_erasure_confirm projected the metadata itself (erasure_ledger_metadata), then erasure_ledger_guard projected
+--    NEW.metadata again and OLD.metadata a third time: three projections per row, 41 erasure_ledger_value calls each;
+--  - erasure_ledger_value walked all ~80 keys of the whitelist shape for every object, although a metadata object has
+--    a handful of keys.
+-- Changes (results and checks are identical): (0) the ledger statement of content_erasure_confirm first selects, with
+-- plain comparisons, the rows naming one of the account's content-deleted runs and only then calls
+-- content_erasure_ledger_owned (it used to call it for every unerased ledger row of the account); (1) erasure_ledger_value walks only the keys the value and the shape
+-- share, instead of every key of the shape; (2) content_erasure_confirm no longer sets metadata itself: the guard
+-- trigger, which already runs on every such update, writes the same projected metadata (and the same description /
+-- reason / error fields are still cleared by the statement); (3) erasure_ledger_guard compares NEW with OLD
+-- projections once when OLD.metadata and NEW.metadata are equal, which is exactly the cleanup update.
+-- Unchanged: the ownership test (content_erasure_ledger_owned), which rows are erased, every guard exception, the
+-- stored result of each row, the lock order, all other statements of content_erasure_confirm.
+-- Compatibility: same signatures, result shapes and privileges; old and new application code are interchangeable.
+-- Repeatable: CREATE OR REPLACE only; no data or index change; a repeated deletion gives the same result.
+-- Recovery: re-apply the three functions from packages/db/functions as of 0403 (slower, same results); no data needs repair.
+BEGIN;
+SET LOCAL lock_timeout='5s';
+
+CREATE OR REPLACE FUNCTION public.erasure_ledger_value(v jsonb, shape jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE k text; item jsonb; result jsonb; typ text:=shape#>>'{}';
+BEGIN
+ IF v IS NULL OR v='null'::jsonb THEN RETURN v; END IF;
+ IF jsonb_typeof(shape)='object' AND shape ? '$enum' THEN
+  IF jsonb_typeof(v)='string' AND (shape->'$enum') @> jsonb_build_array(v) THEN RETURN v; END IF;
+  RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE';
+ END IF;
+ IF jsonb_typeof(shape)='object' THEN
+  IF jsonb_typeof(v)<>'object' THEN RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE'; END IF;
+  result:='{}';
+  FOR k,item IN SELECT s.key,s.value FROM jsonb_each(v) x JOIN jsonb_each(shape) s ON s.key=x.key LOOP
+   result:=result||jsonb_build_object(k,erasure_ledger_value(v->k,item));
+  END LOOP;
+  RETURN result;
+ ELSIF jsonb_typeof(shape)='array' THEN
+  IF jsonb_typeof(v)<>'array' THEN RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE'; END IF;
+  result:='[]';
+  FOR item IN SELECT value FROM jsonb_array_elements(v) LOOP
+   result:=result||jsonb_build_array(erasure_ledger_value(item,shape->0));
+  END LOOP;
+  RETURN result;
+ END IF;
+ IF typ='number' AND jsonb_typeof(v) IN ('number','string')
+  AND v#>>'{}' ~ '^-?[0-9]+(\.[0-9]+)?$' THEN RETURN v; END IF;
+ IF typ='delivery_failure_reason' AND v='"confirmed_delivery_failure"'::jsonb THEN RETURN v; END IF;
+ IF typ='boolean' AND jsonb_typeof(v)='boolean' THEN RETURN v; END IF;
+ IF typ='id' AND jsonb_typeof(v)='string' AND length(v#>>'{}')>0 THEN RETURN v; END IF;
+ RAISE EXCEPTION 'ERASURE_LEDGER_INVALID_EVIDENCE';
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.erasure_ledger_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE prior jsonb; incoming jsonb:=to_jsonb(NEW); projected jsonb; cols text[]; closed boolean;
+BEGIN
+ cols:=CASE TG_TABLE_NAME WHEN 'credit_transactions' THEN ARRAY['description','metadata','content_erased_at']
+  WHEN 'billing_history' THEN ARRAY['reason','metadata','content_erased_at']
+  WHEN 'token_stats' THEN ARRAY['metadata','content_erased_at']
+  WHEN 'ai_usage_logs' THEN ARRAY['error_message','ip_address','user_agent','metadata','content_erased_at'] END;
+ IF cols IS NULL THEN RAISE EXCEPTION 'ERASURE_LEDGER_TABLE_DENIED'; END IF;
+ IF TG_OP='UPDATE' THEN prior:=to_jsonb(OLD); END IF;
+ IF TG_OP='INSERT' AND incoming->>'content_erased_at' IS NOT NULL THEN
+  RAISE EXCEPTION 'ERASURE_LEDGER_IMMUTABLE';
+ END IF;
+ -- Existing client paths remain unchanged. They cannot claim cleanup or bypass closed-account RLS.
+ IF current_user<>pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid=TG_RELID))
+  AND current_user<>'service_role' THEN
+  IF incoming->>'content_erased_at' IS NOT NULL THEN RAISE EXCEPTION 'ERASURE_LEDGER_DENIED'; END IF;
+  RETURN NEW;
+ END IF;
+ closed:=EXISTS(SELECT 1 FROM account_erasure_requests e JOIN profiles p ON p.id=e.profile_id
+  WHERE e.profile_id=NEW.user_id AND p.status='deleted' AND p.is_deleted='true');
+ -- D7 original ledger binding
+ closed:=closed OR content_erasure_ledger_owned(incoming);
+ IF prior->>'content_erased_at' IS NOT NULL THEN
+  IF incoming->'content_erased_at' IS DISTINCT FROM prior->'content_erased_at'
+   OR incoming->'user_id' IS DISTINCT FROM prior->'user_id' THEN
+   RAISE EXCEPTION 'ERASURE_LEDGER_IMMUTABLE';
+  END IF;
+ ELSIF TG_OP='UPDATE' AND incoming->>'content_erased_at' IS NOT NULL THEN
+  IF NOT closed OR current_user<>pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid=TG_RELID))
+   OR (incoming-cols) IS DISTINCT FROM (prior-cols) THEN
+   RAISE EXCEPTION 'ERASURE_LEDGER_DENIED';
+  END IF;
+ ELSIF NOT closed THEN RETURN NEW;
+ END IF;
+ projected:=erasure_ledger_metadata(NEW.metadata);
+ IF TG_OP='UPDATE' AND prior->>'content_erased_at' IS NULL
+  AND incoming->>'content_erased_at' IS NOT NULL
+  AND projected IS DISTINCT FROM (CASE WHEN OLD.metadata IS NOT DISTINCT FROM NEW.metadata THEN projected
+   ELSE erasure_ledger_metadata(OLD.metadata) END) THEN
+  RAISE EXCEPTION 'ERASURE_LEDGER_EVIDENCE_CHANGED';
+ END IF;
+ incoming:=incoming||jsonb_build_object('metadata',projected,
+  'content_erased_at',coalesce(prior->>'content_erased_at',incoming->>'content_erased_at',clock_timestamp()::text));
+ IF TG_TABLE_NAME='credit_transactions' THEN incoming:=incoming||'{"description":null}'::jsonb;
+ ELSIF TG_TABLE_NAME='billing_history' THEN incoming:=incoming||'{"reason":null}'::jsonb;
+ ELSIF TG_TABLE_NAME='ai_usage_logs' THEN
+  incoming:=incoming||'{"error_message":null,"ip_address":null,"user_agent":null}'::jsonb;
+ END IF;
+ NEW:=jsonb_populate_record(NEW,incoming);
+ RETURN NEW;
+END $function$;
+
 CREATE OR REPLACE FUNCTION public.content_erasure_confirm(a uuid, k text, target uuid, expected_hash text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -13,7 +130,7 @@ AS $function$
 
 DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
  refs uuid[]; rounds uuid[]; chats uuid[]; research_ids uuid[]; research_plan_ids uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
- remaining bigint:=0; deleted boolean;
+ remaining bigint:=0; deleted boolean; deleted_runs text[]; deleted_pre text[];
 BEGIN
  PERFORM bill2_actor(a);
  -- Runtime writers use session -> execution -> run. NOWAIT prevents inverse
@@ -321,14 +438,25 @@ BEGIN
  UPDATE artifact_work_references SET creation_payload=NULL,source_hash=NULL,erased_at=stamp WHERE erased_at IS NULL AND
   (project_id=ANY(projects) OR source_version_id=ANY(versions));
  UPDATE artifact_projects SET work_title=NULL,account='erased:'||id,erased_at=stamp WHERE id=ANY(projects) AND erased_at IS NULL;
+ -- content_erasure_ledger_owned is true only for a row naming one of this account's content-deleted runs. Collect those
+ -- runs once and test each row's five identities against them with plain comparisons first, so the function (and the guard
+ -- trigger it feeds) only runs for rows that can be owned; ownership is still decided by content_erasure_ledger_owned.
+ deleted_runs:=ARRAY(SELECT r.id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL);
+ deleted_pre:=ARRAY(SELECT r.pre_deduct_id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL
+   AND r.pre_deduct_id IS NOT NULL);
  FOR row IN SELECT * FROM (VALUES
-  ('token_stats','metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('billing_history','reason=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('credit_transactions','description=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2')
+  ('token_stats','content_erased_at=$2'),
+  ('billing_history','reason=NULL,content_erased_at=$2'),
+  ('credit_transactions','description=NULL,content_erased_at=$2'),
+  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,content_erased_at=$2')
  ) x(tbl,assignment) LOOP
-  EXECUTE format('UPDATE public.%I t SET %s WHERE t.user_id=$1 AND t.content_erased_at IS NULL AND content_erasure_ledger_owned(to_jsonb(t))',
-   row.tbl,row.assignment) USING a,stamp;
+  EXECUTE format('WITH cand AS MATERIALIZED (SELECT t.ctid c FROM public.%1$I t CROSS JOIN LATERAL (SELECT to_jsonb(t) j) x
+    WHERE t.user_id=$1 AND t.content_erased_at IS NULL
+     AND ((x.j->>''bill2_run_id'')=ANY($3) OR (x.j#>>''{metadata,usage,runId}'')=ANY($3) OR (x.j#>>''{metadata,runId}'')=ANY($3)
+      OR (x.j->>''id'')=ANY($4) OR (x.j#>>''{metadata,preDeductId}'')=ANY($4))
+     AND content_erasure_ledger_owned(x.j))
+   UPDATE public.%1$I t SET %2$s FROM cand WHERE t.ctid=cand.c',
+   row.tbl,row.assignment) USING a,stamp,deleted_runs,deleted_pre;
  END LOOP;
  -- This status is about content. Unknown money remains on its original run.
  RETURN jsonb_build_object('kind',k,'id',target,'status',CASE WHEN remaining>0 THEN 'review_required' ELSE 'deleted' END,
@@ -336,3 +464,5 @@ BEGIN
 EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
 END $function$;
+
+COMMIT;
