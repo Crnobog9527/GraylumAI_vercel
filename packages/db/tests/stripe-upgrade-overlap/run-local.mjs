@@ -37,6 +37,16 @@ docker(['image','inspect',POSTGRES_IMAGE]);
 const name='graylum-upgrade-'+randomUUID().slice(0,8);
 const sql=input=>docker(['exec','-i',name,'psql','-XqAt','-U','postgres','-d','upgrade',
   '-v','ON_ERROR_STOP=1','-f','/dev/stdin'],input);
+// 0391 checks the md5 of the claim it replaces; 0416 (DB-RW-A) later turned one row lock of that claim into a switch, so put
+// the original single statement back before 0391 is replayed on a finished database (the replay of 0416 after it restores
+// the switch).
+const restoreClaimThresholdLock=()=>{
+  const claim=sql("SELECT pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure);");
+  const switched=" IF runtime_rw_flag('sharedRowLocks') THEN SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds';\n"
+    +" ELSE SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;END IF;\n";
+  const original=" SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;\n";
+  if(claim.includes(switched))sql(claim.replace(switched,original)+';');
+};
 const clients=[];
 try {
   docker(['run','-d','--pull=never','--name',name,'-e','POSTGRES_DB=upgrade','-e','POSTGRES_HOST_AUTH_METHOD=trust',
@@ -174,7 +184,10 @@ try {
   assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
   sql(read(walletMigration));
   // Forward-fix every later extension too; 0335 intentionally extends the same wallet functions.
-  for(const file of laterMigrations(330))sql(replayable(file));
+  for(const file of laterMigrations(330)) {
+    if(file.startsWith('0391_'))restoreClaimThresholdLock();
+    sql(replayable(file));
+  }
   assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');
   cases.push('wallet-migration-interruption-atomic','wallet-migration-repeat-acl-unchanged','wallet-recovery-preserves-paid-data');
   sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
@@ -192,7 +205,9 @@ try {
   sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
   sql(read('packages/db/migrations/0383_credit_grant_quarantine.sql')); // ARCH-FIX E1 patches atomic_pre_deduct
   sql(replayable('0385_billing_ledger_constraints.sql')); // ARCH-FIX E3 patches atomic_pre_deduct
+  restoreClaimThresholdLock();
   sql(read('packages/db/migrations/0391_credit_available.sql')); // MAINT-P4 replaces atomic_pre_deduct's hold formula
+  sql(read('packages/db/migrations/0416_db_rw_a_shared_row_locks.sql')); // DB-RW-A removes shared row locks from claim, admit and the permission chain
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

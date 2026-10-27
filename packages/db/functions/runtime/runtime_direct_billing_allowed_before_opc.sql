@@ -47,7 +47,11 @@ BEGIN
     OR entry->>'modelId'=p->>'modelId' THEN RAISE EXCEPTION 'BILL2_CALL_POLICY_DENIED';END IF;
    CONTINUE;
   END IF;
-  PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model' AND (provider=entry->>'provider' OR (p->>'mode' IN ('staging_test','production') AND entry->>'provider'='openrouter' AND provider IN ('openai','openrouter','anthropic'))) AND is_active='true' FOR SHARE;
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model' AND (provider=entry->>'provider' OR (p->>'mode' IN ('staging_test','production') AND entry->>'provider'='openrouter' AND provider IN ('openai','openrouter','anthropic'))) AND is_active='true';
+  ELSE
+   PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model' AND (provider=entry->>'provider' OR (p->>'mode' IN ('staging_test','production') AND entry->>'provider'='openrouter' AND provider IN ('openai','openrouter','anthropic'))) AND is_active='true' FOR SHARE;
+  END IF;
   IF NOT FOUND OR entry->>'protocol' IS DISTINCT FROM (CASE WHEN p->>'mode' IN ('staging_test','production') THEN 'openrouter-chat-v1' ELSE 'fixture-cost-v1' END) OR coalesce(length(entry->>'account'),0)=0
   OR coalesce((entry->>'inputLimit')::int,0) NOT BETWEEN 1 AND 1000000 OR coalesce((entry->>'outputLimit')::int,0) NOT BETWEEN 1 AND 1000000
   OR bill2_decimal(entry->'upperUsd')<=0 OR entry->'automaticRetry' IS DISTINCT FROM 'false'::jsonb OR entry->'hiddenTools' IS DISTINCT FROM 'false'::jsonb
@@ -69,19 +73,34 @@ BEGIN
   -- Scope ownership/account/source checks above are independent of the
   -- explicitly selected Skill; never replace its identity with the work owner.
   IF EXISTS(SELECT 1 FROM runtime_executions WHERE billing_run_id=p_run_id AND actor_id=a) THEN
-   PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND (
-    (NOT (p->'input' ? 'reportGeneration') AND model_id=(p->>'modelId')::uuid)
-    OR (p->'input' ? 'reportGeneration' AND EXISTS(
-     SELECT 1 FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
-     WHERE r.id=p_run_id AND r.actor_id=a AND e.actor_id=a AND r.payload=p
-      AND e.payload=p->'input' AND e.payload ? 'reportGeneration'))
-   ) FOR SHARE;
+   IF runtime_rw_flag('sharedRowLocks') THEN
+    PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND (
+     (NOT (p->'input' ? 'reportGeneration') AND model_id=(p->>'modelId')::uuid)
+     OR (p->'input' ? 'reportGeneration' AND EXISTS(
+      SELECT 1 FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
+      WHERE r.id=p_run_id AND r.actor_id=a AND e.actor_id=a AND r.payload=p
+       AND e.payload=p->'input' AND e.payload ? 'reportGeneration'))
+    );
+   ELSE
+    PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND (
+     (NOT (p->'input' ? 'reportGeneration') AND model_id=(p->>'modelId')::uuid)
+     OR (p->'input' ? 'reportGeneration' AND EXISTS(
+      SELECT 1 FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
+      WHERE r.id=p_run_id AND r.actor_id=a AND e.actor_id=a AND r.payload=p
+       AND e.payload=p->'input' AND e.payload ? 'reportGeneration'))
+    ) FOR SHARE;
+   END IF;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
   ELSE
-   PERFORM id FROM modules WHERE id=m FOR SHARE;
+   IF runtime_rw_flag('sharedRowLocks') THEN PERFORM id FROM modules WHERE id=m; ELSE PERFORM id FROM modules WHERE id=m FOR SHARE;END IF;
   END IF;
-  PERFORM id FROM skills WHERE id=k FOR SHARE;
-  PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM skills WHERE id=k;
+   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k;
+  ELSE
+   PERFORM id FROM skills WHERE id=k FOR SHARE;
+   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
+  END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_REVISION_DENIED';END IF;
   PERFORM read_skill_package(a,m,k,rev,NULL,'');
  END IF;
@@ -94,10 +113,16 @@ BEGIN
     AND c->>'key'=e.match_result->>'key';
   IF chosen IS NOT NULL THEN
    m:=(chosen->>'moduleId')::uuid;k:=(chosen->>'skillId')::uuid;rev:=(chosen->>'revisionId')::uuid;
-   PERFORM id FROM modules WHERE id=m AND active AND model_id=(chosen->>'modelId')::uuid FOR SHARE;
+   IF runtime_rw_flag('sharedRowLocks') THEN PERFORM id FROM modules WHERE id=m AND active AND model_id=(chosen->>'modelId')::uuid;
+   ELSE PERFORM id FROM modules WHERE id=m AND active AND model_id=(chosen->>'modelId')::uuid FOR SHARE;END IF;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_MATCH_REVOKED';END IF;
-   PERFORM id FROM skills WHERE id=k FOR SHARE;
-   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
+   IF runtime_rw_flag('sharedRowLocks') THEN
+    PERFORM id FROM skills WHERE id=k;
+    PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k;
+   ELSE
+    PERFORM id FROM skills WHERE id=k FOR SHARE;
+    PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
+   END IF;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_MATCH_REVOKED';END IF;
    PERFORM read_skill_package(a,m,k,rev,chosen->>'packageHash','');
   END IF;
