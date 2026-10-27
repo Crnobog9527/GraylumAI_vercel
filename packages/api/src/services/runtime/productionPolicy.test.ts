@@ -6,6 +6,7 @@ import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { openRouterBound } from '../bill2/openRouterPolicy';
 import { loadProductionPolicy, readPaygProductionPolicies, PAYG_PRODUCTION_SETTING } from './productionPolicy';
 import { parseStagingPolicy } from './stagingPolicy';
+import { clearCatalogCache, withCatalogRequest } from './catalogCache';
 
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 const key = vi.hoisted(() => ({ value: 'platform-key' as string | undefined }));
@@ -212,4 +213,29 @@ it('offline loading (admin settings pages) never renews a stale price snapshot o
   const policy = await loadProductionPolicy(f.admin, actor, env, { read }, { offline: true });
   expect(read).not.toHaveBeenCalled();
   expect(policy.callPolicies.map(c => c.modelId)).toEqual([MODELS[0].id]);
+});
+
+it('DB-RW PR-B: with the catalog cache on, a later request reloads the policy with only the per-request reads', async () => {
+  const f = fixture(), versions = { enabled: true, settings: 1, models: 1, skills: 1 };
+  f.rpc.mockImplementation(async (name: string) => ({ data: name === 'catalog_versions_snapshot' ? { ...versions } : true, error: null }));
+  const from = (f.admin.from as unknown as ReturnType<typeof vi.fn>);
+  const reads = () => from.mock.calls.map(([table]) => table as string);
+  const names = () => f.rpc.mock.calls.map(([name]) => name);
+  clearCatalogCache();
+  try {
+    const first = await withCatalogRequest(() => load(f));
+    // Cold: the settings (PAYG profiles, q and m), the model rows, each model's pricing row and the multipliers. q and m are
+    // read twice by the code; the second read is already served from this request's cache.
+    expect(reads()).toEqual(['system_settings', 'system_settings', 'ai_models', 'ai_models', 'ai_models', 'ai_models']);
+    from.mockClear(); f.rpc.mockClear();
+    // Warm: no catalog read at all. The actor's access decision is still made for this request, and the key is read fresh.
+    expect(await withCatalogRequest(() => load(f))).toEqual({ ...first, expiresAt: expect.any(String) });
+    expect(reads()).toEqual([]);
+    expect(names().toSorted()).toEqual(['catalog_versions_snapshot', 'runtime_production_access']);
+    // A model change (the price refresh writes the model row too) makes the next request read the model rows again.
+    versions.models = 2;
+    from.mockClear();
+    await withCatalogRequest(() => load(f));
+    expect(reads()).toEqual(['ai_models', 'ai_models', 'ai_models', 'ai_models']);
+  } finally { clearCatalogCache(); }
 });

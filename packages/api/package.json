@@ -66,6 +66,7 @@
     "./opc/positioningWorkflow": "./src/services/opc/positioningWorkflow.ts",
     "./skills/modulePublication": "./src/services/skills/modulePublication.ts",
     "./src/services/platformSecrets/request": "./src/services/platformSecrets/request.ts",
+    "./src/services/runtime/catalogCache": "./src/services/runtime/catalogCache.ts",
     "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts",
     "./src/services/runtime/staleChargedRounds": "./src/services/runtime/staleChargedRounds.ts",
     "./src/services/runtime/stopLossNotify": "./src/services/runtime/stopLossNotify.ts",

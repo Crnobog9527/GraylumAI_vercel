@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { catalogRead } from './catalogCache';
 import { logger } from '../../lib/logger';
 import type { OpenRouterLimits } from '../bill2/openRouterPolicy';
 import { readOpenRouterPricing } from '../models/openRouterCatalog';
@@ -120,7 +121,7 @@ export async function readPricingStates(admin: SupabaseClient, quotes: readonly 
   const known = prefetched.filter(row => ids.includes(row.id as string)
     && ROW_COLUMNS.split(',').every(column => Object.hasOwn(row, column)));
   const rows = ids.every(id => known.some(row => row.id === id)) ? { data: known, error: null }
-    : await admin.from('ai_models').select(ROW_COLUMNS).in('id', ids);
+    : await catalogRead(admin, 'models', 'pricing-rows:' + JSON.stringify(ids), () => admin.from('ai_models').select(ROW_COLUMNS).in('id', ids));
   if (rows.error) stagingRpcFailure(rows.error);
   const byId = new Map(((rows.data ?? []) as Row[]).map(row => [row.id, row]));
   const now = resolved.now();

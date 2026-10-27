@@ -63,7 +63,7 @@ import {RESEARCH_RESULT_RESERVE_BYTES} from './researchTurn';
 import {guardResearchAdmission,researchInputHost} from './researchAdmissionGuard';
 import {attachFreeChatResearch} from './freeChatResearch';
 import {organizerSelection} from './organizerSelection';
-import {readAdmissionConfiguration,MODEL_ROW_COLUMNS} from './admissionConfiguration';
+import {readAdmissionConfiguration,readAdmissionModel,readAdmissionModule} from './admissionConfiguration';
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
  brief:z.string().max(8000),material:z.string().max(16000),roundId:uuid.nullable().default(null)}).strict();
@@ -211,8 +211,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')
     modelId=policy.real&&!policy.weeklyReview?serverChatModel(await settings):input.selection.modelId;
    else if(input.selection.kind==='skill'){
-    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related,uses_user_voice')
-     .eq('id',input.selection.moduleId).single();
+    const module=await readAdmissionModule(admin,input.selection.moduleId);
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
     if(gated&&module.data.social_media_related===true)refusePositioning();
     moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);voiceFlagged=module.data.uses_user_voice===true;
@@ -247,7 +246,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
    // DB-PERF PR-3: pricing and the billing unit reuse this row (MODEL_ROW_COLUMNS) instead of reading the model again.
-   const row=await admin.from('ai_models').select(MODEL_ROW_COLUMNS).eq('id',modelId).single();
+   const row=await readAdmissionModel(admin,modelId);
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
@@ -275,7 +274,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     const settings=await configuration;
     if(settings.error)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries((settings.data??[]).map(r=>[r.key,r.value])),modelId));
-    const model=await admin.from('ai_models').select(MODEL_ROW_COLUMNS).eq('id',summary.modelId).single();
+    const model=await readAdmissionModel(admin,summary.modelId);
     if(policy.real&&model.error){if(model.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(model.error);}
     if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw unavailableModel();
     modelConfiguration(()=>assertSeparateSummaryModel(row.data.model_id,model.data.model_id));modelRows.push(model.data);
