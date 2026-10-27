@@ -176,7 +176,9 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,agentTurn&&
     identity.model.startsWith('anthropic/')&&identity.providerLimits.cacheWriteUsdPerMillion!==undefined):-1;
    // These routing constraints must already be in the frozen request bytes.
-   if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&key!=='plugins'&&!((options.allowWorkspaceRead||agentTurn)&&key==='tools')) ||
+   // tool_choice: only the literal 'none' of a host-opened Agent turn that offers its tools (PROMPT-CACHE-ALL opening alignment).
+   const openingChoice=agentTurn&&Array.isArray(parsed?.tools)&&parsed.tools.length>0&&parsed.tool_choice==='none';
+   if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&key!=='plugins'&&!((options.allowWorkspaceRead||agentTurn)&&key==='tools')&&!(openingChoice&&key==='tool_choice')) ||
      !webOffOnly(parsed) ||
      (parsed.tools!==undefined&&!agentTurn&&!workspaceTools.safeParse(parsed.tools).success) ||
      (agentTurn&&(parsed.parallel_tool_calls!==undefined||!Array.isArray(parsed.messages)||!agentHistoryPaired(parsed.messages))) ||
