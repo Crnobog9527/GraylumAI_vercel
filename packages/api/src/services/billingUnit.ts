@@ -4,6 +4,7 @@ import { rowsFor, type ConfigurationRows } from './runtime/settingsRows';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { TRPCError } from '@trpc/server';
 import { BILLING_CONSTANTS } from '../types/billing';
+import { catalogRead } from './runtime/catalogCache';
 
 /**
  * BILL-UNIT configuration: q (credits per USD), the site-wide default multiplier and
@@ -139,7 +140,7 @@ export function describeBillingUnitSettings(settings: Readonly<Record<string, un
 export async function readBillingUnitSettings(db: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<BillingUnitSettings> {
   const keys = [BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier];
   const { data, error } = configuration ? rowsFor(await configuration, keys)
-    : await db.from('system_settings').select('key, value').in('key', keys);
+    : await catalogRead(db, 'settings', 'billing-unit', () => db.from('system_settings').select('key, value').in('key', keys));
   if (error || !Array.isArray(data)) throw new BillingUnitConfigError('BILLING_UNIT_SETTINGS_UNAVAILABLE');
   return billingUnitSettingsFromRows(data as SettingRow[]);
 }
@@ -226,7 +227,7 @@ export async function readMultiplierSnapshot(
   if (ids.length > 0) {
     const known = prefetched.models?.filter(row => ids.includes(row.id as string) && Object.hasOwn(row, 'price_multiplier'));
     const { data, error } = known && ids.every(id => known.some(row => row.id === id)) ? { data: known, error: null }
-      : await db.from('ai_models').select('id, price_multiplier').in('id', ids);
+      : await catalogRead(db, 'models', 'multipliers:' + JSON.stringify(ids), () => db.from('ai_models').select('id, price_multiplier').in('id', ids));
     if (error || !Array.isArray(data)) throw new BillingUnitConfigError('BILLING_UNIT_MODEL_UNAVAILABLE');
     const rows = data as Array<Record<string, unknown>>;
     for (const id of ids) {

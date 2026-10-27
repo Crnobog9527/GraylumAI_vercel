@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { rowFor, type ConfigurationRows } from './settingsRows';
+import { catalogRead } from './catalogCache';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
@@ -40,7 +41,8 @@ export async function assertProductionAccess(admin: SupabaseClient, actorId: str
 
 async function readSettings(admin: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<Settings> {
   const { data, error } = configuration ? rowFor(await configuration, PAYG_PRODUCTION_SETTING)
-    : await admin.from('system_settings').select('value').eq('key', PAYG_PRODUCTION_SETTING).maybeSingle();
+    : await catalogRead(admin, 'settings', 'payg-production', () =>
+      admin.from('system_settings').select('value').eq('key', PAYG_PRODUCTION_SETTING).maybeSingle());
   if (error) throw new StagingAccessError('RUNTIME_PAYG_CONFIG_UNAVAILABLE');
   let value: unknown = data?.value ?? null;
   if (typeof value === 'string') { try { value = JSON.parse(value); } catch { value = null; } }
@@ -93,8 +95,9 @@ export async function loadProductionPolicy(admin: SupabaseClient, actorId: strin
   // ADMIN-SECRETS OR-1: the one OpenRouter key lives in the platform Vault slot, not in the model rows. Settings pages
   // (offline) may use a cached read; anything that authorizes a paid call reads it fresh.
   const key = await readOpenRouterKeyOrUnset(admin, { fresh: !options.offline });
-  const rows = await admin.from('ai_models').select('id,model_id,provider,api_endpoint,config,updated_at')
-    .in('model_id', config.profiles.map(p => p.model)).eq('is_active', 'true');
+  const models = config.profiles.map(p => p.model);
+  const rows = await catalogRead(admin, 'models', 'production-models:' + JSON.stringify(models), () =>
+    admin.from('ai_models').select('id,model_id,provider,api_endpoint,config,updated_at').in('model_id', models).eq('is_active', 'true'));
   if (rows.error) stagingRpcFailure(rows.error);
   const candidates: Array<{ row: ModelRow; profile: Settings['profiles'][number] }> = [];
   for (const profile of config.profiles) {

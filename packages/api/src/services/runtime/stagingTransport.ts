@@ -5,6 +5,7 @@ import {openRouterAccount,readOpenRouterKeyOrUnset} from '../models/openRouterKe
 import {isOpenRouterEndpoint,resolveOpenAICompatibleEndpoint} from '../providerUtils';
 import type {RuntimeBudget} from './budget';
 import type {StagingPolicy} from './stagingPolicy';
+import {catalogRead} from './catalogCache';
 /** Uses the platform OpenRouter key (admin third-party keys page, Vault; OR-1), with no environment
  * key fallback. The namespace binds recovery to the exact original credential.
  */
@@ -16,7 +17,8 @@ export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy,budge
   const query=admin.from('ai_models').select('id,model_id,provider,api_endpoint').eq('id',quotes[0]!.modelId);
   const deadline=budget?AbortSignal.timeout(Math.max(1,Math.ceil(budget.remainingPersistence()))):undefined;
   const bounded=signal&&deadline?AbortSignal.any([signal,deadline]):signal??deadline;
-  const row=await (bounded?query.abortSignal(bounded):query).single();
+  // DB-RW PR-B: the model row is a catalog row; the key below is still read fresh for every call.
+  const row=await catalogRead(admin,'models','transport-model:'+quotes[0]!.modelId,()=>(bounded?query.abortSignal(bounded):query).single());
   const model=row.data;
   // A key that cannot be read (not filled, database unavailable) is a refusal, never another key.
   const key=row.error?undefined:await readOpenRouterKeyOrUnset(admin,{fresh:true});
