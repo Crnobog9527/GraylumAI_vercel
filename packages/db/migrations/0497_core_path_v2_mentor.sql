@@ -1,7 +1,8 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2 V2-5 (kind=mentor, the positioning mentor; docs/launch/tasks/CORE-PATH-V2.md 2.3, 2.7, 4.2, 6.1).
--- MIGRATION NUMBER IS A LOCAL PLACEHOLDER until the controller assigns one.
+-- MIGRATION NUMBER IS A LOCAL PLACEHOLDER until the controller assigns one; it must stay after 0496 (start threshold), whose
+-- turn_open it extends.
 --   turn_mentor_context  read inside turn_open: the draft of this session, its current round, the step's workflow and the
 --                        work projection (checklist values, field provenance, business context; runtime_work_projection's
 --                        fields without its runtime_executions join) the mentor's prompt
@@ -16,7 +17,7 @@
 --                        copied unchanged; the turn's request id stands where the execution id stood (field provenance,
 --                        suggestion order, the idempotent artifact_requests row), so opc_information and the protection
 --                        checks that read artifact_requests keep working on both paths.
---   turn_open            0421 with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
+--   turn_open            0496 with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
 --   turn_close           0421 with the mentor branch of its per-kind hook (turn_mentor_apply on p_kind_result), and the
 --                        capture response returned under kindResult.
 -- Locks: neither function takes an explicit row lock (main-path rule 5). turn_mentor_apply writes the round's checklist with an
@@ -25,7 +26,7 @@
 -- lock on artifact_rounds remains, for the length of a concurrent single-statement edit.
 -- Compatibility: no signature changes; turn_open and turn_close only gain the mentor branches and a returned key. Nothing calls
 -- the mentor kind until core_path_v2 is enabled and the page uses /api/turn (V2-10). Repeatable: CREATE OR REPLACE throughout.
--- Recovery: re-apply 0421's turn_open and turn_close and drop the two mentor functions; no stored data depends on them.
+-- Recovery: re-apply 0496's turn_open and 0421's turn_close and drop the two mentor functions; no stored data depends on them.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -292,9 +293,8 @@ BEGIN
  RETURN response;
 END $function$;
 
--- turn_open: 0421 unchanged except the mentor branch of kindContext.
-CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb,
-  p_resume_of bigint DEFAULT NULL)
+-- turn_open: 0496 (the start threshold) unchanged except the mentor branch of kindContext.
+CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -386,8 +386,10 @@ BEGIN
     END IF;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
+    -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
+    -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
+    IF available < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     h := least(g, available);
-    IF h < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;

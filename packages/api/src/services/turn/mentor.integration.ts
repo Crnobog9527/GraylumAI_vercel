@@ -35,7 +35,7 @@ const db = new pg.Client({ connectionString });
 const MENTOR = 'anthropic/claude-sonnet-5.5', ORGANIZER = 'anthropic/claude-opus-5.5', ROUTE = 'anthropic';
 const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
 const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, 'billing_credits_per_usd', 'billing_token_price_multiplier', 'runtime_rw_v2',
-  'v3_summary_model_id', 'v3_summary_max_tokens'];
+  'v3_summary_model_id', 'v3_summary_max_tokens', 'billing_payg_start_thresholds'];
 let saved: Array<{ key: string; value: unknown }> = [];
 const rest = () => createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false } });
 beforeAll(async () => {
@@ -109,6 +109,9 @@ async function setup() {
   await set('runtime_rw_v2', { catalogCache: true });
   await set('v3_summary_model_id', organizerId);
   await set('v3_summary_max_tokens', 2048);
+  // The start threshold L of each call's model and purpose: the mentor (skill) and the organizer (attached_organizer).
+  await set('billing_payg_start_thresholds', { version: 'core-path-test', thresholds: [
+    { model: MENTOR, purpose: 'skill', typicalUsd: '0.04' }, { model: ORGANIZER, purpose: 'attached_organizer', typicalUsd: '0.01' }] });
   await seedTestOpenRouterKey(db, 'LOCAL_SYNTHETIC_OPENROUTER_KEY');
   const steps = async () => (await db.query('select r.steps from artifact_rounds r join opc_drafts d on d.round_id=r.id where d.draft_id=$1',
     [draft.draftId])).rows[0].steps;
@@ -320,4 +323,20 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a business archived while the turn runs gets no 
   expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
   expect((await db.query('select close_kind,settlement from turns where actor_id=$1', [f.actor])).rows)
     .toEqual([{ close_kind: 'completed', settlement: 'done' }]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5: the start threshold is one normal turn (mentor + organizer); a balance below it opens nothing', async () => {
+  const f = await setup();
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  // L = ceil(2 x 100 x 6) + ceil(0.01 x 100 x 6) = 1206 > the 1000 credits of the account.
+  await db.query("update system_settings set value=jsonb_set(value,'{thresholds,0,typicalUsd}','\"2\"') where key='billing_payg_start_thresholds'");
+  clearCatalogCache();
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  expect(out.events).toEqual([{ type: 'error', code: 'TURN_INSUFFICIENT_CREDITS' }]);
+  expect(t.bodies).toEqual([]);
+  expect(await credits(f.actor)).toBe(1000);
+  // Not configured for the organizer's purpose: refused, never a guessed threshold.
+  await db.query("update system_settings set value=jsonb_set(value,'{thresholds,1,purpose}','\"ordinary\"') where key='billing_payg_start_thresholds'");
+  clearCatalogCache();
+  expect((await turn(f, { text: 'Hello', transport: t.fn })).events).toEqual([{ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' }]);
 });

@@ -5,10 +5,11 @@ import { readAdmissionConfiguration, readAdmissionModule } from '../runtime/admi
 import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { AGENT_TURN_REQUEST_FORMAT } from '../runtime/providerRequest';
 import { readPurposeBudgets } from '../runtime/purposeBudgets';
+import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
 import { rowFor } from '../runtime/settingsRows';
 import type { PricingDeps } from '../runtime/pricingAdmission';
 import { CORE_PATH_SETTING, coreSetting, HISTORY_ITEMS } from './chat';
-import { turnPolicy } from './policy';
+import { startThresholdCredits, turnPolicy } from './policy';
 import { chatQuote, QuoteError, type ChatQuote } from './quote';
 
 /*
@@ -23,6 +24,9 @@ export const MENTOR_INPUT_BYTES = 90000, ORGANIZER_INPUT_BYTES = 112000;
 export type MentorCatalog = {
   config: { enabled: boolean; stopLoss: Parameters<typeof turnPolicy>[0]['stopLoss'] };
   mentor: ChatQuote; organizer: ChatQuote | null; brandIdentity: boolean;
+  /** The start threshold L of this turn: one normal turn's cost, the mentor's L (purpose skill) plus the organizer's
+   * (attached_organizer), each from billing_payg_start_thresholds as the old path claimed each call (Owner 10-01, 10-28). */
+  startCredits: number;
 };
 
 export class MentorCatalogError extends Error {
@@ -54,7 +58,12 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
           outputCap: summary.maxTokens } });
       assertSeparateSummaryModel(mentor.model, organizer.model);
     }
-    return { config: config.data, mentor, organizer, brandIdentity: settings.ok ? settings.identityGuard ?? true : true };
+    const thresholds = rowFor(rows, RESEARCH_THRESHOLDS_KEY), setting = thresholds.error ? null : thresholds.data?.value;
+    const mentorL = startThresholdCredits(setting, mentor.model, 'skill', mentor.q, mentor.multiplier);
+    const organizerL = organizer ? startThresholdCredits(setting, organizer.model, 'attached_organizer', organizer.q, organizer.multiplier) : 0;
+    if (mentorL === undefined || organizerL === undefined) throw new MentorCatalogError('TURN_START_THRESHOLD_UNCONFIGURED');
+    return { config: config.data, mentor, organizer, brandIdentity: settings.ok ? settings.identityGuard ?? true : true,
+      startCredits: mentorL + organizerL };
   } catch (error) {
     if (error instanceof QuoteError) throw new MentorCatalogError(error.code);
     const message = error instanceof Error ? error.message : '';
@@ -68,6 +77,7 @@ export function mentorPolicy(catalog: MentorCatalog, input: { opening: boolean; 
   const freeTools = input.opening ? 0 : 1;
   // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).
   return { ...turnPolicy({ q: mentor.q, multiplier: mentor.multiplier, modelUpperUsd: mentor.upperUsd,
+    startThresholdCredits: catalog.startCredits, pricing: mentor.pricing,
     limits: { model: 1 + freeTools + (organizer ? 1 : 0), paidTools: 0, freeTools, decisions: 0 },
     otherModelCalls: organizer ? [{ upperUsd: organizer.upperUsd, multiplier: organizer.multiplier }] : [],
     stopLoss: catalog.config.stopLoss, historyItems: HISTORY_ITEMS, inputBytes: mentor.inputLimit,

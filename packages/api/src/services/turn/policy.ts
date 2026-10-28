@@ -42,10 +42,18 @@ export type PolicyInput = {
   /** The Decisions model's upper bound for one positioning check, in USD; required when limits.decisions is 1. */
   decisionUpperUsd?: string;
   stopLoss: z.infer<typeof stopLossSettings>; historyItems: number; inputBytes: number;
+  /** The start threshold L in credits (startThresholdCredits): the turn opens when the balance covers it, the freeze is
+   *  H = min(G_turn, A), and a call pauses only below min(G_i, L) (Owner 10-01, restated 10-28; migration 0496). */
+  startThresholdCredits: number;
   /** The model's nominal price table at open: a receipt the recovery job finds later is priced with it (V2-8), as a live one is. */
   pricing?: NominalPricing;
   /** Hashes and versions frozen for the golden-bytes test and the voice tombstone; never user text. */
   frozen?: Record<string, string | number | boolean>;
+};
+
+const validThreshold = (credits: number) => {
+  if (!Number.isSafeInteger(credits) || credits < 1) throw new Error('TURN_POLICY_INVALID');
+  return credits;
 };
 
 export function turnPolicy(input: PolicyInput) {
@@ -65,9 +73,31 @@ export function turnPolicy(input: PolicyInput) {
     ...(input.decisionUpperUsd === undefined ? {} : { decisionUpperUsd: input.decisionUpperUsd }),
     ...(input.pricing ? { pricing: input.pricing } : {}),
     uTurnUsd: Number(format(uTurn)), gCredits, uModelCredits,
-    // The start threshold: one model call (BILL-PAYG L); a short freeze pauses the turn before a call it cannot cover.
-    minCredits: uModelCredits,
+    // The start threshold L (BILL-PAYG): what the balance must cover to start; below it mid-turn the turn pauses.
+    minCredits: validThreshold(input.startThresholdCredits),
     limits, stopLoss, historyItems: input.historyItems, inputBytes: input.inputBytes,
   };
 }
 export type TurnPolicy = ReturnType<typeof turnPolicy>;
+
+/**
+ * BILL-PAYG start threshold L for one model and purpose, as bill2_payg_claim computes it from billing_payg_start_thresholds:
+ * max(1, ceil(typicalUsd x q x m)), or a legacy entry's integer credits. Missing, duplicated or invalid: undefined, and the turn
+ * is refused (never a guessed threshold).
+ */
+export function startThresholdCredits(setting: unknown, model: string, purpose: string, q: string, multiplier: string): number | undefined {
+  const parsed = z.object({ version: z.string().trim().min(1), thresholds: z.array(z.record(z.string(), z.unknown())) })
+    .passthrough().safeParse(setting);
+  if (!parsed.success) return undefined;
+  const matches = parsed.data.thresholds.filter(entry => entry.model === model && entry.purpose === purpose);
+  if (matches.length !== 1) return undefined;
+  const entry = matches[0]!;
+  if ('typicalUsd' in entry) {
+    if ('credits' in entry || !decimal.safeParse(entry.typicalUsd).success) return undefined;
+    const credits = Math.max(1, callCredits(q, entry.typicalUsd as string, multiplier));
+    return credits <= 2147483647 ? credits : undefined;
+  }
+  const credits = entry.credits;
+  return typeof credits === 'number' && Number.isSafeInteger(credits) && credits >= 1 && credits <= 999999999 ? credits
+    : typeof credits === 'string' && /^[1-9][0-9]{0,8}$/.test(credits) ? Number(credits) : undefined;
+}

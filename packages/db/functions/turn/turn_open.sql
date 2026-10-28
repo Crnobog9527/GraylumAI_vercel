@@ -94,8 +94,10 @@ BEGIN
     END IF;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
+    -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
+    -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
+    IF available < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     h := least(g, available);
-    IF h < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;
