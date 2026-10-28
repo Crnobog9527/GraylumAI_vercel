@@ -18,10 +18,12 @@
 --                        checks that read artifact_requests keep working on both paths.
 --   opc_information,     unchanged except one lock: the draft's session row before its project, so a manual checklist save,
 --   opc_capture_resolve, a suggestion decision or an old-path capture serializes with a mentor close (which holds that session
---   opc_capture_apply,   row) instead of overwriting its capture or being overwritten (review of #1520). These are, with the
---   artifact_transition_ step confirmation (artifact_transition_before_reuse), every writer of a draft round's checklist that
---   before_reuse         can run during a mentor turn; erasure already locks sessions first, and revisions, new works, report
---                        revisions and script works write other rounds.
+--   opc_capture_apply,   row) instead of overwriting its capture or being overwritten (review of #1520).
+--   artifact_transition, the same lock first at the entries of a step confirmation, a step result save and a publication.
+--   artifact_publish_    With the three above these are every writer of a draft round's checklist that can run during a mentor
+--   current,             turn (audited: erasure already locks sessions first; revisions, new works, report revisions and script
+--   opc_save_result      works write other rounds). The lock is taken at the entry, before accounts and the project, never
+--                        inside a callee that already holds the project (no project -> session inversion).
 --   turn_open            0422 (start threshold) with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
 --   turn_close           0421 with the mentor branch of its per-kind hook (turn_mentor_apply on p_kind_result), and the
 --                        capture response returned under kindResult.
@@ -896,204 +898,136 @@ BEGIN
  RETURN response;
 END $function$;
 
--- artifact_transition_before_reuse (step confirmation and the other artifact transitions): unchanged except the same session-row
--- lock before the project, for a project that is a positioning draft (no draft: no session row, nothing changes).
-CREATE OR REPLACE FUNCTION public.artifact_transition_before_reuse(p_actor_id uuid, p_module_id uuid, p_skill_id uuid, p_action text, p_project_id uuid, p_round_id uuid, p_request_id uuid DEFAULT NULL::uuid, p_payload jsonb DEFAULT '{}'::jsonb)
+
+-- The entries of a step confirmation, a step result save and a publication: unchanged except the positioning draft's session row
+-- is locked first (before accounts and the project), the order opc_information, opc_capture_resolve and opc_capture_apply use, so
+-- every writer of a draft round's checklist that can run during a mentor turn serializes with its close.
+CREATE OR REPLACE FUNCTION public.artifact_transition(p_actor_id uuid, p_module_id uuid, p_skill_id uuid, p_action text, p_project_id uuid DEFAULT NULL::uuid, p_round_id uuid DEFAULT NULL::uuid, p_request_id uuid DEFAULT NULL::uuid, p_payload jsonb DEFAULT '{}'::jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE p public.artifact_projects%ROWTYPE; r public.artifact_rounds%ROWTYPE; prior public.artifact_rounds%ROWTYPE;
- req public.artifact_requests%ROWTYPE; ev public.artifact_evidence%ROWTYPE; ver public.artifact_versions%ROWTYPE;
- manifest jsonb; old_manifest jsonb; flow jsonb; states jsonb; st jsonb; s jsonb; body text; ids jsonb; response jsonb;
- ident uuid:=gen_random_uuid(); k text; dep text; changed text[]:='{}'; snap jsonb; sections jsonb:='[]'; all_ids jsonb:='[]';
+DECLARE binding opc_account_strategy_drafts;a opc_accounts;b opc_businesses;result jsonb;replay boolean;
 BEGIN
- IF p_payload IS NULL OR octet_length(p_payload::text)>1048576 OR NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false') THEN RAISE EXCEPTION 'artifact denied' USING ERRCODE='42501'; END IF;
- IF p_action='start' THEN
-  INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account)
-  VALUES(p_project_id,p_actor_id,p_module_id,p_skill_id,p_payload->>'account') ON CONFLICT(id) DO NOTHING;
+ -- 0324 archived business guard
+ IF p_action NOT IN ('read','report') THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('projectId',p_project_id)); END IF;
+ -- V2-5: a positioning draft's session row before anything else (accounts, project): the serialization point every writer of its
+ -- checklist shares with a mentor turn's close, which holds it. Lock order: session, account, project.
+ IF p_action NOT IN ('read','report') THEN
+  PERFORM 1 FROM runtime_sessions s JOIN opc_drafts d ON d.session_id=s.id
+   WHERE d.project_id=p_project_id AND d.actor_id=p_actor_id AND s.actor_id=p_actor_id FOR UPDATE OF s;
  END IF;
- -- V2-5: a positioning draft's session row first (the serialization point every writer of its checklist shares with a mentor
- -- turn's close, which holds it), then the project, as opc_information, opc_capture_resolve and opc_capture_apply.
+
+ -- D7 saved report read
+ IF EXISTS(SELECT 1 FROM artifact_projects WHERE id=p_project_id AND actor_id=p_actor_id AND erased_at IS NOT NULL)
+ THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
+ IF p_action='report' AND EXISTS(SELECT 1 FROM artifact_versions v JOIN artifact_projects p ON p.id=v.project_id
+  WHERE v.round_id=p_round_id AND p.id=p_project_id AND p.actor_id=p_actor_id
+   AND p.module_id=p_module_id AND p.skill_id=p_skill_id AND content_erasure_artifact_readable(p_actor_id,v.id)) THEN
+  RETURN (SELECT jsonb_build_object('available',true,'sourceAvailable',artifact_evidence_allowed(v.project_id,v.evidence_ids),
+   'version',v.version,'id',v.id,'report',v.report,'hash',v.report_hash) FROM artifact_versions v WHERE v.round_id=p_round_id AND v.project_id=p_project_id);
+ END IF;
+
+ IF p_action='confirm' AND EXISTS(SELECT 1 FROM opc_drafts d JOIN opc_account_strategy_drafts draft_binding ON draft_binding.draft_id=d.draft_id WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND d.actor_id=p_actor_id) THEN
+  PERFORM 1 FROM opc_accounts acct JOIN opc_account_strategy_drafts draft_binding ON draft_binding.account_project_id=acct.project_id JOIN opc_drafts d ON d.draft_id=draft_binding.draft_id
+   WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND acct.actor_id=p_actor_id FOR UPDATE OF acct;
+  PERFORM 1 FROM artifact_projects WHERE id=p_project_id AND actor_id=p_actor_id FOR UPDATE;
+  IF NOT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) THEN
+   PERFORM opc_account_refresh_confirmations(p_actor_id,p_project_id,p_round_id,p_payload->>'stepId');
+  END IF;
+ END IF;
+ IF p_action<>'publish' THEN
+  RETURN artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);
+ END IF;
+ SELECT asd.* INTO binding FROM opc_account_strategy_drafts asd
+  JOIN opc_drafts d ON d.draft_id=asd.draft_id
+  WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND asd.actor_id=p_actor_id;
+ IF binding.draft_id IS NULL THEN
+  RETURN artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);
+ END IF;
+ SELECT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) INTO replay;
+ IF replay THEN RETURN artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);END IF;
+ IF NOT binding.current THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
+ SELECT * INTO a FROM opc_accounts WHERE project_id=binding.account_project_id AND actor_id=p_actor_id FOR UPDATE;
+ IF EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) THEN RETURN artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);END IF;
+ SELECT * INTO binding FROM opc_account_strategy_drafts WHERE draft_id=binding.draft_id AND actor_id=p_actor_id FOR UPDATE;
+ IF NOT binding.current THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
+ IF a.project_id IS NULL OR a.source_version_id IS DISTINCT FROM binding.base_source_version_id OR
+  a.revision IS DISTINCT FROM binding.base_account_revision THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
+ SELECT * INTO b FROM opc_businesses WHERE id=a.business_id AND actor_id=p_actor_id FOR UPDATE;
+ IF b.id IS NULL THEN RAISE EXCEPTION 'OPC_BUSINESS_DENIED';END IF;
+ PERFORM opc_account_refresh_confirmations(p_actor_id,p_project_id,p_round_id);
+ result:=artifact_transition_before_account_strategy(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);
+ IF result->>'versionId' IS NULL THEN RAISE EXCEPTION 'OPC_VERSION_CONFLICT';END IF;
+ -- The older common-business wrapper selected this version temporarily in
+ -- this transaction. Restore its exact prior source and revision.
+ UPDATE opc_businesses SET current_source_version_id=b.current_source_version_id,revision=b.revision WHERE id=b.id;
+ UPDATE opc_accounts SET source_version_id=(result->>'versionId')::uuid,revision=revision+1 WHERE project_id=a.project_id;
+ UPDATE opc_account_strategy_drafts SET base_source_version_id=(result->>'versionId')::uuid,base_account_revision=a.revision+1
+  WHERE draft_id=binding.draft_id;
+ RETURN result;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.artifact_publish_current(p_actor_id uuid, p_module_id uuid, p_skill_id uuid, p_project_id uuid, p_round_id uuid, p_request_id uuid, p_expected_steps jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE snapshot jsonb; actual jsonb; payload jsonb:=jsonb_build_object('expectedSteps',p_expected_steps);
+BEGIN
+ -- V2-5: the positioning draft's session row first (see artifact_transition); then account -> project, as before.
  PERFORM 1 FROM runtime_sessions s JOIN opc_drafts d ON d.session_id=s.id
-  WHERE d.project_id=p_project_id AND d.actor_id=p_actor_id AND s.actor_id=p_actor_id FOR UPDATE OF s;
- SELECT * INTO p FROM artifact_projects WHERE id=p_project_id FOR UPDATE;
- IF NOT FOUND OR p.actor_id IS DISTINCT FROM p_actor_id OR p.module_id IS DISTINCT FROM p_module_id OR p.skill_id IS DISTINCT FROM p_skill_id THEN RAISE EXCEPTION 'artifact denied' USING ERRCODE='42501'; END IF;
- IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false') THEN RAISE EXCEPTION 'actor no longer active' USING ERRCODE='42501'; END IF;
- SELECT * INTO r FROM artifact_rounds WHERE id=p_round_id;
- IF FOUND AND r.project_id<>p.id THEN RAISE EXCEPTION 'round denied' USING ERRCODE='42501'; END IF;
- IF p_action<>'start' AND r.id IS NULL THEN RAISE EXCEPTION 'round denied'; END IF;
- IF r.id IS NOT NULL THEN
-  states:=r.steps;
-  FOR k,st IN SELECT * FROM jsonb_each(states) LOOP
-   IF NOT artifact_evidence_allowed(p.id,artifact_step_evidence(r.workflow,states,k)||coalesce(st->'provenanceIds','[]')) THEN states:=artifact_invalidate(r.workflow,states,k); END IF;
-  END LOOP;
-  r.steps:=states; -- expiry propagates without a scheduler or modification of historical snapshots.
+   WHERE d.project_id=p_project_id AND d.actor_id=p_actor_id AND s.actor_id=p_actor_id FOR UPDATE OF s;
+ -- Account edits and publication share account -> project lock order.
+ PERFORM 1 FROM opc_accounts acct JOIN opc_account_strategy_drafts draft_binding ON draft_binding.account_project_id=acct.project_id JOIN opc_drafts d ON d.draft_id=draft_binding.draft_id
+  WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND acct.actor_id=p_actor_id FOR UPDATE OF acct;
+ PERFORM 1 FROM artifact_projects WHERE id=p_project_id FOR UPDATE;
+ snapshot:=artifact_transition(p_actor_id,p_module_id,p_skill_id,'read',p_project_id,p_round_id);
+ IF NOT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) THEN
+  SELECT jsonb_object_agg(key,jsonb_build_object('version',value->'version','reviewVersion',value->'reviewVersion')) INTO actual FROM jsonb_each(snapshot->'steps');
+  IF actual IS DISTINCT FROM p_expected_steps THEN RAISE EXCEPTION 'publication conflict'; END IF;
  END IF;
- IF p_action NOT IN ('read','report','restrictEvidence','abandon') THEN
-  manifest:=read_skill_package(p_actor_id,p.module_id,p.skill_id,
-    CASE WHEN p_action='start' THEN (p_payload->>'revisionId')::uuid ELSE r.revision_id END,
-    CASE WHEN p_action='start' THEN p_payload->>'packageHash' ELSE r.package_hash END,NULL);
- END IF;
- IF p_action IN ('read','report') THEN
-  IF p_action='report' THEN
-   SELECT * INTO ver FROM artifact_versions WHERE round_id=r.id AND project_id=p.id;
-   IF NOT FOUND THEN RETURN jsonb_build_object('available',false,'reason','NOT_PUBLISHED'); END IF;
-   IF NOT artifact_evidence_allowed(p.id,ver.evidence_ids) THEN RETURN jsonb_build_object('available',false,'reason','EVIDENCE_UNAVAILABLE','version',ver.version); END IF;
-   RETURN jsonb_build_object('available',true,'version',ver.version,'id',ver.id,'report',ver.report,'hash',ver.report_hash);
-  END IF;
-  states:='{}';
-  FOR k,st IN SELECT * FROM jsonb_each(r.steps) LOOP
-   IF NOT artifact_evidence_allowed(p.id,artifact_step_evidence(r.workflow,r.steps,k)||coalesce(st->'provenanceIds','[]')) THEN st:=st||'{"body":null,"valid":false,"available":false}'; END IF;
-   states:=jsonb_set(states,ARRAY[k],st);
-  END LOOP;
-  SELECT coalesce(jsonb_agg(jsonb_build_object('id',e.id,'kind',e.kind,'supersedes',e.supersedes,'hash',e.content_hash,'createdAt',e.created_at,
-   'available',artifact_evidence_allowed(p.id,jsonb_build_array(e.id)),
-   'payload',CASE WHEN artifact_evidence_allowed(p.id,jsonb_build_array(e.id)) THEN e.payload ELSE 'null'::jsonb END) ORDER BY e.id),'[]') INTO ids FROM artifact_evidence e WHERE e.project_id=p.id;
-  SELECT coalesce(jsonb_agg(jsonb_build_object('id',c.id,'stepId',c.step_id,'body',CASE WHEN artifact_evidence_allowed(p.id,c.evidence_ids) THEN c.body ELSE NULL END,'evidenceIds',c.evidence_ids) ORDER BY c.id),'[]') INTO sections FROM artifact_candidates c WHERE c.round_id=r.id;
-  SELECT coalesce(jsonb_agg(jsonb_build_object('id',c.id,'stepId',c.step_id,'version',c.version,'reviewVersion',c.review_version,'body',CASE WHEN artifact_evidence_allowed(p.id,c.evidence_ids) THEN c.body ELSE NULL END,'evidenceIds',c.evidence_ids) ORDER BY c.id),'[]') INTO snap FROM artifact_confirmations c WHERE c.round_id=r.id;
-  -- Explicit public UI projection; never return resources, required-capability plans or manifest.
-  SELECT jsonb_build_object('id',r.workflow->>'id','version',r.workflow->'version','steps',jsonb_agg(jsonb_build_object('id',x->>'id','title',x->>'title','dependsOn',x->'dependsOn') ORDER BY n)) INTO flow FROM jsonb_array_elements(r.workflow->'steps') WITH ORDINALITY t(x,n);
-  RETURN jsonb_build_object('projectId',p.id,'roundId',r.id,'skillId',p.skill_id,'state',r.state,'currentVersion',p.current_version,
-   'revisionId',r.revision_id,'packageHash',r.package_hash,'workflowHash',r.workflow_hash,'templateHash',r.template_hash,'workflow',flow,'steps',states,'evidence',ids,'candidates',sections,'confirmations',snap);
- END IF;
- IF p_request_id IS NULL THEN RAISE EXCEPTION 'request identity required'; END IF;
- SELECT * INTO req FROM artifact_requests WHERE project_id=p.id AND request_id=p_request_id;
- IF FOUND THEN
-  IF req.round_id<>p_round_id OR req.action<>p_action OR req.payload IS DISTINCT FROM p_payload THEN RAISE EXCEPTION 'request conflict'; END IF;
-  RETURN req.response; -- identifiers only: never replay an expired evidence body.
- END IF;
- IF p_action='start' THEN
-  IF (SELECT count(*) FROM artifact_rounds WHERE project_id=p.id)>=100 THEN RAISE EXCEPTION 'round capacity'; END IF;
-  IF r.id IS NOT NULL OR p.account IS DISTINCT FROM p_payload->>'account' THEN RAISE EXCEPTION 'round conflict'; END IF;
-  flow:=p_payload->'workflow';PERFORM artifact_validate_workflow(flow,manifest);
-  IF (flow->>'kind'='social')<>(p.account IS NOT NULL) THEN RAISE EXCEPTION 'account scope'; END IF;
-  states:='{}';
-  IF p_payload->>'fromRoundId' IS NOT NULL THEN
-   SELECT * INTO prior FROM artifact_rounds WHERE id=(p_payload->>'fromRoundId')::uuid AND project_id=p.id;
-   IF NOT FOUND OR prior.state='draft' THEN RAISE EXCEPTION 'source round denied'; END IF;
-   SELECT m.manifest INTO old_manifest FROM skill_packages m WHERE m.revision_id=prior.revision_id;
-  ELSIF EXISTS(SELECT 1 FROM artifact_rounds WHERE project_id=p.id) THEN RAISE EXCEPTION 'explicit source round required'; END IF;
-  FOR s IN SELECT * FROM jsonb_array_elements(flow->'steps') LOOP
-   k:=s->>'id';st:=coalesce(prior.steps->k,jsonb_build_object('body','','version',0,'reviewVersion',0,'evidenceIds','[]'::jsonb,'provenanceIds','[]'::jsonb,'confirmationId',NULL,'valid',false));
-   IF prior.id IS NOT NULL AND (NOT EXISTS(SELECT 1 FROM jsonb_array_elements(prior.workflow->'steps') x WHERE x=s)
-    OR artifact_resource_identity(manifest,s->'resources') IS DISTINCT FROM artifact_resource_identity(old_manifest,s->'resources')) THEN
-    changed:=array_append(changed,k);
-   END IF;
-   states:=jsonb_set(states,ARRAY[k],st);
-  END LOOP;
-  FOREACH k IN ARRAY changed LOOP states:=artifact_invalidate(flow,states,k); END LOOP;
-  INSERT INTO artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,steps)
-   VALUES(p_round_id,p.id,(p_payload->>'revisionId')::uuid,p_payload->>'packageHash',flow,artifact_hash(flow),artifact_hash(flow->'report'),states);
-  FOR k,st IN SELECT * FROM jsonb_each(states) LOOP
-   IF (st->>'valid')::boolean AND artifact_evidence_allowed(p.id,artifact_step_evidence(flow,states,k)) THEN
-    ident:=gen_random_uuid();INSERT INTO artifact_confirmations VALUES(ident,p_round_id,k,(st->>'version')::integer,(st->>'reviewVersion')::integer,st->>'body',artifact_step_evidence(flow,states,k),now());
-    states:=jsonb_set(states,ARRAY[k,'confirmationId'],to_jsonb(ident));
-   ELSE states:=jsonb_set(states,ARRAY[k,'valid'],'false');states:=jsonb_set(states,ARRAY[k,'confirmationId'],'null'); END IF;
-  END LOOP;
-  UPDATE artifact_rounds SET steps=states WHERE id=p_round_id;
-  response:=jsonb_build_object('roundId',p_round_id);
- ELSE
-  IF p_action NOT IN ('restrictEvidence','abandon') AND r.state<>'draft' THEN RAISE EXCEPTION 'round closed'; END IF;
-  states:=r.steps;k:=p_payload->>'stepId';st:=states->k;
-  IF p_action IN ('save','confirm','candidate') THEN
-   SELECT x INTO s FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=k;
-   IF s IS NULL THEN RAISE EXCEPTION 'step denied'; END IF;
-  END IF;
-  IF p_action IN ('save','candidate') THEN
-   body:=p_payload->>'body';ids:=p_payload->'evidenceIds';
-   IF body IS NULL OR ids IS NULL OR char_length(body)>(s->>'maxLength')::integer OR NOT artifact_evidence_allowed(p.id,ids) THEN RAISE EXCEPTION 'invalid content or evidence'; END IF;
-   -- Match the host's direct-input contract; inherited/report evidence can span the project.
-   IF jsonb_array_length(ids)>64 OR jsonb_array_length(ids)<>(SELECT count(DISTINCT v) FROM jsonb_array_elements(ids) v) THEN RAISE EXCEPTION 'invalid direct evidence'; END IF;
-   IF p_action='candidate' THEN
-    IF (SELECT count(*) FROM artifact_candidates WHERE round_id=r.id)>=256 THEN RAISE EXCEPTION 'candidate capacity'; END IF;
-    ids:=artifact_step_evidence(r.workflow,jsonb_set(states,ARRAY[k,'evidenceIds'],ids),k);
-    IF NOT artifact_evidence_allowed(p.id,ids) THEN RAISE EXCEPTION 'dependency evidence unavailable'; END IF;
-    INSERT INTO artifact_candidates(id,round_id,step_id,body,evidence_ids) VALUES(ident,r.id,k,body,ids);
-    response:=jsonb_build_object('candidateId',ident);
-   ELSE
-    IF (p_payload->>'expectedVersion')::integer IS DISTINCT FROM (st->>'version')::integer THEN RAISE EXCEPTION 'save conflict'; END IF;
-    st:=st||jsonb_build_object('body',body,'evidenceIds',ids,'provenanceIds','[]'::jsonb,'version',(st->>'version')::integer+1);
-    st:=st||jsonb_build_object('provenanceIds',artifact_step_evidence(r.workflow,jsonb_set(states,ARRAY[k],st),k));
-    states:=artifact_invalidate(r.workflow,jsonb_set(states,ARRAY[k],st),k);
-    UPDATE artifact_rounds SET steps=states WHERE id=r.id;
-    response:=jsonb_build_object('version',st->'version');
-   END IF;
-  ELSIF p_action='confirm' THEN
-   IF (p_payload->>'expectedVersion')::integer IS DISTINCT FROM (st->>'version')::integer OR (p_payload->>'expectedReviewVersion')::integer IS DISTINCT FROM (st->>'reviewVersion')::integer OR artifact_text_length(st->>'body')<(s->>'minLength')::integer
-    OR NOT artifact_evidence_allowed(p.id,st->'evidenceIds') OR NOT artifact_evidence_allowed(p.id,coalesce(st->'provenanceIds','[]')) OR ((s->>'requiresEvidence')::boolean AND jsonb_array_length(st->'evidenceIds')=0) THEN RAISE EXCEPTION 'confirmation conflict'; END IF;
-   FOR dep IN SELECT jsonb_array_elements_text(s->'dependsOn') LOOP
-    IF NOT (states->dep->>'valid')::boolean OR NOT artifact_evidence_allowed(p.id,states->dep->'evidenceIds') THEN RAISE EXCEPTION 'dependency review required'; END IF;
-   END LOOP;
-   ids:=artifact_step_evidence(r.workflow,states,k);
-   IF NOT artifact_evidence_allowed(p.id,ids) THEN RAISE EXCEPTION 'dependency evidence unavailable'; END IF;
-   INSERT INTO artifact_confirmations(id,round_id,step_id,version,review_version,body,evidence_ids) VALUES(ident,r.id,k,(st->>'version')::integer,(st->>'reviewVersion')::integer,st->>'body',ids);
-   states:=jsonb_set(states,ARRAY[k],st||jsonb_build_object('confirmationId',ident,'valid',true,'provenanceIds',ids));
-   UPDATE artifact_rounds SET steps=states WHERE id=r.id;
-   response:=jsonb_build_object('confirmationId',ident);
-  ELSIF p_action='publish' THEN
-   FOR s IN SELECT * FROM jsonb_array_elements(r.workflow->'steps') LOOP
-    st:=states->(s->>'id');
-    IF NOT (st->>'valid')::boolean OR NOT artifact_evidence_allowed(p.id,st->'evidenceIds') THEN RAISE EXCEPTION 'confirmation required'; END IF;
-    IF NOT EXISTS(SELECT 1 FROM artifact_confirmations c WHERE c.id=(st->>'confirmationId')::uuid AND c.round_id=r.id AND c.step_id=s->>'id' AND c.version=(st->>'version')::integer AND c.review_version=(st->>'reviewVersion')::integer AND c.body=st->>'body' AND c.evidence_ids=artifact_step_evidence(r.workflow,states,s->>'id')) THEN RAISE EXCEPTION 'snapshot conflict'; END IF;
-    all_ids:=all_ids||artifact_step_evidence(r.workflow,states,s->>'id');
-   END LOOP;
-   SELECT coalesce(jsonb_agg(DISTINCT v ORDER BY v),'[]') INTO all_ids FROM jsonb_array_elements(all_ids) v;
-   IF NOT artifact_evidence_allowed(p.id,all_ids) THEN RAISE EXCEPTION 'report evidence unavailable'; END IF;
-   FOR s IN SELECT * FROM jsonb_array_elements(r.workflow->'report'->'sections') LOOP
-    st:=states->(s->>'stepId');sections:=sections||jsonb_build_array(jsonb_build_object('title',s->>'title','stepId',s->>'stepId','body',st->>'body','confirmationId',st->'confirmationId','evidenceIds',(SELECT c.evidence_ids FROM artifact_confirmations c WHERE c.id=(st->>'confirmationId')::uuid)));
-   END LOOP;
-   SELECT coalesce(jsonb_agg(jsonb_build_object('id',e.id,'kind',e.kind,'hash',e.content_hash,'operationId',e.operation_id,'supersedes',e.supersedes,'fetchedAt',coalesce(e.payload#>'{result,fetchedAt}',to_jsonb(e.created_at)),'observedAt',e.payload->'observedAt','pagination',e.payload#>'{result,pagination}','cost',e.payload#>'{result,cost}','license','unknown',
-    'objects',(SELECT coalesce(jsonb_agg(jsonb_build_object('id',o->'id','sourceUrl',o->'sourceUrl','observedAt',o->'observedAt','missingFields',o->'missingFields')),'[]') FROM jsonb_array_elements(coalesce(e.payload#>'{result,objects}','[]')) o)) ORDER BY e.id),'[]') INTO ids FROM artifact_evidence e WHERE all_ids ? e.id::text;
-   snap:=jsonb_build_object('sources',ids,'title',r.workflow->'report'->>'title','sections',sections,'workflowHash',r.workflow_hash,'templateHash',r.template_hash,'revisionId',r.revision_id,'packageHash',r.package_hash,'version',p.current_version+1,'limitations','Confirmed content and referenced evidence only; not a new model analysis.');
-   snap:=report_final_snapshot(p_actor_id,p.id,r.id,p_payload,snap); IF snap#>>'{generatedReport,evidenceId}' IS NOT NULL THEN all_ids:=all_ids||jsonb_build_array(snap#>'{generatedReport,evidenceId}'); IF jsonb_array_length(all_ids)>128 THEN RAISE EXCEPTION 'REPORT_EVIDENCE_CAPACITY'; END IF; END IF; INSERT INTO artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids) VALUES(ident,p.id,r.id,p.current_version+1,snap,artifact_hash(snap),all_ids);
-   UPDATE artifact_projects SET current_version=current_version+1 WHERE id=p.id;
-   UPDATE artifact_rounds SET state='published' WHERE id=r.id;
-   response:=jsonb_build_object('versionId',ident,'version',p.current_version+1);
-  ELSIF p_action='abandon' THEN
-   IF r.state<>'draft' THEN RAISE EXCEPTION 'round closed'; END IF;
-   UPDATE artifact_rounds SET state='abandoned' WHERE id=r.id;response:='{"abandoned":true}';
-  ELSIF p_action IN ('researchEvidence','userEvidence') THEN
-   IF (SELECT count(*) FROM artifact_evidence WHERE project_id=p.id)>=128 THEN RAISE EXCEPTION 'evidence capacity'; END IF;
-   IF p_action='researchEvidence' THEN
-    SELECT o.result INTO snap FROM research_operations o JOIN research_plans plan ON plan.id=o.plan_id
-     WHERE o.id=(p_payload->>'operationId')::uuid AND o.plan_id=(p_payload->>'planId')::uuid AND plan.actor_id=p.actor_id AND o.state='succeeded' AND o.result IS NOT NULL;
-    IF snap IS NULL THEN RAISE EXCEPTION 'research evidence denied'; END IF;
-    IF EXISTS(SELECT 1 FROM artifact_evidence WHERE project_id<>p.id AND operation_id=(p_payload->>'operationId')::uuid) THEN RAISE EXCEPTION 'evidence already belongs to another project'; END IF;
-    SELECT * INTO ev FROM artifact_evidence WHERE project_id=p.id AND operation_id=(p_payload->>'operationId')::uuid;
-    IF ev.id IS NOT NULL THEN ident:=ev.id;
-    ELSE
-     INSERT INTO artifact_evidence(id,project_id,kind,operation_id,payload,content_hash) VALUES(ident,p.id,'supplier',(p_payload->>'operationId')::uuid,
-      jsonb_build_object('projection','research-result','result',snap,'license','unknown'),artifact_hash(snap));
-    END IF;
-   ELSE
-    IF p_payload->>'supersedes' IS NOT NULL AND NOT EXISTS(SELECT 1 FROM artifact_evidence WHERE id=(p_payload->>'supersedes')::uuid AND project_id=p.id) THEN RAISE EXCEPTION 'evidence denied'; END IF;
-    IF char_length(p_payload->>'body') NOT BETWEEN 1 AND 20000 THEN RAISE EXCEPTION 'invalid evidence'; END IF;
-    snap:=jsonb_build_object('text',p_payload->>'body','observedAt',p_payload->'observedAt','cost',NULL,'license','unknown');
-    INSERT INTO artifact_evidence(id,project_id,kind,supersedes,payload,content_hash) VALUES(ident,p.id,CASE WHEN p_payload->>'supersedes' IS NULL THEN 'user' ELSE 'revision' END,(p_payload->>'supersedes')::uuid,snap,artifact_hash(snap));
-   END IF;
-   INSERT INTO artifact_evidence_restrictions(evidence_id) VALUES(ident) ON CONFLICT DO NOTHING;
-   response:=jsonb_build_object('evidenceId',ident);
-  ELSIF p_action='restrictEvidence' THEN
-   SELECT * INTO ev FROM artifact_evidence WHERE id=(p_payload->>'evidenceId')::uuid AND project_id=p.id;
-   IF NOT FOUND THEN RAISE EXCEPTION 'evidence denied'; END IF;
-   -- Restrictions may only tighten. Never revive a deleted/expired record.
-   UPDATE artifact_evidence_restrictions SET deleted=deleted OR (p_payload->>'deleted')::boolean,
-    expires_at=CASE WHEN p_payload->>'expiresAt' IS NULL THEN expires_at ELSE least(expires_at,(p_payload->>'expiresAt')::timestamptz) END WHERE evidence_id=ev.id;
-   IF NOT artifact_evidence_allowed(p.id,jsonb_build_array(ev.id)) THEN
-    FOR prior IN SELECT * FROM artifact_rounds WHERE project_id=p.id AND state='draft' LOOP
-     states:=prior.steps;
-     FOR k,st IN SELECT * FROM jsonb_each(states) LOOP
-      IF st->'evidenceIds' ? ev.id::text THEN states:=artifact_invalidate(prior.workflow,states,k); END IF;
-     END LOOP;
-     UPDATE artifact_rounds SET steps=states WHERE id=prior.id;
-    END LOOP;
-   END IF;
-   response:=jsonb_build_object('evidenceId',ev.id,'restricted',true);
-  ELSE RAISE EXCEPTION 'invalid artifact action'; END IF;
- END IF;
- INSERT INTO artifact_requests(project_id,request_id,round_id,action,payload,response) VALUES(p.id,p_request_id,p_round_id,p_action,p_payload,response);
+ RETURN artifact_transition(p_actor_id,p_module_id,p_skill_id,'publish',p_project_id,p_round_id,p_request_id,payload);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.opc_save_result(p_actor_id uuid, p_draft_id uuid, p_execution_id uuid, p_step_id text, p_request_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE d opc_drafts;p artifact_projects;r artifact_rounds;e runtime_executions;link opc_result_links;ev uuid;body text;response jsonb;
+BEGIN
+ -- 0324 archived business guard
+ IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id)); END IF;
+
+ IF opc_draft_readonly(p_actor_id,p_draft_id) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF; -- 0249 read-only
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+ -- V2-5: the draft's session row before the project (see artifact_transition).
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
+ SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
+ SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
+ IF NOT EXISTS(SELECT 1 FROM opc_turns t WHERE t.session_id=d.session_id AND t.request_id=e.request_id AND t.token::text=e.payload->>'opcTurnToken' AND t.purpose='step' AND t.step_id=p_step_id AND t.round_id=r.id) OR d.draft_id IS NULL OR e.state IS DISTINCT FROM 'completed' OR NOT runtime_history_available(e.id)
+  OR e.payload->>'revisionId' IS DISTINCT FROM r.revision_id::text OR e.payload->>'moduleId' IS DISTINCT FROM p.module_id::text
+  OR e.payload->'scopeMaterial'->'content'->'work'->>'roundId' IS DISTINCT FROM r.id::text OR NOT(r.steps ? p_step_id) OR e.payload->'scopeMaterial'->'content'->>'brief' IS DISTINCT FROM 'step:'||p_step_id THEN RAISE EXCEPTION 'OPC_RESULT_DENIED';END IF;
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') st,jsonb_array_elements(st->'information') f WHERE st->>'id'=p_step_id AND (f->>'required')::boolean AND coalesce(e.payload->'scopeMaterial'->'content'->'work'->'steps'->p_step_id->'information'->(f->>'id')->>'status','unknown') NOT IN ('confirmed','deferred')) THEN RAISE EXCEPTION 'OPC_INFORMATION_REQUIRED';END IF;
+ -- Only this explicit host-bound step flow projects its requested organizer output.
+ -- Existing Runtime result-read permissions stay unchanged; private inputs and receipts stay server-side.
+ body:=CASE WHEN e.payload->'request'->'organizeAfter'='true'::jsonb AND e.payload ? 'attachedOrganizer' THEN e.result->>'summary' ELSE e.result->>'body' END;
+ IF body IS NULL THEN RAISE EXCEPTION 'OPC_RESULT_PENDING';END IF;
+ SELECT * INTO link FROM opc_result_links WHERE execution_id=e.id AND round_id=r.id AND step_id=p_step_id;
+ IF link.evidence_id IS NULL THEN
+  ev:=gen_random_uuid();
+  INSERT INTO artifact_evidence(id,project_id,kind,payload,content_hash) VALUES(ev,p.id,'user',jsonb_build_object('executionId',e.id),artifact_hash(e.result));
+  INSERT INTO artifact_evidence_restrictions(evidence_id) VALUES(ev);
+
+ ELSE RETURN jsonb_build_object('candidateId',link.candidate_id);END IF;
+ response:=artifact_transition(p_actor_id,p.module_id,p.skill_id,'candidate',p.id,r.id,p_request_id,jsonb_build_object('stepId',p_step_id,'body',body,'evidenceIds',jsonb_build_array(ev)));
+ IF link.evidence_id IS NULL THEN INSERT INTO opc_result_links VALUES(ev,e.id,r.id,p_step_id,(response->>'candidateId')::uuid);END IF;
  RETURN response;
 END $function$;
 
