@@ -435,6 +435,22 @@ try{
   assert.equal(await one('select sum(amount)::int v from credit_transactions where user_id=$1',[actor]),40,'records add up to the balance');
   report.checks.push('a subscription refunded during a freeze: D=6 spend plus 54 intercepted (not a spend); the credit records add up to the balance');
  }
+ // 18. #1512 review: a result the provider charged for but that cannot be used (unusable) costs the user nothing, but its actual
+ // cost is kept on the receipt and spent on the stop-loss.
+ {
+  const a=await account(1000);
+  const o=await open(a);
+  const before=await dayTotals();
+  await begin(a,o.turnId,1);
+  await one('select turn_call_record($1,$2,1,$3,null,0.02,$4,null,$5,null) v',[a.actor,o.turnId,'unusable',JSON.stringify({}),hash('unusable')]);
+  assert.deepEqual((await c.query('select status,nominal_usd::float8 n,actual_usd::float8 c,cost_pending from turn_calls where turn_id=$1',[o.turnId])).rows,
+   [{status:'unusable',n:0,c:0.02,cost_pending:false}]);
+  assert.equal((await close(a,o.turnId,'failed',{messages:[],delivered:false})).chargedCredits,0);
+  assert.equal(await balance(a),1000);
+  const after=await dayTotals();
+  assert.ok(near(Number(after.s)-Number(before.s),0.02),`spent ${after.s} - ${before.s}`);
+  report.checks.push('an unusable result the provider charged for: the user pays 0, the receipt keeps the actual cost and the stop-loss spends it');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

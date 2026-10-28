@@ -28,7 +28,8 @@ BEGIN
     END IF;
     UPDATE turn_calls SET status = p_status,
         nominal_usd = CASE WHEN p_status = 'ok' THEN p_nominal_usd ELSE 0 END,
-        actual_usd = CASE WHEN p_status = 'ok' THEN p_actual_usd END,
+        -- unusable: the provider charged for a result that cannot be used; the user's base is 0, the platform's cost is kept.
+        actual_usd = CASE WHEN p_status IN ('ok','unusable') THEN p_actual_usd END,
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
         payload_hash = p_payload_hash, settled_at = now(), cost_pending = false
       WHERE turn_id = p_turn_id AND seq = p_seq;
