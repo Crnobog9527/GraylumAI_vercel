@@ -23,14 +23,17 @@ export function compare(measured, entry) {
   const problems = [];
   for (const key of ['roundTrips', 'relationLocks',
     'hotSeqScans']) if (measured[key] > entry[key]) problems.push(`${key} ${measured[key]} > baseline ${entry[key]}`);
-  if (measured.dbTimeMs > entry.dbTimeMs * TIME_TOLERANCE) problems.push(`dbTimeMs ${measured.dbTimeMs} > baseline ${entry.dbTimeMs} x ${TIME_TOLERANCE}`);
+  if (measured.dbTimeMs > entry.dbTimeMs * TIME_TOLERANCE) {
+    problems.push(`dbTimeMs ${measured.dbTimeMs} > baseline ${entry.dbTimeMs} x ${TIME_TOLERANCE}`);
+  }
   return problems;
 }
 
 // Measures one scenario on an open database client. `harness` supplies the counted call wrapper.
 export async function measure(scenario, client, { noSeqScan = false } = {}) {
   let roundTrips = 0, relationLocks = 0;
-  const functions = async () => Object.fromEntries((await client.query('SELECT funcname, total_time FROM pg_stat_user_functions')).rows.map(r => [r.funcname, Number(r.total_time)]));
+  const functions = async () => Object.fromEntries(
+    (await client.query('SELECT funcname, total_time FROM pg_stat_user_functions')).rows.map(r => [r.funcname, Number(r.total_time)]));
   const scans = async () => Object.fromEntries((await client.query('SELECT relname, seq_scan FROM pg_stat_user_tables WHERE relname = ANY($1)',
     [scenario.tables])).rows.map(r => [r.relname, Number(r.seq_scan)]));
   const counted = new Set();
@@ -59,7 +62,10 @@ export async function measure(scenario, client, { noSeqScan = false } = {}) {
   await client.query('RESET enable_seqscan');
   let dbTimeMs = 0;
   const byFunction = {};
-  for (const name of counted) { byFunction[name] = Number(((afterFunctions[name] ?? 0) - (beforeFunctions[name] ?? 0)).toFixed(1)); dbTimeMs += byFunction[name]; }
+  for (const name of counted) {
+    byFunction[name] = Number(((afterFunctions[name] ?? 0) - (beforeFunctions[name] ?? 0)).toFixed(1));
+    dbTimeMs += byFunction[name];
+  }
   const hotSeqScans = scenario.tables.reduce((sum, table) => sum + ((afterScans[table] ?? 0) - (beforeScans[table] ?? 0)), 0);
   return { roundTrips, dbTimeMs: Number(dbTimeMs.toFixed(1)), relationLocks, hotSeqScans, byFunction };
 }
@@ -92,13 +98,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       }
       // One more run with sequential scans switched off: a scan that still happens has no index to use at all.
       best.hotSeqScans = (await measure(scenario, db.client, { noSeqScan: true })).hotSeqScans;
-      results[scenario.name] = { path: scenario.path, ...best, seconds: Number(((Date.now() - started) / 1000).toFixed(1)) };
+      const seconds = Number(((Date.now() - started) / 1000).toFixed(1));
+      results[scenario.name] = { path: scenario.path, ...best, seconds };
       const entry = baseline[scenario.name];
-      const line = `${scenario.name} (${scenario.path}): ${best.roundTrips} round trips, ${best.dbTimeMs} ms in the database, ${best.relationLocks} relations locked at most, ${best.hotSeqScans} hot sequential scans`;
+      const line = `${scenario.name} (${scenario.path}): ${best.roundTrips} round trips, ${best.dbTimeMs} ms in the database, `
+        + `${best.relationLocks} relations locked at most, ${best.hotSeqScans} hot sequential scans`;
       if (!entry) console.log(`${line} -- no baseline yet`);
-      else if (!entry.enforce) console.log(`${line} -- report only (baseline ${entry.roundTrips}/${entry.dbTimeMs}/${entry.relationLocks}/${entry.hotSeqScans})`);
-      else { const problems = compare(best,
-        entry); console.log(`${line} -- ${problems.length ? 'OVER BUDGET' : 'within baseline'}`); failures.push(...problems.map(p => `${scenario.name}: ${p}`)); }
+      else if (!entry.enforce) {
+        console.log(`${line} -- report only (baseline ${entry.roundTrips}/${entry.dbTimeMs}/${entry.relationLocks}/${entry.hotSeqScans})`);
+      }
+      else {
+        const problems = compare(best, entry);
+        console.log(`${line} -- ${problems.length ? 'OVER BUDGET' : 'within baseline'}`);
+        failures.push(...problems.map(p => `${scenario.name}: ${p}`));
+      }
     }
   } finally { await db.close(); }
   if (args.includes('--update-baseline')) {
