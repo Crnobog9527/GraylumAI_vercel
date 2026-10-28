@@ -60,7 +60,7 @@ async function setup(maxTools = 9, account: { credits?: number; typicalUsd?: str
   const actor = randomUUID(), session = randomUUID(), modelId = randomUUID();
   await db.query('insert into profiles(id,credits) values($1,$2)', [actor, credits]);
   await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
-    values($1,$3,'addition','grant','opening_grant','system',$2,0,$3)`, [actor, 'opening_grant:' + actor, credits]);
+    values($1,$3::int,'addition','grant','opening_grant','system',$2,0,$3::int)`, [actor, 'opening_grant:' + actor, credits]);
   await db.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
     [session, actor, JSON.stringify({ kind: 'positioning_draft', probe: randomUUID() }), randomUUID()]);
   const { pricing } = pricingConfig(MODEL, ROUTE, '0.000003', '0.000015');
