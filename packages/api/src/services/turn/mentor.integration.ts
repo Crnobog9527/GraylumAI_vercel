@@ -61,8 +61,8 @@ const profile = (model: string) => ({ model, endpointTag: ROUTE, protocol: 'open
     outputLimit: 8192, testedOutputLimit: 512, outputSemantics: 'max-tokens-includes-reasoning', includesReasoning: true,
     cacheCovered: true, costBoundPassed: true } });
 
-async function model(id: string, name: string, prompt = '0.000003', completion = '0.000015') {
-  const { pricing } = pricingConfig(name, ROUTE, prompt, completion);
+async function model(id: string, name: string) {
+  const { pricing } = pricingConfig(name, ROUTE, '0.000003', '0.000015');
   (pricing.endpoints[0]!.base as Record<string, string>).input_cache_write = '0.00000375';
   const off = { mode: 'off', wire: 'reasoning_effort' };
   const config = { pricing, reasoning: { route: ROUTE, purposes: { interactive: off, organize: off },
@@ -75,7 +75,7 @@ async function model(id: string, name: string, prompt = '0.000003', completion =
   [id, 'Mentor fixture ' + name, name, JSON.stringify(config)]);
 }
 
-async function setup(options: { organizerPrompt?: string } = {}) {
+async function setup() {
   clearCatalogCache();
   const owner = randomUUID(), mentorId = randomUUID(), organizerId = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
@@ -86,7 +86,7 @@ async function setup(options: { organizerPrompt?: string } = {}) {
   await db.query("insert into profiles(id,role,credits) values($1,'admin',10000),($2,'user',1000)", [owner, actor]);
   await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
     values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`, [actor, 'opening_grant:' + actor]);
-  await model(mentorId, MENTOR); await model(organizerId, ORGANIZER, options.organizerPrompt);
+  await model(mentorId, MENTOR); await model(organizerId, ORGANIZER);
   const pack = makePackage(), registration = 'mentor-' + randomUUID(), flow = makeWorkflow(3);
   flow.steps.forEach((s, i) => { s.information = [{ id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i },
     { id: 'other', title: 'Other', required: false }]; });
@@ -363,12 +363,14 @@ it('RUNTIME: CORE-PATH-V2 V2-5: the one-switch pause refuses before anything ope
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start pauses the turn (waiting for credits), never closes it', async () => {
-  // An organizer whose own bound G_org is far above L: a balance of exactly L (24 + 6 = 30 credits) opens the turn with H = 30;
-  // after the reply has used part of it, the organizer needs min(G_org, L) = 30 and the remaining freeze is below that.
-  const f = await setup({ organizerPrompt: '0.0003' });
-  await db.query('update profiles set credits=30 where id=$1', [f.actor]);
-  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Sell coffee to students'))
-    : prose('gen-reply-' + n, 'Good. Who buys it?'));
+  const f = await setup();
+  // The freeze capped by the balance, made deterministic: while the reply streams, this turn's freeze is set to nothing left, so
+  // the organizer's turn_call_begin finds the remaining freeze below min(G_org, L) and pauses the turn.
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, patch('Sell coffee to students'));
+    await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+    return prose('gen-reply-' + n, 'Good. Who buys it?');
+  });
   const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
   expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'error', code: 'TURN_PAUSED_FOR_CREDITS' });
   expect(t.bodies.map(b => b.model)).toEqual([MENTOR]);
