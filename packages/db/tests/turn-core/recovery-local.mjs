@@ -261,6 +261,19 @@ try{
    assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[g.a.actor,t3.turnId])).chargedCredits,24);
    assert.equal(await spends(g.a),24);assert.equal(await balance(g.a),106);
   }
+  // A model call whose cost is not final yet: the resume waits for its receipt, then carries it (#1519 review).
+  {
+   const g=await account(30),o=await open(g,{pol:policy({gCredits:60,minCredits:10,uModelCredits:20})});
+   await begin(g,o.turnId,1,{upper:0.02});await identity(g,o.turnId,1,'gen-open');            // usable answer, cost not final
+   assert.equal((await begin(g,o.turnId,2,{upper:0.04})).paused,true,'30 - 12 held for the open call < 24');
+   await c.query('update profiles set credits=credits+100 where id=$1',[g.actor]);
+   const pol2=policy({gCredits:60,minCredits:10,uModelCredits:20,limits:{model:2,paidTools:1,freeTools:1}});
+   assert.match(await refusal(open(g,{resumeOf:o.turnId,pol:pol2})),/TURN_RESUME_COST_PENDING/);
+   assert.equal((await turn(g,o.turnId)).state,'paused');
+   await record(g,o.turnId,1,{n:0.02});                                                        // the receipt: N = 12
+   const n=await open(g,{resumeOf:o.turnId,pol:pol2});
+   assert.equal(await one("select (policy->>'carriedCredits')::int v from turns where id=$1",[n.turnId]),12);
+  }
   // The continuation paused again and expired: the whole chain is refunded (Owner 10-25), the carried part included.
   {
    const g=await paused();
@@ -270,7 +283,7 @@ try{
    assert.equal((await recover(g.a,n.turnId,'expire')).chargedCredits,0);
    assert.equal(await spends(g.a),0);assert.equal(await balance(g.a),130);
   }
-  report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; two resumes in a row carry everything (24 = 12 + 6 + 6); an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
+  report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; two resumes in a row carry everything (24 = 12 + 6 + 6); a model cost not final yet holds the resume until its receipt; an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
  }
  // 6. Ordinary chat and mentor turns cannot be stopped (the old stop-round scenario, now a refusal); reports can.
  {

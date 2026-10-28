@@ -159,6 +159,12 @@ BEGIN
     OR prior.kind <> p_kind OR prior.session_id IS DISTINCT FROM p_session_id THEN
     RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000';
   END IF;
+  -- A model call whose cost is not final yet would be lost to the carry (the paused turn is refunded in full when it closes):
+  -- the resume waits until its receipt arrives. A third-party tool's unknown cost is 0 to the user (2.5.2), so it does not wait.
+  IF EXISTS (SELECT 1 FROM turn_calls WHERE turn_id = p_resume_of AND call_kind = 'model'
+             AND status IN ('dispatched','identified','unknown')) THEN
+    RAISE EXCEPTION 'TURN_RESUME_COST_PENDING' USING ERRCODE='55000';
+  END IF;
   -- What is left of the paused turn's frozen limits, counted as turn_call_begin counts them: the new turn may use no more.
   SELECT count(*) FILTER (WHERE call_kind = 'model'),
          count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd > 0),
