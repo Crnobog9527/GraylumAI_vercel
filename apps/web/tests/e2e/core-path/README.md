@@ -18,11 +18,11 @@
 
 ## 花费上限
 
-整套一次 ≤ 0.5 美元（Opus 汇总的那次评审如果让整套超出，如实报告）（`CORE_E2E_MAX_USD` 只能调低不能调高）。`support/spend.ts` 从 `bill2_runs.provider_cost_usd` 累计这几个测试账号本次运行的**平台实际成本**（不是用户积分：报告固定 500 积分，与成本无关），每个模型回合后检查，超了立刻停止并判失败；每条旅程的花费写进 `test-results/core-path/spend.json` 和 `summary.md`。服务端的止损照旧，不另加。
+整套一次 ≤ 0.5 美元（Opus 汇总的那次评审如果让整套超出，如实报告）（`CORE_E2E_MAX_USD` 只能调低不能调高）。`support/spend.ts` 从 `bill2_runs.provider_cost_usd` 累计这几个测试账号本次运行的**平台实际成本**（不是用户积分：报告固定 500 积分，与成本无关），每个模型回合后检查，超了立刻停止并判失败，并把“已超”写进 `spend.json`：之后每个测试开始前先检查（`meter` fixture），已超就拒绝开始，所以不会再发起付费调用，worker 重启也一样；账号 id 取自登录会话（storageState 或登录页都行），拿不到就直接失败，不会把“不知道账号”当成零花费；每条旅程的花费写进 `test-results/core-path/spend.json` 和 `summary.md`。服务端的止损照旧，不另加。
 
 ## 只读数据库角色（取代 DATABASE_URL）
 
-测试不使用应用的 `DATABASE_URL`，而用 `CORE_E2E_SPEND_DATABASE_URL`：一个只能 SELECT 下面这些列的角色。**角色由总控在 Owner 批准后创建，不写进迁移**。所有这些表都开了行级安全且没有给新角色的策略，所以每张表还要一条只给这个角色的 `FOR SELECT` 策略。
+测试不使用应用的 `DATABASE_URL`，而用 `CORE_E2E_SPEND_DATABASE_URL`：一个只能 SELECT 下面这些列的角色。**角色由总控在 Owner 批准后创建，不写进迁移**。所有这些表都开了行级安全且没有给新角色的策略，所以每张表还要一条只给这个角色的 `FOR SELECT` 策略；测试按账号 id 查（id 取自登录会话），所以不需要读 `profiles`。
 
 ```sql
 -- 以 postgres 角色执行（staging）。<随机密码> 只放进 CORE_E2E_SPEND_DATABASE_URL 密钥。
@@ -31,7 +31,6 @@ alter role core_e2e_reader set default_transaction_read_only = on;
 alter role core_e2e_reader set statement_timeout = '10s';
 grant usage on schema public to core_e2e_reader;
 
-grant select (id, email)                                              on public.profiles           to core_e2e_reader;
 grant select (id, actor_id, created_at, provider_cost_usd)            on public.bill2_runs         to core_e2e_reader;
 grant select (run_id, model, selected_cost_usd)                       on public.bill2_calls        to core_e2e_reader;
 grant select (actor_id, user_stopped_at)                              on public.report_fees        to core_e2e_reader;
@@ -39,7 +38,6 @@ grant select (id, session_id)                                         on public.
 grant select (execution_id, name)                                     on public.runtime_tool_calls to core_e2e_reader;
 grant select (id, model_id, name, is_active, config)                  on public.ai_models          to core_e2e_reader;
 
-create policy core_e2e_read on public.profiles           for select to core_e2e_reader using (true);
 create policy core_e2e_read on public.bill2_runs         for select to core_e2e_reader using (true);
 create policy core_e2e_read on public.bill2_calls        for select to core_e2e_reader using (true);
 create policy core_e2e_read on public.report_fees        for select to core_e2e_reader using (true);
@@ -50,7 +48,7 @@ create policy core_e2e_read on public.ai_models          for select to core_e2e_
 
 - 角色没有任何写权限、不能读其他列和其他表；`system_settings` 不开放（对比名单从页面上读，价格从 `ai_models.config` 读，里面没有密钥）。
 - 连接串用 Supabase 的连接池地址（用户名带项目标识），`ssl=require`。
-- 撤销：`drop owned by core_e2e_reader; drop role core_e2e_reader;`，同时删掉 7 条 `core_e2e_read` 策略。
+- 撤销：`drop owned by core_e2e_reader; drop role core_e2e_reader;`，同时删掉 6 条 `core_e2e_read` 策略。
 
 ## 需要的环境
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { spendCapUsd } from './config';
-import { SpendCapExceeded, SpendMeter } from './spend';
+import { dbSpendReader, SpendCapExceeded, SpendMeter, type SpendStore } from './spend';
 
 const sequence = (...values: number[]) => { let i = 0; return async () => values[Math.min(i++, values.length - 1)]!; };
 
@@ -34,5 +34,35 @@ describe('spendCapUsd', () => {
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: '0.6' })).toThrow();
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: '0' })).toThrow();
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: 'abc' })).toThrow();
+  });
+});
+
+describe('the cap holds across tests and restarts', () => {
+  const memoryStore = () => { let saved: unknown = null; return { load: async () => saved, save: async (state: unknown) => { saved = JSON.parse(JSON.stringify(state)); } } as SpendStore; };
+
+  it('refuses to start a later test once the cap has been passed, also in a new worker', async () => {
+    const store = memoryStore();
+    const first = new SpendMeter(0.5, sequence(0.6), store);
+    await expect(first.checkpoint('turn')).rejects.toBeInstanceOf(SpendCapExceeded);
+    const restarted = new SpendMeter(0.5, sequence(0), store);
+    await expect(restarted.assertRoom('next test')).rejects.toThrow(/cap already passed/);
+  });
+
+  it('lets a test start while there is room, and stops it when the total is already over', async () => {
+    await expect(new SpendMeter(0.5, sequence(0.1), memoryStore()).assertRoom('t')).resolves.toBeUndefined();
+    await expect(new SpendMeter(0.5, sequence(0.7), memoryStore()).assertRoom('t')).rejects.toBeInstanceOf(SpendCapExceeded);
+  });
+
+  it('keeps the journeys it recorded, so the report survives a worker restart', async () => {
+    const store = memoryStore();
+    await new SpendMeter(0.5, sequence(0.1), store).finishJourney('a');
+    const next = new SpendMeter(0.5, sequence(0.25), store);
+    await next.finishJourney('b');
+    expect(next.journeys.map(entry => entry.label)).toEqual(['a', 'b']);
+    expect(next.totalUsd).toBeCloseTo(0.25);
+  });
+
+  it('never reports zero for an unknown account', () => {
+    expect(() => dbSpendReader({} as never, [], '2026-01-01T00:00:00Z')).toThrow(/No billing account/);
   });
 });

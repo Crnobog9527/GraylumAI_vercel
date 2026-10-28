@@ -32,16 +32,20 @@ export function cheapestOther(models: readonly CompareModel[], excludeModelId = 
   return others.length ? others.reduce((best, model) => (model.usdPerMillion < best.usdPerMillion ? model : best)) : null;
 }
 
-/**
- * The models the compare picker offers, looked up by the names it shows. The read-only evidence role cannot read
- * system settings, so the list comes from the page itself and only the (non-secret) synced prices come from ai_models.
- */
-export async function readModelsByName(sql: Sql, names: readonly string[]): Promise<CompareModel[]> {
-  if (names.length === 0) return [];
+/** Every active model with its synced price (non-secret columns only; the evidence role cannot read anything else). */
+export async function readActiveModels(sql: Sql): Promise<CompareModel[]> {
   const rows = await sql<Array<{ id: string; model_id: string; name: string; config: unknown }>>`
-    select id, model_id, name, config from ai_models where is_active = 'true' and name = any(${names as string[]})`;
+    select id, model_id, name, config from ai_models where is_active = 'true'`;
   return rows.flatMap(row => {
     const price = cheapestLine(row.config);
     return price === null ? [] : [{ id: row.id, modelId: row.model_id, name: row.name, usdPerMillion: price }];
   });
+}
+
+/**
+ * The models the compare picker offers: each picker label (which also carries the quote once it has loaded) is matched to the
+ * longest model name it contains. The read-only evidence role cannot read system settings, so the list comes from the page.
+ */
+export function modelsInLabels(all: readonly CompareModel[], labels: readonly string[]): Array<CompareModel | null> {
+  return labels.map(label => [...all].filter(model => label.includes(model.name)).sort((a, b) => b.name.length - a.name.length)[0] ?? null);
 }

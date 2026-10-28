@@ -9,7 +9,7 @@ import { expect, type Page } from '@playwright/test';
 import { coreSql } from './db';
 import { gotoWithBypass } from '../../support/deploymentProtection';
 import type { SpendMeter } from './spend';
-import { confirmStepWhenReady, currentStepHeading, sendAndWait, stepNav } from './ui';
+import { confirmStepWhenReady, sendAndWait, stepNav } from './ui';
 
 /** One fixed persona, so every run says the same things and the coach's questions are predictable. */
 export const PERSONA = {
@@ -58,7 +58,14 @@ export async function completeBenchmarkStep(page: Page, meter: SpendMeter) {
   const candidates = page.locator('section[aria-label="对标候选账号"], section[aria-label="补选对标账号"]').first();
   await expect(candidates).toBeVisible({ timeout: 240_000 });
   await meter.checkpoint('benchmark search');
-  await candidates.getByRole('button', { name: '确认选择' }).click();
+  // Nothing is ticked at first and the button stays off until the card's minimum is reached: tick accounts until it turns on.
+  const confirmChoice = candidates.getByRole('button', { name: '确认选择' });
+  const boxes = candidates.getByRole('group', { name: '候选账号' }).getByRole('checkbox');
+  for (let i = 0; i < await boxes.count() && !(await confirmChoice.isEnabled()); i += 1) {
+    if (await boxes.nth(i).isEnabled()) await boxes.nth(i).check();
+  }
+  await expect(confirmChoice).toBeEnabled();
+  await confirmChoice.click();
   const table = page.locator('section[aria-label="对标表"]');
   await expect(table).toBeVisible({ timeout: 240_000 });
   await meter.checkpoint('benchmark fetch');
@@ -80,14 +87,14 @@ export async function buildReadyDraft(page: Page, meter: SpendMeter): Promise<st
   await completeBenchmarkStep(page, meter);
   await completeStep(page, meter, 'step 2', '请根据对标结果给出可行性和平台选择，我同意你的建议。');
   await completeStep(page, meter, 'step 3', '请给出定位、资料包、第一个月计划和变现方案，我同意你的建议。');
-  await expect(currentStepHeading(page).last()).toContainText('已确认');
+  await expect(stepNav(page).getByRole('button').filter({ hasText: '✓' })).toHaveCount(3);
   return url;
 }
 
 /** How many reports this account has stopped in the last 24 hours (the third stop asks for confirmation). */
-export async function stopsInLast24h(email: string): Promise<number> {
+export async function stopsInLast24h(actorId: string): Promise<number> {
   const rows = await coreSql()<Array<{ n: string }>>`
-    select count(*)::text as n from report_fees f join profiles p on p.id = f.actor_id
-    where p.email = ${email} and f.user_stopped_at > now() - interval '24 hours'`;
+    select count(*)::text as n from report_fees f
+    where f.actor_id = ${actorId}::uuid and f.user_stopped_at > now() - interval '24 hours'`;
   return Number(rows[0]?.n ?? 0);
 }

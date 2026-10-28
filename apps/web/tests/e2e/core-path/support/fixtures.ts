@@ -5,8 +5,9 @@ import { test as base, expect, type BrowserContext, type Page } from '@playwrigh
 
 import { gotoWithBypass } from '../../support/deploymentProtection';
 import { coreSql } from './db';
-import { CORE_ROLES, credentialsFor, resultsDirectory, spendCapUsd, statePathFor, type CoreRole } from './config';
-import { dbSpendReader, SpendMeter } from './spend';
+import { requireAccounts } from './accounts';
+import { resultsDirectory, spendCapUsd, statePathFor, type CoreRole } from './config';
+import { dbSpendReader, fileSpendStore, SpendMeter } from './spend';
 
 let shared: SpendMeter | undefined;
 
@@ -14,8 +15,8 @@ let shared: SpendMeter | undefined;
 export async function spendMeter(): Promise<SpendMeter> {
   if (shared) return shared;
   const { startedAt } = JSON.parse(await readFile(path.join(resultsDirectory, 'run.json'), 'utf8')) as { startedAt: string };
-  const emails = CORE_ROLES.map(role => credentialsFor(role).email).filter(Boolean);
-  shared = new SpendMeter(spendCapUsd(), dbSpendReader(coreSql(), emails, startedAt));
+  const accounts = await requireAccounts();
+  shared = new SpendMeter(spendCapUsd(), dbSpendReader(coreSql(), Object.values(accounts).map(account => account.id), startedAt), fileSpendStore());
   return shared;
 }
 
@@ -26,7 +27,12 @@ interface Fixtures {
 }
 
 export const test = base.extend<Fixtures>({
-  meter: async ({}, provide) => { await provide(await spendMeter()); },
+  // A test that needs the meter starts only if the cap has not been passed yet: nothing paid runs after the budget is gone.
+  meter: async ({}, provide, testInfo) => {
+    const meter = await spendMeter();
+    await meter.assertRoom(testInfo.title);
+    await provide(meter);
+  },
   openAs: async ({ browser }, provide) => {
     const contexts: BrowserContext[] = [];
     await provide(async role => {

@@ -1,10 +1,11 @@
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { expect, test as setup } from '@playwright/test';
 
 import { gotoWithBypass } from '../support/deploymentProtection';
+import { identityFromState, saveAccounts, type Account } from './support/accounts';
 import { waitForLoginFormReady } from '../support/auth';
 import { authDirectory, CORE_ROLES, credentialsFor, resultsDirectory, statePathFor } from './support/config';
 
@@ -17,10 +18,22 @@ import { authDirectory, CORE_ROLES, credentialsFor, resultsDirectory, statePathF
 setup.describe.configure({ mode: 'serial' });
 setup.setTimeout(120_000);
 
+const accounts: Partial<Record<(typeof CORE_ROLES)[number], Account>> = {};
+
 setup('start the run clock', async () => {
   await mkdir(resultsDirectory, { recursive: true });
+  await saveAccounts({});
   await writeFile(path.join(resultsDirectory, 'run.json'), JSON.stringify({ startedAt: new Date().toISOString() }));
 });
+
+/** The billing account behind each session, so the spend cap can be enforced whichever way the session was made. */
+async function rememberAccount(role: (typeof CORE_ROLES)[number]) {
+  const state = JSON.parse(await readFile(statePathFor(role), 'utf8'));
+  const account = identityFromState(state);
+  if (!account) throw new Error(`Could not tell which account the ${role} session belongs to.`);
+  accounts[role] = account;
+  await saveAccounts(accounts);
+}
 
 for (const role of CORE_ROLES) {
   setup(`log in ${role}`, async ({ page }) => {
@@ -29,6 +42,7 @@ for (const role of CORE_ROLES) {
     const provided = stateDir ? path.join(stateDir, `${role}.json`) : '';
     if (provided && existsSync(provided)) {
       await copyFile(provided, statePathFor(role));
+      await rememberAccount(role);
       return;
     }
     const { email, password } = credentialsFor(role);
@@ -42,5 +56,6 @@ for (const role of CORE_ROLES) {
     await gotoWithBypass(page, '/app/profile');
     await expect(page).toHaveURL(/\/app\/profile/);
     await page.context().storageState({ path: statePathFor(role) });
+    await rememberAccount(role);
   });
 }

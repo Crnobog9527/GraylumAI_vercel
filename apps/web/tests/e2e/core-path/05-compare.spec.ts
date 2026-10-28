@@ -4,7 +4,7 @@ import path from 'node:path';
 import { resultsDirectory, testModelId } from './support/config';
 import { coreSql } from './support/db';
 import { expect, test } from './support/fixtures';
-import { cheapestOther, readModelsByName } from './support/models';
+import { cheapestOther, modelsInLabels, readActiveModels } from './support/models';
 import { startFreeChat, waitForRuntimeTurn, runtimeBox } from './support/freeChat';
 import { readCredits } from './support/ui';
 
@@ -27,9 +27,12 @@ test('journey 5: two models answer and the total equals the sum of the columns',
   const picker = page.getByRole('dialog', { name: '多模型对比' });
   await expect(picker).toBeVisible();
   const boxes = picker.getByRole('checkbox');
-  const labels: string[] = [];
-  for (let i = 0; i < await boxes.count(); i += 1) labels.push((await boxes.nth(i).locator('xpath=ancestor::label[1]').innerText()).trim());
-  const list = await readModelsByName(coreSql(), labels);
+  // A label also carries the quote ("最多 N 积分") once it has loaded, so each is matched to the model name inside it.
+  const rawLabels: string[] = [];
+  for (let i = 0; i < await boxes.count(); i += 1) rawLabels.push((await boxes.nth(i).locator('xpath=ancestor::label[1]').innerText()).trim());
+  const matched = modelsInLabels(await readActiveModels(coreSql()), rawLabels);
+  const labels = matched.map((model, i) => model?.name ?? rawLabels[i]!);
+  const list = matched.filter((model): model is NonNullable<typeof model> => model !== null);
   const base = list.find(model => model.modelId === testModelId());
   const other = cheapestOther(list);
   expect(base, 'the test model is on the compare list').toBeDefined();
@@ -37,12 +40,14 @@ test('journey 5: two models answer and the total equals the sum of the columns',
   // The other column is recorded for 99-model-check, which allows the test model, the organizer/summary models and this one.
   await mkdir(resultsDirectory, { recursive: true });
   await writeFile(path.join(resultsDirectory, 'compare-model.json'), JSON.stringify({ modelId: other!.modelId }));
-  for (let i = 0; i < await boxes.count(); i += 1) {
-    const box = boxes.nth(i);
-    const label = labels[i]!;
-    const wanted = label === base!.name || label === other!.name;
-    if (wanted && !(await box.isChecked())) await box.check();
-    if (!wanted && (await box.isChecked())) await box.uncheck();
+  // Untick the models we do not want first, then tick the two we do.
+  for (let i = 0; i < labels.length; i += 1) {
+    const wanted = labels[i] === base!.name || labels[i] === other!.name;
+    if (!wanted && (await boxes.nth(i).isChecked())) await boxes.nth(i).uncheck();
+  }
+  for (let i = 0; i < labels.length; i += 1) {
+    const wanted = labels[i] === base!.name || labels[i] === other!.name;
+    if (wanted && !(await boxes.nth(i).isChecked())) await boxes.nth(i).check();
   }
   await expect(picker.getByRole('checkbox', { checked: true })).toHaveCount(2);
   await expect(picker.getByText(/最多消耗/)).toBeVisible({ timeout: 60_000 });

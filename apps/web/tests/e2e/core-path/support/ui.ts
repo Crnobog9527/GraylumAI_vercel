@@ -47,15 +47,22 @@ export async function sendAndWait(page: Page, text: string, meter?: SpendMeter, 
 
 export const stepNav = (page: Page) => page.getByRole('navigation', { name: '定位步骤' });
 
-/** Waits for the confirm card to say the step is ready, then confirms it. The card ignores clicks for 2 s after it changes. */
+const confirmedSteps = async (page: Page) =>
+  (await stepNav(page).getByRole('button').allInnerTexts()).filter(text => text.trim().startsWith('✓')).length;
+
+/**
+ * Waits for the confirm card to say the step is ready, then confirms it. The card ignores clicks for 2 s after it changes.
+ * Done means one more step shows "✓" in the step strip: the page moves on to the next step by itself, so the heading of
+ * the confirmed step is gone by then.
+ */
 export async function confirmStepWhenReady(page: Page, timeoutMs = 120_000) {
   const card = page.getByRole('region', { name: '本步确认' });
   const confirm = card.getByRole('button', { name: /^没问题，(进入下一步|确认这一步)$/ });
   await expect(confirm).toBeVisible({ timeout: timeoutMs });
+  const before = await confirmedSteps(page);
   await page.waitForTimeout(2500);
   await confirm.click();
-  // The page either moves on to the next step or marks this one confirmed.
-  await expect(page.getByRole('heading', { name: /· 已确认$/ }).first()).toBeVisible({ timeout: 60_000 });
+  await expect.poll(() => confirmedSteps(page), { timeout: 60_000, intervals: [1000, 2000] }).toBe(before + 1);
 }
 
 export const currentStepHeading = (page: Page) => page.getByRole('heading', { name: /^\d+\. .* · (待确认|已确认)$/ });

@@ -11,13 +11,18 @@ import { readCredits } from './ui';
 export const REPORT_PRICE = 500;
 export const reportDialog = (page: Page): Locator => page.getByRole('dialog', { name: '完整运营策略报告' });
 
-/** Opens the report dialog from the page footer and starts generation through the 500-credit confirm. */
+/**
+ * Opens the report dialog (if it is not open) and starts generation through the 500-credit confirm. The footer entry reads
+ * "生成完整报告（N 积分）" the first time and "完整运营策略报告" (or "…（生成中）") once a report exists; inside the dialog the
+ * start button is "生成完整报告" the first time and "重新生成（N 积分）" afterwards.
+ */
 export async function startReport(page: Page, acceptCredits = REPORT_PRICE) {
-  const footerButton = page.getByRole('button', { name: /^(生成完整报告（[\d,]+ 积分）|重新生成)$/ });
-  await footerButton.first().click();
   const dialog = reportDialog(page);
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: /生成完整报告|重新生成/ }).first().click();
+  if (!(await dialog.isVisible())) {
+    await page.getByRole('button', { name: /^(生成完整报告（[\d,]+ 积分）|完整运营策略报告(（生成中）)?)$/ }).first().click();
+    await expect(dialog).toBeVisible();
+  }
+  await dialog.getByRole('button', { name: /^(生成完整报告|重新生成)(（[\d,]+ 积分）)?$/ }).first().click();
   const confirm = dialog.getByRole('group', { name: '确认扣费' });
   await expect(confirm).toContainText(`确认后将扣除 ${acceptCredits} 积分`);
   await confirm.getByRole('button', { name: `确认并扣 ${acceptCredits} 积分` }).click();

@@ -1,4 +1,4 @@
-import { credentialsFor } from './support/config';
+import { requireAccounts } from './support/accounts';
 import { expect, test } from './support/fixtures';
 import { buildReadyDraft, stopsInLast24h } from './support/positioning';
 import { expectBalanceBack, expectThirteenChapters, finalizeReport, REPORT_PRICE, reportDialog, startReport, stopButton, waitForReportDone } from './support/report';
@@ -21,11 +21,11 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
   test('3: stopping a report refunds it; the next stop asks first', async ({ openAs, meter }) => {
     test.setTimeout(30 * 60_000);
     test.skip(!draftUrl, 'needs the draft from the previous test');
-    const { email } = credentialsFor('gold');
+    const gold = (await requireAccounts()).gold;
     const { page } = await openAs('gold');
     await page.goto(draftUrl);
 
-    const prior = await stopsInLast24h(email);
+    const prior = await stopsInLast24h(gold.id);
     const before = await readCredits(page);
 
     // Free stops: the report is held, stopped within a minute, and the whole price comes back.
