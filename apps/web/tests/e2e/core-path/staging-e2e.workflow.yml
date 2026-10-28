@@ -1,13 +1,16 @@
 # CORE-PATH-V2 V2-11: the core user journeys against the deployed staging site, with Claude Haiku 5.5 and at most
-# 0.5 US dollars per run. It never blocks a deployment; a failed run opens an issue.
-# Draft: it takes effect only after the CI-POLICY pull request moves it to .github/workflows/staging-e2e.yml (Owner
-# 2026-10-28 approved this one file as an exception to the workflow policy). Secrets live in the environment staging-e2e,
-# names starting CORE_E2E_ only; the old E2E_* secrets there are not used.
+# 0.5 US dollars per run. A failed run opens an issue.
+# DRAFT, not active (Owner 2026-10-28: for now the controller runs the suite by hand on a machine; automation waits for V2-10).
+# When it is wanted: plan A. Trigger only by workflow_dispatch against the staging branch
+# (`gh workflow run staging-e2e.yml --ref staging`), because then GITHUB_REF is refs/heads/staging and the environment's
+# staging-only branch rule really limits who gets the secrets. deployment_status is NOT usable: Vercel's deployments carry a
+# commit SHA as ref, so GITHUB_REF is empty and that rule can never match. Moving the file to .github/workflows needs the
+# workflow-policy exception (Owner approved this one file) and a separate CI-POLICY change. Secrets live in the environment
+# staging-e2e, names starting CORE_E2E_ only; the old E2E_* secrets there are not used.
 name: Staging core-path e2e
 
 on:
   workflow_dispatch:
-  deployment_status:
 
 permissions:
   contents: read
@@ -15,8 +18,6 @@ permissions:
 jobs:
   core-path:
     name: Run core-path journeys
-    # Only a successful deployment to a staging environment, or a manual run.
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.environment == 'staging') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: staging-e2e
