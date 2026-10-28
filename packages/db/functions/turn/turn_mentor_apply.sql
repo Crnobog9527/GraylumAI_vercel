@@ -20,12 +20,13 @@ BEGIN
  IF t.id IS NULL OR t.kind <> 'mentor' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
- IF d.draft_id IS NULL THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
+ IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false)
+ THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
  business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
- -- No explicit row lock (main-path rule: only the actor's profile and the session row; turn_close holds both here). Instead of
- -- opc_capture_apply's project lock, the checklist is written only if it is still exactly what this pass read; a concurrent
- -- edit (opc_information, opc_capture_resolve, a revision) makes the write miss, and the pass is computed again on the new
- -- state, where the version check turns this turn's patches into suggestions, as before. At most three passes.
+ -- No lock of its own (main-path rule: only the actor's profile and the session row). turn_close holds this draft's session
+ -- row, which opc_information and opc_capture_resolve now take first too (below), so those writers and this one are serialized.
+ -- Any other writer of the round (a revision, an erasure) is caught by the optimistic write: the checklist is written only if
+ -- it is still exactly what this pass read; otherwise the pass is computed again on the new state (at most three passes).
  FOR attempt IN 1..3 LOOP
  -- An archived business is read-only (opc_capture_apply's opc_assert_business_writable): nothing is written, and the turn
  -- itself still settles and keeps its reply. Checked again on every pass.

@@ -14,6 +14,11 @@ DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec js
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
+  -- The draft's scope as the old path checked it (runtime_material / runtime_work_projection): an account-strategy draft whose
+  -- base source was withdrawn or deleted, or whose evidence is no longer allowed, is refused.
+  IF NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false) THEN
+    RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501';
+  END IF;
   -- An archived business is read-only (as opc_assert_business_writable, without its row lock).
   business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
   IF business IS NOT NULL AND EXISTS (SELECT 1 FROM opc_businesses WHERE id = business AND actor_id = p_actor_id AND archived_at IS NOT NULL) THEN
