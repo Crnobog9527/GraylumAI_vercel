@@ -454,8 +454,10 @@ BEGIN
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
   IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
-  -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept.
-  IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable') THEN
+  -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept. So is
+  -- a late proof that the request was never billed (not_sent, rejected), under the same no-provider-id check below; it frees the
+  -- freeze and the stop-loss share at the next settlement.
+  IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable','not_sent','rejected') THEN
     c.status := 'identified';
   END IF;
   IF c.status IN ('dispatched','identified') THEN
