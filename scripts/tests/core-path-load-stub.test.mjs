@@ -21,3 +21,14 @@ test('streams a matching generation and exposes the completed receipt', async t 
   assert.equal(receipt.data.total_cost, 0);
   assert.equal((await fetch(`${base}/generation?id=unknown`)).status, 404);
 });
+
+test('tool follow-up uses the shorter stream', async t => {
+  const server = createStub({ firstByteMs: 1, intervalMs: 1, chunks: 6, secondChunks: 2 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/v1/chat/completions`, {
+    method: 'POST', body: JSON.stringify({ model: 'test/model', stream: true, messages: [{ role: 'tool' }] }),
+  });
+  const body = await response.text();
+  assert.equal((body.match(/"content":"测试"/g) ?? []).length, 2);
+});

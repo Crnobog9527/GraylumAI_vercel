@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 // An explicit bind address is required: exposing this server is an operator decision.
-export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 91 } = {}) {
+export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 90, secondChunks = 50 } = {}) {
   const generations = new Map();
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://stub.invalid');
@@ -32,14 +32,15 @@ export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 91 } 
       return;
     }
     const id = `gen-load-${randomUUID()}`;
+    const count = body.messages?.some(message => message?.role === 'tool') ? secondChunks : chunks;
     const data = { id, model: body.model, finish_reason: 'stop', total_cost: 0,
-      native_tokens_prompt: 100, native_tokens_completion: chunks };
+      native_tokens_prompt: 100, native_tokens_completion: count };
     res.writeHead(200, { 'content-type': 'text/event-stream', 'x-generation-id': id,
       'cache-control': 'no-cache' });
     const start = Date.now();
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     await sleep(firstByteMs);
-    for (let i = 0; i < chunks && !res.destroyed; i++) {
+    for (let i = 0; i < count && !res.destroyed; i++) {
       const chunk = { id, object: 'chat.completion.chunk', model: body.model,
         choices: [{ index: 0, delta: { content: '测试' }, finish_reason: null }] };
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -49,7 +50,7 @@ export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 91 } 
     generations.set(id, data);
     const final = { id, object: 'chat.completion.chunk', model: body.model,
       choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 100, completion_tokens: chunks, total_tokens: 100 + chunks, cost: 0 } };
+      usage: { prompt_tokens: 100, completion_tokens: count, total_tokens: 100 + count, cost: 0 } };
     res.end(`data: ${JSON.stringify(final)}\n\ndata: [DONE]\n\n`);
   });
 }
