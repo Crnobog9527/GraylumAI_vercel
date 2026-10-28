@@ -46,7 +46,7 @@ BEGIN
   SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
                            WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
                            ELSE 0 END), 0) INTO used
-  FROM turn_calls WHERE turn_id = p_turn_id;
+  FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
   next_need := coalesce((t.policy->>'uModelCredits')::int, 0);
   RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits - used < next_need) || tomb;
 END $function$;

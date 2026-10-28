@@ -356,6 +356,28 @@ try{
   }finally{await p1.end();await p2.end();}
   report.checks.push('a late receipt after erasure began or the conversation was deleted keeps billing, stores no response text; concurrent opens in different buckets freeze 80 then the 20 left');
  }
+ // 15. Fable 10-28: the positioning check (decision) has the Decisions model's real upper bound. It needs no freeze and is never
+ // charged to the user, takes no slot of M (its own limit), and its provider cost is spent on the stop-loss like any call.
+ {
+  const a=await account(1000);
+  const o=await open(a,{pol:policy({gCredits:30,uModelCredits:30,uTurnUsd:0.1,limits:{model:1,paidTools:0,freeTools:0,decisions:1}})});
+  assert.equal(o.reservedCredits,30);
+  const before=await dayTotals();
+  // The freeze (30) covers one model call (G_i = ceil(100 x 0.05 x 6) = 30); the decision's 0.05 takes none of it.
+  assert.equal((await begin(a,o.turnId,1,{kind:'decision',upper:0.05})).paused,undefined);
+  await record(a,o.turnId,1,{n:0.04,actual:0.04,raw:null});
+  assert.match(await refusal(begin(a,o.turnId,2,{kind:'decision',upper:0.05})),/TURN_CALL_LIMIT/);
+  assert.equal((await begin(a,o.turnId,2,{upper:0.05})).paused,undefined,'the decision takes no slot of M and no freeze');
+  await record(a,o.turnId,2,{n:0.01});
+  assert.match(await refusal(begin(a,o.turnId,3,{upper:0.05})),/TURN_CALL_LIMIT/);
+  // N = ceil(100 x 0.01 x 6) = 6 from the model call only; the stop-loss spends both receipts (0.05) and releases U_turn.
+  assert.equal((await close(a,o.turnId)).chargedCredits,6);
+  assert.equal(await balance(a),994);
+  const after=await dayTotals();
+  assert.ok(near(Number(after.s)-Number(before.s),0.05),`spent ${after.s} - ${before.s}`);
+  assert.ok(near(Number(before.r)-Number(after.r),0.1),`released ${before.r} - ${after.r}`);
+  report.checks.push('the positioning check needs no freeze, is not charged, takes no slot of M (own limit 1), and its cost is spent on the stop-loss');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

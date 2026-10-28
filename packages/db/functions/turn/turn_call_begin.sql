@@ -9,6 +9,7 @@ CREATE OR REPLACE FUNCTION public.turn_call_begin(p_actor_id uuid, p_turn_id big
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE t turns; c turn_calls; q numeric; used integer; need integer; n_model integer; n_paid integer; n_free integer;
+  n_decision integer;
 BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
@@ -22,25 +23,30 @@ BEGIN
     RAISE EXCEPTION 'TURN_CALL_SEQUENCE' USING ERRCODE='22023';
   END IF;
   IF (p_call_kind = 'tool') IS DISTINCT FROM (p_paid IS NOT NULL) THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
-  -- Frozen limits (2.5.3): attempts that certainly cost nothing (not_sent, rejected, 402) do not count against them.
-  SELECT count(*) FILTER (WHERE call_kind IN ('model','decision')),
+  -- Frozen limits (2.5.3): attempts that certainly cost nothing (not_sent, rejected, 402) do not count against them. M counts
+  -- the model calls the user pays for; the positioning check (decision) is its own limit outside M (Fable 10-28).
+  SELECT count(*) FILTER (WHERE call_kind = 'model'),
          count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd > 0),
-         count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd = 0)
-    INTO n_model, n_paid, n_free
+         count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd = 0),
+         count(*) FILTER (WHERE call_kind = 'decision')
+    INTO n_model, n_paid, n_free, n_decision
   FROM turn_calls WHERE turn_id = p_turn_id AND status NOT IN ('not_sent','rejected','no_charge_402');
-  IF (p_call_kind <> 'tool' AND n_model >= (t.policy->'limits'->>'model')::int)
+  IF (p_call_kind = 'model' AND n_model >= (t.policy->'limits'->>'model')::int)
+    OR (p_call_kind = 'decision' AND n_decision >= coalesce((t.policy->'limits'->>'decisions')::int, 0))
     OR (p_call_kind = 'tool' AND p_paid AND n_paid >= (t.policy->'limits'->>'paidTools')::int)
     OR (p_call_kind = 'tool' AND NOT p_paid AND n_free >= (t.policy->'limits'->>'freeTools')::int)
     OR (p_call_kind = 'tool' AND NOT p_paid AND p_upper_usd <> 0) OR (p_paid AND p_upper_usd <= 0) THEN
     RAISE EXCEPTION 'TURN_CALL_LIMIT' USING ERRCODE='22023';
   END IF;
-  -- The remaining freeze must cover this call's bound G_i = ceil(q x U_i x m_i); otherwise the turn waits for credits.
+  -- The remaining freeze must cover this call's bound G_i = ceil(q x U_i x m_i); otherwise the turn waits for credits. The
+  -- positioning check is never charged to the user (Owner 10-12): it needs no freeze; its upper bound counts in U_turn and the
+  -- stop-loss reservation only.
   q := (t.policy->>'q')::numeric;
   SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
                            WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
                            ELSE 0 END), 0) INTO used
-  FROM turn_calls WHERE turn_id = p_turn_id;
-  need := ceil(q * p_upper_usd * p_multiplier);
+  FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
+  need := CASE WHEN p_call_kind = 'decision' THEN 0 ELSE ceil(q * p_upper_usd * p_multiplier) END;
   IF t.reserved_credits - used < need THEN
     UPDATE turns SET state = 'paused', pause_reason = 'waiting_credits', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
     RETURN jsonb_build_object('state', 'paused', 'paused', true) || turn_tombstones(p_actor_id, t.session_id, t.policy);
