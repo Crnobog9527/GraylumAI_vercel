@@ -6,7 +6,7 @@ import { compareRequest, assertCompareFits, snapshotHash, workspaceDependencies,
 import { columnStreamer } from '../fusion/compareStream';
 import { decimal, DECIMAL_SCALE } from '../bill2/decimal';
 import { fusionRequestBody } from '../fusion/request';
-import { readFusionSettings } from '../fusion/settings';
+import { assertCompareAllowed } from '../fusion/compareAdmission';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
 import { rowFor } from '../runtime/settingsRows';
@@ -61,11 +61,12 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   // The pause and the message limit before anything is priced or opened, as a free chat (the old compare start's rateLimit).
   const admitted = await deps.newWork.message(input.actorId, readAdmissionSettings(admin, Promise.resolve(configuration)));
   if (!admitted.ok) return emit(fail(GATE_CODES[admitted.reason]));
-  const settings = (await readFusionSettings(admin)).compare;
+  // The BILL2 compare's admission rules (assertCompareAllowed): the switch, the live membership facts (not only the cached
+  // level), at least min and at most the plan's maximum (and 8) models, each on the allowlist.
   const models = input.modelIds;
-  if (!settings.enabled) return emit(fail('FUSION_COMPARE_DISABLED'));
-  if (models.length < settings.minModels || new Set(models).size !== models.length
-    || models.some(id => !settings.allowedModelIds.includes(id))) return emit(fail('FUSION_MODEL_DENIED'));
+  let settings;
+  try { settings = await assertCompareAllowed(admin, input.actorId, models); }
+  catch (error) { return emit(fail(error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message) ? error.message : 'FUSION_COMPARE_UNAVAILABLE')); }
   const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
   if (!key) return emit(fail('TURN_PROVIDER_KEY_UNAVAILABLE'));
 

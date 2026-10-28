@@ -86,11 +86,20 @@ describe('jury turn advance', () => {
     expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'ended' });
     expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', refundAll: true }));
   });
-  it('a paused platform or an exhausted call limit stops the relay with nothing sent and the turn untouched (#1522 review)', async () => {
+  it('a paused platform or an exhausted call limit claims nothing; a claimed step never sent is sent later (#1522 review)', async () => {
     m.read.mockResolvedValue(view());
-    m.runGroup.mockResolvedValueOnce(REVIEWERS.map(() => ({ ok: false, code: 'TURN_NEW_CALLS_PAUSED' })));
-    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'gated' });
-    expect(m.close).not.toHaveBeenCalled();
+    const gated = juryTurn({ admin, clients: { write: admin, read: admin } as never, slots: { take: async () => 1, drop: async () => undefined },
+      calls: async () => ({ ok: false, reason: 'paused' }) as never }, 'actor');
+    expect(await gated.advance('r')).toMatchObject({ next: false, reason: 'gated' });
+    expect(m.rpc).not.toHaveBeenCalled();
+    expect(m.runGroup).not.toHaveBeenCalled();
+    // Claimed earlier, nothing begun: the group is sent now (no second claim), not decided as finished.
+    m.read.mockResolvedValue(view({ steps: [{ round: 1, phase: 'review', attempt: 1, groupId: 'g', stepKey: 'review:1:review:1', claimedAt: 'x' }],
+      calls: [] }));
+    m.decide.mockResolvedValueOnce({ state: 'running', round: 1, phase: 'summary', attempt: 1 });
+    expect(await jury().advance('r')).toMatchObject({ next: true, reason: 'advanced', dispatched: 3 });
+    expect(m.runGroup).toHaveBeenCalledTimes(1);
+    expect(m.rpc.mock.calls.filter(c => (c[1] as { p_to: { state: string } }).p_to.state === 'claim')).toHaveLength(0);
   });
   it('waits for credits, leaves an unknown result to recovery, and never sends a group twice', async () => {
     m.read.mockResolvedValue(view());

@@ -167,8 +167,10 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
       const cfg = config.parse(view.config);
       const at: ReviewPosition = { round: view.round, phase: view.phase, attempt: view.attempt };
       const claimed = view.steps.find(s => s.stepKey === stepKey(at));
+      const sent = claimed ? view.calls.filter(c => c.groupId === claimed.groupId) : [];
       let dispatched = 0;
-      if (!claimed) {
+      // A step claimed but none of whose calls was begun (gated, or cut off right after the claim) is sent now, not decided.
+      if (!claimed || !sent.length) {
         const here = core.callsAt(view, at.round, at.phase === 'review' ? 'review' : 'summary');
         const models = (at.phase === 'review' ? cfg.reviewers : [cfg.summary])
           .filter(id => !here.some(call => call.modelId === id && call.verdict !== null && call.verdict !== 'no_delivery'));
@@ -188,13 +190,17 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
           await end(view, 'incomplete', { ...outcome, phase: at.phase });
           return { next: false, reason: 'ended' };
         }
+        // The pause and the call limits for the whole group before it is claimed (the old path's call gate): a refusal claims,
+        // writes and sends nothing, and a later relay or the daily backstop tries the same step again.
+        const gate = await deps.calls(actorId, members.length, 'bill2.v2');
+        if (!gate.ok) return { next: false, reason: 'gated' };
         const fromSeq = Math.max(0, ...view.calls.map(c => c.seq ?? 0)) + 1;
-        await step(reviewId, at, { state: 'claim', fromSeq });
+        if (!claimed) await step(reviewId, at, { state: 'claim', fromSeq });
         let seq = fromSeq - 1;
         const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
         if (!key) return { next: false, reason: 'failed' };
         const outcomes = await runGroup({ db, slots: deps.slots, actorId, turnId: view.turnId, nextSeq: () => ++seq,
-          credential: async () => key, transport: deps.transport, sleep: deps.sleep, calls: deps.calls }, members);
+          credential: async () => key, transport: deps.transport, sleep: deps.sleep, calls: async () => ({ ok: true }) }, members);
         dispatched = outcomes.length;
         const stops = outcomes.flatMap(o => o.ok ? [] : [o.code]);
         if (stops.includes('TURN_TOMBSTONED')) {
@@ -215,7 +221,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
           await step(reviewId, at, { state: 'running', round: at.round, phase: at.phase, attempt: at.attempt + 1 });
           return { next: true, reason: 'retry', dispatched };
         }
-      } else if (view.calls.some(c => c.groupId === claimed.groupId && (c.state === 'dispatched' || c.state === 'identified'))) {
+      } else if (sent.some(c => c.state === 'dispatched' || c.state === 'identified')) {
         return { next: false, reason: 'in_flight' };
       }
       // Every call of the step has its receipt: the same decision as the BILL2 review (reviewCore.decide).

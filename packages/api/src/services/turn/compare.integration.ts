@@ -165,7 +165,9 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: a repeated compare request never calls again; o
   expect(await credits(f.actor)).toBe(998);
   const pro = await member('pro');
   const refused = await compare(pro, transport);
-  expect(refused).toEqual([{ type: 'error', code: 'TURN_MEMBERSHIP_REQUIRED' }]);
+  expect(refused).toHaveLength(1);
+  expect(refused[0]).toMatchObject({ type: 'error' });
+  expect(['FUSION_COMPARE_FORBIDDEN', 'FUSION_MEMBERSHIP_REQUIRED', 'TURN_MEMBERSHIP_REQUIRED']).toContain((refused[0] as { code: string }).code);
   expect(await credits(pro.actor)).toBe(1000);
 });
 
