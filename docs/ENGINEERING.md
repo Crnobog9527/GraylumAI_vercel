@@ -167,6 +167,19 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
    `packages/db/functions/` 和 `built-fingerprint.json` 一起提交。任何带迁移的 PR 都要这样做；合并冲突时
    先解决迁移冲突，再重新生成，不手工合并这些文件。
 
+### 主路径约束（CORE-PATH-V2，Owner 2026-10-28 批准）
+
+适用范围：主路径 v2 的代码，即 `packages/api/src/services/turn/`、`packages/db/functions/turn/` 以及它们调用的账本函数；计划见 `docs/launch/tasks/CORE-PATH-V2.md`。旧路径（`services/runtime/`、`services/bill2/`）在 V2-12 删除前只做必要修复，不加新功能。
+
+- 主路径的表主键带所有者列，查询必须带所有者键；不得对全站共用行加锁或更新（按天累计类数据用分桶行）；数据库函数只用事务级状态（不用 `pg_advisory_lock`、非 LOCAL 的 `SET`、临时表），以兼容连接池事务模式；后台定时任务按批认领（`SKIP LOCKED`）、幂等、可多实例并行；对外部供应商的调用按模型/供应商设并发上限并做退避。
+- 一轮对话只允许三类数据库写入：开轮（`turn_open`）、回执（`turn_call_begin`/`turn_call_identity`/`turn_call_record`，每次付费调用发出前必须先写 `turn_call_begin`）、收轮（`turn_close`）。模型调用与工具调用之间不得有其他数据库读写；需要的数据在开轮时取回，或来自进程内目录缓存。例外（Owner 2026-10-28 批准）：免费的读取工具（读用户自己的资料库、作品）可以在回合中途按本人键只读查询一次，不加锁、不写入，不写回执；次数按本轮免费工具上限计，冻结进 `turns.policy`。
+- 付费调用在 SDK 和 HTTP 客户端里不重试（`maxRetries` 为 0）；只有确定没发出或确定不计费的失败可以重试，每次尝试各自一行回执；结果不明的调用交恢复任务，不退冻结、不释放预占。
+- 主路径的数据库函数只能读写 `turns`、`turn_calls`、`session_messages`、`runtime_sessions`、`profiles`、`credit_transactions`、`credit_source_entries`、`daily_spend`、`catalog_versions`，以及按 `kind` 需要的草稿/报告/评审表各一行；只允许对本人 `profiles` 和本会话 `runtime_sessions` 加行锁；不得对任何全站共用行加锁。
+- 全站只读、管理员写的目录（系统设置、模型目录、Skill 包、权益规则）必须通过 `catalogCache` 读取；余额、冻结、墓碑、会话状态、用户写入的数据永不缓存。
+- staging 与正式环境不得有代码分支；环境差异只能是配置（密钥、地址、价格快照、账号积分）。
+- `scripts/check-turn-budget.mjs` 的基线只许变小（调高需 Owner 批准）；碰主路径的 PR 描述写明往返/锁/数据库时间的前后值。
+- 新的业务规则要进主路径时，先问"它属于开轮、回执还是收轮"，只在那一个函数里加分支；需要新表才能表达的，先在 PR 里写一句为什么现有列不够。
+
 ## 6. AI 与 Agent 功能
 
 以下原则来自 [Master Plan v12](launch/MASTER_PLAN.md) 第 3、4 节（延续已锁定的

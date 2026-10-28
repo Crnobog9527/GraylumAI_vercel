@@ -90,7 +90,9 @@ beforeAll(async () => {
   if (!staging) return;
   const expiresAt = new Date(Date.now() + 7200000).toISOString();
   const policies = pairs.map(([model, providerSlug], i) => {
-    const providerLimits = { providerSlug, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' };
+    // PROMPT-CACHE-ALL: the Anthropic route carries a frozen cache write price, so its frozen body holds cache breakpoints.
+    const providerLimits = { providerSlug, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0',
+      ...(providerSlug === 'anthropic' ? { cacheWriteUsdPerMillion: '1.25' } : {}) };
     return { modelId: models[i], model, provider: 'openrouter', account, protocol: 'openrouter-chat-v1', providerLimits,
       upperUsd: openRouterBound(providerLimits, 8192).upperUsd, inputLimit: 196608, outputLimit: 8192, multiplier: '3',
       automaticRetry: false, hiddenTools: false, lookupSupported: true };
@@ -159,6 +161,14 @@ it.runIf(staging)('RUNTIME: compare start holds every column once, streams each 
     expect(body.plugins).toEqual([{ id: 'web', enabled: false }]);
     expect(body).not.toHaveProperty('tools');
   }
+  // PROMPT-CACHE-ALL: through real compare admission, claim and dispatch, the Anthropic column's frozen body marks its
+  // system message (no history on a first compare); the Gemini column sends the plain string.
+  const markedColumn = sent.slice(-2).find(body => body.model === pairs[0][0])!;
+  const plainColumn = sent.slice(-2).find(body => body.model === pairs[1][0])!;
+  const markedSystem = (markedColumn.messages as Array<{ role: string; content: unknown }>)[0]!;
+  expect(markedSystem.role).toBe('system');
+  expect(markedSystem.content).toEqual([{ type: 'text', text: expect.any(String), cache_control: { type: 'ephemeral' } }]);
+  expect(typeof (plainColumn.messages as Array<{ role: string; content: unknown }>)[0]!.content).toBe('string');
   // A repeat after the answer never dispatches again.
   expect(await collect(streamCompareColumn({ admin, actorId: f.actor, executor }, { compareId: started.compareId, column: 0 })))
     .toEqual([{ type: 'already', verdict: 'usable' }]);
