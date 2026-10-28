@@ -11,7 +11,7 @@ import { freezeSharedPromptCache } from '../runtime/promptCache';
 import { replySettingInstructions } from '../runtime/replyLanguage';
 import { openRouterBound } from '../bill2/openRouterPolicy';
 import { mentorSystem, mentorUserMessage, projectMentorHistory, SKILL_FILE_INSTRUCTIONS } from './mentorPrompt';
-import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillEntryChars } from './mentorSkill';
+import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillEntryChars, skillFileReserveBytes } from './mentorSkill';
 
 /*
  * CORE-PATH-V2 V2-5 golden bytes (plan 2.9; #1502 rewritten for the turn path): the mentor request's three cache breakpoints,
@@ -136,6 +136,15 @@ describe('mentor Skill package from the process cache (plan 2.4, 2.7)', () => {
     await prepareMentorFiles(source, binding, true);
     await loadMentorSkill(source, binding, ['step-1.md'], 90000);
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('the continuation reserve is the largest prepared file as embedded in the request (escaped twice), not its raw size', async () => {
+    const { binding } = skill();
+    const content = '\n"\\'.repeat(4000); // 12000 raw bytes, each escaped twice when embedded
+    const prepared = { files: new Map([['a.md', { text: content, sha256: 'a'.repeat(64) }]]), organizerTemplate: undefined };
+    const embedded = Buffer.byteLength(JSON.stringify(JSON.stringify({ ...binding, path: 'a.md', sha256: 'a'.repeat(64), content })));
+    expect(embedded).toBeGreaterThan(3 * Buffer.byteLength(content));
+    expect(skillFileReserveBytes(prepared, binding)).toBe(embedded + 4096 + 8192);
   });
 
   it('refuses any other package identity', async () => {

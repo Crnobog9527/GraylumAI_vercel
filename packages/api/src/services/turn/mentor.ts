@@ -12,7 +12,7 @@ import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext }
 import { freezeSharedPromptCache } from '../runtime/promptCache';
 import { replySettingInstructions } from '../runtime/replyLanguage';
 import { runRuntime } from '../runtime/runner';
-import { SKILL_FILE_MAX_BYTES, SKILL_FILE_TRACE_BYTES, skillFileToolBytes } from '../runtime/skillFile';
+import { skillFileToolBytes } from '../runtime/skillFile';
 import type { PricingDeps } from '../runtime/pricingAdmission';
 import { modelCall, TurnStop } from './call';
 import { CLOSES, GATE_CODES, type ChatDeps } from './chat';
@@ -22,7 +22,7 @@ import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { mentorHost, mentorOrganizerInput, mentorState, resourcesOf } from './mentorContext';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
-import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles } from './mentorSkill';
+import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
 import type { TurnEvent } from './sse';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -43,8 +43,6 @@ export type MentorDeps = {
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
   organizeAfter: boolean };
 
-// Reserved for the read_skill_file continuation (the largest file the tool returns, its JSON wrapping and the call trace).
-const SKILL_FILE_RESERVE_BYTES = SKILL_FILE_MAX_BYTES + 4096 + SKILL_FILE_TRACE_BYTES;
 const MARKER_RESERVE_BYTES = 256;
 
 const callPolicy = (q: ChatQuote) => ({ modelId: q.modelId, provider: 'openrouter', account: q.identity.account, model: q.model,
@@ -104,7 +102,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 
     // 3. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
-    const toolBytes = groundedCardToolBytes() + skillFileToolBytes() + (opening ? 0 : SKILL_FILE_RESERVE_BYTES);
+    // The continuation reserve: the largest prepared file as the tool result is embedded in the request (twice JSON-escaped).
+    const toolBytes = groundedCardToolBytes() + skillFileToolBytes() + (opening ? 0 : skillFileReserveBytes(prepared, binding));
     const left = mentor.inputLimit - Buffer.byteLength(system.instructions) - Buffer.byteLength(userMessage) - toolBytes
       - MARKER_RESERVE_BYTES - 8192;
     const history = trimHistory(projectHistory(projectMentorHistory(opened.history)), Math.max(left, 0));

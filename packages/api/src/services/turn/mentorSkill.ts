@@ -5,7 +5,7 @@ import {
   type PackageIdentity, type SkillSource,
 } from '../skills/loader';
 import { loadOrganizerTemplate } from '../skills/organizerTemplate';
-import { SKILL_FILE_MAX_BYTES, skillFileParameters, skillFileTool, type SkillFileBinding } from '../runtime/skillFile';
+import { SKILL_FILE_MAX_BYTES, SKILL_FILE_TRACE_BYTES, skillFileParameters, skillFileTool, type SkillFileBinding } from '../runtime/skillFile';
 import type { RuntimeTool } from '../runtime/runner';
 
 /*
@@ -87,6 +87,18 @@ export function skillEntryChars(text: string, identity: PackageIdentity): number
   if (!entry || entry.path !== 'SKILL.md' || typeof entry.content !== 'string') return 0;
   const prefix = JSON.stringify({ skill: identityOf(identity), resources: [{ path: 'SKILL.md', content: entry.content }] }).slice(0, -2);
   return text.startsWith(prefix) ? prefix.length : 0;
+}
+
+/**
+ * Request bytes a read_skill_file continuation may add, measured on this turn's prepared files as skillFileContinuationBytes
+ * measures them (runtime/skillFile.ts): the tool result is a JSON string embedded in the request JSON, so it is measured
+ * escaped twice; plus the call itself and its trace.
+ */
+export function skillFileReserveBytes(prepared: MentorSkillFiles, binding: SkillFileBinding): number {
+  let largest = 0;
+  for (const [path, file] of prepared.files) largest = Math.max(largest,
+    Buffer.byteLength(JSON.stringify(JSON.stringify({ ...binding, path, sha256: file.sha256, content: file.text }))));
+  return largest + 4096 + SKILL_FILE_TRACE_BYTES;
 }
 
 /** read_skill_file for the mentor: one declared file of the frozen package, from this turn's prepared copy only. */
