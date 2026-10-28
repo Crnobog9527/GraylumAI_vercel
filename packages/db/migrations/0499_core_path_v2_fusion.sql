@@ -11,6 +11,7 @@
 --   turn_fusion_close    turn_close with the review's end state or the compare's finished state in the same transaction
 --   fusion_review_turn_step   the review record's claim/advance for a jury on the turn path
 --   fusion_compare_turn_adopt the chosen compare answer into the conversation history
+--   fusion_compare_turn_history the conversation history a compare sizes its columns on (read-only)
 --   turn_fusion_recovery the fusion-recovery cron's step on turns: 24-hour end, deleted review refund, product sync
 -- Changed (whole CREATE OR REPLACE from packages/db/functions):
 --   turn_open            a jury (or adoption) does not occupy its draft conversation (active_turn_id), as before V2
@@ -26,7 +27,7 @@
 -- Compatibility: new columns are nullable, the new table and functions are used only by the V2 path (core_path_v2.enabled);
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
--- Recovery: drop the seven new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the eleven changed
+-- Recovery: drop the eight new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the eleven changed
 -- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -347,6 +348,22 @@ BEGIN
       updated_at = clock_timestamp() WHERE id = cmp.id RETURNING * INTO cmp;
   RETURN cmp.adoption || jsonb_build_object('replay', false);
 END $function$;
+
+-- The history a compare will see, for sizing its columns before turn_open freezes them (read-only; the owner's live conversation
+-- only; turn_open returns the authoritative copy and the compare refuses when they differ). The same query as turn_open's.
+CREATE OR REPLACE FUNCTION public.fusion_compare_turn_history(p_actor_id uuid, p_session_id uuid, p_limit integer)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT coalesce(jsonb_agg(jsonb_build_object('seq', m.seq, 'role', m.role, 'content', m.content) ORDER BY m.seq), '[]'::jsonb)
+  FROM (SELECT seq, role, content FROM session_messages
+        WHERE session_id = p_session_id AND visible AND deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = p_session_id AND s.actor_id = p_actor_id
+            AND s.content_deleted_at IS NULL AND s.erased_at IS NULL)
+        ORDER BY seq DESC LIMIT least(greatest(p_limit, 0), 200)) m;
+$function$;
 
 -- fusion-recovery on the turns (V2-7b): a jury waiting 24 hours between groups ends (expired: the known usage, at most the fixed
 -- price; 10-27); a jury whose review was deleted (its draft deleted) is refunded in full (as the old fee); a review or compare
@@ -960,6 +977,7 @@ BEGIN
     'turn_fusion_close(uuid,bigint,text,boolean,boolean,text,jsonb)',
     'fusion_review_turn_step(uuid,uuid,jsonb,jsonb)',
     'fusion_compare_turn_adopt(uuid,uuid,integer)',
+    'fusion_compare_turn_history(uuid,uuid,integer)',
     'turn_fusion_recovery(integer)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);

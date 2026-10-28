@@ -204,6 +204,9 @@ try{
   assert.deepEqual((await c.query('select role,content from session_messages where session_id=$1 order by seq',[a.session])).rows,
    [{role:'user',content:'which?'},{role:'assistant',content:'two'}]);
   assert.equal((await one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,2])).replay,true);
+  // The history a compare sizes on: the owner's conversation only.
+  assert.deepEqual((await one('select fusion_compare_turn_history($1,$2,10) v',[a.actor,a.session])).map(x=>x.content),['which?','two']);
+  assert.deepEqual(await one('select fusion_compare_turn_history($1,$2,10) v',[randomUUID(),a.session]),[]);
   assert.match(await refusal(one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,1])),/FUSION_COMPARE_ADOPTED/);
   assert.match(await refusal(one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,3])),/FUSION_COMPARE_ADOPTED|FUSION_COMPARE_INVALID/);
   const o2=await open(a,{kind:'compare',pol:comparePolicy(),product:cp});
@@ -280,14 +283,14 @@ try{
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.
  {
   for(const f of ['turn_fusion_open','turn_fusion_begin','turn_fusion_record','turn_fusion_close','fusion_review_turn_step',
-   'fusion_compare_turn_adopt','turn_fusion_recovery']){
+   'fusion_compare_turn_adopt','fusion_compare_turn_history','turn_fusion_recovery']){
    for(const role of ['anon','authenticated'])
     assert.equal(await one(`select bool_or(has_function_privilege($1,p.oid,'execute')) v from pg_proc p where proname=$2`,[role,f]),false,f+' '+role);
    assert.equal(await one(`select bool_or(has_function_privilege('service_role',p.oid,'execute')) v from pg_proc p where proname=$1`,[f]),true,f);
   }
   for(const role of ['anon','authenticated','service_role'])
    assert.equal(await one(`select has_table_privilege($1,'public.fusion_turn_outputs','select') v`,[role]),false);
-  report.checks.push('the seven functions are service role only; no client role reads fusion_turn_outputs');
+  report.checks.push('the eight functions are service role only; no client role reads fusion_turn_outputs');
  }
  console.log(JSON.stringify(report,null,1));
 }finally{await db.close();}

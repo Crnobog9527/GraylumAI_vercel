@@ -59,10 +59,10 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   if (!key) return emit(fail('TURN_PROVIDER_KEY_UNAVAILABLE'));
 
   // 1. The history the turn will see, for sizing (turn_open returns the authoritative copy).
-  const read = await deps.clients.read.from('session_messages').select('seq,role,content').eq('session_id', input.sessionId)
-    .eq('visible', true).is('deleted_at', null).order('seq', { ascending: false }).limit(COMPARE_HISTORY_ITEMS);
+  const read = await deps.clients.read.rpc('fusion_compare_turn_history', { p_actor_id: input.actorId, p_session_id: input.sessionId,
+    p_limit: COMPARE_HISTORY_ITEMS });
   if (read.error) return emit(fail('TURN_DATABASE_UNAVAILABLE'));
-  const sized = (read.data as Array<{ seq: number; role: 'user' | 'assistant'; content: string }>).reverse();
+  const sized = read.data as Array<{ seq: number; role: 'user' | 'assistant'; content: string }>;
   const partsWith = (history: Array<{ role: 'user' | 'assistant'; content: string }>, positioningFallback: boolean): CompareParts =>
     ({ ...input.parts, history: history.map(m => ({ role: m.role, text: m.content })), positioningFallback });
 
@@ -75,8 +75,9 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
     assertCompareFits(request);
     columns = quotes.map(quote => fusionCall(quote, fusionRequestBody(quote.policy as never, request, quote.outputLimit, quote.reasoning)));
   } catch (error) {
+    // A known refusal code (quote, reasoning, price snapshot, request shape) is passed on; anything else stays generic.
     return emit(fail(error instanceof QuoteError || error instanceof TurnStop ? error.code
-      : error instanceof Error && /^FUSION_[A-Z_]+$/.test(error.message) ? error.message : 'TURN_QUOTE_UNAVAILABLE'));
+      : error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message) ? error.message : 'TURN_QUOTE_UNAVAILABLE'));
   }
   const q = quotes[0]!.q;
   const credits = columns.map(c => callCredits(q, c.upperUsd, c.multiplier));

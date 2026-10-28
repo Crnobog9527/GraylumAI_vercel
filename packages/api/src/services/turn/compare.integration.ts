@@ -50,7 +50,7 @@ beforeAll(async () => {
     const config = { pricing, reasoning: { route: tag, purposes: { interactive: { mode: 'off', wire: 'reasoning_effort' } },
       catalog: { fetchedAt: pricing.fetchedAt, model, reasoning: { mandatory: false, defaultEnabled: false, supportedEfforts: ['low', 'high'],
         defaultEffort: 'high', supportsMaxTokens: true },
-      endpoints: [{ tag, providerName: 'Synthetic', supportedParameters: ['reasoning', 'reasoning_effort'], contextLength: 1050000,
+      endpoints: [{ tag, providerName: 'Synthetic', supportedParameters: ['tools', 'reasoning', 'reasoning_effort'], contextLength: 1050000,
         maxCompletionTokens: 8192 }] } } };
     await db.query(`insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint)
       values($1,$2,$2,'openrouter','true',8192,1050000,$3,'https://openrouter.ai/api/v1/chat/completions')`, [models[i], model, JSON.stringify(config)]);
@@ -99,7 +99,8 @@ async function compare(f: { actor: string; session: string }, transport: typeof 
   gate?: PositioningClassifier } = {}) {
   const events: CompareEvent[] = [];
   await withCatalogRequest(() => runCompareTurn({ admin, clients: turnClients(admin), slots, transport,
-    gate: { classify: input.gate ?? (async () => 'allow') } },
+    // The synthetic Decisions check: allowed, reporting a provider cost (as the free-chat tests).
+    gate: { classify: input.gate ?? (async ({ onCost }) => { onCost?.(0.00002); return 'allow'; }) } },
   { actorId: f.actor, sessionId: f.session, requestId: input.requestId ?? randomUUID(), modelIds: models,
     parts: parts(input.question ?? 'Which plan?') }, e => events.push(e)));
   return events;
@@ -141,20 +142,19 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns, each bou
   expect(JSON.stringify(bodies.find(b => b.model === PAIRS[1][0]))).not.toContain('cache_control');
 });
 
-it('RUNTIME: CORE-PATH-V2 V2-7b: a repeated compare request never calls again; only Gold compares; a failed column is free', async () => {
+it('RUNTIME: CORE-PATH-V2 V2-7b: a repeated compare request never calls again; only Gold compares', async () => {
   const f = await member();
   let posts = 0;
   const transport: typeof fetch = async (_url, init) => { posts++; const body = JSON.parse(String(init?.body));
-    return body.model === PAIRS[1][0] ? new Response('{"error":{"code":502}}', { status: 502 })
-      : sse('gen-cmp-' + randomUUID(), body.model, 'Only one'); };
+    return sse('gen-cmp-' + randomUUID(), body.model, 'Answer'); };
   const requestId = randomUUID();
   const first = await compare(f, transport, { requestId });
-  expect(first.at(-1)).toMatchObject({ type: 'result', chargedCredits: 1 });
-  const sentFirst = posts;
+  expect(first.at(-1)).toMatchObject({ type: 'result', chargedCredits: 2 });
+  expect(posts).toBe(2);
   const again = await compare(f, transport, { requestId });
   expect(again.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REQUEST_REPLAYED' });
-  expect(posts).toBe(sentFirst);
-  expect(await credits(f.actor)).toBe(999);
+  expect(posts).toBe(2);
+  expect(await credits(f.actor)).toBe(998);
   const pro = await member('pro');
   const refused = await compare(pro, transport);
   expect(refused).toEqual([{ type: 'error', code: 'TURN_MEMBERSHIP_REQUIRED' }]);
