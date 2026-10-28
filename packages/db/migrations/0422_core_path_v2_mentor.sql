@@ -3,7 +3,8 @@
 -- CORE-PATH-V2 V2-5 (kind=mentor, the positioning mentor; docs/launch/tasks/CORE-PATH-V2.md 2.3, 2.7, 4.2, 6.1).
 -- MIGRATION NUMBER IS A LOCAL PLACEHOLDER until the controller assigns one.
 --   turn_mentor_context  read inside turn_open: the draft of this session, its current round, the step's workflow and the
---                        frozen work projection (checklist values, field provenance, business context) the mentor's prompt
+--                        work projection (checklist values, field provenance, business context; runtime_work_projection's
+--                        fields without its runtime_executions join) the mentor's prompt
 --                        is built from, plus the checked Skill package identity. Replaces opc_query, the workbench read,
 --                        artifact_query resolve, runtime_session_context and opc_step_material of the old path (one round
 --                        trip instead of about ten). Refuses a session without a positioning draft, a module other than the
@@ -33,7 +34,7 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
-  business uuid;
+  business uuid; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; context jsonb;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
@@ -64,9 +65,44 @@ BEGIN
     OR EXISTS (SELECT 1 FROM skill_revision_revocations WHERE revision_id = r.revision_id) THEN
     RAISE EXCEPTION 'TURN_SKILL_UNAVAILABLE' USING ERRCODE='42501';
   END IF;
+  -- The work projection the mentor sees: runtime_work_projection's per-field provenance and protection, computed here without
+  -- its runtime_executions/opc_turns join (V2-12 drops those): a pending suggestion is one the field still carries.
+  steps := r.steps;
+  FOR step_id, st IN SELECT key, value FROM jsonb_each(r.steps) LOOP
+    metas := '{}';
+    FOR field_id IN SELECT f->>'id' FROM jsonb_array_elements(r.workflow->'steps') s, jsonb_array_elements(s->'information') f
+                    WHERE s->>'id' = step_id LOOP
+      metas := metas || jsonb_build_object(field_id, jsonb_build_object(
+        'source', coalesce(st#>>ARRAY['fieldMeta',field_id,'source'], 'unknown'),
+        'basis', coalesce(st#>>ARRAY['fieldMeta',field_id,'basis'], 'unknown'),
+        'executionId', st#>ARRAY['fieldMeta',field_id,'executionId'],
+        'origin', st#>ARRAY['fieldMeta',field_id,'origin'], 'createdAt', st#>ARRAY['fieldMeta',field_id,'createdAt'],
+        'hasPendingSuggestion', jsonb_typeof(st#>ARRAY['fieldMeta',field_id,'suggestion']) = 'object',
+        'protected', NOT coalesce(NOT coalesce((st->>'valid')::boolean,false)
+ AND coalesce(st->'information'->(field_id)->>'status','unknown') NOT IN ('confirmed','deferred') AND (
+  (st->'fieldMeta'->(field_id)->>'source'='capture' AND st->'fieldMeta'->(field_id)->>'fp'=artifact_hash(st->'information'->(field_id))
+   AND EXISTS(SELECT 1 FROM artifact_requests cap WHERE cap.project_id=d.project_id AND cap.round_id=r.id
+    AND cap.request_id=overlay(md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId')) placing 'f' from 13 for 1)::uuid
+    AND cap.action='opc_capture' AND cap.payload->>'executionId'=st->'fieldMeta'->(field_id)->>'executionId'
+    AND cap.response->'versions' ? (step_id)
+    AND NOT EXISTS(SELECT 1 FROM artifact_requests manual WHERE manual.project_id=d.project_id AND manual.round_id=r.id
+     AND manual.action='opc_information' AND manual.payload->>'stepId'=(step_id)
+     AND (manual.payload->>'expectedVersion')::integer >= (cap.response->'versions'->>(step_id))::integer
+     AND artifact_hash(manual.payload->'values'->(field_id)) IS DISTINCT FROM st->'fieldMeta'->(field_id)->>'fp')))
+  OR (st->'fieldMeta'->(field_id)->>'source' IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
+   AND NOT EXISTS(SELECT 1 FROM artifact_requests history WHERE history.project_id=d.project_id AND history.round_id=r.id
+    AND ((history.action='opc_information' AND history.payload->>'stepId'=(step_id)
+      AND coalesce(history.payload->'values'->(field_id)->>'value','')<>'')
+     OR (history.action='opc_capture' AND history.response->'fields'->(step_id) ? (field_id)))))
+ ),false)));
+    END LOOP;
+    steps := jsonb_set(steps, ARRAY[step_id], st || jsonb_build_object('fieldMeta', metas));
+  END LOOP;
+  context := opc_business_context(p_actor_id, p_session_id, r.id);
   RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'roundId', r.id, 'mode', d.mode, 'moduleId', p.module_id,
     'skillId', p.skill_id, 'revisionId', r.revision_id, 'packageHash', r.package_hash, 'steps', r.workflow->'steps',
-    'work', runtime_work_projection(p_actor_id, p_session_id, r.id));
+    'work', jsonb_build_object('projectId', p.id, 'roundId', r.id, 'revisionId', r.revision_id, 'packageHash', r.package_hash,
+      'steps', steps, 'source', NULL) || CASE WHEN context IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext', context) END);
 END $function$;
 
 -- opc_capture_apply's single-execution branch, with the turn in place of the runtime execution (see the header).

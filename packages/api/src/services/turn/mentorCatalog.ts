@@ -48,7 +48,7 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
     if (input.organize) {
       const summary = summaryPolicy(Object.fromEntries((rows.data ?? []).map(r => [r.key, r.value])), module.data.model_id);
       organizer = await chatQuote(admin, { modelId: summary.modelId, inputBytes: budgets?.organize.inputBytes ?? ORGANIZER_INPUT_BYTES,
-        deps: input.pricing, use: { phase: 'attached_organizer', requestFormat: AGENT_TURN_REQUEST_FORMAT, purpose: 'organize',
+        deps: input.pricing, key: await mentor.credential(), use: { phase: 'attached_organizer', requestFormat: AGENT_TURN_REQUEST_FORMAT, purpose: 'organize',
           outputCap: summary.maxTokens } });
       assertSeparateSummaryModel(mentor.model, organizer.model);
     }

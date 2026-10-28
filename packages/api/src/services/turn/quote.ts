@@ -62,7 +62,8 @@ export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer'; req
 const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_REQUEST_FORMAT, purpose: 'interactive' };
 
 export async function chatQuote(admin: SupabaseClient, input: { modelId: string; inputBytes: number; deps?: PricingDeps;
-  use?: QuoteUse }): Promise<ChatQuote> {
+  use?: QuoteUse; /** The platform key this request already read fresh (a second quote in one request reads it once, OR-1). */ key?: string })
+  : Promise<ChatQuote> {
   const use = input.use ?? FREE_CHAT_USE;
   const setting = await catalogRead(admin, 'settings', 'runtime-payg', () =>
     admin.from('system_settings').select('value').eq('key', RUNTIME_PAYG_SETTING).maybeSingle());
@@ -98,7 +99,7 @@ export async function chatQuote(admin: SupabaseClient, input: { modelId: string;
   const multiplier = unit.models[input.modelId]?.multiplier;
   if (!multiplier) throw new QuoteError('TURN_BILLING_UNIT_UNAVAILABLE');
 
-  const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
+  const key = input.key ?? await readOpenRouterKeyOrUnset(admin, { fresh: true });
   if (!key) throw new QuoteError('TURN_PROVIDER_KEY_UNAVAILABLE');
   return {
     modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, providerLimits: limits,
