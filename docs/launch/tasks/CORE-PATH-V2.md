@@ -15,9 +15,9 @@
   一轮 41–82 次数据库往返，事务里持 90–130 把关系锁，并在 `modules`、`system_settings`、止损账本、staging 测试窗口
   这些全站共用的行上排队。Micro 的 2 个共享核被这些 CPU 密集的 PL/pgSQL 吃满：100 人时 CPU 平均 66%、尖峰 89%，
   吞吐在 75 人后不再上涨（约 63 轮/分）。三个开关（0416/0418/0419）没有可测量的改善，因为它们削的是锁数，不是工作量。
-- **方向**：一轮对话只剩三类数据库写入——**开轮**（`turn_open`）、**记账**（每次模型/工具调用一条回执 `turn_call_record`）、
+- **方向**：一轮对话只剩三类数据库写入——**开轮**（`turn_open`）、**记账**（每次模型/工具调用一行回执，分"发出前 / 拿到供应商 id / 结束"三步写，2.5.2）、
   **收轮**（`turn_close`）。证明只在开轮做一次；目录（设置、模型、Skill 包、权益规则）进 Node 进程缓存（0419 已上库的机制）；
-  历史可见性在删除时维护而不是读时重算；删除检查搭在必经的写入上。自由对话一轮 4 次往返（含登录），导师 6–7 次。
+  历史可见性在删除时维护而不是读时重算；删除检查搭在必经的写入上。自由对话一轮 6 次往返（含登录），导师 12 次（今天 41 / 61）。
 - **范围**：定位导师、自由对话、Skill 工具、研究工具、报告、对比、评审团、停止/退款/暂停、历史、删除/注销——都接到同一条核上；
   删掉 staging 测试窗口和 BILL2 逐调用四步；旧路径整体删除，不并存。
 - **工期**：13 个 PR，三个窗口并行，计划 7 周（含 1 周余量，乐观 5 周）；100 人验收通过后 Owner 另定上线日期。
@@ -122,7 +122,7 @@
 | 历史上下文 | 数据库 `session_messages`：按会话取最近 N 条可见消息；可见性在删除时维护，不在读取时重算 | 读路径一条索引查询 |
 | 提示词拼装、缓存断点、输入裁剪 | Node 纯函数，黄金字节测试（2.9 节） | prompt-cache 原则 |
 | 模型与工具调用 | Node（`@openai/agents` runner + OpenRouter）；工具白名单与每轮上限在进程内计数 | SDK 不换（Owner 10-20） |
-| 钱的证据（每次模型/工具调用） | 数据库 `turn_calls` + `turn_call_raw` 同一事务 INSERT（同一语句返回会话墓碑状态） | 回执必须落盘后才把正文交出去；原始正文不进热表（3.3.2 第 9 条） |
+| 钱的证据（每次模型/工具调用） | 数据库 `turn_calls` 一行，三步写：发出前 `turn_call_begin`、拿到供应商 id 时 `turn_call_identity`、结束时 `turn_call_record`（+ `turn_call_raw`）；begin/record 同一语句返回会话墓碑状态（2.5.2） | 发出前先留证据、崩溃后能按供应商 id 追成本（现有 dispatch/onIdentity 的等价物）；回执落盘后才把正文交出去；原始正文不进热表（3.3.2 第 9 条） |
 | 结算、退款、追加历史、关闭回合、整理结果 | **数据库 `turn_close` 一次写事务** | 和"写入前照查删除"原子 |
 | 暂停（余额不足/等用户）、24 小时自动退、评审团押金 | `turns.state` + 现有分钟级 `runtime-recovery` 定时任务（改读 `turns`） | 不新建队列（AGENTS 第 5 节） |
 | 删除、注销 | 会话/消息打墓碑 + `turns` 可见性列；注销走 DATA-ERASURE 现有投影，改指新表 | 删除即时生效的语义不变 |
@@ -148,7 +148,8 @@ running ─(正常结束)────────→ turn_close kind=completed �
   前端"准备中"由第一个 SSE 事件 `opened` 给出，里面带本轮的工具可用性、冻结额、兜底资格（`fallbackEligible`）、被裁剪的内容说明。
 - 评审团、对比、报告是同一个状态机的不同 `kind`，区别只在 `turn_open` 的冻结额和 `turn_close` 的结算口径（2.5 节）。
 - 崩溃恢复：进程死在 `running`，`turns` 行留着；`runtime-recovery` 每分钟扫 `state='running' AND updated_at < now()-15min` 调
-  `turn_close(kind=interrupted)`：已有回执按回执结算、没回执的全退（和今天的 15 分钟过期规则一致）。
+  `turn_close(kind=interrupted)`：已有最终回执的按回执结算；**已发出但没有最终回执的（`dispatched`/`identified`）不退、标 `cost_pending`，
+  由恢复任务按供应商 id 追成本**（2.5.2）；只有连 `turn_call_begin` 都没写过的调用名额才退（和今天的 15 分钟过期 + 未知成本保留规则一致）。
 
 ### 2.3 一轮要碰数据库几次（目标）
 
@@ -158,14 +159,17 @@ running ─(正常结束)────────→ turn_close kind=completed �
 |---|---|---|---|
 | 登录核验 | 1（Auth，不是 Postgres 函数） | — | — |
 | `turn_open` | 1 | `sessions`（FOR UPDATE，本会话一行）、`turns` INSERT、`profiles`（FOR UPDATE，本人一行，毫秒级）、`session_messages` 读、`catalog_versions` 读、按 kind 读 `opc_drafts`/`artifact_versions` 一行 | 两把行锁，都是本人/本会话的，不等别人 |
+| `turn_call_begin`（发出前） | 1 | `turn_calls` INSERT、`sessions` 读墓碑 | 无行锁 |
 | 模型调用 | 0 | — | — |
-| `turn_call_record` | 1 | `turn_calls` INSERT、`sessions` 读墓碑 | 无行锁 |
+| `turn_call_identity`（拿到供应商 id，不阻塞流） | 1 | `turn_calls` UPDATE 一行 | 自己的行 |
+| `turn_call_record`（流结束） | 1 | `turn_calls` UPDATE、`turn_call_raw` INSERT、`sessions` 读墓碑 | 自己的行 |
 | `turn_close` | 1 | `turns` UPDATE、`session_messages` INSERT ×2、`profiles` UPDATE（结算差额）、`credit_transactions` INSERT、`daily_spend` UPDATE、`sessions` UPDATE | 本人/本会话行锁 |
-| **合计** | **4**（含登录 1） | | |
+| **合计** | **6**（含登录 1；每次模型调用 3 次是钱的证据，2.5.2） | | |
 
-定位导师一轮（两次模型调用、一次读 Skill 文件、整理）：`turn_open` 1 + 回执 2 + Skill 文件 0（进程缓存，按包哈希校验）+ 整理模型调用回执 1 +
-`turn_close` 1（整理结果同事务写 `opc_drafts`）= **5**，含登录 **6**。挂研究工具的回合每次工具调用 +1（工具回执和模型回执同一张表、同一函数）。
-对比（N 模型并行）：1 + N + 1。评审团（3 席 × 1 轮 + 汇总）：1 + 4 + 1，两组之间以 `paused` 落地。
+定位导师一轮（两次模型调用、一次读 Skill 文件、整理一次模型调用）：`turn_open` 1 + 3 次模型调用 × 3 + Skill 文件 0（进程缓存，按包哈希校验）+
+`turn_close` 1（整理结果同事务写 `opc_drafts`）= **11**，含登录 **12**。挂研究工具的回合每次工具调用 +2（begin + record，工具无流式身份）。
+对比（N 模型并行）：1 + 3N + 1。评审团（3 席 × 1 轮 + 汇总）：1 + 12 + 1，两组之间以 `paused` 落地。
+对比今天：自由对话 41、导师 61（10-27），且今天每轮没有一次是在等别人的锁；新路径的每次往返都只碰自己的行。
 
 ### 2.4 缓存规则：什么可以缓存、什么绝对不能
 
@@ -185,11 +189,12 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 | 现在（v2 逐调用） | 主路径 v2 |
 |---|---|
-| 每次调用各冻结（claim）、各发出（dispatch）、各回执（record）、各结算（finalize） | **开轮冻结一次**：H=min(G_turn, A)，G_turn=本轮允许的调用数 × 单次上界（导师 2+整理 1、自由对话 1+研究工具上限、报告固定 500、评审团押金+第一组上界、对比 Σ各模型上界）；**每次调用一条回执**（n_i、c_i、usage、generationId、缓存 token）；**收轮结算一次**：N=ceil(q×Σn_i×m_i)，D=min(N,H)，退 H−D，E=N−D 平台承担并记账 |
+| 每次调用各冻结（claim）、各发出（dispatch）、各回执（record）、各结算（finalize） | **开轮冻结一次**：H=min(G_turn, A)，G_turn=本轮允许的调用数 × 单次上界（导师 2+整理 1、自由对话 1+研究工具上限、报告固定 500+本次调用临时上界、评审团固定 1500+当前组临时上界、对比 Σ各模型上界）；**每次调用三步写入**（发出前 pending 回执 → 供应商 id → 最终回执，2.5.2 节；这是钱的证据，不省）；**收轮结算一次**：N=ceil(q×Σn_i×m_i)，D=min(N,H)，退 H−D，E=N−D 平台承担并记账；固定价 kind 按交付判定结算（2.7 节） |
+| 用户侧冻结和平台侧日限混在同一个数上 | **分开两个数**：`H`（积分，用户侧冻结，按上面的 G_turn）和 `U_turn`（美元，平台侧本轮供应商成本上界 = Σ本轮允许的每次调用上界 U_i，给 2.5.1 的日限预占用）。固定价 kind 的 H 和 U_turn 不相等（报告 H=500 积分+临时上界，U_turn=一次调用上界）|
 | `profiles FOR UPDATE` 每次 claim 和 finalize | 开轮一次、收轮一次 |
 | 止损锁 (201,1) 全站独占 | **去掉，改为"开轮预占、收轮回补"**（细则与证明见 2.5.1）：`turn_open` 先在 `daily_spend(day, bucket)` 自己的桶行上 `UPDATE … SET reserved=reserved+U_turn`（U_turn 是本轮冻结的成本上界，和 H 用的同一个数），再读全天 `SUM(reserved+spent)`，加上预留带 B 超过日限 L 就回滚拒绝；`turn_close` 在同一桶行 `spent=spent+n_total, reserved=reserved−U_turn`。**当日实际花费永远 ≤ L，超额为 0**；代价是接近日限时提前拒绝，提前量 ≤ B（staging 现配置约 15 美元）——第 8 节 3b 据此改述 |
 | 多次调用的回合中途余额不够 | `turn_call_record` 返回 `credits_low`（它读 `profiles.balance` 一行，不锁）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)`，不重复收费 |
-| 未知成本 24 小时恢复、`cost_pending` | 回执 `cost IS NULL` 时 `turn_close` 不结算该笔，`turns.settlement='pending'`；现有恢复定时任务按 `turn_calls(cost IS NULL)` 索引补查后再结一次（幂等） |
+| 未知成本 24 小时恢复、`cost_pending` | 调用已发出但没有最终回执（崩溃、断线、超时）→ 回执停在 `dispatched`/`identified`，**不退该笔的用户冻结、不释放该笔的日限预占**；`turn_close` 把它标为 `cost_pending`、`turns.settlement='pending'`；现有恢复定时任务按 `provider_id` 查供应商成本后再结一次（幂等）；查不到按 BILL2 §0.3 的现行规则处理（未知 ≠ 零；第三方搜索工具例外按 0 结算）。细则 2.5.2 |
 | 停止退款 | 只有报告能停（Owner 10-28）：`turn_close(kind=stopped)` 仅接受 `kind=report`；滚动 24 小时内前 2 次 D=0 全退，第 3 次起 D=按回执、≤500（`turns(actor_id, kind, stopped_by_user, closed_at)` 索引数）。普通对话没有停止，用户离开页面回合照常结算 |
 | 402 不计费 | 回执 `status='no_charge_402'`, n=0 | 
 | 白名单系统原因失败自动退（10-12） | `turn_close(kind=failed, reason∈白名单)` 全退；其余按回执结算，每日对账照旧 |
@@ -237,13 +242,47 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 和旧机制的对应：旧 (201,1) 锁保证"按天止损准确"；新机制保证同样的事（实际 ≤ L），并且把"并发时谁先谁后"从全站一把锁变成普通回合 16 行分摊 + 大额 kind 一行。
 
+#### 2.5.2 一次调用的生命周期：发出前留证据、结果不明不重试、未知成本进恢复（回应 #1508 审查 P1-②③）
+
+每次付费调用（模型、研究工具）在 `turn_calls` 里有自己的一行，状态机：
+
+```
+turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事件/响应头)→ identified ─(流结束，拿到 usage/cost)→ ok
+                                                                                       └─(断线/超时/进程死)→ unknown（cost_pending）
+                    dispatched ─(请求确定没发出去：连接被拒、DNS 失败、请求体没写完)→ not_sent（n=0，可重试一次）
+                    dispatched/identified ─(供应商明确拒绝且确定不计费：402、429、5xx 且没有任何正文字节、没有 generation id)→ rejected（n=0，429/5xx 可退避重试一次）
+```
+
+三步写入（每次模型调用 3 次往返，研究工具 2 次；**如实计入 2.3 和 3.1 的预算**，不是"一条回执"）：
+
+1. **`turn_call_begin`（发出前，1 次）**：插入 `turn_calls(turn_id, seq, call_kind, model/tool, request_hash, upper_usd U_i, status='dispatched')`，
+   同一语句返回会话墓碑状态。没有这一行，Node 不许发请求（静态扫描：对 OpenRouter/供应商的 fetch 必须在 `turn_call_begin` 之后）。
+   这就是现有 `bill2_dispatch` "发送前持久化"的等价物。
+2. **`turn_call_identity`（拿到供应商 id 时，1 次，不阻塞流式输出）**：`UPDATE … SET provider_id, status='identified'`。
+   等价于现有 `onIdentity` 提前保存 generation id（`bill2/service.ts:255`）；崩溃后恢复任务靠它去查成本。
+3. **`turn_call_record`（流结束，1 次）**：写 usage、n_i、c_i、缓存 token、`status='ok'`，同事务写 `turn_call_raw`；同一语句再次返回墓碑。
+
+规则（和现有 BILL2 一致，一条不放松）：
+
+- **SDK 内不重试**：runner 保持 `retry:{maxRetries:0}`、OpenAI 客户端 `maxRetries:0`（现 `runner.ts:195,213`），调用策略 `automaticRetry:false`。
+- **只有两种失败允许重试**：`not_sent`（确定没发出）和 `rejected`（确定不计费）。每次尝试都是 `turn_calls` 里独立的一行（自己的 seq），
+  n=0、U_i 不计；同一逻辑调用最多 2 次尝试。`unknown`（发出后结果不明）**永不重试**，交恢复任务。
+- **U_turn 的证明不受影响**：U_turn = Σ 本轮允许的逻辑调用的 U_i；一个逻辑调用在任何时刻最多有一次"可能产生费用"的尝试
+  （`not_sent`/`rejected` 的尝试确定为 0，`unknown` 之后不再有新尝试），所以本轮供应商实际成本 ≤ Σ U_i = U_turn，2.5.1 的 `spent ≤ reserved` 仍成立。
+- **未知成本不退、不释放**：`turn_close` 遇到 `dispatched`/`identified`（没有最终回执）的调用：标 `unknown, cost_pending=true`；
+  该笔对应的用户冻结份额（min(G_i, 剩余 H)）和日限预占 U_i **都保留**，其余已知调用正常结算；`turns.settlement='pending'`。
+  恢复定时任务按 `turn_calls(cost_pending)` 索引找活，用 `provider_id` 查供应商成本（现有 lookup 路径）；查到→按 n/c 结算并释放多余预占；
+  按现行规则到期仍查不到的，沿 BILL2 §0.3（未知 ≠ 零，不推定失败、不重发）和 Owner 10-25/10-27 的 24 小时规则处理；
+  **第三方搜索/社媒工具例外**（Owner 10-13）：对用户按 0 结算、释放用户冻结，供应商成本记 `cost_pending`，日限预占到成本确认或 24 小时后释放。
+- 现有 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不发第二次 POST、不零退"场景原样迁入 V2-4 的验收。
+
 ### 2.6 历史与删除
 
 - `session_messages(session_id, seq, role, turn_id, content, content_hash, visible, deleted_at)`：收轮时追加用户消息和助手回复；
   历史 = 最近 N 条 `visible AND deleted_at IS NULL`，再按输入上限裁剪（Node，裁剪算法不变、只前进不后退）。
 - 可见性在**写入时**维护：删除对话 → `sessions.deleted_at`（一条 UPDATE）；撤销来源/归档业务/删文风来源 → 对应消息 `visible=false`
   （一条按 `turn_id` 的 UPDATE，由现有的删除入口调）；注销 → DATA-ERASURE 投影对三张新表各加一条规则。不再有"祖先执行逐个重算权限链"。
-- 流式输出中的删除检查（Owner 10-27"按阶段查、存结果前照查"）：搭在 `turn_call_record` 和 `turn_close` 上——每条回执写入时同一语句返回
+- 流式输出中的删除检查（Owner 10-27"按阶段查、存结果前照查"）：搭在 `turn_call_begin`、`turn_call_record` 和 `turn_close` 上——每次调用前后的写入同一语句返回
   `session_tombstoned`、`voice_source_revoked`，Node 收到即中止；正文最后由 `turn_close` 写入前再查一次。零额外往返。
   正在出字的那段文字最多多显示到本次模型调用结束（自由对话即整轮），比 10-27 批准的"按阶段"略粗；写入前一定拦住。
 - 长对话删除超时（核心 7②）：删除只打墓碑即返回；正文清理由现有 `content_erasure_sweep_sessions` 分批做。
@@ -256,7 +295,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 定位导师 | kind=mentor；Skill 包从缓存按 module→revision→packageHash 取；hostTurnContext 由 `turn_open` 返回的草稿摘要拼；`fallbackEligible` 按轮次计数算好返回（修核心缺陷：兜底卡从未显示） | 两次模型调用 + `read_skill_file`（进程缓存，不计费、不写库）+ 整理调用 | 整理结果与研究轮次计数在同一事务写 `opc_drafts`（替代 `opc_capture_apply` 独立往返） |
 | 报告 | kind=report；冻结固定 500（+ 本次调用临时上界）；会员/草稿/确认/价格一致（`acceptedCredits`）检查搬进 kind 分支 | 一次长调用（32768 输出上限，不续写） | 成功 D=500；停止按 24 小时规则；结果写 `artifact_versions`（不变） |
 | 对比 | kind=compare；G_turn=Σ各模型上界，用户合计上限 500 积分，超则拒开轮；Gold 门槛 | N 个并行调用各一条回执 | 各模型各自取整 |
-| 评审团 | kind=jury；冻结押金 1500 + 第一组上界；Gold 门槛；同版本 3 次未完成则拒 | 席位调用各一条回执（格式不合格 `status='unusable'`, n=0）；两组之间 `paused(awaiting_user)` | 完成 / 24 小时自动：按席扣、押金余额退；采纳修订另起 `kind=jury_adopt` |
+| 评审团 | kind=jury；**用户侧冻结 = 固定价 1500 积分 + 当前这一组调用的临时上界**（10-17 规则）；平台侧 U_turn = 全部席位与汇总调用的成本上界之和（给 2.5.1 的日限用）；Gold 门槛；同版本 3 次未完成则拒 | 席位调用各一条回执——**只记供应商成本和名义费用，用于平台记账与报表，不按席向用户收费**；格式不合格 `status='unusable'`；每组结束后释放该组临时上界、下一组开始前再冻结下一组的（10-13 规则）；两组之间 `paused(awaiting_user)` | **用户按固定价结算，交付判定沿用 `fusion_review_fee_settle_internal`**：拿到可用修订稿（汇总判定 usable 或 outcome=revised）→ 扣固定价；无需修改（no_change）、修订失败、未完成 → 全退；中断或 24 小时自动结束 → 扣 min(固定价, 已发出调用的已知名义用量折算积分)，其余退（现有 `stopped/interrupted` 分支，也是 10-27"已交付部分按实际扣、未用押金退"的落实）；采纳修订另起 `kind=jury_adopt`（不加费） |
 | 周复盘（上线后） | kind=review；定时任务代替用户发起；G_turn 由 1 美元换算 | 同自由对话 | 同自由对话 |
 
 ### 2.8 staging = 正式
@@ -292,15 +331,15 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 | 指标 | 自由对话 | 导师一轮 | 报告 | 测法 |
 |---|---|---|---|---|
-| Postgres 往返（不含 Auth 和 OpenRouter） | ≤ 4 | ≤ 7 | ≤ 4 | 计数的 Supabase 客户端包装，跑完整回合后断言 |
-| 每轮数据库时间（本机 Docker，单用户） | ≤ 60 ms | ≤ 100 ms | ≤ 60 ms | `pg_stat_statements` 前后差 |
+| Postgres 往返（不含 Auth 和 OpenRouter；每次模型调用 3 次、工具 2 次是钱的证据，2.5.2） | ≤ 5 | ≤ 11 | ≤ 5 | 计数的 Supabase 客户端包装，跑完整回合后断言 |
+| 每轮数据库时间（本机 Docker，单用户） | ≤ 60 ms | ≤ 120 ms | ≤ 60 ms | `pg_stat_statements` 前后差 |
 | `turn_open` 事务内关系锁数 | ≤ 40 | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法） |
 | 任一主路径函数静态可达函数 / 表 | ≤ 15 / ≤ 10 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
 | 行锁 | 0 把全站共用行锁；只允许本人 `profiles`、本会话 `sessions` | 同 | 同 | 静态扫描 `FOR UPDATE|FOR SHARE` 对象白名单 |
 | 热表无顺序扫描 | 0 | 0 | 0 | 三条回合 + 定时任务认领语句的 `EXPLAIN`，对 `turns`/`turn_calls`/`session_messages`/`credit_transactions`/`runtime_sessions` 断言无 Seq Scan |
 | 全站共用行的写/锁 | 0（止损的大额行 `bucket=-1` 除外，只给报告/对比/评审团） | 同 | 同 | 静态扫描：`UPDATE`/`FOR UPDATE` 只许白名单表，WHERE 必须带所有者键或 bucket |
 | 会话级状态 | 0 | 0 | 0 | 静态扫描：禁止 `pg_advisory_lock(`、非 LOCAL `SET `、`CREATE TEMP` |
-| 单条回执原始正文 | ≤ 256 KB，存 `turn_call_raw` 不进 `turn_calls` | 同 | 同 | DB 测试 |
+| 回执与结果的容量（和现有一致，`bill2/responseCapacity.ts`） | 完整响应接收 ≤ 532480 字节；持久化原始回执 ≤ 4194304 字节，存 `turn_call_raw` 不进 `turn_calls`；最终展示结果 ≤ 262144 字节；单次输出 32768 token | 同 | 同 | 现有 `mentorOutput.test.ts`（含 reasoning 的完整响应）等边界测试迁入；合法响应在记账时不许失败 |
 | 首字延迟（服务端，收到请求→第一个模型字节，桩零延迟） | p95 ≤ 400 ms | p95 ≤ 600 ms | — | 桩模型 |
 | 每轮核·秒 k（本机单机压测，500/2000/5000 虚拟用户） | 不随人数变化（±15%）；锁等待占比 < 2% | 同 | — | 3.3.3 节 |
 | 100 人并发（staging Micro，桩模型，10-25 节奏） | 失败 0、57014 0、整轮 p95 ≤ 桩回复时间 + 2 s、CPU 平均 < 60%、交换区不涨、`LWLock:LockManager` < 2% | 同 | — | 3.2 节 |
@@ -344,7 +383,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 - **100 人**：Micro，目标是 CPU < 60%（今天 100 人是 66–89%，且是 CPU 上限）。
 - **500 人**：真人节奏 Micro 够（有余量）；压测节奏要 Large。
 - **2000 人**：真人节奏 Large–XL；压测节奏 2XL。
-- **5000 人**：真人节奏 2XL；压测节奏 4XL。此外只读副本（历史页、积分记录、后台报表）把主库的读分走，主库只剩每轮 3 次写——这是配置，不是代码。
+- **5000 人**：真人节奏 2XL；压测节奏 4XL。此外只读副本（历史页、积分记录、后台报表）把主库的读分走，主库只剩每轮 5–11 次小写入——这是配置，不是代码。
 - 其他资源在同样人数下够不够（都是配置/钱）：
   - **数据库连接**：每轮只在 3 次 RPC 里各占连接几十毫秒，5000 人真人节奏 ≈ 25 轮/秒 × 0.1 秒 ≈ 2.5 条连接常驻，Supavisor 事务模式池 15–20 绰绰有余。
     前提是函数不依赖会话状态（3.3.2 第 6 条）。
@@ -367,8 +406,8 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 6 | **Supavisor 事务模式兼容（不依赖会话状态）** | 新函数都是单次调用单事务；不用 `SET`（只允许 `SET LOCAL`）、不用会话级 advisory 锁、不用临时表、不用预编译语句跨调用；0367 的 memo 用事务内 `set_config(..., true)` 也可以不要（新函数没有重复子检查）✓ | 7.1 静态扫描：主路径 SQL 禁止 `pg_advisory_lock(`、非 LOCAL 的 `SET `、`CREATE TEMP`；Node 侧不开长连接 |
 | 7 | **后台定时任务按批、可并行、可水平扩展** | `runtime-recovery`、内容清除、未知成本补结：`SELECT … FOR UPDATE SKIP LOCKED LIMIT 50` 认领，每批处理完提交，按时间预算循环；两个实例同时跑不重复、不冲突；处理函数幂等（都是 `turn_close`）；按部分索引 `(state, updated_at)` 找活，没有全表扫 | V2-8/V2-9 的验收含"双实例并行不重复"；Vercel cron 以后可改为多区域或外部调度（配置） |
 | 8 | **限流在 Redis** | 已是 Upstash；参数从目录缓存读 ✓ | 新增"按模型/供应商并发计数"也放 Redis（第 10 条） |
-| 9 | **没有每轮扫全表的查询；大字段不进热表** | 三个函数的每条语句都走主键/唯一键/部分索引；`check-turn-budget` 对三条标准回合跑 `EXPLAIN`，断言热表无 Seq Scan。**原始回执（模型完整输出）不放 `turn_calls` 热行**：单独表 `turn_call_raw(turn_id, seq, body)`，单条 ≤ 256 KB、30 天清理（线 G 规则不变），`turn_calls` 只留用量、金额、哈希 | 5.1 节加 `turn_call_raw`；7.1 EXPLAIN 断言进 CI |
-| 10 | **外部供应商按并发设上限、做退避** | 今天没有按模型并发上限，只有每用户限流。新路径：每个模型/供应商一个 Redis 计数（`INCR`+TTL）作为并发上限（目录缓存里配），超上限先等再拒；429/5xx 在**第一个字节之前**按指数退避重试 ≤ 2 次（模型调用一旦开始出字不重发，计费规则不变；研究工具沿用"不推定失败、不重发"） | V2-4、V2-6 实现并单测；上限值是配置 |
+| 9 | **没有每轮扫全表的查询；大字段不进热表** | 三个函数的每条语句都走主键/唯一键/部分索引；`check-turn-budget` 对三条标准回合跑 `EXPLAIN`，断言热表无 Seq Scan。**原始回执（模型完整输出）不放 `turn_calls` 热行**：单独表 `turn_call_raw(turn_id, seq, body)`，单条 ≤ 4194304 字节（现有持久化回执上限，`bill2/responseCapacity.ts`）、30 天清理（线 G 规则不变），`turn_calls` 只留用量、金额、哈希 | 5.1 节加 `turn_call_raw`；7.1 EXPLAIN 断言进 CI |
+| 10 | **外部供应商按并发设上限、做退避** | 今天没有按模型并发上限，只有每用户限流。新路径：每个模型/供应商一个 Redis 计数（`INCR`+TTL）作为并发上限（目录缓存里配），超上限先等再拒；重试只允许 2.5.2 的两种确定不计费的失败（`not_sent`、`rejected`），每次尝试独立一行回执、最多 2 次、带退避；结果不明的永不重试（SDK `maxRetries:0` 保留） | V2-4、V2-6 实现并单测；上限值是配置 |
 | 11 | **流式期间不占数据库连接、不占内存里的大对象** | 调用之间不碰库 ✓；历史在开轮时读一次后只在内存里裁剪（≤ 196608 字节）✓ | 7.1 静态扫描已含 |
 | 12 | **目录缓存在多实例下一致** | 每个 Vercel 实例各自缓存，按 `catalog_versions` 失效，最多 60 秒旧（已上库机制）；实例数多了也不加库压力（版本号随 `turn_open` 返回）✓ | — |
 
@@ -416,7 +455,8 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 报告固定 500、点生成时冻结、完整才扣、失败/截断/停止全退、重生成照收（10-17）；停止防刷 24 小时前 2 次全退、第 3 次起按已生成部分扣（10-27） | `kind=report` 分支；次数用 `turns` 索引数 | 保留 |
 | 普通对话（自由对话、导师）不提供用户停止（Owner 10-28） | 前端无按钮；服务端拒绝；没有普通对话的 `stopped` 分支 | 保留（新决定） |
 | 报告成本逐次记账、超 500 平台承担；删除/注销时完整报告照收、其余退（10-17） | 回执照记；注销投影对 `turns` 加规则 | 保留 |
-| 评审团 1500、只给 Gold、一次冻结、可用修订稿才扣、未完成/失败/无需修改全退（10-17）；每组前余额 ≥ 该组上界（10-13）；格式不合格席位不收费（10-13）；各席各自取整、某席失败只退它自己（10-14）；暂停 24 小时自动结束退押金（10-27） | `kind=jury`：开轮冻结 1500+第一组上界；每席一条回执；组间 `paused`；收轮按席结算 | 保留 |
+| 评审团固定价 1500、只给 Gold、一次冻结、可用修订稿才扣、未完成/失败/无需修改全退（10-17，**取代**了 10-14 的逐席按量规则）；每组前余额 ≥ 该组临时上界、组后释放（10-13）；格式不合格席位的意见不进汇总（10-13）；暂停 24 小时自动结束，已交付部分按实际扣、未用押金退（10-27） | `kind=jury`：用户侧冻结 1500 + 当前组临时上界；每席一条回执只做供应商成本记账；收轮按 2.7 节的交付判定结算固定价（可用修订稿→全价；无需修改/失败/未完成→全退；中断/24 小时自动结束→min(固定价, 已知用量)） | 保留 |
+| 评审团各席各自结算各自取整、某席失败只退它自己（10-14） | 已被 10-17 固定价取代，用户侧不再按席结算；"某席失败"在固定价下的含义是：该席不进汇总，用户仍按交付判定付固定价或全退。**供应商侧**仍逐席记账 | 保留（按 10-17 解释） |
 | 评审团不提供中途停止（10-17）；10-27 又提到"用户点结束评审" | 新路径只留"完成"和"24 小时自动结束"两个收轮入口；要不要用户"结束评审"入口请 Owner 确认 | **待确认**（第 8 节 4） |
 | 对比按量、各模型各自结算取整、开始前显示最多 X、余额够全部上限之和、用户合计 ≤ 500 积分（10-17、10-26） | `kind=compare`：G_turn=Σ上界，超 500 拒开轮 | 保留 |
 | 第三方搜索结果未知对用户 0 结算、释放冻结、供应商成本待确认（10-13 9.2） | 工具回执 `status='unknown'`, n=0, `cost_pending=true` | 保留 |
@@ -501,8 +541,8 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 表 | 列（要点） | 索引 |
 |---|---|---|
 | `turns` | id bigint identity, actor_id, session_id, request_id, kind(chat/mentor/report/compare/jury/jury_adopt/review), state, resume_of, policy jsonb（冻结：模型、q、m、上界、工具白名单哈希、system 两段哈希、文风来源版本、Skill packageHash）, input_bytes, reserved_credits, charged_credits, absorbed_credits, settlement(pending/done), stopped_by_user bool, delivered bool, failure_code, opened_at, updated_at, closed_at | **pk(actor_id, id)**；UNIQUE(actor_id, request_id)；(session_id, opened_at)；(state, updated_at) WHERE state IN ('running','paused')；(actor_id, kind, closed_at) WHERE stopped_by_user；(settlement) WHERE settlement='pending'；(opened_at) 供保留期清理 |
-| `turn_calls` | turn_id, seq, call_kind(model/tool/decision), model_id/tool_name, status(ok/no_charge_402/unknown/unusable/rejected), nominal_usd n, actual_usd c（可空）, multiplier m, usage jsonb（含 cache_read/cache_write）, generation_id, payload_hash, cost_pending bool, created_at | **pk(turn_id, seq)**；(cost_pending) WHERE cost_pending；(created_at) |
-| `turn_call_raw` | turn_id, seq, body（模型完整输出/传输记录，≤ 256 KB）, created_at | pk(turn_id, seq)；(created_at) 供 30 天清理（线 G） |
+| `turn_calls` | turn_id, seq, call_kind(model/tool/decision), model_id/tool_name, status(dispatched/identified/ok/unknown/not_sent/rejected/no_charge_402/unusable), request_hash, upper_usd U_i, provider_id（generation id，发出后尽早写）, nominal_usd n, actual_usd c（可空）, multiplier m, usage jsonb（含 cache_read/cache_write）, payload_hash, cost_pending bool, dispatched_at, settled_at | **pk(turn_id, seq)**；(cost_pending) WHERE cost_pending；(status) WHERE status IN ('dispatched','identified')；(dispatched_at) |
+| `turn_call_raw` | turn_id, seq, body（完整响应/传输记录，≤ 4194304 字节，与现有持久化回执上限一致）, created_at | pk(turn_id, seq)；(created_at) 供 30 天清理（线 G） |
 | `session_messages` | id bigint identity, session_id, seq, role, turn_id, content text, content_hash, visible bool, deleted_at | **pk(session_id, id)**；UNIQUE(session_id, seq)；(session_id, seq DESC) WHERE visible AND deleted_at IS NULL |
 | `daily_spend` | day date, bucket smallint (−1 大额 kind, 0–15 普通回合), reserved_usd numeric, spent_usd numeric；日限 L、P、U_fast、U_big 从目录缓存读 | pk(day, bucket)；开轮先锁本桶预占 U_turn、再读 SUM 检查、收轮回补（2.5.1） |
 
@@ -553,9 +593,9 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | P-1 | `feat(PROMPT-CACHE)` 合 #1501 | 报告/评审团/对比的断点（改 base 到 staging，补复审）；#1500、#1502 关闭，改动迁入 V2-4/V2-5 | high | Claude | — | 0.5 天 | 现有单测；不改主路径 |
 | V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间/EXPLAIN 无顺序扫描断言，棘轮基线）；`scripts/db-function-closure.mjs`（闭包 + 行锁白名单 + 会话级状态禁用扫描）；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本 + 单机外推压测脚本（3.3.3，500/2000/5000 虚拟用户、记 k 与等待事件）；对旧路径跑一次基线存档 | low | Codex | — | 3.5 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
 | V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表；主键与唯一键按 3.3.2 的"可分区"约束设计（按所有者哈希可分区、时间列可做保留期清理） | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库；迁移注释写明未来分区方案 |
-| V2-3 | `feat(CORE-PATH-V2)` 三个核心函数 | `turn_open`/`turn_call_record`/`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
-| V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限 + 429 退避（Redis 计数） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 4；黄金字节；runtime 集成套件里自由对话场景等效迁移；并发上限与退避单测 |
-| V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 7；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
+| V2-3 | `feat(CORE-PATH-V2)` 核心函数 | `turn_open`、`turn_call_begin`/`turn_call_identity`/`turn_call_record`、`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本（发出后无最终回执：不退冻结、不释放日限预占、`cost_pending`；恢复按 provider_id 补结；工具例外 0 结算）、评审团固定价交付判定（修订稿→全价、无需修改→全退、中断→min(固定价,已知用量)）、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
+| V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限；重试只限 `not_sent`/`rejected`、SDK `maxRetries:0`（2.5.2）；回执与结果容量沿用 `responseCapacity.ts`（532480 / 4194304 / 262144） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 5；黄金字节；runtime 集成套件里自由对话场景等效迁移，**含 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不二次 POST、不零退"**；`mentorOutput.test.ts` 等容量边界测试迁入；并发上限与退避单测 |
+| V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 11；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
 | V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file`；TikHub/Parallel/Firecrawl/monid 按供应商并发上限 + 退避（复用 V2-4 的 Redis 计数） | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试；供应商限流退避单测 |
 | V2-7a | `feat(CORE-PATH-V2)` 报告 | `kind=report`：固定价、`acceptedCredits` 校验、会员门槛、停止（唯一允许停止的 kind）与 24 小时防刷、前端停止确认与第 3 次扣费说明（修核心缺陷 1⑤ J2/J3）、`artifact_versions` 写入、#1501 断点保留 | high | Codex | V2-4 | 3.5 天 | `report`、`report-stop` 场景迁移；24 小时 3 次停止测试；双击只扣一次 |
 | V2-7b | `feat(CORE-PATH-V2)` 对比与评审团 | `kind=compare`/`jury`/`jury_adopt`：并行调用、分组暂停、押金、Gold 门槛、三次未完成、`fusion-recovery` 改读 `turns` | high | Claude | V2-4 | 5 天 | fusion 套件场景迁移；24 小时自动结束测试 |
@@ -605,7 +645,8 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
   且 WHERE 带所有者键；`UPDATE` 的表只许白名单（上述三张 + `daily_spend` 带 bucket、`session_messages`、`turn_calls`）；
   禁止 `pg_advisory_lock(`、`pg_advisory_xact_lock(`、非 LOCAL 的 `SET `、`CREATE TEMP`（Supavisor 事务模式与"无全站热点"两条，3.3.2）。
 - `EXPLAIN` 断言：三条标准回合和定时任务认领语句对热表无 Seq Scan（3.1 节）。
-- 静态扫描 `packages/api/src/services/turn/`：模型调用与回执之间不允许出现 `.rpc(`/`.from(`（除 `turn_call_record`）；写路径只用 `writeClient`。
+- 静态扫描 `packages/api/src/services/turn/`：模型/工具调用前后只允许 `turn_call_begin`/`turn_call_identity`/`turn_call_record` 三个 RPC，其他 `.rpc(`/`.from(` 不许出现在调用之间；
+  对供应商的 fetch 必须在 `turn_call_begin` 之后；`maxRetries` 只许为 0；写路径只用 `writeClient`。
 - 单机外推压测（3.3.3）不进 CI，但每次主路径大改（新 kind、新表）后由总控安排跑一次，k 值记进 `docs/validation/core-path-v2/`。
 - PR 模板加一行"主路径影响：往返 / 锁 / 数据库时间 前→后"。架构守门人（当时的总控窗口）合并前核对这一行和基线差。
 
@@ -615,7 +656,8 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 > - 主路径的表主键带所有者列，查询必须带所有者键；不得对全站共用行加锁或更新（按天累计类数据用分桶行）；数据库函数只用事务级状态
 >   （不用 `pg_advisory_lock`、非 LOCAL 的 `SET`、临时表），以兼容连接池事务模式；后台定时任务按批认领（`SKIP LOCKED`）、幂等、可多实例并行；
 >   对外部供应商的调用按模型/供应商设并发上限并做退避。
-> - 一轮对话只允许三类数据库写入：开轮（`turn_open`）、回执（`turn_call_record`）、收轮（`turn_close`）。模型调用与工具调用之间不得有其他数据库读写；需要的数据在开轮时取回，或来自进程内目录缓存。
+> - 一轮对话只允许三类数据库写入：开轮（`turn_open`）、回执（`turn_call_begin`/`turn_call_identity`/`turn_call_record`，每次付费调用发出前必须先写 `turn_call_begin`）、收轮（`turn_close`）。模型调用与工具调用之间不得有其他数据库读写；需要的数据在开轮时取回，或来自进程内目录缓存。
+> - 付费调用在 SDK 和 HTTP 客户端里不重试（`maxRetries` 为 0）；只有确定没发出或确定不计费的失败可以重试，每次尝试各自一行回执；结果不明的调用交恢复任务，不退冻结、不释放预占。
 > - 主路径的数据库函数只能读写 `turns`、`turn_calls`、`session_messages`、`runtime_sessions`、`profiles`、`credit_transactions`、`credit_source_entries`、`daily_spend`、`catalog_versions`，以及按 `kind` 需要的草稿/报告/评审表各一行；只允许对本人 `profiles` 和本会话 `runtime_sessions` 加行锁；不得对任何全站共用行加锁。
 > - 全站只读、管理员写的目录（系统设置、模型目录、Skill 包、权益规则）必须通过 `catalogCache` 读取；余额、冻结、墓碑、会话状态、用户写入的数据永不缓存。
 > - staging 与正式环境不得有代码分支；环境差异只能是配置（密钥、地址、价格快照、账号积分）。
