@@ -1,11 +1,8 @@
-# TEMPLATE, not active. .github/workflows is under the trusted workflow policy (no secrets, no issues:write, no github.*
-# contexts, timeout <= 60), so this file cannot sit there as is. Adopting it means changing that policy first, which is a
-# rule change that needs the Owner (AGENTS.md section 1). To enable: approve the policy change, move this file to
-# .github/workflows/staging-e2e.yml, then set the secrets and variables listed in README.md.
-# CORE-PATH-V2 V2-11: the six core user journeys against the deployed staging site, with Claude Haiku 5.5 and at most
-# 0.5 US dollars per run. It never blocks a deployment; a failed run opens an issue. NOT ENABLED until the repository
-# variable CORE_E2E_ENABLED is "true" (the controller sets it together with the secrets listed in
-# apps/web/tests/e2e/core-path/README.md).
+# CORE-PATH-V2 V2-11: the core user journeys against the deployed staging site, with Claude Haiku 5.5 and at most
+# 0.5 US dollars per run. It never blocks a deployment; a failed run opens an issue.
+# Draft: it takes effect only after the CI-POLICY pull request moves it to .github/workflows/staging-e2e.yml (Owner
+# 2026-10-28 approved this one file as an exception to the workflow policy). Secrets live in the environment staging-e2e,
+# names starting CORE_E2E_ only; the old E2E_* secrets there are not used.
 name: Staging core-path e2e
 
 on:
@@ -18,25 +15,23 @@ permissions:
 jobs:
   core-path:
     name: Run core-path journeys
-    # A Vercel deployment to the staging environment that succeeded, or a manual run.
-    if: ${{ vars.CORE_E2E_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && contains(github.event.deployment_status.environment, 'staging'))) }}
+    # Only a successful deployment to a staging environment, or a manual run.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.environment == 'staging') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
+    environment: staging-e2e
     permissions:
       contents: read
       issues: write
     env:
-      PLAYWRIGHT_BASE_URL: ${{ vars.CORE_E2E_BASE_URL }}
-      DATABASE_URL: ${{ secrets.CORE_E2E_DATABASE_URL }}
+      PLAYWRIGHT_BASE_URL: ${{ secrets.CORE_E2E_BASE_URL }}
+      CORE_E2E_SPEND_DATABASE_URL: ${{ secrets.CORE_E2E_SPEND_DATABASE_URL }}
       CORE_E2E_GOLD_EMAIL: ${{ secrets.CORE_E2E_GOLD_EMAIL }}
       CORE_E2E_GOLD_PASSWORD: ${{ secrets.CORE_E2E_GOLD_PASSWORD }}
       CORE_E2E_PRO_EMAIL: ${{ secrets.CORE_E2E_PRO_EMAIL }}
       CORE_E2E_PRO_PASSWORD: ${{ secrets.CORE_E2E_PRO_PASSWORD }}
-      CORE_E2E_ERASE_EMAIL: ${{ secrets.CORE_E2E_ERASE_EMAIL }}
-      CORE_E2E_ERASE_PASSWORD: ${{ secrets.CORE_E2E_ERASE_PASSWORD }}
       VERCEL_BYPASS_COOKIE: ${{ secrets.CORE_E2E_VERCEL_BYPASS }}
       CORE_E2E_MAX_USD: '0.5'
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -89,6 +84,8 @@ jobs:
 
       - name: Open an issue when a journey failed
         if: ${{ steps.journeys.outputs.status != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           body="A core-path journey failed after a staging deployment. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} (duration ${{ steps.journeys.outputs.seconds }} s). The report and traces are in the run artifacts."
           gh issue create --repo "${GITHUB_REPOSITORY}" --title "Staging core-path e2e failed" --body "$body"

@@ -1,7 +1,10 @@
-import { getE2ESql } from '../support/e2eDb';
-import { TEST_MODEL_ID } from './support/config';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import { TEST_MODEL_ID, resultsDirectory } from './support/config';
+import { coreSql } from './support/db';
 import { expect, test } from './support/fixtures';
-import { cheapestOther, readCompareModels } from './support/models';
+import { cheapestOther, readModelsByName } from './support/models';
 import { startFreeChat, waitForRuntimeTurn, runtimeBox } from './support/freeChat';
 import { readCredits } from './support/ui';
 
@@ -23,15 +26,20 @@ test('journey 5: two models answer and the total equals the sum of the columns',
   await page.getByRole('button', { name: '多模型对比' }).click();
   const picker = page.getByRole('dialog', { name: '多模型对比' });
   await expect(picker).toBeVisible();
-  const list = await readCompareModels(getE2ESql());
+  const boxes = picker.getByRole('checkbox');
+  const labels: string[] = [];
+  for (let i = 0; i < await boxes.count(); i += 1) labels.push((await boxes.nth(i).locator('xpath=ancestor::label[1]').innerText()).trim());
+  const list = await readModelsByName(coreSql(), labels);
   const haiku = list.find(model => model.modelId === TEST_MODEL_ID);
   const other = cheapestOther(list);
   expect(haiku, 'Claude Haiku 5.5 is on the compare list').toBeDefined();
   expect(other, 'a second, cheaper model is on the compare list').not.toBeNull();
-  const boxes = picker.getByRole('checkbox');
+  // The other column is recorded for 99-model-check, which allows exactly Haiku and this model.
+  await mkdir(resultsDirectory, { recursive: true });
+  await writeFile(path.join(resultsDirectory, 'compare-model.json'), JSON.stringify({ modelId: other!.modelId }));
   for (let i = 0; i < await boxes.count(); i += 1) {
     const box = boxes.nth(i);
-    const label = (await box.locator('xpath=ancestor::label[1]').innerText()).trim();
+    const label = labels[i]!;
     const wanted = label === haiku!.name || label === other!.name;
     if (wanted && !(await box.isChecked())) await box.check();
     if (!wanted && (await box.isChecked())) await box.uncheck();

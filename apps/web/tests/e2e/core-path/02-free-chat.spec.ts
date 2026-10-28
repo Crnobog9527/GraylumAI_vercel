@@ -1,4 +1,4 @@
-import { getE2ESql } from '../support/e2eDb';
+import { coreSql } from './support/db';
 import { expect, test } from './support/fixtures';
 import { startFreeChat, waitForRuntimeTurn } from './support/freeChat';
 import { readCredits } from './support/ui';
@@ -26,7 +26,7 @@ test('journey 2: free chat loads a Skill, runs one research lookup and finishes'
   await expect(work.first()).toBeVisible();
   await expect(work.first()).toContainText(/搜索|网页|账号/);
 
-  const loaded = await getE2ESql()<Array<{ n: string }>>`
+  const loaded = await coreSql()<Array<{ n: string }>>`
     select count(*)::text as n from runtime_tool_calls t join runtime_executions e on e.id = t.execution_id
     where e.session_id = ${session}::uuid and t.name = 'load_skill'`;
   expect(Number(loaded[0]?.n ?? 0), 'a Skill was loaded automatically').toBeGreaterThanOrEqual(1);

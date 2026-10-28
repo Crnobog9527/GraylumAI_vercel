@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
 
 import { gotoWithBypass } from '../../support/deploymentProtection';
-import { getE2ESql } from '../../support/e2eDb';
+import { coreSql } from './db';
 import { CORE_ROLES, credentialsFor, resultsDirectory, spendCapUsd, statePathFor, type CoreRole } from './config';
 import { dbSpendReader, SpendMeter } from './spend';
 
@@ -15,7 +15,7 @@ export async function spendMeter(): Promise<SpendMeter> {
   if (shared) return shared;
   const { startedAt } = JSON.parse(await readFile(path.join(resultsDirectory, 'run.json'), 'utf8')) as { startedAt: string };
   const emails = CORE_ROLES.map(role => credentialsFor(role).email).filter(Boolean);
-  shared = new SpendMeter(spendCapUsd(), dbSpendReader(getE2ESql(), emails, startedAt));
+  shared = new SpendMeter(spendCapUsd(), dbSpendReader(coreSql(), emails, startedAt));
   return shared;
 }
 

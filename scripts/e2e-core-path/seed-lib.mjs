@@ -7,10 +7,8 @@ export const PRODUCTION_PROJECT_REF = 'fhmshnqjjnnlvplojktv';
 
 /** The dedicated accounts of the core-path journeys: what each is for, its plan and the credits it is topped up to. */
 export const ACCOUNTS = Object.freeze({
-  gold: { level: 'gold', credits: 6000, recreate: false },
-  pro: { level: 'pro', credits: 2000, recreate: false },
-  // Closed for good by journey 4c, so it is recreated from scratch before every run.
-  erase: { level: 'pro', credits: 100, recreate: true },
+  gold: { level: 'gold', credits: 6000 },
+  pro: { level: 'pro', credits: 2000 },
 });
 
 /** Refuses anything but the staging Supabase project; production is named explicitly. */

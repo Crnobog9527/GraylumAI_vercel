@@ -32,12 +32,14 @@ export function cheapestOther(models: readonly CompareModel[], excludeModelId = 
   return others.length ? others.reduce((best, model) => (model.usdPerMillion < best.usdPerMillion ? model : best)) : null;
 }
 
-/** The models on the back-office compare list (fusion_settings.compare.allowedModelIds), with their synced prices. */
-export async function readCompareModels(sql: Sql): Promise<CompareModel[]> {
+/**
+ * The models the compare picker offers, looked up by the names it shows. The read-only evidence role cannot read
+ * system settings, so the list comes from the page itself and only the (non-secret) synced prices come from ai_models.
+ */
+export async function readModelsByName(sql: Sql, names: readonly string[]): Promise<CompareModel[]> {
+  if (names.length === 0) return [];
   const rows = await sql<Array<{ id: string; model_id: string; name: string; config: unknown }>>`
-    select m.id, m.model_id, m.name, m.config from ai_models m
-    where m.is_active = 'true' and m.id::text in (
-      select jsonb_array_elements_text(s.value->'compare'->'allowedModelIds') from system_settings s where s.key = 'fusion_settings')`;
+    select id, model_id, name, config from ai_models where is_active = 'true' and name = any(${names as string[]})`;
   return rows.flatMap(row => {
     const price = cheapestLine(row.config);
     return price === null ? [] : [{ id: row.id, modelId: row.model_id, name: row.name, usdPerMillion: price }];

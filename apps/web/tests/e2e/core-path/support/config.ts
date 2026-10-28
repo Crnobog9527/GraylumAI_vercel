@@ -7,7 +7,7 @@
 import path from 'node:path';
 
 /** Dedicated accounts, never shared with the Codex acceptance batches or the load test. */
-export const CORE_ROLES = ['gold', 'pro', 'erase'] as const;
+export const CORE_ROLES = ['gold', 'pro'] as const;
 export type CoreRole = (typeof CORE_ROLES)[number];
 
 export const authDirectory = path.join(__dirname, '../../.auth');

@@ -6,7 +6,7 @@
 
 import { expect, type Page } from '@playwright/test';
 
-import { getE2ESql } from '../../support/e2eDb';
+import { coreSql } from './db';
 import { gotoWithBypass } from '../../support/deploymentProtection';
 import type { SpendMeter } from './spend';
 import { confirmStepWhenReady, currentStepHeading, sendAndWait, stepNav } from './ui';
@@ -86,7 +86,7 @@ export async function buildReadyDraft(page: Page, meter: SpendMeter): Promise<st
 
 /** How many reports this account has stopped in the last 24 hours (the third stop asks for confirmation). */
 export async function stopsInLast24h(email: string): Promise<number> {
-  const rows = await getE2ESql()<Array<{ n: string }>>`
+  const rows = await coreSql()<Array<{ n: string }>>`
     select count(*)::text as n from report_fees f join profiles p on p.id = f.actor_id
     where p.email = ${email} and f.user_stopped_at > now() - interval '24 hours'`;
   return Number(rows[0]?.n ?? 0);

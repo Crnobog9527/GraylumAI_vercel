@@ -44,12 +44,6 @@ async function main(argv) {
     const email = emailFor(role, domain);
     const password = randomPassword();
     let user = await findUser(admin, email);
-    if (user && plan.recreate) {
-      // A closed account is banned and its content is gone: start from a clean one.
-      const removed = await admin.auth.admin.deleteUser(user.id);
-      if (removed.error) throw new Error(`Could not remove the previous ${role} account.`);
-      user = null;
-    }
     if (!user) {
       const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
       if (created.error || !created.data.user) throw new Error(`Could not create the ${role} account.`);

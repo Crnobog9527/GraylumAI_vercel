@@ -15,9 +15,8 @@ test('the seed accepts only the staging Supabase project', () => {
   }
 });
 
-test('accounts: three roles, the closing account is recreated, addresses carry the operator domain only', () => {
-  assert.deepEqual(Object.keys(ACCOUNTS).sort(), ['erase', 'gold', 'pro']);
-  assert.equal(ACCOUNTS.erase.recreate, true);
+test('accounts: two roles, no account is closed by the tests, addresses carry the operator domain only', () => {
+  assert.deepEqual(Object.keys(ACCOUNTS).sort(), ['gold', 'pro']);
   assert.equal(ACCOUNTS.gold.level, 'gold');
   assert.equal(emailFor('gold', 'example.com'), 'core-e2e-gold@example.com');
   assert.throws(() => emailFor('admin', 'example.com'), /Unknown role/);
