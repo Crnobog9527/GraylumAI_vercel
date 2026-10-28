@@ -134,7 +134,8 @@ function countingAdmin() {
 const frame = (id: string, model: string, extra: Record<string, unknown>) =>
   'data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model, ...extra }) + '\n\n';
 const usage = (id: string, model: string, finish: string) => frame(id, model, { choices: [{ index: 0, delta: {}, finish_reason: finish }] })
-  + frame(id, model, { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, cost: 0.006 } }) + 'data: [DONE]\n\n';
+  // A cost inside the call's frozen bound (this fixture's bound is small): above it the model would be blocked (budget_conflict).
+  + frame(id, model, { choices: [], usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cost: 0.000003 } }) + 'data: [DONE]\n\n';
 const streamed = (id: string, body: string) => new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
 const prose = (id: string, text: string) => streamed(id, frame(id, MENTOR, { choices: [{ index: 0, delta: { role: 'assistant', content: text },
   finish_reason: null }] }) + usage(id, MENTOR, 'stop'));
@@ -143,7 +144,7 @@ const toolCall = (id: string, name: string, args: unknown) => streamed(id, frame
   + usage(id, MENTOR, 'tool_calls'));
 const organized = (id: string, content: string) => new Response(JSON.stringify({ id, object: 'chat.completion', created: 1, model: ORGANIZER,
   choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
-  usage: { prompt_tokens: 800, completion_tokens: 50, total_tokens: 850, cost: 0.001 } }),
+  usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cost: 0.000003 } }),
 { headers: { 'content-type': 'application/json', 'x-generation-id': id } });
 const patch = (value: string) => JSON.stringify({ inputKind: 'answer', notes: [],
   patches: [{ stepId: 'step-0', fieldId: 'goal', value, status: 'provisional', nature: 'fact', basis: 'user_statement' }] });
