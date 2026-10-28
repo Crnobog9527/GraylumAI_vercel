@@ -1,0 +1,94 @@
+# TEMPLATE, not active. .github/workflows is under the trusted workflow policy (no secrets, no issues:write, no github.*
+# contexts, timeout <= 60), so this file cannot sit there as is. Adopting it means changing that policy first, which is a
+# rule change that needs the Owner (AGENTS.md section 1). To enable: approve the policy change, move this file to
+# .github/workflows/staging-e2e.yml, then set the secrets and variables listed in README.md.
+# CORE-PATH-V2 V2-11: the six core user journeys against the deployed staging site, with Claude Haiku 5.5 and at most
+# 0.5 US dollars per run. It never blocks a deployment; a failed run opens an issue. NOT ENABLED until the repository
+# variable CORE_E2E_ENABLED is "true" (the controller sets it together with the secrets listed in
+# apps/web/tests/e2e/core-path/README.md).
+name: Staging core-path e2e
+
+on:
+  workflow_dispatch:
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  core-path:
+    name: Run core-path journeys
+    # A Vercel deployment to the staging environment that succeeded, or a manual run.
+    if: ${{ vars.CORE_E2E_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && contains(github.event.deployment_status.environment, 'staging'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ vars.CORE_E2E_BASE_URL }}
+      DATABASE_URL: ${{ secrets.CORE_E2E_DATABASE_URL }}
+      CORE_E2E_GOLD_EMAIL: ${{ secrets.CORE_E2E_GOLD_EMAIL }}
+      CORE_E2E_GOLD_PASSWORD: ${{ secrets.CORE_E2E_GOLD_PASSWORD }}
+      CORE_E2E_PRO_EMAIL: ${{ secrets.CORE_E2E_PRO_EMAIL }}
+      CORE_E2E_PRO_PASSWORD: ${{ secrets.CORE_E2E_PRO_PASSWORD }}
+      CORE_E2E_ERASE_EMAIL: ${{ secrets.CORE_E2E_ERASE_EMAIL }}
+      CORE_E2E_ERASE_PASSWORD: ${{ secrets.CORE_E2E_ERASE_PASSWORD }}
+      VERCEL_BYPASS_COOKIE: ${{ secrets.CORE_E2E_VERCEL_BYPASS }}
+      CORE_E2E_MAX_USD: '0.5'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run the core-path journeys
+        id: journeys
+        working-directory: apps/web
+        run: |
+          started=$(date +%s)
+          set +e
+          pnpm exec playwright test -c playwright.core-path.config.ts
+          status=$?
+          set -e
+          echo "seconds=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Summary
+        if: ${{ always() }}
+        working-directory: apps/web
+        run: |
+          echo "Duration: ${{ steps.journeys.outputs.seconds }} s" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f test-results/core-path/summary.md ]; then cat test-results/core-path/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: core-path-report
+          path: apps/web/test-results/core-path
+          retention-days: 14
+
+      - name: Open an issue when a journey failed
+        if: ${{ steps.journeys.outputs.status != '0' }}
+        run: |
+          body="A core-path journey failed after a staging deployment. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} (duration ${{ steps.journeys.outputs.seconds }} s). The report and traces are in the run artifacts."
+          gh issue create --repo "${GITHUB_REPOSITORY}" --title "Staging core-path e2e failed" --body "$body"
