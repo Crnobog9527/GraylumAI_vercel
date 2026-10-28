@@ -28,10 +28,10 @@ describe('SpendMeter', () => {
 });
 
 describe('spendCapUsd', () => {
-  it('defaults to the approved 0.5 and can only be lowered', () => {
-    expect(spendCapUsd({})).toBe(0.5);
+  it('defaults to the approved 2 and can only be lowered', () => {
+    expect(spendCapUsd({})).toBe(2);
     expect(spendCapUsd({ CORE_E2E_MAX_USD: '0.2' })).toBe(0.2);
-    expect(() => spendCapUsd({ CORE_E2E_MAX_USD: '0.6' })).toThrow();
+    expect(() => spendCapUsd({ CORE_E2E_MAX_USD: '2.1' })).toThrow();
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: '0' })).toThrow();
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: 'abc' })).toThrow();
   });

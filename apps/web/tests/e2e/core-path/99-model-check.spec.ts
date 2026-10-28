@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { requireAccounts } from './support/accounts';
@@ -18,10 +18,17 @@ test('every model call of this run was an allowed model', async () => {
   const second = await readFile(path.join(resultsDirectory, 'compare-model.json'), 'utf8')
     .then(text => (JSON.parse(text) as { modelId: string }).modelId, () => null);
   const allowed = new Set([testModelId(), ...sideModelIds(), ...(second ? [second] : [])]);
-  const rows = await coreSql()<Array<{ model: string }>>`
-    select distinct c.model from bill2_calls c
+  // Cost per route since the run started, models and search suppliers apart. Supplier routes are named "<vendor>:<route>".
+  const rows = await coreSql()<Array<{ model: string; calls: number; usd: string }>>`
+    select c.model, count(*)::int as calls, coalesce(sum(c.selected_cost_usd::numeric), 0)::text as usd from bill2_calls c
       join bill2_runs r on r.id = c.run_id
     where r.actor_id = any(${ids}::uuid[]) and r.created_at >= ${startedAt}::timestamptz
-      and c.model !~ '^(tikhub|parallel|firecrawl):'`;
-  expect(rows.map(row => row.model).filter(model => !allowed.has(model)), 'only the test model, the organizer/summary models and the other model of the compare journey may be called').toEqual([]);
+    group by c.model order by sum(c.selected_cost_usd::numeric) desc nulls last`;
+  const isSupplier = (model: string) => /^(tikhub|parallel|firecrawl):/.test(model);
+  const sum = (items: ReadonlyArray<{ usd: string }>) => items.reduce((total, row) => total + Number(row.usd), 0);
+  await writeFile(path.join(resultsDirectory, 'spend-breakdown.json'), JSON.stringify({
+    modelsUsd: sum(rows.filter(row => !isSupplier(row.model))), suppliersUsd: sum(rows.filter(row => isSupplier(row.model))),
+    routes: rows.map(row => ({ route: row.model, calls: row.calls, usd: Number(row.usd), kind: isSupplier(row.model) ? 'supplier' : 'model' })),
+  }, null, 2));
+  expect(rows.map(row => row.model).filter(model => !isSupplier(model) && !allowed.has(model)), 'only the test model, the organizer/summary models and the other model of the compare journey may be called').toEqual([]);
 });

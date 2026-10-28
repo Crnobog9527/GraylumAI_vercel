@@ -1,5 +1,5 @@
 # CORE-PATH-V2 V2-11: the core user journeys against the deployed staging site, with Gemini 3.8 Flash (CORE_E2E_MODEL_ID) and at most
-# 0.5 US dollars per run. A failed run opens an issue.
+# 2 US dollars per run (Owner 2026-10-28). A failed run opens an issue.
 # DRAFT, not active (Owner 2026-10-28: for now the controller runs the suite by hand on a machine; automation waits for V2-10).
 # When it is wanted: plan A. Trigger only by workflow_dispatch against the staging branch
 # (`gh workflow run staging-e2e.yml --ref staging`), because then GITHUB_REF is refs/heads/staging and the environment's
@@ -32,7 +32,7 @@ jobs:
       CORE_E2E_PRO_EMAIL: ${{ secrets.CORE_E2E_PRO_EMAIL }}
       CORE_E2E_PRO_PASSWORD: ${{ secrets.CORE_E2E_PRO_PASSWORD }}
       VERCEL_BYPASS_COOKIE: ${{ secrets.CORE_E2E_VERCEL_BYPASS }}
-      CORE_E2E_MAX_USD: '0.5'
+      CORE_E2E_MAX_USD: '2'
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0

@@ -18,7 +18,7 @@
 
 ## 花费上限
 
-整套一次 ≤ 0.5 美元（Opus 汇总的那次评审如果让整套超出，如实报告）（`CORE_E2E_MAX_USD` 只能调低不能调高）。`support/spend.ts` 从 `bill2_runs.provider_cost_usd` 累计这几个测试账号本次运行的**平台实际成本**（不是用户积分：报告固定 500 积分，与成本无关），每个模型回合后检查，超了立刻停止并判失败，并把“已超”写进 `spend.json`：之后每个测试开始前先检查（`meter` fixture），已超就拒绝开始，所以不会再发起付费调用，worker 重启也一样；账号 id 取自登录会话（storageState 或登录页都行），拿不到就直接失败，不会把“不知道账号”当成零花费；每条旅程的花费写进 `test-results/core-path/spend.json` 和 `summary.md`。服务端的止损照旧，不另加。
+整套一次 ≤ 2 美元（Owner 2026-10-28 原话："同意：自动浏览器测试每次全套的花费上限从 0.5 美元调到 2 美元"；之前是 0.5，第一次 staging 实跑发现仅搜索供应商每次 0.01 美元就远超 0.5）（`CORE_E2E_MAX_USD` 只能调低不能调高，默认就是 2）。每次运行的花费按“模型”和“搜索供应商”分开列在 `spend-breakdown.json` 和 `summary.md` 里。`support/spend.ts` 从 `bill2_runs.provider_cost_usd` 累计这几个测试账号本次运行的**平台实际成本**（不是用户积分：报告固定 500 积分，与成本无关），每个模型回合后检查，超了立刻停止并判失败，并把“已超”写进 `spend.json`：之后每个测试开始前先检查（`meter` fixture），已超就拒绝开始，所以不会再发起付费调用，worker 重启也一样；账号 id 取自登录会话（storageState 或登录页都行），拿不到就直接失败，不会把“不知道账号”当成零花费；每条旅程的花费写进 `test-results/core-path/spend.json` 和 `summary.md`。服务端的止损照旧，不另加。
 
 ## 只读数据库角色（取代 DATABASE_URL）
 

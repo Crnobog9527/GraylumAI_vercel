@@ -20,8 +20,12 @@ export function credentialsFor(role: CoreRole, env: Record<string, string | unde
   return { email: env[`CORE_E2E_${key}_EMAIL`]?.trim() ?? '', password: env[`CORE_E2E_${key}_PASSWORD`] ?? '' };
 }
 
-/** A whole run may cost the platform at most this many US dollars (Owner 2026-10-28: 0.5). */
-export const DEFAULT_SPEND_CAP_USD = 0.5;
+/**
+ * A whole run may cost the platform at most this many US dollars. Owner 2026-10-28: 0.5, raised the same day to 2 ("同意：自动
+ * 浏览器测试每次全套的花费上限从 0.5 美元调到 2 美元") after the first staging run showed that the search supplier alone (about
+ * 0.01 per call) costs more than the models.
+ */
+export const DEFAULT_SPEND_CAP_USD = 2;
 export function spendCapUsd(env: Record<string, string | undefined> = process.env): number {
   const raw = env.CORE_E2E_MAX_USD;
   if (raw === undefined || raw === '') return DEFAULT_SPEND_CAP_USD;
