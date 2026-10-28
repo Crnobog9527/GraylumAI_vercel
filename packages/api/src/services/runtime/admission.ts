@@ -7,7 +7,7 @@ import {type FrozenReport} from '../report/contract';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
-import {freezePromptCache,freezeHostPromptCache,freezeSharedCacheInto,freezeSharedPromptCache,promptCacheReserveBytes} from './promptCache';
+import {freezePromptCache,freezeHostPromptCache,freezeSharedPromptCache,promptCacheReserveBytes} from './promptCache';
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
 import {currentInputBytes} from './historySelection';
@@ -292,9 +292,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
      ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
-   const writePrice=policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined; // PROMPT-CACHE-ALL
-   const sharedCacheWrite=input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration&&
-    row.data.model_id.startsWith('anthropic/')?writePrice:undefined;
+   // PROMPT-CACHE-ALL: a report freezes v3 (Skill text + facts as two blocks); free chat's v3 moves to CORE-PATH-V2 (V2-4).
+   const writePrice=policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined;
    let promptCache=hostTurnContext?undefined:policy.reportGeneration?freezeSharedPromptCache({real:Boolean(policy.real),model:row.data.model_id,
     instructions,prefixChars:skillChars,historyMarker:false,cacheWriteUsdPerMillion:writePrice})
     :freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,instructions,skillChars,
@@ -310,7 +309,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let libraryBytes=0,cb=0; // cb: bytes reserved for the Skill catalog's tool and loads
    const admissionToolBytes=(file:boolean,history=false,extra=0)=>libraryBytes+cb+extra+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+(history?mentorHistoryToolBytes()+Math.max(skillFileReserve,MENTOR_HISTORY_RESERVE_BYTES):skillFileReserve):0)+
-    (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache,sharedCacheWrite));
+    (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache));
    const requireCapacity=(text:string,file:boolean,content=currentInput,history=false,extra=0,bytes?:number)=>selectRuntimeHistory([],[{role:'user',content}],
     {instructions:text,inputBytes:limitOf(bytes),historyItems:0,toolBytes:admissionToolBytes(file,history,extra)});
    const skillFileInstructions='\nYou may read at most one declared Skill file in this turn with read_skill_file, '+
@@ -355,7 +354,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(voiceTurn&&candidates.length)voice=await admitVoice(admin,actorId,candidates.map(candidate=>candidate.moduleId));
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
-     (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache,sharedCacheWrite)),
+     (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache)),
      instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext,strategyGuide),ownPosts,network:input.network,
       replyLanguage:replySetting,libraryReferences,libraryRetrieval,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),...(voice?{voice:{guide:voice.frozen.guide,profile:voice.profile}}:{})})});
@@ -469,7 +468,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ||freeChat&&!policy.weeklyReview&&await attachFreeChatResearch({admin,real:policy.real!,context,billing,configuration,
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,false,currentInput,false,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
-   freezeSharedCacheInto(context,billing,candidates.length?undefined:sharedCacheWrite);
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
    capReviewAdmission(context,billing,policy.weeklyReview);assertFrozenPayloads(context,billing);
