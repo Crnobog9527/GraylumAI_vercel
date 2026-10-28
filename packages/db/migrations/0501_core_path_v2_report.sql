@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-7a (placeholder number 0497, after 0496 whose turn_open it rebuilds; the controller assigns the real one
+-- CORE-PATH-V2 V2-7a (placeholder number 0501, after 0496 whose turn_open it rebuilds; the controller assigns the real one
 -- before it goes to the database): kind=report on the
 -- turn core (docs/launch/tasks/CORE-PATH-V2.md 2.2, 2.5, 2.7, 4.1, 4.4; Owner 10-17 fixed price, 10-27 stop rule, 10-28 only
 -- reports can be stopped). The report's logic is in its own functions; turn_open and turn_close only dispatch to them (the 0421
