@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import type { NominalPricing } from '../../shared/nominalPricing';
 
 /*
  * CORE-PATH-V2 2.5 / 2.5.3: the numbers a turn freezes at turn_open, computed from the catalog cache (q, the model multiplier m,
@@ -38,6 +39,8 @@ export type PolicyInput = {
   /** The Decisions model's upper bound for one positioning check, in USD; required when limits.decisions is 1. */
   decisionUpperUsd?: string;
   stopLoss: z.infer<typeof stopLossSettings>; historyItems: number; inputBytes: number;
+  /** The model's nominal price table at open: a receipt the recovery job finds later is priced with it (V2-8), as a live one is. */
+  pricing?: NominalPricing;
   /** Hashes and versions frozen for the golden-bytes test and the voice tombstone; never user text. */
   frozen?: Record<string, string | number | boolean>;
 };
@@ -54,6 +57,7 @@ export function turnPolicy(input: PolicyInput) {
     ...input.frozen,
     q: Number(input.q), multiplier: input.multiplier, modelUpperUsd: input.modelUpperUsd,
     ...(input.decisionUpperUsd === undefined ? {} : { decisionUpperUsd: input.decisionUpperUsd }),
+    ...(input.pricing ? { pricing: input.pricing } : {}),
     uTurnUsd: Number(format(uTurn)), gCredits, uModelCredits,
     // The start threshold: one model call (BILL-PAYG L); a short freeze pauses the turn before a call it cannot cover.
     minCredits: uModelCredits,

@@ -46,7 +46,7 @@ export type ReportInput = Omit<z.infer<typeof reportTurnRequest>, 'kind'> & { ac
 
 const OPEN_CODES = /^(REPORT_[A-Z_]+|TURN_[A-Z_]+|STOP_LOSS_REACHED)$/;
 /** What turn_open's report branch returns (its kindContext): the confirmed source and benchmark table, read under its locks. */
-const reportContext = z.object({ frozen: z.record(z.string(), z.unknown()),
+const reportContext = z.object({
   source: z.object({ snapshot: z.unknown(), workflow: z.unknown(), snapshotHash: z.string() }).passthrough(), benchmarks: z.unknown() });
 
 /** The fixed price on the catalog (the database checks the same row when it opens the turn). */
@@ -90,11 +90,9 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   // balance must cover both, or nothing opens); the stop-loss reserves the call's bound only (2.5.3).
   const base = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }, stopLoss: config.stopLoss, historyItems: 0,
-    inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
+    inputBytes: quote.inputLimit, pricing: quote.pricing, frozen: { modelId: quote.modelId, model: quote.model } });
   const held = price + base.uModelCredits;
-  // The model and its nominal price table are frozen (policy.model, policy.pricing): recovery prices a call whose cost was
-  // unknown with them, never with the catalog's current values (V2-8).
-  const policy = { ...base, pricing: quote.pricing, fixedCredits: price, gCredits: held, minCredits: held,
+  const policy = { ...base, fixedCredits: price, gCredits: held, minCredits: held,
     report: { projectId: input.projectId, roundId: input.roundId, moduleId: input.moduleId } };
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'report', policy }); }
@@ -151,7 +149,9 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     const transport = deps.transport ?? fetch;
     const callDeps = { db, slots: deps.slots, actorId: input.actorId, turnId, nextSeq: (() => { let seq = 0; return () => ++seq; })(),
       adapter: openRouterAdapter({ credential: quote.credential,
-        transport: ((url, init) => transport(url, { ...init, signal: abort.signal })) as typeof fetch }) };
+        // Both signals: the adapter's own time budget (240 s) still ends a stuck request; the stop ends it at once.
+        transport: ((url, init) => transport(url, { ...init,
+          signal: init?.signal ? AbortSignal.any([init.signal, abort.signal]) : abort.signal })) as typeof fetch }) };
     const output = await runRuntime({
       model: quote.model, instructions, input: REPORT_REQUEST_INPUT, session: turnSession([]),
       maxOutputTokens: quote.outputLimit, maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,

@@ -49,7 +49,7 @@ const workflow = { id: 'w', version: 1, kind: 'document', steps: [{ id: 's', tit
   maxLength: 20000, requiresEvidence: false, requiredCapabilities: [], information: [] }],
   report: { id: 'report', version: 1, title: 'Positioning', sections: [{ title: 'Facts', stepId: 's' }] }, planResources: ['report.md'],
   reportGeneration: { resources: ['report.md'], sections: ['One', 'Two'], maxCharacters: 12000 } };
-const kindContext = { frozen: { roundId: ROUND },
+const kindContext = {
   source: { snapshotHash: 'e'.repeat(64), workflow, snapshot: { projectId: input.projectId, roundId: ROUND, skillId: uuid(6),
     state: 'draft', currentVersion: 0, revisionId: uuid(7), packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64),
     templateHash: 'd'.repeat(64), workflow, evidence: [], candidates: [], confirmations: [],
@@ -58,10 +58,12 @@ const kindContext = { frozen: { roundId: ROUND },
   benchmarks: { rows: [], hash: 'f'.repeat(64) } };
 const COMPLETE = '## One\nFirst.\n## Two\nSecond.';
 
-function harness(over: { open?: () => unknown; state?: string } = {}) {
+function harness(over: { open?: () => unknown; openError?: string; state?: string } = {}) {
   const rpc: Array<[string, Record<string, unknown>]> = [];
   const respond = async (name: string, args: Record<string, unknown>) => {
     rpc.push([name, args]);
+    // A refusal comes back as PostgREST's error object, as from the real database.
+    if (name === 'turn_open' && over.openError) return { data: null, error: { code: 'P0001', message: over.openError, details: null } };
     if (name === 'turn_open') return { data: over.open?.() ?? { turnId: 9, state: 'running', replay: false, reservedCredits: 530,
       reservedUsd: 0.3, history: [], kindContext }, error: null };
     if (name === 'turn_close') return { data: { turnId: 9, closeKind: args.p_close_kind === 'completed' && over.state === 'stopping'
@@ -173,5 +175,24 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     await runReportTurn(t.deps, input, t.emit, gone.signal);
     expect(t.names()).toEqual(['turn_open', 'turn_report_read', 'turn_close']);
     expect(t.rpc[2]![1]).toMatchObject({ p_close_kind: 'completed', p_delivered: true });
+  });
+
+  it('a refusal inside turn_open keeps its report code; a short balance is the report\'s own REPORT_CREDITS', async () => {
+    for (const [message, code] of [['REPORT_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED'],
+      ['REPORT_PRICE_CHANGED', 'REPORT_PRICE_CHANGED'], ['REPORT_ALREADY_EXISTS', 'REPORT_ALREADY_EXISTS'],
+      ['TURN_INSUFFICIENT_CREDITS', 'REPORT_CREDITS'], ['could not serialize access', 'TURN_DATABASE_UNAVAILABLE']]) {
+      const t = harness({ openError: message });
+      await runReportTurn(t.deps, input, t.emit);
+      expect(t.events).toEqual([{ type: 'error', code }]);
+    }
+  });
+
+  it('the stop does not replace the provider request\'s own time budget: either signal ends it', async () => {
+    const t = harness(); runs(COMPLETE);
+    await runReportTurn(t.deps, input, t.emit);
+    const budget = new AbortController();
+    const request = h.transports[0]!('https://openrouter.test', { signal: budget.signal });
+    budget.abort();
+    await expect(request).rejects.toThrow('aborted');
   });
 });

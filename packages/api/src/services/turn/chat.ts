@@ -93,7 +93,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const decisionUpperUsd = config.decisionUpperUsd;
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.stopLoss,
-    historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
+    historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, pricing: quote.pricing,
+    frozen: { modelId: quote.modelId, model: quote.model } });
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }

@@ -48,6 +48,8 @@ export async function reportCases(t){
   // Admitted: the whole 500 + the call bound is frozen; the frozen identity, the source and the benchmark table come back.
   const o=await openReport(a,src);
   assert.deepEqual([o.reservedCredits,o.history,await balance(a)],[530,[],470]);
+  // The exact shape Node's report turn parses (report.ts reportContext): nothing else is promised.
+  assert.deepEqual(Object.keys(o.kindContext).sort(),['benchmarks','source']);
   assert.equal(o.kindContext.source.moduleId,src.module);
   assert.match(o.kindContext.source.snapshotHash,/^[0-9a-f]{64}$/);
   assert.equal(o.kindContext.benchmarks.rows.length,3);

@@ -57,7 +57,8 @@ export type CloseKind = 'completed' | 'failed' | 'interrupted' | 'expired' | 'er
 export class TurnDatabaseError extends Error {
   constructor(readonly code: string) { super(code); }
 }
-const KNOWN = /\b(TURN_[A-Z_]+|STOP_LOSS_REACHED)\b/;
+// A kind's own refusals (a report's REPORT_*, V2-7a) keep their codes too.
+const KNOWN = /\b(TURN_[A-Z_]+|REPORT_[A-Z_]+|STOP_LOSS_REACHED)\b/;
 async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
   const { data, error } = await client.rpc(name, args);
   if (error) throw new TurnDatabaseError(KNOWN.exec(error.message ?? '')?.[1] ?? 'TURN_DATABASE_UNAVAILABLE');
