@@ -364,17 +364,32 @@ try{
   assert.ok(Number((await one('select fusion_review_breaker_usage($1) v',[j.actor])).platformUsd)>=0.5);
   report.checks.push('breaker: refunded compare and jury turns count as platform-borne and refuse the next compare over the line; a compare freezes its workspace sources, a revoked or malformed source refuses it with nothing recorded');
  }
+ // 13. #1522 review: a complete answer whose cost is not final yet is kept (turn_fusion_output) while the call stays open.
+ {
+  const a=await account(),rv=await review(a),o=await open(a,{product:{reviewId:rv}});
+  await begin(a,o.turnId,1);await one('select turn_call_identity($1,$2,$3,$4) v',[a.actor,o.turnId,1,'gen-pending']);
+  const saved=await one('select turn_fusion_output($1,$2,$3,$4) v',[a.actor,o.turnId,1,JSON.stringify(seat('kept'))]);
+  assert.equal(saved.productGone,false);
+  assert.deepEqual((await c.query('select o.body,c.status from fusion_turn_outputs o join turn_calls c using(turn_id,seq) where o.turn_id=$1',[o.turnId])).rows,
+   [{body:'kept',status:'identified'}]);
+  await one('select turn_fusion_output($1,$2,$3,$4) v',[a.actor,o.turnId,1,JSON.stringify(seat('kept'))]);
+  assert.match(await refusal(one('select turn_fusion_output($1,$2,$3,$4) v',[a.actor,o.turnId,1,JSON.stringify(seat('other'))])),/TURN_CALL_CONFLICT/);
+  await begin(a,o.turnId,2);await record(a,o.turnId,2,{output:seat('done')});
+  assert.match(await refusal(one('select turn_fusion_output($1,$2,$3,$4) v',[a.actor,o.turnId,2,JSON.stringify(seat('x'))])),/TURN_CALL_DENIED/,
+   'a call with its final receipt keeps the answer of its receipt');
+  report.checks.push('a complete answer whose cost is not final is saved and judged while its call stays open; repeat is a no-op, a different body conflicts, a settled call refuses');
+ }
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.
  {
   for(const f of ['turn_fusion_open','turn_fusion_begin','turn_fusion_record','turn_fusion_close','fusion_review_turn_step',
-   'fusion_compare_turn_adopt','fusion_compare_turn_history','turn_fusion_recovery','turn_fusion_ended_review']){
+   'fusion_compare_turn_adopt','fusion_compare_turn_history','turn_fusion_recovery','turn_fusion_ended_review','turn_fusion_output']){
    for(const role of ['anon','authenticated'])
     assert.equal(await one(`select bool_or(has_function_privilege($1,p.oid,'execute')) v from pg_proc p where proname=$2`,[role,f]),false,f+' '+role);
    assert.equal(await one(`select bool_or(has_function_privilege('service_role',p.oid,'execute')) v from pg_proc p where proname=$1`,[f]),true,f);
   }
   for(const role of ['anon','authenticated','service_role'])
    assert.equal(await one(`select has_table_privilege($1,'public.fusion_turn_outputs','select') v`,[role]),false);
-  report.checks.push('the nine functions are service role only; no client role reads fusion_turn_outputs');
+  report.checks.push('the ten functions are service role only; no client role reads fusion_turn_outputs');
  }
  console.log(JSON.stringify(report,null,1));
 }finally{await db.close();}

@@ -30,6 +30,7 @@ const tombstones = { sessionTombstoned: z.boolean(), accountErasing: z.boolean()
 const begun = z.object({ state: z.enum(['running', 'paused']), status: z.string().optional(), replay: z.boolean().optional(),
   paused: z.boolean().optional(), ...tombstones });
 const recorded = z.object({ status: z.string(), creditsLow: z.boolean(), productGone: z.boolean(), ...tombstones });
+const outputSaved = z.object({ productGone: z.boolean(), ...tombstones });
 const KNOWN = /\b((?:TURN|FUSION)_[A-Z_]+|STOP_LOSS_REACHED)\b/;
 async function rpc<T>(client: TurnClients['write'], name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
   const { data, error } = await client.rpc(name, args);
@@ -47,6 +48,9 @@ export function fusionDatabase(clients: TurnClients, actorId: string) {
       product?: Record<string, unknown> }) =>
       rpc(w, 'turn_fusion_close', { p_actor_id: actorId, p_turn_id: a.turnId, p_close_kind: a.kind, p_delivered: a.delivered,
         p_refund_all: a.refundAll ?? false, p_failure_code: a.failureCode ?? null, p_product: a.product ?? {} }, closed),
+    /** The answer of a call whose cost is not final yet: saved and judged, the call left for recovery (turn_fusion_output). */
+    output: (turnId: number, seq: number, output: Record<string, unknown>) =>
+      rpc(w, 'turn_fusion_output', { p_actor_id: actorId, p_turn_id: turnId, p_seq: seq, p_output: output }, outputSaved),
     /** The three call writes for one turn, as modelCall uses them (TurnDatabase's shape). */
     calls(turnId: number, output: (seq: number, raw: string | null) => { status: 'ok' | 'unusable'; usage: Record<string, unknown>;
       output: Record<string, unknown> | null } | null) {
@@ -91,7 +95,7 @@ export type GroupContext = { db: FusionDatabase; slots: CounterStore; actorId: s
 /** Runs one group's calls in parallel. Each call is judged on its exact saved text before the receipt is written (a format
  * failure is 'unusable': the platform keeps its cost, the user's base is 0); a call that is not delivered ends with its code. */
 export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promise<MemberOutcome[]> {
-  const bySeq = new Map<number, GroupMember>();
+  const bySeq = new Map<number, GroupMember>(), lastSeq = new Map<GroupMember, number>();
   const texts = new Map<GroupMember, { text: string; verdict: Verdict; empty?: boolean }>();
   const calls = ctx.db.calls(ctx.turnId, (seq, raw) => {
     const member = bySeq.get(seq);
@@ -111,16 +115,28 @@ export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promi
   const adapter = openRouterAdapter({ allowWorkspaceRead: true, credential: ctx.credential, transport: ctx.transport });
   const settled = await Promise.allSettled(members.map(member => {
     const deps = { db: calls as never, adapter, slots: ctx.slots, actorId: ctx.actorId, turnId: ctx.turnId, sleep: ctx.sleep,
-      nextSeq: () => { const seq = ctx.nextSeq(); bySeq.set(seq, member); return seq; } };
+      nextSeq: () => { const seq = ctx.nextSeq(); bySeq.set(seq, member); lastSeq.set(member, seq); return seq; } };
     return modelCall(deps, member.call, member.body, member.onChunk);
   }));
-  return settled.map((result, index): MemberOutcome => {
+  return Promise.all(settled.map(async (result, index): Promise<MemberOutcome> => {
     const member = members[index]!, saved = texts.get(member);
-    // Fulfilled without a saved text: no answer in the response, or its cost not final yet (left for recovery, nothing saved).
-    if (result.status === 'fulfilled') return saved ? { ok: true, ...saved } : { ok: false, code: 'TURN_CALL_UNKNOWN' };
+    if (result.status === 'fulfilled') {
+      if (saved) return { ok: true, ...saved };
+      // A complete answer whose cost is not final yet (modelCall returned it without a receipt): the answer is kept and
+      // judged now; the call stays open for recovery to settle its cost by the provider id (2.5.2).
+      const text = answerText(result.value), seq = lastSeq.get(member);
+      if (!text || seq === undefined) return { ok: false, code: 'TURN_CALL_UNKNOWN' };
+      const judged = member.judge(text);
+      if (judged.verdict === 'no_delivery') return { ok: true, text, verdict: 'no_delivery' };
+      try {
+        const kept = await ctx.db.output(ctx.turnId, seq, { phase: member.phase, body: text, verdict: judged.verdict });
+        if (kept.productGone || kept.sessionTombstoned || kept.accountErasing) return { ok: false, code: 'TURN_TOMBSTONED' };
+      } catch (error) { return { ok: false, code: error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED' }; }
+      return { ok: true, text, verdict: judged.verdict };
+    }
     const error = result.reason;
     return { ok: false, code: error instanceof TurnStop || error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED' };
-  });
+  }));
 }
 
 /** The frozen numbers of a compare or jury turn (2.5.3): no tools, M model calls, each bounded on its own; q the same for all. */

@@ -8,6 +8,7 @@
 --   turn_fusion_begin    turn_call_begin; a jury waiting between groups runs again
 --   turn_fusion_record   turn_call_record plus the saved answer (fusion_turn_outputs); a jury with nothing left in flight waits
 --                        between groups (paused, awaiting_user)
+--   turn_fusion_output   the answer of a call whose cost is not final yet, saved without settling the call
 --   turn_fusion_close    turn_close with the review's end state or the compare's finished state in the same transaction
 --   fusion_review_turn_step   the review record's claim/advance for a jury on the turn path
 --   fusion_compare_turn_adopt the chosen compare answer into the conversation history
@@ -31,7 +32,7 @@
 -- Compatibility: new columns are nullable, the new table and functions are used only by the V2 path (core_path_v2.enabled);
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
--- Recovery: drop the two triggers, the ten new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
+-- Recovery: drop the two triggers, the eleven new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
 -- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -329,6 +330,46 @@ BEGIN
     UPDATE turns SET state = 'paused', pause_reason = 'awaiting_user', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
   END IF;
   RETURN r || jsonb_build_object('productGone', gone);
+END $function$;
+
+-- The answer of a call whose response is complete but whose cost is not final yet (no usage cost in the stream): saved and
+-- judged now, while the call stays dispatched/identified for recovery to settle by its provider id (2.5.2). Same rules as
+-- turn_fusion_record for the text: the product row in key-share mode, nothing stored once it or the conversation is gone.
+CREATE OR REPLACE FUNCTION public.turn_fusion_output(p_actor_id uuid, p_turn_id bigint, p_seq integer, p_output jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE t turns; c turn_calls; o fusion_turn_outputs; gone boolean; tomb jsonb; v_review uuid; v_compare uuid; v_hash text;
+BEGIN
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
+  IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
+  IF t.kind NOT IN ('compare','jury') OR jsonb_typeof(p_output) <> 'object' OR p_output->>'verdict' NOT IN ('usable','format_invalid','revision_invalid') THEN
+    RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
+  IF c.turn_id IS NULL OR c.call_kind <> 'model' OR c.status NOT IN ('dispatched','identified','unknown') THEN
+    RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501';
+  END IF;
+  v_review := (t.policy->>'reviewId')::uuid; v_compare := (t.policy->>'compareId')::uuid;
+  IF v_review IS NOT NULL THEN PERFORM 1 FROM fusion_reviews WHERE id = v_review FOR KEY SHARE;
+  ELSE PERFORM 1 FROM fusion_compares WHERE id = v_compare FOR KEY SHARE; END IF;
+  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE id = v_review)
+               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE id = v_compare) END;
+  tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
+  IF NOT gone AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean THEN
+    v_hash := encode(sha256(convert_to(p_output->>'body', 'UTF8')), 'hex');
+    SELECT * INTO o FROM fusion_turn_outputs WHERE turn_id = p_turn_id AND seq = p_seq;
+    IF o.turn_id IS NOT NULL THEN
+      IF o.body_hash <> v_hash OR o.verdict <> p_output->>'verdict' THEN RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023'; END IF;
+    ELSE
+      INSERT INTO fusion_turn_outputs (actor_id, turn_id, seq, review_id, compare_id, phase, body, body_hash, verdict)
+        VALUES (p_actor_id, p_turn_id, p_seq, v_review, CASE WHEN v_review IS NULL THEN v_compare END, p_output->>'phase',
+          p_output->>'body', v_hash, p_output->>'verdict');
+    END IF;
+  END IF;
+  RETURN jsonb_build_object('productGone', gone) || tomb;
 END $function$;
 
 -- turn_close for these kinds, with the product record ended in the same transaction: the review's end state and outcome (the
@@ -1130,7 +1171,8 @@ BEGIN
     'fusion_compare_turn_adopt(uuid,uuid,integer)',
     'fusion_compare_turn_history(uuid,uuid,integer)',
     'turn_fusion_recovery(integer)',
-    'turn_fusion_ended_review(uuid,bigint,text,jsonb)'] LOOP
+    'turn_fusion_ended_review(uuid,bigint,text,jsonb)',
+    'turn_fusion_output(uuid,bigint,integer,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;

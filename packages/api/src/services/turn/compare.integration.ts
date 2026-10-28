@@ -214,6 +214,22 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: every column refusing under the fallback rule i
   expect(await credits(f.actor)).toBe(1000);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-7b: a complete column whose cost is not final yet keeps its answer; only its cost waits (#1522 review)', async () => {
+  const f = await member();
+  const transport: typeof fetch = async (_url, init) => { const body = JSON.parse(String(init?.body));
+    if (body.model !== PAIRS[1][0]) return sse('gen-cmp-' + randomUUID(), body.model, 'Settled');
+    // A normal end without the usage frame: the answer is complete, its cost unknown.
+    return new Response(frame('gen-nocost', body.model, { choices: [{ index: 0, delta: { role: 'assistant', content: 'Kept answer' },
+      finish_reason: null }] }) + frame('gen-nocost', body.model, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+      + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-nocost' } }); };
+  const events = await compare(f, transport);
+  expect(events.filter(e => e.type === 'answer').map(e => (e as { ok: boolean }).ok)).toEqual([true, true]);
+  expect(events.at(-1)).toMatchObject({ type: 'result', settlement: 'pending' });
+  expect((await db.query(`select o.body,c.status from fusion_turn_outputs o join turn_calls c using(turn_id,seq)
+    where o.actor_id=$1 order by o.seq`, [f.actor])).rows.map(r => r.body + ':' + r.status).sort())
+    .toEqual(['Kept answer:unknown', 'Settled:ok']);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-7b: a column broken after it started keeps its freeze for recovery and is never sent again', async () => {
   const f = await member();
   let posts = 0;
