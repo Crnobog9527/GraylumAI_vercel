@@ -262,3 +262,20 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a checklist edited while the turn runs turns the
   expect(steps['step-0'].information?.goal?.value ?? '').toBe('');
   expect(steps['step-0'].fieldMeta.goal.suggestion).toMatchObject({ value: 'Sell coffee to students', basis: 'user_statement' });
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-5: relation locks of turn_open for a mentor turn against a free chat (measured, plan 3.1)', async () => {
+  const f = await setup();
+  const policy = { q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30, historyItems: 100, inputBytes: 1000,
+    limits: { model: 3, paidTools: 0, freeTools: 1, decisions: 0 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
+    mentorModuleId: f.moduleId, mentorStepId: 'step-0' };
+  const locks = async (kind: string) => {
+    await db.query('begin');
+    try {
+      await db.query('select turn_open($1,$2,$3,$4,$5)', [f.actor, f.session, randomUUID(), kind, JSON.stringify(policy)]);
+      return (await db.query("select count(*)::int n from pg_locks where pid=pg_backend_pid() and locktype='relation'")).rows[0].n as number;
+    } finally { await db.query('rollback'); }
+  };
+  const chat = await locks('chat'), mentor = await locks('mentor');
+  console.log('CORE-PATH-V2 turn_open relation locks', JSON.stringify({ chat, mentor, mentorExtra: mentor - chat }));
+  expect(mentor).toBeGreaterThanOrEqual(chat);
+});
