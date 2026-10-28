@@ -337,7 +337,10 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 ### 2.8 staging = 正式
 
 - 删除 `runtime_test_windows` 表、`mode='staging_test'` 合同、`runtime_test_window_allowed`、`runtime_test_policy`、`runtime_test_*`/`runtime_production_*` 9 个函数、
-  `productionPolicy.ts`/`stagingPolicy.ts` 分派，以及 `runtime_payg_staging`/`runtime_payg_production` 两份档案——只留一份 `runtime_payg` 档案键。
+  `productionPolicy.ts`/`stagingPolicy.ts` 分派，以及 `runtime_payg_staging`/`runtime_payg_production` 两份档案——只留一份 `runtime_payg` 档案键：
+  内容格式沿用现在的正式档案（`paygProductionSettings`：线路、用途、请求格式、思考档位、容量、采样证据、`enabled` 一键关闭），**没有** `windowId` 和到期日；
+  报价由 `ai_models` 价格快照 + q/m 推导（`services/turn/quote.ts`，V2-4），不调 `runtime_production_access`，不查测试窗口。
+  staging 与正式库的建库种子都要有这一行（键名、结构相同，值各自配）；键缺失或 `enabled:false` 时 `turn_open` 拒绝开轮，不退回任何旧路径。
 - 花费控制：OpenRouter 测试密钥在 OpenRouter 后台设额度上限；测试账号积分由总控按批准预算发放；每日对账报表照旧。
 - 保留一条最小"防串库"校验：部署声明的 Supabase 主机必须等于实际连接的主机，否则拒绝开轮。这是防串库，不是两套路径。
 - 压测与 e2e 的"假 AI 回复"不再是代码分支：`OPENROUTER_BASE_URL` 指向压测桩进程（`scripts/loadtest/openrouter-stub.mjs`），同一份代码。
