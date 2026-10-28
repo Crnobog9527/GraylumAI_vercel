@@ -6,8 +6,10 @@ import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
-import { catalogRead } from '../runtime/catalogCache';
-import { readAdmissionSettings } from '../runtime/newWorkGate';
+import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
+import { rowFor } from '../runtime/settingsRows';
+import { CORE_PATH_SETTING } from './settingKeys';
+import { readAdmissionSettings, type NewWorkGateResult, type RuntimeCallGate, type SettingsRead } from '../runtime/newWorkGate';
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import { freeChatInstructions } from '../runtime/primaryInstructions';
 import { assertRuntimeRequestCapacity } from '../runtime/context';
@@ -23,9 +25,10 @@ import { ceil12, modelCall, TurnStop } from './call';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
-import { stopLossSettings, turnPolicy } from './policy';
+import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
+import { swallow } from '../../lib/swallow';
 
 /*
  * CORE-PATH-V2 kind=chat (2.7): a free-chat turn without tools (V2-4a; the free tools come in V2-4b). Database work is
@@ -33,7 +36,7 @@ import type { TurnEvent } from './sse';
  * comes from the catalog cache (settings, model row, price snapshot); the prompt is a site-wide segment and a per-user segment,
  * each with a cache breakpoint (2.9 rule 3), then the history, then the current message.
  */
-export const CORE_PATH_SETTING = 'core_path_v2';
+export { CORE_PATH_SETTING } from './settingKeys';
 // decisionUpperUsd: the most one positioning check (Decisions) can cost the platform; it is reserved on the stop-loss (Fable 10-28).
 const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
@@ -41,6 +44,9 @@ export const HISTORY_ITEMS = 100;
 
 export type ChatDeps = {
   admin: SupabaseClient; clients: TurnClients; slots: CounterStore;
+  /** The runtime rate limits and the one-switch pause (runtime/newWorkGate.ts), checked before the turn opens (message) and
+   *  before each model call (calls), as the old path does (CORE-PATH-V2 4.1). */
+  newWork: { message: (actorId: string, read: Promise<SettingsRead>) => Promise<NewWorkGateResult>; calls: RuntimeCallGate };
   /** OpenRouter transport (tests and the load-test stub); production uses fetch. */
   transport?: typeof fetch; pricing?: PricingDeps; gate?: PositioningGatePolicy;
 };
@@ -55,22 +61,31 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_PROVIDER_BUSY: { kind: 'failed', refundAll: true },
   TURN_PROVIDER_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
   TURN_INPUT_TOO_LARGE: { kind: 'failed', refundAll: true },
+  TURN_NEW_CALLS_PAUSED: { kind: 'failed', refundAll: true },
+  TURN_RATE_LIMITED: { kind: 'failed', refundAll: true },
+  TURN_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
+  TURN_USAGE_CONFIGURATION_REQUIRED: { kind: 'failed', refundAll: true },
 };
+/** A refusal of the new-work gate as a turn code: the administrator's pause, a minute or day limit, or limits unavailable. */
+const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
+  usage_configuration_required: 'TURN_USAGE_CONFIGURATION_REQUIRED' } as const;
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
   // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
-  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
-    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+  const configuration = readAdmissionConfiguration(admin);
+  const core = rowFor(await configuration, CORE_PATH_SETTING);
   const config = coreSetting.safeParse(core.error ? null : core.data?.value);
   if (!config.success || !config.data.enabled) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
-  const configuration = readAdmissionConfiguration(admin);
   const settings = await readAdmissionSettings(admin, configuration);
+  // The one-switch pause and the message limits, before anything is frozen (the old path's admission check).
+  const admitted = await deps.newWork.message(input.actorId, Promise.resolve(settings));
+  if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
   const budgets = await readPurposeBudgets(admin, configuration);
   let quote;
   try {
-    quote = await chatQuote(admin, { modelId: serverChatModel(settings), inputBytes: budgets?.interactive.inputBytes ?? 90000,
-      deps: deps.pricing });
+    quote = await chatQuote(admin, { configuration: await configuration, modelId: serverChatModel(settings),
+      inputBytes: budgets?.interactive.inputBytes ?? 90000, deps: deps.pricing });
   } catch (error) {
     // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.
     const message = error instanceof Error ? error.message : '';
@@ -86,9 +101,16 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
 
   // 2. Open: one model call (2.5.3, V2-4a has no tools) plus the possible positioning check, outside M and the freeze.
   const decisionUpperUsd = config.data.decisionUpperUsd;
+  // The start threshold L of this model for a free chat (purpose ordinary), from the admission configuration rows.
+  const thresholds = rowFor(await configuration, RESEARCH_THRESHOLDS_KEY);
+  const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q,
+    quote.multiplier);
+  if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
+    startThresholdCredits: startCredits,
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.data.stopLoss,
-    historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
+    historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, pricing: quote.pricing,
+    frozen: { modelId: quote.modelId, model: quote.model } });
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
@@ -173,10 +195,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         }
         if (text.length > sentChars) { emit({ type: 'text', delta: text.slice(sentChars) }); sentChars = text.length; }
       },
-      exchange: (_sequence, body, onChunk) => {
+      exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, quote.inputLimit); }
-        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); return Promise.reject(stopped); }
+        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
+        // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
+        const gate = await deps.newWork.calls(input.actorId, 1, 'bill2.v2');
+        if (!gate.ok) { stopped = new TurnStop(GATE_CODES[gate.reason]); throw stopped; }
         return modelCall(callDeps, quote, request, onChunk)
           .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       },
@@ -199,7 +224,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
-      await close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }).catch(() => undefined);
+      // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
+      await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
+        { category: 'ai' });
     }
     emit({ type: 'error', code, turnId: opened.turnId });
   }

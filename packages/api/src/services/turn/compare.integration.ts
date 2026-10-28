@@ -44,9 +44,10 @@ beforeAll(async () => {
       outputLimit: 8192, testedOutputLimit: 512, outputSemantics: 'max-tokens-includes-reasoning', includesReasoning: true,
       cacheCovered: true, costBoundPassed: true } }));
   for (const [i, [model, tag]] of PAIRS.entries()) {
-    const { pricing } = pricingConfig(model, tag, '0.000001', '0.000002');
+    // USD per million tokens: 1 prompt, 2 completion (each column's bound is about 0.02 USD on its exact request).
+    const { pricing } = pricingConfig(model, tag, '1', '2');
     // PROMPT-CACHE-ALL (#1501): the Anthropic route has a cache-write price, so its compare request carries the breakpoints.
-    if (tag === 'anthropic') (pricing.endpoints[0]!.base as Record<string, string>).input_cache_write = '0.00000125';
+    if (tag === 'anthropic') (pricing.endpoints[0]!.base as Record<string, string>).input_cache_write = '1.25';
     const config = { pricing, reasoning: { route: tag, purposes: { interactive: { mode: 'off', wire: 'reasoning_effort' } },
       catalog: { fetchedAt: pricing.fetchedAt, model, reasoning: { mandatory: false, defaultEnabled: false, supportedEfforts: ['low', 'high'],
         defaultEffort: 'high', supportsMaxTokens: true },

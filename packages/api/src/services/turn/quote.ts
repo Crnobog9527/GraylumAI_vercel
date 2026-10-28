@@ -6,8 +6,9 @@ import { openRouterBound, type OpenRouterLimits } from '../bill2/openRouterPolic
 import { readMultiplierSnapshot } from '../billingUnit';
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readAdmissionModel } from '../runtime/admissionConfiguration';
+import { rowFor, type ConfigurationRows } from '../runtime/settingsRows';
+import { RUNTIME_PAYG_SETTING } from './settingKeys';
 import { admittedOutputLimit } from '../runtime/admissionLimits';
-import { catalogRead } from '../runtime/catalogCache';
 import { isAdmittedRoute, matchedProfile, PAYG_PROFILE_MAX_BYTES, paygProductionSettings } from '../runtime/paygHostPolicy';
 import { FREE_CHAT_REQUEST_FORMAT } from '../runtime/providerRequest';
 import { pricingEndpoint, readPricingStates, type PricingDeps } from '../runtime/pricingAdmission';
@@ -22,7 +23,7 @@ import type { ModelCall } from './call';
  * OpenRouter price snapshot (renewed first when older than seven days, the existing rule); q and m from the billing unit.
  * Settings, model rows and snapshots are catalog reads (catalogCache); the platform key is read fresh every time (OR-1).
  */
-export const RUNTIME_PAYG_SETTING = 'runtime_payg';
+export { RUNTIME_PAYG_SETTING } from './settingKeys';
 /** In-flight calls per model across instances until the catalog carries a per-model value (3.3.2 item 10). */
 export const DEFAULT_MODEL_CONCURRENCY = 20;
 
@@ -55,9 +56,10 @@ export function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoin
   return { limits, nominal: nominal as NominalPricing };
 }
 
-export async function chatQuote(admin: SupabaseClient, input: { modelId: string; inputBytes: number; deps?: PricingDeps }): Promise<ChatQuote> {
-  const setting = await catalogRead(admin, 'settings', 'runtime-payg', () =>
-    admin.from('system_settings').select('value').eq('key', RUNTIME_PAYG_SETTING).maybeSingle());
+export async function chatQuote(admin: SupabaseClient, input: { configuration: ConfigurationRows; modelId: string; inputBytes: number;
+  deps?: PricingDeps }): Promise<ChatQuote> {
+  // From the admission configuration rows (one cached query for every setting), never a query of its own.
+  const setting = rowFor(input.configuration, RUNTIME_PAYG_SETTING);
   const parsed = paygProductionSettings.safeParse(setting.error ? null : setting.data?.value);
   if (!parsed.success || !parsed.data.enabled) throw new QuoteError('TURN_PAYG_DISABLED');
 

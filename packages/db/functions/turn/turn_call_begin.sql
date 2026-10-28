@@ -23,6 +23,11 @@ BEGIN
     RAISE EXCEPTION 'TURN_CALL_SEQUENCE' USING ERRCODE='22023';
   END IF;
   IF (p_call_kind = 'tool') IS DISTINCT FROM (p_paid IS NOT NULL) THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
+  -- A model whose cost went above its bound is blocked until an administrator has checked its price and metering (BILL2).
+  IF p_call_kind = 'model' AND EXISTS (SELECT 1 FROM turn_calls WHERE model_id = p_model_id AND budget_conflict
+      AND conflict_reviewed_at IS NULL) THEN
+    RAISE EXCEPTION 'TURN_MODEL_METERING_BLOCKED' USING ERRCODE='P0001';
+  END IF;
   -- Frozen limits (2.5.3): attempts that certainly cost nothing (not_sent, rejected, 402) do not count against them. M counts
   -- the model calls the user pays for; the positioning check (decision) is its own limit outside M (Fable 10-28).
   SELECT count(*) FILTER (WHERE call_kind = 'model'),
@@ -38,9 +43,10 @@ BEGIN
     OR (p_call_kind = 'tool' AND NOT p_paid AND p_upper_usd <> 0) OR (p_paid AND p_upper_usd <= 0) THEN
     RAISE EXCEPTION 'TURN_CALL_LIMIT' USING ERRCODE='22023';
   END IF;
-  -- The remaining freeze must cover this call's bound G_i = ceil(q x U_i x m_i); otherwise the turn waits for credits. The
-  -- positioning check is never charged to the user (Owner 10-12): it needs no freeze; its upper bound counts in U_turn and the
-  -- stop-loss reservation only.
+  -- The remaining freeze must cover min(G_i, L): this call's bound G_i = ceil(q x U_i x m_i), or the start threshold L when the
+  -- freeze was capped by the balance (H = min(G, A), Owner 10-01 and 10-28: a balance that covers one normal turn starts it; the
+  -- part of a call above the freeze is the platform's, E = N - D). Below that the turn waits for credits. The positioning check
+  -- is never charged to the user (Owner 10-12): it needs no freeze; its upper bound counts in U_turn and the stop-loss only.
   q := (t.policy->>'q')::numeric;
   IF t.kind = 'jury' THEN
     -- A jury pays its fixed price whatever its calls cost (Owner 10-17); the freeze above it is the temporary bound of the group
@@ -54,7 +60,8 @@ BEGIN
     FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
   END IF;
   -- A jury adoption is free to the user (10-20): nothing is frozen and nothing needs to be.
-  need := CASE WHEN p_call_kind = 'decision' OR t.kind = 'jury_adopt' THEN 0 ELSE ceil(q * p_upper_usd * p_multiplier) END;
+  need := CASE WHEN p_call_kind = 'decision' OR t.kind = 'jury_adopt' THEN 0
+    ELSE least(ceil(q * p_upper_usd * p_multiplier), coalesce((t.policy->>'minCredits')::numeric, ceil(q * p_upper_usd * p_multiplier))) END;
   IF t.reserved_credits - used < need THEN
     UPDATE turns SET state = 'paused', pause_reason = 'waiting_credits', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
     RETURN jsonb_build_object('state', 'paused', 'paused', true) || turn_tombstones(p_actor_id, t.session_id, t.policy);

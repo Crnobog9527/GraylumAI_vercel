@@ -16,8 +16,10 @@ BEGIN
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
   IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
-  -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept.
-  IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable') THEN
+  -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept. So is
+  -- a late proof that the request was never billed (not_sent, rejected), under the same no-provider-id check below; it frees the
+  -- freeze and the stop-loss share at the next settlement.
+  IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable','not_sent','rejected') THEN
     c.status := 'identified';
   END IF;
   IF c.status IN ('dispatched','identified') THEN
@@ -31,7 +33,10 @@ BEGIN
         -- unusable: the provider charged for a result that cannot be used; the user's base is 0, the platform's cost is kept.
         actual_usd = CASE WHEN p_status IN ('ok','unusable') THEN p_actual_usd END,
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
-        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false
+        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false,
+        -- Above the frozen bound: the estimate failed (price or metering); the model is blocked for new calls (turn_call_begin).
+        budget_conflict = c.call_kind = 'model' AND p_status = 'ok'
+          AND (coalesce(p_actual_usd, 0) > c.upper_usd OR coalesce(p_nominal_usd, 0) > c.upper_usd)
       WHERE turn_id = p_turn_id AND seq = p_seq;
     -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
     -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs
@@ -48,6 +53,7 @@ BEGIN
                            WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
                            ELSE 0 END), 0) INTO used
   FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
-  next_need := coalesce((t.policy->>'uModelCredits')::int, 0);
+  -- credits_low: the same rule that pauses the next call (turn_call_begin): the remaining freeze below the start threshold L.
+  next_need := coalesce((t.policy->>'minCredits')::int, (t.policy->>'uModelCredits')::int, 0);
   RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits - used < next_need) || tomb;
 END $function$;

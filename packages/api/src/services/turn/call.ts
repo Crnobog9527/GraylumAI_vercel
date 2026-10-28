@@ -4,9 +4,10 @@ import type { CallIdentity, TransportObservation } from '../bill2/fixtureAdapter
 import { consumeOpenRouterNotStarted } from '../bill2/openRouterAdapter';
 import { openRouterEvidence } from '../bill2/openRouterEvidence';
 import { openRouterRejection } from '../bill2/openRouterRejection';
-import { nominalActualFallback, nominalCost, type NominalPricing } from '../../shared/nominalPricing';
+import { nominalCost, type NominalPricing } from '../../shared/nominalPricing';
 import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, type TurnDatabase } from './db';
+import { logSwallowed } from '../../lib/swallow';
 
 /*
  * CORE-PATH-V2 2.5.2: one paid model call is three writes. turn_call_begin before anything is sent (no row, no request);
@@ -18,7 +19,8 @@ import { tombstoned, type TurnDatabase } from './db';
  */
 export class TurnStop extends Error {
   constructor(readonly code: 'TURN_PAUSED_FOR_CREDITS' | 'TURN_TOMBSTONED' | 'TURN_CALL_UNKNOWN' | 'TURN_PROVIDER_402'
-    | 'TURN_CALL_DENIED' | 'TURN_PROVIDER_BUSY' | 'TURN_PROVIDER_LIMIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE') { super(code); }
+    | 'TURN_CALL_DENIED' | 'TURN_PROVIDER_BUSY' | 'TURN_PROVIDER_LIMIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE'
+    | 'TURN_NEW_CALLS_PAUSED' | 'TURN_RATE_LIMITED' | 'TURN_LIMIT_UNAVAILABLE' | 'TURN_USAGE_CONFIGURATION_REQUIRED') { super(code); }
 }
 
 type Adapter = { prepareDispatch(input: unknown, identity: CallIdentity, onChunk?: (chunk: string) => void,
@@ -35,7 +37,7 @@ export type CallDeps = {
   nextSeq: () => number;
   sleep?: (ms: number) => Promise<void>; now?: () => number;
 };
-const MAX_ATTEMPTS = 2, RETRY_DELAY_MS = 500;
+const MAX_ATTEMPTS = 2, RETRY_DELAY_MS = 500, IDENTITY_ATTEMPTS = 3, IDENTITY_RETRY_MS = 200;
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 // numeric(20,12): a nominal cost with more digits is rounded up, never down.
 export function ceil12(value: string): string {
@@ -66,10 +68,21 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
       await notSent();
       throw new TurnStop(error instanceof ProviderBusyError ? error.code : 'TURN_PROVIDER_LIMIT_UNAVAILABLE');
     }
-    let identity: Promise<unknown> | undefined;
-    const onIdentity = (providerId: string) => {
-      identity ??= deps.db.identity({ actorId: deps.actorId, turnId: deps.turnId, seq, providerId }).catch(() => undefined);
+    // The provider id is what recovery looks the cost up by. Seeing it and saving it are kept apart: a failed write is retried
+    // (bounded) before the call ends, never taken as saved; it never stops the call (a final receipt carries the id too).
+    let seenId: string | undefined, saved = false, writing: Promise<void> | undefined;
+    const writeIdentity = async () => {
+      for (let attempt = 1; attempt <= IDENTITY_ATTEMPTS && !saved; attempt++) {
+        try { await deps.db.identity({ actorId: deps.actorId, turnId: deps.turnId, seq, providerId: seenId! }); saved = true; }
+        catch (error) {
+          logSwallowed('turn_call_identity_failed', error, { category: 'ai', attempt });
+          if (attempt < IDENTITY_ATTEMPTS) await (deps.sleep ?? (ms => new Promise(r => setTimeout(r, ms))))(IDENTITY_RETRY_MS * attempt);
+        }
+      }
     };
+    const onIdentity = (providerId: string) => { if (seenId) return; seenId = providerId; writing = writeIdentity(); };
+    /** Before the call ends: the first write has finished, and one more bounded round if it did not save. */
+    const identity = async () => { await writing; if (seenId && !saved) await writeIdentity(); };
     let observation: TransportObservation;
     try {
       let send: () => Promise<TransportObservation>;
@@ -88,11 +101,11 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
           throw new TurnStop('TURN_CALL_UNKNOWN');
         }
         // Started and broke (disconnect, timeout): the outcome is unknown. Keep it for recovery; never send it again.
-        await identity;
+        await identity();
         throw new TurnStop('TURN_CALL_UNKNOWN');
       }
     } finally { await release(); }
-    await identity;
+    await identity();
     const rejection = openRouterRejection(observation, call.identity, requestHash);
     if (rejection && observation.httpStatus === 402) {
       // 402: the platform account could not pay; never charged (Owner item 53).
@@ -103,20 +116,22 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
     const evidence = openRouterEvidence(observation, call.identity, 'response');
     const usage = (evidence.usage ?? null) as Record<string, unknown> | null;
     const completion = usage?.sdkResponse;
-    if (!evidence.final || typeof evidence.cost !== 'string' || !usage) {
-      // A usable answer whose cost is not final yet is still delivered; the call stays open for recovery to settle, by the
-      // provider id: the one in the body is stored when no header named it.
-      if (!identity && evidence.providerId) onIdentity(evidence.providerId);
-      await identity;
-      if (completion) return JSON.stringify(completion);
-      throw new TurnStop('TURN_CALL_UNKNOWN');
-    }
     // The receipt keeps token counts as exact decimal strings.
     const count = (value: unknown) => typeof value === 'number' ? value
       : typeof value === 'string' && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
-    const tokens = { promptTokens: count(usage.inputTokens), completionTokens: count(usage.outputTokens),
-      reasoningTokens: count(usage.reasoningTokens) };
-    const nominal = ceil12(nominalCost(call.pricing, tokens) ?? nominalActualFallback(evidence.cost, call.upperUsd));
+    const tokens = usage ? { promptTokens: count(usage.inputTokens), completionTokens: count(usage.outputTokens),
+      reasoningTokens: count(usage.reasoningTokens) } : null;
+    const nominalUsd = tokens ? nominalCost(call.pricing, tokens) : null;
+    // A usable answer whose cost or usage is not final yet is still delivered, and the call stays open: recovery (V2-8) looks the
+    // generation up by the provider id (the one in the body is stored when no header named it) and only when that bounded lookup
+    // still lacks the usage falls back to min(c, U), marked actual_fallback (BILL_PAYG_PLAN 3A, nominalActualFallback).
+    if (!evidence.final || typeof evidence.cost !== 'string' || !usage || nominalUsd === null) {
+      if (!seenId && evidence.providerId) onIdentity(evidence.providerId);
+      await identity();
+      if (completion) return JSON.stringify(completion);
+      throw new TurnStop('TURN_CALL_UNKNOWN');
+    }
+    const nominal = ceil12(nominalUsd);
     // The usage row keeps the token counts; the completion itself is the raw body, stored once.
     const receiptUsage = Object.fromEntries(Object.entries(usage).filter(([key]) => key !== 'sdkResponse'));
     const recorded = await deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'ok', nominalUsd: nominal,
