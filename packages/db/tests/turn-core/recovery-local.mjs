@@ -49,7 +49,7 @@ async function stale(interval='16 minutes'){
  await age(a,o.turnId,interval);
  return {a,id:o.turnId};
 }
-// A turn paused for credits, its freeze capped by the balance (0496): L = 30 = the balance, G = 60, H = min(G, 30) = 30; one call
+// A turn paused for credits, its freeze capped by the balance (0422 start threshold): L = 30 = the balance, G = 60, H = min(G, 30) = 30; one call
 // used 12, the next needs G_i = 24 and 18 < min(24, L) pauses it.
 async function paused(){
  const a=await account(30),o=await open(a,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});

@@ -1,6 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-8 (placeholder 0502 from the controller, after 0496; the real number is assigned before it is applied): pause, resume and the recovery job on the 0420 turns
+-- CORE-PATH-V2 V2-8 (placeholder 0502 from the controller, after 0422 start threshold; the real number is assigned before it is
+-- applied): pause, resume and the recovery job on the 0420 turns
 -- (docs/launch/tasks/CORE-PATH-V2.md sections 2.2, 2.5, 2.5.2, 3.3.2 item 7, 6.1 row V2-8).
 --   turns.recovery_lease_until  the claim lease of the recovery job: a turn one instance claimed is not claimed by another
 --                       instance until the lease ends (the instance died, or a settlement waits for its next lookup)
@@ -20,15 +21,15 @@
 --                       turn_close, the only function that changes a turn's state: interrupted (stopped for a report that was
 --                       stopping), expired (paused 24 hours: D = 0, the whole freeze back), or the closed-turn settlement pass
 --                       of #1512 (what became known since, counted once). Idempotent: anything not due is skipped.
---   turn_open           (0496's version, whole) resume_of (2.2, 2.5 "充值后继续"): a turn paused for credits continues as a new turn of the same session and
---                       kind. In one transaction: the stop-loss reserves the new bound, the paused turn closes (interrupted,
---                       failure_code resumed) and settles its known receipts (the work already done is charged once, the rest
---                       of its freeze comes back), the new turn freezes H = min(G, available) for what is left of the paused
---                       turn's call limits (never more), and the session moves to it. Anything refused (credits still short,
---                       stop-loss) rolls the whole resume back: the turn stays paused. Everything else in turn_open is unchanged.
---                       The paused turn is refunded in full there and what it would charge (D = min(N, H)) is carried as
---                       policy.carriedCredits into the new turn, frozen with it and settled by its rule: a fixed price stays the
---                       fixed price across the chain, and an expiry of the continuation refunds the whole chain.
+--   turn_open           whole copy of the 0422 start-threshold version, plus resume_of (2.2, 2.5 "充值后继续"): a turn paused
+--                       for credits continues as a new turn of the same session and kind. In one transaction: the stop-loss
+--                       reserves the new bound; the paused turn closes refunded in full (failed, failure_code resumed) and what
+--                       it would charge (D = min(N, H)) is carried as policy.carriedCredits into the new turn, frozen with it and
+--                       settled by its rule (a fixed price stays the fixed price across the chain; an expired continuation
+--                       refunds the whole chain; nothing carried is recorded as absorbed); the balance left after the carried
+--                       credits must still cover the start threshold L; the new turn's calls get what is left of the paused
+--                       turn's limits (never more), and the session moves to it. Anything refused (credits still short,
+--                       stop-loss, a model cost not final yet) rolls the whole resume back: the turn stays paused.
 --   turn_resume_carry   the resume check of turn_open (internal): turn_open itself only dispatches to it.
 --   turn_close          whole copy of 0421 plus the carried credits in N (close and settlement pass).
 -- Unknown costs past 24 hours: unchanged rules (BILL2 0.3): a model call with no final receipt is never presumed free or retried;

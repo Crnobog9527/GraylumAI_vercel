@@ -103,7 +103,8 @@ const frame = (id: string, extra: Record<string, unknown>) =>
   'data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model: MODEL, ...extra }) + '\n\n';
 const textFrame = (id: string, content: string) => frame(id, { choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] });
 const endFrames = (id: string) => frame(id, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
-  + frame(id, { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, cost: 0.006 } }) + 'data: [DONE]\n\n';
+  // A cost inside the call's frozen bound (this fixture's bound is small): above it the model would be blocked (budget_conflict).
+  + frame(id, { choices: [], usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cost: 0.000003 } }) + 'data: [DONE]\n\n';
 const sse = (id: string, parts: string[]) => new Response(parts.map(part => textFrame(id, part)).join('') + endFrames(id),
   { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
 
@@ -131,7 +132,7 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in 
   expect(first.events.map(e => e.type), JSON.stringify(first.events)).toEqual(['opened', 'text', 'text', 'result']);
   expect(JSON.parse(bodies[0]!).stream).toBe(true);
   const result = first.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
-  // n = (1000 x 3 + 200 x 15) / 1e6 = 0.006 USD; N = ceil(100 x 0.006 x 6) = 4 credits.
+  // n = 1 x 0.000003 = 0.000003 USD; N = ceil(100 x 0.000003 x 6) = 1 credit.
   expect(result).toMatchObject({ body: 'Synthetic answer', settlement: 'done' });
   expect(result.chargedCredits).toBeGreaterThan(0);
   // Frozen at open for the recovery job (V2-8): the model and its nominal price table, so a late receipt is priced as a live one.

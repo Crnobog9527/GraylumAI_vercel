@@ -33,7 +33,10 @@ BEGIN
         -- unusable: the provider charged for a result that cannot be used; the user's base is 0, the platform's cost is kept.
         actual_usd = CASE WHEN p_status IN ('ok','unusable') THEN p_actual_usd END,
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
-        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false
+        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false,
+        -- Above the frozen bound: the estimate failed (price or metering); the model is blocked for new calls (turn_call_begin).
+        budget_conflict = c.call_kind = 'model' AND p_status = 'ok'
+          AND (coalesce(p_actual_usd, 0) > c.upper_usd OR coalesce(p_nominal_usd, 0) > c.upper_usd)
       WHERE turn_id = p_turn_id AND seq = p_seq;
     -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
     -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs
