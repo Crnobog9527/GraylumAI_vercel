@@ -27,6 +27,27 @@ BEGIN
  ELSE scope:=t; END IF;
  did:=coalesce(scope->>'draftId',t->>'draftId')::uuid;
  pid:=coalesce(scope->>'workItemId',scope->>'projectId')::uuid;
+ IF runtime_rw_flag('chainBranch') THEN
+  -- Each way a business can be reached is looked up only when the scope carries its key (a comparison with NULL is never true),
+  -- and the draft route only when the account has an OPC draft at all; the statement above planned all five tables every time.
+  IF t->>'businessId' IS NOT NULL THEN
+   SELECT b.id INTO bid FROM opc_businesses b WHERE b.actor_id=a AND b.id=(t->>'businessId')::uuid;
+   IF bid IS NOT NULL THEN RETURN bid; END IF;
+  END IF;
+  IF (did IS NOT NULL OR pid IS NOT NULL)
+   AND EXISTS(SELECT 1 FROM opc_drafts d WHERE d.actor_id=a AND (d.draft_id=did OR d.project_id=pid)) THEN
+   SELECT b.id INTO bid FROM opc_businesses b WHERE b.actor_id=a AND EXISTS(
+    SELECT 1 FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id
+     WHERE db.business_id=b.id AND d.actor_id=a AND (d.draft_id=did OR d.project_id=pid));
+   IF bid IS NOT NULL THEN RETURN bid; END IF;
+  END IF;
+  IF pid IS NOT NULL THEN
+   SELECT b.id INTO bid FROM opc_businesses b WHERE b.actor_id=a AND EXISTS(
+    SELECT 1 FROM opc_accounts ac WHERE ac.business_id=b.id AND ac.actor_id=a
+     AND (ac.project_id=pid OR EXISTS(SELECT 1 FROM opc_items i WHERE i.account_project_id=ac.project_id AND i.work_item_id=pid)));
+  END IF;
+  RETURN bid;
+ END IF;
  SELECT b.id INTO bid FROM opc_businesses b WHERE b.actor_id=a AND (
   b.id=(t->>'businessId')::uuid OR EXISTS(
    SELECT 1 FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id

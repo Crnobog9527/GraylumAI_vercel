@@ -22,12 +22,17 @@ BEGIN
   IF NOT runtime_workspace_session(p_actor_id,(p_context->'request'->>'sessionId')::uuid) THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_DENIED';END IF;
   -- Retrieved snapshots remain immutable, but source revocation invalidates both
   -- replay and descendant history through the existing context dependency check.
-  FOR dep IN SELECT jsonb_array_elements_text(t.result->'dependencies')
-   FROM runtime_executions e JOIN runtime_tool_calls t ON t.execution_id=e.id
-   WHERE e.actor_id=p_actor_id AND e.request_id=(p_context->'request'->>'requestId')::uuid AND e.session_id=(p_context->'request'->>'sessionId')::uuid
-    AND t.name='read_source' AND t.result IS NOT NULL
-  LOOP
-   IF NOT opc_source_allowed(p_actor_id,dep::uuid) THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
-  END LOOP;
+  -- The loop below only ever sees tool calls of an execution of this very request; a request that has no execution yet
+  -- (every first admission) has none, and then runtime_tool_calls need not be planned at all.
+  IF NOT runtime_rw_flag('chainBranch') OR EXISTS(SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id
+   AND e.request_id=(p_context->'request'->>'requestId')::uuid AND e.session_id=(p_context->'request'->>'sessionId')::uuid) THEN
+   FOR dep IN SELECT jsonb_array_elements_text(t.result->'dependencies')
+    FROM runtime_executions e JOIN runtime_tool_calls t ON t.execution_id=e.id
+    WHERE e.actor_id=p_actor_id AND e.request_id=(p_context->'request'->>'requestId')::uuid AND e.session_id=(p_context->'request'->>'sessionId')::uuid
+     AND t.name='read_source' AND t.result IS NOT NULL
+   LOOP
+    IF NOT opc_source_allowed(p_actor_id,dep::uuid) THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
+   END LOOP;
+  END IF;
  END IF;
 END $function$;

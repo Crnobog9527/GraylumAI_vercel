@@ -12,7 +12,7 @@ DECLARE k text:=md5('bill2_scope_allowed|'||coalesce(a::text,'')||'|'||coalesce(
 BEGIN
  hit:=runtime_check_memo_get(k);
  IF hit IS NOT NULL THEN RETURN CASE hit WHEN 'n' THEN NULL ELSE hit::boolean END; END IF;
- result:=bill2_scope_allowed_before_memo(a,s);
+ IF runtime_rw_flag('chainBranch') THEN result:=bill2_scope_allowed_branch(a,s); ELSE result:=bill2_scope_allowed_before_memo(a,s); END IF;
  PERFORM runtime_check_memo_put(k,coalesce(result::text,'n'));
  RETURN result;
 END $function$;

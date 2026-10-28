@@ -89,6 +89,7 @@ try {
  await reviewArchiveCases({admin,connect,report,read});
  const preserved=sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b');
  sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
+ sql(read('packages/db/migrations/0420_db_rw_d_chain_branch.sql')); // DB-RW-D later replaces opc_target_business, which 0324/0326 define
  assert.equal(sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b'),preserved,
   'forward recovery/reapply retains every archive, source and revision');
  assert.deepEqual(objects(),finalCatalog,'archive recovery preserves the final catalog including 0325');

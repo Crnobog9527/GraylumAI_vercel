@@ -208,6 +208,7 @@ try {
   restoreClaimThresholdLock();
   sql(read('packages/db/migrations/0391_credit_available.sql')); // MAINT-P4 replaces atomic_pre_deduct's hold formula
   sql(read('packages/db/migrations/0416_db_rw_a_shared_row_locks.sql')); // DB-RW-A removes shared row locks from claim, admit and the permission chain
+  sql(read('packages/db/migrations/0420_db_rw_d_chain_branch.sql')); // DB-RW-D later replaces opc_target_business (0324/0326 define it), bill2_scope_allowed and runtime_context_allowed
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
