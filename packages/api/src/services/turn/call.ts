@@ -5,7 +5,7 @@ import { consumeOpenRouterNotStarted } from '../bill2/openRouterAdapter';
 import { openRouterEvidence } from '../bill2/openRouterEvidence';
 import { openRouterRejection } from '../bill2/openRouterRejection';
 import { nominalActualFallback, nominalCost, type NominalPricing } from '../../shared/nominalPricing';
-import { acquireSlot, type CounterStore } from './limiter';
+import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, type TurnDatabase } from './db';
 
 /*
@@ -18,7 +18,7 @@ import { tombstoned, type TurnDatabase } from './db';
  */
 export class TurnStop extends Error {
   constructor(readonly code: 'TURN_PAUSED_FOR_CREDITS' | 'TURN_TOMBSTONED' | 'TURN_CALL_UNKNOWN' | 'TURN_PROVIDER_402'
-    | 'TURN_CALL_DENIED') { super(code); }
+    | 'TURN_CALL_DENIED' | 'TURN_PROVIDER_BUSY' | 'TURN_PROVIDER_LIMIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE') { super(code); }
 }
 
 type Adapter = { prepareDispatch(input: unknown, identity: CallIdentity, onChunk?: (chunk: string) => void,
@@ -33,7 +33,7 @@ export type CallDeps = {
   db: TurnDatabase; adapter: Adapter; slots: CounterStore; actorId: string; turnId: number;
   /** The next free call sequence of this turn (one per attempt). */
   nextSeq: () => number;
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number) => Promise<void>; now?: () => number;
 };
 const MAX_ATTEMPTS = 2, RETRY_DELAY_MS = 500;
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -56,7 +56,15 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
       toolName: null, paid: null, requestHash, upperUsd: call.upperUsd, multiplier: call.multiplier });
     if (tombstoned(begun)) throw new TurnStop('TURN_TOMBSTONED');
     if (begun.paused) throw new TurnStop('TURN_PAUSED_FOR_CREDITS');
-    const release = await acquireSlot(deps.slots, `model:${call.modelId}`, { limit: call.concurrency, sleep: deps.sleep });
+    const notSent = () => deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'not_sent', nominalUsd: null,
+      actualUsd: null, usage: {}, providerId: null, payloadHash: requestHash, raw: null });
+    let release: () => Promise<void>;
+    try { release = await acquireSlot(deps.slots, `model:${call.modelId}`, { limit: call.concurrency, sleep: deps.sleep, now: deps.now }); }
+    catch (error) {
+      // No slot (all in flight, or the counter unreachable): nothing left, so the row is closed as certainly free.
+      await notSent();
+      throw new TurnStop(error instanceof ProviderBusyError ? error.code : 'TURN_PROVIDER_LIMIT_UNAVAILABLE');
+    }
     let identity: Promise<unknown> | undefined;
     const onIdentity = (providerId: string) => {
       identity ??= deps.db.identity({ actorId: deps.actorId, turnId: deps.turnId, seq, providerId }).catch(() => undefined);
@@ -67,16 +75,14 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
       try { send = await deps.adapter.prepareDispatch(input, call.identity, onChunk, onIdentity); }
       catch {
         // Refused locally before any byte left (shape whitelist, quote): certainly free, not worth a retry (the request is wrong).
-        await deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'not_sent', nominalUsd: null, actualUsd: null,
-          usage: {}, providerId: null, payloadHash: requestHash, raw: null });
+        await notSent();
         throw new TurnStop('TURN_CALL_DENIED');
       }
       try { observation = await send(); }
       catch (error) {
         // Proven unstarted (the time budget refused it before the transport): certainly free, retried once.
         if (consumeOpenRouterNotStarted(error, requestHash, send)) {
-          await deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'not_sent', nominalUsd: null, actualUsd: null,
-            usage: {}, providerId: null, payloadHash: requestHash, raw: null });
+          await notSent();
           if (attempt < MAX_ATTEMPTS) { await (deps.sleep ?? (ms => new Promise(r => setTimeout(r, ms))))(RETRY_DELAY_MS); continue; }
           throw new TurnStop('TURN_CALL_UNKNOWN');
         }
@@ -97,7 +103,10 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
     const usage = (evidence.usage ?? null) as Record<string, unknown> | null;
     const completion = usage?.sdkResponse;
     if (!evidence.final || typeof evidence.cost !== 'string' || !usage) {
-      // A usable answer whose cost is not final yet is still delivered; the call stays open for recovery to settle.
+      // A usable answer whose cost is not final yet is still delivered; the call stays open for recovery to settle, by the
+      // provider id: the one in the body is stored when no header named it.
+      if (!identity && evidence.providerId) onIdentity(evidence.providerId);
+      await identity;
       if (completion) return JSON.stringify(completion);
       throw new TurnStop('TURN_CALL_UNKNOWN');
     }

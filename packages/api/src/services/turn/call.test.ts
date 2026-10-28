@@ -104,4 +104,27 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     expect(kinds(denied.writes)).toEqual(['begin', 'record:not_sent']);
     expect(never).not.toHaveBeenCalled();
   });
+  it('no concurrency slot (busy or the counter down) closes the row as certainly unsent, never as unknown', async () => {
+    for (const [store, code] of [
+      [{ incr: async () => { throw new Error('redis down'); }, decr: async () => 0 }, 'TURN_PROVIDER_LIMIT_UNAVAILABLE'],
+      [{ incr: async () => 99, decr: async () => 98 }, 'TURN_PROVIDER_BUSY'],
+    ] as const) {
+      let t = 0;
+      const h = harness(), transport = vi.fn();
+      await expect(modelCall({ ...h.deps, slots: store, now: () => t, sleep: async (ms: number) => { t += ms; }, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) },
+        call, body)).rejects.toThrow(code);
+      expect(kinds(h.writes)).toEqual(['begin', 'record:not_sent']);
+      expect(transport).not.toHaveBeenCalled();
+    }
+  });
+
+  it('an answer whose cost is not final keeps the body provider id when no header named it, for recovery', async () => {
+    const h = harness();
+    const noCost = JSON.stringify({ ...JSON.parse(completion('gen-body')), usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } });
+    const transport = vi.fn(async () => new Response(noCost));
+    const out = await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body);
+    expect(JSON.parse(out).choices[0].message.content).toBe('hello');
+    expect(kinds(h.writes)).toEqual(['begin', 'identity']);
+    expect(h.writes[1]![1]).toMatchObject({ providerId: 'gen-body' });
+  });
 });

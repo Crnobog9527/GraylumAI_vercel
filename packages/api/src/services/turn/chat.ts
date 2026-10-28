@@ -10,7 +10,9 @@ import { catalogRead } from '../runtime/catalogCache';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import { freeChatInstructions } from '../runtime/primaryInstructions';
-import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
+import { assertRuntimeRequestCapacity } from '../runtime/context';
+import { isPositioningRefusal, POSITIONING_FALLBACK_INSTRUCTIONS, POSITIONING_MARKER } from '../runtime/positioningFallback';
+import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, type RequestContext } from '../runtime/providerRequest';
 import { freezeSharedPromptCache } from '../runtime/promptCache';
 import { readPurposeBudgets } from '../runtime/purposeBudgets';
 import { replySettingInstructions } from '../runtime/replyLanguage';
@@ -50,6 +52,9 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_CALL_UNKNOWN: { kind: 'interrupted', refundAll: false },
   TURN_PROVIDER_402: { kind: 'failed', refundAll: true },
   TURN_CALL_DENIED: { kind: 'failed', refundAll: true },
+  TURN_PROVIDER_BUSY: { kind: 'failed', refundAll: true },
+  TURN_PROVIDER_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
+  TURN_INPUT_TOO_LARGE: { kind: 'failed', refundAll: true },
 };
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
@@ -73,6 +78,12 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       : 'TURN_QUOTE_UNAVAILABLE' });
   }
 
+  // The current message with the smallest instructions must fit the input budget, or nothing opens (the request bytes are
+  // checked again before sending, with everything in them).
+  const guard = settings.ok ? settings.identityGuard ?? true : true;
+  if (Buffer.byteLength(input.text) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard)) > quote.inputLimit)
+    return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
+
   // 2. Open: one model call (2.5.3, V2-4a has no tools) plus the possible positioning check, outside M and the freeze.
   const decisionUpperUsd = config.data.decisionUpperUsd;
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
@@ -87,7 +98,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
 
   let seq = 0;
   const callDeps = { db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
-    adapter: openRouterAdapter({ credential: quote.credential, transport: deps.transport }) };
+    // allowWorkspaceRead: the free-chat request shape, which may carry a history cache marker (PROMPT-CACHE-ALL).
+    adapter: openRouterAdapter({ allowWorkspaceRead: true, credential: quote.credential, transport: deps.transport }) };
   const close = (kind: CloseKind, extra: { messages?: Array<{ role: 'user' | 'assistant'; content: string }>; delivered?: boolean;
     refundAll?: boolean; failureCode?: string } = {}) =>
     db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
@@ -123,12 +135,16 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       }
     }
 
-    // 4. The prompt: site-wide segment (brand, free-chat rules) then the per-user segment (reply language), both cached.
-    const shared = withBrandIdentity(freeChatInstructions(fallback), settings.ok ? settings.identityGuard ?? true : true);
-    const instructions = shared + '\n' + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage));
+    // 4. The prompt: site-wide segment (brand, free-chat rules) then the per-user segment (reply language and, for an account
+    // without a confirmed positioning, the primary model's fallback rule: "Decisions 先判断，主模型兜底"), both cached. The
+    // positioning-page redirect is only for an account that has a positioning (as admission.ts).
+    const gated = Boolean(gate && !gate.positioned);
+    const shared = withBrandIdentity(freeChatInstructions(!gated), guard);
+    const instructions = shared + '\n' + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage))
+      + (fallback ? POSITIONING_FALLBACK_INSTRUCTIONS : '');
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
       quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: true });
-    const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, tools: [], network: 'deny',
+    const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, textStream: PLAIN_TEXT_STREAM, tools: [], network: 'deny',
       reasoning: quote.reasoning, ...(promptCache ? { promptCache } : {}) };
     const callPolicy = { modelId: quote.modelId, provider: 'openrouter', account: quote.identity.account, model: quote.model,
       protocol: 'openrouter-chat-v1' as const, providerLimits: quote.providerLimits, upperUsd: quote.upperUsd, outputLimit: quote.outputLimit,
@@ -136,17 +152,37 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
     const left = quote.inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(input.text) - 8192;
     const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
-    let text = '';
+    // The reply streams. Under the fallback rule nothing is sent while the text so far could still be the refusal marker, which
+    // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
+    let text = '', sentChars = 0, holding = fallback;
     const output = await runRuntime({
       model: quote.model, instructions, input: input.text, session: turnSession(history),
-      maxOutputTokens: quote.outputLimit, maxTurns: 1, reasoning: quote.reasoning, tools: [],
-      selectHistory: async items => items,
-      onText: delta => { text += delta; emit({ type: 'text', delta }); },
-      exchange: (_sequence, body, onChunk) => modelCall(callDeps, quote,
-        openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true }), onChunk)
-        .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; }),
+      maxOutputTokens: quote.outputLimit, maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,
+      // The history was trimmed above; the SDK appends what this returns to nothing else, so the current message goes last.
+      selectHistory: async (items, incoming) => [...items, ...incoming],
+      onText: delta => {
+        text += delta;
+        if (holding) {
+          const start = text.trimStart();
+          if (POSITIONING_MARKER.startsWith(start) || start.startsWith(POSITIONING_MARKER)) return;
+          holding = false;
+        }
+        if (text.length > sentChars) { emit({ type: 'text', delta: text.slice(sentChars) }); sentChars = text.length; }
+      },
+      exchange: (_sequence, body, onChunk) => {
+        const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
+        try { assertRuntimeRequestCapacity(request, quote.inputLimit); }
+        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); return Promise.reject(stopped); }
+        return modelCall(callDeps, quote, request, onChunk)
+          .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
+      },
     });
     const reply = output || text;
+    // The fallback refusal: never shown or saved; Graylum bears the model cost (the stop-loss still counts it).
+    if (fallback && isPositioningRefusal(reply)) {
+      await close('failed', { refundAll: true, failureCode: 'positioning_required' });
+      return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
+    }
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: input.text }, { role: 'assistant', content: reply }] });

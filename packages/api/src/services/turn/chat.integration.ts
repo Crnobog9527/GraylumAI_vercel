@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
@@ -7,6 +7,7 @@ import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
 import type { PositioningClassifier } from '../runtime/positioningGate';
+import { POSITIONING_MARKER } from '../runtime/positioningFallback';
 import { runChatTurn, CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
@@ -58,6 +59,8 @@ async function setup() {
   await db.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
     [session, actor, JSON.stringify({ kind: 'positioning_draft', probe: randomUUID() }), randomUUID()]);
   const { pricing } = pricingConfig(MODEL, ROUTE, '0.000003', '0.000015');
+  // A cache-write price: the free chat freezes its prompt cache and marks one history message (PROMPT-CACHE-ALL).
+  (pricing.endpoints[0]!.base as Record<string, string>).input_cache_write = '0.00000375';
   const config = { pricing, reasoning: { route: ROUTE, purposes: { interactive: { mode: 'off', wire: 'reasoning_effort' } },
     catalog: { fetchedAt: pricing.fetchedAt, model: MODEL, reasoning: { mandatory: false, defaultEnabled: false, supportedEfforts: ['low', 'high'],
       defaultEffort: 'high', supportsMaxTokens: true },
@@ -92,27 +95,35 @@ function countingAdmin() {
   return { admin, calls };
 }
 
-const completion = (id: string) => JSON.stringify({ id, object: 'chat.completion', created: 1, model: MODEL,
-  choices: [{ index: 0, message: { role: 'assistant', content: 'Synthetic answer' }, finish_reason: 'stop' }],
-  usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, cost: '0.006' } });
+// The streamed OpenRouter response: text frames, the stop frame and the usage frame with the cost.
+const frame = (id: string, extra: Record<string, unknown>) =>
+  'data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model: MODEL, ...extra }) + '\n\n';
+const textFrame = (id: string, content: string) => frame(id, { choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] });
+const endFrames = (id: string) => frame(id, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+  + frame(id, { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, cost: 0.006 } }) + 'data: [DONE]\n\n';
+const sse = (id: string, parts: string[]) => new Response(parts.map(part => textFrame(id, part)).join('') + endFrames(id),
+  { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
 
 // The synthetic Decisions check: allowed, reporting a provider cost of 0.00003 USD.
 const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.00003); return 'allow'; };
-async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier }) {
+async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier;
+  onEvent?: (event: TurnEvent) => void }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
     gate: { classify: input.gate ?? allowGate } },
-  { actorId: input.actor, sessionId: input.session, requestId: randomUUID(), text: input.text }, e => events.push(e)));
+  { actorId: input.actor, sessionId: input.session, requestId: randomUUID(), text: input.text }, e => { events.push(e); input.onEvent?.(e); }));
   return { events, calls };
 }
 
-it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, calls once in three writes, settles once and appends both messages', async () => {
+it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in three writes, settles once and appends both messages', async () => {
   const f = await setup();
   let posts = 0;
-  const transport: typeof fetch = async () => { posts++; return new Response(completion('gen-core-' + posts), {
-    headers: { 'x-generation-id': 'gen-core-' + posts } }); };
+  const bodies: string[] = [];
+  const transport: typeof fetch = async (_url, init) => { posts++; bodies.push(String(init?.body));
+    return sse('gen-core-' + posts, ['Synthetic ', 'answer']); };
   const first = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
-  expect(first.events.map(e => e.type), JSON.stringify(first.events)).toEqual(['opened', 'result']);
+  expect(first.events.map(e => e.type), JSON.stringify(first.events)).toEqual(['opened', 'text', 'text', 'result']);
+  expect(JSON.parse(bodies[0]!).stream).toBe(true);
   const result = first.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   // n = (1000 x 3 + 200 x 15) / 1e6 = 0.006 USD; N = ceil(100 x 0.006 x 6) = 4 credits.
   expect(result).toMatchObject({ body: 'Synthetic answer', settlement: 'done' });
@@ -125,7 +136,15 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, calls once in three wri
     .toEqual([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Synthetic answer' }]);
   // The second turn is warm (catalog cache): its round trips are the turn's own.
   const second = await turn({ actor: f.actor, session: f.session, text: 'Again', transport });
-  expect(second.events.map(e => e.type)).toEqual(['opened', 'result']);
+  expect(second.events.map(e => e.type)).toEqual(['opened', 'text', 'text', 'result']);
+  // The second request carries the history and one cache marker on it, and the adapter sent it (no TURN_CALL_DENIED).
+  const marked = (JSON.parse(bodies[1]!).messages as Array<{ role: string; content: unknown }>)
+    .filter(m => m.role !== 'system' && JSON.stringify(m.content).includes('cache_control'));
+  expect(marked).toHaveLength(1);
+  // Both requests end with the current message, after the history.
+  expect(JSON.parse(bodies[0]!).messages.slice(1)).toEqual([{ role: 'user', content: 'Hello' }]);
+  expect(JSON.parse(bodies[1]!).messages.slice(1).map((m: { role: string }) => m.role)).toEqual(['user', 'assistant', 'user']);
+  expect(JSON.parse(bodies[1]!).messages.at(-1)).toEqual({ role: 'user', content: 'Again' });
   // The budget in two lines (plan 2.3 / 3.1, Fable 10-28): the turn's own <= 5 without tools, +2 for the positioning check of an
   // account without a confirmed positioning; plus a fixed 2 per request (catalog version check, the platform key read fresh).
   const own = second.calls.filter(c => c.startsWith('rpc/turn_')), fixed = second.calls.filter(c => !c.startsWith('rpc/turn_'));
@@ -142,8 +161,8 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken after it started keeps the pr
   const f = await setup();
   let posts = 0;
   const transport: typeof fetch = async () => { posts++; return new Response(new ReadableStream({ start(controller) {
-    controller.enqueue(new TextEncoder().encode('{"id":"gen-broken","choi')); controller.error(new Error('connection lost'));
-  } }), { headers: { 'x-generation-id': 'gen-broken' } }); };
+    controller.enqueue(new TextEncoder().encode(textFrame('gen-broken', 'Half an ans'))); controller.error(new Error('connection lost'));
+  } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-broken' } }); };
   const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
   expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
   expect(posts).toBe(1);
@@ -153,4 +172,46 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken after it started keeps the pr
   expect(t).toMatchObject({ close_kind: 'interrupted', settlement: 'pending', charged_credits: null });
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - t.reserved_credits);
   expect((await db.query('select count(*)::int n from session_messages where session_id=$1', [f.session])).rows[0].n).toBe(0);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: the client gets text before the provider response ends', async () => {
+  const f = await setup();
+  let shown!: () => void;
+  const textShown = new Promise<void>(resolve => { shown = resolve; });
+  const encoder = new TextEncoder();
+  const transport: typeof fetch = async () => new Response(new ReadableStream({ async start(controller) {
+    controller.enqueue(encoder.encode(textFrame('gen-live', 'First words')));
+    // The provider sends nothing more until the client has seen the first words.
+    await textShown;
+    controller.enqueue(encoder.encode(textFrame('gen-live', ', then the rest') + endFrames('gen-live')));
+    controller.close();
+  } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-live' } });
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport,
+    onEvent: e => { if (e.type === 'text') shown(); } });
+  expect(out.events.map(e => e.type)).toEqual(['opened', 'text', 'text', 'result']);
+  expect(out.events.at(-1)).toMatchObject({ body: 'First words, then the rest' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: an account without a positioning gets the fallback rule; a refusal is never shown, saved or charged', async () => {
+  const f = await setup();
+  const bodies: string[] = [];
+  const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body));
+    return sse('gen-refuse', [POSITIONING_MARKER.slice(0, 9), POSITIONING_MARKER.slice(9)]); };
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Plan my posts for next week', transport });
+  expect(out.events.map(e => e.type)).toEqual(['opened', 'error']);
+  expect(out.events.at(-1)).toMatchObject({ code: 'POSITIONING_REQUIRED' });
+  expect(JSON.stringify(JSON.parse(bodies[0]!).messages[0])).toContain(POSITIONING_MARKER);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
+  expect((await db.query('select count(*)::int n from session_messages where session_id=$1', [f.session])).rows[0].n).toBe(0);
+  expect((await db.query("select failure_code,charged_credits from turns where actor_id=$1", [f.actor])).rows)
+    .toEqual([{ failure_code: 'positioning_required', charged_credits: 0 }]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a message over the input budget is refused before anything opens or is sent', async () => {
+  const f = await setup();
+  const transport = vi.fn<typeof fetch>();
+  const out = await turn({ actor: f.actor, session: f.session, text: 'x'.repeat(95_000), transport });
+  expect(out.events).toEqual([{ type: 'error', code: 'TURN_INPUT_TOO_LARGE' }]);
+  expect(transport).not.toHaveBeenCalled();
+  expect((await db.query('select count(*)::int n from turns where actor_id=$1', [f.actor])).rows[0].n).toBe(0);
 });
