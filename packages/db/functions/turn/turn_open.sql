@@ -28,6 +28,7 @@ BEGIN
     OR coalesce((p_policy->'limits'->>'model')::numeric, 0) < 1
     OR coalesce((p_policy->'limits'->>'paidTools')::numeric, -1) < 0
     OR coalesce((p_policy->'limits'->>'freeTools')::numeric, -1) < 0
+    OR coalesce((p_policy->'limits'->>'decisions')::numeric, 0) < 0
     OR jsonb_typeof(p_policy->'stopLoss') <> 'object'
     OR coalesce((p_policy->'stopLoss'->>'limitUsd')::numeric, 0) <= 0
     OR coalesce((p_policy->'stopLoss'->>'p')::numeric, 0) < 1

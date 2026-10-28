@@ -36,8 +36,9 @@ BEGIN
   UPDATE turn_calls SET status = 'unknown', cost_pending = true
    WHERE turn_id = p_turn_id AND status IN ('dispatched','identified');
   q := (t.policy->>'q')::numeric;
-  -- N = ceil(q x sum(n_i x m_i)) over the known receipts; n_total is the provider cost the stop-loss counts as spent.
-  SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok'), 0))::integer,
+  -- N = ceil(q x sum(n_i x m_i)) over the known receipts the user pays for (never the positioning check); n_total is the provider
+  -- cost of every receipt, the positioning check included, which the stop-loss counts as spent.
+  SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
          coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0),
          coalesce(sum(upper_usd) FILTER (WHERE cost_pending), 0),
          coalesce(bool_or(cost_pending), false)
