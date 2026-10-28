@@ -25,7 +25,9 @@ const opened = z.object({ turnId: z.number().int().positive(), state: z.enum(['r
   history: z.array(historyItem),
   // Read by turn_open with the account row: the reply language setting and, for a free chat, the positioning gate.
   replyLanguage: z.unknown().optional(),
-  positioning: z.object({ positioned: z.boolean(), refusals24h: z.number().int().nonnegative() }).nullable().optional() });
+  positioning: z.object({ positioned: z.boolean(), refusals24h: z.number().int().nonnegative() }).nullable().optional(),
+  // The per-kind hook: what a kind's prompt needs, built by its branch in turn_open (null until a kind adds one).
+  kindContext: z.unknown().optional() });
 export type Opened = z.infer<typeof opened>;
 const begun = tombstones.extend({ state: z.enum(['running', 'paused']), status: z.string().optional(),
   replay: z.boolean().optional(), paused: z.boolean().optional() });
@@ -72,9 +74,12 @@ export function turnDatabase(clients: TurnClients) {
         p_nominal_usd: a.nominalUsd, p_actual_usd: a.actualUsd, p_usage: a.usage, p_provider_id: a.providerId,
         p_payload_hash: a.payloadHash, p_raw: a.raw }, recorded),
     close: (a: { actorId: string; turnId: number; kind: CloseKind; messages: Array<{ role: 'user' | 'assistant'; content: string }>;
-      delivered: boolean; refundAll?: boolean; failureCode?: string | null }) =>
+      delivered: boolean; refundAll?: boolean; failureCode?: string | null;
+      /** The per-kind hook: what the kind keeps from its result, written by its function in the close transaction. */
+      kindResult?: unknown }) =>
       call(w, 'turn_close', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_close_kind: a.kind, p_messages: a.messages,
-        p_delivered: a.delivered, p_refund_all: a.refundAll ?? false, p_failure_code: a.failureCode ?? null }, closed),
+        p_delivered: a.delivered, p_refund_all: a.refundAll ?? false, p_failure_code: a.failureCode ?? null,
+        p_kind_result: a.kindResult ?? null }, closed),
   };
 }
 export type TurnDatabase = ReturnType<typeof turnDatabase>;
