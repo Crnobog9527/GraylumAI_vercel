@@ -12,6 +12,14 @@ import { latestReportSettlement, readCredits } from './support/ui';
  * Journeys 1 and 3 share one draft, because every draft costs real research calls: the three steps, then the report,
  * stopped on purpose (free while under two stops in 24 h, then it asks first), then written to the end and finalized.
  */
+/** A reused draft whose conversation was deleted (journey 4a of an earlier run) is read-only: no report, no review to work on. */
+async function skipIfReadOnly(page: import('@playwright/test').Page) {
+  const readOnly = page.getByRole('heading', { name: '定位分析（只读）' });
+  const normal = page.getByRole('navigation', { name: '定位步骤' });
+  await expect(readOnly.or(normal).first()).toBeVisible({ timeout: 60_000 });
+  test.skip(await readOnly.isVisible(), 'the draft\'s conversation was already deleted: it is read-only');
+}
+
 test.describe.serial('journey 1 + 3: positioning to a finalized report, with stops', () => {
   // A ready draft can be handed in (CORE_E2E_DRAFT_URL, a path like /app/positioning/<id>) so the later journeys run on their own.
   let draftUrl = process.env.CORE_E2E_DRAFT_URL ? new URL(process.env.CORE_E2E_DRAFT_URL, process.env.PLAYWRIGHT_BASE_URL).toString() : '';
@@ -38,6 +46,23 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     const gold = (await requireAccounts()).gold;
     const { page } = await openAs('gold');
     await page.goto(draftUrl);
+    await skipIfReadOnly(page);
+
+    // A draft that already carries a complete or finalized report offers no way to start one (a reused draft, CORE_E2E_DRAFT_URL):
+    // there is nothing to stop. Look at the footer entry: "生成完整报告（N 积分）" starts one, "完整运营策略报告" opens an existing one.
+    const startsHere = page.getByRole('button', { name: /^生成完整报告（[\d,]+ 积分）$/ });
+    const opens = page.getByRole('button', { name: /^完整运营策略报告$/ });
+    // Once the positioning is published the footer has no report entry at all (it offers "修订定位，保留原版本" instead).
+    const published = page.getByRole('button', { name: '修订定位，保留原版本' });
+    await expect(startsHere.or(opens).or(published).first()).toBeVisible({ timeout: 60_000 });
+    test.skip(await published.isVisible(), 'the draft is already published: it has no report to stop');
+    if (!(await startsHere.isVisible())) {
+      await opens.click();
+      const regenerate = reportDialog(page).getByRole('button', { name: /^重新生成/ });
+      const hasOutline = await reportDialog(page).getByRole('navigation', { name: '报告目录' }).waitFor({ state: 'visible', timeout: 15_000 }).then(() => true, () => false);
+      test.skip(hasOutline && (await regenerate.count()) === 0, 'the draft already has a complete or finalized report: nothing to stop');
+      await reportDialog(page).getByRole('button', { name: '关闭完整运营策略报告' }).click();
+    }
 
     const prior = await stopsInLast24h(gold.id);
     const before = await readCredits(page);
@@ -89,9 +114,12 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     test.skip(!draftUrl, 'needs the draft from the previous test');
     const { page } = await openAs('gold');
     await page.goto(draftUrl);
+    await skipIfReadOnly(page);
     const before = await readCredits(page);
     // A reused draft may already carry a complete report from an earlier run (CORE_E2E_DRAFT_URL): then it is only finalized.
     const entry = page.getByRole('button', { name: /^完整运营策略报告$/ });
+    test.skip(await page.getByRole('button', { name: '修订定位，保留原版本' }).waitFor({ state: 'visible', timeout: 5_000 }).then(() => true, () => false),
+      'the draft is already published (and its review adopted): there is no report entry left to check');
     let written = false;
     let alreadyFinal = false;
     if (await entry.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false)) {
@@ -121,6 +149,7 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     test.skip(!draftUrl, 'needs the draft from the previous test');
     const { page } = await openAs('gold');
     await page.goto(draftUrl);
+    await skipIfReadOnly(page);
     const before = await readCredits(page);
 
     // A review that already ran on this draft (a reused draft, or a run that was cut short) is opened instead of paid for again.
@@ -147,6 +176,14 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     await meter.checkpoint('journey 6: review ran');
 
     const count = await chapters.count();
+    // A review whose choices were already made (a reused draft) shows them locked, with the outcome in place of the confirm bar.
+    if (count > 0 && (await chapters.first().getByRole('radio').first().isDisabled())) {
+      const outcome = page.getByText(/新版本已生成|你选择全部保留原文|你放弃了这次修改/);
+      await expect(outcome.first()).toBeVisible({ timeout: 30_000 });
+      test.info().annotations.push({ type: 'jury-already-adopted', description: (await outcome.first().innerText()).slice(0, 200) });
+      await meter.finishJourney('journey 6: jury (choices already recorded)');
+      return;
+    }
     if (count === 0) {
       // Rule: the review price is charged only when a usable revised draft exists; otherwise it is refunded in full.
       test.info().annotations.push({ type: 'jury-no-draft', description: (await noDraft.first().innerText()).slice(0, 200) });
@@ -190,6 +227,13 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     const link = page.getByLabel('平台、账号与工作').locator('a[href$="' + new URL(draftUrl).pathname + '"]').first();
     await expect(link).toBeVisible();
     const row = link.locator('xpath=..');
+    // A reused draft whose conversation was already deleted only has to show the read-only state.
+    if (await row.getByText('对话已删除 · 只读').isVisible()) {
+      await page.goto(draftUrl);
+      await expect(page.getByRole('heading', { name: '定位分析（只读）' })).toBeVisible();
+      await meter.finishJourney('journey 4a: draft conversation was already deleted');
+      return;
+    }
     await link.hover();
     await row.getByRole('button', { name: /定位分析的更多操作$/ }).click({ force: true });
     await page.getByRole('menuitem', { name: '删除对话' }).click();
