@@ -23,6 +23,8 @@ export const GROUPS = {
   report: '^report_',
   research: '^research_',
   voice: '^voice_',
+  // CORE-PATH-V2: the per-turn core functions (turn_open, turn_call_*, turn_close, turn_settle_credits, turn_tombstones).
+  turn: '^turn_',
 };
 
 const groupOf = () => `CASE ${Object.entries(GROUPS).map(([key, pattern]) => `WHEN p.proname ~ '${pattern}' THEN '${key}'`).join(' ')}
