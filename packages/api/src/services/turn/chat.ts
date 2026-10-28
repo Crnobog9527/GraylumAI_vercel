@@ -192,7 +192,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     // Paused for credits: the turn waits (recovery or a resume closes it); everything else closes now.
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
-      const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: false };
+      // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
+      // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
+      const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
       await close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }).catch(() => undefined);
     }
     emit({ type: 'error', code, turnId: opened.turnId });

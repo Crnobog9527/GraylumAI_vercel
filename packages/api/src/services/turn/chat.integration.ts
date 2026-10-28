@@ -215,3 +215,20 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a message over the input budget is refused befo
   expect(transport).not.toHaveBeenCalled();
   expect((await db.query('select count(*)::int n from turns where actor_id=$1', [f.actor])).rows[0].n).toBe(0);
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a billed response truncated before any text is fully refunded and its cost kept', async () => {
+  const f = await setup();
+  const transport: typeof fetch = async () => new Response(
+    frame('gen-trunc', { choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })
+    + frame('gen-trunc', { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] })
+    + frame('gen-trunc', { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 8192, total_tokens: 9192, cost: 0.13 } })
+    + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-trunc' } });
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
+  expect(out.events.at(-1)).toMatchObject({ type: 'error' });
+  expect((await db.query("select c.status,c.provider_id from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model'", [f.actor])).rows)
+    .toEqual([{ status: 'ok', provider_id: 'gen-trunc' }]);
+  expect((await db.query('select close_kind,charged_credits from turns where actor_id=$1', [f.actor])).rows)
+    .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
+  expect((await db.query('select count(*)::int n from session_messages where session_id=$1', [f.session])).rows[0].n).toBe(0);
+});
