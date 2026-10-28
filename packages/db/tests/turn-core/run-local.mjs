@@ -378,6 +378,28 @@ try{
   assert.ok(near(Number(before.r)-Number(after.r),0.1),`released ${before.r} - ${after.r}`);
   report.checks.push('the positioning check needs no freeze, is not charged, takes no slot of M (own limit 1), and its cost is spent on the stop-loss');
  }
+ // 16. #1512 review: an erasure that holds the account row (as account_erasure_confirm) while a turn_open waits for it; once it
+ // commits, the open re-checks under the lock and is refused: no freeze, no turn.
+ {
+  const a=await account(1000);
+  const p1=await peer(),p2=await peer();
+  try{
+   await p1.query('begin');
+   await p1.query('select 1 from profiles where id=$1 for update',[a.actor]);
+   await p1.query("update profiles set status='deleted',is_deleted='true',deleted_at=clock_timestamp() where id=$1",[a.actor]);
+   await p1.query('insert into account_erasure_requests(profile_id,request_id) values($1,$2)',[a.actor,randomUUID()]);
+   const opening=refusal(open(a,{client:p2}));
+   // Wait until the open is blocked on the account row, then let the erasure commit.
+   for(let i=0;i<100&&!(await one("select count(*)::int v from pg_stat_activity where pid=$1 and wait_event_type='Lock'",[p2.processID]));i++)
+    await new Promise(r=>setTimeout(r,20));
+   assert.equal(await one("select count(*)::int v from pg_stat_activity where pid=$1 and wait_event_type='Lock'",[p2.processID]),1,'open waits');
+   await p1.query('commit');
+   assert.match(await opening,/TURN_ACCOUNT_ERASING/);
+   assert.equal(await one('select count(*)::int v from turns where actor_id=$1',[a.actor]),0);
+   assert.equal(await balance(a),1000);
+  }finally{await p1.end();await p2.end();}
+  report.checks.push('a turn_open waiting on an account erasure that commits is refused under the account lock: no freeze, no turn');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

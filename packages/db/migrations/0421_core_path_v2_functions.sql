@@ -300,7 +300,12 @@ BEGIN
     -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
     -- the balance is read: two sessions of one account in different stop-loss buckets would otherwise both size H on the same
     -- balance, and the second would be refused instead of freezing what is left. Order: session, bucket, account (as turn_close).
-    PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+    -- Re-checked under the lock: an erasure that held it (account_erasure_confirm) may have committed while this waited.
+    SELECT * INTO prof FROM profiles WHERE id = p_actor_id FOR UPDATE;
+    IF prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false'
+      OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
+      RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
+    END IF;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
     h := least(g, available);
