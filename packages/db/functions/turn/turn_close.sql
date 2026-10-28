@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, 
 AS $function$
 DECLARE
   t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
-  v_kind text := p_close_kind; tomb jsonb; stops integer; next_seq integer; msg jsonb; pending boolean;
+  v_kind text := p_close_kind; tomb jsonb; stops integer; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
 BEGIN
   IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
     RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
@@ -41,8 +41,11 @@ BEGIN
   SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
          coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
          coalesce(sum(upper_usd) FILTER (WHERE cost_pending), 0),
-         coalesce(bool_or(cost_pending), false)
-    INTO credits, n_total, pending_upper, pending
+         coalesce(bool_or(cost_pending), false),
+         -- Only an unknown model call holds the user's settlement: a third-party tool whose result is unknown is 0 to the user
+         -- (Owner 10-13, plan 2.5.2) and the positioning check is never theirs; both keep only the provider cost pending.
+         coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
+    INTO credits, n_total, pending_upper, pending, user_pending
   FROM turn_calls WHERE turn_id = p_turn_id;
   h := t.reserved_credits;
 
@@ -67,8 +70,10 @@ BEGIN
     charge := least(credits, h);
   END IF;
 
-  -- Credits: settled once; with an unknown cost the whole freeze waits for recovery (one freeze is settled exactly once).
-  IF NOT pending AND t.policy->>'holdId' IS NOT NULL THEN
+  -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
+  -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
+  -- settlement of the same freeze returns the first one.
+  IF NOT user_pending AND t.policy->>'holdId' IS NOT NULL THEN
     PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
   END IF;
 
@@ -83,8 +88,8 @@ BEGIN
   END IF;
 
   UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = now(), updated_at = now(),
-      charged_credits = CASE WHEN pending THEN NULL ELSE charge END,
-      absorbed_credits = CASE WHEN pending THEN NULL ELSE greatest(credits - charge, 0) END,
+      charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
+      absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,
       settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END,
       stopped_by_user = (v_kind = 'stopped'), delivered = p_delivered AND v_kind IN ('completed','stopped'),
       failure_code = p_failure_code

@@ -465,6 +465,32 @@ try{
   }
   report.checks.push('a replay of an old request is refused once the conversation is deleted or the account is erasing: no history read back');
  }
+ // 20. #1512 review (plan 2.5.2, Owner 10-13): a third-party tool timing out without a final receipt is 0 to the user. The known
+ // model cost settles now and the rest of the freeze comes back; only the tool's provider cost and its stop-loss share wait.
+ {
+  const a=await account(1000);
+  const o=await open(a,{pol:policy({gCredits:60})});
+  const before=await dayTotals();
+  await begin(a,o.turnId,1);await record(a,o.turnId,1,{n:0.01}); // N = ceil(100 x 0.01 x 6) = 6
+  await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.02});  // the search tool times out: no final receipt
+  const closed=await close(a,o.turnId);
+  assert.equal(closed.chargedCredits,6);
+  assert.equal(closed.settlement,'pending','the provider cost of the tool is still unknown');
+  assert.equal(await balance(a),994,'the freeze minus the known model cost came back');
+  assert.deepEqual((await c.query("select call_kind,status,cost_pending from turn_calls where turn_id=$1 order by seq",[o.turnId])).rows,
+   [{call_kind:'model',status:'ok',cost_pending:false},{call_kind:'tool',status:'unknown',cost_pending:true}]);
+  const after=await dayTotals();
+  // U_turn 0.1 reserved at open; close spends 0.01 and keeps the tool's 0.02 reserved until recovery.
+  assert.ok(near(Number(after.s)-Number(before.s),0.01));
+  assert.ok(near(Number(before.r)-Number(after.r),0.08),`released ${before.r} - ${after.r}`);
+  // A model call without a final receipt still holds the whole freeze.
+  const b=await account(1000);
+  const ob=await open(b,{pol:policy({gCredits:60})});
+  await begin(b,ob.turnId,1);
+  assert.deepEqual(await close(b,ob.turnId,'interrupted',{messages:[],delivered:false}).then(r=>[r.chargedCredits,r.settlement]),[null,'pending']);
+  assert.equal(await balance(b),940);
+  report.checks.push('an unknown third-party tool result is 0 to the user: the known model cost settles and the rest of the freeze comes back; an unknown model call still holds it');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
