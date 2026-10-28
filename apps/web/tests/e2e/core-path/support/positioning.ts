@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { coreSql } from './db';
 import { gotoWithBypass } from '../../support/deploymentProtection';
@@ -56,13 +56,23 @@ export async function completeBenchmarkStep(page: Page, meter: SpendMeter) {
   await keywordCard.getByRole('button', { name: '确认关键词' }).click();
   await expect(keywordCard).toBeHidden({ timeout: 60_000 }).catch(() => undefined);
   const candidates = page.locator('section[aria-label="对标候选账号"], section[aria-label="补选对标账号"]').first();
+  // The supplier search sometimes comes back empty ("这次没取到数据") and no candidate card follows. The product's own way on is to
+  // ask the coach again, so do that once before giving up.
+  const cardShown = () => candidates.waitFor({ state: 'visible', timeout: 150_000 }).then(() => true, () => false);
+  if (!(await cardShown())) {
+    test.info().annotations.push({ type: 'benchmark-search-empty', description: 'no candidate card after the first search; asked the coach to search again' });
+    await sendAndWait(page, '这次没有找到候选账号，请换一组关键词再搜一次。', meter, 'benchmark ask again');
+    const again = page.locator('section[aria-label="关键词选择"]').last();
+    if (await again.isVisible().catch(() => false)) await again.getByRole('button', { name: '确认关键词' }).click();
+  }
   await expect(candidates).toBeVisible({ timeout: 240_000 });
   await meter.checkpoint('benchmark search');
   // Nothing is ticked at first and the button stays off until the card's minimum is reached: tick accounts until it turns on.
   const confirmChoice = candidates.getByRole('button', { name: '确认选择' });
-  const boxes = candidates.getByRole('group', { name: '候选账号' }).getByRole('checkbox');
+  // Reference-only accounts ("头部账号", "只作参考") have a disabled box; the others are ticked one by one, counted by "已选 N 个".
+  const boxes = candidates.getByRole('checkbox');
   for (let i = 0; i < await boxes.count() && !(await confirmChoice.isEnabled()); i += 1) {
-    if (await boxes.nth(i).isEnabled()) await boxes.nth(i).check();
+    if (await boxes.nth(i).isEnabled() && !(await boxes.nth(i).isChecked())) await boxes.nth(i).click({ force: true });
   }
   await expect(confirmChoice).toBeEnabled();
   await confirmChoice.click();

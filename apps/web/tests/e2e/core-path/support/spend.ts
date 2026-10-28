@@ -24,7 +24,7 @@ export interface JourneySpend {
   cumulativeUsd: number;
 }
 
-interface SpendState { capUsd: number; totalUsd: number; exceeded: boolean; journeys: JourneySpend[] }
+interface SpendState { capUsd: number; totalUsd: number; exceeded: boolean; journeys: JourneySpend[]; lastSeenUsd?: number }
 
 /** Where the running state lives: a file, so a restarted worker keeps the journeys and the "exceeded" flag. */
 export interface SpendStore { load(): Promise<SpendState | null>; save(state: SpendState): Promise<void> }
@@ -83,6 +83,10 @@ export class SpendMeter {
   async checkpoint(label: string): Promise<number> {
     const cumulative = await this.read();
     if (cumulative > this.capUsd) await this.exceed(label, cumulative);
+    // Keep the latest reading on disk, so a journey that fails half way still leaves what it had spent.
+    const state = await this.current();
+    state.lastSeenUsd = cumulative;
+    await this.store.save(state);
     return cumulative;
   }
 

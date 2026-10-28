@@ -24,12 +24,25 @@ export const chatBox = (page: Page): Locator => page.getByRole('textbox', { name
 export const sendButton = (page: Page): Locator => page.getByRole('button', { name: '发送', exact: true });
 const assistantMessages = (page: Page) => page.locator('[data-message-role="assistant"]');
 const stopNotice = (page: Page) => page.getByRole('button', { name: '停止', exact: true });
+/** The coach's progress notices under a reply; while any is showing the turn is not finished and the composer is locked. */
+const turnNotice = (page: Page) => page.getByText(/^(正在查阅方法资料|正文已返回，正在整理|正在保存结果并核对费用|正在回复|正在思考|正在写回复|正在想怎么回复)/);
+
+/**
+ * The page starts turns of its own: the coach's opening of a step (after the draft is created and after each confirm). Wait
+ * for it to show up (it can take a few seconds) and then to finish, so the next message is not typed into a locked composer.
+ */
+export async function settleOpening(page: Page, timeoutMs = 150_000) {
+  await turnNotice(page).first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => undefined);
+  await expect(turnNotice(page)).toHaveCount(0, { timeout: timeoutMs });
+  await expect(stopNotice(page)).toHaveCount(0);
+}
 
 /**
  * Sends one message to the coach and waits until the reply is finished: a new assistant message exists, the stop button
  * is gone and the composer accepts input again. There is no single test id for "done", so all three are required.
  */
 export async function sendAndWait(page: Page, text: string, meter?: SpendMeter, label = 'turn', timeoutMs = 150_000) {
+  await settleOpening(page, timeoutMs);
   const before = await assistantMessages(page).count();
   const box = chatBox(page);
   await box.click();
@@ -39,6 +52,7 @@ export async function sendAndWait(page: Page, text: string, meter?: SpendMeter, 
   await expect(async () => {
     expect(await assistantMessages(page).count()).toBeGreaterThan(before);
     await expect(stopNotice(page)).toHaveCount(0);
+    await expect(turnNotice(page)).toHaveCount(0);
     await expect(sendButton(page)).toBeDisabled(); // empty composer: the send button is off until the next input
   }).toPass({ timeout: timeoutMs, intervals: [1000, 2000, 3000] });
   await expect(page.getByText('回复尚未完成')).toHaveCount(0);
