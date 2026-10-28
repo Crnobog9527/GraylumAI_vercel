@@ -194,7 +194,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 用户侧冻结和平台侧日限混在同一个数上 | **分开两个数**：`H`（积分，用户侧冻结，按上面的 G_turn）和 `U_turn`（美元，平台侧本轮供应商成本上界 = Σ本轮允许的每次调用上界 U_i，给 2.5.1 的日限预占用）。固定价 kind 的 H 和 U_turn 不相等（报告 H=500 积分+临时上界，U_turn=一次调用上界）|
 | `profiles FOR UPDATE` 每次 claim 和 finalize | 开轮一次、收轮一次 |
 | 止损锁 (201,1) 全站独占 | **去掉，改为"开轮预占、收轮回补"**（细则与证明见 2.5.1）：`turn_open` 先在 `daily_spend(day, bucket)` 自己的桶行上 `UPDATE … SET reserved=reserved+U_turn`（U_turn 是本轮冻结的成本上界，和 H 用的同一个数），再读全天 `SUM(reserved+spent)`，加上预留带 B 超过日限 L 就回滚拒绝；`turn_close` 在同一桶行 `spent=spent+n_total, reserved=reserved−U_turn`。**当日实际花费永远 ≤ L，超额为 0**；代价是接近日限时提前拒绝，提前量 ≤ B（staging 现配置约 15 美元）——第 8 节 3b 据此改述 |
-| 多次调用的回合中途余额不够 | `turn_call_begin` 按 `turns` 自己的行判断（剩余冻结 H − Σ已记名义积分 < 下一次调用上界，不读 `profiles`，2.5.4）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)` 只补冻结差额，不重复收费 |
+| 多次调用的回合中途余额不够 | `turn_call_begin` 按 `turns` 自己的行判断（剩余冻结 H − Σ已记名义积分 < min(下一次调用上界, L)，不读 `profiles`，2.5.4）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)` 只补冻结差额，不重复收费 |
 | 未知成本 24 小时恢复、`cost_pending` | 调用已发出但没有最终回执（崩溃、断线、超时）→ 回执停在 `dispatched`/`identified`，**不退该笔的用户冻结、不释放该笔的日限预占**；`turn_close` 把它标为 `cost_pending`、`turns.settlement='pending'`；现有恢复定时任务按 `provider_id` 查供应商成本后再结一次（幂等）；查不到按 BILL2 §0.3 的现行规则处理（未知 ≠ 零；第三方搜索工具例外按 0 结算）。细则 2.5.2 |
 | 停止退款 | 只有报告能停（Owner 10-28）：`turn_close(kind=stopped)` 仅接受 `kind=report`；滚动 24 小时内前 2 次 D=0 全退，第 3 次起 D=按回执、≤500（`turns(actor_id, kind, stopped_by_user, closed_at)` 索引数）。普通对话没有停止，用户离开页面回合照常结算 |
 | 402 不计费 | 回执 `status='no_charge_402'`, n=0 | 
@@ -296,7 +296,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 - 这些数都是目录里的配置（现有 `maxCalls`、`FREE_CHAT_RESEARCH_CALLS=3`、`load_skill` 每轮 2 次、`read_source` 每轮 2 次），`turn_open` 读出来算 G_turn、U_turn 并冻结进 `turns.policy`；
   Node 在运行时按同一份上限计数，到上限就不再把工具挂给模型（现有 `runnerRetrieval` 的"最后一次允许的调用后不再提供工具"规则不变）。
 - 2.5.1 的证明以此为准：U_turn 是本轮**所有**可能产生供应商费用的调用（模型续轮 + 付费工具）的上界之和，免费工具引起的续轮在 M 里。
-- 余额不够 G_turn 时：开轮按 H=min(G,A) 冻结，运行中 `turn_call_begin` 发现剩余冻结 < 下一次调用上界 → `paused(waiting_credits)`（2.2），不会超扣。
+- 余额不够 G_turn 时：开轮按 H=min(G,A) 冻结，运行中 `turn_call_begin` 发现剩余冻结 < min(下一次调用上界, L) → `paused(waiting_credits)`（2.2）；冻结被余额封顶时，超出 H 的部分按 D=min(N,H) 由平台承担，不向用户补扣（Owner 10-01），不会负余额。
 
 #### 2.5.4 两种"冻结"不是一回事：实预扣 vs 逻辑预留（回应 #1508 审查 P1）
 
@@ -305,7 +305,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | 怎么做 | `atomic_pre_deduct(actor, H, …)`：**真的从 `profiles.credits` 里扣掉**（`credits = balance_before − p_amount`），`billing_history` 留预扣记录 | `daily_spend.reserved_usd += U_turn`：只是一个计数，不碰任何余额 |
 | `turns` 里记什么 | `reserved_credits = H`：**只是"已经预扣了多少"的记录**，收轮时用来算退多少（退 H−D）；**可用余额永远不再减它** | `policy.upper_usd = U_turn`：收轮回补用 |
 | 可用余额 A 怎么算 | 现有 `credit_available`：`profiles.credits` − 隔离的赠送余量 − 退款包 hold − 拒付 pending hold（现有算法一条不改）。因为预扣已经在 `credits` 里扣掉了，**不减 `turns.reserved_credits`**；否则余额 1000、冻结 400 会被算成 200 而不是 600，同一账号的其他会话会被错误拒绝 | 不参与 A |
-| 回合中途"够不够" | 只看 `turns` 自己的行：`H − Σ已记名义积分 ≥ 下一次调用上界` 否则 `paused(waiting_credits)`；**不读 `profiles`** | `turn_call_begin` 不再碰 `daily_spend`（预占在开轮一次做完） |
+| 回合中途"够不够" | 只看 `turns` 自己的行：`H − Σ已记名义积分 ≥ min(下一次调用上界, L)` 否则 `paused(waiting_credits)`；**不读 `profiles`** | `turn_call_begin` 不再碰 `daily_spend`（预占在开轮一次做完） |
 | 收轮 | `turn_settle_credits`：结算 D、退还 H−D 到 `profiles.credits`，守恒 `restored + D = H` | `spent += n_total, reserved −= U_turn` |
 | 崩溃/未知成本 | 该笔份额留在预扣里（2.5.2），`turns.reserved_credits` 不变，直到恢复任务结算 | 同 2.5.2 |
 
