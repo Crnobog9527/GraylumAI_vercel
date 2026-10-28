@@ -187,7 +187,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 |---|---|
 | 每次调用各冻结（claim）、各发出（dispatch）、各回执（record）、各结算（finalize） | **开轮冻结一次**：H=min(G_turn, A)，G_turn=本轮允许的调用数 × 单次上界（导师 2+整理 1、自由对话 1+研究工具上限、报告固定 500、评审团押金+第一组上界、对比 Σ各模型上界）；**每次调用一条回执**（n_i、c_i、usage、generationId、缓存 token）；**收轮结算一次**：N=ceil(q×Σn_i×m_i)，D=min(N,H)，退 H−D，E=N−D 平台承担并记账 |
 | `profiles FOR UPDATE` 每次 claim 和 finalize | 开轮一次、收轮一次 |
-| 止损锁 (201,1) 全站独占 | **去掉**：`turn_close` 对 `daily_spend(day, bucket)` 的一行做 `UPDATE … SET spent=spent+n`（bucket = actor_id 哈希 % 16，16 行分摊，没有单一热点行）；`turn_open` 用 `SUM(spent) WHERE day=今天`（≤16 行索引读）判断是否超阈值而拒绝；允许最后一笔略超（≤ 一轮上界，远低于 5 美元线）——第 8 节 3b |
+| 止损锁 (201,1) 全站独占 | **去掉，改为"开轮预占、收轮回补"**（细则与证明见 2.5.1）：`turn_open` 先在 `daily_spend(day, bucket)` 自己的桶行上 `UPDATE … SET reserved=reserved+U_turn`（U_turn 是本轮冻结的成本上界，和 H 用的同一个数），再读全天 `SUM(reserved+spent)`，加上预留带 B 超过日限 L 就回滚拒绝；`turn_close` 在同一桶行 `spent=spent+n_total, reserved=reserved−U_turn`。**当日实际花费永远 ≤ L，超额为 0**；代价是接近日限时提前拒绝，提前量 ≤ B（staging 现配置约 15 美元）——第 8 节 3b 据此改述 |
 | 多次调用的回合中途余额不够 | `turn_call_record` 返回 `credits_low`（它读 `profiles.balance` 一行，不锁）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)`，不重复收费 |
 | 未知成本 24 小时恢复、`cost_pending` | 回执 `cost IS NULL` 时 `turn_close` 不结算该笔，`turns.settlement='pending'`；现有恢复定时任务按 `turn_calls(cost IS NULL)` 索引补查后再结一次（幂等） |
 | 停止退款 | 只有报告能停（Owner 10-28）：`turn_close(kind=stopped)` 仅接受 `kind=report`；滚动 24 小时内前 2 次 D=0 全退，第 3 次起 D=按回执、≤500（`turns(actor_id, kind, stopped_by_user, closed_at)` 索引数）。普通对话没有停止，用户离开页面回合照常结算 |
@@ -197,6 +197,45 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 幂等 | `turns UNIQUE(actor_id, request_id)`；`turn_calls UNIQUE(turn_id, seq)`；`turn_close` 对已 closed 的行原样返回；payload hash 比对保留 |
 | 并发 | 同一会话同时只能一个 `running/paused` 的 turn（`sessions.active_turn_id` + FOR UPDATE）；同一账号不同会话可并行，各自在 `profiles` 行上排毫秒级的队 |
 | 积分记录只显示实际变动（10-25） | 冻结不进 `credit_transactions`，记在 `turns.reserved_credits`；收轮写一笔净扣（D）与一笔平台承担（E，`kind='platform_absorb'`） |
+
+#### 2.5.1 每日止损：开轮预占、收轮回补（回应 #1508 审查 P1）
+
+旧设计只在收轮累加，开轮看不到在途回合，并发时超额没有上界。改法：
+
+表 `daily_spend(day, bucket smallint, reserved_usd, spent_usd)`：`bucket 0–15` 按 `actor_id` 哈希分摊给普通回合（chat、mentor、review）；
+`bucket=-1` 是"大额行"，只给单轮上界大的 kind（report、compare、jury、jury_adopt）用，它们是 Gold 功能、量少，串行无妨。
+目录缓存提供：日限 L；`P` = 数据库最大并发事务数（= 连接池大小，staging 现在 8，必须 ≥ 实际池大小）；
+`U_fast` = 普通回合的单轮上界最大值（导师 2 次调用 + 整理，按 150000 字节输入、32768 输出和当前最贵普通模型算，约 1–1.5 美元）；
+`U_big` = 大额 kind 的单轮上界最大值（评审团 4 席或对比 N 模型，约 5 美元量级）。预留带 `B = (P−1)×U_fast + U_big`。
+
+`turn_open`（本轮冻结上界 U_turn，与 H 用的同一个数；**先锁自己的行，再读总和，再检查**）：
+
+```
+1. UPDATE daily_spend SET reserved = reserved + U_turn
+     WHERE (day,bucket) = (今天, 我的桶 或 -1)            -- 行锁；同桶的后来者在这里排队
+2. s := SUM(reserved+spent) FROM daily_spend WHERE day=今天   -- 已含自己；≤17 行索引读
+3. IF s + B > L THEN RAISE STOP_LOSS_REACHED                   -- 整个事务回滚，预占自动撤销
+4. turns.policy 记下 (day, bucket, U_turn)；事务继续做其余开轮工作
+```
+
+`turn_close`（含恢复定时任务的 close，幂等）：
+`UPDATE daily_spend SET spent = spent + n_total, reserved = reserved − U_turn WHERE (day,bucket) = policy 里记的那一行`。
+跨天收轮回补的仍是开轮那天的行。
+
+**上界证明**（读已提交隔离级别）：
+- 第 2 步在拿到自己行锁之后读，所以 s 包含此刻所有**已提交**的预占和花费，以及自己的。它漏掉的只有此刻**未提交**的其他开轮事务的预占。
+- 同时在数据库里的事务不超过 P 个（连接池），除自己外 ≤ P−1 个；其中走 `-1` 行的最多 1 个（那一行串行），其余 ≤ P−2 个走普通桶。
+  所以漏掉的总额 ≤ (P−2)×U_fast + U_big ≤ B。
+- 第 3 步要求 s + B ≤ L。因此任一开轮事务提交时，全天 `SUM(reserved+spent)`（含所有当时未提交、之后会提交的）≤ L。**预占总额永远 ≤ L。**
+- 实际花费 n_total ≤ U_turn（U 就是 BILL2 的单次上界，H=min(G,A) 用的同一个数），所以任何时刻 `spent ≤ reserved`，**当日实际花费 ≤ L，超额为 0**。
+- 代价（如实）：接近日限时会**提前拒绝**，提前量 ≤ B + 在途回合的 (U_turn − 实际花费)。按 staging 现在 P=8、U_fast≈1.5、U_big≈5 算，B ≈ 15.5 美元；
+  P 调到 20 时 B ≈ 33.5 美元。这是保守方向，不是损失；B 相对 L 的占比随 L 调大而变小（3.3.3 扩容前检查：L ≥ 10×B）。
+- 热点：普通回合各锁自己桶的一行（16 行分摊，3.3.2 第 1 条）；`-1` 行只有 Gold 的大额 kind 用，量少且本来就按席位串行调用，不是扩容热点。
+- 连接池调大时必须同步调大 P（配置）；P 小于实际池大小证明就不成立，所以 `turn_open` 在 P < 当前池大小时直接拒绝开轮（池大小由目录里的一个设置键声明，上池时先改键）。
+- 回合崩溃不收轮：预占会一直占着，直到恢复定时任务 15 分钟内 `turn_close(kind=interrupted)` 回补。注销、删除同样经 `turn_close` 回补。
+- 桶数 16 不进证明（证明只依赖 P），它只决定普通回合的锁分摊；不够时改常量 + 一个迁移。
+
+和旧机制的对应：旧 (201,1) 锁保证"按天止损准确"；新机制保证同样的事（实际 ≤ L），并且把"并发时谁先谁后"从全站一把锁变成普通回合 16 行分摊 + 大额 kind 一行。
 
 ### 2.6 历史与删除
 
@@ -259,7 +298,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 任一主路径函数静态可达函数 / 表 | ≤ 15 / ≤ 10 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
 | 行锁 | 0 把全站共用行锁；只允许本人 `profiles`、本会话 `sessions` | 同 | 同 | 静态扫描 `FOR UPDATE|FOR SHARE` 对象白名单 |
 | 热表无顺序扫描 | 0 | 0 | 0 | 三条回合 + 定时任务认领语句的 `EXPLAIN`，对 `turns`/`turn_calls`/`session_messages`/`credit_transactions`/`runtime_sessions` 断言无 Seq Scan |
-| 全站共用行的写/锁 | 0 | 0 | 0 | 静态扫描：`UPDATE`/`FOR UPDATE` 只许白名单表，WHERE 必须带所有者键或 bucket |
+| 全站共用行的写/锁 | 0（止损的大额行 `bucket=-1` 除外，只给报告/对比/评审团） | 同 | 同 | 静态扫描：`UPDATE`/`FOR UPDATE` 只许白名单表，WHERE 必须带所有者键或 bucket |
 | 会话级状态 | 0 | 0 | 0 | 静态扫描：禁止 `pg_advisory_lock(`、非 LOCAL `SET `、`CREATE TEMP` |
 | 单条回执原始正文 | ≤ 256 KB，存 `turn_call_raw` 不进 `turn_calls` | 同 | 同 | DB 测试 |
 | 首字延迟（服务端，收到请求→第一个模型字节，桩零延迟） | p95 ≤ 400 ms | p95 ≤ 600 ms | — | 桩模型 |
@@ -320,7 +359,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 | # | 结构点 | 新设计是否满足 | 要补/要守的 |
 |---|---|---|---|
-| 1 | **没有任何全站共用的热点行（写）** | `profiles`（按人）、`runtime_sessions`（按会话）、`turns`/`turn_calls`/`session_messages`（按轮）✓；`catalog_versions` 只读 ✓；**`daily_spend` 原设计单行 ✗ → 改为 `(day, bucket 0–15)` 16 行按 actor 哈希分摊**，`turn_close` 更新一行、`turn_open` 读 SUM。5000 人真人节奏 25 次/秒分到 16 行 ≈ 每行 1.6 次/秒，每次持锁 < 1 ms，占用 < 0.2%；桶数不够时只改常量和一个迁移，不改逻辑 | 7.1 静态扫描：主路径 SQL 里 `UPDATE/FOR UPDATE` 的表只能是白名单，且 WHERE 必须带 actor/session/turn/bucket 键 |
+| 1 | **没有任何全站共用的热点行（写）** | `profiles`（按人）、`runtime_sessions`（按会话）、`turns`/`turn_calls`/`session_messages`（按轮）✓；`catalog_versions` 只读 ✓；**`daily_spend` 原设计单行 ✗ → 改为 `(day, bucket 0–15)` 16 行按 actor 哈希分摊，开轮预占、收轮回补（2.5.1）**：开轮和收轮各更新自己桶的一行。5000 人真人节奏 25 轮/秒 × 2 次更新分到 16 行 ≈ 每行 3 次/秒，每次持锁 < 1 ms，占用 < 0.3%。`-1` 大额行只给 Gold 的报告/对比/评审团用，量少、本来就串行；桶数不够时只改常量和一个迁移，不改逻辑 | 7.1 静态扫描：主路径 SQL 里 `UPDATE/FOR UPDATE` 的表只能是白名单，且 WHERE 必须带 actor/session/turn/bucket 键（`bucket=-1` 只允许大额 kind 使用） |
 | 2 | **所有锁按用户或会话** | `turn_open`：`runtime_sessions FOR UPDATE`（本会话）、`profiles FOR UPDATE`（本人）；`turn_close` 同；无 advisory 锁 ✓ | 禁止 `pg_advisory_lock`（会话级）；事务级 `pg_advisory_xact_lock` 也不用（没必要） |
 | 3 | **幂等键** | `turns UNIQUE(actor_id, request_id)`、`turn_calls UNIQUE(turn_id, seq)`、`session_messages UNIQUE(session_id, seq)`、`turn_close` 重复调用原样返回、回执 payload_hash ✓ | 幂等键都带所有者列，为第 4 条服务 |
 | 4 | **大表将来能按所有者分区，不改代码** | 主键改为复合：`turns (actor_id, id)`、`turn_calls (turn_id, seq)`、`session_messages (session_id, id)`；`id` 用 bigint identity（时间有序、紧凑）；所有查询都带所有者键（没有"按 id 全表找"的查询）；`credit_transactions` 已有 `user_id`。将来按 `HASH(actor_id)` / `HASH(session_id)` / `HASH(turn_id)` 分区：唯一键都含分区列，PostgreSQL 直接支持；转换是一次运维搬家（建分区表、搬数据、改名），不改任何 SQL 函数或 Node 代码。时间列（`opened_at`/`created_at`）单独建索引，供保留期清理按时间批量删 | V2-2 的迁移注释写明分区方案；7.1 静态扫描：主路径 SQL 对这四张表的 WHERE 必须带所有者键 |
@@ -348,6 +387,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 3. **第一次真要扩容前（比如要上 500 人）必做的验证**：
    - 开一个临时 Supabase 项目选目标规格，从文件建库，用桩模型按目标人数压一次（费用按次问 Owner），核对 k 和等待事件与外推一致；
    - 确认连接池模式为事务模式、池大小按 3.3.1 算；确认 Vercel 套餐的并发与时长上限；确认 OpenRouter 密钥限速与余额告警；
+   - 连接池调大前先把目录里的 P 调到新池大小，并确认日限 L ≥ 10×B（B=(P−1)×U_fast+U_big，2.5.1），否则接近日限时提前拒绝的比例会变大；
    - 若到 2000 人：开只读副本，把 3.3.2 第 5 条的读切过去；评估是否做第 4 条的分区搬家（表超过几千万行或保留期清理变慢时才做）；
    - 看一遍慢查询日志和 `check-turn-budget` 最新基线，确认没有人把"每轮一次"的查询偷偷加回去。
 4. **持续证明**：7.1 的守门脚本每个 PR 都跑，基线只许变小；k 的实测值随每次压测记进 `docs/validation/core-path-v2/`。
@@ -452,7 +492,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 |---|---|
 | staging 测试窗口（`runtime_test_windows`、`staging_test` 合同、窗口累计额度、"再开一个 1000 次窗口"，10-25 原话） | Owner 10-28 已决定去掉；staging 花费改由测试密钥额度 + 测试账号积分控制。**取代** 10-25"测试窗口用满时总控再开一个 1000 次新窗口" |
 | BILL2 v1 合同、逐调用 claim/dispatch/record/finalize、`bill2_runs`/`bill2_calls`/`bill2_receipts` | 由 `turns`/`turn_calls` 取代；数学不变；"积分记录"规则不变 |
-| 按天止损的全站独占锁 (201,1) | 改 `daily_spend` 计数行，允许最后一笔略超（第 8 节 3b） |
+| 按天止损的全站独占锁 (201,1) | 改 `daily_spend` 分桶行，开轮预占、收轮回补（2.5.1）：当日实际花费不超日限，接近日限时提前拒绝 ≤ 预留带 B（第 8 节 3b 改述） |
 
 ## 5. 数据模型：保留、替换、删除，以及切换
 
@@ -464,7 +504,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | `turn_calls` | turn_id, seq, call_kind(model/tool/decision), model_id/tool_name, status(ok/no_charge_402/unknown/unusable/rejected), nominal_usd n, actual_usd c（可空）, multiplier m, usage jsonb（含 cache_read/cache_write）, generation_id, payload_hash, cost_pending bool, created_at | **pk(turn_id, seq)**；(cost_pending) WHERE cost_pending；(created_at) |
 | `turn_call_raw` | turn_id, seq, body（模型完整输出/传输记录，≤ 256 KB）, created_at | pk(turn_id, seq)；(created_at) 供 30 天清理（线 G） |
 | `session_messages` | id bigint identity, session_id, seq, role, turn_id, content text, content_hash, visible bool, deleted_at | **pk(session_id, id)**；UNIQUE(session_id, seq)；(session_id, seq DESC) WHERE visible AND deleted_at IS NULL |
-| `daily_spend` | day date, bucket smallint (0–15), spent_usd numeric；阈值 `limit_usd` 从目录缓存读 | pk(day, bucket)；16 行按 actor 哈希分摊，`turn_open` 用 SUM 读当天 |
+| `daily_spend` | day date, bucket smallint (−1 大额 kind, 0–15 普通回合), reserved_usd numeric, spent_usd numeric；日限 L、P、U_fast、U_big 从目录缓存读 | pk(day, bucket)；开轮先锁本桶预占 U_turn、再读 SUM 检查、收轮回补（2.5.1） |
 
 `sessions`：复用 `runtime_sessions`，改名为 `sessions` 或保留原名（V2-2 决定，建议保留原名少改引用），加 `active_turn_id`、`deleted_at`；
 去掉 `active_execution`、revision 相关列的使用。
@@ -513,7 +553,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | P-1 | `feat(PROMPT-CACHE)` 合 #1501 | 报告/评审团/对比的断点（改 base 到 staging，补复审）；#1500、#1502 关闭，改动迁入 V2-4/V2-5 | high | Claude | — | 0.5 天 | 现有单测；不改主路径 |
 | V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间/EXPLAIN 无顺序扫描断言，棘轮基线）；`scripts/db-function-closure.mjs`（闭包 + 行锁白名单 + 会话级状态禁用扫描）；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本 + 单机外推压测脚本（3.3.3，500/2000/5000 虚拟用户、记 k 与等待事件）；对旧路径跑一次基线存档 | low | Codex | — | 3.5 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
 | V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表；主键与唯一键按 3.3.2 的"可分区"约束设计（按所有者哈希可分区、时间列可做保留期清理） | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库；迁移注释写明未来分区方案 |
-| V2-3 | `feat(CORE-PATH-V2)` 三个核心函数 | `turn_open`/`turn_call_record`/`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损分桶；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
+| V2-3 | `feat(CORE-PATH-V2)` 三个核心函数 | `turn_open`/`turn_call_record`/`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
 | V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限 + 429 退避（Redis 计数） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 4；黄金字节；runtime 集成套件里自由对话场景等效迁移；并发上限与退避单测 |
 | V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 7；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
 | V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file`；TikHub/Parallel/Firecrawl/monid 按供应商并发上限 + 退避（复用 V2-4 的 Redis 计数） | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试；供应商限流退避单测 |
@@ -640,6 +680,9 @@ Owner 原话：
 
 - 3a 同一会话里一次只跑一轮；用户没等回复结束又发，前端排队。现在也是这样，只是改由会话行保证。确认即可。
 - 3b 每日止损从"全站一把锁、绝不超一分"改为"允许最后一笔略超（最多一轮的上界，≤ 0.5 美元），超过后下一轮拒绝"。
+  **10-28 审查后改述（2.5.1）**：改成"开轮按上界预占、收轮回补"后，当日实际花费**不会超过日限**（超额为 0，比原来承诺的还紧）；
+  代价是接近日限时会**提前拒绝**，提前量 ≤ 预留带 B =（连接池大小−1）× 普通回合单轮上界 + 大额回合单轮上界，staging 现配置约 15 美元
+  （池 8、普通 1.5、大额 5）。总控按这个新说法重新向 Owner 确认 3b。
 - 3c 暂停回合与评审团押金的 24 小时自动结束，由同一个分钟级定时任务按 `turns` 表统一处理（规则不变，入口合一）。
 - 3d 一轮冻结一次：开始一轮需要的可用积分从"一次调用的上界"变成"本轮最多几次调用的上界之和"（导师 2 次 + 整理 1 次）。
   余额刚好够一次调用的用户，会在开轮时就被提示充值，而不是第一次调用后暂停；暂停与"继续"的规则不变。
