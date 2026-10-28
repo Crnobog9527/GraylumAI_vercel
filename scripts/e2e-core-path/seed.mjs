@@ -60,12 +60,18 @@ async function main(argv) {
       else await new Promise(resolve => setTimeout(resolve, 500));
     }
     if (!profile) throw new Error(`The ${role} profile did not appear.`);
-    const update = await admin.from('profiles')
-      .update({ membership_level: plan.level, credits: Math.max(Number(profile.credits ?? 0), plan.credits) })
-      .eq('id', user.id);
-    if (update.error) throw new Error(`Could not set the ${role} plan and credits (${topUpAmount(profile.credits, plan.credits)} to add).`);
+    // The plan is a plain column update; credits are never overwritten (service_role may not UPDATE profiles.credits): the
+    // missing amount goes in through the credit ledger function, the same one the back office uses.
+    const level = await admin.from('profiles').update({ membership_level: plan.level }).eq('id', user.id);
+    if (level.error) throw new Error(`Could not set the ${role} plan.`);
+    const missing = topUpAmount(profile.credits, plan.credits);
+    if (missing > 0) {
+      const ledger = await admin.rpc('atomic_apply_credit_ledger_entry', { p_user_id: user.id, p_amount: missing, p_type: 'addition',
+        p_description: 'core-path e2e test credits', p_idempotency_key: `core-e2e-seed:${role}:${Date.now()}` });
+      if (ledger.error) throw new Error(`Could not add test credits to the ${role} account.`);
+    }
     result[role] = { email, password };
-    console.log(`${role}: ready (${plan.level}, at least ${plan.credits} credits)`);
+    console.log(`${role}: ready (${plan.level}, at least ${plan.credits} credits, ${missing} added)`);
   }
 
   await writeFile(out, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });

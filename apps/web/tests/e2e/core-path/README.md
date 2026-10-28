@@ -60,18 +60,18 @@ create policy core_e2e_read on public.ai_models          for select to core_e2e_
 | `CORE_E2E_<GOLD/PRO>_EMAIL`、`_PASSWORD` | CI：走登录页登录（没有 STATE_DIR 时使用） |
 | `VERCEL_BYPASS_COOKIE` | 如果 staging 有部署保护 |
 | `CORE_E2E_MODEL_ID` | 测试用模型，默认 `google/gemini-3.8-flash` |
-| `CORE_E2E_SIDE_MODEL_IDS` | 额外放行的模型（逗号分隔），默认整理 `openai/gpt-6-luna` 和评审汇总 `anthropic/claude-opus-5.5` |
+| `CORE_E2E_SIDE_MODEL_IDS` | 额外放行的模型（逗号分隔），默认整理 `openai/gpt-6-luna`、评审汇总 `anthropic/claude-opus-5.5`、评审席位 `openai/gpt-6.1-sol` 和 `google/gemini-4-argon` |
 | `CORE_E2E_PATH=v2` | V2-10 之后设置：额外断言普通对话没有“停止”按钮（旧路径的回复里有，所以此前只记一条说明） |
 
 登录只读：`auth.setup.ts` 不写站点，不动维护模式等全站开关。
 
 ## 账号和种子
 
-`node scripts/e2e-core-path/seed.mjs --out <文件>` 建/刷新两个专用账号（gold 至少 6000 积分、pro 至少 2000），密码随机、只写进 `--out` 文件（0600），不打印。只接受 staging 项目（脚本里硬校验，正式项目一律拒绝）。需要 `E2E_SEED_SUPABASE_URL`、`E2E_SEED_SERVICE_ROLE_KEY`、`CORE_E2E_EMAIL_DOMAIN`（邮箱域名不进仓库）。写 staging，由总控执行。
+`node scripts/e2e-core-path/seed.mjs --out <文件>` 建/刷新两个专用账号（gold 至少 6000 积分、pro 至少 2000；积分差额通过积分账本函数 `atomic_apply_credit_ledger_entry` 补，不直接改余额），密码随机、只写进 `--out` 文件（0600），不打印。只接受 staging 项目（脚本里硬校验，正式项目一律拒绝）。需要 `E2E_SEED_SUPABASE_URL`、`E2E_SEED_SERVICE_ROLE_KEY`、`CORE_E2E_EMAIL_DOMAIN`（邮箱域名不进仓库）。写 staging，由总控执行。
 
 ## 测试用模型：Gemini 3.8 Flash（总控照这一节执行）
 
-模型由 `CORE_E2E_MODEL_ID` 决定，默认 `google/gemini-3.8-flash`。选它是因为它在 staging 已经有每次调用的计费档案（对话、报告、技能匹配、评审、对比），**不需要新增模型、档案或测试窗口条目**；价格是输入 $0.375 + 输出 $1.875（每百万 token）。整理类调用仍是 GPT-6 Luna（便宜，已有档案），评审团的汇总仍是 Opus 5.5（`fusion_summary` 目前只有 Opus 有档案），所以 `99-model-check` 放行：Flash、Luna、Opus，以及对比旅程里“对比名单中最便宜的另一个模型”（`CORE_E2E_SIDE_MODEL_IDS` 可改）。Opus 汇总那一次评审可能是整套里最贵的一笔，花费按实测如实报，超过 0.5 美元由计量直接判失败。
+模型由 `CORE_E2E_MODEL_ID` 决定，默认 `google/gemini-3.8-flash`。选它是因为它在 staging 已经有每次调用的计费档案（对话、报告、技能匹配、评审、对比），**不需要新增模型、档案或测试窗口条目**；价格是输入 $0.375 + 输出 $1.875（每百万 token）。整理类调用仍是 GPT-6 Luna（便宜，已有档案），评审团的汇总仍是 Opus 5.5（`fusion_summary` 目前只有 Opus 有档案），评审席位除 Flash 外仍保留 Sol 和 Argon，所以 `99-model-check` 放行：Flash、Luna、Opus、Sol、Argon，以及对比旅程里“对比名单中最便宜的另一个模型”（`CORE_E2E_SIDE_MODEL_IDS` 可改）。Opus 汇总那一次评审可能是整套里最贵的一笔，花费按实测如实报，超过 0.5 美元由计量直接判失败。
 
 ### 写 staging 的清单（总控执行；每步先备份旧值，跑完切回）
 

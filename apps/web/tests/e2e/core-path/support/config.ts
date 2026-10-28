@@ -39,7 +39,10 @@ export function spendCapUsd(env: Record<string, string | undefined> = process.en
  */
 export const DEFAULT_TEST_MODEL_ID = 'google/gemini-3.8-flash';
 export const testModelId = (env: Record<string, string | undefined> = process.env) => env.CORE_E2E_MODEL_ID?.trim() || DEFAULT_TEST_MODEL_ID;
-/** Calls that are not the dialogue model but are part of the product path and already profiled: the organizer and the jury summary. */
-export const DEFAULT_SIDE_MODEL_IDS = ['openai/gpt-6-luna', 'anthropic/claude-opus-5.5'] as const;
+/**
+ * Calls that are not the dialogue model but are part of the product path and already profiled: the organizer (Luna), the jury
+ * summary (Opus) and the two reviewers that stay on the jury next to Flash (Sol, Argon; see README, step 3).
+ */
+export const DEFAULT_SIDE_MODEL_IDS = ['openai/gpt-6-luna', 'anthropic/claude-opus-5.5', 'openai/gpt-6.1-sol', 'google/gemini-4-argon'] as const;
 export const sideModelIds = (env: Record<string, string | undefined> = process.env) =>
   env.CORE_E2E_SIDE_MODEL_IDS === undefined ? [...DEFAULT_SIDE_MODEL_IDS] : env.CORE_E2E_SIDE_MODEL_IDS.split(',').map(id => id.trim()).filter(Boolean);
