@@ -1,0 +1,121 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/*
+ * CORE-PATH-V2 V2-7b: how a jury turn advances one group (turn/jury.ts). The review's own decisions (reviewCore), the call
+ * group (runGroup) and the database are replaced; what is checked is which step is claimed, how the outcome of the group
+ * moves the review and how the turn is closed (fixed-price delivery, refunds, waiting, unknown results).
+ */
+const m = vi.hoisted(() => ({ read: vi.fn(), decide: vi.fn(), buildMembers: vi.fn(), runGroup: vi.fn(), close: vi.fn(), rpc: vi.fn(),
+  callsAt: vi.fn() }));
+vi.mock('../fusion/reviewRecord', async original => ({ ...(await original<typeof import('../fusion/reviewRecord')>()),
+  reviewRecord: () => ({ read: m.read, replay: vi.fn() }) }));
+vi.mock('../fusion/reviewCore', async original => ({ ...(await original<typeof import('../fusion/reviewCore')>()),
+  reviewCore: () => ({ readSource: async () => ({ body: 'b', sections: ['One'], maxCharacters: 100, declared: [] }),
+    callsAt: m.callsAt, buildMembers: m.buildMembers, decide: m.decide,
+    phaseOf: (at: { round: number; phase: string }) => at.phase === 'summary' ? 'summary' : at.round > 1 ? 'debate' : 'review',
+    opinionRules: async () => ({ sections: ['One'] }), revisionInput: () => ({}) }) }));
+vi.mock('./fusionCalls', async original => ({ ...(await original<typeof import('./fusionCalls')>()),
+  runGroup: m.runGroup, fusionDatabase: () => ({ close: m.close }) }));
+vi.mock('./fusionQuote', () => ({ fusionQuote: async (_a: unknown, i: { modelId: string }) => ({ modelId: i.modelId, q: '100',
+  multiplier: '6', outputLimit: 100, reasoning: {}, policy: {} }), fusionCall: (quote: object) => ({ ...quote, upperUsd: '0.01' }) }));
+vi.mock('../fusion/request', async original => ({ ...(await original<typeof import('../fusion/request')>()), fusionRequestBody: () => '{}' }));
+vi.mock('../models/openRouterKey', async original => ({ ...(await original<typeof import('../models/openRouterKey')>()),
+  readOpenRouterKeyOrUnset: async () => 'SYNTHETIC' }));
+import { juryTurn } from './jury';
+
+const REVIEWERS = ['00000000-0000-4000-8000-00000000000a', '00000000-0000-4000-8000-00000000000b', '00000000-0000-4000-8000-00000000000c'];
+const SUMMARY = '00000000-0000-4000-8000-0000000000d0';
+const cfg = { path: 'turn', estimateUsd: '1', maxRounds: 2, reviewers: REVIEWERS, summary: SUMMARY, opinionTokens: 100, summaryTokens: 100,
+  skill: { skillId: SUMMARY, revisionId: SUMMARY, packageHash: 'h' },
+  callCaps: { review: Object.fromEntries(REVIEWERS.map(id => [id, { credits: 60, usd: '0.1' }])), debate: {},
+    summary: { [SUMMARY]: { credits: 60, usd: '0.1' } } } };
+const view = (over: Record<string, unknown> = {}) => ({ reviewId: '00000000-0000-4000-8000-000000000001', state: 'running', round: 1,
+  phase: 'review', attempt: 1, turnId: 7, config: cfg, steps: [], calls: [], ...over });
+const admin = { rpc: m.rpc } as never;
+const jury = () => juryTurn({ admin, clients: { write: admin, read: admin } as never, slots: { take: async () => 1, drop: async () => undefined } }, 'actor');
+const member = { modelId: REVIEWERS[0], phase: 'fusion_review', request: { instructions: 'i', input: 'x' } };
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  m.rpc.mockResolvedValue({ data: {}, error: null });
+  m.callsAt.mockReturnValue([]);
+  m.buildMembers.mockResolvedValue(REVIEWERS.map(modelId => ({ ...member, modelId })));
+  m.runGroup.mockResolvedValue(REVIEWERS.map(() => ({ ok: true, text: '{}', verdict: 'usable' })));
+  m.close.mockResolvedValue({ turnId: 7, closeKind: 'completed', chargedCredits: 1500, settlement: 'done', replay: false });
+});
+
+describe('jury turn advance', () => {
+  it('claims the step with its first sequence, runs the seats in parallel and moves on', async () => {
+    m.read.mockResolvedValue(view({ calls: [{ seq: 3 }] }));
+    m.decide.mockResolvedValue({ state: 'running', round: 1, phase: 'summary', attempt: 1 });
+    expect(await jury().advance('r')).toMatchObject({ next: true, reason: 'advanced', dispatched: 3 });
+    expect(m.rpc).toHaveBeenCalledWith('fusion_review_turn_step', expect.objectContaining({
+      p_from: { round: 1, phase: 'review', attempt: 1 }, p_to: { state: 'claim', fromSeq: 4 } }));
+    expect(m.runGroup.mock.calls[0]![1]).toHaveLength(3);
+    expect(m.rpc).toHaveBeenLastCalledWith('fusion_review_turn_step', expect.objectContaining({
+      p_to: { state: 'running', round: 1, phase: 'summary', attempt: 1 } }));
+    expect(m.close).not.toHaveBeenCalled();
+  });
+  it('closes delivered at the fixed price on a revised summary; no change and failures refund', async () => {
+    m.read.mockResolvedValue(view({ phase: 'summary' }));
+    m.buildMembers.mockResolvedValue([{ ...member, modelId: SUMMARY, phase: 'fusion_summary' }]);
+    m.decide.mockResolvedValueOnce({ state: 'completed', outcome: { kind: 'revised' } });
+    await jury().advance('r');
+    expect(m.close).toHaveBeenLastCalledWith({ turnId: 7, kind: 'completed', delivered: true, refundAll: false, failureCode: null,
+      product: { state: 'completed', outcome: { kind: 'revised' } } });
+    m.decide.mockResolvedValueOnce({ state: 'completed', outcome: { kind: 'no_change' } });
+    await jury().advance('r');
+    expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'completed', delivered: false, refundAll: false }));
+    m.decide.mockResolvedValueOnce({ state: 'revision_failed', outcome: { kind: 'revision_failed' } });
+    await jury().advance('r');
+    expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', delivered: false, refundAll: true,
+      failureCode: 'review_revision_failed' }));
+  });
+  it('waits for credits, leaves an unknown result to recovery, and never sends a group twice', async () => {
+    m.read.mockResolvedValue(view());
+    m.runGroup.mockResolvedValueOnce([{ ok: false, code: 'TURN_PAUSED_FOR_CREDITS' }, { ok: false, code: 'TURN_PAUSED_FOR_CREDITS' }]);
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'waiting_credits' });
+    m.runGroup.mockResolvedValueOnce([{ ok: true, text: '{}', verdict: 'usable' }, { ok: false, code: 'TURN_CALL_UNKNOWN' }]);
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'in_flight' });
+    expect(m.close).not.toHaveBeenCalled();
+    // A claimed step with a call still in flight (an invocation cut off): nothing is sent again.
+    m.read.mockResolvedValue(view({ steps: [{ round: 1, phase: 'review', attempt: 1, groupId: 'g', stepKey: 'review:1:review:1', claimedAt: 'x' }],
+      calls: [{ groupId: 'g', state: 'identified', seq: 1 }] }));
+    m.runGroup.mockClear();
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'in_flight' });
+    expect(m.runGroup).not.toHaveBeenCalled();
+  });
+  it('retries a step nothing of which was sent, then gives up after three attempts; a tombstone closes erased', async () => {
+    m.read.mockResolvedValue(view());
+    m.runGroup.mockResolvedValue(REVIEWERS.map(() => ({ ok: false, code: 'TURN_PROVIDER_BUSY' })));
+    expect(await jury().advance('r')).toMatchObject({ next: true, reason: 'retry' });
+    expect(m.rpc).toHaveBeenLastCalledWith('fusion_review_turn_step', expect.objectContaining({
+      p_to: { state: 'running', round: 1, phase: 'review', attempt: 2 } }));
+    m.read.mockResolvedValue(view({ attempt: 3 }));
+    m.decide.mockResolvedValueOnce({ state: 'incomplete', outcome: { kind: 'no_opinions' } });
+    await jury().advance('r');
+    expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', refundAll: true }));
+    m.runGroup.mockResolvedValueOnce([{ ok: false, code: 'TURN_TOMBSTONED' }]);
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'ended' });
+    expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'erased', product: { state: 'interrupted', outcome: { kind: 'erased' } } }));
+  });
+  it('a seat above its frozen cap ends round 1 as incomplete and skips a debate round', async () => {
+    vi.mocked(m.buildMembers).mockResolvedValue([{ ...member }]);
+    const over = { ...cfg, callCaps: { ...cfg.callCaps, review: { [REVIEWERS[0]!]: { credits: 1, usd: '0.001' } } } };
+    m.read.mockResolvedValue(view({ config: over }));
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'ended' });
+    expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', refundAll: true,
+      product: { state: 'incomplete', outcome: { kind: 'fusion_estimate_exceeded', phase: 'review' } } }));
+    m.read.mockResolvedValue(view({ config: over, round: 2 }));
+    expect(await jury().advance('r')).toMatchObject({ next: true, reason: 'advanced' });
+    expect(m.rpc).toHaveBeenLastCalledWith('fusion_review_turn_step', expect.objectContaining({
+      p_to: { state: 'running', round: 2, phase: 'summary', attempt: 1 } }));
+  });
+  it('an ended review or one on the BILL2 path is not advanced', async () => {
+    m.read.mockResolvedValueOnce(view({ state: 'completed' }));
+    expect(await jury().advance('r')).toEqual({ next: false, reason: 'ended' });
+    m.read.mockResolvedValueOnce(view({ turnId: null }));
+    expect(await jury().advance('r')).toEqual({ next: false, reason: 'not_turn_path' });
+  });
+});

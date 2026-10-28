@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { NextResponse } from 'next/server';
 import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
+import { recoverFusionTurns } from '@repo/api/src/services/turn/fusionRecovery';
 import { createCronServiceClient, validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -18,6 +19,8 @@ export async function GET(request: Request) {
   if (!client) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   try {
     const summary = await recoverFusionFinancials(client, { dispatchedGraceMs: DISPATCHED_GRACE_MS });
-    return NextResponse.json(summary, { status: summary.success ? 200 : 500 });
+    // CORE-PATH-V2 V2-7b: reviews and compares on the turn path (24-hour end, deleted reviews, records of closed turns).
+    const turns = await recoverFusionTurns(client);
+    return NextResponse.json({ ...summary, turns }, { status: summary.success && turns.success ? 200 : 500 });
   } catch { return NextResponse.json({ error: 'Fusion recovery failed' }, { status: 500 }); }
 }

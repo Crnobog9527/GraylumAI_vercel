@@ -36,10 +36,10 @@ export type ChatQuote = ModelCall & {
   providerLimits: OpenRouterLimits; credential: () => Promise<string>;
 };
 
-type Row = { id: string; model_id: string; config: unknown; updated_at: string; is_active?: unknown; max_tokens?: unknown };
+export type Row = { id: string; model_id: string; config: unknown; updated_at: string; is_active?: unknown; max_tokens?: unknown };
 
 /** The OpenRouter limits of one admitted route, from the snapshot endpoint whose tag is the profile's (as production today). */
-function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], endpointTag: string) {
+export function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], endpointTag: string) {
   const probe = { modelId: row.id, model: row.model_id, providerLimits: { providerSlug: endpointTag, contextTokens: 1,
     promptUsdPerMillion: '0', completionUsdPerMillion: '0', requestUsd: '0' } };
   const endpoint = pricingEndpoint(row, snapshot, probe);

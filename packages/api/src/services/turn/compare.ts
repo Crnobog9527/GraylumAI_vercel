@@ -1,0 +1,168 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { compareRequest, assertCompareFits, snapshotHash, type CompareParts } from '../fusion/compareSnapshot';
+import { fusionRequestBody } from '../fusion/request';
+import { readFusionSettings } from '../fusion/settings';
+import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
+import { catalogRead } from '../runtime/catalogCache';
+import { isPositioningRefusal } from '../runtime/positioningFallback';
+import { judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
+import type { PricingDeps } from '../runtime/pricingAdmission';
+import { ceil12, TurnStop } from './call';
+import { CORE_PATH_SETTING } from './chat';
+import { TurnDatabaseError, type TurnClients } from './db';
+import { fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type MemberOutcome } from './fusionCalls';
+import { fusionCall, fusionQuote } from './fusionQuote';
+import type { CounterStore } from './limiter';
+import { callCredits } from './policy';
+import { QuoteError } from './quote';
+
+/*
+ * CORE-PATH-V2 kind=compare (2.7, FUSION-COMPARE): one turn of the conversation; N models answer the same request in
+ * parallel, each column one call with its own receipt and its own rounding. Gold only; at least two models from the
+ * administrator's allowlist; the columns' bounds together at most 500 credits (turn_fusion_open refuses otherwise) and within
+ * the single-compare budget. A user without a confirmed positioning gets the positioning check first (a 'decision' call, never
+ * charged to the user) and, below the refund cap, the fallback rule; a column that answers with the refusal is not shown and
+ * costs the user nothing ('unusable'). The answers are saved with their receipts; the user adopts one into the conversation
+ * later (fusion_compare_turn_adopt). Each column's bound is measured on its exact request, so the history is read first (the
+ * read client, one query) and must be the history turn_open returns; if another turn changed it in between, nothing is sent.
+ */
+export const COMPARE_HISTORY_ITEMS = 100;
+export type CompareEvent =
+  | { type: 'opened'; turnId: number; compareId: string; reservedCredits: number; replay: boolean }
+  | { type: 'column'; index: number; delta: string }
+  | { type: 'answer'; index: number; ok: boolean; code?: string }
+  | { type: 'result'; turnId: number; compareId: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null }
+  | { type: 'error'; code: string; turnId?: number };
+export type CompareTurnDeps = { admin: SupabaseClient; clients: TurnClients; slots: CounterStore; transport?: typeof fetch;
+  pricing?: PricingDeps; gate?: PositioningGatePolicy };
+export type CompareTurnInput = { actorId: string; sessionId: string; requestId: string; modelIds: string[];
+  /** Everything a column is sent except the history (read here) and the fallback rule (decided here). */
+  parts: Omit<CompareParts, 'history' | 'positioningFallback'> };
+
+const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+const fail = (code: string): CompareEvent => ({ type: 'error', code });
+
+export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnInput, emit: (event: CompareEvent) => void) {
+  const { admin } = deps;
+  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
+    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+  const config = fusionCoreSetting.safeParse(core.error ? null : core.data?.value);
+  if (!config.success || !config.data.enabled) return emit(fail('TURN_CORE_DISABLED'));
+  const settings = (await readFusionSettings(admin)).compare;
+  const models = input.modelIds;
+  if (!settings.enabled) return emit(fail('FUSION_COMPARE_DISABLED'));
+  if (models.length < settings.minModels || new Set(models).size !== models.length
+    || models.some(id => !settings.allowedModelIds.includes(id))) return emit(fail('FUSION_MODEL_DENIED'));
+  const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
+  if (!key) return emit(fail('TURN_PROVIDER_KEY_UNAVAILABLE'));
+
+  // 1. The history the turn will see, for sizing (turn_open returns the authoritative copy).
+  const read = await deps.clients.read.from('session_messages').select('seq,role,content').eq('session_id', input.sessionId)
+    .eq('visible', true).is('deleted_at', null).order('seq', { ascending: false }).limit(COMPARE_HISTORY_ITEMS);
+  if (read.error) return emit(fail('TURN_DATABASE_UNAVAILABLE'));
+  const sized = (read.data as Array<{ seq: number; role: 'user' | 'assistant'; content: string }>).reverse();
+  const partsWith = (history: Array<{ role: 'user' | 'assistant'; content: string }>, positioningFallback: boolean): CompareParts =>
+    ({ ...input.parts, history: history.map(m => ({ role: m.role, text: m.content })), positioningFallback });
+
+  // 2. Quotes and the exact request of every column, priced with the fallback rule (the larger of the two possible requests).
+  let quotes, columns;
+  try {
+    quotes = await Promise.all(models.map(modelId => fusionQuote(admin, { modelId, phase: 'fusion_compare',
+      outputTokens: settings.answerOutputTokens, key, deps: deps.pricing })));
+    const request = compareRequest(partsWith(sized, true));
+    assertCompareFits(request);
+    columns = quotes.map(quote => fusionCall(quote, fusionRequestBody(quote.policy as never, request, quote.outputLimit, quote.reasoning)));
+  } catch (error) {
+    return emit(fail(error instanceof QuoteError || error instanceof TurnStop ? error.code
+      : error instanceof Error && /^FUSION_[A-Z_]+$/.test(error.message) ? error.message : 'TURN_QUOTE_UNAVAILABLE'));
+  }
+  const q = quotes[0]!.q;
+  const credits = columns.map(c => callCredits(q, c.upperUsd, c.multiplier));
+  const gCredits = credits.reduce((a, b) => a + b, 0);
+  const usd = columns.reduce((sum, c) => sum + Number(c.upperUsd), 0);
+  if (settings.maxBudgetUsd !== null && usd > Number(settings.maxBudgetUsd)) return emit(fail('FUSION_BUDGET_EXCEEDED'));
+
+  // 3. Open: Gold, >= 2 models, <= 500 credits, one compare at a time; the compare record; the freeze of every column.
+  const db = fusionDatabase(deps.clients, input.actorId);
+  const decisionUpper = String((config.data as { decisionUpperUsd?: unknown }).decisionUpperUsd ?? '');
+  if (!/^0\.\d{1,12}$/.test(decisionUpper)) return emit(fail('TURN_CORE_DISABLED'));
+  const policy = fusionPolicy({ q, calls: columns, gCredits, minCredits: gCredits, stopLoss: config.data.stopLoss,
+    decisionUpperUsd: decisionUpper, historyItems: COMPARE_HISTORY_ITEMS, frozen: { models: models.join(',') } });
+  let opened;
+  try {
+    opened = await db.open({ sessionId: input.sessionId, requestId: input.requestId, kind: 'compare', policy, product: {
+      question: input.parts.question, questionHash: sha256(input.parts.question), snapshotHash: snapshotHash(partsWith(sized, false)),
+      requestHash: sha256(JSON.stringify([input.sessionId, models, input.parts.question, credits])), config: { models } } });
+  } catch (error) { return emit(fail(error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED')); }
+  const compareId = opened.compareId!;
+  emit({ type: 'opened', turnId: opened.turnId, compareId, reservedCredits: opened.reservedCredits, replay: opened.replay });
+  if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
+
+  const close = (kind: 'completed' | 'failed' | 'interrupted' | 'erased', extra: { delivered?: boolean; refundAll?: boolean;
+    failureCode?: string } = {}) => db.close({ turnId: opened.turnId, kind, delivered: extra.delivered ?? false,
+    refundAll: extra.refundAll, failureCode: extra.failureCode ?? null });
+  try {
+    const history = (opened as { history?: Array<{ seq: number; role: 'user' | 'assistant'; content: string }> }).history ?? [];
+    if (history.map(m => m.seq).join() !== sized.map(m => m.seq).join()) throw new TurnStop('TURN_INPUT_TOO_LARGE');
+    let seq = 0;
+    // 4. The positioning check, as a free chat: only without a confirmed positioning; never charged to the user.
+    let fallback = false;
+    const gate = (opened as { positioning?: { positioned: boolean; refusals24h: number } | null }).positioning;
+    if (gate && !gate.positioned) {
+      if (input.parts.skill?.socialMedia) { await close('failed', { refundAll: true, failureCode: 'positioning_required' });
+        return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId }); }
+      const calls = db.calls(opened.turnId, () => null);
+      const begun = await calls.begin({ actorId: input.actorId, turnId: opened.turnId, seq: ++seq, callKind: 'decision',
+        modelId: quotes[0]!.modelId, toolName: null, paid: null, requestHash: sha256(input.parts.question),
+        upperUsd: decisionUpper, multiplier: quotes[0]!.multiplier });
+      if (begun.sessionTombstoned || begun.accountErasing) throw new TurnStop('TURN_TOMBSTONED');
+      let refused = false;
+      const spent: { sent: boolean; cost: string | null } = { sent: false, cost: null };
+      try { fallback = await judgePositioning(deps.gate ?? {}, { text: input.parts.question, apiKey: key,
+        onCost: usdCost => { spent.sent = true; spent.cost = usdCost === null ? null : ceil12(usdCost.toFixed(15)); } },
+        gate.refusals24h >= POSITIONING_REFUSAL_CAP); }
+      catch { refused = true; }
+      const usage = { chargeUser: false };
+      await calls.record(spent.sent
+        ? { actorId: input.actorId, turnId: opened.turnId, seq, status: 'ok', nominalUsd: spent.cost ?? decisionUpper,
+          actualUsd: spent.cost, usage, providerId: null, payloadHash: sha256(refused ? 'refused' : 'allowed'), raw: null }
+        : { actorId: input.actorId, turnId: opened.turnId, seq, status: 'not_sent', nominalUsd: null, actualUsd: null, usage,
+          providerId: null, payloadHash: sha256(refused ? 'refused' : 'allowed'), raw: null });
+      if (refused) {
+        await close('failed', { refundAll: true, failureCode: 'positioning_required' });
+        return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
+      }
+    }
+    // 5. The columns: the request rebuilt from turn_open's history with the rule actually admitted; never above its frozen bound.
+    const request = compareRequest(partsWith(history, fallback));
+    const members = quotes.map((quote, index) => {
+      const body = fusionRequestBody(quote.policy as never, request, quote.outputLimit, quote.reasoning);
+      const call = fusionCall(quote, body);
+      if (callCredits(q, call.upperUsd, call.multiplier) > credits[index]!) throw new TurnStop('TURN_INPUT_TOO_LARGE');
+      return { call, body, phase: 'fusion_compare' as const,
+        judge: (text: string) => ({ verdict: fallback && isPositioningRefusal(text) ? 'no_delivery' as const : 'usable' as const }),
+        onChunk: (chunk: string) => emit({ type: 'column', index, delta: chunk }) };
+    });
+    const outcomes: MemberOutcome[] = await runGroup({ db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId,
+      nextSeq: () => ++seq, credential: async () => key, transport: deps.transport }, members);
+    outcomes.forEach((outcome, index) => emit({ type: 'answer', index, ok: outcome.ok && outcome.verdict === 'usable',
+      ...(outcome.ok ? {} : { code: outcome.code }) }));
+    // 6. Close: the columns delivered pay their own cost (each rounded); none delivered pays nothing.
+    if (outcomes.some(o => !o.ok && o.code === 'TURN_TOMBSTONED')) {
+      await close('erased', { failureCode: 'turn_tombstoned' });
+      return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
+    }
+    const delivered = outcomes.some(o => o.ok && o.verdict === 'usable');
+    const unknown = outcomes.some(o => !o.ok && o.code === 'TURN_CALL_UNKNOWN');
+    const closed = delivered ? await close('completed', { delivered: true })
+      : await close(unknown ? 'interrupted' : 'failed', { refundAll: !unknown, failureCode: 'compare_no_answer' });
+    emit({ type: 'result', turnId: opened.turnId, compareId, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
+  } catch (error) {
+    const code = error instanceof TurnStop || error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
+    await close(code === 'TURN_TOMBSTONED' ? 'erased' : 'failed', { refundAll: code !== 'TURN_TOMBSTONED', failureCode: code.toLowerCase() })
+      .catch(() => undefined);
+    emit({ type: 'error', code, turnId: opened.turnId });
+  }
+}

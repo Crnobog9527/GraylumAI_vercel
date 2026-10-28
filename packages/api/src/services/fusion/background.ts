@@ -12,7 +12,10 @@ import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { fusionExecutor } from './executor';
 import { reviewFlow } from './review';
-import { ENDED_STATES } from './reviewRecord';
+import { ENDED_STATES, reviewRecord } from './reviewRecord';
+import { turnClients } from '../turn/db';
+import { juryTurn } from '../turn/jury';
+import { redisCounterStore, type CounterStore } from '../turn/limiter';
 
 /** FUSION-BACKGROUND (Owner 2026-10-15 "现在就做。"): a review advances on the server, one step per function
  * invocation, so the user may leave the page. Each invocation takes the review's advance lease (0258), runs one
@@ -76,10 +79,24 @@ export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: strin
 
 /** One step of one review. Never throws for an expected stop; the caller relays only when next is true. */
 export async function advanceReview(input: { admin: SupabaseClient; reviewId: string; env?: Record<string, string | undefined>;
-  budget?: RuntimeBudget; flow?: (actorId: string, budget: RuntimeBudget) => ReturnType<typeof reviewFlow> }): Promise<AdvanceResult> {
+  budget?: RuntimeBudget; flow?: (actorId: string, budget: RuntimeBudget) => ReturnType<typeof reviewFlow>;
+  /** CORE-PATH-V2 V2-7b: the jury turn's dependencies for a review on the turn path (tests inject them). */
+  jury?: { slots?: CounterStore; transport?: typeof fetch } }): Promise<AdvanceResult> {
   return withPlatformSecretRequest(async () => {
     const { admin, reviewId } = input;
     const outcome = await withAdvanceLease(admin, reviewId, async lease => {
+      // A review on the turn path advances through its jury turn (one group per invocation), never through BILL2.
+      const view = await reviewRecord(admin, lease.actorId!).read(reviewId).catch(() => null);
+      if (view?.turnId) {
+        try {
+          return await juryTurn({ admin, clients: turnClients(admin), slots: input.jury?.slots ?? redisCounterStore(),
+            transport: input.jury?.transport }, lease.actorId!).advance(reviewId);
+        } catch (error) {
+          const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
+          logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
+          return { next: false, reason: 'failed' };
+        }
+      }
       const budget = input.budget ?? createRuntimeBudget();
       const flow = input.flow ? input.flow(lease.actorId!, budget) : serviceReviewFlow(admin, lease.actorId!, budget, input.env);
       try {

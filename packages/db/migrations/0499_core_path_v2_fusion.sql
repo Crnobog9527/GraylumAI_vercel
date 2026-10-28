@@ -18,10 +18,14 @@
 --   turn_user_charge     jury: deliverable revision -> fixed price; interrupted / 24-hour end -> min(fixed, known usage);
 --                        otherwise 0. compare: each column rounded on its own
 --   fusion_review_view, fusion_call_output_read: a review on the turn path reads its calls and answers from the turn
+--   fusion_review_start  a turn-path review (config.path = 'turn') holds no fee (its jury turn freezes the price); no review
+--                        while a compare turn runs
+--   fusion_review_claim, fusion_review_close: refuse turn-path reviews (no BILL2 group; no stop or end button, Owner 10-28)
+--   fusion_review_pause_idle, fusion_review_end_paused: skip turn-path reviews (their turn waits and ends instead)
 -- Compatibility: new columns are nullable, the new table and functions are used only by the V2 path (core_path_v2.enabled);
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
--- Recovery: drop the seven new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the five changed
+-- Recovery: drop the seven new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the ten changed
 -- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -85,6 +89,18 @@ BEGIN
     OR p_policy ?| ARRAY['reviewId','versionId','compareId'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
+  -- A jury starts its review record in the same transaction (fusion_review_start, idempotent by request, turn path: no fee),
+  -- so a refused open leaves no review behind, as a refused start never did.
+  IF p_kind = 'jury' AND jsonb_typeof(p_product->'start') = 'object' THEN
+    IF NOT EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id) THEN
+      IF p_product->'start'->'config'->>'path' IS DISTINCT FROM 'turn' THEN RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023'; END IF;
+      p_product := p_product || jsonb_build_object('reviewId', fusion_review_start(p_actor_id, p_request_id,
+        (p_product->'start'->>'draftId')::uuid, (p_product->'start'->>'sourceVersionId')::uuid, p_product->'start'->'config')->>'reviewId');
+    ELSE
+      p_product := p_product || jsonb_build_object('reviewId', (SELECT policy->>'reviewId' FROM turns WHERE actor_id = p_actor_id
+        AND request_id = p_request_id));
+    END IF;
+  END IF;
   -- The row the kind serializes on first (a compare's conversation, a jury's review), then the request: two concurrent opens of
   -- one request make one turn, the second answering as a replay.
   IF p_kind = 'compare' THEN
@@ -95,7 +111,9 @@ BEGIN
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
     IF existing.kind <> p_kind THEN RAISE EXCEPTION 'TURN_REQUEST_CONFLICT' USING ERRCODE='22023'; END IF;
-    opened := turn_open(p_actor_id, p_session_id, p_request_id, p_kind, p_policy, NULL);
+    -- A jury's conversation is its review's (the draft conversation); a repeat answers on the turn's own.
+    opened := turn_open(p_actor_id, CASE WHEN p_kind = 'compare' THEN p_session_id ELSE existing.session_id END, p_request_id, p_kind,
+      p_policy, NULL);
     RETURN opened || jsonb_build_object('reviewId', existing.policy->'reviewId', 'compareId', existing.policy->'compareId');
   END IF;
 
@@ -127,14 +145,19 @@ BEGIN
     pol := p_policy || jsonb_build_object('compareId', cmp.id);
     opened := turn_open(p_actor_id, p_session_id, p_request_id, p_kind, pol, NULL);
     UPDATE fusion_compares SET turn_id = (opened->>'turnId')::bigint WHERE id = cmp.id;
-    RETURN opened || jsonb_build_object('compareId', cmp.id);
+    -- The positioning gate of a compare (as turn_open's for a free chat): confirmed positioning, refusals in 24 hours.
+    RETURN opened || jsonb_build_object('compareId', cmp.id, 'positioning', jsonb_build_object(
+      'positioned', public.opc_has_confirmed_positioning(p_actor_id),
+      'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
+        AND r.closed_at > now() - interval '24 hours')));
   END IF;
 
   SELECT * INTO rv FROM fusion_reviews WHERE id = (p_product->>'reviewId')::uuid AND actor_id = p_actor_id FOR NO KEY UPDATE;
   IF rv.id IS NULL THEN RAISE EXCEPTION 'TURN_PRODUCT_DENIED' USING ERRCODE='42501'; END IF;
-  IF rv.source_session_id <> p_session_id THEN RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023'; END IF;
+  -- The review's draft conversation, whatever the caller passed (p_session_id is only a compare's).
+  p_session_id := rv.source_session_id;
   IF p_kind = 'jury' THEN
-    IF rv.state NOT IN ('running','paused') OR rv.turn_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023'; END IF;
+    IF rv.state NOT IN ('running','paused') OR rv.turn_id IS NOT NULL OR rv.config->>'path' IS DISTINCT FROM 'turn' THEN RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023'; END IF;
     IF coalesce((p_policy->>'fixedCredits')::int, 0) < 1 OR (p_policy->>'minCredits')::numeric < (p_policy->>'fixedCredits')::numeric THEN
       RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
     END IF;
@@ -627,7 +650,7 @@ AS $function$
       FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id
       WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)),'[]')
     ELSE coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',st.x->>'groupId','runId',md5(c.turn_id::text||':'||c.seq::text)::uuid,
-      'callId',md5(c.turn_id::text||':'||c.seq::text)::uuid,'modelId',c.model_id,
+      'callId',md5(c.turn_id::text||':'||c.seq::text)::uuid,'seq',c.seq,'modelId',c.model_id,
       'phase',CASE WHEN st.x->>'phase'='summary' THEN 'fusion_summary' ELSE 'fusion_review' END,
       'dispatched',c.status<>'not_sent',
       'verdict',coalesce(o.verdict,CASE WHEN c.status IN ('not_sent','rejected','no_charge_402') THEN 'no_delivery' END),
@@ -664,6 +687,213 @@ BEGIN
   SELECT * INTO o FROM fusion_call_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id;
   IF o.call_id IS NULL THEN RETURN NULL; END IF;
   RETURN jsonb_build_object('callId',o.call_id,'body',o.body,'bodyHash',o.body_hash,'savedAt',o.saved_at);
+END $function$;
+
+-- fusion_review_start(uuid,uuid,uuid,uuid,jsonb)
+CREATE OR REPLACE FUNCTION public.fusion_review_start(p_actor_id uuid, p_request_id uuid, p_draft_id uuid, p_source_version_id uuid, p_config jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE rv fusion_reviews; d opc_drafts; p artifact_projects; r artifact_rounds; ver artifact_versions; v jsonb;
+  usage jsonb; m jsonb; h text;
+BEGIN
+ -- 0324 archived business guard
+ IF true THEN BEGIN
+   PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id));
+  EXCEPTION WHEN raise_exception THEN
+   -- 0326 archived review replay repair
+   IF SQLERRM<>'OPC_BUSINESS_ARCHIVED' THEN RAISE; END IF;
+   PERFORM fusion_review_archive_reconcile(p_actor_id,jsonb_build_object('draftId',p_draft_id));
+   IF EXISTS(SELECT 1 FROM fusion_reviews existing WHERE existing.actor_id=p_actor_id
+    AND existing.request_id=p_request_id AND existing.draft_id=p_draft_id AND existing.source_version_id=p_source_version_id) THEN
+    RETURN fusion_review_view((SELECT existing FROM fusion_reviews existing
+     WHERE existing.actor_id=p_actor_id AND existing.request_id=p_request_id));
+   END IF;
+   RAISE;
+  END; END IF;
+
+ IF opc_draft_readonly(p_actor_id,p_draft_id) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF; -- 0249 read-only
+  PERFORM bill2_actor(p_actor_id);
+  PERFORM pg_advisory_xact_lock(hashtextextended('fusion-review:'||p_actor_id::text,0));
+  SELECT * INTO rv FROM fusion_reviews WHERE actor_id=p_actor_id AND request_id=p_request_id;
+  IF rv.id IS NOT NULL THEN
+    IF rv.draft_id<>p_draft_id OR rv.source_version_id<>p_source_version_id THEN RAISE EXCEPTION 'FUSION_REVIEW_CONFLICT'; END IF;
+    RETURN fusion_review_view(rv);
+  END IF;
+  IF jsonb_typeof(p_config) IS DISTINCT FROM 'object' OR coalesce(p_config->>'estimateUsd','')!~'^[0-9]+(\.[0-9]+)?$' THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  v:=fusion_review_settings(p_actor_id);
+  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+  SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR SHARE;
+  -- Re-read the draft under the project lock, as opc_revise/report_revision do: a revise that committed
+  -- meanwhile has moved the draft to a new round, which the freshness check below then refuses.
+  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+  SELECT * INTO ver FROM artifact_versions WHERE id=p_source_version_id AND project_id=p.id AND erased_at IS NULL;
+  SELECT * INTO r FROM artifact_rounds WHERE id=ver.round_id AND project_id=p.id;
+  -- The same freshness rule as R14 propose: only the current formal version from a generated report.
+  IF d.draft_id IS NULL OR p.id IS NULL OR ver.id IS NULL OR r.state IS DISTINCT FROM 'published' OR d.round_id IS DISTINCT FROM r.id
+    OR ver.version IS DISTINCT FROM p.current_version OR NOT coalesce(ver.report ? 'generatedReport',false)
+    OR NOT content_erasure_artifact_readable(p_actor_id,ver.id) THEN RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
+  IF fusion_compare_active(p_actor_id) OR EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused'))
+    OR EXISTS(SELECT 1 FROM turns WHERE actor_id=p_actor_id AND kind='compare' AND state IN ('running','paused','stopping'))
+    OR EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id WHERE br.actor_id=p_actor_id
+      AND br.fusion_group_id IS NOT NULL AND fusion_call_in_flight(c)) THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE'; END IF;
+  usage:=fusion_review_breaker_usage(p_actor_id);
+  IF (usage->>'noDeliveryCalls')::int>=coalesce((v#>>'{review,breaker,noDeliveryCalls}')::int,10)
+    OR (usage->>'platformUsd')::numeric>=coalesce((v#>>'{review,breaker,platformUsd}')::numeric,2) THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_BREAKER'; END IF;
+  IF (SELECT count(*) FROM (SELECT state FROM fusion_reviews WHERE source_version_id=ver.id AND breaker_cleared_at IS NULL
+      ORDER BY created_at DESC LIMIT 3) last3 WHERE state IN ('incomplete','revision_failed'))=3 THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_VERSION_BLOCKED'; END IF;
+  IF coalesce(v#>>'{review,maxBudgetUsd}','')='' OR (p_config->>'estimateUsd')::numeric>(v#>>'{review,maxBudgetUsd}')::numeric THEN
+    RAISE EXCEPTION 'FUSION_BUDGET_EXCEEDED'; END IF;
+  SELECT coalesce(jsonb_object_agg(s.key,(SELECT coalesce(jsonb_object_agg(f.key,jsonb_build_object('value',f.value->'value',
+      'status',f.value->'status')),'{}') FROM jsonb_each(coalesce(s.value->'information','{}')) f)),'{}')
+    INTO m FROM jsonb_each(r.steps) s;
+  h:=encode(sha256(convert_to(m::text,'UTF8')),'hex');
+  INSERT INTO fusion_reviews(actor_id,request_id,draft_id,project_id,source_session_id,source_version_id,version_hash,
+    materials,materials_hash,config,state,round,phase,attempt)
+  VALUES(p_actor_id,p_request_id,d.draft_id,p.id,d.session_id,ver.id,ver.report_hash,m,h,p_config,'running',1,'review',1)
+  RETURNING * INTO rv;
+  -- 0294 fixed price. On the turn path (CORE-PATH-V2 V2-7b) the price is the jury turn's freeze (turn_fusion_open), not a fee.
+  IF p_config->>'path' IS DISTINCT FROM 'turn' THEN PERFORM fusion_review_fee_hold(rv,v,p_config); END IF;
+  RETURN fusion_review_view(rv);
+END $function$;
+
+-- fusion_review_claim(uuid,uuid,integer,text,integer,uuid,jsonb)
+CREATE OR REPLACE FUNCTION public.fusion_review_claim(p_actor_id uuid, p_review_id uuid, p_round integer, p_phase text, p_attempt integer, p_group_id uuid, p_items jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE rv fusion_reviews; g fusion_billing_groups; k text; res jsonb;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  SELECT * INTO rv FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id FOR UPDATE;
+  -- A review on the turn path is billed by its jury turn only (V2-7b): never through a BILL2 group.
+  IF rv.id IS NULL OR rv.config->>'path' = 'turn' THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
+  IF rv.state NOT IN ('running','paused') THEN RAISE EXCEPTION 'FUSION_REVIEW_ENDED'; END IF;
+  IF rv.round<>p_round OR rv.phase<>p_phase OR rv.attempt<>p_attempt THEN RAISE EXCEPTION 'FUSION_REVIEW_STEP_CONFLICT'; END IF;
+  SELECT * INTO g FROM fusion_billing_groups WHERE id=p_group_id AND actor_id=p_actor_id;
+  IF g.id IS NULL OR g.kind<>'review' OR g.source_session_id IS DISTINCT FROM rv.source_session_id THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+  k:=format('review:%s:%s:%s',p_round,p_phase,p_attempt);
+  IF EXISTS(SELECT 1 FROM jsonb_array_elements(rv.steps) x WHERE x->>'stepKey'=k AND x->>'groupId'<>p_group_id::text) THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_STEP_CONFLICT'; END IF;
+  -- 0294 fee marker
+  IF EXISTS(SELECT 1 FROM fusion_review_fees WHERE review_id=rv.id) THEN
+    IF fusion_review_gold(p_actor_id) IS NOT TRUE THEN RAISE EXCEPTION 'FUSION_MEMBERSHIP_REQUIRED'; END IF;
+    UPDATE fusion_billing_groups SET fee_review_id=rv.id WHERE id=g.id AND fee_review_id IS NULL;
+    IF (SELECT fee_review_id FROM fusion_billing_groups WHERE id=g.id) IS DISTINCT FROM rv.id THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+  ELSIF (SELECT fee_review_id FROM fusion_billing_groups WHERE id=g.id) IS NOT NULL THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED';
+  END IF;
+  res:=fusion_group_claim(p_actor_id,p_group_id,k,1,p_items);
+  -- Every successful claim (a replay too) resumes the review; the step is appended once.
+  IF res->>'state'='claimed' THEN
+    UPDATE fusion_reviews SET steps=CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(steps) x WHERE x->>'stepKey'=k) THEN steps
+      ELSE steps||jsonb_build_array(jsonb_build_object('round',p_round,'phase',p_phase,
+      'attempt',p_attempt,'groupId',p_group_id,'stepKey',k,'claimedAt',clock_timestamp())) END,
+      state='running',updated_at=clock_timestamp() WHERE id=rv.id;
+  END IF;
+  RETURN res;
+END $function$;
+
+-- fusion_review_close(uuid,uuid,text)
+CREATE OR REPLACE FUNCTION public.fusion_review_close(p_actor_id uuid, p_review_id uuid, p_state text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE rv fusion_reviews; run record;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  IF p_state NOT IN ('stopped','interrupted') THEN RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  SELECT * INTO rv FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id FOR UPDATE;
+  -- A jury on the turn path has no stop or end button (Owner 10-28); its turn ends it (turn_fusion_close, 24-hour recovery).
+  IF rv.id IS NULL OR rv.config->>'path' = 'turn' THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
+  IF rv.state NOT IN ('running','paused') THEN
+    -- 0294 fee settle
+    IF rv.state=p_state THEN PERFORM fusion_review_fee_settle_internal(rv.id); RETURN fusion_review_view(rv); END IF;
+    RAISE EXCEPTION 'FUSION_REVIEW_ENDED';
+  END IF;
+  -- "End review" is for a paused review; a running one is stopped.
+  IF p_state='interrupted' AND rv.state<>'paused' THEN RAISE EXCEPTION 'FUSION_REVIEW_STEP_CONFLICT'; END IF;
+  UPDATE fusion_reviews SET state=p_state,updated_at=clock_timestamp(),ended_at=clock_timestamp() WHERE id=rv.id RETURNING * INTO rv;
+  FOR run IN SELECT br.id,br.closed FROM bill2_runs br WHERE br.actor_id=p_actor_id
+    AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x) ORDER BY br.id LOOP
+    IF NOT run.closed THEN PERFORM bill2_cancel(p_actor_id,run.id); END IF;
+    PERFORM bill2_finalize(p_actor_id,run.id);
+  END LOOP;
+  PERFORM fusion_review_fee_settle_internal(rv.id);
+  RETURN fusion_review_view(rv);
+END $function$;
+
+-- fusion_review_pause_idle(interval)
+CREATE OR REPLACE FUNCTION public.fusion_review_pause_idle(p_idle interval)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE n integer;
+BEGIN
+  -- Never waits on a review row a claim, advance or close holds: those are skipped until the next run.
+  UPDATE fusion_reviews rv SET state='paused',updated_at=clock_timestamp()
+  -- Turn-path reviews wait on their jury turn instead (paused between groups, 24-hour recovery; V2-7b).
+  WHERE rv.id IN (SELECT id FROM fusion_reviews WHERE state='running' AND turn_id IS NULL AND updated_at<=clock_timestamp()-p_idle
+      ORDER BY updated_at LIMIT 500 FOR UPDATE SKIP LOCKED)
+    AND rv.state='running' AND rv.updated_at<=clock_timestamp()-p_idle
+    AND NOT EXISTS(SELECT 1 FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id WHERE br.actor_id=rv.actor_id
+      AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)
+      AND (fusion_call_in_flight(c) OR (c.dispatched_at IS NULL AND c.settled_at IS NULL)));
+  GET DIAGNOSTICS n=ROW_COUNT;
+  RETURN n;
+END $function$;
+
+-- fusion_review_end_paused(interval,integer)
+CREATE OR REPLACE FUNCTION public.fusion_review_end_paused(p_idle interval DEFAULT '24:00:00'::interval, p_limit integer DEFAULT 100)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE cand record; rv fusion_reviews; ended integer:=0; failed integer:=0; skipped integer:=0;
+BEGIN
+  IF p_idle IS NULL OR p_idle<interval '1 hour' OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  -- Turn-path reviews are ended by turn_fusion_recovery (V2-7b).
+  FOR cand IN SELECT id FROM fusion_reviews WHERE state='paused' AND turn_id IS NULL AND updated_at<=clock_timestamp()-p_idle
+      ORDER BY updated_at,id LOOP
+    -- p_limit bounds the reviews actually ended or failed in one run; a skipped review (locked, resumed, or waiting for its
+    -- unjudged output to be judged) takes no place, so a stuck one in front never keeps the ones behind it from being ended.
+    EXIT WHEN ended+failed>=p_limit;
+    BEGIN
+      -- Never waits on a review row a claim, advance or close holds: it is skipped until the next run. The state and the age
+      -- are read again under the lock, because a claim may have resumed it (running, age restarted) since the listing.
+      SELECT * INTO rv FROM fusion_reviews WHERE id=cand.id FOR UPDATE SKIP LOCKED;
+      IF NOT FOUND OR rv.state<>'paused' OR rv.updated_at>clock_timestamp()-p_idle THEN skipped:=skipped+1; CONTINUE; END IF;
+      IF EXISTS(SELECT 1 FROM jsonb_array_elements(rv.steps) x
+          JOIN bill2_runs br ON br.fusion_group_id=(x->>'groupId')::uuid AND br.actor_id=rv.actor_id
+          JOIN bill2_calls c ON c.run_id=br.id
+          WHERE c.fusion_verdict IS NULL AND c.settled_at IS NULL
+            AND EXISTS(SELECT 1 FROM fusion_call_outputs o WHERE o.call_id=c.id)) THEN skipped:=skipped+1; CONTINUE; END IF;
+      -- The user's "end review": cancels and finalizes the review's runs, then settles the fixed fee (charge what the stop
+      -- rule says was delivered, release the rest) with the settlement's conservation check.
+      PERFORM fusion_review_close(rv.actor_id,rv.id,'interrupted');
+      ended:=ended+1;
+    EXCEPTION
+      WHEN deadlock_detected OR lock_not_available THEN skipped:=skipped+1;
+      WHEN OTHERS THEN
+        -- Content-free: the review id and the error code only. The review stays paused and is tried again next run.
+        failed:=failed+1;
+        RAISE WARNING 'fusion_review_end_paused failed: review % sqlstate %',cand.id,SQLSTATE;
+    END;
+  END LOOP;
+  RETURN jsonb_build_object('ended',ended,'failed',failed,'skipped',skipped);
 END $function$;
 
 DO $$

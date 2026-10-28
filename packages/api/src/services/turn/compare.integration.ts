@@ -1,0 +1,184 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { afterAll, beforeAll, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import pg from 'pg';
+import { createClient } from '@supabase/supabase-js';
+import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
+import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from '../fusion/settings';
+import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
+import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
+import type { PositioningClassifier } from '../runtime/positioningGate';
+import { POSITIONING_MARKER } from '../runtime/positioningFallback';
+import { CORE_PATH_SETTING } from './chat';
+import { runCompareTurn, type CompareEvent } from './compare';
+import { turnClients } from './db';
+import type { CounterStore } from './limiter';
+import { RUNTIME_PAYG_SETTING } from './quote';
+
+/*
+ * CORE-PATH-V2 V2-7b acceptance on the local database with a synthetic OpenRouter: a compare turn end to end (Gold, columns in
+ * parallel, each bounded on its exact request and accepted by the adapter, receipts with the answers, per-column rounding,
+ * adoption), a repeated request, a failed column, the positioning fallback refusal and a response broken after it started.
+ */
+const connectionString = process.env.V3_LOCAL_DB!;
+if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connectionString.endsWith('/v3_disposable'))
+  throw new Error('isolated runner required');
+const db = new pg.Client({ connectionString });
+const admin = createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false } });
+const PAIRS = [['anthropic/claude-sonnet-5.5', 'anthropic'], ['openai/gpt-6-luna', 'openai']] as const;
+const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
+const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, FUSION_SETTINGS_KEY, 'billing_credits_per_usd', 'billing_token_price_multiplier',
+  'runtime_rw_v2'];
+let saved: Array<{ key: string; value: unknown }> = [];
+const models = PAIRS.map(() => randomUUID());
+beforeAll(async () => {
+  await db.connect();
+  saved = (await db.query('select key,value from system_settings where key = any($1)', [SETTINGS])).rows;
+  const profiles = PAIRS.map(([model, endpointTag]) => ({ model, endpointTag, protocol: 'openrouter-chat-v1', profileVersion: 'test-only',
+    evidenceVersion: 'test-only', admissionPath: 'empirical', templateTokens: 4096, marginTokens: 4096, maxBytes: 196608,
+    maxMessages: 128, maxTools: 2, maxSchemaBytes: 16384, purposes: ['fusion_compare'], requestFormats: ['fusion-text-v1-stream'],
+    reasoningVariants: [{ reasoning: { effort: 'none' }, outputLimit: 8192, testedOutputLimit: 512, evidenceReference: 'test-only',
+      manifestHash: 'b'.repeat(64), outputStressSamples: 2, includesReasoning: true }], outputLimit: 8192,
+    evidence: { reference: 'test-only', manifestHash: 'a'.repeat(64), distinctSamples: 60, messageStressSamples: 12,
+      maxVerifiedMessages: 128, completeCells: 15, variantsPerCell: 4, maxPromptToBytes: 0.5, maxPromptToUpper: 0.4,
+      outputLimit: 8192, testedOutputLimit: 512, outputSemantics: 'max-tokens-includes-reasoning', includesReasoning: true,
+      cacheCovered: true, costBoundPassed: true } }));
+  for (const [i, [model, tag]] of PAIRS.entries()) {
+    const { pricing } = pricingConfig(model, tag, '0.000001', '0.000002');
+    const config = { pricing, reasoning: { route: tag, purposes: { interactive: { mode: 'off', wire: 'reasoning_effort' } },
+      catalog: { fetchedAt: pricing.fetchedAt, model, reasoning: { mandatory: false, defaultEnabled: false, supportedEfforts: ['low', 'high'],
+        defaultEffort: 'high', supportsMaxTokens: true },
+      endpoints: [{ tag, providerName: 'Synthetic', supportedParameters: ['reasoning', 'reasoning_effort'], contextLength: 1050000,
+        maxCompletionTokens: 8192 }] } } };
+    await db.query(`insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint)
+      values($1,$2,$2,'openrouter','true',8192,1050000,$3,'https://openrouter.ai/api/v1/chat/completions')`, [models[i], model, JSON.stringify(config)]);
+  }
+  const set = (key: string, value: unknown) => db.query(
+    'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value', [key, JSON.stringify(value)]);
+  await set(CORE_PATH_SETTING, { enabled: true, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
+    decisionUpperUsd: '0.001' });
+  await set(RUNTIME_PAYG_SETTING, { version: 1, enabled: true, policyVersion: 'core-path-test', profiles });
+  await set(FUSION_SETTINGS_KEY, { ...DEFAULT_FUSION_SETTINGS, compare: { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true,
+    allowedModelIds: models, defaultModelIds: models, minModels: 2, answerOutputTokens: 4096, maxBudgetUsd: '5' } });
+  await set('billing_credits_per_usd', 100);
+  await set('billing_token_price_multiplier', 6);
+  await set('runtime_rw_v2', { catalogCache: true });
+  await db.query(`insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+    values($1,'Local fixture','gold',true,true,500000000) on conflict(level) do update set allow_fusion_compare=true`, [randomUUID()]);
+  await seedTestOpenRouterKey(db, 'LOCAL_SYNTHETIC_OPENROUTER_KEY');
+});
+afterAll(async () => {
+  await db.query('delete from system_settings where key = any($1)', [SETTINGS]);
+  for (const row of saved) await db.query('insert into system_settings(key,value) values($1,$2)', [row.key, JSON.stringify(row.value)]);
+  await clearTestOpenRouterKey(db);
+  clearCatalogCache();
+  await db.end();
+});
+
+async function member(level = 'gold', credits = 1000) {
+  const actor = randomUUID(), session = randomUUID();
+  await db.query('insert into profiles(id,credits,membership_level) values($1,$2,$3)', [actor, credits, level]);
+  await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+    values($1,$2::int,'addition','grant','opening_grant','system',$3,0,$2::int)`, [actor, credits, 'opening_grant:' + actor]);
+  await db.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+    [session, actor, JSON.stringify({ kind: 'positioning_draft', probe: randomUUID() }), randomUUID()]);
+  return { actor, session };
+}
+
+const frame = (id: string, model: string, extra: Record<string, unknown>) =>
+  'data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model, ...extra }) + '\n\n';
+const sse = (id: string, model: string, text: string, cost = 0.0021) => new Response(
+  frame(id, model, { choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] })
+  + frame(id, model, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+  + frame(id, model, { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050, cost } }) + 'data: [DONE]\n\n',
+  { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
+const parts = (question: string) => ({ skill: null, workspace: [], references: [], question, replyLocale: 'en' as const });
+async function compare(f: { actor: string; session: string }, transport: typeof fetch, input: { requestId?: string; question?: string;
+  gate?: PositioningClassifier } = {}) {
+  const events: CompareEvent[] = [];
+  await withCatalogRequest(() => runCompareTurn({ admin, clients: turnClients(admin), slots, transport,
+    gate: { classify: input.gate ?? (async () => 'allow') } },
+  { actorId: f.actor, sessionId: f.session, requestId: input.requestId ?? randomUUID(), modelIds: models,
+    parts: parts(input.question ?? 'Which plan?') }, e => events.push(e)));
+  return events;
+}
+const credits = async (actor: string) => (await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits as number;
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns, each bounded on its exact request, settled column by column, adopted once', async () => {
+  const f = await member();
+  const bodies: Array<Record<string, unknown>> = [];
+  const transport: typeof fetch = async (_url, init) => { const body = JSON.parse(String(init?.body)); bodies.push(body);
+    return sse('gen-cmp-' + randomUUID(), body.model as string, 'Answer of ' + body.model); };
+  const events = await compare(f, transport);
+  expect(events.map(e => e.type).filter(t => t !== 'column'), JSON.stringify(events)).toEqual(['opened', 'answer', 'answer', 'result']);
+  expect(bodies.map(b => b.model).sort()).toEqual(PAIRS.map(p => p[0]).sort());
+  const result = events.at(-1) as Extract<CompareEvent, { type: 'result' }>;
+  // Each column: n = (1000 x 0.000001 + 50 x 0.000002) = 0.0011 USD; ceil(100 x 0.0011 x 6) = 1 credit per column.
+  expect(result).toMatchObject({ chargedCredits: 2, settlement: 'done' });
+  expect(await credits(f.actor)).toBe(998);
+  const calls = (await db.query(`select c.seq,c.status,c.call_kind from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id
+    where t.actor_id=$1 order by c.seq`, [f.actor])).rows;
+  // The positioning check first (an account without a confirmed positioning; never charged), then the two columns.
+  expect(calls.map(c => c.call_kind + ':' + c.status)).toEqual(['decision:ok', 'model:ok', 'model:ok']);
+  const outputs = (await db.query('select seq,body,verdict from fusion_turn_outputs where actor_id=$1 order by seq', [f.actor])).rows;
+  expect(outputs.map(o => o.verdict)).toEqual(['usable', 'usable']);
+  const adopted = await admin.rpc('fusion_compare_turn_adopt', { p_actor_id: f.actor, p_compare_id: result.compareId, p_seq: outputs[0].seq });
+  expect(adopted.error).toBeNull();
+  expect((await db.query('select role,content from session_messages where session_id=$1 order by seq', [f.session])).rows)
+    .toEqual([{ role: 'user', content: 'Which plan?' }, { role: 'assistant', content: outputs[0].body }]);
+  // The next compare sees that history, as plain messages after the system message.
+  bodies.length = 0;
+  await compare(f, transport, { question: 'And then?' });
+  expect((bodies[0]!.messages as Array<{ role: string }>).map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: a repeated compare request never calls again; only Gold compares; a failed column is free', async () => {
+  const f = await member();
+  let posts = 0;
+  const transport: typeof fetch = async (_url, init) => { posts++; const body = JSON.parse(String(init?.body));
+    return body.model === PAIRS[1][0] ? new Response('{"error":{"code":502}}', { status: 502 })
+      : sse('gen-cmp-' + randomUUID(), body.model, 'Only one'); };
+  const requestId = randomUUID();
+  const first = await compare(f, transport, { requestId });
+  expect(first.at(-1)).toMatchObject({ type: 'result', chargedCredits: 1 });
+  const sentFirst = posts;
+  const again = await compare(f, transport, { requestId });
+  expect(again.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REQUEST_REPLAYED' });
+  expect(posts).toBe(sentFirst);
+  expect(await credits(f.actor)).toBe(999);
+  const pro = await member('pro');
+  const refused = await compare(pro, transport);
+  expect(refused).toEqual([{ type: 'error', code: 'TURN_MEMBERSHIP_REQUIRED' }]);
+  expect(await credits(pro.actor)).toBe(1000);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: without a positioning the fallback rule goes to every column; a refusing column is neither shown nor charged', async () => {
+  const f = await member();
+  const bodies: string[] = [];
+  const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); const body = JSON.parse(String(init?.body));
+    return sse('gen-cmp-' + randomUUID(), body.model, body.model === PAIRS[0][0] ? POSITIONING_MARKER : 'A real answer'); };
+  const events = await compare(f, transport, { gate: async ({ onCost }) => { onCost?.(0.00002); return 'allow'; } });
+  expect(bodies.every(b => b.includes(POSITIONING_MARKER.slice(0, 12)))).toBe(true);
+  expect(events.filter(e => e.type === 'answer').map(e => (e as { ok: boolean }).ok).sort()).toEqual([false, true]);
+  expect(events.at(-1)).toMatchObject({ type: 'result', chargedCredits: 1 });
+  expect((await db.query(`select c.call_kind,c.status from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id
+    where t.actor_id=$1 order by c.seq`, [f.actor])).rows.map(r => r.call_kind + ':' + r.status).sort())
+    .toEqual(['decision:ok', 'model:ok', 'model:unusable']);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: a column broken after it started keeps its freeze for recovery and is never sent again', async () => {
+  const f = await member();
+  let posts = 0;
+  const transport: typeof fetch = async (_url, init) => { posts++; const body = JSON.parse(String(init?.body));
+    if (body.model !== PAIRS[1][0]) return sse('gen-cmp-' + randomUUID(), body.model, 'Fine');
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(frame('gen-broken-cmp', body.model, { choices: [{ index: 0, delta: { content: 'Half' } }] })));
+      controller.error(new Error('connection lost'));
+    } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-broken-cmp' } }); };
+  const events = await compare(f, transport);
+  expect(posts).toBe(2);
+  expect(events.at(-1)).toMatchObject({ type: 'result', settlement: 'pending', chargedCredits: null });
+  expect((await db.query(`select c.status,c.cost_pending,c.provider_id from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id
+    where t.actor_id=$1 and c.status<>'ok' and c.call_kind='model'`, [f.actor])).rows).toEqual([{ status: 'unknown', cost_pending: true, provider_id: 'gen-broken-cmp' }]);
+  expect(await credits(f.actor)).toBeLessThan(1000);
+});

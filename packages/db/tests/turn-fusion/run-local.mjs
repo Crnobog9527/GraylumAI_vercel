@@ -39,7 +39,7 @@ async function review(a,{state='running',version=a.version,outcome=null,adoption
  const id=randomUUID();
  await c.query(`insert into fusion_reviews(id,actor_id,request_id,draft_id,project_id,source_session_id,source_version_id,version_hash,
   materials,materials_hash,config,state,round,phase,attempt,outcome,adoption,ended_at) values($1,$2,$3,$4,$5,$6,$7,'h','{}',$8,
-  '{"maxRounds":2}',$9,1,'review',1,$10,$11,case when $9 in ('running','paused') then null else now() end)`,
+  '{"maxRounds":2,"path":"turn"}',$9,1,'review',1,$10,$11,case when $9 in ('running','paused') then null else now() end)`,
  [id,a.actor,randomUUID(),randomUUID(),randomUUID(),a.session,version,hash('m'),state,outcome&&JSON.stringify(outcome),adoption&&JSON.stringify(adoption)]);
  return id;
 }

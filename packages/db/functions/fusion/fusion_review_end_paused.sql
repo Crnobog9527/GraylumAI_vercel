@@ -12,7 +12,8 @@ DECLARE cand record; rv fusion_reviews; ended integer:=0; failed integer:=0; ski
 BEGIN
   IF p_idle IS NULL OR p_idle<interval '1 hour' OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN
     RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
-  FOR cand IN SELECT id FROM fusion_reviews WHERE state='paused' AND updated_at<=clock_timestamp()-p_idle
+  -- Turn-path reviews are ended by turn_fusion_recovery (V2-7b).
+  FOR cand IN SELECT id FROM fusion_reviews WHERE state='paused' AND turn_id IS NULL AND updated_at<=clock_timestamp()-p_idle
       ORDER BY updated_at,id LOOP
     -- p_limit bounds the reviews actually ended or failed in one run; a skipped review (locked, resumed, or waiting for its
     -- unjudged output to be judged) takes no place, so a stuck one in front never keeps the ones behind it from being ended.
