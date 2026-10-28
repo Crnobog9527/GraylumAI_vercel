@@ -62,3 +62,18 @@ test('creates the requested accounts, bans the previous batch and writes credent
   assert.ok(logs.join('\n').includes('email_exists'));
   assert.ok(!logs.join('\n').includes('sb_secret_fixture'), 'the key is never printed');
 });
+
+test('an output file that is itself a symbolic link, or already exists, is refused before any account is created', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linkfile-'));
+  const link = join(dir, 'accounts.json');
+  symlinkSync(join(REPO, 'scripts', 'not-yet-there.json'), link);
+  assert.throws(() => assertOutsideRepo(link), /symbolic link/);
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return { ok: true, status: 200, json: async () => ({ id: 'x' }) }; };
+  await assert.rejects(resetAccounts({ env, fetchImpl, from: 1, count: 2, out: link }), /symbolic link/);
+  const existing = join(dir, 'existing.json');
+  (await import('node:fs')).writeFileSync(existing, '{}');
+  await assert.rejects(resetAccounts({ env, fetchImpl, from: 1, count: 2, out: existing }), /already exists/);
+  assert.equal(calls, 0, 'no account was created');
+  assert.equal((await import('node:fs')).existsSync(join(REPO, 'scripts', 'not-yet-there.json')), false, 'nothing was written through the link');
+});

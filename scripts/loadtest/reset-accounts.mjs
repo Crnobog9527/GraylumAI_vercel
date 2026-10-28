@@ -9,9 +9,9 @@
 // The profile and the opening test credits are created by the app on each account's first authenticated request (the load driver
 // makes it). The credentials of the created accounts are written only to --out (mode 0600), which must live outside the repository.
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, relative, isAbsolute, sep, basename } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export function emailFor(template, n) {
@@ -29,6 +29,9 @@ export function assertStaging(url, allowedHost) {
 // resolved, and "outside" means a whole parent path segment (".." or "../x"), not a name that merely starts with two dots.
 const REPO = resolve(import.meta.dirname, '../..');
 export function assertOutsideRepo(file, repo = REPO) {
+  // The file itself must not be a symlink (a link outside the repository can still point into it); a missing file is fine.
+  try { if (lstatSync(file).isSymbolicLink()) throw new Error('--out must not be a symbolic link'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
   const folder = resolve(dirname(file));
   let real = folder;
   try { real = realpathSync(folder); } catch { /* a folder that does not exist yet is judged by its written path */ }
@@ -39,6 +42,8 @@ export function assertOutsideRepo(file, repo = REPO) {
 
 export async function resetAccounts({ env = process.env, fetchImpl = fetch, from, count, out, banPrevious, log = console.log }) {
   const base = env.SUPABASE_URL, key = env.SUPABASE_SERVICE_ROLE_KEY;
+  // The credentials file is checked before any account exists, and is created exclusively (never through a link, never over a file).
+  if (out) { assertOutsideRepo(out); if (existsSync(out)) throw new Error('--out already exists; remove it first'); }
   if (!base || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   assertStaging(base, env.LOADTEST_ALLOWED_HOST);
   const headers = { apikey: key, 'content-type': 'application/json', ...(key.startsWith('sb_secret_') ? {} : { authorization: `Bearer ${key}` }) };
@@ -60,7 +65,7 @@ export async function resetAccounts({ env = process.env, fetchImpl = fetch, from
     accounts.push({ email, id: body.id, password });
     tally.created++;
   }
-  if (out) { writeFileSync(out, JSON.stringify({ accounts }, null, 1)); chmodSync(out, 0o600); }
+  if (out) writeFileSync(out, JSON.stringify({ accounts }, null, 1), { flag: 'wx', mode: 0o600 });
   return { tally, accounts };
 }
 
