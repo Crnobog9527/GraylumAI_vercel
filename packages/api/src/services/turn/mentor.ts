@@ -185,6 +185,9 @@ async function runOrganizer(input: { catalog: ChatQuote; context: RequestContext
   template: string | undefined; opening: boolean; input: string }): Promise<unknown> {
   const { catalog } = input;
   const instructions = organizerInstructions(input.template, input.opening);
+  // The SDK wraps what the exchange throws; the turn's own stop (a pause, a deletion) is kept and rethrown as itself.
+  let stopped: TurnStop | undefined;
+  const keep = (error: unknown) => { if (error instanceof TurnStop) stopped = error; throw error; };
   const output = await runRuntime({ model: catalog.model, instructions, input: input.input, session: turnSession([]),
     maxOutputTokens: catalog.outputLimit, maxTurns: 1, reasoning: catalog.reasoning, tools: [], readSessionHistory: false,
     selectHistory: async (_items, incoming) => incoming,
@@ -192,9 +195,9 @@ async function runOrganizer(input: { catalog: ChatQuote; context: RequestContext
       const request = openRouterRequestBody(body, { context: input.context, policy: callPolicy(catalog) as never,
         phase: 'attached_organizer', primaryDialogue: false });
       assertRuntimeRequestCapacity(request, catalog.inputLimit);
-      await input.gate();
-      return modelCall(input.deps, catalog, request);
-    } });
+      await input.gate().catch(keep);
+      return modelCall(input.deps, catalog, request).catch(keep);
+    } }).catch(error => { throw stopped ?? error; });
   try {
     const value: unknown = JSON.parse(output);
     return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
