@@ -7,7 +7,7 @@ import {type FrozenReport} from '../report/contract';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
-import {freezePromptCache,freezeHostPromptCache,freezeSharedPromptCache,promptCacheReserveBytes} from './promptCache';
+import {freezePromptCache,freezeHostPromptCache,promptCacheReserveBytes} from './promptCache';
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
 import {currentInputBytes} from './historySelection';
@@ -292,12 +292,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
      ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
-   // PROMPT-CACHE-ALL: a report freezes v3 (Skill text + facts as two blocks); free chat's v3 moves to CORE-PATH-V2 (V2-4).
+   // PROMPT-CACHE-ALL: reports (V2-7a) and free chat (V2-4) get prompt-cache-v3 on the CORE-PATH-V2 turn path, not here:
+   // report_admission_check.sql refuses a report context with promptCache.
    const writePrice=policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined;
-   let promptCache=hostTurnContext?undefined:policy.reportGeneration?freezeSharedPromptCache({real:Boolean(policy.real),model:row.data.model_id,
-    instructions,prefixChars:skillChars,historyMarker:false,cacheWriteUsdPerMillion:writePrice})
-    :freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,instructions,skillChars,
-    stableAdditionalPrefix:policy.stableAdditionalInstructions,cacheWriteUsdPerMillion:writePrice});
+   let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,
+    model:row.data.model_id,instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,cacheWriteUsdPerMillion:writePrice});
    if(mentorStream&&!stepSummary&&!hostTurnContext?.cardContract)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
    const currentInput=runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext);
    const maxOutputTokens=outputCapacity(row.data,organizerOutput,

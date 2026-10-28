@@ -77,7 +77,7 @@ export const runtimeContext=z.object({
 }).strict().superRefine((context, ctx) => {
  if (context.reportGeneration && (context.role !== 'skill' || context.historyItems !== 0 || context.maxTurns !== 1
    || context.tools.length || context.maxToolCalls || context.network !== 'deny' || context.attachedOrganizer
-   || context.scopeMaterial || context.workspaceContext || context.promptCache&&context.promptCache.version!=='prompt-cache-v3' || context.hostTurnContext
+   || context.scopeMaterial || context.workspaceContext || context.promptCache || context.hostTurnContext
    || context.historySelection || context.sources?.length || context.libraryReferences || context.libraryRetrieval
    || context.ownPosts || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
@@ -121,8 +121,7 @@ export const runtimeContext=z.object({
      host && (context.role !== 'skill' || context.providerRequestFormat !== 'agent-turn-v5-stream') ||
      context.promptCache?.version === 'prompt-cache-v2' && !host ||
      host && context.promptCache?.version !== undefined && context.promptCache.version !== 'prompt-cache-v2' ||
-     // PROMPT-CACHE-ALL: v3 belongs to a free-chat turn (never a Skill matching turn, whose system text changes) or a report.
-     context.promptCache?.version === 'prompt-cache-v3' && (context.reportGeneration ? context.promptCache.historyMarker :
-       context.role !== 'ordinary' || context.matching !== undefined))
+     // PROMPT-CACHE-ALL: v3 belongs to a free-chat turn (never a Skill matching turn, whose system text changes).
+     context.promptCache?.version === 'prompt-cache-v3' && (context.role !== 'ordinary' || context.matching !== undefined))
   ctx.addIssue({code: 'custom', message: 'RUNTIME_CONTEXT_INVALID'});
 });
