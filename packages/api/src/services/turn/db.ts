@@ -43,8 +43,9 @@ export type RecoveryAction = 'interrupt' | 'expire' | 'settle';
 const recoveryClaim = z.array(z.object({ actorId: z.string().uuid(), turnId: z.number().int().positive(),
   action: z.enum(['interrupt', 'expire', 'settle']),
   /** settle: the unknown model costs to look up by provider id. */
+  /** model and pricing are the ones the turn froze at open (policy), never the catalog's current values. */
   calls: z.array(z.object({ seq: z.number().int().positive(), providerId: z.string().min(1), model: z.string().nullable(),
-    upperUsd: z.coerce.string() })) })).max(50);
+    pricing: z.unknown().nullable().optional(), upperUsd: z.coerce.string() })) })).max(50);
 export type RecoveryItem = z.infer<typeof recoveryClaim>[number];
 const recovered = z.object({ action: z.enum(['interrupt', 'expire', 'settle']), skipped: z.boolean().optional(),
   closeKind: z.string().optional(), settlement: z.enum(['pending', 'done']).nullable().optional() }).passthrough();

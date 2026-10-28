@@ -116,7 +116,10 @@ try{
  // 3. Late receipt: an interrupted turn with an unknown model cost is claimed for settlement with its provider id; the receipt
  // found by lookup settles it once. A receipt the API itself wrote late is settled too. No provider id: left for review.
  {
-  const a=await account(),o=await open(a);
+  const pricing={version:'nominal-v1',pricingHash:'a'.repeat(64),endpointTag:'synthetic/exact',
+   tiers:[{minPromptTokens:0,prompt:'2',completion:'10',request:'0'}],timeOfDay:[]};
+  const a=await account(),o=await open(a,{pol:policy({model:'test/model',pricing})});
+  // The catalog may change after the call: the claim still names what the turn froze.
   await begin(a,o.turnId,1);await identity(a,o.turnId,1,'gen-late');
   await age(a,o.turnId,'16 minutes');
   assert.ok(ids(await claim()).includes(o.turnId));
@@ -125,7 +128,7 @@ try{
   assert.equal(await balance(a),940,'the freeze stays while the model cost is unknown');
   const item=(await claim()).find(i=>i.turnId===o.turnId);
   assert.equal(item?.action,'settle');
-  assert.deepEqual(item.calls,[{seq:1,providerId:'gen-late',model:null,upperUsd:0.02}]);
+  assert.deepEqual(item.calls,[{seq:1,providerId:'gen-late',model:'test/model',pricing,upperUsd:'0.020000000000'}]);
   assert.equal((await claim()).find(i=>i.turnId===o.turnId),undefined,'not looked up again within the lease');
   await record(a,o.turnId,1);
   const settled=await recover(a,o.turnId,'settle');

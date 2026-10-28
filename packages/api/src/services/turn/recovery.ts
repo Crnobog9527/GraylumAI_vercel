@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TransportObservation } from '../bill2/fixtureAdapter';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { openRouterEvidence, type OpenRouterIdentity } from '../bill2/openRouterEvidence';
-import { nominalActualFallback } from '../../shared/nominalPricing';
+import { nominalActualFallback, nominalCost, nominalPricing } from '../../shared/nominalPricing';
 import { ceil12 } from './call';
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { turnClients, turnDatabase, type RecoveryItem, type TurnDatabase } from './db';
@@ -35,17 +35,24 @@ export type TurnRecoverySummary = {
 
 /** One unknown model cost: its final cost by provider id, recorded as the late receipt; anything less leaves it unknown. */
 async function lookUp(deps: TurnRecoveryDeps, item: RecoveryItem, call: RecoveryItem['calls'][number]): Promise<boolean> {
-  if (!deps.lookup || !deps.account || !call.model) return false;
+  // Priced as a live receipt is (call.ts): the price table frozen at open, from the looked-up token counts; min(c, U) only when
+  // the counts are missing. A turn that froze no price table is left unknown rather than priced by another rule.
+  const pricing = nominalPricing.safeParse(call.pricing);
+  if (!deps.lookup || !deps.account || !call.model || !pricing.success) return false;
   const identity: OpenRouterIdentity = { provider: 'openrouter', account: deps.account, model: call.model, protocol: 'openrouter-chat-v1' };
   const observation = await deps.lookup(call.providerId, identity, RECOVERY_LOOKUP_MS);
   const evidence = openRouterEvidence(observation, identity, 'lookup', call.providerId);
   if (!('final' in evidence) || !evidence.final || typeof evidence.cost !== 'string') return false;
   const actual = ceil12(evidence.cost);
-  // The lookup reports what the provider charged; the nominal base is that cost, never above the call's frozen bound U_i (the
-  // user is never charged more than the list price the turn froze, and with cache reads usually less).
+  const usage = (evidence.usage ?? {}) as Record<string, unknown>;
+  const count = (value: unknown) => typeof value === 'number' ? value
+    : typeof value === 'string' && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
+  const tokens = { promptTokens: count(usage.inputTokens), completionTokens: count(usage.outputTokens),
+    reasoningTokens: count(usage.reasoningTokens) };
+  const upper = ceil12(call.upperUsd.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, ''));
   await deps.db.record({ actorId: item.actorId, turnId: item.turnId, seq: call.seq, status: 'ok',
-    nominalUsd: ceil12(nominalActualFallback(actual, call.upperUsd)), actualUsd: actual,
-    usage: { ...(evidence.usage ?? {}), source: 'lookup' }, providerId: call.providerId,
+    nominalUsd: ceil12(nominalCost(pricing.data, tokens) ?? nominalActualFallback(actual, upper)), actualUsd: actual,
+    usage: { ...usage, source: 'lookup' }, providerId: call.providerId,
     payloadHash: evidence.sourceHash, raw: evidence.rawBody || null });
   return true;
 }

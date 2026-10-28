@@ -11,6 +11,8 @@
 --                       compare and jury included (aligned with V2-7b: a jury between groups is paused(awaiting_user) and
 --                       expires here with refund_all false, so turn_user_charge applies the jury rule; fusion-recovery only
 --                       syncs the fusion_* rows).
+--                       For a settle it returns each unknown model call with the model and nominal price table the turn froze
+--                       at open (policy model/pricing, or models/pricings by model id), so a late receipt is priced as a live one.
 --   turn_recover        one turn, one short transaction: locks session then turn (as turn_close), re-checks under the locks that
 --                       the work is still due (a resume, a late write or another instance may have moved it), then calls
 --                       turn_close, the only function that changes a turn's state: interrupted (stopped for a report that was
@@ -84,8 +86,12 @@ BEGIN
   )
   SELECT coalesce(jsonb_agg(jsonb_build_object('actorId', l.actor_id, 'turnId', l.id, 'action', 'settle',
     'calls', (SELECT coalesce(jsonb_agg(jsonb_build_object('seq', k.seq, 'providerId', k.provider_id,
-        'model', (SELECT a.model_id FROM ai_models a WHERE a.id = k.model_id), 'upperUsd', k.upper_usd) ORDER BY k.seq), '[]'::jsonb)
-      FROM turn_calls k WHERE k.turn_id = l.id AND k.cost_pending AND k.provider_id IS NOT NULL AND k.call_kind = 'model'))),
+        -- The model and price table frozen at open (a multi-model kind freezes them per model id), never the catalog's current
+        -- values: an edited model slug or price must not change how an old call is matched or priced.
+        'model', coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model'),
+        'pricing', coalesce(t.policy->'pricings'->(k.model_id::text), t.policy->'pricing'),
+        'upperUsd', k.upper_usd::text) ORDER BY k.seq), '[]'::jsonb)
+      FROM turn_calls k JOIN turns t ON t.actor_id = l.actor_id AND t.id = k.turn_id WHERE k.turn_id = l.id AND k.cost_pending AND k.provider_id IS NOT NULL AND k.call_kind = 'model'))),
     '[]'::jsonb)
   INTO settle FROM leased l;
   RETURN live || settle;
