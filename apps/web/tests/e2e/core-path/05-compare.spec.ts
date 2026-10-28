@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { TEST_MODEL_ID, resultsDirectory } from './support/config';
+import { resultsDirectory, testModelId } from './support/config';
 import { coreSql } from './support/db';
 import { expect, test } from './support/fixtures';
 import { cheapestOther, readModelsByName } from './support/models';
@@ -9,7 +9,7 @@ import { startFreeChat, waitForRuntimeTurn, runtimeBox } from './support/freeCha
 import { readCredits } from './support/ui';
 
 /**
- * Journey 5: compare two models. The left column is Claude Haiku 5.5, the right one the cheapest other model on the back-office
+ * Journey 5: compare two models. The left column is the test model, the right one the cheapest other model on the back-office
  * compare list. Both columns answer; the total charge is exactly the sum of the column charges.
  */
 test('journey 5: two models answer and the total equals the sum of the columns', async ({ openAs, meter }) => {
@@ -30,17 +30,17 @@ test('journey 5: two models answer and the total equals the sum of the columns',
   const labels: string[] = [];
   for (let i = 0; i < await boxes.count(); i += 1) labels.push((await boxes.nth(i).locator('xpath=ancestor::label[1]').innerText()).trim());
   const list = await readModelsByName(coreSql(), labels);
-  const haiku = list.find(model => model.modelId === TEST_MODEL_ID);
+  const base = list.find(model => model.modelId === testModelId());
   const other = cheapestOther(list);
-  expect(haiku, 'Claude Haiku 5.5 is on the compare list').toBeDefined();
+  expect(base, 'the test model is on the compare list').toBeDefined();
   expect(other, 'a second, cheaper model is on the compare list').not.toBeNull();
-  // The other column is recorded for 99-model-check, which allows exactly Haiku and this model.
+  // The other column is recorded for 99-model-check, which allows the test model, the organizer/summary models and this one.
   await mkdir(resultsDirectory, { recursive: true });
   await writeFile(path.join(resultsDirectory, 'compare-model.json'), JSON.stringify({ modelId: other!.modelId }));
   for (let i = 0; i < await boxes.count(); i += 1) {
     const box = boxes.nth(i);
     const label = labels[i]!;
-    const wanted = label === haiku!.name || label === other!.name;
+    const wanted = label === base!.name || label === other!.name;
     if (wanted && !(await box.isChecked())) await box.check();
     if (!wanted && (await box.isChecked())) await box.uncheck();
   }
@@ -55,7 +55,7 @@ test('journey 5: two models answer and the total equals the sum of the columns',
   await meter.checkpoint('journey 5: compare answered');
 
   const columns = card.getByRole('article');
-  await expect(columns.nth(0)).toHaveAccessibleName(haiku!.name);
+  await expect(columns.nth(0)).toHaveAccessibleName(base!.name);
   await expect(columns.nth(1)).toHaveAccessibleName(other!.name);
   const charges: number[] = [];
   for (let i = 0; i < 2; i += 1) {

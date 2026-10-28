@@ -1,4 +1,4 @@
-# CORE-PATH-V2 V2-11: the core user journeys against the deployed staging site, with Claude Haiku 5.5 and at most
+# CORE-PATH-V2 V2-11: the core user journeys against the deployed staging site, with Gemini 3.8 Flash (CORE_E2E_MODEL_ID) and at most
 # 0.5 US dollars per run. A failed run opens an issue.
 # DRAFT, not active (Owner 2026-10-28: for now the controller runs the suite by hand on a machine; automation waits for V2-10).
 # When it is wanted: plan A. Trigger only by workflow_dispatch against the staging branch

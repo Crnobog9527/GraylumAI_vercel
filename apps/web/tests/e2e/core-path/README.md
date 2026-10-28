@@ -10,15 +10,15 @@
 | `01-positioning-report.spec.ts` | ① 定位三步（含对标）→ 生成报告（确认框 500 积分）→ 13 章 → 定稿；③ 报告停止（前两次 24 小时内免费并全额退回；之后先弹确认，“继续生成”继续、“确认停止”按已生成部分扣费）；⑥ 评审团逐章选择并结算；④a 删除已定稿草稿的对话（留只读条目，旧链接不白屏） | gold |
 | `02-free-chat.spec.ts` | ② 自由对话：自动加载 Skill、触发一次研究工具、回复完成、扣费 | pro |
 | `04-delete-conversation.spec.ts` | ④b 删除 20 轮长对话（行消失、旧链接回到起始页） | pro |
-| `05-compare.spec.ts` | ⑤ 对比两个模型：左列 Haiku、右列是对比名单里最便宜的另一个模型，两列都有结果，合计扣费 = 各列之和 | gold |
-| `99-model-check.spec.ts` | 本次运行里语言模型调用只允许 Claude Haiku 5.5，以及对比旅程的那一个“最便宜的另一个模型” | — |
+| `05-compare.spec.ts` | ⑤ 对比两个模型：左列是测试模型（默认 Flash）、右列是对比名单里最便宜的另一个模型，两列都有结果，合计扣费 = 各列之和 | gold |
+| `99-model-check.spec.ts` | 本次运行里语言模型调用只允许测试模型、整理和评审汇总模型，以及对比旅程的那一个“最便宜的另一个模型” | — |
 
 **注销账号不在自动测试里**（Owner 2026-10-28：人机验证不改，注销留给人工验收），所以这里没有注销账号、种子和密钥。
 01 里的几个测试共用一份草稿（对标会真实花钱查询，不为每条旅程重建），按顺序跑。整套要在 60 分钟内跑完（工作流超时上限）；超时就缩短旅程，不能调大。
 
 ## 花费上限
 
-整套一次 ≤ 0.5 美元（`CORE_E2E_MAX_USD` 只能调低不能调高）。`support/spend.ts` 从 `bill2_runs.provider_cost_usd` 累计这几个测试账号本次运行的**平台实际成本**（不是用户积分：报告固定 500 积分，与成本无关），每个模型回合后检查，超了立刻停止并判失败；每条旅程的花费写进 `test-results/core-path/spend.json` 和 `summary.md`。服务端的止损照旧，不另加。
+整套一次 ≤ 0.5 美元（Opus 汇总的那次评审如果让整套超出，如实报告）（`CORE_E2E_MAX_USD` 只能调低不能调高）。`support/spend.ts` 从 `bill2_runs.provider_cost_usd` 累计这几个测试账号本次运行的**平台实际成本**（不是用户积分：报告固定 500 积分，与成本无关），每个模型回合后检查，超了立刻停止并判失败；每条旅程的花费写进 `test-results/core-path/spend.json` 和 `summary.md`。服务端的止损照旧，不另加。
 
 ## 只读数据库角色（取代 DATABASE_URL）
 
@@ -61,6 +61,8 @@ create policy core_e2e_read on public.ai_models          for select to core_e2e_
 | `CORE_E2E_STATE_DIR` | 本机：放 `gold.json`、`pro.json`（Playwright storageState，用 `~/.graylum/staging-login` 生成）的目录 |
 | `CORE_E2E_<GOLD/PRO>_EMAIL`、`_PASSWORD` | CI：走登录页登录（没有 STATE_DIR 时使用） |
 | `VERCEL_BYPASS_COOKIE` | 如果 staging 有部署保护 |
+| `CORE_E2E_MODEL_ID` | 测试用模型，默认 `google/gemini-3.8-flash` |
+| `CORE_E2E_SIDE_MODEL_IDS` | 额外放行的模型（逗号分隔），默认整理 `openai/gpt-6-luna` 和评审汇总 `anthropic/claude-opus-5.5` |
 | `CORE_E2E_PATH=v2` | V2-10 之后设置：额外断言普通对话没有“停止”按钮（旧路径的回复里有，所以此前只记一条说明） |
 
 登录只读：`auth.setup.ts` 不写站点，不动维护模式等全站开关。
@@ -69,33 +71,23 @@ create policy core_e2e_read on public.ai_models          for select to core_e2e_
 
 `node scripts/e2e-core-path/seed.mjs --out <文件>` 建/刷新两个专用账号（gold 至少 6000 积分、pro 至少 2000），密码随机、只写进 `--out` 文件（0600），不打印。只接受 staging 项目（脚本里硬校验，正式项目一律拒绝）。需要 `E2E_SEED_SUPABASE_URL`、`E2E_SEED_SERVICE_ROLE_KEY`、`CORE_E2E_EMAIL_DOMAIN`（邮箱域名不进仓库）。写 staging，由总控执行。
 
-## 测试用模型：Claude Haiku 5.5（总控照这一节执行）
+## 测试用模型：Gemini 3.8 Flash（总控照这一节执行）
 
-**结论：不是纯配置。** 查证后有三层，第一层要先合一个代码 PR：
-
-1. **代码**：`packages/api/src/services/runtime/paygHostPolicy.ts` 的 `admittedRoutes` 是写死的“已批准的模型/线路”清单（现有：Sonnet 5.5、Gemini 3.8 Flash、Gemini 4 Argon、GPT-6 Luna、GPT-6.1 Sol、Opus 5.5）。没有 `anthropic/claude-haiku-5.5 → anthropic`，哪怕配置写对了准入也认不出它（Gemini 4 Argon 当时就是这样接入的，见 `docs/launch/FUSION_ARGON.md`）。要先开一个小 PR 加这一行和测试（不扩大用途）。
-2. **取样证据**：`runtime_payg_staging` 里每个模型/线路/用途组合都要有真实取样证据（`scripts/payg-profile`，Haiku 目录价 输入 $0.1/百万、输出 $0.5/百万，预计整套远低于 1 美元，总控已批上限 1 美元）。Sonnet 现有档案覆盖：skill、report、ordinary、skill_matching、fusion_review、fusion_compare；整理类（organizer、attached_organizer）现在是 GPT-6 Luna；评审汇总（fusion_summary）是 Opus。Haiku 要覆盖的用途取决于下面第 4 步切哪些席位。
-3. **配置写入**（下面清单）。
-
-OpenRouter 线路已核对：`anthropic/claude-haiku-5.5` 有 10 条线路，其中 `anthropic`、`google-vertex/global`、`azure/global`、`amazon-bedrock`、`claude-on-aws` 价格为输入 $0.1、输出 $0.5、缓存读 $0.01、缓存写 $0.125（每百万），上下文 1,000,000，最大输出 128,000，都支持 tools 和 reasoning；`*/us`、`*/eu` 区域线路贵 10%。**选 `anthropic`**（和 Sonnet、Opus 同一个线路名，已有同线路的准入与密钥绑定经验）。
+模型由 `CORE_E2E_MODEL_ID` 决定，默认 `google/gemini-3.8-flash`。选它是因为它在 staging 已经有每次调用的计费档案（对话、报告、技能匹配、评审、对比），**不需要新增模型、档案或测试窗口条目**；价格是输入 $0.375 + 输出 $1.875（每百万 token）。整理类调用仍是 GPT-6 Luna（便宜，已有档案），评审团的汇总仍是 Opus 5.5（`fusion_summary` 目前只有 Opus 有档案），所以 `99-model-check` 放行：Flash、Luna、Opus，以及对比旅程里“对比名单中最便宜的另一个模型”（`CORE_E2E_SIDE_MODEL_IDS` 可改）。Opus 汇总那一次评审可能是整套里最贵的一笔，花费按实测如实报，超过 0.5 美元由计量直接判失败。
 
 ### 写 staging 的清单（总控执行；每步先备份旧值，跑完切回）
 
-压测结束、第 1、2 步的 PR 已合并并部署后：
-
 | 步骤 | 写哪里 | 内容 | 备份 / 切回 |
 | --- | --- | --- | --- |
-| 0 | 备份 | 把下面各键的当前完整值导出到本机 `~/.graylum/core-e2e-backup-<日期>/`（`system_settings` 的 `runtime_payg_staging`、`billing_payg_start_thresholds`、`billing_provider_prices`、`fusion_settings`、`primary_model_id`、`assistant_model_id`、`v3_summary_model_id`；定位模块在 `modules` 表的 `model_id`、`report_model_id`；测试窗口 `call_policies` 数组） | 文件权限 600，不进仓库 |
-| 1 | 后台“模型管理 → 添加模型” | 模型 ID `anthropic/claude-haiku-5.5`，名称 `claude-haiku-5.5`；点“从 OpenRouter 读取”，线路选 `anthropic`，保存价格快照（MODEL-PRICING-SYNC）。读回 `ai_models.config.pricing.endpoints` 里有 `anthropic` 且 `admissible: true`；`config.reasoning.route = anthropic` | 切回：该行置 `is_active=false`（不删） |
-| 2 | `billing_provider_prices` | 确认后台价格同步已为该路线写入价格；缺则按后台“价格”页补（输入 0.1、输出 0.5、缓存读 0.01、缓存写 0.125 每百万，单位与其他模型一致） | 备份见步骤 0 |
-| 3 | `runtime_payg_staging.profiles` | 追加第 2 层取样 PR 产出的 `*.profiles-draft.json` 里 Haiku 的档案（写前用 `paygHostProfile` 校验整份 value；不得出现重复的 Haiku/线路档案；保留 version、enabled、windowId 和全部原档案） | 切回：移除追加的 Haiku 档案 |
-| 4 | 测试窗口 `call_policies` | 追加 Haiku 条目（provider openrouter、protocol openrouter-chat-v1、account 沿用 Sonnet 的同一平台绑定、providerSlug `anthropic`、contextTokens 1000000、multiplier 与窗口一致、价格按 `deriveFrozenPrices`）；写前重新核价；断言只改目标窗口恰好 1 行 | 切回：移除该条目 |
-| 5 | `billing_payg_start_thresholds` | 为 Haiku 每个用途补一条（同模型 Sonnet 的 typicalUsd 可作参考，取样 PR 会给出名义成本） | 切回：移除这些条目 |
-| 6 | 把用到的席位切到 Haiku | ① 定位 Skill 模块：`modules.model_id`、`modules.report_model_id`；② `system_settings.primary_model_id`（自由对话）；③ `assistant_model_id`、`v3_summary_model_id`（整理/摘要，现为 GPT-6 Luna；不换就会在 `99-model-check` 里出现 GPT-6 Luna）；④ `fusion_settings.review`：`reviewerModelIds`、`reviewerRoles`、`summaryModelId` 全换成 Haiku（现为 Sonnet/Sol/Argon + Opus 汇总，一次评审就可能超过 0.5 美元）；⑤ `fusion_settings.compare.allowedModelIds` 在原名单（Sonnet、Gemini 3.8 Flash、GPT-6.1 Sol、Opus）基础上追加 Haiku，**不要**另加第二条 Haiku 线路。对比旅程自动选 Haiku + 名单里最便宜的另一个（现为 Gemini 3.8 Flash），并断言它确实最便宜 | 切回：按步骤 0 的备份逐项还原；`allowedModelIds` 去掉 Haiku |
-| 7 | 读回 | 逐项读回上面的键，确认和预期一致，并用后台“测试准入”看 Haiku 在上述用途下可被准入（不被“缺报价/缺档案/错线路”拒绝） | — |
-| 8 | 跑种子脚本、通知实跑 | 见上面“账号和种子” | — |
+| 0 | 备份 | 把下面各键当前完整值导出到本机 `~/.graylum/core-e2e-backup-<日期>/`（权限 600，不进仓库）：`modules` 表里定位 Skill 模块的 `model_id`、`report_model_id`；`system_settings` 的 `primary_model_id`、`fusion_settings` | 切回时按它还原 |
+| 1 | `modules.model_id`、`modules.report_model_id`（定位 Skill 模块，后台“模块”页或同一张表） | 都改成 Flash：`da9e7046-fddc-4b97-bf65-a275b05d6cf0` | 还原备份值 |
+| 2 | `system_settings.primary_model_id`（自由对话） | 改成 `da9e7046-fddc-4b97-bf65-a275b05d6cf0` | 还原备份值 |
+| 3 | `system_settings.fusion_settings.review`（走后台保存校验） | `reviewerModelIds` 里的 Sonnet `d04a4800-2d3a-43b3-8af9-cb960572e34f` 原位换成 Flash `da9e7046-fddc-4b97-bf65-a275b05d6cf0`；`reviewerRoles` 去掉 Sonnet 键，加 Flash=`evidence`；保留 Sol `8122be92-…`=finance、Argon `7169edbf-…`=execution、Opus 汇总、Skill、1 轮、固定 1500 积分和其他配置 | 还原备份的整个 `fusion_settings` |
+| 4 | 不用改 | `assistant_model_id`、`v3_summary_model_id`（GPT-6 Luna，整理类）保持；对比名单（Sonnet、Flash、Sol、Opus）保持，对比旅程左列 Flash、右列自动选名单里最便宜的另一个（现为 Sol，约 $6/百万） | — |
+| 5 | 读回 | 逐项读回上面的键，确认和预期一致；用后台“测试准入”确认 Flash 在对话/报告/评审/对比用途下可被准入（不被“缺报价/缺档案”拒绝） | — |
+| 6 | 跑种子脚本、通知实跑 | 见上面“账号和种子” | — |
 
-跑完后按步骤 0 的备份切回第 6、5、4、3 步，Haiku 模型行可以保留（置为停用）。
+跑完后按步骤 0 的备份还原第 1、2、3 步。
 
 ## 当前路径与未验证的部分
 

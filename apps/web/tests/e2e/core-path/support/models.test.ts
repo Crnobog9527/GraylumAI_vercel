@@ -15,13 +15,14 @@ describe('compare model choice', () => {
     expect(cheapestLine(null)).toBeNull();
   });
 
-  it('picks the cheapest model other than Haiku', () => {
-    const list = [model('anthropic/claude-haiku-5.5', 0.6), model('anthropic/claude-sonnet-5.5', 12),
-      model('google/gemini-3.8-flash', 2.25), model('openai/gpt-6.1-sol', 20)];
-    expect(cheapestOther(list)?.modelId).toBe('google/gemini-3.8-flash');
+  it('picks the cheapest model other than the test model', () => {
+    const list = [model('google/gemini-3.8-flash', 2.25), model('anthropic/claude-sonnet-5.5', 12),
+      model('openai/gpt-6.1-sol', 6), model('anthropic/claude-opus-5.5', 24)];
+    expect(cheapestOther(list)?.modelId).toBe('openai/gpt-6.1-sol');
+    expect(cheapestOther(list, 'openai/gpt-6.1-sol')?.modelId).toBe('google/gemini-3.8-flash');
   });
 
-  it('is null when Haiku is the only model on the list', () => {
-    expect(cheapestOther([model('anthropic/claude-haiku-5.5', 0.6)])).toBeNull();
+  it('is null when the test model is the only model on the list', () => {
+    expect(cheapestOther([model('google/gemini-3.8-flash', 2.25)])).toBeNull();
   });
 });

@@ -6,7 +6,7 @@
 
 import type { Sql } from 'postgres';
 
-import { TEST_MODEL_ID } from './config';
+import { testModelId } from './config';
 
 export interface CompareModel {
   id: string;
@@ -26,8 +26,8 @@ export function cheapestLine(config: unknown): number | null {
   return sums.length ? Math.min(...sums) : null;
 }
 
-/** Journey 5 compares Haiku with the cheapest other model on the compare list (Owner/controller 2026-10-28). */
-export function cheapestOther(models: readonly CompareModel[], excludeModelId = TEST_MODEL_ID): CompareModel | null {
+/** Journey 5 compares the test model with the cheapest other model on the compare list (controller 2026-10-28). */
+export function cheapestOther(models: readonly CompareModel[], excludeModelId = testModelId()): CompareModel | null {
   const others = models.filter(model => model.modelId !== excludeModelId);
   return others.length ? others.reduce((best, model) => (model.usdPerMillion < best.usdPerMillion ? model : best)) : null;
 }

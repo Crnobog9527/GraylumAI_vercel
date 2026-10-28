@@ -33,5 +33,13 @@ export function spendCapUsd(env: Record<string, string | undefined> = process.en
   return value;
 }
 
-/** Every language-model call of a run must be Claude Haiku 5.5 (Owner 2026-10-28); 99-model-check.spec.ts enforces it. */
-export const TEST_MODEL_ID = 'anthropic/claude-haiku-5.5';
+/**
+ * The model the journeys run on (CORE_E2E_MODEL_ID). Gemini 3.8 Flash for now: it already has full per-call billing profiles, and a
+ * profile for another model needs its own sampling run. 99-model-check.spec.ts enforces it.
+ */
+export const DEFAULT_TEST_MODEL_ID = 'google/gemini-3.8-flash';
+export const testModelId = (env: Record<string, string | undefined> = process.env) => env.CORE_E2E_MODEL_ID?.trim() || DEFAULT_TEST_MODEL_ID;
+/** Calls that are not the dialogue model but are part of the product path and already profiled: the organizer and the jury summary. */
+export const DEFAULT_SIDE_MODEL_IDS = ['openai/gpt-6-luna', 'anthropic/claude-opus-5.5'] as const;
+export const sideModelIds = (env: Record<string, string | undefined> = process.env) =>
+  env.CORE_E2E_SIDE_MODEL_IDS === undefined ? [...DEFAULT_SIDE_MODEL_IDS] : env.CORE_E2E_SIDE_MODEL_IDS.split(',').map(id => id.trim()).filter(Boolean);
