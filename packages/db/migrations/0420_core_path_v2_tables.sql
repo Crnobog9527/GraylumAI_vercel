@@ -78,6 +78,8 @@ CREATE INDEX IF NOT EXISTS turns_live ON public.turns (state, updated_at) WHERE 
 CREATE INDEX IF NOT EXISTS turns_report_stops ON public.turns (actor_id, kind, closed_at) WHERE stopped_by_user;
 CREATE INDEX IF NOT EXISTS turns_settlement_pending ON public.turns (updated_at) WHERE settlement = 'pending';
 CREATE INDEX IF NOT EXISTS turns_opened ON public.turns (opened_at);
+-- The positioning gate counts an actor's refused free-chat turns of the last 24 hours (POSITIONING_REFUSAL_CAP) at turn_open.
+CREATE INDEX IF NOT EXISTS turns_positioning_refusals ON public.turns (actor_id, closed_at) WHERE failure_code = 'positioning_required';
 
 CREATE TABLE IF NOT EXISTS public.turn_calls (
   actor_id uuid NOT NULL,

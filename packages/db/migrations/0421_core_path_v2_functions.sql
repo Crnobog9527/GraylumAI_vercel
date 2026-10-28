@@ -262,6 +262,7 @@ BEGIN
   -- 1. The session, locked: one turn at a time per conversation (3a).
   SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
   IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
   -- 2. The same request again: the turn it opened, unchanged.
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
@@ -275,7 +276,6 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
     IF s.active_turn_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
-    SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
     -- The same account check as bill2_actor: active and not deleted.
     IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
@@ -319,8 +319,15 @@ BEGIN
   FROM (SELECT seq, role, content, content_hash FROM session_messages
         WHERE session_id = p_session_id AND visible AND deleted_at IS NULL
         ORDER BY seq DESC LIMIT (t.policy->>'historyItems')::int) m;
+  -- 6. What the turn's prompt needs from the account, read here instead of in more round trips: the reply language and, for a
+  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it).
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
-    'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history);
+    'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history,
+    'replyLanguage', prof.reply_language,
+    'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
+      'positioned', public.opc_has_confirmed_positioning(p_actor_id),
+      'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
+        AND r.closed_at > now() - interval '24 hours')) END);
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_call_begin(p_actor_id uuid, p_turn_id bigint, p_seq integer, p_call_kind text,

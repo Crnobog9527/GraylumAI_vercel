@@ -119,6 +119,7 @@ try{
    [`select * from turns where state in ('running','paused') and updated_at<now()-interval '15 minutes' order by updated_at limit 50`,/turns_live/],
    [`select count(*) from turns where actor_id='${b.actor}' and kind='report' and stopped_by_user and closed_at>now()-interval '24 hours'`,null],
    [`select * from turns where settlement='pending' order by updated_at limit 50`,/turns_settlement_pending/],
+   [`select count(*) from turns where actor_id='${b.actor}' and failure_code='positioning_required' and closed_at>now()-interval '24 hours'`,null],
    [`select * from turn_calls where turn_id=1 order by seq`,/turn_calls_pkey/],
    [`select * from turn_calls where cost_pending order by dispatched_at limit 50`,/turn_calls_cost_pending/],
    [`select * from turn_calls where status in ('dispatched','identified') and dispatched_at<now()-interval '15 minutes' limit 50`,/turn_calls_in_flight/],
