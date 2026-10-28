@@ -59,7 +59,10 @@ export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 90, s
     const id = `gen-load-${randomUUID()}`;
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const tools = Array.isArray(body.tools) ? body.tools : [];
-    const hadToolResult = messages.some(message => message?.role === 'tool');
+    // Only a tool result that comes after the newest user message makes this the follow-up call: a session that keeps its earlier
+    // turns' tool results in its history still starts every new turn with the tool call.
+    const lastUser = messages.map(message => message?.role).lastIndexOf('user');
+    const hadToolResult = messages.slice(lastUser + 1).some(message => message?.role === 'tool');
     const skillTool = tools.find(tool => tool?.function?.name === toolName);
     const callTool = Boolean(skillTool) && !hadToolResult;
     const count = hadToolResult ? secondChunks : chunks;

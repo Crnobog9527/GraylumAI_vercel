@@ -61,6 +61,17 @@ test('the coach first call answers with the skill tool call and schema-valid arg
   assert.doesNotMatch(second, /"tool_calls"/);
 });
 
+test('a later turn of the same session starts with the tool call again although its history holds earlier tool results', async t => {
+  const base = await start(t, { firstByteMs: 1, intervalMs: 1, chunks: 5, secondChunks: 2 });
+  const history = [{ role: 'user' }, { role: 'assistant' }, { role: 'tool' }, { role: 'assistant' }];
+  const next = await (await post(base, { model: 'm', stream: true, tools: [skillTool], messages: [...history, { role: 'user' }] })).text();
+  assert.match(next, /"tool_calls"/);
+  const followUp = await (await post(base, { model: 'm', stream: true, tools: [skillTool], messages: [...history, { role: 'user' }, { role: 'assistant' },
+    { role: 'tool' }] })).text();
+  assert.equal(parts(followUp), 2);
+  assert.doesNotMatch(followUp, /"tool_calls"/);
+});
+
 test('non-streaming calls return the whole message, usage and a receipt; usage stays under the call\'s own price bound', async t => {
   const base = await start(t, { firstByteMs: 5, intervalMs: 1, chunks: 4 });
   const response = await post(base, { model: 'm', provider: { max_price: { prompt: 3, completion: 15 } }, messages: [{ role: 'user',
