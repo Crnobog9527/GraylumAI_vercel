@@ -9,10 +9,10 @@ CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, 
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  s runtime_sessions; t turns; prof profiles; existing turns; prior turns;
+  s runtime_sessions; t turns; prof profiles; existing turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
-  n_model integer; n_paid integer; n_free integer; n_decision integer; carried integer := 0;
+  carried integer := 0;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
@@ -66,34 +66,8 @@ BEGIN
     IF p_resume_of IS NULL THEN
       IF s.active_turn_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
     ELSE
-      -- Resume (2.2): only this session's turn paused for credits, by the same kind. Locked after the session (as turn_close).
-      IF s.active_turn_id IS DISTINCT FROM p_resume_of THEN RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000'; END IF;
-      SELECT * INTO prior FROM turns WHERE actor_id = p_actor_id AND id = p_resume_of FOR UPDATE;
-      IF prior.id IS NULL OR prior.state IS DISTINCT FROM 'paused' OR prior.pause_reason IS DISTINCT FROM 'waiting_credits'
-        OR prior.kind <> p_kind OR prior.session_id IS DISTINCT FROM p_session_id THEN
-        RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000';
-      END IF;
-      -- What is left of the paused turn's frozen limits, counted as turn_call_begin counts them: the new turn may use no more.
-      SELECT count(*) FILTER (WHERE call_kind = 'model'),
-             count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd > 0),
-             count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd = 0),
-             count(*) FILTER (WHERE call_kind = 'decision')
-        INTO n_model, n_paid, n_free, n_decision
-      FROM turn_calls WHERE turn_id = p_resume_of AND status NOT IN ('not_sent','rejected','no_charge_402');
-      IF (p_policy->'limits'->>'model')::int > (prior.policy->'limits'->>'model')::int - n_model
-        OR (p_policy->'limits'->>'paidTools')::int > (prior.policy->'limits'->>'paidTools')::int - n_paid
-        OR (p_policy->'limits'->>'freeTools')::int > (prior.policy->'limits'->>'freeTools')::int - n_free
-        OR coalesce((p_policy->'limits'->>'decisions')::int, 0) > coalesce((prior.policy->'limits'->>'decisions')::int, 0) - n_decision THEN
-        RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
-      END IF;
-      -- What the paused turn would charge now (D = min(N, H), N over its known receipts plus what it carried itself). It is not
-      -- charged there: it is carried into the turn that continues it and settled with it, once, by that turn's rule (a fixed
-      -- price stays the fixed price; an expiry refunds the whole chain).
-      SELECT least(ceil((prior.policy->>'q')::numeric * coalesce(sum(nominal_usd * multiplier)
-               FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer
-               + coalesce((prior.policy->>'carriedCredits')::int, 0), prior.reserved_credits)
-        INTO carried
-      FROM turn_calls WHERE turn_id = p_resume_of;
+      -- Resume (V2-8): the paused turn is checked, locked and priced by turn_resume_carry.
+      carried := public.turn_resume_carry(p_actor_id, p_session_id, s.active_turn_id, p_resume_of, p_kind, p_policy);
     END IF;
     -- The same account check as bill2_actor: active and not deleted.
     IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN

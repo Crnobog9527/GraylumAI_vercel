@@ -247,6 +247,20 @@ try{
    assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[f.actor,n.turnId])).chargedCredits,500);
    assert.equal(await spends(f),500);assert.equal(await balance(f),530);
   }
+  // Two resumes in a row (#1519 review): the second carries everything carried before, nothing is lost to a cap.
+  {
+   const g=await paused();                                         // segment 1: N = 12, carried
+   await c.query('update profiles set credits=credits+100 where id=$1',[g.a.actor]);
+   const t2=await open(g.a,{resumeOf:g.id,pol:policy({gCredits:10,minCredits:10,uModelCredits:20,limits:{model:2,paidTools:1,freeTools:1}})});
+   assert.deepEqual(await c.query("select reserved_credits r,(policy->>'carriedCredits')::int k from turns where id=$1",[t2.turnId]).then(x=>x.rows[0]),{r:10,k:12});
+   await begin(g.a,t2.turnId,1,{upper:0.01});await record(g.a,t2.turnId,1,{n:0.01});  // segment 2: N = 6
+   assert.equal((await begin(g.a,t2.turnId,2,{upper:0.02})).paused,true,'4 left < 12: paused again');
+   const t3=await open(g.a,{resumeOf:t2.turnId,pol:policy({gCredits:60,minCredits:10,uModelCredits:20,limits:{model:1,paidTools:1,freeTools:1}})});
+   assert.equal(await one("select (policy->>'carriedCredits')::int v from turns where id=$1",[t3.turnId]),18,'6 + 12, not capped at 10');
+   await begin(g.a,t3.turnId,1,{upper:0.01});await record(g.a,t3.turnId,1,{n:0.01});  // segment 3: N = 6
+   assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[g.a.actor,t3.turnId])).chargedCredits,24);
+   assert.equal(await spends(g.a),24);assert.equal(await balance(g.a),106);
+  }
   // The continuation paused again and expired: the whole chain is refunded (Owner 10-25), the carried part included.
   {
    const g=await paused();
@@ -256,7 +270,7 @@ try{
    assert.equal((await recover(g.a,n.turnId,'expire')).chargedCredits,0);
    assert.equal(await spends(g.a),0);assert.equal(await balance(g.a),130);
   }
-  report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
+  report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; two resumes in a row carry everything (24 = 12 + 6 + 6); an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
  }
  // 6. Ordinary chat and mentor turns cannot be stopped (the old stop-round scenario, now a refusal); reports can.
  {
