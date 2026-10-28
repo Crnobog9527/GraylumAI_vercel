@@ -7,8 +7,10 @@
 --   turn_recovery_claim  one short transaction: claims up to 50 turns with FOR UPDATE SKIP LOCKED and stamps the lease. Work is
 --                       a running/stopping turn untouched for 15 minutes (interrupt), a paused turn untouched for 24 hours
 --                       (expire), a closed turn whose settlement is pending and has either a final receipt that arrived after
---                       the last pass or an unknown model cost with a provider id to look up (settle). Compare and jury turns
---                       are left to fusion-recovery (V2-7b) for interrupt and expire; their unknown costs are settled here.
+--                       the last pass or an unknown model cost with a provider id to look up (settle). Every kind,
+--                       compare and jury included (aligned with V2-7b: a jury between groups is paused(awaiting_user) and
+--                       expires here with refund_all false, so turn_user_charge applies the jury rule; fusion-recovery only
+--                       syncs the fusion_* rows).
 --   turn_recover        one turn, one short transaction: locks session then turn (as turn_close), re-checks under the locks that
 --                       the work is still due (a resume, a late write or another instance may have moved it), then calls
 --                       turn_close, the only function that changes a turn's state: interrupted (stopped for a report that was
@@ -50,7 +52,6 @@ BEGIN
     SELECT actor_id, id, state FROM turns
     WHERE ((state IN ('running','stopping') AND updated_at < now() - interval '15 minutes')
         OR (state = 'paused' AND updated_at < now() - interval '24 hours'))
-      AND kind NOT IN ('compare','jury','jury_adopt')
       AND (recovery_lease_until IS NULL OR recovery_lease_until <= now())
     ORDER BY updated_at LIMIT p_limit
     FOR UPDATE SKIP LOCKED
@@ -96,7 +97,7 @@ CREATE OR REPLACE FUNCTION public.turn_recover(p_actor_id uuid, p_turn_id bigint
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; s runtime_sessions; result jsonb; fusion boolean;
+DECLARE t turns; s runtime_sessions; result jsonb;
 BEGIN
   IF p_action IS NULL OR p_action NOT IN ('interrupt','expire','settle') THEN
     RAISE EXCEPTION 'TURN_RECOVERY_INVALID' USING ERRCODE='22023';
@@ -106,15 +107,15 @@ BEGIN
   -- Lock order as turn_close: session, then the turn.
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
-  fusion := t.kind IN ('compare','jury','jury_adopt');
   -- Re-checked under the locks; turn_close is the only state change.
-  IF p_action = 'interrupt' AND NOT fusion AND t.state IN ('running','stopping') AND t.updated_at < now() - interval '15 minutes' THEN
+  IF p_action = 'interrupt' AND t.state IN ('running','stopping') AND t.updated_at < now() - interval '15 minutes' THEN
     -- A report its user was stopping closes as stopped (the 24-hour stop rule applies); anything else as interrupted: the known
     -- receipts settle, an unknown cost keeps its share of the freeze for the settlement pass.
     result := public.turn_close(p_actor_id, p_turn_id, CASE WHEN t.state = 'stopping' THEN 'stopped' ELSE 'interrupted' END,
       '[]'::jsonb, false, false, 'recovery_interrupted');
-  ELSIF p_action = 'expire' AND NOT fusion AND t.state = 'paused' AND t.updated_at < now() - interval '24 hours' THEN
-    -- Owner 10-25: a paused turn that delivered nothing for 24 hours is refunded in full (expired, not delivered: D = 0).
+  ELSIF p_action = 'expire' AND t.state = 'paused' AND t.updated_at < now() - interval '24 hours' THEN
+    -- Owner 10-25/10-27: a paused turn that delivered nothing for 24 hours is refunded in full (expired, not delivered: D = 0);
+    -- refund_all stays false so a jury is charged by its own rule in turn_user_charge (V2-7b).
     result := public.turn_close(p_actor_id, p_turn_id, 'expired', '[]'::jsonb, false, false, 'recovery_expired');
   ELSIF p_action = 'settle' AND t.state = 'closed' AND t.settlement = 'pending' THEN
     -- The settlement pass of a closed turn (#1512): what became known since the last pass, counted once. The lease stays: the

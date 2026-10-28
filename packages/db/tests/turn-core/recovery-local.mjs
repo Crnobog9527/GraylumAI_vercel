@@ -156,22 +156,25 @@ try{
   assert.equal(await balance(d),940);assert.equal(await balance(e),994);
   report.checks.push('late receipt: interrupted with unknown model cost -> claimed for settlement with its provider id -> receipt -> settled once (D=6); an API-written late receipt settles; no provider id / unknown tool stays pending, never presumed free');
  }
- // 4. Fusion kinds stay with fusion-recovery (V2-7b); a report its user was stopping closes as stopped.
+ // 4. Every kind is recovered (aligned with V2-7b): a jury left running or paused between groups closes here; a report its
+ // user was stopping closes as stopped.
  {
   const a=await account(),j=await open(a,{kind:'jury',pol:policy({gCredits:60})});
   await age(a,j.turnId,'16 minutes');
-  const b=await account(),k=await open(b,{kind:'compare'});
+  const b=await account(),k=await open(b,{kind:'jury',pol:policy({gCredits:60})});
   await c.query("update turns set state='paused',pause_reason='awaiting_user',updated_at=now()-interval '25 hours' where id=$1",[k.turnId]);
-  const got=ids(await claim());
-  assert.ok(!got.includes(j.turnId)&&!got.includes(k.turnId));
-  assert.equal((await recover(a,j.turnId,'interrupt')).skipped,true);
+  const got=new Map((await claim()).map(i=>[i.turnId,i.action]));
+  assert.equal(got.get(j.turnId),'interrupt');assert.equal(got.get(k.turnId),'expire');
+  assert.equal((await recover(a,j.turnId,'interrupt')).closeKind,'interrupted');
+  assert.equal((await recover(b,k.turnId,'expire')).closeKind,'expired');
+  assert.equal(await one('select failure_code v from turns where id=$1',[k.turnId]),'recovery_expired');
   const r=await account(),rep=await open(r,{kind:'report',pol:policy({gCredits:500,fixedCredits:500})});
   await begin(r,rep.turnId,1,{upper:0.5});await record(r,rep.turnId,1,{n:0.2});
   await c.query("update turns set state='stopping',updated_at=now()-interval '16 minutes' where id=$1",[rep.turnId]);
   assert.equal((await claim()).find(i=>i.turnId===rep.turnId)?.action,'interrupt');
   const stopped=await recover(r,rep.turnId,'interrupt');
   assert.deepEqual([stopped.closeKind,stopped.chargedCredits],['stopped',0],'the first stop in 24 hours is free');
-  report.checks.push('compare/jury turns are left to fusion-recovery; a stuck stopping report closes as stopped under the 24-hour stop rule');
+  report.checks.push('jury turns are recovered too (interrupt; expire after 24 h paused awaiting_user with refund_all false); a stuck stopping report closes as stopped under the 24-hour stop rule');
  }
  // 5. Resume after a top-up (2.2): the paused turn closes and charges its known receipt once, the new turn freezes for what is
  // left of the limits; refusals roll back and keep the turn paused.
@@ -251,7 +254,7 @@ try{
    const plans=[];
    for(const sql of [
     `select actor_id,id from turns where ((state in ('running','stopping') and updated_at<now()-interval '15 minutes')
-      or (state='paused' and updated_at<now()-interval '24 hours')) and kind not in ('compare','jury','jury_adopt')
+      or (state='paused' and updated_at<now()-interval '24 hours'))
       and (recovery_lease_until is null or recovery_lease_until<=now()) order by updated_at limit 50 for update skip locked`,
     `select t.actor_id,t.id from turns t where t.settlement='pending' and t.state='closed'
       and (t.recovery_lease_until is null or t.recovery_lease_until<=now())
