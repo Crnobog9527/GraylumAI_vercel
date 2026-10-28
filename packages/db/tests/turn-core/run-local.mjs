@@ -306,6 +306,20 @@ try{
   assert.deepEqual((await c.query("select amount from credit_transactions where user_id=$1 and reason_code='turn_spend'",[a.actor])).rows,[{amount:-150}]);
   report.checks.push('a freeze lowers the available balance once: 1000 -> freeze 400 -> 600 available to another session; close D=150 -> 850, one -150 record');
  }
+ // 13. turn_open returns what the prompt needs from the account (no extra round trip): the reply language, and for a free chat
+ // the positioning gate (confirmed positioning, refusals in 24 hours counted on turns closed for it).
+ {
+  const a=await account();
+  await c.query("update profiles set reply_language='en' where id=$1",[a.actor]);
+  const first=await open(a);
+  assert.equal(first.replyLanguage,'en');
+  assert.deepEqual(first.positioning,{positioned:false,refusals24h:0});
+  await c.query("select turn_close($1,$2,'failed','[]',false,true,'positioning_required')",[a.actor,first.turnId]);
+  assert.deepEqual((await open(a)).positioning,{positioned:false,refusals24h:1});
+  const b=await account(),report=await open(b,{kind:'report',pol:policy({gCredits:500,fixedCredits:500})});
+  assert.equal(report.positioning,null,'only a free chat is gated');
+ }
+ report.checks.push('turn_open returns the reply language and, for a free chat, the positioning gate with its 24-hour refusal count');
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
