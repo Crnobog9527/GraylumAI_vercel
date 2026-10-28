@@ -19,8 +19,9 @@
 --   turn_open            0421 with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
 --   turn_close           0421 with the mentor branch of its per-kind hook (turn_mentor_apply on p_kind_result), and the
 --                        capture response returned under kindResult.
--- Locks: turn_mentor_context takes none. turn_mentor_apply locks the draft's artifact_projects row (the lock opc_information,
--- opc_capture_apply and opc_capture_resolve take for the same round), after turn_close's session, turn, bucket and profile.
+-- Locks: turn_mentor_context takes none. turn_mentor_apply takes the business row KEY SHARE (the archive guard) and the draft's
+-- artifact_projects row (the lock opc_information, opc_capture_apply and opc_capture_resolve take for the same round), after
+-- turn_close's session and turn rows, as those functions take them: business, then project.
 -- Compatibility: no signature changes; turn_open and turn_close only gain the mentor branches and a returned key. Nothing calls
 -- the mentor kind until core_path_v2 is enabled and the page uses /api/turn (V2-10). Repeatable: CREATE OR REPLACE throughout.
 -- Recovery: re-apply 0421's turn_open and turn_close and drop the two mentor functions; no stored data depends on them.
@@ -34,7 +35,8 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
-  business uuid; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; context jsonb;
+  business uuid; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; context jsonb; suggestions jsonb := '{}';
+  suggestion jsonb;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
@@ -72,6 +74,13 @@ BEGIN
     metas := '{}';
     FOR field_id IN SELECT f->>'id' FROM jsonb_array_elements(r.workflow->'steps') s, jsonb_array_elements(s->'information') f
                     WHERE s->>'id' = step_id LOOP
+      -- The organizer sees a pending suggestion's content (to keep or withdraw it, captureFrozenInformation); the mentor sees
+      -- only that one exists. Kept apart from the work projection, which goes to the mentor.
+      suggestion := st#>ARRAY['fieldMeta',field_id,'suggestion'];
+      IF jsonb_typeof(suggestion) = 'object' AND jsonb_typeof(suggestion->'value') = 'string' AND btrim(suggestion->>'value') <> '' THEN
+        suggestions := jsonb_set(suggestions, ARRAY[step_id], coalesce(suggestions->step_id, '{}') || jsonb_build_object(field_id,
+          jsonb_build_object('value', suggestion->'value', 'nature', suggestion->'nature', 'basis', suggestion->'basis')));
+      END IF;
       metas := metas || jsonb_build_object(field_id, jsonb_build_object(
         'source', coalesce(st#>>ARRAY['fieldMeta',field_id,'source'], 'unknown'),
         'basis', coalesce(st#>>ARRAY['fieldMeta',field_id,'basis'], 'unknown'),
@@ -101,6 +110,7 @@ BEGIN
   context := opc_business_context(p_actor_id, p_session_id, r.id);
   RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'roundId', r.id, 'mode', d.mode, 'moduleId', p.module_id,
     'skillId', p.skill_id, 'revisionId', r.revision_id, 'packageHash', r.package_hash, 'steps', r.workflow->'steps',
+    'suggestions', suggestions,
     'work', jsonb_build_object('projectId', p.id, 'roundId', r.id, 'revisionId', r.revision_id, 'packageHash', r.package_hash,
       'steps', steps, 'source', NULL) || CASE WHEN context IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext', context) END);
 END $function$;
@@ -120,13 +130,21 @@ DECLARE t turns; d opc_drafts; r artifact_rounds; p artifact_projects; req artif
  changed jsonb:='{}'; fields jsonb:='{}'; discarded jsonb:='[]'; versions jsonb:='{}'; old_steps jsonb;
  protected boolean; material_changed boolean; seq jsonb; suggestion jsonb; patch_index integer:=0;
  withdrawal jsonb; withdrawn jsonb:='{}'; withdraw_index integer:=0; withdraw_reason text; organizer_input jsonb;
- exec_id uuid; exec_at timestamptz;
+ exec_id uuid; exec_at timestamptz; business uuid; archived timestamptz;
 BEGIN
  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
  IF t.id IS NULL OR t.kind <> 'mentor' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
  IF d.draft_id IS NULL THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
+ -- An archived business is read-only (opc_capture_apply's opc_assert_business_writable, same KEY SHARE lock so an archive
+ -- cannot commit between this check and the write). The business may have been archived while the turn ran: nothing is
+ -- written, and the turn itself still settles and keeps its reply.
+ business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
+ IF business IS NOT NULL THEN
+  SELECT archived_at INTO archived FROM opc_businesses WHERE id = business AND actor_id = p_actor_id FOR KEY SHARE;
+  IF archived IS NOT NULL THEN RETURN jsonb_build_object('result', 'archived'); END IF;
+ END IF;
  SELECT * INTO p FROM artifact_projects WHERE id = d.project_id FOR UPDATE;
  -- Refresh the draft after waiting: a concurrent revision may have advanced it.
  SELECT * INTO d FROM opc_drafts WHERE draft_id = d.draft_id AND actor_id = p_actor_id;

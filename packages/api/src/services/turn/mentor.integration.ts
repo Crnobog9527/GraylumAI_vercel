@@ -178,7 +178,8 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Sk
   // 2. A user turn: the mentor reads its step file, then answers; the organizer patches the goal field.
   const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Sell coffee to students'))
     : body.messages.some(m => m.role === 'tool') ? prose('gen-reply-' + n, 'Good. Who buys it?')
-      : toolCall('gen-read-' + n, 'read_skill_file', { path: 'references/step-0.md' }));
+      // A file outside this step's resources: prepared before the first call, so reading it adds no round trip.
+      : toolCall('gen-read-' + n, 'read_skill_file', { path: 'references/step-2.md' }));
   const second = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
   expect(second.events.map(e => e.type), JSON.stringify(second.events)).toEqual(['opened', 'text', 'result']);
   const result = second.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
@@ -186,7 +187,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Sk
   expect(result.kindResult).toMatchObject({ result: 'applied', fields: { 'step-0': ['goal'] } });
   expect(t.bodies.map(b => b.model)).toEqual([MENTOR, MENTOR, ORGANIZER]);
   // The Skill file came from the cache: the tool result is in the continuation request.
-  expect(JSON.stringify(t.bodies[1]!.messages.at(-1))).toContain('Synthetic resource 0');
+  expect(JSON.stringify(t.bodies[1]!.messages.at(-1))).toContain('Synthetic resource 2');
   // Three breakpoints on the request with history: SKILL.md end, system end, the last plain history message.
   expect(JSON.stringify(t.bodies[0]).match(/cache_control/g)).toHaveLength(3);
   const first = (b: { messages: Array<{ content: unknown }> }) => (b.messages[0]!.content as Array<{ text: string }>)[0]!.text;
@@ -266,6 +267,18 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a checklist edited while the turn runs turns the
   const steps = await f.steps();
   expect(steps['step-0'].information?.goal?.value ?? '').toBe('');
   expect(steps['step-0'].fieldMeta.goal.suggestion).toMatchObject({ value: 'Sell coffee to students', basis: 'user_statement' });
+  // The next turn's organizer is shown that suggestion (and only it sees its content); withdrawing it is applied.
+  const next = transport((body, n) => body.model !== ORGANIZER ? prose('gen-reply-' + n, 'Understood.')
+    : organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [], withdrawals: [{ stepId: 'step-0', fieldId: 'goal' }] })));
+  const again = await turn(f, { text: 'Forget that suggestion, it is wrong', transport: next.fn });
+  const shown = JSON.stringify(next.bodies.find(b => b.model === ORGANIZER)!.messages);
+  expect(shown).toContain('pendingSuggestion');
+  expect(shown).toContain('Sell coffee to students');
+  expect(JSON.stringify(next.bodies.find(b => b.model === MENTOR)!.messages)).not.toContain('Sell coffee to students');
+  expect((again.events.at(-1) as Extract<TurnEvent, { type: 'result' }>).kindResult).toMatchObject({ withdrawn: { 'step-0': ['goal'] } });
+  const after = (await f.steps())['step-0'].fieldMeta.goal;
+  expect(after.suggestion).toBeUndefined();
+  expect(after.withdrawnSuggestion).toMatchObject({ value: 'Sell coffee to students' });
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5: relation locks of turn_open for a mentor turn against a free chat (measured, plan 3.1)', async () => {
@@ -286,4 +299,25 @@ it('RUNTIME: CORE-PATH-V2 V2-5: relation locks of turn_open for a mentor turn ag
   console.log('CORE-PATH-V2 turn_open table locks', JSON.stringify({ chat: chat.length, mentor: mentor.length,
     mentorExtra: mentor.filter(t => !chat.includes(t)) }));
   expect(mentor.length).toBeGreaterThanOrEqual(chat.length);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5: a business archived while the turn runs gets no checklist write; the turn still settles', async () => {
+  const f = await setup();
+  let business = (await db.query("select opc_target_business($1, jsonb_build_object('draftId',$2::text)) v", [f.actor, f.draftId])).rows[0].v;
+  if (!business) {
+    business = randomUUID();
+    await db.query("insert into opc_businesses(id,actor_id,name) values($1,$2,'Coffee')", [business, f.actor]);
+    await db.query('insert into opc_draft_businesses(draft_id,business_id) values($1,$2)', [f.draftId, business]);
+  }
+  const t = transport(async (body, n) => {
+    if (body.model !== ORGANIZER) return prose('gen-reply-' + n, 'Noted.');
+    await db.query('update opc_businesses set archived_at=now() where id=$1', [business]);
+    return organized('gen-org-' + n, patch('Sell coffee to students'));
+  });
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.kindResult, JSON.stringify(out.events)).toEqual({ result: 'archived' });
+  expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
+  expect((await db.query('select close_kind,settlement from turns where actor_id=$1', [f.actor])).rows)
+    .toEqual([{ close_kind: 'completed', settlement: 'done' }]);
 });

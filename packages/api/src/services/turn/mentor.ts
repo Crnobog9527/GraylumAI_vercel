@@ -4,7 +4,6 @@ import { ASK_QUESTION_TOOL, INVALID_REPLY_NOTICE } from '../../shared/agentTurn'
 import { isOpeningInput } from '../../shared/opcQuestions';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { loadOrganizerTemplate } from '../skills/organizerTemplate';
 import { agentTurnResult } from '../runtime/agentTurnResult';
 import { assertRuntimeRequestCapacity } from '../runtime/context';
 import { cardSources, groundedCardFallback, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse,
@@ -23,7 +22,7 @@ import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { mentorHost, mentorOrganizerInput, mentorState, resourcesOf } from './mentorContext';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
-import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource } from './mentorSkill';
+import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles } from './mentorSkill';
 import type { ChatQuote } from './quote';
 import type { TurnEvent } from './sse';
 
@@ -85,6 +84,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const { source, binding } = mentorSkillSource(admin, { actorId: input.actorId, moduleId: ctx.moduleId, skillId: ctx.skillId,
       revisionId: ctx.revisionId, packageHash: ctx.packageHash });
     const skill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
+    // Everything later steps may read, prepared now: no database read between model calls.
+    const prepared = await prepareMentorFiles(source, binding, Boolean(organizer));
     const host = mentorHost(state, input.stepId, opening);
     const system = mentorSystem({ skillText: skill.text, skillEntryChars: skill.entryChars, brandIdentity: catalog.brandIdentity,
       mode: ctx.mode, host, skillFile: !opening, replyRule: replySettingInstructions(effectiveReplyLocale(opened.replyLanguage)) });
@@ -100,7 +101,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       cacheWriteUsdPerMillion: mentor.providerLimits.cacheWriteUsdPerMillion, instructions: system.instructions,
       prefixChars: system.prefixChars, historyMarker: !opening }) : undefined;
     let sources: CardSources = cardSources(input.text, history);
-    const tools = [groundedCardTool(() => sources), mentorSkillFileTool(source, binding)];
+    const tools = [groundedCardTool(() => sources), mentorSkillFileTool(prepared, binding)];
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };
@@ -136,8 +137,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     if (organizer) {
       const capture = mentorOrganizerInput(state, host, input.text);
       captureInput = capture.value;
-      try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), source, revisionId: ctx.revisionId,
-        opening, input: organizerInput(capture.text, turn.body) }); }
+      try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer),
+        template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
       catch (error) { if (error instanceof TurnStop && error.code === 'TURN_TOMBSTONED') throw error; }
     }
 
@@ -162,9 +163,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 
 /** One organizer call (no tools, no history): its JSON object, or null when the reply is not one. */
 async function runOrganizer(input: { catalog: ChatQuote; context: RequestContext; deps: Parameters<typeof modelCall>[0];
-  source: Parameters<typeof loadOrganizerTemplate>[0]; revisionId: string; opening: boolean; input: string }): Promise<unknown> {
+  template: string | undefined; opening: boolean; input: string }): Promise<unknown> {
   const { catalog } = input;
-  const instructions = organizerInstructions(await loadOrganizerTemplate(input.source, input.revisionId), input.opening);
+  const instructions = organizerInstructions(input.template, input.opening);
   const output = await runRuntime({ model: catalog.model, instructions, input: input.input, session: turnSession([]),
     maxOutputTokens: catalog.outputLimit, maxTurns: 1, reasoning: catalog.reasoning, tools: [], readSessionHistory: false,
     selectHistory: async (_items, incoming) => incoming,

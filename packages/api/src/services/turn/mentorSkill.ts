@@ -1,9 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  activateSkill, batchBytes, batchFiles, frozenDescriptor, identityOf, sameIdentity, type PackageIdentity, type SkillSource,
+  activateSkill, assertPath, batchBytes, batchFiles, frozenDescriptor, identityOf, readSkillResources, sameIdentity,
+  type PackageIdentity, type SkillSource,
 } from '../skills/loader';
-import { readFrozenSkillFile, skillFileTool, type SkillFileBinding } from '../runtime/skillFile';
+import { loadOrganizerTemplate } from '../skills/organizerTemplate';
+import { SKILL_FILE_MAX_BYTES, skillFileParameters, skillFileTool, type SkillFileBinding } from '../runtime/skillFile';
 import type { RuntimeTool } from '../runtime/runner';
 
 /*
@@ -11,8 +13,9 @@ import type { RuntimeTool } from '../runtime/runner';
  * transaction that froze the turn, that the module is active, the Skill published and this revision not revoked
  * (turn_mentor_context). After that the package is content addressed (revision + packageHash never change), so its descriptor
  * and file texts come from the loader's process caches; only a cold cache reads read_skill_package (a catalog read, before the
- * first model call). Nothing here runs between model calls: read_skill_file answers from the same cached texts, writes no row
- * and costs the user nothing (plan 2.5.3: its continuation is one of the turn's model calls).
+ * first model call). Everything a turn may read is prepared before its first model call: the step's Skill text, every file
+ * read_skill_file may return and the organizer template. Between model calls nothing touches the database: the tool answers
+ * from this turn's own copy, writes no row and costs the user nothing (plan 2.5.3: its continuation is one of the turn's calls).
  */
 export type MentorSkill = { actorId: string; moduleId: string; skillId: string; revisionId: string; packageHash: string };
 
@@ -46,11 +49,30 @@ export function mentorSkillSource(admin: Pick<SupabaseClient, 'rpc'>, skill: Men
   return { source, binding };
 }
 
+export type MentorSkillFiles = { files: ReadonlyMap<string, { text: string; sha256: string }>; organizerTemplate: string | undefined };
+
 /** The Skill text of one workflow step (SKILL.md first, then the step's resources) and where the SKILL.md section ends. */
 export async function loadMentorSkill(source: SkillSource, binding: SkillFileBinding, resources: readonly string[], maxBytes: number) {
   const loaded = await activateSkill(source, binding, { resources, maxContextBytes: maxBytes });
   const text = loaded.forModel();
   return { text, entryChars: skillEntryChars(text, binding) };
+}
+
+/**
+ * Before the first model call: every declared file read_skill_file may return (at most SKILL_FILE_MAX_BYTES each; a warm
+ * loader cache reads nothing, a cold one reads them in batches of 64) and the organizer template when the turn organizes.
+ */
+export async function prepareMentorFiles(source: SkillSource, binding: SkillFileBinding, organize: boolean): Promise<MentorSkillFiles> {
+  const [descriptor] = await source.list();
+  if (!descriptor || !sameIdentity(descriptor, binding)) throw new Error('TURN_SKILL_UNAVAILABLE');
+  const readable = descriptor.files.filter(f => f.bytes <= SKILL_FILE_MAX_BYTES);
+  const files = new Map<string, { text: string; sha256: string }>();
+  for (let offset = 0; offset < readable.length; offset += 64) {
+    const chunk = readable.slice(offset, offset + 64);
+    const texts = await readSkillResources(source, binding, chunk.map(f => f.path), SKILL_FILE_MAX_BYTES);
+    for (const file of chunk) files.set(file.path, { text: texts.get(file.path)!, sha256: file.sha256 });
+  }
+  return { files, organizerTemplate: organize ? await loadOrganizerTemplate(source, binding.revisionId) : undefined };
 }
 
 /**
@@ -67,8 +89,14 @@ export function skillEntryChars(text: string, identity: PackageIdentity): number
   return text.startsWith(prefix) ? prefix.length : 0;
 }
 
-/** read_skill_file for the mentor: one declared file of the frozen package, from the cached texts. */
-export function mentorSkillFileTool(source: SkillSource, binding: SkillFileBinding): RuntimeTool {
-  return skillFileTool(async arguments_ =>
-    JSON.stringify(await readFrozenSkillFile({ source, binding, arguments: arguments_, saved: null })));
+/** read_skill_file for the mentor: one declared file of the frozen package, from this turn's prepared copy only. */
+export function mentorSkillFileTool(prepared: MentorSkillFiles, binding: SkillFileBinding): RuntimeTool {
+  return skillFileTool(async arguments_ => {
+    const { path } = skillFileParameters.parse(arguments_);
+    assertPath(path);
+    const file = prepared.files.get(path);
+    // Undeclared, or larger than the tool may return: refused as the old tool refused it, without any read.
+    if (!file) throw new Error('RUNTIME_SKILL_FILE_DENIED');
+    return JSON.stringify({ ...binding, path, sha256: file.sha256, content: file.text });
+  });
 }

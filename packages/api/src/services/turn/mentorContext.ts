@@ -20,6 +20,8 @@ const workStep = z.object({ information: z.record(z.string(), z.any()).optional(
 export const mentorContextSchema = z.object({
   draftId: uuid, projectId: uuid, roundId: uuid, mode: z.string(), moduleId: uuid, skillId: uuid, revisionId: uuid,
   packageHash: z.string().regex(/^[a-f0-9]{64}$/), steps: z.array(step).min(1).max(32),
+  // Pending suggestions' content, for the organizer only (the mentor sees hasPendingSuggestion).
+  suggestions: z.record(z.string(), z.record(z.string(), z.object({ value: z.string(), nature: z.unknown(), basis: z.unknown() }))),
   work: z.object({ roundId: uuid, steps: z.record(z.string(), workStep) }).passthrough(),
 }).strict();
 export type MentorContext = z.infer<typeof mentorContextSchema>;
@@ -37,7 +39,12 @@ export function mentorState(raw: unknown, stepId: string): MentorState {
   for (const s of context.steps) {
     const work = context.work.steps[s.id];
     if (!work) throw new Error('TURN_MENTOR_CONTEXT_INVALID');
-    information[s.id] = { schema: s.information as MethodInformationField[], values: work.information ?? {}, meta: work.fieldMeta ?? {},
+    // As captureFrozenInformation: a field marked as having a pending suggestion carries its content for the organizer.
+    const meta = Object.fromEntries(Object.entries(work.fieldMeta ?? {}).map(([id, item]) => {
+      const pending = context.suggestions[s.id]?.[id];
+      return [id, item?.hasPendingSuggestion && pending ? { ...item, pendingSuggestion: pending } : item];
+    }));
+    information[s.id] = { schema: s.information as MethodInformationField[], values: work.information ?? {}, meta,
       notes: work.notes ?? [] };
     confirmed[s.id] = work.valid === true;
   }

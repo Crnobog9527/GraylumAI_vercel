@@ -11,7 +11,7 @@ import { freezeSharedPromptCache } from '../runtime/promptCache';
 import { replySettingInstructions } from '../runtime/replyLanguage';
 import { openRouterBound } from '../bill2/openRouterPolicy';
 import { mentorSystem, mentorUserMessage, projectMentorHistory, SKILL_FILE_INSTRUCTIONS } from './mentorPrompt';
-import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, skillEntryChars } from './mentorSkill';
+import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillEntryChars } from './mentorSkill';
 
 /*
  * CORE-PATH-V2 V2-5 golden bytes (plan 2.9; #1502 rewritten for the turn path): the mentor request's three cache breakpoints,
@@ -118,21 +118,24 @@ describe('mentor prompt cache breakpoints (CORE-PATH-V2 2.9, #1502)', () => {
 });
 
 describe('mentor Skill package from the process cache (plan 2.4, 2.7)', () => {
-  it('a warm cache loads the step text and answers read_skill_file without any database read', async () => {
+  it('every readable file is prepared before the first model call; afterwards the tool never reads the database', async () => {
     await request({ stepId: 'step-1' });
-    expect(rpc).toHaveBeenCalledTimes(2); // cold: the listing and one batch of the needed files
     rpc.mockClear();
     const { source, binding } = skill();
-    const loaded = await loadMentorSkill(source, binding, ['step-1.md'], 90000);
-    expect(loaded.text).toContain('Step one guide');
-    // The declared file not yet read is the only database read; reading it again is free.
-    const tool = mentorSkillFileTool(source, binding);
-    expect(JSON.parse(await tool.execute({ path: 'templates/card.md' }, 'call-1')).content).toBe('A declared file\n');
+    const prepared = await prepareMentorFiles(source, binding, true);
+    // Cold for the files the step did not load: one batch read before the first model call.
     const before = rpc.mock.calls.length;
-    await tool.execute({ path: 'templates/card.md' }, 'call-2');
-    await loadMentorSkill(source, binding, ['step-1.md'], 90000);
-    expect(rpc.mock.calls.length).toBe(before);
     expect(before).toBeLessThanOrEqual(1);
+    const tool = mentorSkillFileTool(prepared, binding);
+    expect(JSON.parse(await tool.execute({ path: 'templates/card.md' }, 'call-1'))).toMatchObject({ path: 'templates/card.md',
+      content: 'A declared file\n', revisionId });
+    await expect(tool.execute({ path: 'missing.md' }, 'call-2')).rejects.toThrow('RUNTIME_SKILL_FILE_DENIED');
+    expect(rpc.mock.calls.length).toBe(before);
+    // A warm cache prepares everything without any read at all.
+    rpc.mockClear();
+    await prepareMentorFiles(source, binding, true);
+    await loadMentorSkill(source, binding, ['step-1.md'], 90000);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('refuses any other package identity', async () => {
