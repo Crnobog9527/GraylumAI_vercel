@@ -58,6 +58,10 @@ export async function finalizeReport(page: Page) {
   await dialog.getByRole('button', { name: '定稿', exact: true }).click();
   await expect(dialog.getByText('定稿后这份报告成为正式定位版本，之后不能再修改。确定定稿吗？')).toBeVisible();
   await dialog.getByRole('button', { name: '确定定稿' }).click();
-  await expect(dialog.getByText(/报告已定稿，成为正式定位/)).toBeVisible({ timeout: 60_000 });
-  await expect(dialog.getByRole('button', { name: '定稿', exact: true })).toHaveCount(0);
+  // Finalizing publishes the positioning, and the page then asks whether to start the first week's topics: that question is the
+  // sign it worked. Answer "稍后" (the topics are a separate, paid task this journey does not run).
+  const published = page.getByRole('heading', { name: '正式定位已发布。现在生成第一周选题吗？' });
+  await expect(published.or(dialog.getByText(/报告已定稿，成为正式定位/)).first()).toBeVisible({ timeout: 90_000 });
+  if (await published.isVisible()) await page.getByRole('button', { name: '稍后' }).click();
+  await expect(page.getByRole('button', { name: '定稿', exact: true })).toHaveCount(0);
 }

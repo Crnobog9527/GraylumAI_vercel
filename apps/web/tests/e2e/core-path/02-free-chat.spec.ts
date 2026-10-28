@@ -8,7 +8,7 @@ import { readCredits } from './support/ui';
  * (server side, invisible in the page, so it is read back from the tool journal), one research tool runs (a row in the
  * work record), the reply finishes, and the balance drops by what the ledger says.
  */
-test('journey 2: free chat loads a Skill, runs one research lookup and finishes', async ({ openAs, meter }) => {
+test('journey 2: free chat loads a Skill, runs one research lookup and finishes @cheap', async ({ openAs, meter }) => {
   test.setTimeout(8 * 60_000);
   const { page } = await openAs('pro');
   await page.goto('/app/profile');

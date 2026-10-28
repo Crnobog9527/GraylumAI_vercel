@@ -11,7 +11,7 @@ import { coreSql } from './support/db';
  * (CORE_E2E_SIDE_MODEL_IDS), or the one other column of the compare journey, which is the cheapest other model on the compare
  * list. Supplier tool routes are not models.
  */
-test('every model call of this run was an allowed model', async () => {
+test('every model call of this run was an allowed model @cheap', async () => {
   const { startedAt } = JSON.parse(await readFile(path.join(resultsDirectory, 'run.json'), 'utf8')) as { startedAt: string };
   const ids = Object.values(await requireAccounts()).map(account => account.id);
   // The compare journey records which other model it picked (and asserted to be the cheapest on the picker's list).

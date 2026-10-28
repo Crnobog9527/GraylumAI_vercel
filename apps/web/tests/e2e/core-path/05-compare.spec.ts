@@ -12,7 +12,7 @@ import { readCredits } from './support/ui';
  * Journey 5: compare two models. The left column is the test model, the right one the cheapest other model on the back-office
  * compare list. Both columns answer; the total charge is exactly the sum of the column charges.
  */
-test('journey 5: two models answer and the total equals the sum of the columns', async ({ openAs, meter }) => {
+test('journey 5: two models answer and the total equals the sum of the columns @cheap', async ({ openAs, meter }) => {
   test.setTimeout(10 * 60_000);
   const { page } = await openAs('gold');
   await page.goto('/app/profile');
