@@ -32,7 +32,7 @@ const connectionString = process.env.V3_LOCAL_DB!;
 if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connectionString.endsWith('/v3_disposable'))
   throw new Error('isolated runner required');
 const db = new pg.Client({ connectionString });
-const MENTOR = 'anthropic/claude-sonnet-5.5', ORGANIZER = 'anthropic/claude-haiku-5.5', ROUTE = 'anthropic';
+const MENTOR = 'anthropic/claude-sonnet-5.5', ORGANIZER = 'anthropic/claude-opus-5.5', ROUTE = 'anthropic';
 const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
 const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, 'billing_credits_per_usd', 'billing_token_price_multiplier', 'runtime_rw_v2',
   'v3_summary_model_id', 'v3_summary_max_tokens'];
@@ -273,10 +273,13 @@ it('RUNTIME: CORE-PATH-V2 V2-5: relation locks of turn_open for a mentor turn ag
     await db.query('begin');
     try {
       await db.query('select turn_open($1,$2,$3,$4,$5)', [f.actor, f.session, randomUUID(), kind, JSON.stringify(policy)]);
-      return (await db.query("select count(*)::int n from pg_locks where pid=pg_backend_pid() and locktype='relation'")).rows[0].n as number;
+      return (await db.query(`select c.relname n from pg_locks l join pg_class c on c.oid=l.relation
+        where l.pid=pg_backend_pid() and l.locktype='relation' and c.relkind in ('r','p') order by 1`)).rows.map(r => r.n as string);
     } finally { await db.query('rollback'); }
   };
+  // Tables only (indexes and TOAST follow them); the mentor's extra tables are the draft context it reads.
   const chat = await locks('chat'), mentor = await locks('mentor');
-  console.log('CORE-PATH-V2 turn_open relation locks', JSON.stringify({ chat, mentor, mentorExtra: mentor - chat }));
-  expect(mentor).toBeGreaterThanOrEqual(chat);
+  console.log('CORE-PATH-V2 turn_open table locks', JSON.stringify({ chat: chat.length, mentor: mentor.length,
+    mentorExtra: mentor.filter(t => !chat.includes(t)) }));
+  expect(mentor.length).toBeGreaterThanOrEqual(chat.length);
 });
