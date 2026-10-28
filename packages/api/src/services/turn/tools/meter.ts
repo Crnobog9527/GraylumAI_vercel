@@ -8,9 +8,9 @@ import type { SubcallReceipt, ToolCallDeps, ToolCallOutcome } from './types';
 /*
  * CORE-PATH-V2 2.5.2 / 2.5.3: one tool call is one turn_calls row. A paid call (research) writes turn_call_begin before its
  * first supplier subcall and turn_call_record after its last one; its subcalls are counted in Node and their costs summed into
- * that one receipt, so a turn of three research calls is six writes however many subcalls they make. A free call (library
- * read, Skill load) writes the same two rows with a zero bound: it costs the user nothing, but the model call that reads its
- * result is one of the turn's M (2.5.3).
+ * that one receipt, so a turn of three research calls is six writes however many subcalls they make. A free tool (library
+ * read, Skill load) writes no row at all (Owner 10-28): it costs nobody anything, and the model call that reads its result
+ * is one of the turn's M with its own three writes (2.5.3).
  */
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const format = (value: bigint) => {
@@ -99,33 +99,4 @@ export async function paidToolCall<T>(deps: ToolCallDeps, call: PaidToolCall,
   }
   if (failed) throw failure;
   return { value: value!, outcome: settled.outcome };
-}
-
-/**
- * One free tool call: begin with a zero bound, read, record n=0. The read's own failure records the row as not_sent (it
- * cost nothing and does not count against the limit) before the error passes.
- */
-export async function freeToolCall<T>(deps: ToolCallDeps, call: { toolName: string; requestHash: string; multiplier: string },
-  read: () => Promise<{ value: T; raw: string | null }>): Promise<T> {
-  const seq = deps.nextSeq();
-  const base = { actorId: deps.actorId, turnId: deps.turnId, seq };
-  let begun;
-  try {
-    begun = await deps.db.begin({ ...base, callKind: 'tool', modelId: null, toolName: call.toolName, paid: false,
-      requestHash: call.requestHash, upperUsd: '0', multiplier: call.multiplier });
-  } catch (error) {
-    if (error instanceof TurnDatabaseError && error.code === 'TURN_CALL_LIMIT') throw new ToolLimitReached();
-    throw error;
-  }
-  const notSent = () => deps.db.record({ ...base, status: 'not_sent', nominalUsd: null, actualUsd: null, usage: {},
-    providerId: null, payloadHash: call.requestHash, raw: null });
-  if (begun.paused) throw new TurnStop('TURN_PAUSED_FOR_CREDITS');
-  if (tombstoned(begun)) { await notSent(); throw new TurnStop('TURN_TOMBSTONED'); }
-  let result;
-  try { result = await read(); }
-  catch (error) { await notSent(); throw error; }
-  const recorded = await deps.db.record({ ...base, status: 'ok', nominalUsd: '0', actualUsd: '0', usage: { tool: call.toolName },
-    providerId: null, payloadHash: sha256(result.raw ?? call.requestHash), raw: result.raw });
-  if (tombstoned(recorded)) throw new TurnStop('TURN_TOMBSTONED');
-  return result.value;
 }

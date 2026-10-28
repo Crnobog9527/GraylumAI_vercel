@@ -13,6 +13,8 @@ import type { ConfigurationRows } from '../../runtime/settingsRows';
 import type { RuntimeTool } from '../../runtime/runner';
 import { TurnStop } from '../call';
 import type { CounterStore } from '../limiter';
+import type { TurnClients } from '../db';
+import { libraryTurnReader } from './source';
 import { planTurnTools, RESEARCH_INPUT_BYTES, type ResearchSetup } from './plan';
 import { researchInstructions, READ_SOURCE_DESCRIPTION, turnTools, type SourceReader } from './index';
 import type { PreparedSkills } from './skills';
@@ -21,14 +23,14 @@ import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
 /*
  * CORE-PATH-V2 V2-6: the tools of a free chat (kind=chat, 2.7). The session's whitelist is the general research lookups
  * (when the chat research switch is on and the route profile's tool ceiling holds them), load_skill (when the account has a
- * Skill catalog) and read_source (when the kind gives a reader); its definitions and the research/catalog instructions are
+ * Skill catalog) and read_source (when the deployment enables the library read); its definitions and the research/catalog instructions are
  * the same on every turn of the session. What this turn can use, and its limits and bounds, come from planTurnTools before turn_open.
  */
 export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
   skills?: (actorId: string) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills }>;
-  /** The owned-source read (library, business context), when the deployment provides one. */
-  readSource?: (actorId: string, sessionId: string) => SourceReader;
+  /** Offer read_source over the user's own library (library_turn_read through the read client); tests may give their own. */
+  library?: boolean | ((actorId: string, sessionId: string) => SourceReader);
   /** Accounts from the user's benchmark table that social_account may look up. */
   benchmarkAccounts?: (actorId: string) => Promise<CanonicalAccount[]>;
   /** Tests and the load-test stub only; production reads the admin Vault and calls the real suppliers. */
@@ -43,14 +45,15 @@ export type ChatToolsSetup = {
   sharedInstructions: string;
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean };
-  build(calls: ToolCallDeps, extra: { slots: CounterStore; multiplier: string; currentMessage: string; deadline: number;
+  build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number;
     onStop: (stop: TurnStop) => void }): Promise<ReturnType<typeof turnTools>>;
 };
 
 /** Leave this much of the turn's 300 s for the reply after the last supplier answer. */
 const REPLY_RESERVE_MS = 60_000;
 
-export async function prepareChatTools(input: { admin: SupabaseClient; configuration: Promise<ConfigurationRows>; tools: ChatToolDeps;
+export async function prepareChatTools(input: { admin: SupabaseClient; read: TurnClients['read'];
+  configuration: Promise<ConfigurationRows>; tools: ChatToolDeps;
   actorId: string; sessionId: string; requiredBytes: number; interactiveBytes: number; quotedBytes: number;
   modelMultiplier: string; defaultMultiplier: string;
   /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
@@ -61,7 +64,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; configura
   const offered: TurnToolName[] = [];
   // The research lookups are offered only while the admin's chat research switch is on (a configuration change, not a turn's).
   const researchOn = await chatResearchEnabled(input.admin, input.configuration).catch(() => false);
-  for (const group of [input.tools.readSource ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
+  for (const group of [input.tools.library ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
     researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : []]) if (offered.length + group.length <= input.maxTools) offered.push(...group);
   const research = offered.filter(name => (GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) as typeof GENERAL_RESEARCH_TOOLS[number][];
   const skillOffered = offered.includes('load_skill'), sourceOffered = offered.includes('read_source');
@@ -86,12 +89,13 @@ export async function prepareChatTools(input: { admin: SupabaseClient; configura
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
       ...(sourceOffered ? { libraryRetrieval: true } : {}) },
     async build(calls, extra) {
-      const built = turnTools({ plan, calls, multiplier: extra.multiplier, research: setup,
+      const built = turnTools({ plan, calls, research: setup,
         suppliers: { slots: extra.slots, timeLeft: () => extra.deadline - Date.now() - REPLY_RESERVE_MS,
           ...(input.tools.vendors ? { vendors: input.tools.vendors } : {}) },
         accounts: { benchmark, currentMessage: extra.currentMessage },
         ...(skillOffered ? { skills: skills!.prepared } : {}),
-        ...(sourceOffered && input.tools.readSource ? { readSource: input.tools.readSource(input.actorId, input.sessionId) } : {}) });
+        ...(sourceOffered ? { readSource: typeof input.tools.library === 'function' ? input.tools.library(input.actorId, input.sessionId)
+          : libraryTurnReader(input.read, input.actorId, input.sessionId) } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
       const tools: RuntimeTool[] = built.tools.map(tool => ({ ...tool, async execute(args, callId) {
         try { return await tool.execute(args, callId); }

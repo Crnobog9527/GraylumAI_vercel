@@ -96,7 +96,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   let tools: ChatToolsSetup | null = null;
   if (deps.tools) {
     try {
-      tools = await prepareChatTools({ admin, configuration, tools: deps.tools, actorId: input.actorId, sessionId: input.sessionId,
+      tools = await prepareChatTools({ admin, read: deps.clients.read, configuration, tools: deps.tools, actorId: input.actorId, sessionId: input.sessionId,
         requiredBytes, interactiveBytes, quotedBytes: quote.inputLimit, modelMultiplier: quote.multiplier,
         defaultMultiplier: quote.defaultMultiplier, maxTools: quote.maxTools });
     } catch { return emit({ type: 'error', code: 'TURN_TOOLS_UNAVAILABLE' }); }
@@ -187,7 +187,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
     let text = '', sentChars = 0, holding = fallback;
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
-      { slots: deps.slots, multiplier: quote.multiplier, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
+      { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
         onStop: stop => { stopped ??= stop; } }) : null;
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),

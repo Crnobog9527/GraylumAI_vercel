@@ -1,21 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { createHash } from 'node:crypto';
 import { identityOf, readSkillResources, sha256 as hashBytes, type PackageDescriptor, type SkillSource } from '../../skills/loader';
 import { loadSkillParameters, loadSkillTool, SKILL_LOAD_REFUSED } from '../../runtime/loadSkillTool';
 import { entryInstructions, loadSkillResult, type SkillCatalogEntry } from '../../runtime/skillCatalog';
 import { SKILL_FILE_MAX_BYTES, skillFileParameters, skillFileTool } from '../../runtime/skillFile';
 import type { RuntimeTool } from '../../runtime/runner';
-import { freeToolCall, ToolLimitReached } from './meter';
-import type { ToolCallDeps } from './types';
 
 /*
  * CORE-PATH-V2 V2-6, 2.4 / 2.7: the Skill tools read nothing from the database during the turn. Before turn_open the kind
  * prefetches, through the process cache keyed by package hash (one access check per request, made at its start), the
  * instructions of every catalog entry (load_skill) or the declared files of the turn's frozen package (read_skill_file).
- * load_skill is a free tool: one zero-bound row (begin + record), and the model call that reads it is one of the turn's M.
+ * load_skill is a free tool: no row and no read (Owner 10-28); the model call that reads it is one of the turn's M.
  * read_skill_file writes nothing: it is served in the same SDK run from the frozen package (2.5.3, mentor).
  */
-const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
 /** The loadable Skills of this turn: name → the exact tool result, built before turn_open. */
 export type PreparedSkills = ReadonlyMap<string, string>;
@@ -33,24 +29,16 @@ export async function prepareSkills(entries: readonly SkillCatalogEntry[], sourc
   return prepared;
 }
 
-export function turnLoadSkillTool(calls: ToolCallDeps, skills: PreparedSkills, maxLoads: number, multiplier: string,
-  onLoad?: () => void): RuntimeTool {
+export function turnLoadSkillTool(skills: PreparedSkills, maxLoads: number, onLoad?: () => void): RuntimeTool {
   let loads = 0;
   return loadSkillTool(async arguments_ => {
     const parsed = loadSkillParameters.safeParse(arguments_);
     const result = parsed.success ? skills.get(parsed.data.name) : undefined;
     // Unknown name, unloadable package, or the per-turn limit: nothing is written and the model answers without it.
     if (!result || loads >= maxLoads) return SKILL_LOAD_REFUSED;
-    try {
-      const value = await freeToolCall(calls, { toolName: 'load_skill', requestHash: sha256(parsed.data!.name), multiplier },
-        async () => ({ value: result, raw: result }));
-      loads++;
-      onLoad?.();
-      return value;
-    } catch (error) {
-      if (error instanceof ToolLimitReached) { loads = maxLoads; return SKILL_LOAD_REFUSED; }
-      throw error;
-    }
+    loads++;
+    onLoad?.();
+    return result;
   }, () => loads < maxLoads);
 }
 

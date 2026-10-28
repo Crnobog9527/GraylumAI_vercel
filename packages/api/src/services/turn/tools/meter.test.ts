@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { TurnDatabaseError } from '../db';
-import { freeToolCall, paidToolCall, settleToolCall, ToolLimitReached } from './meter';
+import { paidToolCall, settleToolCall, ToolLimitReached } from './meter';
 import { ledger, result } from './testFixtures.test';
 import type { SubcallReceipt } from './types';
 
@@ -94,22 +94,5 @@ describe('one paid tool call is one row: begin, subcalls, record (2.5.2)', () =>
     const h = ledger({ begin: () => new TurnDatabaseError('TURN_CALL_LIMIT') });
     await expect(paidToolCall(h.deps, call, async () => undefined)).rejects.toBeInstanceOf(ToolLimitReached);
     expect(h.writes).toEqual([]);
-  });
-});
-
-describe('a free tool call is a zero-bound row', () => {
-  it('begin with upper 0 and paid false, then an ok receipt with n 0', async () => {
-    const h = ledger();
-    expect(await freeToolCall(h.deps, { toolName: 'load_skill', requestHash: 'h'.repeat(64), multiplier: '6' },
-      async () => ({ value: 'v', raw: 'v' }))).toBe('v');
-    expect(h.kinds()).toEqual(['begin', 'record:ok']);
-    expect(h.writes[0]![1]).toMatchObject({ paid: false, upperUsd: '0', callKind: 'tool' });
-    expect(h.writes[1]![1]).toMatchObject({ nominalUsd: '0', actualUsd: '0', raw: 'v' });
-  });
-  it('a failed read closes the row as not sent', async () => {
-    const h = ledger();
-    await expect(freeToolCall(h.deps, { toolName: 'read_source', requestHash: 'h'.repeat(64), multiplier: '6' },
-      async () => { throw new Error('read'); })).rejects.toThrow('read');
-    expect(h.kinds()).toEqual(['begin', 'record:not_sent']);
   });
 });

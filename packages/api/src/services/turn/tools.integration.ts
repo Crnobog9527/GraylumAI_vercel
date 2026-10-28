@@ -103,13 +103,14 @@ const frame = (id: string, extra: Record<string, unknown>) =>
 const usage = (id: string) => frame(id, { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, cost: 0.006 } })
   + 'data: [DONE]\n\n';
 const respond = (id: string, body: string) => new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
-/** The first response calls web_search; the next one answers. The request bodies are kept for inspection. */
-function searchingModel(bodies: string[]): typeof fetch {
+/** The first response calls `tool` (web_search by default); the next one answers. The request bodies are kept for inspection. */
+function searchingModel(bodies: string[],
+  tool: { name: string; args: Record<string, unknown> } = { name: 'web_search', args: { query: 'coffee shop positioning', mode: 'fast' } }): typeof fetch {
   return async (_url, init) => {
     bodies.push(String(init?.body));
     const n = bodies.length, id = `gen-tools-${randomUUID()}`;
     if (n === 1) return respond(id, frame(id, { choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-1',
-      type: 'function', function: { name: 'web_search', arguments: JSON.stringify({ query: 'coffee shop positioning', mode: 'fast' }) } }] },
+      type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] },
     finish_reason: null }] }) + frame(id, { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }) + usage(id));
     return respond(id, frame(id, { choices: [{ index: 0, delta: { role: 'assistant', content: 'Answer from the search.' }, finish_reason: null }] })
       + frame(id, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + usage(id));
@@ -121,10 +122,10 @@ const searchResult = (over: Partial<ResearchCallResult> = {}): ResearchCallResul
 const suppliers = (parallel: VendorCalls['parallel']): VendorCalls => ({ parallel, tikhub: vi.fn(), firecrawl: vi.fn() });
 
 const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.00003); return 'allow'; };
-async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls) {
+async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate },
-    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors } },
+    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library } },
   { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text: 'How should a coffee shop position itself?' }, e => events.push(e)));
   return { events, calls };
 }
@@ -197,4 +198,27 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a route profile allowing two tools never carries
   expect(out.events.at(-1)).toMatchObject({ type: 'result', body: 'Plain.' });
   expect((out.events[0] as Extract<TurnEvent, { type: 'opened' }>).tools).toEqual({ available: [], trimmed: [] });
   expect(JSON.parse(bodies[0]!).tools).toBeUndefined();
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-6: read_source reads the user\'s own library once, read-only, with no tool row', async () => {
+  const f = await setup(), bodies: string[] = [], doc = randomUUID();
+  await db.query(`insert into library_documents(id,actor_id,request_id,kind,format,purpose,filename,status,original_bytes,text_bytes)
+    values($1,$2,$3,'document','md','reference','coffee-notes.md','ready',10,10)`, [doc, f.actor, randomUUID()]);
+  await db.query(`insert into library_document_segments(document_id,actor_id,ordinal,title,body,source)
+    values($1,$2,0,'Intro','Our coffee shop sells single origin beans.','extracted')`, [doc, f.actor]);
+  const out = await turn(f, searchingModel(bodies, { name: 'read_source', args: { query: 'search:coffee' } }), suppliers(vi.fn()), true);
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(bodies[1]).toContain('single origin beans');
+  expect(bodies[1]).toContain('doc-1');
+  expect(bodies[1]).not.toContain(doc);
+  // No tool row: the decision check and the two model calls only.
+  expect((await rows(f.actor)).map(r => r.call_kind)).toEqual(['decision', 'model', 'model']);
+  const own = out.calls.filter(c => c.startsWith('rpc/turn_') || c === 'rpc/library_turn_read');
+  expect(own).toEqual(['rpc/turn_open', 'rpc/turn_call_begin', 'rpc/turn_call_record',
+    'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/library_turn_read',
+    'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/turn_close']);
+  // A deleted conversation reads nothing.
+  await db.query('update runtime_sessions set content_deleted_at=now() where id=$1', [f.session]);
+  const read = await db.query("select library_turn_read($1,$2,'search:coffee','[]') r", [f.actor, f.session]);
+  expect(read.rows[0].r).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
 });
