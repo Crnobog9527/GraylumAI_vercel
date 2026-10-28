@@ -77,7 +77,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   let quote;
   try {
     // With tools the quote allows the research ceiling; the turn narrows it again unless research is usable (V2-6).
-    quote = await chatQuote(admin, { modelId: serverChatModel(settings), inputBytes: deps.tools ? Math.max(interactiveBytes, RESEARCH_INPUT_BYTES) : interactiveBytes,
+    quote = await chatQuote(admin, { modelId: serverChatModel(settings),
+      inputBytes: deps.tools ? Math.max(interactiveBytes, RESEARCH_INPUT_BYTES) : interactiveBytes,
       deps: deps.pricing });
   } catch (error) {
     // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.

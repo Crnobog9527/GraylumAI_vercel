@@ -20,9 +20,9 @@ import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
 
 /*
  * CORE-PATH-V2 V2-6: the tools of a free chat (kind=chat, 2.7). The session's whitelist is the general research lookups
- * (when the chat research switch is on and the route profile's tool ceiling holds them), load_skill (when the account has a Skill catalog) and read_source (when the kind
- * gives a reader); its definitions and the research/catalog instructions are the same on every turn of the session. What
- * this turn can use, and its limits and bounds, come from planTurnTools before turn_open.
+ * (when the chat research switch is on and the route profile's tool ceiling holds them), load_skill (when the account has a
+ * Skill catalog) and read_source (when the kind gives a reader); its definitions and the research/catalog instructions are
+ * the same on every turn of the session. What this turn can use, and its limits and bounds, come from planTurnTools before turn_open.
  */
 export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
