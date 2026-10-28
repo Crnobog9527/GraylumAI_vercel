@@ -55,11 +55,12 @@ const profile = (maxTools: number) => ({ model: MODEL, endpointTag: ROUTE, proto
     outputLimit: 8192, testedOutputLimit: 512, outputSemantics: 'max-tokens-includes-reasoning', includesReasoning: true,
     cacheCovered: true, costBoundPassed: true } });
 
-async function setup(maxTools = 9) {
+async function setup(maxTools = 9, account: { credits?: number; typicalUsd?: string } = {}) {
+  const credits = account.credits ?? 1000;
   const actor = randomUUID(), session = randomUUID(), modelId = randomUUID();
-  await db.query('insert into profiles(id,credits) values($1,1000)', [actor]);
+  await db.query('insert into profiles(id,credits) values($1,$2)', [actor, credits]);
   await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
-    values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`, [actor, 'opening_grant:' + actor]);
+    values($1,$3,'addition','grant','opening_grant','system',$2,0,$3)`, [actor, 'opening_grant:' + actor, credits]);
   await db.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
     [session, actor, JSON.stringify({ kind: 'positioning_draft', probe: randomUUID() }), randomUUID()]);
   const { pricing } = pricingConfig(MODEL, ROUTE, '0.000003', '0.000015');
@@ -81,7 +82,10 @@ async function setup(maxTools = 9) {
   await set('billing_credits_per_usd', 100);
   await set('billing_token_price_multiplier', 6);
   await set('runtime_rw_v2', { catalogCache: true });
-  for (const [key, value] of Object.entries(researchSettings())) await set(key, value);
+  const research = researchSettings() as Record<string, { thresholds?: unknown[] }>;
+  // The research routes' thresholds and the chat model's own start threshold L (Owner 10-28) in one setting.
+  research.billing_payg_start_thresholds!.thresholds!.push({ model: MODEL, purpose: 'ordinary', typicalUsd: account.typicalUsd ?? '0.04' });
+  for (const [key, value] of Object.entries(research)) await set(key, value);
   await seedTestOpenRouterKey(db, 'LOCAL_SYNTHETIC_OPENROUTER_KEY');
   clearCatalogCache();
   return { actor, session };
@@ -122,9 +126,12 @@ const searchResult = (over: Partial<ResearchCallResult> = {}): ResearchCallResul
 const suppliers = (parallel: VendorCalls['parallel']): VendorCalls => ({ parallel, tikhub: vi.fn(), firecrawl: vi.fn() });
 
 const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.00003); return 'allow'; };
-async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false) {
+const admit = async () => ({ ok: true as const });
+type NewWork = Parameters<typeof runChatTurn>[0]['newWork'];
+async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false,
+  newWork: NewWork = { message: admit, calls: admit }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate },
+  await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate }, newWork,
     tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library } },
   { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text: 'How should a coffee shop position itself?' }, e => events.push(e)));
   return { events, calls };
@@ -243,4 +250,34 @@ it('RUNTIME: CORE-PATH-V2 V2-6: read_source reads the user\'s own library once, 
   await db.query('update runtime_sessions set content_deleted_at=now() where id=$1', [f.session]);
   const read = await db.query("select library_turn_read($1,$2,'search:coffee','[]') r", [f.actor, f.session]);
   expect(read.rows[0].r).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-6: the call limits refuse a research call before anything is written or sent', async () => {
+  const f = await setup(), bodies: string[] = [], counts: number[] = [];
+  const parallel = vi.fn(async () => searchResult());
+  // The model call passes the gate; the research call (one subcall) is refused.
+  const calls: NewWork['calls'] = async (_actor, count) => { counts.push(count);
+    return counts.length === 1 ? { ok: true as const } : { ok: false as const, reason: 'call_limited' as const, retryAfter: 60 }; };
+  const out = await turn(f, searchingModel(bodies), suppliers(parallel), false, { message: admit, calls });
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_RATE_LIMITED' });
+  expect(counts).toEqual([1, 1]);
+  expect(parallel).not.toHaveBeenCalled();
+  expect((await rows(f.actor)).map(r => r.call_kind)).toEqual(['decision', 'model']);
+  expect((await db.query('select state,close_kind from turns where actor_id=$1', [f.actor])).rows[0]).toEqual({ state: 'closed', close_kind: 'failed' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-6: a balance that opens the turn but not the continuation after a search pauses it there', async () => {
+  // L = max(1, ceil(0.001 x 100 x 6)) = 1 credit; the balance 3 opens the turn and freezes H = min(G, 3) = 3. The first model
+  // call and the search (its bound held) use it up, so the model call that would read the result pauses for credits.
+  const f = await setup(9, { credits: 3, typicalUsd: '0.001' }), bodies: string[] = [];
+  const parallel = vi.fn(async () => searchResult());
+  const out = await turn(f, searchingModel(bodies), suppliers(parallel));
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'error', code: 'TURN_PAUSED_FOR_CREDITS' });
+  expect(parallel).toHaveBeenCalledTimes(1);
+  expect(bodies).toHaveLength(1);
+  const t = (await db.query('select state,pause_reason,reserved_credits from turns where actor_id=$1', [f.actor])).rows[0];
+  expect(t).toEqual({ state: 'paused', pause_reason: 'waiting_credits', reserved_credits: 3 });
+  // The search is recorded with its cost; nothing was sent for the continuation.
+  expect((await rows(f.actor)).map(r => [r.call_kind, r.status])).toEqual([['decision', 'ok'], ['model', 'ok'], ['tool', 'ok']]);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(0);
 });

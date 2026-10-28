@@ -39,6 +39,8 @@ export type ResearchToolsInput = {
   /** Where social_account may take an account from: the user's benchmark table and the message this turn answers. */
   accounts: { benchmark: readonly CanonicalAccount[]; currentMessage: string };
   onOutcome?: (name: GeneralResearchToolName, outcome: ToolCallOutcome, subcalls: number) => void;
+  /** The one-switch pause and the call limits for this call's subcalls (newWorkGate); throws TurnStop to refuse. */
+  callGate?: (subcalls: number) => Promise<void>;
 };
 
 type Step = { request: SupplierRequest; label: ResearchItem['fields'] };
@@ -159,6 +161,8 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       if (allowance.exhausted) return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
       const bound = callBound(input.suppliers.policies, planned.steps.map(step => step.request), allowance.allowed);
       if (!bound) return toolEnvelope({ status: 'unavailable', reason: 'ROUTE_NOT_FROZEN' });
+      // Refused here: nothing is written or sent, and the turn stops (the gate's TurnStop passes).
+      await input.callGate?.(allowance.allowed);
       let metered;
       try {
         metered = await paidToolCall(input.calls, { toolName: name, requestHash: sha256(canonical({ name, args: parsed.data })),

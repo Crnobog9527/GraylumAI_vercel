@@ -46,7 +46,7 @@ export type ChatToolsSetup = {
   sharedInstructions: string;
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean };
-  build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number;
+  build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
     onStop: (stop: TurnStop) => void }): Promise<ReturnType<typeof turnTools>>;
 };
 
@@ -92,7 +92,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
       ...(sourceOffered ? { libraryRetrieval: true } : {}) },
     async build(calls, extra) {
-      const built = turnTools({ plan, calls, research: setup,
+      const built = turnTools({ plan, calls, research: setup, callGate: extra.callGate,
         suppliers: { slots: extra.slots, timeLeft: () => extra.deadline - Date.now() - REPLY_RESERVE_MS,
           ...(input.tools.vendors ? { vendors: input.tools.vendors } : {}) },
         accounts: { benchmark, currentMessage: extra.currentMessage },

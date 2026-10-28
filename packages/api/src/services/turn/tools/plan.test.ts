@@ -28,7 +28,7 @@ describe('the tools of a turn, planned before turn_open (CORE-PATH-V2 2.5.3, 2.7
     // It is a valid freeze: M = 1 + 3 + 2 model calls, and G covers every subcall.
     const frozen = turnPolicy({ q: '100', multiplier: '6', modelUpperUsd: '0.01', limits: { model: 6, ...plan.limits, decisions: 0 },
       paidToolUpperUsd: plan.paidToolUpperUsd, stopLoss: { limitUsd: 100, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
-      historyItems: 10, inputBytes: 150_000 });
+      historyItems: 10, inputBytes: 150_000, startThresholdCredits: 1 });
     expect(frozen.gCredits).toBe(6 * 6 + 3 * 24);
   });
 

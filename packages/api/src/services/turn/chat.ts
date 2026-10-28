@@ -6,9 +6,10 @@ import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
+import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
 import { rowFor } from '../runtime/settingsRows';
 import { CORE_PATH_SETTING } from './settingKeys';
-import { readAdmissionSettings } from '../runtime/newWorkGate';
+import { readAdmissionSettings, type NewWorkGateResult, type RuntimeCallGate, type SettingsRead } from '../runtime/newWorkGate';
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import { freeChatInstructions } from '../runtime/primaryInstructions';
 import { assertRuntimeRequestCapacity } from '../runtime/context';
@@ -24,7 +25,7 @@ import { ceil12, modelCall, TurnStop } from './call';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
-import { stopLossSettings, turnPolicy } from './policy';
+import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
@@ -47,6 +48,9 @@ const TURN_BUDGET_MS = 300_000;
 
 export type ChatDeps = {
   admin: SupabaseClient; clients: TurnClients; slots: CounterStore;
+  /** The runtime rate limits and the one-switch pause (runtime/newWorkGate.ts), checked before the turn opens (message) and
+   *  before each model call (calls), as the old path does (CORE-PATH-V2 4.1). */
+  newWork: { message: (actorId: string, read: Promise<SettingsRead>) => Promise<NewWorkGateResult>; calls: RuntimeCallGate };
   /** OpenRouter transport (tests and the load-test stub); production uses fetch. */
   transport?: typeof fetch; pricing?: PricingDeps; gate?: PositioningGatePolicy;
   /** V2-6: the tools a free chat offers; absent, the turn has none (V2-4a). */
@@ -63,7 +67,14 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_PROVIDER_BUSY: { kind: 'failed', refundAll: true },
   TURN_PROVIDER_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
   TURN_INPUT_TOO_LARGE: { kind: 'failed', refundAll: true },
+  TURN_NEW_CALLS_PAUSED: { kind: 'failed', refundAll: true },
+  TURN_RATE_LIMITED: { kind: 'failed', refundAll: true },
+  TURN_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
+  TURN_USAGE_CONFIGURATION_REQUIRED: { kind: 'failed', refundAll: true },
 };
+/** A refusal of the new-work gate as a turn code: the administrator's pause, a minute or day limit, or limits unavailable. */
+const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
+  usage_configuration_required: 'TURN_USAGE_CONFIGURATION_REQUIRED' } as const;
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients), started = Date.now();
@@ -73,6 +84,15 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const config = coreSetting.safeParse(core.error ? null : core.data?.value);
   if (!config.success || !config.data.enabled) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   const settings = await readAdmissionSettings(admin, configuration);
+  // The one-switch pause and the message limits, before anything is frozen (the old path's admission check).
+  const admitted = await deps.newWork.message(input.actorId, Promise.resolve(settings));
+  if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
+  // Before each paid call (model, or a research tool for its subcalls): the one-switch pause and the call limits; a refusal
+  // stops the turn before anything is written or sent.
+  const callGate = async (count: number) => {
+    const gate = await deps.newWork.calls(input.actorId, count, 'bill2.v2');
+    if (!gate.ok) { stopped = new TurnStop(GATE_CODES[gate.reason]); throw stopped; }
+  };
   const budgets = await readPurposeBudgets(admin, configuration);
   const interactiveBytes = budgets?.interactive.inputBytes ?? 90000;
   let quote;
@@ -108,7 +128,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // 2. Open: one model call per tool return plus one (2.5.3), the paid tools' bounds, and the possible positioning check,
   // outside M and the freeze.
   const decisionUpperUsd = config.data.decisionUpperUsd;
+  // The start threshold L of this model for a free chat (purpose ordinary), from the admission configuration rows.
+  const thresholds = rowFor(await configuration, RESEARCH_THRESHOLDS_KEY);
+  const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q,
+    quote.multiplier);
+  if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
+    startThresholdCredits: startCredits,
     limits: { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 },
     paidToolUpperUsd: tools?.plan.paidToolUpperUsd ?? [], stopLoss: config.data.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing,
@@ -190,7 +216,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     let text = '', sentChars = 0, holding = fallback;
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
-        onStop: stop => { stopped ??= stop; } }) : null;
+        callGate, onStop: stop => { stopped ??= stop; } }) : null;
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),
       maxOutputTokens: quote.outputLimit, maxTurns: 1 + (built?.maxToolCalls ?? 0), reasoning: quote.reasoning,
@@ -208,10 +234,12 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         }
         if (text.length > sentChars) { emit({ type: 'text', delta: text.slice(sentChars) }); sentChars = text.length; }
       },
-      exchange: (_sequence, body, onChunk) => {
+      exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, inputLimit); }
-        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); return Promise.reject(stopped); }
+        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
+        // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
+        await callGate(1);
         return modelCall(callDeps, quote, request, onChunk)
           .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       },

@@ -39,6 +39,8 @@ export type TurnToolsInput = {
   plan: ToolPlan; calls: ToolCallDeps;
   research: ResearchSetup | null;
   suppliers: { slots: CounterStore; timeLeft?: () => number; vendors?: VendorCalls };
+  /** Checked before each paid tool call with its subcall count (newWorkGate); throws TurnStop to refuse. */
+  callGate?: (subcalls: number) => Promise<void>;
   accounts?: { benchmark: readonly CanonicalAccount[]; currentMessage: string };
   skills?: PreparedSkills; skillFiles?: PreparedSkillFiles; readSource?: SourceReader;
 };
@@ -64,6 +66,7 @@ export function turnTools(input: TurnToolsInput): TurnTools {
     maxCalls: plan.limits.paidTools, maxSubcalls: plan.subcalls,
     suppliers: { keys: input.research?.keys ?? {}, policies: input.research?.policies ?? [], ...input.suppliers },
     accounts: input.accounts ?? { benchmark: [], currentMessage: '' },
+    ...(input.callGate ? { callGate: input.callGate } : {}),
     onOutcome: (_name, outcome, sent) => {
       outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
       if (outcome !== 'not_sent') paidCalls++;
