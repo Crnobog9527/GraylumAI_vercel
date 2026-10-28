@@ -172,7 +172,7 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
     const unknown = outcomes.some(o => !o.ok && o.code === 'TURN_CALL_UNKNOWN');
     // Nothing delivered because the models refused under the fallback rule: a positioning refusal, counted toward the refund
     // cap (turn_fusion_open's refusals24h), as the free chat's; repeating it cannot keep using models for free.
-    const refusedAll = !delivered && outcomes.some(o => o.ok && o.verdict === 'no_delivery');
+    const refusedAll = !delivered && outcomes.some(o => o.ok && o.verdict === 'no_delivery' && !o.empty);
     if (refusedAll && !unknown) {
       await close('failed', { refundAll: true, failureCode: 'positioning_required' });
       return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });

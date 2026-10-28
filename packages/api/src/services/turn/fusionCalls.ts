@@ -18,7 +18,8 @@ export type Verdict = 'usable' | 'format_invalid' | 'revision_invalid' | 'no_del
 export type Judged = { verdict: Verdict; deliverable?: boolean };
 export type GroupMember = { call: ModelCall; body: string; phase: FusionPhase; judge: (text: string) => Judged;
   onChunk?: (chunk: string) => void };
-export type MemberOutcome = { ok: true; text: string; verdict: Verdict } | { ok: false; code: string };
+/** ok: the call has its final receipt (empty: the provider billed a response without an answer, settled as no delivery). */
+export type MemberOutcome = { ok: true; text: string; verdict: Verdict; empty?: boolean } | { ok: false; code: string };
 
 const opened = z.object({ turnId: z.number().int().positive(), state: z.string(), replay: z.boolean(),
   reservedCredits: z.number().int().nonnegative(), reviewId: z.string().uuid().nullable().optional(),
@@ -91,12 +92,15 @@ export type GroupContext = { db: FusionDatabase; slots: CounterStore; actorId: s
  * failure is 'unusable': the platform keeps its cost, the user's base is 0); a call that is not delivered ends with its code. */
 export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promise<MemberOutcome[]> {
   const bySeq = new Map<number, GroupMember>();
-  const texts = new Map<GroupMember, { text: string; verdict: Verdict }>();
+  const texts = new Map<GroupMember, { text: string; verdict: Verdict; empty?: boolean }>();
   const calls = ctx.db.calls(ctx.turnId, (seq, raw) => {
     const member = bySeq.get(seq);
     if (!member) return null;
     const text = answerText(raw);
-    if (!text) return { status: 'unusable', usage: { verdict: 'no_delivery' }, output: null };
+    if (!text) {
+      texts.set(member, { text: '', verdict: 'no_delivery', empty: true });
+      return { status: 'unusable', usage: { verdict: 'no_delivery' }, output: null };
+    }
     const judged = member.judge(text);
     texts.set(member, { text, verdict: judged.verdict });
     if (judged.verdict === 'no_delivery') return { status: 'unusable', usage: { verdict: 'no_delivery' }, output: null };
@@ -113,8 +117,7 @@ export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promi
   return settled.map((result, index): MemberOutcome => {
     const member = members[index]!, saved = texts.get(member);
     // Fulfilled without a saved text: no answer in the response, or its cost not final yet (left for recovery, nothing saved).
-    if (result.status === 'fulfilled') return saved ? { ok: true, text: saved.text, verdict: saved.verdict }
-      : { ok: false, code: 'TURN_CALL_UNKNOWN' };
+    if (result.status === 'fulfilled') return saved ? { ok: true, ...saved } : { ok: false, code: 'TURN_CALL_UNKNOWN' };
     const error = result.reason;
     return { ok: false, code: error instanceof TurnStop || error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED' };
   });

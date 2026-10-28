@@ -13,6 +13,8 @@
 --   fusion_compare_turn_adopt the chosen compare answer into the conversation history
 --   fusion_compare_turn_history the conversation history a compare sizes its columns on (read-only)
 --   turn_fusion_recovery the fusion-recovery cron's step on turns: 24-hour end, deleted review refund, product sync
+--   fusion_turn_raw_scrub (trigger on fusion_reviews / fusion_compares) a deleted review or compare deletes its turn's raw
+--                        provider responses
 -- Changed (whole CREATE OR REPLACE from packages/db/functions):
 --   turn_open            a jury (or adoption) does not occupy its draft conversation (active_turn_id), as before V2
 --   turn_call_begin      a jury's freeze check counts the fixed price plus the calls in flight (the group's temporary bound)
@@ -28,7 +30,7 @@
 -- Compatibility: new columns are nullable, the new table and functions are used only by the V2 path (core_path_v2.enabled);
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
--- Recovery: drop the eight new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
+-- Recovery: drop the two triggers, the nine new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
 -- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -74,6 +76,26 @@ CREATE INDEX IF NOT EXISTS fusion_turn_outputs_compare_idx ON public.fusion_turn
 CREATE INDEX IF NOT EXISTS fusion_turn_outputs_actor_idx ON public.fusion_turn_outputs(actor_id);
 ALTER TABLE public.fusion_turn_outputs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.fusion_turn_outputs FROM PUBLIC, anon, authenticated, service_role;
+
+-- A review or compare deleted (its draft, its conversation or a workspace source deleted, the account erased) takes the raw
+-- provider responses of its turn with it: they hold the same content as its saved answers (fusion_turn_outputs, cascaded).
+-- The receipts themselves stay (billing records). A receipt still being written holds the row in key-share mode, so the
+-- deletion waits for it and removes its raw response too (turn_fusion_record).
+CREATE OR REPLACE FUNCTION public.fusion_turn_raw_scrub()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF OLD.turn_id IS NOT NULL THEN DELETE FROM turn_call_raw WHERE turn_id = OLD.turn_id; END IF;
+  RETURN OLD;
+END $function$;
+DROP TRIGGER IF EXISTS fusion_reviews_turn_raw_scrub ON public.fusion_reviews;
+CREATE TRIGGER fusion_reviews_turn_raw_scrub AFTER DELETE ON public.fusion_reviews FOR EACH ROW EXECUTE FUNCTION public.fusion_turn_raw_scrub();
+DROP TRIGGER IF EXISTS fusion_compares_turn_raw_scrub ON public.fusion_compares;
+CREATE TRIGGER fusion_compares_turn_raw_scrub AFTER DELETE ON public.fusion_compares FOR EACH ROW EXECUTE FUNCTION public.fusion_turn_raw_scrub();
+REVOKE ALL ON FUNCTION public.fusion_turn_raw_scrub() FROM PUBLIC, anon, authenticated, service_role;
 
 -- Open a compare, jury or jury adoption turn: the Gold gate and the kind's own rules, the product record, then turn_open in the
 -- same transaction (one round trip). A repeated request answers like turn_open, without the live gates (its freeze exists).
@@ -261,10 +283,16 @@ BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023'; END IF;
-  r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd, p_usage, p_provider_id, p_payload_hash, p_raw);
   v_review := (t.policy->>'reviewId')::uuid; v_compare := (t.policy->>'compareId')::uuid;
+  -- The product row in key-share mode first: a deletion (draft or source deleted, account erased) waits for this receipt and
+  -- then removes the raw response with it (fusion_turn_raw_scrub); one that committed first leaves nothing to keep.
+  IF v_review IS NOT NULL THEN PERFORM 1 FROM fusion_reviews WHERE id = v_review FOR KEY SHARE;
+  ELSE PERFORM 1 FROM fusion_compares WHERE id = v_compare FOR KEY SHARE; END IF;
   gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE id = v_review)
                ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE id = v_compare) END;
+  -- The receipt (billing evidence) is always written; the response text is not once its review or compare is gone.
+  r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd, p_usage, p_provider_id, p_payload_hash,
+    CASE WHEN gone THEN NULL ELSE p_raw END);
   IF jsonb_typeof(p_output) = 'object' AND NOT gone AND NOT (r->>'sessionTombstoned')::boolean AND NOT (r->>'accountErasing')::boolean THEN
     IF p_status NOT IN ('ok','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
     v_hash := encode(sha256(convert_to(p_output->>'body', 'UTF8')), 'hex');

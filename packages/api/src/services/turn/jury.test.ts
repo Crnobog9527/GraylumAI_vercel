@@ -78,6 +78,13 @@ describe('jury turn advance', () => {
     expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', delivered: false, refundAll: true,
       failureCode: 'review_revision_failed' }));
   });
+  it('a billed response without an answer is a settled seat, not an unknown one: the review goes on (#1522 review)', async () => {
+    m.read.mockResolvedValue(view());
+    m.runGroup.mockResolvedValueOnce(REVIEWERS.map(() => ({ ok: true, text: '', verdict: 'no_delivery', empty: true })));
+    m.decide.mockResolvedValueOnce({ state: 'incomplete', outcome: { kind: 'no_opinions' } });
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'ended' });
+    expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', refundAll: true }));
+  });
   it('waits for credits, leaves an unknown result to recovery, and never sends a group twice', async () => {
     m.read.mockResolvedValue(view());
     m.runGroup.mockResolvedValueOnce([{ ok: false, code: 'TURN_PAUSED_FOR_CREDITS' }, { ok: false, code: 'TURN_PAUSED_FOR_CREDITS' }]);

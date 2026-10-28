@@ -13,10 +13,16 @@ BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023'; END IF;
-  r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd, p_usage, p_provider_id, p_payload_hash, p_raw);
   v_review := (t.policy->>'reviewId')::uuid; v_compare := (t.policy->>'compareId')::uuid;
+  -- The product row in key-share mode first: a deletion (draft or source deleted, account erased) waits for this receipt and
+  -- then removes the raw response with it (fusion_turn_raw_scrub); one that committed first leaves nothing to keep.
+  IF v_review IS NOT NULL THEN PERFORM 1 FROM fusion_reviews WHERE id = v_review FOR KEY SHARE;
+  ELSE PERFORM 1 FROM fusion_compares WHERE id = v_compare FOR KEY SHARE; END IF;
   gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE id = v_review)
                ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE id = v_compare) END;
+  -- The receipt (billing evidence) is always written; the response text is not once its review or compare is gone.
+  r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd, p_usage, p_provider_id, p_payload_hash,
+    CASE WHEN gone THEN NULL ELSE p_raw END);
   IF jsonb_typeof(p_output) = 'object' AND NOT gone AND NOT (r->>'sessionTombstoned')::boolean AND NOT (r->>'accountErasing')::boolean THEN
     IF p_status NOT IN ('ok','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
     v_hash := encode(sha256(convert_to(p_output->>'body', 'UTF8')), 'hex');

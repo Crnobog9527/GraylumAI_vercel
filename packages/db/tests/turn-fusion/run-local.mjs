@@ -312,7 +312,19 @@ try{
   await c.query('delete from fusion_reviews where id=$1',[rv]);
   assert.equal(await one('select count(*)::int v from fusion_turn_outputs where turn_id=$1',[o.turnId]),0);
   assert.equal(await one('select count(*)::int v from turn_calls where turn_id=$1',[o.turnId]),1,'the billing record stays');
-  report.checks.push('deleting a review (draft deletion, account erasure) deletes its saved answers through the cascade; the billing records stay');
+  // #1522 review: the raw provider responses go with the review too, and a receipt arriving after the deletion stores none.
+  const b=await account(),rb=await review(b),ob=await open(b,{product:{reviewId:rb}});
+  const rawRecord=(seq)=>one('select turn_fusion_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v',[b.actor,ob.turnId,seq,'ok',0.01,0.01,'{}',null,
+   hash('raw'+seq),'{"choices":[{"message":{"content":"secret"}}]}',JSON.stringify(seat('secret'))]);
+  await begin(b,ob.turnId,1);await begin(b,ob.turnId,2);
+  await rawRecord(1);
+  assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[ob.turnId]),1);
+  await c.query('delete from fusion_reviews where id=$1',[rb]);
+  assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[ob.turnId]),0,'deleted with the review');
+  assert.equal((await rawRecord(2)).productGone,true);
+  assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[ob.turnId]),0,'a late receipt stores no raw response');
+  assert.equal(await one("select count(*)::int v from turn_calls where turn_id=$1 and status='ok'",[ob.turnId]),2,'both receipts recorded');
+  report.checks.push('deleting a review (draft deletion, account erasure) deletes its saved answers and its raw provider responses; a late receipt keeps billing only; the billing records stay');
  }
  // 12. #1522 review: the 7-day breaker counts the turn path's platform-borne cost and refuses the next compare; a compare's
  // workspace sources are frozen with its record (content deletion finds it by them) and a revoked source refuses it.
