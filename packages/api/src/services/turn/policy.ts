@@ -48,11 +48,15 @@ export type PolicyInput = {
   frozen?: Record<string, string | number | boolean>;
 };
 
+const validThreshold = (credits: number) => {
+  if (!Number.isSafeInteger(credits) || credits < 1) throw new Error('TURN_POLICY_INVALID');
+  return credits;
+};
+
 export function turnPolicy(input: PolicyInput) {
   const limits = turnLimits.parse(input.limits), stopLoss = stopLossSettings.parse(input.stopLoss);
   const paid = input.paidToolUpperUsd ?? [];
   if (paid.length !== limits.paidTools || (limits.decisions > 0) !== (input.decisionUpperUsd !== undefined)) throw new Error('TURN_POLICY_INVALID');
-  if (!Number.isSafeInteger(input.startThresholdCredits) || input.startThresholdCredits < 1) throw new Error('TURN_POLICY_INVALID');
   const uModelCredits = callCredits(input.q, input.modelUpperUsd, input.multiplier);
   const gCredits = limits.model * uModelCredits + paid.reduce((sum, u) => sum + callCredits(input.q, u, input.multiplier), 0);
   const uTurn = units(input.modelUpperUsd) * BigInt(limits.model) + paid.reduce((sum, u) => sum + units(u), 0n)
@@ -64,7 +68,7 @@ export function turnPolicy(input: PolicyInput) {
     ...(input.pricing ? { pricing: input.pricing } : {}),
     uTurnUsd: Number(format(uTurn)), gCredits, uModelCredits,
     // The start threshold L (BILL-PAYG): what the balance must cover to start; below it mid-turn the turn pauses.
-    minCredits: input.startThresholdCredits,
+    minCredits: validThreshold(input.startThresholdCredits),
     limits, stopLoss, historyItems: input.historyItems, inputBytes: input.inputBytes,
   };
 }
