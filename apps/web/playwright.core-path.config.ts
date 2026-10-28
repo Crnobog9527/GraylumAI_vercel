@@ -22,6 +22,9 @@ export default defineConfig({
   ],
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL,
+    // A stuck click must fail in half a minute, not eat the whole journey budget.
+    actionTimeout: 30_000,
+    navigationTimeout: 60_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

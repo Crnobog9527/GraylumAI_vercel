@@ -39,14 +39,12 @@ export const test = base.extend<Fixtures>({
       const context = await browser.newContext({ storageState: statePathFor(role) });
       contexts.push(context);
       const page = await context.newPage();
-      // The cookie-consent banner (Termly) covers a fresh browser. Decline it once, up front: answering it while a journey is
-      // under way (it calls analytics.withdrawConsent) interrupts the page, so it must be settled before anything else happens.
-      await gotoWithBypass(page, '/app/profile');
-      const decline = page.getByRole('button', { name: 'Decline', exact: true });
-      if (await decline.waitFor({ state: 'visible', timeout: 8_000 }).then(() => true, () => false)) {
-        await decline.click();
-        await expect(decline).toBeHidden();
-      }
+      // The cookie-consent banner (Termly, region "Cookie Consent Prompt") covers the lower left of every page and swallows
+      // clicks there; "Decline" does not stick between page loads and calls analytics.withdrawConsent in the middle of a journey.
+      // Taking the banner out of the page whenever it shows up changes nothing the journeys test.
+      await page.addLocatorHandler(page.getByRole('region', { name: 'Cookie Consent Prompt' }), async banner => {
+        await banner.evaluate(node => node.remove());
+      });
       return { page, context };
     });
     await Promise.all(contexts.map(context => context.close()));

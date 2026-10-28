@@ -18,16 +18,23 @@ test('journey 4b: a 20-turn free conversation is deleted; the row goes and the o
   await expect(runtimeBox(page)).toBeVisible();
   await meter.checkpoint('journey 4b: 20 turns');
 
-  const link = page.locator(`a[href*="session=${session}"]`).first();
-  await expect(link).toBeVisible();
-  const row = link.locator('xpath=ancestor::*[.//button[contains(@aria-label,"的更多操作")]][1]');
-  await row.getByRole('button', { name: /的更多操作$/ }).click();
+  // The conversation list is on the start page: go there fresh, find this session's row, and open its menu.
+  await page.goto('/app/positioning');
+  // A row is a <div> holding the link and, next to it, the "⋯" button.
+  const row = page.getByLabel('平台、账号与工作').locator(`a[href*="session=${session}"]`).first().locator('xpath=..');
+  await expect(row).toBeVisible();
+  // The "⋯" button only takes clicks while the row is hovered, and Playwright checks that before it moves the mouse: hover the
+  // link first, then click the button.
+  await row.locator('a').first().hover();
+  await row.getByRole('button', { name: /的更多操作$/ }).click({ force: true });
   await page.getByRole('menuitem', { name: '删除对话' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('删除后无法恢复');
   await dialog.getByRole('button', { name: '删除', exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.locator(`a[href*="session=${session}"]`)).toHaveCount(0);
+  // Only the conversation list counts: the page's "返回当前工作" link keeps pointing at the deleted session until you leave the page
+  // (observed 2026-10-28, noted in the PR).
+  await expect(page.getByLabel('平台、账号与工作').locator(`a[href*="session=${session}"]`)).toHaveCount(0);
 
   // The old link goes back to the start page; nothing blank, no error screen.
   await page.goto(`/app/runtime?session=${session}`);
