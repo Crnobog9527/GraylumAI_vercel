@@ -1,13 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), notice: vi.fn(), start: vi.fn(), finish: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), notice: vi.fn(), start: vi.fn(), finish: vi.fn(), turns: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/runtime/automaticRecovery', () => ({ runAutomaticFinancialRecovery: mocks.recover }));
 vi.mock('@repo/api/src/services/runtime/stopLossNotify', () => ({ deliverStopLossAlerts: mocks.notice }));
+vi.mock('@repo/api/src/services/turn/recovery', () => ({ runTurnRecovery: mocks.turns }));
 vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start, finishScheduledJobRun: mocks.finish }));
 import { GET } from './route';
+const TURNS = { claimed: 2, interrupted: 1, expired: 1, settled: 0, pending: 0, skipped: 0, lookups: 0, lateReceipts: 0, failed: 0 };
 afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
   vi.resetAllMocks();
@@ -18,6 +20,7 @@ beforeEach(() => {
   mocks.notice.mockResolvedValue({ outcome: 'none', alerts: 0 });
   mocks.start.mockResolvedValue('run-1');
   mocks.finish.mockResolvedValue(undefined);
+  mocks.turns.mockResolvedValue(TURNS);
 });
 it('denies unauthenticated cron before inventory or provider work', async () => {
   mocks.auth.mockReturnValue(new Response('Unauthorized', { status: 401 }));
@@ -30,7 +33,7 @@ it('runs the bounded recovery through the existing authenticated cron entry', as
   expect(response.status).toBe(200);
   expect(mocks.auth).toHaveBeenCalledWith(expect.any(Request), 'runtime-recovery');
   expect(mocks.recover).toHaveBeenCalledWith({ synthetic: true });
-  expect(await response.json()).toEqual({ success: true, selected: 1, processed: 1, settled: 1, pending: 0, failed: 0 });
+  expect(await response.json()).toEqual({ success: true, selected: 1, processed: 1, settled: 1, pending: 0, failed: 0, turns: TURNS });
 });
 it('reports sanitized failure without raw provider or database content', async () => {
   mocks.recover.mockRejectedValue(new Error('synthetic private diagnostic'));
@@ -53,7 +56,20 @@ it('reports the automatic stale-round close and fails while any of its refunds i
   mocks.recover.mockResolvedValue({ selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds });
   const response = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
   expect(response.status).toBe(500);
-  expect(await response.json()).toEqual({ success: false, selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds });
+  expect(await response.json()).toEqual({ success: false, selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds, turns: TURNS });
+});
+// CORE-PATH-V2 V2-8: the turns recovery runs in the same job, beside the old one, and ends before the route limit.
+it('runs the turns recovery beside the old recovery and fails while a turn could not be recovered', async () => {
+  const before = Date.now();
+  expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(200);
+  expect(mocks.turns).toHaveBeenCalledWith({ synthetic: true }, expect.any(Number));
+  const deadline = mocks.turns.mock.calls[0]![1] as number;
+  expect(deadline - before).toBeGreaterThanOrEqual(55_000);
+  expect(deadline - Date.now()).toBeLessThanOrEqual(55_000);
+  mocks.turns.mockResolvedValue({ ...TURNS, failed: 1 });
+  const failed = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
+  expect(failed.status).toBe(500);
+  expect((await failed.json()).turns.failed).toBe(1);
 });
 it('fails while reported stale-round refunds were deferred by the time budget', async () => {
   const staleRounds = { found: 5, compensated: 2, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 6, manualReview: 0, deferred: 3 };
@@ -76,7 +92,7 @@ it('records every run with its counts, success or failure', async () => {
   await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
   expect(mocks.start).toHaveBeenCalledWith({ supabase: { synthetic: true }, jobKey: 'runtime_recovery', triggerSource: 'cron' });
   expect(mocks.finish).toHaveBeenCalledWith({ supabase: { synthetic: true }, runId: 'run-1', status: 'success',
-    summary: { selected: 1, processed: 1, settled: 1, pending: 0, failed: 0 }, error: undefined });
+    summary: { selected: 1, processed: 1, settled: 1, pending: 0, failed: 0, turns: TURNS }, error: undefined });
   mocks.finish.mockClear();
   mocks.recover.mockRejectedValue(new Error('synthetic private diagnostic'));
   await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
