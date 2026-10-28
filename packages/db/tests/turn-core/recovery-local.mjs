@@ -206,6 +206,8 @@ try{
   await begin(p.a,r,1);await record(p.a,r,1);
   assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[p.a.actor,r])).chargedCredits,18);
   assert.equal(await balance(p.a),112);assert.equal(await spends(p.a),18);
+  assert.deepEqual(await c.query('select absorbed_credits a from turns where id=any($1) order by id',[[p.id,r]]).then(x=>x.rows.map(y=>y.a)),[0,0],
+   'the carried 12 is charged by the continuation, not absorbed by the paused turn');
   // Replay of the resume request: the same turn; with another resume_of: a conflict.
   const q=await paused(),request=randomUUID();
   await c.query('update profiles set credits=credits+100 where id=$1',[q.a.actor]);
@@ -260,6 +262,8 @@ try{
    await begin(g.a,t3.turnId,1,{upper:0.01});await record(g.a,t3.turnId,1,{n:0.01});  // segment 3: N = 6
    assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[g.a.actor,t3.turnId])).chargedCredits,24);
    assert.equal(await spends(g.a),24);assert.equal(await balance(g.a),106);
+   // Carried credits are not borne by the platform: nothing absorbed anywhere in the chain (#1519 review).
+   assert.equal(await one('select sum(absorbed_credits)::int v from turns where actor_id=$1',[g.a.actor]),0);
   }
   // A model call whose cost is not final yet: the resume waits for its receipt, then carries it (#1519 review).
   {

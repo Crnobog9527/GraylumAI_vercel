@@ -4214,7 +4214,7 @@
   "fn:turn_call_identity(uuid,bigint,integer,text)": "40ec987e5d70",
   "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "134d118b31db",
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "4a4ffd93742c",
-  "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "4bef66d96701",
+  "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "f2f07d96c990",
   "fn:turn_recover(uuid,bigint,text)": "643852dcec58",
   "fn:turn_recovery_claim(integer)": "c5a94c8c8c58",
   "fn:turn_resume_carry(uuid,uuid,bigint,bigint,text,jsonb)": "c62cc53dff02",
