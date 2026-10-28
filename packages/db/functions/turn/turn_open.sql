@@ -75,7 +75,10 @@ BEGIN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
     END IF;
 
-    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open.
+    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
+    -- the balance is read: two sessions of one account in different stop-loss buckets would otherwise both size H on the same
+    -- balance, and the second would be refused instead of freezing what is left. Order: session, bucket, account (as turn_close).
+    PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
     h := least(g, available);
