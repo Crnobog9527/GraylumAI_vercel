@@ -1,8 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2 V2-5 (kind=mentor, the positioning mentor; docs/launch/tasks/CORE-PATH-V2.md 2.3, 2.7, 4.2, 6.1).
--- MIGRATION NUMBER IS A LOCAL PLACEHOLDER until the controller assigns one; it must stay after 0422 (start threshold, controller-assigned), whose
--- turn_open it extends.
+-- Number 0423 assigned by the controller; after 0422 (start threshold), whose turn_open it extends.
 --   turn_mentor_context  read inside turn_open: the draft of this session, its current round, the step's workflow and the
 --                        work projection (checklist values, field provenance, business context; runtime_work_projection's
 --                        fields without its runtime_executions join) the mentor's prompt
