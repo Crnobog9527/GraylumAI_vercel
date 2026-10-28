@@ -88,7 +88,8 @@ async function setup() {
     values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`, [actor, 'opening_grant:' + actor]);
   await model(mentorId, MENTOR); await model(organizerId, ORGANIZER);
   const pack = makePackage(), registration = 'mentor-' + randomUUID(), flow = makeWorkflow(3);
-  flow.steps.forEach(s => { s.information = [{ id: 'goal', title: 'Goal', required: true }, { id: 'other', title: 'Other', required: false }]; });
+  flow.steps.forEach((s, i) => { s.information = [{ id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i },
+    { id: 'other', title: 'Other', required: false }]; });
   await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)', [pack.id, registration, owner]);
   await db.query('insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)', [moduleId, registration, pack.id, mentorId]);
   await publishSkillPackage(admin, owner, pack);
