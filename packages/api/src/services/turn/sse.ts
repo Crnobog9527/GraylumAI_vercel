@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { logSwallowed } from '../../lib/swallow';
 import type { ToolAvailability } from './tools/types';
 
 /*
@@ -29,7 +30,7 @@ export function eventStream(run: (emit: (event: TurnEvent) => void) => Promise<v
         if (!open) return;
         try { controller.enqueue(encoder.encode(encodeEvent(event))); } catch { open = false; }
       };
-      run(emit).catch(() => emit({ type: 'error', code: 'TURN_FAILED' }))
+      run(emit).catch((error: unknown) => { logSwallowed('turn_stream_failed', error, { category: 'ai' }); emit({ type: 'error', code: 'TURN_FAILED' }); })
         .finally(() => { if (open) { open = false; try { controller.close(); } catch { /* already closed */ } } });
     },
     cancel() { open = false; },

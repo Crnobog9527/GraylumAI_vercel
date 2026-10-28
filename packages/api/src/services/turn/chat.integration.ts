@@ -129,6 +129,9 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in 
   // n = (1000 x 3 + 200 x 15) / 1e6 = 0.006 USD; N = ceil(100 x 0.006 x 6) = 4 credits.
   expect(result).toMatchObject({ body: 'Synthetic answer', settlement: 'done' });
   expect(result.chargedCredits).toBeGreaterThan(0);
+  // Frozen at open for the recovery job (V2-8): the model and its nominal price table, so a late receipt is priced as a live one.
+  const frozen = (await db.query('select policy from turns where actor_id=$1', [f.actor])).rows[0].policy;
+  expect(frozen).toMatchObject({ model: MODEL, pricing: { version: 'nominal-v1', endpointTag: ROUTE } });
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - result.chargedCredits!);
   // The positioning check: its real cost on the platform's side (stop-loss), nothing in what the user paid.
   expect((await db.query("select c.status,c.nominal_usd::float8 n,c.upper_usd::float8 u,c.usage->>'chargeUser' charge from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='decision'", [f.actor])).rows)

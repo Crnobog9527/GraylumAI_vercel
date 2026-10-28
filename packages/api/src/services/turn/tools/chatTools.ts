@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { swallow } from '../../../lib/swallow';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CanonicalAccount } from '../../research/tools/accountLinks';
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
@@ -58,12 +59,13 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   modelMultiplier: string; defaultMultiplier: string;
   /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
   maxTools: number }): Promise<ChatToolsSetup> {
-  const skills = input.tools.skills ? await input.tools.skills(input.actorId).catch(() => null) : null;
+  const skills = input.tools.skills ? await swallow('turn_tools_skills_unavailable', input.tools.skills(input.actorId), null) : null;
   // Whole groups in this order, each only if it still fits the profile's ceiling; the result depends on configuration only,
   // so it is the same on every turn of the session (2.9 rule 2).
   const offered: TurnToolName[] = [];
   // The research lookups are offered only while the admin's chat research switch is on (a configuration change, not a turn's).
-  const researchOn = await chatResearchEnabled(input.admin, input.configuration).catch(() => false);
+  const researchOn = await swallow('turn_tools_research_switch_unavailable',
+    chatResearchEnabled(input.admin, input.configuration), false);
   for (const group of [input.tools.library ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
     researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : []]) if (offered.length + group.length <= input.maxTools) offered.push(...group);
   const research = offered.filter(name => (GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) as typeof GENERAL_RESEARCH_TOOLS[number][];
@@ -81,7 +83,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const researchUsable = plan.limits.paidTools > 0;
   // Without usable research the turn keeps the interactive ceiling (the free tools were sized against it).
   const inputLimit = researchUsable ? Math.min(input.quotedBytes, RESEARCH_INPUT_BYTES) : Math.min(input.quotedBytes, input.interactiveBytes);
-  const benchmark = setup && input.tools.benchmarkAccounts ? await input.tools.benchmarkAccounts(input.actorId).catch(() => []) : [];
+  const benchmark = setup && input.tools.benchmarkAccounts ? await swallow('turn_tools_benchmark_accounts_unavailable',
+    input.tools.benchmarkAccounts(input.actorId), []) : [];
   return {
     plan, research: setup, inputLimit, definitionBytes,
     sharedInstructions: researchInstructions(plan) + catalogText,

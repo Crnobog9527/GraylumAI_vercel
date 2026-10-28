@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { swallow } from '../../../lib/swallow';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { decimal, DECIMAL_SCALE } from '../../bill2/decimal';
 import type { ToolCallPolicy } from '../../bill2/toolBilling';
@@ -116,7 +117,7 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
       const keys: ResearchSetup['keys'] = {};
       for (const vendor of admitted.research.vendors) {
         // An unreadable key store trims the tools like an empty slot: the turn goes on without them.
-        const key = await input.readKey(vendor).catch(() => null);
+        const key = await swallow('turn_tools_vendor_key_unavailable', input.readKey(vendor), null, { vendor });
         if (key) keys[vendor] = key;
       }
       const usable = (name: GeneralResearchToolName) => admitted.tools.includes(name) && config.routes.some(route =>
