@@ -5639,6 +5639,7 @@
   "idx:turns.turns_live": "c2b43512a645",
   "idx:turns.turns_opened": "6d65157f401e",
   "idx:turns.turns_pkey": "de268185fbd8",
+  "idx:turns.turns_positioning_refusals": "26fa7e59e9e1",
   "idx:turns.turns_report_stops": "523458456bba",
   "idx:turns.turns_session_opened": "f516e96399c2",
   "idx:turns.turns_settlement_pending": "c19cab00e941",
