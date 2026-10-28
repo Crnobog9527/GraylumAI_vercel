@@ -8,7 +8,7 @@ import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
 import { catalogRead } from '../runtime/catalogCache';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
-import { judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
+import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import { freeChatInstructions } from '../runtime/primaryInstructions';
 import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
 import { freezeSharedPromptCache } from '../runtime/promptCache';
@@ -17,7 +17,7 @@ import { replySettingInstructions } from '../runtime/replyLanguage';
 import { runRuntime } from '../runtime/runner';
 import { serverChatModel } from '../runtime/serverChatModel';
 import type { PricingDeps } from '../runtime/pricingAdmission';
-import { modelCall, TurnStop } from './call';
+import { ceil12, modelCall, TurnStop } from './call';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
@@ -32,7 +32,9 @@ import type { TurnEvent } from './sse';
  * each with a cache breakpoint (2.9 rule 3), then the history, then the current message.
  */
 export const CORE_PATH_SETTING = 'core_path_v2';
-const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings }).strict();
+// decisionUpperUsd: the most one positioning check (Decisions) can cost the platform; it is reserved on the stop-loss (Fable 10-28).
+const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
+  decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
 
 export type ChatDeps = {
@@ -71,9 +73,10 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       : 'TURN_QUOTE_UNAVAILABLE' });
   }
 
-  // 2. Open: one model call plus the possible Decisions check (2.5.3, V2-4a has no tools).
-  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
-    limits: { model: 2, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.data.stopLoss,
+  // 2. Open: one model call (2.5.3, V2-4a has no tools) plus the possible positioning check, outside M and the freeze.
+  const decisionUpperUsd = config.data.decisionUpperUsd;
+  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
+    limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.data.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
@@ -92,19 +95,28 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // The model SDK wraps what the exchange throws; the stop that ended the call is kept here and wins over the wrapper.
   let stopped: TurnStop | undefined;
   try {
-    // 3. Positioning gate (2.7): only when the account has no confirmed positioning; the check is a call row that costs nothing.
+    // 3. Positioning gate (2.7): only when the account has no confirmed positioning. A call row the user is never charged for
+    // (charge_user=false); the platform's cost is its real one, or the upper bound when the response reported none.
     let fallback = false;
     const gate = opened.positioning;
     if (gate && !gate.positioned) {
       const decision = await db.begin({ actorId: input.actorId, turnId: opened.turnId, seq: ++seq, callKind: 'decision',
-        modelId: quote.modelId, toolName: null, paid: null, requestHash: sha256(input.text), upperUsd: '0', multiplier: quote.multiplier });
+        modelId: quote.modelId, toolName: null, paid: null, requestHash: sha256(input.text), upperUsd: decisionUpperUsd,
+        multiplier: quote.multiplier });
       if (decision.sessionTombstoned || decision.accountErasing) throw new TurnStop('TURN_TOMBSTONED');
       let refused = false;
-      try { fallback = await judgePositioning(deps.gate ?? {}, { text: input.text, apiKey: await quote.credential() },
+      const spent: { sent: boolean; cost: string | null } = { sent: false, cost: null };
+      const onCost = (usd: number | null) => { spent.sent = true; spent.cost = usd === null ? null : ceil12(usd.toFixed(15)); };
+      try { fallback = await judgePositioning(deps.gate ?? {}, { text: input.text, apiKey: await quote.credential(), onCost },
         gate.refusals24h >= POSITIONING_REFUSAL_CAP); }
       catch { refused = true; }
-      await db.record({ actorId: input.actorId, turnId: opened.turnId, seq, status: 'ok', nominalUsd: '0', actualUsd: null,
-        usage: {}, providerId: null, payloadHash: sha256(refused ? 'refused' : 'allowed'), raw: null });
+      const usage = { chargeUser: false, model: DECISIONS_MODEL };
+      await db.record(spent.sent
+        ? { actorId: input.actorId, turnId: opened.turnId, seq, status: 'ok', nominalUsd: spent.cost ?? decisionUpperUsd,
+          actualUsd: spent.cost,
+          usage, providerId: null, payloadHash: sha256(refused ? 'refused' : 'allowed'), raw: null }
+        : { actorId: input.actorId, turnId: opened.turnId, seq, status: 'not_sent', nominalUsd: null, actualUsd: null,
+          usage, providerId: null, payloadHash: sha256(refused ? 'refused' : 'allowed'), raw: null });
       if (refused) {
         await close('failed', { refundAll: true, failureCode: 'positioning_required' });
         return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });

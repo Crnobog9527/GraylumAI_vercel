@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
+import type { PositioningClassifier } from '../runtime/positioningGate';
 import { runChatTurn, CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
@@ -67,7 +68,8 @@ async function setup() {
   [modelId, MODEL, JSON.stringify(config)]);
   const set = (key: string, value: unknown) => db.query(
     'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value', [key, JSON.stringify(value)]);
-  await set(CORE_PATH_SETTING, { enabled: true, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 } });
+  await set(CORE_PATH_SETTING, { enabled: true, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
+    decisionUpperUsd: '0.001' });
   await set(RUNTIME_PAYG_SETTING, { version: 1, enabled: true, policyVersion: 'core-path-test', profiles: [profile] });
   await set('primary_model_id', modelId);
   await set('billing_credits_per_usd', 100);
@@ -94,10 +96,12 @@ const completion = (id: string) => JSON.stringify({ id, object: 'chat.completion
   choices: [{ index: 0, message: { role: 'assistant', content: 'Synthetic answer' }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, cost: '0.006' } });
 
-async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: () => Promise<'allow'> }) {
+// The synthetic Decisions check: allowed, reporting a provider cost of 0.00003 USD.
+const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.00003); return 'allow'; };
+async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
-    gate: { classify: input.gate ?? (async () => 'allow') } },
+    gate: { classify: input.gate ?? allowGate } },
   { actorId: input.actor, sessionId: input.session, requestId: randomUUID(), text: input.text }, e => events.push(e)));
   return { events, calls };
 }
@@ -114,16 +118,23 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, calls once in three wri
   expect(result).toMatchObject({ body: 'Synthetic answer', settlement: 'done' });
   expect(result.chargedCredits).toBeGreaterThan(0);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - result.chargedCredits!);
+  // The positioning check: its real cost on the platform's side (stop-loss), nothing in what the user paid.
+  expect((await db.query("select c.status,c.nominal_usd::float8 n,c.upper_usd::float8 u,c.usage->>'chargeUser' charge from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='decision'", [f.actor])).rows)
+    .toEqual([{ status: 'ok', n: 0.00003, u: 0.001, charge: 'false' }]);
   expect((await db.query("select role,content from session_messages where session_id=$1 order by seq", [f.session])).rows)
     .toEqual([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Synthetic answer' }]);
   // The second turn is warm (catalog cache): its round trips are the turn's own.
   const second = await turn({ actor: f.actor, session: f.session, text: 'Again', transport });
   expect(second.events.map(e => e.type)).toEqual(['opened', 'result']);
-  const own = second.calls.filter(c => c.startsWith('rpc/turn_'));
-  console.log('CORE-PATH-V2 free chat round trips', JSON.stringify({ all: second.calls, own }));
-  // This account has no confirmed positioning, so the gate's Decisions check is one more call row (begin + record, n = 0).
+  // The budget in two lines (plan 2.3 / 3.1, Fable 10-28): the turn's own <= 5 without tools, +2 for the positioning check of an
+  // account without a confirmed positioning; plus a fixed 2 per request (catalog version check, the platform key read fresh).
+  const own = second.calls.filter(c => c.startsWith('rpc/turn_')), fixed = second.calls.filter(c => !c.startsWith('rpc/turn_'));
+  console.log('CORE-PATH-V2 free chat round trips', JSON.stringify({ total: second.calls.length, own: own.length, fixed: fixed.length,
+    calls: second.calls }));
   expect(own).toEqual(['rpc/turn_open', 'rpc/turn_call_begin', 'rpc/turn_call_record',
     'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/turn_close']);
+  expect(own.length).toBeLessThanOrEqual(5 + 2);
+  expect(fixed).toEqual(['rpc/catalog_versions_snapshot', 'rpc/platform_secret_read']);
   expect(posts).toBe(2);
 });
 

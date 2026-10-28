@@ -38,7 +38,7 @@ export type CallDeps = {
 const MAX_ATTEMPTS = 2, RETRY_DELAY_MS = 500;
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 // numeric(20,12): a nominal cost with more digits is rounded up, never down.
-function ceil12(value: string): string {
+export function ceil12(value: string): string {
   const [whole, fraction = ''] = value.split('.');
   if (fraction.length <= 12) return value;
   const kept = BigInt((whole ?? '0') + fraction.slice(0, 12)) + (/[1-9]/.test(fraction.slice(12)) ? 1n : 0n);
