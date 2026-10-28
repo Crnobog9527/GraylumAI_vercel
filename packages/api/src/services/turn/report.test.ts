@@ -14,10 +14,9 @@ const h = vi.hoisted(() => ({
   request: [] as Array<{ context: Record<string, unknown>; phase: string }>,
   call: vi.fn(), runtime: vi.fn(), transports: [] as Array<typeof fetch>,
 }));
-vi.mock('./chat', async original => ({ ...await original<object>(), readCoreConfig: async () => ({ enabled: true, decisionUpperUsd: '0.01',
+vi.mock('./chat', async original => ({ ...await original<object>(), readCoreConfig: () => ({ enabled: true, decisionUpperUsd: '0.01',
   stopLoss: { limitUsd: 100, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 } }) }));
-vi.mock('../runtime/catalogCache', async original => ({ ...await original<object>(), catalogRead: async () => ({ data: { value: 500 }, error: null }) }));
-vi.mock('../runtime/admissionConfiguration', async original => ({ ...await original<object>(), readAdmissionConfiguration: async () => ({}),
+vi.mock('../runtime/admissionConfiguration', async original => ({ ...await original<object>(), readAdmissionConfiguration: async () => ({ data: [{ key: 'report_fixed_price_credits', value: 500 }], error: null }),
   readAdmissionModule: async (_admin: unknown, id: string) => ({ error: null,
     data: { id, active: true, model_id: '20000000-0000-4000-8000-000000000001', report_model_id: '20000000-0000-4000-8000-000000000002' } }) }));
 vi.mock('../runtime/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));

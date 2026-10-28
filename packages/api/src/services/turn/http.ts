@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { runChatTurn, type ChatDeps } from './chat';
 import { reportTurnRequest, runReportTurn } from './report';
 import { eventStream } from './sse';
+import { swallow } from '../../lib/swallow';
 
 /*
  * CORE-PATH-V2 2.2: POST /api/turn, one turn per request, answered as one event stream. Before anything opens: the request
@@ -29,9 +30,10 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
   let input;
   try { input = turnRequest.parse(await request.json()); } catch { return json(400, 'TURN_REQUEST_INVALID'); }
   if (!deps.databaseHost.declared || deps.databaseHost.declared !== deps.databaseHost.actual) return json(503, 'TURN_DATABASE_MISMATCH');
-  const actorId = await deps.authenticate(request).catch(() => null);
+  const actorId = await swallow('turn_authenticate_failed', deps.authenticate(request), null, { category: 'auth' });
   if (!actorId) return json(401, 'TURN_UNAUTHENTICATED');
-  if (await deps.rateLimited(actorId).catch(() => true)) return json(429, 'TURN_RATE_LIMITED');
+  // A limiter that cannot answer refuses (fails closed).
+  if (await swallow('turn_rate_limit_unavailable', deps.rateLimited(actorId), true, { category: 'api' })) return json(429, 'TURN_RATE_LIMITED');
   if (input.kind === 'report') {
     // A report hears when its page drops the stream (the user's stop, V2-7a); a chat runs to its end regardless.
     const gone = new AbortController();

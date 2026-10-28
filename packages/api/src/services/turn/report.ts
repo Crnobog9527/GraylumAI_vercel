@@ -7,8 +7,9 @@ import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { benchmarkReportFacts, benchmarkShortfallNote, completeReportCandidate, confirmedReportFacts, frozenReport,
   reportInstructions, REPORT_INPUT_BYTES, REPORT_REQUEST_INPUT } from '../report/contract';
 import { DEFAULT_REPORT_PRICE, REPORT_PRICE_KEY } from '../report/fees';
-import { readAdmissionConfiguration, readAdmissionModule } from '../runtime/admissionConfiguration';
-import { catalogRead } from '../runtime/catalogCache';
+import { readAdmissionConfiguration, readAdmissionModule, type ConfigurationRows } from '../runtime/admissionConfiguration';
+import { rowFor } from '../runtime/settingsRows';
+import { swallow } from '../../lib/swallow';
 import { assertRuntimeRequestCapacity } from '../runtime/context';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { freezeSharedPromptCache } from '../runtime/promptCache';
@@ -49,10 +50,9 @@ const OPEN_CODES = /^(REPORT_[A-Z_]+|TURN_[A-Z_]+|STOP_LOSS_REACHED)$/;
 const reportContext = z.object({
   source: z.object({ snapshot: z.unknown(), workflow: z.unknown(), snapshotHash: z.string() }).passthrough(), benchmarks: z.unknown() });
 
-/** The fixed price on the catalog (the database checks the same row when it opens the turn). */
-async function reportPrice(admin: ChatDeps['admin']): Promise<number> {
-  const row = await catalogRead(admin, 'settings', 'report-price', () =>
-    admin.from('system_settings').select('value').eq('key', REPORT_PRICE_KEY).maybeSingle());
+/** The fixed price from the admission configuration rows (the database checks the same row when it opens the turn). */
+function reportPrice(configuration: ConfigurationRows): number {
+  const row = rowFor(configuration, REPORT_PRICE_KEY);
   if (row.error) throw new Error('REPORT_UNAVAILABLE');
   if (!row.data) return DEFAULT_REPORT_PRICE;
   const parsed = z.coerce.number().int().min(1).max(999999).safeParse(row.data.value);
@@ -64,26 +64,27 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   clientGone?: AbortSignal): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
   // 1. The catalog (cached): switch, price, module and its report model, input budget, the quote of the one call.
-  const config = await readCoreConfig(admin);
+  const configuration = readAdmissionConfiguration(admin);
+  const config = readCoreConfig(await configuration);
   if (!config) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   let quote, price: number;
   try {
-    price = await reportPrice(admin);
+    price = reportPrice(await configuration);
     if (input.acceptedCredits !== price) return emit({ type: 'error', code: 'REPORT_PRICE_CHANGED' });
     const module = await readAdmissionModule(admin, input.moduleId);
     if (module.error || module.data?.active !== true) return emit({ type: 'error', code: 'REPORT_SOURCE_CONFLICT' });
     // Back-office report model (10-10), else the module's model, as the old report admission chose it.
     const modelId = z.string().uuid().parse(module.data.report_model_id ?? module.data.model_id);
-    const configuration = readAdmissionConfiguration(admin);
     const budgets = await readPurposeBudgets(admin, configuration);
-    quote = await chatQuote(admin, { modelId, inputBytes: budgets?.report.inputBytes ?? REPORT_INPUT_BYTES, deps: deps.pricing,
+    quote = await chatQuote(admin, { configuration: await configuration, modelId,
+      inputBytes: budgets?.report.inputBytes ?? REPORT_INPUT_BYTES, deps: deps.pricing,
       use: { phase: 'report', requestFormat: AGENT_TURN_REQUEST_FORMAT } });
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     return emit({ type: 'error', code: error instanceof QuoteError ? error.code : /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message
       : 'TURN_QUOTE_UNAVAILABLE' });
   }
-  const settings = await readAdmissionSettings(admin, readAdmissionConfiguration(admin));
+  const settings = await readAdmissionSettings(admin, configuration);
   const guard = settings.ok ? settings.identityGuard ?? true : true;
 
   // 2. Open: one model call, no tools, no history. The user's freeze is the fixed price plus the call's bound (10-17: the
@@ -112,8 +113,10 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   const abort = new AbortController();
   let stopRead: Promise<void> | undefined;
   const onGone = () => {
-    stopRead ??= db.reportRead({ actorId: input.actorId, sessionId: input.sessionId, roundId: null, turnId })
-      .then(turn => { if (turn?.state === 'stopping') abort.abort(); }).catch(() => undefined);
+    if (stopRead) return;
+    // Unreadable: the report runs on (a dropped stream alone never stops it); the miss is logged.
+    stopRead = swallow('turn_report_stop_read_failed', db.reportRead({ actorId: input.actorId, sessionId: input.sessionId,
+      roundId: null, turnId }).then(turn => { if (turn?.state === 'stopping') abort.abort(); }), undefined, { category: 'api' });
   };
   if (clientGone?.aborted) onGone(); else clientGone?.addEventListener('abort', onGone, { once: true });
 
@@ -181,12 +184,12 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     // Stopped by its user: the aborted stream is the stopped report, with what was generated (turn_close cuts it to what the
     // user saw; its provider cost is looked up by recovery). Anything else delivered nothing and pays nothing (turn_close).
     if (abort.signal.aborted) {
-      const closed = await close('stopped', { body: text }).catch(() => null);
+      const closed = await swallow('turn_report_stop_close_failed', close('stopped', { body: text }), null, { category: 'api' });
       if (closed) return emit({ type: 'result', turnId, body: text, chargedCredits: closed.chargedCredits,
         settlement: closed.settlement, closeKind: closed.closeKind, delivered: false });
     } else {
       const kind: CloseKind = code === 'TURN_TOMBSTONED' ? 'erased' : code === 'TURN_CALL_UNKNOWN' ? 'interrupted' : 'failed';
-      await close(kind, { failureCode: code.toLowerCase() }).catch(() => undefined);
+      await swallow('turn_report_close_failed', close(kind, { failureCode: code.toLowerCase() }), undefined, { category: 'api' });
     }
     emit({ type: 'error', code, turnId });
   } finally {

@@ -14,6 +14,9 @@ BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind <> 'report' THEN RAISE EXCEPTION 'TURN_STOP_NOT_ALLOWED' USING ERRCODE='42501'; END IF;
+  -- Lock order as turn_open, turn_close and the erasure functions: the account, the session, the turn. The account row also
+  -- serializes this account's stops, so two stops at once never both count as free.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   IF t.session_id IS NOT NULL THEN PERFORM 1 FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   -- Pressed again, or the report ended first: what happened, unchanged.
@@ -22,8 +25,6 @@ BEGIN
       'chargeable', coalesce((t.policy->>'stopChargeable')::boolean, false), 'replay', true);
   END IF;
   IF t.state <> 'running' THEN RAISE EXCEPTION 'TURN_NOT_RUNNING' USING ERRCODE='55000'; END IF;
-  -- The account row serializes this account's stops, so two stops at once never both count as free.
-  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   SELECT count(*) INTO n FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user AND r.id <> p_turn_id
     AND coalesce(r.closed_at, (r.policy->>'stoppedAt')::timestamptz) > now() - interval '24 hours';
   IF n >= 2 AND NOT coalesce(p_confirmed, false) THEN

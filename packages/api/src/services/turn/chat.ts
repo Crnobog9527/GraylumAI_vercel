@@ -5,8 +5,9 @@ import { z } from 'zod';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
-import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
-import { catalogRead } from '../runtime/catalogCache';
+import { readAdmissionConfiguration, type ConfigurationRows } from '../runtime/admissionConfiguration';
+import { rowFor } from '../runtime/settingsRows';
+import { CORE_PATH_SETTING } from './settingKeys';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import { freeChatInstructions } from '../runtime/primaryInstructions';
@@ -26,6 +27,7 @@ import type { CounterStore } from './limiter';
 import { stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
+import { swallow } from '../../lib/swallow';
 
 /*
  * CORE-PATH-V2 kind=chat (2.7): a free-chat turn without tools (V2-4a; the free tools come in V2-4b). Database work is
@@ -33,15 +35,14 @@ import type { TurnEvent } from './sse';
  * comes from the catalog cache (settings, model row, price snapshot); the prompt is a site-wide segment and a per-user segment,
  * each with a cache breakpoint (2.9 rule 3), then the history, then the current message.
  */
-export const CORE_PATH_SETTING = 'core_path_v2';
+export { CORE_PATH_SETTING } from './settingKeys';
 // decisionUpperUsd: the most one positioning check (Decisions) can cost the platform; it is reserved on the stop-loss (Fable 10-28).
 const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
-/** The core-path switch and stop-loss parameters (cached), or null when the path is off or the setting is not valid. */
-export async function readCoreConfig(admin: SupabaseClient) {
-  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
-    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+/** The core-path switch and stop-loss parameters from the admission configuration rows, or null when off or not valid. */
+export function readCoreConfig(configuration: ConfigurationRows) {
+  const core = rowFor(configuration, CORE_PATH_SETTING);
   const config = coreSetting.safeParse(core.error ? null : core.data?.value);
   return config.success && config.data.enabled ? config.data : null;
 }
@@ -67,15 +68,15 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
   // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
-  const config = await readCoreConfig(admin);
-  if (!config) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   const configuration = readAdmissionConfiguration(admin);
+  const config = readCoreConfig(await configuration);
+  if (!config) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   const settings = await readAdmissionSettings(admin, configuration);
   const budgets = await readPurposeBudgets(admin, configuration);
   let quote;
   try {
-    quote = await chatQuote(admin, { modelId: serverChatModel(settings), inputBytes: budgets?.interactive.inputBytes ?? 90000,
-      deps: deps.pricing });
+    quote = await chatQuote(admin, { configuration: await configuration, modelId: serverChatModel(settings),
+      inputBytes: budgets?.interactive.inputBytes ?? 90000, deps: deps.pricing });
   } catch (error) {
     // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.
     const message = error instanceof Error ? error.message : '';
@@ -205,7 +206,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
-      await close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }).catch(() => undefined);
+      // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
+      await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
+        { category: 'ai' });
     }
     emit({ type: 'error', code, turnId: opened.turnId });
   }

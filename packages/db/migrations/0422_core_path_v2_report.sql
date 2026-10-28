@@ -172,10 +172,11 @@ BEGIN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
-  -- 1. The session, locked: one turn at a time per conversation (3a).
+  -- 1. The account row first, then the session: one turn at a time per conversation (3a). The account comes first as in the
+  -- erasure functions (they hold it before the session), so an open and a deletion of the same conversation never deadlock.
+  SELECT * INTO prof FROM profiles WHERE id = p_actor_id FOR UPDATE;
   SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
   IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
   -- 2. The same request again: the turn it opened, unchanged.
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
@@ -216,11 +217,10 @@ BEGIN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
     END IF;
 
-    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
-    -- the balance is read: two sessions of one account in different stop-loss buckets would otherwise both size H on the same
-    -- balance, and the second would be refused instead of freezing what is left. Order: session, bucket, account (as turn_close).
-    -- Re-checked under the lock: an erasure that held it (account_erasure_confirm) may have committed while this waited.
-    SELECT * INTO prof FROM profiles WHERE id = p_actor_id FOR UPDATE;
+    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The balance is read under the
+    -- account lock taken first: two sessions of one account in different stop-loss buckets never size H on the same balance.
+    -- The account is checked again here (same lock) before anything is frozen.
+    SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
     IF prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false'
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
@@ -274,6 +274,9 @@ BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind <> 'report' THEN RAISE EXCEPTION 'TURN_STOP_NOT_ALLOWED' USING ERRCODE='42501'; END IF;
+  -- Lock order as turn_open, turn_close and the erasure functions: the account, the session, the turn. The account row also
+  -- serializes this account's stops, so two stops at once never both count as free.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   IF t.session_id IS NOT NULL THEN PERFORM 1 FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   -- Pressed again, or the report ended first: what happened, unchanged.
@@ -282,8 +285,6 @@ BEGIN
       'chargeable', coalesce((t.policy->>'stopChargeable')::boolean, false), 'replay', true);
   END IF;
   IF t.state <> 'running' THEN RAISE EXCEPTION 'TURN_NOT_RUNNING' USING ERRCODE='55000'; END IF;
-  -- The account row serializes this account's stops, so two stops at once never both count as free.
-  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   SELECT count(*) INTO n FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user AND r.id <> p_turn_id
     AND coalesce(r.closed_at, (r.policy->>'stoppedAt')::timestamptz) > now() - interval '24 hours';
   IF n >= 2 AND NOT coalesce(p_confirmed, false) THEN
@@ -314,7 +315,9 @@ BEGIN
   END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  -- Lock order: session, then the turn, then the stop-loss bucket, then the profile (as turn_open: session, bucket, profile).
+  -- Lock order: the profile, the session, the turn, then the stop-loss bucket (as turn_open and the erasure functions). The
+  -- profile also serializes the actor's closes (the free-stop count) before the settlement locks it again.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.state = 'closed' THEN
@@ -329,7 +332,6 @@ BEGIN
       FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
       UPDATE daily_spend SET spent_usd = spent_usd + n_total, reserved_usd = greatest(reserved_usd - pending_upper, 0)
         WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
-      PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
       q := (t.policy->>'q')::numeric;
       -- The user's base is what it was at the close plus the late model receipts: a tool whose result was unknown at the close
       -- stays 0 to the user (2.5.2) however late its receipt comes; only its cost goes to the stop-loss above.
@@ -392,8 +394,6 @@ BEGIN
   UPDATE daily_spend SET spent_usd = spent_usd + n_total,
       reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
     WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
-  -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
-  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
 
   -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
   -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a

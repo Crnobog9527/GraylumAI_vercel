@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { swallow } from '../../lib/swallow';
 import { turnDatabase, TurnDatabaseError, type TurnClients } from './db';
 
 /*
@@ -31,7 +32,7 @@ const STATUS: Record<string, number> = { TURN_DENIED: 404, TURN_SESSION_DENIED: 
 async function admitted(request: Request, deps: ReportHttpDeps): Promise<string | Response> {
   if (!deps.databaseHost.declared || deps.databaseHost.declared !== deps.databaseHost.actual)
     return json(503, { error: 'TURN_DATABASE_MISMATCH' });
-  const actorId = await deps.authenticate(request).catch(() => null);
+  const actorId = await swallow('turn_report_auth_failed', deps.authenticate(request), null, { category: 'api' });
   return actorId ?? json(401, { error: 'TURN_UNAUTHENTICATED' });
 }
 const failed = (error: unknown) => {
