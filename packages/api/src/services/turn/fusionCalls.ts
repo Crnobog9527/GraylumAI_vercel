@@ -148,13 +148,17 @@ export function fusionPolicy(input: { q: string; calls: Array<{ upperUsd: string
   /** The positioning check's platform bound (compare): one 'decision' call outside M, in U_turn, never in G (Fable 10-28). */
   decisionUpperUsd?: string; historyItems?: number; frozen?: Record<string, string | number | boolean> }) {
   const SCALE = 10n ** 12n;
-  const units = (value: string) => { const [whole, fraction = ''] = value.split('.'); return BigInt(whole!) * SCALE + BigInt(fraction.padEnd(12, '0').slice(0, 12)); };
+  const units = (value: string) => {
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(whole!) * SCALE + BigInt(fraction.padEnd(12, '0').slice(0, 12));
+  };
   const total = input.calls.reduce((sum, c) => sum + units(c.upperUsd), 0n)
     + (input.decisionUpperUsd === undefined ? 0n : units(input.decisionUpperUsd));
   const fraction = (total % SCALE).toString().padStart(12, '0').replace(/0+$/, '');
   const uModelCredits = Math.max(0, ...input.calls.map(c => callCredits(input.q, c.upperUsd, c.multiplier)));
   return {
-    ...input.frozen, q: Number(input.q), uTurnUsd: Number(`${total / SCALE}${fraction ? '.' + fraction : ''}`), gCredits: input.gCredits, minCredits: input.minCredits,
+    ...input.frozen, q: Number(input.q), uTurnUsd: Number(`${total / SCALE}${fraction ? '.' + fraction : ''}`),
+    gCredits: input.gCredits, minCredits: input.minCredits,
     uModelCredits, ...(input.fixedCredits === undefined ? {} : { fixedCredits: input.fixedCredits }),
     ...(input.decisionUpperUsd === undefined ? {} : { decisionUpperUsd: input.decisionUpperUsd }),
     limits: { model: Math.max(1, input.calls.length), paidTools: 0, freeTools: 0, decisions: input.decisionUpperUsd === undefined ? 0 : 1 },
