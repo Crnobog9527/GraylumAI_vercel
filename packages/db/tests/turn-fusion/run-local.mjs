@@ -233,6 +233,11 @@ try{
   assert.equal((await one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o2.compareId,1])).state,'quoted',
    'the conversation moved on: the answer comes back as a quote, nothing recorded');
   assert.equal(await one('select count(*)::int v from session_messages where session_id=$1',[a.session]),3);
+  // #1522 review: the compare deleted (a workspace source it read was deleted): its adopted copy leaves the history.
+  await c.query('delete from fusion_compares where id=$1',[o.compareId]);
+  assert.deepEqual((await c.query('select content,visible from session_messages where session_id=$1 and turn_id=$2 order by seq',
+   [a.session,o.turnId])).rows,[{content:'',visible:false},{content:'',visible:false}]);
+  assert.equal(await one('select content v from session_messages where session_id=$1 and seq=3',[a.session]),'later','other messages stay');
   report.checks.push('compare: >= 2 models and <= 500 credits or nothing is recorded; N columns each rounded on its own (4, not 3); a refused column is free; adoption appends question and answer once, replays, refuses another column; a moved-on conversation gets a quote');
  }
  // 8. The 3-unfinished version rule (10-20) and jury adoption (once per adopted review, no fee).

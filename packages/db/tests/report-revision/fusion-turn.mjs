@@ -36,7 +36,8 @@ const NIL = '00000000-0000-0000-0000-000000000000';
 const open = (db,f,request=randomUUID(),cfg=config,pol=policy) => service(db,'turn_fusion_open',f.actor,NIL,request,'jury',
   JSON.stringify(pol),JSON.stringify({start:{draftId:f.draft,sourceVersionId:f.versionId,config:cfg}}));
 
-export async function runFusionTurn({db,report}) {
+export async function runFusionTurn({db,report,Client,connectionString}) {
+  const connect = async () => { const client = new Client({connectionString}); await client.connect(); return client; };
   await db.query(`INSERT INTO system_settings(key,value) VALUES('fusion_settings',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
     [JSON.stringify({version:1,review,compare:{enabled:false}})]);
   await db.query(`INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
@@ -100,5 +101,30 @@ export async function runFusionTurn({db,report}) {
     await assert.rejects(open(db,other,randomUUID(),{...config,path:undefined}),/TURN_POLICY_INVALID/);
     assert.equal((await db.query('SELECT count(*)::int n FROM fusion_reviews WHERE actor_id=$1',[other.actor])).rows[0].n,0);
     report.checks.push('turn path: a refused open (credits below price + hold, not Gold, no turn path) leaves no review and no freeze');
+  }
+  // 3. #1522 review: a review and a compare started at the same time in two conversations of one account exclude each other.
+  {
+    const comparePolicy = {q:100,uTurnUsd:0.2,gCredits:120,minCredits:120,uModelCredits:60,historyItems:0,inputBytes:0,
+      limits:{model:2,paidTools:0,freeTools:0,decisions:0},stopLoss:policy.stopLoss};
+    const compareProduct = {question:'q',questionHash:hash('q'),requestHash:hash('r'),snapshotHash:hash('s'),workspaceDependencies:[]};
+    for (const juryFirst of [true,false]) {
+      const f = await member(db,5000), other = randomUUID();
+      await db.query(`INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')`,
+        [other,f.actor,{kind:'positioning_draft',probe:randomUUID()},randomUUID()]);
+      const first = await connect(), second = await connect();
+      const jury = client => open(client,f);
+      const compare = client => service(client,'turn_fusion_open',f.actor,other,randomUUID(),'compare',JSON.stringify(comparePolicy),
+        JSON.stringify(compareProduct));
+      try {
+        await first.query('BEGIN');
+        await (juryFirst ? jury(first) : compare(first));
+        const racing = (juryFirst ? compare(second) : jury(second)).then(v=>({v}),e=>({e:e.message}));
+        await new Promise(r=>setTimeout(r,300));
+        await first.query('COMMIT');
+        assert.match((await racing).e ?? '', /TURN_COMPARE_ACTIVE|FUSION_REVIEW_ACTIVE/);
+      } finally { await first.end(); await second.end(); }
+      assert.equal((await db.query('SELECT count(*)::int n FROM turns WHERE actor_id=$1',[f.actor])).rows[0].n,1);
+    }
+    report.checks.push('turn path: a review and a compare started at once in two conversations of one account: the second is refused, either order');
   }
 }

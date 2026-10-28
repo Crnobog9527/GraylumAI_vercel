@@ -79,7 +79,8 @@ ALTER TABLE public.fusion_turn_outputs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.fusion_turn_outputs FROM PUBLIC, anon, authenticated, service_role;
 
 -- A review or compare deleted (its draft, its conversation or a workspace source deleted, the account erased) takes the raw
--- provider responses of its turn with it: they hold the same content as its saved answers (fusion_turn_outputs, cascaded).
+-- provider responses of its turn with it: they hold the same content as its saved answers (fusion_turn_outputs, cascaded);
+-- an adopted compare answer copied into the conversation is emptied and hidden too.
 -- The receipts themselves stay (billing records). A receipt still being written holds the row in key-share mode, so the
 -- deletion waits for it and removes its raw response too (turn_fusion_record).
 CREATE OR REPLACE FUNCTION public.fusion_turn_raw_scrub()
@@ -89,7 +90,16 @@ CREATE OR REPLACE FUNCTION public.fusion_turn_raw_scrub()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
-  IF OLD.turn_id IS NOT NULL THEN DELETE FROM turn_call_raw WHERE turn_id = OLD.turn_id; END IF;
+  IF OLD.turn_id IS NOT NULL THEN
+    DELETE FROM turn_call_raw WHERE turn_id = OLD.turn_id;
+    -- An adopted compare answer copied into the conversation (fusion_compare_turn_adopt) leaves the history with its compare
+    -- (e.g. a workspace source it read was deleted): emptied and hidden, as account erasure does with messages.
+    IF TG_TABLE_NAME = 'fusion_compares' THEN
+      UPDATE session_messages SET content = '', content_hash = encode(sha256(''::bytea), 'hex'), visible = false,
+          deleted_at = coalesce(deleted_at, clock_timestamp())
+        WHERE session_id = OLD.session_id AND turn_id = OLD.turn_id AND (content <> '' OR visible);
+    END IF;
+  END IF;
   RETURN OLD;
 END $function$;
 DROP TRIGGER IF EXISTS fusion_reviews_turn_raw_scrub ON public.fusion_reviews;
@@ -199,8 +209,10 @@ BEGIN
     opened := turn_open(p_actor_id, p_session_id, p_request_id, p_kind, pol, NULL);
     -- Again under turn_open's account lock: two compares opened at once in two conversations both passed the check above;
     -- the second waits on the account row and sees the first here, and rolls back (its freeze and record with it).
+    -- A review started at the same time in another conversation is seen here too (the jury checks compares the same way).
     IF EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare' AND state IN ('running','paused','stopping')
-        AND id <> (opened->>'turnId')::bigint) THEN
+        AND id <> (opened->>'turnId')::bigint)
+      OR EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused')) THEN
       RAISE EXCEPTION 'TURN_COMPARE_ACTIVE' USING ERRCODE='55P03';
     END IF;
     UPDATE fusion_compares SET turn_id = (opened->>'turnId')::bigint WHERE id = cmp.id;
@@ -242,6 +254,12 @@ BEGIN
   END IF;
   pol := p_policy || jsonb_build_object('reviewId', rv.id, 'versionId', rv.source_version_id);
   opened := turn_open(p_actor_id, p_session_id, p_request_id, p_kind, pol, NULL);
+  -- A review and a compare exclude each other (fusion_review_start, fusion_compare_begin): checked again here, under
+  -- turn_open's account lock, so one started at the same time in another conversation is seen and this one rolls back.
+  IF p_kind = 'jury' AND EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare'
+      AND state IN ('running','paused','stopping')) THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE' USING ERRCODE='55P03';
+  END IF;
   IF p_kind = 'jury' THEN UPDATE fusion_reviews SET turn_id = (opened->>'turnId')::bigint, updated_at = clock_timestamp() WHERE id = rv.id; END IF;
   RETURN opened || jsonb_build_object('reviewId', rv.id);
 END $function$;
