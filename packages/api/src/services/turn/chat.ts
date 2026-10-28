@@ -26,6 +26,8 @@ import type { CounterStore } from './limiter';
 import { stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
+import { prepareChatTools, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
+import { RESEARCH_INPUT_BYTES } from './tools/plan';
 
 /*
  * CORE-PATH-V2 kind=chat (2.7): a free-chat turn without tools (V2-4a; the free tools come in V2-4b). Database work is
@@ -38,11 +40,15 @@ export const CORE_PATH_SETTING = 'core_path_v2';
 const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
+/** The route's maxDuration (300 s): supplier requests stop in time for the reply (V2-6). */
+const TURN_BUDGET_MS = 300_000;
 
 export type ChatDeps = {
   admin: SupabaseClient; clients: TurnClients; slots: CounterStore;
   /** OpenRouter transport (tests and the load-test stub); production uses fetch. */
   transport?: typeof fetch; pricing?: PricingDeps; gate?: PositioningGatePolicy;
+  /** V2-6: the tools a free chat offers; absent, the turn has none (V2-4a). */
+  tools?: ChatToolDeps;
 };
 export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string };
 
@@ -58,7 +64,7 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
 };
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
-  const { admin } = deps, db = turnDatabase(deps.clients);
+  const { admin } = deps, db = turnDatabase(deps.clients), started = Date.now();
   // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
   const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
     admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
@@ -67,9 +73,11 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const configuration = readAdmissionConfiguration(admin);
   const settings = await readAdmissionSettings(admin, configuration);
   const budgets = await readPurposeBudgets(admin, configuration);
+  const interactiveBytes = budgets?.interactive.inputBytes ?? 90000;
   let quote;
   try {
-    quote = await chatQuote(admin, { modelId: serverChatModel(settings), inputBytes: budgets?.interactive.inputBytes ?? 90000,
+    // With tools the quote allows the research ceiling; the turn narrows it again unless research is usable (V2-6).
+    quote = await chatQuote(admin, { modelId: serverChatModel(settings), inputBytes: deps.tools ? Math.max(interactiveBytes, RESEARCH_INPUT_BYTES) : interactiveBytes,
       deps: deps.pricing });
   } catch (error) {
     // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.
@@ -81,18 +89,32 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // The current message with the smallest instructions must fit the input budget, or nothing opens (the request bytes are
   // checked again before sending, with everything in them).
   const guard = settings.ok ? settings.identityGuard ?? true : true;
-  if (Buffer.byteLength(input.text) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard)) > quote.inputLimit)
-    return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
+  const requiredBytes = Buffer.byteLength(input.text) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard));
+  if (requiredBytes > Math.min(quote.inputLimit, interactiveBytes)) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
+  // V2-6: what this turn's tools may do, from the catalog cache, before anything opens (limits and bounds go into the freeze).
+  let tools: ChatToolsSetup | null = null;
+  if (deps.tools) {
+    try {
+      tools = await prepareChatTools({ admin, configuration, tools: deps.tools, actorId: input.actorId, sessionId: input.sessionId,
+        requiredBytes, interactiveBytes, quotedBytes: quote.inputLimit, modelMultiplier: quote.multiplier,
+        defaultMultiplier: quote.defaultMultiplier });
+    } catch { return emit({ type: 'error', code: 'TURN_TOOLS_UNAVAILABLE' }); }
+  }
+  const inputLimit = tools ? tools.inputLimit : quote.inputLimit;
+  const toolLimits = tools ? tools.plan.limits : { paidTools: 0, freeTools: 0 };
 
-  // 2. Open: one model call (2.5.3, V2-4a has no tools) plus the possible positioning check, outside M and the freeze.
+  // 2. Open: one model call per tool return plus one (2.5.3), the paid tools' bounds, and the possible positioning check,
+  // outside M and the freeze.
   const decisionUpperUsd = config.data.decisionUpperUsd;
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
-    limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.data.stopLoss,
-    historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
+    limits: { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 },
+    paidToolUpperUsd: tools?.plan.paidToolUpperUsd ?? [], stopLoss: config.data.stopLoss,
+    historyItems: HISTORY_ITEMS, inputBytes: inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
-  emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay });
+  emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
+    ...(tools ? { tools: { available: tools.plan.available, trimmed: tools.plan.trimmed } } : {}) });
   // A repeated request never runs the model again; the first request owns the turn.
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
 
@@ -143,25 +165,34 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // without a confirmed positioning, the primary model's fallback rule: "Decisions 先判断，主模型兜底"), both cached. The
     // positioning-page redirect is only for an account that has a positioning (as admission.ts).
     const gated = Boolean(gate && !gate.positioned);
-    const shared = withBrandIdentity(freeChatInstructions(!gated), guard);
+    const shared = withBrandIdentity(freeChatInstructions(!gated), guard) + (tools?.sharedInstructions ?? '');
     const instructions = shared + '\n' + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage))
       + (fallback ? POSITIONING_FALLBACK_INSTRUCTIONS : '');
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
       quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: true });
-    const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, textStream: PLAIN_TEXT_STREAM, tools: [], network: 'deny',
+    const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, textStream: PLAIN_TEXT_STREAM, tools: [],
+      ...tools?.context, network: 'deny',
       reasoning: quote.reasoning, ...(promptCache ? { promptCache } : {}) };
     const callPolicy = { modelId: quote.modelId, provider: 'openrouter', account: quote.identity.account, model: quote.model,
       protocol: 'openrouter-chat-v1' as const, providerLimits: quote.providerLimits, upperUsd: quote.upperUsd, outputLimit: quote.outputLimit,
-      inputLimit: quote.inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
+      inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
-    const left = quote.inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(input.text) - 8192;
+    // The tool definitions and the room kept for tool results are part of what the history may not take (V2-6).
+    const current = input.text + (tools?.plan.note ?? '');
+    const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192 - (tools?.plan.reserveBytes ?? 0);
     const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
     // The reply streams. Under the fallback rule nothing is sent while the text so far could still be the refusal marker, which
     // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
     let text = '', sentChars = 0, holding = fallback;
+    const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
+      { slots: deps.slots, multiplier: quote.multiplier, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
+        onStop: stop => { stopped ??= stop; } }) : null;
     const output = await runRuntime({
-      model: quote.model, instructions, input: input.text, session: turnSession(history),
-      maxOutputTokens: quote.outputLimit, maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,
+      model: quote.model, instructions, input: current, session: turnSession(history),
+      maxOutputTokens: quote.outputLimit, maxTurns: 1 + (built?.maxToolCalls ?? 0), reasoning: quote.reasoning,
+      tools: built?.tools ?? [], stream: true,
+      // One call per response, and no tool on the request after the last allowed call (runner.ts, 2.5.3).
+      ...(built?.tools.length ? { firstToolCallOnly: true, research: { freeChat: 'core-path-v2' }, maxToolCalls: built.maxToolCalls } : {}),
       // The history was trimmed above; the SDK appends what this returns to nothing else, so the current message goes last.
       selectHistory: async (items, incoming) => [...items, ...incoming],
       onText: delta => {
@@ -175,7 +206,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       },
       exchange: (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
-        try { assertRuntimeRequestCapacity(request, quote.inputLimit); }
+        try { assertRuntimeRequestCapacity(request, inputLimit); }
         catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); return Promise.reject(stopped); }
         return modelCall(callDeps, quote, request, onChunk)
           .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });

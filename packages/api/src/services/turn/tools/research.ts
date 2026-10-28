@@ -142,7 +142,8 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
   const make = (name: GeneralResearchToolName): RuntimeTool => ({
     name, description: researchToolDescription(name, true), parameters: researchToolParameters(name, fastOnly),
     invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true,
-    enabled: () => calls < input.maxCalls,
+    // Withdrawn only once used up within the turn; a turn that may make none keeps the definition (2.9 rule 2) and answers unavailable.
+    enabled: () => input.maxCalls === 0 || calls < input.maxCalls,
     async execute(offered) {
       if (!input.names.includes(name)) return toolEnvelope({ status: 'unavailable', reason: 'TOOL_UNAVAILABLE_THIS_TURN' });
       if (calls >= input.maxCalls) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });

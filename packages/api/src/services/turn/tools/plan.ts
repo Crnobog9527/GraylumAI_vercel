@@ -42,6 +42,8 @@ export type PlanInput = {
   freeReady?: Partial<Record<'read_source' | 'load_skill', boolean>>;
   /** Bytes the turn needs without any tool result (instructions, current message, tool definitions), and its input ceiling. */
   requiredBytes: number; inputBytes: number;
+  /** The ceiling a turn with usable research may use (absent: inputBytes). */
+  researchInputBytes?: number;
   /** The turn's model multiplier, the billing unit's default multiplier. */
   modelMultiplier: string; defaultMultiplier: string;
   /** Supplier keys, read fresh (OR-1). */
@@ -106,7 +108,7 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
         // Prices must outlive the turn (maxDuration 300 s), with margin.
         deadline: new Date((input.now?.() ?? new Date()).getTime() + 3_600_000).toISOString(),
         // The definitions are on the request whatever happens (2.9 rule 2), so only the result reserve must fit.
-        fits: () => fits(RESEARCH_RESULT_RESERVE_BYTES), ...(input.now ? { now: input.now } : {}),
+        fits: () => used + RESEARCH_RESULT_RESERVE_BYTES <= (input.researchInputBytes ?? input.inputBytes), ...(input.now ? { now: input.now } : {}),
         onRejected: rejection => { rejected = REASONS[rejection.reason] ?? 'no_route'; } })
       : (rejected = 'disabled', null);
     if (admitted) {
