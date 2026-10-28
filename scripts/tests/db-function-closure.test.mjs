@@ -85,3 +85,14 @@ test('closure limits are enforced for turn functions', () => {
   const result = analyze({ root });
   assert.match(result.violations.join('\n'), /turn_open: 17 reachable functions \(max 15\)/);
 });
+
+test('a baseline lets known debt through and fails anything new or bigger; it only shrinks', async () => {
+  const { applyBaseline, shrinkBaseline } = await import('../db-function-closure.mjs');
+  const baseline = { closure: { turn_open: { functions: 78, tables: 53 } }, rules: ['turn_x: non-LOCAL SET'] };
+  const known = ['turn_open: 78 reachable functions (max 15)', 'turn_open: 53 reachable tables (max 10)', 'turn_x: non-LOCAL SET'];
+  assert.deepEqual(applyBaseline(known, baseline), { failing: [], known });
+  const worse = ['turn_open: 79 reachable functions (max 15)', 'turn_y: advisory lock', 'turn_z: 20 reachable tables (max 10)'];
+  assert.deepEqual(applyBaseline(worse, baseline).failing, worse, 'a bigger closure, a new rule hit and an unlisted function all fail');
+  assert.deepEqual(shrinkBaseline(['turn_open: 60 reachable functions (max 15)', 'turn_new: advisory lock'], baseline),
+    { closure: { turn_open: { functions: 60 } }, rules: [] }, 'smaller sizes are kept, fixed rules are dropped, nothing new is added');
+});

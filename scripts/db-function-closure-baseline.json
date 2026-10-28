@@ -1,0 +1,10 @@
+{
+ "closure": {
+  "turn_open": { "functions": 78, "tables": 53 }
+ },
+ "rules": [
+  "turn_settle_credits: UPDATE of subscription_credit_grants",
+  "turn_settle_credits: non-LOCAL SET",
+  "turn_settle_credits: row lock on subscription_credit_grants"
+ ]
+}

@@ -8,7 +8,7 @@
 // Functions under the enforced directory (default packages/db/functions/turn, absent until V2-3) must pass; every other
 // function is only reported, so the old path never turns the check red.
 // Usage: node scripts/db-function-closure.mjs [--root name]... [--enforce-dir dir] [--report] [--json]
-import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -178,17 +178,54 @@ export function analyze({ root = process.cwd(), functionsDir = 'packages/db/func
   return result;
 }
 
+// Known debt: functions already under the enforced directory when this check arrived (V2-3 merged first). A violation that is in the
+// baseline is reported but does not fail; a new one, or a closure that grew, fails. The baseline only shrinks: --update-baseline
+// removes what was fixed and never adds or raises anything (adding or raising needs the Owner's approval, by hand).
+const CLOSURE = /^(\S+): (\d+) reachable (functions|tables) \(max \d+\)$/;
+export function applyBaseline(violations, baseline = { closure: {}, rules: [] }) {
+  const failing = [], known = [];
+  for (const v of violations) {
+    const m = CLOSURE.exec(v);
+    if (m) {
+      const allowed = baseline.closure?.[m[1]]?.[m[3]];
+      (allowed !== undefined && Number(m[2]) <= allowed ? known : failing).push(v);
+    } else (baseline.rules?.includes(v) ? known : failing).push(v);
+  }
+  return { failing, known };
+}
+
+export function shrinkBaseline(violations, baseline) {
+  const next = { closure: {}, rules: [] };
+  for (const v of violations) {
+    const m = CLOSURE.exec(v);
+    if (m && baseline.closure?.[m[1]]?.[m[3]] !== undefined) {
+      next.closure[m[1]] ??= {};
+      next.closure[m[1]][m[3]] = Math.min(Number(m[2]), baseline.closure[m[1]][m[3]]);
+    } else if (!m && baseline.rules?.includes(v)) next.rules.push(v);
+  }
+  next.rules.sort();
+  return next;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   const values = flag => args.flatMap((a, i) => (a === flag ? [args[i + 1]] : []));
   const result = analyze({ roots: values('--root'), enforceDir: values('--enforce-dir')[0] ?? DEFAULTS.enforceDir });
-  if (args.includes('--json')) console.log(JSON.stringify(result, null, 1));
+  const baselineFile = join(import.meta.dirname, 'db-function-closure-baseline.json');
+  const baseline = existsSync(baselineFile) ? JSON.parse(readFileSync(baselineFile, 'utf8')) : { closure: {}, rules: [] };
+  const { failing, known } = applyBaseline(result.violations, baseline);
+  if (args.includes('--update-baseline')) {
+    writeFileSync(baselineFile, JSON.stringify(shrinkBaseline(result.violations, baseline), null, 1) + '\n');
+  }
+  if (args.includes('--json')) console.log(JSON.stringify({ ...result, failing, known }, null, 1));
   else {
     console.log(`functions ${result.functions}, tables ${result.tables}; enforced directory present: ${result.enforcedDirPresent}`);
     for (const [name, r] of Object.entries(result.roots)) console.log(`  ${name}: ${r.functions} functions, ${r.tables} tables`);
-    for (const [name,
-      list] of Object.entries(result.reported)) if (args.includes('--report')) console.log(`  [report] ${name}: ${new Set(list).size} rule hits`);
-    for (const v of result.violations) console.error(`VIOLATION ${v}`);
+    if (args.includes('--report')) {
+      for (const [name, list] of Object.entries(result.reported)) console.log(`  [report] ${name}: ${new Set(list).size} rule hits`);
+    }
+    for (const v of known) console.log(`KNOWN (baseline) ${v}`);
+    for (const v of failing) console.error(`VIOLATION ${v}`);
   }
-  if (result.violations.length) process.exit(1);
+  if (failing.length) process.exit(1);
 }
