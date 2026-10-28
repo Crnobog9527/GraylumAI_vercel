@@ -1,0 +1,561 @@
+# CORE-PATH-V2 每轮对话主路径重做：诊断与完整计划
+
+状态：方案（仅方案，待 Owner 决定第 8 节后开工）。2026-10-28，架构窗口（Fable 5.1）。
+依据：Master Plan §2.1 2026-10-28 条（Owner 选 B：不升级数据库、推迟上线、重做主路径；staging 与正式不得有区别）、
+2026-10-27 DB-PERF 条、2026-10-25 两条 DB-PERF 决定；代码以 `origin/staging` `4f6fbf995` 为准（本窗口逐条核对）；
+压测与诊断数据来自 DB-PERF 窗口（10-25/26/27）、架构窗口 `db-rw-redesign-v1`、缓存窗口 `prompt-cache-diagnosis-v1`。
+本文只做诊断和计划：不写产品代码、不写 staging、不花钱。
+
+> 给接手窗口的话：按第 6 节的 PR 顺序做，每个 PR 的"验收"就是合并条件；第 2 节是设计，第 4 节是不能丢的产品规则，
+> 第 7 节是以后每个主路径 PR 都要过的门。遇到本文没写的决定，先看 Master Plan §2.1，再问总控，不自己定。
+
+## 0. 一页总览
+
+- **病根**：每一轮对话把"这一轮能不能继续"的全部证明从头算、从头锁一遍。一次准入静态可达 112 个函数、62 张表，
+  一轮 41–82 次数据库往返，事务里持 90–130 把关系锁，并在 `modules`、`system_settings`、止损账本、staging 测试窗口
+  这些全站共用的行上排队。Micro 的 2 个共享核被这些 CPU 密集的 PL/pgSQL 吃满：100 人时 CPU 平均 66%、尖峰 89%，
+  吞吐在 75 人后不再上涨（约 63 轮/分）。三个开关（0416/0418/0419）没有可测量的改善，因为它们削的是锁数，不是工作量。
+- **方向**：一轮对话只剩三类数据库写入——**开轮**（`turn_open`）、**记账**（每次模型/工具调用一条回执 `turn_call_record`）、
+  **收轮**（`turn_close`）。证明只在开轮做一次；目录（设置、模型、Skill 包、权益规则）进 Node 进程缓存（0419 已上库的机制）；
+  历史可见性在删除时维护而不是读时重算；删除检查搭在必经的写入上。自由对话一轮 4 次往返（含登录），导师 6–7 次。
+- **范围**：定位导师、自由对话、Skill 工具、研究工具、报告、对比、评审团、停止/退款/暂停、历史、删除/注销——都接到同一条核上；
+  删掉 staging 测试窗口和 BILL2 逐调用四步；旧路径整体删除，不并存。
+- **工期**：13 个 PR，三个窗口并行，计划 7 周（含 1 周余量，乐观 5 周）；100 人验收通过后 Owner 另定上线日期。
+- **要 Owner 决定**：第 8 节 4 件事（重做范围、上线日期、3 条规则简化、评审团"结束"入口）。
+
+## 1. 诊断：现在一轮对话发生了什么
+
+### 1.1 一轮的生命周期（现状，自由对话一次模型调用）
+
+| 阶段 | 入口 | 数据库调用（RPC） | 往返（10-27 实测中位数） |
+|---|---|---|---|
+| 请求开头 ×2（`prepare`、`executeStream` 是两个 tRPC 请求，`packages/api/src/routers/runtime.ts:172,204`） | 登录、维护开关、`profiles`、staging 策略 `runtime_test_policy`（`runtime/stagingPolicy.ts:22`；正式环境改走 `productionPolicy.ts:36` 的 7+N 次） | 每请求 3–4 | 6–8 |
+| 准备（`runtime/admission.ts:155-195`） | `runtime_session_context`、`runtime_admission_replay`、资料库/PAYG/研究工具准入、`runtime_positioning_gate`，设置 10 次、Skill 包 5 次、模型 3 次，最后 `runtime_admit`（或 0418 的 `precheck`+`commit`，`admitSplit.ts:23-36`） | 1 个大事务 | 22 |
+| 开始 | `runtime_execution('read')`、`runtime_session_items read/freeze`（`runtime/session.ts:24`） | 3 | 3 |
+| 每次模型调用 | `bill2_claim`→`bill2_payg_claim`（冻结）、`bill2_dispatch`（发出）、`runtime_response` ×2、`bill2_record`（回执，内联 `bill2_payg_finalize`）、`bill2_finalize`（再结一次）（`execute.ts:177-217`、`bill2/service.ts:124-266`） | 7 | 7 |
+| 流式输出 | 每个对外事件前 `executionVisibility.visible()`→`runtime_execution_visibility`（`executionStream.ts:233-250`，文本每 100 ms 一次） | 15–30 | 15–30 |
+| 收尾 | `runtime_session_items append`、`runtime_execution complete`、`opc_capture_apply`（自由对话必被拒） | 3–4 | 3–4 |
+| **合计** | | | **41（10-27）；教练 61；10-25 为 62/82** |
+
+### 1.2 一次 `runtime_admit` 做了什么（`packages/db/functions/runtime/runtime_admit.sql`，db-rw-redesign-v1 §1.1 逐步核对）
+
+归档守卫（`opc_assert_business_writable`，对 `opc_businesses` FOR KEY SHARE）→ 删除边界 → 请求锁与会话锁 → 范围归属
+（`bill2_scope_allowed` 走 opc/artifact/library 一遍）→ 幂等 → 报告检查 → 整理待处理（`runtime_executions` 缺 session_id 索引，
+0416 前顺序扫描）→ 提问卡 → 上下文（`runtime_context_allowed` 对 artifact_* FOR SHARE）→ 内容源 → **历史候选**（最近最多 228 行，
+对每个祖先执行跑 `runtime_direct_billing_allowed` = 再走一遍权限链 + `modules/skills/skill_revisions FOR SHARE`）→ Skill 绑定
+（`modules FOR SHARE`，全站热点行）→ `bill2_prepare`（`bill2_execution_allowed` 又一遍权限链；`profiles FOR UPDATE`；插 `bill2_runs`）
+→ 插 `runtime_executions`、更新会话。
+
+静态闭包（架构窗口脚本，`packages/db/functions` 为准）：
+
+| RPC | 可达函数 | 不同的表 | 每轮次数 |
+|---|---|---|---|
+| runtime_admit | 112 | 62 | 1 |
+| bill2_payg_claim | 100 | 56 | 每次调用 1 |
+| bill2_dispatch | 121 | 68 | 每次调用 1 |
+| runtime_execution | 127 | 67 | 5–7 |
+| runtime_session_items | 87 | 54 | 2–3 |
+| runtime_tool | 77 | 45 | 每次工具 2 |
+
+规模：`packages/db/functions` 939 个函数文件（runtime 111、billing 102、fusion 63、erasure 61、opc 87、research 51、report 31……）；
+398 个迁移（最新 0419）；`packages/api/src/services/runtime` 315 个文件、`bill2` 56 个；`packages/db/tests` 约 120 个套件。
+
+### 1.3 压测事实（staging Micro、连接池 8、假回复、10-25 节奏；DB-PERF 窗口 10-26 第三轮、10-27 复测）
+
+| 人数 | 自由对话失败 | 教练失败 | 57014 | 数据库 CPU 平均/最高 | 交换区最高 | 教练一轮 p50/p95 |
+|---|---|---|---|---|---|---|
+| 50 | 0 | 0 | 0 | 45% / 63% | 568 MB | 32 / 41 s |
+| 75 | 0 | 4.8% | 0 | 61% / 82% | 726 MB | 44 / 56 s |
+| 100 | 0 | 5.5% | 4 | 66% / 89% | 676 MB | 55 / 64 s |
+
+- 吞吐在 75→100 人不再涨（63.2→62.8 轮/分）：**CPU 上限**。每完成 1 轮/分，数据库机器约用 1 个百分点 CPU。
+- 数据库时间大头：`runtime_execution` 35%、`runtime_admit` 24%（并发时 600–970 ms；本机单用户只 7–25 ms）、`bill2_dispatch` 8.6%、
+  `runtime_session_context` 8.3%、`bill2_claim` 7%、`bill2_record` 6.9%。
+- 锁：precheck 事务持 90（本机最小 payload）–118（staging 真实回合）把关系锁，其中 69 把是索引——PostgreSQL 规划语句时锁住涉及表的全部索引，
+  不管分支走不走。PG17 每连接 16 个快路径槽，超出进共享锁表，采样里 `LWLock:LockManager` 占 21–38%。
+- staging 独有的两处失真：全站共用的测试窗口行（`runtime_test_window_allowed` FOR UPDATE，`bill2_payg_claim` 对窗口求和）让 admit 慢 4.3 倍；
+  50 个压测账号共用让 `profiles` 行排队。正式形状没有这两项，但有全站止损锁 (201,1)（每次结算独占、每次冻结/发出共享）。
+- 30 人并发教练失败 9–65%（随数据库"热度"），三个开关 0416/0418/0419 默认关、打开后无可测量改善（DB-PERF 窗口 10-27）。
+- 提示缓存：导师真实调用缓存读 46%；自由对话、报告、评审团、对比 0%（缓存窗口 10-27，排除压测桩）。
+
+### 1.4 根因排序
+
+1. **证明重复**：权限/历史/范围/目录每轮重算，且在 admit、claim、dispatch、record、session_items 里各算一遍（1.2 节）。
+   这是 CPU 的大头，也是锁的大头。做法上的原因：业务规则逐条叠加进 PL/pgSQL，每条新规则都"再查一次"，没有一个"本轮已证明"的载体。
+2. **写入次数**：逐调用四步计费（claim/dispatch/record/finalize）+ 执行记录每步一写 + 会话历史独立写，一轮 10–20 次写事务，
+   每次都锁同一个人的 `profiles` 行和止损账本行。
+3. **读路径没有索引化的可见性**：历史可用性沿依赖链逐个祖先重算（`runtime_history_availability`→`runtime_direct_billing_allowed`），
+   老账号准入 6–10 秒。
+4. **删除检查按事件而不是按写入**：每 100 ms 一次往返（`executionStream.ts:240`），单项最大、最不固定。
+5. **staging 与正式两条路径**：测试窗口、`staging_test` 合同、`productionPolicy`/`stagingPolicy` 分派、`runtime_production_allowed`——
+   23 个 SQL 文件、30 个非测试 TS 文件。压测测的不是正式路径；正式路径（策略 7+N 次、自由对话跑两遍）压测里根本没跑过。
+6. **提示缓存没按前缀设计请求体**：开场轮 `tools=[]`、历史标记受 8000 字节预留限制永远不生效、报告显式排除。
+
+### 1.5 真正好的、必须保留的
+
+- **BILL-PAYG 第七版的数学与不变量**：名义费用 n、q/m 冻结、G/H/L、`C+E=N` 守恒、收据幂等（payload hash）、402 不计费、未知成本 24 小时恢复、
+  第三方工具未知 0 结算。全部保留，只改"什么时候写"。
+- **回执是钱的证据、必须落盘后才交出正文**（BILL2 原要求）。保留。
+- **DATA-ERASURE 的墓碑与投影设计**、注销执行器、内容删除预览/确认哈希（`accountErasure/content.ts:64-181`）。保留，改指新表。
+- **0419 `catalog_versions` + `catalogCache.ts`**（DB-RW PR-B）：触发器版本号 + 进程内缓存，是新路径的目录层。保留并成为依赖。
+- **Skill 包按内容哈希寻址、私密仓库 + 公开哈希**、`@openai/agents` runner、研究工具供应商适配层、Fusion 席位合并/引文核对的纯函数、
+  prompt-cache-v2 的黄金字节测试思路、`packages/db/tests` 里 payg/erasure/stop-round/native-stop 这些**场景**（断言要按新 RPC 等效维护，场景一个不丢）。
+- 0384 `runtime_read_verified`、0367 语句内 memo 的**思路**（"本轮已核验就不重算"）——新路径把它做成结构（`turns` 行就是载体），函数本身随旧路径删。
+
+## 2. 目标架构：轻量 MVP 的主路径 v2
+
+### 2.0 一句话
+
+**一轮对话 = 一个 HTTP 流式请求 + 数据库里的"开轮、记账、收轮"三类写入 + 模型/工具调用之间不碰数据库。**
+权限、历史、目录、Skill 包、策略这些"证明"在开轮时一次算清并随返回值带回 Node；之后只有钱的证据（每次调用的回执）
+和最后的收轮才写库；删除检查搭在这些必经的写入上，不单独往返。
+
+### 2.1 分层：什么放哪
+
+| 关注点 | 放哪 | 为什么 |
+|---|---|---|
+| 身份与登录 | Node（Supabase Auth，一次 `auth/v1/user`，请求内复用） | 不变 |
+| 准入（账号状态、墓碑、范围归属、Skill 绑定、模型可用、输入上限、会员门槛） | **数据库 `turn_open` 一次写事务** | 必须和"占住会话、冻结积分"原子；但只碰本轮自己的行 |
+| 目录（系统设置、模型目录与价格、Skill 元数据与包文件、权益规则表、限流参数） | **Node 进程内缓存**，按 `catalog_versions` 失效（0419 已上库） | 全站只读、管理员写；每轮 3 组读 → 0 次往返 |
+| 历史上下文 | 数据库 `session_messages`：按会话取最近 N 条可见消息；可见性在删除时维护，不在读取时重算 | 读路径一条索引查询 |
+| 提示词拼装、缓存断点、输入裁剪 | Node 纯函数，黄金字节测试（2.9 节） | prompt-cache 原则 |
+| 模型与工具调用 | Node（`@openai/agents` runner + OpenRouter）；工具白名单与每轮上限在进程内计数 | SDK 不换（Owner 10-20） |
+| 钱的证据（每次模型/工具调用） | 数据库 `turn_calls` 一次 INSERT（同一语句返回会话墓碑状态） | 回执必须落盘后才把正文交出去 |
+| 结算、退款、追加历史、关闭回合、整理结果 | **数据库 `turn_close` 一次写事务** | 和"写入前照查删除"原子 |
+| 暂停（余额不足/等用户）、24 小时自动退、评审团押金 | `turns.state` + 现有分钟级 `runtime-recovery` 定时任务（改读 `turns`） | 不新建队列（AGENTS 第 5 节） |
+| 删除、注销 | 会话/消息打墓碑 + `turns` 可见性列；注销走 DATA-ERASURE 现有投影，改指新表 | 删除即时生效的语义不变 |
+| staging 与正式的差别 | **没有代码分支**。差别只在配置：OpenRouter 密钥（测试密钥自带额度上限）、`OPENROUTER_BASE_URL`（压测指向桩）、`ai_models` 行价格快照、测试账号积分 | Owner 10-28 |
+
+### 2.2 每轮状态机（`turns.state`）
+
+```
+opening ─(turn_open 成功)─→ running ─(每次调用后 turn_call_record)─→ running
+running ─(用户点停止)──────→ stopping ─(turn_close kind=stopped)──→ closed
+running ─(余额低于 L，多次调用的回合)→ paused(waiting_credits) ─(充值后用户点继续 = 新 turn_open(resume_of) / 24h 自动退)→ running | closed
+running ─(评审团两组之间 / 等用户)→ paused(awaiting_user) ─(用户动作 / 24h 自动结束)→ running | closed
+running ─(模型/工具出错，可恢复)→ running（SDK 内重试，不写库）
+running ─(不可恢复错误 / 402 / 超时 / 白名单系统原因)→ turn_close kind=failed → closed（退未用冻结）
+running ─(正常结束)────────→ turn_close kind=completed → closed
+任何状态 ─(会话被删 / 账号注销 / 文风来源被删)→ 下一次写入（record 或 close）返回 tombstone → Node 立即中止，不保存正文，close kind=erased
+```
+
+- 状态只在 `turn_open` / `turn_call_record` / `turn_close` 三个函数里改，没有第四个入口（恢复定时任务也只调 `turn_close`）。
+- 没有"准备"和"执行"两个 HTTP 请求：一个 `POST /api/turn`（SSE，`maxDuration` 沿用 300）从登录核验到最后一个事件；
+  前端"准备中"由第一个 SSE 事件 `opened` 给出，里面带本轮的工具可用性、冻结额、兜底资格（`fallbackEligible`）、被裁剪的内容说明。
+- 评审团、对比、报告是同一个状态机的不同 `kind`，区别只在 `turn_open` 的冻结额和 `turn_close` 的结算口径（2.5 节）。
+- 崩溃恢复：进程死在 `running`，`turns` 行留着；`runtime-recovery` 每分钟扫 `state='running' AND updated_at < now()-15min` 调
+  `turn_close(kind=interrupted)`：已有回执按回执结算、没回执的全退（和今天的 15 分钟过期规则一致）。
+
+### 2.3 一轮要碰数据库几次（目标）
+
+自由对话（一次模型调用、无工具）：
+
+| 步骤 | 往返 | 事务里碰到的表 | 锁 |
+|---|---|---|---|
+| 登录核验 | 1（Auth，不是 Postgres 函数） | — | — |
+| `turn_open` | 1 | `sessions`（FOR UPDATE，本会话一行）、`turns` INSERT、`profiles`（FOR UPDATE，本人一行，毫秒级）、`session_messages` 读、`catalog_versions` 读、按 kind 读 `opc_drafts`/`artifact_versions` 一行 | 两把行锁，都是本人/本会话的，不等别人 |
+| 模型调用 | 0 | — | — |
+| `turn_call_record` | 1 | `turn_calls` INSERT、`sessions` 读墓碑 | 无行锁 |
+| `turn_close` | 1 | `turns` UPDATE、`session_messages` INSERT ×2、`profiles` UPDATE（结算差额）、`credit_transactions` INSERT、`daily_spend` UPDATE、`sessions` UPDATE | 本人/本会话行锁 |
+| **合计** | **4**（含登录 1） | | |
+
+定位导师一轮（两次模型调用、一次读 Skill 文件、整理）：`turn_open` 1 + 回执 2 + Skill 文件 0（进程缓存，按包哈希校验）+ 整理模型调用回执 1 +
+`turn_close` 1（整理结果同事务写 `opc_drafts`）= **5**，含登录 **6**。挂研究工具的回合每次工具调用 +1（工具回执和模型回执同一张表、同一函数）。
+对比（N 模型并行）：1 + N + 1。评审团（3 席 × 1 轮 + 汇总）：1 + 4 + 1，两组之间以 `paused` 落地。
+
+### 2.4 缓存规则：什么可以缓存、什么绝对不能
+
+| 可以进 Node 进程内缓存（按 `catalog_versions` 失效，兜底 60 秒） | 绝对不缓存（每次现查现写） |
+|---|---|
+| `system_settings` 全部键（含限流参数、输入上限、价格倍率、q、L 公式参数） | 余额、冻结、grants、权益到期 |
+| `ai_models` 目录、线路、价格快照、凭据指纹（密钥本身仍按安全规则每请求 fresh 读） | 会话/消息/账号墓碑、文风来源版本 |
+| Skill 元数据、修订、包文件（按内容哈希寻址，永不过期） | 会话 revision、`turns.state` |
+| 权益规则表（Pro/Gold 的数值与门槛表） | 某个用户当前的会员等级（请求内从 profiles 复用一次） |
+| 提示词固定段的哈希（给缓存断点用） | 任何用户写入的数据 |
+
+Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
+
+### 2.5 计费：一轮冻结一次、结算一次
+
+沿用 BILL-PAYG 第七版的全部数学（q、m、U、L、G=ceil(q×U×m)、H=min(G,A)、名义费用 n、W、N、C+E=N 守恒），只改"什么时候写库"：
+
+| 现在（v2 逐调用） | 主路径 v2 |
+|---|---|
+| 每次调用各冻结（claim）、各发出（dispatch）、各回执（record）、各结算（finalize） | **开轮冻结一次**：H=min(G_turn, A)，G_turn=本轮允许的调用数 × 单次上界（导师 2+整理 1、自由对话 1+研究工具上限、报告固定 500、评审团押金+第一组上界、对比 Σ各模型上界）；**每次调用一条回执**（n_i、c_i、usage、generationId、缓存 token）；**收轮结算一次**：N=ceil(q×Σn_i×m_i)，D=min(N,H)，退 H−D，E=N−D 平台承担并记账 |
+| `profiles FOR UPDATE` 每次 claim 和 finalize | 开轮一次、收轮一次 |
+| 止损锁 (201,1) 全站独占 | **去掉**：`turn_close` 对 `daily_spend(day)` 行 `UPDATE … SET spent=spent+n RETURNING`，超阈值时下一轮 `turn_open` 拒绝；允许最后一笔略超（≤ 一轮上界，远低于 5 美元线）——第 8 节 3b |
+| 多次调用的回合中途余额不够 | `turn_call_record` 返回 `credits_low`（它读 `profiles.balance` 一行，不锁）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)`，不重复收费 |
+| 未知成本 24 小时恢复、`cost_pending` | 回执 `cost IS NULL` 时 `turn_close` 不结算该笔，`turns.settlement='pending'`；现有恢复定时任务按 `turn_calls(cost IS NULL)` 索引补查后再结一次（幂等） |
+| 停止退款 | `turn_close(kind=stopped)`：按已写回执结算，其余退；报告：滚动 24 小时内前 2 次 D=0 全退，第 3 次起 D=按回执、≤500（`turns(actor_id, kind, stopped_by_user, closed_at)` 索引数） |
+| 402 不计费 | 回执 `status='no_charge_402'`, n=0 | 
+| 白名单系统原因失败自动退（10-12） | `turn_close(kind=failed, reason∈白名单)` 全退；其余按回执结算，每日对账照旧 |
+| 暂停 24 小时自动退（10-25）、评审团押金 24 小时自动结束（10-27） | 同一个恢复定时任务：`state='paused' AND updated_at<now()-24h` → `turn_close(kind=expired)`，`delivered=false` 全退，评审团按已交付席位扣 |
+| 幂等 | `turns UNIQUE(actor_id, request_id)`；`turn_calls UNIQUE(turn_id, seq)`；`turn_close` 对已 closed 的行原样返回；payload hash 比对保留 |
+| 并发 | 同一会话同时只能一个 `running/paused` 的 turn（`sessions.active_turn_id` + FOR UPDATE）；同一账号不同会话可并行，各自在 `profiles` 行上排毫秒级的队 |
+| 积分记录只显示实际变动（10-25） | 冻结不进 `credit_transactions`，记在 `turns.reserved_credits`；收轮写一笔净扣（D）与一笔平台承担（E，`kind='platform_absorb'`） |
+
+### 2.6 历史与删除
+
+- `session_messages(session_id, seq, role, turn_id, content, content_hash, visible, deleted_at)`：收轮时追加用户消息和助手回复；
+  历史 = 最近 N 条 `visible AND deleted_at IS NULL`，再按输入上限裁剪（Node，裁剪算法不变、只前进不后退）。
+- 可见性在**写入时**维护：删除对话 → `sessions.deleted_at`（一条 UPDATE）；撤销来源/归档业务/删文风来源 → 对应消息 `visible=false`
+  （一条按 `turn_id` 的 UPDATE，由现有的删除入口调）；注销 → DATA-ERASURE 投影对三张新表各加一条规则。不再有"祖先执行逐个重算权限链"。
+- 流式输出中的删除检查（Owner 10-27"按阶段查、存结果前照查"）：搭在 `turn_call_record` 和 `turn_close` 上——每条回执写入时同一语句返回
+  `session_tombstoned`、`voice_source_revoked`，Node 收到即中止；正文最后由 `turn_close` 写入前再查一次。零额外往返。
+  正在出字的那段文字最多多显示到本次模型调用结束（自由对话即整轮），比 10-27 批准的"按阶段"略粗；写入前一定拦住。
+- 长对话删除超时（核心 7②）：删除只打墓碑即返回；正文清理由现有 `content_erasure_sweep_sessions` 分批做。
+
+### 2.7 研究工具、Skill、报告、评审团、对比：同一条核
+
+| 路径 | 开轮差异 | 中间 | 收轮差异 |
+|---|---|---|---|
+| 自由对话 | kind=chat；工具白名单按会话固定（2.9 第 2 条）；输入上限 90000 / 挂研究工具 150000；定位前置检查（Decisions）是开轮前一次不计费的独立调用，有回执 n=0 | SDK 工具循环；每个工具一条回执；容量不够时去掉的是"工具可用性说明"（进 user 消息）而不是工具定义，并在 `opened` 事件里明说（修核心缺陷：静默丢工具仍计费） | 按回执结算 |
+| 定位导师 | kind=mentor；Skill 包从缓存按 module→revision→packageHash 取；hostTurnContext 由 `turn_open` 返回的草稿摘要拼；`fallbackEligible` 按轮次计数算好返回（修核心缺陷：兜底卡从未显示） | 两次模型调用 + `read_skill_file`（进程缓存，不计费、不写库）+ 整理调用 | 整理结果与研究轮次计数在同一事务写 `opc_drafts`（替代 `opc_capture_apply` 独立往返） |
+| 报告 | kind=report；冻结固定 500（+ 本次调用临时上界）；会员/草稿/确认/价格一致（`acceptedCredits`）检查搬进 kind 分支 | 一次长调用（32768 输出上限，不续写） | 成功 D=500；停止按 24 小时规则；结果写 `artifact_versions`（不变） |
+| 对比 | kind=compare；G_turn=Σ各模型上界，用户合计上限 500 积分，超则拒开轮；Gold 门槛 | N 个并行调用各一条回执 | 各模型各自取整 |
+| 评审团 | kind=jury；冻结押金 1500 + 第一组上界；Gold 门槛；同版本 3 次未完成则拒 | 席位调用各一条回执（格式不合格 `status='unusable'`, n=0）；两组之间 `paused(awaiting_user)` | 完成 / 24 小时自动：按席扣、押金余额退；采纳修订另起 `kind=jury_adopt` |
+| 周复盘（上线后） | kind=review；定时任务代替用户发起；G_turn 由 1 美元换算 | 同自由对话 | 同自由对话 |
+
+### 2.8 staging = 正式
+
+- 删除 `runtime_test_windows` 表、`mode='staging_test'` 合同、`runtime_test_window_allowed`、`runtime_test_policy`、`runtime_test_*`/`runtime_production_*` 9 个函数、
+  `productionPolicy.ts`/`stagingPolicy.ts` 分派，以及 `runtime_payg_staging`/`runtime_payg_production` 两份档案——只留一份 `runtime_payg` 档案键。
+- 花费控制：OpenRouter 测试密钥在 OpenRouter 后台设额度上限；测试账号积分由总控按批准预算发放；每日对账报表照旧。
+- 保留一条最小"防串库"校验：部署声明的 Supabase 主机必须等于实际连接的主机，否则拒绝开轮。这是防串库，不是两套路径。
+- 压测与 e2e 的"假 AI 回复"不再是代码分支：`OPENROUTER_BASE_URL` 指向压测桩进程（`scripts/loadtest/openrouter-stub.mjs`），同一份代码。
+  桩生成的回执 `generationId` 以 `gen-load-` 开头（财务报表排除，缓存窗口的建议）。
+
+### 2.9 提示缓存：新路径必须保住的 8 条（Owner 项 35：上线必做；原则来自缓存窗口 10-28 交接）
+
+这 8 条是**请求体拼装层的硬约束**，写进 V2-4 的验收和黄金字节测试：
+
+1. 顺序固定：工具定义 → 系统提示 → 历史 → 当前消息。
+2. 工具列表跨轮不变：同一会话里不按轮增减工具；开场轮要禁止调用就用 `tool_choice:"none"`（#1504 已放行）。
+   因此 `turn_open` 返回的工具白名单按会话 kind 决定，不按本轮容量决定。
+3. 系统提示 = 全站共用段（品牌声明、SKILL.md、固定规则）+ 按用户稳定段（回复语言、工作区说明、文风），各一个断点；
+   每轮会变的（清单状态、步骤、材料修订号）一律放当前 user 消息。
+4. Skill 文本里 SKILL.md 排在步骤资源前面，换步骤只重写后半段。
+5. 历史投影确定性：旧消息换占位时只取决于那条消息自己（`content_hash`）；裁剪只前进不后退；第三个断点放"当前消息之前最后一条纯文本历史"。
+6. 当前 user 消息上不打断点、不用顶层自动缓存；最多 4 个断点，用 3 个。
+7. Sonnet/Opus 5.5 最小 512 token、5 分钟 TTL、读 0.1×（官网 0.05×，以回执为准）、写 1.25×；盈亏点 22%。1 小时 TTL 不做（项 43）。
+8. 复核用 #1503 脚本（排除压测桩）；目标导师和自由对话缓存读占输入 ≥ 50%（基线导师 46%、自由对话 0%）。
+
+对数据模型的直接影响：`session_messages.content_hash`（第 5 条）；`turns.policy` 冻结工具白名单与 system 两段哈希（黄金字节测试）；
+`turn_calls.cache_read_tokens/cache_write_tokens`（第 8 条）。
+
+## 3. 每轮性能预算与 100 人验收
+
+### 3.1 预算（每个主路径 PR 都要过；`scripts/check-turn-budget.mjs` 在本机 Docker 库 + 桩模型上实测并断言）
+
+| 指标 | 自由对话 | 导师一轮 | 报告 | 测法 |
+|---|---|---|---|---|
+| Postgres 往返（不含 Auth 和 OpenRouter） | ≤ 4 | ≤ 7 | ≤ 4 | 计数的 Supabase 客户端包装，跑完整回合后断言 |
+| 每轮数据库时间（本机 Docker，单用户） | ≤ 60 ms | ≤ 100 ms | ≤ 60 ms | `pg_stat_statements` 前后差 |
+| `turn_open` 事务内关系锁数 | ≤ 40 | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法） |
+| 任一主路径函数静态可达函数 / 表 | ≤ 15 / ≤ 10 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
+| 行锁 | 0 把全站共用行锁；只允许本人 `profiles`、本会话 `sessions` | 同 | 同 | 静态扫描 `FOR UPDATE|FOR SHARE` 对象白名单 |
+| 首字延迟（服务端，收到请求→第一个模型字节，桩零延迟） | p95 ≤ 400 ms | p95 ≤ 600 ms | — | 桩模型 |
+| 100 人并发（staging Micro，桩模型，10-25 节奏） | 失败 0、57014 0、整轮 p95 ≤ 桩回复时间 + 2 s、CPU 平均 < 60%、交换区不涨、`LWLock:LockManager` < 2% | 同 | — | 3.2 节 |
+
+### 3.2 100 人验收怎么跑才公平
+
+1. **环境**：staging（Micro、连接池 8、Redis us-west-2）；`OPENROUTER_BASE_URL` 指向压测桩（固定 1.5 秒首字、每 50 ms 一段、约 6 秒回复；教练第二次调用约 4 秒），不花模型钱。
+2. **账号**：100 个独立测试账号（不是 50 个共用），每批前用脚本重置为新账号（注册 + 发测试积分），避免 `profiles` 行争用和历史长度漂移。
+3. **节奏**：10-25 的混合（自由对话:教练:资料库 = 5:3:2），每人回复后等 7–22 秒，每档 2.5 分钟含 10 秒爬坡。
+4. **档位与顺序**：30 → 50 → 75 → 100 → 50（回归）→ 100（复测）；每档之间**冷却 10 分钟**（Micro 突发额度恢复、交换区回落）；
+   每批先跑一次 30 人基线，和上一批 30 人基线差 >10% 判本批无效（Micro 突发额度漂移）。
+5. **采样**：每 5 秒 `pg_stat_activity` 等待事件、`pg_locks` 按 locktype 计数；Supabase 报表 CPU/内存/交换区；应用日志里每轮往返计数。
+6. **通过线**：3.1 节最后一行；达不到就按实测写"最多撑多少人、差多少"，不说做到了。
+7. **对照**：切换前用同一桩、同一账号池对现有路径跑一次存档（`docs/validation/core-path-v2/baseline-old-path.md`）。
+8. 正式库连接池按复测结果定，上线前问 Owner（10-24 待办不变）。
+
+## 4. 产品规则清单：保留、简化、删除
+
+来源：Master Plan §2.1 全部 Owner 决定（本窗口 10-28 逐条读完，第 85–3003 行）。只列和主路径有关的；会员价格、支付渠道、退款审批、
+拒付这类不经过主路径的规则不在表里，不受本任务影响。
+
+状态含义：**保留** = 新路径原样实现，不需要 Owner 点头；**简化** = 结果对用户一样或差别极小、实现方式变了，列在第 8 节请 Owner 点头；
+**删除** = 规则本身随旧路径消失，必须 Owner 点头。
+
+### 4.1 计费与积分
+
+| 规则（§2.1 出处） | 新路径里怎么做 | 状态 |
+|---|---|---|
+| 1 美元 = 100 积分（q=100，项 32）；默认倍数 m=6，按模型/线路可单独设，调用时冻结（项 50/33/34） | `turn_open` 从目录缓存读 q、m、模型倍数，写进 `turns.policy`；收轮按冻结值算 | 保留 |
+| 按名义费用收费、不让缓存折扣、分时价取最贵、缺 token 时 min(c,U)（项 41） | 回执写 n_i、c_i、usage；`turn_close` 按第七版公式算 N、D、E | 保留 |
+| 边用边扣、余额封顶冻结 H=min(G,A)、不负余额、低于 L 暂停提示充值、断点续跑不重复收费（项 26、记录 J） | 冻结改为**一轮一次**；L 在 `turn_open`；中途不够 `credits_low`→暂停；"继续"= `turn_open(resume_of)` | **简化**（第 8 节 3d：开始需要的可用积分从"一次调用上界"变成"本轮最多几次调用上界之和"） |
+| 单次超冻结额平台承担；只有真实成本超估算上界才停新调用（项 27） | E=N−D；上界校验在回执写入 | 保留 |
+| 启动门槛 L 自动按模型×用途算（10-06） | 同公式，目录缓存里算 | 保留 |
+| 整理等积分时用户发新消息，先补上一轮整理（项 41 Q1=A） | 上一轮 `paused(waiting_credits)` 时新消息开轮先完成它 | 保留 |
+| 402 当作没有费用（项 53） | 回执 `status='no_charge_402'`, n=0 | 保留 |
+| 白名单系统原因失败自动退本轮；白名单外走每日对账（10-12） | `turn_close(kind=failed, reason)` | 保留 |
+| 暂停回合 24 小时没交付自动退（10-25）；"Graylum 原因没答案 24 小时后退"（10-12） | 恢复定时任务对 `turns` 统一处理 | 保留（入口合一，第 8 节 3c） |
+| 报告固定 500、点生成时冻结、完整才扣、失败/截断/停止全退、重生成照收（10-17）；停止防刷 24 小时前 2 次全退、第 3 次起按已生成部分扣（10-27） | `kind=report` 分支；次数用 `turns` 索引数 | 保留 |
+| 报告成本逐次记账、超 500 平台承担；删除/注销时完整报告照收、其余退（10-17） | 回执照记；注销投影对 `turns` 加规则 | 保留 |
+| 评审团 1500、只给 Gold、一次冻结、可用修订稿才扣、未完成/失败/无需修改全退（10-17）；每组前余额 ≥ 该组上界（10-13）；格式不合格席位不收费（10-13）；各席各自取整、某席失败只退它自己（10-14）；暂停 24 小时自动结束退押金（10-27） | `kind=jury`：开轮冻结 1500+第一组上界；每席一条回执；组间 `paused`；收轮按席结算 | 保留 |
+| 评审团不提供中途停止（10-17）；10-27 又提到"用户点结束评审" | 新路径只留"完成"和"24 小时自动结束"两个收轮入口；要不要用户"结束评审"入口请 Owner 确认 | **待确认**（第 8 节 4） |
+| 对比按量、各模型各自结算取整、开始前显示最多 X、余额够全部上限之和、用户合计 ≤ 500 积分（10-17、10-26） | `kind=compare`：G_turn=Σ上界，超 500 拒开轮 | 保留 |
+| 第三方搜索结果未知对用户 0 结算、释放冻结、供应商成本待确认（10-13 9.2） | 工具回执 `status='unknown'`, n=0, `cost_pending=true` | 保留 |
+| 发布每成功平台 0.01×6 美元；读自己作品不收积分（10-13） | 发布不经主路径；读作品作为工具调用，回执 n=0 | 保留 |
+| 复盘每份成本上限 1 美元、按用量扣、多品牌各一份（10-27） | `kind=review` 的 G_turn 由 1 美元换算 | 保留（上线后接入） |
+| 积分记录只列实际变动，预留/释放不列（10-25） | 冻结不进流水（`turns.reserved_credits`）；收轮写净扣一笔 | 保留（实现更简单） |
+| 带步骤 Skill 的报告必须付费会员，免费可做完前面步骤（项 50） | `turn_open(kind=report)` 查会员等级 | 保留 |
+| 限流：新对话 10/分 200/天、模型调用 30/分 600/天、一键暂停（项 30/49） | Redis 限流器不变，参数从目录缓存读 | 保留（落地状态待核，9 节） |
+
+### 4.2 导师与自由对话
+
+| 规则 | 新路径 | 状态 |
+|---|---|---|
+| 模型按用途后台配置，会员不区分模型，输入框只显示 Auto（项 13/50/38） | 目录缓存里的用途→模型表 | 保留 |
+| 输入上限：普通 90000、挂研究工具 150000、报告 196608（10-27 RT-6） | 常量不变（`purposeBudgets.ts`）；裁剪结果在 `opened` 事件里明说 | 保留 |
+| 提问卡只在选择且意思不明时出、推荐一项、末尾"其他"、开场不出卡（项 20）；出卡前分析保留（10-05） | 提示词与 Skill 规则 | 保留 |
+| 整步确认：一张确认卡、一步点一次、"继续"重出卡不自动确认（10-07） | 确认是独立动作，写 `opc_drafts`，不经回合 | 保留 |
+| 导师每轮看到右侧已填内容；"让导师接着聊"由用户点（10-07） | `turn_open` 返回草稿摘要拼进 hostTurnContext（进 user 消息，2.9 第 3 条） | 保留 |
+| 右侧信息跟对话走、AI 提议用户确认才保存、不自动整理（项 48、10-13） | 整理结果在收轮同事务写 `opc_drafts` 候选 | 保留 |
+| 自由对话模型自己调"加载 Skill"，每轮最多 2 个，按当前模型计费；定位/选题/报告用绑定模型（10-23） | 工具白名单与计数在 Node；Skill 包来自缓存 | 保留 |
+| AI 自己决定检索资料库/读发布数据/取对标；每条回答最多 3 次研究调用、12 次子调用；逐行显示扣费；资料库/读定位/读对标表免费；读自己发布数据按档位（10-17） | 工具计数在 Node；每次工具一条回执（免费的 n=0） | 保留 |
+| 联网不受用户设置限制，发生搜索时展示；评审团不联网（项 21） | 同上 | 保留 |
+| 定位前置检查只拦"为自己账号做运营"；Decisions 先判、主模型兜底；被拦不扣费（10-12）；代码预过滤（10-25 B）待 Owner 确认 | 开轮前一次 Decisions 调用，回执 n=0；代码预过滤不做 | 保留 |
+| 回复语言按顶栏设置、用户明确要求时按要求、公开页进来以页为准（10-24/25） | 语言规则进 system 按用户段 | 保留 |
+| 模型身份保护默认开；对比显示真实模型名，评审团只显席位名（10-12/14/17） | 提示词与前端 | 保留 |
+| 一窗口一选题、提醒并给新窗口入口（CONTENT-CONVERSATION-2，上线后） | 不在本任务 | 保留 |
+
+### 4.3 研究与对标
+
+| 规则 | 新路径 | 状态 |
+|---|---|---|
+| 对标发现：关键词 6–10、按需翻页、直搜账号、网页线索；子调用上限 TikTok/X/YouTube 80、抖音/小红书 40（10-23）；单次核对最多 5 个账号（10-27） | 工具参数与计数在 Node，不变 | 保留 |
+| 合格对标 1 万–20 万粉、30 天活跃、≥20 条、候选 8–12、合格 ≥3；YouTube 约数保守（10-23、10-16） | Skill + 代码校验 | 保留 |
+| 对标不允许跳过（R11）；兜底 B：≥1 合格 + ≥2 轮确认过的搜索 + 用户明确选"用现有先生成"（10-20）；贴链接核对也算一轮（10-27） | 轮次计数在 `opc_drafts`，`turn_close` 更新；兜底卡按 `opened.fallbackEligible` 显示 | 保留 |
+| 小众领域 1–7 个也出卡（10-23）；每轮重新对标（10-23 晚） | Skill 规则 | 保留 |
+| 供应商 TikHub / Parallel / Firecrawl / monid / Bright Data，各自平台设硬上限（项 10、10-07）；Firecrawl 不开零保留（10-24） | 不变 | 保留 |
+
+### 4.4 报告、评审团、对比
+
+| 规则 | 新路径 | 状态 |
+|---|---|---|
+| 报告由模型写、12000 字、Skill 模板定结构（项 22/25）；两种形态、结构化 9000 字（REPORT-VISUAL） | `kind=report`；结果写 `artifact_versions` | 保留 |
+| 后台可单独指定报告模型（10-10）；单次输出 32768 不续写（10-07） | 目录；常量 | 保留 |
+| 旧版本报告可看可导出（10-12）；已评审徽章代码判断（10-20） | `artifact_versions` 不变 | 保留 |
+| 评审团 3 席固定视角 + 汇总、默认 1 轮、代码合并去重、引文核对（10-20/10-14）；模型 Sonnet/GPT-6.1 Sol/Gemini 4 Argon/Opus（10-25）；逐章选择一次（10-14）；三次未完成暂停该版本（10-20）；采纳后可编辑重定稿不加费（10-20） | `kind=jury`；合并、引文核对是 Node 纯函数；`jury_adopt` | 保留 |
+| 评审、对比只给 Gold，非 Gold 弹付费墙（记录 D、10-20） | `turn_open` 查会员等级 | 保留 |
+| 对比默认勾选、最少 ≥2、第一条消息就支持对比（项 50、10-24） | 前端 + `kind=compare` | 保留 |
+
+### 4.5 历史与缓存
+
+| 规则 | 新路径 | 状态 |
+|---|---|---|
+| 保留原始对话记录，不做摘要压缩（项 31）；历史最多约 100 条、受 196608 字节约束（项 55） | `session_messages` 原文；裁剪算法不变 | 保留 |
+| 提示缓存上线必做（项 35）；历史缓存 H1、不做 1 小时（项 43） | 2.9 节 | 保留 |
+| 结算放回复结束后、历史按标记读写前照查、流式按阶段查删除（10-27 三项） | 结算在收轮（一次，同步，不再需要异步）；历史按 `visible`；删除检查搭回执 | 保留（"异步结算"不再需要，第 8 节 3e） |
+| 数据库 Micro、100 人并发（10-25） | 第 3 节 | 保留 |
+
+### 4.6 删除、注销、隐私
+
+| 规则 | 新路径 | 状态 |
+|---|---|---|
+| 只能整个删对话（10-13）；删除瞬间完成、不显示影响清单（10-13） | `sessions.deleted_at` 一条 UPDATE；正文分批清 | 保留 |
+| 删除检查立即生效（10-25）；同一轮只读不重复查、写前照查（C3） | 每次写入返回墓碑；收轮前必查 | 保留 |
+| 删除定位对话后已确认内容只读可导出（10-14） | `opc_drafts` 不变 | 保留 |
+| 删文风画像立即生效、正在写的作废、按"删除中止"结算（10-23） | 文风来源版本进 `turns.policy`；回执写入核对→中止；`kind=erased` | 保留 |
+| 注销立即、无冷静期、账务 3 年、日志 30 天（项 14、10-12） | DATA-ERASURE 投影改指新表 | 保留 |
+| 收据原始输出 30 天清、计费字段 3 年（10-25 线 G） | `turn_calls.raw` 30 天清理照旧 | 保留 |
+| 数据不用于训练（10-12/26）；备份恢复演练是公开前提（10-24 E2） | 不变 | 保留 |
+
+### 4.7 随旧路径一起消失的（需要 Owner 点头）
+
+| 项 | 说明 |
+|---|---|
+| staging 测试窗口（`runtime_test_windows`、`staging_test` 合同、窗口累计额度、"再开一个 1000 次窗口"，10-25 原话） | Owner 10-28 已决定去掉；staging 花费改由测试密钥额度 + 测试账号积分控制。**取代** 10-25"测试窗口用满时总控再开一个 1000 次新窗口" |
+| BILL2 v1 合同、逐调用 claim/dispatch/record/finalize、`bill2_runs`/`bill2_calls`/`bill2_receipts` | 由 `turns`/`turn_calls` 取代；数学不变；"积分记录"规则不变 |
+| 按天止损的全站独占锁 (201,1) | 改 `daily_spend` 计数行，允许最后一笔略超（第 8 节 3b） |
+
+## 5. 数据模型：保留、替换、删除，以及切换
+
+### 5.1 新表（一个迁移，V2-2）
+
+| 表 | 列（要点） | 索引 |
+|---|---|---|
+| `turns` | id, actor_id, session_id, request_id, kind(chat/mentor/report/compare/jury/jury_adopt/review), state, resume_of, policy jsonb（冻结：模型、q、m、上界、工具白名单哈希、system 两段哈希、文风来源版本、Skill packageHash）, input_bytes, reserved_credits, charged_credits, absorbed_credits, settlement(pending/done), stopped_by_user bool, delivered bool, failure_code, opened_at, updated_at, closed_at | pk；UNIQUE(actor_id, request_id)；(session_id, opened_at)；(state, updated_at) WHERE state IN ('running','paused')；(actor_id, kind, closed_at) WHERE stopped_by_user；(settlement) WHERE settlement='pending' |
+| `turn_calls` | id, turn_id, seq, call_kind(model/tool/decision), model_id/tool_name, status(ok/no_charge_402/unknown/unusable/rejected), nominal_usd n, actual_usd c（可空）, multiplier m, usage jsonb（含 cache_read/cache_write）, generation_id, payload_hash, raw jsonb（30 天清）, cost_pending bool, created_at | pk；UNIQUE(turn_id, seq)；(cost_pending) WHERE cost_pending |
+| `session_messages` | id, session_id, seq, role, turn_id, content text, content_hash, visible bool, deleted_at | pk；UNIQUE(session_id, seq)；(session_id, seq DESC) WHERE visible AND deleted_at IS NULL |
+| `daily_spend` | day date pk, spent_usd numeric, limit_usd | — |
+
+`sessions`：复用 `runtime_sessions`，改名为 `sessions` 或保留原名（V2-2 决定，建议保留原名少改引用），加 `active_turn_id`、`deleted_at`；
+去掉 `active_execution`、revision 相关列的使用。
+
+### 5.2 保留的表（主路径只读或按 kind 写一行）
+
+`profiles`（余额、会员、状态）、`credit_transactions`、`credit_source_entries`（grants，结算用现有 `atomic_*` 账本函数）、`catalog_versions`、
+`system_settings`、`ai_models`、`modules`/`skills`/`skill_revisions`/`skill_packages`/`skill_package_files`、`opc_drafts`/`opc_turns`（导师整理与轮次）、
+`bill2_drafts`、`artifact_versions`（报告）、`fusion_reviews`/`fusion_compares`（评审团/对比的产物与逐章选择，去掉它们的 billing_group 列）、
+`research_*`（对标发现产物）、`library_*`、`voice_*`、`social_*`、`account_erasure_*` 状态表。
+
+### 5.3 删除的表与函数（V2-12，staging 只有测试数据，直接 DROP；正式库新建时不带）
+
+- 表：`runtime_executions`、`runtime_session_history`、`runtime_history_dependencies`、`runtime_tool_calls`、`runtime_session_batches`、
+  `runtime_session_results`、`runtime_scope_material`、`runtime_library_references`、`runtime_voice_references`、`runtime_test_windows`、
+  `bill2_runs`、`bill2_calls`、`bill2_receipts`、`bill2_provider_ids`、`fusion_billing_groups`、`fusion_billing_group_steps`、`report_fees`、`fusion_review_fees`。
+  （`runtime_session_names` 并入 `sessions.title`。）
+- 函数：`runtime/` 111 个中除 `runtime_start`（改写为建会话）外全部；`billing/` 102 个中 `bill2_*` 全部（`atomic_*`、`credit_*` 账本函数保留）；
+  `fusion/` 63 个中计费与推进相关的（产物读写保留）；`report/` 的 `report_fee_*`、`report_stop`、`report_admission_check`；`other/` 中 `catalog_versions_snapshot` 保留。
+  目标：`packages/db/functions` 从 939 降到约 450（主路径相关从约 330 降到约 20）。
+- Node：`services/runtime/` 315 个文件和 `services/bill2/` 56 个文件整体删除，新目录 `services/turn/`（目标 ≤ 60 个文件，每个 ≤ 500 行）；
+  `routers/runtime.ts`、`fusionReview.ts`、`fusionCompare.ts` 的计费部分改调 `services/turn`。
+
+### 5.4 切换顺序（staging 只有测试数据；正式库从文件新建）
+
+1. V2-2 先加新表（旧表不动），V2-3 加新函数，V2-4 起新 Node 路径在 `services/turn/` 下，前端 V2-10 前仍走旧路由——新旧并存只在开发期，
+   由 `system_settings.core_path_v2.enabled`（staging 与正式同值）决定前端调哪条；这不是 staging 专用分支。
+2. V2-10 合并后 staging 切到 v2，旧路径跑不到；V2-11 e2e 在 staging 跑通；V2-13 压测通过。
+3. V2-12 一个迁移 DROP 旧表旧函数（迁移开头写明：不可逆、staging 仅测试数据、正式库尚不存在）；删旧 Node 代码；删 `core_path_v2.enabled` 开关。
+4. 正式库按 REL-1/BASELINE-SQUASH 从文件新建，天然只有新结构。
+5. 回退：V2-12 之前任何时候关 `core_path_v2.enabled` 即回旧路径（旧表旧函数都在）；V2-12 之后不回退（删除是不可逆的，所以它排最后、压测通过后才做）。
+
+## 6. 实施计划
+
+### 6.1 PR 清单
+
+风险等级按 AGENTS.md（high = 计费/数据库/权限/CI）。"窗口"：Claude = Claude 执行窗口（Opus），Codex = 交 Codex。
+带迁移的 PR 由总控上库后合并；迁移号开工时向总控要。
+
+| # | PR | 范围 | 风险 | 窗口 | 依赖 | 工期 | 验收（合并条件） |
+|---|---|---|---|---|---|---|---|
+| V2-0 | `docs(CORE-PATH-V2)` 本文 | 本文；Owner 决定后记进 MASTER_PLAN §2.1 | ordinary | Claude | — | 已做 | Codex 审查；Owner 第 8 节决定 |
+| P-1 | `feat(PROMPT-CACHE)` 合 #1501 | 报告/评审团/对比的断点（改 base 到 staging，补复审）；#1500、#1502 关闭，改动迁入 V2-4/V2-5 | high | Claude | — | 0.5 天 | 现有单测；不改主路径 |
+| V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间断言，棘轮基线）；`scripts/db-function-closure.mjs`；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本；对旧路径跑一次基线存档 | low | Codex | — | 3 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
+| V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表 | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库 |
+| V2-3 | `feat(CORE-PATH-V2)` 三个核心函数 | `turn_open`/`turn_call_record`/`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本、停止（普通/报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损 | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；总控上库 |
+| V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具） | high | Claude | V2-3 | 6 天 | `check-turn-budget` 自由对话 ≤ 4；黄金字节；runtime 集成套件里自由对话场景等效迁移 |
+| V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 7；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
+| V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file` | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试 |
+| V2-7a | `feat(CORE-PATH-V2)` 报告 | `kind=report`：固定价、`acceptedCredits` 校验、会员门槛、停止防刷、`artifact_versions` 写入、#1501 断点保留 | high | Codex | V2-4 | 3 天 | `report`、`report-stop` 场景迁移；24 小时 3 次停止测试 |
+| V2-7b | `feat(CORE-PATH-V2)` 对比与评审团 | `kind=compare`/`jury`/`jury_adopt`：并行调用、分组暂停、押金、Gold 门槛、三次未完成、`fusion-recovery` 改读 `turns` | high | Claude | V2-4 | 5 天 | fusion 套件场景迁移；24 小时自动结束测试 |
+| V2-8 | `feat(CORE-PATH-V2)` 停止/暂停/恢复 | `runtime-recovery` 定时任务改读 `turns`（15 分钟中断、24 小时暂停、未知成本补结）；前端停止确认（修核心缺陷 J2/J3） | high | Codex | V2-3、V2-4 | 3 天 | `native-stop`、`stop-round`、`bill2-stuck` 场景迁移；崩溃恢复集成测试 |
+| V2-9 | `feat(CORE-PATH-V2)` 删除与注销接新表 | 会话删除墓碑化、内容清除投影、注销投影、文风来源撤销、`content_erasure_runtime_check` 替换 | high | Codex | V2-3 | 4 天 | erasure 套件逐条等效迁移；长对话（≥100 轮）删除 < 1 秒 |
+| V2-10 | `feat(CORE-PATH-V2)` 前端切换 | `/app` 对话工作区改调 `/api/turn` SSE；`opened` 事件渲染（工具可用性、裁剪说明、兜底卡）；右侧成果夹；`core_path_v2.enabled` 开关 | ordinary | Claude | V2-5、V2-6、V2-7、V2-8 | 4 天 | 浏览器验证（Codex 验收批次）；旧 e2e 全过 |
+| V2-11 | `test(CORE-PATH-V2)` 核心路径 e2e | `apps/web/tests/e2e/core-path/`：① 定位三步到定稿报告；② 自由对话 + 加载 Skill + 一次研究；③ 停止与退款（普通 + 报告 3 次）；④ 删除对话（长对话）与注销；⑤ 对比；⑥ 评审团到逐章选择。新 workflow `staging-e2e.yml`：staging 每次部署成功后跑，用 Gemini Flash 等便宜模型，预算每次 ≤ 0.5 美元（总控按已批准测试预算发测试账号积分），失败开 issue | high（CI） | Codex | V2-10 | 4 天 | 在 staging 跑通一次并附报告；Owner 批准测试预算 |
+| V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
+| V2-13 | `docs(CORE-PATH-V2)` 100 人验收 | 3.2 节压测，报告进 `docs/validation/core-path-v2/`；MASTER_PLAN §2.1 记录结果 | ordinary | Codex | V2-10 | 2 天 | 3.1 节通过线 |
+
+### 6.2 顺序与并行
+
+```
+P-1 ─┐
+V2-1 ─┤（与 V2-2/3 并行）
+V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
+                     ├→ V2-6 ──┤
+                     ├→ V2-7a ─┼→ V2-10 → V2-11 → V2-13 → V2-12
+                     ├→ V2-7b ─┤
+                     ├→ V2-8 ──┤
+                     └→ V2-9 ──┘
+```
+
+- 串行骨架 V2-2→3→4 约 13 个工作日（一个 Claude 窗口）；V2-1 同时由 Codex 做。
+- V2-5…V2-9 六个 PR 文件不重叠（各自 `services/turn/<kind>/`、各自的定时任务与投影文件），三个窗口并行约 6 个工作日。
+- V2-10 → V2-11 → V2-13 → V2-12 串行约 15 个工作日（其中 V2-11、V2-13 可部分并行）。
+- **合计约 53 个工作日的工作量；三窗口并行约 30 个工作日 = 6 周；加 1 周余量 = 7 周。** 乐观 5 周。
+- 期间不做：运营教练复盘、图片生成、落地页以外的新功能；上线前其他任务（REL-1 未完项、ARCH-FIX 不重叠的线）可以由不碰主路径文件的窗口继续。
+- 冻结前排不下时的砍法：V2-11 的 ⑤⑥（对比、评审团 e2e）后补；V2-12 的文档部分后补。不砍 V2-12 的删除本身。
+
+### 6.3 每个 PR 共同的验收
+
+1. CI 全绿（含 `check-turn-budget` 棘轮）。
+2. 迁移：整段 `CREATE OR REPLACE`/`CREATE TABLE`，开头写兼容/可重复/回退；回放两次；指纹与 `functions/` 重新生成。
+3. 旧套件的场景按"等效维护"迁移，PR 描述列出"旧场景 → 新测试"的对照表，一个场景都不许丢；删除旧套件只在 V2-12。
+4. 独立审查（Codex 审 Claude 写的，反之亦然）+ 一轮复核。
+5. 碰主路径的 PR 描述写明"往返 / 锁 / 数据库时间 前→后"。
+
+## 7. 治理：不让它再劣化
+
+### 7.1 "架构守门"——每个碰主路径的 PR 必须过
+
+进 CI 的 `scripts/check-turn-budget.mjs`（本机 Docker 库，桩模型）：
+- 跑三条标准回合（自由对话、导师、报告），断言 3.1 节的往返、锁数、数据库时间；数字只许变小，基线 `scripts/turn-budget-baseline.json`
+  和代码大小基线一样是棘轮，手动调高需要 Owner 批准。
+- `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：闭包 ≤ 15 函数 / ≤ 10 表；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`。
+- 静态扫描 `packages/api/src/services/turn/`：模型调用与回执之间不允许出现 `.rpc(`/`.from(`（除 `turn_call_record`）。
+- PR 模板加一行"主路径影响：往返 / 锁 / 数据库时间 前→后"。架构守门人（当时的总控窗口）合并前核对这一行和基线差。
+
+### 7.2 建议加进 `docs/ENGINEERING.md` 的规则（提议文本；规则变更需 Owner 批准后另开 PR）
+
+> **第 5 节新增"主路径约束"**
+> - 一轮对话只允许三类数据库写入：开轮（`turn_open`）、回执（`turn_call_record`）、收轮（`turn_close`）。模型调用与工具调用之间不得有其他数据库读写；需要的数据在开轮时取回，或来自进程内目录缓存。
+> - 主路径的数据库函数只能读写 `turns`、`turn_calls`、`session_messages`、`runtime_sessions`、`profiles`、`credit_transactions`、`credit_source_entries`、`daily_spend`、`catalog_versions`，以及按 `kind` 需要的草稿/报告/评审表各一行；只允许对本人 `profiles` 和本会话 `runtime_sessions` 加行锁；不得对任何全站共用行加锁。
+> - 全站只读、管理员写的目录（系统设置、模型目录、Skill 包、权益规则）必须通过 `catalogCache` 读取；余额、冻结、墓碑、会话状态、用户写入的数据永不缓存。
+> - staging 与正式环境不得有代码分支；环境差异只能是配置（密钥、地址、价格快照、账号积分）。
+> - `scripts/check-turn-budget.mjs` 的基线只许变小；碰主路径的 PR 描述写明往返/锁/数据库时间的前后值。
+> - 新的业务规则要进主路径时，先问"它属于开轮、回执还是收轮"，只在那一个函数里加分支；需要新表才能表达的，先在 PR 里写一句为什么现有列不够。
+
+### 7.3 搁置的工作在新路径下变成什么
+
+| 搁置项 | 处置 |
+|---|---|
+| DB-RW PR-D（历史可用标记）、PR-E（每轮写合并）、PR-F（结算异步） | **不再做**：目标由 `session_messages.visible`、三类写入、收轮一次结算直接达成。已上库的 PR-B（0419 `catalog_versions` + `catalogCache`）**保留并成为主路径依赖**；PR-A（0416）的索引保留、开关函数随旧路径删；PR-C（0418 `admitSplit`）随旧路径删 |
+| 权限链分支化（chain-branch） | 不再做：新函数闭包 ≤ 10 表，没有对象 |
+| 提示缓存 #1500（自由对话 v3） | **改写后并入 V2-4**：它的三个假设（system = 前缀 + 按用户段；工具跨轮不变；每轮状态只在 user 消息）新路径全部成立并写成硬约束（2.9 节），但冻结位置从 `admission.ts` 挪到新拼装层；`promptCache.ts`/`cacheMessages.ts`/adapter 形状白名单与 ≤3 标记上限按文件迁移，单测随迁。原 PR 关闭 |
+| 提示缓存 #1501（报告/评审团/对比） | **直接合**（P-1，开工前第一件事）：报告、评审团、对比的请求体拼装在 V2-7 之前不动；V2-7 接核时保留断点位置。先改 base 到 staging、补 Codex 复审 |
+| 提示缓存 #1502（导师历史标记 + SKILL.md 断点） | **按新路径改写**（V2-5）：三个断点规则不变，hostTurnContext/材料位置、历史投影占位算法按 2.9 节第 3、5 条重写；`hostTurnAdmission.test.ts` 的断言作为 V2-5 验收原样迁入。原 PR 关闭 |
+| #1503 复核脚本 | 改读 `turn_calls` 缓存 token 列后合并（V2-13 之前） |
+| #1504 `tool_choice:"none"` 放行 | 已合并；V2-5 开场轮对齐依赖它 |
+| 运营教练复盘 #1481（迁移 0407）、#1483 | 主路径完成后以 `kind=review` 接核：#1481 的数据地基（结算事实、实验账本）与主路径无关，可在 V2-2 之后由总控择机上库合并；#1483 要改成不走 `REVIEW_PROMPT`+旧 Runtime，而是 V2-6 的"固定 Skill"入口，等 V2-12 后改写 |
+| 图片生成规划 | 上线后；按新 `kind=image` 接入，冻结额按张数 |
+| ARCH-FIX 未完成的线 | 与主路径重叠的（线 C 工具参数、线 D 卡住回合收尾、线 A 入口限流）在 V2-6/V2-8/V2-4 内完成并在 PR 标题带 ARCH-FIX；不重叠的（线 B 上传存储、线 E 订阅积分隔离与对账、线 G 收据保留期改读 `turn_calls`）照原计划 |
+| REL-1 核心 12 项未通过的（10-27 清单） | 1⑤ 停止退款、1② 兜底 B、7② 长对话删除、9③ >500 拒绝、10⑤ 周复盘：前四项由 V2-8/V2-5/V2-9/V2-7b 直接解决并在 V2-11 e2e 覆盖；周复盘随复盘任务上线后 |
+
+## 8. 要 Owner 决定的事（大白话）
+
+**决定 1：怎么重做**
+
+- A（推荐）：**重做主路径，旧的删掉**。新写"开轮 / 记账 / 收轮"三步的数据库函数和一条 Node 流程，把定位导师、自由对话、报告、评审团、对比都接上，
+  然后删掉旧 Runtime/BILL2 和 staging 测试窗口。好处：一轮往返从 40–60 次降到 4–7 次，主路径函数从约 330 个减到约 20 个，以后任何窗口都看得懂、改得动；
+  坏处：约 7 周（乐观 5 周），期间不上新功能。
+- B：**沿 DB-RW 方案继续改**（D/E/F + 分支化）。约 3 周；往返只能降到 12–18 次，940 个函数、62 张表的闭包还在，测试窗口的双路径还在，下一次改需求又会长回来。
+- C：A 的范围，但先只做自由对话 + 导师（报告/评审团/对比暂留旧路径，上线后再迁）。约 5 周；新旧两套并存，正式库建库时要同时带两套表，和"旧路径删掉"的目标冲突。
+
+可直接复制的话：`主路径按 A 重做，旧路径删掉。`
+
+**决定 2：新的上线日期**
+
+- A（推荐）：主路径通过 100 人验收后再定，现在只定"验收通过后 7 天内上线"。
+- B：现在定固定日期（7 周 + 核心 12 项余下验收 ≈ 12 月中旬），到期没过验收就延。
+
+可直接复制的话：`上线日期按 A，验收通过后 7 天内上线。`
+
+**决定 3：五条规则的简化（第 4 节标"简化"的，都不改用户能感知的结果）**
+
+- 3a 同一会话里一次只跑一轮；用户没等回复结束又发，前端排队。现在也是这样，只是改由会话行保证。确认即可。
+- 3b 每日止损从"全站一把锁、绝不超一分"改为"允许最后一笔略超（最多一轮的上界，≤ 0.5 美元），超过后下一轮拒绝"。
+- 3c 暂停回合与评审团押金的 24 小时自动结束，由同一个分钟级定时任务按 `turns` 表统一处理（规则不变，入口合一）。
+- 3d 一轮冻结一次：开始一轮需要的可用积分从"一次调用的上界"变成"本轮最多几次调用的上界之和"（导师 2 次 + 整理 1 次）。
+  余额刚好够一次调用的用户，会在开轮时就被提示充值，而不是第一次调用后暂停；暂停与"继续"的规则不变。
+- 3e 10-27 批的"结算放到回复结束后异步做"不再需要：新路径一轮只结算一次、就在回复结束时同步做，余额不会晚几秒。等于撤回那条取舍，按更好的结果执行。
+
+可直接复制的话：`3a、3b、3c、3d、3e 都同意。`
+
+**决定 4：评审团要不要给用户一个"结束评审"按钮**
+
+10-17 定的是评审团不提供中途停止；10-27 的决定里又出现"用户点结束评审"。新路径两种都能做：
+- A（推荐）：不提供，只有"评审完成"和"暂停超过 24 小时自动结束退押金"两个出口（和 10-17 一致，少一个入口少一类争议）。
+- B：提供"结束评审"，走和 24 小时自动结束同样的结算。
+
+可直接复制的话：`评审团结束按 A，不给按钮。`
+
+## 9. 发现的问题（不在本任务范围，记给总控）
+
+1. 普通对话（非报告）用户停止时的退款规则，代码里只有报告的 24 小时 2 次规则（`report_stop.sql:34-37`），普通对话停止走 `runtime_cancel`：
+   规则本身在 MASTER_PLAN 里没找到明确条目，V2-8 按"按已写回执结算、其余退"做，请总控确认。
+2. 限流（项 30/49）的接线状态：§2.1 写"尚未生效"，后续没有生效记录，V2-4 接目录缓存时顺带核对。
+3. 项 28 的单次回复接收上限 139264 字节（对应旧 8192 输出上限）与 10-07 的 32768 输出上限是否同步：#714 已改为 532480，§2.1 条目未更新。
+4. 压测桩回执应标 `gen-load-`（缓存窗口建议），V2-1 落实。
+5. `runtime_tool_calls` 114 万次顺序扫描、`runtime_executions.payload` 与 `bill2_runs.payload.input` 两份 20–33 KB 重复——随旧路径删除一并消失，不单独修。
+6. 评审团固定价 1500 与报告 500 仍是"暂定"（10-17），本计划按现值做，后台键可改。
+
+## 10. 资料出处
+
+- 代码：`origin/staging` `4f6fbf995`（2026-10-28）；文内路径与行号均为该版本。
+- 压测：DB-PERF 窗口共享笔记 `db-perf-round3-result-1026.md`（10-26 第三轮与本机回放对比）、总控转述的 10-27 复测（30 人 9–65%、三开关无改善）。
+- 诊断：架构窗口 `db-rw-redesign-v1.md`（10-27）、`db-rw-chain-branch-plan.md`（10-28）。
+- 缓存：缓存窗口 `prompt-cache-diagnosis-v1.md`（10-27，10-28 第 6 节）；PR #1500/#1501/#1502 交接。
+- 规则：Master Plan §2.1（第 85–3003 行，10-28 逐条）；`docs/ENGINEERING.md`；`AGENTS.md`。
+- 核心 12 项未通过清单：总控-13 `core12-open-1027.md`。
