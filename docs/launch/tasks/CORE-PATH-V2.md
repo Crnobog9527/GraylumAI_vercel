@@ -164,7 +164,8 @@ running ─(正常结束)────────→ turn_close kind=completed �
 | `turn_call_identity`（拿到供应商 id，不阻塞流） | 1 | `turn_calls` UPDATE 一行 | 自己的行 |
 | `turn_call_record`（流结束） | 1 | `turn_calls` UPDATE、`turn_call_raw` INSERT、`sessions` 读墓碑 | 自己的行 |
 | `turn_close` | 1 | `turns` UPDATE、`session_messages` INSERT ×2、`profiles` UPDATE（结算差额）、`credit_transactions` INSERT、`daily_spend` UPDATE、`sessions` UPDATE | 本人/本会话行锁 |
-| **合计** | **6**（含登录 1；每次模型调用 3 次是钱的证据，2.5.2） | | |
+| 每请求固定：`catalog_versions_snapshot`、`platform_secret_read` | 2 | `catalog_versions` 读；平台密钥表读（OR-1，每次 fresh） | 无 |
+| **合计** | **8**（含登录 1 + 固定 2；未确认定位的账号再 +2 定位检查；每次模型调用 3 次是钱的证据，2.5.2） | | |
 
 定位导师一轮（两次模型调用、一次读 Skill 文件、整理一次模型调用）：`turn_open` 1 + 3 次模型调用 × 3 + Skill 文件 0（进程缓存，按包哈希校验）+
 `turn_close` 1（整理结果同事务写 `opc_drafts`）= **11**，含登录 **12**。挂研究工具的回合每次工具调用 +2（begin + record，工具无流式身份）。
@@ -327,7 +328,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 
 | 路径 | 开轮差异 | 中间 | 收轮差异 |
 |---|---|---|---|
-| 自由对话 | kind=chat；工具白名单按会话固定（2.9 第 2 条）；输入上限 90000 / 挂研究工具 150000；模型/付费工具/免费工具次数上限分开（2.5.3，免费工具的续轮计入 G_turn）；定位前置检查（Decisions）是开轮前一次不计费的独立调用，有回执 n=0 | SDK 工具循环；每个工具一条回执（免费工具 n=0，但其后的模型续轮照常三步写）；容量不够时去掉的是"工具可用性说明"（进 user 消息）而不是工具定义，并在 `opened` 事件里明说（修核心缺陷：静默丢工具仍计费） | 按回执结算 |
+| 自由对话 | kind=chat；工具白名单按会话固定（2.9 第 2 条）；输入上限 90000 / 挂研究工具 150000；模型/付费工具/免费工具次数上限分开（2.5.3，免费工具的续轮计入 G_turn）；定位前置检查（Decisions）是回合内第一次调用（`call_kind='decision'`，begin + record 两步）：**用户不计费**（回执 `charge_user=false`，n 对用户为 0，Owner 10-12），但**平台侧 U_i 是 Decisions 模型的真实单次上界**（不是 0），计入 U_turn 和日限预占，供应商成本照记 | SDK 工具循环；每个工具一条回执（免费工具 n=0，但其后的模型续轮照常三步写）；容量不够时去掉的是"工具可用性说明"（进 user 消息）而不是工具定义，并在 `opened` 事件里明说（修核心缺陷：静默丢工具仍计费） | 按回执结算 |
 | 定位导师 | kind=mentor；Skill 包从缓存按 module→revision→packageHash 取；hostTurnContext 由 `turn_open` 返回的草稿摘要拼；`fallbackEligible` 按轮次计数算好返回（修核心缺陷：兜底卡从未显示） | 两次模型调用 + `read_skill_file`（进程缓存，不计费、不写库）+ 整理调用 | 整理结果与研究轮次计数在同一事务写 `opc_drafts`（替代 `opc_capture_apply` 独立往返） |
 | 报告 | kind=report；冻结固定 500（+ 本次调用临时上界）；会员/草稿/确认/价格一致（`acceptedCredits`）检查搬进 kind 分支 | 一次长调用（32768 输出上限，不续写） | 成功 D=500；停止按 24 小时规则；结果写 `artifact_versions`（不变） |
 | 对比 | kind=compare；G_turn=Σ各模型上界，用户合计上限 500 积分，超则拒开轮；Gold 门槛 | N 个并行调用各一条回执 | 各模型各自取整 |
@@ -370,7 +371,8 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 
 | 指标 | 自由对话 | 导师一轮 | 报告 | 测法 |
 |---|---|---|---|---|
-| Postgres 往返（不含 Auth 和 OpenRouter；每次模型调用 3 次、工具 2 次是钱的证据，2.5.2） | ≤ 5（无工具）；每多一轮免费工具 +5（工具 2 + 续轮 3），上限 M 按 2.5.3 | ≤ 11 | ≤ 5 | 计数的 Supabase 客户端包装，跑三条标准回合（无工具自由对话、导师、报告）后断言；工具回合另按 2.5.3 公式断言 |
+| Postgres 往返——回合自己的（不含 Auth 和 OpenRouter；每次模型调用 3 次、工具 2 次是钱的证据，2.5.2） | ≤ 5（无工具）；每多一轮免费工具 +5（工具 2 + 续轮 3），上限 M 按 2.5.3；未确认定位的账号另 +2（定位检查 begin/record） | ≤ 11 | ≤ 5 | 计数的 Supabase 客户端包装，跑三条标准回合（无工具自由对话、导师、报告）后断言；工具回合另按 2.5.3 公式断言 |
+| Postgres 往返——每个请求固定的 2 次 | `catalog_versions_snapshot`（0419，目录缓存的版本检查）+ `platform_secret_read`（OR-1：平台密钥每次 fresh 读，安全规定不动） | 同 | 同 | 单独一行计数、固定 = 2；V2-4a 本机实测自由对话合计 7（已定位）/ 9（未定位），今天 41 |
 | 每轮数据库时间（本机 Docker，单用户） | ≤ 60 ms | ≤ 120 ms | ≤ 60 ms | `pg_stat_statements` 前后差 |
 | `turn_open` 事务内关系锁数——主路径自己的表（`turns`、`runtime_sessions`、`profiles`、`daily_spend`、`session_messages`、墓碑表及其索引/TOAST） | ≤ 40（V2-3 本机实测 18） | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法），按表归类 |
 | `turn_open` 事务内关系锁数——账本叶子（`atomic_pre_deduct`、`credit_available` 碰到的 grants/积分包/订单/账单表） | 棘轮：只许变小（V2-3 本机基线 38，其中 `bill2_runs` 9 把来自 `billing_history` 的注销账本守卫触发器，V2-12 改读 `turns` 后消失） | 同 | 同 | 同上，单独一行记录；口径和 7.1"账本叶子不展开"一致。合计（本机 56）也记录，对比今天的 90–130 |
