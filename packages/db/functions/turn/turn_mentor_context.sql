@@ -9,7 +9,8 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
-  business uuid; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; context jsonb;
+  business uuid; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; context jsonb; suggestions jsonb := '{}';
+  suggestion jsonb;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
@@ -47,6 +48,13 @@ BEGIN
     metas := '{}';
     FOR field_id IN SELECT f->>'id' FROM jsonb_array_elements(r.workflow->'steps') s, jsonb_array_elements(s->'information') f
                     WHERE s->>'id' = step_id LOOP
+      -- The organizer sees a pending suggestion's content (to keep or withdraw it, captureFrozenInformation); the mentor sees
+      -- only that one exists. Kept apart from the work projection, which goes to the mentor.
+      suggestion := st#>ARRAY['fieldMeta',field_id,'suggestion'];
+      IF jsonb_typeof(suggestion) = 'object' AND jsonb_typeof(suggestion->'value') = 'string' AND btrim(suggestion->>'value') <> '' THEN
+        suggestions := jsonb_set(suggestions, ARRAY[step_id], coalesce(suggestions->step_id, '{}') || jsonb_build_object(field_id,
+          jsonb_build_object('value', suggestion->'value', 'nature', suggestion->'nature', 'basis', suggestion->'basis')));
+      END IF;
       metas := metas || jsonb_build_object(field_id, jsonb_build_object(
         'source', coalesce(st#>>ARRAY['fieldMeta',field_id,'source'], 'unknown'),
         'basis', coalesce(st#>>ARRAY['fieldMeta',field_id,'basis'], 'unknown'),
@@ -76,6 +84,7 @@ BEGIN
   context := opc_business_context(p_actor_id, p_session_id, r.id);
   RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'roundId', r.id, 'mode', d.mode, 'moduleId', p.module_id,
     'skillId', p.skill_id, 'revisionId', r.revision_id, 'packageHash', r.package_hash, 'steps', r.workflow->'steps',
+    'suggestions', suggestions,
     'work', jsonb_build_object('projectId', p.id, 'roundId', r.id, 'revisionId', r.revision_id, 'packageHash', r.package_hash,
       'steps', steps, 'source', NULL) || CASE WHEN context IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext', context) END);
 END $function$;

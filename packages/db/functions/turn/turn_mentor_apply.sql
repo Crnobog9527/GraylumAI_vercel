@@ -14,13 +14,21 @@ DECLARE t turns; d opc_drafts; r artifact_rounds; p artifact_projects; req artif
  changed jsonb:='{}'; fields jsonb:='{}'; discarded jsonb:='[]'; versions jsonb:='{}'; old_steps jsonb;
  protected boolean; material_changed boolean; seq jsonb; suggestion jsonb; patch_index integer:=0;
  withdrawal jsonb; withdrawn jsonb:='{}'; withdraw_index integer:=0; withdraw_reason text; organizer_input jsonb;
- exec_id uuid; exec_at timestamptz;
+ exec_id uuid; exec_at timestamptz; business uuid; archived timestamptz;
 BEGIN
  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
  IF t.id IS NULL OR t.kind <> 'mentor' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
  IF d.draft_id IS NULL THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
+ -- An archived business is read-only (opc_capture_apply's opc_assert_business_writable, same KEY SHARE lock so an archive
+ -- cannot commit between this check and the write). The business may have been archived while the turn ran: nothing is
+ -- written, and the turn itself still settles and keeps its reply.
+ business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
+ IF business IS NOT NULL THEN
+  SELECT archived_at INTO archived FROM opc_businesses WHERE id = business AND actor_id = p_actor_id FOR KEY SHARE;
+  IF archived IS NOT NULL THEN RETURN jsonb_build_object('result', 'archived'); END IF;
+ END IF;
  SELECT * INTO p FROM artifact_projects WHERE id = d.project_id FOR UPDATE;
  -- Refresh the draft after waiting: a concurrent revision may have advanced it.
  SELECT * INTO d FROM opc_drafts WHERE draft_id = d.draft_id AND actor_id = p_actor_id;
