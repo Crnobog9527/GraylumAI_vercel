@@ -27,6 +27,7 @@ function setup(overrides: Record<string, Override> = {}) {
       else if (name === 'runtime_financial_recovery') data = { runId: run, executionId: execution, state: 'completed' };
       else if (name === 'account_erasure_scrub_content') data = { artifact_generations: 1, artifact_generations_skipped: 0 };
       else if (name === 'account_erasure_scrub_runtime') data = { runtime_sessions: 1, runtime_sessions_skipped: 0 };
+      else if (name === 'account_erasure_scrub_turns') data = { turn_call_raw: 1, turn_call_raw_skipped: 0, session_messages: 2, session_messages_skipped: 0 };
       else if (name === 'account_erasure_storage_ready') data = { ready: true };
       else if (name === 'account_erasure_scrub_ledger' || name === 'account_erasure_scrub_payment') {
         data = { ...empty, manualReview: 0, nextRowId: null };
@@ -68,6 +69,16 @@ describe('unwired account erasure processor', () => {
     const result = await processAccountErasure(f.input);
     expect(result.retry).toBe(true); expect(result.remaining).toBeGreaterThan(0);
     expect(f.storageAdapter.cleanSubject).toHaveBeenCalledOnce(); expect(f.authAdapter.remove).not.toHaveBeenCalled();
+  });
+  // CORE-PATH-V2 (0420): a raw provider body of a turn still open, or messages of a busy session, keep the account.
+  it.each([
+    { turn_call_raw: 0, turn_call_raw_skipped: 1, session_messages: 0, session_messages_skipped: 0 },
+    { turn_call_raw: 0, turn_call_raw_skipped: 0, session_messages: 0, session_messages_skipped: 3 },
+  ])('does not delete while core-path content remains: %j', async value => {
+    const f = setup({ account_erasure_scrub_turns: () => value });
+    const result = await processAccountErasure(f.input);
+    expect(result.retry).toBe(true); expect(result.remaining).toBeGreaterThan(0);
+    expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
   it('keeps unknown financial results pending without a provider request', async () => {
     const f = setup({
