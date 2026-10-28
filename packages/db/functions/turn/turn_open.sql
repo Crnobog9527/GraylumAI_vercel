@@ -9,14 +9,14 @@ CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, 
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  s runtime_sessions; t turns; prof profiles; existing turns;
+  s runtime_sessions; t turns; prof profiles; existing turns; prior turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
+  n_model integer; n_paid integer; n_free integer; n_decision integer;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
   END IF;
-  IF p_resume_of IS NOT NULL THEN RAISE EXCEPTION 'TURN_RESUME_NOT_SUPPORTED' USING ERRCODE='0A000'; END IF;
   IF jsonb_typeof(p_policy) <> 'object'
     OR jsonb_typeof(p_policy->'q') <> 'number' OR (p_policy->>'q')::numeric <= 0
     OR jsonb_typeof(p_policy->'uTurnUsd') <> 'number' OR (p_policy->>'uTurnUsd')::numeric < 0
@@ -46,7 +46,8 @@ BEGIN
   -- 2. The same request again: the turn it opened, unchanged.
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
-    IF existing.session_id IS DISTINCT FROM p_session_id OR existing.kind <> p_kind THEN
+    IF existing.session_id IS DISTINCT FROM p_session_id OR existing.kind <> p_kind
+      OR existing.resume_of IS DISTINCT FROM p_resume_of THEN
       RAISE EXCEPTION 'TURN_REQUEST_CONFLICT' USING ERRCODE='22023';
     END IF;
     -- A replay reads the history too: a deleted conversation or an erasing account is refused here as for a new request,
@@ -62,13 +63,38 @@ BEGIN
     IF EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    IF s.active_turn_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+    IF p_resume_of IS NULL THEN
+      IF s.active_turn_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+    ELSE
+      -- Resume (2.2): only this session's turn paused for credits, by the same kind. Locked after the session (as turn_close).
+      IF s.active_turn_id IS DISTINCT FROM p_resume_of THEN RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000'; END IF;
+      SELECT * INTO prior FROM turns WHERE actor_id = p_actor_id AND id = p_resume_of FOR UPDATE;
+      IF prior.id IS NULL OR prior.state IS DISTINCT FROM 'paused' OR prior.pause_reason IS DISTINCT FROM 'waiting_credits'
+        OR prior.kind <> p_kind OR prior.session_id IS DISTINCT FROM p_session_id THEN
+        RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000';
+      END IF;
+      -- What is left of the paused turn's frozen limits, counted as turn_call_begin counts them: the new turn may use no more.
+      SELECT count(*) FILTER (WHERE call_kind = 'model'),
+             count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd > 0),
+             count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd = 0),
+             count(*) FILTER (WHERE call_kind = 'decision')
+        INTO n_model, n_paid, n_free, n_decision
+      FROM turn_calls WHERE turn_id = p_resume_of AND status NOT IN ('not_sent','rejected','no_charge_402');
+      IF (p_policy->'limits'->>'model')::int > (prior.policy->'limits'->>'model')::int - n_model
+        OR (p_policy->'limits'->>'paidTools')::int > (prior.policy->'limits'->>'paidTools')::int - n_paid
+        OR (p_policy->'limits'->>'freeTools')::int > (prior.policy->'limits'->>'freeTools')::int - n_free
+        OR coalesce((p_policy->'limits'->>'decisions')::int, 0) > coalesce((prior.policy->'limits'->>'decisions')::int, 0) - n_decision THEN
+        RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+      END IF;
+    END IF;
     -- The same account check as bill2_actor: active and not deleted.
     IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
     END IF;
 
     -- 3. Stop-loss (2.5.1): reserve U_turn on the own bucket row first, then read the day's sum, then check with the band B.
+    -- On a resume the paused turn's reservation is still counted here (it is released by its close below): refusing earlier,
+    -- never later.
     IF (p_policy->'stopLoss'->>'p')::int < (p_policy->'stopLoss'->>'poolSize')::int THEN
       RAISE EXCEPTION 'TURN_STOP_LOSS_CONFIG' USING ERRCODE='22023';
     END IF;
@@ -81,6 +107,13 @@ BEGIN
       + (p_policy->'stopLoss'->>'uBigUsd')::numeric;
     IF total + band > (p_policy->'stopLoss'->>'limitUsd')::numeric THEN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
+    END IF;
+
+    -- The paused turn closes before the new freeze is sized: its known receipts are charged once (the work done before the
+    -- pause), the rest of its freeze comes back and counts in the balance read below. Not delivered, no messages: the turn that
+    -- continues it saves the conversation.
+    IF p_resume_of IS NOT NULL THEN
+      PERFORM public.turn_close(p_actor_id, p_resume_of, 'interrupted', '[]'::jsonb, false, false, 'resumed');
     END IF;
 
     -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
@@ -101,8 +134,8 @@ BEGIN
     END IF;
 
     frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h);
-    INSERT INTO turns (actor_id, session_id, request_id, kind, state, policy, reserved_credits, reserved_usd, input_bytes)
-      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', frozen, h, u_turn,
+    INSERT INTO turns (actor_id, session_id, request_id, kind, state, resume_of, policy, reserved_credits, reserved_usd, input_bytes)
+      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h, u_turn,
         (p_policy->>'inputBytes')::int)
       RETURNING * INTO t;
     UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id;
@@ -117,7 +150,7 @@ BEGIN
   -- 6. What the turn's prompt needs from the account, read here instead of in more round trips: the reply language and, for a
   -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it).
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
-    'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history,
+    'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history, 'resumeOf', t.resume_of,
     'replyLanguage', prof.reply_language,
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),

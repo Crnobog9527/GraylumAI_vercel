@@ -36,7 +36,7 @@ const record=(a,turn,seq,{n=0.01}={})=>
 const close=(a,turn,kind='completed')=>one("select turn_close($1,$2,$3,'[]',false,false,null) v",[a.actor,turn,kind]);
 const claim=(limit=50,client=c)=>one('select turn_recovery_claim($1) v',[limit],client);
 const recover=(a,turn,action,client=c)=>one('select turn_recover($1,$2,$3) v',[a.actor,turn,action],client);
-const turn=(a,id)=>c.query('select state,close_kind,failure_code,charged_credits,settlement,resume_of,recovery_lease_until from turns where actor_id=$1 and id=$2',
+const turn=(a,id)=>c.query('select state,close_kind,failure_code,charged_credits,settlement,resume_of::int resume_of,recovery_lease_until from turns where actor_id=$1 and id=$2',
  [a.actor,id]).then(r=>r.rows[0]);
 const age=(a,id,interval)=>c.query(`update turns set updated_at=now()-interval '${interval}' where actor_id=$1 and id=$2`,[a.actor,id]);
 const balance=a=>one('select credits v from profiles where id=$1',[a.actor]);
@@ -190,12 +190,12 @@ try{
   await c.query('update profiles set credits=credits+100 where id=$1',[p.a.actor]);
   assert.match(await refusal(resumed({limits:{model:3,paidTools:1,freeTools:1}})),/TURN_POLICY_INVALID/);
   assert.match(await refusal(resumed({},randomUUID()).then(()=>open(p.a))),/TURN_SESSION_BUSY/,'a plain open while resuming is busy');
-  const r=(await c.query("select id from turns where actor_id=$1 and resume_of=$2",[p.a.actor,p.id])).rows[0].id;
+  const r=(await c.query("select id::int id from turns where actor_id=$1 and resume_of=$2",[p.a.actor,p.id])).rows[0].id;
   // The paused segment: N = ceil(100 x 0.02 x 6) = 12 charged, 18 back; the new turn freezes min(60, 100 + 18) = 60.
   assert.deepEqual(await turn(p.a,p.id).then(t=>[t.state,t.close_kind,t.failure_code,t.charged_credits]),['closed','interrupted','resumed',12]);
   assert.deepEqual(await turn(p.a,r).then(t=>[t.state,t.resume_of]),['running',p.id]);
   assert.equal(await balance(p.a),58);assert.equal(await spends(p.a),12);
-  assert.equal(await one('select active_turn_id v from runtime_sessions where id=$1',[p.a.session]),r);
+  assert.equal(await one('select active_turn_id::int v from runtime_sessions where id=$1',[p.a.session]),r);
   assert.match(await refusal(resumed()),/TURN_RESUME_DENIED/,'a closed turn cannot be resumed again');
   // The resumed turn continues and closes normally: the work is charged once across both turns.
   await begin(p.a,r,1);await record(p.a,r,1);
