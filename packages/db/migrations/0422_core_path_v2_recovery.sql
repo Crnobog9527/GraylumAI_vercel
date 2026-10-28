@@ -284,7 +284,10 @@ BEGIN
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
-        AND r.closed_at > now() - interval '24 hours')) END);
+        AND r.closed_at > now() - interval '24 hours')) END,
+    -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
+    'kindContext', NULL::jsonb);
 END $function$;
 
 DO $$
