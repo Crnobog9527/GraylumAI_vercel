@@ -217,6 +217,18 @@ it('RUNTIME: CORE-PATH-V2 V2-6: read_source reads the user\'s own library once, 
   expect(own).toEqual(['rpc/turn_open', 'rpc/turn_call_begin', 'rpc/turn_call_record',
     'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/library_turn_read',
     'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/turn_close']);
+  // Another account never reads this library: not by search, not by listing, not with this document's reference.
+  const other = await setup();
+  const ref = JSON.stringify([{ ref: 'doc-1', documentId: doc, version: 1 }]);
+  const steal = (query: string) => db.query('select library_turn_read($1,$2,$3,$4::jsonb) r', [other.actor, other.session, query, ref])
+    .then(r => r.rows[0].r);
+  expect(await steal('search:coffee')).toMatchObject({ kind: 'library_search', hits: [] });
+  expect(await steal('library')).toMatchObject({ kind: 'library_index', documents: [] });
+  expect(await steal('doc-1/segment-1')).toEqual({ kind: 'unavailable', reason: 'source_deleted', ref: 'doc-1' });
+  expect(await steal('doc-1')).toEqual({ kind: 'unavailable', reason: 'source_deleted', ref: 'doc-1' });
+  // Nor through someone else's conversation.
+  expect(await db.query("select library_turn_read($1,$2,'search:coffee','[]') r", [other.actor, f.session]).then(r => r.rows[0].r))
+    .toEqual({ kind: 'unavailable', reason: 'source_deleted' });
   // A deleted conversation reads nothing.
   await db.query('update runtime_sessions set content_deleted_at=now() where id=$1', [f.session]);
   const read = await db.query("select library_turn_read($1,$2,'search:coffee','[]') r", [f.actor, f.session]);

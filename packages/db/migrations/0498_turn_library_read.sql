@@ -1,9 +1,9 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-6 (number to be assigned by the controller): library_turn_read, the read_source tool of a turn on the core
+-- CORE-PATH-V2 V2-6 (placeholder number 0498; the controller assigns the real one before it is applied): library_turn_read, the read_source tool of a turn on the core
 -- path. Owner 2026-10-28 (ENGINEERING section 5 supplement, #1518): a free read tool may read the user's own material once
 -- per call in the middle of a turn, read-only, by the owner's key, without locks or writes, counted against the turn's limit.
--- So this function is STABLE: no row locks (no library_actor, no library_document_read, both of which lock), no inserts.
+-- Every query carries the caller's actor key. So this function is STABLE: no row locks (no library_actor, no library_document_read, both of which lock), no inserts.
 -- doc-N references are the turn's own: Node keeps the doc-N -> (document, version) map of this turn and passes the known
 -- references in p_refs; a listing or a search returns documents without refs and Node numbers them.
 --   ''/'library'           the first 10 ready documents (by file name)
@@ -106,15 +106,16 @@ BEGIN
  END IF;
  IF m[2] IS NULL OR m[2] = 'page' THEN
   page := coalesce(m[3]::integer, 1);
-  SELECT count(*) INTO total FROM library_document_segments WHERE document_id = d.id;
+  SELECT count(*) INTO total FROM library_document_segments WHERE document_id = d.id AND actor_id = p_actor_id;
   SELECT jsonb_build_object('kind', 'library_directory', 'ref', m[1], 'version', d.content_version, 'page', page,
     'pages', greatest(1, (total + 24) / 25), 'total', total,
     'entries', coalesce(jsonb_agg(jsonb_build_object('segment', s.ordinal + 1, 'title', left(s.title, 160), 'pageNumber', s.page_number)
       ORDER BY s.ordinal), '[]'::jsonb))
-   INTO result FROM (SELECT * FROM library_document_segments WHERE document_id = d.id ORDER BY ordinal OFFSET (page - 1) * 25 LIMIT 25) s;
+   INTO result FROM (SELECT * FROM library_document_segments WHERE document_id = d.id AND actor_id = p_actor_id
+    ORDER BY ordinal OFFSET (page - 1) * 25 LIMIT 25) s;
   RETURN result;
  END IF;
- SELECT * INTO seg FROM library_document_segments WHERE document_id = d.id AND ordinal = m[3]::integer - 1;
+ SELECT * INTO seg FROM library_document_segments WHERE document_id = d.id AND actor_id = p_actor_id AND ordinal = m[3]::integer - 1;
  IF seg.document_id IS NULL THEN RETURN jsonb_build_object('kind', 'unavailable', 'reason', 'unknown_query'); END IF;
  -- Segments are at most 8,192 bytes; heavily escaped text is shortened so the result stays bounded.
  FOREACH cap IN ARRAY ARRAY[8192, 4000, 2000] LOOP
