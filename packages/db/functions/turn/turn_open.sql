@@ -12,7 +12,7 @@ DECLARE
   s runtime_sessions; t turns; prof profiles; existing turns; prior turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
-  n_model integer; n_paid integer; n_free integer; n_decision integer;
+  n_model integer; n_paid integer; n_free integer; n_decision integer; carried integer := 0;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
@@ -35,7 +35,7 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits'] THEN
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -86,6 +86,14 @@ BEGIN
         OR coalesce((p_policy->'limits'->>'decisions')::int, 0) > coalesce((prior.policy->'limits'->>'decisions')::int, 0) - n_decision THEN
         RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
       END IF;
+      -- What the paused turn would charge now (D = min(N, H), N over its known receipts plus what it carried itself). It is not
+      -- charged there: it is carried into the turn that continues it and settled with it, once, by that turn's rule (a fixed
+      -- price stays the fixed price; an expiry refunds the whole chain).
+      SELECT least(ceil((prior.policy->>'q')::numeric * coalesce(sum(nominal_usd * multiplier)
+               FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer
+               + coalesce((prior.policy->>'carriedCredits')::int, 0), prior.reserved_credits)
+        INTO carried
+      FROM turn_calls WHERE turn_id = p_resume_of;
     END IF;
     -- The same account check as bill2_actor: active and not deleted.
     IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN
@@ -109,11 +117,11 @@ BEGIN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
     END IF;
 
-    -- The paused turn closes before the new freeze is sized: its known receipts are charged once (the work done before the
-    -- pause), the rest of its freeze comes back and counts in the balance read below. Not delivered, no messages: the turn that
-    -- continues it saves the conversation.
+    -- The paused turn closes before the new freeze is sized: its whole freeze comes back (refund_all; what it would have charged
+    -- is carried above) and counts in the balance read below. Its receipts stay its own for the stop-loss. Not delivered, no
+    -- messages: the turn that continues it saves the conversation.
     IF p_resume_of IS NOT NULL THEN
-      PERFORM public.turn_close(p_actor_id, p_resume_of, 'interrupted', '[]'::jsonb, false, false, 'resumed');
+      PERFORM public.turn_close(p_actor_id, p_resume_of, 'failed', '[]'::jsonb, false, true, 'resumed');
     END IF;
 
     -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
@@ -125,17 +133,22 @@ BEGIN
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    g := (p_policy->>'gCredits')::int;
+    -- The freeze covers the carried credits too (the continuation settles them).
+    g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     h := least(g, available);
-    IF h < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
+    -- The carried credits are held but not for this turn's calls: what is left must still reach the start threshold.
+    IF h - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;
 
-    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h);
+    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h)
+      || CASE WHEN carried > 0 THEN jsonb_build_object('carriedCredits', carried) ELSE '{}'::jsonb END;
     INSERT INTO turns (actor_id, session_id, request_id, kind, state, resume_of, policy, reserved_credits, reserved_usd, input_bytes)
-      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h, u_turn,
+      -- reserved_credits is the freeze this turn's calls may use (turn_call_begin pauses on it); the carried part is added back
+      -- at the close (turn_close), and the hold itself is the whole H (policy.heldCredits).
+      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h - carried, u_turn,
         (p_policy->>'inputBytes')::int)
       RETURNING * INTO t;
     UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id;

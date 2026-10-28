@@ -194,15 +194,17 @@ try{
   assert.match(await refusal(resumed({limits:{model:3,paidTools:1,freeTools:1}})),/TURN_POLICY_INVALID/);
   assert.match(await refusal(resumed({},randomUUID()).then(()=>open(p.a))),/TURN_SESSION_BUSY/,'a plain open while resuming is busy');
   const r=(await c.query("select id::int id from turns where actor_id=$1 and resume_of=$2",[p.a.actor,p.id])).rows[0].id;
-  // The paused segment: N = ceil(100 x 0.02 x 6) = 12 charged, 18 back; the new turn freezes min(60, 100 + 18) = 60.
-  assert.deepEqual(await turn(p.a,p.id).then(t=>[t.state,t.close_kind,t.failure_code,t.charged_credits]),['closed','interrupted','resumed',12]);
+  // The paused segment is refunded in full (30 back) and its N = ceil(100 x 0.02 x 6) = 12 is carried: the new turn holds
+  // min(60 + 12, 100 + 30) = 72, of which 60 for its own calls.
+  assert.deepEqual(await turn(p.a,p.id).then(t=>[t.state,t.close_kind,t.failure_code,t.charged_credits]),['closed','failed','resumed',0]);
   assert.deepEqual(await turn(p.a,r).then(t=>[t.state,t.resume_of]),['running',p.id]);
-  assert.equal(await balance(p.a),58);assert.equal(await spends(p.a),12);
+  assert.deepEqual(await c.query("select reserved_credits r,(policy->>'carriedCredits')::int k,(policy->>'heldCredits')::int h from turns where id=$1",[r]).then(x=>x.rows[0]),{r:60,k:12,h:72});
+  assert.equal(await balance(p.a),58);assert.equal(await spends(p.a),0,'nothing charged until the chain settles');
   assert.equal(await one('select active_turn_id::int v from runtime_sessions where id=$1',[p.a.session]),r);
   assert.match(await refusal(resumed()),/TURN_RESUME_DENIED/,'a closed turn cannot be resumed again');
-  // The resumed turn continues and closes normally: the work is charged once across both turns.
+  // The resumed turn continues and closes normally: the work is charged once across both turns (6 + carried 12).
   await begin(p.a,r,1);await record(p.a,r,1);
-  assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[p.a.actor,r])).chargedCredits,6);
+  assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[p.a.actor,r])).chargedCredits,18);
   assert.equal(await balance(p.a),112);assert.equal(await spends(p.a),18);
   // Replay of the resume request: the same turn; with another resume_of: a conflict.
   const q=await paused(),request=randomUUID();
@@ -232,7 +234,29 @@ try{
    else{assert.equal(exp.skipped,true);assert.equal(res.state,'running');assert.equal(await balance(x.a),58);}
    report.resumeExpiryRace=won;
   }finally{await p1.end();await p2.end();}
-  report.checks.push('resume after top-up: the paused turn charges its known receipt once (12) and returns the rest, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
+  // A fixed price stays the fixed price across a resume (#1519 review): 500, not 500 + what the paused segment used.
+  {
+   const f=await account(30);
+   const fp=(o={})=>policy({gCredits:600,fixedCredits:500,minCredits:10,uModelCredits:20,...o});
+   const o=await open(f,{kind:'report',pol:fp()});
+   await begin(f,o.turnId,1,{upper:0.02});await record(f,o.turnId,1,{n:0.02});
+   assert.equal((await begin(f,o.turnId,2,{upper:0.04})).paused,true);
+   await c.query('update profiles set credits=credits+1000 where id=$1',[f.actor]);
+   const n=await open(f,{kind:'report',resumeOf:o.turnId,pol:fp({limits:{model:2,paidTools:1,freeTools:1}})});
+   await begin(f,n.turnId,1);await record(f,n.turnId,1);
+   assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[f.actor,n.turnId])).chargedCredits,500);
+   assert.equal(await spends(f),500);assert.equal(await balance(f),530);
+  }
+  // The continuation paused again and expired: the whole chain is refunded (Owner 10-25), the carried part included.
+  {
+   const g=await paused();
+   await c.query('update profiles set credits=credits+100 where id=$1',[g.a.actor]);
+   const n=await open(g.a,{resumeOf:g.id,pol});
+   await c.query("update turns set state='paused',pause_reason='waiting_credits',updated_at=now()-interval '25 hours' where id=$1",[n.turnId]);
+   assert.equal((await recover(g.a,n.turnId,'expire')).chargedCredits,0);
+   assert.equal(await spends(g.a),0);assert.equal(await balance(g.a),130);
+  }
+  report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
  }
  // 6. Ordinary chat and mentor turns cannot be stopped (the old stop-round scenario, now a refusal); reports can.
  {

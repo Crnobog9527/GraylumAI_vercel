@@ -24,6 +24,10 @@
 --                       of its freeze comes back), the new turn freezes H = min(G, available) for what is left of the paused
 --                       turn's call limits (never more), and the session moves to it. Anything refused (credits still short,
 --                       stop-loss) rolls the whole resume back: the turn stays paused. Everything else in turn_open is unchanged.
+--                       The paused turn is refunded in full there and what it would charge (D = min(N, H)) is carried as
+--                       policy.carriedCredits into the new turn, frozen with it and settled by its rule: a fixed price stays the
+--                       fixed price across the chain, and an expiry of the continuation refunds the whole chain.
+--   turn_close          whole copy of 0421 plus the carried credits in N (close and settlement pass).
 -- Unknown costs past 24 hours: unchanged rules (BILL2 0.3): a model call with no final receipt is never presumed free or retried;
 -- the job keeps looking it up by provider id (every 10 minutes for a day, then every 6 hours) and a call without a provider id
 -- waits for review. A third-party tool's unknown cost is 0 to the user already at the close (#1512); its stop-loss share sits on
@@ -147,7 +151,7 @@ DECLARE
   s runtime_sessions; t turns; prof profiles; existing turns; prior turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
-  n_model integer; n_paid integer; n_free integer; n_decision integer;
+  n_model integer; n_paid integer; n_free integer; n_decision integer; carried integer := 0;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
@@ -170,7 +174,7 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits'] THEN
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -221,6 +225,14 @@ BEGIN
         OR coalesce((p_policy->'limits'->>'decisions')::int, 0) > coalesce((prior.policy->'limits'->>'decisions')::int, 0) - n_decision THEN
         RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
       END IF;
+      -- What the paused turn would charge now (D = min(N, H), N over its known receipts plus what it carried itself). It is not
+      -- charged there: it is carried into the turn that continues it and settled with it, once, by that turn's rule (a fixed
+      -- price stays the fixed price; an expiry refunds the whole chain).
+      SELECT least(ceil((prior.policy->>'q')::numeric * coalesce(sum(nominal_usd * multiplier)
+               FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer
+               + coalesce((prior.policy->>'carriedCredits')::int, 0), prior.reserved_credits)
+        INTO carried
+      FROM turn_calls WHERE turn_id = p_resume_of;
     END IF;
     -- The same account check as bill2_actor: active and not deleted.
     IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN
@@ -244,11 +256,11 @@ BEGIN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
     END IF;
 
-    -- The paused turn closes before the new freeze is sized: its known receipts are charged once (the work done before the
-    -- pause), the rest of its freeze comes back and counts in the balance read below. Not delivered, no messages: the turn that
-    -- continues it saves the conversation.
+    -- The paused turn closes before the new freeze is sized: its whole freeze comes back (refund_all; what it would have charged
+    -- is carried above) and counts in the balance read below. Its receipts stay its own for the stop-loss. Not delivered, no
+    -- messages: the turn that continues it saves the conversation.
     IF p_resume_of IS NOT NULL THEN
-      PERFORM public.turn_close(p_actor_id, p_resume_of, 'interrupted', '[]'::jsonb, false, false, 'resumed');
+      PERFORM public.turn_close(p_actor_id, p_resume_of, 'failed', '[]'::jsonb, false, true, 'resumed');
     END IF;
 
     -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
@@ -260,17 +272,22 @@ BEGIN
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    g := (p_policy->>'gCredits')::int;
+    -- The freeze covers the carried credits too (the continuation settles them).
+    g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     h := least(g, available);
-    IF h < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
+    -- The carried credits are held but not for this turn's calls: what is left must still reach the start threshold.
+    IF h - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;
 
-    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h);
+    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h)
+      || CASE WHEN carried > 0 THEN jsonb_build_object('carriedCredits', carried) ELSE '{}'::jsonb END;
     INSERT INTO turns (actor_id, session_id, request_id, kind, state, resume_of, policy, reserved_credits, reserved_usd, input_bytes)
-      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h, u_turn,
+      -- reserved_credits is the freeze this turn's calls may use (turn_call_begin pauses on it); the carried part is added back
+      -- at the close (turn_close), and the hold itself is the whole H (policy.heldCredits).
+      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h - carried, u_turn,
         (p_policy->>'inputBytes')::int)
       RETURNING * INTO t;
     UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id;
@@ -294,6 +311,145 @@ BEGIN
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
     'kindContext', NULL::jsonb);
+END $function$;
+
+-- turn_close as of 0421 (#1512/#1516), whole, with one change: the credits a resumed turn carried (policy.carriedCredits, set
+-- only by turn_open) are added to N and to H (reserved_credits leaves them out) in both the close and the settlement pass.
+CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text, p_kind_result jsonb DEFAULT NULL::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
+  v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
+  marker timestamptz;
+BEGIN
+  IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
+    RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
+  -- Lock order: session, then the turn, then the stop-loss bucket, then the profile (as turn_open: session, bucket, profile).
+  IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
+  IF t.state = 'closed' THEN
+    -- Closed with a provider cost still unknown: calling turn_close again settles what has become known since (recovery, a late
+    -- receipt). The close itself (kind, messages) is kept; each receipt is counted once, by settled_at after the last pass
+    -- (both stamped with clock_timestamp under this turn's row lock, so a receipt and a pass never miss each other).
+    IF t.settlement = 'pending' THEN
+      marker := clock_timestamp();
+      SELECT coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+             coalesce(sum(upper_usd), 0)
+        INTO n_total, pending_upper
+      FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
+      UPDATE daily_spend SET spent_usd = spent_usd + n_total, reserved_usd = greatest(reserved_usd - pending_upper, 0)
+        WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+      PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+      q := (t.policy->>'q')::numeric;
+      -- The user's base is what it was at the close plus the late model receipts: a tool whose result was unknown at the close
+      -- stays 0 to the user (2.5.2) however late its receipt comes; only its cost goes to the stop-loss above.
+      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'
+               AND NOT (call_kind = 'tool' AND settled_at > t.closed_at)), 0))::integer,
+             coalesce(bool_or(cost_pending), false), coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
+        INTO credits, pending, user_pending
+      FROM turn_calls WHERE turn_id = p_turn_id;
+      credits := credits + coalesce((t.policy->>'carriedCredits')::int, 0);
+      IF t.charged_credits IS NULL AND NOT user_pending THEN
+        charge := public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
+          coalesce((t.policy->>'closeRefundAll')::boolean, false), credits,
+          t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), (t.policy->>'fixedCredits')::int, t.closed_at);
+        IF t.policy->>'holdId' IS NOT NULL THEN
+          PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
+        END IF;
+        t.charged_credits := charge; t.absorbed_credits := greatest(credits - charge, 0);
+      END IF;
+      UPDATE turns SET charged_credits = t.charged_credits, absorbed_credits = t.absorbed_credits,
+          settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END, updated_at = marker
+        WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
+    END IF;
+    RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
+      'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', true);
+  END IF;
+  -- Only a report can be stopped by its user (Owner 10-28).
+  IF v_kind = 'stopped' AND t.kind <> 'report' THEN RAISE EXCEPTION 'TURN_STOP_NOT_ALLOWED' USING ERRCODE='42501'; END IF;
+  IF p_refund_all AND v_kind NOT IN ('failed','expired','erased') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023'; END IF;
+  -- A tombstone wins: nothing is saved and the turn closes as erased.
+  tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
+  IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
+    OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
+  -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
+  -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
+  --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
+  -- No kind has one yet, so a result is refused rather than dropped.
+  IF p_kind_result IS NOT NULL THEN
+    RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+  END IF;
+
+  -- Calls without a final receipt: their cost is unknown; it is never presumed zero and never retried (2.5.2).
+  UPDATE turn_calls SET status = 'unknown', cost_pending = true
+   WHERE turn_id = p_turn_id AND status IN ('dispatched','identified');
+  q := (t.policy->>'q')::numeric;
+  -- N = ceil(q x sum(n_i x m_i)) over the known receipts the user pays for (never the positioning check); n_total is the provider
+  -- cost of every receipt, the positioning check and the platform-paid unusable results included, which the stop-loss counts.
+  SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
+         coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+         coalesce(sum(upper_usd) FILTER (WHERE cost_pending), 0),
+         coalesce(bool_or(cost_pending), false),
+         -- Only an unknown model call holds the user's settlement: a third-party tool whose result is unknown is 0 to the user
+         -- (Owner 10-13, plan 2.5.2) and the positioning check is never theirs; both keep only the provider cost pending.
+         coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
+    INTO credits, n_total, pending_upper, pending, user_pending
+  FROM turn_calls WHERE turn_id = p_turn_id;
+  -- Credits a resumed turn carried from the turn it continues (V2-8): settled here, once, under this turn's rule.
+  credits := credits + coalesce((t.policy->>'carriedCredits')::int, 0);
+  -- H: the whole hold, the carried credits included (reserved_credits leaves them out for the calls' own checks).
+  h := t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0);
+
+  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
+  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
+      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
+    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+  -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+
+  -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
+  -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a
+  -- concurrent close of the same actor that committed first is always before it, and a later settlement counts the same.
+  marker := clock_timestamp();
+  charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
+    (t.policy->>'fixedCredits')::int, marker);
+
+  -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
+  -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
+  -- settlement of the same freeze returns the first one.
+  IF NOT user_pending AND t.policy->>'holdId' IS NOT NULL THEN
+    PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
+  END IF;
+
+  -- The messages of a delivered turn, appended in order.
+  IF v_kind IN ('completed','stopped') AND t.session_id IS NOT NULL AND jsonb_typeof(p_messages) = 'array' THEN
+    SELECT coalesce(max(seq), 0) INTO next_seq FROM session_messages WHERE session_id = t.session_id;
+    FOR msg IN SELECT value FROM jsonb_array_elements(p_messages) LOOP
+      next_seq := next_seq + 1;
+      INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash)
+        VALUES (t.session_id, next_seq, msg->>'role', p_turn_id, msg->>'content', encode(sha256(convert_to(msg->>'content', 'UTF8')), 'hex'));
+    END LOOP;
+  END IF;
+
+  -- updated_at marks this settlement pass (see the closed branch above); a full refund still owed is kept with the turn.
+  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = marker, updated_at = marker,
+      policy = CASE WHEN user_pending AND p_refund_all THEN policy || '{"closeRefundAll": true}'::jsonb ELSE policy END,
+      charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
+      absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,
+      settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END,
+      stopped_by_user = (v_kind = 'stopped'), delivered = p_delivered AND v_kind IN ('completed','stopped'),
+      failure_code = p_failure_code
+    WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
+  IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
+  RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
+    'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false) || tomb;
 END $function$;
 
 DO $$
