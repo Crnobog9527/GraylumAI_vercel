@@ -11,11 +11,11 @@ AS $function$
 DECLARE s runtime_sessions; deleted boolean; scope jsonb; ids uuid[]; refs uuid[]; local boolean; stamp timestamptz; unbound boolean;
 BEGIN
  PERFORM bill2_actor(a);
- -- Same order as content_erasure_confirm (profile, then session). A short wait instead of
- -- NOWAIT lets a reply commit that holds this session for a moment finish first.
+ -- Lock order: the session, its executions, then the account row (share) - the order the reply writers take them
+ -- (runtime_admit: session, then the profile in bill2_prepare; turn_close: session, turn, profile), so a deletion that
+ -- waits never holds a lock a closing reply needs next (CORE-PATH-V2 V2-9; the account row came first before). A short
+ -- wait instead of NOWAIT lets a reply commit that holds this session for a moment finish first.
  PERFORM set_config('lock_timeout','2000',true);
- PERFORM id FROM profiles WHERE id=a FOR SHARE;
- PERFORM bill2_actor(a);
  SELECT * INTO s FROM runtime_sessions WHERE id=target AND actor_id=a FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
  deleted:=s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL;
@@ -28,6 +28,9 @@ BEGIN
  -- rows here serializes them with the marker: a copy committed first is visible to the checks
  -- below and cleaned now; a writer that waits sees the committed marker and is refused.
  PERFORM id FROM runtime_executions WHERE session_id=target AND actor_id=a ORDER BY id FOR UPDATE;
+ -- Serialized with an account erasure confirming (it locks the account row) and re-checked under that lock.
+ PERFORM id FROM profiles WHERE id=a FOR SHARE;
+ PERFORM bill2_actor(a);
  -- Read-only scope (no account-wide locks). The marker alone is enough only when nothing outside
  -- this conversation holds a copy: a free conversation (no work, draft or topic binding), every scoped
  -- execution in it, no saved content, work, data event, result link, captured field, library
@@ -61,6 +64,9 @@ BEGIN
    WHERE o.actor_id=a AND m.session_id<>target AND m.erased_at IS NULL
     AND (content_erasure_references(m.request,refs) OR content_erasure_references(m.content,refs)));
  UPDATE runtime_sessions SET content_deleted_at=clock_timestamp() WHERE id=target RETURNING content_deleted_at INTO stamp;
+ -- CORE-PATH-V2: the conversation's messages leave the visible history now (one indexed update, still under the session
+ -- lock turn_close appends under); their text is cleared with the rest of the conversation by content_erasure_confirm.
+ UPDATE session_messages SET visible=false,deleted_at=stamp WHERE session_id=target AND (visible OR deleted_at IS NULL);
  -- Off-database erasure manifest (0227): recorded at the marker's time, in the same transaction;
  -- the later cleanup's own note keeps this first time.
  PERFORM erasure_manifest_note('session',target,a,stamp);
