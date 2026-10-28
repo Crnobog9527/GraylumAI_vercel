@@ -10,7 +10,8 @@
 // makes it). The credentials of the created accounts are written only to --out (mode 0600), which must live outside the repository.
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { dirname, join, resolve, relative, isAbsolute, sep, basename } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export function emailFor(template, n) {
@@ -24,9 +25,16 @@ export function assertStaging(url, allowedHost) {
   return host;
 }
 
-export function assertOutsideRepo(file, repo = process.cwd()) {
-  const rel = relative(repo, resolve(file));
-  if (!rel.startsWith('..') && !isAbsolute(rel)) throw new Error('--out must be outside the repository');
+// The repository root comes from this script's own location, never from the working directory; symlinks in the target's folder are
+// resolved, and "outside" means a whole parent path segment (".." or "../x"), not a name that merely starts with two dots.
+const REPO = resolve(import.meta.dirname, '../..');
+export function assertOutsideRepo(file, repo = REPO) {
+  const folder = resolve(dirname(file));
+  let real = folder;
+  try { real = realpathSync(folder); } catch { /* a folder that does not exist yet is judged by its written path */ }
+  const rel = relative(realpathSync(repo), join(real, basename(file)));
+  const outside = rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+  if (!outside) throw new Error('--out must be outside the repository');
 }
 
 export async function resetAccounts({ env = process.env, fetchImpl = fetch, from, count, out, banPrevious, log = console.log }) {

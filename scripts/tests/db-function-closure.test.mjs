@@ -10,6 +10,9 @@ const fn = (name, body) => `CREATE OR REPLACE FUNCTION public.${name}()\n RETURN
 function repo(files, tables = ['profiles', 'turns', 'runtime_sessions', 'turn_calls', 'daily_spend', 'catalog_versions', 'secret_things', 'a_t', 'b_t']) {
   const root = mkdtempSync(join(tmpdir(), 'closure-'));
   mkdirSync(join(root, 'packages/db/migrations'), { recursive: true });
+  mkdirSync(join(root, 'packages/db/baseline'), { recursive: true });
+  writeFileSync(join(root, 'packages/db/baseline/0000_core_prerequisites.sql'),
+    'CREATE TABLE IF NOT EXISTS public.profiles(id uuid);\nCREATE TABLE public.credit_transactions(id int);');
   writeFileSync(join(root, 'packages/db/migrations/0001.sql'), tables.map(t => `CREATE TABLE public.${t}(id int);`).join('\n'));
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(join(root, 'packages/db/functions', path, '..'), { recursive: true });
@@ -29,9 +32,10 @@ test('closure counts reachable functions and tables and does not enter ledger le
     'other/helper_b.sql': fn('helper_b', 'SELECT 1 FROM b_t;'),
     'billing/atomic_pre_deduct.sql': fn('atomic_pre_deduct', 'SELECT 1 FROM secret_things;'),
   });
-  const c = closure('turn_open', readFunctions(join(root, 'packages/db/functions')), readTables(join(root, 'packages/db/migrations')));
+  const c = closure('turn_open', readFunctions(join(root, 'packages/db/functions')),
+    readTables(join(root, 'packages/db/baseline'), join(root, 'packages/db/migrations')));
   assert.deepEqual(c.functions, ['atomic_pre_deduct', 'helper_a', 'helper_b', 'turn_open']);
-  assert.deepEqual(c.tables, ['a_t', 'b_t', 'profiles'], 'the leaf\'s own table is not reached');
+  assert.deepEqual(c.tables, ['a_t', 'b_t', 'profiles'], 'the leaf\'s own table is not reached; profiles comes from the baseline file');
 });
 
 test('rules: row locks, UPDATE targets and keys, session state, temporary tables', () => {
@@ -43,6 +47,12 @@ test('rules: row locks, UPDATE targets and keys, session state, temporary tables
   assert.deepEqual(bad('UPDATE turns SET state=1 WHERE actor_id=a AND id=b;'), []);
   assert.deepEqual(bad('UPDATE turns SET state=1;'), ['f: UPDATE of turns without actor_id or id in WHERE']);
   assert.deepEqual(bad('UPDATE secret_things SET x=1 WHERE id=1;'), ['f: UPDATE of secret_things']);
+  // The UPDATE may open a control block and its alias may omit AS.
+  assert.deepEqual(bad('BEGIN\n UPDATE secret_things s SET x=1; END;'), ['f: UPDATE of secret_things']);
+  assert.deepEqual(bad('IF a THEN UPDATE turns t SET state=1 WHERE t.id=b; END IF;'), []);
+  assert.deepEqual(bad('IF a THEN UPDATE turns t SET state=1; END IF;'), ['f: UPDATE of turns without actor_id or id in WHERE']);
+  assert.deepEqual(bad('ELSE UPDATE secret_things AS s SET x=1; END IF;'), ['f: UPDATE of secret_things']);
+  assert.deepEqual(bad('INSERT INTO turns(id) VALUES(1) ON CONFLICT (id) DO UPDATE SET state=1;'), [], 'DO UPDATE SET names no table');
   assert.deepEqual(bad('UPDATE daily_spend SET spent=spent+1 WHERE day=d AND bucket=b;'), []);
   assert.deepEqual(bad("PERFORM pg_advisory_xact_lock(1);"), ['f: advisory lock']);
   assert.deepEqual(bad("PERFORM pg_advisory_lock(1);"), ['f: advisory lock']);

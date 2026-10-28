@@ -5,6 +5,10 @@ import { mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertOutsideRepo, assertStaging, emailFor, resetAccounts } from '../loadtest/reset-accounts.mjs';
+import { symlinkSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const REPO = resolve(import.meta.dirname, '../..');
 
 const env = { SUPABASE_URL: 'https://staging.example.invalid', SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_fixture',
   LOADTEST_ALLOWED_HOST: 'staging.example.invalid', LOADTEST_EMAIL_TEMPLATE: 'load{n}@example.test' };
@@ -14,8 +18,26 @@ test('templates, host allow-list and output location are enforced', () => {
   assert.throws(() => emailFor('nope@x.test', 1), /needs \{n\}/);
   assert.throws(() => assertStaging('https://other.example.invalid', 'staging.example.invalid'), /refusing/);
   assert.throws(() => assertStaging('https://staging.example.invalid', undefined), /refusing/);
-  assert.throws(() => assertOutsideRepo(join(process.cwd(), 'accounts.json')), /outside the repository/);
+  assert.throws(() => assertOutsideRepo(join(REPO, 'accounts.json')), /outside the repository/);
   assert.doesNotThrow(() => assertOutsideRepo(join(tmpdir(), 'accounts.json')));
+});
+
+test('the repository is found from the script, not from the working directory, and a leading ".." in a name is not "outside"', () => {
+  const before = process.cwd();
+  try {
+    process.chdir(join(REPO, 'scripts'));
+    assert.throws(() => assertOutsideRepo('../accounts.json'), /outside the repository/, 'from scripts/, ../accounts.json is the repository root');
+    assert.throws(() => assertOutsideRepo(join(REPO, '..accounts.json')), /outside the repository/, '"..accounts.json" is a file inside the repository');
+    process.chdir(tmpdir());
+    assert.throws(() => assertOutsideRepo(join(REPO, 'scripts', 'x.json')), /outside the repository/);
+    assert.doesNotThrow(() => assertOutsideRepo(join(REPO, '..', 'elsewhere.json')));
+  } finally { process.chdir(before); }
+});
+
+test('a symlinked folder that points into the repository does not make the output "outside"', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'link-'));
+  symlinkSync(join(REPO, 'scripts'), join(dir, 'inside'));
+  assert.throws(() => assertOutsideRepo(join(dir, 'inside', 'accounts.json')), /outside the repository/);
 });
 
 test('creates the requested accounts, bans the previous batch and writes credentials only to the 0600 file', async () => {

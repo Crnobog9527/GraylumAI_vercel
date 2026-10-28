@@ -66,9 +66,10 @@ export function readFunctions(functionsDir) {
   return functions;
 }
 
-export function readTables(migrationsDir) {
+// Tables of an empty database: the baseline prerequisites (profiles, credit_transactions, ai_models, system_settings ...) and the migrations.
+export function readTables(...dirs) {
   const tables = new Set();
-  for (const file of sqlFiles(migrationsDir)) {
+  for (const file of dirs.flatMap(dir => [...sqlFiles(dir)])) {
     for (const m of readFileSync(file, 'utf8').matchAll(/CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?/gi))
       tables.add(m[1].toLowerCase());
   }
@@ -132,8 +133,12 @@ export function scan(name, body, options = DEFAULTS) {
       const targets = named ? named.map(n => from.find(f => f.alias === n || f.table === n)?.table ?? n) : from.map(f => f.table);
       for (const table of targets.length ? targets : ['?']) if (!options.lockTables.includes(table)) found.push(`${name}: row lock on ${table}`);
     }
-    const update = /^\s*(?:WITH\b[\s\S]*?\)\s*)?UPDATE\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?/i.exec(statement)
-      ?? /\bUPDATE\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?\s+(?:AS\s+[a-z_]+\s+)?SET\b/i.exec(statement);
+    // UPDATE <table> [[AS] alias] SET, anywhere in the statement: it may follow BEGIN, THEN, ELSE or a WITH list. FOR UPDATE, ON UPDATE
+    // and DO UPDATE SET are not an UPDATE of a table.
+    const updateStatement = new RegExp(
+      '(?<!\\bFOR\\s)(?<!\\bON\\s)(?<!\\bDO\\s)\\bUPDATE\\s+(?:ONLY\\s+)?(?:public\\.)?"?([a-z_][a-z0-9_]*)"?'
+      + '(?:\\s+(?:AS\\s+)?[a-z_][a-z0-9_]*)?\\s+SET\\b', 'i');
+    const update = updateStatement.exec(statement);
     if (update) {
       const table = update[1].toLowerCase();
       const keys = options.updateKeys[table];
@@ -146,9 +151,10 @@ export function scan(name, body, options = DEFAULTS) {
 }
 
 export function analyze({ root = process.cwd(), functionsDir = 'packages/db/functions', migrationsDir = 'packages/db/migrations',
+  baselineDir = 'packages/db/baseline',
   roots = [], enforceDir = DEFAULTS.enforceDir, options = DEFAULTS } = {}) {
   const functions = readFunctions(join(root, functionsDir));
-  const tables = readTables(join(root, migrationsDir));
+  const tables = readTables(join(root, baselineDir), join(root, migrationsDir));
   const enforceAbs = join(root, enforceDir) + sep;
   const enforced = new Map([...functions].filter(([, defs]) => defs.some(d => d.file.startsWith(enforceAbs))));
   const result = { functions: functions.size, tables: tables.size, enforcedDirPresent: existsSync(join(root, enforceDir)), roots: {}, violations: [] };
