@@ -24,7 +24,7 @@ if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connecti
   throw new Error('isolated runner required');
 const db = new pg.Client({ connectionString });
 const MODEL = 'anthropic/claude-sonnet-5.5', ROUTE = 'anthropic';
-const slots: CounterStore = { incr: async () => 1, decr: async () => 0 };
+const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
 const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, 'primary_model_id', 'billing_credits_per_usd', 'billing_token_price_multiplier',
   'runtime_rw_v2'];
 let saved: Array<{ key: string; value: unknown }> = [];

@@ -19,7 +19,7 @@ const completion = (id: string) => JSON.stringify({ id, object: 'chat.completion
   choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14, cost: '0.003' } });
 const quiet = { sessionTombstoned: false, accountErasing: false, voiceSourceRevoked: false };
-const slots: CounterStore = { incr: async () => 1, decr: async () => 0 };
+const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
 
 function harness(over: { begin?: (seq: number) => Record<string, unknown> } = {}) {
   const writes: Array<[string, Record<string, unknown>]> = [];
@@ -108,8 +108,8 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
   });
   it('no concurrency slot (busy or the counter down) closes the row as certainly unsent, never as unknown', async () => {
     for (const [store, code] of [
-      [{ incr: async () => { throw new Error('redis down'); }, decr: async () => 0 }, 'TURN_PROVIDER_LIMIT_UNAVAILABLE'],
-      [{ incr: async () => 99, decr: async () => 98 }, 'TURN_PROVIDER_BUSY'],
+      [{ take: async () => { throw new Error('redis down'); }, drop: async () => undefined }, 'TURN_PROVIDER_LIMIT_UNAVAILABLE'],
+      [{ take: async () => 99, drop: async () => undefined }, 'TURN_PROVIDER_BUSY'],
     ] as const) {
       let t = 0;
       const h = harness(), transport = vi.fn();
