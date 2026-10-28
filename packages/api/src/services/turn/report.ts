@@ -45,6 +45,9 @@ export const reportTurnRequest = z.object({
 export type ReportInput = Omit<z.infer<typeof reportTurnRequest>, 'kind'> & { actorId: string };
 
 const OPEN_CODES = /^(REPORT_[A-Z_]+|TURN_[A-Z_]+|STOP_LOSS_REACHED)$/;
+/** What turn_open's report branch returns (its kindContext): the confirmed source and benchmark table, read under its locks. */
+const reportContext = z.object({ frozen: z.record(z.string(), z.unknown()),
+  source: z.object({ snapshot: z.unknown(), workflow: z.unknown(), snapshotHash: z.string() }).passthrough(), benchmarks: z.unknown() });
 
 /** The fixed price on the catalog (the database checks the same row when it opens the turn). */
 async function reportPrice(admin: ChatDeps['admin']): Promise<number> {
@@ -117,8 +120,9 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   try {
     // 3. The prompt: the Skill text (site-wide per package) then the report's own instructions with the confirmed facts and the
     // benchmark table that turn_open read under its locks.
-    const report = opened.report;
-    if (!report) throw new Error('REPORT_SOURCE_CONFLICT');
+    const parsed = reportContext.safeParse(opened.kindContext);
+    if (!parsed.success) throw new Error('REPORT_SOURCE_CONFLICT');
+    const report = parsed.data;
     const snapshot = snapshotSchema.parse(report.source.snapshot);
     const manifest = workflowSchema.parse(report.source.workflow).reportGeneration;
     if (!manifest) throw new Error('REPORT_MANIFEST_REQUIRED');

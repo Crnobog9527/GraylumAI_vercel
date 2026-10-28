@@ -46,13 +46,13 @@ export async function reportCases(t){
   // Admitted: the whole 500 + the call bound is frozen; the frozen identity, the source and the benchmark table come back.
   const o=await openReport(a,src);
   assert.deepEqual([o.reservedCredits,o.history,await balance(a)],[530,[],470]);
-  assert.equal(o.report.frozen.roundId,src.round);assert.equal(o.report.frozen.moduleId,src.module);
-  assert.match(o.report.frozen.snapshotHash,/^[0-9a-f]{64}$/);
-  assert.deepEqual(o.report.frozen.sections,['One','Two']);
-  assert.equal(o.report.benchmarks.rows.length,3);
-  assert.equal(o.report.source.snapshot.steps.s.body,'CONFIRMED_FACTS');
+  assert.equal(o.kindContext.frozen.roundId,src.round);assert.equal(o.kindContext.frozen.moduleId,src.module);
+  assert.match(o.kindContext.frozen.snapshotHash,/^[0-9a-f]{64}$/);
+  assert.deepEqual(o.kindContext.frozen.sections,['One','Two']);
+  assert.equal(o.kindContext.benchmarks.rows.length,3);
+  assert.equal(o.kindContext.source.snapshot.steps.s.body,'CONFIRMED_FACTS');
   const policy=await one('select policy v from turns where id=$1',[o.turnId]);
-  assert.deepEqual([policy.bucket,policy.fixedCredits,policy.report.snapshotHash],[-1,500,o.report.frozen.snapshotHash],
+  assert.deepEqual([policy.bucket,policy.fixedCredits,policy.report.snapshotHash],[-1,500,o.kindContext.frozen.snapshotHash],
    'a report reserves the large-kind stop-loss row and freezes its identity');
   await close(a,o.turnId,'failed',{messages:[],delivered:false});
   assert.equal(await balance(a),1000);

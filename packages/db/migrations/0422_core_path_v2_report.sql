@@ -5,7 +5,8 @@
 --   turn_report_admit  inside turn_open, for a new report: the switch, the fixed price the button showed is today's price, the
 --                      one-call shape, membership, the confirmed source (report_source), an active module, the benchmark gate
 --                      and one paid report per round; returns the frozen report identity, the source and the benchmark table
---   turn_open          the report branch above (whole function, otherwise unchanged)
+--   turn_open          the report branch above, returned as its kindContext (the 0421 per-kind hook; whole function,
+--                      otherwise unchanged)
 --   turn_stop          the user's stop of a running report: within 24 hours the first two are free, from the third the stop
 --                      waits for the user's confirmation and then charges what was generated (at most the fixed price); the
 --                      decision is frozen on the turn, so the close charges what the user was told; state -> stopping
@@ -13,9 +14,7 @@
 --                      the run ended, its saved text cut to what the user saw; a stop charges its frozen decision; a report
 --                      that is not complete or stopped pays nothing (failed, interrupted, expired, erased: Owner 10-17); every
 --                      report except a charged stop settles the user at once even while the provider cost is unknown; a
---                      report's text is stored hidden from the conversation history (visible=false), found by its turn;
---                      and (all kinds) the close's moment is read under the account lock, so two stops closing at once count
---                      each other (0421 compared against the transaction's start time and could miss the other close)
+--                      report's text is stored hidden from the conversation history (visible=false), found by its turn
 --   turn_report_read   the report turn of a round (or one turn): state, close, charge, stop decision and the saved text
 -- Compatibility: nothing calls kind=report until the page switches (V2-10); the old report path is untouched.
 -- Repeatable: CREATE OR REPLACE throughout. Recovery: re-apply 0421's turn_open and turn_close, drop the three new functions.
@@ -202,8 +201,7 @@ BEGIN
         WHERE session_id = p_session_id AND visible AND deleted_at IS NULL
         ORDER BY seq DESC LIMIT (t.policy->>'historyItems')::int) m;
   -- 6. What the turn's prompt needs from the account, read here instead of in more round trips: the reply language and, for a
-  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it); for a new
-  -- report, its frozen identity, confirmed source and benchmark table (a replay runs nothing, so it gets none).
+  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it).
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
     'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history,
     'replyLanguage', prof.reply_language,
@@ -211,8 +209,10 @@ BEGIN
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')) END,
-    'report', CASE WHEN report IS NULL THEN NULL
-      ELSE jsonb_build_object('frozen', report->'frozen', 'source', report->'source', 'benchmarks', report->'benchmarks') END);
+    -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END). A new report: its frozen identity, confirmed source
+    -- and benchmark table, read under the open's locks (a replay runs nothing, so it gets none).
+    'kindContext', CASE WHEN p_kind = 'report' THEN report END);
 END $function$;
 
 -- The user's stop of a running report (Owner 10-27, 10-28). Lock order as turn_close: session, turn, account.
@@ -252,7 +252,7 @@ BEGIN
     'chargeable', n >= 2, 'replay', false);
 END $function$;
 
-CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text)
+CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text, p_kind_result jsonb DEFAULT NULL::jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -285,7 +285,10 @@ BEGIN
         WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
       PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
       q := (t.policy->>'q')::numeric;
-      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
+      -- The user's base is what it was at the close plus the late model receipts: a tool whose result was unknown at the close
+      -- stays 0 to the user (2.5.2) however late its receipt comes; only its cost goes to the stop-loss above.
+      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'
+               AND NOT (call_kind = 'tool' AND settled_at > t.closed_at)), 0))::integer,
              coalesce(bool_or(cost_pending), false), coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
         INTO credits, pending, user_pending
       FROM turn_calls WHERE turn_id = p_turn_id;
@@ -319,6 +322,13 @@ BEGIN
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
     OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
+  -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
+  -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
+  --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
+  -- No kind has one yet, so a result is refused rather than dropped.
+  IF p_kind_result IS NOT NULL THEN
+    RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+  END IF;
 
   -- Calls without a final receipt: their cost is unknown; it is never presumed zero and never retried (2.5.2).
   UPDATE turn_calls SET status = 'unknown', cost_pending = true
@@ -336,25 +346,25 @@ BEGIN
     INTO credits, n_total, pending_upper, pending, user_pending
   FROM turn_calls WHERE turn_id = p_turn_id;
   h := t.reserved_credits;
+
+  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
+  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
+      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
+    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
   -- A report's charge depends on its provider cost only for a charged stop (Owner 10-17: complete pays the fixed price, failed,
   -- cut off, interrupted or deleted pays nothing; 10-27: a free stop pays nothing): every other report settles the user now,
   -- even while the provider cost is unknown; only the platform's cost and the stop-loss wait for recovery.
   IF t.kind = 'report' AND NOT (v_kind = 'stopped' AND coalesce((t.policy->>'stopChargeable')::boolean, true)) THEN
     user_pending := false;
   END IF;
-
-  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
-  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
-      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
-    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
   -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
   PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
-  -- The close's moment, read under the account lock: another close of this account that held the lock has committed its
-  -- closed_at before it, so the 24-hour stop count sees it (now() is this transaction's start and could be earlier, #1512 race).
-  marker := clock_timestamp();
 
-  -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules); a user stop pays what turn_stop said;
-  -- a report that is neither complete nor stopped pays nothing.
+  -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
+  -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a
+  -- concurrent close of the same actor that committed first is always before it, and a later settlement counts the same.
+  marker := clock_timestamp();
+  -- A user stop pays what turn_stop told the user; a report that is neither complete nor stopped pays nothing.
   charge := CASE WHEN t.kind = 'report' AND v_kind NOT IN ('completed','stopped') THEN 0
     WHEN v_kind = 'stopped' AND t.policy ? 'stopChargeable'
     THEN CASE WHEN (t.policy->>'stopChargeable')::boolean THEN least(credits, h, coalesce((t.policy->>'fixedCredits')::int, h)) ELSE 0 END
@@ -383,13 +393,12 @@ BEGIN
   END IF;
 
   -- updated_at marks this settlement pass (see the closed branch above); a full refund still owed is kept with the turn.
-  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = marker, updated_at = clock_timestamp(),
+  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = marker, updated_at = marker,
       policy = CASE WHEN user_pending AND p_refund_all THEN policy || '{"closeRefundAll": true}'::jsonb ELSE policy END,
       charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
       absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,
       settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END,
-      -- A stopped report is never a delivered (complete) report.
-      stopped_by_user = (v_kind = 'stopped'), delivered = p_delivered AND v_kind = 'completed',
+      stopped_by_user = (v_kind = 'stopped'), delivered = p_delivered AND v_kind = 'completed', -- a stopped report is never a complete one
       failure_code = p_failure_code
     WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
   IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
@@ -431,14 +440,14 @@ DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
     'turn_report_admit(uuid,uuid,jsonb)', 'turn_open(uuid,uuid,uuid,text,jsonb,bigint)',
-    'turn_stop(uuid,bigint,boolean,integer)', 'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text)',
+    'turn_stop(uuid,bigint,boolean,integer)', 'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)',
     'turn_report_read(uuid,uuid,uuid,bigint)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
   END LOOP;
   -- turn_report_admit stays internal (turn_open's report branch).
   FOREACH f IN ARRAY ARRAY[
     'turn_open(uuid,uuid,uuid,text,jsonb,bigint)', 'turn_stop(uuid,bigint,boolean,integer)',
-    'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text)', 'turn_report_read(uuid,uuid,uuid,bigint)'] LOOP
+    'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)', 'turn_report_read(uuid,uuid,uuid,bigint)'] LOOP
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;
 END $$;

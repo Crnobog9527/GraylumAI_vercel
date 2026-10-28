@@ -119,8 +119,7 @@ BEGIN
         WHERE session_id = p_session_id AND visible AND deleted_at IS NULL
         ORDER BY seq DESC LIMIT (t.policy->>'historyItems')::int) m;
   -- 6. What the turn's prompt needs from the account, read here instead of in more round trips: the reply language and, for a
-  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it); for a new
-  -- report, its frozen identity, confirmed source and benchmark table (a replay runs nothing, so it gets none).
+  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it).
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
     'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history,
     'replyLanguage', prof.reply_language,
@@ -128,6 +127,8 @@ BEGIN
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')) END,
-    'report', CASE WHEN report IS NULL THEN NULL
-      ELSE jsonb_build_object('frozen', report->'frozen', 'source', report->'source', 'benchmarks', report->'benchmarks') END);
+    -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END). A new report: its frozen identity, confirmed source
+    -- and benchmark table, read under the open's locks (a replay runs nothing, so it gets none).
+    'kindContext', CASE WHEN p_kind = 'report' THEN report END);
 END $function$;
