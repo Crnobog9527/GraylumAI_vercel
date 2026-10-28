@@ -64,10 +64,11 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
 export function mentorPolicy(catalog: MentorCatalog, input: { opening: boolean; stepId: string; moduleId: string }) {
   const { mentor, organizer } = catalog;
   const freeTools = input.opening ? 0 : 1;
-  return turnPolicy({ q: mentor.q, multiplier: mentor.multiplier, modelUpperUsd: mentor.upperUsd,
+  // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).
+  return { ...turnPolicy({ q: mentor.q, multiplier: mentor.multiplier, modelUpperUsd: mentor.upperUsd,
     limits: { model: 1 + freeTools + (organizer ? 1 : 0), paidTools: 0, freeTools, decisions: 0 },
     otherModelCalls: organizer ? [{ upperUsd: organizer.upperUsd, multiplier: organizer.multiplier }] : [],
     stopLoss: catalog.config.stopLoss, historyItems: HISTORY_ITEMS, inputBytes: mentor.inputLimit,
-    frozen: { modelId: mentor.modelId, model: mentor.model, ...(organizer ? { organizerModelId: organizer.modelId } : {}),
-      mentorModuleId: input.moduleId, mentorStepId: input.stepId } });
+    frozen: { modelId: mentor.modelId, model: mentor.model, ...(organizer ? { organizerModelId: organizer.modelId } : {}) } }),
+  mentor: { moduleId: input.moduleId, stepId: input.stepId } };
 }

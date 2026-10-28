@@ -15,26 +15,24 @@
 --                        copied unchanged; the turn's request id stands where the execution id stood (field provenance,
 --                        suggestion order, the idempotent artifact_requests row), so opc_information and the protection
 --                        checks that read artifact_requests keep working on both paths.
---   turn_open            unchanged except one more key in what it returns: kindContext (the mentor context for kind mentor).
---   turn_close           one more parameter, p_kind_result jsonb DEFAULT NULL (the organizer result of a mentor turn), and
---                        its capture response under kindResult. Kind-specific close work goes in its own function, one line
---                        per kind here.
+--   turn_open            0421 with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
+--   turn_close           0421 with the mentor branch of its per-kind hook (turn_mentor_apply on p_kind_result), and the
+--                        capture response returned under kindResult.
 -- Locks: turn_mentor_context takes none. turn_mentor_apply locks the draft's artifact_projects row (the lock opc_information,
 -- opc_capture_apply and opc_capture_resolve take for the same round), after turn_close's session, turn, bucket and profile.
--- Compatibility: turn_close keeps its seven leading parameters (callers pass seven positional arguments and still work); turn_open
--- only adds a key. Nothing calls the mentor kind until core_path_v2 is enabled and the page uses /api/turn (V2-10).
--- Repeatable: CREATE OR REPLACE throughout; the old turn_close signature is dropped only if present.
+-- Compatibility: no signature changes; turn_open and turn_close only gain the mentor branches and a returned key. Nothing calls
+-- the mentor kind until core_path_v2 is enabled and the page uses /api/turn (V2-10). Repeatable: CREATE OR REPLACE throughout.
 -- Recovery: re-apply 0421's turn_open and turn_close and drop the two mentor functions; no stored data depends on them.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
-CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session_id uuid, p_policy jsonb)
+CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session_id uuid, p_mentor jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_policy->>'mentorStepId';
+DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
   business uuid;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
@@ -50,7 +48,7 @@ BEGIN
     RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501';
   END IF;
   -- The turn was quoted for this module's model: any other module is refused.
-  IF p.module_id::text IS DISTINCT FROM p_policy->>'mentorModuleId' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
+  IF p.module_id::text IS DISTINCT FROM p_mentor->>'moduleId' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
   SELECT x INTO spec FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id' = v_step;
   IF r.state <> 'draft' OR spec IS NULL OR NOT (r.steps ? v_step) THEN RAISE EXCEPTION 'TURN_MENTOR_STEP_DENIED' USING ERRCODE='42501'; END IF;
   IF EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(spec->'dependsOn', '[]')) dep
@@ -107,7 +105,7 @@ BEGIN
  code := NULL;
  organizer_input := p_result->'organizerInput';
  IF jsonb_typeof(organizer_input) IS DISTINCT FROM 'object' OR organizer_input->>'captureFormat' IS DISTINCT FROM 'v2' THEN code := 'skipped_format'; END IF;
- IF code IS NULL AND (p.module_id::text IS DISTINCT FROM t.policy->>'mentorModuleId' OR r.revision_id::text IS DISTINCT FROM p_result->>'revisionId')
+ IF code IS NULL AND (p.module_id::text IS DISTINCT FROM t.policy->'mentor'->>'moduleId' OR r.revision_id::text IS DISTINCT FROM p_result->>'revisionId')
   THEN code := 'denied_binding'; END IF;
  IF code IS NULL AND (r.id::text IS DISTINCT FROM p_result->>'roundId' OR r.state <> 'draft') THEN code := 'stale_round'; END IF;
  IF code IS NULL THEN
@@ -229,7 +227,7 @@ BEGIN
  RETURN response;
 END $function$;
 
--- turn_open: 0421 unchanged, plus kindContext in what it returns.
+-- turn_open: 0421 unchanged except the mentor branch of kindContext.
 CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -347,16 +345,16 @@ BEGIN
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
     'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history,
     'replyLanguage', prof.reply_language,
-    -- V2-5: what the kind's prompt needs, read in this same transaction (the mentor's draft, checklist and Skill identity).
-    'kindContext', CASE WHEN p_kind = 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, t.policy) END,
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
-        AND r.closed_at > now() - interval '24 hours')) END);
+        AND r.closed_at > now() - interval '24 hours')) END,
+    -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
 END $function$;
 
--- turn_close: 0421 unchanged, plus p_kind_result and the mentor apply. The new parameter changes the signature: drop the old one.
-DROP FUNCTION IF EXISTS public.turn_close(uuid,bigint,text,jsonb,boolean,boolean,text);
+-- turn_close: 0421 unchanged except the mentor branch of the per-kind hook and kindResult in what it returns.
 CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text, p_kind_result jsonb DEFAULT NULL::jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -416,6 +414,18 @@ BEGIN
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
     OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
+  -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
+  -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
+  --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
+  -- A kind without a branch has its result refused rather than dropped.
+  IF p_kind_result IS NOT NULL THEN
+    IF t.kind = 'mentor' THEN
+      -- V2-5: the organizer's checklist patches; only a delivered completed turn applies them (an erased one saves nothing).
+      IF v_kind = 'completed' AND p_delivered THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+    ELSE
+      RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+    END IF;
+  END IF;
 
   -- Calls without a final receipt: their cost is unknown; it is never presumed zero and never retried (2.5.2).
   UPDATE turn_calls SET status = 'unknown', cost_pending = true
@@ -442,19 +452,16 @@ BEGIN
   PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
 
   -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
+  -- Counted as of now, under the account lock: a concurrent close of the same actor that committed first is seen (its closed_at
+  -- is its transaction start, which may be later than this one's).
   charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
-    (t.policy->>'fixedCredits')::int, now());
+    (t.policy->>'fixedCredits')::int, clock_timestamp());
 
   -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
   -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
   -- settlement of the same freeze returns the first one.
   IF NOT user_pending AND t.policy->>'holdId' IS NOT NULL THEN
     PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
-  END IF;
-
-  -- V2-5: the kind's own close work, in this transaction; only a delivered turn applies it (a tombstone made it erased above).
-  IF v_kind = 'completed' AND p_delivered AND t.kind = 'mentor' AND p_kind_result IS NOT NULL THEN
-    kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result);
   END IF;
 
   -- The messages of a delivered turn, appended in order.
@@ -484,14 +491,8 @@ END $function$;
 DO $$
 DECLARE f text;
 BEGIN
-  FOREACH f IN ARRAY ARRAY['turn_mentor_context(uuid,uuid,jsonb)', 'turn_mentor_apply(uuid,bigint,jsonb)',
-    'turn_open(uuid,uuid,uuid,text,jsonb,bigint)', 'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)'] LOOP
+  FOREACH f IN ARRAY ARRAY['turn_mentor_context(uuid,uuid,jsonb)', 'turn_mentor_apply(uuid,bigint,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
-  END LOOP;
-  -- The mentor helpers stay internal; turn_open and turn_close stay the service role's.
-  FOREACH f IN ARRAY ARRAY['turn_open(uuid,uuid,uuid,text,jsonb,bigint)',
-    'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)'] LOOP
-    EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;
 END $$;
 

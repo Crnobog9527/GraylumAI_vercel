@@ -524,11 +524,26 @@ try{
   assert.equal(await balance(b),1000);
   report.checks.push('closed first, receipt late, settled by turn_close again: D=6 and 54 back once, stop-loss spent 0.01 and released, messages kept; a full refund owed at the close still applies');
  }
+ // 22. The per-kind hook (controller 10-28): turn_open returns kindContext (null until a kind adds its branch); turn_close takes
+ // p_kind_result and refuses it while no kind handles one, without closing the turn; the replay of a closed turn ignores it.
+ {
+  const a=await account();
+  const o=await open(a);
+  assert.ok('kindContext' in o);
+  assert.equal(o.kindContext,null);
+  assert.match(await refusal(c.query("select turn_close($1,$2,'completed','[]',true,false,null,'{\"draft\":1}') v",[a.actor,o.turnId])),
+   /TURN_KIND_RESULT_UNSUPPORTED/);
+  assert.equal(await one('select state v from turns where id=$1',[o.turnId]),'running','the refused close changed nothing');
+  await close(a,o.turnId);
+  assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null,'{\"draft\":1}') v",[a.actor,o.turnId])).replay,true);
+  assert.equal(await one("select count(*)::int v from pg_proc where proname='turn_close' and pronamespace='public'::regnamespace"),1,'one signature only');
+  report.checks.push('the per-kind hook: turn_open returns kindContext null; turn_close refuses a kind result no kind handles yet, with one signature');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
    'turn_call_identity(uuid,bigint,integer,text)','turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)',
-   'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text)'])
+   'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)'])
    for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]])
     assert.equal(await one("select has_function_privilege($1,$2,'EXECUTE') v",[role,'public.'+fn]),want,`${fn} ${role}`);
   for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)',

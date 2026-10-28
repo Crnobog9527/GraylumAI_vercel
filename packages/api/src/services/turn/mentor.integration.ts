@@ -267,7 +267,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5: relation locks of turn_open for a mentor turn ag
   const f = await setup();
   const policy = { q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30, historyItems: 100, inputBytes: 1000,
     limits: { model: 3, paidTools: 0, freeTools: 1, decisions: 0 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
-    mentorModuleId: f.moduleId, mentorStepId: 'step-0' };
+    mentor: { moduleId: f.moduleId, stepId: 'step-0' } };
   const locks = async (kind: string) => {
     await db.query('begin');
     try {

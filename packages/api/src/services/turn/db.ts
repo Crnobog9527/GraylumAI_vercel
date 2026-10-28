@@ -26,7 +26,7 @@ const opened = z.object({ turnId: z.number().int().positive(), state: z.enum(['r
   // Read by turn_open with the account row: the reply language setting and, for a free chat, the positioning gate.
   replyLanguage: z.unknown().optional(),
   positioning: z.object({ positioned: z.boolean(), refusals24h: z.number().int().nonnegative() }).nullable().optional(),
-  // V2-5: what the kind's prompt needs, read in the same transaction (the mentor's draft and checklist); the kind validates it.
+  // The per-kind hook: what a kind's prompt needs, built by its branch in turn_open (null until a kind adds one).
   kindContext: z.unknown().optional() });
 export type Opened = z.infer<typeof opened>;
 const begun = tombstones.extend({ state: z.enum(['running', 'paused']), status: z.string().optional(),
@@ -36,6 +36,7 @@ const recorded = tombstones.extend({ status: z.string(), creditsLow: z.boolean()
 export type Recorded = z.infer<typeof recorded>;
 const closed = z.object({ turnId: z.number().int().positive(), closeKind: z.string(), chargedCredits: z.number().int().nullable(),
   absorbedCredits: z.number().int().nullable(), settlement: z.enum(['pending', 'done']).nullable(), replay: z.boolean(),
+  // What the kind's close function returned (the mentor's checklist capture), when it has one.
   kindResult: z.unknown().optional() })
   .and(tombstones.partial());
 export type Closed = z.infer<typeof closed>;
@@ -75,11 +76,12 @@ export function turnDatabase(clients: TurnClients) {
         p_nominal_usd: a.nominalUsd, p_actual_usd: a.actualUsd, p_usage: a.usage, p_provider_id: a.providerId,
         p_payload_hash: a.payloadHash, p_raw: a.raw }, recorded),
     close: (a: { actorId: string; turnId: number; kind: CloseKind; messages: Array<{ role: 'user' | 'assistant'; content: string }>;
-      delivered: boolean; refundAll?: boolean; failureCode?: string | null; kindResult?: Record<string, unknown> }) =>
+      delivered: boolean; refundAll?: boolean; failureCode?: string | null;
+      /** The per-kind hook: what the kind keeps from its result, written by its function in the close transaction. */
+      kindResult?: unknown }) =>
       call(w, 'turn_close', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_close_kind: a.kind, p_messages: a.messages,
         p_delivered: a.delivered, p_refund_all: a.refundAll ?? false, p_failure_code: a.failureCode ?? null,
-        // V2-5: the kind's close input (the mentor's organizer result); absent for every other kind.
-        ...(a.kindResult ? { p_kind_result: a.kindResult } : {}) }, closed),
+        p_kind_result: a.kindResult ?? null }, closed),
   };
 }
 export type TurnDatabase = ReturnType<typeof turnDatabase>;
