@@ -195,6 +195,10 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Sk
   expect(steps['step-0'].information.goal).toEqual({ value: 'Sell coffee to students', status: 'provisional', nature: 'fact' });
   expect(steps['step-0'].fieldMeta.goal).toMatchObject({ source: 'capture', basis: 'user_statement' });
   // Both turns charged once each, both messages of each saved.
+  // V2-8: the model and price table of each model are frozen per model id for recovery.
+  const frozen = (await db.query("select policy from turns where actor_id=$1 order by id desc limit 1", [f.actor])).rows[0].policy;
+  expect(Object.values(frozen.models).sort()).toEqual([ORGANIZER, MENTOR].sort());
+  expect(Object.keys(frozen.pricings)).toEqual(Object.keys(frozen.models));
   const turns = (await db.query("select kind,close_kind,charged_credits,settlement from turns where actor_id=$1 order by id", [f.actor])).rows;
   expect(turns.map(r => [r.kind, r.close_kind, r.settlement])).toEqual([['mentor', 'completed', 'done'], ['mentor', 'completed', 'done']]);
   expect(await credits(f.actor)).toBe(1000 - turns.reduce((sum, r) => sum + r.charged_credits, 0));

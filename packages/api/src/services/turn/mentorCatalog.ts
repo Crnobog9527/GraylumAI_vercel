@@ -70,5 +70,8 @@ export function mentorPolicy(catalog: MentorCatalog, input: { opening: boolean; 
     otherModelCalls: organizer ? [{ upperUsd: organizer.upperUsd, multiplier: organizer.multiplier }] : [],
     stopLoss: catalog.config.stopLoss, historyItems: HISTORY_ITEMS, inputBytes: mentor.inputLimit,
     frozen: { modelId: mentor.modelId, model: mentor.model, ...(organizer ? { organizerModelId: organizer.modelId } : {}) } }),
+  // V2-8: recovery prices a call whose cost is unknown with the model and price table frozen here, per model id (two models).
+  models: Object.fromEntries([mentor, ...(organizer ? [organizer] : [])].map(q => [q.modelId, q.model])),
+  pricings: Object.fromEntries([mentor, ...(organizer ? [organizer] : [])].map(q => [q.modelId, q.pricing])),
   mentor: { moduleId: input.moduleId, stepId: input.stepId } };
 }
