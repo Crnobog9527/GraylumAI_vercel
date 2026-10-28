@@ -264,7 +264,8 @@ BEGIN
 END $function$;
 
 -- turn_open: 0421 unchanged except the mentor branch of kindContext.
-CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
+CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb,
+  p_resume_of bigint DEFAULT NULL)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -301,10 +302,11 @@ BEGIN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
-  -- 1. The session, locked: one turn at a time per conversation (3a).
+  -- 1. The account row first, then the session: one turn at a time per conversation (3a). The account comes first as in the
+  -- erasure functions (they hold it before the session), so an open and a deletion of the same conversation never deadlock.
+  SELECT * INTO prof FROM profiles WHERE id = p_actor_id FOR UPDATE;
   SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
   IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
   -- 2. The same request again: the turn it opened, unchanged.
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
@@ -345,11 +347,10 @@ BEGIN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
     END IF;
 
-    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
-    -- the balance is read: two sessions of one account in different stop-loss buckets would otherwise both size H on the same
-    -- balance, and the second would be refused instead of freezing what is left. Order: session, bucket, account (as turn_close).
-    -- Re-checked under the lock: an erasure that held it (account_erasure_confirm) may have committed while this waited.
-    SELECT * INTO prof FROM profiles WHERE id = p_actor_id FOR UPDATE;
+    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The balance is read under the
+    -- account lock taken first: two sessions of one account in different stop-loss buckets never size H on the same balance.
+    -- The account is checked again here (same lock) before anything is frozen.
+    SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
     IF prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false'
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
@@ -391,7 +392,9 @@ BEGIN
 END $function$;
 
 -- turn_close: 0421 unchanged except the mentor branch of the per-kind hook and kindResult in what it returns.
-CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text, p_kind_result jsonb DEFAULT NULL::jsonb)
+CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb,
+  p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL,
+  p_kind_result jsonb DEFAULT NULL)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -407,7 +410,9 @@ BEGIN
   END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  -- Lock order: session, then the turn, then the stop-loss bucket, then the profile (as turn_open: session, bucket, profile).
+  -- Lock order: the profile, the session, the turn, then the stop-loss bucket (as turn_open and the erasure functions). The
+  -- profile also serializes the actor's closes (the free-stop count) before the settlement locks it again.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.state = 'closed' THEN
@@ -422,9 +427,11 @@ BEGIN
       FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
       UPDATE daily_spend SET spent_usd = spent_usd + n_total, reserved_usd = greatest(reserved_usd - pending_upper, 0)
         WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
-      PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
       q := (t.policy->>'q')::numeric;
-      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
+      -- The user's base is what it was at the close plus the late model receipts: a tool whose result was unknown at the close
+      -- stays 0 to the user (2.5.2) however late its receipt comes; only its cost goes to the stop-loss above.
+      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'
+               AND NOT (call_kind = 'tool' AND settled_at > t.closed_at)), 0))::integer,
              coalesce(bool_or(cost_pending), false), coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
         INTO credits, pending, user_pending
       FROM turn_calls WHERE turn_id = p_turn_id;
@@ -484,14 +491,13 @@ BEGIN
   UPDATE daily_spend SET spent_usd = spent_usd + n_total,
       reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
     WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
-  -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
-  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
 
   -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
-  -- Counted as of now, under the account lock: a concurrent close of the same actor that committed first is seen (its closed_at
-  -- is its transaction start, which may be later than this one's).
+  -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a
+  -- concurrent close of the same actor that committed first is always before it, and a later settlement counts the same.
+  marker := clock_timestamp();
   charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
-    (t.policy->>'fixedCredits')::int, clock_timestamp());
+    (t.policy->>'fixedCredits')::int, marker);
 
   -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
   -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
@@ -511,7 +517,7 @@ BEGIN
   END IF;
 
   -- updated_at marks this settlement pass (see the closed branch above); a full refund still owed is kept with the turn.
-  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = now(), updated_at = clock_timestamp(),
+  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = marker, updated_at = marker,
       policy = CASE WHEN user_pending AND p_refund_all THEN policy || '{"closeRefundAll": true}'::jsonb ELSE policy END,
       charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
       absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,

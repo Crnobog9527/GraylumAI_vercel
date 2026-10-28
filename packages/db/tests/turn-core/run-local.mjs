@@ -539,6 +539,94 @@ try{
   assert.equal(await one("select count(*)::int v from pg_proc where proname='turn_close' and pronamespace='public'::regnamespace"),1,'one signature only');
   report.checks.push('the per-kind hook: turn_open returns kindContext null; turn_close refuses a kind result no kind handles yet, with one signature');
  }
+ // 23. #1512 review: the later settlement keeps the close's decisions. (P1) A tool unknown at the close stays 0 to the user even
+ // when the model receipt is also late: D counts the model only. (P2) A report stop that was the third at the close stays charged:
+ // the close and the settlement count stops at the same instant, taken under the account lock.
+ {
+  const a=await account(1000);
+  const o=await open(a,{pol:policy({gCredits:60})});
+  await begin(a,o.turnId,1);await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.02});
+  await close(a,o.turnId,'interrupted',{messages:[],delivered:false});
+  await record(a,o.turnId,1,{n:0.01});await record(a,o.turnId,2,{n:0.02});
+  const settled=await close(a,o.turnId,'interrupted');
+  assert.deepEqual([settled.chargedCredits,settled.settlement],[6,'done'],'D = 6 from the model; the late tool receipt (12) is not charged');
+  assert.equal(await balance(a),994);
+
+  const r=await account(),other=randomUUID();
+  await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+   [other,r.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
+  const rep=session=>open(r,{kind:'report',session,pol:policy({gCredits:500,fixedCredits:500})});
+  const used=await rep(r.session);await begin(r,used.turnId,1,{upper:0.5});await record(r,used.turnId,1,{n:0.2});
+  await close(r,used.turnId,'stopped',{messages:[],delivered:false});            // the one free stop already used
+  const x=await rep(r.session),y=await rep(other);
+  await begin(r,x.turnId,1,{upper:0.5});await record(r,x.turnId,1,{n:0.2});
+  await begin(r,y.turnId,1,{upper:0.5});                                          // y's model receipt will be late
+  const p2=await peer();
+  try{
+   // y's transaction starts first, x closes and commits, then y closes: y's now() is earlier than x's close.
+   await p2.query('begin');await p2.query('select 1');
+   await close(r,x.turnId,'stopped',{messages:[],delivered:false});               // second stop: free
+   await p2.query("select turn_close($1,$2,'stopped','[]',false,false,null)",[r.actor,y.turnId]);
+   await p2.query('commit');
+  }finally{await p2.end();}
+  await record(r,y.turnId,1,{n:0.2});
+  assert.equal((await close(r,y.turnId,'stopped')).chargedCredits,120,'the third stop is charged when it settles later');
+  report.checks.push('a later settlement keeps the close: an unknown tool stays 0 to the user; a third report stop stays charged');
+ }
+ // 24. #1512 review: a call closed as unknown whose late receipt proves it was never billed (not_sent, rejected). The receipt is
+ // accepted, and the next settlement frees the whole freeze and the stop-loss share; with a provider id it is still refused.
+ {
+  for(const status of ['not_sent','rejected']){
+   const a=await account(1000),before=await dayTotals();
+   const o=await open(a,{pol:policy({gCredits:60})});
+   await begin(a,o.turnId,1);
+   await close(a,o.turnId,'interrupted',{messages:[],delivered:false});
+   assert.equal(await balance(a),940);
+   await record(a,o.turnId,1,{status});
+   assert.deepEqual((await c.query('select status,cost_pending from turn_calls where turn_id=$1',[o.turnId])).rows,[{status,cost_pending:false}]);
+   const settled=await close(a,o.turnId,'interrupted');
+   assert.deepEqual([settled.chargedCredits,settled.settlement],[0,'done'],status);
+   assert.equal(await balance(a),1000);
+   const after=await dayTotals();
+   assert.ok(near(Number(after.r),Number(before.r))&&near(Number(after.s),Number(before.s)),`${status}: reservation released, nothing spent`);
+  }
+  const b=await account(1000);
+  const ob=await open(b,{pol:policy({gCredits:60})});
+  await begin(b,ob.turnId,1);await identity(b,ob.turnId,1,'gen-billed');
+  await close(b,ob.turnId,'interrupted',{messages:[],delivered:false});
+  assert.match(await refusal(record(b,ob.turnId,1,{status:'not_sent'})),/TURN_CALL_INVALID/,'a call with a provider id is never proven unbilled');
+  report.checks.push('a late not_sent/rejected receipt for a call closed as unknown is accepted and frees the freeze and the stop-loss share; with a provider id it is refused');
+ }
+ // 25. #1512 review: the real deletion (content_erasure_mark_session: profile FOR SHARE, then the session) racing turn_open and
+ // turn_close of the same conversation. The deletion holds the profile; the turn waits for it holding nothing else (profile
+ // first), so the deletion takes the session, commits, and the turn then sees it: the open is refused, the close is erased.
+ {
+  const waiting=async client=>{
+   for(let i=0;i<100&&!(await one("select count(*)::int v from pg_stat_activity where pid=$1 and wait_event_type='Lock'",[client.processID]));i++)
+    await new Promise(r=>setTimeout(r,20));
+   return one("select count(*)::int v from pg_stat_activity where pid=$1 and wait_event_type='Lock'",[client.processID]);
+  };
+  for(const step of ['open','close']){
+   const a=await account(1000);
+   const o=step==='close'?await open(a):null;
+   const p1=await peer(),p2=await peer();
+   try{
+    await p2.query('begin');
+    await p2.query('select 1 from profiles where id=$1 for share',[a.actor]);
+    const turn=step==='open'
+     ?refusal(open(a,{client:p1}))
+     :p1.query("select turn_close($1,$2,'completed',$3,true,false,null) v",[a.actor,o.turnId,JSON.stringify([{role:'user',content:'hi'}])]).then(r=>r.rows[0].v);
+    assert.equal(await waiting(p1),1,`${step} waits for the profile`);
+    await p2.query('select content_erasure_mark_session($1,$2)',[a.actor,a.session]);
+    await p2.query('commit');
+    const out=await turn;
+    if(step==='open')assert.match(out,/TURN_SESSION_ERASED/);
+    else assert.equal(out.closeKind,'erased');
+    assert.equal(await one('select count(*)::int v from session_messages where session_id=$1',[a.session]),0);
+   }finally{await p1.end();await p2.end();}
+  }
+  report.checks.push('the real deletion racing turn_open and turn_close: no deadlock; the open is refused and the close is erased');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

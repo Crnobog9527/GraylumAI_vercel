@@ -18,7 +18,9 @@ BEGIN
   END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  -- Lock order: session, then the turn, then the stop-loss bucket, then the profile (as turn_open: session, bucket, profile).
+  -- Lock order: the profile, the session, the turn, then the stop-loss bucket (as turn_open and the erasure functions). The
+  -- profile also serializes the actor's closes (the free-stop count) before the settlement locks it again.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.state = 'closed' THEN
@@ -33,9 +35,11 @@ BEGIN
       FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
       UPDATE daily_spend SET spent_usd = spent_usd + n_total, reserved_usd = greatest(reserved_usd - pending_upper, 0)
         WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
-      PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
       q := (t.policy->>'q')::numeric;
-      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
+      -- The user's base is what it was at the close plus the late model receipts: a tool whose result was unknown at the close
+      -- stays 0 to the user (2.5.2) however late its receipt comes; only its cost goes to the stop-loss above.
+      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'
+               AND NOT (call_kind = 'tool' AND settled_at > t.closed_at)), 0))::integer,
              coalesce(bool_or(cost_pending), false), coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
         INTO credits, pending, user_pending
       FROM turn_calls WHERE turn_id = p_turn_id;
@@ -95,14 +99,13 @@ BEGIN
   UPDATE daily_spend SET spent_usd = spent_usd + n_total,
       reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
     WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
-  -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
-  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
 
   -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
-  -- Counted as of now, under the account lock: a concurrent close of the same actor that committed first is seen (its closed_at
-  -- is its transaction start, which may be later than this one's).
+  -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a
+  -- concurrent close of the same actor that committed first is always before it, and a later settlement counts the same.
+  marker := clock_timestamp();
   charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
-    (t.policy->>'fixedCredits')::int, clock_timestamp());
+    (t.policy->>'fixedCredits')::int, marker);
 
   -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
   -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
@@ -122,7 +125,7 @@ BEGIN
   END IF;
 
   -- updated_at marks this settlement pass (see the closed branch above); a full refund still owed is kept with the turn.
-  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = now(), updated_at = clock_timestamp(),
+  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = marker, updated_at = marker,
       policy = CASE WHEN user_pending AND p_refund_all THEN policy || '{"closeRefundAll": true}'::jsonb ELSE policy END,
       charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
       absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,
