@@ -21,7 +21,9 @@
 - **范围**：定位导师、自由对话、Skill 工具、研究工具、报告、对比、评审团、停止/退款/暂停、历史、删除/注销——都接到同一条核上；
   删掉 staging 测试窗口和 BILL2 逐调用四步；旧路径整体删除，不并存。
 - **工期**：13 个 PR，三个窗口并行，计划 7 周（含 1 周余量，乐观 5 周）；100 人验收通过后 Owner 另定上线日期。
-- **要 Owner 决定**：第 8 节 4 件事（重做范围、上线日期、3 条规则简化、评审团"结束"入口）。
+- **Owner 已决（10-28，第 8.0 节）**：A 重做并删旧；验收通过后 7 天内上线；五条简化全同意；评审团不给结束按钮；普通对话不提供停止；
+  e2e 用 Claude Haiku 5.5；**新要求：扩容到 500/2000/5000 不再重构**——第 3.3 节回答：代码结构现在做对（无热点行、锁按人/会话、可分区主键、
+  事务模式兼容、定时任务分批、供应商限流），人数靠加规格（Micro ≈ 真人节奏 950 人，5000 人要 2XL）。
 
 ## 1. 诊断：现在一轮对话发生了什么
 
@@ -120,7 +122,7 @@
 | 历史上下文 | 数据库 `session_messages`：按会话取最近 N 条可见消息；可见性在删除时维护，不在读取时重算 | 读路径一条索引查询 |
 | 提示词拼装、缓存断点、输入裁剪 | Node 纯函数，黄金字节测试（2.9 节） | prompt-cache 原则 |
 | 模型与工具调用 | Node（`@openai/agents` runner + OpenRouter）；工具白名单与每轮上限在进程内计数 | SDK 不换（Owner 10-20） |
-| 钱的证据（每次模型/工具调用） | 数据库 `turn_calls` 一次 INSERT（同一语句返回会话墓碑状态） | 回执必须落盘后才把正文交出去 |
+| 钱的证据（每次模型/工具调用） | 数据库 `turn_calls` + `turn_call_raw` 同一事务 INSERT（同一语句返回会话墓碑状态） | 回执必须落盘后才把正文交出去；原始正文不进热表（3.3.2 第 9 条） |
 | 结算、退款、追加历史、关闭回合、整理结果 | **数据库 `turn_close` 一次写事务** | 和"写入前照查删除"原子 |
 | 暂停（余额不足/等用户）、24 小时自动退、评审团押金 | `turns.state` + 现有分钟级 `runtime-recovery` 定时任务（改读 `turns`） | 不新建队列（AGENTS 第 5 节） |
 | 删除、注销 | 会话/消息打墓碑 + `turns` 可见性列；注销走 DATA-ERASURE 现有投影，改指新表 | 删除即时生效的语义不变 |
@@ -130,7 +132,7 @@
 
 ```
 opening ─(turn_open 成功)─→ running ─(每次调用后 turn_call_record)─→ running
-running ─(用户点停止)──────→ stopping ─(turn_close kind=stopped)──→ closed
+running ─(用户点停止，仅 kind=report)→ stopping ─(turn_close kind=stopped)──→ closed
 running ─(余额低于 L，多次调用的回合)→ paused(waiting_credits) ─(充值后用户点继续 = 新 turn_open(resume_of) / 24h 自动退)→ running | closed
 running ─(评审团两组之间 / 等用户)→ paused(awaiting_user) ─(用户动作 / 24h 自动结束)→ running | closed
 running ─(模型/工具出错，可恢复)→ running（SDK 内重试，不写库）
@@ -140,6 +142,8 @@ running ─(正常结束)────────→ turn_close kind=completed �
 ```
 
 - 状态只在 `turn_open` / `turn_call_record` / `turn_close` 三个函数里改，没有第四个入口（恢复定时任务也只调 `turn_close`）。
+- **普通对话（chat、mentor）没有用户停止入口**（Owner 10-28）：前端没有按钮，服务端对这两种 kind 的停止请求返回 `TURN_STOP_NOT_ALLOWED`；
+  只有 `kind=report` 有 `stopping` 状态。用户关掉页面不影响回合：服务端照常跑完、照常结算（和今天一样）。
 - 没有"准备"和"执行"两个 HTTP 请求：一个 `POST /api/turn`（SSE，`maxDuration` 沿用 300）从登录核验到最后一个事件；
   前端"准备中"由第一个 SSE 事件 `opened` 给出，里面带本轮的工具可用性、冻结额、兜底资格（`fallbackEligible`）、被裁剪的内容说明。
 - 评审团、对比、报告是同一个状态机的不同 `kind`，区别只在 `turn_open` 的冻结额和 `turn_close` 的结算口径（2.5 节）。
@@ -183,10 +187,10 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 |---|---|
 | 每次调用各冻结（claim）、各发出（dispatch）、各回执（record）、各结算（finalize） | **开轮冻结一次**：H=min(G_turn, A)，G_turn=本轮允许的调用数 × 单次上界（导师 2+整理 1、自由对话 1+研究工具上限、报告固定 500、评审团押金+第一组上界、对比 Σ各模型上界）；**每次调用一条回执**（n_i、c_i、usage、generationId、缓存 token）；**收轮结算一次**：N=ceil(q×Σn_i×m_i)，D=min(N,H)，退 H−D，E=N−D 平台承担并记账 |
 | `profiles FOR UPDATE` 每次 claim 和 finalize | 开轮一次、收轮一次 |
-| 止损锁 (201,1) 全站独占 | **去掉**：`turn_close` 对 `daily_spend(day)` 行 `UPDATE … SET spent=spent+n RETURNING`，超阈值时下一轮 `turn_open` 拒绝；允许最后一笔略超（≤ 一轮上界，远低于 5 美元线）——第 8 节 3b |
+| 止损锁 (201,1) 全站独占 | **去掉**：`turn_close` 对 `daily_spend(day, bucket)` 的一行做 `UPDATE … SET spent=spent+n`（bucket = actor_id 哈希 % 16，16 行分摊，没有单一热点行）；`turn_open` 用 `SUM(spent) WHERE day=今天`（≤16 行索引读）判断是否超阈值而拒绝；允许最后一笔略超（≤ 一轮上界，远低于 5 美元线）——第 8 节 3b |
 | 多次调用的回合中途余额不够 | `turn_call_record` 返回 `credits_low`（它读 `profiles.balance` 一行，不锁）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)`，不重复收费 |
 | 未知成本 24 小时恢复、`cost_pending` | 回执 `cost IS NULL` 时 `turn_close` 不结算该笔，`turns.settlement='pending'`；现有恢复定时任务按 `turn_calls(cost IS NULL)` 索引补查后再结一次（幂等） |
-| 停止退款 | `turn_close(kind=stopped)`：按已写回执结算，其余退；报告：滚动 24 小时内前 2 次 D=0 全退，第 3 次起 D=按回执、≤500（`turns(actor_id, kind, stopped_by_user, closed_at)` 索引数） |
+| 停止退款 | 只有报告能停（Owner 10-28）：`turn_close(kind=stopped)` 仅接受 `kind=report`；滚动 24 小时内前 2 次 D=0 全退，第 3 次起 D=按回执、≤500（`turns(actor_id, kind, stopped_by_user, closed_at)` 索引数）。普通对话没有停止，用户离开页面回合照常结算 |
 | 402 不计费 | 回执 `status='no_charge_402'`, n=0 | 
 | 白名单系统原因失败自动退（10-12） | `turn_close(kind=failed, reason∈白名单)` 全退；其余按回执结算，每日对账照旧 |
 | 暂停 24 小时自动退（10-25）、评审团押金 24 小时自动结束（10-27） | 同一个恢复定时任务：`state='paused' AND updated_at<now()-24h` → `turn_close(kind=expired)`，`delivered=false` 全退，评审团按已交付席位扣 |
@@ -254,7 +258,12 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | `turn_open` 事务内关系锁数 | ≤ 40 | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法） |
 | 任一主路径函数静态可达函数 / 表 | ≤ 15 / ≤ 10 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
 | 行锁 | 0 把全站共用行锁；只允许本人 `profiles`、本会话 `sessions` | 同 | 同 | 静态扫描 `FOR UPDATE|FOR SHARE` 对象白名单 |
+| 热表无顺序扫描 | 0 | 0 | 0 | 三条回合 + 定时任务认领语句的 `EXPLAIN`，对 `turns`/`turn_calls`/`session_messages`/`credit_transactions`/`runtime_sessions` 断言无 Seq Scan |
+| 全站共用行的写/锁 | 0 | 0 | 0 | 静态扫描：`UPDATE`/`FOR UPDATE` 只许白名单表，WHERE 必须带所有者键或 bucket |
+| 会话级状态 | 0 | 0 | 0 | 静态扫描：禁止 `pg_advisory_lock(`、非 LOCAL `SET `、`CREATE TEMP` |
+| 单条回执原始正文 | ≤ 256 KB，存 `turn_call_raw` 不进 `turn_calls` | 同 | 同 | DB 测试 |
 | 首字延迟（服务端，收到请求→第一个模型字节，桩零延迟） | p95 ≤ 400 ms | p95 ≤ 600 ms | — | 桩模型 |
+| 每轮核·秒 k（本机单机压测，500/2000/5000 虚拟用户） | 不随人数变化（±15%）；锁等待占比 < 2% | 同 | — | 3.3.3 节 |
 | 100 人并发（staging Micro，桩模型，10-25 节奏） | 失败 0、57014 0、整轮 p95 ≤ 桩回复时间 + 2 s、CPU 平均 < 60%、交换区不涨、`LWLock:LockManager` < 2% | 同 | — | 3.2 节 |
 
 ### 3.2 100 人验收怎么跑才公平
@@ -268,6 +277,80 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 6. **通过线**：3.1 节最后一行；达不到就按实测写"最多撑多少人、差多少"，不说做到了。
 7. **对照**：切换前用同一桩、同一账号池对现有路径跑一次存档（`docs/validation/core-path-v2/baseline-old-path.md`）。
 8. 正式库连接池按复测结果定，上线前问 Owner（10-24 待办不变）。
+
+### 3.3 扩容到 500 / 2000 / 5000 并发不用再重构（Owner 10-28 要求）
+
+实话先说：**代码结构能保证的是"扩容时只加规格、改配置、做一次数据搬家，不改业务代码"；它不能保证 Micro 撑 5000 人**。
+5000 人要买更大的数据库，这是钱的事，不是重构的事。下面把"只靠加钱"和"现在就要做对"分开写清。
+
+#### 3.3.1 容量模型（估算，依据和不确定性见 3.3.3）
+
+单位和依据：
+- 今天：staging 实测每完成 1 轮/分 ≈ 占数据库机器 1 个百分点 CPU（10-26 第三轮），折合每轮约 **1.15 核·秒**（2 核）。
+- 新路径目标：每轮数据库时间 ≤ 60–100 ms（3.1 节）。`pg_stat_statements` 不含连接、PostgREST、JSON 编解码和共享核抖动，
+  按 **3 倍保守系数**取每轮 **0.25 核·秒**（比今天少 4.6 倍；若实测更接近 0.1 核·秒，下表人数再乘 2.5）。
+- 节奏：压测节奏每人 0.93 轮/分（回复后 7–22 秒再发）；真人节奏按每人 0.3 轮/分估（约 3 分钟一条，**没有实测，上线后用正式数据替换**）。
+- 数据库 CPU 目标占用 60%（留尖峰）。
+
+| 规格（Supabase，以其价格页为准） | 核 | 内存 | 每分钟可完成轮数（0.25 核·秒/轮，60%） | 压测节奏可撑人数 | 真人节奏可撑人数 |
+|---|---|---|---|---|---|
+| Micro（现在） | 2 共享 | 1 GB | ≈ 290 | ≈ 300 | ≈ 950 |
+| Small / Medium | 2 共享 | 2 / 4 GB | ≈ 290（内存多，交换区压力小，更稳） | ≈ 300 | ≈ 950 |
+| Large | 2 专用 | 8 GB | ≈ 430 | ≈ 450 | ≈ 1400 |
+| XL | 4 专用 | 16 GB | ≈ 860 | ≈ 900 | ≈ 2900 |
+| 2XL | 8 专用 | 32 GB | ≈ 1700 | ≈ 1800 | ≈ 5700 |
+| 4XL | 16 专用 | 64 GB | ≈ 3400 | ≈ 3700 | ≈ 11000 |
+
+结论：
+- **100 人**：Micro，目标是 CPU < 60%（今天 100 人是 66–89%，且是 CPU 上限）。
+- **500 人**：真人节奏 Micro 够（有余量）；压测节奏要 Large。
+- **2000 人**：真人节奏 Large–XL；压测节奏 2XL。
+- **5000 人**：真人节奏 2XL；压测节奏 4XL。此外只读副本（历史页、积分记录、后台报表）把主库的读分走，主库只剩每轮 3 次写——这是配置，不是代码。
+- 其他资源在同样人数下够不够（都是配置/钱）：
+  - **数据库连接**：每轮只在 3 次 RPC 里各占连接几十毫秒，5000 人真人节奏 ≈ 25 轮/秒 × 0.1 秒 ≈ 2.5 条连接常驻，Supavisor 事务模式池 15–20 绰绰有余。
+    前提是函数不依赖会话状态（3.3.2 第 6 条）。
+  - **写入量与存储**：每轮约 6 行、约 15 KB（两条消息 + 回执用量；原始回执另存，见 3.3.2 第 9 条）。5000 人真人节奏 ≈ 1500 轮/分 ≈ 22 MB/分 ≈ 30 GB/天；
+    原始回执 30 天清理、删除的会话正文分批清理（已有规则）。Micro 磁盘 IO 基线低，1000 人以上要看 IOPS，升规格同时升磁盘（配置）。
+  - **Vercel**：每轮一个函数实例流式占用模型时长（10–60 秒）；Fluid compute 下流式是 IO 等待，不占 CPU；并发上限按套餐（Pro → 更高档），
+    是套餐/配置。前提：流式期间不占数据库连接（新路径成立：调用之间不碰库）。
+  - **OpenRouter / TikHub 等供应商**：按密钥限速和余额；需要按模型/供应商的并发上限和 429 退避（3.3.2 第 10 条，代码现在做）；额度是钱。
+  - **Redis（Upstash）**：限流和并发计数的 QPS 按套餐；配置。
+
+#### 3.3.2 现在就必须做对的结构点（逐条对照新设计）
+
+| # | 结构点 | 新设计是否满足 | 要补/要守的 |
+|---|---|---|---|
+| 1 | **没有任何全站共用的热点行（写）** | `profiles`（按人）、`runtime_sessions`（按会话）、`turns`/`turn_calls`/`session_messages`（按轮）✓；`catalog_versions` 只读 ✓；**`daily_spend` 原设计单行 ✗ → 改为 `(day, bucket 0–15)` 16 行按 actor 哈希分摊**，`turn_close` 更新一行、`turn_open` 读 SUM。5000 人真人节奏 25 次/秒分到 16 行 ≈ 每行 1.6 次/秒，每次持锁 < 1 ms，占用 < 0.2%；桶数不够时只改常量和一个迁移，不改逻辑 | 7.1 静态扫描：主路径 SQL 里 `UPDATE/FOR UPDATE` 的表只能是白名单，且 WHERE 必须带 actor/session/turn/bucket 键 |
+| 2 | **所有锁按用户或会话** | `turn_open`：`runtime_sessions FOR UPDATE`（本会话）、`profiles FOR UPDATE`（本人）；`turn_close` 同；无 advisory 锁 ✓ | 禁止 `pg_advisory_lock`（会话级）；事务级 `pg_advisory_xact_lock` 也不用（没必要） |
+| 3 | **幂等键** | `turns UNIQUE(actor_id, request_id)`、`turn_calls UNIQUE(turn_id, seq)`、`session_messages UNIQUE(session_id, seq)`、`turn_close` 重复调用原样返回、回执 payload_hash ✓ | 幂等键都带所有者列，为第 4 条服务 |
+| 4 | **大表将来能按所有者分区，不改代码** | 主键改为复合：`turns (actor_id, id)`、`turn_calls (turn_id, seq)`、`session_messages (session_id, id)`；`id` 用 bigint identity（时间有序、紧凑）；所有查询都带所有者键（没有"按 id 全表找"的查询）；`credit_transactions` 已有 `user_id`。将来按 `HASH(actor_id)` / `HASH(session_id)` / `HASH(turn_id)` 分区：唯一键都含分区列，PostgreSQL 直接支持；转换是一次运维搬家（建分区表、搬数据、改名），不改任何 SQL 函数或 Node 代码。时间列（`opened_at`/`created_at`）单独建索引，供保留期清理按时间批量删 | V2-2 的迁移注释写明分区方案；7.1 静态扫描：主路径 SQL 对这四张表的 WHERE 必须带所有者键 |
+| 5 | **读写分离将来能接上** | 主路径三类写入必须走主库；`turn_open` 内的历史读也在主库（和墓碑同一事务）。可以走只读副本的：会话列表、历史消息展示、积分记录、报告阅读、后台报表、发布监测数据、e2e/压测分析 | V2-4 加 `readClient`/`writeClient` 两个客户端接缝（今天都指主库，上副本时只改环境变量）；路由层按"读展示 / 写回合"分别用 |
+| 6 | **Supavisor 事务模式兼容（不依赖会话状态）** | 新函数都是单次调用单事务；不用 `SET`（只允许 `SET LOCAL`）、不用会话级 advisory 锁、不用临时表、不用预编译语句跨调用；0367 的 memo 用事务内 `set_config(..., true)` 也可以不要（新函数没有重复子检查）✓ | 7.1 静态扫描：主路径 SQL 禁止 `pg_advisory_lock(`、非 LOCAL 的 `SET `、`CREATE TEMP`；Node 侧不开长连接 |
+| 7 | **后台定时任务按批、可并行、可水平扩展** | `runtime-recovery`、内容清除、未知成本补结：`SELECT … FOR UPDATE SKIP LOCKED LIMIT 50` 认领，每批处理完提交，按时间预算循环；两个实例同时跑不重复、不冲突；处理函数幂等（都是 `turn_close`）；按部分索引 `(state, updated_at)` 找活，没有全表扫 | V2-8/V2-9 的验收含"双实例并行不重复"；Vercel cron 以后可改为多区域或外部调度（配置） |
+| 8 | **限流在 Redis** | 已是 Upstash；参数从目录缓存读 ✓ | 新增"按模型/供应商并发计数"也放 Redis（第 10 条） |
+| 9 | **没有每轮扫全表的查询；大字段不进热表** | 三个函数的每条语句都走主键/唯一键/部分索引；`check-turn-budget` 对三条标准回合跑 `EXPLAIN`，断言热表无 Seq Scan。**原始回执（模型完整输出）不放 `turn_calls` 热行**：单独表 `turn_call_raw(turn_id, seq, body)`，单条 ≤ 256 KB、30 天清理（线 G 规则不变），`turn_calls` 只留用量、金额、哈希 | 5.1 节加 `turn_call_raw`；7.1 EXPLAIN 断言进 CI |
+| 10 | **外部供应商按并发设上限、做退避** | 今天没有按模型并发上限，只有每用户限流。新路径：每个模型/供应商一个 Redis 计数（`INCR`+TTL）作为并发上限（目录缓存里配），超上限先等再拒；429/5xx 在**第一个字节之前**按指数退避重试 ≤ 2 次（模型调用一旦开始出字不重发，计费规则不变；研究工具沿用"不推定失败、不重发"） | V2-4、V2-6 实现并单测；上限值是配置 |
+| 11 | **流式期间不占数据库连接、不占内存里的大对象** | 调用之间不碰库 ✓；历史在开轮时读一次后只在内存里裁剪（≤ 196608 字节）✓ | 7.1 静态扫描已含 |
+| 12 | **目录缓存在多实例下一致** | 每个 Vercel 实例各自缓存，按 `catalog_versions` 失效，最多 60 秒旧（已上库机制）；实例数多了也不加库压力（版本号随 `turn_open` 返回）✓ | — |
+
+补一句什么**不是**现在要做的：不分库、不上消息队列、不上事件溯源、不做多区域写。这些在 5000 人以内都用不上；真到那一步也是加组件，不是重写主路径，因为主路径的接口就是三个函数。
+
+#### 3.3.3 怎么证明
+
+1. **100 人在 Micro 实测**（3.2 节）：这是唯一真实环境的数据点，也给出"每轮核·秒"的实测值 k。
+2. **500 / 2000 / 5000 用单机压测 + 线性外推**：
+   - 在一台开发机的 Docker PostgreSQL 17 上（固定核数、`shared_buffers` 与 Supabase 对应规格一致），用桩模型跑 500 / 2000 / 5000 虚拟用户（压测节奏和真人节奏各一遍），
+     采 `pg_stat_statements` 的每轮 CPU 时间、`pg_locks` 等待、每秒写入行数与 WAL 量。
+   - 外推依据：新路径每轮的数据库工作量与并发人数无关（只碰自己的行、没有共用行、没有随表变大的查询），所以数据库 CPU ≈ k × 轮数/分，
+     是线性的；锁等待应接近 0 且不随人数增长——压测要**证明这两条**（k 在 500 → 5000 之间不变、等待事件占比不涨），而不是证明某台开发机能撑 5000。
+   - 不确定性（如实写进报告）：共享核的突发额度（Micro/Small/Medium）；内存与交换区（表变大后缓存命中率下降）；磁盘 IOPS；Vercel 到数据库的网络往返
+     （本机为 0，线上 1–5 ms × 3 次）；OpenRouter 的真实限速；真人节奏没有实测。外推结果按"量级"给，不按"精确人数"给。
+3. **第一次真要扩容前（比如要上 500 人）必做的验证**：
+   - 开一个临时 Supabase 项目选目标规格，从文件建库，用桩模型按目标人数压一次（费用按次问 Owner），核对 k 和等待事件与外推一致；
+   - 确认连接池模式为事务模式、池大小按 3.3.1 算；确认 Vercel 套餐的并发与时长上限；确认 OpenRouter 密钥限速与余额告警；
+   - 若到 2000 人：开只读副本，把 3.3.2 第 5 条的读切过去；评估是否做第 4 条的分区搬家（表超过几千万行或保留期清理变慢时才做）；
+   - 看一遍慢查询日志和 `check-turn-budget` 最新基线，确认没有人把"每轮一次"的查询偷偷加回去。
+4. **持续证明**：7.1 的守门脚本每个 PR 都跑，基线只许变小；k 的实测值随每次压测记进 `docs/validation/core-path-v2/`。
 
 ## 4. 产品规则清单：保留、简化、删除
 
@@ -291,6 +374,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 白名单系统原因失败自动退本轮；白名单外走每日对账（10-12） | `turn_close(kind=failed, reason)` | 保留 |
 | 暂停回合 24 小时没交付自动退（10-25）；"Graylum 原因没答案 24 小时后退"（10-12） | 恢复定时任务对 `turns` 统一处理 | 保留（入口合一，第 8 节 3c） |
 | 报告固定 500、点生成时冻结、完整才扣、失败/截断/停止全退、重生成照收（10-17）；停止防刷 24 小时前 2 次全退、第 3 次起按已生成部分扣（10-27） | `kind=report` 分支；次数用 `turns` 索引数 | 保留 |
+| 普通对话（自由对话、导师）不提供用户停止（Owner 10-28） | 前端无按钮；服务端拒绝；没有普通对话的 `stopped` 分支 | 保留（新决定） |
 | 报告成本逐次记账、超 500 平台承担；删除/注销时完整报告照收、其余退（10-17） | 回执照记；注销投影对 `turns` 加规则 | 保留 |
 | 评审团 1500、只给 Gold、一次冻结、可用修订稿才扣、未完成/失败/无需修改全退（10-17）；每组前余额 ≥ 该组上界（10-13）；格式不合格席位不收费（10-13）；各席各自取整、某席失败只退它自己（10-14）；暂停 24 小时自动结束退押金（10-27） | `kind=jury`：开轮冻结 1500+第一组上界；每席一条回执；组间 `paused`；收轮按席结算 | 保留 |
 | 评审团不提供中途停止（10-17）；10-27 又提到"用户点结束评审" | 新路径只留"完成"和"24 小时自动结束"两个收轮入口；要不要用户"结束评审"入口请 Owner 确认 | **待确认**（第 8 节 4） |
@@ -359,7 +443,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 删除定位对话后已确认内容只读可导出（10-14） | `opc_drafts` 不变 | 保留 |
 | 删文风画像立即生效、正在写的作废、按"删除中止"结算（10-23） | 文风来源版本进 `turns.policy`；回执写入核对→中止；`kind=erased` | 保留 |
 | 注销立即、无冷静期、账务 3 年、日志 30 天（项 14、10-12） | DATA-ERASURE 投影改指新表 | 保留 |
-| 收据原始输出 30 天清、计费字段 3 年（10-25 线 G） | `turn_calls.raw` 30 天清理照旧 | 保留 |
+| 收据原始输出 30 天清、计费字段 3 年（10-25 线 G） | `turn_call_raw` 30 天按批清理；`turn_calls` 计费字段 3 年 | 保留 |
 | 数据不用于训练（10-12/26）；备份恢复演练是公开前提（10-24 E2） | 不变 | 保留 |
 
 ### 4.7 随旧路径一起消失的（需要 Owner 点头）
@@ -376,13 +460,17 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 | 表 | 列（要点） | 索引 |
 |---|---|---|
-| `turns` | id, actor_id, session_id, request_id, kind(chat/mentor/report/compare/jury/jury_adopt/review), state, resume_of, policy jsonb（冻结：模型、q、m、上界、工具白名单哈希、system 两段哈希、文风来源版本、Skill packageHash）, input_bytes, reserved_credits, charged_credits, absorbed_credits, settlement(pending/done), stopped_by_user bool, delivered bool, failure_code, opened_at, updated_at, closed_at | pk；UNIQUE(actor_id, request_id)；(session_id, opened_at)；(state, updated_at) WHERE state IN ('running','paused')；(actor_id, kind, closed_at) WHERE stopped_by_user；(settlement) WHERE settlement='pending' |
-| `turn_calls` | id, turn_id, seq, call_kind(model/tool/decision), model_id/tool_name, status(ok/no_charge_402/unknown/unusable/rejected), nominal_usd n, actual_usd c（可空）, multiplier m, usage jsonb（含 cache_read/cache_write）, generation_id, payload_hash, raw jsonb（30 天清）, cost_pending bool, created_at | pk；UNIQUE(turn_id, seq)；(cost_pending) WHERE cost_pending |
-| `session_messages` | id, session_id, seq, role, turn_id, content text, content_hash, visible bool, deleted_at | pk；UNIQUE(session_id, seq)；(session_id, seq DESC) WHERE visible AND deleted_at IS NULL |
-| `daily_spend` | day date pk, spent_usd numeric, limit_usd | — |
+| `turns` | id bigint identity, actor_id, session_id, request_id, kind(chat/mentor/report/compare/jury/jury_adopt/review), state, resume_of, policy jsonb（冻结：模型、q、m、上界、工具白名单哈希、system 两段哈希、文风来源版本、Skill packageHash）, input_bytes, reserved_credits, charged_credits, absorbed_credits, settlement(pending/done), stopped_by_user bool, delivered bool, failure_code, opened_at, updated_at, closed_at | **pk(actor_id, id)**；UNIQUE(actor_id, request_id)；(session_id, opened_at)；(state, updated_at) WHERE state IN ('running','paused')；(actor_id, kind, closed_at) WHERE stopped_by_user；(settlement) WHERE settlement='pending'；(opened_at) 供保留期清理 |
+| `turn_calls` | turn_id, seq, call_kind(model/tool/decision), model_id/tool_name, status(ok/no_charge_402/unknown/unusable/rejected), nominal_usd n, actual_usd c（可空）, multiplier m, usage jsonb（含 cache_read/cache_write）, generation_id, payload_hash, cost_pending bool, created_at | **pk(turn_id, seq)**；(cost_pending) WHERE cost_pending；(created_at) |
+| `turn_call_raw` | turn_id, seq, body（模型完整输出/传输记录，≤ 256 KB）, created_at | pk(turn_id, seq)；(created_at) 供 30 天清理（线 G） |
+| `session_messages` | id bigint identity, session_id, seq, role, turn_id, content text, content_hash, visible bool, deleted_at | **pk(session_id, id)**；UNIQUE(session_id, seq)；(session_id, seq DESC) WHERE visible AND deleted_at IS NULL |
+| `daily_spend` | day date, bucket smallint (0–15), spent_usd numeric；阈值 `limit_usd` 从目录缓存读 | pk(day, bucket)；16 行按 actor 哈希分摊，`turn_open` 用 SUM 读当天 |
 
 `sessions`：复用 `runtime_sessions`，改名为 `sessions` 或保留原名（V2-2 决定，建议保留原名少改引用），加 `active_turn_id`、`deleted_at`；
 去掉 `active_execution`、revision 相关列的使用。
+
+主键都带所有者列、`id` 用时间有序的 bigint、所有查询都带所有者键——这是为了将来按 `HASH(actor_id)`/`HASH(session_id)`/`HASH(turn_id)` 分区时
+不改任何代码（3.3.2 第 4 条）。V2-2 的迁移注释要写明这个分区方案和触发条件（单表超过几千万行或保留期清理变慢）。
 
 ### 5.2 保留的表（主路径只读或按 kind 写一行）
 
@@ -423,20 +511,20 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 |---|---|---|---|---|---|---|---|
 | V2-0 | `docs(CORE-PATH-V2)` 本文 | 本文；Owner 决定后记进 MASTER_PLAN §2.1 | ordinary | Claude | — | 已做 | Codex 审查；Owner 第 8 节决定 |
 | P-1 | `feat(PROMPT-CACHE)` 合 #1501 | 报告/评审团/对比的断点（改 base 到 staging，补复审）；#1500、#1502 关闭，改动迁入 V2-4/V2-5 | high | Claude | — | 0.5 天 | 现有单测；不改主路径 |
-| V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间断言，棘轮基线）；`scripts/db-function-closure.mjs`；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本；对旧路径跑一次基线存档 | low | Codex | — | 3 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
-| V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表 | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库 |
-| V2-3 | `feat(CORE-PATH-V2)` 三个核心函数 | `turn_open`/`turn_call_record`/`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本、停止（普通/报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损 | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；总控上库 |
-| V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具） | high | Claude | V2-3 | 6 天 | `check-turn-budget` 自由对话 ≤ 4；黄金字节；runtime 集成套件里自由对话场景等效迁移 |
+| V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间/EXPLAIN 无顺序扫描断言，棘轮基线）；`scripts/db-function-closure.mjs`（闭包 + 行锁白名单 + 会话级状态禁用扫描）；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本 + 单机外推压测脚本（3.3.3，500/2000/5000 虚拟用户、记 k 与等待事件）；对旧路径跑一次基线存档 | low | Codex | — | 3.5 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
+| V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表；主键与唯一键按 3.3.2 的"可分区"约束设计（按所有者哈希可分区、时间列可做保留期清理） | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库；迁移注释写明未来分区方案 |
+| V2-3 | `feat(CORE-PATH-V2)` 三个核心函数 | `turn_open`/`turn_call_record`/`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损分桶；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
+| V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限 + 429 退避（Redis 计数） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 4；黄金字节；runtime 集成套件里自由对话场景等效迁移；并发上限与退避单测 |
 | V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 7；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
-| V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file` | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试 |
-| V2-7a | `feat(CORE-PATH-V2)` 报告 | `kind=report`：固定价、`acceptedCredits` 校验、会员门槛、停止防刷、`artifact_versions` 写入、#1501 断点保留 | high | Codex | V2-4 | 3 天 | `report`、`report-stop` 场景迁移；24 小时 3 次停止测试 |
+| V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file`；TikHub/Parallel/Firecrawl/monid 按供应商并发上限 + 退避（复用 V2-4 的 Redis 计数） | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试；供应商限流退避单测 |
+| V2-7a | `feat(CORE-PATH-V2)` 报告 | `kind=report`：固定价、`acceptedCredits` 校验、会员门槛、停止（唯一允许停止的 kind）与 24 小时防刷、前端停止确认与第 3 次扣费说明（修核心缺陷 1⑤ J2/J3）、`artifact_versions` 写入、#1501 断点保留 | high | Codex | V2-4 | 3.5 天 | `report`、`report-stop` 场景迁移；24 小时 3 次停止测试；双击只扣一次 |
 | V2-7b | `feat(CORE-PATH-V2)` 对比与评审团 | `kind=compare`/`jury`/`jury_adopt`：并行调用、分组暂停、押金、Gold 门槛、三次未完成、`fusion-recovery` 改读 `turns` | high | Claude | V2-4 | 5 天 | fusion 套件场景迁移；24 小时自动结束测试 |
-| V2-8 | `feat(CORE-PATH-V2)` 停止/暂停/恢复 | `runtime-recovery` 定时任务改读 `turns`（15 分钟中断、24 小时暂停、未知成本补结）；前端停止确认（修核心缺陷 J2/J3） | high | Codex | V2-3、V2-4 | 3 天 | `native-stop`、`stop-round`、`bill2-stuck` 场景迁移；崩溃恢复集成测试 |
+| V2-8 | `feat(CORE-PATH-V2)` 暂停/恢复/定时任务 | `runtime-recovery` 定时任务改读 `turns`（15 分钟中断、24 小时暂停、未知成本补结），按批认领（`FOR UPDATE SKIP LOCKED`、每批 ≤50、可多实例并行、幂等）；普通对话停止入口删除、服务端拒绝 | high | Codex | V2-3、V2-4 | 3 天 | `bill2-stuck`、`stop-round`（改为"普通对话不能停"的拒绝断言）场景迁移；崩溃恢复集成测试；两个实例同时跑定时任务不重复处理 |
 | V2-9 | `feat(CORE-PATH-V2)` 删除与注销接新表 | 会话删除墓碑化、内容清除投影、注销投影、文风来源撤销、`content_erasure_runtime_check` 替换 | high | Codex | V2-3 | 4 天 | erasure 套件逐条等效迁移；长对话（≥100 轮）删除 < 1 秒 |
-| V2-10 | `feat(CORE-PATH-V2)` 前端切换 | `/app` 对话工作区改调 `/api/turn` SSE；`opened` 事件渲染（工具可用性、裁剪说明、兜底卡）；右侧成果夹；`core_path_v2.enabled` 开关 | ordinary | Claude | V2-5、V2-6、V2-7、V2-8 | 4 天 | 浏览器验证（Codex 验收批次）；旧 e2e 全过 |
-| V2-11 | `test(CORE-PATH-V2)` 核心路径 e2e | `apps/web/tests/e2e/core-path/`：① 定位三步到定稿报告；② 自由对话 + 加载 Skill + 一次研究；③ 停止与退款（普通 + 报告 3 次）；④ 删除对话（长对话）与注销；⑤ 对比；⑥ 评审团到逐章选择。新 workflow `staging-e2e.yml`：staging 每次部署成功后跑，用 Gemini Flash 等便宜模型，预算每次 ≤ 0.5 美元（总控按已批准测试预算发测试账号积分），失败开 issue | high（CI） | Codex | V2-10 | 4 天 | 在 staging 跑通一次并附报告；Owner 批准测试预算 |
+| V2-10 | `feat(CORE-PATH-V2)` 前端切换 | `/app` 对话工作区改调 `/api/turn` SSE；`opened` 事件渲染（工具可用性、裁剪说明、兜底卡）；右侧成果夹；普通对话去掉停止按钮（报告保留）；`core_path_v2.enabled` 开关 | ordinary | Claude | V2-5、V2-6、V2-7、V2-8 | 4 天 | 浏览器验证（Codex 验收批次）；旧 e2e 全过 |
+| V2-11 | `test(CORE-PATH-V2)` 核心路径 e2e | `apps/web/tests/e2e/core-path/`：① 定位三步到定稿报告；② 自由对话 + 加载 Skill + 一次研究；③ 报告停止与 24 小时防刷（第 3 次看到扣费说明）、普通对话无停止按钮；④ 删除对话（长对话）与注销；⑤ 对比；⑥ 评审团到逐章选择。新 workflow `staging-e2e.yml`：staging 每次部署成功后跑，模型用 **Claude Haiku 5.5**（Owner 10-28 批准），每次运行 ≤ 0.5 美元，失败开 issue | high（CI） | Codex | V2-10 | 4 天 | 在 staging 跑通一次并附报告与实际花费 |
 | V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
-| V2-13 | `docs(CORE-PATH-V2)` 100 人验收 | 3.2 节压测，报告进 `docs/validation/core-path-v2/`；MASTER_PLAN §2.1 记录结果 | ordinary | Codex | V2-10 | 2 天 | 3.1 节通过线 |
+| V2-13 | `docs(CORE-PATH-V2)` 100 人验收与外推 | 3.2 节 staging 压测 + 3.3.3 单机 500/2000/5000 外推压测，报告进 `docs/validation/core-path-v2/`（含 k 值、等待事件、不确定性）；MASTER_PLAN §2.1 记录结果 | ordinary | Codex | V2-10 | 3 天 | 3.1 节通过线；k 在 500→5000 不变（±15%） |
 
 ### 6.2 顺序与并行
 
@@ -454,7 +542,7 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 - 串行骨架 V2-2→3→4 约 13 个工作日（一个 Claude 窗口）；V2-1 同时由 Codex 做。
 - V2-5…V2-9 六个 PR 文件不重叠（各自 `services/turn/<kind>/`、各自的定时任务与投影文件），三个窗口并行约 6 个工作日。
 - V2-10 → V2-11 → V2-13 → V2-12 串行约 15 个工作日（其中 V2-11、V2-13 可部分并行）。
-- **合计约 53 个工作日的工作量；三窗口并行约 30 个工作日 = 6 周；加 1 周余量 = 7 周。** 乐观 5 周。
+- **合计约 56 个工作日的工作量（含 10-28 扩容要求新增的约 3 天）；三窗口并行约 31 个工作日 ≈ 6 周；加 1 周余量 = 7 周。** 乐观 5 周。
 - 期间不做：运营教练复盘、图片生成、落地页以外的新功能；上线前其他任务（REL-1 未完项、ARCH-FIX 不重叠的线）可以由不碰主路径文件的窗口继续。
 - 冻结前排不下时的砍法：V2-11 的 ⑤⑥（对比、评审团 e2e）后补；V2-12 的文档部分后补。不砍 V2-12 的删除本身。
 
@@ -473,13 +561,20 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 进 CI 的 `scripts/check-turn-budget.mjs`（本机 Docker 库，桩模型）：
 - 跑三条标准回合（自由对话、导师、报告），断言 3.1 节的往返、锁数、数据库时间；数字只许变小，基线 `scripts/turn-budget-baseline.json`
   和代码大小基线一样是棘轮，手动调高需要 Owner 批准。
-- `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：闭包 ≤ 15 函数 / ≤ 10 表；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`。
-- 静态扫描 `packages/api/src/services/turn/`：模型调用与回执之间不允许出现 `.rpc(`/`.from(`（除 `turn_call_record`）。
+- `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：闭包 ≤ 15 函数 / ≤ 10 表；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`，
+  且 WHERE 带所有者键；`UPDATE` 的表只许白名单（上述三张 + `daily_spend` 带 bucket、`session_messages`、`turn_calls`）；
+  禁止 `pg_advisory_lock(`、`pg_advisory_xact_lock(`、非 LOCAL 的 `SET `、`CREATE TEMP`（Supavisor 事务模式与"无全站热点"两条，3.3.2）。
+- `EXPLAIN` 断言：三条标准回合和定时任务认领语句对热表无 Seq Scan（3.1 节）。
+- 静态扫描 `packages/api/src/services/turn/`：模型调用与回执之间不允许出现 `.rpc(`/`.from(`（除 `turn_call_record`）；写路径只用 `writeClient`。
+- 单机外推压测（3.3.3）不进 CI，但每次主路径大改（新 kind、新表）后由总控安排跑一次，k 值记进 `docs/validation/core-path-v2/`。
 - PR 模板加一行"主路径影响：往返 / 锁 / 数据库时间 前→后"。架构守门人（当时的总控窗口）合并前核对这一行和基线差。
 
 ### 7.2 建议加进 `docs/ENGINEERING.md` 的规则（提议文本；规则变更需 Owner 批准后另开 PR）
 
 > **第 5 节新增"主路径约束"**
+> - 主路径的表主键带所有者列，查询必须带所有者键；不得对全站共用行加锁或更新（按天累计类数据用分桶行）；数据库函数只用事务级状态
+>   （不用 `pg_advisory_lock`、非 LOCAL 的 `SET`、临时表），以兼容连接池事务模式；后台定时任务按批认领（`SKIP LOCKED`）、幂等、可多实例并行；
+>   对外部供应商的调用按模型/供应商设并发上限并做退避。
 > - 一轮对话只允许三类数据库写入：开轮（`turn_open`）、回执（`turn_call_record`）、收轮（`turn_close`）。模型调用与工具调用之间不得有其他数据库读写；需要的数据在开轮时取回，或来自进程内目录缓存。
 > - 主路径的数据库函数只能读写 `turns`、`turn_calls`、`session_messages`、`runtime_sessions`、`profiles`、`credit_transactions`、`credit_source_entries`、`daily_spend`、`catalog_versions`，以及按 `kind` 需要的草稿/报告/评审表各一行；只允许对本人 `profiles` 和本会话 `runtime_sessions` 加行锁；不得对任何全站共用行加锁。
 > - 全站只读、管理员写的目录（系统设置、模型目录、Skill 包、权益规则）必须通过 `catalogCache` 读取；余额、冻结、墓碑、会话状态、用户写入的数据永不缓存。
@@ -501,9 +596,28 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 | 运营教练复盘 #1481（迁移 0407）、#1483 | 主路径完成后以 `kind=review` 接核：#1481 的数据地基（结算事实、实验账本）与主路径无关，可在 V2-2 之后由总控择机上库合并；#1483 要改成不走 `REVIEW_PROMPT`+旧 Runtime，而是 V2-6 的"固定 Skill"入口，等 V2-12 后改写 |
 | 图片生成规划 | 上线后；按新 `kind=image` 接入，冻结额按张数 |
 | ARCH-FIX 未完成的线 | 与主路径重叠的（线 C 工具参数、线 D 卡住回合收尾、线 A 入口限流）在 V2-6/V2-8/V2-4 内完成并在 PR 标题带 ARCH-FIX；不重叠的（线 B 上传存储、线 E 订阅积分隔离与对账、线 G 收据保留期改读 `turn_calls`）照原计划 |
-| REL-1 核心 12 项未通过的（10-27 清单） | 1⑤ 停止退款、1② 兜底 B、7② 长对话删除、9③ >500 拒绝、10⑤ 周复盘：前四项由 V2-8/V2-5/V2-9/V2-7b 直接解决并在 V2-11 e2e 覆盖；周复盘随复盘任务上线后 |
+| REL-1 核心 12 项未通过的（10-27 清单） | 1⑤ 报告停止退款与确认、1② 兜底 B、7② 长对话删除、9③ >500 拒绝、10⑤ 周复盘：前四项由 V2-7a/V2-5/V2-9/V2-7b 直接解决并在 V2-11 e2e 覆盖；周复盘随复盘任务上线后 |
 
-## 8. 要 Owner 决定的事（大白话）
+## 8. Owner 的决定
+
+### 8.0 已定（2026-10-28，总控-13 转达）
+
+Owner 原话：
+
+> 普通对话（不是报告）中途不允许用户点停止，不提供这个功能。自动浏览器测试的费用我批准，用 claude haiku 5.5 模型做测试，这个省钱。其他的都按你的推荐做。
+
+> 这次新路径设计好以后我希望未来扩容的时候能够无缝支持 500 人、2000 人、5000 人使用都不用再次重构了可以吗？所以这一次你的这个重构一定要找好正确的技术方案了。
+
+落实范围（不是原话）：
+
+- 决定 1 选 A：重做主路径，旧路径删掉。决定 2 选 A：100 人验收通过后 7 天内上线。3a–3e 全部同意。决定 4 选 A：评审团不给"结束评审"按钮。
+- **普通对话（自由对话、定位导师）不提供用户停止**：前端去掉停止按钮，服务端不接受普通对话的停止请求，`turn_close` 没有普通对话的 `kind=stopped` 分支。
+  报告的停止与 24 小时防刷规则（10-27）保留。本文 2.2、2.5、4.1、6.1（V2-7a/V2-8/V2-10/V2-11）已按此改。第 9 节问题 1 随之了结。
+- V2-11 的 staging 自动浏览器测试用 Claude Haiku 5.5，每次运行 ≤ 0.5 美元，Owner 已批准费用。
+- 扩容要求：新路径在 500 / 2000 / 5000 并发时只靠加规格和改配置扩，不再重构。本文新增 3.3 节回答，并把结构点写进 3.1 预算、7.1 守门和 6.1 PR 清单。
+- 下面 8.1 保留当时给 Owner 的选项，供追溯；以上决定为准。
+
+### 8.1 当时的选项（已决，仅追溯）
 
 **决定 1：怎么重做**
 
@@ -543,8 +657,7 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 
 ## 9. 发现的问题（不在本任务范围，记给总控）
 
-1. 普通对话（非报告）用户停止时的退款规则，代码里只有报告的 24 小时 2 次规则（`report_stop.sql:34-37`），普通对话停止走 `runtime_cancel`：
-   规则本身在 MASTER_PLAN 里没找到明确条目，V2-8 按"按已写回执结算、其余退"做，请总控确认。
+1. **已决（10-28）**：普通对话不提供用户停止（第 8.0 节），停止退款规则只剩报告一条；原问题了结。
 2. 限流（项 30/49）的接线状态：§2.1 写"尚未生效"，后续没有生效记录，V2-4 接目录缓存时顺带核对。
 3. 项 28 的单次回复接收上限 139264 字节（对应旧 8192 输出上限）与 10-07 的 32768 输出上限是否同步：#714 已改为 532480，§2.1 条目未更新。
 4. 压测桩回执应标 `gen-load-`（缓存窗口建议），V2-1 落实。
