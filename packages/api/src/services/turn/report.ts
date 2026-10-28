@@ -17,10 +17,10 @@ import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext }
 import { readPurposeBudgets } from '../runtime/purposeBudgets';
 import { runRuntime } from '../runtime/runner';
 import { modelCall, TurnStop } from './call';
-import { readCoreConfig, type ChatDeps } from './chat';
+import { GATE_CODES, readCoreConfig, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
 import { turnSession } from './history';
-import { turnPolicy } from './policy';
+import { callCredits, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import { reportSkillText } from './reportSkill';
 import type { TurnEvent } from './sse';
@@ -67,6 +67,10 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   const configuration = readAdmissionConfiguration(admin);
   const config = readCoreConfig(await configuration);
   if (!config) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
+  const settings = await readAdmissionSettings(admin, configuration);
+  // The one-switch pause and the message limits, before anything is frozen (as a chat).
+  const admitted = await deps.newWork.message(input.actorId, Promise.resolve(settings));
+  if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
   let quote, price: number;
   try {
     price = reportPrice(await configuration);
@@ -84,16 +88,17 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     return emit({ type: 'error', code: error instanceof QuoteError ? error.code : /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message
       : 'TURN_QUOTE_UNAVAILABLE' });
   }
-  const settings = await readAdmissionSettings(admin, configuration);
   const guard = settings.ok ? settings.identityGuard ?? true : true;
 
   // 2. Open: one model call, no tools, no history. The user's freeze is the fixed price plus the call's bound (10-17: the
   // balance must cover both, or nothing opens); the stop-loss reserves the call's bound only (2.5.3).
-  const base = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
+  const held = price + callCredits(quote.q, quote.upperUsd, quote.multiplier);
+  // The start threshold L of a report is its whole freeze (Owner 10-28 restating 10-01 for metered turns; a fixed-price report
+  // freezes the price and the call's bound at open and never pauses for credits): the balance must cover all of it.
+  const base = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, startThresholdCredits: held,
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }, stopLoss: config.stopLoss, historyItems: 0,
     inputBytes: quote.inputLimit, pricing: quote.pricing, frozen: { modelId: quote.modelId, model: quote.model } });
-  const held = price + base.uModelCredits;
-  const policy = { ...base, fixedCredits: price, gCredits: held, minCredits: held,
+  const policy = { ...base, fixedCredits: price, gCredits: held,
     report: { projectId: input.projectId, roundId: input.roundId, moduleId: input.moduleId } };
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'report', policy }); }
@@ -160,10 +165,13 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
       maxOutputTokens: quote.outputLimit, maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,
       selectHistory: async (items, incoming) => [...items, ...incoming],
       onText: delta => { text += delta; emit({ type: 'text', delta }); },
-      exchange: (_sequence, body, onChunk) => {
+      exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'report', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, quote.inputLimit); }
-        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); return Promise.reject(stopped); }
+        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
+        // The pause and the call limits again before the paid call: nothing is written or sent when refused.
+        const gate = await deps.newWork.calls(input.actorId, 1, 'bill2.v2');
+        if (!gate.ok) { stopped = new TurnStop(GATE_CODES[gate.reason]); throw stopped; }
         return modelCall(callDeps, quote, request, onChunk)
           .then(completion => { finish = (JSON.parse(completion) as { choices?: Array<{ finish_reason?: unknown }> })
             .choices?.[0]?.finish_reason; return completion; })

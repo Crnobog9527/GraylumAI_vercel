@@ -1,9 +1,10 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-7a (placeholder number; the controller assigns the real one before it goes to the database): kind=report on the
+-- CORE-PATH-V2 V2-7a (placeholder number 0497, after 0496 whose turn_open it rebuilds; the controller assigns the real one
+-- before it goes to the database): kind=report on the
 -- turn core (docs/launch/tasks/CORE-PATH-V2.md 2.2, 2.5, 2.7, 4.1, 4.4; Owner 10-17 fixed price, 10-27 stop rule, 10-28 only
 -- reports can be stopped). The report's logic is in its own functions; turn_open and turn_close only dispatch to them (the 0421
--- per-kind hook), rebuilt whole on their latest text:
+-- per-kind hook), rebuilt whole on their latest text (turn_open as 0496 left it, turn_close as 0421):
 --   turn_report_admit       turn_open, new report: switch, today's fixed price (acceptedCredits), one-call shape, the round's
 --                           module, membership, confirmed source, benchmarks, one paid report per round; its result is the
 --                           report's kindContext (source and benchmark table)
@@ -228,8 +229,10 @@ BEGIN
     IF p_kind = 'report' THEN report := public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
+    -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
+    -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
+    IF available < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     h := least(g, available);
-    IF h < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;

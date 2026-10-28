@@ -57,7 +57,8 @@ const kindContext = {
   benchmarks: { rows: [], hash: 'f'.repeat(64) } };
 const COMPLETE = '## One\nFirst.\n## Two\nSecond.';
 
-function harness(over: { open?: () => unknown; openError?: string; state?: string } = {}) {
+function harness(over: { open?: () => unknown; openError?: string; state?: string;
+  gate?: { message?: { ok: false; reason: string }; calls?: { ok: false; reason: string } } } = {}) {
   const rpc: Array<[string, Record<string, unknown>]> = [];
   const respond = async (name: string, args: Record<string, unknown>) => {
     rpc.push([name, args]);
@@ -75,6 +76,7 @@ function harness(over: { open?: () => unknown; openError?: string; state?: strin
   };
   const client = { rpc: respond, from: () => { throw new Error('no table reads'); } };
   const deps = { admin: {}, clients: { write: client, read: client }, slots: {},
+    newWork: { message: async () => over.gate?.message ?? { ok: true }, calls: async () => over.gate?.calls ?? { ok: true } },
     transport: (async (_url: string, init: RequestInit) => new Promise((_resolve, reject) =>
       init.signal?.addEventListener('abort', () => reject(new Error('aborted'))))) as unknown as typeof fetch } as unknown as ChatDeps;
   const events: TurnEvent[] = [];
@@ -193,5 +195,18 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     const request = h.transports[0]!('https://openrouter.test', { signal: budget.signal });
     budget.abort();
     await expect(request).rejects.toThrow('aborted');
+  });
+
+  it('the one-switch pause refuses before anything opens; a call limit refuses before the paid call and pays nothing', async () => {
+    const paused = harness({ gate: { message: { ok: false, reason: 'paused' } } });
+    await runReportTurn(paused.deps, input, paused.emit);
+    expect(paused.events).toEqual([{ type: 'error', code: 'TURN_NEW_CALLS_PAUSED' }]);
+    expect(paused.rpc).toEqual([]);
+    const limited = harness({ gate: { calls: { ok: false, reason: 'call_limited' } } });
+    runs(COMPLETE);
+    await runReportTurn(limited.deps, input, limited.emit);
+    expect(h.call).not.toHaveBeenCalled();
+    expect(limited.rpc[1]![1]).toMatchObject({ p_close_kind: 'failed' });
+    expect(limited.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_RATE_LIMITED' });
   });
 });
