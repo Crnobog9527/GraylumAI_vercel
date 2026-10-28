@@ -573,6 +573,30 @@ try{
   assert.equal((await close(r,y.turnId,'stopped')).chargedCredits,120,'the third stop is charged when it settles later');
   report.checks.push('a later settlement keeps the close: an unknown tool stays 0 to the user; a third report stop stays charged');
  }
+ // 24. #1512 review: a call closed as unknown whose late receipt proves it was never billed (not_sent, rejected). The receipt is
+ // accepted, and the next settlement frees the whole freeze and the stop-loss share; with a provider id it is still refused.
+ {
+  for(const status of ['not_sent','rejected']){
+   const a=await account(1000),before=await dayTotals();
+   const o=await open(a,{pol:policy({gCredits:60})});
+   await begin(a,o.turnId,1);
+   await close(a,o.turnId,'interrupted',{messages:[],delivered:false});
+   assert.equal(await balance(a),940);
+   await record(a,o.turnId,1,{status});
+   assert.deepEqual((await c.query('select status,cost_pending from turn_calls where turn_id=$1',[o.turnId])).rows,[{status,cost_pending:false}]);
+   const settled=await close(a,o.turnId,'interrupted');
+   assert.deepEqual([settled.chargedCredits,settled.settlement],[0,'done'],status);
+   assert.equal(await balance(a),1000);
+   const after=await dayTotals();
+   assert.ok(near(Number(after.r),Number(before.r))&&near(Number(after.s),Number(before.s)),`${status}: reservation released, nothing spent`);
+  }
+  const b=await account(1000);
+  const ob=await open(b,{pol:policy({gCredits:60})});
+  await begin(b,ob.turnId,1);await identity(b,ob.turnId,1,'gen-billed');
+  await close(b,ob.turnId,'interrupted',{messages:[],delivered:false});
+  assert.match(await refusal(record(b,ob.turnId,1,{status:'not_sent'})),/TURN_CALL_INVALID/,'a call with a provider id is never proven unbilled');
+  report.checks.push('a late not_sent/rejected receipt for a call closed as unknown is accepted and frees the freeze and the stop-loss share; with a provider id it is refused');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

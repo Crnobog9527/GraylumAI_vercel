@@ -4212,7 +4212,7 @@
   "fn:token_stats_model_alias()": "2d856e4cf9bb",
   "fn:turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "9dbb859c9901",
   "fn:turn_call_identity(uuid,bigint,integer,text)": "40ec987e5d70",
-  "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "134d118b31db",
+  "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "d6153b0cba2c",
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "4a4ffd93742c",
   "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "f2f07d96c990",
   "fn:turn_recover(uuid,bigint,text)": "643852dcec58",
