@@ -7,9 +7,9 @@ import { readMultiplierSnapshot } from '../billingUnit';
 import { fusionRequestFormat, reasoningPurpose, type FusionPhase } from '../fusion/models';
 import { openRouterAccount } from '../models/openRouterKey';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
-import { readAdmissionModel } from '../runtime/admissionConfiguration';
+import { readAdmissionModel, type ConfigurationRows } from '../runtime/admissionConfiguration';
+import { rowFor } from '../runtime/settingsRows';
 import { admittedOutputLimit } from '../runtime/admissionLimits';
-import { catalogRead } from '../runtime/catalogCache';
 import { isAdmittedRoute, matchedProfile, paygProductionSettings } from '../runtime/paygHostPolicy';
 import { readPricingStates, type PricingDeps } from '../runtime/pricingAdmission';
 import { admitReasoning } from '../runtime/reasoningAdmission';
@@ -50,10 +50,10 @@ export function fusionCall(quote: FusionQuote, body: string): ModelCall {
   return { ...quote, upperUsd, identity: { ...quote.identity, upperUsd, payg } as ModelCall['identity'] };
 }
 
-export async function fusionQuote(admin: SupabaseClient, input: { modelId: string; phase: FusionPhase; outputTokens: number;
-  key: string; deps?: PricingDeps }): Promise<FusionQuote> {
-  const setting = await catalogRead(admin, 'settings', 'runtime-payg', () =>
-    admin.from('system_settings').select('value').eq('key', RUNTIME_PAYG_SETTING).maybeSingle());
+export async function fusionQuote(admin: SupabaseClient, input: { configuration: ConfigurationRows; modelId: string; phase: FusionPhase;
+  outputTokens: number; key: string; deps?: PricingDeps }): Promise<FusionQuote> {
+  // From the admission configuration rows (one cached query for every setting), as chatQuote.
+  const setting = rowFor(input.configuration, RUNTIME_PAYG_SETTING);
   const parsed = paygProductionSettings.safeParse(setting.error ? null : setting.data?.value);
   if (!parsed.success || !parsed.data.enabled) throw new QuoteError('TURN_PAYG_DISABLED');
 

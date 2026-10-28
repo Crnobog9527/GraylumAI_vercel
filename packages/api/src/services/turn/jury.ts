@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { logSwallowed } from '../../lib/swallow';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { checkRevision, parseOpinion } from '../fusion/hostChecks';
 import { fusionRequestBody } from '../fusion/request';
@@ -11,7 +12,8 @@ import { claimOutcome } from '../fusion/reviewLimits';
 import { readFusionSettings } from '../fusion/settings';
 import { assertFusionEntitlement, readMembershipEntitlements } from '../membershipEntitlements';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
-import { catalogRead } from '../runtime/catalogCache';
+import { readAdmissionConfiguration, type ConfigurationRows } from '../runtime/admissionConfiguration';
+import { rowFor } from '../runtime/settingsRows';
 import type { PricingDeps } from '../runtime/pricingAdmission';
 import { readReplyLocale } from '../runtime/replyLanguage';
 import { TurnStop } from './call';
@@ -43,9 +45,8 @@ const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.att
 const codeOf = (error: unknown) => error instanceof QuoteError || error instanceof TurnStop || error instanceof TurnDatabaseError
   ? error.code : error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'TURN_FAILED';
 
-async function coreSettings(admin: SupabaseClient) {
-  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
-    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+async function coreSettings(configuration: ConfigurationRows) {
+  const core = rowFor(configuration, CORE_PATH_SETTING);
   const parsed = fusionCoreSetting.safeParse(core.error ? null : core.data?.value);
   if (!parsed.success || !parsed.data.enabled) throw new Error('TURN_CORE_DISABLED');
   return parsed.data;
@@ -53,9 +54,11 @@ async function coreSettings(admin: SupabaseClient) {
 
 /** Each panel model's quote for its phase, the turn's way (fusionQuote): reviewers and the summary. */
 async function panelQuotes(deps: JuryDeps, cfg: { reviewers: string[]; summary: string; opinionTokens: number; summaryTokens: number }, key: string) {
-  const reviewers = await Promise.all(cfg.reviewers.map(modelId => fusionQuote(deps.admin, { modelId, phase: 'fusion_review',
+  // The settings come with the admission configuration (one cached query for every setting), never a query of their own.
+  const configuration = await readAdmissionConfiguration(deps.admin);
+  const reviewers = await Promise.all(cfg.reviewers.map(modelId => fusionQuote(deps.admin, { configuration, modelId, phase: 'fusion_review',
     outputTokens: cfg.opinionTokens, key, deps: deps.pricing })));
-  const summary = await fusionQuote(deps.admin, { modelId: cfg.summary, phase: 'fusion_summary', outputTokens: cfg.summaryTokens, key,
+  const summary = await fusionQuote(deps.admin, { configuration, modelId: cfg.summary, phase: 'fusion_summary', outputTokens: cfg.summaryTokens, key,
     deps: deps.pricing });
   return { reviewers, summary, of: (modelId: string, phase: 'fusion_review' | 'fusion_summary') =>
     phase === 'fusion_summary' ? summary : reviewers.find(q => q.modelId === modelId)! };
@@ -118,7 +121,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
     async start(input: { requestId: string; draftId: string; sourceVersionId: string; acceptedCredits?: number }): Promise<ReviewView> {
       const replayed = await record.replay(input);
       if (replayed?.turnId) return replayed;
-      const coreSetting = await coreSettings(admin);
+      const coreSetting = await coreSettings(await readAdmissionConfiguration(admin));
       const { settings, skill, estimate, q, holdCredits, priceCredits, replyLocale } = await plan(input);
       if (input.acceptedCredits !== undefined && priceCredits !== input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
       const planned = [...Object.values(estimate.callCaps.review), ...Object.values(estimate.callCaps.debate),
@@ -192,7 +195,8 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         const stops = outcomes.flatMap(o => o.ok ? [] : [o.code]);
         if (stops.includes('TURN_TOMBSTONED')) {
           await db.close({ turnId: view.turnId, kind: 'erased', delivered: false, failureCode: 'turn_tombstoned',
-            product: { state: 'interrupted', outcome: { kind: 'erased' } } }).catch(() => undefined);
+            product: { state: 'interrupted', outcome: { kind: 'erased' } } }).catch(error => logSwallowed('jury_erased_close_failed', error,
+            { category: 'billing', reviewId }));
           return { next: false, reason: 'ended' };
         }
         if (stops.includes('TURN_PAUSED_FOR_CREDITS')) return { next: false, reason: 'waiting_credits' };

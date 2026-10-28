@@ -1,13 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { logSwallowed } from '../../lib/swallow';
 import { compareRequest, assertCompareFits, snapshotHash, workspaceDependencies, type CompareParts } from '../fusion/compareSnapshot';
 import { columnStreamer } from '../fusion/compareStream';
 import { decimal, DECIMAL_SCALE } from '../bill2/decimal';
 import { fusionRequestBody } from '../fusion/request';
 import { readFusionSettings } from '../fusion/settings';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
-import { catalogRead } from '../runtime/catalogCache';
+import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
+import { rowFor } from '../runtime/settingsRows';
 import { isPositioningRefusal } from '../runtime/positioningFallback';
 import { judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import type { PricingDeps } from '../runtime/pricingAdmission';
@@ -48,8 +50,9 @@ const fail = (code: string): CompareEvent => ({ type: 'error', code });
 
 export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnInput, emit: (event: CompareEvent) => void) {
   const { admin } = deps;
-  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
-    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+  // The settings come with the admission configuration (one cached query for every setting), never a query of their own.
+  const configuration = await readAdmissionConfiguration(admin);
+  const core = rowFor(configuration, CORE_PATH_SETTING);
   const config = fusionCoreSetting.safeParse(core.error ? null : core.data?.value);
   if (!config.success || !config.data.enabled) return emit(fail('TURN_CORE_DISABLED'));
   const settings = (await readFusionSettings(admin)).compare;
@@ -71,7 +74,7 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   // 2. Quotes and the exact request of every column, priced with the fallback rule (the larger of the two possible requests).
   let quotes, columns;
   try {
-    quotes = await Promise.all(models.map(modelId => fusionQuote(admin, { modelId, phase: 'fusion_compare',
+    quotes = await Promise.all(models.map(modelId => fusionQuote(admin, { configuration, modelId, phase: 'fusion_compare',
       outputTokens: settings.answerOutputTokens, key, deps: deps.pricing })));
     const request = compareRequest(partsWith(sized, true));
     assertCompareFits(request);
@@ -183,7 +186,7 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   } catch (error) {
     const code = error instanceof TurnStop || error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     await close(code === 'TURN_TOMBSTONED' ? 'erased' : 'failed', { refundAll: code !== 'TURN_TOMBSTONED', failureCode: code.toLowerCase() })
-      .catch(() => undefined);
+      .catch(error => logSwallowed('compare_close_failed', error, { category: 'billing', turnId: opened.turnId }));
     emit({ type: 'error', code, turnId: opened.turnId });
   }
 }

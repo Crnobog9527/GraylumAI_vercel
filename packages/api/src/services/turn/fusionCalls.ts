@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { swallow } from '../../lib/swallow';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import type { FusionPhase } from '../fusion/models';
 import { modelCall, TurnStop, type ModelCall } from './call';
@@ -61,7 +62,8 @@ export function fusionDatabase(clients: TurnClients, actorId: string) {
           const next = queue.then(() => rpc(w, 'turn_fusion_begin', { p_actor_id: actorId, p_turn_id: turnId, p_seq: a.seq,
             p_call_kind: a.callKind, p_model_id: a.modelId, p_tool_name: a.toolName, p_paid: a.paid, p_request_hash: a.requestHash,
             p_upper_usd: a.upperUsd, p_multiplier: a.multiplier }, begun));
-          queue = next.catch(() => undefined);
+          // The chain only orders the begins; this begin's own failure reaches its caller through `next`.
+          queue = swallow('turn_fusion_begin_queue', next, undefined, { category: 'ai' });
           return next;
         },
         async record(a: Parameters<typeof core.record>[0]) {

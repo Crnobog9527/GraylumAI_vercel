@@ -4,6 +4,7 @@ import { withPlatformSecretRequest } from '../platformSecrets/request';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
+import { swallow } from '../../lib/swallow';
 import { authoritativeBilling, type BillingRpc } from '../bill2/service';
 import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
 import { newWorkGate } from '../runtime/newWorkGate';
@@ -86,7 +87,8 @@ export async function advanceReview(input: { admin: SupabaseClient; reviewId: st
     const { admin, reviewId } = input;
     const outcome = await withAdvanceLease(admin, reviewId, async lease => {
       // A review on the turn path advances through its jury turn (one group per invocation), never through BILL2.
-      const view = await reviewRecord(admin, lease.actorId!).read(reviewId).catch(() => null);
+      const view = await swallow('fusion_review_read_failed', reviewRecord(admin, lease.actorId!).read(reviewId), null,
+        { category: 'billing', reviewId });
       if (view?.turnId) {
         try {
           return await juryTurn({ admin, clients: turnClients(admin), slots: input.jury?.slots ?? redisCounterStore(),
