@@ -8,10 +8,20 @@
 --   turn_call_begin   a call pauses the turn only when the remaining freeze is below min(G_i, L), so a turn whose freeze was
 --                     capped by the balance still sends its call; the part above the freeze is absorbed by the platform
 --   turn_call_record  credits_low uses the same threshold
+-- Also (#1516 review, CORE-PATH-V2 4.1 keeps BILL2's metering block): a model call whose actual or nominal cost is above its
+-- frozen bound marks turn_calls.budget_conflict; turn_call_begin refuses new model calls of that model while an unreviewed mark
+-- exists (TURN_MODEL_METERING_BLOCKED), as bill2_record / bill2_payg_claim do. After checking the price and metering, an
+-- administrator clears it: UPDATE turn_calls SET conflict_reviewed_at = now() WHERE budget_conflict AND conflict_reviewed_at IS NULL
+-- AND model_id = '<model id>'.
 -- Compatibility: a policy without minCredits keeps the earlier rule (G_i). Repeatable: whole CREATE OR REPLACE of the three
 -- functions (from 0421 as applied). Recovery: re-run 0421's definitions of these three functions; no data changes.
 BEGIN;
 SET LOCAL lock_timeout='5s';
+
+ALTER TABLE public.turn_calls ADD COLUMN IF NOT EXISTS budget_conflict boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS conflict_reviewed_at timestamptz;
+CREATE INDEX IF NOT EXISTS turn_calls_budget_conflict ON public.turn_calls (model_id)
+  WHERE budget_conflict AND conflict_reviewed_at IS NULL;
 
 CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
  RETURNS jsonb
@@ -162,6 +172,11 @@ BEGIN
     RAISE EXCEPTION 'TURN_CALL_SEQUENCE' USING ERRCODE='22023';
   END IF;
   IF (p_call_kind = 'tool') IS DISTINCT FROM (p_paid IS NOT NULL) THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
+  -- A model whose cost went above its bound is blocked until an administrator has checked its price and metering (BILL2).
+  IF p_call_kind = 'model' AND EXISTS (SELECT 1 FROM turn_calls WHERE model_id = p_model_id AND budget_conflict
+      AND conflict_reviewed_at IS NULL) THEN
+    RAISE EXCEPTION 'TURN_MODEL_METERING_BLOCKED' USING ERRCODE='P0001';
+  END IF;
   -- Frozen limits (2.5.3): attempts that certainly cost nothing (not_sent, rejected, 402) do not count against them. M counts
   -- the model calls the user pays for; the positioning check (decision) is its own limit outside M (Fable 10-28).
   SELECT count(*) FILTER (WHERE call_kind = 'model'),
@@ -229,7 +244,10 @@ BEGIN
         -- unusable: the provider charged for a result that cannot be used; the user's base is 0, the platform's cost is kept.
         actual_usd = CASE WHEN p_status IN ('ok','unusable') THEN p_actual_usd END,
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
-        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false
+        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false,
+        -- Above the frozen bound: the estimate failed (price or metering); the model is blocked for new calls (turn_call_begin).
+        budget_conflict = c.call_kind = 'model' AND p_status = 'ok'
+          AND (coalesce(p_actual_usd, 0) > c.upper_usd OR coalesce(p_nominal_usd, 0) > c.upper_usd)
       WHERE turn_id = p_turn_id AND seq = p_seq;
     -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
     -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs

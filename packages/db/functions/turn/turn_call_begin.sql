@@ -23,6 +23,11 @@ BEGIN
     RAISE EXCEPTION 'TURN_CALL_SEQUENCE' USING ERRCODE='22023';
   END IF;
   IF (p_call_kind = 'tool') IS DISTINCT FROM (p_paid IS NOT NULL) THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
+  -- A model whose cost went above its bound is blocked until an administrator has checked its price and metering (BILL2).
+  IF p_call_kind = 'model' AND EXISTS (SELECT 1 FROM turn_calls WHERE model_id = p_model_id AND budget_conflict
+      AND conflict_reviewed_at IS NULL) THEN
+    RAISE EXCEPTION 'TURN_MODEL_METERING_BLOCKED' USING ERRCODE='P0001';
+  END IF;
   -- Frozen limits (2.5.3): attempts that certainly cost nothing (not_sent, rejected, 402) do not count against them. M counts
   -- the model calls the user pays for; the positioning check (decision) is its own limit outside M (Fable 10-28).
   SELECT count(*) FILTER (WHERE call_kind = 'model'),

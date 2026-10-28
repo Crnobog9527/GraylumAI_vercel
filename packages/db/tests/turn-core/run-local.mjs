@@ -656,6 +656,30 @@ try{
   assert.equal((await begin(b,ob.turnId,3,{upper:1})).paused,true,'the next call pauses below L');
   report.checks.push('start threshold L: balance 500 < G 600 opens with H 500 and sends its call (D 500, E 40); below L no open; credits_low and the pause at L');
  }
+ // 27. #1516 review (4.1, BILL2's metering block): a model call whose cost is above its frozen bound marks budget_conflict, and
+ // that model takes no new call until an administrator marks it reviewed; other models are not affected.
+ {
+  const model=randomUUID(),other=randomUUID();
+  const beginOn=(a,turn,seq,modelId,upper=0.02)=>one('select turn_call_begin($1,$2,$3,$4,$5,null,null,$6,$7,$8) v',
+   [a.actor,turn,seq,'model',modelId,hash('m'+turn+seq),upper,m]);
+  const a=await account(1000);
+  const o=await open(a);
+  await beginOn(a,o.turnId,1,model);
+  await record(a,o.turnId,1,{n:0.03,actual:0.035}); // above U = 0.02
+  assert.equal(await one('select budget_conflict v from turn_calls where turn_id=$1 and seq=1',[o.turnId]),true);
+  await close(a,o.turnId);
+  const b=await account(1000);
+  const ob=await open(b);
+  assert.match(await refusal(beginOn(b,ob.turnId,1,model)),/TURN_MODEL_METERING_BLOCKED/);
+  assert.equal((await beginOn(b,ob.turnId,1,other)).status,'dispatched','another model is not blocked');
+  await record(b,ob.turnId,1,{n:0.01});
+  await c.query('update turn_calls set conflict_reviewed_at=now() where model_id=$1 and budget_conflict',[model]);
+  assert.equal((await beginOn(b,ob.turnId,2,model)).status,'dispatched','reviewed: the model takes calls again');
+  // A cost inside the bound never marks.
+  await record(b,ob.turnId,2,{n:0.02,actual:0.02});
+  assert.equal(await one('select budget_conflict v from turn_calls where turn_id=$1 and seq=2',[ob.turnId]),false);
+  report.checks.push('a model call above its bound marks budget_conflict and blocks that model until reviewed; within the bound it does not');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
