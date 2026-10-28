@@ -37,6 +37,8 @@ export type ChatToolDeps = {
 
 export type ChatToolsSetup = {
   plan: ToolPlan; research: ResearchSetup | null; inputLimit: number;
+  /** Request bytes of the offered tool definitions (the history may not take them). */
+  definitionBytes: number;
   /** Appended to the shared (cached) instructions: fixed per session. */
   sharedInstructions: string;
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
@@ -78,7 +80,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; configura
   const inputLimit = researchUsable ? Math.min(input.quotedBytes, RESEARCH_INPUT_BYTES) : Math.min(input.quotedBytes, input.interactiveBytes);
   const benchmark = setup && input.tools.benchmarkAccounts ? await input.tools.benchmarkAccounts(input.actorId).catch(() => []) : [];
   return {
-    plan, research: setup, inputLimit,
+    plan, research: setup, inputLimit, definitionBytes,
     sharedInstructions: researchInstructions(plan) + catalogText,
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),

@@ -180,7 +180,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
     // The tool definitions and the room kept for tool results are part of what the history may not take (V2-6).
     const current = input.text + (tools?.plan.note ?? '');
-    const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192 - (tools?.plan.reserveBytes ?? 0);
+    const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192
+      - (tools ? tools.plan.reserveBytes + tools.definitionBytes : 0);
     const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
     // The reply streams. Under the fallback rule nothing is sent while the text so far could still be the refusal marker, which
     // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
