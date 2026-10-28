@@ -15,6 +15,7 @@ import {readRuntimeView,retainedOutputReason} from './view';
 import {readNativeRuntimeView} from './nativeView';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
+import './catalogCache.integration';
 import './payg.integration';
 import './reliability.integration';
 import './nativeStopView.integration';

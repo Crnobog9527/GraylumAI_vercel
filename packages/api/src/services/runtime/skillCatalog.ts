@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
 import { activateFreeChatSkill, isPositioningPackage } from '../skills/stepGuide';
 import { discoverSkills, SkillLoadError, type SkillSource } from '../skills/loader';
+import { catalogVersion } from './catalogCache';
 
 /*
  * CONTENT-CONVERSATION-DRIVEN: free chat lets the current dialogue model load a Skill itself (Owner 2026-10-23:
@@ -59,7 +60,8 @@ export function loadSkillResult(entry: Omit<SkillCatalogEntry, 'resultBytes'>, i
 // per-process, per-user cache can at worst list a Skill that was just unpublished: loading it is then refused. Test isolation
 // clears it.
 const CATALOG_TTL_MS = 5 * 60 * 1000, CATALOG_CACHE_ENTRIES = 256;
-const catalogCache = new Map<string, { at: number; entries: SkillCatalogEntry[]; versions: Record<string, number | null> }>();
+const catalogCache = new Map<string, { at: number; entries: SkillCatalogEntry[]; versions: Record<string, number | null>;
+  catalogVersion?: number }>();
 export function clearSkillCatalogCache(): void { catalogCache.clear(); }
 
 /**
@@ -89,16 +91,22 @@ export async function discoverSkillCatalog(user: SupabaseClient, admin: Supabase
   const key = limits.actorId ? [limits.actorId, limits.excludeSocial, limits.maxResultBytes].join('|') : undefined;
   const now = limits.now ?? Date.now();
   const cached = key ? catalogCache.get(key) : undefined;
-  // One read confirms no listed Skill was republished or unpublished since; otherwise the catalog is rebuilt.
-  if (cached && now - cached.at < CATALOG_TTL_MS
-    && sameVersions(cached.versions, await publishedVersions(admin, cached.entries.map(e => e.skillId)))) {
-    return structuredClone(cached.entries);
+  // One read confirms no listed Skill was republished or unpublished since; otherwise the catalog is rebuilt. DB-RW PR-B: an
+  // unchanged Skill catalog version (any publication, revocation or module change raises it) confirms the same without it.
+  // The version is taken before any read, so a change during the read only makes the next turn check again.
+  const catalogVersionBefore = key ? await catalogVersion(admin, 'skills') : undefined;
+  if (cached && now - cached.at < CATALOG_TTL_MS) {
+    if (catalogVersionBefore !== undefined && cached.catalogVersion === catalogVersionBefore) return structuredClone(cached.entries);
+    if (sameVersions(cached.versions, await publishedVersions(admin, cached.entries.map(e => e.skillId)))) {
+      cached.catalogVersion = catalogVersionBefore;
+      return structuredClone(cached.entries);
+    }
   }
   const entries = await discoverUncached(user, admin, limits);
   if (key) {
     const versions = await publishedVersions(admin, entries.map(e => e.skillId));
     catalogCache.delete(key);
-    catalogCache.set(key, { at: now, entries: structuredClone(entries), versions });
+    catalogCache.set(key, { at: now, entries: structuredClone(entries), versions, catalogVersion: catalogVersionBefore });
     for (const oldest of catalogCache.keys()) { if (catalogCache.size <= CATALOG_CACHE_ENTRIES) break; catalogCache.delete(oldest); }
   }
   return entries;
