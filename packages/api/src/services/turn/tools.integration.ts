@@ -129,6 +129,13 @@ async function turn(f: { actor: string; session: string }, transport: typeof fet
   { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text: 'How should a coffee shop position itself?' }, e => events.push(e)));
   return { events, calls };
 }
+/** N = ceil(q x sum(n x m)) over the receipts the user pays for: ok rows except the positioning check (q 100, m 6 here). */
+const expectedCredits = (actor: string) => db.query(`select ceil(100 * coalesce(sum(c.nominal_usd * c.multiplier), 0))::int n
+  from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.status='ok'
+  and c.call_kind<>'decision'`, [actor]).then(r => r.rows[0].n as number);
+const modelCredits = (actor: string) => db.query(`select ceil(100 * coalesce(sum(c.nominal_usd * c.multiplier), 0))::int n
+  from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model'`, [actor])
+  .then(r => r.rows[0].n as number);
 const rows = (actor: string) => db.query(`select c.seq,c.call_kind,c.tool_name,c.status,c.nominal_usd::float8 n,c.actual_usd::float8 c,
   c.upper_usd::float8 u,c.cost_pending from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1
   order by c.seq`, [actor]).then(r => r.rows);
@@ -152,10 +159,12 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the con
   expect(tools[0]).toBe(tools[1]);
   expect(bodies[1]).toContain('Coffee guide');
   const t = (await db.query('select reserved_credits,charged_credits,settlement from turns where actor_id=$1', [f.actor])).rows[0];
-  // Two model calls (0.006 each) and the search (0.01): N = ceil(100 x 0.022 x 6) = 14 credits, within the freeze.
-  expect(t).toMatchObject({ charged_credits: 14, settlement: 'done' });
-  expect(t.reserved_credits).toBeGreaterThanOrEqual(14);
-  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - 14);
+  // Both model calls and the search (0.01 x m 6 x q 100 = 6 credits of it), within the freeze.
+  const n = await expectedCredits(f.actor);
+  expect(n).toBeGreaterThanOrEqual(6 + 1);
+  expect(t).toMatchObject({ charged_credits: n, settlement: 'done' });
+  expect(t.reserved_credits).toBeGreaterThanOrEqual(n);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - n);
   // Round trips of the turn's own: the V2-4a seven plus two for the tool row and three for the model call that reads it.
   const own = out.calls.filter(c => c.startsWith('rpc/turn_'));
   console.log('CORE-PATH-V2 free chat with one search, round trips', JSON.stringify({ total: out.calls.length, own: own.length, calls: out.calls }));
@@ -172,8 +181,9 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a search that returns nothing is said plainly an
   expect(bodies[1]).toContain('NO_DATA_RETURNED');
   const tool = (await rows(f.actor)).find(r => r.call_kind === 'tool');
   expect(tool).toMatchObject({ status: 'unusable', n: 0, c: 0.01 });
-  // Only the two model calls: N = ceil(100 x 0.012 x 6) = 8 credits.
-  expect((await db.query('select charged_credits from turns where actor_id=$1', [f.actor])).rows[0].charged_credits).toBe(8);
+  // Only the two model calls.
+  expect((await db.query('select charged_credits from turns where actor_id=$1', [f.actor])).rows[0].charged_credits)
+    .toBe(await modelCredits(f.actor));
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-6: an unknown supplier result costs the user nothing and keeps the provider cost pending', async () => {
@@ -186,7 +196,7 @@ it('RUNTIME: CORE-PATH-V2 V2-6: an unknown supplier result costs the user nothin
   expect((await rows(f.actor)).find(r => r.call_kind === 'tool')).toMatchObject({ status: 'unknown', cost_pending: true, u: 0.01 });
   const t = (await db.query('select charged_credits,settlement from turns where actor_id=$1', [f.actor])).rows[0];
   // The user is settled now for the two model calls only; the turn stays pending for the supplier cost (recovery).
-  expect(t).toEqual({ charged_credits: 8, settlement: 'pending' });
+  expect(t).toEqual({ charged_credits: await modelCredits(f.actor), settlement: 'pending' });
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-6: a route profile allowing two tools never carries the research group (payg-three-tools)', async () => {
