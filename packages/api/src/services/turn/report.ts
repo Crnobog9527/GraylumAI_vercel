@@ -92,7 +92,9 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }, stopLoss: config.stopLoss, historyItems: 0,
     inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
   const held = price + base.uModelCredits;
-  const policy = { ...base, fixedCredits: price, gCredits: held, minCredits: held,
+  // The model and its nominal price table are frozen (policy.model, policy.pricing): recovery prices a call whose cost was
+  // unknown with them, never with the catalog's current values (V2-8).
+  const policy = { ...base, pricing: quote.pricing, fixedCredits: price, gCredits: held, minCredits: held,
     report: { projectId: input.projectId, roundId: input.roundId, moduleId: input.moduleId } };
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'report', policy }); }

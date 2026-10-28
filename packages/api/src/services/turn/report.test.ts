@@ -30,7 +30,9 @@ vi.mock('../runtime/providerRequest', async original => ({ ...await original<obj
 vi.mock('../bill2/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: (o: { transport: typeof fetch }) => { h.transports.push(o.transport); return {}; } }));
 vi.mock('./call', async original => ({ ...await original<object>(), modelCall: h.call }));
 vi.mock('../runtime/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
-const quote = { modelId: '20000000-0000-4000-8000-000000000002', model: 'anthropic/claude-sonnet-5.5', q: '100', multiplier: '6',
+const pricing = { version: 'nominal-v1', pricingHash: 'a'.repeat(64), endpointTag: 'anthropic/exact',
+  tiers: [{ minPromptTokens: 0, prompt: '3', completion: '15', request: '0' }], timeOfDay: [] };
+const quote = { pricing, modelId: '20000000-0000-4000-8000-000000000002', model: 'anthropic/claude-sonnet-5.5', q: '100', multiplier: '6',
   upperUsd: '0.3', outputLimit: 32768, inputLimit: 196608, reasoning: { parameter: 'none' },
   providerLimits: { providerSlug: 'anthropic', contextTokens: 200000, promptUsdPerMillion: '3', completionUsdPerMillion: '15',
     requestUsd: '0', cacheWriteUsdPerMillion: '3.75' },
@@ -103,7 +105,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
       use: { phase: 'report', requestFormat: 'agent-turn-v5-stream' } });
     const policy = t.rpc[0]![1].p_policy as Record<string, unknown>;
     // One call: G = ceil(100 x 0.3 x 6) = 180; the user's freeze is 500 + 180, all of it or nothing.
-    expect(policy).toMatchObject({ fixedCredits: 500, gCredits: 680, minCredits: 680, uModelCredits: 180, uTurnUsd: 0.3, historyItems: 0,
+    expect(policy).toMatchObject({ model: 'anthropic/claude-sonnet-5.5', pricing, fixedCredits: 500, gCredits: 680, minCredits: 680, uModelCredits: 180, uTurnUsd: 0.3, historyItems: 0,
       limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 },
       report: { projectId: input.projectId, roundId: ROUND, moduleId: input.moduleId } });
     expect(t.rpc[0]![1].p_kind).toBe('report');
