@@ -4,9 +4,10 @@ import type { CallIdentity, TransportObservation } from '../bill2/fixtureAdapter
 import { consumeOpenRouterNotStarted } from '../bill2/openRouterAdapter';
 import { openRouterEvidence } from '../bill2/openRouterEvidence';
 import { openRouterRejection } from '../bill2/openRouterRejection';
-import { nominalActualFallback, nominalCost, type NominalPricing } from '../../shared/nominalPricing';
+import { nominalCost, type NominalPricing } from '../../shared/nominalPricing';
 import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, type TurnDatabase } from './db';
+import { swallow } from '../../lib/swallow';
 
 /*
  * CORE-PATH-V2 2.5.2: one paid model call is three writes. turn_call_begin before anything is sent (no row, no request);
@@ -68,7 +69,9 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
     }
     let identity: Promise<unknown> | undefined;
     const onIdentity = (providerId: string) => {
-      identity ??= deps.db.identity({ actorId: deps.actorId, turnId: deps.turnId, seq, providerId }).catch(() => undefined);
+      // The id only helps recovery find the cost; a failed write never stops the call (the receipt carries the id too).
+      identity ??= swallow('turn_call_identity_failed', deps.db.identity({ actorId: deps.actorId, turnId: deps.turnId, seq, providerId }),
+        undefined, { category: 'ai' });
     };
     let observation: TransportObservation;
     try {
@@ -103,20 +106,22 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
     const evidence = openRouterEvidence(observation, call.identity, 'response');
     const usage = (evidence.usage ?? null) as Record<string, unknown> | null;
     const completion = usage?.sdkResponse;
-    if (!evidence.final || typeof evidence.cost !== 'string' || !usage) {
-      // A usable answer whose cost is not final yet is still delivered; the call stays open for recovery to settle, by the
-      // provider id: the one in the body is stored when no header named it.
+    // The receipt keeps token counts as exact decimal strings.
+    const count = (value: unknown) => typeof value === 'number' ? value
+      : typeof value === 'string' && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
+    const tokens = usage ? { promptTokens: count(usage.inputTokens), completionTokens: count(usage.outputTokens),
+      reasoningTokens: count(usage.reasoningTokens) } : null;
+    const nominalUsd = tokens ? nominalCost(call.pricing, tokens) : null;
+    // A usable answer whose cost or usage is not final yet is still delivered, and the call stays open: recovery (V2-8) looks the
+    // generation up by the provider id (the one in the body is stored when no header named it) and only when that bounded lookup
+    // still lacks the usage falls back to min(c, U), marked actual_fallback (BILL_PAYG_PLAN 3A, nominalActualFallback).
+    if (!evidence.final || typeof evidence.cost !== 'string' || !usage || nominalUsd === null) {
       if (!identity && evidence.providerId) onIdentity(evidence.providerId);
       await identity;
       if (completion) return JSON.stringify(completion);
       throw new TurnStop('TURN_CALL_UNKNOWN');
     }
-    // The receipt keeps token counts as exact decimal strings.
-    const count = (value: unknown) => typeof value === 'number' ? value
-      : typeof value === 'string' && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
-    const tokens = { promptTokens: count(usage.inputTokens), completionTokens: count(usage.outputTokens),
-      reasoningTokens: count(usage.reasoningTokens) };
-    const nominal = ceil12(nominalCost(call.pricing, tokens) ?? nominalActualFallback(evidence.cost, call.upperUsd));
+    const nominal = ceil12(nominalUsd);
     // The usage row keeps the token counts; the completion itself is the raw body, stored once.
     const receiptUsage = Object.fromEntries(Object.entries(usage).filter(([key]) => key !== 'sdkResponse'));
     const recorded = await deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'ok', nominalUsd: nominal,

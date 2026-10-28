@@ -4,6 +4,7 @@ import type { TransportObservation } from '../bill2/fixtureAdapter';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { openRouterEvidence, type OpenRouterIdentity } from '../bill2/openRouterEvidence';
 import { nominalActualFallback, nominalCost, nominalPricing } from '../../shared/nominalPricing';
+import { logSwallowed, swallow } from '../../lib/swallow';
 import { ceil12 } from './call';
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { turnClients, turnDatabase, type RecoveryItem, type TurnDatabase } from './db';
@@ -50,9 +51,11 @@ async function lookUp(deps: TurnRecoveryDeps, item: RecoveryItem, call: Recovery
   const tokens = { promptTokens: count(usage.inputTokens), completionTokens: count(usage.outputTokens),
     reasoningTokens: count(usage.reasoningTokens) };
   const upper = ceil12(call.upperUsd.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, ''));
+  const nominal = nominalCost(pricing.data, tokens);
   await deps.db.record({ actorId: item.actorId, turnId: item.turnId, seq: call.seq, status: 'ok',
-    nominalUsd: ceil12(nominalCost(pricing.data, tokens) ?? nominalActualFallback(actual, upper)), actualUsd: actual,
-    usage: { ...usage, source: 'lookup' }, providerId: call.providerId,
+    nominalUsd: ceil12(nominal ?? nominalActualFallback(actual, upper)), actualUsd: actual,
+    // nominalSource: actual_fallback when even the lookup has no token counts (BILL_PAYG_PLAN 3A), as the reports count it.
+    usage: { ...usage, source: 'lookup', nominalSource: nominal === null ? 'actual_fallback' : 'nominal' }, providerId: call.providerId,
     payloadHash: evidence.sourceHash, raw: evidence.rawBody || null });
   return true;
 }
@@ -72,7 +75,7 @@ export async function recoverTurns(deps: TurnRecoveryDeps): Promise<TurnRecovery
           if (now() + RECOVERY_LOOKUP_MS + RECOVER_STEP_MS >= deps.deadline) break;
           summary.lookups++;
           // A failed lookup is not evidence: the cost stays unknown and is looked up again after the lease.
-          if (await lookUp(deps, item, call).catch(() => false)) summary.lateReceipts++;
+          if (await swallow('turn_recovery_lookup_failed', lookUp(deps, item, call), false, { category: 'api' })) summary.lateReceipts++;
         }
         // A paused turn's lookup only records what it finds; the turn stays paused (its resume, or the 24-hour expiry, closes it).
         if (item.action === 'lookup') continue;
@@ -83,7 +86,7 @@ export async function recoverTurns(deps: TurnRecoveryDeps): Promise<TurnRecovery
         else if (result.settlement === 'done') summary.settled++;
         // Closed with a cost still unknown: claimed again for the settlement pass.
         if (result.settlement === 'pending') summary.pending++;
-      } catch { summary.failed++; }
+      } catch (error) { logSwallowed('turn_recovery_turn_failed', error, { category: 'api' }); summary.failed++; }
     }
     if (batch.length < RECOVERY_BATCH) break;
   }
@@ -92,7 +95,7 @@ export async function recoverTurns(deps: TurnRecoveryDeps): Promise<TurnRecovery
 
 /** The scheduled job's wiring: the write client and the platform key, read fresh once per run (OR-1). */
 export async function runTurnRecovery(admin: SupabaseClient, deadline: number, transport?: typeof fetch): Promise<TurnRecoverySummary> {
-  const key = await readOpenRouterKeyOrUnset(admin, { fresh: true }).catch(() => null);
+  const key = await swallow('turn_recovery_key_unavailable', readOpenRouterKeyOrUnset(admin, { fresh: true }), null, { category: 'api' });
   const adapter = key ? openRouterAdapter({ credential: async () => key, transport }) : null;
   return recoverTurns({ db: turnDatabase(turnClients(admin)), deadline, account: key ? openRouterAccount(key) : null,
     lookup: adapter ? (providerId, identity, timeoutMs) => adapter.lookup(providerId, identity, { timeoutMs }) : null });

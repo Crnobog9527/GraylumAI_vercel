@@ -15,7 +15,8 @@ BEGIN
   END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  -- Lock order as turn_close: session, then the turn.
+  -- Lock order as turn_close: the profile, the session, then the turn.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   -- Re-checked under the locks; turn_close is the only state change.

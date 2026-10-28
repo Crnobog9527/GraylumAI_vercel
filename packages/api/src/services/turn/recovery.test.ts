@@ -53,13 +53,15 @@ describe('recoverTurns', () => {
     expect(db.record).toHaveBeenCalledWith(expect.objectContaining({ turnId: 7, seq: 1, status: 'ok', nominalUsd: '0.0004', actualUsd: '0.0001',
       providerId: 'gen-1' }));
     expect(db.record.mock.invocationCallOrder[0]).toBeLessThan(db.recover.mock.invocationCallOrder[0]!);
+    expect(db.record).toHaveBeenCalledWith(expect.objectContaining({ usage: expect.objectContaining({ nominalSource: 'nominal' }) }));
     expect(summary).toMatchObject({ lookups: 1, lateReceipts: 1, settled: 1 });
   });
 
   it('falls back to min(actual, U) only when the token counts are missing, and leaves a turn without a frozen price table unknown', async () => {
     const missing = harness([[settle(11)]], vi.fn(async () => generation(0.5, {})));
     await recoverTurns(missing.deps);
-    expect(missing.db.record).toHaveBeenCalledWith(expect.objectContaining({ nominalUsd: '0.02', actualUsd: '0.5' }));
+    expect(missing.db.record).toHaveBeenCalledWith(expect.objectContaining({ nominalUsd: '0.02', actualUsd: '0.5',
+      usage: expect.objectContaining({ nominalSource: 'actual_fallback' }) }));
     const unpriced = harness([[settle(12, [{ seq: 1, providerId: 'gen-1', model: 'test/model', pricing: null, upperUsd: '0.02' }])]],
       vi.fn(async () => generation(0.0001)));
     await recoverTurns(unpriced.deps);
