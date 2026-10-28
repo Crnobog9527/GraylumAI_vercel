@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { compareRequest, assertCompareFits, snapshotHash, type CompareParts } from '../fusion/compareSnapshot';
+import { compareRequest, assertCompareFits, snapshotHash, workspaceDependencies, type CompareParts } from '../fusion/compareSnapshot';
 import { columnStreamer } from '../fusion/compareStream';
 import { fusionRequestBody } from '../fusion/request';
 import { readFusionSettings } from '../fusion/settings';
@@ -96,7 +96,9 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   try {
     opened = await db.open({ sessionId: input.sessionId, requestId: input.requestId, kind: 'compare', policy, product: {
       question: input.parts.question, questionHash: sha256(input.parts.question), snapshotHash: snapshotHash(partsWith(sized, false)),
-      requestHash: sha256(JSON.stringify([input.sessionId, models, input.parts.question, credits])), config: { models } } });
+      requestHash: sha256(JSON.stringify([input.sessionId, models, input.parts.question, credits])), config: { models },
+      // The sources the columns read: content deletion of a source finds this compare by them (content_erasure_confirm).
+      workspaceDependencies: workspaceDependencies(partsWith(sized, false)) } });
   } catch (error) { return emit(fail(error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED')); }
   const compareId = opened.compareId!;
   emit({ type: 'opened', turnId: opened.turnId, compareId, reservedCredits: opened.reservedCredits, replay: opened.replay });

@@ -24,10 +24,11 @@
 --   fusion_review_claim, fusion_review_close: refuse turn-path reviews (no BILL2 group; no stop or end button, Owner 10-28)
 --   fusion_review_pause_idle, fusion_review_end_paused: skip turn-path reviews (their turn waits and ends instead)
 --   account_erasure_scrub_turns: also deletes the account's saved answers (fusion_turn_outputs)
+--   fusion_review_breaker_usage: the 7-day platform cost breaker also counts compare and jury turns
 -- Compatibility: new columns are nullable, the new table and functions are used only by the V2 path (core_path_v2.enabled);
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
--- Recovery: drop the eight new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the eleven changed
+-- Recovery: drop the eight new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
 -- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -86,6 +87,7 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_open(p_actor_id uuid, p_session_id
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE rv fusion_reviews; cmp fusion_compares; existing turns; opened jsonb; pol jsonb; lvl text; product jsonb;
+  breaker jsonb; settings jsonb; deps jsonb;
 BEGIN
   IF p_kind NOT IN ('compare','jury','jury_adopt') OR jsonb_typeof(p_product) <> 'object' OR jsonb_typeof(p_policy) <> 'object'
     OR p_policy ?| ARRAY['reviewId','versionId','compareId'] THEN
@@ -133,16 +135,40 @@ BEGIN
       OR coalesce((p_policy->'limits'->>'freeTools')::int, 1) <> 0 THEN
       RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
     END IF;
-    -- One compare at a time per user, as before (the session lock in turn_open covers one conversation only).
-    IF EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare' AND state IN ('running','paused','stopping')) THEN
+    -- One compare at a time per user and none while a review runs, as before (the session lock covers one conversation only).
+    IF EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare' AND state IN ('running','paused','stopping'))
+      OR EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused')) THEN
       RAISE EXCEPTION 'TURN_COMPARE_ACTIVE' USING ERRCODE='55P03';
     END IF;
+    -- The 7-day platform cost breaker (§3.6), the same statistic and settings as fusion_compare_begin.
+    breaker := fusion_review_breaker_usage(p_actor_id);
+    SELECT value INTO settings FROM system_settings WHERE key = 'fusion_settings';
+    IF jsonb_typeof(settings) = 'string' THEN settings := (settings #>> '{}')::jsonb; END IF;
+    IF (breaker->>'noDeliveryCalls')::int >= coalesce((settings #>> '{compare,breaker,noDeliveryCalls}')::int, 10)
+      OR (breaker->>'platformUsd')::numeric >= coalesce((settings #>> '{compare,breaker,platformUsd}')::numeric, 2) THEN
+      RAISE EXCEPTION 'FUSION_REVIEW_BREAKER' USING ERRCODE='P0001';
+    END IF;
+    -- The workspace sources the columns read, frozen with the record (content_erasure_confirm finds the compare by them when a
+    -- source is deleted); each still allowed, under a share lock on its project, as fusion_compare_begin.
+    deps := coalesce(p_product->'workspaceDependencies', '[]'::jsonb);
+    IF jsonb_typeof(deps) <> 'array' OR EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d WHERE jsonb_typeof(d) <> 'object'
+        OR coalesce(d->>'sourceVersionId','') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        OR (SELECT count(*) FROM jsonb_object_keys(d)) <> 1) THEN
+      RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+    END IF;
+    PERFORM p.id FROM artifact_projects p JOIN artifact_versions v ON v.project_id = p.id
+      WHERE p.actor_id = p_actor_id AND v.id::text IN (SELECT d->>'sourceVersionId' FROM jsonb_array_elements(deps) d)
+      ORDER BY p.id FOR SHARE OF p;
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d
+        WHERE NOT coalesce(opc_source_allowed(p_actor_id, (d->>'sourceVersionId')::uuid), false)) THEN
+      RAISE EXCEPTION 'FUSION_COMPARE_SOURCE_REVOKED' USING ERRCODE='42501';
+    END IF;
     INSERT INTO fusion_compares (actor_id, request_id, session_id, history_revision, question, question_hash, request_hash,
-        snapshot_hash, config, gate_verdict, state)
+        snapshot_hash, config, gate_verdict, workspace_dependencies, state)
       VALUES (p_actor_id, p_request_id, p_session_id,
         (SELECT coalesce(max(seq), 0) FROM session_messages WHERE session_id = p_session_id),
         p_product->>'question', p_product->>'questionHash', p_product->>'requestHash', p_product->>'snapshotHash',
-        coalesce(p_product->'config', '{}'::jsonb), nullif(p_product->>'gateVerdict', ''), 'running')
+        coalesce(p_product->'config', '{}'::jsonb), nullif(p_product->>'gateVerdict', ''), deps, 'running')
       RETURNING * INTO cmp;
     pol := p_policy || jsonb_build_object('compareId', cmp.id);
     opened := turn_open(p_actor_id, p_session_id, p_request_id, p_kind, pol, NULL);
@@ -972,6 +998,32 @@ BEGIN
   counts := counts || jsonb_build_object('session_messages_skipped', n);
   RETURN counts;
 END $function$;
+
+-- fusion_review_breaker_usage(uuid)
+CREATE OR REPLACE FUNCTION public.fusion_review_breaker_usage(a uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  -- Platform-borne outcomes of the last 7 days (§3.3 breaker), on both paths: the BILL2 groups, and the compare and jury turns
+  -- of CORE-PATH-V2 (V2-7b): calls that delivered nothing (a provider refusal, a 402, an answer refused under the fallback rule)
+  -- and the provider cost of calls whose result was unusable or whose turn refunded everything.
+  SELECT jsonb_build_object('noDeliveryCalls', o.n + t.n, 'platformUsd', o.usd + t.usd)
+  FROM (SELECT count(*) FILTER (WHERE c.fusion_verdict='no_delivery') n,
+    coalesce(sum(coalesce(c.selected_cost_usd,0)) FILTER (WHERE c.fusion_verdict IN
+      ('no_delivery','format_invalid','revision_invalid','erased_before_verdict')
+      OR EXISTS(SELECT 1 FROM fusion_review_fees fe WHERE fe.review_id=g.fee_review_id AND fe.state='refunded')),0) usd
+    FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id LEFT JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
+    WHERE r.actor_id=a AND r.fusion_group_id IS NOT NULL AND c.created_at>=clock_timestamp()-interval '7 days') o,
+  (SELECT count(*) FILTER (WHERE c.status IN ('rejected','no_charge_402')
+      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery')) n,
+    coalesce(sum(coalesce(c.actual_usd,c.nominal_usd,0)) FILTER (WHERE c.status='unusable'
+      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0)),0) usd
+    FROM turn_calls c JOIN turns t ON t.actor_id=c.actor_id AND t.id=c.turn_id
+    WHERE c.actor_id=a AND t.kind IN ('compare','jury') AND c.call_kind='model'
+      AND c.dispatched_at>=clock_timestamp()-interval '7 days') t;
+$function$;
 
 DO $$
 DECLARE f text;

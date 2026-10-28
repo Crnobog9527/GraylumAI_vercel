@@ -296,6 +296,30 @@ try{
   assert.equal(await one('select count(*)::int v from turn_calls where turn_id=$1',[o.turnId]),1,'the billing record stays');
   report.checks.push('deleting a review (draft deletion, account erasure) deletes its saved answers through the cascade; the billing records stay');
  }
+ // 12. #1522 review: the 7-day breaker counts the turn path's platform-borne cost and refuses the next compare; a compare's
+ // workspace sources are frozen with its record (content deletion finds it by them) and a revoked source refuses it.
+ {
+  const a=await account(),cp={question:'q',questionHash:hash('q'),requestHash:hash('r'),snapshotHash:hash('s')};
+  assert.match(await refusal(open(a,{kind:'compare',pol:comparePolicy(),product:{...cp,workspaceDependencies:[{sourceVersionId:randomUUID()}]}})),
+   /FUSION_COMPARE_SOURCE_REVOKED/);
+  assert.equal(await one('select count(*)::int v from fusion_compares where actor_id=$1',[a.actor]),0);
+  assert.match(await refusal(open(a,{kind:'compare',pol:comparePolicy(),product:{...cp,workspaceDependencies:[{sourceVersionId:'x'}]}})),
+   /TURN_POLICY_INVALID/);
+  const o=await open(a,{kind:'compare',pol:comparePolicy(),product:{...cp,workspaceDependencies:[]}});
+  assert.deepEqual(await one('select workspace_dependencies v from fusion_compares where id=$1',[o.compareId]),[]);
+  // Both columns cost 1.5 USD and nothing was delivered: refunded, the platform bears 3 USD (>= the 2 USD default line).
+  for(const s of [1,2]){await begin(a,o.turnId,s);await record(a,o.turnId,s,{status:'unusable',actual:1.5});}
+  await close(a,o.turnId,'failed',{refundAll:true,failure:'compare_no_answer'});
+  const usage=await one('select fusion_review_breaker_usage($1) v',[a.actor]);
+  assert.ok(Number(usage.platformUsd)>=3,JSON.stringify(usage));
+  assert.match(await refusal(open(a,{kind:'compare',pol:comparePolicy(),product:cp})),/FUSION_REVIEW_BREAKER/);
+  // A refunded jury counts too (no change: everything refunded, the seats' cost borne by the platform).
+  const j=await account(),rv=await review(j),t=(await open(j,{product:{reviewId:rv}})).turnId;
+  await begin(j,t,1);await record(j,t,1,{n:0.5,actual:0.5,output:seat()});
+  await close(j,t,'completed',{product:{state:'completed',outcome:{kind:'no_change'}}});
+  assert.ok(Number((await one('select fusion_review_breaker_usage($1) v',[j.actor])).platformUsd)>=0.5);
+  report.checks.push('breaker: refunded compare and jury turns count as platform-borne and refuse the next compare over the line; a compare freezes its workspace sources, a revoked or malformed source refuses it with nothing recorded');
+ }
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.
  {
   for(const f of ['turn_fusion_open','turn_fusion_begin','turn_fusion_record','turn_fusion_close','fusion_review_turn_step',
