@@ -27,7 +27,16 @@ export async function startPositioning(page: Page): Promise<string> {
   // The start page's "梳理账号定位" now fills the composer and sends a free chat (/app/runtime). A draft with the three-step
   // strip is created by the direct entry, which calls opc.start (it needs a free profile slot: the account's limit is 6).
   await gotoWithBypass(page, `/app/positioning?start=mentor&intent=${randomUUID()}`);
-  await expect(page.getByText('定位档案名额用完了')).toHaveCount(0, { timeout: 15_000 });
+  // When the profile slots are full the page lists the profiles with an "归档" button each. Archiving is two clicks: the button,
+  // then "确认归档". Free one slot (these are the test account's own earlier drafts) and the start goes on by itself.
+  const full = page.getByText('定位档案名额用完了');
+  if (await full.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true, () => false)) {
+    await page.getByRole('button', { name: '归档', exact: true }).first().click();
+    await page.getByRole('button', { name: '确认归档' }).click();
+    await expect(page.getByText(/已归档，空出了 1 个名额/)).toBeVisible({ timeout: 30_000 });
+    // The page does not carry on with the refused start by itself: ask for it again.
+    await gotoWithBypass(page, `/app/positioning?start=mentor&intent=${randomUUID()}`);
+  }
   await page.waitForURL(/\/app\/positioning\/[0-9a-f-]{36}$/, { timeout: 90_000 });
   return page.url();
 }
@@ -56,23 +65,25 @@ export async function completeBenchmarkStep(page: Page, meter: SpendMeter) {
   await keywordCard.getByRole('button', { name: '确认关键词' }).click();
   await expect(keywordCard).toBeHidden({ timeout: 60_000 }).catch(() => undefined);
   const candidates = page.locator('section[aria-label="对标候选账号"], section[aria-label="补选对标账号"]').first();
-  // The supplier search sometimes comes back empty ("这次没取到数据") and no candidate card follows. The product's own way on is to
-  // ask the coach again, so do that once before giving up.
-  const cardShown = () => candidates.waitFor({ state: 'visible', timeout: 150_000 }).then(() => true, () => false);
-  if (!(await cardShown())) {
-    test.info().annotations.push({ type: 'benchmark-search-empty', description: 'no candidate card after the first search; asked the coach to search again' });
-    await sendAndWait(page, '这次没有找到候选账号，请换一组关键词再搜一次。', meter, 'benchmark ask again');
-    const again = page.locator('section[aria-label="关键词选择"]').last();
-    if (await again.isVisible().catch(() => false)) await again.getByRole('button', { name: '确认关键词' }).click();
+  // The search runs in several rounds. The coach says "如果界面没有自动继续，回复一句“继续”即可", and the supplier sometimes
+  // comes back empty (then it offers a fresh keyword card). So: wait for the candidate card; when it does not come, say "继续"
+  // (or confirm a fresh keyword card) and wait again, a few times.
+  for (let round = 1; round <= 4; round += 1) {
+    if (await candidates.waitFor({ state: 'visible', timeout: 120_000 }).then(() => true, () => false)) break;
+    test.info().annotations.push({ type: 'benchmark-search-no-card', description: `round ${round}: no candidate card yet; nudging the coach` });
+    const freshKeywords = page.locator('section[aria-label="关键词选择"]').last();
+    const confirmKeywords = freshKeywords.getByRole('button', { name: '确认关键词' });
+    if (await confirmKeywords.isVisible().catch(() => false)) await confirmKeywords.click();
+    else await sendAndWait(page, '继续', meter, `benchmark continue ${round}`);
   }
-  await expect(candidates).toBeVisible({ timeout: 240_000 });
+  await expect(candidates).toBeVisible({ timeout: 60_000 });
   await meter.checkpoint('benchmark search');
   // Nothing is ticked at first and the button stays off until the card's minimum is reached: tick accounts until it turns on.
   const confirmChoice = candidates.getByRole('button', { name: '确认选择' });
   // Reference-only accounts ("头部账号", "只作参考") have a disabled box; the others are ticked one by one, counted by "已选 N 个".
   const boxes = candidates.getByRole('checkbox');
   for (let i = 0; i < await boxes.count() && !(await confirmChoice.isEnabled()); i += 1) {
-    if (await boxes.nth(i).isEnabled() && !(await boxes.nth(i).isChecked())) await boxes.nth(i).click({ force: true });
+    if (await boxes.nth(i).isEnabled() && !(await boxes.nth(i).isChecked())) await boxes.nth(i).check(); // scrolls the box into view first
   }
   await expect(confirmChoice).toBeEnabled();
   await confirmChoice.click();

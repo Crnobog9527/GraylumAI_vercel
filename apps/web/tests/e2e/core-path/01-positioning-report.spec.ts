@@ -2,7 +2,7 @@ import { requireAccounts } from './support/accounts';
 import { expect, test } from './support/fixtures';
 import { buildReadyDraft, stopsInLast24h } from './support/positioning';
 import { expectBalanceBack, expectThirteenChapters, finalizeReport, REPORT_PRICE, reportDialog, startReport, stopButton, waitForReportDone } from './support/report';
-import { readCredits } from './support/ui';
+import { latestReportSettlement, readCredits } from './support/ui';
 
 /**
  * Journeys 1 and 3 share one draft, because every draft costs real research calls: the three steps, then the report,
@@ -13,6 +13,12 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
 
   test('1: three steps to a ready draft', async ({ openAs, meter }) => {
     test.setTimeout(30 * 60_000);
+    // Reuse a draft whose three steps are already confirmed (CORE_E2E_DRAFT_URL, a path like /app/positioning/<id>): the benchmark
+    // search is the costly part of the run, so a follow-up run of the later journeys does not repeat it.
+    if (process.env.CORE_E2E_DRAFT_URL) {
+      draftUrl = new URL(process.env.CORE_E2E_DRAFT_URL, process.env.PLAYWRIGHT_BASE_URL).toString();
+      return;
+    }
     const { page } = await openAs('gold');
     draftUrl = await buildReadyDraft(page, meter);
     await meter.finishJourney('journey 1a: three steps');
@@ -51,10 +57,22 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     await expect(ask).toBeVisible({ timeout: 30_000 });
     await ask.getByRole('button', { name: '确认停止' }).click();
     await expect(reportDialog(page).getByText(/已停止/).first()).toBeVisible({ timeout: 60_000 });
-    await expect(reportDialog(page).getByText(/本次报告扣了 \d+ 积分/)).toBeVisible({ timeout: 90_000 });
-    const afterPaidStop = await readCredits(page);
-    expect(before - afterPaidStop).toBeGreaterThan(0);
-    expect(before - afterPaidStop).toBeLessThanOrEqual(REPORT_PRICE);
+    // The charge for the part already written, from the ledger: the 500 hold leaves the balance first and the refund comes back
+    // later, so the balance alone would read a charge of about 500. (On staging the status line stayed at "已停止，正在保存已显示的内容…"
+    // for minutes while the ledger was already right; the notice text is noted, not asserted.)
+    const startedAt = Date.now();
+    await expect.poll(async () => {
+      const entry = await latestReportSettlement(page);
+      return entry !== null && Date.parse(entry.createdAt) > startedAt - 15 * 60_000 && entry.outcome === 'user_stop' ? entry : null;
+    }, { timeout: 180_000, intervals: [3000, 5000] }).not.toBeNull();
+    const settled = (await latestReportSettlement(page))!;
+    test.info().annotations.push({ type: 'paid-stop', description: `consumed ${settled.consumedCredits}, refunded ${settled.refundedCredits} of ${settled.nominalReserved}` });
+    expect(settled.consumedCredits).toBeGreaterThan(0);
+    expect(settled.consumedCredits).toBeLessThanOrEqual(REPORT_PRICE);
+    expect(settled.consumedCredits + settled.refundedCredits).toBe(settled.nominalReserved);
+    expect(settled.nominalReserved).toBe(REPORT_PRICE);
+    // The page says so too, though late: the status line stays at "已停止，正在保存已显示的内容…" for minutes first.
+    await expect(reportDialog(page).getByText(new RegExp(`本次报告扣了 ${settled.consumedCredits} 积分`))).toBeVisible({ timeout: 300_000 });
     await meter.finishJourney('journey 3: stops');
   });
 

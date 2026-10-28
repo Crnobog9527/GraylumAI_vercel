@@ -98,6 +98,13 @@ export class SpendMeter {
     return entry;
   }
 
+  /** Books what is still unaccounted for to the test that was running, so a failed journey keeps its own cost. */
+  async closeTest(label: string): Promise<void> {
+    const state = await this.current();
+    const cumulative = await this.read();
+    if (cumulative - state.totalUsd > 0.00005) await this.record(`${label} (unclosed)`, cumulative);
+  }
+
   private async exceed(label: string, cumulative: number, record = true): Promise<never> {
     const state = await this.current();
     if (record) await this.record(label, cumulative);

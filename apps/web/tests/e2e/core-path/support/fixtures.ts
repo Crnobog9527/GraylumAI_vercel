@@ -32,6 +32,9 @@ export const test = base.extend<Fixtures>({
     const meter = await spendMeter();
     await meter.assertRoom(testInfo.title);
     await provide(meter);
+    // Whatever the test spent and did not close itself (a failed journey, the part after its last checkpoint) is booked to it,
+    // not to the next test.
+    await meter.closeTest(testInfo.title);
   },
   openAs: async ({ browser }, provide) => {
     const contexts: BrowserContext[] = [];

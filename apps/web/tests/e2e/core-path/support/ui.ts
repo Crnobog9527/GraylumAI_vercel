@@ -19,6 +19,24 @@ export async function readCredits(page: Page): Promise<number> {
   return credits;
 }
 
+export interface ReportSettlement { consumedCredits: number; refundedCredits: number; nominalReserved: number; outcome: string; createdAt: string }
+
+/**
+ * The newest report settlement in the user's credit ledger (credits.getCreditTransactions): what the stopped report really
+ * consumed and what was given back. The balance alone cannot tell it, because the 500 hold leaves the balance before the refund
+ * comes back.
+ */
+export async function latestReportSettlement(page: Page): Promise<ReportSettlement | null> {
+  const input = encodeURIComponent(JSON.stringify({ limit: 20, actualOnly: true }));
+  const body = await page.evaluate(async query => (await fetch(`/api/trpc/credits.getCreditTransactions?input=${query}`, { credentials: 'include' })).json(), input);
+  const items = ((body as { result?: { data?: { items?: Array<{ created_at: string; metadata?: Record<string, unknown> }> } } }).result?.data?.items) ?? [];
+  const entry = items.find(item => item.metadata?.sourceType === 'report' && typeof item.metadata?.consumedCredits === 'number');
+  if (!entry?.metadata) return null;
+  const { consumedCredits, refundedCredits, nominalReserved, outcome } = entry.metadata as Record<string, number | string>;
+  return { consumedCredits: Number(consumedCredits), refundedCredits: Number(refundedCredits ?? 0), nominalReserved: Number(nominalReserved ?? 0),
+    outcome: String(outcome ?? ''), createdAt: entry.created_at };
+}
+
 /** The composer is a ProseMirror editor: type into it, never fill(). */
 export const chatBox = (page: Page): Locator => page.getByRole('textbox', { name: '给 AI 教练的回复' });
 export const sendButton = (page: Page): Locator => page.getByRole('button', { name: '发送', exact: true });

@@ -22,6 +22,8 @@ export async function startReport(page: Page, acceptCredits = REPORT_PRICE) {
     await page.getByRole('button', { name: /^(生成完整报告（[\d,]+ 积分）|完整运营策略报告(（生成中）)?)$/ }).first().click();
     await expect(dialog).toBeVisible();
   }
+  // A report that was stopped a moment ago can still show "报告还在后台写…" for a few minutes (observed on staging); wait it out.
+  await expect(dialog.getByText('报告还在后台写')).toHaveCount(0, { timeout: 300_000 });
   await dialog.getByRole('button', { name: /^(生成完整报告|重新生成)(（[\d,]+ 积分）)?$/ }).first().click();
   const confirm = dialog.getByRole('group', { name: '确认扣费' });
   await expect(confirm).toContainText(`确认后将扣除 ${acceptCredits} 积分`);
@@ -43,7 +45,12 @@ export async function waitForReportDone(page: Page, timeoutMs = 600_000) {
 export async function expectThirteenChapters(page: Page) {
   const outline = reportDialog(page).getByRole('navigation', { name: '报告目录' });
   await expect(outline).toBeVisible();
-  await expect(outline.getByRole('listitem')).toHaveCount(13);
+  // The outline is "一句话结论" followed by the 13 numbered chapters (一 … 十三), so 14 entries (observed on staging 2026-10-28).
+  const numbers = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三'];
+  await expect(outline.getByRole('listitem')).toHaveCount(numbers.length + 1);
+  const titles = await outline.getByRole('listitem').allInnerTexts();
+  expect(titles[0]).toContain('一句话结论');
+  numbers.forEach((number, index) => expect(titles[index + 1]!.trim().startsWith(`${number}、`), `chapter ${number}`).toBe(true));
 }
 
 export async function finalizeReport(page: Page) {
