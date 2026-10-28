@@ -354,8 +354,8 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 |---|---|---|---|---|
 | Postgres 往返（不含 Auth 和 OpenRouter；每次模型调用 3 次、工具 2 次是钱的证据，2.5.2） | ≤ 5（无工具）；每多一轮免费工具 +5（工具 2 + 续轮 3），上限 M 按 2.5.3 | ≤ 11 | ≤ 5 | 计数的 Supabase 客户端包装，跑三条标准回合（无工具自由对话、导师、报告）后断言；工具回合另按 2.5.3 公式断言 |
 | 每轮数据库时间（本机 Docker，单用户） | ≤ 60 ms | ≤ 120 ms | ≤ 60 ms | `pg_stat_statements` 前后差 |
-| `turn_open` 事务内关系锁数——主路径自己的表（`turns`、`runtime_sessions`、`profiles`、`daily_spend`、`session_messages`、墓碑表及其索引/TOAST） | ≤ 40（V2-3 本机实测约 18） | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法），按表归类 |
-| `turn_open` 事务内关系锁数——账本叶子（`atomic_pre_deduct`、`credit_available` 碰到的 grants/积分包/订单/账单表） | 棘轮：只许变小（V2-3 本机基线约 39，其中 `bill2_runs` 9 把在 V2-12 随表删除） | 同 | 同 | 同上，单独一行记录；口径和 7.1"账本叶子不展开"一致。合计（约 59）也记录，对比今天的 90–130 |
+| `turn_open` 事务内关系锁数——主路径自己的表（`turns`、`runtime_sessions`、`profiles`、`daily_spend`、`session_messages`、墓碑表及其索引/TOAST） | ≤ 40（V2-3 本机实测 18） | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法），按表归类 |
+| `turn_open` 事务内关系锁数——账本叶子（`atomic_pre_deduct`、`credit_available` 碰到的 grants/积分包/订单/账单表） | 棘轮：只许变小（V2-3 本机基线 38，其中 `bill2_runs` 9 把来自 `billing_history` 的注销账本守卫触发器，V2-12 改读 `turns` 后消失） | 同 | 同 | 同上，单独一行记录；口径和 7.1"账本叶子不展开"一致。合计（本机 56）也记录，对比今天的 90–130 |
 | 任一主路径函数静态可达函数 / 表 | ≤ 15 / ≤ 10 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
 | 行锁 | 0 把全站共用行锁；只允许本人 `profiles`、本会话 `sessions` | 同 | 同 | 静态扫描 `FOR UPDATE|FOR SHARE` 对象白名单 |
 | 热表无顺序扫描 | 0 | 0 | 0 | 三条回合 + 定时任务认领语句的 `EXPLAIN`，对 `turns`/`turn_calls`/`session_messages`/`credit_transactions`/`runtime_sessions` 断言无 Seq Scan |
@@ -629,7 +629,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | V2-9 | `feat(CORE-PATH-V2)` 删除与注销接新表 | 会话删除墓碑化、内容清除投影、注销投影、文风来源撤销、`content_erasure_runtime_check` 替换 | high | Codex | V2-3 | 4 天 | erasure 套件逐条等效迁移；长对话（≥100 轮）删除 < 1 秒 |
 | V2-10 | `feat(CORE-PATH-V2)` 前端切换 | `/app` 对话工作区改调 `/api/turn` SSE；`opened` 事件渲染（工具可用性、裁剪说明、兜底卡）；右侧成果夹；普通对话去掉停止按钮（报告保留）；`core_path_v2.enabled` 开关 | ordinary | Claude | V2-5、V2-6、V2-7、V2-8 | 4 天 | 浏览器验证（Codex 验收批次）；旧 e2e 全过 |
 | V2-11 | `test(CORE-PATH-V2)` 核心路径 e2e | `apps/web/tests/e2e/core-path/`：① 定位三步到定稿报告；② 自由对话 + 加载 Skill + 一次研究；③ 报告停止与 24 小时防刷（第 3 次看到扣费说明）、普通对话无停止按钮；④ 删除对话（长对话）与注销；⑤ 对比；⑥ 评审团到逐章选择。新 workflow `staging-e2e.yml`：staging 每次部署成功后跑，模型用 **Claude Haiku 5.5**（Owner 10-28 批准），每次运行 ≤ 0.5 美元，失败开 issue | high（CI） | Codex | V2-10 | 4 天 | 在 staging 跑通一次并附报告与实际花费 |
-| V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | **先**把账本叶子调用链里读 `bill2_runs` 的部分（V2-3 本机实测 `atomic_pre_deduct`/`credit_available` 的闭包里有 `bill2_runs` 9 把锁；具体在哪个函数由 V2-12 用闭包脚本定位）改为读 `turns` 的打开回合冻结额（整段 CREATE OR REPLACE，同一迁移里排在 DROP 之前，并加一条测试：有打开回合时可用余额扣除其冻结额）；再 DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
+| V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | **先**改 `content_erasure_ledger_owned`（V2-3 本机实测定位：`atomic_pre_deduct` 往 `billing_history` 插行 → 触发器 `zz_erasure_ledger_guard` → `erasure_ledger_guard()` → 它在第 23/28 行按 run_ids/pre_ids 查 `bill2_runs`，9 把锁全来自这里；`credit_available` 本身 0 把），把按 `bill2_runs` 判断账本归属改为按 `turns`（整段 CREATE OR REPLACE，同一迁移里排在 DROP 之前，并把 erasure-ledger 套件里"账本行归属"的断言改成按 `turns`）；再 DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
 | V2-13 | `docs(CORE-PATH-V2)` 100 人验收与外推 | 3.2 节 staging 压测 + 3.3.3 单机 500/2000/5000 外推压测，报告进 `docs/validation/core-path-v2/`（含 k 值、等待事件、不确定性）；MASTER_PLAN §2.1 记录结果 | ordinary | Codex | V2-10 | 3 天 | 3.1 节通过线；k 在 500→5000 不变（±15%） |
 
 ### 6.2 顺序与并行
