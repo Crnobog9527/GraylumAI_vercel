@@ -112,7 +112,7 @@ try{
  // 4. Limits, pause and credits_low: the frozen model / paid / free limits; the freeze cannot be exceeded.
  {
   const a=await account(30);
-  // L = 20 (minCredits): credits_low and the pause are measured against it (0496, Owner 10-28).
+  // L = 20 (minCredits): credits_low and the pause are measured against it (0422, Owner 10-28).
   const o=await open(a,{pol:policy({gCredits:60,minCredits:20,uModelCredits:20})});
   assert.equal(o.reservedCredits,30,'H = min(G, A) when the balance is short');
   assert.equal((await begin(a,o.turnId,1,{upper:0.02})).status,'dispatched');
@@ -628,7 +628,7 @@ try{
   }
   report.checks.push('the real deletion racing turn_open and turn_close: no deadlock; the open is refused and the close is erased');
  }
- // 26. 0496, Owner 10-28 (10-01): a balance that covers one normal turn (the start threshold L) starts it; the freeze is
+ // 26. 0422, Owner 10-28 (10-01): a balance that covers one normal turn (the start threshold L) starts it; the freeze is
  // H = min(G, A); a call pauses the turn only below min(G_i, L); credits_low uses L. The part above H is the platform's.
  {
   // G_i = ceil(100 x 1.0 x 6) = 600, L = 30. Balance 500: opens with H = 500 and the call still goes out.
