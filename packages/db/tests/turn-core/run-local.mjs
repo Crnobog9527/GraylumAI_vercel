@@ -320,6 +320,42 @@ try{
   assert.equal(report.positioning,null,'only a free chat is gated');
  }
  report.checks.push('turn_open returns the reply language and, for a free chat, the positioning gate with its 24-hour refusal count');
+ // 14. #1512 review: (P1) a late receipt after the account began erasure keeps its billing fields but never stores the response
+ // text; (P2) two sessions of one account in different stop-loss buckets size H under the account lock, so the second freezes
+ // what is left instead of being refused.
+ {
+  const e=await account();
+  const o=await open(e);await begin(e,o.turnId,1);await identity(e,o.turnId,1,'gen-erase');
+  await close(e,o.turnId,'interrupted',{messages:[],delivered:false});
+  await c.query('insert into account_erasure_requests(profile_id,request_id) values($1,$2)',[e.actor,randomUUID()]);
+  const late=await record(e,o.turnId,1,{n:0.01,raw:'user content'});
+  assert.equal(late.accountErasing,true);
+  assert.deepEqual((await c.query('select status,cost_pending,nominal_usd::text n from turn_calls where turn_id=$1',[o.turnId])).rows,
+   [{status:'ok',cost_pending:false,n:'0.010000000000'}]);
+  assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[o.turnId]),0,'no response text after erasure began');
+  // The same for a deleted conversation.
+  const d=await account();
+  const od=await open(d);await begin(d,od.turnId,1);
+  await close(d,od.turnId,'interrupted',{messages:[],delivered:false});
+  await c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[d.session]);
+  await record(d,od.turnId,1,{raw:'user content'});
+  assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[od.turnId]),0);
+
+  // P2: balance 100, a chat (actor bucket) and a report (bucket -1) each ask 80 with threshold 10, opened at the same time.
+  const a=await account(100),other=randomUUID();
+  await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+   [other,a.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
+  const p1=await peer(),p2=await peer();
+  try{
+   const frozen=(await Promise.all([
+    open(a,{client:p1,pol:policy({gCredits:80,minCredits:10})}),
+    open(a,{client:p2,kind:'report',session:other,pol:policy({gCredits:80,minCredits:10,fixedCredits:80})}),
+   ])).map(v=>v.reservedCredits).sort((x,y)=>x-y);
+   assert.deepEqual(frozen,[20,80],'the second open freezes the 20 left');
+   assert.equal(await balance(a),0);
+  }finally{await p1.end();await p2.end();}
+  report.checks.push('a late receipt after erasure began or the conversation was deleted keeps billing, stores no response text; concurrent opens in different buckets freeze 80 then the 20 left');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

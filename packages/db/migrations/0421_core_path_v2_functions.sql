@@ -296,7 +296,10 @@ BEGIN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
     END IF;
 
-    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open.
+    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The account row is locked before
+    -- the balance is read: two sessions of one account in different stop-loss buckets would otherwise both size H on the same
+    -- balance, and the second would be refused instead of freezing what is left. Order: session, bucket, account (as turn_close).
+    PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
     h := least(g, available);
@@ -410,13 +413,14 @@ CREATE OR REPLACE FUNCTION public.turn_call_record(p_actor_id uuid, p_turn_id bi
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; c turn_calls; q numeric; used integer; next_need integer;
+DECLARE t turns; c turn_calls; q numeric; used integer; next_need integer; tomb jsonb;
 BEGIN
   IF p_status NOT IN ('ok','not_sent','rejected','no_charge_402','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
   -- Lock the turn row before reading the call: turn_close may be marking it unknown, or the same receipt may arrive twice.
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
   IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
+  tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept.
   IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable') THEN
     c.status := 'identified';
@@ -433,7 +437,12 @@ BEGIN
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
         payload_hash = p_payload_hash, settled_at = now(), cost_pending = false
       WHERE turn_id = p_turn_id AND seq = p_seq;
-    IF p_raw IS NOT NULL THEN INSERT INTO turn_call_raw (turn_id, seq, body) VALUES (p_turn_id, p_seq, p_raw); END IF;
+    -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
+    -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs
+    -- only after account_erasure_barrier, so any receipt still writing then started after the request and sees it here.
+    IF p_raw IS NOT NULL AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean THEN
+      INSERT INTO turn_call_raw (turn_id, seq, body) VALUES (p_turn_id, p_seq, p_raw);
+    END IF;
   ELSIF c.status <> p_status OR c.payload_hash IS DISTINCT FROM p_payload_hash THEN
     RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023';
   END IF;
@@ -444,8 +453,7 @@ BEGIN
                            ELSE 0 END), 0) INTO used
   FROM turn_calls WHERE turn_id = p_turn_id;
   next_need := coalesce((t.policy->>'uModelCredits')::int, 0);
-  RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits - used < next_need)
-    || turn_tombstones(p_actor_id, t.session_id, t.policy);
+  RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits - used < next_need) || tomb;
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb,
