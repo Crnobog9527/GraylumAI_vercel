@@ -4,6 +4,8 @@
  * This code is proprietary and confidential.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import { expect, type Page } from '@playwright/test';
 
 import { coreSql } from './db';
@@ -22,13 +24,11 @@ export const PERSONA = {
 };
 
 export async function startPositioning(page: Page): Promise<string> {
-  await gotoWithBypass(page, '/app/positioning');
-  await expect(page.getByRole('heading', { name: '今天，想推进什么？' })).toBeVisible();
-  await page.getByRole('button', { name: '梳理账号定位' }).first().click();
-  const dialog = page.getByRole('dialog', { name: '梳理账号定位' });
-  await expect(dialog.getByRole('button', { name: '从头分析新定位' })).toBeEnabled({ timeout: 30_000 });
-  await dialog.getByRole('button', { name: '从头分析新定位' }).click();
-  await page.waitForURL(/\/app\/positioning\/[0-9a-f-]{36}$/, { timeout: 60_000 });
+  // The start page's "梳理账号定位" now fills the composer and sends a free chat (/app/runtime). A draft with the three-step
+  // strip is created by the direct entry, which calls opc.start (it needs a free profile slot: the account's limit is 6).
+  await gotoWithBypass(page, `/app/positioning?start=mentor&intent=${randomUUID()}`);
+  await expect(page.getByText('定位档案名额用完了')).toHaveCount(0, { timeout: 15_000 });
+  await page.waitForURL(/\/app\/positioning\/[0-9a-f-]{36}$/, { timeout: 90_000 });
   return page.url();
 }
 
