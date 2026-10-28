@@ -129,4 +129,14 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     expect(kinds(h.writes)).toEqual(['begin', 'identity']);
     expect(h.writes[1]![1]).toMatchObject({ providerId: 'gen-body' });
   });
+
+  it('a final cost without the token counts is not charged as min(c, U) here: the call stays open for the recovery lookup', async () => {
+    const h = harness();
+    const noTokens = JSON.stringify({ ...JSON.parse(completion('gen-notok')), usage: { cost: '0.003' } });
+    const transport = vi.fn(async () => new Response(noTokens, { headers: { 'x-generation-id': 'gen-notok' } }));
+    const out = await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body);
+    expect(JSON.parse(out).choices[0].message.content).toBe('hello');
+    // begin and the provider id only: no receipt, so turn_close marks it unknown and recovery prices it after the lookup.
+    expect(kinds(h.writes)).toEqual(['begin', 'identity']);
+  });
 });
