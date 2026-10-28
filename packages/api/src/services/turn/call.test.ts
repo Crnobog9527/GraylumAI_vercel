@@ -70,14 +70,16 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     expect(transport).toHaveBeenCalledTimes(1);
   });
 
-  it('a short freeze or a tombstone stops before anything is sent', async () => {
-    for (const [patch, code] of [[{ paused: true, state: 'paused' }, 'TURN_PAUSED_FOR_CREDITS'],
-      [{ sessionTombstoned: true }, 'TURN_TOMBSTONED']] as const) {
+  it('a short freeze or a tombstone stops before anything is sent; a row begin wrote is closed as unsent', async () => {
+    // Paused: begin wrote no row. Tombstoned: begin wrote the row, which is closed as certainly unsent (never unknown).
+    for (const [patch, code, writes] of [[{ paused: true, state: 'paused' }, 'TURN_PAUSED_FOR_CREDITS', ['begin']],
+      [{ sessionTombstoned: true }, 'TURN_TOMBSTONED', ['begin', 'record:not_sent']],
+      [{ accountErasing: true }, 'TURN_TOMBSTONED', ['begin', 'record:not_sent']]] as const) {
       const h = harness({ begin: () => patch }), transport = vi.fn();
       await expect(modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body))
         .rejects.toThrow(code);
       expect(transport).not.toHaveBeenCalled();
-      expect(kinds(h.writes)).toEqual(['begin']);
+      expect(kinds(h.writes)).toEqual(writes);
     }
   });
 

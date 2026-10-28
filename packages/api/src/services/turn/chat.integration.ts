@@ -43,8 +43,9 @@ afterAll(async () => {
 // Synthetic evidence for validation only (the shape productionPolicy.test.ts uses); never a real admission profile.
 const profile = { model: MODEL, endpointTag: ROUTE, protocol: 'openrouter-chat-v1', profileVersion: 'test-only', evidenceVersion: 'test-only',
   admissionPath: 'empirical', templateTokens: 4096, marginTokens: 4096, maxBytes: 196608, maxMessages: 128, maxTools: 2,
-  maxSchemaBytes: 16384, purposes: ['ordinary', 'organizer'], requestFormats: ['serial-tools-v2'],
-  reasoningVariants: [{ reasoning: { parameter: 'none' }, outputLimit: 8192, testedOutputLimit: 512, evidenceReference: 'test-only',
+  maxSchemaBytes: 16384, purposes: ['ordinary', 'organizer'], requestFormats: ['serial-tools-v6-reasoning'],
+  // The variant free chat sends for interactive reasoning 'off' on this route (reasoning_effort none).
+  reasoningVariants: [{ reasoning: { effort: 'none' }, outputLimit: 8192, testedOutputLimit: 512, evidenceReference: 'test-only',
     manifestHash: 'b'.repeat(64), outputStressSamples: 2, includesReasoning: true }], outputLimit: 8192,
   evidence: { reference: 'test-only', manifestHash: 'a'.repeat(64), distinctSamples: 60, messageStressSamples: 12,
     maxVerifiedMessages: 128, completeCells: 15, variantsPerCell: 4, maxPromptToBytes: 0.5, maxPromptToUpper: 0.4,
@@ -231,4 +232,32 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a billed response truncated before any text is 
     .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
   expect((await db.query('select count(*)::int n from session_messages where session_id=$1', [f.session])).rows[0].n).toBe(0);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a conversation deleted after the turn opened closes its call as unsent, never as unknown', async () => {
+  const f = await setup();
+  const transport = vi.fn<typeof fetch>();
+  // The positioning check runs between turn_open and the model call's begin: the conversation is deleted there.
+  const gate: PositioningClassifier = async () => {
+    await db.query('update runtime_sessions set content_deleted_at=now() where id=$1', [f.session]);
+    return 'allow';
+  };
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport, gate });
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_TOMBSTONED' });
+  expect(transport).not.toHaveBeenCalled();
+  expect((await db.query("select c.status,c.cost_pending from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model'", [f.actor])).rows)
+    .toEqual([{ status: 'not_sent', cost_pending: false }]);
+  expect((await db.query('select close_kind,settlement from turns where actor_id=$1', [f.actor])).rows)
+    .toEqual([{ close_kind: 'erased', settlement: 'done' }]);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a payg profile approved for another use does not admit a free chat', async () => {
+  const f = await setup();
+  await db.query("update system_settings set value=jsonb_set(value,'{profiles,0,purposes}','[\"fusion_review\"]') where key=$1", [RUNTIME_PAYG_SETTING]);
+  clearCatalogCache();
+  const transport = vi.fn<typeof fetch>();
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
+  expect(out.events).toEqual([{ type: 'error', code: 'TURN_MODEL_NOT_ADMITTED' }]);
+  expect(transport).not.toHaveBeenCalled();
 });

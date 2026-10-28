@@ -8,7 +8,8 @@ import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRoute
 import { readAdmissionModel } from '../runtime/admissionConfiguration';
 import { admittedOutputLimit } from '../runtime/admissionLimits';
 import { catalogRead } from '../runtime/catalogCache';
-import { isAdmittedRoute, PAYG_PROFILE_MAX_BYTES, paygProductionSettings } from '../runtime/paygHostPolicy';
+import { isAdmittedRoute, matchedProfile, PAYG_PROFILE_MAX_BYTES, paygProductionSettings } from '../runtime/paygHostPolicy';
+import { FREE_CHAT_REQUEST_FORMAT } from '../runtime/providerRequest';
 import { pricingEndpoint, readPricingStates, type PricingDeps } from '../runtime/pricingAdmission';
 import { admitReasoning } from '../runtime/reasoningAdmission';
 import type { ReasoningPolicy } from '../runtime/reasoningPolicy';
@@ -63,16 +64,24 @@ export async function chatQuote(admin: SupabaseClient, input: { modelId: string;
   const row = await readAdmissionModel(admin, input.modelId);
   if (row.error || !row.data || row.data.is_active !== 'true') throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
   const model = row.data.model_id as string;
-  const profile = parsed.data.profiles.find(p => p.model === model && isAdmittedRoute(p.model, p.endpointTag));
-  if (!profile) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
+  const candidate = parsed.data.profiles.find(p => p.model === model && isAdmittedRoute(p.model, p.endpointTag));
+  if (!candidate) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
 
   let states;
   try { states = await readPricingStates(admin, [{ modelId: input.modelId, model }], input.deps, false, [row.data]); }
   catch { throw new QuoteError('TURN_PRICE_UNAVAILABLE'); }
   const state = states.get(input.modelId);
   if (!state) throw new QuoteError('TURN_PRICE_UNAVAILABLE');
-  const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, profile.endpointTag);
-  const outputLimit = admittedOutputLimit(profile.outputLimit, row.data.max_tokens);
+  const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag);
+  const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens);
+  const reasoning = admitReasoning(row.data, 'interactive', limits.providerSlug, outputLimit);
+  // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): the ordinary purpose, the
+  // free-chat request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
+  // A profile approved for another use (e.g. Argon only for fusion_review) never admits a free chat.
+  const profile = matchedProfile(parsed.data.profiles,
+    { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],
+    [{ modelId: input.modelId, phase: 'ordinary', outputLimit, requestFormat: FREE_CHAT_REQUEST_FORMAT, reasoning }]);
+  if (!profile || profile.endpointTag !== candidate.endpointTag) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
   const upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
   let unit;
@@ -87,7 +96,7 @@ export async function chatQuote(admin: SupabaseClient, input: { modelId: string;
     modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, providerLimits: limits,
     identity: { provider: 'openrouter', account: openRouterAccount(key), model, protocol: 'openrouter-chat-v1',
       providerLimits: limits, outputLimit, upperUsd },
-    reasoning: admitReasoning(row.data, 'interactive', limits.providerSlug, outputLimit),
+    reasoning,
     outputLimit, inputLimit: Math.min(input.inputBytes, PAYG_PROFILE_MAX_BYTES),
     concurrency: DEFAULT_MODEL_CONCURRENCY, credential: async () => key,
   };

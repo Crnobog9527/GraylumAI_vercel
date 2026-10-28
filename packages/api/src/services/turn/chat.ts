@@ -115,7 +115,11 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       const decision = await db.begin({ actorId: input.actorId, turnId: opened.turnId, seq: ++seq, callKind: 'decision',
         modelId: quote.modelId, toolName: null, paid: null, requestHash: sha256(input.text), upperUsd: decisionUpperUsd,
         multiplier: quote.multiplier });
-      if (decision.sessionTombstoned || decision.accountErasing) throw new TurnStop('TURN_TOMBSTONED');
+      if (decision.sessionTombstoned || decision.accountErasing) {
+        await db.record({ actorId: input.actorId, turnId: opened.turnId, seq, status: 'not_sent', nominalUsd: null, actualUsd: null,
+          usage: { chargeUser: false, model: DECISIONS_MODEL }, providerId: null, payloadHash: sha256('tombstoned'), raw: null });
+        throw new TurnStop('TURN_TOMBSTONED');
+      }
       let refused = false;
       const spent: { sent: boolean; cost: string | null } = { sent: false, cost: null };
       const onCost = (usd: number | null) => { spent.sent = true; spent.cost = usd === null ? null : ceil12(usd.toFixed(15)); };

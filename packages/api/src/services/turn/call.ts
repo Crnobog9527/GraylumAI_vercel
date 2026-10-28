@@ -54,10 +54,11 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
     const seq = deps.nextSeq();
     const begun = await deps.db.begin({ actorId: deps.actorId, turnId: deps.turnId, seq, callKind: 'model', modelId: call.modelId,
       toolName: null, paid: null, requestHash, upperUsd: call.upperUsd, multiplier: call.multiplier });
-    if (tombstoned(begun)) throw new TurnStop('TURN_TOMBSTONED');
-    if (begun.paused) throw new TurnStop('TURN_PAUSED_FOR_CREDITS');
     const notSent = () => deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'not_sent', nominalUsd: null,
       actualUsd: null, usage: {}, providerId: null, payloadHash: requestHash, raw: null });
+    if (begun.paused) throw new TurnStop('TURN_PAUSED_FOR_CREDITS');
+    // Deleted after the turn opened: begin already wrote the row; it is closed as certainly unsent, never left for recovery.
+    if (tombstoned(begun)) { await notSent(); throw new TurnStop('TURN_TOMBSTONED'); }
     let release: () => Promise<void>;
     try { release = await acquireSlot(deps.slots, `model:${call.modelId}`, { limit: call.concurrency, sleep: deps.sleep, now: deps.now }); }
     catch (error) {
