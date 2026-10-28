@@ -4214,7 +4214,7 @@
   "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "d45f130a0feb",
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text)": "082c6ca642d3",
   "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "46acb86d4e4a",
-  "fn:turn_settle_credits(uuid,uuid,integer,bigint)": "e742d5794e96",
+  "fn:turn_settle_credits(uuid,uuid,integer,bigint)": "3ecf04bd4362",
   "fn:turn_tombstones(uuid,uuid,jsonb)": "7650ea48b0f5",
   "fn:voice_billing_scrub(uuid)": "6cf04ac8046a",
   "fn:voice_corpus_limit()": "b41be220f585",

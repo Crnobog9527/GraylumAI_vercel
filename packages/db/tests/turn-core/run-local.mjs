@@ -400,6 +400,41 @@ try{
   }finally{await p1.end();await p2.end();}
   report.checks.push('a turn_open waiting on an account erasure that commits is refused under the account lock: no freeze, no turn');
  }
+ // 17. #1512 review: a subscription refunded while its credits are frozen. 100 granted, 60 frozen from the period, the grant is
+ // reversed, the turn closes with D = 6: the 54 left are intercepted (never returned). The credit records still add up to the
+ // balance: +100, -6 spend, -54 intercepted (not a spend).
+ {
+  const actor=randomUUID(),session=randomUUID(),grant=randomUUID(),subscription='sub_'+randomUUID(),invoice='in_'+randomUUID();
+  const day=24*3600e3,start=new Date(Date.now()-day).toISOString(),end=new Date(Date.now()+day).toISOString();
+  await c.query('insert into profiles(id,credits) values($1,100)',[actor]);
+  await c.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+   values($1,100,'addition','grant','opening_grant','system',$2,0,100)`,[actor,'opening_grant:'+actor]);
+  await c.query(`insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+   values($1,'Local fixture','pro',true,true,500000000) on conflict(level) do nothing`,[randomUUID()]);
+  const plan=await one("select id v from membership_plans where level='pro'");
+  await c.query(`insert into user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,
+   current_period_end,status) values($1,$2,$3,'monthly',$4,$5,'active')`,[actor,subscription,plan,start,end]);
+  await c.query(`insert into subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,
+   grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,consumed_amount,idempotency_key)
+   values($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,100,0,$9)`,
+  [grant,actor,subscription,plan,'invoice:'+invoice,start,end,invoice,'grant:'+invoice]);
+  await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+   [session,actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
+  const a={actor,session,credits:100};
+  const o=await open(a,{pol:policy({gCredits:60,minCredits:10})});
+  assert.equal(o.reservedCredits,60);
+  assert.equal(await one("select metadata->>'chargedGrantId' v from billing_history where id=(select (policy->>'holdId')::uuid from turns where id=$1)",[o.turnId]),grant,
+   'the freeze came from the subscription period');
+  await c.query("update subscription_credit_grants set status='reversed' where id=$1",[grant]);
+  // G_i = ceil(100 x 0.1 x 6) = 60 fits the freeze; N = ceil(100 x 0.01 x 6) = 6.
+  await begin(a,o.turnId,1,{upper:0.1});await record(a,o.turnId,1,{n:0.01});
+  assert.equal((await close(a,o.turnId)).chargedCredits,6);
+  assert.equal(await balance(a),40,'the intercepted 54 are not returned');
+  assert.deepEqual((await c.query("select reason_code,amount,counts_as_spend from credit_transactions where user_id=$1 and source_id=$2 order by amount desc",
+   [actor,String(o.turnId)])).rows,[{reason_code:'turn_spend',amount:-6,counts_as_spend:true},{reason_code:'turn_intercepted',amount:-54,counts_as_spend:false}]);
+  assert.equal(await one('select sum(amount)::int v from credit_transactions where user_id=$1',[actor]),40,'records add up to the balance');
+  report.checks.push('a subscription refunded during a freeze: D=6 spend plus 54 intercepted (not a spend); the credit records add up to the balance');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

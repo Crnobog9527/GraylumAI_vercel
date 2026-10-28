@@ -145,14 +145,25 @@ BEGIN
     RAISE EXCEPTION 'TURN_SETTLE_CONSERVATION' USING ERRCODE='XX000';
   END IF;
 
-  -- One net row in the user's credit records: what this turn actually cost (the freeze itself is never listed, 10-25).
+  -- One net row in the user's credit records: what this turn actually cost (the freeze itself is never listed, 10-25). When the
+  -- subscription the freeze came from was refunded or ended meanwhile, the unused part is not returned (intercepted): one more
+  -- row, not a spend, keeps the records equal to the balance (as bill2 release rows and billing_reconcile_day count it).
+  -- D <= H, so a turn never overruns its freeze (v_intercepted_overrun stays 0).
   IF p_actual_credits > 0 THEN
     INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,source_type,source_id,
      idempotency_key,balance_before,balance_after,metadata)
     VALUES(p_user_id,-p_actual_credits,'consumption','AI turn','spend','turn_spend','ai_task',p_turn_id::text,
-     'turn:'||p_turn_id||':spend',v_balance_after+p_actual_credits,v_balance_after,
+     'turn:'||p_turn_id||':spend',v_balance_after+p_actual_credits+v_intercepted_restoration,v_balance_after+v_intercepted_restoration,
      jsonb_build_object('turnId',p_turn_id,'preDeductId',p_pre_deduct_id))
     RETURNING id INTO v_spend;
+  END IF;
+  IF v_intercepted_restoration > 0 THEN
+    INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,source_type,source_id,
+     idempotency_key,balance_before,balance_after,metadata)
+    VALUES(p_user_id,-v_intercepted_restoration,'adjustment','AI turn freeze not returned (subscription refunded or ended)',
+     'adjustment','turn_intercepted','ai_task',p_turn_id::text,'turn:'||p_turn_id||':intercepted',
+     v_balance_after+v_intercepted_restoration,v_balance_after,
+     jsonb_build_object('turnId',p_turn_id,'preDeductId',p_pre_deduct_id,'chargedGrantId',v_charged_grant_id));
   END IF;
 
   INSERT INTO billing_history (user_id, operation_type, amount, reason, metadata, transaction_id)
