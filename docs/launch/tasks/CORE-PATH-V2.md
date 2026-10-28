@@ -575,7 +575,11 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 
 ### 5.2 保留的表（主路径只读或按 kind 写一行）
 
-`profiles`（余额、会员、状态）、`credit_transactions`、`credit_source_entries`（grants，结算用现有 `atomic_*` 账本函数）、`catalog_versions`、
+`profiles`（余额、会员、状态）、`credit_transactions`、`credit_source_entries`（grants）、`billing_history`、`subscription_credit_grants`、`credit_package_sources`
+（**积分账本按"账本叶子"接法**，10-28 骨架窗口与架构窗口定：开轮调现有 `atomic_pre_deduct(actor, H, …, request_id)` 冻结；收轮调新写的
+`turn_settle_credits`，它把 `bill2_legacy_settle` 的账本数学整段拷过来不改、只去掉 `bill2_*` 依赖，再写一笔净扣进 `credit_transactions`；
+`credit_available`、`credit_source_apply` 照用。额度来源、会员赠送消耗、拒付冻结的规则一条不动。这四个账本函数里的行锁都是按用户的，
+没有全站共用行，符合 3.3.2）、`catalog_versions`、
 `system_settings`、`ai_models`、`modules`/`skills`/`skill_revisions`/`skill_packages`/`skill_package_files`、`opc_drafts`/`opc_turns`（导师整理与轮次）、
 `bill2_drafts`、`artifact_versions`（报告）、`fusion_reviews`/`fusion_compares`（评审团/对比的产物与逐章选择，去掉它们的 billing_group 列）、
 `research_*`（对标发现产物）、`library_*`、`voice_*`、`social_*`、`account_erasure_*` 状态表。
@@ -662,7 +666,8 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 进 CI 的 `scripts/check-turn-budget.mjs`（本机 Docker 库，桩模型）：
 - 跑三条标准回合（自由对话、导师、报告），断言 3.1 节的往返、锁数、数据库时间；数字只许变小，基线 `scripts/turn-budget-baseline.json`
   和代码大小基线一样是棘轮，手动调高需要 Owner 批准。
-- `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：闭包 ≤ 15 函数 / ≤ 10 表；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`，
+- `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：闭包 ≤ 15 函数 / ≤ 10 表（**账本叶子不展开**：`atomic_pre_deduct`、`turn_settle_credits`、
+  `credit_available`、`credit_source_apply` 四个按名字计 1、不递归进去，它们只碰本人的 `profiles`/grants/积分包行，列表写死在脚本里、加名字要 Owner 批准）；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`，
   且 WHERE 带所有者键；`UPDATE` 的表只许白名单（上述三张 + `daily_spend` 带 bucket、`session_messages`、`turn_calls`）；
   禁止 `pg_advisory_lock(`、`pg_advisory_xact_lock(`、非 LOCAL 的 `SET `、`CREATE TEMP`（Supavisor 事务模式与"无全站热点"两条，3.3.2）。
 - `EXPLAIN` 断言：三条标准回合和定时任务认领语句对热表无 Seq Scan（3.1 节）。
