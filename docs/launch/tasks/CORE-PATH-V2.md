@@ -193,7 +193,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 用户侧冻结和平台侧日限混在同一个数上 | **分开两个数**：`H`（积分，用户侧冻结，按上面的 G_turn）和 `U_turn`（美元，平台侧本轮供应商成本上界 = Σ本轮允许的每次调用上界 U_i，给 2.5.1 的日限预占用）。固定价 kind 的 H 和 U_turn 不相等（报告 H=500 积分+临时上界，U_turn=一次调用上界）|
 | `profiles FOR UPDATE` 每次 claim 和 finalize | 开轮一次、收轮一次 |
 | 止损锁 (201,1) 全站独占 | **去掉，改为"开轮预占、收轮回补"**（细则与证明见 2.5.1）：`turn_open` 先在 `daily_spend(day, bucket)` 自己的桶行上 `UPDATE … SET reserved=reserved+U_turn`（U_turn 是本轮冻结的成本上界，和 H 用的同一个数），再读全天 `SUM(reserved+spent)`，加上预留带 B 超过日限 L 就回滚拒绝；`turn_close` 在同一桶行 `spent=spent+n_total, reserved=reserved−U_turn`。**当日实际花费永远 ≤ L，超额为 0**；代价是接近日限时提前拒绝，提前量 ≤ B（staging 现配置约 15 美元）——第 8 节 3b 据此改述 |
-| 多次调用的回合中途余额不够 | `turn_call_record` 返回 `credits_low`（它读 `profiles.balance` 一行，不锁）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)`，不重复收费 |
+| 多次调用的回合中途余额不够 | `turn_call_begin` 按 `turns` 自己的行判断（剩余冻结 H − Σ已记名义积分 < 下一次调用上界，不读 `profiles`，2.5.4）→ `paused(waiting_credits)`；充值后"继续"= `turn_open(resume_of=turn_id)` 只补冻结差额，不重复收费 |
 | 未知成本 24 小时恢复、`cost_pending` | 调用已发出但没有最终回执（崩溃、断线、超时）→ 回执停在 `dispatched`/`identified`，**不退该笔的用户冻结、不释放该笔的日限预占**；`turn_close` 把它标为 `cost_pending`、`turns.settlement='pending'`；现有恢复定时任务按 `provider_id` 查供应商成本后再结一次（幂等）；查不到按 BILL2 §0.3 的现行规则处理（未知 ≠ 零；第三方搜索工具例外按 0 结算）。细则 2.5.2 |
 | 停止退款 | 只有报告能停（Owner 10-28）：`turn_close(kind=stopped)` 仅接受 `kind=report`；滚动 24 小时内前 2 次 D=0 全退，第 3 次起 D=按回执、≤500（`turns(actor_id, kind, stopped_by_user, closed_at)` 索引数）。普通对话没有停止，用户离开页面回合照常结算 |
 | 402 不计费 | 回执 `status='no_charge_402'`, n=0 | 
@@ -296,6 +296,21 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
   Node 在运行时按同一份上限计数，到上限就不再把工具挂给模型（现有 `runnerRetrieval` 的"最后一次允许的调用后不再提供工具"规则不变）。
 - 2.5.1 的证明以此为准：U_turn 是本轮**所有**可能产生供应商费用的调用（模型续轮 + 付费工具）的上界之和，免费工具引起的续轮在 M 里。
 - 余额不够 G_turn 时：开轮按 H=min(G,A) 冻结，运行中 `turn_call_begin` 发现剩余冻结 < 下一次调用上界 → `paused(waiting_credits)`（2.2），不会超扣。
+
+#### 2.5.4 两种"冻结"不是一回事：实预扣 vs 逻辑预留（回应 #1508 审查 P1）
+
+| | 用户侧积分冻结 H | 平台侧日限预占 U_turn |
+|---|---|---|
+| 怎么做 | `atomic_pre_deduct(actor, H, …)`：**真的从 `profiles.credits` 里扣掉**（`credits = balance_before − p_amount`），`billing_history` 留预扣记录 | `daily_spend.reserved_usd += U_turn`：只是一个计数，不碰任何余额 |
+| `turns` 里记什么 | `reserved_credits = H`：**只是"已经预扣了多少"的记录**，收轮时用来算退多少（退 H−D）；**可用余额永远不再减它** | `policy.upper_usd = U_turn`：收轮回补用 |
+| 可用余额 A 怎么算 | 现有 `credit_available`：`profiles.credits` − 隔离的赠送余量 − 退款包 hold − 拒付 pending hold（现有算法一条不改）。因为预扣已经在 `credits` 里扣掉了，**不减 `turns.reserved_credits`**；否则余额 1000、冻结 400 会被算成 200 而不是 600，同一账号的其他会话会被错误拒绝 | 不参与 A |
+| 回合中途"够不够" | 只看 `turns` 自己的行：`H − Σ已记名义积分 ≥ 下一次调用上界` 否则 `paused(waiting_credits)`；**不读 `profiles`** | `turn_call_begin` 不再碰 `daily_spend`（预占在开轮一次做完） |
+| 收轮 | `turn_settle_credits`：结算 D、退还 H−D 到 `profiles.credits`，守恒 `restored + D = H` | `spent += n_total, reserved −= U_turn` |
+| 崩溃/未知成本 | 该笔份额留在预扣里（2.5.2），`turns.reserved_credits` 不变，直到恢复任务结算 | 同 2.5.2 |
+
+验收（V2-3 套件）："**冻结只影响可用余额一次**"：余额 1000 的账号开一轮 H=400 → `profiles.credits=600`、`credit_available=600`；
+同一账号另一个会话此时 `turn_open` 看到的 A 是 600（不是 200）；收轮 D=150 → `credits=850`、流水只有一笔 −150。
+退款包 hold、拒付 pending hold 的现有算法和测试原样保留。
 
 ### 2.6 历史与删除
 
@@ -484,7 +499,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | 第三方搜索结果未知对用户 0 结算、释放冻结、供应商成本待确认（10-13 9.2） | 工具回执 `status='unknown'`, n=0, `cost_pending=true` | 保留 |
 | 发布每成功平台 0.01×6 美元；读自己作品不收积分（10-13） | 发布不经主路径；读作品作为工具调用，回执 n=0 | 保留 |
 | 复盘每份成本上限 1 美元、按用量扣、多品牌各一份（10-27） | `kind=review` 的 G_turn 由 1 美元换算 | 保留（上线后接入） |
-| 积分记录只列实际变动，预留/释放不列（10-25） | 冻结不进流水（`turns.reserved_credits`）；收轮写净扣一笔 | 保留（实现更简单） |
+| 积分记录只列实际变动，预留/释放不列（10-25） | 预扣走 `atomic_pre_deduct`（`billing_history` 记录，不进 `credit_transactions`）；`turns.reserved_credits` 只是预扣额的记录，不参与可用余额（2.5.4）；收轮写净扣一笔 | 保留（实现更简单） |
 | 带步骤 Skill 的报告必须付费会员，免费可做完前面步骤（项 50） | `turn_open(kind=report)` 查会员等级 | 保留 |
 | 限流：新对话 10/分 200/天、模型调用 30/分 600/天、一键暂停（项 30/49） | Redis 限流器不变，参数从目录缓存读 | 保留（落地状态待核，9 节） |
 
@@ -619,7 +634,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | P-1 | `feat(PROMPT-CACHE)` 合 #1501 | 报告/评审团/对比的断点（改 base 到 staging，补复审）；#1500、#1502 关闭，改动迁入 V2-4/V2-5 | high | Claude | — | 0.5 天 | 现有单测；不改主路径 |
 | V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间/EXPLAIN 无顺序扫描断言，棘轮基线）；`scripts/db-function-closure.mjs`（闭包 + 行锁白名单 + 会话级状态禁用扫描）；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本 + 单机外推压测脚本（3.3.3，500/2000/5000 虚拟用户、记 k 与等待事件）；对旧路径跑一次基线存档 | low | Codex | — | 3.5 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
 | V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表；主键与唯一键按 3.3.2 的"可分区"约束设计（按所有者哈希可分区、时间列可做保留期清理） | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库；迁移注释写明未来分区方案 |
-| V2-3 | `feat(CORE-PATH-V2)` 核心函数 | `turn_open`、`turn_call_begin`/`turn_call_identity`/`turn_call_record`、`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本（发出后无最终回执：不退冻结、不释放日限预占、`cost_pending`；恢复按 provider_id 补结；工具例外 0 结算）、评审团固定价交付判定（修订稿→全价、无需修改→全退、中断→min(固定价,已知用量)）、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
+| V2-3 | `feat(CORE-PATH-V2)` 核心函数 | `turn_open`、`turn_call_begin`/`turn_call_identity`/`turn_call_record`、`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、**冻结只影响可用余额一次**（2.5.4：开轮 H=400 后 `credits` 与 `credit_available` 都是 600，另一会话开轮看到 600）、402、未知成本（发出后无最终回执：不退冻结、不释放日限预占、`cost_pending`；恢复按 provider_id 补结；工具例外 0 结算）、评审团固定价交付判定（修订稿→全价、无需修改→全退、中断→min(固定价,已知用量)）、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
 | V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限；重试只限 `not_sent`/`rejected`、SDK `maxRetries:0`（2.5.2）；回执与结果容量沿用 `responseCapacity.ts`（532480 / 4194304 / 262144） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 5；黄金字节；runtime 集成套件里自由对话场景等效迁移，**含 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不二次 POST、不零退"**，以及 `runnerRetrieval.test.ts` 的"两次资料库读取、三次模型请求"（三次模型调用都在开轮的 G_turn/U_turn 内、各自三步回执，最后一次后不再提供工具）；`mentorOutput.test.ts` 等容量边界测试迁入；并发上限与退避单测 |
 | V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 11；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
 | V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file`；TikHub/Parallel/Firecrawl/monid 按供应商并发上限 + 退避（复用 V2-4 的 Redis 计数） | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试；供应商限流退避单测 |
@@ -629,7 +644,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | V2-9 | `feat(CORE-PATH-V2)` 删除与注销接新表 | 会话删除墓碑化、内容清除投影、注销投影、文风来源撤销、`content_erasure_runtime_check` 替换 | high | Codex | V2-3 | 4 天 | erasure 套件逐条等效迁移；长对话（≥100 轮）删除 < 1 秒 |
 | V2-10 | `feat(CORE-PATH-V2)` 前端切换 | `/app` 对话工作区改调 `/api/turn` SSE；`opened` 事件渲染（工具可用性、裁剪说明、兜底卡）；右侧成果夹；普通对话去掉停止按钮（报告保留）；`core_path_v2.enabled` 开关 | ordinary | Claude | V2-5、V2-6、V2-7、V2-8 | 4 天 | 浏览器验证（Codex 验收批次）；旧 e2e 全过 |
 | V2-11 | `test(CORE-PATH-V2)` 核心路径 e2e | `apps/web/tests/e2e/core-path/`：① 定位三步到定稿报告；② 自由对话 + 加载 Skill + 一次研究；③ 报告停止与 24 小时防刷（第 3 次看到扣费说明）、普通对话无停止按钮；④ 删除对话（长对话）与注销；⑤ 对比；⑥ 评审团到逐章选择。新 workflow `staging-e2e.yml`：staging 每次部署成功后跑，模型用 **Claude Haiku 5.5**（Owner 10-28 批准），每次运行 ≤ 0.5 美元，失败开 issue | high（CI） | Codex | V2-10 | 4 天 | 在 staging 跑通一次并附报告与实际花费 |
-| V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | **先**改 `content_erasure_ledger_owned`（V2-3 本机实测定位：`atomic_pre_deduct` 往 `billing_history` 插行 → 触发器 `zz_erasure_ledger_guard` → `erasure_ledger_guard()` → 它在第 23/28 行按 run_ids/pre_ids 查 `bill2_runs`，9 把锁全来自这里；`credit_available` 本身 0 把），把按 `bill2_runs` 判断账本归属改为按 `turns`（整段 CREATE OR REPLACE，同一迁移里排在 DROP 之前，并把 erasure-ledger 套件里"账本行归属"的断言改成按 `turns`）；再 DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
+| V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | **先**改 `content_erasure_ledger_owned`（V2-3 本机实测定位：`atomic_pre_deduct` 往 `billing_history` 插行 → 触发器 `zz_erasure_ledger_guard` → `erasure_ledger_guard()` → 它在第 23/28 行按 run_ids/pre_ids 查 `bill2_runs`，9 把锁全来自这里；`credit_available` 本身 0 把），把按 `bill2_runs` 判断账本归属改为按 `turns`（整段 CREATE OR REPLACE，同一迁移里排在 DROP 之前，并把 erasure-ledger 套件里"账本行归属"的断言改成按 `turns`；**`credit_available` 不改、也不减 `turns.reserved_credits`**，预扣已在 `profiles.credits` 里，2.5.4）；再 DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
 | V2-13 | `docs(CORE-PATH-V2)` 100 人验收与外推 | 3.2 节 staging 压测 + 3.3.3 单机 500/2000/5000 外推压测，报告进 `docs/validation/core-path-v2/`（含 k 值、等待事件、不确定性）；MASTER_PLAN §2.1 记录结果 | ordinary | Codex | V2-10 | 3 天 | 3.1 节通过线；k 在 500→5000 不变（±15%） |
 
 ### 6.2 顺序与并行
