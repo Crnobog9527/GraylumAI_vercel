@@ -144,7 +144,7 @@ const organized = (id: string, content: string) => new Response(JSON.stringify({
 const patch = (value: string) => JSON.stringify({ inputKind: 'answer', notes: [],
   patches: [{ stepId: 'step-0', fieldId: 'goal', value, status: 'provisional', nature: 'fact', basis: 'user_statement' }] });
 
-type Reply = (body: { model: string; messages: Array<{ role: string; content: unknown }> }, n: number) => Response;
+type Reply = (body: { model: string; messages: Array<{ role: string; content: unknown }> }, n: number) => Response | Promise<Response>;
 function transport(reply: Reply) {
   const bodies: Array<{ model: string; messages: Array<{ role: string; content: unknown }>; tools?: unknown[]; tool_choice?: string }> = [];
   const fn: typeof fetch = async (_url, init) => {
@@ -244,4 +244,21 @@ it('RUNTIME: CORE-PATH-V2 V2-5: an organizer reply that is not a patch object ke
   expect(result.kindResult).toMatchObject({ result: 'invalid_output' });
   expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
   expect((await db.query("select close_kind from turns where actor_id=$1", [f.actor])).rows).toEqual([{ close_kind: 'completed' }]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5: a checklist edited while the turn runs turns the organizer patch into a suggestion, never an overwrite', async () => {
+  const f = await setup();
+  const t = transport(async (body, n) => {
+    if (body.model !== ORGANIZER) return prose('gen-reply-' + n, 'Noted.');
+    // The user saves the step by hand while the organizer runs (opc_information bumps the step version).
+    await db.query(`update artifact_rounds r set steps=jsonb_set(r.steps,'{step-0,version}',to_jsonb((r.steps->'step-0'->>'version')::int+1))
+      from opc_drafts d where d.round_id=r.id and d.draft_id=$1`, [f.draftId]);
+    return organized('gen-org-' + n, patch('Sell coffee to students'));
+  });
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.kindResult, JSON.stringify(out.events)).toMatchObject({ result: 'suggested' });
+  const steps = await f.steps();
+  expect(steps['step-0'].information?.goal?.value ?? '').toBe('');
+  expect(steps['step-0'].fieldMeta.goal.suggestion).toMatchObject({ value: 'Sell coffee to students', basis: 'user_statement' });
 });

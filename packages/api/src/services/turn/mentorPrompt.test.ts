@@ -148,3 +148,13 @@ describe('mentor history projection (plan 2.9 rule 5)', () => {
     expect(projectMentorHistory([item('user', 'Hi', 1), item('assistant', body, 2)]).map(m => m.content)).toEqual(['Hi', 'Visible reply']);
   });
 });
+
+describe('mentor prompt cache eligibility (hostTurnAdmission.test.ts, migrated)', () => {
+  it('no breakpoint without a cache write price or on a non-Anthropic model; the host structure is unchanged', () => {
+    const base = { real: true, instructions: 'brand+skill rest', prefixChars: 11, historyMarker: true };
+    expect(freezeSharedPromptCache({ ...base, model: 'anthropic/claude-sonnet-5.5', cacheWriteUsdPerMillion: undefined })).toBeUndefined();
+    expect(freezeSharedPromptCache({ ...base, model: 'google/gemini-test', cacheWriteUsdPerMillion: '1' })).toBeUndefined();
+    expect(freezeSharedPromptCache({ ...base, model: 'anthropic/claude-sonnet-5.5', cacheWriteUsdPerMillion: '3.75' }))
+      .toMatchObject({ version: 'prompt-cache-v3', systemPrefixChars: 11, historyMarker: true });
+  });
+});
