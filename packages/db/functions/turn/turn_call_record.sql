@@ -11,9 +11,14 @@ AS $function$
 DECLARE t turns; c turn_calls; q numeric; used integer; next_need integer;
 BEGIN
   IF p_status NOT IN ('ok','not_sent','rejected','no_charge_402','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
+  -- Lock the turn row before reading the call: turn_close may be marking it unknown, or the same receipt may arrive twice.
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
   IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept.
+  IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable') THEN
+    c.status := 'identified';
+  END IF;
   IF c.status IN ('dispatched','identified') THEN
     IF p_status = 'ok' AND (p_nominal_usd IS NULL OR p_nominal_usd < 0) THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
     -- not_sent and rejected are only for requests the provider certainly never billed: no provider id, no cost.
@@ -24,7 +29,7 @@ BEGIN
         nominal_usd = CASE WHEN p_status = 'ok' THEN p_nominal_usd ELSE 0 END,
         actual_usd = CASE WHEN p_status = 'ok' THEN p_actual_usd END,
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
-        payload_hash = p_payload_hash, settled_at = now()
+        payload_hash = p_payload_hash, settled_at = now(), cost_pending = false
       WHERE turn_id = p_turn_id AND seq = p_seq;
     IF p_raw IS NOT NULL THEN INSERT INTO turn_call_raw (turn_id, seq, body) VALUES (p_turn_id, p_seq, p_raw); END IF;
   ELSIF c.status <> p_status OR c.payload_hash IS DISTINCT FROM p_payload_hash THEN

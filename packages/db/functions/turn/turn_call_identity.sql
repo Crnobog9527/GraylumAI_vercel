@@ -10,13 +10,17 @@ CREATE OR REPLACE FUNCTION public.turn_call_identity(p_actor_id uuid, p_turn_id 
 AS $function$
 DECLARE c turn_calls;
 BEGIN
-  UPDATE turn_calls SET provider_id = p_provider_id, status = 'identified'
-   WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq AND status = 'dispatched'
-   RETURNING * INTO c;
-  IF c.turn_id IS NULL THEN
-    SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
-    IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
-    IF c.provider_id IS DISTINCT FROM p_provider_id THEN RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023'; END IF;
+  -- Serialized with turn_close and the other call writes of this turn on the turn row (the only lock a call write takes).
+  PERFORM 1 FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
+  SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
+  IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
+  IF c.status = 'dispatched' THEN
+    UPDATE turn_calls SET provider_id = p_provider_id, status = 'identified' WHERE turn_id = p_turn_id AND seq = p_seq RETURNING * INTO c;
+  ELSIF c.status = 'unknown' AND c.provider_id IS NULL THEN
+    -- The turn closed first (crash or timeout); the id still helps recovery find the cost.
+    UPDATE turn_calls SET provider_id = p_provider_id WHERE turn_id = p_turn_id AND seq = p_seq RETURNING * INTO c;
+  ELSIF c.provider_id IS DISTINCT FROM p_provider_id THEN
+    RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023';
   END IF;
   RETURN jsonb_build_object('status', c.status);
 END $function$;

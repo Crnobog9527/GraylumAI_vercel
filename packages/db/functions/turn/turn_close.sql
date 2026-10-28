@@ -17,7 +17,7 @@ BEGIN
   END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  -- Lock order: session, then the turn, then the stop-loss bucket, then (in the settlement) the profile.
+  -- Lock order: session, then the turn, then the stop-loss bucket, then the profile (as turn_open: session, bucket, profile).
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.state = 'closed' THEN
@@ -45,6 +45,13 @@ BEGIN
   FROM turn_calls WHERE turn_id = p_turn_id;
   h := t.reserved_credits;
 
+  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
+  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
+      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
+    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+  -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+
   -- What the user pays (BILL-PAYG v7: D = min(N, H); the rest E = N - D is absorbed by the platform).
   IF p_refund_all OR (v_kind = 'expired' AND NOT p_delivered) THEN
     charge := 0;
@@ -58,11 +65,6 @@ BEGIN
   ELSE
     charge := least(credits, h);
   END IF;
-
-  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
-  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
-      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
-    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
 
   -- Credits: settled once; with an unknown cost the whole freeze waits for recovery (one freeze is settled exactly once).
   IF NOT pending AND t.policy->>'holdId' IS NOT NULL THEN

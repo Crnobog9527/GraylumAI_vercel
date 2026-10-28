@@ -245,6 +245,45 @@ try{
   assert.equal(ledger,await balance(a),'the credit records add up to the balance');
   report.checks.push('conservation: charged + absorbed = N; the freeze never goes negative; the credit records add up to the balance');
  }
+ // 11. Codex #1512 review: a final receipt racing turn_close, the same receipt twice at once, and report stops in two sessions
+ // of one account at once (with one free stop already used, exactly one more is free).
+ {
+  const p1=await peer(),p2=await peer();
+  try{
+   const as=(client,a)=>client.query("select set_config('request.jwt.claim.sub',$1,false)",[a.actor]);
+   const a=await account(),o=await open(a);
+   await begin(a,o.turnId,1);await identity(a,o.turnId,1);
+   const recordOn=client=>client.query('select turn_call_record($1,$2,1,$3,$4,$5,$6,null,$7,$8) v',
+    [a.actor,o.turnId,'ok',0.01,0.01,'{}',hash('same'),'raw']).then(r=>({ok:r.rows[0].v}),e=>({error:e.message}));
+   const closeOn=client=>client.query("select turn_close($1,$2,'interrupted','[]',false,false,null) v",[a.actor,o.turnId])
+    .then(r=>({ok:r.rows[0].v}),e=>({error:e.message}));
+   await as(p1,a);await as(p2,a);
+   const [r1,cl,r2]=await Promise.all([recordOn(p1),closeOn(c),recordOn(p2)]);
+   assert.ok(!r1.error&&!r2.error&&!cl.error,JSON.stringify([r1,cl,r2]));
+   const call=(await c.query('select status,cost_pending,settled_at is not null s from turn_calls where turn_id=$1 and seq=1',[o.turnId])).rows[0];
+   assert.deepEqual(call,{status:'ok',cost_pending:false,s:true},'the receipt is kept whichever came first');
+   assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[o.turnId]),1,'one raw body');
+   // A provider id that arrives after the close marked the call unknown is still stored for recovery.
+   const b=await account(),o2=await open(b);await begin(b,o2.turnId,1);
+   await close(b,o2.turnId,'interrupted',{messages:[],delivered:false});
+   await identity(b,o2.turnId,1,'gen-late');
+   assert.deepEqual((await c.query('select status,provider_id from turn_calls where turn_id=$1',[o2.turnId])).rows[0],{status:'unknown',provider_id:'gen-late'});
+   // Report stops: one free stop used; two more in two sessions at once -> one free, one charged.
+   const r=await account(),other=randomUUID();
+   await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+    [other,r.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
+   const rep=session=>open(r,{kind:'report',session,pol:policy({gCredits:500,fixedCredits:500})});
+   const first=await rep(r.session);await begin(r,first.turnId,1,{upper:0.5});await record(r,first.turnId,1,{n:0.2});
+   await close(r,first.turnId,'stopped',{messages:[],delivered:false});
+   const x=await rep(r.session),y=await rep(other);
+   for(const t of [x,y]){await begin(r,t.turnId,1,{upper:0.5});await record(r,t.turnId,1,{n:0.2});}
+   await as(p1,r);await as(p2,r);
+   const stop=(client,t)=>client.query("select turn_close($1,$2,'stopped','[]',false,false,null) v",[r.actor,t.turnId]).then(v=>v.rows[0].v);
+   const charged=(await Promise.all([stop(p1,x),stop(p2,y)])).map(v=>v.chargedCredits).sort((m,n)=>m-n);
+   assert.deepEqual(charged,[0,120],'exactly one of the two concurrent stops is free');
+  }finally{await p1.end();await p2.end();}
+  report.checks.push('a receipt racing turn_close or arriving twice is kept once; a late provider id is stored; concurrent report stops of one account count serially');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

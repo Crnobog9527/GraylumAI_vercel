@@ -381,13 +381,17 @@ CREATE OR REPLACE FUNCTION public.turn_call_identity(p_actor_id uuid, p_turn_id 
 AS $function$
 DECLARE c turn_calls;
 BEGIN
-  UPDATE turn_calls SET provider_id = p_provider_id, status = 'identified'
-   WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq AND status = 'dispatched'
-   RETURNING * INTO c;
-  IF c.turn_id IS NULL THEN
-    SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
-    IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
-    IF c.provider_id IS DISTINCT FROM p_provider_id THEN RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023'; END IF;
+  -- Serialized with turn_close and the other call writes of this turn on the turn row (the only lock a call write takes).
+  PERFORM 1 FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
+  SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
+  IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
+  IF c.status = 'dispatched' THEN
+    UPDATE turn_calls SET provider_id = p_provider_id, status = 'identified' WHERE turn_id = p_turn_id AND seq = p_seq RETURNING * INTO c;
+  ELSIF c.status = 'unknown' AND c.provider_id IS NULL THEN
+    -- The turn closed first (crash or timeout); the id still helps recovery find the cost.
+    UPDATE turn_calls SET provider_id = p_provider_id WHERE turn_id = p_turn_id AND seq = p_seq RETURNING * INTO c;
+  ELSIF c.provider_id IS DISTINCT FROM p_provider_id THEN
+    RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023';
   END IF;
   RETURN jsonb_build_object('status', c.status);
 END $function$;
@@ -402,9 +406,14 @@ AS $function$
 DECLARE t turns; c turn_calls; q numeric; used integer; next_need integer;
 BEGIN
   IF p_status NOT IN ('ok','not_sent','rejected','no_charge_402','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
+  -- Lock the turn row before reading the call: turn_close may be marking it unknown, or the same receipt may arrive twice.
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
   IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept.
+  IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable') THEN
+    c.status := 'identified';
+  END IF;
   IF c.status IN ('dispatched','identified') THEN
     IF p_status = 'ok' AND (p_nominal_usd IS NULL OR p_nominal_usd < 0) THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
     -- not_sent and rejected are only for requests the provider certainly never billed: no provider id, no cost.
@@ -415,7 +424,7 @@ BEGIN
         nominal_usd = CASE WHEN p_status = 'ok' THEN p_nominal_usd ELSE 0 END,
         actual_usd = CASE WHEN p_status = 'ok' THEN p_actual_usd END,
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
-        payload_hash = p_payload_hash, settled_at = now()
+        payload_hash = p_payload_hash, settled_at = now(), cost_pending = false
       WHERE turn_id = p_turn_id AND seq = p_seq;
     IF p_raw IS NOT NULL THEN INSERT INTO turn_call_raw (turn_id, seq, body) VALUES (p_turn_id, p_seq, p_raw); END IF;
   ELSIF c.status <> p_status OR c.payload_hash IS DISTINCT FROM p_payload_hash THEN
@@ -448,7 +457,7 @@ BEGIN
   END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  -- Lock order: session, then the turn, then the stop-loss bucket, then (in the settlement) the profile.
+  -- Lock order: session, then the turn, then the stop-loss bucket, then the profile (as turn_open: session, bucket, profile).
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.state = 'closed' THEN
@@ -476,6 +485,13 @@ BEGIN
   FROM turn_calls WHERE turn_id = p_turn_id;
   h := t.reserved_credits;
 
+  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
+  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
+      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
+    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+  -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+
   -- What the user pays (BILL-PAYG v7: D = min(N, H); the rest E = N - D is absorbed by the platform).
   IF p_refund_all OR (v_kind = 'expired' AND NOT p_delivered) THEN
     charge := 0;
@@ -489,11 +505,6 @@ BEGIN
   ELSE
     charge := least(credits, h);
   END IF;
-
-  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
-  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
-      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
-    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
 
   -- Credits: settled once; with an unknown cost the whole freeze waits for recovery (one freeze is settled exactly once).
   IF NOT pending AND t.policy->>'holdId' IS NOT NULL THEN
