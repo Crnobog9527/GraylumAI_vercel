@@ -1,0 +1,182 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
+import { decimal } from '../../bill2/decimal';
+import type { ToolCallPolicy } from '../../bill2/toolBilling';
+import { canonicalAccount, profileLinksIn, type CanonicalAccount } from '../../research/tools/accountLinks';
+import { toolEnvelope, type ToolEnvelope } from '../../research/tools/envelope';
+import { admitSubcalls, researchToolArgs, subcallNeed, withoutNulls, type ResearchToolArgs } from '../../research/tools/schemas';
+import { BENCHMARK_ROUTE_KINDS, selectRoute, type ResearchToolsConfig } from '../../research/vendors/config';
+import { parallelModeFor } from '../../research/vendors/parallel';
+import type { ResearchItem, SocialKind, SocialPlatform } from '../../research/vendors/types';
+import type { SupplierRequest } from '../../research/runtime/subcall';
+import { INVALID_RESEARCH_ARGUMENTS, fastSearchOnly, researchToolDescription, researchToolParameters } from '../../runtime/researchRuntimeTool';
+import type { RuntimeTool } from '../../runtime/runner';
+import { paidToolCall, ToolLimitReached, type SubcallLedger } from './meter';
+import { routePolicy, supplierSubcall, type SupplierDeps } from './suppliers';
+import type { GeneralResearchToolName, ToolCallDeps, ToolCallOutcome } from './types';
+
+/*
+ * CORE-PATH-V2 V2-6 (CHAT-AUTO-CONTEXT C rules, now on the turn core): the general research lookups of a free chat.
+ * social_search sends one keyword_posts subcall per keyword; social_account the platform's account route set (YouTube adds
+ * one post_detail after the posts); web_search one Parallel search; web_fetch one Firecrawl scrape. Each tool call is one
+ * paid turn_calls row (meter.ts); a call the turn cannot afford (call limit, subcall allowance) or cannot route is refused
+ * before anything is written or sent. Nothing here writes a benchmark table.
+ */
+const DEFAULT_POSTS = 20;
+const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+  ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) : item);
+
+/** The explicit "ran but returned nothing" result (product observation: a Xiaohongshu search answered "这次没取到数据"). */
+export const NO_DATA_REASON = 'NO_DATA_RETURNED';
+
+export type ResearchToolsInput = {
+  calls: ToolCallDeps; suppliers: SupplierDeps; config: ResearchToolsConfig;
+  /** The tools this turn may use (ToolPlan.available ∩ research); offered-but-trimmed tools answer unavailable. */
+  names: readonly GeneralResearchToolName[]; offered: readonly GeneralResearchToolName[];
+  /** Paid tool calls and supplier subcalls the turn froze (2.5.3). */
+  maxCalls: number; maxSubcalls: number;
+  /** Where social_account may take an account from: the user's benchmark table and the message this turn answers. */
+  accounts: { benchmark: readonly CanonicalAccount[]; currentMessage: string };
+  onOutcome?: (name: GeneralResearchToolName, outcome: ToolCallOutcome, subcalls: number) => void;
+};
+
+type Step = { request: SupplierRequest; label: ResearchItem['fields'] };
+
+function tikhub(config: ResearchToolsConfig, platform: SocialPlatform, kind: SocialKind,
+  input: { account?: string; keyword?: string; postId?: string }, limit: number): SupplierRequest | null {
+  const route = selectRoute(config, platform, kind);
+  if (!route.ok || route.vendor !== 'tikhub') return null;
+  return { vendor: 'tikhub', route: route.route, call: { platform, kind, ...input, limit } };
+}
+
+/** Whether social_account may look this account up (the benchmark table, or a profile link in the current message). */
+export function accountAllowed(accounts: ResearchToolsInput['accounts'], platform: SocialPlatform, value: string): string | null {
+  const account = canonicalAccount(platform, value);
+  if (account === null) return null;
+  const same = (item: CanonicalAccount) => item.platform === platform && item.account === account;
+  return accounts.benchmark.some(same) || profileLinksIn(accounts.currentMessage).some(same) ? account : null;
+}
+
+type Planned = { steps: Step[]; next?: (step: Step, items: ResearchItem[]) => Step | undefined } | { refused: string };
+
+function planSteps(input: ResearchToolsInput, name: GeneralResearchToolName, args: Record<string, unknown>): Planned {
+  const config = input.config;
+  if (name === 'social_search') {
+    const a = args as ResearchToolArgs<'social_search'>;
+    const steps: Step[] = [];
+    for (const keyword of a.keywords) {
+      const request = tikhub(config, a.platform, 'keyword_posts', { keyword }, a.limit ?? DEFAULT_POSTS);
+      if (!request) return { refused: 'ROUTE_NOT_SUPPORTED' };
+      steps.push({ request, label: { platform: a.platform, keyword } });
+    }
+    return { steps };
+  }
+  if (name === 'social_account') {
+    const a = args as ResearchToolArgs<'social_account'>;
+    const account = accountAllowed(input.accounts, a.platform, a.account);
+    if (!account) return { refused: 'ACCOUNT_NOT_CONFIRMED' };
+    const kinds = BENCHMARK_ROUTE_KINDS[a.platform]?.kinds;
+    const posts = a.posts ?? DEFAULT_POSTS;
+    const step = (kind: SocialKind, postId?: string): Step | null => {
+      const request = tikhub(config, a.platform, kind, { account, ...(postId ? { postId } : {}) }, posts);
+      return request && { request, label: { platform: a.platform, account, dataKind: kind } };
+    };
+    const first = kinds?.filter(kind => kind !== 'post_detail').map(kind => step(kind));
+    if (!kinds || !first?.length || first.some(item => !item) || (kinds.includes('post_detail') && !step('post_detail', 'x')))
+      return { refused: 'ROUTE_NOT_SUPPORTED' };
+    // YouTube: post_detail needs a post id from account_posts, so it follows once those came back.
+    return { steps: first as Step[], next: (current, items) => {
+      if (!kinds.includes('post_detail') || current.request.vendor !== 'tikhub' || current.request.call.kind !== 'account_posts') return;
+      const postId = items[0]?.fields.id;
+      return typeof postId === 'string' ? step('post_detail', postId) ?? undefined : undefined;
+    } };
+  }
+  if (name === 'web_search') {
+    const a = args as ResearchToolArgs<'web_search'>;
+    const route = selectRoute(config, 'web', a.mode === 'pro' ? 'web_search_pro' : 'web_search');
+    if (!route.ok) return { refused: route.reason };
+    return { steps: [{ request: { vendor: 'parallel', route: route.route, query: a.query, mode: parallelModeFor(a.mode) },
+      label: { query: a.query } }] };
+  }
+  const a = args as ResearchToolArgs<'web_fetch'>;
+  const route = selectRoute(config, 'web', 'web_fetch');
+  if (!route.ok) return { refused: route.reason };
+  return { steps: [{ request: { vendor: 'firecrawl', route: route.route, url: a.url }, label: { url: a.url } }] };
+}
+
+/** Runs the steps in order; stops at the first one without data; returns what came back. */
+async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planned: Extract<Planned, { steps: Step[] }>) {
+  const items: ToolEnvelope['items'] = [];
+  const steps = [...planned.steps];
+  let stoppedAt: string | null = null, fetchedAt: string | undefined;
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]!;
+    const receipt = await supplierSubcall(input.suppliers, step.request);
+    ledger.add(receipt);
+    const result = receipt.result;
+    if (result.outcome !== 'ok' && result.outcome !== 'partial') { stoppedAt = result.reason ?? result.outcome; break; }
+    fetchedAt ??= result.fetchedAt;
+    const n = ledger.receipts.length;
+    items.push(...result.items.map((item, index) => ({ ...(item.url ? { url: item.url } : {}),
+      fields: { ...item.fields, ...step.label, ref: `s${n}#${index + 1}` }, missing: item.missing })));
+    const following = planned.next?.(step, result.items);
+    if (following) steps.splice(i + 1, 0, following);
+  }
+  return { items, stoppedAt, fetchedAt, subcalls: ledger.receipts.filter(r => r.result.outcome !== 'not_sent').length };
+}
+
+/** The bound of one call: its worst-case subcalls at the highest frozen route price, and the highest route multiplier. */
+export function callBound(policies: readonly ToolCallPolicy[], requests: readonly SupplierRequest[], subcalls: number) {
+  const priced = requests.map(request => routePolicy(policies, request));
+  if (!priced.length || priced.some(policy => !policy)) return null;
+  const upper = priced.reduce((max, p) => decimal(p!.upperUsd) > max ? decimal(p!.upperUsd) : max, 0n) * BigInt(subcalls);
+  const multiplier = priced.reduce((max, p) => decimal(p!.multiplier) > decimal(max) ? p!.multiplier : max, priced[0]!.multiplier);
+  const whole = upper / 1_000_000_000_000n, fraction = (upper % 1_000_000_000_000n).toString().padStart(12, '0').replace(/0+$/, '');
+  return { upperUsd: fraction ? `${whole}.${fraction}` : String(whole), multiplier };
+}
+
+export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
+  let calls = 0, subcallsLeft = input.maxSubcalls;
+  const fastOnly = fastSearchOnly(input.config);
+  const make = (name: GeneralResearchToolName): RuntimeTool => ({
+    name, description: researchToolDescription(name, true), parameters: researchToolParameters(name, fastOnly),
+    invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true,
+    enabled: () => calls < input.maxCalls,
+    async execute(offered) {
+      if (!input.names.includes(name)) return toolEnvelope({ status: 'unavailable', reason: 'TOOL_UNAVAILABLE_THIS_TURN' });
+      if (calls >= input.maxCalls) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });
+      const raw = withoutNulls(offered) as Record<string, unknown>;
+      const parsed = researchToolArgs[name].safeParse(raw);
+      if (!parsed.success) return toolEnvelope({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS' });
+      const planned = planSteps(input, name, parsed.data as Record<string, unknown>);
+      if ('refused' in planned) return toolEnvelope({ status: planned.refused === 'ACCOUNT_NOT_CONFIRMED' ? 'not_confirmed'
+        : planned.refused === 'ROUTE_NOT_SUPPORTED' ? 'not_supported' : 'unavailable', reason: planned.refused });
+      // General lookups are all or nothing: the whole worst case must fit what the turn has left.
+      const need = subcallNeed(name, parsed.data as never, input.config);
+      const allowance = admitSubcalls(need, subcallsLeft);
+      if (allowance.exhausted) return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
+      const bound = callBound(input.suppliers.policies, planned.steps.map(step => step.request), allowance.allowed);
+      if (!bound) return toolEnvelope({ status: 'unavailable', reason: 'ROUTE_NOT_FROZEN' });
+      let metered;
+      try {
+        metered = await paidToolCall(input.calls, { toolName: name, requestHash: sha256(canonical({ name, args: parsed.data })),
+          upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger => runSteps(input, ledger, planned));
+      } catch (error) {
+        if (error instanceof ToolLimitReached) { calls = input.maxCalls; return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' }); }
+        throw error;
+      }
+      const { value, outcome } = metered;
+      // The allowance is spent whole (it is what the call reserved); a call nothing was sent for spends nothing.
+      if (outcome !== 'not_sent') { calls++; subcallsLeft = Math.max(0, subcallsLeft - allowance.allowed); }
+      input.onOutcome?.(name, outcome, value.subcalls);
+      if (outcome === 'not_sent') return toolEnvelope({ status: 'unavailable', reason: value.stoppedAt ?? 'NOT_SENT' });
+      if (outcome === 'unknown') return toolEnvelope({ status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN',
+        ...(value.items.length ? { items: value.items } : {}) });
+      if (outcome === 'no_data') return toolEnvelope({ status: 'unavailable', reason: NO_DATA_REASON });
+      return toolEnvelope({ status: value.stoppedAt ? 'partial' : 'ok', reason: value.stoppedAt, items: value.items,
+        ...(value.fetchedAt ? { fetchedAt: value.fetchedAt } : {}) });
+    },
+  });
+  return input.offered.map(make);
+}
