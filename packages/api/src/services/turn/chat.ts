@@ -6,6 +6,7 @@ import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
+import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
 import { rowFor } from '../runtime/settingsRows';
 import { CORE_PATH_SETTING } from './settingKeys';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
@@ -24,7 +25,7 @@ import { ceil12, modelCall, TurnStop } from './call';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
-import { stopLossSettings, turnPolicy } from './policy';
+import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
@@ -87,7 +88,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
 
   // 2. Open: one model call (2.5.3, V2-4a has no tools) plus the possible positioning check, outside M and the freeze.
   const decisionUpperUsd = config.data.decisionUpperUsd;
+  // The start threshold L of this model for a free chat (purpose ordinary), from the admission configuration rows.
+  const thresholds = rowFor(await configuration, RESEARCH_THRESHOLDS_KEY);
+  const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q,
+    quote.multiplier);
+  if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
+    startThresholdCredits: startCredits,
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.data.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, pricing: quote.pricing,
     frozen: { modelId: quote.modelId, model: quote.model } });

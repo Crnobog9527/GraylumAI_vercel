@@ -50,6 +50,7 @@ BEGIN
                            WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
                            ELSE 0 END), 0) INTO used
   FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
-  next_need := coalesce((t.policy->>'uModelCredits')::int, 0);
+  -- credits_low: the same rule that pauses the next call (turn_call_begin): the remaining freeze below the start threshold L.
+  next_need := coalesce((t.policy->>'minCredits')::int, (t.policy->>'uModelCredits')::int, 0);
   RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits - used < next_need) || tomb;
 END $function$;
