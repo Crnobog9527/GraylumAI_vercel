@@ -32,7 +32,9 @@ export const POSITIONING_REFUSAL_CAP = 5;
 const QUESTION = 'own_account_social_media_operations';
 
 export type GateVerdict = 'block' | 'allow' | 'clear' | 'unavailable';
-export type PositioningClassifier = (input: { text: string; apiKey: string | undefined }) => Promise<GateVerdict>;
+/** `onCost` hears of a request that left (its provider cost when the response reported one): the turn path records it. */
+export type DecisionCost = (costUsd: number | null) => void;
+export type PositioningClassifier = (input: { text: string; apiKey: string | undefined; onCost?: DecisionCost }) => Promise<GateVerdict>;
 /** Present only for the free-chat host; positioning flows (OPC turns) and reports never carry it. */
 export type PositioningGatePolicy = { classify?: PositioningClassifier };
 
@@ -85,11 +87,12 @@ const decisionsAnswer = z.object({
 
 /** One platform-paid Decisions call, no retry. Never throws; every failure is 'unavailable'. */
 export async function decide(apiKey: string, text: string, transport: typeof fetch = fetch,
-  clock: () => number = () => performance.now()): Promise<GateVerdict> {
+  clock: () => number = () => performance.now(), onCost?: DecisionCost): Promise<GateVerdict> {
   const started = clock();
   let httpStatus: number | null = null, verdict: GateVerdict = 'unavailable', probability: number | null = null;
-  let usage: z.infer<typeof decisionsUsage>['usage'] | undefined;
+  let usage: z.infer<typeof decisionsUsage>['usage'] | undefined, sent = false;
   try {
+    sent = true;
     const response = await transport(DECISIONS_URL, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(DECISIONS_TIMEOUT_MS),
       headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
@@ -106,6 +109,7 @@ export async function decide(apiKey: string, text: string, transport: typeof fet
       verdict = probability >= DECISIONS_BLOCK_AT ? 'block' : probability < DECISIONS_CLEAR_BELOW ? 'clear' : 'allow';
     }
   } catch { verdict = 'unavailable'; }
+  if (sent) onCost?.(typeof usage?.cost === 'number' && usage.cost >= 0 ? usage.cost : null);
   // Graylum bears this cost; the log line is its ledger entry (no user text, no account id).
   logger.info('api', 'positioning_gate_decision', { model: DECISIONS_MODEL, verdict, probability, httpStatus,
     costUsd: usage?.cost ?? null, inputTokens: usage?.input_tokens ?? null, outputTokens: usage?.output_tokens ?? null,
@@ -133,12 +137,12 @@ export function windowBoundKey(row: Parameters<typeof openRouterKey>[0], platfor
 }
 
 export function decisionsClassifier(transport: typeof fetch = fetch): PositioningClassifier {
-  return async ({ text, apiKey }) => {
+  return async ({ text, apiKey, onCost }) => {
     if (!apiKey) {
       logger.warn('api', 'positioning_gate_decision', { model: DECISIONS_MODEL, verdict: 'unavailable', reason: 'no_key' });
       return 'unavailable';
     }
-    return decide(apiKey, text, transport);
+    return decide(apiKey, text, transport, undefined, onCost);
   };
 }
 
@@ -148,7 +152,7 @@ export function decisionsClassifier(transport: typeof fetch = fetch): Positionin
  * rule. At the cap: admit only a 'clear' verdict, without the rule; refuse everything else (conservative when unavailable).
  */
 export async function judgePositioning(gate: PositioningGatePolicy,
-  input: { text: string; apiKey: string | undefined }, capped: boolean): Promise<boolean> {
+  input: { text: string; apiKey: string | undefined; onCost?: DecisionCost }, capped: boolean): Promise<boolean> {
   let verdict: GateVerdict;
   try { verdict = await (gate.classify ?? decisionsClassifier())(input); }
   catch { verdict = 'unavailable'; }

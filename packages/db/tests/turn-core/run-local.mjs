@@ -112,12 +112,13 @@ try{
  // 4. Limits, pause and credits_low: the frozen model / paid / free limits; the freeze cannot be exceeded.
  {
   const a=await account(30);
-  const o=await open(a,{pol:policy({gCredits:60,minCredits:10,uModelCredits:20})});
+  // L = 20 (minCredits): credits_low and the pause are measured against it (0422, Owner 10-28).
+  const o=await open(a,{pol:policy({gCredits:60,minCredits:20,uModelCredits:20})});
   assert.equal(o.reservedCredits,30,'H = min(G, A) when the balance is short');
   assert.equal((await begin(a,o.turnId,1,{upper:0.02})).status,'dispatched');
   const r1=await record(a,o.turnId,1,{n:0.02});
-  assert.equal(r1.creditsLow,true,'30 - 12 used < 20 needed for one more model call');
-  assert.equal((await begin(a,o.turnId,2,{upper:0.04})).paused,true,'18 left < 24 for the next call: paused before sending');
+  assert.equal(r1.creditsLow,true,'30 - 12 used < L 20');
+  assert.equal((await begin(a,o.turnId,2,{upper:0.04})).paused,true,'18 left < min(G_i 24, L 20): paused before sending');
   assert.equal(await one('select pause_reason v from turns where actor_id=$1 and id=$2',[a.actor,o.turnId]),'waiting_credits');
   assert.match(await refusal(begin(a,o.turnId,2)),/TURN_NOT_RUNNING/);
   const expired=await close(a,o.turnId,'expired',{messages:[],delivered:false});
@@ -626,6 +627,58 @@ try{
    }finally{await p1.end();await p2.end();}
   }
   report.checks.push('the real deletion racing turn_open and turn_close: no deadlock; the open is refused and the close is erased');
+ }
+ // 26. 0422, Owner 10-28 (10-01): a balance that covers one normal turn (the start threshold L) starts it; the freeze is
+ // H = min(G, A); a call pauses the turn only below min(G_i, L); credits_low uses L. The part above H is the platform's.
+ {
+  // G_i = ceil(100 x 1.0 x 6) = 600, L = 30. Balance 500: opens with H = 500 and the call still goes out.
+  const a=await account(500);
+  const o=await open(a,{pol:policy({gCredits:600,uModelCredits:600,minCredits:30})});
+  assert.equal(o.reservedCredits,500);
+  assert.equal((await begin(a,o.turnId,1,{upper:1})).paused,undefined,'a freeze capped by the balance still sends its call');
+  await record(a,o.turnId,1,{n:0.9}); // N = ceil(100 x 0.9 x 6) = 540 > H
+  const closed=await close(a,o.turnId);
+  assert.deepEqual([closed.chargedCredits,closed.absorbedCredits],[500,40],'D = min(N, H), E = N - D absorbed');
+  assert.equal(await balance(a),0);
+  // The balance (not the freeze) is held against L: a turn whose whole bound G (5) is below L (30) still opens, freezing 5.
+  const small=await account(100);
+  assert.equal((await open(small,{pol:policy({gCredits:5,uModelCredits:5,minCredits:30})})).reservedCredits,5);
+  // Below L the turn does not open.
+  const poor=await account(20);
+  assert.match(await refusal(open(poor,{pol:policy({gCredits:600,uModelCredits:600,minCredits:30})})),/TURN_INSUFFICIENT_CREDITS/);
+  // Mid-turn: credits_low once the remaining freeze is below L, and the next call pauses there.
+  const b=await account(1000);
+  const ob=await open(b,{pol:policy({gCredits:600,uModelCredits:600,minCredits:30,limits:{model:3,paidTools:1,freeTools:1}})});
+  await begin(b,ob.turnId,1,{upper:1});
+  assert.equal((await record(b,ob.turnId,1,{n:0.95})).creditsLow,false,'600 - 570 = 30 left: not below L');
+  await begin(b,ob.turnId,2,{upper:0.001});
+  assert.equal((await record(b,ob.turnId,2,{n:0.001})).creditsLow,true,'600 - 571 = 29 left: below L');
+  assert.equal((await begin(b,ob.turnId,3,{upper:1})).paused,true,'the next call pauses below L');
+  report.checks.push('start threshold L: balance 500 < G 600 opens with H 500 and sends its call (D 500, E 40); below L no open; credits_low and the pause at L');
+ }
+ // 27. #1516 review (4.1, BILL2's metering block): a model call whose cost is above its frozen bound marks budget_conflict, and
+ // that model takes no new call until an administrator marks it reviewed; other models are not affected.
+ {
+  const model=randomUUID(),other=randomUUID();
+  const beginOn=(a,turn,seq,modelId,upper=0.02)=>one('select turn_call_begin($1,$2,$3,$4,$5,null,null,$6,$7,$8) v',
+   [a.actor,turn,seq,'model',modelId,hash('m'+turn+seq),upper,m]);
+  const a=await account(1000);
+  const o=await open(a);
+  await beginOn(a,o.turnId,1,model);
+  await record(a,o.turnId,1,{n:0.03,actual:0.035}); // above U = 0.02
+  assert.equal(await one('select budget_conflict v from turn_calls where turn_id=$1 and seq=1',[o.turnId]),true);
+  await close(a,o.turnId);
+  const b=await account(1000);
+  const ob=await open(b);
+  assert.match(await refusal(beginOn(b,ob.turnId,1,model)),/TURN_MODEL_METERING_BLOCKED/);
+  assert.equal((await beginOn(b,ob.turnId,1,other)).status,'dispatched','another model is not blocked');
+  await record(b,ob.turnId,1,{n:0.01});
+  await c.query('update turn_calls set conflict_reviewed_at=now() where model_id=$1 and budget_conflict',[model]);
+  assert.equal((await beginOn(b,ob.turnId,2,model)).status,'dispatched','reviewed: the model takes calls again');
+  // A cost inside the bound never marks.
+  await record(b,ob.turnId,2,{n:0.02,actual:0.02});
+  assert.equal(await one('select budget_conflict v from turn_calls where turn_id=$1 and seq=2',[ob.turnId]),false);
+  report.checks.push('a model call above its bound marks budget_conflict and blocks that model until reviewed; within the bound it does not');
  }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {

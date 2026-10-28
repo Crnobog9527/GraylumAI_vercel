@@ -160,10 +160,22 @@ const envSchema = z.object({
   VERCEL_URL: optionalString,
   SECURITY_E2E_LOCAL_ONLY: optionalString,
   V3_RUNTIME_LOCAL_ENDPOINT: optionalString,
+  // CORE-PATH-V2 2.8: the database host this deployment declares; POST /api/turn refuses when it is not the one it connects to.
+  TURN_DATABASE_HOST: optionalString,
 });
 
 /** 代码里允许读取的全部环境变量名；safeguard 测试要求代码里读取的每个环境变量名都在这里。 */
 export const ENV_SCHEMA_KEYS: readonly string[] = Object.keys(envSchema.shape);
+
+/** CORE-PATH-V2 POST /api/turn: what the route needs from the environment, read here instead of in the route. */
+export function readTurnRouteEnv() {
+  return {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL, anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY, databaseHost: process.env.TURN_DATABASE_HOST,
+    // The rate-limit namespace (redisRateLimiter keeps production apart): production only on the production deployment.
+    environment: process.env.VERCEL_ENV === 'production' ? 'production' as const : 'staging' as const,
+  };
+}
 
 /** Only Redis is in this task's deployment preflight; reuse the same schema. */
 export function validateRedisEnvForBuild(): void {
