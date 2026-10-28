@@ -17,10 +17,14 @@
 --                        copied unchanged; the turn's request id stands where the execution id stood (field provenance,
 --                        suggestion order, the idempotent artifact_requests row), so opc_information and the protection
 --                        checks that read artifact_requests keep working on both paths.
+--   opc_information,     unchanged except one lock: the draft's session row before its project, so a manual checklist save or
+--   opc_capture_resolve  a suggestion decision serializes with a mentor close (which holds that session row) instead of
+--                        overwriting its capture or being overwritten (review of #1520).
 --   turn_open            0496 with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
 --   turn_close           0421 with the mentor branch of its per-kind hook (turn_mentor_apply on p_kind_result), and the
 --                        capture response returned under kindResult.
--- Locks: neither function takes an explicit row lock (main-path rule 5). turn_mentor_apply writes the round's checklist with an
+-- Locks: neither mentor function takes an explicit row lock (main-path rule 5); opc_information and opc_capture_resolve now lock
+-- the draft's session row before its project, so they serialize with a mentor close, which holds that session row. turn_mentor_apply writes the round's checklist with an
 -- optimistic check (the UPDATE applies only if the checklist is unchanged since it was read; otherwise it computes again), so a
 -- close never waits on opc_information's project lock while holding the session and account locks; only the UPDATE's own row
 -- lock on artifact_rounds remains, for the length of a concurrent single-statement edit.
@@ -42,6 +46,11 @@ DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec js
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
+  -- The draft's scope as the old path checked it (runtime_material / runtime_work_projection): an account-strategy draft whose
+  -- base source was withdrawn or deleted, or whose evidence is no longer allowed, is refused.
+  IF NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false) THEN
+    RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501';
+  END IF;
   -- An archived business is read-only (as opc_assert_business_writable, without its row lock).
   business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
   IF business IS NOT NULL AND EXISTS (SELECT 1 FROM opc_businesses WHERE id = business AND actor_id = p_actor_id AND archived_at IS NOT NULL) THEN
@@ -138,12 +147,13 @@ BEGIN
  IF t.id IS NULL OR t.kind <> 'mentor' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
- IF d.draft_id IS NULL THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
+ IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false)
+ THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
  business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
- -- No explicit row lock (main-path rule: only the actor's profile and the session row; turn_close holds both here). Instead of
- -- opc_capture_apply's project lock, the checklist is written only if it is still exactly what this pass read; a concurrent
- -- edit (opc_information, opc_capture_resolve, a revision) makes the write miss, and the pass is computed again on the new
- -- state, where the version check turns this turn's patches into suggestions, as before. At most three passes.
+ -- No lock of its own (main-path rule: only the actor's profile and the session row). turn_close holds this draft's session
+ -- row, which opc_information and opc_capture_resolve now take first too (below), so those writers and this one are serialized.
+ -- Any other writer of the round (a revision, an erasure) is caught by the optimistic write: the checklist is written only if
+ -- it is still exactly what this pass read; otherwise the pass is computed again on the new state (at most three passes).
  FOR attempt IN 1..3 LOOP
  -- An archived business is read-only (opc_capture_apply's opc_assert_business_writable): nothing is written, and the turn
  -- itself still settles and keeps its reply. Checked again on every pass.
@@ -559,6 +569,126 @@ BEGIN
   IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
   RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
     'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false, 'kindResult', kind_result) || tomb;
+END $function$;
+
+-- opc_information and opc_capture_resolve: unchanged except that they lock the draft's session row before the project (see
+-- turn_mentor_apply), the order content_erasure_confirm and report_document_source already use (sessions, then projects).
+CREATE OR REPLACE FUNCTION public.opc_information(p_actor_id uuid, p_draft_id uuid, p_step_id text, p_request_id uuid, p_expected_version integer, p_values jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+-- R9 manual provenance
+
+DECLARE d opc_drafts;r artifact_rounds;step jsonb;field jsonb;value jsonb;st jsonb;req artifact_requests;payload jsonb;
+BEGIN
+ -- 0324 archived business guard
+ IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id)); END IF;
+
+ PERFORM bill2_actor(p_actor_id);
+ IF substr(p_request_id::text,15,1)='f' THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+ SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND draft_id=p_draft_id;
+ IF d.draft_id IS NULL OR NOT bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',p_draft_id)) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
+ -- V2-5: the draft's session row first, the lock a mentor turn's close holds while it writes this checklist (the main-path
+ -- serialization point), so a manual save and a mentor capture never overwrite each other; then the project, as before.
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
+ PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
+ SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
+ PERFORM read_skill_package(p_actor_id,(SELECT module_id FROM artifact_projects WHERE id=d.project_id),(SELECT skill_id FROM artifact_projects WHERE id=d.project_id),r.revision_id,r.package_hash,NULL);
+ payload:=jsonb_build_object('stepId',p_step_id,'expectedVersion',p_expected_version,'values',p_values);
+ SELECT * INTO req FROM artifact_requests WHERE project_id=d.project_id AND request_id=p_request_id;
+ IF FOUND THEN IF req.action<>'opc_information' OR req.payload<>payload THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+  RETURN req.response||jsonb_build_object('values',req.payload->'values');END IF;
+ SELECT x INTO step FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=p_step_id;
+ st:=r.steps->p_step_id;
+ IF r.state<>'draft' OR step IS NULL OR p_request_id IS NULL OR (st->>'version')::int IS DISTINCT FROM p_expected_version OR jsonb_typeof(p_values) IS DISTINCT FROM 'object' OR octet_length(p_values::text)>12000 THEN RAISE EXCEPTION 'OPC_INFORMATION_CONFLICT';END IF;
+ FOR field IN SELECT * FROM jsonb_array_elements(step->'information') LOOP
+  value:=p_values->(field->>'id');
+  IF value IS NULL OR value-ARRAY['status','value','nature']<>'{}' OR coalesce(value->>'status','') NOT IN ('unknown','unclear','provisional','confirmed','deferred') OR coalesce(value->>'nature','') NOT IN ('fact','decision','hypothesis','unknown') OR char_length(coalesce(value->>'value',''))>400 OR (value->>'status' IN ('confirmed','deferred') AND char_length(btrim(coalesce(value->>'value','')))=0) THEN RAISE EXCEPTION 'OPC_INFORMATION_INVALID';END IF;
+ END LOOP;
+ IF (SELECT count(*) FROM jsonb_object_keys(p_values))<>jsonb_array_length(step->'information') THEN RAISE EXCEPTION 'OPC_INFORMATION_INVALID';END IF;
+ FOR field IN SELECT * FROM jsonb_array_elements(step->'information') LOOP
+  value:=p_values->(field->>'id');
+  IF st->'information'->(field->>'id') IS DISTINCT FROM value THEN
+   st:=st||jsonb_build_object('fieldMeta',coalesce(st->'fieldMeta','{}')||jsonb_build_object(field->>'id',
+    (coalesce(st->'fieldMeta'->(field->>'id'),'{}')-ARRAY['executionId','basis','acceptedAt'])
+    ||jsonb_build_object('source','user','basis','user_statement','fp',artifact_hash(value),'createdAt',clock_timestamp(),
+     'origin',coalesce(st#>ARRAY['fieldMeta',field->>'id','origin'],
+      jsonb_strip_nulls(jsonb_build_object('executionId',st#>ARRAY['fieldMeta',field->>'id','executionId'],
+       'basis',st#>ARRAY['fieldMeta',field->>'id','basis']))))));
+  END IF;
+ END LOOP;
+ st:=st||jsonb_build_object('information',p_values,'informationUpdatedAt',clock_timestamp(),'version',p_expected_version+1);
+ UPDATE artifact_rounds SET steps=artifact_invalidate(r.workflow,jsonb_set(r.steps,ARRAY[p_step_id],st),p_step_id) WHERE id=r.id;
+ INSERT INTO artifact_requests VALUES(d.project_id,p_request_id,r.id,'opc_information',payload,jsonb_build_object('version',p_expected_version+1,'values',p_values));RETURN jsonb_build_object('version',p_expected_version+1,'values',p_values);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.opc_capture_resolve(p_actor_id uuid, p_draft_id uuid, p_request_id uuid, p_step_id text, p_field_id text, p_execution_id uuid, p_hash text, p_action text, p_expected_version integer)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+-- R9 accepted provenance
+
+DECLARE d opc_drafts;r artifact_rounds;req artifact_requests;payload jsonb;st jsonb;meta jsonb;suggestion jsonb;
+ value jsonb;information jsonb;version integer;response jsonb;e runtime_executions;t opc_turns;
+BEGIN
+ -- 0324 archived business guard
+ IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id)); END IF;
+
+ PERFORM bill2_actor(p_actor_id);
+ IF substr(p_request_id::text,15,1)='f' THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+ SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+ IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',p_draft_id)),false)
+ THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ -- V2-5: the draft's session row first, the lock a mentor turn's close holds while it writes this checklist (the main-path
+ -- serialization point), so a manual save and a mentor capture never overwrite each other; then the project, as before.
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
+ PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
+ SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+ SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
+ payload:=jsonb_build_object('stepId',p_step_id,'fieldId',p_field_id,'executionId',p_execution_id,
+  'hash',p_hash,'action',p_action,'expectedVersion',p_expected_version);
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
+ SELECT * INTO t FROM opc_turns WHERE session_id=d.session_id AND request_id=e.request_id;
+ IF e.id IS NULL OR t.token::text IS DISTINCT FROM e.payload->>'opcTurnToken' OR t.purpose IS DISTINCT FROM 'mentor'
+  OR NOT runtime_history_available(e.id) THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ SELECT * INTO req FROM artifact_requests WHERE project_id=d.project_id AND request_id=p_request_id;
+ IF FOUND THEN
+  IF req.action IS DISTINCT FROM 'opc_capture_resolve' OR req.payload IS DISTINCT FROM payload THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+  RETURN req.response;
+ END IF;
+ st:=r.steps->p_step_id;meta:=st->'fieldMeta'->p_field_id;
+ -- v3 suggestion withdraw: dismiss binds to the withdrawn record; accept/ignore to the pending one.
+ suggestion:=CASE WHEN p_action='dismiss' THEN meta->'withdrawnSuggestion' ELSE meta->'suggestion' END;
+ IF suggestion->>'executionId' IS DISTINCT FROM p_execution_id::text OR suggestion->>'hash' IS DISTINCT FROM p_hash
+  OR suggestion IS NULL OR r.state<>'draft' OR t.round_id<>r.id THEN RAISE EXCEPTION 'OPC_SUGGESTION_CHANGED';END IF;
+ IF p_request_id IS NULL OR p_hash IS NULL OR p_action IS NULL OR p_action NOT IN ('accept','ignore','dismiss')
+ THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ version:=(st->>'version')::integer;
+ IF p_action='accept' THEN
+  IF version IS DISTINCT FROM p_expected_version THEN RAISE EXCEPTION 'OPC_INFORMATION_CONFLICT';END IF;
+  value:=jsonb_build_object('value',suggestion->'value','status',suggestion->'status','nature',suggestion->'nature');
+  information:=st->'information'||jsonb_build_object(p_field_id,value);
+  IF octet_length(information::text)>12000 THEN RAISE EXCEPTION 'OPC_INFORMATION_CONFLICT';END IF;
+  IF st->'information'->p_field_id IS DISTINCT FROM value THEN
+   version:=version+1;
+   st:=st||jsonb_build_object('information',information,'version',version,'informationUpdatedAt',clock_timestamp());
+  END IF;
+  meta:=jsonb_build_object('source','user','fp',artifact_hash(value),'basis',suggestion->'basis',
+   'executionId',p_execution_id,'acceptedAt',clock_timestamp(),'createdAt',suggestion->'createdAt');
+ ELSIF p_action='dismiss' THEN meta:=meta-'withdrawnSuggestion';
+ ELSE meta:=meta-'suggestion';END IF;
+ IF meta='{}' THEN st:=st #- ARRAY['fieldMeta',p_field_id];
+ ELSE st:=jsonb_set(st,ARRAY['fieldMeta',p_field_id],meta);END IF;
+ r.steps:=jsonb_set(r.steps,ARRAY[p_step_id],st);
+ IF p_action='accept' AND version<>p_expected_version THEN r.steps:=artifact_invalidate(r.workflow,r.steps,p_step_id);END IF;
+ UPDATE artifact_rounds SET steps=r.steps WHERE id=r.id;
+ response:=jsonb_build_object('version',version,'result',p_action);
+ INSERT INTO artifact_requests VALUES(d.project_id,p_request_id,r.id,'opc_capture_resolve',payload,response);
+ RETURN response;
 END $function$;
 
 DO $$
