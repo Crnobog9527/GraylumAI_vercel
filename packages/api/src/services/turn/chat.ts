@@ -1,0 +1,152 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { effectiveReplyLocale } from '../../shared/replyLanguage';
+import { openRouterAdapter } from '../bill2/openRouterAdapter';
+import { withBrandIdentity } from '../modelIdentity/brandIdentity';
+import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
+import { catalogRead } from '../runtime/catalogCache';
+import { readAdmissionSettings } from '../runtime/newWorkGate';
+import { judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
+import { freeChatInstructions } from '../runtime/primaryInstructions';
+import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
+import { freezeSharedPromptCache } from '../runtime/promptCache';
+import { readPurposeBudgets } from '../runtime/purposeBudgets';
+import { replySettingInstructions } from '../runtime/replyLanguage';
+import { runRuntime } from '../runtime/runner';
+import { serverChatModel } from '../runtime/serverChatModel';
+import type { PricingDeps } from '../runtime/pricingAdmission';
+import { modelCall, TurnStop } from './call';
+import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
+import { projectHistory, trimHistory, turnSession } from './history';
+import type { CounterStore } from './limiter';
+import { stopLossSettings, turnPolicy } from './policy';
+import { chatQuote, QuoteError } from './quote';
+import type { TurnEvent } from './sse';
+
+/*
+ * CORE-PATH-V2 kind=chat (2.7): a free-chat turn without tools (V2-4a; the free tools come in V2-4b). Database work is
+ * turn_open, the three writes of each call and turn_close: five round trips for one model call. Everything slow-changing
+ * comes from the catalog cache (settings, model row, price snapshot); the prompt is a site-wide segment and a per-user segment,
+ * each with a cache breakpoint (2.9 rule 3), then the history, then the current message.
+ */
+export const CORE_PATH_SETTING = 'core_path_v2';
+const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings }).strict();
+export const HISTORY_ITEMS = 100;
+
+export type ChatDeps = {
+  admin: SupabaseClient; clients: TurnClients; slots: CounterStore;
+  /** OpenRouter transport (tests and the load-test stub); production uses fetch. */
+  transport?: typeof fetch; pricing?: PricingDeps; gate?: PositioningGatePolicy;
+};
+export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string };
+
+const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
+  TURN_TOMBSTONED: { kind: 'erased', refundAll: false },
+  TURN_CALL_UNKNOWN: { kind: 'interrupted', refundAll: false },
+  TURN_PROVIDER_402: { kind: 'failed', refundAll: true },
+  TURN_CALL_DENIED: { kind: 'failed', refundAll: true },
+};
+
+export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
+  const { admin } = deps, db = turnDatabase(deps.clients);
+  // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
+  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
+    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+  const config = coreSetting.safeParse(core.error ? null : core.data?.value);
+  if (!config.success || !config.data.enabled) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
+  const configuration = readAdmissionConfiguration(admin);
+  const settings = await readAdmissionSettings(admin, configuration);
+  const budgets = await readPurposeBudgets(admin, configuration);
+  let quote;
+  try {
+    quote = await chatQuote(admin, { modelId: serverChatModel(settings), inputBytes: budgets?.interactive.inputBytes ?? 90000,
+      deps: deps.pricing });
+  } catch (error) {
+    // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.
+    const message = error instanceof Error ? error.message : '';
+    return emit({ type: 'error', code: error instanceof QuoteError ? error.code : /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message
+      : 'TURN_QUOTE_UNAVAILABLE' });
+  }
+
+  // 2. Open: one model call plus the possible Decisions check (2.5.3, V2-4a has no tools).
+  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
+    limits: { model: 2, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.data.stopLoss,
+    historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
+  let opened;
+  try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
+  catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
+  emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay });
+  // A repeated request never runs the model again; the first request owns the turn.
+  if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
+
+  let seq = 0;
+  const callDeps = { db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
+    adapter: openRouterAdapter({ credential: quote.credential, transport: deps.transport }) };
+  const close = (kind: CloseKind, extra: { messages?: Array<{ role: 'user' | 'assistant'; content: string }>; delivered?: boolean;
+    refundAll?: boolean; failureCode?: string } = {}) =>
+    db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
+      refundAll: extra.refundAll, failureCode: extra.failureCode ?? null });
+  // The model SDK wraps what the exchange throws; the stop that ended the call is kept here and wins over the wrapper.
+  let stopped: TurnStop | undefined;
+  try {
+    // 3. Positioning gate (2.7): only when the account has no confirmed positioning; the check is a call row that costs nothing.
+    let fallback = false;
+    const gate = opened.positioning;
+    if (gate && !gate.positioned) {
+      const decision = await db.begin({ actorId: input.actorId, turnId: opened.turnId, seq: ++seq, callKind: 'decision',
+        modelId: quote.modelId, toolName: null, paid: null, requestHash: sha256(input.text), upperUsd: '0', multiplier: quote.multiplier });
+      if (decision.sessionTombstoned || decision.accountErasing) throw new TurnStop('TURN_TOMBSTONED');
+      let refused = false;
+      try { fallback = await judgePositioning(deps.gate ?? {}, { text: input.text, apiKey: await quote.credential() },
+        gate.refusals24h >= POSITIONING_REFUSAL_CAP); }
+      catch { refused = true; }
+      await db.record({ actorId: input.actorId, turnId: opened.turnId, seq, status: 'ok', nominalUsd: '0', actualUsd: null,
+        usage: {}, providerId: null, payloadHash: sha256(refused ? 'refused' : 'allowed'), raw: null });
+      if (refused) {
+        await close('failed', { refundAll: true, failureCode: 'positioning_required' });
+        return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
+      }
+    }
+
+    // 4. The prompt: site-wide segment (brand, free-chat rules) then the per-user segment (reply language), both cached.
+    const shared = withBrandIdentity(freeChatInstructions(fallback), settings.ok ? settings.identityGuard ?? true : true);
+    const instructions = shared + '\n' + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage));
+    const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
+      quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: true });
+    const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, tools: [], network: 'deny',
+      reasoning: quote.reasoning, ...(promptCache ? { promptCache } : {}) };
+    const callPolicy = { modelId: quote.modelId, provider: 'openrouter', account: quote.identity.account, model: quote.model,
+      protocol: 'openrouter-chat-v1' as const, providerLimits: quote.providerLimits, upperUsd: quote.upperUsd, outputLimit: quote.outputLimit,
+      inputLimit: quote.inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
+    // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
+    const left = quote.inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(input.text) - 8192;
+    const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
+    let text = '';
+    const output = await runRuntime({
+      model: quote.model, instructions, input: input.text, session: turnSession(history),
+      maxOutputTokens: quote.outputLimit, maxTurns: 1, reasoning: quote.reasoning, tools: [],
+      selectHistory: async items => items,
+      onText: delta => { text += delta; emit({ type: 'text', delta }); },
+      exchange: (_sequence, body, onChunk) => modelCall(callDeps, quote,
+        openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true }), onChunk)
+        .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; }),
+    });
+    const reply = output || text;
+    // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
+    const closed = await close('completed', { delivered: true,
+      messages: [{ role: 'user', content: input.text }, { role: 'assistant', content: reply }] });
+    if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
+    emit({ type: 'result', turnId: opened.turnId, body: reply, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
+  } catch (error) {
+    const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
+    // Paused for credits: the turn waits (recovery or a resume closes it); everything else closes now.
+    if (code !== 'TURN_PAUSED_FOR_CREDITS') {
+      const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: false };
+      await close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }).catch(() => undefined);
+    }
+    emit({ type: 'error', code, turnId: opened.turnId });
+  }
+}

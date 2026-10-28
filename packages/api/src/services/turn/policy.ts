@@ -24,8 +24,9 @@ export function callCredits(q: string, upperUsd: string, multiplier: string): nu
 }
 
 export const turnLimits = z.object({ model: z.number().int().min(1).max(16), paidTools: z.number().int().min(0).max(8),
-  freeTools: z.number().int().min(0).max(8) }).strict()
-  .refine(l => l.model === 1 + l.paidTools + l.freeTools, 'every tool return is one more model call (2.5.3)');
+  freeTools: z.number().int().min(0).max(8), decisions: z.number().int().min(0).max(1) }).strict()
+  .refine(l => l.model === 1 + l.paidTools + l.freeTools + l.decisions,
+    'every tool return is one more model call (2.5.3); a Decisions check is one more call row');
 export type TurnLimits = z.infer<typeof turnLimits>;
 export const stopLossSettings = z.object({ limitUsd: z.number().positive(), p: z.number().int().min(1),
   poolSize: z.number().int().min(1), uFastUsd: z.number().nonnegative(), uBigUsd: z.number().nonnegative() }).strict();
@@ -43,9 +44,11 @@ export function turnPolicy(input: PolicyInput) {
   const limits = turnLimits.parse(input.limits), stopLoss = stopLossSettings.parse(input.stopLoss);
   const paid = input.paidToolUpperUsd ?? [];
   if (paid.length !== limits.paidTools) throw new Error('TURN_POLICY_INVALID');
+  // The Decisions check (positioning gate) is a call row that costs the user nothing: it is in M, not in G or U.
+  const paidModelCalls = limits.model - limits.decisions;
   const uModelCredits = callCredits(input.q, input.modelUpperUsd, input.multiplier);
-  const gCredits = limits.model * uModelCredits + paid.reduce((sum, u) => sum + callCredits(input.q, u, input.multiplier), 0);
-  const uTurn = units(input.modelUpperUsd) * BigInt(limits.model) + paid.reduce((sum, u) => sum + units(u), 0n);
+  const gCredits = paidModelCalls * uModelCredits + paid.reduce((sum, u) => sum + callCredits(input.q, u, input.multiplier), 0);
+  const uTurn = units(input.modelUpperUsd) * BigInt(paidModelCalls) + paid.reduce((sum, u) => sum + units(u), 0n);
   return {
     ...input.frozen,
     q: Number(input.q), multiplier: input.multiplier, modelUpperUsd: input.modelUpperUsd,

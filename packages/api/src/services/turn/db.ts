@@ -22,7 +22,10 @@ const historyItem = z.object({ seq: z.number().int().positive(), role: z.enum(['
 export type HistoryItem = z.infer<typeof historyItem>;
 const opened = z.object({ turnId: z.number().int().positive(), state: z.enum(['running', 'paused', 'closed', 'stopping', 'opening']),
   replay: z.boolean(), reservedCredits: z.number().int().nonnegative(), reservedUsd: z.coerce.number().nonnegative(),
-  history: z.array(historyItem) });
+  history: z.array(historyItem),
+  // Read by turn_open with the account row: the reply language setting and, for a free chat, the positioning gate.
+  replyLanguage: z.unknown().optional(),
+  positioning: z.object({ positioned: z.boolean(), refusals24h: z.number().int().nonnegative() }).nullable().optional() });
 export type Opened = z.infer<typeof opened>;
 const begun = tombstones.extend({ state: z.enum(['running', 'paused']), status: z.string().optional(),
   replay: z.boolean().optional(), paused: z.boolean().optional() });
