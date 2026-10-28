@@ -14,6 +14,15 @@ BEGIN
   FOR item IN SELECT actor_id, id FROM turns WHERE state = 'paused' AND updated_at < now() - interval '24 hours'
       AND kind = 'jury' AND pause_reason = 'awaiting_user' ORDER BY updated_at LIMIT p_limit LOOP
     BEGIN
+      -- Locked in the close's own order (review, conversation, turn), then the condition read again: a relay that resumed the
+      -- jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
+      PERFORM 1 FROM fusion_reviews WHERE id = (SELECT (policy->>'reviewId')::uuid FROM turns WHERE actor_id = item.actor_id AND id = item.id)
+        FOR NO KEY UPDATE;
+      PERFORM 1 FROM runtime_sessions WHERE id = (SELECT session_id FROM turns WHERE actor_id = item.actor_id AND id = item.id) FOR UPDATE;
+      IF NOT EXISTS (SELECT 1 FROM turns WHERE actor_id = item.actor_id AND id = item.id AND state = 'paused'
+          AND pause_reason = 'awaiting_user' AND updated_at < now() - interval '24 hours' FOR UPDATE) THEN
+        CONTINUE;
+      END IF;
       PERFORM turn_fusion_close(item.actor_id, item.id, 'expired', false, false, 'jury_expired',
         jsonb_build_object('state', 'interrupted', 'outcome', jsonb_build_object('kind', 'expired')));
       expired := expired + 1;

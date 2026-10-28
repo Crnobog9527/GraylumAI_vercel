@@ -129,6 +129,8 @@ BEGIN
   END IF;
 
   IF p_kind = 'compare' THEN
+    -- An archived business is read-only (0324): no compare in its conversation, as fusion_compare_begin; nothing is created.
+    PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', p_session_id));
     -- 2.7: the columns' bounds together are at most 500 credits, or the compare does not open; at least two models.
     IF coalesce((p_policy->>'gCredits')::numeric, 501) > 500 THEN RAISE EXCEPTION 'TURN_COMPARE_LIMIT' USING ERRCODE='P0001'; END IF;
     IF coalesce((p_policy->'limits'->>'model')::int, 0) < 2 OR coalesce((p_policy->'limits'->>'paidTools')::int, 1) <> 0
@@ -201,7 +203,8 @@ BEGIN
       RAISE EXCEPTION 'TURN_JURY_VERSION_BLOCKED' USING ERRCODE='P0001';
     END IF;
   ELSE
-    -- jury_adopt: re-finalizing an adopted revision, without a fee (10-20), once per review.
+    -- jury_adopt: re-finalizing an adopted revision, without a fee (10-20), once per review; not in an archived business.
+    PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('draftId', rv.draft_id));
     IF rv.state <> 'completed' OR rv.outcome->>'kind' IS DISTINCT FROM 'revised' OR rv.adoption->>'state' IS DISTINCT FROM 'recorded'
       OR rv.adoption->>'versionId' IS NULL THEN
       RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023';
@@ -359,6 +362,8 @@ DECLARE cmp fusion_compares; s runtime_sessions; o fusion_turn_outputs; head int
 BEGIN
   SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id;
   IF cmp.id IS NULL OR cmp.turn_id IS NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
+  -- An archived business is read-only (0324), as fusion_compare_adopt.
+  PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', cmp.session_id));
   SELECT * INTO s FROM runtime_sessions WHERE id = cmp.session_id AND actor_id = p_actor_id FOR UPDATE;
   IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
   SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id FOR NO KEY UPDATE;
@@ -413,6 +418,15 @@ BEGIN
   FOR item IN SELECT actor_id, id FROM turns WHERE state = 'paused' AND updated_at < now() - interval '24 hours'
       AND kind = 'jury' AND pause_reason = 'awaiting_user' ORDER BY updated_at LIMIT p_limit LOOP
     BEGIN
+      -- Locked in the close's own order (review, conversation, turn), then the condition read again: a relay that resumed the
+      -- jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
+      PERFORM 1 FROM fusion_reviews WHERE id = (SELECT (policy->>'reviewId')::uuid FROM turns WHERE actor_id = item.actor_id AND id = item.id)
+        FOR NO KEY UPDATE;
+      PERFORM 1 FROM runtime_sessions WHERE id = (SELECT session_id FROM turns WHERE actor_id = item.actor_id AND id = item.id) FOR UPDATE;
+      IF NOT EXISTS (SELECT 1 FROM turns WHERE actor_id = item.actor_id AND id = item.id AND state = 'paused'
+          AND pause_reason = 'awaiting_user' AND updated_at < now() - interval '24 hours' FOR UPDATE) THEN
+        CONTINUE;
+      END IF;
       PERFORM turn_fusion_close(item.actor_id, item.id, 'expired', false, false, 'jury_expired',
         jsonb_build_object('state', 'interrupted', 'outcome', jsonb_build_object('kind', 'expired')));
       expired := expired + 1;

@@ -261,8 +261,26 @@ try{
   await c.query("update turns set updated_at=now()-interval '23 hours' where id=$1",[o.turnId]);
   assert.equal((await one('select turn_fusion_recovery(50) v')).expired,0);
   await c.query("update turns set updated_at=now()-interval '25 hours' where id=$1",[o.turnId]);
+  // #1522 review: a relay resuming a jury while recovery runs. Recovery waits on the turn, reads it again and keeps it running.
+  {
+   const r=await account(),rr=await review(r),orr=await open(r,{product:{reviewId:rr}});
+   await begin(r,orr.turnId,1);await record(r,orr.turnId,1,{output:seat()});
+   await c.query("update turns set updated_at=now()-interval '25 hours' where id=$1",[orr.turnId]);
+   const p=await peer();
+   try{
+    await p.query('begin');
+    await begin(r,orr.turnId,2,{client:p});
+    const recovering=one('select turn_fusion_recovery(50) v');
+    await new Promise(res=>setTimeout(res,300));
+    await p.query('commit');
+    await recovering;
+   }finally{await p.end();}
+   const kept=await turnRow(r,orr.turnId);
+   assert.deepEqual([kept.state,kept.close_kind],['running',null],'a jury resumed meanwhile is not ended');
+   assert.equal(await one('select state v from fusion_reviews where id=$1',[rr]),'running');
+  }
   const run1=await one('select turn_fusion_recovery(50) v');
-  assert.ok(run1.expired>=1);
+  assert.equal(run1.failed,0);
   const t=await turnRow(a,o.turnId);
   assert.deepEqual([t.state,t.close_kind,t.charged_credits],['closed','expired',30]);
   assert.equal(await one('select state v from fusion_reviews where id=$1',[rv]),'interrupted');

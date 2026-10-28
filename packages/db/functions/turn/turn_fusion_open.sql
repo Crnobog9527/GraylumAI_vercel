@@ -51,6 +51,8 @@ BEGIN
   END IF;
 
   IF p_kind = 'compare' THEN
+    -- An archived business is read-only (0324): no compare in its conversation, as fusion_compare_begin; nothing is created.
+    PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', p_session_id));
     -- 2.7: the columns' bounds together are at most 500 credits, or the compare does not open; at least two models.
     IF coalesce((p_policy->>'gCredits')::numeric, 501) > 500 THEN RAISE EXCEPTION 'TURN_COMPARE_LIMIT' USING ERRCODE='P0001'; END IF;
     IF coalesce((p_policy->'limits'->>'model')::int, 0) < 2 OR coalesce((p_policy->'limits'->>'paidTools')::int, 1) <> 0
@@ -123,7 +125,8 @@ BEGIN
       RAISE EXCEPTION 'TURN_JURY_VERSION_BLOCKED' USING ERRCODE='P0001';
     END IF;
   ELSE
-    -- jury_adopt: re-finalizing an adopted revision, without a fee (10-20), once per review.
+    -- jury_adopt: re-finalizing an adopted revision, without a fee (10-20), once per review; not in an archived business.
+    PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('draftId', rv.draft_id));
     IF rv.state <> 'completed' OR rv.outcome->>'kind' IS DISTINCT FROM 'revised' OR rv.adoption->>'state' IS DISTINCT FROM 'recorded'
       OR rv.adoption->>'versionId' IS NULL THEN
       RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023';
