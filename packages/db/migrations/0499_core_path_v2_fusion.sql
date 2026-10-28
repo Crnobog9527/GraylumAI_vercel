@@ -22,10 +22,11 @@
 --                        while a compare turn runs
 --   fusion_review_claim, fusion_review_close: refuse turn-path reviews (no BILL2 group; no stop or end button, Owner 10-28)
 --   fusion_review_pause_idle, fusion_review_end_paused: skip turn-path reviews (their turn waits and ends instead)
+--   account_erasure_scrub_turns: also deletes the account's saved answers (fusion_turn_outputs)
 -- Compatibility: new columns are nullable, the new table and functions are used only by the V2 path (core_path_v2.enabled);
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
--- Recovery: drop the seven new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the ten changed
+-- Recovery: drop the seven new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the eleven changed
 -- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -520,7 +521,10 @@ BEGIN
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
-        AND r.closed_at > now() - interval '24 hours')) END);
+        AND r.closed_at > now() - interval '24 hours')) END,
+    -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
+    'kindContext', NULL::jsonb);
 END $function$;
 
 -- turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)
@@ -894,6 +898,56 @@ BEGIN
     END;
   END LOOP;
   RETURN jsonb_build_object('ended',ended,'failed',failed,'skipped',skipped);
+END $function$;
+
+-- account_erasure_scrub_turns(uuid)
+CREATE OR REPLACE FUNCTION public.account_erasure_scrub_turns(p_profile_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  now_at timestamptz := clock_timestamp(); counts jsonb := '{}'; n bigint; session_ids uuid[];
+  empty_hash text := encode(sha256(''::bytea), 'hex');
+BEGIN
+  IF p_profile_id IS NULL OR NOT EXISTS (
+    SELECT 1 FROM account_erasure_requests WHERE profile_id = p_profile_id) THEN
+    RAISE EXCEPTION 'ACCOUNT_ERASURE_NOT_CLOSED' USING ERRCODE = '42501';
+  END IF;
+  IF NOT public.account_erasure_barrier() THEN
+    RETURN jsonb_build_object('retry', true, 'reason', 'transactions_pending');
+  END IF;
+  IF EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_profile_id
+    AND confirmed_at >= transaction_timestamp()) THEN
+    RETURN jsonb_build_object('retry', true, 'reason', 'transactions_pending');
+  END IF;
+  -- Turn writers lock the session first; skip a busy one and count what it holds as remaining.
+  session_ids := ARRAY(SELECT id FROM runtime_sessions WHERE actor_id = p_profile_id FOR UPDATE SKIP LOCKED);
+
+  DELETE FROM turn_call_raw r USING turn_calls c, turns t
+   WHERE c.turn_id = r.turn_id AND c.seq = r.seq AND c.actor_id = p_profile_id
+     AND t.actor_id = p_profile_id AND t.id = c.turn_id AND t.state = 'closed';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  counts := counts || jsonb_build_object('turn_call_raw', n);
+  SELECT count(*) INTO n FROM turn_call_raw r JOIN turn_calls c ON c.turn_id = r.turn_id AND c.seq = r.seq
+   WHERE c.actor_id = p_profile_id;
+  counts := counts || jsonb_build_object('turn_call_raw_skipped', n);
+
+  -- The saved review and compare answers (V2-7b): content, deleted with the rest of the account's turn content. They also go with
+  -- their review or compare row (cascade); this covers an answer whose product row erasure removes later or not at all.
+  DELETE FROM fusion_turn_outputs WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  counts := counts || jsonb_build_object('fusion_turn_outputs', n);
+
+  UPDATE session_messages SET content = '', content_hash = empty_hash, visible = false, deleted_at = coalesce(deleted_at, now_at)
+   WHERE session_id = ANY(session_ids) AND (content <> '' OR visible);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  counts := counts || jsonb_build_object('session_messages', n);
+  SELECT count(*) INTO n FROM session_messages m JOIN runtime_sessions s ON s.id = m.session_id
+   WHERE s.actor_id = p_profile_id AND (m.content <> '' OR m.visible);
+  counts := counts || jsonb_build_object('session_messages_skipped', n);
+  RETURN counts;
 END $function$;
 
 DO $$

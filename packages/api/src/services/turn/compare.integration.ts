@@ -45,6 +45,8 @@ beforeAll(async () => {
       cacheCovered: true, costBoundPassed: true } }));
   for (const [i, [model, tag]] of PAIRS.entries()) {
     const { pricing } = pricingConfig(model, tag, '0.000001', '0.000002');
+    // PROMPT-CACHE-ALL (#1501): the Anthropic route has a cache-write price, so its compare request carries the breakpoints.
+    if (tag === 'anthropic') (pricing.endpoints[0]!.base as Record<string, string>).input_cache_write = '0.00000125';
     const config = { pricing, reasoning: { route: tag, purposes: { interactive: { mode: 'off', wire: 'reasoning_effort' } },
       catalog: { fetchedAt: pricing.fetchedAt, model, reasoning: { mandatory: false, defaultEnabled: false, supportedEfforts: ['low', 'high'],
         defaultEffort: 'high', supportsMaxTokens: true },
@@ -126,10 +128,17 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns, each bou
   expect(adopted.error).toBeNull();
   expect((await db.query('select role,content from session_messages where session_id=$1 order by seq', [f.session])).rows)
     .toEqual([{ role: 'user', content: 'Which plan?' }, { role: 'assistant', content: outputs[0].body }]);
-  // The next compare sees that history, as plain messages after the system message.
+  // The next compare sees that history, as plain messages after the system message; on the Anthropic route the system message
+  // and the last earlier turn are the cache breakpoints (#1501), and the adapter sends that request.
   bodies.length = 0;
-  await compare(f, transport, { question: 'And then?' });
-  expect((bodies[0]!.messages as Array<{ role: string }>).map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+  const next = await compare(f, transport, { question: 'And then?' });
+  expect(next.at(-1)).toMatchObject({ type: 'result' });
+  for (const body of bodies) expect((body.messages as Array<{ role: string }>).map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+  const anthropic = bodies.find(b => b.model === PAIRS[0][0])!.messages as Array<{ content: unknown }>;
+  expect(JSON.stringify(anthropic[0]!.content)).toContain('cache_control');
+  expect(JSON.stringify(anthropic[2]!.content)).toContain('cache_control');
+  expect(JSON.stringify(anthropic[3]!.content)).not.toContain('cache_control');
+  expect(JSON.stringify(bodies.find(b => b.model === PAIRS[1][0]))).not.toContain('cache_control');
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-7b: a repeated compare request never calls again; only Gold compares; a failed column is free', async () => {
