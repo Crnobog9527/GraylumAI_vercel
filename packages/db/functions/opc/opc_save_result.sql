@@ -16,6 +16,8 @@ BEGIN
  IF opc_draft_readonly(p_actor_id,p_draft_id) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF; -- 0249 read-only
  PERFORM bill2_actor(p_actor_id);
  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+ -- V2-5: the draft's session row before the project (see artifact_transition).
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
  SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
