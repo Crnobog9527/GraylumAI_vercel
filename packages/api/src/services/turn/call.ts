@@ -7,7 +7,7 @@ import { openRouterRejection } from '../bill2/openRouterRejection';
 import { nominalCost, type NominalPricing } from '../../shared/nominalPricing';
 import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, type TurnDatabase } from './db';
-import { swallow } from '../../lib/swallow';
+import { logSwallowed } from '../../lib/swallow';
 
 /*
  * CORE-PATH-V2 2.5.2: one paid model call is three writes. turn_call_begin before anything is sent (no row, no request);
@@ -36,7 +36,7 @@ export type CallDeps = {
   nextSeq: () => number;
   sleep?: (ms: number) => Promise<void>; now?: () => number;
 };
-const MAX_ATTEMPTS = 2, RETRY_DELAY_MS = 500;
+const MAX_ATTEMPTS = 2, RETRY_DELAY_MS = 500, IDENTITY_ATTEMPTS = 3, IDENTITY_RETRY_MS = 200;
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 // numeric(20,12): a nominal cost with more digits is rounded up, never down.
 export function ceil12(value: string): string {
@@ -67,12 +67,21 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
       await notSent();
       throw new TurnStop(error instanceof ProviderBusyError ? error.code : 'TURN_PROVIDER_LIMIT_UNAVAILABLE');
     }
-    let identity: Promise<unknown> | undefined;
-    const onIdentity = (providerId: string) => {
-      // The id only helps recovery find the cost; a failed write never stops the call (the receipt carries the id too).
-      identity ??= swallow('turn_call_identity_failed', deps.db.identity({ actorId: deps.actorId, turnId: deps.turnId, seq, providerId }),
-        undefined, { category: 'ai' });
+    // The provider id is what recovery looks the cost up by. Seeing it and saving it are kept apart: a failed write is retried
+    // (bounded) before the call ends, never taken as saved; it never stops the call (a final receipt carries the id too).
+    let seenId: string | undefined, saved = false, writing: Promise<void> | undefined;
+    const writeIdentity = async () => {
+      for (let attempt = 1; attempt <= IDENTITY_ATTEMPTS && !saved; attempt++) {
+        try { await deps.db.identity({ actorId: deps.actorId, turnId: deps.turnId, seq, providerId: seenId! }); saved = true; }
+        catch (error) {
+          logSwallowed('turn_call_identity_failed', error, { category: 'ai', attempt });
+          if (attempt < IDENTITY_ATTEMPTS) await (deps.sleep ?? (ms => new Promise(r => setTimeout(r, ms))))(IDENTITY_RETRY_MS * attempt);
+        }
+      }
     };
+    const onIdentity = (providerId: string) => { if (seenId) return; seenId = providerId; writing = writeIdentity(); };
+    /** Before the call ends: the first write has finished, and one more bounded round if it did not save. */
+    const identity = async () => { await writing; if (seenId && !saved) await writeIdentity(); };
     let observation: TransportObservation;
     try {
       let send: () => Promise<TransportObservation>;
@@ -91,11 +100,11 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
           throw new TurnStop('TURN_CALL_UNKNOWN');
         }
         // Started and broke (disconnect, timeout): the outcome is unknown. Keep it for recovery; never send it again.
-        await identity;
+        await identity();
         throw new TurnStop('TURN_CALL_UNKNOWN');
       }
     } finally { await release(); }
-    await identity;
+    await identity();
     const rejection = openRouterRejection(observation, call.identity, requestHash);
     if (rejection && observation.httpStatus === 402) {
       // 402: the platform account could not pay; never charged (Owner item 53).
@@ -116,8 +125,8 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
     // generation up by the provider id (the one in the body is stored when no header named it) and only when that bounded lookup
     // still lacks the usage falls back to min(c, U), marked actual_fallback (BILL_PAYG_PLAN 3A, nominalActualFallback).
     if (!evidence.final || typeof evidence.cost !== 'string' || !usage || nominalUsd === null) {
-      if (!identity && evidence.providerId) onIdentity(evidence.providerId);
-      await identity;
+      if (!seenId && evidence.providerId) onIdentity(evidence.providerId);
+      await identity();
       if (completion) return JSON.stringify(completion);
       throw new TurnStop('TURN_CALL_UNKNOWN');
     }
