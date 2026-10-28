@@ -35,7 +35,7 @@ import type { TurnEvent } from './sse';
  */
 export const CORE_PATH_SETTING = 'core_path_v2';
 // decisionUpperUsd: the most one positioning check (Decisions) can cost the platform; it is reserved on the stop-loss (Fable 10-28).
-const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
+export const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
 
@@ -47,7 +47,7 @@ export type ChatDeps = {
 export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
-const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
+export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_TOMBSTONED: { kind: 'erased', refundAll: false },
   TURN_CALL_UNKNOWN: { kind: 'interrupted', refundAll: false },
   TURN_PROVIDER_402: { kind: 'failed', refundAll: true },

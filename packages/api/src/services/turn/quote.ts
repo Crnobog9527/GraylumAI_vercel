@@ -55,7 +55,15 @@ function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], 
   return { limits, nominal: nominal as NominalPricing };
 }
 
-export async function chatQuote(admin: SupabaseClient, input: { modelId: string; inputBytes: number; deps?: PricingDeps }): Promise<ChatQuote> {
+/** What a quoted call is for: the profile must cover exactly this use (free chat by default; the mentor's Skill call and its
+ * organizer use the agent-turn format, V2-5). outputCap: a lower output limit of that use (the organizer's summary limit). */
+export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer'; requestFormat: string;
+  purpose: 'interactive' | 'organize'; outputCap?: number };
+const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_REQUEST_FORMAT, purpose: 'interactive' };
+
+export async function chatQuote(admin: SupabaseClient, input: { modelId: string; inputBytes: number; deps?: PricingDeps;
+  use?: QuoteUse }): Promise<ChatQuote> {
+  const use = input.use ?? FREE_CHAT_USE;
   const setting = await catalogRead(admin, 'settings', 'runtime-payg', () =>
     admin.from('system_settings').select('value').eq('key', RUNTIME_PAYG_SETTING).maybeSingle());
   const parsed = paygProductionSettings.safeParse(setting.error ? null : setting.data?.value);
@@ -73,14 +81,14 @@ export async function chatQuote(admin: SupabaseClient, input: { modelId: string;
   const state = states.get(input.modelId);
   if (!state) throw new QuoteError('TURN_PRICE_UNAVAILABLE');
   const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag);
-  const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens);
-  const reasoning = admitReasoning(row.data, 'interactive', limits.providerSlug, outputLimit);
+  const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens, use.outputCap);
+  const reasoning = admitReasoning(row.data, use.purpose, limits.providerSlug, outputLimit);
   // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): the ordinary purpose, the
   // free-chat request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
   // A profile approved for another use (e.g. Argon only for fusion_review) never admits a free chat.
   const profile = matchedProfile(parsed.data.profiles,
     { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],
-    [{ modelId: input.modelId, phase: 'ordinary', outputLimit, requestFormat: FREE_CHAT_REQUEST_FORMAT, reasoning }]);
+    [{ modelId: input.modelId, phase: use.phase, outputLimit, requestFormat: use.requestFormat, reasoning }]);
   if (!profile || profile.endpointTag !== candidate.endpointTag) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
   const upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
