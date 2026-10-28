@@ -89,12 +89,23 @@ it.each([
   expect((await runtimeAdmissionService(f.user,f.admin,policy).prepare(f.input)).context).not.toHaveProperty('promptCache');
  }else expect((await f.service.prepare(f.input)).context).not.toHaveProperty('promptCache');
 });
-it('ordinary role is never marked even on Anthropic with a write price',async()=>{
+it('ordinary role stays unmarked here: free chat caching lives in the CORE-PATH-V2 turn path (V2-4)',async()=>{
  const f=fixture();
  const reasoning=configuredReasoning(f.row.model_id).reasoning;
  f.row.config.reasoning={...reasoning,catalog:reasoning.catalog!,route:reasoning.route!};
  const result=await f.service.prepare({...f.input,selection:{kind:'ordinary',modelId}});
  expect(result.context).not.toHaveProperty('promptCache');
+});
+it('a report context never carries promptCache: report_admission_check.sql refuses it (reports cache on CORE-PATH-V2, V2-7a)',async()=>{
+ const f=fixture();
+ const reasoning=configuredReasoning(f.row.model_id).reasoning;
+ f.row.config.reasoning={...reasoning,catalog:reasoning.catalog!,route:reasoning.route!};
+ const reportGeneration={version:1 as const,projectId:actor,roundId:actor,evidenceIds:[],snapshotHash:'a'.repeat(64),packageHash:'b'.repeat(64),
+  workflowHash:'c'.repeat(64),templateHash:'d'.repeat(64),sections:['One'],maxCharacters:12000};
+ const result=await runtimeAdmissionService(f.user,f.admin,{...f.policy,reportGeneration,skillResources:['report.md'],
+  additionalInstructions:'Confirmed facts: {"x":1}',stableAdditionalInstructions:undefined,searchEnabled:false,workspaceContext:false}).prepare(f.input);
+ expect(result.context).not.toHaveProperty('promptCache');
+ expect(()=>runtimeContext.parse({...result.context,promptCache:{version:'prompt-cache-v3',systemPrefixChars:1,systemPrefixSha256:'a'.repeat(64),historyMarker:false}})).toThrow();
 });
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
  const instructions=brand+skill+'\n'+host();
