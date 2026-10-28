@@ -40,15 +40,11 @@ test('journey 5: two models answer and the total equals the sum of the columns',
   // The other column is recorded for 99-model-check, which allows the test model, the organizer/summary models and this one.
   await mkdir(resultsDirectory, { recursive: true });
   await writeFile(path.join(resultsDirectory, 'compare-model.json'), JSON.stringify({ modelId: other!.modelId }));
-  // Untick the models we do not want first, then tick the two we do.
-  for (let i = 0; i < labels.length; i += 1) {
-    const wanted = labels[i] === base!.name || labels[i] === other!.name;
-    if (!wanted && (await boxes.nth(i).isChecked())) await boxes.nth(i).uncheck();
-  }
-  for (let i = 0; i < labels.length; i += 1) {
-    const wanted = labels[i] === base!.name || labels[i] === other!.name;
-    if (wanted && !(await boxes.nth(i).isChecked())) await boxes.nth(i).check();
-  }
+  // The picker keeps the order in which models are ticked and the columns follow it. Untick everything, then tick the test
+  // model first and the other model second, so the test model is the left column.
+  for (let i = 0; i < labels.length; i += 1) if (await boxes.nth(i).isChecked()) await boxes.nth(i).uncheck();
+  await boxes.nth(labels.indexOf(base!.name)).check();
+  await boxes.nth(labels.indexOf(other!.name)).check();
   await expect(picker.getByRole('checkbox', { checked: true })).toHaveCount(2);
   await expect(picker.getByText(/最多消耗/)).toBeVisible({ timeout: 60_000 });
   await picker.getByRole('button', { name: '开始对比' }).click();

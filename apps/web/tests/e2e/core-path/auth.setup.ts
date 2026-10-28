@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
@@ -23,6 +23,8 @@ const accounts: Partial<Record<(typeof CORE_ROLES)[number], Account>> = {};
 setup('start the run clock', async () => {
   await mkdir(resultsDirectory, { recursive: true });
   await saveAccounts({});
+  // A new run starts from nothing: last run's spend state (it may be over the cap) and compare choice must not leak in.
+  await Promise.all(['spend.json', 'summary.md', 'compare-model.json'].map(name => rm(path.join(resultsDirectory, name), { force: true })));
   await writeFile(path.join(resultsDirectory, 'run.json'), JSON.stringify({ startedAt: new Date().toISOString() }));
 });
 
