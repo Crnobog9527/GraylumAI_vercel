@@ -67,7 +67,9 @@ beforeAll(async () => {
   if (!staging) return;
   const expiresAt = new Date(Date.now() + 7200000).toISOString();
   const policies = pairs.map(([model, providerSlug], i) => {
-    const providerLimits = { providerSlug, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' };
+    // PROMPT-CACHE-ALL: the Anthropic route carries a frozen cache write price, so its frozen body holds cache breakpoints.
+    const providerLimits = { providerSlug, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0',
+      ...(providerSlug === 'anthropic' ? { cacheWriteUsdPerMillion: '1.25' } : {}) };
     return { modelId: models[i], model, provider: 'openrouter', account, protocol: 'openrouter-chat-v1', providerLimits,
       upperUsd: openRouterBound(providerLimits, 8192).upperUsd, inputLimit: 196608, outputLimit: 8192, multiplier: '3',
       automaticRetry: false, hiddenTools: false, lookupSupported: true };
@@ -133,6 +135,13 @@ it.runIf(staging)('RUNTIME: Fusion group admission, streamed dispatch, saved bod
     expect(body).not.toHaveProperty('tools');
     expect(body).not.toHaveProperty('tool_choice');
   }
+  // PROMPT-CACHE-ALL: through real admission (bill2_payg_validate_quote), claim and dispatch, the Anthropic reviewer's frozen
+  // body marks its system message; the OpenAI summary route (no frozen write price) sends the plain string.
+  const markedReview = sent.slice(-2).find(body => body.model === pairs[0][0])!;
+  const plainSummary = sent.slice(-2).find(body => body.model === pairs[2][0])!;
+  expect((markedReview.messages as Array<{ role: string; content: unknown }>)[0])
+    .toEqual({ role: 'system', content: [{ type: 'text', text: 'Review the report.', cache_control: { type: 'ephemeral' } }] });
+  expect((plainSummary.messages as Array<{ role: string; content: unknown }>)[0]).toEqual({ role: 'system', content: 'Summarize the opinions.' });
   const calls = (await db.query('select c.settled_at,c.fusion_verdict,c.charged_delta,r.closed from bill2_calls c join bill2_runs r on r.id=c.run_id where r.fusion_group_id=$1',
     [group.groupId])).rows;
   expect(calls).toHaveLength(2);
