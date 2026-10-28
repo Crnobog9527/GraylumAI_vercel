@@ -16,15 +16,15 @@
 --                        copied unchanged; the turn's request id stands where the execution id stood (field provenance,
 --                        suggestion order, the idempotent artifact_requests row), so opc_information and the protection
 --                        checks that read artifact_requests keep working on both paths.
---   opc_information,     unchanged except one lock: the draft's session row before its project, so a manual checklist save or
---   opc_capture_resolve  a suggestion decision serializes with a mentor close (which holds that session row) instead of
---                        overwriting its capture or being overwritten (review of #1520).
+--   opc_information,     unchanged except one lock: the draft's session row before its project, so a manual checklist save,
+--   opc_capture_resolve, a suggestion decision or an old-path capture serializes with a mentor close (which holds that session
+--   opc_capture_apply    row) instead of overwriting its capture or being overwritten (review of #1520).
 --   turn_open            0422 (start threshold) with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
 --   turn_close           0421 with the mentor branch of its per-kind hook (turn_mentor_apply on p_kind_result), and the
 --                        capture response returned under kindResult.
--- Locks: neither mentor function takes an explicit row lock (main-path rule 5); opc_information and opc_capture_resolve now lock
--- the draft's session row before its project, so they serialize with a mentor close, which holds that session row. turn_mentor_apply writes the round's checklist with an
--- optimistic check (the UPDATE applies only if the checklist is unchanged since it was read; otherwise it computes again), so a
+-- Locks: neither mentor function takes an explicit row lock (main-path rule 5); opc_information, opc_capture_resolve and
+-- opc_capture_apply now lock the draft's session row before its project, so they serialize with a mentor close, which holds
+-- that session row. turn_mentor_apply writes the round's checklist with an optimistic check (the UPDATE applies only if the checklist is unchanged since it was read; otherwise it computes again), so a
 -- close never waits on opc_information's project lock while holding the session and account locks; only the UPDATE's own row
 -- lock on artifact_rounds remains, for the length of a concurrent single-statement edit.
 -- Compatibility: no signature changes; turn_open and turn_close only gain the mentor branches and a returned key. Nothing calls
@@ -687,6 +687,209 @@ BEGIN
  UPDATE artifact_rounds SET steps=r.steps WHERE id=r.id;
  response:=jsonb_build_object('version',version,'result',p_action);
  INSERT INTO artifact_requests VALUES(d.project_id,p_request_id,r.id,'opc_capture_resolve',payload,response);
+ RETURN response;
+END $function$;
+
+-- opc_capture_apply (the old path's organizer capture): unchanged except the same session-row lock before the project.
+CREATE OR REPLACE FUNCTION public.opc_capture_apply(p_actor_id uuid, p_draft_id uuid, p_execution_id uuid DEFAULT NULL::uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+-- R9 suggestion time
+
+-- R9 capture provenance
+
+DECLARE d opc_drafts;r artifact_rounds;p artifact_projects;e runtime_executions;t opc_turns;req artifact_requests;
+ ids uuid[];available_ids uuid[];execution_id uuid;processed jsonb:='[]';response jsonb;payload jsonb;capture_request_id uuid;
+ output jsonb;code text;patch jsonb;step_id text;field_id text;st jsonb;meta jsonb;value jsonb;candidate jsonb;
+ changed jsonb:='{}';fields jsonb:='{}';discarded jsonb:='[]';versions jsonb:='{}';old_steps jsonb;
+ protected boolean;material_changed boolean;seq jsonb;suggestion jsonb;remaining integer;patch_index integer:=0;
+ withdrawal jsonb;withdrawn jsonb:='{}';withdraw_index integer:=0;withdraw_reason text;organizer_input jsonb;
+BEGIN
+ -- 0324 archived business guard
+ IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id,'executionId',p_execution_id)); END IF;
+
+ -- Lock order: the draft's session row, then the project (V2-5: the session row is the one serialization point every checklist
+ -- writer shares with a mentor turn's close, which holds it; opc_information and opc_capture_resolve take it the same way).
+ -- Never a run update lock.
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND (draft_id=p_draft_id OR
+  (p_draft_id IS NULL AND session_id=(SELECT session_id FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id)));
+ IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)),false)
+ THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
+ SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
+ -- Refresh the draft after waiting: a concurrent revision may have advanced it.
+ SELECT * INTO d FROM opc_drafts WHERE draft_id=d.draft_id AND actor_id=p_actor_id;
+ SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
+ IF p_execution_id IS NULL THEN
+  SELECT coalesce(array_agg(ex.id ORDER BY ex.created_at,ex.id),'{}') INTO ids
+  FROM opc_turns turn JOIN runtime_executions ex ON ex.session_id=turn.session_id AND ex.request_id=turn.request_id
+  WHERE turn.session_id=d.session_id AND turn.draft_id=d.draft_id AND turn.round_id=r.id AND turn.purpose='mentor'
+   AND ex.actor_id=p_actor_id AND ex.state='completed'
+   AND CASE WHEN (ex.payload#>>'{attachedOrganizer,input}') IS JSON OBJECT
+    THEN (ex.payload#>>'{attachedOrganizer,input}')::jsonb->>'captureFormat'='v2' ELSE false END
+   AND NOT EXISTS(SELECT 1 FROM artifact_requests a WHERE a.project_id=d.project_id
+    AND a.request_id=overlay(md5('opc_capture:'||ex.id::text) placing 'f' from 13 for 1)::uuid AND a.action='opc_capture'
+    AND a.payload=jsonb_build_object('executionId',ex.id,'ruleVersion',1));
+  SELECT coalesce(array_agg(x.id ORDER BY x.ord),'{}') INTO available_ids
+  FROM unnest(ids) WITH ORDINALITY x(id,ord)
+  JOIN runtime_history_availability(ids) a ON a.execution_id=x.id AND a.available;
+  -- Recursive calls share this transaction: any storage error rolls back ALL five.
+  FOREACH execution_id IN ARRAY available_ids[1:5] LOOP
+   response:=opc_capture_apply(p_actor_id,p_draft_id,execution_id);
+   processed:=processed||jsonb_build_array(jsonb_build_object('executionId',execution_id,'result',response->>'result'));
+  END LOOP;
+  SELECT count(*)::integer INTO remaining FROM unnest(available_ids) x(id)
+  WHERE NOT EXISTS(SELECT 1 FROM artifact_requests a WHERE a.project_id=d.project_id
+   AND a.request_id=overlay(md5('opc_capture:'||x.id::text) placing 'f' from 13 for 1)::uuid);
+  RETURN jsonb_build_object('processed',processed,'remaining',remaining,'hasMore',remaining>0);
+ END IF;
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
+ IF e.id IS NULL THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ capture_request_id:=overlay(md5('opc_capture:'||e.id::text) placing 'f' from 13 for 1)::uuid;
+ payload:=jsonb_build_object('executionId',e.id,'ruleVersion',1);
+ SELECT * INTO req FROM artifact_requests WHERE project_id=d.project_id AND artifact_requests.request_id=capture_request_id;
+ IF FOUND THEN
+  IF req.action IS DISTINCT FROM 'opc_capture' OR req.payload IS DISTINCT FROM payload THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+  IF NOT runtime_history_available(e.id) THEN RETURN jsonb_build_object('result','unavailable');END IF;
+  RETURN req.response;
+ END IF;
+ IF e.state<>'completed' THEN RETURN jsonb_build_object('result','not_ready');END IF;
+ code:=NULL;
+ IF NOT coalesce((CASE WHEN (e.payload#>>'{attachedOrganizer,input}') IS JSON OBJECT
+  THEN (e.payload#>>'{attachedOrganizer,input}')::jsonb->>'captureFormat'='v2' ELSE false END),false)
+ THEN code:='skipped_format';END IF;
+ SELECT * INTO t FROM opc_turns WHERE session_id=d.session_id AND request_id=e.request_id;
+ IF code IS NULL AND (t.token IS NULL OR t.token::text IS DISTINCT FROM e.payload->>'opcTurnToken'
+  OR t.draft_id<>d.draft_id OR t.purpose<>'mentor'
+  OR e.payload->>'revisionId' IS DISTINCT FROM (SELECT revision_id::text FROM artifact_rounds WHERE id=t.round_id)
+  OR e.payload->>'moduleId' IS DISTINCT FROM p.module_id::text) THEN code:='denied_binding';END IF;
+ IF code IS NULL AND (t.round_id<>r.id OR e.payload#>>'{scopeMaterial,content,work,roundId}' IS DISTINCT FROM r.id::text
+  OR r.state<>'draft') THEN code:='stale_round';END IF;
+ IF code IS NULL AND NOT runtime_history_available(e.id) THEN RETURN jsonb_build_object('result','unavailable');END IF;
+ IF code IS NULL THEN
+  -- Only malformed JSON is caught. Storage, permission, lock and transaction errors escape.
+  BEGIN output:=(e.result->>'summary')::jsonb;
+  EXCEPTION WHEN invalid_text_representation THEN output:=NULL;END;
+  IF jsonb_typeof(output) IS DISTINCT FROM 'object'
+   OR coalesce(output->>'inputKind','') NOT IN ('answer','acknowledgement','uncertainty','request','revision_request')
+   OR jsonb_typeof(output->'patches') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(output->'notes') IS DISTINCT FROM 'array'
+   THEN code:='invalid_output';
+  ELSIF jsonb_array_length(output->'patches')>12 THEN code:='invalid_output';
+  ELSIF output ? 'withdrawals' AND jsonb_typeof(output->'withdrawals') IS DISTINCT FROM 'array' THEN code:='invalid_output';
+  ELSIF jsonb_array_length(coalesce(output->'withdrawals','[]'))>12 THEN code:='invalid_output';END IF;
+ END IF;
+ IF code IS NULL THEN
+  old_steps:=r.steps;
+  material_changed:=EXISTS(SELECT 1 FROM jsonb_each(r.steps) s
+   WHERE s.value->'version' IS DISTINCT FROM e.payload#>ARRAY['scopeMaterial','content','work','steps',s.key,'version']);
+  FOR patch IN SELECT * FROM jsonb_array_elements(output->'patches') LOOP
+   patch_index:=patch_index+1;
+   step_id:=patch->>'stepId';field_id:=patch->>'fieldId';st:=r.steps->step_id;
+   IF jsonb_typeof(patch) IS DISTINCT FROM 'object' OR jsonb_typeof(patch->'value') IS DISTINCT FROM 'string'
+    OR char_length(btrim(coalesce(patch->>'value','')))=0 OR char_length(patch->>'value')>400
+    OR coalesce(patch->>'status','') NOT IN ('provisional','unclear')
+    OR coalesce(patch->>'nature','') NOT IN ('fact','decision','hypothesis','unknown')
+    OR coalesce(patch->>'basis','') NOT IN ('user_statement','agent_proposal')
+    OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') s,jsonb_array_elements(s->'information') f
+      WHERE s->>'id'=step_id AND f->>'id'=field_id)
+   THEN discarded:=discarded||jsonb_build_array(jsonb_build_object('index',patch_index,'reason','invalid_patch'));CONTINUE;END IF;
+   -- Host notifications contain no user statement. Preserve only concrete mentor proposals
+   -- for fields explicitly declared as agent-owned by this pinned workflow.
+   IF ((e.payload#>>'{attachedOrganizer,input}')::jsonb#>>'{hostEvent,kind}')='checklist_updated'
+    AND (patch->>'basis'<>'agent_proposal' OR position('HOST_CHECKLIST_UPDATED:' in (patch->>'value'))>0
+     OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') s,
+      jsonb_array_elements(s->'information') f WHERE s->>'id'=step_id AND f->>'id'=field_id
+       AND f->>'elicitation'='agent_proposal'))
+   THEN discarded:=discarded||jsonb_build_array(jsonb_build_object('index',patch_index,'reason','host_checklist_updated'));
+    CONTINUE;END IF;
+   value:=patch-ARRAY['stepId','fieldId','basis'];
+   value:=jsonb_build_object('value',value->'value','status',value->'status','nature',value->'nature');
+   meta:=coalesce(st->'fieldMeta'->field_id,'{}');
+   protected:=NOT coalesce(NOT coalesce((st->>'valid')::boolean,false)
+ AND coalesce(st->'information'->(field_id)->>'status','unknown') NOT IN ('confirmed','deferred') AND (
+  (st->'fieldMeta'->(field_id)->>'source'='capture' AND st->'fieldMeta'->(field_id)->>'fp'=artifact_hash(st->'information'->(field_id))
+   AND EXISTS(SELECT 1 FROM artifact_requests cap WHERE cap.project_id=d.project_id AND cap.round_id=r.id
+    AND cap.request_id=overlay(md5('opc_capture:'||(st->'fieldMeta'->(field_id)->>'executionId')) placing 'f' from 13 for 1)::uuid
+    AND cap.action='opc_capture' AND cap.payload->>'executionId'=st->'fieldMeta'->(field_id)->>'executionId'
+    AND cap.response->'versions' ? (step_id)
+    AND NOT EXISTS(SELECT 1 FROM artifact_requests manual WHERE manual.project_id=d.project_id AND manual.round_id=r.id
+     AND manual.action='opc_information' AND manual.payload->>'stepId'=(step_id)
+     AND (manual.payload->>'expectedVersion')::integer >= (cap.response->'versions'->>(step_id))::integer
+     AND artifact_hash(manual.payload->'values'->(field_id)) IS DISTINCT FROM st->'fieldMeta'->(field_id)->>'fp')))
+  OR (st->'fieldMeta'->(field_id)->>'source' IS NULL AND coalesce(st->'information'->(field_id)->>'value','')='' AND coalesce(st->'information'->(field_id)->>'status','unknown')='unknown'
+   AND NOT EXISTS(SELECT 1 FROM artifact_requests history WHERE history.project_id=d.project_id AND history.round_id=r.id
+    AND ((history.action='opc_information' AND history.payload->>'stepId'=(step_id)
+      AND coalesce(history.payload->'values'->(field_id)->>'value','')<>'')
+     OR (history.action='opc_capture' AND history.response->'fields'->(step_id) ? (field_id)))))
+ ),false);
+   candidate:=coalesce(st->'information','{}')||jsonb_build_object(field_id,value);
+   IF NOT material_changed AND NOT protected AND octet_length(candidate::text)<=12000 THEN
+    IF st->'information'->field_id IS DISTINCT FROM value THEN
+     st:=st||jsonb_build_object('information',candidate,'informationUpdatedAt',clock_timestamp());
+     changed:=changed||jsonb_build_object(step_id,true);
+     fields:=jsonb_set(fields,ARRAY[step_id],coalesce(fields->step_id,'[]')||to_jsonb(field_id));
+     meta:=jsonb_build_object('source','capture','basis',patch->'basis','executionId',e.id,'fp',artifact_hash(value),
+   'createdAt',clock_timestamp());
+    END IF;
+   ELSE
+    seq:=jsonb_build_array(e.created_at,e.id);
+    suggestion:=jsonb_build_object('executionId',e.id,'seq',seq,'value',value->'value',
+     'status',value->'status','nature',value->'nature','basis',patch->'basis');
+    suggestion:=suggestion||jsonb_build_object('createdAt',clock_timestamp());
+    suggestion:=suggestion||jsonb_build_object('hash',artifact_hash(suggestion));
+    -- v3: a turn older than the user's withdrawal can neither revive advice nor erase the withdrawn record.
+    IF (meta->'suggestion' IS NULL OR ((meta#>>'{suggestion,seq,0}')::timestamptz,(meta#>>'{suggestion,seq,1}')::uuid) < (e.created_at,e.id))
+     AND (meta->'withdrawnSuggestion' IS NULL OR ((meta#>>'{withdrawnSuggestion,withdrawnSeq,0}')::timestamptz,
+      (meta#>>'{withdrawnSuggestion,withdrawnSeq,1}')::uuid) < (e.created_at,e.id))
+    THEN meta:=(meta-'withdrawnSuggestion')||jsonb_build_object('suggestion',suggestion);END IF;
+   END IF;
+   st:=st||jsonb_build_object('fieldMeta',coalesce(st->'fieldMeta','{}')||jsonb_build_object(field_id,meta));
+   r.steps:=jsonb_set(r.steps,ARRAY[step_id],st);
+  END LOOP;
+  -- v3 suggestion withdraw: a real user turn may clear a pending suggestion older than this turn.
+  -- The record moves to withdrawnSuggestion so the page can show it; information is never read or written.
+  organizer_input:=(e.payload#>>'{attachedOrganizer,input}')::jsonb;
+  FOR withdrawal IN SELECT * FROM jsonb_array_elements(coalesce(output->'withdrawals','[]')) LOOP
+   withdraw_index:=withdraw_index+1;
+   step_id:=withdrawal->>'stepId';field_id:=withdrawal->>'fieldId';meta:=r.steps#>ARRAY[step_id,'fieldMeta',field_id];
+   IF jsonb_typeof(withdrawal) IS DISTINCT FROM 'object' OR step_id IS NULL OR field_id IS NULL
+    OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') s,jsonb_array_elements(s->'information') f
+     WHERE s->>'id'=step_id AND f->>'id'=field_id) THEN withdraw_reason:='invalid_withdrawal';
+   ELSIF organizer_input ? 'hostEvent' OR coalesce(btrim(organizer_input->>'userInput'),'') IN ('','HOST_OPEN_CURRENT_QUESTION')
+    THEN withdraw_reason:='no_user_turn';
+   ELSIF jsonb_typeof(meta->'suggestion') IS DISTINCT FROM 'object' THEN withdraw_reason:='no_suggestion';
+   -- Bind to the complete suggestion the organizer was shown (value, nature, basis): a replacement stays.
+   ELSIF jsonb_strip_nulls(jsonb_build_object('value',meta#>'{suggestion,value}','nature',meta#>'{suggestion,nature}',
+    'basis',meta#>'{suggestion,basis}')) IS DISTINCT FROM (SELECT jsonb_strip_nulls(fld->'pendingSuggestion')
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(organizer_input->'checklist')='array' THEN organizer_input->'checklist' ELSE '[]' END) stp,
+     jsonb_array_elements(CASE WHEN jsonb_typeof(stp->'fields')='array' THEN stp->'fields' ELSE '[]' END) fld
+    WHERE stp->>'id'=step_id AND fld->>'id'=field_id LIMIT 1) THEN withdraw_reason:='not_shown';
+   ELSIF ((meta#>>'{suggestion,seq,0}')::timestamptz,(meta#>>'{suggestion,seq,1}')::uuid) >= (e.created_at,e.id)
+    THEN withdraw_reason:='superseded';
+   ELSE withdraw_reason:=NULL;END IF;
+   IF withdraw_reason IS NOT NULL THEN
+    discarded:=discarded||jsonb_build_array(jsonb_build_object('withdrawal',withdraw_index,'reason',withdraw_reason));CONTINUE;END IF;
+   meta:=(meta-'suggestion')||jsonb_build_object('withdrawnSuggestion',(meta->'suggestion')||jsonb_build_object('withdrawnBy',e.id,
+    'withdrawnSeq',jsonb_build_array(e.created_at,e.id)));
+   r.steps:=jsonb_set(r.steps,ARRAY[step_id,'fieldMeta',field_id],meta);
+   withdrawn:=jsonb_set(withdrawn,ARRAY[step_id],coalesce(withdrawn->step_id,'[]')||to_jsonb(field_id));
+  END LOOP;
+  FOR step_id IN SELECT jsonb_object_keys(changed) LOOP
+   r.steps:=jsonb_set(r.steps,ARRAY[step_id,'version'],to_jsonb((old_steps->step_id->>'version')::integer+1));
+   r.steps:=artifact_invalidate(r.workflow,r.steps,step_id);
+   versions:=versions||jsonb_build_object(step_id,r.steps->step_id->'version');
+  END LOOP;
+  UPDATE artifact_rounds SET steps=r.steps WHERE id=r.id;
+  code:=CASE WHEN changed='{}' THEN 'suggested' ELSE 'applied' END;
+ END IF;
+ response:=jsonb_build_object('executionId',e.id,'result',code,'ruleVersion',1,'versions',versions,'fields',fields,'discarded',discarded);
+ response:=response||CASE WHEN withdrawn='{}' THEN '{}'::jsonb ELSE jsonb_build_object('withdrawn',withdrawn) END;
+ INSERT INTO artifact_requests VALUES(d.project_id,capture_request_id,r.id,'opc_capture',payload,response);
  RETURN response;
 END $function$;
 
