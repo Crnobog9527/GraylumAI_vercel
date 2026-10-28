@@ -25,6 +25,9 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   // a profile; admission still needs a profile entry with evidence for the purpose, format and reasoning.
   'openai/gpt-6.1-sol':'openai',
   'anthropic/claude-opus-5.5':'anthropic',
+  // CORE-PATH-V2 V2-11 (controller 2026-10-28): the browser journeys run on Haiku 5.5 so one suite costs cents. Like every other
+  // route here this only allows a profile; admission still needs a profile with evidence per purpose, format and reasoning.
+  'anthropic/claude-haiku-5.5':'anthropic',
 };
 /** The model/route pairs whose request shape and output semantics were approved (staging and production alike). */
 export const isAdmittedRoute = (model: string, endpointTag: string) => admittedRoutes[model] === endpointTag;
