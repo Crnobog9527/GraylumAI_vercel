@@ -183,6 +183,25 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: without a positioning the fallback rule goes to
     .toEqual(['decision:ok', 'model:ok', 'model:unusable']);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-7b: the single-compare budget also bounds what the user may pay, not only the provider cost', async () => {
+  // The bounds of one compare as admitted: U (USD, the columns plus the positioning check) and G (credits, at q = 100, m = 6).
+  const probe = await member();
+  await compare(probe, async (_url, init) => sse('gen-cmp-' + randomUUID(), JSON.parse(String(init?.body)).model, 'A'));
+  const bounds = (await db.query('select reserved_usd::float8 u,reserved_credits g from turns where actor_id=$1', [probe.actor])).rows[0];
+  // A budget above the provider cost bounds but below what the credits cost: refused (G > budget x q).
+  const usd = Math.ceil(bounds.u * 1.5 * 1e6) / 1e6;
+  expect(bounds.g).toBeGreaterThan(usd * 100);
+  const f = await member();
+  const transport: typeof fetch = async () => { throw new Error('nothing may be sent'); };
+  const budget = (value: string) => db.query(`update system_settings set value=jsonb_set(value,'{compare,maxBudgetUsd}',to_jsonb($1::text))
+    where key=$2`, [value, FUSION_SETTINGS_KEY]).then(() => clearCatalogCache());
+  await budget(usd.toFixed(6));
+  try {
+    expect(await compare(f, transport)).toEqual([{ type: 'error', code: 'FUSION_BUDGET_EXCEEDED' }]);
+    expect((await db.query('select count(*)::int n from turns where actor_id=$1', [f.actor])).rows[0].n).toBe(0);
+  } finally { await budget('5'); }
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-7b: every column refusing under the fallback rule is a positioning refusal, counted toward the cap', async () => {
   const f = await member();
   const transport: typeof fetch = async (_url, init) => { const body = JSON.parse(String(init?.body));

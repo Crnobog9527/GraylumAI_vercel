@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { compareRequest, assertCompareFits, snapshotHash, workspaceDependencies, type CompareParts } from '../fusion/compareSnapshot';
 import { columnStreamer } from '../fusion/compareStream';
+import { decimal, DECIMAL_SCALE } from '../bill2/decimal';
 import { fusionRequestBody } from '../fusion/request';
 import { readFusionSettings } from '../fusion/settings';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
@@ -83,8 +84,11 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   const q = quotes[0]!.q;
   const credits = columns.map(c => callCredits(q, c.upperUsd, c.multiplier));
   const gCredits = credits.reduce((a, b) => a + b, 0);
-  const usd = columns.reduce((sum, c) => sum + Number(c.upperUsd), 0);
-  if (settings.maxBudgetUsd !== null && usd > Number(settings.maxBudgetUsd)) return emit(fail('FUSION_BUDGET_EXCEEDED'));
+  // The single-compare budget (Owner 10-26) holds both ways, as overCompareBudget: the columns' provider cost bounds, and what
+  // the user may pay (each column rounded on its own) against the budget converted at q.
+  const usd = columns.reduce((sum, c) => sum + decimal(c.upperUsd), 0n);
+  if (settings.maxBudgetUsd === null || usd > decimal(settings.maxBudgetUsd)
+    || BigInt(gCredits) > decimal(settings.maxBudgetUsd) * decimal(q) / (DECIMAL_SCALE * DECIMAL_SCALE)) return emit(fail('FUSION_BUDGET_EXCEEDED'));
 
   // 3. Open: Gold, >= 2 models, <= 500 credits, one compare at a time; the compare record; the freeze of every column.
   const db = fusionDatabase(deps.clients, input.actorId);

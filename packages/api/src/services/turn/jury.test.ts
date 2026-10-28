@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * group (runGroup) and the database are replaced; what is checked is which step is claimed, how the outcome of the group
  * moves the review and how the turn is closed (fixed-price delivery, refunds, waiting, unknown results).
  */
-const m = vi.hoisted(() => ({ read: vi.fn(), decide: vi.fn(), buildMembers: vi.fn(), runGroup: vi.fn(), close: vi.fn(), rpc: vi.fn(),
+const m = vi.hoisted(() => ({ settings: vi.fn(), member: vi.fn(), read: vi.fn(), decide: vi.fn(), buildMembers: vi.fn(), runGroup: vi.fn(), close: vi.fn(), rpc: vi.fn(),
   callsAt: vi.fn() }));
 vi.mock('../fusion/reviewRecord', async original => ({ ...(await original<typeof import('../fusion/reviewRecord')>()),
   reviewRecord: () => ({ read: m.read, replay: vi.fn() }) }));
@@ -20,6 +20,10 @@ vi.mock('./fusionCalls', async original => ({ ...(await original<typeof import('
 vi.mock('./fusionQuote', () => ({ fusionQuote: async (_a: unknown, i: { modelId: string }) => ({ modelId: i.modelId, q: '100',
   multiplier: '6', outputLimit: 100, reasoning: {}, policy: {} }), fusionCall: (quote: object) => ({ ...quote, upperUsd: '0.01' }) }));
 vi.mock('../fusion/request', async original => ({ ...(await original<typeof import('../fusion/request')>()), fusionRequestBody: () => '{}' }));
+vi.mock('../fusion/settings', async original => ({ ...(await original<typeof import('../fusion/settings')>()),
+  readFusionSettings: async () => m.settings() }));
+vi.mock('../membershipEntitlements', () => ({ readMembershipEntitlements: async () => ({}),
+  assertFusionEntitlement: () => { if (m.member() === false) throw new Error('FUSION_MEMBERSHIP_REQUIRED'); } }));
 vi.mock('../models/openRouterKey', async original => ({ ...(await original<typeof import('../models/openRouterKey')>()),
   readOpenRouterKeyOrUnset: async () => 'SYNTHETIC' }));
 import { juryTurn } from './jury';
@@ -43,6 +47,8 @@ beforeEach(() => {
   m.buildMembers.mockResolvedValue(REVIEWERS.map(modelId => ({ ...member, modelId })));
   m.runGroup.mockResolvedValue(REVIEWERS.map(() => ({ ok: true, text: '{}', verdict: 'usable' })));
   m.close.mockResolvedValue({ turnId: 7, closeKind: 'completed', chargedCredits: 1500, settlement: 'done', replay: false });
+  m.settings.mockReturnValue({ review: { enabled: true, reviewerModelIds: REVIEWERS, summaryModelId: SUMMARY } });
+  m.member.mockReturnValue(true);
 });
 
 describe('jury turn advance', () => {
@@ -106,11 +112,28 @@ describe('jury turn advance', () => {
     m.read.mockResolvedValue(view({ config: over }));
     expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'ended' });
     expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', refundAll: true,
-      product: { state: 'incomplete', outcome: { kind: 'fusion_estimate_exceeded', phase: 'review' } } }));
+      product: { state: 'incomplete', outcome: { kind: 'price_changed', phase: 'review' } } }));
     m.read.mockResolvedValue(view({ config: over, round: 2 }));
     expect(await jury().advance('r')).toMatchObject({ next: true, reason: 'advanced' });
     expect(m.rpc).toHaveBeenLastCalledWith('fusion_review_turn_step', expect.objectContaining({
       p_to: { state: 'running', round: 2, phase: 'summary', attempt: 1 } }));
+  });
+  it('a switch turned off, a lost membership or a model removed from the panel sends nothing more and refunds (#1522 review)', async () => {
+    m.read.mockResolvedValue(view());
+    for (const [setup, reason] of [
+      [() => m.settings.mockReturnValue({ review: { enabled: false, reviewerModelIds: REVIEWERS, summaryModelId: SUMMARY } }), 'FUSION_REVIEW_DISABLED'],
+      [() => m.member.mockReturnValue(false), 'FUSION_MEMBERSHIP_REQUIRED'],
+      [() => m.settings.mockReturnValue({ review: { enabled: true, reviewerModelIds: REVIEWERS.slice(1), summaryModelId: SUMMARY } }), 'FUSION_MODEL_DENIED'],
+    ] as const) {
+      m.settings.mockReturnValue({ review: { enabled: true, reviewerModelIds: REVIEWERS, summaryModelId: SUMMARY } });
+      m.member.mockReturnValue(true);
+      setup();
+      m.runGroup.mockClear();
+      expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'ended' });
+      expect(m.runGroup).not.toHaveBeenCalled();
+      expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', refundAll: true,
+        product: { state: 'incomplete', outcome: { kind: 'claim_refused', reason, phase: 'review' } } }));
+    }
   });
   it('an ended review or one on the BILL2 path is not advanced', async () => {
     m.read.mockResolvedValueOnce(view({ state: 'completed' }));

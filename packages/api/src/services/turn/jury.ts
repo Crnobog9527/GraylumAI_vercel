@@ -7,7 +7,9 @@ import { config, reviewCore, type Source } from '../fusion/reviewCore';
 import { estimateReview } from '../fusion/reviewEstimate';
 import { readReviewSkill, resolveReviewSkill, reviewLanguageRule } from '../fusion/reviewPrompts';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from '../fusion/reviewRecord';
+import { claimOutcome } from '../fusion/reviewLimits';
 import { readFusionSettings } from '../fusion/settings';
+import { assertFusionEntitlement, readMembershipEntitlements } from '../membershipEntitlements';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { catalogRead } from '../runtime/catalogCache';
 import type { PricingDeps } from '../runtime/pricingAdmission';
@@ -34,6 +36,8 @@ import { QuoteError } from './quote';
 export type JuryDeps = { admin: SupabaseClient; clients: TurnClients; slots: CounterStore; transport?: typeof fetch;
   pricing?: PricingDeps; sleep?: (ms: number) => Promise<void> };
 export type JuryAdvance = { next: boolean; reason: string; dispatched?: number };
+const TRANSIENT = new Set(['TURN_DATABASE_UNAVAILABLE', 'TURN_PROVIDER_KEY_UNAVAILABLE', 'TURN_PRICE_UNAVAILABLE',
+  'TURN_BILLING_UNIT_UNAVAILABLE']);
 const ATTEMPTS = 3, NIL = '00000000-0000-0000-0000-000000000000';
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 const codeOf = (error: unknown) => error instanceof QuoteError || error instanceof TurnStop || error instanceof TurnDatabaseError
@@ -155,14 +159,17 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         let members: GroupMember[];
         try { members = await groupMembers(view, src, at, models); }
         catch (error) {
+          // A step refused for good (the BILL2 review's claimOutcome: switch off, membership, allowlist, size, price) ends or
+          // skips as there; what may clear by retrying (database, key, price snapshot) is thrown and retried by the relay.
           const code = codeOf(error);
-          if (!/^(FUSION_INPUT_TOO_LARGE|FUSION_ESTIMATE_EXCEEDED|TURN_INPUT_TOO_LARGE|TURN_MODEL_NOT_ADMITTED|TURN_PRICE_UNAVAILABLE|FUSION_REVIEW_STALE)$/.test(code)) throw error;
+          const outcome = TRANSIENT.has(code) ? null : claimOutcome(new Error(code));
+          if (!outcome) throw error;
           // A step refused for good: a debate round is skipped; round 1 or the summary ends the review (earlier receipts stay).
           if (at.phase === 'review' && at.round > 1) {
             await step(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: 1 });
             return { next: true, reason: 'advanced' };
           }
-          await end(view, 'incomplete', { kind: code.toLowerCase(), phase: at.phase });
+          await end(view, 'incomplete', { ...outcome, phase: at.phase });
           return { next: false, reason: 'ended' };
         }
         const fromSeq = Math.max(0, ...view.calls.map(c => c.seq ?? 0)) + 1;
@@ -206,6 +213,13 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
   /** The step's calls: the review's own requests (reviewCore), each bounded on its exact body within its frozen cap. */
   async function groupMembers(view: ReviewView, src: Source, at: ReviewPosition, models: string[]): Promise<GroupMember[]> {
     const cfg = config.parse(view.config);
+    // The live permissions before every group, as the BILL2 group admission (admission.ts): the switch, the membership and the
+    // allowlist may have changed since the review started; a revoked one never sends another paid call.
+    const settings = (await readFusionSettings(admin)).review;
+    if (!settings.enabled) throw new Error('FUSION_REVIEW_DISABLED');
+    assertFusionEntitlement(await readMembershipEntitlements(admin, actorId), 'review', models.length);
+    if (models.some(id => at.phase === 'summary' ? settings.summaryModelId !== id : !settings.reviewerModelIds.includes(id)))
+      throw new Error('FUSION_MODEL_DENIED');
     const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
     if (!key) throw new QuoteError('TURN_PROVIDER_KEY_UNAVAILABLE');
     const quotes = await panelQuotes(deps, cfg, key);
