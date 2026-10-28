@@ -4212,7 +4212,7 @@
   "fn:turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "9dbb859c9901",
   "fn:turn_call_identity(uuid,bigint,integer,text)": "40ec987e5d70",
   "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "134d118b31db",
-  "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "e59e26fbb3b2",
+  "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "17ca10b9f0c7",
   "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "4b42f46dc045",
   "fn:turn_settle_credits(uuid,uuid,integer,bigint)": "3ecf04bd4362",
   "fn:turn_tombstones(uuid,uuid,jsonb)": "7650ea48b0f5",
