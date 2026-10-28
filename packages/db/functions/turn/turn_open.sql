@@ -35,8 +35,7 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','stoppedAt','stopChargeable','stopAt']
-    OR (p_kind = 'report') <> (p_policy ? 'report') THEN
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -93,7 +92,6 @@ BEGIN
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    -- A report is admitted here, under the same locks as its freeze (V2-7a): price, membership, source, one per round.
     IF p_kind = 'report' THEN report := public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
@@ -103,8 +101,7 @@ BEGIN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;
 
-    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h)
-      || CASE WHEN report IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('report', report->'frozen') END;
+    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h);
     INSERT INTO turns (actor_id, session_id, request_id, kind, state, policy, reserved_credits, reserved_usd, input_bytes)
       VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', frozen, h, u_turn,
         (p_policy->>'inputBytes')::int)
@@ -128,7 +125,6 @@ BEGIN
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
-    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END). A new report: its frozen identity, confirmed source
-    -- and benchmark table, read under the open's locks (a replay runs nothing, so it gets none).
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
     'kindContext', CASE WHEN p_kind = 'report' THEN report END);
 END $function$;

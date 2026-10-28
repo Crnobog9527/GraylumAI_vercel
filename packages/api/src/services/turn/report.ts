@@ -105,7 +105,8 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   const turnId = opened.turnId;
   const close = (kind: CloseKind, extra: { body?: string; delivered?: boolean; failureCode?: string } = {}) =>
     db.close({ actorId: input.actorId, turnId, kind, delivered: extra.delivered ?? false, failureCode: extra.failureCode ?? null,
-      messages: extra.body === undefined ? [] : [{ role: 'assistant', content: extra.body }] });
+      // The report text is the kind's result (turn_report_apply keeps it hidden from history), never a conversation message.
+      messages: [], ...(extra.body === undefined ? {} : { kindResult: { body: extra.body } }) });
 
   // A dropped stream: was it the user's stop? One read, only then. A stop aborts the provider stream below.
   const abort = new AbortController();

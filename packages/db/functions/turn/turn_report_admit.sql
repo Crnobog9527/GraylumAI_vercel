@@ -11,6 +11,10 @@ AS $function$
 DECLARE flag jsonb; rep jsonb := p_policy->'report'; source jsonb; spec jsonb; item jsonb; scope jsonb; required integer;
   fixed integer;
 BEGIN
+  -- The stop's frozen fields are written by turn_stop only.
+  IF rep IS NULL OR jsonb_typeof(rep) <> 'object' OR p_policy ?| ARRAY['stoppedAt','stopChargeable','stopAt'] THEN
+    RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+  END IF;
   SELECT value::jsonb INTO flag FROM system_settings WHERE key = 'runtime_report_generation';
   IF flag IS DISTINCT FROM '{"enabled":true}'::jsonb THEN RAISE EXCEPTION 'REPORT_DISABLED' USING ERRCODE='P0001'; END IF;
   IF jsonb_typeof(rep) <> 'object' OR rep->>'projectId' !~ '^[0-9a-f-]{36}$' OR rep->>'roundId' !~ '^[0-9a-f-]{36}$'
@@ -57,8 +61,5 @@ BEGIN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS' USING ERRCODE='P0001';
   END IF;
   RETURN jsonb_build_object(
-    'frozen', jsonb_build_object('projectId', rep->>'projectId', 'roundId', rep->>'roundId',
-      'moduleId', source->>'moduleId', 'snapshotHash', source->>'snapshotHash',
-      'sections', spec->'sections', 'maxCharacters', spec->'maxCharacters'),
     'source', source, 'benchmarks', public.research_benchmark_rows(p_actor_id, p_session_id));
 END $function$;

@@ -118,7 +118,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     expect(context).toMatchObject({ providerRequestFormat: 'agent-turn-v5-stream', tools: [], network: 'deny',
       promptCache: { version: 'prompt-cache-v3', systemPrefixChars: 'SKILL TEXT'.length, historyMarker: false } });
     const close = t.rpc[1]![1];
-    expect(close).toMatchObject({ p_close_kind: 'completed', p_delivered: true, p_messages: [{ role: 'assistant', content: COMPLETE }] });
+    expect(close).toMatchObject({ p_close_kind: 'completed', p_delivered: true, p_messages: [], p_kind_result: { body: COMPLETE } });
     expect(t.events.at(-1)).toMatchObject({ type: 'result', chargedCredits: 500, closeKind: 'completed', delivered: true });
   });
 
@@ -158,7 +158,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     });
     await runReportTurn(t.deps, input, t.emit, gone.signal);
     expect(t.names()).toEqual(['turn_open', 'turn_report_read', 'turn_close']);
-    expect(t.rpc[2]![1]).toMatchObject({ p_close_kind: 'stopped', p_messages: [{ role: 'assistant', content: '## One\nPart' }] });
+    expect(t.rpc[2]![1]).toMatchObject({ p_close_kind: 'stopped', p_messages: [], p_kind_result: { body: '## One\nPart' } });
     expect(t.events.at(-1)).toMatchObject({ type: 'result', closeKind: 'stopped', delivered: false });
   });
 

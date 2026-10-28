@@ -1,23 +1,20 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-7a (number to be assigned by the controller): kind=report on the turn core (docs/launch/tasks/CORE-PATH-V2.md
--- sections 2.2, 2.5, 2.7, 4.1, 4.4; Owner 10-17 fixed price, 10-27 stop rule, 10-28 only reports can be stopped).
---   turn_report_admit  inside turn_open, for a new report: the switch, the fixed price the button showed is today's price, the
---                      one-call shape, membership, the confirmed source (report_source), an active module, the benchmark gate
---                      and one paid report per round; returns the frozen report identity, the source and the benchmark table
---   turn_open          the report branch above, returned as its kindContext (the 0421 per-kind hook; whole function,
---                      otherwise unchanged)
---   turn_stop          the user's stop of a running report: within 24 hours the first two are free, from the third the stop
---                      waits for the user's confirmation and then charges what was generated (at most the fixed price); the
---                      decision is frozen on the turn, so the close charges what the user was told; state -> stopping
---   turn_close         report rules only (whole function, otherwise unchanged): a stopping turn closes as stopped however
---                      the run ended, its saved text cut to what the user saw; a stop charges its frozen decision; a report
---                      that is not complete or stopped pays nothing (failed, interrupted, expired, erased: Owner 10-17); every
---                      report except a charged stop settles the user at once even while the provider cost is unknown; a
---                      report's text is stored hidden from the conversation history (visible=false), found by its turn
---   turn_report_read   the report turn of a round (or one turn): state, close, charge, stop decision and the saved text
--- Compatibility: nothing calls kind=report until the page switches (V2-10); the old report path is untouched.
--- Repeatable: CREATE OR REPLACE throughout. Recovery: re-apply 0421's turn_open and turn_close, drop the three new functions.
+-- CORE-PATH-V2 V2-7a (placeholder number; the controller assigns the real one before it goes to the database): kind=report on the
+-- turn core (docs/launch/tasks/CORE-PATH-V2.md 2.2, 2.5, 2.7, 4.1, 4.4; Owner 10-17 fixed price, 10-27 stop rule, 10-28 only
+-- reports can be stopped). The report's logic is in its own functions; turn_open and turn_close only dispatch to them (the 0421
+-- per-kind hook), rebuilt whole on their latest text:
+--   turn_report_admit       turn_open, new report: switch, today's fixed price (acceptedCredits), one-call shape, the round's
+--                           module, membership, confirmed source, benchmarks, one paid report per round; its result is the
+--                           report's kindContext (source and benchmark table)
+--   turn_stop               the user's stop of a running report: first two in 24 hours free; from the third it asks, and once
+--                           confirmed charges what was generated (at most the fixed price); the decision is frozen on the turn
+--   turn_report_close_kind  turn_close: a stopping report closes as stopped however the run ended
+--   turn_report_apply       turn_close's kind result: the report text, hidden from history, cut to what the user saw on a stop
+--   turn_report_settlement  turn_close: what the user pays and whether it waits for an unknown cost (only a charged stop does)
+--   turn_report_read        the report turn of a round (or one turn) with its saved text
+-- Compatibility: nothing calls kind=report until the page switches (V2-10); other kinds are unchanged; the old report path is
+-- untouched. Repeatable: CREATE OR REPLACE throughout. Recovery: re-apply 0421's turn_open and turn_close, drop the new functions.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -32,6 +29,10 @@ AS $function$
 DECLARE flag jsonb; rep jsonb := p_policy->'report'; source jsonb; spec jsonb; item jsonb; scope jsonb; required integer;
   fixed integer;
 BEGIN
+  -- The stop's frozen fields are written by turn_stop only.
+  IF rep IS NULL OR jsonb_typeof(rep) <> 'object' OR p_policy ?| ARRAY['stoppedAt','stopChargeable','stopAt'] THEN
+    RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+  END IF;
   SELECT value::jsonb INTO flag FROM system_settings WHERE key = 'runtime_report_generation';
   IF flag IS DISTINCT FROM '{"enabled":true}'::jsonb THEN RAISE EXCEPTION 'REPORT_DISABLED' USING ERRCODE='P0001'; END IF;
   IF jsonb_typeof(rep) <> 'object' OR rep->>'projectId' !~ '^[0-9a-f-]{36}$' OR rep->>'roundId' !~ '^[0-9a-f-]{36}$'
@@ -78,10 +79,60 @@ BEGIN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS' USING ERRCODE='P0001';
   END IF;
   RETURN jsonb_build_object(
-    'frozen', jsonb_build_object('projectId', rep->>'projectId', 'roundId', rep->>'roundId',
-      'moduleId', source->>'moduleId', 'snapshotHash', source->>'snapshotHash',
-      'sections', spec->'sections', 'maxCharacters', spec->'maxCharacters'),
     'source', source, 'benchmarks', public.research_benchmark_rows(p_actor_id, p_session_id));
+END $function$;
+
+-- A report's close kind: a stop the user asked for (turn_stop) is honoured however the run ended (the reply finished first, the
+-- aborted stream, recovery); a failure that refunds everything keeps its full refund.
+CREATE OR REPLACE FUNCTION public.turn_report_close_kind(t turns, p_kind text)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT CASE WHEN t.state = 'stopping' AND p_kind IN ('completed','interrupted') THEN 'stopped' ELSE p_kind END
+$function$;
+
+-- What a report keeps from its result (the per-kind hook of turn_close): its text, hidden from the conversation history
+-- (visible=false, found by its turn); a stopped report keeps what the user saw (turn_stop's stopAt, in characters). Nothing is
+-- kept for a report that did not complete or stop (failed, interrupted, erased).
+CREATE OR REPLACE FUNCTION public.turn_report_apply(t turns, p_kind text, p_result jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE body text; next_seq integer;
+BEGIN
+  IF jsonb_typeof(p_result) <> 'object' OR jsonb_typeof(p_result->'body') <> 'string' OR (SELECT count(*) FROM jsonb_object_keys(p_result)) <> 1 THEN
+    RAISE EXCEPTION 'TURN_KIND_RESULT_INVALID' USING ERRCODE='22023';
+  END IF;
+  IF p_kind NOT IN ('completed','stopped') OR t.session_id IS NULL THEN RETURN; END IF;
+  body := CASE WHEN p_kind = 'stopped' AND t.policy ? 'stopAt' THEN left(p_result->>'body', (t.policy->>'stopAt')::int)
+    ELSE p_result->>'body' END;
+  SELECT coalesce(max(seq), 0) + 1 INTO next_seq FROM session_messages WHERE session_id = t.session_id;
+  INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash, visible)
+    VALUES (t.session_id, next_seq, 'assistant', t.id, body, encode(sha256(convert_to(body, 'UTF8')), 'hex'), false);
+END $function$;
+
+-- What the user pays for a report and whether that waits for an unknown provider cost (Owner 10-17: a complete report pays the
+-- fixed price; cut off, failed, interrupted, expired or deleted pays nothing; 10-27: a stop pays what turn_stop told the user).
+-- Only a charged stop depends on the provider cost; every other report settles the user at once. A stop closed without
+-- turn_stop's decision keeps the 24-hour count of turn_user_charge.
+CREATE OR REPLACE FUNCTION public.turn_report_settlement(t turns, p_kind text, p_delivered boolean, p_credits integer,
+  p_held integer, p_at timestamp with time zone, OUT charge integer, OUT settle_now boolean)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE fixed integer := coalesce((t.policy->>'fixedCredits')::int, p_held); chargeable boolean := (t.policy->>'stopChargeable')::boolean;
+BEGIN
+  IF p_kind = 'completed' THEN charge := CASE WHEN p_delivered THEN least(fixed, p_held) ELSE 0 END; settle_now := true;
+  ELSIF p_kind <> 'stopped' THEN charge := 0; settle_now := true;
+  ELSIF chargeable IS NULL THEN
+    charge := public.turn_user_charge(t.actor_id, t.id, 'stopped', false, false, p_credits, p_held, fixed, p_at); settle_now := false;
+  ELSE charge := CASE WHEN chargeable THEN least(p_credits, p_held, fixed) ELSE 0 END; settle_now := NOT chargeable;
+  END IF;
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
@@ -117,8 +168,7 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','stoppedAt','stopChargeable','stopAt']
-    OR (p_kind = 'report') <> (p_policy ? 'report') THEN
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -175,7 +225,6 @@ BEGIN
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    -- A report is admitted here, under the same locks as its freeze (V2-7a): price, membership, source, one per round.
     IF p_kind = 'report' THEN report := public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
@@ -185,8 +234,7 @@ BEGIN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;
 
-    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h)
-      || CASE WHEN report IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('report', report->'frozen') END;
+    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h);
     INSERT INTO turns (actor_id, session_id, request_id, kind, state, policy, reserved_credits, reserved_usd, input_bytes)
       VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', frozen, h, u_turn,
         (p_policy->>'inputBytes')::int)
@@ -210,12 +258,10 @@ BEGIN
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
-    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END). A new report: its frozen identity, confirmed source
-    -- and benchmark table, read under the open's locks (a replay runs nothing, so it gets none).
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
     'kindContext', CASE WHEN p_kind = 'report' THEN report END);
 END $function$;
 
--- The user's stop of a running report (Owner 10-27, 10-28). Lock order as turn_close: session, turn, account.
 CREATE OR REPLACE FUNCTION public.turn_stop(p_actor_id uuid, p_turn_id bigint, p_confirmed boolean, p_stop_at integer)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -261,7 +307,7 @@ AS $function$
 DECLARE
   t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
   v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
-  marker timestamptz; body text;
+  marker timestamptz;
 BEGIN
   IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
     RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
@@ -293,13 +339,9 @@ BEGIN
         INTO credits, pending, user_pending
       FROM turn_calls WHERE turn_id = p_turn_id;
       IF t.charged_credits IS NULL AND NOT user_pending THEN
-        -- A user stop charges what the user was told when they stopped (turn_stop's frozen decision).
-        charge := CASE WHEN t.close_kind = 'stopped' AND t.policy ? 'stopChargeable'
-          THEN CASE WHEN (t.policy->>'stopChargeable')::boolean
-            THEN least(credits, t.reserved_credits, coalesce((t.policy->>'fixedCredits')::int, t.reserved_credits)) ELSE 0 END
+        charge := CASE WHEN t.kind = 'report' THEN (public.turn_report_settlement(t, t.close_kind, t.delivered, credits, t.reserved_credits, t.closed_at)).charge
           ELSE public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
-            coalesce((t.policy->>'closeRefundAll')::boolean, false), credits, t.reserved_credits, (t.policy->>'fixedCredits')::int,
-            t.closed_at) END;
+          coalesce((t.policy->>'closeRefundAll')::boolean, false), credits, t.reserved_credits, (t.policy->>'fixedCredits')::int, t.closed_at) END;
         IF t.policy->>'holdId' IS NOT NULL THEN
           PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
         END IF;
@@ -315,10 +357,8 @@ BEGIN
   -- Only a report can be stopped by its user (Owner 10-28).
   IF v_kind = 'stopped' AND t.kind <> 'report' THEN RAISE EXCEPTION 'TURN_STOP_NOT_ALLOWED' USING ERRCODE='42501'; END IF;
   IF p_refund_all AND v_kind NOT IN ('failed','expired','erased') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023'; END IF;
-  -- The user stopped it (turn_stop): however the run ended (the reply finished first, the aborted stream, recovery), it is the
-  -- stopped report. A failure that refunds everything keeps its full refund.
-  IF t.state = 'stopping' AND v_kind IN ('completed','interrupted') THEN v_kind := 'stopped'; END IF;
   -- A tombstone wins: nothing is saved and the turn closes as erased.
+  IF t.kind = 'report' THEN v_kind := public.turn_report_close_kind(t, v_kind); END IF;
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
     OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
@@ -326,7 +366,8 @@ BEGIN
   -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
   --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
   -- No kind has one yet, so a result is refused rather than dropped.
-  IF p_kind_result IS NOT NULL THEN
+  IF t.kind = 'report' AND p_kind_result IS NOT NULL THEN PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
+  ELSIF p_kind_result IS NOT NULL THEN
     RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
   END IF;
 
@@ -351,12 +392,6 @@ BEGIN
   UPDATE daily_spend SET spent_usd = spent_usd + n_total,
       reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
     WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
-  -- A report's charge depends on its provider cost only for a charged stop (Owner 10-17: complete pays the fixed price, failed,
-  -- cut off, interrupted or deleted pays nothing; 10-27: a free stop pays nothing): every other report settles the user now,
-  -- even while the provider cost is unknown; only the platform's cost and the stop-loss wait for recovery.
-  IF t.kind = 'report' AND NOT (v_kind = 'stopped' AND coalesce((t.policy->>'stopChargeable')::boolean, true)) THEN
-    user_pending := false;
-  END IF;
   -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
   PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
 
@@ -364,12 +399,12 @@ BEGIN
   -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a
   -- concurrent close of the same actor that committed first is always before it, and a later settlement counts the same.
   marker := clock_timestamp();
-  -- A user stop pays what turn_stop told the user; a report that is neither complete nor stopped pays nothing.
-  charge := CASE WHEN t.kind = 'report' AND v_kind NOT IN ('completed','stopped') THEN 0
-    WHEN v_kind = 'stopped' AND t.policy ? 'stopChargeable'
-    THEN CASE WHEN (t.policy->>'stopChargeable')::boolean THEN least(credits, h, coalesce((t.policy->>'fixedCredits')::int, h)) ELSE 0 END
-    ELSE public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
-      (t.policy->>'fixedCredits')::int, marker) END;
+  IF t.kind = 'report' THEN
+    SELECT r.charge, user_pending AND NOT r.settle_now INTO charge, user_pending FROM public.turn_report_settlement(t, v_kind, p_delivered, credits, h, marker) r;
+  ELSE
+    charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
+      (t.policy->>'fixedCredits')::int, marker);
+  END IF;
 
   -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
   -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
@@ -378,17 +413,13 @@ BEGIN
     PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
   END IF;
 
-  -- The messages of a delivered turn, appended in order. A report's text is not conversation history (visible=false, found by
-  -- its turn); a stopped report keeps what the user saw (turn_stop's stopAt, in characters).
+  -- The messages of a delivered turn, appended in order.
   IF v_kind IN ('completed','stopped') AND t.session_id IS NOT NULL AND jsonb_typeof(p_messages) = 'array' THEN
     SELECT coalesce(max(seq), 0) INTO next_seq FROM session_messages WHERE session_id = t.session_id;
     FOR msg IN SELECT value FROM jsonb_array_elements(p_messages) LOOP
       next_seq := next_seq + 1;
-      body := CASE WHEN v_kind = 'stopped' AND msg->>'role' = 'assistant' AND t.policy ? 'stopAt'
-        THEN left(msg->>'content', (t.policy->>'stopAt')::int) ELSE msg->>'content' END;
-      INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash, visible)
-        VALUES (t.session_id, next_seq, msg->>'role', p_turn_id, body, encode(sha256(convert_to(body, 'UTF8')), 'hex'),
-          t.kind <> 'report');
+      INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash)
+        VALUES (t.session_id, next_seq, msg->>'role', p_turn_id, msg->>'content', encode(sha256(convert_to(msg->>'content', 'UTF8')), 'hex'));
     END LOOP;
   END IF;
 
@@ -398,7 +429,7 @@ BEGIN
       charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
       absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,
       settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END,
-      stopped_by_user = (v_kind = 'stopped'), delivered = p_delivered AND v_kind = 'completed', -- a stopped report is never a complete one
+      stopped_by_user = (v_kind = 'stopped'), delivered = p_delivered AND v_kind IN ('completed','stopped'),
       failure_code = p_failure_code
     WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
   IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
@@ -406,7 +437,6 @@ BEGIN
     'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false) || tomb;
 END $function$;
 
--- The newest report turn of a round in a session (p_turn_id NULL), or one report turn; its text unless the conversation was deleted.
 CREATE OR REPLACE FUNCTION public.turn_report_read(p_actor_id uuid, p_session_id uuid, p_round_id uuid, p_turn_id bigint)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -429,7 +459,7 @@ BEGIN
      WHERE m.session_id = p_session_id AND m.turn_id = t.id AND m.role = 'assistant' AND m.deleted_at IS NULL
      ORDER BY m.seq DESC LIMIT 1;
   END IF;
-  RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'closeKind', t.close_kind, 'delivered', t.delivered,
+  RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'closeKind', t.close_kind, 'delivered', t.delivered AND t.close_kind = 'completed',
     'chargedCredits', t.charged_credits, 'settlement', t.settlement, 'fixedCredits', (t.policy->>'fixedCredits')::int,
     'stopChargeable', (t.policy->>'stopChargeable')::boolean, 'report', t.policy->'report', 'body', body,
     'openedAt', t.opened_at, 'closedAt', t.closed_at);
@@ -439,12 +469,13 @@ DO $$
 DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
-    'turn_report_admit(uuid,uuid,jsonb)', 'turn_open(uuid,uuid,uuid,text,jsonb,bigint)',
-    'turn_stop(uuid,bigint,boolean,integer)', 'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)',
-    'turn_report_read(uuid,uuid,uuid,bigint)'] LOOP
+    'turn_report_admit(uuid,uuid,jsonb)', 'turn_report_close_kind(turns,text)', 'turn_report_apply(turns,text,jsonb)',
+    'turn_report_settlement(turns,text,boolean,integer,integer,timestamp with time zone)',
+    'turn_open(uuid,uuid,uuid,text,jsonb,bigint)', 'turn_stop(uuid,bigint,boolean,integer)',
+    'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)', 'turn_report_read(uuid,uuid,uuid,bigint)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
   END LOOP;
-  -- turn_report_admit stays internal (turn_open's report branch).
+  -- The report helpers stay internal (turn_open's and turn_close's dispatch).
   FOREACH f IN ARRAY ARRAY[
     'turn_open(uuid,uuid,uuid,text,jsonb,bigint)', 'turn_stop(uuid,bigint,boolean,integer)',
     'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)', 'turn_report_read(uuid,uuid,uuid,bigint)'] LOOP

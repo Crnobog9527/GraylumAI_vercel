@@ -626,15 +626,17 @@ try{
    assert.ok(locks<=40,`turn_open relation locks ${locks}`);
   }finally{await c.query('rollback');}
   report.checks.push(`service role only (helpers unexposed); no advisory locks, session SET or temp tables; turn_open holds ${report.turnOpenRelationLocks} relation locks on core-path tables (<= 40) plus ${report.turnOpenLedgerLocks} in the ledger leaves`);
-  // V2-7a: a report's open also reads its source (report_source, membership, benchmarks); the core-path tables stay <= 40 and
-  // the source tables (the artifact, draft, research and payment-fact reads of the old report admission) are recorded apart.
-  const r=await account(),src=await reportSource(r),chatTables=new Set((await lockedBy(()=>open(a))).map(x=>x.tbl));
+  // V2-7a: a report's open also reads its source (report_source, membership, benchmarks). Plan 3.1's core-path tables (turns,
+  // runtime_sessions, profiles, daily_spend, session_messages, the tombstone table) stay <= 40; the source tables (the artifact,
+  // draft, research and payment-fact reads of the old report admission) and the ledger leaves are recorded apart.
+  const r=await account(),src=await reportSource(r);
+  const coreTables=new Set(['turns','turns_id_seq','runtime_sessions','profiles','daily_spend','session_messages','account_erasure_requests']);
   const ledger=new Set(['subscription_credit_grants','user_subscriptions','billing_history','credit_package_sources','credit_source_entries',
    'credit_source_entries_id_seq','credit_source_reviews','payment_orders','bill2_runs','pay_disputes']);
   const rows=await lockedBy(()=>openReport(r,src));
-  const core=rows.filter(x=>chatTables.has(x.tbl)&&!ledger.has(x.tbl)).reduce((n,x)=>n+x.n,0);
-  report.reportOpenRelationLocks={core,source:rows.filter(x=>!chatTables.has(x.tbl)&&!ledger.has(x.tbl)).reduce((n,x)=>n+x.n,0),
-   ledger:rows.filter(x=>ledger.has(x.tbl)).reduce((n,x)=>n+x.n,0)};
+  const sum=keep=>rows.filter(keep).reduce((n,x)=>n+x.n,0);
+  const core=sum(x=>coreTables.has(x.tbl));
+  report.reportOpenRelationLocks={core,source:sum(x=>!coreTables.has(x.tbl)&&!ledger.has(x.tbl)),ledger:sum(x=>ledger.has(x.tbl))};
   assert.ok(core<=40,`report turn_open core-path relation locks ${core}`);
   report.checks.push(`a report's turn_open: ${core} relation locks on core-path tables (<= 40), ${report.reportOpenRelationLocks.source} on its source reads, ${report.reportOpenRelationLocks.ledger} in the ledger leaves`);
  }

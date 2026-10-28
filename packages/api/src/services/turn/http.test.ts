@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatDeps } from './chat';
 import { handleTurnRequest, type TurnHttpDeps } from './http';
 
-const run = vi.hoisted(() => vi.fn()), report = vi.hoisted(() => vi.fn());
+const run = vi.hoisted(() => vi.fn());
+const report = vi.hoisted(() => vi.fn());
 vi.mock('./chat', () => ({ runChatTurn: run }));
 vi.mock('./report', async original => ({ ...await original<object>(), runReportTurn: report }));
 
