@@ -9,9 +9,9 @@
 | --- | --- | --- |
 | `01-positioning-report.spec.ts` | ① 定位三步（含对标）→ 生成报告（确认框 500 积分）→ 13 章 → 定稿；③ 报告停止（前两次 24 小时内免费并全额退回；之后先弹确认，“继续生成”继续、“确认停止”按已生成部分扣费）；⑥ 评审团逐章选择并结算；④a 删除已定稿草稿的对话（留只读条目，旧链接不白屏） | gold |
 | `02-free-chat.spec.ts` | ② 自由对话：自动加载 Skill、触发一次研究工具、回复完成、扣费 | pro |
-| `04-delete-and-erase.spec.ts` | ④b 删除 20 轮长对话（行消失、旧链接回到起始页）；④c 注销账号（登录被拒） | pro、erase |
-| `05-compare.spec.ts` | ⑤ 对比两个模型：两列都有结果，合计扣费 = 各列之和 | gold |
-| `99-model-check.spec.ts` | 本次运行里所有语言模型调用都是 Claude Haiku 5.5 | — |
+| `04-delete-and-erase.spec.ts` | ④b 删除 20 轮长对话（行消失、旧链接回到起始页）；④c 注销账号（登录被拒）**待定**：人机验证的站点密钥是凭证，要 Owner 决定后设 `CORE_E2E_ENABLE_ERASE=1` 才跑 | pro、erase |
+| `05-compare.spec.ts` | ⑤ 对比两个模型：左列 Haiku、右列是对比名单里最便宜的另一个模型，两列都有结果，合计扣费 = 各列之和 | gold |
+| `99-model-check.spec.ts` | 本次运行里语言模型调用只允许 Claude Haiku 5.5，以及对比旅程的那一个“最便宜的另一个模型” | — |
 
 01 里的几个测试共用一份草稿（对标会真实花钱查询，不为每条旅程重建），按顺序跑。
 
@@ -36,16 +36,33 @@
 
 `node scripts/e2e-core-path/seed.mjs --out <文件>` 建/刷新三个专用账号（gold 至少 6000 积分、pro 至少 2000、erase 100 且每次重建），密码随机、只写进 `--out` 文件（0600），不打印。只接受 staging 项目（脚本里硬校验，正式项目一律拒绝）。需要 `E2E_SEED_SUPABASE_URL`、`E2E_SEED_SERVICE_ROLE_KEY`、`CORE_E2E_EMAIL_DOMAIN`（邮箱域名不进仓库）。写 staging，由总控执行。
 
-## 测试用模型：Claude Haiku 5.5
+## 测试用模型：Claude Haiku 5.5（总控照这一节执行）
 
-OpenRouter 有 `anthropic/claude-haiku-5.5`（目录价 输入 $0.1/百万、输出 $0.5/百万，上下文 100 万），但 staging 的 `ai_models` 里**还没有这个模型**（现有 7 个：Qwen3.8 Max、Opus 5.5、Sonnet 5.5、Gemini 3.8 Flash、Gemini 4 Argon、GPT-6 Luna、GPT-6.1 Sol）。不改代码、不给测试账号单独指定模型。用纯配置办法，由总控在测试窗口期间执行，跑完切回：
+**结论：不是纯配置。** 查证后有三层，第一层要先合一个代码 PR：
 
-1. 后台“添加模型”：模型 ID `anthropic/claude-haiku-5.5`，点“从 OpenRouter 读取”，选线路，保存价格快照。
-2. `system_settings.runtime_payg_staging` 追加该模型各用途的 profile（对话/报告/整理/研究/评审…），需要小额真实取样证据（`scripts/payg-profile`，Haiku 价格极低，预计远低于 1 美元，仍属付费调用，需先批预算）。
-3. 测试窗口 `call_policies` 加该模型条目（价格按 `deriveFrozenPrices`），`billing_payg_start_thresholds` 补对应路线。
-4. 切换（跑完切回，先保存原值）：定位 Skill 模块的 `model_id` 和 `report_model_id`（`modules` 表，对话与报告）；`primary_model_id`（自由对话）；`fusion_settings.review` 的评审席位和汇总模型（现为 Argon/GPT/Sonnet/Opus，一次评审就可能超过 0.5 美元，必须换成 Haiku）；`fusion_settings.compare.allowedModelIds` 至少两个可对比模型（对比旅程要两列，可以是 Haiku 加一个便宜模型，需要 Owner 知情，见下）；`assistant_model_id`、`v3_summary_model_id` 如被用到。
+1. **代码**：`packages/api/src/services/runtime/paygHostPolicy.ts` 的 `admittedRoutes` 是写死的“已批准的模型/线路”清单（现有：Sonnet 5.5、Gemini 3.8 Flash、Gemini 4 Argon、GPT-6 Luna、GPT-6.1 Sol、Opus 5.5）。没有 `anthropic/claude-haiku-5.5 → anthropic`，哪怕配置写对了准入也认不出它（Gemini 4 Argon 当时就是这样接入的，见 `docs/launch/FUSION_ARGON.md`）。要先开一个小 PR 加这一行和测试（不扩大用途）。
+2. **取样证据**：`runtime_payg_staging` 里每个模型/线路/用途组合都要有真实取样证据（`scripts/payg-profile`，Haiku 目录价 输入 $0.1/百万、输出 $0.5/百万，预计整套远低于 1 美元，总控已批上限 1 美元）。Sonnet 现有档案覆盖：skill、report、ordinary、skill_matching、fusion_review、fusion_compare；整理类（organizer、attached_organizer）现在是 GPT-6 Luna；评审汇总（fusion_summary）是 Opus。Haiku 要覆盖的用途取决于下面第 4 步切哪些席位。
+3. **配置写入**（下面清单）。
 
-对比旅程要“选 2 个模型”：只有一个 Haiku 时，第二个必须是别的模型，那一列就不是 Haiku，`99-model-check` 会失败。要么把同一个模型的两条线路都列进可对比名单，要么对比旅程放宽成“允许名单里最便宜的两个”，请总控定。
+OpenRouter 线路已核对：`anthropic/claude-haiku-5.5` 有 10 条线路，其中 `anthropic`、`google-vertex/global`、`azure/global`、`amazon-bedrock`、`claude-on-aws` 价格为输入 $0.1、输出 $0.5、缓存读 $0.01、缓存写 $0.125（每百万），上下文 1,000,000，最大输出 128,000，都支持 tools 和 reasoning；`*/us`、`*/eu` 区域线路贵 10%。**选 `anthropic`**（和 Sonnet、Opus 同一个线路名，已有同线路的准入与密钥绑定经验）。
+
+### 写 staging 的清单（总控执行；每步先备份旧值，跑完切回）
+
+压测结束、第 1、2 步的 PR 已合并并部署后：
+
+| 步骤 | 写哪里 | 内容 | 备份 / 切回 |
+| --- | --- | --- | --- |
+| 0 | 备份 | 把下面各键的当前完整值导出到本机 `~/.graylum/core-e2e-backup-<日期>/`（`system_settings` 的 `runtime_payg_staging`、`billing_payg_start_thresholds`、`billing_provider_prices`、`fusion_settings`、`primary_model_id`、`assistant_model_id`、`v3_summary_model_id`；定位模块在 `modules` 表的 `model_id`、`report_model_id`；测试窗口 `call_policies` 数组） | 文件权限 600，不进仓库 |
+| 1 | 后台“模型管理 → 添加模型” | 模型 ID `anthropic/claude-haiku-5.5`，名称 `claude-haiku-5.5`；点“从 OpenRouter 读取”，线路选 `anthropic`，保存价格快照（MODEL-PRICING-SYNC）。读回 `ai_models.config.pricing.endpoints` 里有 `anthropic` 且 `admissible: true`；`config.reasoning.route = anthropic` | 切回：该行置 `is_active=false`（不删） |
+| 2 | `billing_provider_prices` | 确认后台价格同步已为该路线写入价格；缺则按后台“价格”页补（输入 0.1、输出 0.5、缓存读 0.01、缓存写 0.125 每百万，单位与其他模型一致） | 备份见步骤 0 |
+| 3 | `runtime_payg_staging.profiles` | 追加第 2 层取样 PR 产出的 `*.profiles-draft.json` 里 Haiku 的档案（写前用 `paygHostProfile` 校验整份 value；不得出现重复的 Haiku/线路档案；保留 version、enabled、windowId 和全部原档案） | 切回：移除追加的 Haiku 档案 |
+| 4 | 测试窗口 `call_policies` | 追加 Haiku 条目（provider openrouter、protocol openrouter-chat-v1、account 沿用 Sonnet 的同一平台绑定、providerSlug `anthropic`、contextTokens 1000000、multiplier 与窗口一致、价格按 `deriveFrozenPrices`）；写前重新核价；断言只改目标窗口恰好 1 行 | 切回：移除该条目 |
+| 5 | `billing_payg_start_thresholds` | 为 Haiku 每个用途补一条（同模型 Sonnet 的 typicalUsd 可作参考，取样 PR 会给出名义成本） | 切回：移除这些条目 |
+| 6 | 把用到的席位切到 Haiku | ① 定位 Skill 模块：`modules.model_id`、`modules.report_model_id`；② `system_settings.primary_model_id`（自由对话）；③ `assistant_model_id`、`v3_summary_model_id`（整理/摘要，现为 GPT-6 Luna；不换就会在 `99-model-check` 里出现 GPT-6 Luna）；④ `fusion_settings.review`：`reviewerModelIds`、`reviewerRoles`、`summaryModelId` 全换成 Haiku（现为 Sonnet/Sol/Argon + Opus 汇总，一次评审就可能超过 0.5 美元）；⑤ `fusion_settings.compare.allowedModelIds` 在原名单（Sonnet、Gemini 3.8 Flash、GPT-6.1 Sol、Opus）基础上追加 Haiku，**不要**另加第二条 Haiku 线路。对比旅程自动选 Haiku + 名单里最便宜的另一个（现为 Gemini 3.8 Flash），并断言它确实最便宜 | 切回：按步骤 0 的备份逐项还原；`allowedModelIds` 去掉 Haiku |
+| 7 | 读回 | 逐项读回上面的键，确认和预期一致，并用后台“测试准入”看 Haiku 在上述用途下可被准入（不被“缺报价/缺档案/错线路”拒绝） | — |
+| 8 | 跑种子脚本、通知实跑 | 见上面“账号和种子” | — |
+
+跑完后按步骤 0 的备份切回第 6、5、4、3 步，Haiku 模型行可以保留（置为停用）。
 
 ## 当前路径与未验证的部分
 

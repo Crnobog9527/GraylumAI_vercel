@@ -42,6 +42,9 @@ test('journey 4b: a 20-turn free conversation is deleted; the row goes and the o
  */
 test('journey 4c: closing an account signs it out and the account can no longer log in', async ({ openAs, browser }) => {
   test.setTimeout(5 * 60_000);
+  // PENDING (controller 2026-10-28): closing an account re-checks the password behind a human-check widget, and its site key is a
+  // credential only the Owner may change. Until staging has a test key and the Owner says so, this journey is off.
+  test.skip(process.env.CORE_E2E_ENABLE_ERASE !== '1', 'account closing is pending the human-check test key (Owner decision)');
   const { email, password } = credentialsFor('erase');
   test.skip(!email || !password, 'needs CORE_E2E_ERASE_EMAIL / CORE_E2E_ERASE_PASSWORD');
   const { page } = await openAs('erase');
