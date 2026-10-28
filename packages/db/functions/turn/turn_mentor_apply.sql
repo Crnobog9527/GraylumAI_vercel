@@ -14,25 +14,29 @@ DECLARE t turns; d opc_drafts; r artifact_rounds; p artifact_projects; req artif
  changed jsonb:='{}'; fields jsonb:='{}'; discarded jsonb:='[]'; versions jsonb:='{}'; old_steps jsonb;
  protected boolean; material_changed boolean; seq jsonb; suggestion jsonb; patch_index integer:=0;
  withdrawal jsonb; withdrawn jsonb:='{}'; withdraw_index integer:=0; withdraw_reason text; organizer_input jsonb;
- exec_id uuid; exec_at timestamptz; business uuid; archived timestamptz;
+ exec_id uuid; exec_at timestamptz; business uuid; written boolean := false;
 BEGIN
  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
  IF t.id IS NULL OR t.kind <> 'mentor' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
  IF d.draft_id IS NULL THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
- -- An archived business is read-only (opc_capture_apply's opc_assert_business_writable, same KEY SHARE lock so an archive
- -- cannot commit between this check and the write). The business may have been archived while the turn ran: nothing is
- -- written, and the turn itself still settles and keeps its reply.
  business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
- IF business IS NOT NULL THEN
-  SELECT archived_at INTO archived FROM opc_businesses WHERE id = business AND actor_id = p_actor_id FOR KEY SHARE;
-  IF archived IS NOT NULL THEN RETURN jsonb_build_object('result', 'archived'); END IF;
+ -- No explicit row lock (main-path rule: only the actor's profile and the session row; turn_close holds both here). Instead of
+ -- opc_capture_apply's project lock, the checklist is written only if it is still exactly what this pass read; a concurrent
+ -- edit (opc_information, opc_capture_resolve, a revision) makes the write miss, and the pass is computed again on the new
+ -- state, where the version check turns this turn's patches into suggestions, as before. At most three passes.
+ FOR attempt IN 1..3 LOOP
+ -- An archived business is read-only (opc_capture_apply's opc_assert_business_writable): nothing is written, and the turn
+ -- itself still settles and keeps its reply. Checked again on every pass.
+ IF business IS NOT NULL AND EXISTS (SELECT 1 FROM opc_businesses WHERE id = business AND actor_id = p_actor_id AND archived_at IS NOT NULL) THEN
+  RETURN jsonb_build_object('result', 'archived');
  END IF;
- SELECT * INTO p FROM artifact_projects WHERE id = d.project_id FOR UPDATE;
- -- Refresh the draft after waiting: a concurrent revision may have advanced it.
+ changed:='{}'; fields:='{}'; discarded:='[]'; versions:='{}'; withdrawn:='{}'; patch_index:=0; withdraw_index:=0;
  SELECT * INTO d FROM opc_drafts WHERE draft_id = d.draft_id AND actor_id = p_actor_id;
+ SELECT * INTO p FROM artifact_projects WHERE id = d.project_id;
  SELECT * INTO r FROM artifact_rounds WHERE id = d.round_id;
+ old_steps := r.steps;
  capture_request_id := overlay(md5('opc_capture:'||exec_id::text) placing 'f' from 13 for 1)::uuid;
  payload := jsonb_build_object('executionId', exec_id, 'ruleVersion', 1);
  SELECT * INTO req FROM artifact_requests WHERE project_id = d.project_id AND artifact_requests.request_id = capture_request_id;
@@ -58,7 +62,6 @@ BEGIN
   ELSIF jsonb_array_length(coalesce(output->'withdrawals','[]'))>12 THEN code:='invalid_output';END IF;
  END IF;
  IF code IS NULL THEN
-  old_steps:=r.steps;
   material_changed:=EXISTS(SELECT 1 FROM jsonb_each(r.steps) s
    WHERE s.value->'version' IS DISTINCT FROM p_result->'versions'->s.key);
   FOR patch IN SELECT * FROM jsonb_array_elements(output->'patches') LOOP
@@ -156,9 +159,16 @@ BEGIN
    r.steps:=artifact_invalidate(r.workflow,r.steps,step_id);
    versions:=versions||jsonb_build_object(step_id,r.steps->step_id->'version');
   END LOOP;
-  UPDATE artifact_rounds SET steps=r.steps WHERE id=r.id;
+  UPDATE artifact_rounds SET steps=r.steps WHERE id=r.id AND steps IS NOT DISTINCT FROM old_steps;
+  -- Someone else changed the checklist since this pass read it: compute again on the new state.
+  IF NOT FOUND THEN CONTINUE; END IF;
   code:=CASE WHEN changed='{}' THEN 'suggested' ELSE 'applied' END;
  END IF;
+ written := true;
+ EXIT;
+ END LOOP;
+ -- Three passes each overtaken by a concurrent edit: nothing is written; the turn still settles (a rare, recorded miss).
+ IF NOT written THEN RETURN jsonb_build_object('executionId', exec_id, 'result', 'conflict'); END IF;
  response:=jsonb_build_object('executionId',exec_id,'result',code,'ruleVersion',1,'versions',versions,'fields',fields,'discarded',discarded);
  response:=response||CASE WHEN withdrawn='{}' THEN '{}'::jsonb ELSE jsonb_build_object('withdrawn',withdrawn) END;
  INSERT INTO artifact_requests VALUES(d.project_id,capture_request_id,r.id,'opc_capture',payload,response);
