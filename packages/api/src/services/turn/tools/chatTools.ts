@@ -6,6 +6,7 @@ import { platformSecretReader, type SecretReader } from '../../research/runtime/
 import type { VendorCalls } from '../../research/runtime/subcall';
 import { researchToolBytes } from '../../runtime/researchAdmission';
 import { FREE_CHAT_RESEARCH } from '../../runtime/researchTurn';
+import { chatResearchEnabled } from '../../runtime/freeChatResearch';
 import { loadSkillToolBytes } from '../../runtime/loadSkillTool';
 import { skillCatalogInstructions, type SkillCatalogEntry } from '../../runtime/skillCatalog';
 import type { ConfigurationRows } from '../../runtime/settingsRows';
@@ -19,7 +20,7 @@ import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
 
 /*
  * CORE-PATH-V2 V2-6: the tools of a free chat (kind=chat, 2.7). The session's whitelist is the general research lookups
- * (when the chat research switch is on), load_skill (when the account has a Skill catalog) and read_source (when the kind
+ * (when the chat research switch is on and the route profile's tool ceiling holds them), load_skill (when the account has a Skill catalog) and read_source (when the kind
  * gives a reader); its definitions and the research/catalog instructions are the same on every turn of the session. What
  * this turn can use, and its limits and bounds, come from planTurnTools before turn_open.
  */
@@ -49,17 +50,22 @@ const REPLY_RESERVE_MS = 60_000;
 
 export async function prepareChatTools(input: { admin: SupabaseClient; configuration: Promise<ConfigurationRows>; tools: ChatToolDeps;
   actorId: string; sessionId: string; requiredBytes: number; interactiveBytes: number; quotedBytes: number;
-  modelMultiplier: string; defaultMultiplier: string }): Promise<ChatToolsSetup> {
+  modelMultiplier: string; defaultMultiplier: string;
+  /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
+  maxTools: number }): Promise<ChatToolsSetup> {
   const skills = input.tools.skills ? await input.tools.skills(input.actorId).catch(() => null) : null;
-  const offered: TurnToolName[] = [
-    ...(input.tools.readSource ? ['read_source' as const] : []),
-    ...(skills?.catalog.length ? ['load_skill' as const] : []),
-    ...GENERAL_RESEARCH_TOOLS as readonly TurnToolName[],
-  ];
+  // Whole groups in this order, each only if it still fits the profile's ceiling; the result depends on configuration only,
+  // so it is the same on every turn of the session (2.9 rule 2).
+  const offered: TurnToolName[] = [];
+  // The research lookups are offered only while the admin's chat research switch is on (a configuration change, not a turn's).
+  const researchOn = await chatResearchEnabled(input.admin, input.configuration).catch(() => false);
+  for (const group of [input.tools.readSource ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
+    researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : []]) if (offered.length + group.length <= input.maxTools) offered.push(...group);
   const research = offered.filter(name => (GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) as typeof GENERAL_RESEARCH_TOOLS[number][];
-  const definitionBytes = researchToolBytes(research, false, true) + (skills?.catalog.length ? loadSkillToolBytes() : 0)
-    + (input.tools.readSource ? Buffer.byteLength(READ_SOURCE_DESCRIPTION) + 256 : 0);
-  const catalogText = skills?.catalog.length ? skillCatalogInstructions(skills.catalog) : '';
+  const skillOffered = offered.includes('load_skill'), sourceOffered = offered.includes('read_source');
+  const definitionBytes = (research.length ? researchToolBytes(research, false, true) : 0) + (skillOffered ? loadSkillToolBytes() : 0)
+    + (sourceOffered ? Buffer.byteLength(READ_SOURCE_DESCRIPTION) + 256 : 0);
+  const catalogText = skillOffered ? skillCatalogInstructions(skills!.catalog) : '';
   const { plan, research: setup } = await planTurnTools({ admin: input.admin, configuration: input.configuration, offered,
     freeReady: { load_skill: Boolean(skills?.prepared.size) },
     requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText),
@@ -75,15 +81,15 @@ export async function prepareChatTools(input: { admin: SupabaseClient; configura
     plan, research: setup, inputLimit,
     sharedInstructions: researchInstructions(plan) + catalogText,
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
-      ...(skills?.catalog.length ? { skillCatalog: skills.catalog } : {}),
-      ...(input.tools.readSource ? { libraryRetrieval: true } : {}) },
+      ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
+      ...(sourceOffered ? { libraryRetrieval: true } : {}) },
     async build(calls, extra) {
       const built = turnTools({ plan, calls, multiplier: extra.multiplier, research: setup,
         suppliers: { slots: extra.slots, timeLeft: () => extra.deadline - Date.now() - REPLY_RESERVE_MS,
           ...(input.tools.vendors ? { vendors: input.tools.vendors } : {}) },
         accounts: { benchmark, currentMessage: extra.currentMessage },
-        ...(skills ? { skills: skills.prepared } : {}),
-        ...(input.tools.readSource ? { readSource: input.tools.readSource(input.actorId, input.sessionId) } : {}) });
+        ...(skillOffered ? { skills: skills!.prepared } : {}),
+        ...(sourceOffered && input.tools.readSource ? { readSource: input.tools.readSource(input.actorId, input.sessionId) } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
       const tools: RuntimeTool[] = built.tools.map(tool => ({ ...tool, async execute(args, callId) {
         try { return await tool.execute(args, callId); }

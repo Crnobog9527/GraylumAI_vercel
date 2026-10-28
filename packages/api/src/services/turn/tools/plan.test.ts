@@ -1,41 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../../research/vendors/config';
-import { tikhubRouteId } from '../../research/vendors/tikhub';
-import { FIRECRAWL_ROUTE } from '../../research/vendors/firecrawl';
-import { CHAT_RESEARCH_KEY } from '../../runtime/freeChatResearch';
-import { RESEARCH_PHASE } from '../../runtime/researchTurn';
 import { decimal } from '../../bill2/decimal';
 import { turnPolicy } from '../policy';
 import { paidToolBounds, planTurnTools, type PlanInput } from './plan';
 import { fallbackEligible, researchRounds } from './rounds';
-import { policy } from './testFixtures.test';
-
-// The research settings as freeChatResearch.test.ts seeds them (synthetic prices, never real ones).
-const actor = '10000000-0000-4000-8000-000000000001', now = Date.now(), day = 86_400_000;
-const routes = [...(['keyword_posts', 'account_profile', 'account_posts'] as const).map(kind => ({ platform: 'tiktok', kind, vendor: 'tikhub',
-  route: tikhubRouteId('tiktok', kind)!, backup: null, maxUnitsPerCall: '1' })),
-{ platform: 'web', kind: 'web_search', vendor: 'parallel', route: 'parallel:search:fast', backup: null, maxUnitsPerCall: '1' },
-{ platform: 'web', kind: 'web_fetch', vendor: 'firecrawl', route: FIRECRAWL_ROUTE, backup: null, maxUnitsPerCall: '1' }];
-const price = (provider: string, route: string | null, usageUnit: string) => ({ provider, route, appliesToUnlistedRoutes: route === null,
-  currency: 'USD', usageUnit, unitsPerPrice: '1', price: '0.01', usdPerCurrency: null, fxSourceUrl: null, fxEffectiveAt: null,
-  fxValidUntil: null, pricingBasis: 'list', sourceUrl: 'https://example.com/p', evidenceHash: 'a'.repeat(64),
-  verifiedAt: new Date(now - day).toISOString(), validUntil: new Date(now + 7 * day).toISOString(), chargeCondition: 'per call',
-  includedInReceipt: false, priceMultiplier: null });
-export function researchSettings(switchOn = true): Record<string, unknown> {
-  const vendor = { enabled: true, hardCapAttested: { by: actor, at: new Date(now).toISOString() } };
-  return {
-    [CHAT_RESEARCH_KEY]: switchOn,
-    research_tools_config: { ...researchToolsConfigSchema.parse({ ...DISABLED_RESEARCH_TOOLS, enabled: true,
-      vendors: { tikhub: vendor, parallel: vendor, firecrawl: vendor }, verifiedPlatforms: ['tiktok'], benchmarkPlatforms: ['tiktok'],
-      routes, limits: { maxSubcallsPerRound: 12, discoverSubcalls: 25 } }), revision: 3, updatedBy: actor, updatedAt: new Date(now).toISOString() },
-    billing_provider_prices: { version: 1, entries: [price('tikhub', null, 'call'), price('parallel', 'parallel:search:fast', 'sku_search'),
-      price('firecrawl', FIRECRAWL_ROUTE, 'credit')] },
-    billing_payg_start_thresholds: { version: 'v1', thresholds: routes.map(r => ({ model: `${r.vendor}:${r.route}`, purpose: RESEARCH_PHASE,
-      credits: 1 })) },
-  };
-}
+import { policy, researchSettings } from './testFixtures.test';
 
 function input(over: Partial<PlanInput> = {}, settings = researchSettings()): PlanInput {
   const rows = Object.entries(settings).map(([key, value]) => ({ key, value }));

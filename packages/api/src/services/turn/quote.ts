@@ -32,9 +32,9 @@ export class QuoteError extends Error {
 }
 
 export type ChatQuote = ModelCall & {
-  model: string; q: string; reasoning: ReasoningPolicy;
-  /** The billing unit's default multiplier (research routes without their own, V2-6). */
-  defaultMultiplier: string; outputLimit: number; inputLimit: number;
+  model: string; q: string; reasoning: ReasoningPolicy; outputLimit: number; inputLimit: number;
+  /** V2-6: the billing unit's default multiplier (research routes without their own) and the profile's tool ceiling. */
+  defaultMultiplier: string; maxTools: number;
   providerLimits: OpenRouterLimits; credential: () => Promise<string>;
 };
 
@@ -95,7 +95,8 @@ export async function chatQuote(admin: SupabaseClient, input: { modelId: string;
   const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
   if (!key) throw new QuoteError('TURN_PROVIDER_KEY_UNAVAILABLE');
   return {
-    modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, defaultMultiplier: unit.defaultMultiplier, upperUsd, pricing: nominal, providerLimits: limits,
+    modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, providerLimits: limits,
+    defaultMultiplier: unit.defaultMultiplier, maxTools: profile.maxTools,
     identity: { provider: 'openrouter', account: openRouterAccount(key), model, protocol: 'openrouter-chat-v1',
       providerLimits: limits, outputLimit, upperUsd },
     reasoning,

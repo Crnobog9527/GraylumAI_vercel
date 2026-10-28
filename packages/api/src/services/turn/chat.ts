@@ -97,7 +97,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     try {
       tools = await prepareChatTools({ admin, configuration, tools: deps.tools, actorId: input.actorId, sessionId: input.sessionId,
         requiredBytes, interactiveBytes, quotedBytes: quote.inputLimit, modelMultiplier: quote.multiplier,
-        defaultMultiplier: quote.defaultMultiplier });
+        defaultMultiplier: quote.defaultMultiplier, maxTools: quote.maxTools });
     } catch { return emit({ type: 'error', code: 'TURN_TOOLS_UNAVAILABLE' }); }
   }
   const inputLimit = tools ? tools.inputLimit : quote.inputLimit;
