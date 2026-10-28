@@ -680,6 +680,42 @@ try{
   assert.equal(await one('select budget_conflict v from turn_calls where turn_id=$1 and seq=2',[ob.turnId]),false);
   report.checks.push('a model call above its bound marks budget_conflict and blocks that model until reviewed; within the bound it does not');
  }
+ // 28. V2-3b (0503): turn_positioned, the positioning gate's narrow check, agrees with opc_has_confirmed_positioning on a confirmed
+ // positioning and an unpublished round (an erased source version: the same join condition as the old check); it differs only where the old check re-validates the evidence
+ // or the Skill package (controller 10-29: such a positioning counts as positioned). turn_open returns it.
+ {
+  const positioned=async(evidence='[]',state='published')=>{
+   const a=await account(),sk=randomUUID(),mod=randomUUID(),rev=randomUUID(),p=randomUUID(),r=randomUUID(),v=randomUUID();
+   await c.query("insert into skills(id,skill_key,content_kind) values($1::uuid,'tc-'||$1::text,'directory')",[sk]);
+   await c.query("insert into modules(id,title,skill_id,active) values($1,'TC fixture',$2,true)",[mod,sk]);
+   await c.query("insert into skill_revisions(id,skill_id,version,content,content_hash,published_by) values($1,$2,1,'fixture',repeat('a',64),$3)",[rev,sk,a.actor]);
+   await c.query(`insert into skill_packages(revision_id,skill_id,request_id,manifest,package_hash,entry_hash,expected_version,actor_id)
+    values($1,$2,gen_random_uuid(),'{}',repeat('b',64),repeat('a',64),0,$3)`,[rev,sk,a.actor]);
+   await c.query(`insert into artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version)
+    values($1::uuid,$2,$3,$4,'source-'||$1::text,'source title',1)`,[p,a.actor,mod,sk]);
+   await c.query(`insert into artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,state,steps)
+    values($1,$2,$3,repeat('b',64),'{}',repeat('c',64),repeat('d',64),$4,'{}')`,[r,p,rev,state]);
+   await c.query(`insert into artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)
+    values($1,$2,$3,1,'{}',repeat('e',64),$4)`,[v,p,r,evidence]);
+   await c.query("insert into opc_businesses(id,actor_id,name,current_source_version_id) values(gen_random_uuid(),$1,'business',$2)",[a.actor,v]);
+   return {a,v};
+  };
+  const both=async a=>[await one('select turn_positioned($1) v',[a.actor]),await one('select opc_has_confirmed_positioning($1) v',[a.actor])];
+  // The old check also reads the Skill package through the permission chain (entitlement, package files), which this minimal
+  // fixture does not set up: exactly the dependency the gate drops. Where neither needs it, the two agree.
+  const ok=await positioned();
+  assert.equal(await one('select turn_positioned($1) v',[ok.a.actor]),true,'a confirmed positioning');
+  assert.deepEqual((await open(ok.a)).positioning,{positioned:true,refusals24h:0});
+  const none=await account();
+  assert.deepEqual(await both(none),[false,false],'no positioning');
+  const draft=await positioned('[]','draft');
+  assert.deepEqual(await both(draft.a),[false,false],'the round is not published');
+  // The documented difference: evidence that cannot be read back no longer blocks the gate's answer.
+  const unreadable=await positioned(JSON.stringify([randomUUID()]));
+  assert.deepEqual(await both(unreadable.a),[true,false],'unreadable evidence: positioned for the gate only');
+  assert.equal(await one("select has_function_privilege('service_role','public.turn_positioned(uuid)','EXECUTE') v"),false);
+  report.checks.push('turn_positioned: a confirmed positioning is positioned (and turn_open returns it); it agrees with opc_has_confirmed_positioning on none and unpublished (erased versions: the same join condition); unreadable evidence or Skill package still counts as positioned');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
@@ -687,7 +723,7 @@ try{
    'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)'])
    for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]])
     assert.equal(await one("select has_function_privilege($1,$2,'EXECUTE') v",[role,'public.'+fn]),want,`${fn} ${role}`);
-  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)',
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)','turn_positioned(uuid)',
    'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)'])
    assert.equal(await one("select has_function_privilege('service_role',$1,'EXECUTE') v",['public.'+fn]),false,fn);
   const text=await one("select string_agg(pg_get_functiondef(oid),E'\\n') v from pg_proc where proname like 'turn\\_%' and pronamespace='public'::regnamespace");
