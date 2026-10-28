@@ -68,6 +68,19 @@ async function panelQuotes(deps: JuryDeps, cfg: { reviewers: string[]; summary: 
     phase === 'fusion_summary' ? summary : reviewers.find(q => q.modelId === modelId)! };
 }
 
+/** The quotes estimateReview reads, one per model (it matches by model id): a model that is both a reviewer and the summary
+ * keeps the larger of its two output limits, since each phase's bound takes the smaller of that limit and its own tokens. */
+export function estimateQuotes(quotes: readonly FusionQuote[]) {
+  const byModel = new Map<string, { modelId: string; providerLimits: FusionQuote['policy']['providerLimits']; outputLimit: number;
+    multiplier: string }>();
+  for (const quote of quotes) {
+    const known = byModel.get(quote.modelId);
+    if (!known || quote.outputLimit > known.outputLimit) byModel.set(quote.modelId, { modelId: quote.modelId,
+      providerLimits: quote.policy.providerLimits, outputLimit: quote.outputLimit, multiplier: quote.multiplier });
+  }
+  return [...byModel.values()];
+}
+
 export function juryTurn(deps: JuryDeps, actorId: string) {
   const { admin } = deps;
   const record = reviewRecord(admin, actorId), core = reviewCore(admin, actorId), db = fusionDatabase(deps.clients, actorId);
@@ -91,8 +104,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
     const all = [...quotes.reviewers, quotes.summary];
     const q = all[0]!.q;
     const sent = (value: string) => Buffer.byteLength(JSON.stringify(value)) + 4096;
-    const estimate = estimateReview({ quotes: all.map(quote => ({ modelId: quote.modelId, providerLimits: quote.policy.providerLimits,
-      outputLimit: quote.outputLimit, multiplier: quote.multiplier })) as never, creditsPerUsd: q,
+    const estimate = estimateReview({ quotes: estimateQuotes(all) as never, creditsPerUsd: q,
       reviewers: settings.reviewerModelIds, summary: settings.summaryModelId, maxRounds: settings.maxRounds,
       maxBudgetUsd: settings.maxBudgetUsd, opinionTokens: settings.opinionOutputTokens, summaryTokens: settings.summaryOutputTokens,
       fieldCount: preview.fieldCount, snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,

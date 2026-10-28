@@ -26,7 +26,7 @@ vi.mock('../membershipEntitlements', () => ({ readMembershipEntitlements: async 
   assertFusionEntitlement: () => { if (m.member() === false) throw new Error('FUSION_MEMBERSHIP_REQUIRED'); } }));
 vi.mock('../models/openRouterKey', async original => ({ ...(await original<typeof import('../models/openRouterKey')>()),
   readOpenRouterKeyOrUnset: async () => 'SYNTHETIC' }));
-import { juryTurn } from './jury';
+import { estimateQuotes, juryTurn } from './jury';
 
 const REVIEWERS = ['00000000-0000-4000-8000-00000000000a', '00000000-0000-4000-8000-00000000000b', '00000000-0000-4000-8000-00000000000c'];
 const SUMMARY = '00000000-0000-4000-8000-0000000000d0';
@@ -50,6 +50,14 @@ beforeEach(() => {
   m.close.mockResolvedValue({ turnId: 7, closeKind: 'completed', chargedCredits: 1500, settlement: 'done', replay: false });
   m.settings.mockReturnValue({ review: { enabled: true, reviewerModelIds: REVIEWERS, summaryModelId: SUMMARY } });
   m.member.mockReturnValue(true);
+});
+
+describe('jury estimate quotes', () => {
+  it('a model that is both a reviewer and the summary is estimated with the larger output limit (#1522 review)', () => {
+    const quote = (modelId: string, outputLimit: number) => ({ modelId, outputLimit, multiplier: '6', policy: { providerLimits: {} } }) as never;
+    expect(estimateQuotes([quote('a', 4096), quote('b', 4096), quote('a', 16384)]).map(q => [q.modelId, q.outputLimit]))
+      .toEqual([['a', 16384], ['b', 4096]]);
+  });
 });
 
 describe('jury turn advance', () => {
