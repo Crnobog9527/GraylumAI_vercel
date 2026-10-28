@@ -4243,7 +4243,7 @@
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "17ca10b9f0c7",
   "fn:turn_fusion_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "2b5745934e54",
   "fn:turn_fusion_close(uuid,bigint,text,boolean,boolean,text,jsonb)": "7a496f3051af",
-  "fn:turn_fusion_open(uuid,uuid,uuid,text,jsonb,jsonb)": "3d4166a6a149",
+  "fn:turn_fusion_open(uuid,uuid,uuid,text,jsonb,jsonb)": "0b2aef5f361e",
   "fn:turn_fusion_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text,jsonb)": "3a9af7e3df64",
   "fn:turn_fusion_recovery(integer)": "b27b9cb58ce8",
   "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "cb5244286199",

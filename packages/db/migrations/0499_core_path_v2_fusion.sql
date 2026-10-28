@@ -146,6 +146,12 @@ BEGIN
       RETURNING * INTO cmp;
     pol := p_policy || jsonb_build_object('compareId', cmp.id);
     opened := turn_open(p_actor_id, p_session_id, p_request_id, p_kind, pol, NULL);
+    -- Again under turn_open's account lock: two compares opened at once in two conversations both passed the check above;
+    -- the second waits on the account row and sees the first here, and rolls back (its freeze and record with it).
+    IF EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare' AND state IN ('running','paused','stopping')
+        AND id <> (opened->>'turnId')::bigint) THEN
+      RAISE EXCEPTION 'TURN_COMPARE_ACTIVE' USING ERRCODE='55P03';
+    END IF;
     UPDATE fusion_compares SET turn_id = (opened->>'turnId')::bigint WHERE id = cmp.id;
     -- The positioning gate of a compare (as turn_open's for a free chat): confirmed positioning, refusals in 24 hours.
     RETURN opened || jsonb_build_object('compareId', cmp.id, 'positioning', jsonb_build_object(

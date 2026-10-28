@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { compareRequest, assertCompareFits, snapshotHash, type CompareParts } from '../fusion/compareSnapshot';
+import { columnStreamer } from '../fusion/compareStream';
 import { fusionRequestBody } from '../fusion/request';
 import { readFusionSettings } from '../fusion/settings';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
@@ -138,18 +139,24 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
     }
     // 5. The columns: the request rebuilt from turn_open's history with the rule actually admitted; never above its frozen bound.
     const request = compareRequest(partsWith(history, fallback));
+    // The provider's stream frames become the column's visible text; under the fallback rule the start is held until it
+    // cannot be the refusal marker, and a refused column is never shown (as the BILL2 column, compareStream.columnStreamer).
+    const streamers = quotes.map((_quote, index) => columnStreamer({ holdForRefusal: fallback,
+      emit: text => emit({ type: 'column', index, delta: text }) }));
     const members = quotes.map((quote, index) => {
       const body = fusionRequestBody(quote.policy as never, request, quote.outputLimit, quote.reasoning);
       const call = fusionCall(quote, body);
       if (callCredits(q, call.upperUsd, call.multiplier) > credits[index]!) throw new TurnStop('TURN_INPUT_TOO_LARGE');
       return { call, body, phase: 'fusion_compare' as const,
         judge: (text: string) => ({ verdict: fallback && isPositioningRefusal(text) ? 'no_delivery' as const : 'usable' as const }),
-        onChunk: (chunk: string) => emit({ type: 'column', index, delta: chunk }) };
+        onChunk: streamers[index]!.onChunk };
     });
     const outcomes: MemberOutcome[] = await runGroup({ db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId,
       nextSeq: () => ++seq, credential: async () => key, transport: deps.transport }, members);
-    outcomes.forEach((outcome, index) => emit({ type: 'answer', index, ok: outcome.ok && outcome.verdict === 'usable',
-      ...(outcome.ok ? {} : { code: outcome.code }) }));
+    outcomes.forEach((outcome, index) => {
+      streamers[index]!.settle(outcome.ok && outcome.verdict === 'no_delivery');
+      emit({ type: 'answer', index, ok: outcome.ok && outcome.verdict === 'usable', ...(outcome.ok ? {} : { code: outcome.code }) });
+    });
     // 6. Close: the columns delivered pay their own cost (each rounded); none delivered pays nothing.
     if (outcomes.some(o => !o.ok && o.code === 'TURN_TOMBSTONED')) {
       await close('erased', { failureCode: 'turn_tombstoned' });
@@ -157,6 +164,13 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
     }
     const delivered = outcomes.some(o => o.ok && o.verdict === 'usable');
     const unknown = outcomes.some(o => !o.ok && o.code === 'TURN_CALL_UNKNOWN');
+    // Nothing delivered because the models refused under the fallback rule: a positioning refusal, counted toward the refund
+    // cap (turn_fusion_open's refusals24h), as the free chat's; repeating it cannot keep using models for free.
+    const refusedAll = !delivered && outcomes.some(o => o.ok && o.verdict === 'no_delivery');
+    if (refusedAll && !unknown) {
+      await close('failed', { refundAll: true, failureCode: 'positioning_required' });
+      return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
+    }
     const closed = delivered ? await close('completed', { delivered: true })
       : await close(unknown ? 'interrupted' : 'failed', { refundAll: !unknown, failureCode: 'compare_no_answer' });
     emit({ type: 'result', turnId: opened.turnId, compareId, chargedCredits: closed.chargedCredits, settlement: closed.settlement });

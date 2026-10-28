@@ -116,6 +116,11 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns, each bou
   expect(events.map(e => e.type).filter(t => t !== 'column'), JSON.stringify(events)).toEqual(['opened', 'answer', 'answer', 'result']);
   expect(bodies.map(b => b.model).sort()).toEqual(PAIRS.map(p => p[0]).sort());
   const result = events.at(-1) as Extract<CompareEvent, { type: 'result' }>;
+  // The columns stream the answers' text, not provider frames (#1522 review).
+  for (const [index] of models.entries()) {
+    const text = events.filter(e => e.type === 'column' && e.index === index).map(e => (e as { delta: string }).delta).join('');
+    expect(PAIRS.map(p => 'Answer of ' + p[0])).toContain(text);
+  }
   // Each column: n = (1000 x 0.000001 + 50 x 0.000002) = 0.0011 USD; ceil(100 x 0.0011 x 6) = 1 credit per column.
   expect(result).toMatchObject({ chargedCredits: 2, settlement: 'done' });
   expect(await credits(f.actor)).toBe(998);
@@ -170,9 +175,24 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: without a positioning the fallback rule goes to
   expect(bodies.every(b => b.includes(POSITIONING_MARKER.slice(0, 12)))).toBe(true);
   expect(events.filter(e => e.type === 'answer').map(e => (e as { ok: boolean }).ok).sort()).toEqual([false, true]);
   expect(events.at(-1)).toMatchObject({ type: 'result', chargedCredits: 1 });
+  // The refusing column never streams its marker (#1522 review); the other column's answer does.
+  const shown = events.filter(e => e.type === 'column').map(e => (e as { delta: string }).delta).join('');
+  expect(shown).toBe('A real answer');
   expect((await db.query(`select c.call_kind,c.status from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id
     where t.actor_id=$1 order by c.seq`, [f.actor])).rows.map(r => r.call_kind + ':' + r.status).sort())
     .toEqual(['decision:ok', 'model:ok', 'model:unusable']);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: every column refusing under the fallback rule is a positioning refusal, counted toward the cap', async () => {
+  const f = await member();
+  const transport: typeof fetch = async (_url, init) => { const body = JSON.parse(String(init?.body));
+    return sse('gen-cmp-' + randomUUID(), body.model, POSITIONING_MARKER); };
+  const events = await compare(f, transport);
+  expect(events.at(-1)).toMatchObject({ type: 'error', code: 'POSITIONING_REQUIRED' });
+  expect(events.filter(e => e.type === 'column')).toEqual([]);
+  expect((await db.query('select failure_code,charged_credits from turns where actor_id=$1', [f.actor])).rows)
+    .toEqual([{ failure_code: 'positioning_required', charged_credits: 0 }]);
+  expect(await credits(f.actor)).toBe(1000);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-7b: a column broken after it started keeps its freeze for recovery and is never sent again', async () => {

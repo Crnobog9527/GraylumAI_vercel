@@ -180,7 +180,23 @@ try{
   assert.match(await refusal(one('select turn_open($1,$2,$3,$4,$5) v',[b.actor,b.session,randomUUID(),'chat',JSON.stringify({q,uTurnUsd:0.1,
    gCredits:60,minCredits:10,uModelCredits:30,historyItems:10,inputBytes:1000,limits:{model:1,paidTools:0,freeTools:0},stopLoss})])),
    /TURN_SESSION_BUSY/,'a compare is a turn of its conversation');
-  report.checks.push('concurrency: a jury leaves its draft conversation free (a chat turn opens meanwhile); a compare occupies its conversation; one compare per user');
+  // Two compares opened at the same time in two conversations of one account: one opens, the other is refused (#1522 review).
+  const d=await account(),second=randomUUID();
+  await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+   [second,d.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
+  const q1=await peer(),q2=await peer();
+  try{
+   await q1.query('begin');
+   const first=await open(d,{kind:'compare',pol:comparePolicy(),product:cp,client:q1});
+   const racing=open(d,{kind:'compare',session:second,pol:comparePolicy(),product:cp,client:q2}).then(v=>({v}),e=>({e:e.message}));
+   await new Promise(r=>setTimeout(r,300));
+   await q1.query('commit');
+   assert.ok(first.turnId);
+   assert.match((await racing).e??'',/TURN_COMPARE_ACTIVE/);
+  }finally{await q1.end();await q2.end();}
+  assert.equal(await one("select count(*)::int v from turns where actor_id=$1 and kind='compare'",[d.actor]),1);
+  assert.equal(await one('select count(*)::int v from fusion_compares where actor_id=$1',[d.actor]),1);
+  report.checks.push('concurrency: a jury leaves its draft conversation free (a chat turn opens meanwhile); a compare occupies its conversation; one compare per user, also for two opened at once in two conversations');
  }
  // 7. Compare: at least two models, bounds <= 500 credits; N columns; each column rounded on its own; a refused column costs
  // nothing; adoption appends the question and the chosen answer once; a conversation that moved on gets a quote.
