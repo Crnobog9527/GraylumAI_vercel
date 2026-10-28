@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 start threshold (number 0496 assigned by the controller; Owner 2026-10-28 restating 10-01: "按 10-01 的决定：余额够
+-- CORE-PATH-V2 start threshold (number 0422 assigned by the controller; Owner 2026-10-28 restating 10-01: "按 10-01 的决定：余额够
 -- 一轮正常费用就能开始，冻结取上限和余额的较小值，不够时中途暂停提示充值。"). The turn's policy carries minCredits = L, the start
 -- threshold of BILL-PAYG (max(1, ceil(typicalUsd x q x m)) per model and purpose, billing_payg_start_thresholds). What changes:
 --   turn_open         the available balance (not the freeze) is held against L, as bill2_payg_claim; the freeze stays
