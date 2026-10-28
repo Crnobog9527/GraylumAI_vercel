@@ -9,7 +9,7 @@ import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
 import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
 import { rowFor } from '../runtime/settingsRows';
 import { CORE_PATH_SETTING } from './settingKeys';
-import { readAdmissionSettings } from '../runtime/newWorkGate';
+import { readAdmissionSettings, type NewWorkGateResult, type RuntimeCallGate, type SettingsRead } from '../runtime/newWorkGate';
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import { freeChatInstructions } from '../runtime/primaryInstructions';
 import { assertRuntimeRequestCapacity } from '../runtime/context';
@@ -44,6 +44,9 @@ export const HISTORY_ITEMS = 100;
 
 export type ChatDeps = {
   admin: SupabaseClient; clients: TurnClients; slots: CounterStore;
+  /** The runtime rate limits and the one-switch pause (runtime/newWorkGate.ts), checked before the turn opens (message) and
+   *  before each model call (calls), as the old path does (CORE-PATH-V2 4.1). */
+  newWork: { message: (actorId: string, read: Promise<SettingsRead>) => Promise<NewWorkGateResult>; calls: RuntimeCallGate };
   /** OpenRouter transport (tests and the load-test stub); production uses fetch. */
   transport?: typeof fetch; pricing?: PricingDeps; gate?: PositioningGatePolicy;
 };
@@ -58,7 +61,14 @@ export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_PROVIDER_BUSY: { kind: 'failed', refundAll: true },
   TURN_PROVIDER_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
   TURN_INPUT_TOO_LARGE: { kind: 'failed', refundAll: true },
+  TURN_NEW_CALLS_PAUSED: { kind: 'failed', refundAll: true },
+  TURN_RATE_LIMITED: { kind: 'failed', refundAll: true },
+  TURN_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
+  TURN_USAGE_CONFIGURATION_REQUIRED: { kind: 'failed', refundAll: true },
 };
+/** A refusal of the new-work gate as a turn code: the administrator's pause, a minute or day limit, or limits unavailable. */
+const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
+  usage_configuration_required: 'TURN_USAGE_CONFIGURATION_REQUIRED' } as const;
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
@@ -68,6 +78,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const config = coreSetting.safeParse(core.error ? null : core.data?.value);
   if (!config.success || !config.data.enabled) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   const settings = await readAdmissionSettings(admin, configuration);
+  // The one-switch pause and the message limits, before anything is frozen (the old path's admission check).
+  const admitted = await deps.newWork.message(input.actorId, Promise.resolve(settings));
+  if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
   const budgets = await readPurposeBudgets(admin, configuration);
   let quote;
   try {
@@ -182,10 +195,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         }
         if (text.length > sentChars) { emit({ type: 'text', delta: text.slice(sentChars) }); sentChars = text.length; }
       },
-      exchange: (_sequence, body, onChunk) => {
+      exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, quote.inputLimit); }
-        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); return Promise.reject(stopped); }
+        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
+        // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
+        const gate = await deps.newWork.calls(input.actorId, 1, 'bill2.v2');
+        if (!gate.ok) { stopped = new TurnStop(GATE_CODES[gate.reason]); throw stopped; }
         return modelCall(callDeps, quote, request, onChunk)
           .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       },

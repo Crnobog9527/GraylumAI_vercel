@@ -8,7 +8,7 @@ import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRou
 import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
 import type { PositioningClassifier } from '../runtime/positioningGate';
 import { POSITIONING_MARKER } from '../runtime/positioningFallback';
-import { runChatTurn, CORE_PATH_SETTING } from './chat';
+import { runChatTurn, CORE_PATH_SETTING, type ChatDeps } from './chat';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
 import { RUNTIME_PAYG_SETTING } from './quote';
@@ -109,11 +109,14 @@ const sse = (id: string, parts: string[]) => new Response(parts.map(part => text
 
 // The synthetic Decisions check: allowed, reporting a provider cost of 0.00003 USD.
 const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.00003); return 'allow'; };
+// The runtime rate limits and pause (newWorkGate) are Redis-backed; here a stub that admits, or refuses as a case needs.
+const admit = async () => ({ ok: true as const });
+type NewWork = ChatDeps['newWork'];
 async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier;
-  onEvent?: (event: TurnEvent) => void }) {
+  onEvent?: (event: TurnEvent) => void; newWork?: NewWork }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
-    gate: { classify: input.gate ?? allowGate } },
+    gate: { classify: input.gate ?? allowGate }, newWork: input.newWork ?? { message: admit, calls: admit } },
   { actorId: input.actor, sessionId: input.session, requestId: randomUUID(), text: input.text }, e => { events.push(e); input.onEvent?.(e); }));
   return { events, calls };
 }
@@ -291,4 +294,24 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: the balance is held against the start threshold
   clearCatalogCache();
   expect((await turn({ actor: unset.actor, session: unset.session, text: 'Hello', transport })).events)
     .toEqual([{ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' }]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: the one-switch pause and the call limits refuse before anything is frozen or sent', async () => {
+  const transport = vi.fn<typeof fetch>();
+  // Paused by the administrator (stopNewCalls) or over the message limit: refused before the turn opens.
+  const paused = await setup();
+  const out = await turn({ actor: paused.actor, session: paused.session, text: 'Hello', transport,
+    newWork: { message: async () => ({ ok: false, reason: 'paused', retryAfter: 60 }), calls: admit } });
+  expect(out.events).toEqual([{ type: 'error', code: 'TURN_NEW_CALLS_PAUSED' }]);
+  expect((await db.query('select count(*)::int n from turns where actor_id=$1', [paused.actor])).rows[0].n).toBe(0);
+  // Over the daily call limit at the model call: no call row, nothing sent, the turn closes with a full refund.
+  const limited = await setup();
+  const out2 = await turn({ actor: limited.actor, session: limited.session, text: 'Hello', transport,
+    newWork: { message: admit, calls: async () => ({ ok: false, reason: 'call_limited', retryAfter: 3600, window: 'day' }) } });
+  expect(out2.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_RATE_LIMITED' });
+  expect(transport).not.toHaveBeenCalled();
+  expect((await db.query("select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model'", [limited.actor])).rows[0].n).toBe(0);
+  expect((await db.query('select close_kind,charged_credits from turns where actor_id=$1', [limited.actor])).rows)
+    .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);
+  expect((await db.query('select credits from profiles where id=$1', [limited.actor])).rows[0].credits).toBe(1000);
 });
