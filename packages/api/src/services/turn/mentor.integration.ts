@@ -361,3 +361,17 @@ it('RUNTIME: CORE-PATH-V2 V2-5: the one-switch pause refuses before anything ope
     [f.actor])).rows[0].n).toBe(0);
   expect(await credits(f.actor)).toBe(1000);
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start pauses the turn (waiting for credits), never closes it', async () => {
+  const f = await setup();
+  // A balance of exactly L (24 + 6 = 30 credits): the turn opens with H = 30; after the reply the organizer needs min(G_org, L) more.
+  await db.query('update profiles set credits=30 where id=$1', [f.actor]);
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Sell coffee to students'))
+    : prose('gen-reply-' + n, 'Good. Who buys it?'));
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'error', code: 'TURN_PAUSED_FOR_CREDITS' });
+  expect(t.bodies.map(b => b.model)).toEqual([MENTOR]);
+  expect((await db.query('select state,pause_reason,close_kind from turns where actor_id=$1', [f.actor])).rows)
+    .toEqual([{ state: 'paused', pause_reason: 'waiting_credits', close_kind: null }]);
+  expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
+});

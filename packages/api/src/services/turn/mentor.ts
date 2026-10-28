@@ -61,7 +61,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   // The administrator's pause and the message limit, before anything is frozen (as chat.ts).
   const admitted = await deps.newWork.message(input.actorId, Promise.resolve(catalog.settings));
   if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
-  if (Buffer.byteLength(input.text) > 8000 || Buffer.byteLength(input.text) > mentor.inputLimit)
+  // The product limit is 8000 characters (as the old mentor request); the model's input budget is in bytes, checked apart.
+  if (input.text.length > 8000 || Buffer.byteLength(input.text) > mentor.inputLimit)
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
 
   // 1. Open: freeze, read the draft and its checklist in the same transaction.
@@ -151,7 +152,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), gate: callGate,
         template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
       catch (error) {
-        if (error instanceof TurnStop && error.code === 'TURN_TOMBSTONED') throw error;
+        // A deletion ends the turn; a credit pause keeps it waiting (not closed, so a resume can still organize this reply).
+        if (error instanceof TurnStop && (error.code === 'TURN_TOMBSTONED' || error.code === 'TURN_PAUSED_FOR_CREDITS')) throw error;
         logSwallowed('turn_mentor_organizer_failed', error, { category: 'ai' });
       }
     }
