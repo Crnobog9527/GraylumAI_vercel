@@ -451,6 +451,20 @@ try{
   assert.ok(near(Number(after.s)-Number(before.s),0.02),`spent ${after.s} - ${before.s}`);
   report.checks.push('an unusable result the provider charged for: the user pays 0, the receipt keeps the actual cost and the stop-loss spends it');
  }
+ // 19. #1512 review: replaying an old request never reads back a deleted conversation or an erasing account's history.
+ {
+  for(const erase of [
+   a=>c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[a.session]),
+   a=>c.query('insert into account_erasure_requests(profile_id,request_id) values($1,$2)',[a.actor,randomUUID()]),
+  ]){
+   const a=await account(),request=randomUUID();
+   const o=await open(a,{request});await close(a,o.turnId);
+   assert.equal((await open(a,{request})).replay,true,'the same request replays while nothing is deleted');
+   await erase(a);
+   assert.match(await refusal(open(a,{request})),/TURN_SESSION_ERASED|TURN_ACCOUNT_ERASING/);
+  }
+  report.checks.push('a replay of an old request is refused once the conversation is deleted or the account is erasing: no history read back');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
