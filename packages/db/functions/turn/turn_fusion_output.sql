@@ -31,9 +31,9 @@ BEGIN
     IF o.turn_id IS NOT NULL THEN
       IF o.body_hash <> v_hash OR o.verdict <> p_output->>'verdict' THEN RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023'; END IF;
     ELSE
-      INSERT INTO fusion_turn_outputs (actor_id, turn_id, seq, review_id, compare_id, phase, body, body_hash, verdict)
+      INSERT INTO fusion_turn_outputs (actor_id, turn_id, seq, review_id, compare_id, phase, body, body_hash, verdict, deliverable)
         VALUES (p_actor_id, p_turn_id, p_seq, v_review, CASE WHEN v_review IS NULL THEN v_compare END, p_output->>'phase',
-          p_output->>'body', v_hash, p_output->>'verdict');
+          p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
   END IF;
   RETURN jsonb_build_object('productGone', gone) || tomb;

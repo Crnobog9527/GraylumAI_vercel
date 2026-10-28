@@ -377,7 +377,17 @@ try{
   await begin(a,o.turnId,2);await record(a,o.turnId,2,{output:seat('done')});
   assert.match(await refusal(one('select turn_fusion_output($1,$2,$3,$4) v',[a.actor,o.turnId,2,JSON.stringify(seat('x'))])),/TURN_CALL_DENIED/,
    'a call with its final receipt keeps the answer of its receipt');
-  report.checks.push('a complete answer whose cost is not final is saved and judged while its call stays open; repeat is a no-op, a different body conflicts, a settled call refuses');
+  // #1522 review: a deliverable revision saved before its cost was final still pays the fixed price once settled.
+  const d=await account(),rd=await review(d),od=await open(d,{product:{reviewId:rd}});
+  await begin(d,od.turnId,1);await one('select turn_call_identity($1,$2,$3,$4) v',[d.actor,od.turnId,1,'gen-summary']);
+  await one('select turn_fusion_output($1,$2,$3,$4) v',[d.actor,od.turnId,1,
+   JSON.stringify({phase:'fusion_summary',body:'revised',verdict:'usable',deliverable:true})]);
+  const pending=await close(d,od.turnId,'completed',{delivered:true,product:{state:'completed',outcome:{kind:'revised'}}});
+  assert.deepEqual([pending.settlement,pending.chargedCredits],['pending',null],'the cost is not known yet');
+  // The receipt arrives later (no deliverable mark in its usage): the settlement still charges the price.
+  await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[d.actor,od.turnId,1,'ok',0.05,0.05,'{}',null,hash('late'),null]);
+  assert.equal((await close(d,od.turnId,'completed')).chargedCredits,FIXED);
+  report.checks.push('a complete answer whose cost is not final is saved and judged while its call stays open; repeat is a no-op, a different body conflicts, a settled call refuses; a deliverable revision saved so still pays the fixed price');
  }
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.
  {

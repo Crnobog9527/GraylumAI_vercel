@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS public.fusion_turn_outputs (
   body text NOT NULL CHECK (octet_length(body) BETWEEN 1 AND 262144),
   body_hash text NOT NULL CHECK (body_hash ~ '^[a-f0-9]{64}$'),
   verdict text NOT NULL CHECK (verdict IN ('usable','format_invalid','revision_invalid')),
+  -- A summary that passed the host check and changes a section: the jury's fixed price is due (turn_user_charge), also when
+  -- the call's cost was not final when the answer was saved (turn_fusion_output).
+  deliverable boolean NOT NULL DEFAULT false CHECK (NOT deliverable OR (verdict = 'usable' AND phase = 'fusion_summary')),
   saved_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT fusion_turn_outputs_pk PRIMARY KEY (turn_id, seq),
   CONSTRAINT fusion_turn_outputs_call_ref FOREIGN KEY (turn_id, seq) REFERENCES public.turn_calls(turn_id, seq),
@@ -320,9 +323,9 @@ BEGIN
     IF o.turn_id IS NOT NULL THEN
       IF o.body_hash <> v_hash OR o.verdict <> p_output->>'verdict' THEN RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023'; END IF;
     ELSE
-      INSERT INTO fusion_turn_outputs (actor_id, turn_id, seq, review_id, compare_id, phase, body, body_hash, verdict)
+      INSERT INTO fusion_turn_outputs (actor_id, turn_id, seq, review_id, compare_id, phase, body, body_hash, verdict, deliverable)
         VALUES (p_actor_id, p_turn_id, p_seq, v_review, CASE WHEN v_review IS NULL THEN v_compare END, p_output->>'phase',
-          p_output->>'body', v_hash, p_output->>'verdict');
+          p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
   END IF;
   IF t.kind = 'jury' AND t.state = 'running'
@@ -364,9 +367,9 @@ BEGIN
     IF o.turn_id IS NOT NULL THEN
       IF o.body_hash <> v_hash OR o.verdict <> p_output->>'verdict' THEN RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023'; END IF;
     ELSE
-      INSERT INTO fusion_turn_outputs (actor_id, turn_id, seq, review_id, compare_id, phase, body, body_hash, verdict)
+      INSERT INTO fusion_turn_outputs (actor_id, turn_id, seq, review_id, compare_id, phase, body, body_hash, verdict, deliverable)
         VALUES (p_actor_id, p_turn_id, p_seq, v_review, CASE WHEN v_review IS NULL THEN v_compare END, p_output->>'phase',
-          p_output->>'body', v_hash, p_output->>'verdict');
+          p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
   END IF;
   RETURN jsonb_build_object('productGone', gone) || tomb;
@@ -789,7 +792,8 @@ BEGIN
     -- The jury's fixed price (Owner 10-17/10-27, V2-7b), as fusion_review_fee_settle_internal: a deliverable revision (a usable
     -- summary that changes a section) pays the price however the turn ended; an interruption or the 24-hour end pays the known
     -- usage, at most the price; no change, a failed revision, an incomplete review or an erasure pays nothing.
-    IF EXISTS (SELECT 1 FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.usage->>'deliverable' = 'true') THEN
+    IF EXISTS (SELECT 1 FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.usage->>'deliverable' = 'true')
+      OR EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = p_turn_id AND o.deliverable) THEN
       RETURN least(coalesce(p_fixed, p_held), p_held);
     END IF;
     IF p_kind IN ('interrupted','expired') THEN RETURN least(p_credits, coalesce(p_fixed, p_held), p_held); END IF;

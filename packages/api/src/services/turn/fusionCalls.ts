@@ -110,7 +110,7 @@ export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promi
     if (judged.verdict === 'no_delivery') return { status: 'unusable', usage: { verdict: 'no_delivery' }, output: null };
     return { status: judged.verdict === 'usable' ? 'ok' : 'unusable',
       usage: { verdict: judged.verdict, ...(judged.deliverable ? { deliverable: true } : {}) },
-      output: { phase: member.phase, body: text, verdict: judged.verdict } };
+      output: { phase: member.phase, body: text, verdict: judged.verdict, ...(judged.deliverable ? { deliverable: true } : {}) } };
   });
   const adapter = openRouterAdapter({ allowWorkspaceRead: true, credential: ctx.credential, transport: ctx.transport });
   const settled = await Promise.allSettled(members.map(member => {
@@ -129,7 +129,8 @@ export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promi
       const judged = member.judge(text);
       if (judged.verdict === 'no_delivery') return { ok: true, text, verdict: 'no_delivery' };
       try {
-        const kept = await ctx.db.output(ctx.turnId, seq, { phase: member.phase, body: text, verdict: judged.verdict });
+        const kept = await ctx.db.output(ctx.turnId, seq, { phase: member.phase, body: text, verdict: judged.verdict,
+          ...(judged.deliverable ? { deliverable: true } : {}) });
         if (kept.productGone || kept.sessionTombstoned || kept.accountErasing) return { ok: false, code: 'TURN_TOMBSTONED' };
       } catch (error) { return { ok: false, code: error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED' }; }
       return { ok: true, text, verdict: judged.verdict };
