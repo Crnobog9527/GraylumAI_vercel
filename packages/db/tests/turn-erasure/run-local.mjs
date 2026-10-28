@@ -131,7 +131,8 @@ try{
   assert.equal((await cleanup(a)).alreadyDeleted,true);
   report.checks.push('instant cleanup: clears the marked conversation (text, bodies), repeat no-op; a busy other conversation of the same account blocks neither mark nor cleanup and keeps its content');
  }
- // 4. content-erasure/instant "same conversation locked": a turn closing on it holds the session; bounded wait, then busy.
+ // 4. content-erasure/instant "same conversation locked": a turn closing on it holds the session; bounded wait, then busy;
+ //    and the deletion racing the real turn_open / turn_close in both orders without deadlock.
  {
   const a=await account();await turn(a);
   const o=await open(a);await begin(a,o.turnId);await record(a,o.turnId);
@@ -143,20 +144,40 @@ try{
   }finally{await p.end();}
   assert.equal(await one('select content_deleted_at v from runtime_sessions where id=$1',[a.session]),null);
   assert.equal((await content(a.session)).visible,2,'nothing marked or hidden');
-  // turn_close takes the session, then the account row; the mark takes them in the same order, so a mark waiting on the
-  // session holds nothing the close needs next: the close completes (no deadlock) and the mark then deletes.
-  const p2=await peer();
-  try{
-   const pid=await one('select pg_backend_pid() v');
-   await p2.query('begin');await p2.query('select 1 from runtime_sessions where id=$1 for update',[a.session]);
-   const marking=mark(a).then(v=>({v}),e=>({e:e.message}));
-   await blocked(p2,pid);
-   await p2.query('select 1 from profiles where id=$1 for update',[a.actor]);
-   await p2.query('commit');
-   assert.equal((await marking).v?.status,'deleted');
-  }finally{await p2.end();}
-  assert.notEqual(await one('select content_deleted_at v from runtime_sessions where id=$1',[a.session]),null);
-  report.checks.push('instant same conversation locked: a closing turn holds the session; mark waits its bound, reports busy and marks nothing; a close taking the account row while the mark waits completes without deadlock, then the mark deletes');
+  // The real turn functions racing the mark (#1521 review): all take the account row, then the session, then the turn.
+  const pidOf=async client=>one('select pg_backend_pid() v',[],client);
+  // (a) Mark first: a turn_close and a turn_open of the same conversation wait for it, then close erased / are refused.
+  {
+   const d=await peer(),p1=await peer(),p2=await peer();
+   try{
+    await d.query('begin');assert.equal((await mark(a,a.session,d)).status,'deleted');
+    const closing=close(a,o.turnId,undefined,p1).then(v=>({v}),e=>({e:e.message}));
+    const opening=open(a,{client:p2}).then(v=>({v}),e=>({e:e.message}));
+    await blocked(d,await pidOf(p1));await blocked(d,await pidOf(p2));
+    await d.query('commit');
+    assert.equal((await closing).v?.closeKind,'erased');
+    assert.match((await opening).e??'',/TURN_SESSION_ERASED/);
+   }finally{await d.end();await p1.end();await p2.end();}
+   assert.deepEqual(await content(a.session),{visible:0,text:2,total:2},'the waiting close saved nothing');
+  }
+  // (b) Close first: the mark waits on the account row; once the close commits it deletes and hides what the close saved.
+  // (c) Open first: the same, and the turn that opened then closes erased.
+  for(const first of ['close','open']){
+   const b=await account();await turn(b);
+   const ob=first==='close'?await open(b):null;
+   const p=await peer();
+   try{
+    await p.query('begin');
+    const held=first==='close'?await close(b,ob.turnId,undefined,p):await open(b,{client:p});
+    const marking=mark(b).then(v=>({v}),e=>({e:e.message}));
+    await blocked(p,await pidOf(c));
+    await p.query('commit');
+    assert.equal((await marking).v?.status,'deleted',first);
+    if(first==='open')assert.equal((await close(b,held.turnId)).closeKind,'erased');
+   }finally{await p.end();}
+   assert.equal((await content(b.session)).visible,0,first);
+  }
+  report.checks.push('instant same conversation locked: a closing turn holds the session; mark waits its bound, reports busy and marks nothing; with the real turn_open/turn_close in both orders no deadlock: mark first -> close erased and open refused; close or open first -> mark waits, then deletes and hides what was saved');
  }
  // 5. content-erasure/instant "same conversation generating" and turn-core 7: deleted while a turn runs.
  {
@@ -257,7 +278,7 @@ try{
   assert.deepEqual((await open(a)).history.map(h=>h.content),['PRIVATE_Q','PRIVATE_A'],'the next turn reads only the plain turn');
   report.checks.push('voice revocation: deleting a version hides the replies written with it (both messages), keeps plain replies and those of another version; the next turn reads only what is left');
  }
- // 10. Voice revocation racing a closing turn, both orders (lock on the turn row).
+ // 10. Voice revocation racing a closing turn, both orders, and a receipt holding the turn row.
  {
   for(const closeFirst of [true,false]){
    const a=await account(),version=randomUUID();
@@ -282,23 +303,27 @@ try{
    }finally{await p.end();await d.end();}
    assert.equal((await content(a.session)).visible,0,closeFirst?'committed messages hidden by the deletion':'nothing saved');
   }
-  // A close holding only its turn row (before it takes the account row): the deletion does not wait (no deadlock), it
-  // reports busy and deletes nothing.
+  // A receipt holding the turn row (call writes lock only their turn): the deletion waits for it (no deadlock: the
+  // receipt needs nothing the deletion holds), then deletes; the turn then closes erased.
   {
    const a=await account(),version=randomUUID();
    await c.query(`insert into voice_profile_versions(id,actor_id,request_id,version,status,profile,confirmed_at)
     values($1,$2,$3,1,'confirmed','{"tone":"x"}',now())`,[version,a.actor,randomUUID()]);
-   const o=await open(a,{pol:policy({voiceVersionId:version})});
-   const p=await peer();
+   await c.query('insert into voice_profiles(actor_id,confirmed_version_id,enabled) values($1,$2,true)',[a.actor,version]);
+   const o=await open(a,{pol:policy({voiceVersionId:version})});await begin(a,o.turnId);
+   const p=await peer(),d=await peer();
    try{
-    await p.query('begin');await p.query('select 1 from turns where actor_id=$1 and id=$2 for update',[a.actor,o.turnId]);
-    await c.query('begin');await c.query('set local role service_role');
-    assert.match(await refusal(c.query('select voice_profile_delete($1,$2)',[a.actor,version])),/VOICE_WRITING_BUSY/);
-    await c.query('rollback');await p.query('rollback');
-   }finally{await p.end();}
-   assert.equal(await one('select count(*)::int v from voice_profile_versions where id=$1',[version]),1);
+    await p.query('begin');await record(a,o.turnId,1,'RAW_PRIVATE_BODY',p);
+    await d.query('begin');await d.query('set local role service_role');
+    const deleting=d.query('select voice_profile_delete($1,$2)',[a.actor,version]);
+    await blocked(p,await one('select pg_backend_pid() v',[],d));
+    await p.query('commit');await deleting;await d.query('commit');
+   }finally{await p.end();await d.end();}
+   assert.equal(await one('select count(*)::int v from voice_profile_versions where id=$1',[version]),0);
+   assert.equal((await close(a,o.turnId)).closeKind,'erased');
+   assert.equal((await content(a.session)).total,0);
   }
-  report.checks.push('voice revocation vs a closing turn: close first -> the deletion waits (account row) and hides its committed messages; deletion first -> the close waits, closes erased and saves nothing; a close holding only its turn -> busy at once, nothing deleted');
+  report.checks.push('voice revocation vs a closing turn (real functions): close first -> the deletion waits (account row) and hides its committed messages; deletion first -> the close waits, closes erased and saves nothing; a receipt holding its turn -> the deletion waits, then deletes, the turn closes erased');
  }
  // 11. content_erasure_turn_check (replaces content_erasure_runtime_check): allow and every deny.
  {

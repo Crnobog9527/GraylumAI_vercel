@@ -93,7 +93,7 @@ BEGIN
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
  PERFORM id FROM bill2_runs WHERE id IN (SELECT billing_run_id FROM runtime_executions WHERE id=ANY(ids))
   ORDER BY id FOR UPDATE NOWAIT;
- -- CORE-PATH-V2 turns: after their sessions, the order turn_close takes them. A receipt holding one either committed its
+ -- CORE-PATH-V2 turns: after the account row and their sessions, the order turn_close takes them. A receipt holding one either committed its
  -- response body before this (removed below) or runs after and sees the tombstone (turn_call_record stores no body then).
  PERFORM 1 FROM turns WHERE actor_id=a AND session_id=ANY(sessions) ORDER BY id FOR UPDATE NOWAIT;
  IF EXISTS(SELECT 1 FROM artifact_generations g WHERE g.state NOT IN ('succeeded','refunded')

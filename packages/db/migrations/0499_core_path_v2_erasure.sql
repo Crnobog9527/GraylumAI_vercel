@@ -12,11 +12,12 @@
 --   content_erasure_confirm, leaves a session with a turn still open un-erased until the turn closes (an erased session row is
 --   immutable, and turn_close releases active_turn_id on it; erasing it first left that turn unable to close).
 --   Voice source revocation: voice_delete_versions hides the replies written with a deleted version (turns.policy
---   voiceVersionId), serialized with a closing turn on the turn row; turn_tombstones (0421) already stops a running turn.
+--   voiceVersionId), serialized with a closing turn on the account and turn rows; turn_tombstones (0421) already stops a running turn.
 --   content_erasure_turn_check is the core-path replacement of content_erasure_runtime_check (a turn instead of an
 --   execution); the old check stays for the old path until V2-12 drops it.
 -- Each changed function is the full current text of packages/db/functions/ with the added lines; nothing is patched in place.
--- Lock order: session -> turn everywhere (as turn_close); the erasure functions take turn rows NOWAIT and report busy.
+-- Lock order: account row -> session -> turn everywhere (as turn_open and turn_close of 0421); content_erasure_confirm takes
+-- them NOWAIT and reports busy, content_erasure_mark_session waits up to 2 seconds, voice_delete_versions waits on the turn.
 -- Compatibility: the old Runtime path never writes the new tables, so the added statements touch no row for it; Node needs
 --   no change. Repeatable: CREATE OR REPLACE and IF NOT EXISTS. Recovery: re-apply the previous texts from git history
 --   (packages/db/functions at the parent commit) and drop content_erasure_turn_check and turns_voice_version.
@@ -37,11 +38,11 @@ AS $function$
 DECLARE s runtime_sessions; deleted boolean; scope jsonb; ids uuid[]; refs uuid[]; local boolean; stamp timestamptz; unbound boolean;
 BEGIN
  PERFORM bill2_actor(a);
- -- Lock order: the session, its executions, then the account row (share) - the order the reply writers take them
- -- (runtime_admit: session, then the profile in bill2_prepare; turn_close: session, turn, profile), so a deletion that
- -- waits never holds a lock a closing reply needs next (CORE-PATH-V2 V2-9; the account row came first before). A short
- -- wait instead of NOWAIT lets a reply commit that holds this session for a moment finish first.
+ -- Same order as content_erasure_confirm (profile, then session). A short wait instead of
+ -- NOWAIT lets a reply commit that holds this session for a moment finish first.
  PERFORM set_config('lock_timeout','2000',true);
+ PERFORM id FROM profiles WHERE id=a FOR SHARE;
+ PERFORM bill2_actor(a);
  SELECT * INTO s FROM runtime_sessions WHERE id=target AND actor_id=a FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
  deleted:=s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL;
@@ -54,9 +55,6 @@ BEGIN
  -- rows here serializes them with the marker: a copy committed first is visible to the checks
  -- below and cleaned now; a writer that waits sees the committed marker and is refused.
  PERFORM id FROM runtime_executions WHERE session_id=target AND actor_id=a ORDER BY id FOR UPDATE;
- -- Serialized with an account erasure confirming (it locks the account row) and re-checked under that lock.
- PERFORM id FROM profiles WHERE id=a FOR SHARE;
- PERFORM bill2_actor(a);
  -- Read-only scope (no account-wide locks). The marker alone is enough only when nothing outside
  -- this conversation holds a copy: a free conversation (no work, draft or topic binding), every scoped
  -- execution in it, no saved content, work, data event, result link, captured field, library
@@ -201,7 +199,7 @@ BEGIN
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
  PERFORM id FROM bill2_runs WHERE id IN (SELECT billing_run_id FROM runtime_executions WHERE id=ANY(ids))
   ORDER BY id FOR UPDATE NOWAIT;
- -- CORE-PATH-V2 turns: after their sessions, the order turn_close takes them. A receipt holding one either committed its
+ -- CORE-PATH-V2 turns: after the account row and their sessions, the order turn_close takes them. A receipt holding one either committed its
  -- response body before this (removed below) or runs after and sees the tombstone (turn_call_record stores no body then).
  PERFORM 1 FROM turns WHERE actor_id=a AND session_id=ANY(sessions) ORDER BY id FOR UPDATE NOWAIT;
  IF EXISTS(SELECT 1 FROM artifact_generations g WHERE g.state NOT IN ('succeeded','refunded')
@@ -555,14 +553,10 @@ BEGIN
  GET DIAGNOSTICS n=ROW_COUNT;
  -- CORE-PATH-V2: replies written with a deleted version leave the visible history (Owner 10-23: effective at once). The
  -- open turns bound to it are locked first, so a turn that closes waits for this commit, re-reads its tombstones, closes
- -- erased and saves nothing. NOWAIT: a turn_close already holding its row takes this account's profile row next, which the
- -- callers (library_actor) hold here, so waiting could deadlock; such a moment reports busy and the deletion is retried.
- BEGIN
-  PERFORM 1 FROM turns WHERE actor_id=a AND policy->>'voiceVersionId'=ANY(ids::text[]) AND policy ? 'voiceVersionId'
-   AND state<>'closed' ORDER BY id FOR UPDATE NOWAIT;
- EXCEPTION WHEN lock_not_available THEN
-  RAISE EXCEPTION 'VOICE_WRITING_BUSY' USING ERRCODE='55P03';
- END;
+ -- erased and saves nothing. The callers hold the account row (library_actor), which turn_close takes before its turn row,
+ -- so a turn row held here is only ever held by a call write (turn row only): waiting on it cannot deadlock.
+ PERFORM 1 FROM turns WHERE actor_id=a AND policy->>'voiceVersionId'=ANY(ids::text[]) AND policy ? 'voiceVersionId'
+  AND state<>'closed' ORDER BY id FOR UPDATE;
  UPDATE session_messages m SET visible=false FROM turns t
   WHERE t.actor_id=a AND t.policy ? 'voiceVersionId' AND t.policy->>'voiceVersionId'=ANY(ids::text[])
    AND m.session_id=t.session_id AND m.turn_id=t.id AND m.visible;

@@ -18,14 +18,10 @@ BEGIN
  GET DIAGNOSTICS n=ROW_COUNT;
  -- CORE-PATH-V2: replies written with a deleted version leave the visible history (Owner 10-23: effective at once). The
  -- open turns bound to it are locked first, so a turn that closes waits for this commit, re-reads its tombstones, closes
- -- erased and saves nothing. NOWAIT: a turn_close already holding its row takes this account's profile row next, which the
- -- callers (library_actor) hold here, so waiting could deadlock; such a moment reports busy and the deletion is retried.
- BEGIN
-  PERFORM 1 FROM turns WHERE actor_id=a AND policy->>'voiceVersionId'=ANY(ids::text[]) AND policy ? 'voiceVersionId'
-   AND state<>'closed' ORDER BY id FOR UPDATE NOWAIT;
- EXCEPTION WHEN lock_not_available THEN
-  RAISE EXCEPTION 'VOICE_WRITING_BUSY' USING ERRCODE='55P03';
- END;
+ -- erased and saves nothing. The callers hold the account row (library_actor), which turn_close takes before its turn row,
+ -- so a turn row held here is only ever held by a call write (turn row only): waiting on it cannot deadlock.
+ PERFORM 1 FROM turns WHERE actor_id=a AND policy->>'voiceVersionId'=ANY(ids::text[]) AND policy ? 'voiceVersionId'
+  AND state<>'closed' ORDER BY id FOR UPDATE;
  UPDATE session_messages m SET visible=false FROM turns t
   WHERE t.actor_id=a AND t.policy ? 'voiceVersionId' AND t.policy->>'voiceVersionId'=ANY(ids::text[])
    AND m.session_id=t.session_id AND m.turn_id=t.id AND m.visible;
