@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { assertSeparateSummaryModel, summaryPolicy } from '../artifacts/summaryPolicy';
 import { readAdmissionConfiguration, readAdmissionModule } from '../runtime/admissionConfiguration';
-import { readAdmissionSettings } from '../runtime/newWorkGate';
+import { readAdmissionSettings, type SettingsRead } from '../runtime/newWorkGate';
 import { AGENT_TURN_REQUEST_FORMAT } from '../runtime/providerRequest';
 import { readPurposeBudgets } from '../runtime/purposeBudgets';
 import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
@@ -24,6 +24,8 @@ export const MENTOR_INPUT_BYTES = 90000, ORGANIZER_INPUT_BYTES = 112000;
 export type MentorCatalog = {
   config: { enabled: boolean; stopLoss: Parameters<typeof turnPolicy>[0]['stopLoss'] };
   mentor: ChatQuote; organizer: ChatQuote | null; brandIdentity: boolean;
+  /** The admission settings read once, for the new-work gate (the one-switch pause and the message limit). */
+  settings: SettingsRead;
   /** The start threshold L of this turn: one normal turn's cost, the mentor's L (purpose skill) plus the organizer's
    * (attached_organizer), each from billing_payg_start_thresholds as the old path claimed each call (Owner 10-01, 10-28). */
   startCredits: number;
@@ -62,7 +64,7 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
     const mentorL = startThresholdCredits(setting, mentor.model, 'skill', mentor.q, mentor.multiplier);
     const organizerL = organizer ? startThresholdCredits(setting, organizer.model, 'attached_organizer', organizer.q, organizer.multiplier) : 0;
     if (mentorL === undefined || organizerL === undefined) throw new MentorCatalogError('TURN_START_THRESHOLD_UNCONFIGURED');
-    return { config: config.data, mentor, organizer, brandIdentity: settings.ok ? settings.identityGuard ?? true : true,
+    return { config: config.data, mentor, organizer, settings, brandIdentity: settings.ok ? settings.identityGuard ?? true : true,
       startCredits: mentorL + organizerL };
   } catch (error) {
     if (error instanceof QuoteError) throw new MentorCatalogError(error.code);

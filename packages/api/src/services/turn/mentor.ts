@@ -15,7 +15,7 @@ import { runRuntime } from '../runtime/runner';
 import { SKILL_FILE_MAX_BYTES, SKILL_FILE_TRACE_BYTES, skillFileToolBytes } from '../runtime/skillFile';
 import type { PricingDeps } from '../runtime/pricingAdmission';
 import { modelCall, TurnStop } from './call';
-import { CLOSES } from './chat';
+import { CLOSES, GATE_CODES, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
@@ -37,6 +37,8 @@ import { logSwallowed, swallow } from '../../lib/swallow';
  */
 export type MentorDeps = {
   admin: SupabaseClient; clients: TurnClients; slots: CounterStore; transport?: typeof fetch; pricing?: PricingDeps;
+  /** The one-switch pause and the runtime limits: the message before the turn opens, the call limit before each paid call. */
+  newWork: ChatDeps['newWork'];
 };
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
   organizeAfter: boolean };
@@ -58,6 +60,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   try { catalog = await mentorCatalog(admin, { moduleId: input.moduleId, organize, pricing: deps.pricing }); }
   catch (error) { return emit({ type: 'error', code: error instanceof MentorCatalogError ? error.code : 'TURN_QUOTE_UNAVAILABLE' }); }
   const { mentor, organizer } = catalog;
+  // The administrator's pause and the message limit, before anything is frozen (as chat.ts).
+  const admitted = await deps.newWork.message(input.actorId, Promise.resolve(catalog.settings));
+  if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
   if (Buffer.byteLength(input.text) > 8000 || Buffer.byteLength(input.text) > mentor.inputLimit)
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
 
@@ -78,6 +83,11 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       refundAll: extra.refundAll, failureCode: extra.failureCode ?? null, kindResult: extra.kindResult });
   let stopped: TurnStop | undefined;
   const keep = (error: unknown) => { if (error instanceof TurnStop) stopped = error; throw error; };
+  // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
+  const callGate = async () => {
+    const gate = await deps.newWork.calls(input.actorId, 1, 'bill2.v2');
+    if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]);
+  };
   try {
     // 2. The draft state, the Skill text of this step (cached by content hash) and the host state of this turn.
     const state = mentorState(opened.kindContext, input.stepId);
@@ -115,11 +125,12 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       allowEmptyResult: true, firstToolCallOnly: true, stopAtToolNames: [ASK_QUESTION_TOOL],
       selectHistory: async (items, incoming) => { sources = cardSources(input.text, items); return [...items, ...incoming]; },
       onText: delta => { text += delta; if (delta) emit({ type: 'text', delta }); },
-      exchange: (_sequence, body, onChunk) => {
+      exchange: async (_sequence, body, onChunk) => {
         text = ''; cardMessage = undefined;
         const request = openRouterRequestBody(body, { context, policy: callPolicy(mentor) as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, mentor.inputLimit); }
-        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); return Promise.reject(stopped); }
+        catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
+        await callGate().catch(keep);
         return modelCall(callDeps(mentor), mentor, request, onChunk).then(response => {
           const message = JSON.parse(response)?.choices?.[0]?.message, call = message?.tool_calls?.[0];
           toolCalled = Boolean(message?.tool_calls?.length);
@@ -138,7 +149,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     if (organizer) {
       const capture = mentorOrganizerInput(state, host, input.text);
       captureInput = capture.value;
-      try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer),
+      try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), gate: callGate,
         template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
       catch (error) {
         if (error instanceof TurnStop && error.code === 'TURN_TOMBSTONED') throw error;
@@ -169,16 +180,18 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 
 /** One organizer call (no tools, no history): its JSON object, or null when the reply is not one. */
 async function runOrganizer(input: { catalog: ChatQuote; context: RequestContext; deps: Parameters<typeof modelCall>[0];
+  gate: () => Promise<void>;
   template: string | undefined; opening: boolean; input: string }): Promise<unknown> {
   const { catalog } = input;
   const instructions = organizerInstructions(input.template, input.opening);
   const output = await runRuntime({ model: catalog.model, instructions, input: input.input, session: turnSession([]),
     maxOutputTokens: catalog.outputLimit, maxTurns: 1, reasoning: catalog.reasoning, tools: [], readSessionHistory: false,
     selectHistory: async (_items, incoming) => incoming,
-    exchange: (_sequence, body) => {
+    exchange: async (_sequence, body) => {
       const request = openRouterRequestBody(body, { context: input.context, policy: callPolicy(catalog) as never,
         phase: 'attached_organizer', primaryDialogue: false });
       assertRuntimeRequestCapacity(request, catalog.inputLimit);
+      await input.gate();
       return modelCall(input.deps, catalog, request);
     } });
   try {

@@ -12,7 +12,7 @@ import { publishSkillPackage } from '../skills/publication';
 import { CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
-import { runMentorTurn } from './mentor';
+import { runMentorTurn, type MentorDeps } from './mentor';
 import { RUNTIME_PAYG_SETTING } from './quote';
 import type { TurnEvent } from './sse';
 
@@ -158,9 +158,14 @@ function transport(reply: Reply) {
   };
   return { fn, bodies };
 }
-async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string; organizeAfter?: boolean }) {
+// The runtime rate limits and pause (newWorkGate) are Redis-backed; here a stub that admits, or refuses as a case needs.
+const admit = async () => ({ ok: true as const });
+type NewWork = MentorDeps['newWork'];
+async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
+  organizeAfter?: boolean; newWork?: NewWork }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport },
+  await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
+    newWork: input.newWork ?? { message: admit, calls: admit } },
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
       text: input.text, organizeAfter: input.organizeAfter ?? true }, e => events.push(e)));
   return { events, calls };
@@ -339,4 +344,20 @@ it('RUNTIME: CORE-PATH-V2 V2-5: the start threshold is one normal turn (mentor +
   await db.query("update system_settings set value=jsonb_set(value,'{thresholds,1,purpose}','\"ordinary\"') where key='billing_payg_start_thresholds'");
   clearCatalogCache();
   expect((await turn(f, { text: 'Hello', transport: t.fn })).events).toEqual([{ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' }]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5: the one-switch pause refuses before anything opens; a call limit at the reply sends nothing and refunds', async () => {
+  const f = await setup();
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const paused = await turn(f, { text: 'Hello', transport: t.fn,
+    newWork: { message: async () => ({ ok: false, reason: 'paused', retryAfter: 60 }), calls: admit } });
+  expect(paused.events).toEqual([{ type: 'error', code: 'TURN_NEW_CALLS_PAUSED' }]);
+  expect((await db.query('select count(*)::int n from turns where actor_id=$1', [f.actor])).rows[0].n).toBe(0);
+  const limited = await turn(f, { text: 'Hello', transport: t.fn,
+    newWork: { message: admit, calls: async () => ({ ok: false, reason: 'call_limited', retryAfter: 3600, window: 'day' }) } });
+  expect(limited.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_RATE_LIMITED' });
+  expect(t.bodies).toEqual([]);
+  expect((await db.query('select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1',
+    [f.actor])).rows[0].n).toBe(0);
+  expect(await credits(f.actor)).toBe(1000);
 });
