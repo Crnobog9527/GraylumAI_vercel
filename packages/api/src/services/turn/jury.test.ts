@@ -142,9 +142,14 @@ describe('jury turn advance', () => {
         product: { state: 'incomplete', outcome: { kind: 'claim_refused', reason, phase: 'review' } } }));
     }
   });
-  it('an ended review or one on the BILL2 path is not advanced', async () => {
-    m.read.mockResolvedValueOnce(view({ state: 'completed' }));
+  it('an ended review or one on the BILL2 path is not advanced; one ended elsewhere closes its open turn (#1522 review)', async () => {
+    m.read.mockResolvedValueOnce(view({ state: 'completed', fee: { state: 'charged' } }));
     expect(await jury().advance('r')).toEqual({ next: false, reason: 'ended' });
+    expect(m.rpc).not.toHaveBeenCalled();
+    m.read.mockResolvedValueOnce(view({ state: 'incomplete', outcome: { kind: 'source_archived' }, fee: { state: 'held' } }));
+    expect(await jury().advance('r')).toEqual({ next: false, reason: 'ended' });
+    expect(m.rpc).toHaveBeenCalledWith('turn_fusion_ended_review', { p_actor_id: 'actor', p_turn_id: 7, p_state: 'incomplete',
+      p_outcome: { kind: 'source_archived' } });
     m.read.mockResolvedValueOnce(view({ turnId: null }));
     expect(await jury().advance('r')).toEqual({ next: false, reason: 'not_turn_path' });
   });

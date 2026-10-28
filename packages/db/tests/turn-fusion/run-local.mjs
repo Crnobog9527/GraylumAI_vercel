@@ -297,6 +297,15 @@ try{
   assert.ok((await one('select turn_fusion_recovery(50) v')).orphaned>=1);
   assert.deepEqual([(await turnRow(b,ob.turnId)).close_kind,(await turnRow(b,ob.turnId)).charged_credits],['failed',0]);
   assert.equal(await balance(b),3000);
+  // #1522 review: the review ended by another path (archived business) while its turn waits: the turn closes by the review's
+  // end before the 24-hour end could charge it; an incomplete review refunds everything.
+  const e=await account(),re=await review(e),oe=await open(e,{product:{reviewId:re}});
+  await begin(e,oe.turnId,1);await record(e,oe.turnId,1,{n:0.05,output:seat()});
+  await c.query(`update fusion_reviews set state='incomplete',outcome='{"kind":"source_archived"}',ended_at=now() where id=$1`,[re]);
+  await c.query("update turns set updated_at=now()-interval '25 hours' where id=$1",[oe.turnId]);
+  await one('select turn_fusion_recovery(50) v');
+  assert.deepEqual([(await turnRow(e,oe.turnId)).close_kind,(await turnRow(e,oe.turnId)).charged_credits],['failed',0]);
+  assert.equal(await balance(e),3000);
   // Another path closed the turn (the crash sweep): the review record ends on the next run.
   const d=await account(),rd=await review(d),od=await open(d,{product:{reviewId:rd}});
   await one('select turn_close($1,$2,$3,$4,$5,$6,$7) v',[d.actor,od.turnId,'interrupted','[]',false,false,null]);
@@ -353,14 +362,14 @@ try{
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.
  {
   for(const f of ['turn_fusion_open','turn_fusion_begin','turn_fusion_record','turn_fusion_close','fusion_review_turn_step',
-   'fusion_compare_turn_adopt','fusion_compare_turn_history','turn_fusion_recovery']){
+   'fusion_compare_turn_adopt','fusion_compare_turn_history','turn_fusion_recovery','turn_fusion_ended_review']){
    for(const role of ['anon','authenticated'])
     assert.equal(await one(`select bool_or(has_function_privilege($1,p.oid,'execute')) v from pg_proc p where proname=$2`,[role,f]),false,f+' '+role);
    assert.equal(await one(`select bool_or(has_function_privilege('service_role',p.oid,'execute')) v from pg_proc p where proname=$1`,[f]),true,f);
   }
   for(const role of ['anon','authenticated','service_role'])
    assert.equal(await one(`select has_table_privilege($1,'public.fusion_turn_outputs','select') v`,[role]),false);
-  report.checks.push('the eight functions are service role only; no client role reads fusion_turn_outputs');
+  report.checks.push('the nine functions are service role only; no client role reads fusion_turn_outputs');
  }
  console.log(JSON.stringify(report,null,1));
 }finally{await db.close();}

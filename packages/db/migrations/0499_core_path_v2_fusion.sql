@@ -13,6 +13,7 @@
 --   fusion_compare_turn_adopt the chosen compare answer into the conversation history
 --   fusion_compare_turn_history the conversation history a compare sizes its columns on (read-only)
 --   turn_fusion_recovery the fusion-recovery cron's step on turns: 24-hour end, deleted review refund, product sync
+--   turn_fusion_ended_review closes a jury turn whose review another path ended (archived business) by that end
 --   fusion_turn_raw_scrub (trigger on fusion_reviews / fusion_compares) a deleted review or compare deletes its turn's raw
 --                        provider responses
 -- Changed (whole CREATE OR REPLACE from packages/db/functions):
@@ -30,7 +31,7 @@
 -- Compatibility: new columns are nullable, the new table and functions are used only by the V2 path (core_path_v2.enabled);
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
--- Recovery: drop the two triggers, the nine new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
+-- Recovery: drop the two triggers, the ten new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
 -- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -430,6 +431,23 @@ AS $function$
         ORDER BY seq DESC LIMIT least(greatest(p_limit, 0), 200)) m;
 $function$;
 
+-- Closes a jury turn whose review another path already ended (an archived business, 0326): by the review's end, as the jury
+-- itself would have closed it. Used by turn_fusion_recovery; the relay calls the same rule (jury.ts) when it reads such a review.
+CREATE OR REPLACE FUNCTION public.turn_fusion_ended_review(p_actor_id uuid, p_turn_id bigint, p_state text, p_outcome jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  RETURN CASE
+    WHEN p_state IN ('incomplete','revision_failed') THEN
+      turn_fusion_close(p_actor_id, p_turn_id, 'failed', false, true, 'review_' || coalesce(p_outcome->>'kind', p_state), '{}'::jsonb)
+    WHEN p_state = 'completed' THEN
+      turn_fusion_close(p_actor_id, p_turn_id, 'completed', p_outcome->>'kind' = 'revised', false, NULL, '{}'::jsonb)
+    ELSE turn_fusion_close(p_actor_id, p_turn_id, 'interrupted', false, false, 'review_' || p_state, '{}'::jsonb) END;
+END $function$;
+
 -- fusion-recovery on the turns (V2-7b): a jury waiting 24 hours between groups ends (expired: the known usage, at most the fixed
 -- price; 10-27); a jury whose review was deleted (its draft deleted) is refunded in full (as the old fee); a review or compare
 -- whose turn another path closed (the 15-minute crash sweep, the 24-hour sweep of runtime-recovery) ends too. In batches of at
@@ -443,6 +461,21 @@ AS $function$
 DECLARE item record; expired integer := 0; orphaned integer := 0; synced integer := 0; failed integer := 0;
 BEGIN
   IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023'; END IF;
+  -- First, a review another path ended (its business archived: fusion_review_archive_reconcile ends it incomplete) while its
+  -- turn is still open: the turn closes by the review's end, before the 24-hour end could charge it as expired. Incomplete
+  -- or a failed revision refunds everything; a delivered revision pays the price; anything else is an interruption.
+  FOR item IN SELECT t.actor_id, t.id, r.state, r.outcome FROM turns t
+      JOIN fusion_reviews r ON r.id = (t.policy->>'reviewId')::uuid AND r.actor_id = t.actor_id
+      WHERE t.state IN ('running','paused') AND t.kind = 'jury' AND r.state NOT IN ('running','paused')
+      ORDER BY t.updated_at LIMIT p_limit LOOP
+    BEGIN
+      PERFORM turn_fusion_ended_review(item.actor_id, item.id, item.state, item.outcome);
+      synced := synced + 1;
+    EXCEPTION WHEN OTHERS THEN
+      failed := failed + 1;
+      RAISE WARNING 'turn_fusion_recovery ended review failed: turn % sqlstate %', item.id, SQLSTATE;
+    END;
+  END LOOP;
   FOR item IN SELECT actor_id, id FROM turns WHERE state = 'paused' AND updated_at < now() - interval '24 hours'
       AND kind = 'jury' AND pause_reason = 'awaiting_user' ORDER BY updated_at LIMIT p_limit LOOP
     BEGIN
@@ -1078,7 +1111,8 @@ BEGIN
     'fusion_review_turn_step(uuid,uuid,jsonb,jsonb)',
     'fusion_compare_turn_adopt(uuid,uuid,integer)',
     'fusion_compare_turn_history(uuid,uuid,integer)',
-    'turn_fusion_recovery(integer)'] LOOP
+    'turn_fusion_recovery(integer)',
+    'turn_fusion_ended_review(uuid,bigint,text,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;

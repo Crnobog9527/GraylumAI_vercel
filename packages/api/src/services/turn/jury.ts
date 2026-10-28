@@ -146,7 +146,16 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
     async advance(reviewId: string): Promise<JuryAdvance> {
       let view = await record.read(reviewId);
       if (!view?.turnId) return { next: false, reason: 'not_turn_path' };
-      if (ENDED_STATES.has(view.state)) return { next: false, reason: 'ended' };
+      if (ENDED_STATES.has(view.state)) {
+        // Ended by another path (an archived business ends the review on read): its turn closes by that end now, so an
+        // incomplete review refunds at once instead of waiting for the 24-hour end (turn_fusion_ended_review; idempotent).
+        if (view.fee?.state === 'held') {
+          const closed = await admin.rpc('turn_fusion_ended_review', { p_actor_id: actorId, p_turn_id: view.turnId, p_state: view.state,
+            p_outcome: view.outcome ?? {} });
+          if (closed.error) throw new TurnDatabaseError('TURN_DATABASE_UNAVAILABLE');
+        }
+        return { next: false, reason: 'ended' };
+      }
       const src = await core.readSource(reviewId);
       const cfg = config.parse(view.config);
       const at: ReviewPosition = { round: view.round, phase: view.phase, attempt: view.attempt };

@@ -11,6 +11,21 @@ AS $function$
 DECLARE item record; expired integer := 0; orphaned integer := 0; synced integer := 0; failed integer := 0;
 BEGIN
   IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023'; END IF;
+  -- First, a review another path ended (its business archived: fusion_review_archive_reconcile ends it incomplete) while its
+  -- turn is still open: the turn closes by the review's end, before the 24-hour end could charge it as expired. Incomplete
+  -- or a failed revision refunds everything; a delivered revision pays the price; anything else is an interruption.
+  FOR item IN SELECT t.actor_id, t.id, r.state, r.outcome FROM turns t
+      JOIN fusion_reviews r ON r.id = (t.policy->>'reviewId')::uuid AND r.actor_id = t.actor_id
+      WHERE t.state IN ('running','paused') AND t.kind = 'jury' AND r.state NOT IN ('running','paused')
+      ORDER BY t.updated_at LIMIT p_limit LOOP
+    BEGIN
+      PERFORM turn_fusion_ended_review(item.actor_id, item.id, item.state, item.outcome);
+      synced := synced + 1;
+    EXCEPTION WHEN OTHERS THEN
+      failed := failed + 1;
+      RAISE WARNING 'turn_fusion_recovery ended review failed: turn % sqlstate %', item.id, SQLSTATE;
+    END;
+  END LOOP;
   FOR item IN SELECT actor_id, id FROM turns WHERE state = 'paused' AND updated_at < now() - interval '24 hours'
       AND kind = 'jury' AND pause_reason = 'awaiting_user' ORDER BY updated_at LIMIT p_limit LOOP
     BEGIN
