@@ -22,7 +22,7 @@
 -- The policy is computed by Node from the catalog cache (q, multipliers, bounds, limits, stop-loss parameters) and frozen here.
 -- Not here yet: resuming a paused turn (V2-8), fixed-price jury settlement (V2-7b), report stop counting beyond the 24-hour rule.
 -- Compatibility: new functions only; nothing calls them until core_path_v2 is enabled (V2-4). Repeatable: CREATE OR REPLACE.
--- Recovery: drop the six functions; no existing object depends on them.
+-- Recovery: drop the eight functions; no existing object depends on them.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -466,7 +466,7 @@ BEGIN
         -- unusable: the provider charged for a result that cannot be used; the user's base is 0, the platform's cost is kept.
         actual_usd = CASE WHEN p_status IN ('ok','unusable') THEN p_actual_usd END,
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
-        payload_hash = p_payload_hash, settled_at = now(), cost_pending = false
+        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false
       WHERE turn_id = p_turn_id AND seq = p_seq;
     -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
     -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs
@@ -487,6 +487,28 @@ BEGIN
   RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits - used < next_need) || tomb;
 END $function$;
 
+-- What the user pays for a closed turn (BILL-PAYG v7: D = min(N, H); the rest E = N - D is absorbed by the platform). Shared by
+-- turn_close and its later settlement of a turn closed with an unknown model cost, so both apply the same rules.
+CREATE OR REPLACE FUNCTION public.turn_user_charge(p_actor_id uuid, p_turn_id bigint, p_kind text, p_delivered boolean,
+  p_refund_all boolean, p_credits integer, p_held integer, p_fixed integer, p_at timestamptz)
+ RETURNS integer
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE stops integer;
+BEGIN
+  IF p_refund_all OR (p_kind = 'expired' AND NOT p_delivered) THEN RETURN 0; END IF;
+  IF p_kind = 'stopped' THEN
+    -- 10-27: the first two stops within 24 hours are free; from the third, what was generated, at most the fixed price.
+    SELECT count(*) INTO stops FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user
+      AND r.id <> p_turn_id AND r.closed_at > p_at - interval '24 hours' AND r.closed_at <= p_at;
+    RETURN CASE WHEN stops < 2 THEN 0 ELSE least(p_credits, p_held, coalesce(p_fixed, p_held)) END;
+  END IF;
+  IF p_kind = 'completed' AND p_fixed IS NOT NULL THEN RETURN CASE WHEN p_delivered THEN least(p_fixed, p_held) ELSE 0 END; END IF;
+  RETURN least(p_credits, p_held);
+END $function$;
+
 CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb,
   p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL)
  RETURNS jsonb
@@ -496,7 +518,8 @@ CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, 
 AS $function$
 DECLARE
   t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
-  v_kind text := p_close_kind; tomb jsonb; stops integer; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
+  v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
+  marker timestamptz;
 BEGIN
   IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
     RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
@@ -507,6 +530,35 @@ BEGIN
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.state = 'closed' THEN
+    -- Closed with a provider cost still unknown: calling turn_close again settles what has become known since (recovery, a late
+    -- receipt). The close itself (kind, messages) is kept; each receipt is counted once, by settled_at after the last pass
+    -- (both stamped with clock_timestamp under this turn's row lock, so a receipt and a pass never miss each other).
+    IF t.settlement = 'pending' THEN
+      marker := clock_timestamp();
+      SELECT coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+             coalesce(sum(upper_usd), 0)
+        INTO n_total, pending_upper
+      FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
+      UPDATE daily_spend SET spent_usd = spent_usd + n_total, reserved_usd = greatest(reserved_usd - pending_upper, 0)
+        WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+      PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+      q := (t.policy->>'q')::numeric;
+      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
+             coalesce(bool_or(cost_pending), false), coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
+        INTO credits, pending, user_pending
+      FROM turn_calls WHERE turn_id = p_turn_id;
+      IF t.charged_credits IS NULL AND NOT user_pending THEN
+        charge := public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
+          coalesce((t.policy->>'closeRefundAll')::boolean, false), credits, t.reserved_credits, (t.policy->>'fixedCredits')::int, t.closed_at);
+        IF t.policy->>'holdId' IS NOT NULL THEN
+          PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
+        END IF;
+        t.charged_credits := charge; t.absorbed_credits := greatest(credits - charge, 0);
+      END IF;
+      UPDATE turns SET charged_credits = t.charged_credits, absorbed_credits = t.absorbed_credits,
+          settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END, updated_at = marker
+        WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
+    END IF;
     RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
       'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', true);
   END IF;
@@ -542,19 +594,9 @@ BEGIN
   -- The account row: serializes the actor's closes (the free-stop count below) before the settlement locks it again.
   PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
 
-  -- What the user pays (BILL-PAYG v7: D = min(N, H); the rest E = N - D is absorbed by the platform).
-  IF p_refund_all OR (v_kind = 'expired' AND NOT p_delivered) THEN
-    charge := 0;
-  ELSIF v_kind = 'stopped' THEN
-    -- 10-27: the first two stops within 24 hours are free; from the third, what was generated, at most the fixed price.
-    SELECT count(*) INTO stops FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user
-      AND closed_at > now() - interval '24 hours';
-    charge := CASE WHEN stops < 2 THEN 0 ELSE least(credits, h, coalesce((t.policy->>'fixedCredits')::int, h)) END;
-  ELSIF v_kind = 'completed' AND t.policy ? 'fixedCredits' THEN
-    charge := CASE WHEN p_delivered THEN least((t.policy->>'fixedCredits')::int, h) ELSE 0 END;
-  ELSE
-    charge := least(credits, h);
-  END IF;
+  -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
+  charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
+    (t.policy->>'fixedCredits')::int, now());
 
   -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
   -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
@@ -573,7 +615,9 @@ BEGIN
     END LOOP;
   END IF;
 
-  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = now(), updated_at = now(),
+  -- updated_at marks this settlement pass (see the closed branch above); a full refund still owed is kept with the turn.
+  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = now(), updated_at = clock_timestamp(),
+      policy = CASE WHEN user_pending AND p_refund_all THEN policy || '{"closeRefundAll": true}'::jsonb ELSE policy END,
       charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
       absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,
       settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END,
@@ -590,6 +634,7 @@ DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
     'turn_settle_credits(uuid,uuid,integer,bigint)', 'turn_tombstones(uuid,uuid,jsonb)',
+    'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)',
     'turn_open(uuid,uuid,uuid,text,jsonb,bigint)',
     'turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
     'turn_call_identity(uuid,bigint,integer,text)',

@@ -491,6 +491,39 @@ try{
   assert.equal(await balance(b),940);
   report.checks.push('an unknown third-party tool result is 0 to the user: the known model cost settles and the rest of the freeze comes back; an unknown model call still holds it');
  }
+ // 21. #1512 review: closed first, the receipt late, then settled. turn_close on a closed turn still pending settles what became
+ // known since, once: credits (D = 6, 54 back), the stop-loss (0.01 spent, the whole reservation released), settlement done; the
+ // close and its messages are kept. A full refund owed at the close still applies when it settles later.
+ {
+  const a=await account(1000),before=await dayTotals();
+  const o=await open(a,{pol:policy({gCredits:60})});
+  await begin(a,o.turnId,1);await identity(a,o.turnId,1,'gen-late-settle');
+  const first=await close(a,o.turnId,'interrupted',{messages:[],delivered:false});
+  assert.deepEqual([first.chargedCredits,first.settlement],[null,'pending']);
+  assert.equal(await balance(a),940);
+  await record(a,o.turnId,1,{n:0.01});
+  const settled=await close(a,o.turnId,'interrupted',{messages:[],delivered:false});
+  assert.deepEqual([settled.closeKind,settled.chargedCredits,settled.settlement,settled.replay],['interrupted',6,'done',true]);
+  assert.equal(await balance(a),994);
+  const after=await dayTotals();
+  assert.ok(near(Number(after.s)-Number(before.s),0.01),`spent ${after.s} - ${before.s}`);
+  assert.ok(near(Number(after.r),Number(before.r)),`reserved ${after.r} vs ${before.r}`);
+  // Again: nothing more happens.
+  assert.equal((await close(a,o.turnId,'interrupted')).chargedCredits,6);
+  assert.equal(await balance(a),994);
+  assert.ok(near(Number((await dayTotals()).s),Number(after.s)));
+  assert.equal(await spends(a),6);
+  assert.equal(await one('select count(*)::int v from session_messages where session_id=$1',[a.session]),0);
+  // A full refund owed at the close (failed, refundAll) is kept for the later settlement: D = 0.
+  const b=await account(1000);
+  const ob=await open(b,{pol:policy({gCredits:60})});
+  await begin(b,ob.turnId,1);
+  await c.query("select turn_close($1,$2,'failed','[]',false,true,'turn_failed')",[b.actor,ob.turnId]);
+  await record(b,ob.turnId,1,{n:0.01});
+  assert.equal((await close(b,ob.turnId,'failed')).chargedCredits,0);
+  assert.equal(await balance(b),1000);
+  report.checks.push('closed first, receipt late, settled by turn_close again: D=6 and 54 back once, stop-loss spent 0.01 and released, messages kept; a full refund owed at the close still applies');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
@@ -498,7 +531,8 @@ try{
    'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text)'])
    for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]])
     assert.equal(await one("select has_function_privilege($1,$2,'EXECUTE') v",[role,'public.'+fn]),want,`${fn} ${role}`);
-  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)'])
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)',
+   'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)'])
    assert.equal(await one("select has_function_privilege('service_role',$1,'EXECUTE') v",['public.'+fn]),false,fn);
   const text=await one("select string_agg(pg_get_functiondef(oid),E'\\n') v from pg_proc where proname like 'turn\\_%' and pronamespace='public'::regnamespace");
   // No advisory lock, temp table, session-level set_config or SET statement (the SET clauses of UPDATEs are not statements).
