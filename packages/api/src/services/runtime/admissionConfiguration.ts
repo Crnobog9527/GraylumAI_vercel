@@ -19,6 +19,7 @@ import {PROVIDER_PRICES_KEY} from '../billingProviderPrices';
 import {RESEARCH_THRESHOLDS_KEY} from './researchAdmission';
 import type {ConfigurationRows} from './settingsRows';
 import {catalogRead} from './catalogCache';
+import {CORE_PATH_SETTING, RUNTIME_PAYG_SETTING} from '../turn/settingKeys';
 export type {ConfigurationRows} from './settingsRows';
 /** DB-PERF PR-3: admission's model row also carries what pricing (updated_at) and the billing unit (price_multiplier) read. */
 export const MODEL_ROW_COLUMNS = 'id,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint,updated_at,price_multiplier';
@@ -35,7 +36,7 @@ export async function readAdmissionConfiguration(admin: SupabaseClient): Promise
       PURPOSE_BUDGET_KEY, SUMMARY_MODEL_SETTING, SUMMARY_OUTPUT_SETTING,
       LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY, OWN_POSTS_SWITCH, 'publish_monitor_enabled',
       PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier,
-      CHAT_RESEARCH_KEY, RESEARCH_THRESHOLDS_KEY, PROVIDER_PRICES_KEY, RW_V2_KEY,
+      CHAT_RESEARCH_KEY, RESEARCH_THRESHOLDS_KEY, PROVIDER_PRICES_KEY, RW_V2_KEY, CORE_PATH_SETTING, RUNTIME_PAYG_SETTING,
     ]));
   } catch (error) { return {data: null, error}; }
 }

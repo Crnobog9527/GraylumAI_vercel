@@ -2,10 +2,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { assertSeparateSummaryModel, summaryPolicy } from '../artifacts/summaryPolicy';
 import { readAdmissionConfiguration, readAdmissionModule } from '../runtime/admissionConfiguration';
-import { catalogRead } from '../runtime/catalogCache';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { AGENT_TURN_REQUEST_FORMAT } from '../runtime/providerRequest';
 import { readPurposeBudgets } from '../runtime/purposeBudgets';
+import { rowFor } from '../runtime/settingsRows';
 import type { PricingDeps } from '../runtime/pricingAdmission';
 import { CORE_PATH_SETTING, coreSetting, HISTORY_ITEMS } from './chat';
 import { turnPolicy } from './policy';
@@ -32,22 +32,24 @@ const KNOWN = /^[A-Z][A-Z0-9_]{2,63}$/;
 
 export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: string; organize: boolean; pricing?: PricingDeps })
   : Promise<MentorCatalog> {
-  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
-    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+  // Every setting from the admission configuration rows (one cached query), as chat.ts.
+  const configuration = readAdmissionConfiguration(admin);
+  const rows = await configuration;
+  const core = rowFor(rows, CORE_PATH_SETTING);
   const config = coreSetting.safeParse(core.error ? null : core.data?.value);
   if (!config.success || !config.data.enabled) throw new MentorCatalogError('TURN_CORE_DISABLED');
-  const configuration = readAdmissionConfiguration(admin);
-  const [settings, budgets, rows, module] = await Promise.all([readAdmissionSettings(admin, configuration),
-    readPurposeBudgets(admin, configuration), configuration, readAdmissionModule(admin, input.moduleId)]);
+  const [settings, budgets, module] = await Promise.all([readAdmissionSettings(admin, configuration),
+    readPurposeBudgets(admin, configuration), readAdmissionModule(admin, input.moduleId)]);
   if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string')
     throw new MentorCatalogError('TURN_MENTOR_DENIED');
   try {
-    const mentor = await chatQuote(admin, { modelId: module.data.model_id, inputBytes: budgets?.interactive.inputBytes ?? MENTOR_INPUT_BYTES,
+    const mentor = await chatQuote(admin, { configuration: rows, modelId: module.data.model_id,
+      inputBytes: budgets?.interactive.inputBytes ?? MENTOR_INPUT_BYTES,
       deps: input.pricing, use: { phase: 'skill', requestFormat: AGENT_TURN_REQUEST_FORMAT, purpose: 'interactive' } });
     let organizer: ChatQuote | null = null;
     if (input.organize) {
       const summary = summaryPolicy(Object.fromEntries((rows.data ?? []).map(r => [r.key, r.value])), module.data.model_id);
-      organizer = await chatQuote(admin, { modelId: summary.modelId, inputBytes: budgets?.organize.inputBytes ?? ORGANIZER_INPUT_BYTES,
+      organizer = await chatQuote(admin, { configuration: rows, modelId: summary.modelId, inputBytes: budgets?.organize.inputBytes ?? ORGANIZER_INPUT_BYTES,
         deps: input.pricing, key: await mentor.credential(), use: { phase: 'attached_organizer', requestFormat: AGENT_TURN_REQUEST_FORMAT, purpose: 'organize',
           outputCap: summary.maxTokens } });
       assertSeparateSummaryModel(mentor.model, organizer.model);

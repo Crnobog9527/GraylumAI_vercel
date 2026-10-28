@@ -25,6 +25,7 @@ import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions,
 import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles } from './mentorSkill';
 import type { ChatQuote } from './quote';
 import type { TurnEvent } from './sse';
+import { logSwallowed, swallow } from '../../lib/swallow';
 
 /*
  * CORE-PATH-V2 kind=mentor (plan 2.7, 6.1 V2-5): one turn of the positioning mentor. Database work is turn_open (which also
@@ -139,7 +140,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       captureInput = capture.value;
       try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer),
         template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
-      catch (error) { if (error instanceof TurnStop && error.code === 'TURN_TOMBSTONED') throw error; }
+      catch (error) {
+        if (error instanceof TurnStop && error.code === 'TURN_TOMBSTONED') throw error;
+        logSwallowed('turn_mentor_organizer_failed', error, { category: 'ai' });
+      }
     }
 
     // 6. Close: settle once, save both messages, apply the checklist patches in the same transaction.
@@ -155,7 +159,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       : error instanceof Error && /^TURN_[A-Z_]+$/.test(error.message) ? error.message : 'TURN_FAILED';
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
-      await close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }).catch(() => undefined);
+      // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
+      await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
+        { category: 'ai' });
     }
     emit({ type: 'error', code, turnId: opened.turnId });
   }
