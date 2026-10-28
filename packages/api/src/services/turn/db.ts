@@ -25,7 +25,10 @@ const opened = z.object({ turnId: z.number().int().positive(), state: z.enum(['r
   history: z.array(historyItem),
   // Read by turn_open with the account row: the reply language setting and, for a free chat, the positioning gate.
   replyLanguage: z.unknown().optional(),
-  positioning: z.object({ positioned: z.boolean(), refusals24h: z.number().int().nonnegative() }).nullable().optional() });
+  positioning: z.object({ positioned: z.boolean(), refusals24h: z.number().int().nonnegative() }).nullable().optional(),
+  // A new report (V2-7a): its frozen identity, confirmed source and benchmark table, read under the open's locks.
+  report: z.object({ frozen: z.record(z.string(), z.unknown()), source: z.record(z.string(), z.unknown()), benchmarks: z.unknown() })
+    .nullable().optional() });
 export type Opened = z.infer<typeof opened>;
 const begun = tombstones.extend({ state: z.enum(['running', 'paused']), status: z.string().optional(),
   replay: z.boolean().optional(), paused: z.boolean().optional() });
@@ -36,6 +39,16 @@ const closed = z.object({ turnId: z.number().int().positive(), closeKind: z.stri
   absorbedCredits: z.number().int().nullable(), settlement: z.enum(['pending', 'done']).nullable(), replay: z.boolean() })
   .and(tombstones.partial());
 export type Closed = z.infer<typeof closed>;
+
+const stopped = z.object({ turnId: z.number().int().positive(), state: z.enum(['stopping', 'closed', 'confirmation_required']),
+  chargeable: z.boolean(), replay: z.boolean(), closeKind: z.string().nullable().optional(),
+  chargedCredits: z.number().int().nullable().optional(), fixedCredits: z.number().int().optional() });
+export type Stopped = z.infer<typeof stopped>;
+const reportTurn = z.object({ turnId: z.number().int().positive(), state: z.enum(['opening', 'running', 'stopping', 'paused', 'closed']),
+  closeKind: z.string().nullable(), delivered: z.boolean(), chargedCredits: z.number().int().nullable(),
+  settlement: z.enum(['pending', 'done']).nullable(), fixedCredits: z.number().int().nullable(), stopChargeable: z.boolean().nullable(),
+  report: z.record(z.string(), z.unknown()).nullable(), body: z.string().nullable(), openedAt: z.string(), closedAt: z.string().nullable() });
+export type ReportTurn = z.infer<typeof reportTurn>;
 
 export type CallKind = 'model' | 'tool' | 'decision';
 export type CallStatus = 'ok' | 'not_sent' | 'rejected' | 'no_charge_402' | 'unusable';
@@ -75,6 +88,13 @@ export function turnDatabase(clients: TurnClients) {
       delivered: boolean; refundAll?: boolean; failureCode?: string | null }) =>
       call(w, 'turn_close', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_close_kind: a.kind, p_messages: a.messages,
         p_delivered: a.delivered, p_refund_all: a.refundAll ?? false, p_failure_code: a.failureCode ?? null }, closed),
+    /** The user's stop of a running report (V2-7a); not part of a turn's own writes. */
+    stop: (a: { actorId: string; turnId: number; confirmed: boolean; stopAt: number | null }) =>
+      call(w, 'turn_stop', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_confirmed: a.confirmed, p_stop_at: a.stopAt }, stopped),
+    /** A report turn of a round (newest, or by id), with its saved text. */
+    reportRead: (a: { actorId: string; sessionId: string; roundId: string | null; turnId: number | null }) =>
+      call(clients.read, 'turn_report_read', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_round_id: a.roundId,
+        p_turn_id: a.turnId }, reportTurn.nullable()),
   };
 }
 export type TurnDatabase = ReturnType<typeof turnDatabase>;

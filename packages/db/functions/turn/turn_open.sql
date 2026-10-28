@@ -11,7 +11,7 @@ AS $function$
 DECLARE
   s runtime_sessions; t turns; prof profiles; existing turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
-  u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
+  u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb; report jsonb;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
@@ -35,7 +35,8 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits'] THEN
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','stoppedAt','stopChargeable','stopAt']
+    OR (p_kind = 'report') <> (p_policy ? 'report') THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -92,6 +93,8 @@ BEGIN
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
+    -- A report is admitted here, under the same locks as its freeze (V2-7a): price, membership, source, one per round.
+    IF p_kind = 'report' THEN report := public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int;
     available := greatest(public.credit_available(p_actor_id), 0);
     h := least(g, available);
@@ -100,7 +103,8 @@ BEGIN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;
 
-    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h);
+    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h)
+      || CASE WHEN report IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('report', report->'frozen') END;
     INSERT INTO turns (actor_id, session_id, request_id, kind, state, policy, reserved_credits, reserved_usd, input_bytes)
       VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', frozen, h, u_turn,
         (p_policy->>'inputBytes')::int)
@@ -115,12 +119,15 @@ BEGIN
         WHERE session_id = p_session_id AND visible AND deleted_at IS NULL
         ORDER BY seq DESC LIMIT (t.policy->>'historyItems')::int) m;
   -- 6. What the turn's prompt needs from the account, read here instead of in more round trips: the reply language and, for a
-  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it).
+  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it); for a new
+  -- report, its frozen identity, confirmed source and benchmark table (a replay runs nothing, so it gets none).
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
     'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history,
     'replyLanguage', prof.reply_language,
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
-        AND r.closed_at > now() - interval '24 hours')) END);
+        AND r.closed_at > now() - interval '24 hours')) END,
+    'report', CASE WHEN report IS NULL THEN NULL
+      ELSE jsonb_build_object('frozen', report->'frozen', 'source', report->'source', 'benchmarks', report->'benchmarks') END);
 END $function$;

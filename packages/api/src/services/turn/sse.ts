@@ -8,7 +8,9 @@
 export type TurnEvent =
   | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean }
   | { type: 'text'; delta: string }
-  | { type: 'result'; turnId: number; body: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null }
+  | { type: 'result'; turnId: number; body: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null;
+      /** A report: how it closed (completed, or stopped by its user) and whether it is a complete report. */
+      closeKind?: string; delivered?: boolean }
   | { type: 'error'; code: string; turnId?: number };
 
 const CODE = /^[A-Z][A-Z0-9_]{2,63}$/;
@@ -17,8 +19,11 @@ export function encodeEvent(event: TurnEvent): string {
   return `event: ${safe.type}\ndata: ${JSON.stringify(safe)}\n\n`;
 }
 
-/** A Response that streams the events of `run`; the turn keeps running to its close even if the client goes away. */
-export function eventStream(run: (emit: (event: TurnEvent) => void) => Promise<void>): Response {
+/**
+ * A Response that streams the events of `run`; the turn keeps running to its close even if the client goes away. `onCancel`
+ * hears that the client went away (a report then checks once whether its user stopped it).
+ */
+export function eventStream(run: (emit: (event: TurnEvent) => void) => Promise<void>, onCancel?: () => void): Response {
   const encoder = new TextEncoder();
   let open = true;
   const body = new ReadableStream<Uint8Array>({
@@ -30,7 +35,7 @@ export function eventStream(run: (emit: (event: TurnEvent) => void) => Promise<v
       run(emit).catch(() => emit({ type: 'error', code: 'TURN_FAILED' }))
         .finally(() => { if (open) { open = false; try { controller.close(); } catch { /* already closed */ } } });
     },
-    cancel() { open = false; },
+    cancel() { open = false; onCancel?.(); },
   });
   return new Response(body, { headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store',
     'x-accel-buffering': 'no' } });

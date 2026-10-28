@@ -38,6 +38,13 @@ export const CORE_PATH_SETTING = 'core_path_v2';
 const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
+/** The core-path switch and stop-loss parameters (cached), or null when the path is off or the setting is not valid. */
+export async function readCoreConfig(admin: SupabaseClient) {
+  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
+    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
+  const config = coreSetting.safeParse(core.error ? null : core.data?.value);
+  return config.success && config.data.enabled ? config.data : null;
+}
 
 export type ChatDeps = {
   admin: SupabaseClient; clients: TurnClients; slots: CounterStore;
@@ -60,10 +67,8 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
   // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
-  const core = await catalogRead(admin, 'settings', 'core-path-v2', () =>
-    admin.from('system_settings').select('value').eq('key', CORE_PATH_SETTING).maybeSingle());
-  const config = coreSetting.safeParse(core.error ? null : core.data?.value);
-  if (!config.success || !config.data.enabled) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
+  const config = await readCoreConfig(admin);
+  if (!config) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   const configuration = readAdmissionConfiguration(admin);
   const settings = await readAdmissionSettings(admin, configuration);
   const budgets = await readPurposeBudgets(admin, configuration);
@@ -85,9 +90,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
 
   // 2. Open: one model call (2.5.3, V2-4a has no tools) plus the possible positioning check, outside M and the freeze.
-  const decisionUpperUsd = config.data.decisionUpperUsd;
+  const decisionUpperUsd = config.decisionUpperUsd;
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
-    limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.data.stopLoss,
+    limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 }, stopLoss: config.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: quote.inputLimit, frozen: { modelId: quote.modelId, model: quote.model } });
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }

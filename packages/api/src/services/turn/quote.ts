@@ -55,7 +55,13 @@ function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], 
   return { limits, nominal: nominal as NominalPricing };
 }
 
-export async function chatQuote(admin: SupabaseClient, input: { modelId: string; inputBytes: number; deps?: PricingDeps }): Promise<ChatQuote> {
+/** What the quoted call is for: a free chat (the default) or a report (V2-7a), each matched to its own admitted profile use. */
+export type QuoteUse = { phase: 'ordinary' | 'report'; requestFormat: string };
+const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_REQUEST_FORMAT };
+
+export async function chatQuote(admin: SupabaseClient, input: { modelId: string; inputBytes: number; deps?: PricingDeps;
+  use?: QuoteUse }): Promise<ChatQuote> {
+  const use = input.use ?? FREE_CHAT_USE;
   const setting = await catalogRead(admin, 'settings', 'runtime-payg', () =>
     admin.from('system_settings').select('value').eq('key', RUNTIME_PAYG_SETTING).maybeSingle());
   const parsed = paygProductionSettings.safeParse(setting.error ? null : setting.data?.value);
@@ -75,12 +81,12 @@ export async function chatQuote(admin: SupabaseClient, input: { modelId: string;
   const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag);
   const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens);
   const reasoning = admitReasoning(row.data, 'interactive', limits.providerSlug, outputLimit);
-  // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): the ordinary purpose, the
-  // free-chat request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
+  // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): the purpose (ordinary, or
+  // report), its request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
   // A profile approved for another use (e.g. Argon only for fusion_review) never admits a free chat.
   const profile = matchedProfile(parsed.data.profiles,
     { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],
-    [{ modelId: input.modelId, phase: 'ordinary', outputLimit, requestFormat: FREE_CHAT_REQUEST_FORMAT, reasoning }]);
+    [{ modelId: input.modelId, phase: use.phase, outputLimit, requestFormat: use.requestFormat, reasoning }]);
   if (!profile || profile.endpointTag !== candidate.endpointTag) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
   const upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
