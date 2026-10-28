@@ -43,7 +43,7 @@ export type PolicyInput = {
   decisionUpperUsd?: string;
   stopLoss: z.infer<typeof stopLossSettings>; historyItems: number; inputBytes: number;
   /** The start threshold L in credits (startThresholdCredits): the turn opens when the balance covers it, the freeze is
-   *  H = min(G_turn, A), and a call pauses only below min(G_i, L) (Owner 10-01, restated 10-28; migration 0496). */
+   *  H = min(G_turn, A), and a call pauses only below min(G_i, L) (Owner 10-01, restated 10-28; migration 0422). */
   startThresholdCredits: number;
   /** The model's nominal price table at open: a receipt the recovery job finds later is priced with it (V2-8), as a live one is. */
   pricing?: NominalPricing;

@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2 V2-5 (kind=mentor, the positioning mentor; docs/launch/tasks/CORE-PATH-V2.md 2.3, 2.7, 4.2, 6.1).
--- MIGRATION NUMBER IS A LOCAL PLACEHOLDER until the controller assigns one; it must stay after 0496 (start threshold), whose
+-- MIGRATION NUMBER IS A LOCAL PLACEHOLDER until the controller assigns one; it must stay after 0422 (start threshold, controller-assigned), whose
 -- turn_open it extends.
 --   turn_mentor_context  read inside turn_open: the draft of this session, its current round, the step's workflow and the
 --                        work projection (checklist values, field provenance, business context; runtime_work_projection's
@@ -20,7 +20,7 @@
 --   opc_information,     unchanged except one lock: the draft's session row before its project, so a manual checklist save or
 --   opc_capture_resolve  a suggestion decision serializes with a mentor close (which holds that session row) instead of
 --                        overwriting its capture or being overwritten (review of #1520).
---   turn_open            0496 with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
+--   turn_open            0422 (start threshold) with the mentor branch of its per-kind hook: kindContext = turn_mentor_context(p_policy->'mentor').
 --   turn_close           0421 with the mentor branch of its per-kind hook (turn_mentor_apply on p_kind_result), and the
 --                        capture response returned under kindResult.
 -- Locks: neither mentor function takes an explicit row lock (main-path rule 5); opc_information and opc_capture_resolve now lock
@@ -30,7 +30,7 @@
 -- lock on artifact_rounds remains, for the length of a concurrent single-statement edit.
 -- Compatibility: no signature changes; turn_open and turn_close only gain the mentor branches and a returned key. Nothing calls
 -- the mentor kind until core_path_v2 is enabled and the page uses /api/turn (V2-10). Repeatable: CREATE OR REPLACE throughout.
--- Recovery: re-apply 0496's turn_open and 0421's turn_close and drop the two mentor functions; no stored data depends on them.
+-- Recovery: re-apply 0422 (start threshold)'s turn_open and 0421's turn_close and drop the two mentor functions; no stored data depends on them.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -303,7 +303,7 @@ BEGIN
  RETURN response;
 END $function$;
 
--- turn_open: 0496 (the start threshold) unchanged except the mentor branch of kindContext.
+-- turn_open: 0422 (the start threshold) unchanged except the mentor branch of kindContext.
 CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
  RETURNS jsonb
  LANGUAGE plpgsql
