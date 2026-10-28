@@ -1,0 +1,10 @@
+{
+ "old:free-chat": {
+  "path": "old",
+  "roundTrips": 8,
+  "dbTimeMs": 52.4,
+  "relationLocks": 140,
+  "hotSeqScans": 0,
+  "enforce": false
+ }
+}

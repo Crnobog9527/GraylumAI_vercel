@@ -63,7 +63,8 @@ test('the coach first call answers with the skill tool call and schema-valid arg
 
 test('non-streaming calls return the whole message, usage and a receipt; usage stays under the call\'s own price bound', async t => {
   const base = await start(t, { firstByteMs: 5, intervalMs: 1, chunks: 4 });
-  const response = await post(base, { model: 'm', provider: { max_price: { prompt: 3, completion: 15 } }, messages: [{ role: 'user', content: 'x'.repeat(800) }] });
+  const response = await post(base, { model: 'm', provider: { max_price: { prompt: 3, completion: 15 } }, messages: [{ role: 'user',
+    content: 'x'.repeat(800) }] });
   const id = response.headers.get('x-generation-id');
   const reply = await response.json();
   assert.equal(reply.id, id);

@@ -138,7 +138,8 @@ export function scan(name, body, options = DEFAULTS) {
       const table = update[1].toLowerCase();
       const keys = options.updateKeys[table];
       if (!keys) found.push(`${name}: UPDATE of ${table}`);
-      else if (!new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`, 'i').test(statement)) found.push(`${name}: UPDATE of ${table} without ${keys.join(' or ')} in WHERE`);
+      else if (!new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`,
+        'i').test(statement)) found.push(`${name}: UPDATE of ${table} without ${keys.join(' or ')} in WHERE`);
     }
   }
   return found;
@@ -160,7 +161,8 @@ export function analyze({ root = process.cwd(), functionsDir = 'packages/db/func
       if (c.tables.length > options.maxTables) result.violations.push(`${name}: ${c.tables.length} reachable tables (max ${options.maxTables})`);
     }
   }
-  for (const [name, defs] of enforced) for (const def of defs.filter(d => d.file.startsWith(enforceAbs))) result.violations.push(...scan(name, def.body, options));
+  for (const [name, defs] of enforced) for (const def of defs.filter(d => d.file.startsWith(enforceAbs))) result.violations.push(...scan(name, def.body,
+    options));
   // Report-only scan of the roots that are not enforced: what the old path would trip.
   result.reported = {};
   for (const name of rootNames.filter(n => !enforced.has(n))) {
@@ -178,7 +180,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   else {
     console.log(`functions ${result.functions}, tables ${result.tables}; enforced directory present: ${result.enforcedDirPresent}`);
     for (const [name, r] of Object.entries(result.roots)) console.log(`  ${name}: ${r.functions} functions, ${r.tables} tables`);
-    for (const [name, list] of Object.entries(result.reported)) if (args.includes('--report')) console.log(`  [report] ${name}: ${new Set(list).size} rule hits`);
+    for (const [name,
+      list] of Object.entries(result.reported)) if (args.includes('--report')) console.log(`  [report] ${name}: ${new Set(list).size} rule hits`);
     for (const v of result.violations) console.error(`VIOLATION ${v}`);
   }
   if (result.violations.length) process.exit(1);

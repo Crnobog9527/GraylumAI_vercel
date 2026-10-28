@@ -61,7 +61,8 @@ test('the enforced directory is checked, everything else is only reported; an ab
   assert.equal(skipped.enforcedDirPresent, false);
   assert.deepEqual(skipped.violations, []);
   assert.ok(skipped.reported.old_one.length >= 2, 'the old path is reported');
-  const withTurn = repo({ 'runtime/old_one.sql': old, 'turn/turn_open.sql': fn('turn_open', 'PERFORM old_one(); SELECT 1 FROM profiles WHERE id=a FOR UPDATE; PERFORM pg_advisory_xact_lock(1);') });
+  const withTurn = repo({ 'runtime/old_one.sql': old, 'turn/turn_open.sql': fn('turn_open',
+    'PERFORM old_one(); SELECT 1 FROM profiles WHERE id=a FOR UPDATE; PERFORM pg_advisory_xact_lock(1);') });
   const checked = analyze({ root: withTurn });
   assert.equal(checked.enforcedDirPresent, true);
   assert.deepEqual(checked.violations, ['turn_open: advisory lock'], 'only the turn function is enforced');
