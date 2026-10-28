@@ -62,7 +62,11 @@ BEGIN
     IF EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    IF s.active_turn_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+    -- A jury (or its adoption) runs on the report's draft conversation without occupying it (V2-7b): the conversation stays
+    -- usable while a review advances or waits, as before; one review per user is the review record's own rule.
+    IF s.active_turn_id IS NOT NULL AND p_kind NOT IN ('jury','jury_adopt') THEN
+      RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03';
+    END IF;
     -- The same account check as bill2_actor: active and not deleted.
     IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
@@ -105,7 +109,7 @@ BEGIN
       VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', frozen, h, u_turn,
         (p_policy->>'inputBytes')::int)
       RETURNING * INTO t;
-    UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id;
+    IF p_kind NOT IN ('jury','jury_adopt') THEN UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id; END IF;
   END IF;
 
   -- 5. The visible history, newest N in order.

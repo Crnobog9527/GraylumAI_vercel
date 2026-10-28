@@ -42,11 +42,19 @@ BEGIN
   -- positioning check is never charged to the user (Owner 10-12): it needs no freeze; its upper bound counts in U_turn and the
   -- stop-loss reservation only.
   q := (t.policy->>'q')::numeric;
-  SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
-                           WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
-                           ELSE 0 END), 0) INTO used
-  FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
-  need := CASE WHEN p_call_kind = 'decision' THEN 0 ELSE ceil(q * p_upper_usd * p_multiplier) END;
+  IF t.kind = 'jury' THEN
+    -- A jury pays its fixed price whatever its calls cost (Owner 10-17); the freeze above it is the temporary bound of the group
+    -- in flight (10-13): only calls still in flight count against it, a finished group's bound is free again (V2-7b).
+    SELECT coalesce((t.policy->>'fixedCredits')::int, 0) + coalesce(sum(ceil(q * upper_usd * multiplier)), 0) INTO used
+    FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision' AND status IN ('dispatched','identified');
+  ELSE
+    SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
+                             WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
+                             ELSE 0 END), 0) INTO used
+    FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
+  END IF;
+  -- A jury adoption is free to the user (10-20): nothing is frozen and nothing needs to be.
+  need := CASE WHEN p_call_kind = 'decision' OR t.kind = 'jury_adopt' THEN 0 ELSE ceil(q * p_upper_usd * p_multiplier) END;
   IF t.reserved_credits - used < need THEN
     UPDATE turns SET state = 'paused', pause_reason = 'waiting_credits', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
     RETURN jsonb_build_object('state', 'paused', 'paused', true) || turn_tombstones(p_actor_id, t.session_id, t.policy);

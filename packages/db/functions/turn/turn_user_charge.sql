@@ -8,9 +8,26 @@ CREATE OR REPLACE FUNCTION public.turn_user_charge(p_actor_id uuid, p_turn_id bi
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE stops integer;
+DECLARE stops integer; t turns;
 BEGIN
-  IF p_refund_all OR (p_kind = 'expired' AND NOT p_delivered) THEN RETURN 0; END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  IF p_refund_all THEN RETURN 0; END IF;
+  IF t.kind = 'jury' THEN
+    -- The jury's fixed price (Owner 10-17/10-27, V2-7b), as fusion_review_fee_settle_internal: a deliverable revision (a usable
+    -- summary that changes a section) pays the price however the turn ended; an interruption or the 24-hour end pays the known
+    -- usage, at most the price; no change, a failed revision, an incomplete review or an erasure pays nothing.
+    IF EXISTS (SELECT 1 FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.usage->>'deliverable' = 'true') THEN
+      RETURN least(coalesce(p_fixed, p_held), p_held);
+    END IF;
+    IF p_kind IN ('interrupted','expired') THEN RETURN least(p_credits, coalesce(p_fixed, p_held), p_held); END IF;
+    RETURN 0;
+  END IF;
+  IF t.kind = 'compare' THEN
+    -- Each column is rounded on its own (2.7 "各模型各自取整"), as the old per-run settlement did.
+    SELECT coalesce(sum(ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)), 0)::integer INTO p_credits
+    FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision';
+  END IF;
+  IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN
     -- 10-27: the first two stops within 24 hours are free; from the third, what was generated, at most the fixed price.
     SELECT count(*) INTO stops FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user
