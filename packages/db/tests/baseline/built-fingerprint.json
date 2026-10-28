@@ -4213,7 +4213,7 @@
   "fn:turn_call_identity(uuid,bigint,integer,text)": "40ec987e5d70",
   "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "cbea530a018e",
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text)": "8b79b695fbca",
-  "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "46acb86d4e4a",
+  "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "d8f127084b42",
   "fn:turn_settle_credits(uuid,uuid,integer,bigint)": "3ecf04bd4362",
   "fn:turn_tombstones(uuid,uuid,jsonb)": "7650ea48b0f5",
   "fn:voice_billing_scrub(uuid)": "6cf04ac8046a",

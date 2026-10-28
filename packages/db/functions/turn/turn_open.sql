@@ -49,6 +49,13 @@ BEGIN
     IF existing.session_id IS DISTINCT FROM p_session_id OR existing.kind <> p_kind THEN
       RAISE EXCEPTION 'TURN_REQUEST_CONFLICT' USING ERRCODE='22023';
     END IF;
+    -- A replay reads the history too: a deleted conversation or an erasing account is refused here as for a new request,
+    -- so the same old request can never read back deleted content (as runtime_session_context).
+    IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
+    IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false'
+      OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
+      RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
+    END IF;
     t := existing;
   ELSE
     IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
