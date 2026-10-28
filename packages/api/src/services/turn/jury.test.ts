@@ -37,7 +37,8 @@ const cfg = { path: 'turn', estimateUsd: '1', maxRounds: 2, reviewers: REVIEWERS
 const view = (over: Record<string, unknown> = {}) => ({ reviewId: '00000000-0000-4000-8000-000000000001', state: 'running', round: 1,
   phase: 'review', attempt: 1, turnId: 7, config: cfg, steps: [], calls: [], ...over });
 const admin = { rpc: m.rpc } as never;
-const jury = () => juryTurn({ admin, clients: { write: admin, read: admin } as never, slots: { take: async () => 1, drop: async () => undefined } }, 'actor');
+const jury = () => juryTurn({ admin, clients: { write: admin, read: admin } as never, slots: { take: async () => 1, drop: async () => undefined },
+  calls: async () => ({ ok: true }) }, 'actor');
 const member = { modelId: REVIEWERS[0], phase: 'fusion_review', request: { instructions: 'i', input: 'x' } };
 
 beforeEach(() => {
@@ -84,6 +85,12 @@ describe('jury turn advance', () => {
     m.decide.mockResolvedValueOnce({ state: 'incomplete', outcome: { kind: 'no_opinions' } });
     expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'ended' });
     expect(m.close).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'failed', refundAll: true }));
+  });
+  it('a paused platform or an exhausted call limit stops the relay with nothing sent and the turn untouched (#1522 review)', async () => {
+    m.read.mockResolvedValue(view());
+    m.runGroup.mockResolvedValueOnce(REVIEWERS.map(() => ({ ok: false, code: 'TURN_NEW_CALLS_PAUSED' })));
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'gated' });
+    expect(m.close).not.toHaveBeenCalled();
   });
   it('waits for credits, leaves an unknown result to recovery, and never sends a group twice', async () => {
     m.read.mockResolvedValue(view());

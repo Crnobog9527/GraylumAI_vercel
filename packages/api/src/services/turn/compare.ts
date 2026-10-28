@@ -14,7 +14,8 @@ import { isPositioningRefusal } from '../runtime/positioningFallback';
 import { judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import type { PricingDeps } from '../runtime/pricingAdmission';
 import { ceil12, TurnStop } from './call';
-import { CORE_PATH_SETTING } from './chat';
+import { CORE_PATH_SETTING, GATE_CODES, type ChatDeps } from './chat';
+import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { TurnDatabaseError, type TurnClients } from './db';
 import { fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type MemberOutcome } from './fusionCalls';
 import { fusionCall, fusionQuote } from './fusionQuote';
@@ -40,7 +41,9 @@ export type CompareEvent =
   | { type: 'result'; turnId: number; compareId: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null }
   | { type: 'error'; code: string; turnId?: number };
 export type CompareTurnDeps = { admin: SupabaseClient; clients: TurnClients; slots: CounterStore; transport?: typeof fetch;
-  pricing?: PricingDeps; gate?: PositioningGatePolicy };
+  pricing?: PricingDeps; gate?: PositioningGatePolicy;
+  /** The runtime rate limits and the one-switch pause, before the compare opens (message) and before each paid call (calls). */
+  newWork: Pick<ChatDeps['newWork'], 'message' | 'calls'> };
 export type CompareTurnInput = { actorId: string; sessionId: string; requestId: string; modelIds: string[];
   /** Everything a column is sent except the history (read here) and the fallback rule (decided here). */
   parts: Omit<CompareParts, 'history' | 'positioningFallback'> };
@@ -55,6 +58,9 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   const core = rowFor(configuration, CORE_PATH_SETTING);
   const config = fusionCoreSetting.safeParse(core.error ? null : core.data?.value);
   if (!config.success || !config.data.enabled) return emit(fail('TURN_CORE_DISABLED'));
+  // The pause and the message limit before anything is priced or opened, as a free chat (the old compare start's rateLimit).
+  const admitted = await deps.newWork.message(input.actorId, readAdmissionSettings(admin, Promise.resolve(configuration)));
+  if (!admitted.ok) return emit(fail(GATE_CODES[admitted.reason]));
   const settings = (await readFusionSettings(admin)).compare;
   const models = input.modelIds;
   if (!settings.enabled) return emit(fail('FUSION_COMPARE_DISABLED'));
@@ -161,7 +167,7 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
         onChunk: streamers[index]!.onChunk };
     });
     const outcomes: MemberOutcome[] = await runGroup({ db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId,
-      nextSeq: () => ++seq, credential: async () => key, transport: deps.transport }, members);
+      nextSeq: () => ++seq, credential: async () => key, transport: deps.transport, calls: deps.newWork.calls }, members);
     outcomes.forEach((outcome, index) => {
       streamers[index]!.settle(outcome.ok && outcome.verdict === 'no_delivery');
       emit({ type: 'answer', index, ok: outcome.ok && outcome.verdict === 'usable', ...(outcome.ok ? {} : { code: outcome.code }) });

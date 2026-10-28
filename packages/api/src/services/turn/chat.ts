@@ -67,7 +67,7 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_USAGE_CONFIGURATION_REQUIRED: { kind: 'failed', refundAll: true },
 };
 /** A refusal of the new-work gate as a turn code: the administrator's pause, a minute or day limit, or limits unavailable. */
-const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
+export const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
   usage_configuration_required: 'TURN_USAGE_CONFIGURATION_REQUIRED' } as const;
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {

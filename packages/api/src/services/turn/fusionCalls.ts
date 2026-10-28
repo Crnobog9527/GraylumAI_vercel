@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { swallow } from '../../lib/swallow';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import type { FusionPhase } from '../fusion/models';
+import type { RuntimeCallGate } from '../runtime/newWorkGate';
 import { modelCall, TurnStop, type ModelCall } from './call';
+import { GATE_CODES } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import type { CounterStore } from './limiter';
 import { callCredits, stopLossSettings } from './policy';
@@ -91,6 +93,8 @@ export function answerText(raw: string | null): string | null {
 }
 
 export type GroupContext = { db: FusionDatabase; slots: CounterStore; actorId: string; turnId: number;
+  /** The one-switch pause and the account's call limits (runtime/newWorkGate.ts), before every paid call, as the old path. */
+  calls: RuntimeCallGate;
   /** The next free call sequence of the turn (shared by every group of it). */
   nextSeq: () => number; credential: () => Promise<string>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void> };
 
@@ -115,7 +119,10 @@ export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promi
       output: { phase: member.phase, body: text, verdict: judged.verdict, ...(judged.deliverable ? { deliverable: true } : {}) } };
   });
   const adapter = openRouterAdapter({ allowWorkspaceRead: true, credential: ctx.credential, transport: ctx.transport });
-  const settled = await Promise.allSettled(members.map(member => {
+  const settled = await Promise.allSettled(members.map(async member => {
+    // The pause and the call limits before the call is begun or sent (the old path's call gate): a refusal writes nothing.
+    const gate = await ctx.calls(ctx.actorId, 1, 'bill2.v2');
+    if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]);
     const deps = { db: calls as never, adapter, slots: ctx.slots, actorId: ctx.actorId, turnId: ctx.turnId, sleep: ctx.sleep,
       nextSeq: () => { const seq = ctx.nextSeq(); bySeq.set(seq, member); lastSeq.set(member, seq); return seq; } };
     return modelCall(deps, member.call, member.body, member.onChunk);

@@ -4,10 +4,11 @@ import { withPlatformSecretRequest } from '../platformSecrets/request';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
+import { readTurnRouteEnv } from '../../lib/envValidator';
 import { swallow } from '../../lib/swallow';
 import { authoritativeBilling, type BillingRpc } from '../bill2/service';
 import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
-import { newWorkGate } from '../runtime/newWorkGate';
+import { newWorkGate, type RuntimeCallGate } from '../runtime/newWorkGate';
 import { runtimeGateEnvironment } from '../runtime/realHost';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
@@ -82,7 +83,7 @@ export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: strin
 export async function advanceReview(input: { admin: SupabaseClient; reviewId: string; env?: Record<string, string | undefined>;
   budget?: RuntimeBudget; flow?: (actorId: string, budget: RuntimeBudget) => ReturnType<typeof reviewFlow>;
   /** CORE-PATH-V2 V2-7b: the jury turn's dependencies for a review on the turn path (tests inject them). */
-  jury?: { slots?: CounterStore; transport?: typeof fetch } }): Promise<AdvanceResult> {
+  jury?: { slots?: CounterStore; transport?: typeof fetch; calls?: RuntimeCallGate } }): Promise<AdvanceResult> {
   return withPlatformSecretRequest(async () => {
     const { admin, reviewId } = input;
     const outcome = await withAdvanceLease(admin, reviewId, async lease => {
@@ -91,8 +92,10 @@ export async function advanceReview(input: { admin: SupabaseClient; reviewId: st
         { category: 'billing', reviewId });
       if (view?.turnId) {
         try {
+          // The call gate of the turn path: the same namespace as POST /api/turn (no test window on the turn path).
           return await juryTurn({ admin, clients: turnClients(admin), slots: input.jury?.slots ?? redisCounterStore(),
-            transport: input.jury?.transport }, lease.actorId!).advance(reviewId);
+            transport: input.jury?.transport, calls: input.jury?.calls ?? newWorkGate(admin, readTurnRouteEnv().environment).calls },
+          lease.actorId!).advance(reviewId);
         } catch (error) {
           const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
           logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
@@ -123,7 +126,7 @@ export async function advanceReview(input: { admin: SupabaseClient; reviewId: st
         logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
         return { next: false, reason: 'failed' };
       }
-    }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed'].includes(value.reason));
+    }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed', 'gated'].includes(value.reason));
     return outcome.ran ? outcome.value : { next: false, reason: outcome.reason };
   });
 }

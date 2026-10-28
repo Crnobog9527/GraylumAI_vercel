@@ -7,6 +7,7 @@ import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from '../fusion/settings';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
+import type { RuntimeCallGate } from '../runtime/newWorkGate';
 import type { PositioningClassifier } from '../runtime/positioningGate';
 import { POSITIONING_MARKER } from '../runtime/positioningFallback';
 import { CORE_PATH_SETTING } from './chat';
@@ -97,9 +98,10 @@ const sse = (id: string, model: string, text: string, cost = 0.0021) => new Resp
   { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
 const parts = (question: string) => ({ skill: null, workspace: [], references: [], question, replyLocale: 'en' as const });
 async function compare(f: { actor: string; session: string }, transport: typeof fetch, input: { requestId?: string; question?: string;
-  gate?: PositioningClassifier } = {}) {
+  gate?: PositioningClassifier; calls?: RuntimeCallGate } = {}) {
   const events: CompareEvent[] = [];
   await withCatalogRequest(() => runCompareTurn({ admin, clients: turnClients(admin), slots, transport,
+    newWork: { message: async () => ({ ok: true }), calls: input.calls ?? (async () => ({ ok: true })) },
     // The synthetic Decisions check: allowed, reporting a provider cost (as the free-chat tests).
     gate: { classify: input.gate ?? (async ({ onCost }) => { onCost?.(0.00002); return 'allow'; }) } },
   { actorId: f.actor, sessionId: f.session, requestId: input.requestId ?? randomUUID(), modelIds: models,
@@ -201,6 +203,18 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: the single-compare budget also bounds what the 
     expect(await compare(f, transport)).toEqual([{ type: 'error', code: 'FUSION_BUDGET_EXCEEDED' }]);
     expect((await db.query('select count(*)::int n from turns where actor_id=$1', [f.actor])).rows[0].n).toBe(0);
   } finally { await budget('5'); }
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: the platform pause or a call limit sends no column and refunds everything (#1522 review)', async () => {
+  const f = await member();
+  let posts = 0;
+  const transport: typeof fetch = async () => { posts++; throw new Error('nothing may be sent'); };
+  const events = await compare(f, transport, { calls: async () => ({ ok: false, reason: 'paused' }) as never });
+  expect(posts).toBe(0);
+  expect(events.filter(e => e.type === 'answer').map(e => (e as { code?: string }).code)).toEqual(['TURN_NEW_CALLS_PAUSED', 'TURN_NEW_CALLS_PAUSED']);
+  expect((await db.query("select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model'",
+    [f.actor])).rows[0].n).toBe(0);
+  expect(await credits(f.actor)).toBe(1000);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-7b: every column refusing under the fallback rule is a positioning refusal, counted toward the cap', async () => {

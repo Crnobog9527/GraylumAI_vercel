@@ -15,6 +15,7 @@ import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readAdmissionConfiguration, type ConfigurationRows } from '../runtime/admissionConfiguration';
 import { rowFor } from '../runtime/settingsRows';
 import type { PricingDeps } from '../runtime/pricingAdmission';
+import type { RuntimeCallGate } from '../runtime/newWorkGate';
 import { readReplyLocale } from '../runtime/replyLanguage';
 import { TurnStop } from './call';
 import { CORE_PATH_SETTING } from './chat';
@@ -36,8 +37,11 @@ import { QuoteError } from './quote';
  * interruption or the 24-hour end pays the known usage, at most the price.
  */
 export type JuryDeps = { admin: SupabaseClient; clients: TurnClients; slots: CounterStore; transport?: typeof fetch;
-  pricing?: PricingDeps; sleep?: (ms: number) => Promise<void> };
+  pricing?: PricingDeps; sleep?: (ms: number) => Promise<void>;
+  /** The one-switch pause and the account's call limits before every seat call (runtime/newWorkGate.ts). */
+  calls: RuntimeCallGate };
 export type JuryAdvance = { next: boolean; reason: string; dispatched?: number };
+const GATED = new Set(['TURN_NEW_CALLS_PAUSED', 'TURN_RATE_LIMITED', 'TURN_LIMIT_UNAVAILABLE', 'TURN_USAGE_CONFIGURATION_REQUIRED']);
 const TRANSIENT = new Set(['TURN_DATABASE_UNAVAILABLE', 'TURN_PROVIDER_KEY_UNAVAILABLE', 'TURN_PRICE_UNAVAILABLE',
   'TURN_BILLING_UNIT_UNAVAILABLE']);
 const ATTEMPTS = 3, NIL = '00000000-0000-0000-0000-000000000000';
@@ -190,7 +194,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
         if (!key) return { next: false, reason: 'failed' };
         const outcomes = await runGroup({ db, slots: deps.slots, actorId, turnId: view.turnId, nextSeq: () => ++seq,
-          credential: async () => key, transport: deps.transport, sleep: deps.sleep }, members);
+          credential: async () => key, transport: deps.transport, sleep: deps.sleep, calls: deps.calls }, members);
         dispatched = outcomes.length;
         const stops = outcomes.flatMap(o => o.ok ? [] : [o.code]);
         if (stops.includes('TURN_TOMBSTONED')) {
@@ -200,6 +204,9 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
           return { next: false, reason: 'ended' };
         }
         if (stops.includes('TURN_PAUSED_FOR_CREDITS')) return { next: false, reason: 'waiting_credits' };
+        // Paused by the administrator or over the call limits: nothing was sent; the relay stops and the daily backstop (or the
+        // 24-hour end) picks the review up, as a refused BILL2 call gate did.
+        if (stops.some(code => GATED.has(code))) return { next: false, reason: 'gated' };
         // A call sent whose outcome is unknown: never sent again; the crash sweep and recovery settle it and end the review.
         if (stops.includes('TURN_CALL_UNKNOWN')) return { next: false, reason: 'in_flight' };
         view = (await record.read(reviewId))!;
