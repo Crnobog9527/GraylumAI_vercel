@@ -35,8 +35,9 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
   if (input.kind === 'report') {
     // A report hears when its page drops the stream (the user's stop, V2-7a); a chat runs to its end regardless.
     const gone = new AbortController();
-    const { kind: _kind, ...report } = input;
-    return eventStream(emit => runReportTurn(deps.chat, { ...report, actorId }, emit, gone.signal), () => gone.abort());
+    const report = { actorId, sessionId: input.sessionId, requestId: input.requestId, moduleId: input.moduleId,
+      projectId: input.projectId, roundId: input.roundId, acceptedCredits: input.acceptedCredits };
+    return eventStream(emit => runReportTurn(deps.chat, report, emit, gone.signal), () => gone.abort());
   }
   return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text }, emit));
 }
