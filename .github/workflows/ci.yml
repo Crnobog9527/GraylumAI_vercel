@@ -555,10 +555,9 @@ jobs:
       - name: Integration — Database behaviour suites (run-local)
         run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/2
 
-      # CORE-PATH-V2 V2-1: turn budget. Runs once (shard 1), on the same database image; the old path's numbers are reported
-      # against scripts/turn-budget-baseline.json, a scenario marked "enforce": true may not exceed its baseline.
+      # CORE-PATH-V2 V2-1: turn budget, on the same database image in each shard (about half a minute); the old path's numbers
+      # are reported against scripts/turn-budget-baseline.json, a scenario marked "enforce": true may not exceed its baseline.
       - name: Check turn budget (database round trips, time, locks)
-        if: matrix.shard == 1
         run: node scripts/check-turn-budget.mjs --ci
 
   unit-check:
