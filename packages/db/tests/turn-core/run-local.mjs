@@ -284,6 +284,28 @@ try{
   }finally{await p1.end();await p2.end();}
   report.checks.push('a receipt racing turn_close or arriving twice is kept once; a late provider id is stored; concurrent report stops of one account count serially');
  }
+ // 12. #1508 review P1 (2.5.4): a freeze lowers the available balance exactly once. atomic_pre_deduct takes H out of
+ // profiles.credits; nothing subtracts turns.reserved_credits again, so another session of the account sees the true remainder.
+ {
+  const a=await account(1000),other=randomUUID();
+  await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+   [other,a.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
+  const first=await open(a,{pol:policy({gCredits:400,minCredits:10})});
+  assert.equal(first.reservedCredits,400);
+  assert.equal(await balance(a),600);
+  assert.equal(await one('select credit_available($1) v',[a.actor]),600,'available = balance after the freeze, not 600 - 400');
+  // The other session asks for more than is left and is frozen exactly the 600 that remain.
+  const second=await open(a,{session:other,pol:policy({gCredits:1000,minCredits:10})});
+  assert.equal(second.reservedCredits,600);
+  await close(a,second.turnId,'failed',{messages:[],delivered:false,refundAll:true});
+  assert.equal(await balance(a),600);
+  // Close the first with D = 150: N = ceil(100 x 0.25 x 6) = 150; 250 of the freeze comes back.
+  await begin(a,first.turnId,1,{upper:0.5});await record(a,first.turnId,1,{n:0.25});
+  assert.equal((await close(a,first.turnId,'completed',{messages:[]})).chargedCredits,150);
+  assert.equal(await balance(a),850);
+  assert.deepEqual((await c.query("select amount from credit_transactions where user_id=$1 and reason_code='turn_spend'",[a.actor])).rows,[{amount:-150}]);
+  report.checks.push('a freeze lowers the available balance once: 1000 -> freeze 400 -> 600 available to another session; close D=150 -> 850, one -150 record');
+ }
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
