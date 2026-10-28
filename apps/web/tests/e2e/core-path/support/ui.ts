@@ -19,7 +19,7 @@ export async function readCredits(page: Page): Promise<number> {
   return credits;
 }
 
-export interface ReportSettlement { consumedCredits: number; refundedCredits: number; nominalReserved: number; outcome: string; createdAt: string }
+export interface ReportSettlement { executionId: string; consumedCredits: number; refundedCredits: number; nominalReserved: number; outcome: string; createdAt: string }
 
 /**
  * The newest report settlement in the user's credit ledger (credits.getCreditTransactions): what the stopped report really
@@ -32,8 +32,8 @@ export async function latestReportSettlement(page: Page): Promise<ReportSettleme
   const items = ((body as { result?: { data?: { items?: Array<{ created_at: string; metadata?: Record<string, unknown> }> } } }).result?.data?.items) ?? [];
   const entry = items.find(item => item.metadata?.sourceType === 'report' && typeof item.metadata?.consumedCredits === 'number');
   if (!entry?.metadata) return null;
-  const { consumedCredits, refundedCredits, nominalReserved, outcome } = entry.metadata as Record<string, number | string>;
-  return { consumedCredits: Number(consumedCredits), refundedCredits: Number(refundedCredits ?? 0), nominalReserved: Number(nominalReserved ?? 0),
+  const { consumedCredits, refundedCredits, nominalReserved, outcome, executionId } = entry.metadata as Record<string, number | string>;
+  return { executionId: String(executionId ?? ''), consumedCredits: Number(consumedCredits), refundedCredits: Number(refundedCredits ?? 0), nominalReserved: Number(nominalReserved ?? 0),
     outcome: String(outcome ?? ''), createdAt: entry.created_at };
 }
 

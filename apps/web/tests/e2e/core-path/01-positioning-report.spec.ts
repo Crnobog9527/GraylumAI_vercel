@@ -76,6 +76,8 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
       await meter.checkpoint(`journey 3: free stop ${free + 1}`);
     }
 
+    // The settlement already in the ledger before this report starts: the one for this report must be a different one.
+    const settledBefore = (await latestReportSettlement(page))?.executionId ?? null;
     // The next stop asks first. "继续生成" keeps the report going; "确认停止" charges the part already written.
     await startReport(page);
     await stopButton(page).click();
@@ -93,12 +95,12 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     // The charge for the part already written, from the ledger: the 500 hold leaves the balance first and the refund comes back
     // later, so the balance alone would read a charge of about 500. (On staging the status line stayed at "已停止，正在保存已显示的内容…"
     // for minutes while the ledger was already right; the notice text is noted, not asserted.)
-    const startedAt = Date.now();
-    await expect.poll(async () => {
+    const newSettlement = async () => {
       const entry = await latestReportSettlement(page);
-      return entry !== null && Date.parse(entry.createdAt) > startedAt - 15 * 60_000 && entry.outcome === 'user_stop' ? entry : null;
-    }, { timeout: 180_000, intervals: [3000, 5000] }).not.toBeNull();
-    const settled = (await latestReportSettlement(page))!;
+      return entry !== null && entry.executionId !== settledBefore && entry.outcome === 'user_stop' ? entry : null;
+    };
+    await expect.poll(newSettlement, { timeout: 180_000, intervals: [3000, 5000] }).not.toBeNull();
+    const settled = (await newSettlement())!;
     test.info().annotations.push({ type: 'paid-stop', description: `consumed ${settled.consumedCredits}, refunded ${settled.refundedCredits} of ${settled.nominalReserved}` });
     expect(settled.consumedCredits).toBeGreaterThan(0);
     expect(settled.consumedCredits).toBeLessThanOrEqual(REPORT_PRICE);
