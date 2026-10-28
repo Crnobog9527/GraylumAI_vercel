@@ -49,9 +49,10 @@ async function stale(interval='16 minutes'){
  await age(a,o.turnId,interval);
  return {a,id:o.turnId};
 }
-// A turn paused for credits: H = 30, one call used 12, the next needs 24.
+// A turn paused for credits, its freeze capped by the balance (0496): L = 30 = the balance, G = 60, H = min(G, 30) = 30; one call
+// used 12, the next needs G_i = 24 and 18 < min(24, L) pauses it.
 async function paused(){
- const a=await account(30),o=await open(a,{pol:policy({gCredits:60,minCredits:10,uModelCredits:20})});
+ const a=await account(30),o=await open(a,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});
  await begin(a,o.turnId,1,{upper:0.02});await record(a,o.turnId,1,{n:0.02});
  assert.equal((await begin(a,o.turnId,2,{upper:0.04})).paused,true);
  return {a,id:o.turnId};
@@ -185,7 +186,7 @@ try{
   const p=await paused();
   const resumed=(over={},request=randomUUID())=>open(p.a,{request,resumeOf:p.id,
    pol:policy({gCredits:60,minCredits:20,uModelCredits:20,limits:{model:2,paidTools:1,freeTools:1},...over})});
-  // Still short: the paused turn's 18 back is below the start threshold of 20. Nothing changes.
+  // Still short: the paused turn's 30 back minus the 12 it carries leaves 18, below the start threshold of 20. Nothing changes.
   assert.match(await refusal(resumed()),/TURN_INSUFFICIENT_CREDITS/);
   assert.deepEqual(await turn(p.a,p.id).then(r=>[r.state,r.charged_credits]),['paused',null]);
   assert.equal(await balance(p.a),0);
@@ -239,7 +240,7 @@ try{
   // A fixed price stays the fixed price across a resume (#1519 review): 500, not 500 + what the paused segment used.
   {
    const f=await account(30);
-   const fp=(o={})=>policy({gCredits:600,fixedCredits:500,minCredits:10,uModelCredits:20,...o});
+   const fp=(o={})=>policy({gCredits:600,fixedCredits:500,minCredits:30,uModelCredits:20,...o});
    const o=await open(f,{kind:'report',pol:fp()});
    await begin(f,o.turnId,1,{upper:0.02});await record(f,o.turnId,1,{n:0.02});
    assert.equal((await begin(f,o.turnId,2,{upper:0.04})).paused,true);
@@ -267,7 +268,7 @@ try{
   }
   // A model call whose cost is not final yet: the resume waits for its receipt, then carries it (#1519 review).
   {
-   const g=await account(30),o=await open(g,{pol:policy({gCredits:60,minCredits:10,uModelCredits:20})});
+   const g=await account(30),o=await open(g,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});
    await begin(g,o.turnId,1,{upper:0.02});await identity(g,o.turnId,1,'gen-open');            // usable answer, cost not final
    assert.equal((await begin(g,o.turnId,2,{upper:0.04})).paused,true,'30 - 12 held for the open call < 24');
    await c.query('update profiles set credits=credits+100 where id=$1',[g.actor]);

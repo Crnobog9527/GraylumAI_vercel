@@ -139,4 +139,21 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     // begin and the provider id only: no receipt, so turn_close marks it unknown and recovery prices it after the lookup.
     expect(kinds(h.writes)).toEqual(['begin', 'identity']);
   });
+  it('a provider id write that fails is retried before the call ends, until the database is back', async () => {
+    // The first round of three writes fails (database down), the next succeeds; the cost is not final, so the id is all recovery
+    // will have to look the cost up by.
+    const h = harness();
+    let calls = 0;
+    (h.deps.db as { identity: unknown }).identity = vi.fn(async (a: Record<string, unknown>) => {
+      h.writes.push(['identity', a]);
+      if (++calls <= 3) throw new Error('db down');
+      return { status: 'identified' };
+    });
+    const noCost = JSON.stringify({ ...JSON.parse(completion('gen-retry')), usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } });
+    const transport = vi.fn(async () => new Response(noCost, { headers: { 'x-generation-id': 'gen-retry' } }));
+    await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body);
+    expect(kinds(h.writes)).toEqual(['begin', 'identity', 'identity', 'identity', 'identity']);
+    expect(h.writes.at(-1)![1]).toMatchObject({ providerId: 'gen-retry' });
+    expect(calls).toBe(4);
+  });
 });

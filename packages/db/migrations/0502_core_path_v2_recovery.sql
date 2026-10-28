@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-8 (number provisional until the controller assigns it): pause, resume and the recovery job on the 0420 turns
+-- CORE-PATH-V2 V2-8 (placeholder 0502 from the controller, after 0496; the real number is assigned before it is applied): pause, resume and the recovery job on the 0420 turns
 -- (docs/launch/tasks/CORE-PATH-V2.md sections 2.2, 2.5, 2.5.2, 3.3.2 item 7, 6.1 row V2-8).
 --   turns.recovery_lease_until  the claim lease of the recovery job: a turn one instance claimed is not claimed by another
 --                       instance until the lease ends (the instance died, or a settlement waits for its next lookup)
@@ -20,7 +20,7 @@
 --                       turn_close, the only function that changes a turn's state: interrupted (stopped for a report that was
 --                       stopping), expired (paused 24 hours: D = 0, the whole freeze back), or the closed-turn settlement pass
 --                       of #1512 (what became known since, counted once). Idempotent: anything not due is skipped.
---   turn_open           resume_of (2.2, 2.5 "充值后继续"): a turn paused for credits continues as a new turn of the same session and
+--   turn_open           (0496's version, whole) resume_of (2.2, 2.5 "充值后继续"): a turn paused for credits continues as a new turn of the same session and
 --                       kind. In one transaction: the stop-loss reserves the new bound, the paused turn closes (interrupted,
 --                       failure_code resumed) and settles its known receipts (the work already done is charged once, the rest
 --                       of its freeze comes back), the new turn freezes H = min(G, available) for what is left of the paused
@@ -220,8 +220,7 @@ BEGIN
   RETURN carried;
 END $function$;
 
-CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb,
-  p_resume_of bigint DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -332,9 +331,11 @@ BEGIN
     -- The freeze covers the carried credits too (the continuation settles them).
     g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
+    -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
+    -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
+    -- On a resume the carried credits are owed already: the balance left after them must still cover one normal turn.
+    IF available - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     h := least(g, available);
-    -- The carried credits are held but not for this turn's calls: what is left must still reach the start threshold.
-    IF h - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;

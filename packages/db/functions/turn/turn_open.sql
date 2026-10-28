@@ -113,9 +113,11 @@ BEGIN
     -- The freeze covers the carried credits too (the continuation settles them).
     g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
+    -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
+    -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
+    -- On a resume the carried credits are owed already: the balance left after them must still cover one normal turn.
+    IF available - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     h := least(g, available);
-    -- The carried credits are held but not for this turn's calls: what is left must still reach the start threshold.
-    IF h - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;

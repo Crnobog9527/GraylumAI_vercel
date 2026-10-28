@@ -172,6 +172,8 @@ export function readTurnRouteEnv() {
   return {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL, anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY, databaseHost: process.env.TURN_DATABASE_HOST,
+    // The rate-limit namespace (redisRateLimiter keeps production apart): production only on the production deployment.
+    environment: process.env.VERCEL_ENV === 'production' ? 'production' as const : 'staging' as const,
   };
 }
 

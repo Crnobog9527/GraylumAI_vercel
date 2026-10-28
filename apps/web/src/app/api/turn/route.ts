@@ -8,6 +8,7 @@ import { checkRateLimit } from '@repo/api/src/services/redisRateLimiter';
 import { handleTurnRequest } from '@repo/api/src/services/turn/http';
 import { redisCounterStore } from '@repo/api/src/services/turn/limiter';
 import { turnClients } from '@repo/api/src/services/turn/db';
+import { newWorkGate } from '@repo/api/src/services/runtime/newWorkGate';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 export const runtime = 'nodejs';
@@ -16,7 +17,7 @@ export const maxDuration = 300;
 
 /** CORE-PATH-V2 POST /api/turn (V2-4a: kind chat). Off until system_settings core_path_v2.enabled; the page switches in V2-10. */
 export async function POST(request: NextRequest) {
-  const { url, anonKey: anon, serviceKey: service, databaseHost } = readTurnRouteEnv();
+  const { url, anonKey: anon, serviceKey: service, databaseHost, environment } = readTurnRouteEnv();
   if (!url || !anon || !service) return new Response(JSON.stringify({ error: 'TURN_CONFIGURATION' }), { status: 503 });
   const admin = createClient(url, service, { auth: { persistSession: false } });
   return withPlatformSecretRequest(() => withCatalogRequest(() => handleTurnRequest(request, {
@@ -33,6 +34,6 @@ export async function POST(request: NextRequest) {
     },
     rateLimited: async actorId => !(await checkRateLimit(actorId, 'ai_stream')).success,
     databaseHost: { declared: databaseHost, actual: new URL(url).host },
-    chat: { admin, clients: turnClients(admin), slots: redisCounterStore() },
+    chat: { admin, clients: turnClients(admin), slots: redisCounterStore(), newWork: newWorkGate(admin, environment) },
   })));
 }

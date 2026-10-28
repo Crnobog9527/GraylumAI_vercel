@@ -38,15 +38,17 @@ BEGIN
     OR (p_call_kind = 'tool' AND NOT p_paid AND p_upper_usd <> 0) OR (p_paid AND p_upper_usd <= 0) THEN
     RAISE EXCEPTION 'TURN_CALL_LIMIT' USING ERRCODE='22023';
   END IF;
-  -- The remaining freeze must cover this call's bound G_i = ceil(q x U_i x m_i); otherwise the turn waits for credits. The
-  -- positioning check is never charged to the user (Owner 10-12): it needs no freeze; its upper bound counts in U_turn and the
-  -- stop-loss reservation only.
+  -- The remaining freeze must cover min(G_i, L): this call's bound G_i = ceil(q x U_i x m_i), or the start threshold L when the
+  -- freeze was capped by the balance (H = min(G, A), Owner 10-01 and 10-28: a balance that covers one normal turn starts it; the
+  -- part of a call above the freeze is the platform's, E = N - D). Below that the turn waits for credits. The positioning check
+  -- is never charged to the user (Owner 10-12): it needs no freeze; its upper bound counts in U_turn and the stop-loss only.
   q := (t.policy->>'q')::numeric;
   SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
                            WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
                            ELSE 0 END), 0) INTO used
   FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
-  need := CASE WHEN p_call_kind = 'decision' THEN 0 ELSE ceil(q * p_upper_usd * p_multiplier) END;
+  need := CASE WHEN p_call_kind = 'decision' THEN 0
+    ELSE least(ceil(q * p_upper_usd * p_multiplier), coalesce((t.policy->>'minCredits')::numeric, ceil(q * p_upper_usd * p_multiplier))) END;
   IF t.reserved_credits - used < need THEN
     UPDATE turns SET state = 'paused', pause_reason = 'waiting_credits', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
     RETURN jsonb_build_object('state', 'paused', 'paused', true) || turn_tombstones(p_actor_id, t.session_id, t.policy);
