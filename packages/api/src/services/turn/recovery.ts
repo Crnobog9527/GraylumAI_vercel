@@ -68,12 +68,14 @@ export async function recoverTurns(deps: TurnRecoveryDeps): Promise<TurnRecovery
       // Out of time: the rest keep their lease and come back to the next run.
       if (now() + RECOVER_STEP_MS >= deps.deadline) return summary;
       try {
-        if (item.action === 'settle') for (const call of item.calls) {
+        if (item.action === 'settle' || item.action === 'lookup') for (const call of item.calls) {
           if (now() + RECOVERY_LOOKUP_MS + RECOVER_STEP_MS >= deps.deadline) break;
           summary.lookups++;
           // A failed lookup is not evidence: the cost stays unknown and is looked up again after the lease.
           if (await lookUp(deps, item, call).catch(() => false)) summary.lateReceipts++;
         }
+        // A paused turn's lookup only records what it finds; the turn stays paused (its resume, or the 24-hour expiry, closes it).
+        if (item.action === 'lookup') continue;
         const result = await deps.db.recover({ actorId: item.actorId, turnId: item.turnId, action: item.action });
         if (result.skipped) { summary.skipped++; continue; }
         if (item.action === 'interrupt') summary.interrupted++;

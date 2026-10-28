@@ -40,9 +40,10 @@ const closed = z.object({ turnId: z.number().int().positive(), closeKind: z.stri
 export type Closed = z.infer<typeof closed>;
 
 export type RecoveryAction = 'interrupt' | 'expire' | 'settle';
+export type ClaimAction = RecoveryAction | 'lookup';
 const recoveryClaim = z.array(z.object({ actorId: z.string().uuid(), turnId: z.number().int().positive(),
-  action: z.enum(['interrupt', 'expire', 'settle']),
-  /** settle: the unknown model costs to look up by provider id. */
+  action: z.enum(['interrupt', 'expire', 'settle', 'lookup']),
+  /** settle, lookup: the model costs not final yet, to look up by provider id (lookup: of a turn paused for credits). */
   /** model and pricing are the ones the turn froze at open (policy), never the catalog's current values. */
   calls: z.array(z.object({ seq: z.number().int().positive(), providerId: z.string().min(1), model: z.string().nullable(),
     pricing: z.unknown().nullable().optional(), upperUsd: z.coerce.string() })) })).max(50);

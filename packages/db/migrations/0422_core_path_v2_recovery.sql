@@ -11,7 +11,9 @@
 --                       compare and jury included (aligned with V2-7b: a jury between groups is paused(awaiting_user) and
 --                       expires here with refund_all false, so turn_user_charge applies the jury rule; fusion-recovery only
 --                       syncs the fusion_* rows).
---                       For a settle it returns each unknown model call with the model and nominal price table the turn froze
+--                       A paused turn (under 24 hours) with a used model answer whose cost is not final is claimed for a
+--                       lookup: the job records the receipt it finds, so the resume (which waits for it) can go ahead.
+--                       For a settle or a lookup it returns each unknown model call with the model and nominal price table the turn froze
 --                       at open (policy model/pricing, or models/pricings by model id), so a late receipt is priced as a live one.
 --   turn_recover        one turn, one short transaction: locks session then turn (as turn_close), re-checks under the locks that
 --                       the work is still due (a resume, a late write or another instance may have moved it), then calls
@@ -50,7 +52,7 @@ CREATE OR REPLACE FUNCTION public.turn_recovery_claim(p_limit integer)
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE live jsonb; settle jsonb; n integer;
+DECLARE live jsonb; lookup jsonb; settle jsonb; n integer;
 BEGIN
   IF p_limit IS NULL OR p_limit < 1 OR p_limit > 50 THEN RAISE EXCEPTION 'TURN_RECOVERY_INVALID' USING ERRCODE='22023'; END IF;
   -- 1. Live turns nobody has written for a while (partial index turns_live). The lease is short: a dead instance's claim comes
@@ -72,7 +74,33 @@ BEGIN
   INTO live FROM leased;
   n := p_limit - jsonb_array_length(live);
   IF n = 0 THEN RETURN live; END IF;
-  -- 2. Closed turns still settling (partial index turns_settlement_pending), least recently tried first: a final receipt that
+  -- 2. Turns paused for credits with a model call whose answer was used but whose cost is not final: its cost is looked up
+  -- (the job records the receipt), so a resume after a top-up is not held until the 24-hour expiry. Every two minutes.
+  WITH due AS (
+    SELECT t.actor_id, t.id FROM turns t
+    WHERE t.state = 'paused' AND t.updated_at >= now() - interval '24 hours'
+      AND (t.recovery_lease_until IS NULL OR t.recovery_lease_until <= now())
+      AND EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = t.id AND k.call_kind = 'model'
+        AND k.status IN ('dispatched','identified') AND k.provider_id IS NOT NULL)
+    ORDER BY t.recovery_lease_until NULLS FIRST, t.updated_at LIMIT n
+    FOR UPDATE OF t SKIP LOCKED
+  ), leased AS (
+    UPDATE turns t SET recovery_lease_until = now() + interval '2 minutes'
+    FROM due WHERE t.actor_id = due.actor_id AND t.id = due.id
+    RETURNING t.actor_id, t.id
+  )
+  SELECT coalesce(jsonb_agg(jsonb_build_object('actorId', l.actor_id, 'turnId', l.id, 'action', 'lookup',
+    'calls', (SELECT coalesce(jsonb_agg(jsonb_build_object('seq', k.seq, 'providerId', k.provider_id,
+        'model', coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model'),
+        'pricing', coalesce(t.policy->'pricings'->(k.model_id::text), t.policy->'pricing'),
+        'upperUsd', k.upper_usd::text) ORDER BY k.seq), '[]'::jsonb)
+      FROM turn_calls k JOIN turns t ON t.actor_id = l.actor_id AND t.id = k.turn_id
+      WHERE k.turn_id = l.id AND k.call_kind = 'model' AND k.status IN ('dispatched','identified') AND k.provider_id IS NOT NULL))),
+    '[]'::jsonb)
+  INTO lookup FROM leased l;
+  n := n - jsonb_array_length(lookup);
+  IF n = 0 THEN RETURN live || lookup; END IF;
+  -- 3. Closed turns still settling (partial index turns_settlement_pending), least recently tried first: a final receipt that
   -- arrived after the last pass, or an unknown model cost whose provider id can be looked up. The lease is the lookup interval.
   WITH due AS (
     SELECT t.actor_id, t.id, t.closed_at FROM turns t
@@ -99,7 +127,7 @@ BEGIN
       FROM turn_calls k JOIN turns t ON t.actor_id = l.actor_id AND t.id = k.turn_id WHERE k.turn_id = l.id AND k.cost_pending AND k.provider_id IS NOT NULL AND k.call_kind = 'model'))),
     '[]'::jsonb)
   INTO settle FROM leased l;
-  RETURN live || settle;
+  RETURN live || lookup || settle;
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_recover(p_actor_id uuid, p_turn_id bigint, p_action text)

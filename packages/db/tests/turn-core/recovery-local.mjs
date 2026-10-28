@@ -270,7 +270,14 @@ try{
    const pol2=policy({gCredits:60,minCredits:10,uModelCredits:20,limits:{model:2,paidTools:1,freeTools:1}});
    assert.match(await refusal(open(g,{resumeOf:o.turnId,pol:pol2})),/TURN_RESUME_COST_PENDING/);
    assert.equal((await turn(g,o.turnId)).state,'paused');
-   await record(g,o.turnId,1,{n:0.02});                                                        // the receipt: N = 12
+   // The job claims the paused turn for a lookup of that cost (not for an expiry), once per lease, and records what it finds.
+   const item=(await claim()).find(i=>i.turnId===o.turnId);
+   assert.deepEqual([item?.action,item?.calls.map(k=>[k.seq,k.providerId])],['lookup',[[1,'gen-open']]]);
+   assert.equal((await claim()).find(i=>i.turnId===o.turnId),undefined,'not again within the lease');
+   await record(g,o.turnId,1,{n:0.02});                                                        // the receipt found: N = 12
+   assert.equal((await turn(g,o.turnId)).state,'paused','a lookup only records; the turn stays paused');
+   await c.query("update turns set recovery_lease_until=null where id=$1",[o.turnId]);
+   assert.equal((await claim()).find(i=>i.turnId===o.turnId),undefined,'nothing left to look up');
    const n=await open(g,{resumeOf:o.turnId,pol:pol2});
    assert.equal(await one("select (policy->>'carriedCredits')::int v from turns where id=$1",[n.turnId]),12);
   }
@@ -283,7 +290,7 @@ try{
    assert.equal((await recover(g.a,n.turnId,'expire')).chargedCredits,0);
    assert.equal(await spends(g.a),0);assert.equal(await balance(g.a),130);
   }
-  report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; two resumes in a row carry everything (24 = 12 + 6 + 6); a model cost not final yet holds the resume until its receipt; an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
+  report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; two resumes in a row carry everything (24 = 12 + 6 + 6); a model cost not final yet holds the resume until the recovery lookup records its receipt; an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
  }
  // 6. Ordinary chat and mentor turns cannot be stopped (the old stop-round scenario, now a refusal); reports can.
  {
@@ -314,6 +321,11 @@ try{
       and (t.recovery_lease_until is null or t.recovery_lease_until<=now())
       and exists (select 1 from turn_calls k where k.turn_id=t.id and ((k.cost_pending and k.provider_id is not null and k.call_kind='model')
         or (not k.cost_pending and k.settled_at>t.updated_at)))
+      order by t.recovery_lease_until nulls first,t.updated_at limit 50 for update of t skip locked`,
+    `select t.actor_id,t.id from turns t where t.state='paused' and t.updated_at>=now()-interval '24 hours'
+      and (t.recovery_lease_until is null or t.recovery_lease_until<=now())
+      and exists (select 1 from turn_calls k where k.turn_id=t.id and k.call_kind='model'
+        and k.status in ('dispatched','identified') and k.provider_id is not null)
       order by t.recovery_lease_until nulls first,t.updated_at limit 50 for update of t skip locked`]){
     const plan=(await c.query('explain '+sql)).rows.map(r=>r['QUERY PLAN']).join('\n');
     plans.push(plan);

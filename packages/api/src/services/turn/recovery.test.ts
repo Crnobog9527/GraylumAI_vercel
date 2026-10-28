@@ -67,6 +67,15 @@ describe('recoverTurns', () => {
     expect(unpriced.db.recover).toHaveBeenCalledOnce();
   });
 
+  it('looks up a paused turn\'s open model cost and records it, leaving the turn paused for its resume', async () => {
+    const lookup = vi.fn(async () => generation(0.0001));
+    const { db, deps } = harness([[{ ...settle(13), action: 'lookup' as const }]], lookup);
+    const summary = await recoverTurns(deps);
+    expect(db.record).toHaveBeenCalledWith(expect.objectContaining({ turnId: 13, seq: 1, status: 'ok', nominalUsd: '0.0004' }));
+    expect(db.recover).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({ claimed: 1, lookups: 1, lateReceipts: 1, settled: 0, failed: 0 });
+  });
+
   it('never presumes an unknown cost: a failed, unfinished or mismatched lookup records nothing', async () => {
     for (const lookup of [vi.fn(async () => { throw new Error('timeout'); }), vi.fn(async () => observed({ error: { code: 500 } }, 500)),
       vi.fn(async () => observed({ data: { id: 'gen-other', model: 'test/model', finish_reason: 'stop', total_cost: 0 } }))]) {
