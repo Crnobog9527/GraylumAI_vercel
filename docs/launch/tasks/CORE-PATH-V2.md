@@ -189,7 +189,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 | 现在（v2 逐调用） | 主路径 v2 |
 |---|---|
-| 每次调用各冻结（claim）、各发出（dispatch）、各回执（record）、各结算（finalize） | **开轮冻结一次**：H=min(G_turn, A)，G_turn=本轮允许的调用数 × 单次上界（导师 2+整理 1、自由对话 1+研究工具上限、报告固定 500+本次调用临时上界、评审团固定 1500+当前组临时上界、对比 Σ各模型上界）；**每次调用三步写入**（发出前 pending 回执 → 供应商 id → 最终回执，2.5.2 节；这是钱的证据，不省）；**收轮结算一次**：N=ceil(q×Σn_i×m_i)，D=min(N,H)，退 H−D，E=N−D 平台承担并记账；固定价 kind 按交付判定结算（2.7 节） |
+| 每次调用各冻结（claim）、各发出（dispatch）、各回执（record）、各结算（finalize） | **开轮冻结一次**：H=min(G_turn, A)，G_turn = Σ本轮允许的**模型调用**上界 + Σ允许的**付费工具调用**上界（两类次数上限分开列，见 2.5.3；免费工具本身 0 元，但它引起的模型续轮算模型调用）；固定价 kind 另加固定价；**每次调用三步写入**（发出前 pending 回执 → 供应商 id → 最终回执，2.5.2 节；这是钱的证据，不省）；**收轮结算一次**：N=ceil(q×Σn_i×m_i)，D=min(N,H)，退 H−D，E=N−D 平台承担并记账；固定价 kind 按交付判定结算（2.7 节） |
 | 用户侧冻结和平台侧日限混在同一个数上 | **分开两个数**：`H`（积分，用户侧冻结，按上面的 G_turn）和 `U_turn`（美元，平台侧本轮供应商成本上界 = Σ本轮允许的每次调用上界 U_i，给 2.5.1 的日限预占用）。固定价 kind 的 H 和 U_turn 不相等（报告 H=500 积分+临时上界，U_turn=一次调用上界）|
 | `profiles FOR UPDATE` 每次 claim 和 finalize | 开轮一次、收轮一次 |
 | 止损锁 (201,1) 全站独占 | **去掉，改为"开轮预占、收轮回补"**（细则与证明见 2.5.1）：`turn_open` 先在 `daily_spend(day, bucket)` 自己的桶行上 `UPDATE … SET reserved=reserved+U_turn`（U_turn 是本轮冻结的成本上界，和 H 用的同一个数），再读全天 `SUM(reserved+spent)`，加上预留带 B 超过日限 L 就回滚拒绝；`turn_close` 在同一桶行 `spent=spent+n_total, reserved=reserved−U_turn`。**当日实际花费永远 ≤ L，超额为 0**；代价是接近日限时提前拒绝，提前量 ≤ B（staging 现配置约 15 美元）——第 8 节 3b 据此改述 |
@@ -276,6 +276,27 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
   **第三方搜索/社媒工具例外**（Owner 10-13）：对用户按 0 结算、释放用户冻结，供应商成本记 `cost_pending`，日限预占到成本确认或 24 小时后释放。
 - 现有 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不发第二次 POST、不零退"场景原样迁入 V2-4 的验收。
 
+#### 2.5.3 每种回合允许几次模型调用、几次工具调用（G_turn 与 U_turn 的来源；回应 #1508 审查 P2）
+
+工具分两种：**付费工具**（研究工具：社媒搜索/账号取数/网页搜索/抓取，按供应商计费，Owner 10-13/10-17）和**免费工具**（读资料库 `read_source`、加载 Skill
+`load_skill`、读 Skill 文件、读自己的作品数据——对用户 0 元，但每次工具返回后模型要再跑一次来消费结果）。
+**每一次工具返回都引起一次模型续轮**，所以模型调用次数上限 = 1 + 允许的工具轮数（付费 + 免费），不管工具本身收不收费。
+现有 `runnerRetrieval.test.ts`"两次资料库读取、三次模型请求"就是这种情况，新路径把它写成规则：
+
+| kind | 模型调用上限 M（每次上界 U_model，按 kind 的模型与输入上限算） | 付费工具上限 T_paid（每次上界 U_tool） | 免费工具上限 T_free | G_turn / U_turn |
+|---|---|---|---|---|
+| chat（自由对话） | M = 1 + T_paid + T_free；T 按现有规则：研究 3 次（含子调用 12 次）、加载 Skill 2 次、资料库/作品读取 2 次 → **M ≤ 8**；没挂研究工具时 M = 1 + T_free ≤ 5 | 3（子调用 ≤ 12，计入 U_tool） | 4（Skill 2 + 读取 2） | G_turn = M×U_model(credits) + Σ U_tool；U_turn = M×U_model(usd) + Σ U_tool(usd) |
+| mentor（定位导师） | 导师 2 次 + 整理 1 次 + 工具续轮：读 Skill 文件来自进程缓存**不计模型续轮**（它在同一次 SDK 调用里完成，不发新请求，现状如此）；挂研究工具时 +T_paid → **M ≤ 3 + T_paid** | 按对标步骤规则（发现/核对各自上限） | 读 Skill 文件不计 | 同上 |
+| report | 1（续写不做，10-07） | 0 | 0 | 用户侧 H = 500 积分 + U_model；U_turn = U_model |
+| compare | N（所选模型数，各自 U_model） | 0 | 0 | 各模型各自 G；用户合计 ≤ 500 积分 |
+| jury | 每组席位数 + 汇总 1，按 maxRounds | 0（评审不联网） | 0 | 用户侧 H = 1500 + 当前组 Σ U_model；U_turn = 全部组 Σ U_model |
+| review（上线后） | 同 chat | 同 chat | 同 chat | 另受 1 美元成本上限 |
+
+- 这些数都是目录里的配置（现有 `maxCalls`、`FREE_CHAT_RESEARCH_CALLS=3`、`load_skill` 每轮 2 次、`read_source` 每轮 2 次），`turn_open` 读出来算 G_turn、U_turn 并冻结进 `turns.policy`；
+  Node 在运行时按同一份上限计数，到上限就不再把工具挂给模型（现有 `runnerRetrieval` 的"最后一次允许的调用后不再提供工具"规则不变）。
+- 2.5.1 的证明以此为准：U_turn 是本轮**所有**可能产生供应商费用的调用（模型续轮 + 付费工具）的上界之和，免费工具引起的续轮在 M 里。
+- 余额不够 G_turn 时：开轮按 H=min(G,A) 冻结，运行中 `turn_call_begin` 发现剩余冻结 < 下一次调用上界 → `paused(waiting_credits)`（2.2），不会超扣。
+
 ### 2.6 历史与删除
 
 - `session_messages(session_id, seq, role, turn_id, content, content_hash, visible, deleted_at)`：收轮时追加用户消息和助手回复；
@@ -291,7 +312,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 
 | 路径 | 开轮差异 | 中间 | 收轮差异 |
 |---|---|---|---|
-| 自由对话 | kind=chat；工具白名单按会话固定（2.9 第 2 条）；输入上限 90000 / 挂研究工具 150000；定位前置检查（Decisions）是开轮前一次不计费的独立调用，有回执 n=0 | SDK 工具循环；每个工具一条回执；容量不够时去掉的是"工具可用性说明"（进 user 消息）而不是工具定义，并在 `opened` 事件里明说（修核心缺陷：静默丢工具仍计费） | 按回执结算 |
+| 自由对话 | kind=chat；工具白名单按会话固定（2.9 第 2 条）；输入上限 90000 / 挂研究工具 150000；模型/付费工具/免费工具次数上限分开（2.5.3，免费工具的续轮计入 G_turn）；定位前置检查（Decisions）是开轮前一次不计费的独立调用，有回执 n=0 | SDK 工具循环；每个工具一条回执（免费工具 n=0，但其后的模型续轮照常三步写）；容量不够时去掉的是"工具可用性说明"（进 user 消息）而不是工具定义，并在 `opened` 事件里明说（修核心缺陷：静默丢工具仍计费） | 按回执结算 |
 | 定位导师 | kind=mentor；Skill 包从缓存按 module→revision→packageHash 取；hostTurnContext 由 `turn_open` 返回的草稿摘要拼；`fallbackEligible` 按轮次计数算好返回（修核心缺陷：兜底卡从未显示） | 两次模型调用 + `read_skill_file`（进程缓存，不计费、不写库）+ 整理调用 | 整理结果与研究轮次计数在同一事务写 `opc_drafts`（替代 `opc_capture_apply` 独立往返） |
 | 报告 | kind=report；冻结固定 500（+ 本次调用临时上界）；会员/草稿/确认/价格一致（`acceptedCredits`）检查搬进 kind 分支 | 一次长调用（32768 输出上限，不续写） | 成功 D=500；停止按 24 小时规则；结果写 `artifact_versions`（不变） |
 | 对比 | kind=compare；G_turn=Σ各模型上界，用户合计上限 500 积分，超则拒开轮；Gold 门槛 | N 个并行调用各一条回执 | 各模型各自取整 |
@@ -331,7 +352,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 
 | 指标 | 自由对话 | 导师一轮 | 报告 | 测法 |
 |---|---|---|---|---|
-| Postgres 往返（不含 Auth 和 OpenRouter；每次模型调用 3 次、工具 2 次是钱的证据，2.5.2） | ≤ 5 | ≤ 11 | ≤ 5 | 计数的 Supabase 客户端包装，跑完整回合后断言 |
+| Postgres 往返（不含 Auth 和 OpenRouter；每次模型调用 3 次、工具 2 次是钱的证据，2.5.2） | ≤ 5（无工具）；每多一轮免费工具 +5（工具 2 + 续轮 3），上限 M 按 2.5.3 | ≤ 11 | ≤ 5 | 计数的 Supabase 客户端包装，跑三条标准回合（无工具自由对话、导师、报告）后断言；工具回合另按 2.5.3 公式断言 |
 | 每轮数据库时间（本机 Docker，单用户） | ≤ 60 ms | ≤ 120 ms | ≤ 60 ms | `pg_stat_statements` 前后差 |
 | `turn_open` 事务内关系锁数 | ≤ 40 | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法） |
 | 任一主路径函数静态可达函数 / 表 | ≤ 15 / ≤ 10 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
@@ -476,7 +497,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | 整步确认：一张确认卡、一步点一次、"继续"重出卡不自动确认（10-07） | 确认是独立动作，写 `opc_drafts`，不经回合 | 保留 |
 | 导师每轮看到右侧已填内容；"让导师接着聊"由用户点（10-07） | `turn_open` 返回草稿摘要拼进 hostTurnContext（进 user 消息，2.9 第 3 条） | 保留 |
 | 右侧信息跟对话走、AI 提议用户确认才保存、不自动整理（项 48、10-13） | 整理结果在收轮同事务写 `opc_drafts` 候选 | 保留 |
-| 自由对话模型自己调"加载 Skill"，每轮最多 2 个，按当前模型计费；定位/选题/报告用绑定模型（10-23） | 工具白名单与计数在 Node；Skill 包来自缓存 | 保留 |
+| 自由对话模型自己调"加载 Skill"，每轮最多 2 个，按当前模型计费；定位/选题/报告用绑定模型（10-23） | 工具白名单与计数在 Node；Skill 包来自缓存；加载后的模型续轮计入 G_turn（2.5.3） | 保留 |
 | AI 自己决定检索资料库/读发布数据/取对标；每条回答最多 3 次研究调用、12 次子调用；逐行显示扣费；资料库/读定位/读对标表免费；读自己发布数据按档位（10-17） | 工具计数在 Node；每次工具一条回执（免费的 n=0） | 保留 |
 | 联网不受用户设置限制，发生搜索时展示；评审团不联网（项 21） | 同上 | 保留 |
 | 定位前置检查只拦"为自己账号做运营"；Decisions 先判、主模型兜底；被拦不扣费（10-12）；代码预过滤（10-25 B）待 Owner 确认 | 开轮前一次 Decisions 调用，回执 n=0；代码预过滤不做 | 保留 |
@@ -594,7 +615,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间/EXPLAIN 无顺序扫描断言，棘轮基线）；`scripts/db-function-closure.mjs`（闭包 + 行锁白名单 + 会话级状态禁用扫描）；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本 + 单机外推压测脚本（3.3.3，500/2000/5000 虚拟用户、记 k 与等待事件）；对旧路径跑一次基线存档 | low | Codex | — | 3.5 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
 | V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表；主键与唯一键按 3.3.2 的"可分区"约束设计（按所有者哈希可分区、时间列可做保留期清理） | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库；迁移注释写明未来分区方案 |
 | V2-3 | `feat(CORE-PATH-V2)` 核心函数 | `turn_open`、`turn_call_begin`/`turn_call_identity`/`turn_call_record`、`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、402、未知成本（发出后无最终回执：不退冻结、不释放日限预占、`cost_pending`；恢复按 provider_id 补结；工具例外 0 结算）、评审团固定价交付判定（修订稿→全价、无需修改→全退、中断→min(固定价,已知用量)）、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
-| V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限；重试只限 `not_sent`/`rejected`、SDK `maxRetries:0`（2.5.2）；回执与结果容量沿用 `responseCapacity.ts`（532480 / 4194304 / 262144） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 5；黄金字节；runtime 集成套件里自由对话场景等效迁移，**含 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不二次 POST、不零退"**；`mentorOutput.test.ts` 等容量边界测试迁入；并发上限与退避单测 |
+| V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限；重试只限 `not_sent`/`rejected`、SDK `maxRetries:0`（2.5.2）；回执与结果容量沿用 `responseCapacity.ts`（532480 / 4194304 / 262144） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 5；黄金字节；runtime 集成套件里自由对话场景等效迁移，**含 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不二次 POST、不零退"**，以及 `runnerRetrieval.test.ts` 的"两次资料库读取、三次模型请求"（三次模型调用都在开轮的 G_turn/U_turn 内、各自三步回执，最后一次后不再提供工具）；`mentorOutput.test.ts` 等容量边界测试迁入；并发上限与退避单测 |
 | V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 11；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
 | V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file`；TikHub/Parallel/Firecrawl/monid 按供应商并发上限 + 退避（复用 V2-4 的 Redis 计数） | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试；供应商限流退避单测 |
 | V2-7a | `feat(CORE-PATH-V2)` 报告 | `kind=report`：固定价、`acceptedCredits` 校验、会员门槛、停止（唯一允许停止的 kind）与 24 小时防刷、前端停止确认与第 3 次扣费说明（修核心缺陷 1⑤ J2/J3）、`artifact_versions` 写入、#1501 断点保留 | high | Codex | V2-4 | 3.5 天 | `report`、`report-stop` 场景迁移；24 小时 3 次停止测试；双击只扣一次 |
