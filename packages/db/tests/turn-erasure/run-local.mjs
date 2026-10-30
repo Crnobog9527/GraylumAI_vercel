@@ -150,10 +150,12 @@ try{
   {
    const d=await peer(),p1=await peer(),p2=await peer();
    try{
+    // Process ids first: a connection waiting on a lock cannot answer another query.
+    const pid1=await pidOf(p1),pid2=await pidOf(p2);
     await d.query('begin');assert.equal((await mark(a,a.session,d)).status,'deleted');
     const closing=close(a,o.turnId,undefined,p1).then(v=>({v}),e=>({e:e.message}));
     const opening=open(a,{client:p2}).then(v=>({v}),e=>({e:e.message}));
-    await blocked(d,await pidOf(p1));await blocked(d,await pidOf(p2));
+    await blocked(d,pid1);await blocked(d,pid2);
     await d.query('commit');
     assert.equal((await closing).v?.closeKind,'erased');
     assert.match((await opening).e??'',/TURN_SESSION_ERASED/);
@@ -169,8 +171,9 @@ try{
    try{
     await p.query('begin');
     const held=first==='close'?await close(b,ob.turnId,undefined,p):await open(b,{client:p});
+    const pidC=await pidOf(c);
     const marking=mark(b).then(v=>({v}),e=>({e:e.message}));
-    await blocked(p,await pidOf(c));
+    await blocked(p,pidC);
     await p.query('commit');
     assert.equal((await marking).v?.status,'deleted',first);
     if(first==='open')assert.equal((await close(b,held.turnId)).closeKind,'erased');
@@ -314,9 +317,10 @@ try{
    const p=await peer(),d=await peer();
    try{
     await p.query('begin');await record(a,o.turnId,1,'RAW_PRIVATE_BODY',p);
+    const pidD=await one('select pg_backend_pid() v',[],d);
     await d.query('begin');await d.query('set local role service_role');
     const deleting=d.query('select voice_profile_delete($1,$2)',[a.actor,version]);
-    await blocked(p,await one('select pg_backend_pid() v',[],d));
+    await blocked(p,pidD);
     await p.query('commit');await deleting;await d.query('commit');
    }finally{await p.end();await d.end();}
    assert.equal(await one('select count(*)::int v from voice_profile_versions where id=$1',[version]),0);
