@@ -19,6 +19,8 @@ import { REVIEWER_ROLES } from './reviewEvidence';
  * and the CORE-PATH-V2 jury turn (turn/jury.ts), so both run the same review. */
 export const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
   evidence: z.boolean().optional(), roles: z.array(z.enum(REVIEWER_ROLES).nullable()).optional(),
+  /** The turn path's frozen provider route of each model (absent on BILL2 reviews). */
+  models: z.record(z.string(), z.string()).optional(),
   /** "最多消耗 X 积分" (§3.2), shown before the user agrees; absent on reviews started before it was recorded. */
   estimateCredits: z.number().int().positive().optional(),
   /** Each call's credit and dollar bounds by phase and model, frozen with that maximum (absent on older reviews: no cap). */

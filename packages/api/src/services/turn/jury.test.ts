@@ -131,6 +131,13 @@ describe('jury turn advance', () => {
     expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'in_flight' });
     expect(m.rpc.mock.calls.filter(c => (c[1] as { p_to: { state: string } }).p_to.state === 'running')).toHaveLength(0);
   });
+  it('a model record re-pointed since the start gets no further paid call of the review (#1522 review)', async () => {
+    m.read.mockResolvedValue(view({ config: { ...cfg, models: Object.fromEntries(REVIEWERS.map(id => [id, 'old/route'])) } }));
+    expect(await jury().advance(view().reviewId)).toMatchObject({ next: false, reason: 'ended' });
+    expect(m.runGroup).not.toHaveBeenCalled();
+    expect(m.close).toHaveBeenCalledWith(expect.objectContaining({ refundAll: true, product: expect.objectContaining({ state: 'incomplete' }) }));
+  });
+
   it('a review ended while its group ran is settled by that end, not by the answers just saved (#1522 review)', async () => {
     m.read.mockResolvedValueOnce(view()).mockResolvedValue(view({ state: 'incomplete', outcome: { kind: 'source_archived' }, fee: { state: 'held' } }));
     expect(await jury().advance(view().reviewId)).toMatchObject({ next: false, reason: 'ended' });

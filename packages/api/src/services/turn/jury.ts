@@ -156,7 +156,8 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         ...Object.values(estimate.callCaps.summary)].map(cap => ({ upperUsd: cap.usd, multiplier: '1' }));
       const policy = fusionPolicy({ q, calls: planned, gCredits: priceCredits + holdCredits, minCredits: priceCredits + holdCredits,
         fixedCredits: priceCredits, stopLoss: coreSetting.stopLoss, quotes });
-      const reviewConfig = { path: 'turn', estimateUsd: estimate.estimateUsd, estimateCredits: priceCredits,
+      const reviewConfig = { path: 'turn', models: Object.fromEntries(quotes.map(quote => [quote.modelId, quote.model])),
+        estimateUsd: estimate.estimateUsd, estimateCredits: priceCredits,
         fixedPrice: { credits: priceCredits, holdCredits }, callCaps: estimate.callCaps, maxRounds: estimate.rounds,
         reviewers: settings.reviewerModelIds, evidence: true,
         roles: settings.reviewerModelIds.map(id => settings.reviewerRoles[id] ?? null), summary: settings.summaryModelId,
@@ -285,6 +286,9 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
     const requests = await core.buildMembers(view, src, at, models);
     return Promise.all(requests.map(async member => {
       const quote: FusionQuote = quotes.of(member.modelId, member.phase);
+      // The route frozen at the start (policy.models): recovery checks a late receipt against it, so a model record re-pointed
+      // since never gets another paid call of this review.
+      if (cfg.models && cfg.models[member.modelId] !== quote.model) throw new Error('FUSION_MODEL_DENIED');
       const body = fusionRequestBody(quote.policy as never, member.request, quote.outputLimit, quote.reasoning);
       const call = fusionCall(quote, body);
       const cap = caps[member.modelId];
