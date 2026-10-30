@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-9 (number placeholder; the controller assigns it before staging): conversation deletion and account erasure
+-- CORE-PATH-V2 V2-9 (number 0426 assigned by the controller): conversation deletion and account erasure
 -- on the core-path tables of 0420/0421 (docs/launch/tasks/CORE-PATH-V2.md sections 2.6, 4.6 and 6.1 row V2-9).
 --   Conversation deletion stays a tombstone (runtime_sessions.content_deleted_at, read by turn_open and every call write):
 --   content_erasure_mark_session also takes the conversation's messages out of the visible history in the same transaction
