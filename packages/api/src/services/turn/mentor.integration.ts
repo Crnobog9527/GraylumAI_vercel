@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -13,6 +15,12 @@ import { CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
 import { runMentorTurn, type MentorDeps } from './mentor';
+import type { VendorCalls } from '../research/runtime/subcall';
+import type { ResearchCallResult } from '../research/vendors/types';
+import { parallelRoute } from '../research/vendors/parallel';
+import { tikhubRouteId } from '../research/vendors/tikhub';
+import { researchSettings } from './tools/__tests__/fixtures';
+import { preparedResearch } from './tools/benchmarkStore';
 import { RUNTIME_PAYG_SETTING } from './quote';
 import type { TurnEvent } from './sse';
 
@@ -35,7 +43,7 @@ const db = new pg.Client({ connectionString });
 const MENTOR = 'anthropic/claude-sonnet-5.5', ORGANIZER = 'anthropic/claude-opus-5.5', ROUTE = 'anthropic';
 const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
 const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, 'billing_credits_per_usd', 'billing_token_price_multiplier', 'runtime_rw_v2',
-  'v3_summary_model_id', 'v3_summary_max_tokens', 'billing_payg_start_thresholds'];
+  'v3_summary_model_id', 'v3_summary_max_tokens', ...Object.keys(researchSettings())];
 let saved: Array<{ key: string; value: unknown }> = [];
 const rest = () => createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false } });
 beforeAll(async () => {
@@ -75,7 +83,7 @@ async function model(id: string, name: string) {
   [id, 'Mentor fixture ' + name, name, JSON.stringify(config)]);
 }
 
-async function setup() {
+async function setup(input: { benchmarkStep?: boolean } = {}) {
   clearCatalogCache();
   const owner = randomUUID(), mentorId = randomUUID(), organizerId = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
@@ -88,7 +96,7 @@ async function setup() {
     values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`, [actor, 'opening_grant:' + actor]);
   await model(mentorId, MENTOR); await model(organizerId, ORGANIZER);
   const pack = makePackage(), registration = 'mentor-' + randomUUID(), flow = makeWorkflow(3);
-  flow.steps.forEach((s, i) => { s.information = [{ id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i },
+  flow.steps.forEach((s, i) => { s.information = [{ id: i === 0 && input.benchmarkStep ? 'benchmark_findings' : 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i },
     { id: 'other', title: 'Other', required: false }]; });
   await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)', [pack.id, registration, owner]);
   await db.query('insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)', [moduleId, registration, pack.id, mentorId]);
@@ -163,14 +171,39 @@ function transport(reply: Reply) {
 const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
-  organizeAfter?: boolean; newWork?: NewWork }) {
+  organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number }; research?: MentorDeps['research'];
+  researchRefreshId?: string; afterPrepare?: () => Promise<void> }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
-    newWork: input.newWork ?? { message: admit, calls: admit } },
+  const clients = turnClients(admin);
+  let hook = input.afterPrepare;
+  const read = hook ? { rpc: async (name: string, args: unknown) => {
+    const result = await clients.read.rpc(name, args as never);
+    if (name === 'mentor_turn_prepare' && hook) { const run = hook; hook = undefined; await run(); }
+    return result;
+  } } as unknown as typeof clients.read : clients.read;
+  await withCatalogRequest(() => runMentorTurn({ admin, clients: { ...clients, read }, slots, transport: input.transport,
+    newWork: input.newWork ?? { message: admit, calls: admit }, ...(input.research ? { research: input.research } : {}) },
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
-      text: input.text, organizeAfter: input.organizeAfter ?? true }, e => events.push(e)));
+      text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}),
+      ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) },
+    e => events.push(e)));
   return { events, calls };
 }
+// V2-5c: the research settings on top of the mentor's, and synthetic suppliers (no network, no paid call).
+async function researchOn(limits?: { maxSubcallsPerRound: number; discoverSubcalls: number }) {
+  const settings = researchSettings() as Record<string, { thresholds?: unknown[]; limits?: unknown }>;
+  if (limits) settings.research_tools_config!.limits = limits;
+  settings.billing_payg_start_thresholds!.thresholds!.push({ model: MENTOR, purpose: 'skill', typicalUsd: '0.04' },
+    { model: ORGANIZER, purpose: 'attached_organizer', typicalUsd: '0.01' });
+  for (const [key, value] of Object.entries(settings)) await db.query(
+    'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value', [key, JSON.stringify(value)]);
+  clearCatalogCache();
+}
+const vendors = (parallel: VendorCalls['parallel']): NonNullable<MentorDeps['research']> => ({ readKey: async () => 'local-synthetic',
+  vendors: { parallel, tikhub: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); } } as unknown as VendorCalls });
+const webResult = (over: Partial<ResearchCallResult> = {}): ResearchCallResult => ({ vendor: 'parallel', route: parallelRoute('fast'), outcome: 'ok', reason: null,
+  httpStatus: 200, supplierMayCharge: true, usage: { unit: 'sku_search', units: '1' }, truncated: false, fetchedAt: new Date().toISOString(),
+  items: [{ url: 'https://example.test/a', fields: { title: 'a result' }, missing: [] }], ...over });
 const credits = async (actor: string) => (await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits as number;
 
 it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Skill file, applies the organizer patch at close, in <= 11 round trips', async () => {
@@ -221,7 +254,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Sk
   expect(own).toEqual(['rpc/turn_open', ...Array(3).fill(['rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record']).flat(),
     'rpc/turn_close']);
   expect(own.length).toBeLessThanOrEqual(11);
-  expect(fixed).toEqual(['rpc/catalog_versions_snapshot', 'rpc/platform_secret_read']);
+  expect([...fixed].sort()).toEqual(['rpc/catalog_versions_snapshot', 'rpc/mentor_turn_prepare', 'rpc/platform_secret_read']);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5: a grounded choice card ends the reply and is saved as the agent-turn card', async () => {
@@ -378,4 +411,473 @@ it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start p
   expect((await db.query('select state,pause_reason,close_kind from turns where actor_id=$1', [f.actor])).rows)
     .toEqual([{ state: 'paused', pause_reason: 'waiting_credits', close_kind: null }]);
   expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown by opc_query and can be accepted', async () => {
+  const f = await setup();
+  // capture.integration.ts reloads the 0159/0182 definitions of the checklist functions and restores only 0199's patches, so a
+  // later file in the same database can see an old opc_query; this migration (idempotent) restores the current definitions.
+  const migrations = resolve(import.meta.dirname, '../../../../db/migrations');
+  await db.query(readFileSync(resolve(migrations, readdirSync(migrations).find(name => name.endsWith('_core_path_v2_mentor_b.sql'))!), 'utf8'));
+  // A draft whose fields were initialised (as agentCorePlanB's fixture does): opc_capture_resolve merges into st.information.
+  await db.query(`update artifact_rounds r set steps=(select jsonb_object_agg(s.key, s.value || jsonb_build_object('information',
+      (select jsonb_object_agg(f->>'id', jsonb_build_object('value','','status','unknown','nature','unknown'))
+       from jsonb_array_elements(r.workflow->'steps') w, jsonb_array_elements(w->'information') f where w->>'id'=s.key)))
+    from jsonb_each(r.steps) s) where r.id=(select round_id from opc_drafts where draft_id=$1)`, [f.draftId]);
+  const t = transport(async (body, n) => {
+    if (body.model !== ORGANIZER) return prose('gen-reply-' + n, 'Noted.');
+    await db.query(`update artifact_rounds r set steps=jsonb_set(r.steps,'{step-0,version}',to_jsonb((r.steps->'step-0'->>'version')::int+1))
+      from opc_drafts d where d.round_id=r.id and d.draft_id=$1`, [f.draftId]);
+    return organized('gen-org-' + n, patch('Sell coffee to students'));
+  });
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  expect((out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>).kindResult).toMatchObject({ result: 'suggested' });
+  const shown = (await db.query('select opc_query($1,$2) v', [f.actor, f.draftId])).rows[0].v;
+  const suggestion = shown.information['step-0'].meta.goal.suggestion;
+  expect(suggestion).toMatchObject({ value: 'Sell coffee to students' });
+  const version = (await f.steps())['step-0'].version;
+  const resolved = (await db.query('select opc_capture_resolve($1,$2,$3,$4,$5,$6,$7,$8,$9) v', [f.actor, f.draftId, randomUUID(), 'step-0', 'goal',
+    suggestion.executionId, suggestion.hash, 'accept', version])).rows[0].v;
+  expect(resolved).toMatchObject({ result: 'accept' });
+  expect((await f.steps())['step-0'].information.goal).toMatchObject({ value: 'Sell coffee to students' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: the next turn answers the card; the chosen option is the words, the organizer sees answeredCard', async () => {
+  const f = await setup();
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : toolCall('gen-card-' + n, 'ask_question', { intent: 'grounded_comparison', requestQuote: 'coffee or tea',
+      basisQuotes: ['coffee or tea'], question: 'Which one first?', options: [{ text: 'Coffee', reason: 'You named it first' },
+        { text: 'Tea', reason: 'Fewer rivals' }], recommended: 0 }));
+  await turn(f, { text: 'Should I start with coffee or tea?', transport: first.fn });
+  const { content: saved, seq: cardSeq } = (await db.query(
+    "select content, seq from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1", [f.session])).rows[0];
+  expect(JSON.parse(saved)).toMatchObject({ stepId: 'step-0', card: { options: ['Coffee', 'Tea'] } });
+  const next = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Tea first'))
+    : prose('gen-reply-' + n, 'Tea it is.'));
+  const out = await turn(f, { text: 'Tea', transport: next.fn, answer: { sourceSeq: cardSeq, optionIndex: 1 } });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(JSON.stringify(next.bodies.find(b => b.model === ORGANIZER)!.messages)).toContain('answeredCard');
+  expect((await db.query("select content from session_messages where session_id=$1 and role='user' order by seq desc limit 1",
+    [f.session])).rows[0].content).toBe('Tea');
+  // An answer to a card the latest reply does not carry (a stale tab still showing it) is refused, and that turn is refunded.
+  const refused = await turn(f, { text: 'Coffee', transport: next.fn, answer: { sourceSeq: cardSeq, optionIndex: 0 } });
+  expect(refused.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_ANSWER_SOURCE_DENIED' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: the refresh-recovery read shows the running turn, then its saved messages', async () => {
+  const f = await setup();
+  const view = async (afterSeq = 0) => (await db.query('select turn_session_view($1,$2,$3) v', [f.actor, f.session, afterSeq])).rows[0].v;
+  let during: unknown;
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }));
+    during = await view();
+    return prose('gen-reply-' + n, 'Noted.');
+  });
+  await turn(f, { text: 'I want to sell coffee', transport: t.fn });
+  expect(during).toMatchObject({ activeTurn: { kind: 'mentor', state: 'running' }, messages: [] });
+  const after = await view();
+  expect(after).toMatchObject({ activeTurn: null, lastTurn: { kind: 'mentor', closeKind: 'completed' } });
+  expect(after.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
+  expect((await view(after.messages[0].seq)).messages.map((m: { role: string }) => m.role)).toEqual(['assistant']);
+  // Another account's conversation is refused; an unknown account is no account at all.
+  const other = await setup();
+  await expect(db.query('select turn_session_view($1,$2,0) v', [other.actor, f.session])).rejects.toThrow(/TURN_SESSION_DENIED/);
+  await expect(db.query('select turn_session_view($1,$2,0) v', [randomUUID(), f.session])).rejects.toThrow(/TURN_ACCOUNT_DENIED/);
+  // A disabled account reads nothing, although its sign-in is still valid.
+  await db.query("update profiles set status='disabled' where id=$1", [f.actor]);
+  try { await expect(view()).rejects.toThrow(/TURN_ACCOUNT_DENIED/); }
+  finally { await db.query("update profiles set status='active' where id=$1", [f.actor]); }
+  // A revoked draft keeps its conversation out of view, as the other reads of it do, although the conversation is not deleted.
+  await db.query('update bill2_drafts set revoked=true where id=$1', [f.draftId]);
+  await expect(view()).rejects.toThrow(/TURN_SESSION_DENIED/);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: a step summary turn writes the summary and is never organized', async () => {
+  const f = await setup();
+  const t = transport(() => prose('gen-summary', 'Step summary: goal is still missing.'));
+  const out = await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: false });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(t.bodies.map(b => b.model)).toEqual([MENTOR]);
+  const system = JSON.stringify(t.bodies[0]!.messages[0]);
+  expect(system).toContain('hostTurnContext.stepSummary');
+  expect(JSON.parse(t.bodies[0]!.messages.at(-1)!.content as string).hostTurnContext.stepSummary).toMatchObject({ kind: 'step_summary' });
+  // The host offers a summary no question card; the Skill file tool stays.
+  const offered = JSON.stringify(t.bodies[0]!.tools ?? []);
+  expect(offered).not.toContain('ask_question');
+  expect(offered).toContain('read_skill_file');
+  // A summary may not be organized.
+  expect((await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: true })).events)
+    .toEqual([{ type: 'error', code: 'TURN_REQUEST_INVALID' }]);
+});
+
+// V2-5d: the narrow check plus mentor_source_check must answer exactly as the old chain, in every state, allowed or refused.
+const verdicts = async (f: Awaited<ReturnType<typeof setup>>) => {
+  const old = (await db.query("select coalesce(bill2_scope_allowed($1, jsonb_build_object('kind','positioning_draft','draftId',$2::uuid)), false) v",
+    [f.actor, f.draftId])).rows[0].v as boolean;
+  const narrow = (await db.query('select turn_mentor_draft_allowed($1,$2) v', [f.actor, f.draftId])).rows[0].v as boolean;
+  const check = (await db.query('select mentor_source_check($1,$2) v', [f.actor, f.session])).rows[0].v as { allowed: boolean };
+  return { old, fresh: narrow && check.allowed, sessionView: (await db.query('select session_view_allowed($1,$2) v', [f.actor, f.session])).rows[0].v as boolean };
+};
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: the new checks agree with the old chain, allowed and refused', async () => {
+  const allowed = await setup();
+  expect(await verdicts(allowed)).toEqual({ old: true, fresh: true, sessionView: true });
+
+  const revoked = await setup();
+  await db.query('update bill2_drafts set revoked=true where id=$1', [revoked.draftId]);
+  expect(await verdicts(revoked)).toEqual({ old: false, fresh: false, sessionView: false });
+
+  const erased = await setup();
+  await db.query("set session_replication_role=replica");
+  await db.query('update artifact_projects p set erased_at=now() from opc_drafts d where d.project_id=p.id and d.draft_id=$1', [erased.draftId]);
+  await db.query("set session_replication_role=origin");
+  expect((await verdicts(erased)).old).toBe(false);
+  expect((await verdicts(erased)).fresh).toBe(false);
+
+  const other = await setup();
+  const stranger = (await db.query('select count(*) from bill2_drafts where id=$1 and actor_id=$2', [other.draftId, randomUUID()])).rows[0].count;
+  expect(stranger).toBe('0');
+  expect((await db.query('select turn_mentor_draft_allowed($1,$2) v', [randomUUID(), other.draftId])).rows[0].v).toBe(false);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: a draft whose base source is gone is refused before the turn opens', async () => {
+  const f = await setup();
+  await db.query('set session_replication_role=replica');
+  await db.query(`insert into opc_account_strategy_drafts(account_project_id,draft_id,actor_id,base_source_version_id,root_source_version_id,base_account_revision)
+    values($3,$1,$2,$3,$3,1)`, [f.draftId, f.actor, randomUUID()]);
+  await db.query('set session_replication_role=origin');
+  expect(await verdicts(f)).toEqual({ old: false, fresh: false, sessionView: false });
+  const before = await credits(f.actor);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  // Refused before anything was frozen: no turn row at all, and no second open.
+  expect(out.events).toEqual([{ type: 'error', code: 'TURN_MENTOR_DENIED' }]);
+  expect(t.bodies).toEqual([]);
+  expect(await credits(f.actor)).toBe(before);
+  expect((await db.query('select 1 from turns where actor_id=$1', [f.actor])).rows).toEqual([]);
+  expect(out.calls.filter(path => path.includes('mentor_turn_prepare')).length).toBe(1);
+  await expect(db.query(`select turn_mentor_context($1,$2,$3)`, [f.actor, f.session, JSON.stringify({ moduleId: f.moduleId, stepId: 'step-0' })]))
+    .rejects.toThrow('TURN_SOURCE_CHECK_REQUIRED');
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: a plain draft makes no source check round trip', async () => {
+  const f = await setup();
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : prose('gen-reply-' + n, 'Hello.'));
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect(out.calls.filter(path => path.includes('mentor_source_check'))).toEqual([]);
+  expect((await db.query('select mentor_turn_prepare($1,$2,false,null) v', [f.actor, f.session])).rows[0].v.source).toBeNull();
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: a revoked Skill revision is refused through the catalog cache before any model call, and refunded', async () => {
+  const f = await setup();
+  const round = (await db.query('select r.revision_id from artifact_rounds r join opc_drafts d on d.round_id=r.id where d.draft_id=$1', [f.draftId])).rows[0];
+  await db.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)', [round.revision_id, f.actor]);
+  const before = await credits(f.actor);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_SKILL_UNAVAILABLE' });
+  expect(t.bodies).toEqual([]);
+  expect(await credits(f.actor)).toBe(before);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a mentor web search is one receipt mid-turn, and research rows are written only at close, without an execution', async () => {
+  const f = await setup();
+  await researchOn();
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }));
+    if (n === 1) return toolCall('gen-reply-1', 'web_search', { query: 'coffee shops', mode: 'fast' });
+    // Between the tool and the reply: the receipt exists, no research row does.
+    expect((await db.query('select 1 from research_plans where session_id=$1', [f.session])).rows).toEqual([]);
+    return prose('gen-reply-' + n, 'Found one.');
+  });
+  const out = await turn(f, { text: 'Look up coffee shops', transport: t.fn, research: vendors(async () => webResult()) });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect(out.events.filter(e => e.type === 'research_call').map(e => (e as { state: string }).state)).toEqual(['running', 'succeeded']);
+  expect((await db.query(`select c.tool_name,c.status from turn_calls c join turns t on t.id=c.turn_id
+    where t.actor_id=$1 and c.call_kind='tool'`, [f.actor])).rows).toEqual([{ tool_name: 'web_search', status: 'ok' }]);
+  expect((await db.query('select 1 from runtime_executions where session_id=$1', [f.session])).rows).toEqual([]);
+  expect((await db.query(`select o.state,p.execution_id,p.turn_id is not null turn from research_operations o join research_plans p on p.id=o.plan_id
+    where p.session_id=$1`, [f.session])).rows).toEqual([{ state: 'succeeded', execution_id: null, turn: true }]);
+  expect(JSON.stringify(t.bodies.filter(b => b.model === MENTOR)[1]!.messages)).toContain('a result');
+  // The page's evidence list sees a turn-keyed operation.
+  const evidence = await rest().rpc('research_user_evidence', { a: f.actor, p_limit: 10, p_cursor_time: null, p_cursor_id: null });
+  expect((evidence.data as unknown[]).length).toBe(1);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a keyword card is free, reaches the page at close, and a confirmed card feeds the next turn', async () => {
+  const f = await setup();
+  await researchOn();
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'propose_keywords', { keywords: ['coffee', 'latte art', 'cafe', 'beans', 'roasting', 'barista'] })
+      : prose('gen-reply-' + n, 'Please pick on the card.'));
+  const out = await turn(f, { text: 'Find benchmarks', transport: t.fn, research: vendors(async () => webResult()) });
+  expect(out.events.at(-1)?.type).toBe('result');
+  const card = out.events.find(e => e.type === 'research_card') as { card: { cardId: string } } | undefined;
+  expect(card).toBeTruthy();
+  const listed = await rest().rpc('research_user_cards', { a: f.actor, s: f.session });
+  expect((listed.data as Array<{ cardId: string }>).map(c => c.cardId)).toEqual([card!.card.cardId]);
+  expect((await db.query(`select 1 from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool'`, [f.actor])).rows).toEqual([]);
+  const confirmed = await rest().rpc('research_card_confirm', { a: f.actor, p_card: card!.card.cardId, p: { selected: ['k0', 'k1', 'k2'] } });
+  expect(confirmed.error).toBeNull();
+  const prepared = await rest().rpc('mentor_turn_prepare', { p_actor_id: f.actor, p_session_id: f.session, p_research: true, p_refresh: null });
+  expect((prepared.data as { cards: Array<{ items: string[] }> }).cards[0]!.items).toEqual(['coffee', 'latte art', 'cafe']);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: an unknown supplier result is not the user\'s, and a failed reply keeps what the lookup saved', async () => {
+  const f = await setup();
+  await researchOn();
+  const before = await credits(f.actor);
+  const t = transport((body, n) => n === 1 ? toolCall('gen-reply-1', 'web_search', { query: 'coffee', mode: 'fast' }) : new Response('down', { status: 500 }));
+  const out = await turn(f, { text: 'Look up coffee', transport: t.fn, research: vendors(async () => webResult()) });
+  expect(out.events.at(-1)?.type).toBe('error');
+  expect((await db.query('select 1 from research_plans where session_id=$1', [f.session])).rows.length).toBe(1);
+  expect(await credits(f.actor)).toBeLessThanOrEqual(before);
+  const g = await setup();
+  await researchOn();
+  const u = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'web_search', { query: 'coffee', mode: 'fast' }) : prose('gen-reply-' + n, 'No answer this time.'));
+  const unknown = await turn(g, { text: 'Look up coffee', transport: u.fn, research: vendors(async () => { throw new Error('connection lost'); }) });
+  expect(unknown.events.at(-1)?.type).toBe('result');
+  const rows = (await db.query(`select c.status from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool'`, [g.actor])).rows;
+  expect(rows.map(r => r.status)).toEqual(['unknown']);
+  // Its cost stays on the receipt: the operation does not hold up deleting the conversation.
+  expect((await db.query(`select research_operation_settled(o) v from research_operations o join research_plans p on p.id=o.plan_id where p.session_id=$1`,
+    [g.session])).rows).toEqual([{ v: true }]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a benchmark step without its tools, and a link that cannot be checked, are refused with nothing sent', async () => {
+  const f = await setup({ benchmarkStep: true });
+  const before = await credits(f.actor);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const out = await turn(f, { text: 'Find benchmarks', transport: t.fn });
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'RESEARCH_TOOLS_UNAVAILABLE' });
+  const g = await setup();
+  const link = await turn(g, { text: 'Check https://www.tiktok.com/@somebody please', transport: t.fn });
+  expect(link.events).toEqual([{ type: 'error', code: 'RESEARCH_TOOLS_LINK_UNAVAILABLE' }]);
+  expect(t.bodies).toEqual([]);
+  expect(await credits(f.actor)).toBe(before);
+});
+
+// Synthetic TikTok: a qualifying profile and 25 dated posts per account.
+const tiktokVendors = (): NonNullable<MentorDeps['research']> => ({ readKey: async () => 'local-synthetic', vendors: {
+  parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+  tikhub: async (call: { platform: string; kind: string; account?: string }) => {
+    const base = { vendor: 'tikhub', route: tikhubRouteId(call.platform as never, call.kind as never), outcome: 'ok', reason: null, httpStatus: 200,
+      supplierMayCharge: true, usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
+    if (call.kind === 'account_profile') return { ...base, items: [{ fields: { followers: 50000, postsCount: 200, nickname: String(call.account) }, missing: [] }] };
+    return { ...base, items: Array.from({ length: 25 }, (_, i) => ({ url: `https://example.test/${call.account}/${i}`, missing: [], fields: { id: `${call.account}-${i}`,
+      views: 1000 + i, likes: 50, comments: 5, shares: 2, publishedAt: new Date(Date.now() - i * 86400000).toISOString() } })) };
+  } } as unknown as VendorCalls });
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: pasted links settle in batches, make benchmarks at close, count one round, and go with the session', async () => {
+  const f = await setup();
+  await researchOn();
+  const links = ['aa_one', 'bb_two', 'cc_three'];
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }));
+    if (n === 1) return toolCall('gen-reply-1', 'benchmark_fetch', { accounts: links.map(account => ({ platform: 'tiktok', account })),
+      source: { kind: 'user_message', messageId: null } });
+    // Two receipts already (5 + 1 subcalls), and still nothing in research_*.
+    expect((await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool'`, [f.actor])).rows[0].n).toBe(2);
+    expect((await db.query('select 1 from research_account_fetches where session_id=$1', [f.session])).rows).toEqual([]);
+    return prose('gen-reply-' + n, 'Checked.');
+  });
+  const text = 'Check ' + links.map(a => `https://www.tiktok.com/@${a}`).join(' ');
+  const out = await turn(f, { text, transport: t.fn, research: tiktokVendors() });
+  expect(out.events.at(-1)?.type).toBe('result');
+  const rows = (await db.query('select account,turn_id,execution_id from research_benchmarks where session_id=$1 order by account', [f.session])).rows;
+  expect(rows.map(r => r.account)).toEqual(links);
+  expect(rows.every(r => r.turn_id !== null && r.execution_id === null)).toBe(true);
+  expect((await db.query('select research_rounds,research_qualified from opc_drafts where draft_id=$1', [f.draftId])).rows[0].research_rounds).toBe(1);
+  const again = await rest().rpc('research_benchmark_rows', { a: f.actor, s: f.session });
+  expect(JSON.stringify(again.data)).toContain('bb_two');
+  // A later turn does not pay again for an account already fetched.
+  const u = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } })
+      : prose('gen-reply-' + n, 'Already known.'));
+  await turn(f, { text: 'Check https://www.tiktok.com/@aa_one', transport: u.fn, research: tiktokVendors() });
+  expect((await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`, [f.actor])).rows[0].n).toBe(2);
+  // Deleting the conversation takes the turn's research with it.
+  const preview = (await db.query("select content_erasure_preview($1,'session',$2) v", [f.actor, f.session])).rows[0].v;
+  await db.query("select content_erasure_confirm($1,'session',$2,$3)", [f.actor, f.session, preview.previewHash]);
+  for (const table of ['research_benchmarks', 'research_account_fetches', 'research_plans']) {
+    const left = (await db.query(`select count(*)::int n from ${table} where session_id=$1 and ${table === 'research_plans' ? 'erased_at is null' : 'true'}`, [f.session])).rows[0].n;
+    expect([table, left]).toEqual([table, 0]);
+  }
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: the digest a deleted answer left stops a second payment for that account', async () => {
+  const f = await setup();
+  await researchOn();
+  const check = (name: string) => transport((body, n) => body.model === ORGANIZER ? organized(`${name}-org-${n}`, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall(`${name}-1`, 'benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } })
+      : prose(`${name}-${n}`, 'Checked.'));
+  const first = await turn(f, { text: 'Check https://www.tiktok.com/@aa_one', transport: check('first').fn, research: tiktokVendors() });
+  expect(JSON.stringify(first.events.at(-1))).toContain('"type":"result"');
+  // As content_erasure_confirm leaves a charged fetch when only its answer is deleted.
+  await db.query(`update research_account_fetches set state='failed_charged',execution_id=null,account=null,evidence=null,last_success=null,
+    last_success_execution_id=null,refresh_id=null,attempt=gen_random_uuid() where session_id=$1`, [f.session]);
+  const paid = `select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`;
+  const before = (await db.query(paid, [f.actor])).rows[0].n;
+  const out = await turn(f, { text: 'Check https://www.tiktok.com/@AA_one', transport: check('second').fn, research: tiktokVendors() });
+  expect(JSON.stringify(out.events.at(-1))).toContain('"type":"result"');
+  expect((await db.query(paid, [f.actor])).rows[0].n).toBe(before);
+  expect((await db.query('select account,state from research_account_fetches where session_id=$1', [f.session])).rows).toEqual([{ account: null, state: 'failed_charged' }]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const card = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'propose_keywords', { keywords: ['coffee', 'latte art', 'cafe', 'beans', 'roasting', 'barista'] })
+      : prose('gen-reply-' + n, 'Please pick.'));
+  const first = await turn(f, { text: 'Find benchmarks', transport: card.fn, research: tiktokVendors() });
+  const cardId = (first.events.find(e => e.type === 'research_card') as { card: { cardId: string } }).card.cardId;
+  const confirmed = await rest().rpc('research_card_confirm', { a: f.actor, p_card: cardId, p: { selected: ['k0', 'k1', 'k2'] } });
+  const confirmationId = (confirmed.data as { confirmationId: string }).confirmationId;
+  const calls: string[] = [];
+  const route = (kind: string) => tikhubRouteId('tiktok', kind as never);
+  const stub: NonNullable<MentorDeps['research']> = { readKey: async () => 'local-synthetic', vendors: {
+    parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+    tikhub: async (call: { kind: string; keyword?: string; account?: string }) => {
+      calls.push(call.kind + ':' + (call.keyword ?? call.account));
+      const base = { vendor: 'tikhub', route: route(call.kind), outcome: 'ok', reason: null, httpStatus: 200, supplierMayCharge: true,
+        usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
+      if (call.kind === 'keyword_posts') return { ...base, items: Array.from({ length: 20 }, (_, i) => ({ missing: [], fields: { id: `${call.keyword}-${i}`,
+        authorId: `author${call.keyword}${i}`, author: `Author ${i}`, likes: 10, comments: 1, shares: 1, views: 1000, publishedAt: new Date().toISOString() } })) };
+      return { ...base, items: [{ missing: [], fields: { followers: 50000, postsCount: 200 } }] };
+    } } as unknown as VendorCalls };
+  const discover = (args: unknown) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_discover', args) : prose('gen-reply-' + n, 'Still searching.'));
+  const second = await turn(f, { text: 'Go on', transport: discover({ keywordConfirmationId: confirmationId, platforms: ['tiktok'], discoveryId: null }).fn,
+    research: stub });
+  expect(second.events.at(-1)?.type).toBe('result');
+  const stopped = second.events.find(e => e.type === 'research_continue') as { discoveryId: string } | undefined;
+  expect(stopped).toBeTruthy();
+  expect((await db.query('select state,turn_id is not null turn from research_discoveries where id=$1', [stopped!.discoveryId])).rows)
+    .toEqual([{ state: 'running', turn: true }]);
+  const unfinished = await rest().rpc('research_user_unfinished_round', { a: f.actor, s: f.session });
+  expect((unfinished.data as { discoveryId: string }).discoveryId).toBe(stopped!.discoveryId);
+  const sent = calls.length;
+  expect(sent).toBeGreaterThan(5);
+  const third = await turn(f, { text: 'Go on', transport: discover({ keywordConfirmationId: null, platforms: null, discoveryId: stopped!.discoveryId }).fn,
+    research: stub });
+  expect(third.events.at(-1)?.type).toBe('result');
+  // No supplier call was sent twice: the round went on from what the earlier turn paid for.
+  expect(calls.slice(sent).filter(c => c.startsWith('keyword_posts'))).toEqual([]);
+  expect(new Set(calls).size).toBe(calls.length);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a round that finishes makes its candidate card at close, and the next turn can follow it up', async () => {
+  const f = await setup();
+  await researchOn({ maxSubcallsPerRound: 26, discoverSubcalls: 26 });
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const say = (args: [string, unknown]) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', args[0], args[1]) : prose('gen-reply-' + n, 'Done.'));
+  const first = await turn(f, { text: 'Find benchmarks', transport: say(['propose_keywords', { keywords: ['coffee', 'latte art', 'cafe', 'beans', 'roasting', 'barista'] }]).fn,
+    research: tiktokVendors() });
+  const keywordCard = (first.events.find(e => e.type === 'research_card') as { card: { cardId: string } }).card.cardId;
+  const keywords = await rest().rpc('research_card_confirm', { a: f.actor, p_card: keywordCard, p: { selected: ['k0', 'k1', 'k2'] } });
+  const stub: NonNullable<MentorDeps['research']> = { readKey: async () => 'local-synthetic', vendors: {
+    parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+    tikhub: async (call: { kind: string; keyword?: string; account?: string }) => {
+      const base = { vendor: 'tikhub', route: tikhubRouteId('tiktok', call.kind as never), outcome: 'ok', reason: null, httpStatus: 200, supplierMayCharge: true,
+        usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
+      if (call.kind === 'keyword_posts') return { ...base, items: Array.from({ length: 5 }, (_, i) => ({ missing: [], fields: { id: `${call.keyword}-${i}`,
+        authorId: `author${String(call.keyword).replace(/\W/g, '')}${i}`, author: `Author ${i}`, likes: 10, comments: 1, shares: 1, views: 1000, publishedAt: new Date().toISOString() } })) };
+      return { ...base, items: [{ missing: [], fields: { followers: 50000, postsCount: 200 } }] };
+    } } as unknown as VendorCalls };
+  const second = await turn(f, { text: 'Go on', transport: say(['benchmark_discover', { keywordConfirmationId: (keywords.data as { confirmationId: string }).confirmationId,
+    platforms: ['tiktok'], discoveryId: null }]).fn, research: stub });
+  expect(second.events.at(-1)?.type).toBe('result');
+  const candidates = (second.events.find(e => e.type === 'research_card') as { card: { cardId: string; kind: string; options: Array<{ id: string; selectable: boolean }> } }).card;
+  expect(candidates.kind).toBe('candidates');
+  const discovery = (await db.query("select id,state from research_discoveries where session_id=$1", [f.session])).rows[0];
+  expect(discovery.state).toBe('completed');
+  const picks = candidates.options.filter(o => o.selectable).slice(0, 3).map(o => o.id);
+  expect((await rest().rpc('research_card_confirm', { a: f.actor, p_card: candidates.cardId, p: { selected: picks } })).error).toBeNull();
+  const third = await turn(f, { text: 'More please', transport: say(['propose_more_candidates', { discoveryId: discovery.id }]).fn, research: stub });
+  expect(third.events.at(-1)?.type).toBe('result');
+  expect(JSON.stringify(third.events)).not.toContain('DISCOVERY_NOT_FOUND');
+  // Asking for the finished round again sends nothing and charges nothing.
+  const rows = async () => (await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool'`, [f.actor])).rows[0].n;
+  const paid = await rows();
+  const again = await turn(f, { text: 'Search again', transport: say(['benchmark_discover', { keywordConfirmationId: null, platforms: null, discoveryId: discovery.id }]).fn, research: stub });
+  expect(again.events.at(-1)?.type).toBe('result');
+  expect(await rows()).toBe(paid);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: receipts of a turn that never applied them come back as operations the next turn can parse', async () => {
+  const f = await setup();
+  await researchOn();
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'web_search', { query: 'coffee', mode: 'fast' }) : prose('gen-reply-' + n, 'Found.'));
+  await turn(f, { text: 'Look up coffee', transport: t.fn, research: vendors(async () => webResult()) });
+  // As if the close never wrote them.
+  await db.query('update research_plans set turn_id=null where session_id=$1', [f.session]);
+  const raw = (await db.query('select mentor_turn_prepare($1,$2,true,null) v', [f.actor, f.session])).rows[0].v;
+  const prepared = preparedResearch.parse(raw);
+  expect(prepared.unapplied).toHaveLength(1);
+  expect(prepared.unapplied[0]![0]).toMatchObject({ state: 'succeeded' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a pasted link that failed does not count as a round', async () => {
+  const f = await setup();
+  await researchOn();
+  const stub: NonNullable<MentorDeps['research']> = { readKey: async () => 'local-synthetic', vendors: {
+    parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+    tikhub: async () => ({ vendor: 'tikhub', route: tikhubRouteId('tiktok', 'account_profile'), outcome: 'failed', reason: 'UPSTREAM', httpStatus: 500,
+      supplierMayCharge: false, usage: { unit: 'call', units: '0' }, items: [], truncated: false, fetchedAt: new Date().toISOString() }) } as unknown as VendorCalls };
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } })
+      : prose('gen-reply-' + n, 'Could not check it.'));
+  const out = await turn(f, { text: 'Check https://www.tiktok.com/@aa_one', transport: t.fn, research: stub });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect((await db.query('select research_rounds from opc_drafts where draft_id=$1', [f.draftId])).rows[0].research_rounds).toBe(0);
+  expect((await db.query('select pasted_turns from research_account_fetches where session_id=$1', [f.session])).rows[0].pasted_turns).toEqual([]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: Refresh on a turn-made benchmark fetches it again once, and a used grant is refused', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const say = (name: string, args: unknown) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', name, args) : prose('gen-reply-' + n, 'Done.'));
+  await turn(f, { text: 'Check https://www.tiktok.com/@aa_one', research: tiktokVendors(),
+    transport: say('benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } }).fn });
+  const grant = await rest().rpc('research_refresh_create', { a: f.actor, s: f.session, p_platform: 'tiktok', p_account: 'aa_one' });
+  expect(grant.error).toBeNull();
+  const refreshId = grant.data as string;
+  const rows = async () => (await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`, [f.actor])).rows[0].n;
+  const before = await rows();
+  const out = await turn(f, { text: 'Refresh it', researchRefreshId: refreshId, research: tiktokVendors(),
+    transport: say('benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'refresh', refreshId } }).fn });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect(await rows()).toBeGreaterThan(before);
+  expect((await db.query('select used_at is not null used,used_turn_id is not null turn from research_refresh_grants where id=$1', [refreshId])).rows)
+    .toEqual([{ used: true, turn: true }]);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const again = await turn(f, { text: 'Refresh it', researchRefreshId: refreshId, research: tiktokVendors(), transport: t.fn });
+  expect(again.events).toEqual([{ type: 'error', code: 'TURN_REFRESH_INVALID' }]);
+  expect(t.bodies).toEqual([]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a turn that closed after this read makes it stale: it is read again, so nothing is paid twice', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const fetch = () => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } })
+      : prose('gen-reply-' + n, 'Done.'));
+  const text = 'Check https://www.tiktok.com/@aa_one';
+  const out = await turn(f, { text, transport: fetch().fn, research: tiktokVendors(),
+    // The other request of this conversation fetches the account and closes between this read and this open.
+    afterPrepare: async () => { await turn(f, { text, transport: fetch().fn, research: tiktokVendors() }); } });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect(out.calls.filter(path => path.includes('mentor_turn_prepare')).length).toBe(2);
+  const rows = (await db.query(`select c.status from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`, [f.actor])).rows;
+  expect(rows.length).toBe(1);
 });

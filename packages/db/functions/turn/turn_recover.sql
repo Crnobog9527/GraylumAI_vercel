@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.turn_recover(p_actor_id uuid, p_turn_id bigint
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; s runtime_sessions; result jsonb;
+DECLARE t turns; s runtime_sessions; result jsonb; ending text;
 BEGIN
   IF p_action IS NULL OR p_action NOT IN ('interrupt','expire','settle') THEN
     RAISE EXCEPTION 'TURN_RECOVERY_INVALID' USING ERRCODE='22023';
@@ -23,12 +23,11 @@ BEGIN
   IF p_action = 'interrupt' AND t.state IN ('running','stopping') AND t.updated_at < now() - interval '15 minutes' THEN
     -- A report its user was stopping closes as stopped (the 24-hour stop rule applies); anything else as interrupted: the known
     -- receipts settle, an unknown cost keeps its share of the freeze for the settlement pass.
-    result := public.turn_close(p_actor_id, p_turn_id, CASE WHEN t.state = 'stopping' THEN 'stopped' ELSE 'interrupted' END,
-      '[]'::jsonb, false, false, 'recovery_interrupted');
+    ending := CASE WHEN t.state = 'stopping' THEN 'stopped' ELSE 'interrupted' END;
   ELSIF p_action = 'expire' AND t.state = 'paused' AND t.updated_at < now() - interval '24 hours' THEN
     -- Owner 10-25/10-27: a paused turn that delivered nothing for 24 hours is refunded in full (expired, not delivered: D = 0);
     -- refund_all stays false so a jury is charged by its own rule in turn_user_charge (V2-7b).
-    result := public.turn_close(p_actor_id, p_turn_id, 'expired', '[]'::jsonb, false, false, 'recovery_expired');
+    ending := 'expired';
   ELSIF p_action = 'settle' AND t.state = 'closed' AND t.settlement = 'pending' THEN
     -- The settlement pass of a closed turn (#1512): what became known since the last pass, counted once. The lease stays: the
     -- next lookup of what is still unknown waits for it.
@@ -36,6 +35,15 @@ BEGIN
   ELSE
     UPDATE turns SET recovery_lease_until = NULL WHERE actor_id = p_actor_id AND id = p_turn_id;
     RETURN jsonb_build_object('turnId', t.id, 'action', p_action, 'skipped', true, 'state', t.state, 'settlement', t.settlement);
+  END IF;
+  -- A jury closes with its review, or by the end another path is committing on it: the charge must not read that review stale.
+  IF t.kind = 'jury' THEN
+    result := public.turn_fusion_close(p_actor_id, p_turn_id, ending, false, false,
+      CASE WHEN ending = 'expired' THEN 'recovery_expired' ELSE 'recovery_interrupted' END,
+      jsonb_build_object('state', 'interrupted', 'outcome', jsonb_build_object('kind', ending)));
+  ELSE
+    result := public.turn_close(p_actor_id, p_turn_id, ending, '[]'::jsonb, false, false,
+      CASE WHEN ending = 'expired' THEN 'recovery_expired' ELSE 'recovery_interrupted' END);
   END IF;
   -- Closed now: a cost still unknown is claimed again for the settlement pass without waiting for this lease.
   UPDATE turns SET recovery_lease_until = NULL WHERE actor_id = p_actor_id AND id = p_turn_id;

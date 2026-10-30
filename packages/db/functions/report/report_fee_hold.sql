@@ -22,6 +22,14 @@ BEGIN
         OR (f.state='held' AND (x.state NOT IN ('completed','cancelled')
           OR (x.result->>'completeness'='complete' AND report_body_complete(x.result->>'body',x.payload->'reportGeneration')))))) THEN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS'; END IF;
+  -- CORE-PATH-V2 V2-7a (#1523 review): the same round's report on the turn path, under the same session lock turn_open takes:
+  -- one still going, or a complete one delivered, blocks this paid start too (turn_report_admit checks the other way). V2-12
+  -- removes the old path and this check with it.
+  IF EXISTS(SELECT 1 FROM turns t WHERE t.session_id=e.session_id AND t.actor_id=e.actor_id AND t.kind='report'
+      AND t.policy#>>'{report,projectId}'=e.payload#>>'{reportGeneration,projectId}'
+      AND t.policy#>>'{report,roundId}'=e.payload#>>'{reportGeneration,roundId}'
+      AND (t.state<>'closed' OR (t.close_kind='completed' AND t.delivered))) THEN
+    RAISE EXCEPTION 'REPORT_ALREADY_EXISTS'; END IF;
   -- The report call's own temporary hold: its frozen cost bound in credits (released at zero charge).
   BEGIN
     call_hold:=ceil(bill2_decimal(billing#>'{limits,costUsd}')*(billing#>>'{rules,creditsPerUsd}')::numeric

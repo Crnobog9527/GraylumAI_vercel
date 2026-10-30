@@ -19,7 +19,7 @@ export const FUSION_COMPARE_REQUEST_FORMAT = 'fusion-text-v1-stream';
 export type FusionPhase = 'fusion_review' | 'fusion_summary' | 'fusion_compare';
 export const fusionRequestFormat = (phase: FusionPhase) => phase === 'fusion_compare' ? FUSION_COMPARE_REQUEST_FORMAT : FUSION_REQUEST_FORMAT;
 /** Reasoning purpose of a phase (admin setting per model): compare answers are ordinary conversation answers. */
-const reasoningPurpose = (phase: FusionPhase) => phase === 'fusion_review' ? 'review' : phase === 'fusion_summary' ? 'writing' : 'interactive';
+export const reasoningPurpose = (phase: FusionPhase) => phase === 'fusion_review' ? 'review' : phase === 'fusion_summary' ? 'writing' : 'interactive';
 export type FusionModelRow = RuntimeModelRow & { provider: string; is_active: string; input_limit: number; max_tokens: number };
 /** Includes the endpoint; the OpenRouter key is the platform secret (OR-1), checked here only and never returned. */
 export const FUSION_MODEL_COLUMNS = RUNTIME_MODEL_COLUMNS;

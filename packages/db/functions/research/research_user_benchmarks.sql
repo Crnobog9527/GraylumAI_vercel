@@ -28,9 +28,9 @@ BEGIN
         AND (f.last_success->'relevance'->>'value')::numeric BETWEEN 0 AND 1
         THEN (f.last_success->'relevance'->>'value')::numeric END AS topic_relevance
     FROM research_benchmarks b
-    JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
+    LEFT JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
     LEFT JOIN research_account_fetches f ON f.id=b.fetch_id AND f.actor_id=a
-    WHERE b.actor_id=a AND b.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    WHERE b.actor_id=a AND b.session_id=s AND (b.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
     ORDER BY b.qualified DESC,topic_relevance DESC NULLS LAST,b.followers DESC NULLS LAST,b.platform,b.account LIMIT 30) b;
   RETURN output;
 END $function$;

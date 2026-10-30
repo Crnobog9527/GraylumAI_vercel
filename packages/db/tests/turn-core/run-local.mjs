@@ -8,8 +8,12 @@ import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
-import {localDb,root} from '../runtime-view-perf/local-db.mjs';
+import {localDb,read,root} from '../runtime-view-perf/local-db.mjs';
+import {reportCases} from './report-cases.mjs';
+import {reportFinalCases} from './report-final-cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
+// V2-7a: a report opens only for a Gold account's confirmed round (turn_report_admit); the fixture builds one per call.
+db.sql(read('packages/db/tests/content-erasure/fixture.sql'));db.sql(read('packages/db/tests/turn-core/report-fixture.sql'));
 const one=async(sql,args=[],client=c)=>(await client.query(sql,args)).rows[0]?.v;
 const hash=text=>createHash('sha256').update(text).digest('hex');
 const {Client}=createRequire(resolve(root,'package.json'))('pg');
@@ -20,6 +24,11 @@ const q=100,m=6;
 // Node computes the policy from the catalog cache; these are the frozen numbers (2.5.3).
 const policy=(over={})=>({q,uTurnUsd:0.1,gCredits:60,minCredits:10,uModelCredits:30,historyItems:100,inputBytes:1000,
  limits:{model:3,paidTools:1,freeTools:1},stopLoss:{limitUsd:1000,p:8,poolSize:8,uFastUsd:1,uBigUsd:5},...over});
+// A report's shape (turn_report_admit): one call, no tools or history, the whole fixed price plus the call's bound frozen.
+const reportPolicy=(src,over={})=>policy({gCredits:530,minCredits:530,fixedCredits:500,historyItems:0,
+ limits:{model:1,paidTools:0,freeTools:0},report:{projectId:src.project,roundId:src.round,moduleId:src.module},...over});
+const reportSource=a=>one('select turn_test.report_source($1) v',[a.actor]);
+const openReport=(a,src,extra={})=>open(a,{kind:'report',session:src.session,pol:reportPolicy(src),...extra});
 async function account(credits=1000){
  const actor=randomUUID(),session=randomUUID();
  await c.query('insert into profiles(id,credits) values($1,$2)',[actor,credits]);
@@ -29,8 +38,12 @@ async function account(credits=1000){
   [session,actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
  return {actor,session,credits};
 }
-const open=(a,{kind='chat',request=randomUUID(),pol=policy(),session=a.session,client=c}={})=>
- one('select turn_open($1,$2,$3,$4,$5) v',[a.actor,session,request,kind,JSON.stringify(pol)],client);
+// As the API calls it: the service role (a report's membership check reads payment facts only for it, as in production).
+const open=async(a,{kind='chat',request=randomUUID(),pol=policy(),session=a.session,client=c}={})=>{
+ await client.query('set role service_role');
+ try{return await one('select turn_open($1,$2,$3,$4,$5) v',[a.actor,session,request,kind,JSON.stringify(pol)],client);}
+ finally{await client.query('reset role');}
+};
 const begin=(a,turn,seq,{kind='model',paid=null,upper=0.02,tool=null,request=hash('r'+turn+seq)}={})=>
  one('select turn_call_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',
   [a.actor,turn,seq,kind,kind==='tool'?null:randomUUID(),kind==='tool'?(tool??'research_search'):null,paid,request,upper,m]);
@@ -161,14 +174,14 @@ try{
   const chat=await open(a);
   assert.match(await refusal(close(a,chat.turnId,'stopped')),/TURN_STOP_NOT_ALLOWED/);
   await close(a,chat.turnId,'completed',{messages:[]});
-  const charges=[];
+  const charges=[],src=await reportSource(a);
   for(let i=0;i<3;i++){
-   const r=await open(a,{kind:'report',pol:policy({gCredits:500,fixedCredits:500})});
+   const r=await openReport(a,src);
    await begin(a,r.turnId,1,{upper:0.5});await record(a,r.turnId,1,{n:0.2});
    charges.push((await close(a,r.turnId,'stopped',{messages:[],delivered:false})).chargedCredits);
   }
   assert.deepEqual(charges,[0,0,120]);
-  const r=await open(a,{kind:'report',pol:policy({gCredits:500,fixedCredits:500})});
+  const r=await openReport(a,src);
   await begin(a,r.turnId,1,{upper:0.5});await record(a,r.turnId,1,{n:0.01});
   assert.equal((await close(a,r.turnId,'completed',{messages:[],delivered:true})).chargedCredits,500,'a delivered report is the fixed price');
   report.checks.push('only a report can be stopped; first two stops in 24 hours free, the third charges what was generated; a delivered report charges the fixed price');
@@ -270,13 +283,11 @@ try{
    await identity(b,o2.turnId,1,'gen-late');
    assert.deepEqual((await c.query('select status,provider_id from turn_calls where turn_id=$1',[o2.turnId])).rows[0],{status:'unknown',provider_id:'gen-late'});
    // Report stops: one free stop used; two more in two sessions at once -> one free, one charged.
-   const r=await account(),other=randomUUID();
-   await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
-    [other,r.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
-   const rep=session=>open(r,{kind:'report',session,pol:policy({gCredits:500,fixedCredits:500})});
-   const first=await rep(r.session);await begin(r,first.turnId,1,{upper:0.5});await record(r,first.turnId,1,{n:0.2});
+   const r=await account(2000),one1=await reportSource(r),other=await reportSource(r);
+   const rep=src=>openReport(r,src);
+   const first=await rep(one1);await begin(r,first.turnId,1,{upper:0.5});await record(r,first.turnId,1,{n:0.2});
    await close(r,first.turnId,'stopped',{messages:[],delivered:false});
-   const x=await rep(r.session),y=await rep(other);
+   const x=await rep(one1),y=await rep(other);
    for(const t of [x,y]){await begin(r,t.turnId,1,{upper:0.5});await record(r,t.turnId,1,{n:0.2});}
    await as(p1,r);await as(p2,r);
    const stop=(client,t)=>client.query("select turn_close($1,$2,'stopped','[]',false,false,null) v",[r.actor,t.turnId]).then(v=>v.rows[0].v);
@@ -317,7 +328,7 @@ try{
   assert.deepEqual(first.positioning,{positioned:false,refusals24h:0});
   await c.query("select turn_close($1,$2,'failed','[]',false,true,'positioning_required')",[a.actor,first.turnId]);
   assert.deepEqual((await open(a)).positioning,{positioned:false,refusals24h:1});
-  const b=await account(),report=await open(b,{kind:'report',pol:policy({gCredits:500,fixedCredits:500})});
+  const b=await account(),report=await openReport(b,await reportSource(b));
   assert.equal(report.positioning,null,'only a free chat is gated');
  }
  report.checks.push('turn_open returns the reply language and, for a free chat, the positioning gate with its 24-hour refusal count');
@@ -342,7 +353,8 @@ try{
   await record(d,od.turnId,1,{raw:'user content'});
   assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[od.turnId]),0);
 
-  // P2: balance 100, a chat (actor bucket) and a report (bucket -1) each ask 80 with threshold 10, opened at the same time.
+  // P2: balance 100, a chat (actor bucket) and a compare (bucket -1) each ask 80 with threshold 10, opened at the same time
+  // (a report now needs its whole fixed price, V2-7a, so the large-kind bucket is a compare's here).
   const a=await account(100),other=randomUUID();
   await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
    [other,a.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
@@ -350,7 +362,7 @@ try{
   try{
    const frozen=(await Promise.all([
     open(a,{client:p1,pol:policy({gCredits:80,minCredits:10})}),
-    open(a,{client:p2,kind:'report',session:other,pol:policy({gCredits:80,minCredits:10,fixedCredits:80})}),
+    open(a,{client:p2,kind:'compare',session:other,pol:policy({gCredits:80,minCredits:10})}),
    ])).map(v=>v.reservedCredits).sort((x,y)=>x-y);
    assert.deepEqual(frozen,[20,80],'the second open freezes the 20 left');
    assert.equal(await balance(a),0);
@@ -553,13 +565,11 @@ try{
   assert.deepEqual([settled.chargedCredits,settled.settlement],[6,'done'],'D = 6 from the model; the late tool receipt (12) is not charged');
   assert.equal(await balance(a),994);
 
-  const r=await account(),other=randomUUID();
-  await c.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
-   [other,r.actor,JSON.stringify({kind:'positioning_draft',probe:randomUUID()}),randomUUID()]);
-  const rep=session=>open(r,{kind:'report',session,pol:policy({gCredits:500,fixedCredits:500})});
-  const used=await rep(r.session);await begin(r,used.turnId,1,{upper:0.5});await record(r,used.turnId,1,{n:0.2});
+  const r=await account(2000),mine=await reportSource(r),other=await reportSource(r);
+  const rep=src=>openReport(r,src);
+  const used=await rep(mine);await begin(r,used.turnId,1,{upper:0.5});await record(r,used.turnId,1,{n:0.2});
   await close(r,used.turnId,'stopped',{messages:[],delivered:false});            // the one free stop already used
-  const x=await rep(r.session),y=await rep(other);
+  const x=await rep(mine),y=await rep(other);
   await begin(r,x.turnId,1,{upper:0.5});await record(r,x.turnId,1,{n:0.2});
   await begin(r,y.turnId,1,{upper:0.5});                                          // y's model receipt will be late
   const p2=await peer();
@@ -680,19 +690,71 @@ try{
   assert.equal(await one('select budget_conflict v from turn_calls where turn_id=$1 and seq=2',[ob.turnId]),false);
   report.checks.push('a model call above its bound marks budget_conflict and blocks that model until reviewed; within the bound it does not');
  }
+ // 28. V2-3b (0425): turn_positioned, the positioning gate's narrow check, agrees with opc_has_confirmed_positioning on a confirmed
+ // positioning and an unpublished round (an erased source version: the same join condition as the old check); it differs only where the old check re-validates the evidence
+ // or the Skill package (controller 10-29: such a positioning counts as positioned). turn_open returns it.
+ {
+  const positioned=async(evidence='[]',state='published')=>{
+   const a=await account(),sk=randomUUID(),mod=randomUUID(),rev=randomUUID(),p=randomUUID(),r=randomUUID(),v=randomUUID();
+   await c.query("insert into skills(id,skill_key,content_kind) values($1::uuid,'tc-'||$1::text,'directory')",[sk]);
+   await c.query("insert into modules(id,title,skill_id,active) values($1,'TC fixture',$2,true)",[mod,sk]);
+   await c.query("insert into skill_revisions(id,skill_id,version,content,content_hash,published_by) values($1,$2,1,'fixture',repeat('a',64),$3)",[rev,sk,a.actor]);
+   await c.query(`insert into skill_packages(revision_id,skill_id,request_id,manifest,package_hash,entry_hash,expected_version,actor_id)
+    values($1,$2,gen_random_uuid(),'{}',repeat('b',64),repeat('a',64),0,$3)`,[rev,sk,a.actor]);
+   await c.query(`insert into artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version)
+    values($1::uuid,$2,$3,$4,'source-'||$1::text,'source title',1)`,[p,a.actor,mod,sk]);
+   await c.query(`insert into artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,state,steps)
+    values($1,$2,$3,repeat('b',64),'{}',repeat('c',64),repeat('d',64),$4,'{}')`,[r,p,rev,state]);
+   await c.query(`insert into artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)
+    values($1,$2,$3,1,'{}',repeat('e',64),$4)`,[v,p,r,evidence]);
+   await c.query("insert into opc_businesses(id,actor_id,name,current_source_version_id) values(gen_random_uuid(),$1,'business',$2)",[a.actor,v]);
+   return {a,v};
+  };
+  const both=async a=>[await one('select turn_positioned($1) v',[a.actor]),await one('select opc_has_confirmed_positioning($1) v',[a.actor])];
+  // The old check also reads the Skill package through the permission chain (entitlement, package files), which this minimal
+  // fixture does not set up: exactly the dependency the gate drops. Where neither needs it, the two agree.
+  const ok=await positioned();
+  assert.equal(await one('select turn_positioned($1) v',[ok.a.actor]),true,'a confirmed positioning');
+  assert.deepEqual((await open(ok.a)).positioning,{positioned:true,refusals24h:0});
+  const none=await account();
+  assert.deepEqual(await both(none),[false,false],'no positioning');
+  const draft=await positioned('[]','draft');
+  assert.deepEqual(await both(draft.a),[false,false],'the round is not published');
+  // The documented difference: evidence that cannot be read back no longer blocks the gate's answer.
+  const unreadable=await positioned(JSON.stringify([randomUUID()]));
+  assert.deepEqual(await both(unreadable.a),[true,false],'unreadable evidence: positioned for the gate only');
+  assert.equal(await one("select has_function_privilege('service_role','public.turn_positioned(uuid)','EXECUTE') v"),false);
+  report.checks.push('turn_positioned: a confirmed positioning is positioned (and turn_open returns it); it agrees with opc_has_confirmed_positioning on none and unpublished (erased versions: the same join condition); unreadable evidence or Skill package still counts as positioned');
+ }
+ // V2-7a: kind=report (report-cases.mjs).
+ await reportCases({c,one,open,begin,identity,record,close,balance,account,reportSource,reportPolicy,openReport,refusal,peer,report});
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
    'turn_call_identity(uuid,bigint,integer,text)','turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)',
-   'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)'])
+   'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)','turn_stop(uuid,bigint,boolean,integer)',
+   'turn_report_read(uuid,uuid,uuid,bigint)'])
    for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]])
     assert.equal(await one("select has_function_privilege($1,$2,'EXECUTE') v",[role,'public.'+fn]),want,`${fn} ${role}`);
-  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)',
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)','turn_positioned(uuid)',
    'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)'])
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)',
+   'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)',
+   'turn_report_admit(uuid,uuid,jsonb)'])
    assert.equal(await one("select has_function_privilege('service_role',$1,'EXECUTE') v",['public.'+fn]),false,fn);
   const text=await one("select string_agg(pg_get_functiondef(oid),E'\\n') v from pg_proc where proname like 'turn\\_%' and pronamespace='public'::regnamespace");
   // No advisory lock, temp table, session-level set_config or SET statement (the SET clauses of UPDATEs are not statements).
   assert.doesNotMatch(text,/pg_advisory|CREATE\s+TEMP|set_config\(|(;|\bBEGIN|\bTHEN|\bLOOP|\bELSE)\s*SET\s+(?!LOCAL\b)/i);
+  // Relation locks held at the end of one open, per table (indexes and TOAST with their table).
+  const lockedBy=async work=>{
+   await c.query('begin');
+   try{
+    await work();
+    return (await c.query(`select coalesce(t.relname,i.relname) tbl,count(*)::int n from pg_locks l join pg_class i on i.oid=l.relation
+      left join pg_index x on x.indexrelid=i.oid left join pg_class t on t.oid=coalesce(x.indrelid,(select oid from pg_class where reltoastrelid=i.oid))
+      where l.pid=pg_backend_pid() and l.locktype='relation' and i.relnamespace='public'::regnamespace group by 1`)).rows;
+   }finally{await c.query('rollback');}
+  };
   const a=await account();
   await c.query('begin');
   try{
@@ -710,6 +772,20 @@ try{
    assert.ok(locks<=40,`turn_open relation locks ${locks}`);
   }finally{await c.query('rollback');}
   report.checks.push(`service role only (helpers unexposed); no advisory locks, session SET or temp tables; turn_open holds ${report.turnOpenRelationLocks} relation locks on core-path tables (<= 40) plus ${report.turnOpenLedgerLocks} in the ledger leaves`);
+  // V2-7a: a report's open also reads its source (report_source, membership, benchmarks). Plan 3.1's core-path tables (turns,
+  // runtime_sessions, profiles, daily_spend, session_messages, the tombstone table) stay <= 40; the source tables (the artifact,
+  // draft, research and payment-fact reads of the old report admission) and the ledger leaves are recorded apart.
+  const r=await account(),src=await reportSource(r);
+  const coreTables=new Set(['turns','turns_id_seq','runtime_sessions','profiles','daily_spend','session_messages','account_erasure_requests']);
+  const ledger=new Set(['subscription_credit_grants','user_subscriptions','billing_history','credit_package_sources','credit_source_entries',
+   'credit_source_entries_id_seq','credit_source_reviews','payment_orders','bill2_runs','pay_disputes']);
+  const rows=await lockedBy(()=>openReport(r,src));
+  const sum=keep=>rows.filter(keep).reduce((n,x)=>n+x.n,0);
+  const core=sum(x=>coreTables.has(x.tbl));
+  report.reportOpenRelationLocks={core,source:sum(x=>!coreTables.has(x.tbl)&&!ledger.has(x.tbl)),ledger:sum(x=>ledger.has(x.tbl))};
+  assert.ok(core<=40,`report turn_open core-path relation locks ${core}`);
+  report.checks.push(`a report's turn_open: ${core} relation locks on core-path tables (<= 40), ${report.reportOpenRelationLocks.source} on its source reads, ${report.reportOpenRelationLocks.ledger} in the ledger leaves`);
  }
+ await reportFinalCases({c,one,open,begin,record,account,reportSource,reportPolicy,refusal,report});
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

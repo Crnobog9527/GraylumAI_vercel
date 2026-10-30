@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { catalogRead } from '../runtime/catalogCache';
 import {
   activateSkill, assertPath, batchBytes, batchFiles, frozenDescriptor, identityOf, readSkillResources, sameIdentity,
   type PackageIdentity, type SkillSource,
@@ -18,6 +19,15 @@ import type { RuntimeTool } from '../runtime/runner';
  * from this turn's own copy, writes no row and costs the user nothing (plan 2.5.3: its continuation is one of the turn's calls).
  */
 export type MentorSkill = { actorId: string; moduleId: string; skillId: string; revisionId: string; packageHash: string };
+
+/** The Skill checks of a mentor turn, from the Skill catalog cache (versioned by the tables they read); no database read on a hit. */
+export async function mentorSkillAvailable(admin: Pick<SupabaseClient, 'rpc'>, skill: Omit<MentorSkill, 'actorId'>): Promise<boolean> {
+  const { data, error } = await catalogRead(admin, 'skills', `mentor-skill:${skill.moduleId}:${skill.skillId}:${skill.revisionId}:${skill.packageHash}`,
+    () => admin.rpc('mentor_skill_available', { p_module_id: skill.moduleId, p_skill_id: skill.skillId, p_revision_id: skill.revisionId,
+      p_package_hash: skill.packageHash }));
+  if (error) throw new Error('TURN_SKILL_UNAVAILABLE');
+  return data === true;
+}
 
 export function mentorSkillSource(admin: Pick<SupabaseClient, 'rpc'>, skill: MentorSkill): { source: SkillSource; binding: SkillFileBinding } {
   const binding = { packageId: skill.skillId, revisionId: skill.revisionId, packageHash: skill.packageHash };

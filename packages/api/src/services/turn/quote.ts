@@ -34,13 +34,15 @@ export class QuoteError extends Error {
 
 export type ChatQuote = ModelCall & {
   model: string; q: string; reasoning: ReasoningPolicy; outputLimit: number; inputLimit: number;
+  /** V2-6: the billing unit's default multiplier (research routes without their own) and the profile's tool ceiling. */
+  defaultMultiplier: string; maxTools: number;
   providerLimits: OpenRouterLimits; credential: () => Promise<string>;
 };
 
-type Row = { id: string; model_id: string; config: unknown; updated_at: string; is_active?: unknown; max_tokens?: unknown };
+export type Row = { id: string; model_id: string; config: unknown; updated_at: string; is_active?: unknown; max_tokens?: unknown };
 
 /** The OpenRouter limits of one admitted route, from the snapshot endpoint whose tag is the profile's (as production today). */
-function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], endpointTag: string) {
+export function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], endpointTag: string) {
   const probe = { modelId: row.id, model: row.model_id, providerLimits: { providerSlug: endpointTag, contextTokens: 1,
     promptUsdPerMillion: '0', completionUsdPerMillion: '0', requestUsd: '0' } };
   const endpoint = pricingEndpoint(row, snapshot, probe);
@@ -57,8 +59,9 @@ function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], 
 }
 
 /** What a quoted call is for: the profile must cover exactly this use (free chat by default; the mentor's Skill call and its
- * organizer use the agent-turn format, V2-5). outputCap: a lower output limit of that use (the organizer's summary limit). */
-export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer'; requestFormat: string;
+ * organizer use the agent-turn format, V2-5; a report its own report phase, V2-7a). outputCap: a lower output limit of that
+ * use (the organizer's summary limit). */
+export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer' | 'report'; requestFormat: string;
   purpose: 'interactive' | 'organize'; outputCap?: number };
 const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_REQUEST_FORMAT, purpose: 'interactive' };
 
@@ -86,8 +89,8 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
   const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag);
   const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens, use.outputCap);
   const reasoning = admitReasoning(row.data, use.purpose, limits.providerSlug, outputLimit);
-  // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): the ordinary purpose, the
-  // free-chat request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
+  // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): its phase and purpose, its
+  // request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
   // A profile approved for another use (e.g. Argon only for fusion_review) never admits a free chat.
   const profile = matchedProfile(parsed.data.profiles,
     { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],
@@ -105,6 +108,7 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
   if (!key) throw new QuoteError('TURN_PROVIDER_KEY_UNAVAILABLE');
   return {
     modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, providerLimits: limits,
+    defaultMultiplier: unit.defaultMultiplier, maxTools: profile.maxTools,
     identity: { provider: 'openrouter', account: openRouterAccount(key), model, protocol: 'openrouter-chat-v1',
       providerLimits: limits, outputLimit, upperUsd },
     reasoning,

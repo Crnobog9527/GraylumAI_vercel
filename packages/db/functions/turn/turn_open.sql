@@ -65,7 +65,15 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
     IF p_resume_of IS NULL THEN
-      IF s.active_turn_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+      -- A jury (or its adoption) runs on the report's draft conversation without occupying it (V2-7b): the conversation stays
+      -- usable while a review advances or waits, as before; one review per user is the review record's own rule.
+      IF s.active_turn_id IS NOT NULL AND p_kind NOT IN ('jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+      -- V2-5c: the mentor's read before this turn is bound to it: a turn that closed since then makes that read stale (it could pay
+      -- again for what that turn fetched, or use a grant it spent). Under this session's lock, so no close can slip in after it.
+      IF p_kind = 'mentor' AND p_policy->'mentor'->>'preparedAt' IS NOT NULL AND EXISTS (SELECT 1 FROM turns x
+          WHERE x.actor_id = p_actor_id AND x.session_id = p_session_id AND x.closed_at > (p_policy->'mentor'->>'preparedAt')::timestamptz) THEN
+        RAISE EXCEPTION 'TURN_PREPARE_STALE' USING ERRCODE='55P03';
+      END IF;
     ELSE
       -- Resume (V2-8): the paused turn is checked, locked and priced by turn_resume_carry.
       carried := public.turn_resume_carry(p_actor_id, p_session_id, s.active_turn_id, p_resume_of, p_kind, p_policy);
@@ -111,6 +119,7 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
     -- The freeze covers the carried credits too (the continuation settles them).
+    IF p_kind = 'report' THEN PERFORM public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
@@ -130,7 +139,7 @@ BEGIN
       VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h - carried, u_turn,
         (p_policy->>'inputBytes')::int)
       RETURNING * INTO t;
-    UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id;
+    IF p_kind NOT IN ('jury','jury_adopt') THEN UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id; END IF;
   END IF;
 
   -- 5. The visible history, newest N in order.
@@ -145,7 +154,7 @@ BEGIN
     'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history, 'resumeOf', t.resume_of,
     'replyLanguage', prof.reply_language,
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
-      'positioned', public.opc_has_confirmed_positioning(p_actor_id),
+      'positioned', public.turn_positioned(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here

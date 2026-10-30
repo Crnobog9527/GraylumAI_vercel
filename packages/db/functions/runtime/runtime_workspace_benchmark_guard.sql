@@ -27,7 +27,7 @@ BEGIN
   s:=(one->>'sessionId')::uuid;
   IF NOT EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=s AND rs.actor_id=a AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL)
    OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(one->'producedBy','[]'::jsonb)) i
-    WHERE NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=(i->>'executionId')::uuid AND x.actor_id=a
+    WHERE i ? 'executionId' AND NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=(i->>'executionId')::uuid AND x.actor_id=a
      AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
   THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
  END LOOP;

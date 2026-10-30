@@ -38,7 +38,7 @@ BEGIN
   FROM turn_calls WHERE turn_id = p_turn_id AND status NOT IN ('not_sent','rejected','no_charge_402');
   IF (p_call_kind = 'model' AND n_model >= (t.policy->'limits'->>'model')::int)
     OR (p_call_kind = 'decision' AND n_decision >= coalesce((t.policy->'limits'->>'decisions')::int, 0))
-    OR (p_call_kind = 'tool' AND p_paid AND n_paid >= (t.policy->'limits'->>'paidTools')::int)
+    OR (p_call_kind = 'tool' AND p_paid AND n_paid >= coalesce((t.policy->'limits'->>'toolRows')::int, (t.policy->'limits'->>'paidTools')::int))
     OR (p_call_kind = 'tool' AND NOT p_paid AND n_free >= (t.policy->'limits'->>'freeTools')::int)
     OR (p_call_kind = 'tool' AND NOT p_paid AND p_upper_usd <> 0) OR (p_paid AND p_upper_usd <= 0) THEN
     RAISE EXCEPTION 'TURN_CALL_LIMIT' USING ERRCODE='22023';
@@ -48,11 +48,21 @@ BEGIN
   -- part of a call above the freeze is the platform's, E = N - D). Below that the turn waits for credits. The positioning check
   -- is never charged to the user (Owner 10-12): it needs no freeze; its upper bound counts in U_turn and the stop-loss only.
   q := (t.policy->>'q')::numeric;
-  SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
-                           WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
-                           ELSE 0 END), 0) INTO used
-  FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
-  need := CASE WHEN p_call_kind = 'decision' THEN 0
+  IF t.kind = 'jury' THEN
+    -- A jury pays its fixed price whatever its calls cost (Owner 10-17); the freeze above it is the temporary bound of the group
+    -- in flight (10-13): only calls still in flight count against it, a finished group's bound is free again (V2-7b). A call
+    -- whose answer is saved and judged has finished, with only its cost pending: it does not hold the next group back.
+    SELECT coalesce((t.policy->>'fixedCredits')::int, 0) + coalesce(sum(ceil(q * k.upper_usd * k.multiplier)), 0) INTO used
+    FROM turn_calls k WHERE k.turn_id = p_turn_id AND k.call_kind <> 'decision' AND k.status IN ('dispatched','identified')
+      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = k.turn_id AND o.seq = k.seq);
+  ELSE
+    SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
+                             WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
+                             ELSE 0 END), 0) INTO used
+    FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
+  END IF;
+  -- A jury adoption is free to the user (10-20): nothing is frozen and nothing needs to be.
+  need := CASE WHEN p_call_kind = 'decision' OR t.kind = 'jury_adopt' THEN 0
     ELSE least(ceil(q * p_upper_usd * p_multiplier), coalesce((t.policy->>'minCredits')::numeric, ceil(q * p_upper_usd * p_multiplier))) END;
   IF t.reserved_credits - used < need THEN
     UPDATE turns SET state = 'paused', pause_reason = 'waiting_credits', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;

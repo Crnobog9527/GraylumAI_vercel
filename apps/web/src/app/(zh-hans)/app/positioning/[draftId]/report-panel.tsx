@@ -21,6 +21,7 @@ import { ReportChargeAction } from "./report-charge-confirm";
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
+import { reportStopChargeNotice } from "./turn-report-stop";
 export { PublishFootnote, PublishNext, reportPublishes } from "./report-publish";
 import { ReportDocumentPanel } from "./report-document-panel";
 import { REPORT_DOC_TEXT } from "./report-document";
@@ -195,7 +196,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认停止报告？</AlertDialogTitle>
-            <AlertDialogDescription>今天已停止过 2 次，本次将按已生成部分扣费（不超过 500 积分）</AlertDialogDescription>
+            <AlertDialogDescription>{reportStopChargeNotice(price)}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={report.cancelStop}>继续生成</AlertDialogCancel>

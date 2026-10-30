@@ -53,6 +53,7 @@ BEGIN
   AND NOT EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.actor_id=a AND c.execution_id=ANY(ids))
   AND NOT EXISTS(SELECT 1 FROM opc_data_events d WHERE d.actor_id=a AND d.execution_id=ANY(ids))
   AND NOT EXISTS(SELECT 1 FROM opc_result_links l WHERE l.execution_id=ANY(ids))
+  AND NOT EXISTS(SELECT 1 FROM opc_result_links l JOIN turns t ON t.actor_id=l.turn_actor_id AND t.id=l.turn_id WHERE t.actor_id=a AND t.session_id=target)
   AND NOT EXISTS(SELECT 1 FROM artifact_rounds r JOIN artifact_projects p ON p.id=r.project_id
    WHERE p.actor_id=a AND r.erased_at IS NULL AND content_erasure_references(r.steps,refs))
   AND NOT EXISTS(SELECT 1 FROM opc_library_requests q WHERE q.actor_id=a AND q.erased_at IS NULL
@@ -61,6 +62,9 @@ BEGIN
    WHERE o.actor_id=a AND m.session_id<>target AND m.erased_at IS NULL
     AND (content_erasure_references(m.request,refs) OR content_erasure_references(m.content,refs)));
  UPDATE runtime_sessions SET content_deleted_at=clock_timestamp() WHERE id=target RETURNING content_deleted_at INTO stamp;
+ -- CORE-PATH-V2: the conversation's messages leave the visible history now (one indexed update, still under the session
+ -- lock turn_close appends under); their text is cleared with the rest of the conversation by content_erasure_confirm.
+ UPDATE session_messages SET visible=false,deleted_at=stamp WHERE session_id=target AND (visible OR deleted_at IS NULL);
  -- Off-database erasure manifest (0227): recorded at the marker's time, in the same transaction;
  -- the later cleanup's own note keeps this first time.
  PERFORM erasure_manifest_note('session',target,a,stamp);

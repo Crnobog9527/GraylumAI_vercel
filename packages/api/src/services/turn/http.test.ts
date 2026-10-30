@@ -4,7 +4,11 @@ import type { ChatDeps } from './chat';
 import { handleTurnRequest, type TurnHttpDeps } from './http';
 
 const run = vi.hoisted(() => vi.fn());
+const report = vi.hoisted(() => vi.fn());
+const mentor = vi.hoisted(() => vi.fn());
 vi.mock('./chat', () => ({ runChatTurn: run }));
+vi.mock('./mentor', () => ({ runMentorTurn: mentor }));
+vi.mock('./report', async original => ({ ...await original<object>(), runReportTurn: report }));
 
 const SESSION = '00000000-0000-4000-8000-000000000001', REQUEST = '00000000-0000-4000-8000-000000000002';
 const post = (body: unknown) => new Request('https://app.test/api/turn', { method: 'POST', body: JSON.stringify(body) });
@@ -15,7 +19,7 @@ const deps = (over: Partial<TurnHttpDeps> = {}): TurnHttpDeps => ({
 });
 
 describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
-  beforeEach(() => { run.mockReset(); });
+  beforeEach(() => { run.mockReset(); report.mockReset(); });
 
   it('refuses before any turn work: bad shape, wrong or undeclared database host, no account, rate limited', async () => {
     const status = async (body: unknown, d: TurnHttpDeps) => {
@@ -64,5 +68,38 @@ describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
     await reader.cancel();
     finish();
     await vi.waitFor(() => expect(closed).toBe(true));
+  });
+
+  it('a report (V2-7a) gets its own input and hears when the page drops the stream; a chat never does', async () => {
+    let gone: AbortSignal | undefined;
+    report.mockImplementation(async (_deps, input, emit, signal) => {
+      gone = signal;
+      expect(input).toEqual({ actorId: 'actor-1', sessionId: SESSION, requestId: REQUEST, moduleId: SESSION, projectId: SESSION,
+        roundId: SESSION, acceptedCredits: 500 });
+      emit({ type: 'opened', turnId: 3, reservedCredits: 680, replay: false });
+      await new Promise(resolve => signal.addEventListener('abort', resolve));
+    });
+    const body = { kind: 'report', sessionId: SESSION, requestId: REQUEST, moduleId: SESSION, projectId: SESSION, roundId: SESSION,
+      acceptedCredits: 500 };
+    expect((await handleTurnRequest(post({ ...body, acceptedCredits: undefined }), deps())).status).toBe(400);
+    const res = await handleTurnRequest(post(body), deps());
+    const reader = res.body!.getReader();
+    await reader.read();
+    expect(gone?.aborted).toBe(false);
+    await reader.cancel();
+    expect(gone?.aborted).toBe(true);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('hands a mentor request its Refresh grant', async () => {
+    mentor.mockReset();
+    mentor.mockImplementation(async (_deps: unknown, _input: unknown, emit: (e: unknown) => void) => {
+      emit({ type: 'error', code: 'TURN_FAILED' });
+    });
+    const refresh = '00000000-0000-4000-8000-000000000003';
+    const res = await handleTurnRequest(post({ kind: 'mentor', sessionId: SESSION, requestId: REQUEST, moduleId: '00000000-0000-4000-8000-000000000004',
+      stepId: 'step-0', text: 'Refresh it', organizeAfter: true, researchRefreshId: refresh }), deps());
+    await res.text();
+    expect(mentor.mock.calls[0]![1]).toMatchObject({ researchRefreshId: refresh });
   });
 });

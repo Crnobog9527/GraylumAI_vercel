@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION public.report_final_snapshot(a uuid, pid uuid, rid uu
  LANGUAGE plpgsql
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE source jsonb;r artifact_rounds;ev uuid;eid uuid;
+DECLARE source jsonb;r artifact_rounds;ev uuid;eid uuid;tid bigint;l opc_result_links;
 BEGIN
  SELECT * INTO r FROM artifact_rounds WHERE id=rid AND project_id=pid;
  IF NOT(r.workflow ? 'reportGeneration') THEN RETURN snapshot; END IF;
@@ -21,16 +21,24 @@ BEGIN
  IF source->'revision' IS DISTINCT FROM payload->'reportRevision'
   OR source->>'bodyHash' IS DISTINCT FROM payload->>'reportBodyHash' THEN RAISE EXCEPTION 'REPORT_VERSION_CONFLICT'; END IF;
  eid:=(source->>'executionId')::uuid;
- IF NOT runtime_history_available(eid) THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
- SELECT evidence_id INTO ev FROM opc_result_links WHERE execution_id=eid AND round_id=rid AND step_id='report-final';
+ -- CORE-PATH-V2 V2-7a2: a report generated on the turn path has no old execution; its link names the turn (report_document_source
+ -- prefers an old execution, so the same order here).
+ IF NOT EXISTS(SELECT 1 FROM runtime_executions WHERE id=eid AND actor_id=a) THEN
+  SELECT id INTO tid FROM turns WHERE actor_id=a AND request_id=eid AND kind='report' AND state='closed';
+ END IF;
+ IF tid IS NULL THEN l.execution_id:=eid; ELSE l.turn_actor_id:=a; l.turn_id:=tid; END IF;
+ IF NOT opc_result_link_available(l) THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
+ SELECT evidence_id INTO ev FROM opc_result_links WHERE round_id=rid AND step_id='report-final'
+  AND (execution_id=eid OR (turn_actor_id=a AND turn_id=tid));
  IF ev IS NULL THEN
   IF (SELECT count(*) FROM artifact_evidence WHERE project_id=pid)>=128 THEN
    RAISE EXCEPTION 'REPORT_EVIDENCE_CAPACITY'; END IF;
   ev:=gen_random_uuid();
   INSERT INTO artifact_evidence(id,project_id,kind,payload,content_hash)
-   VALUES(ev,pid,'user',jsonb_build_object('executionId',eid),source->>'bodyHash');
+   VALUES(ev,pid,'user',jsonb_strip_nulls(jsonb_build_object('executionId',eid,'turnId',tid)),source->>'bodyHash');
   INSERT INTO artifact_evidence_restrictions(evidence_id) VALUES(ev);
-  INSERT INTO opc_result_links(evidence_id,execution_id,round_id,step_id) VALUES(ev,eid,rid,'report-final');
+  INSERT INTO opc_result_links(evidence_id,execution_id,turn_actor_id,turn_id,round_id,step_id)
+   VALUES(ev,l.execution_id,l.turn_actor_id,l.turn_id,rid,'report-final');
  END IF;
  RETURN snapshot||jsonb_build_object('sources',(snapshot->'sources')||jsonb_build_array(
   jsonb_build_object('id',ev,'kind','report','executionId',eid)),

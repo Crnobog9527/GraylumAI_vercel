@@ -21,8 +21,8 @@ BEGIN
     SELECT rb.platform,rb.account,row_number() OVER (PARTITION BY rb.session_id
       ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account) n
     FROM research_benchmarks rb
-    JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=a AND x.session_id=rb.session_id
-     AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    LEFT JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=a AND x.session_id=rb.session_id
+     AND (rb.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
     WHERE rb.actor_id=a AND rb.session_id=ANY(sessions)) t WHERE t.n<=30
    ORDER BY t.platform,t.account) b);
 END $function$;

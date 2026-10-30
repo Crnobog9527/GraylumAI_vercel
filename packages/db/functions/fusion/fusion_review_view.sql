@@ -12,11 +12,29 @@ AS $function$
     'draftId',rv.draft_id,'sourceVersionId',rv.source_version_id,'sourceSessionId',rv.source_session_id,
     'versionHash',rv.version_hash,'materials',rv.materials,'materialsHash',rv.materials_hash,'config',rv.config,
     'steps',rv.steps,'outcome',rv.outcome,'revisionId',rv.revision_id,'endedAt',rv.ended_at,'adoption',rv.adoption,
-    'fee',fusion_review_fee_view(rv.id),
-    -- Per call: its run, verdict and whether it settled, for continueReview.
-    'calls',coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',br.fusion_group_id,'runId',br.id,'callId',c.id,'modelId',br.payload->>'modelId',
+    'turnId',rv.turn_id,
+    -- A review on the turn path (V2-7b): its fixed price is the turn's freeze and settlement.
+    'fee',CASE WHEN rv.turn_id IS NULL THEN fusion_review_fee_view(rv.id) ELSE (SELECT jsonb_build_object(
+      'credits',(t.policy->>'fixedCredits')::int,
+      'state',CASE WHEN t.charged_credits IS NULL THEN 'held' WHEN t.charged_credits>0 THEN 'charged' ELSE 'refunded' END,
+      'chargedCredits',t.charged_credits,'reason',t.close_kind,'settledAt',CASE WHEN t.charged_credits IS NOT NULL THEN t.closed_at END)
+      FROM turns t WHERE t.actor_id=rv.actor_id AND t.id=rv.turn_id) END,
+    -- Per call: its run, verdict and whether it settled, for continueReview. On the turn path a call is one turn_calls row of the
+    -- review's turn, in the step whose first sequence is the nearest at or below it; its id is the one fusion_turn_outputs keys.
+    'calls',CASE WHEN rv.turn_id IS NULL THEN coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',br.fusion_group_id,'runId',br.id,'callId',c.id,'modelId',br.payload->>'modelId',
       'phase',c.payload->>'phase','dispatched',c.dispatched_at IS NOT NULL,'verdict',c.fusion_verdict,
       'settled',c.settled_at IS NOT NULL,'state',c.state,'dispatchedAt',c.dispatched_at,'settledAt',c.settled_at) ORDER BY c.created_at,c.id)
       FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id
-      WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)),'[]'));
+      WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)),'[]')
+    ELSE coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',st.x->>'groupId','runId',md5(c.turn_id::text||':'||c.seq::text)::uuid,
+      'callId',md5(c.turn_id::text||':'||c.seq::text)::uuid,'seq',c.seq,'modelId',c.model_id,
+      'phase',CASE WHEN st.x->>'phase'='summary' THEN 'fusion_summary' ELSE 'fusion_review' END,
+      'dispatched',c.status<>'not_sent',
+      'verdict',coalesce(o.verdict,CASE WHEN c.status IN ('not_sent','rejected','no_charge_402') THEN 'no_delivery' END),
+      'settled',c.settled_at IS NOT NULL,'state',c.status,'dispatchedAt',c.dispatched_at,'settledAt',c.settled_at) ORDER BY c.seq)
+      FROM turn_calls c
+      CROSS JOIN LATERAL (SELECT x FROM jsonb_array_elements(rv.steps) x WHERE (x->>'fromSeq')::int<=c.seq
+        ORDER BY (x->>'fromSeq')::int DESC LIMIT 1) st
+      LEFT JOIN fusion_turn_outputs o ON o.turn_id=c.turn_id AND o.seq=c.seq
+      WHERE c.turn_id=rv.turn_id AND c.call_kind='model'),'[]') END);
 $function$;

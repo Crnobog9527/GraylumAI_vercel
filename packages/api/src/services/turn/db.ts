@@ -53,6 +53,15 @@ export type RecoveryItem = z.infer<typeof recoveryClaim>[number];
 const recovered = z.object({ action: z.enum(['interrupt', 'expire', 'settle']), skipped: z.boolean().optional(),
   closeKind: z.string().optional(), settlement: z.enum(['pending', 'done']).nullable().optional() }).passthrough();
 export type Recovered = z.infer<typeof recovered>;
+const stopped = z.object({ turnId: z.number().int().positive(), state: z.enum(['stopping', 'closed', 'confirmation_required']),
+  chargeable: z.boolean(), replay: z.boolean(), closeKind: z.string().nullable().optional(),
+  chargedCredits: z.number().int().nullable().optional(), fixedCredits: z.number().int().optional() });
+export type Stopped = z.infer<typeof stopped>;
+const reportTurn = z.object({ turnId: z.number().int().positive(), state: z.enum(['opening', 'running', 'stopping', 'paused', 'closed']),
+  closeKind: z.string().nullable(), delivered: z.boolean(), chargedCredits: z.number().int().nullable(),
+  settlement: z.enum(['pending', 'done']).nullable(), fixedCredits: z.number().int().nullable(), stopChargeable: z.boolean().nullable(),
+  report: z.record(z.string(), z.unknown()).nullable(), body: z.string().nullable(), openedAt: z.string(), closedAt: z.string().nullable() });
+export type ReportTurn = z.infer<typeof reportTurn>;
 
 export type CallKind = 'model' | 'tool' | 'decision';
 export type CallStatus = 'ok' | 'not_sent' | 'rejected' | 'no_charge_402' | 'unusable';
@@ -62,7 +71,8 @@ export type CloseKind = 'completed' | 'failed' | 'interrupted' | 'expired' | 'er
 export class TurnDatabaseError extends Error {
   constructor(readonly code: string) { super(code); }
 }
-const KNOWN = /\b(TURN_[A-Z_]+|STOP_LOSS_REACHED)\b/;
+// A kind's own refusals (a report's REPORT_*, an archived business, V2-7a) keep their codes too.
+const KNOWN = /\b(TURN_[A-Z_]+|REPORT_[A-Z_]+|STOP_LOSS_REACHED|OPC_BUSINESS_ARCHIVED)\b/;
 async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
   const { data, error } = await client.rpc(name, args);
   if (error) throw new TurnDatabaseError(KNOWN.exec(error.message ?? '')?.[1] ?? 'TURN_DATABASE_UNAVAILABLE');
@@ -100,6 +110,26 @@ export function turnDatabase(clients: TurnClients) {
     claimRecovery: (limit: number) => call(w, 'turn_recovery_claim', { p_limit: limit }, recoveryClaim),
     recover: (a: { actorId: string; turnId: number; action: RecoveryAction }) =>
       call(w, 'turn_recover', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_action: a.action }, recovered),
+    /** The user's stop of a running report (V2-7a); not part of a turn's own writes. */
+    stop: (a: { actorId: string; turnId: number; confirmed: boolean; stopAt: number | null }) =>
+      call(w, 'turn_stop', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_confirmed: a.confirmed, p_stop_at: a.stopAt }, stopped),
+    /** A report turn of a round (newest, or by id), with its saved text. */
+    reportRead: (a: { actorId: string; sessionId: string; roundId: string | null; turnId: number | null }) =>
+      call(clients.read, 'turn_report_read', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_round_id: a.roundId,
+        p_turn_id: a.turnId }, reportTurn.nullable()),
+    // A report's reads before it opens (controller 10-30, B1), on the read client and by the actor's own keys: the confirmed
+    // source of its round, the session's benchmark table, and the benchmark shortfall card (only when the table is short).
+    // The report membership check of the old admission (payment facts, refunds, the subscription's period end; never only the
+    // cached level): on the write client, as it takes the account's own row lock to serialize with paid fulfilment.
+    reportMembership: (a: { actorId: string }) =>
+      call(w, 'report_membership_check', { p_actor_id: a.actorId }, z.unknown()),
+    reportSource: (a: { actorId: string; sessionId: string; projectId: string; roundId: string }) =>
+      call(clients.read, 'report_source', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_project_id: a.projectId,
+        p_round_id: a.roundId }, z.record(z.string(), z.unknown())),
+    benchmarkRows: (a: { actorId: string; sessionId: string }) =>
+      call(clients.read, 'research_benchmark_rows', { a: a.actorId, s: a.sessionId }, z.unknown()),
+    benchmarkShortfall: (a: { actorId: string; sessionId: string }) =>
+      call(clients.read, 'research_user_shortfall', { a: a.actorId, s: a.sessionId }, z.unknown()),
   };
 }
 export type TurnDatabase = ReturnType<typeof turnDatabase>;

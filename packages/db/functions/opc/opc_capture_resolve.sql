@@ -30,9 +30,14 @@ BEGIN
  payload:=jsonb_build_object('stepId',p_step_id,'fieldId',p_field_id,'executionId',p_execution_id,
   'hash',p_hash,'action',p_action,'expectedVersion',p_expected_version);
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
- SELECT * INTO t FROM opc_turns WHERE session_id=d.session_id AND request_id=e.request_id;
- IF e.id IS NULL OR t.token::text IS DISTINCT FROM e.payload->>'opcTurnToken' OR t.purpose IS DISTINCT FROM 'mentor'
-  OR NOT runtime_history_available(e.id) THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ IF e.id IS NOT NULL THEN
+  SELECT * INTO t FROM opc_turns WHERE session_id=d.session_id AND request_id=e.request_id;
+  IF t.token::text IS DISTINCT FROM e.payload->>'opcTurnToken' OR t.purpose IS DISTINCT FROM 'mentor'
+   OR NOT runtime_history_available(e.id) THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ -- V2-5b: a suggestion of a mentor turn on the new path (its id is the turn's request id), still available in this round.
+ ELSIF NOT turn_mentor_source_available(p_actor_id,d.session_id,p_execution_id,d.project_id,r.id) THEN
+  RAISE EXCEPTION 'OPC_CAPTURE_DENIED';
+ END IF;
  SELECT * INTO req FROM artifact_requests WHERE project_id=d.project_id AND request_id=p_request_id;
  IF FOUND THEN
   IF req.action IS DISTINCT FROM 'opc_capture_resolve' OR req.payload IS DISTINCT FROM payload THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
@@ -42,7 +47,7 @@ BEGIN
  -- v3 suggestion withdraw: dismiss binds to the withdrawn record; accept/ignore to the pending one.
  suggestion:=CASE WHEN p_action='dismiss' THEN meta->'withdrawnSuggestion' ELSE meta->'suggestion' END;
  IF suggestion->>'executionId' IS DISTINCT FROM p_execution_id::text OR suggestion->>'hash' IS DISTINCT FROM p_hash
-  OR suggestion IS NULL OR r.state<>'draft' OR t.round_id<>r.id THEN RAISE EXCEPTION 'OPC_SUGGESTION_CHANGED';END IF;
+  OR suggestion IS NULL OR r.state<>'draft' OR (e.id IS NOT NULL AND t.round_id<>r.id) THEN RAISE EXCEPTION 'OPC_SUGGESTION_CHANGED';END IF;
  IF p_request_id IS NULL OR p_hash IS NULL OR p_action IS NULL OR p_action NOT IN ('accept','ignore','dismiss')
  THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
  version:=(st->>'version')::integer;

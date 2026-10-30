@@ -42,6 +42,9 @@ export interface RuntimeOperation {
   result?: Record<string, unknown> | null; resultAccess?: 'restricted';
 }
 
+/** The billing run of a subcall settled on turn_calls (CORE-PATH-V2): it has no BILL2 receipt to record again. */
+export const TURN_BILLING_RUN = '00000000-0000-4000-8000-000000000000';
+
 /** Construct from authenticated host identity only. The migration owns every state transition. */
 export function databaseRuntimeResearchStore(deps: {
   /** Unused: every read and write goes through the 0263 RPCs (tables stay closed). */
@@ -160,6 +163,7 @@ export function databaseRuntimeResearchStore(deps: {
       receipt: z.record(z.string(), z.unknown()),
     }).safeParse(operation.result.billing);
     if (!saved.success) throw new Error('RESEARCH_STATE_UNAVAILABLE');
+    if (saved.data.runId === TURN_BILLING_RUN) return operation;
     const plan = await read<RuntimePlan | null>('plan', id);
     if (!plan?.executionId) throw new Error('RESEARCH_SCOPE_DENIED');
     // Validate the original answer, request hash and call owner before recording its saved receipt.

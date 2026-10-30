@@ -14,6 +14,7 @@ import {runFusionBackground} from './fusion-background.mjs';
 import {runFusionFee} from './fusion-fee.mjs';
 import {runFusionPausedEnd} from './fusion-paused-end.mjs';
 import {runReportFee} from './report-fee.mjs';
+import {runFusionTurn} from './fusion-turn.mjs';
 const mode=process.argv.slice(2).join(' ');
 const development=mode==='--local-only --development';
 // --ci is for the CI runner (CI set, images already pulled by the workflow); --local-only never runs inside CI.
@@ -40,7 +41,11 @@ const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packag
   // 0383 patches 0294's review check and 0295's report hold (ARCH-FIX E1 shared quarantine check).
   'packages/db/migrations/0383_credit_grant_quarantine.sql',
   'packages/db/migrations/0397_report_fee_terminal_settlement.sql',
-  'packages/db/migrations/0412_report_stop_limit.sql'];
+  'packages/db/migrations/0412_report_stop_limit.sql',
+  // V2-7a: report_fee_hold and report_stop as they stand with the turn path (both replayed above in their older text).
+  'packages/db/migrations/0429_core_path_v2_report.sql',
+  // CORE-PATH-V2 V2-7b replaces fusion functions the re-applied migrations above define again (review view, start, claim).
+  'packages/db/migrations/0436_core_path_v2_fusion.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -79,6 +84,7 @@ try {
  await runFusionFee({db:client,Client,connectionString,report});
  await runFusionPausedEnd({db:client,Client,connectionString,report});
  await runReportFee({db:client,Client,connectionString,report});
+ await runFusionTurn({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

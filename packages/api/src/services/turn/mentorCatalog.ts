@@ -11,6 +11,8 @@ import type { PricingDeps } from '../runtime/pricingAdmission';
 import { CORE_PATH_SETTING, coreSetting, HISTORY_ITEMS } from './chat';
 import { startThresholdCredits, turnPolicy } from './policy';
 import { chatQuote, QuoteError, type ChatQuote } from './quote';
+import { BENCHMARK_ROWS, mentorResearchBounds, planMentorResearch, type MentorResearch } from './tools/benchmark';
+import { RESEARCH_INPUT_BYTES } from './tools/plan';
 
 /*
  * CORE-PATH-V2 kind=mentor, before turn_open: everything the turn freezes comes from the catalog cache (plan 2.4). The mentor
@@ -29,6 +31,8 @@ export type MentorCatalog = {
   /** The start threshold L of this turn: one normal turn's cost, the mentor's L (purpose skill) plus the organizer's
    * (attached_organizer), each from billing_payg_start_thresholds as the old path claimed each call (Owner 10-01, 10-28). */
   startCredits: number;
+  /** V2-5c: the benchmark tools this turn may use; null when it offers none. */
+  research: MentorResearch | null;
 };
 
 export class MentorCatalogError extends Error {
@@ -36,7 +40,7 @@ export class MentorCatalogError extends Error {
 }
 const KNOWN = /^[A-Z][A-Z0-9_]{2,63}$/;
 
-export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: string; organize: boolean; pricing?: PricingDeps })
+export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: string; organize: boolean; research: boolean; pricing?: PricingDeps })
   : Promise<MentorCatalog> {
   // Every setting from the admission configuration rows (one cached query), as chat.ts.
   const configuration = readAdmissionConfiguration(admin);
@@ -49,9 +53,13 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
   if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string')
     throw new MentorCatalogError('TURN_MENTOR_DENIED');
   try {
-    const mentor = await chatQuote(admin, { configuration: rows, modelId: module.data.model_id,
-      inputBytes: budgets?.interactive.inputBytes ?? MENTOR_INPUT_BYTES,
+    const quoteMentor = (inputBytes: number) => chatQuote(admin, { configuration: rows, modelId: module.data.model_id, inputBytes,
       deps: input.pricing, use: { phase: 'skill', requestFormat: AGENT_TURN_REQUEST_FORMAT, purpose: 'interactive' } });
+    let mentor = await quoteMentor(budgets?.interactive.inputBytes ?? MENTOR_INPUT_BYTES);
+    // A turn with usable research may use the research ceiling (Owner 10-17, 10-27) and is quoted for it.
+    const research = input.research ? await planMentorResearch({ admin, configuration, modelCalls: input.organize ? 4 : 3,
+      modelMultiplier: mentor.multiplier }) : null;
+    if (research && mentor.inputLimit < RESEARCH_INPUT_BYTES) mentor = await quoteMentor(RESEARCH_INPUT_BYTES);
     let organizer: ChatQuote | null = null;
     if (input.organize) {
       const summary = summaryPolicy(Object.fromEntries((rows.data ?? []).map(r => [r.key, r.value])), module.data.model_id);
@@ -65,7 +73,7 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
     const organizerL = organizer ? startThresholdCredits(setting, organizer.model, 'attached_organizer', organizer.q, organizer.multiplier) : 0;
     if (mentorL === undefined || organizerL === undefined) throw new MentorCatalogError('TURN_START_THRESHOLD_UNCONFIGURED');
     return { config: config.data, mentor, organizer, settings, brandIdentity: settings.ok ? settings.identityGuard ?? true : true,
-      startCredits: mentorL + organizerL };
+      startCredits: mentorL + organizerL, research };
   } catch (error) {
     if (error instanceof QuoteError) throw new MentorCatalogError(error.code);
     const message = error instanceof Error ? error.message : '';
@@ -74,18 +82,23 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
 }
 
 /** The frozen numbers of one mentor turn (G_turn, U_turn, the call limits) and what turn_mentor_context checks. */
-export function mentorPolicy(catalog: MentorCatalog, input: { opening: boolean; stepId: string; moduleId: string }) {
-  const { mentor, organizer } = catalog;
-  const freeTools = input.opening ? 0 : 1;
+export function mentorPolicy(catalog: MentorCatalog,
+  input: { opening: boolean; stepId: string; moduleId: string; sourceChecked: boolean; sourceDrafts: readonly string[];
+    preparedAt?: string }) {
+  const { mentor, organizer, research } = catalog;
+  const freeTools = input.opening ? 0 : 1, paid = research ? mentorResearchBounds(research, mentor.multiplier) : [];
   // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).
   return { ...turnPolicy({ q: mentor.q, multiplier: mentor.multiplier, modelUpperUsd: mentor.upperUsd,
     startThresholdCredits: catalog.startCredits, pricing: mentor.pricing,
-    limits: { model: 1 + freeTools + (organizer ? 1 : 0), paidTools: 0, freeTools, decisions: 0 },
+    limits: { model: 1 + (research ? 1 : 0) + freeTools + (organizer ? 1 : 0), paidTools: research ? 1 : 0, freeTools, decisions: 0,
+      ...(research ? { toolRows: BENCHMARK_ROWS } : {}) },
+    paidToolUpperUsd: paid,
     otherModelCalls: organizer ? [{ upperUsd: organizer.upperUsd, multiplier: organizer.multiplier }] : [],
     stopLoss: catalog.config.stopLoss, historyItems: HISTORY_ITEMS, inputBytes: mentor.inputLimit,
     frozen: { modelId: mentor.modelId, model: mentor.model, ...(organizer ? { organizerModelId: organizer.modelId } : {}) } }),
   // V2-8: recovery prices a call whose cost is unknown with the model and price table frozen here, per model id (two models).
   models: Object.fromEntries([mentor, ...(organizer ? [organizer] : [])].map(q => [q.modelId, q.model])),
   pricings: Object.fromEntries([mentor, ...(organizer ? [organizer] : [])].map(q => [q.modelId, q.pricing])),
-  mentor: { moduleId: input.moduleId, stepId: input.stepId } };
+  mentor: { moduleId: input.moduleId, stepId: input.stepId, sourceChecked: input.sourceChecked, sourceDrafts: input.sourceDrafts,
+    ...(input.preparedAt ? { preparedAt: input.preparedAt } : {}) } };
 }

@@ -29,7 +29,7 @@ BEGIN
     -- (both stamped with clock_timestamp under this turn's row lock, so a receipt and a pass never miss each other).
     IF t.settlement = 'pending' THEN
       marker := clock_timestamp();
-      SELECT coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+      SELECT coalesce(sum(turn_call_spent_usd(call_kind, nominal_usd, actual_usd)) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
              coalesce(sum(upper_usd), 0)
         INTO n_total, pending_upper
       FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
@@ -45,9 +45,11 @@ BEGIN
       FROM turn_calls WHERE turn_id = p_turn_id;
       credits := credits + coalesce((t.policy->>'carriedCredits')::int, 0);
       IF t.charged_credits IS NULL AND NOT user_pending THEN
-        charge := public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
+        charge := CASE WHEN t.kind = 'report' THEN (public.turn_report_settlement(t, t.close_kind, t.delivered, credits,
+            t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), t.closed_at)).charge
+          ELSE public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
           coalesce((t.policy->>'closeRefundAll')::boolean, false), credits,
-          t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), (t.policy->>'fixedCredits')::int, t.closed_at);
+          t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), (t.policy->>'fixedCredits')::int, t.closed_at) END;
         IF t.policy->>'holdId' IS NOT NULL THEN
           PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
         END IF;
@@ -64,6 +66,7 @@ BEGIN
   IF v_kind = 'stopped' AND t.kind <> 'report' THEN RAISE EXCEPTION 'TURN_STOP_NOT_ALLOWED' USING ERRCODE='42501'; END IF;
   IF p_refund_all AND v_kind NOT IN ('failed','expired','erased') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023'; END IF;
   -- A tombstone wins: nothing is saved and the turn closes as erased.
+  IF t.kind = 'report' THEN v_kind := public.turn_report_close_kind(t, v_kind); END IF;
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
     OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
@@ -73,8 +76,12 @@ BEGIN
   -- A kind without a branch has its result refused rather than dropped.
   IF p_kind_result IS NOT NULL THEN
     IF t.kind = 'mentor' THEN
+      -- V2-5c: what this turn's research made, on any close that saves anything (paid lookups stay paid when the reply failed).
+      IF v_kind <> 'erased' AND p_kind_result ? 'research' THEN PERFORM public.research_turn_apply(p_actor_id, t, p_kind_result->'research'); END IF;
       -- V2-5: the organizer's checklist patches; only a delivered completed turn applies them (an erased one saves nothing).
-      IF v_kind = 'completed' AND p_delivered THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+      IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'organizerInput' THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+    ELSIF t.kind = 'report' THEN
+      PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
     ELSE
       RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
     END IF;
@@ -85,9 +92,10 @@ BEGIN
    WHERE turn_id = p_turn_id AND status IN ('dispatched','identified');
   q := (t.policy->>'q')::numeric;
   -- N = ceil(q x sum(n_i x m_i)) over the known receipts the user pays for (never the positioning check); n_total is the provider
-  -- cost of every receipt, the positioning check and the platform-paid unusable results included, which the stop-loss counts.
+  -- cost of every receipt, the positioning check and the platform-paid unusable results included, which the stop-loss counts; a
+  -- tool receipt counts its whole known supplier cost (turn_call_spent_usd), the subcalls the user does not pay for included.
   SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
-         coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+         coalesce(sum(turn_call_spent_usd(call_kind, nominal_usd, actual_usd)) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
          coalesce(sum(upper_usd) FILTER (WHERE cost_pending), 0),
          coalesce(bool_or(cost_pending), false),
          -- Only an unknown model call holds the user's settlement: a third-party tool whose result is unknown is 0 to the user
@@ -109,8 +117,12 @@ BEGIN
   -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a
   -- concurrent close of the same actor that committed first is always before it, and a later settlement counts the same.
   marker := clock_timestamp();
-  charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
-    (t.policy->>'fixedCredits')::int, marker);
+  IF t.kind = 'report' THEN
+    SELECT r.charge, user_pending AND NOT r.settle_now INTO charge, user_pending FROM public.turn_report_settlement(t, v_kind, p_delivered, credits, h, marker) r;
+  ELSE
+    charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
+      (t.policy->>'fixedCredits')::int, marker);
+  END IF;
 
   -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
   -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit

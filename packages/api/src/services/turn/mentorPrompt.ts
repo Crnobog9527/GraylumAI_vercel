@@ -5,6 +5,7 @@ import { ANSWER_CARD_RULE } from '../opc/answerCard';
 import { OPENING_EXTRACTION_RULE } from '../opc/agentTurnPrompt';
 import { positioningMentorInstructions } from '../opc/existingPositioning';
 import { ORGANIZER_INSTRUCTIONS } from '../opc/organizerPrompt';
+import { STEP_SUMMARY_INSTRUCTIONS } from '../opc/stepSummary';
 import { hostTurnInput, type HostTurnContext } from '../runtime/hostTurn';
 import type { HistoryItem } from './db';
 
@@ -29,9 +30,11 @@ export type MentorSystem = { instructions: string; prefixChars: number };
  * prefix and the caller marks nothing).
  */
 export function mentorSystem(input: { skillText: string; skillEntryChars: number; brandIdentity: boolean; mode: unknown;
-  host: HostTurnContext; skillFile: boolean; replyRule: string }): MentorSystem {
+  host: HostTurnContext; skillFile: boolean; replyRule: string; /** A step summary turn (V2-5b): its rules, as the old path. */
+  summary?: boolean }): MentorSystem {
   const skill = withBrandIdentity(input.skillText, input.brandIdentity);
   const instructions = skill + '\n' + positioningMentorInstructions(input.mode, input.host)
+    + (input.summary ? '\n' + STEP_SUMMARY_INSTRUCTIONS : '')
     + (input.skillFile ? SKILL_FILE_INSTRUCTIONS : '') + '\n' + input.replyRule;
   const brand = input.brandIdentity ? BRAND_IDENTITY_INSTRUCTIONS.length + 1 : 0;
   return { instructions, prefixChars: input.skillEntryChars > 0 ? brand + input.skillEntryChars : 0 };

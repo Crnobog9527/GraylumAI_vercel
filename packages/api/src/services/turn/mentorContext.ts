@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { MethodInformationField } from '../../shared/opcMethodPolicy';
+import type { AnsweredCard } from '../opc/answerCard';
 import { captureHostContext, captureOrganizerInput, type CaptureState } from '../opc/captureContext';
 import type { HostTurnContext } from '../runtime/hostTurn';
 
@@ -22,6 +23,7 @@ export const mentorContextSchema = z.object({
   packageHash: z.string().regex(/^[a-f0-9]{64}$/), steps: z.array(step).min(1).max(32),
   // Pending suggestions' content, for the organizer only (the mentor sees hasPendingSuggestion).
   suggestions: z.record(z.string(), z.record(z.string(), z.object({ value: z.string(), nature: z.unknown(), basis: z.unknown() }))),
+  fallbackEligible: z.boolean(),
   work: z.object({ roundId: uuid, steps: z.record(z.string(), workStep) }).passthrough(),
 }).strict();
 export type MentorContext = z.infer<typeof mentorContextSchema>;
@@ -53,13 +55,16 @@ export function mentorState(raw: unknown, stepId: string): MentorState {
     scopeMaterial: { content: { brief: 'mentor:' + stepId, material: '', roundId: context.roundId, work: context.work } } };
 }
 
-export function mentorHost(state: MentorState, stepId: string, opening: boolean): HostTurnContext {
-  return captureHostContext(state.context.steps, state.information, stepId, opening, undefined, state.confirmed);
+export function mentorHost(state: MentorState, stepId: string,
+  turn: { opening: boolean; summary: boolean; updatedFieldIds?: string[] }): HostTurnContext {
+  return captureHostContext(state.context.steps, state.information, stepId, turn.opening, turn.updatedFieldIds, state.confirmed,
+    turn.summary);
 }
 
 /** The organizer's checklist input (captureFormat v2) and the object turn_close binds withdrawals to. */
-export function mentorOrganizerInput(state: MentorState, host: HostTurnContext, text: string): { text: string; value: unknown } {
-  const input = captureOrganizerInput(host, state.information, state.confirmed, text);
+export function mentorOrganizerInput(state: MentorState, host: HostTurnContext, text: string, answered?: AnsweredCard)
+  : { text: string; value: unknown } {
+  const input = captureOrganizerInput(host, state.information, state.confirmed, text, answered);
   return { text: input, value: JSON.parse(input) };
 }
 
