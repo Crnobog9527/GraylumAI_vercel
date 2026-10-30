@@ -188,7 +188,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
   it('a refusal inside turn_open keeps its report code; a short balance is the report\'s own REPORT_CREDITS', async () => {
     for (const [message, code] of [['REPORT_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED'],
       ['REPORT_PRICE_CHANGED', 'REPORT_PRICE_CHANGED'], ['REPORT_ALREADY_EXISTS', 'REPORT_ALREADY_EXISTS'],
-      ['TURN_INSUFFICIENT_CREDITS', 'REPORT_CREDITS'], ['could not serialize access', 'TURN_DATABASE_UNAVAILABLE']]) {
+      ['TURN_INSUFFICIENT_CREDITS', 'REPORT_CREDITS'], ['OPC_BUSINESS_ARCHIVED', 'OPC_BUSINESS_ARCHIVED'], ['could not serialize access', 'TURN_DATABASE_UNAVAILABLE']]) {
       const t = harness({ openError: message });
       await runReportTurn(t.deps, input, t.emit);
       expect(t.events).toEqual([{ type: 'error', code }]);

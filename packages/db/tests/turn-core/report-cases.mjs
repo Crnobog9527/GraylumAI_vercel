@@ -43,6 +43,12 @@ export async function reportCases(t){
   await c.query("update profiles set membership_level='gold' where id=$1",[a.actor]);
   // The confirmed facts and the benchmark gate are read by Node before opening (B1); under turn_open's locks the round must be
   // this conversation's draft: another round of the same account is refused.
+  // An archived business is read-only (0324): its draft's report does not open (nothing frozen); unarchived, it does.
+  const business=await one("insert into opc_businesses(actor_id,name) values($1,'archived business') returning id v",[a.actor]);
+  await c.query('insert into opc_draft_businesses(draft_id,business_id) values($1,$2)',[src.draft,business]);
+  await c.query('update opc_businesses set archived_at=now() where id=$1',[business]);
+  await refused(reportPolicy(src),/OPC_BUSINESS_ARCHIVED/);
+  await c.query('update opc_businesses set archived_at=null where id=$1',[business]);
   const elsewhere=await reportSource(a);
   await refused(reportPolicy(src,{report:{projectId:elsewhere.project,roundId:elsewhere.round,moduleId:src.module}}),/REPORT_SOURCE_CONFLICT/);
   await c.query("update system_settings set value='{\"enabled\":false}' where key='runtime_report_generation'");

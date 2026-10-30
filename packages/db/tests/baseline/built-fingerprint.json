@@ -4222,7 +4222,7 @@
   "fn:turn_open(uuid,uuid,uuid,text,jsonb,bigint)": "03718066c3c4",
   "fn:turn_recover(uuid,bigint,text)": "118ae98f26ce",
   "fn:turn_recovery_claim(integer)": "c5a94c8c8c58",
-  "fn:turn_report_admit(uuid,uuid,jsonb)": "8c4041a558c3",
+  "fn:turn_report_admit(uuid,uuid,jsonb)": "26352b6e1ccd",
   "fn:turn_report_apply(turns,text,jsonb)": "5350de5453ba",
   "fn:turn_report_close_kind(turns,text)": "0aaaafdd2738",
   "fn:turn_report_read(uuid,uuid,uuid,bigint)": "07ed7a5cae92",

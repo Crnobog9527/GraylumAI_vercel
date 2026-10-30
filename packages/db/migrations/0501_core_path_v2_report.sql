@@ -7,6 +7,7 @@
 -- per-kind hook), rebuilt whole on their latest text on staging (after 0424, with the mentor's dispatch and the recovery's carried freeze kept):
 --   turn_report_admit       turn_open, new report, under its locks: switch, today's fixed price (acceptedCredits), one-call
 --                           shape, membership (cached level), the round is this conversation's draft and of the quoted module,
+--                           its business is not archived (0324),
 --                           one paid report per round. The confirmed facts and the benchmark table are read by Node just before
 --                           opening (report_source, research_benchmark_rows), not inside turn_open (controller 10-30, B1)
 --   turn_stop               the user's stop of a running report: first two in 24 hours free; from the third it asks, and once
@@ -32,7 +33,7 @@ CREATE OR REPLACE FUNCTION public.turn_report_admit(p_actor_id uuid, p_session_i
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE rep jsonb := p_policy->'report'; fixed integer; lvl text;
+DECLARE rep jsonb := p_policy->'report'; fixed integer; lvl text; draft uuid;
 BEGIN
   -- The stop's frozen fields are written by turn_stop only.
   IF rep IS NULL OR jsonb_typeof(rep) <> 'object' OR p_policy ?| ARRAY['stoppedAt','stopChargeable','stopAt']
@@ -60,10 +61,14 @@ BEGIN
   -- The round is this conversation's draft and of the module Node quoted (the model, so the call's bound, is the module's).
   -- Its confirmed facts and benchmarks were read by Node just before (report_source, research_benchmark_rows) and are not read
   -- again here (controller 10-30, B1): turn_open re-checks only what its locks must hold.
-  IF NOT EXISTS (SELECT 1 FROM opc_drafts d JOIN artifact_projects p ON p.id = d.project_id AND p.actor_id = p_actor_id
-      WHERE d.actor_id = p_actor_id AND d.session_id = p_session_id AND d.project_id = (rep->>'projectId')::uuid
-        AND d.round_id = (rep->>'roundId')::uuid AND p.module_id = (rep->>'moduleId')::uuid AND p.erased_at IS NULL) THEN
-    RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT' USING ERRCODE='P0001';
+  SELECT d.draft_id INTO draft FROM opc_drafts d JOIN artifact_projects p ON p.id = d.project_id AND p.actor_id = p_actor_id
+    WHERE d.actor_id = p_actor_id AND d.session_id = p_session_id AND d.project_id = (rep->>'projectId')::uuid
+      AND d.round_id = (rep->>'roundId')::uuid AND p.module_id = (rep->>'moduleId')::uuid AND p.erased_at IS NULL;
+  IF draft IS NULL THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT' USING ERRCODE='P0001'; END IF;
+  -- An archived business is read-only (0324, as opc_assert_business_writable on the old path): no new paid report for its draft.
+  IF EXISTS (SELECT 1 FROM opc_draft_businesses db JOIN opc_businesses b ON b.id = db.business_id AND b.actor_id = p_actor_id
+      WHERE db.draft_id = draft AND b.archived_at IS NOT NULL) THEN
+    RAISE EXCEPTION 'OPC_BUSINESS_ARCHIVED' USING ERRCODE='42501';
   END IF;
   -- One paid report per round: one still going, or a complete one delivered, blocks a new start (a stopped, failed or cut-off
   -- one does not: a new start pays again, Owner 10-17).
