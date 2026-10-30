@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { CASE_INSENSITIVE, canonicalAccount, type CanonicalAccount } from '../../research/tools/accountLinks';
 import type { CardPayload, DiscoveryRecord, FetchClaim, RuntimeResearchStore, SelectionCard, ShortfallCard } from '../../research/runtime/store';
@@ -20,6 +21,7 @@ export const preparedResearch = z.object({
   cardDiscoveries: z.record(z.string(), uuid).default({}),
   fetches: z.array(z.object({ id: uuid, attempt: uuid, platform: z.string(), account: z.string(), state: z.string(),
     evidence: z.record(z.string(), z.unknown()).nullable() })).default([]),
+  fetchGuards: z.array(z.object({ id: uuid, platform: z.string(), accountKey: z.string(), state: z.string() })).default([]),
   discoveries: z.array(z.object({ discoveryId: uuid, keywords: z.array(z.string()), platforms: z.array(z.string()),
     cursor: z.record(z.string(), z.unknown()), state: z.enum(['running', 'completed']), keywordConfirmationId: uuid })).default([]),
   operations: z.array(operation).default([]),
@@ -38,6 +40,12 @@ const FETCH_KINDS = ['account_profile', 'account_posts', 'account_relation', 'po
 /** The account as research_account_key compares it: only some platforms ignore case. */
 const sameCase = (platform: string, account: string) => CASE_INSENSITIVE.has(platform as SocialPlatform) ? account.toLowerCase() : account;
 const accountKey = (platform: string, account: string) => `${platform}:${sameCase(platform, account)}`;
+/** research_account_fetches.account_key: the session-scoped digest of research_account_key. */
+const accountDigest = (sessionId: string, platform: string, account: string) => {
+  const trimmed = account.trim();
+  const key = CASE_INSENSITIVE.has(platform as SocialPlatform) ? trimmed.replace(/^@/, '').toLowerCase() : trimmed;
+  return createHash('sha256').update(`${sessionId}:${key}`).digest('hex');
+};
 
 export function turnResearchStore(input: { actorId: string; sessionId: string; requestId: string; text: string; prepared: PreparedResearch;
   /** The user's Refresh this turn answers; prepared.refresh is its grant. */
@@ -55,6 +63,7 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   for (const batch of prepared.unapplied) for (const o of batch) if (!known.has(o.id)) { known.set(o.id, o); fresh.set(o.id, o); }
   const tokens = new Map<string, Operation>(), cards = new Map<string, { kind: string; card: SelectionCard; payload: CardPayload }>();
   const fetches = new Map<string, Fetch>(prepared.fetches.map(f => [accountKey(f.platform, f.account), f]));
+  const guards = new Map(prepared.fetchGuards.map(g => [`${g.platform}:${g.accountKey}`, g]));
   const touched = new Set<string>(), shortfalls = new Set<string>(), refreshed = new Map<string, string>();
   const discoveries = new Map<string, DiscoveryRecord & { keywordConfirmationId: string }>();
   for (const d of prepared.discoveries) discoveries.set(d.discoveryId, { ...d, platforms: d.platforms as SocialPlatform[] });
@@ -160,6 +169,10 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
         .flatMap(c => c.items as unknown[]));
     },
     async fetchClaim(platform, account, refreshId): Promise<FetchClaim> {
+      // A charged or unknown fetch whose answer was deleted: nothing to show, and never sent again (research_account_fetch_claim).
+      const guard = guards.get(`${platform}:${accountDigest(sessionId, platform, account)}`);
+      if (guard && refreshId) throw new Error('RESEARCH_REFRESH_INVALID');
+      if (guard) return { claimed: false, fetchId: guard.id, state: guard.state as never, evidence: null };
       const key = accountKey(platform, account), found = fetches.get(key);
       // A refresh may replace a finished fetch, once; an attempt the supplier charged for and failed is never resent.
       if (refreshId && (!found || found.state === 'failed_charged')) throw new Error('RESEARCH_REFRESH_INVALID');

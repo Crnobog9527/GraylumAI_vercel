@@ -27,6 +27,9 @@ BEGIN
     'shortfall', research_user_shortfall(a, s),
     'fetches', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'attempt', f.attempt, 'platform', f.platform, 'account', f.account,
         'state', f.state, 'evidence', f.last_success)), '[]'::jsonb) FROM research_account_fetches f WHERE f.actor_id = a AND f.session_id = s AND f.account IS NOT NULL),
+    -- What a deleted answer left of a charged or unknown fetch: no account, only its digest, so the same account is not paid for again.
+    'fetchGuards', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'platform', f.platform, 'accountKey', f.account_key, 'state', f.state)), '[]'::jsonb)
+      FROM research_account_fetches f WHERE f.actor_id = a AND f.session_id = s AND f.account IS NULL),
     -- Every round of the session: a follow-up card reads a finished round's candidates, and a finished round is never run again.
     'discoveries', (SELECT coalesce(jsonb_agg(jsonb_build_object('discoveryId', x.id, 'keywords', x.keywords, 'platforms', to_jsonb(x.platforms),
         'cursor', x.cursor, 'state', x.state, 'keywordConfirmationId', x.keyword_confirmation_id)), '[]'::jsonb)

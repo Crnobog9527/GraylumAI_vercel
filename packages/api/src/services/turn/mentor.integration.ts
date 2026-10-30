@@ -708,6 +708,25 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: pasted links settle in batches, make benchmarks
   }
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-5c: the digest a deleted answer left stops a second payment for that account', async () => {
+  const f = await setup();
+  await researchOn();
+  const check = (name: string) => transport((body, n) => body.model === ORGANIZER ? organized(`${name}-org-${n}`, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall(`${name}-1`, 'benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } })
+      : prose(`${name}-${n}`, 'Checked.'));
+  const first = await turn(f, { text: 'Check https://www.tiktok.com/@aa_one', transport: check('first').fn, research: tiktokVendors() });
+  expect(JSON.stringify(first.events.at(-1))).toContain('"type":"result"');
+  // As content_erasure_confirm leaves a charged fetch when only its answer is deleted.
+  await db.query(`update research_account_fetches set state='failed_charged',execution_id=null,account=null,evidence=null,last_success=null,
+    last_success_execution_id=null,refresh_id=null,attempt=gen_random_uuid() where session_id=$1`, [f.session]);
+  const paid = `select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`;
+  const before = (await db.query(paid, [f.actor])).rows[0].n;
+  const out = await turn(f, { text: 'Check https://www.tiktok.com/@AA_one', transport: check('second').fn, research: tiktokVendors() });
+  expect(JSON.stringify(out.events.at(-1))).toContain('"type":"result"');
+  expect((await db.query(paid, [f.actor])).rows[0].n).toBe(before);
+  expect((await db.query('select account,state from research_account_fetches where session_id=$1', [f.session])).rows).toEqual([{ account: null, state: 'failed_charged' }]);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
   const f = await setup();
   await researchOn();

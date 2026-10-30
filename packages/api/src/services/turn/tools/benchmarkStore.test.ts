@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { stableResearchId } from '../../research/runtime/toolContext';
 import { preparedResearch, turnResearchStore } from './benchmarkStore';
@@ -25,6 +26,14 @@ it('never pays again for a fetched account, and a free failure may be claimed ag
   expect((claim as { attempt: string }).attempt).not.toBe(attempt);
   const unknown = make({ fetches: [{ id: fetchId, attempt, platform: 'tiktok', account: 'a', state: 'unknown', evidence: null }] });
   expect(await unknown.store.fetchClaim('tiktok', 'a')).toMatchObject({ claimed: false });
+});
+
+it('a charged fetch whose answer was deleted is known only by its digest, and is never paid for again', async () => {
+  const accountKey = createHash('sha256').update(`${sessionId}:aa_one`).digest('hex');
+  const s = make({ fetchGuards: [{ id: fetchId, platform: 'tiktok', accountKey, state: 'failed_charged' }] });
+  expect(await s.store.fetchClaim('tiktok', 'AA_one')).toEqual({ claimed: false, fetchId, state: 'failed_charged', evidence: null });
+  await expect(s.store.fetchClaim('tiktok', 'aa_one', opId)).rejects.toThrow('RESEARCH_REFRESH_INVALID');
+  expect(await s.store.fetchClaim('tiktok', 'bb_two')).toMatchObject({ claimed: true });
 });
 
 it('a turn that made nothing has no journal; a card is kept for close', async () => {
