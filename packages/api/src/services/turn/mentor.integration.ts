@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -383,6 +385,10 @@ it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start p
 
 it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown by opc_query and can be accepted', async () => {
   const f = await setup();
+  // capture.integration.ts reloads the 0159/0182 definitions of the checklist functions and restores only 0199's patches, so a
+  // later file in the same database can see an old opc_query; this migration (idempotent) restores the current definitions.
+  const migrations = resolve(import.meta.dirname, '../../../../db/migrations');
+  await db.query(readFileSync(resolve(migrations, readdirSync(migrations).find(name => name.endsWith('_core_path_v2_mentor_b.sql'))!), 'utf8'));
   const t = transport(async (body, n) => {
     if (body.model !== ORGANIZER) return prose('gen-reply-' + n, 'Noted.');
     await db.query(`update artifact_rounds r set steps=jsonb_set(r.steps,'{step-0,version}',to_jsonb((r.steps->'step-0'->>'version')::int+1))
@@ -393,21 +399,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown
   expect((out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>).kindResult).toMatchObject({ result: 'suggested' });
   const shown = (await db.query('select opc_query($1,$2) v', [f.actor, f.draftId])).rows[0].v;
   const suggestion = shown.information['step-0'].meta.goal.suggestion;
-  const raw = (await f.steps())['step-0'].fieldMeta.goal;
-  const probe = (await db.query(`select t.id, t.close_kind, t.session_id=$2 same_session,
-      (select count(*) from session_messages m where m.session_id=t.session_id and m.turn_id=t.id and m.visible) msgs,
-      (select count(*) from artifact_requests c join opc_drafts d on d.project_id=c.project_id and d.draft_id=$3
-        where c.action='opc_capture' and c.round_id=d.round_id
-          and c.request_id=overlay(md5('opc_capture:'||t.request_id::text) placing 'f' from 13 for 1)::uuid) caps,
-      t.request_id::text=$4 same_id,
-      turn_mentor_source_available($1,$2,$4::uuid,(select project_id from opc_drafts where draft_id=$3),(select round_id from opc_drafts where draft_id=$3)) fn,
-      (select count(*) from runtime_sessions s where s.id=t.session_id and s.content_deleted_at is null and s.erased_at is null) live,
-      (select json_agg(json_build_object('ns',p.pronamespace::regnamespace::text,'args',pg_get_function_identity_arguments(p.oid),
-        'patched',p.prosrc like '%turn_mentor_source_available%','len',length(p.prosrc))) from pg_proc p where p.proname='opc_query') overloads
-    from turns t where t.actor_id=$1 and t.kind='mentor' order by t.id desc limit 1`,
-    [f.actor, f.session, f.draftId, raw?.suggestion?.executionId])).rows[0];
-  expect(suggestion, JSON.stringify({ raw, probe, sessionId: shown.sessionId, meta: shown.information['step-0'].meta.goal }))
-    .toMatchObject({ value: 'Sell coffee to students' });
+  expect(suggestion).toMatchObject({ value: 'Sell coffee to students' });
   const version = (await f.steps())['step-0'].version;
   const resolved = (await db.query('select opc_capture_resolve($1,$2,$3,$4,$5,$6,$7,$8,$9) v', [f.actor, f.draftId, randomUUID(), 'step-0', 'goal',
     suggestion.executionId, suggestion.hash, 'accept', version])).rows[0].v;
