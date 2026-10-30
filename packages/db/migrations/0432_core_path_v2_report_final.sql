@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-7a2 (placeholder number until the controller assigns one; the functions are rebuilt whole on their text after 0429):
+-- CORE-PATH-V2 V2-7a2 (number 0432 assigned by the controller; the functions are rebuilt whole on their text after 0429):
 -- a report generated on the turn path can be finalized into artifact_versions. opc_result_links, which registers the finalized report,
 -- only accepted runtime_executions; it now also accepts a turn, and every reader of the table decides through the turn branch:
 --   opc_result_link_available            the one check: an old row reads runtime_history_available exactly as before; a turn row needs
