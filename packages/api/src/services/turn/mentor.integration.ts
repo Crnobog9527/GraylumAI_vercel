@@ -389,6 +389,11 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown
   // later file in the same database can see an old opc_query; this migration (idempotent) restores the current definitions.
   const migrations = resolve(import.meta.dirname, '../../../../db/migrations');
   await db.query(readFileSync(resolve(migrations, readdirSync(migrations).find(name => name.endsWith('_core_path_v2_mentor_b.sql'))!), 'utf8'));
+  // A draft whose fields were initialised (as agentCorePlanB's fixture does): opc_capture_resolve merges into st.information.
+  await db.query(`update artifact_rounds r set steps=(select jsonb_object_agg(s.key, s.value || jsonb_build_object('information',
+      (select jsonb_object_agg(f->>'id', jsonb_build_object('value','','status','unknown','nature','unknown'))
+       from jsonb_array_elements(r.workflow->'steps') w, jsonb_array_elements(w->'information') f where w->>'id'=s.key)))
+    from jsonb_each(r.steps) s) where r.id=(select round_id from opc_drafts where draft_id=$1)`, [f.draftId]);
   const t = transport(async (body, n) => {
     if (body.model !== ORGANIZER) return prose('gen-reply-' + n, 'Noted.');
     await db.query(`update artifact_rounds r set steps=jsonb_set(r.steps,'{step-0,version}',to_jsonb((r.steps->'step-0'->>'version')::int+1))
