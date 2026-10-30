@@ -21,6 +21,9 @@ export const DEFAULTS = {
   // Row locks (FOR UPDATE / FOR SHARE ...) may only name these objects.
   lockTables: ['runtime_sessions', 'profiles', 'turns'],
   // UPDATE may only name these tables, and the statement must carry the table's owner key.
+  // The per-kind draft / report / review tables a turn may write one row of (ENGINEERING 5), with their owner keys. Adding a table
+  // needs the Owner's approval.
+  kindTables: { artifact_rounds: ['id', 'project_id'] },
   updateKeys: {
     turns: ['actor_id', 'id'], profiles: ['id'], runtime_sessions: ['id', 'actor_id'], session_messages: ['session_id'],
     turn_calls: ['turn_id'], daily_spend: ['bucket'], credit_transactions: ['user_id'], credit_source_entries: ['user_id'],
@@ -113,25 +116,49 @@ export function closure(root, functions, tableNames, leaves = DEFAULTS.leaves) {
 }
 
 const statements = code => code.split(';').map(s => s.trim()).filter(Boolean);
+const CTE = /(?:\bWITH\s+(?:RECURSIVE\s+)?|,\s*)([a-z_][a-z0-9_]*)\s+AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(/gi;
+const cteNames = statement => new Set([...statement.matchAll(CTE)].map(m => m[1].toLowerCase()));
+// The text of the select that holds position `at`: from its opening parenthesis (or the statement start) up to `at`, with nested
+// parenthesised selects blanked out, so a lock is attributed to its own SELECT and not to a sibling CTE or a subquery.
+function ownSelect(statement, at) {
+  let depth = 0, open = -1;
+  for (let i = at - 1; i >= 0; i--) {
+    if (statement[i] === ')') depth++;
+    else if (statement[i] === '(') { if (depth === 0) { open = i; break; } depth--; }
+  }
+  let out = '', nested = 0;
+  for (const ch of statement.slice(open + 1, at)) {
+    if (ch === '(') nested++;
+    else if (ch === ')') nested = Math.max(0, nested - 1);
+    else out += nested ? ' ' : ch;
+  }
+  return out;
+}
+const LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b(?:\s+OF\s+([a-z_][a-z0-9_.,\s]*?))?(?=\s*(?:SKIP|NOWAIT|\)|$))/gi;
 
-// Violations of the plan-7.1 rules in one function body.
+// Violations of the plan-7.1 rules in one function body. The ledger leaves are exempt from the table lists (ENGINEERING 5: they may
+// lock and write the user's own subscription and credit-package source rows) but not from the session-state rules.
 export function scan(name, body, options = DEFAULTS) {
   const code = stripCode(body);
   const found = [];
+  const ledger = options.leaves.includes(name);
   if (/\bpg_advisory_(?:xact_)?lock(?:_shared)?\s*\(/i.test(code)) found.push(`${name}: advisory lock`);
   if (/\bpg_try_advisory(?:_xact)?_lock/i.test(code)) found.push(`${name}: advisory lock`);
-  if (/^\s*SET\s+(?!LOCAL\b)(?:SESSION\s+)?[a-z_.]+\s*(?:=|\bTO\b)/im.test(code) || /\bSET\s+SESSION\b/i.test(code)) found.push(`${name}: non-LOCAL SET`);
   if (/\bset_config\s*\([^)]*,\s*false\s*\)/i.test(code)) found.push(`${name}: session-level set_config`);
   if (/\bCREATE\s+(?:GLOBAL\s+|LOCAL\s+)?TEMP(?:ORARY)?\s+TABLE\b/i.test(code)) found.push(`${name}: temporary table`);
   for (const statement of statements(code)) {
-    const lock = /\bFOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE)\b(?:\s+OF\s+([a-z_][a-z0-9_.,\s]*?))?(?=\s*(?:SKIP|NOWAIT|$)|\s*$)/i.exec(statement)
-      ?? /\bFOR\s+(?:KEY\s+)?SHARE\b/i.exec(statement);
-    if (lock) {
-      const named = lock[1] ? lock[1].split(',').map(s => s.trim().split('.').pop().toLowerCase()) : null;
-      const from = [...statement.matchAll(/\b(?:FROM|JOIN)\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?/gi)]
-        .map(m => ({ table: m[1].toLowerCase(), alias: (m[2] ?? '').toLowerCase() }));
+    // A SET statement (not UPDATE ... SET): the statement starts with it, after an optional BEGIN / THEN / ELSE.
+    if (/^(?:(?:BEGIN|THEN|ELSE)\s+)?SET\s+(?!LOCAL\b)(?:SESSION\s+)?[a-z_.]+\s*(?:=|\bTO\b)/i.test(statement)
+      || /^(?:(?:BEGIN|THEN|ELSE)\s+)?SET\s+SESSION\b/i.test(statement)) found.push(`${name}: non-LOCAL SET`);
+    if (ledger) continue;
+    const ctes = cteNames(statement);
+    for (const lock of statement.matchAll(LOCK)) {
+      const own = ownSelect(statement, lock.index);
+      const from = [...own.matchAll(/\b(?:FROM|JOIN)\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?/gi)]
+        .map(m => ({ table: m[1].toLowerCase(), alias: (m[2] ?? '').toLowerCase() })).filter(f => !ctes.has(f.table));
+      const named = lock[1] ? lock[1].split(',').map(x => x.trim().split('.').pop().toLowerCase()) : null;
       const targets = named ? named.map(n => from.find(f => f.alias === n || f.table === n)?.table ?? n) : from.map(f => f.table);
-      for (const table of targets.length ? targets : ['?']) if (!options.lockTables.includes(table)) found.push(`${name}: row lock on ${table}`);
+      for (const table of targets) if (!ctes.has(table) && !options.lockTables.includes(table)) found.push(`${name}: row lock on ${table}`);
     }
     // UPDATE <table> [[AS] alias] SET, anywhere in the statement: it may follow BEGIN, THEN, ELSE or a WITH list. FOR UPDATE, ON UPDATE
     // and DO UPDATE SET are not an UPDATE of a table.
@@ -141,7 +168,7 @@ export function scan(name, body, options = DEFAULTS) {
     const update = updateStatement.exec(statement);
     if (update) {
       const table = update[1].toLowerCase();
-      const keys = options.updateKeys[table];
+      const keys = options.updateKeys[table] ?? options.kindTables[table];
       if (!keys) found.push(`${name}: UPDATE of ${table}`);
       else if (!new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`,
         'i').test(statement)) found.push(`${name}: UPDATE of ${table} without ${keys.join(' or ')} in WHERE`);

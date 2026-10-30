@@ -96,3 +96,28 @@ test('a baseline lets known debt through and fails anything new or bigger; it on
   assert.deepEqual(shrinkBaseline(['turn_open: 60 reachable functions (max 15)', 'turn_new: advisory lock'], baseline),
     { closure: { turn_open: { functions: 60 } }, rules: [] }, 'smaller sizes are kept, fixed rules are dropped, nothing new is added');
 });
+
+test('a lock is attributed to its own SELECT: CTE names are not tables, nested selects and siblings do not count', () => {
+  const hits = body => scan('f', body, DEFAULTS);
+  const claim = `WITH due AS (SELECT t.id FROM turns t WHERE t.state='x' ORDER BY t.id LIMIT 5 FOR UPDATE OF t SKIP LOCKED),
+    leased AS (UPDATE turns SET state='y' WHERE id IN (SELECT id FROM due) RETURNING id) SELECT id FROM leased;`;
+  assert.deepEqual(hits(claim), [], 'FOR UPDATE ... SKIP LOCKED locks turns; due and leased are CTE names');
+  assert.deepEqual(hits('WITH due AS (SELECT id FROM turns FOR UPDATE SKIP LOCKED) SELECT id FROM due;'), []);
+  assert.deepEqual(hits('WITH due AS (SELECT id FROM secret_things FOR UPDATE SKIP LOCKED) SELECT id FROM due;'), ['f: row lock on secret_things']);
+  assert.deepEqual(hits('SELECT id FROM profiles WHERE id IN (SELECT id FROM secret_things) FOR UPDATE;'), [], 'the subquery is not locked');
+  assert.deepEqual(hits('SELECT 1 FROM profiles p JOIN secret_things s ON true WHERE p.id=a FOR UPDATE OF s;'), ['f: row lock on secret_things']);
+});
+
+test('SET is a statement, UPDATE ... SET on its own line is not; ledger leaves may lock and write source rows; kind tables are writable', () => {
+  const hits = (body, name = 'f') => scan(name, body, DEFAULTS);
+  assert.deepEqual(hits('UPDATE turns\n  SET state = 1\n  WHERE id = b;'), []);
+  assert.deepEqual(hits('SET search_path = x;'), ['f: non-LOCAL SET']);
+  assert.deepEqual(hits('BEGIN SET statement_timeout TO 5; END;'), ['f: non-LOCAL SET']);
+  assert.deepEqual(hits('SET LOCAL statement_timeout = 5;'), []);
+  const ledger = 'SELECT 1 FROM subscription_credit_grants WHERE user_id=a FOR UPDATE; UPDATE subscription_credit_grants SET consumed=1 WHERE id=g;';
+  assert.deepEqual(hits(ledger), ['f: row lock on subscription_credit_grants', 'f: UPDATE of subscription_credit_grants']);
+  assert.deepEqual(hits(ledger, 'turn_settle_credits'), [], 'the ledger leaf is exempt from the table lists');
+  assert.deepEqual(hits('SET search_path = x;', 'turn_settle_credits'), ['turn_settle_credits: non-LOCAL SET'], 'but not from the session-state rules');
+  assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s WHERE id = r;'), []);
+  assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s;'), ['f: UPDATE of artifact_rounds without id or project_id in WHERE']);
+});

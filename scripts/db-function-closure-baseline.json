@@ -13,14 +13,13 @@
    "tables": 49
   },
   "turn_open": {
-   "functions": 79,
-   "tables": 53
+   "functions": 85,
+   "tables": 55
+  },
+  "turn_recover": {
+   "functions": 80,
+   "tables": 55
   }
  },
- "rules": [
-  "turn_mentor_apply: UPDATE of artifact_rounds",
-  "turn_settle_credits: UPDATE of subscription_credit_grants",
-  "turn_settle_credits: non-LOCAL SET",
-  "turn_settle_credits: row lock on subscription_credit_grants"
- ]
+ "rules": []
 }
