@@ -5,7 +5,9 @@ import { handleTurnRequest, type TurnHttpDeps } from './http';
 
 const run = vi.hoisted(() => vi.fn());
 const report = vi.hoisted(() => vi.fn());
+const mentor = vi.hoisted(() => vi.fn());
 vi.mock('./chat', () => ({ runChatTurn: run }));
+vi.mock('./mentor', () => ({ runMentorTurn: mentor }));
 vi.mock('./report', async original => ({ ...await original<object>(), runReportTurn: report }));
 
 const SESSION = '00000000-0000-4000-8000-000000000001', REQUEST = '00000000-0000-4000-8000-000000000002';
@@ -87,5 +89,17 @@ describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
     await reader.cancel();
     expect(gone?.aborted).toBe(true);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('hands a mentor request its Refresh grant', async () => {
+    mentor.mockReset();
+    mentor.mockImplementation(async (_deps: unknown, _input: unknown, emit: (e: unknown) => void) => {
+      emit({ type: 'error', code: 'TURN_FAILED' });
+    });
+    const refresh = '00000000-0000-4000-8000-000000000003';
+    const res = await handleTurnRequest(post({ kind: 'mentor', sessionId: SESSION, requestId: REQUEST, moduleId: '00000000-0000-4000-8000-000000000004',
+      stepId: 'step-0', text: 'Refresh it', organizeAfter: true, researchRefreshId: refresh }), deps());
+    await res.text();
+    expect(mentor.mock.calls[0]![1]).toMatchObject({ researchRefreshId: refresh });
   });
 });
