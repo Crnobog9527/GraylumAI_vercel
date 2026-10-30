@@ -241,9 +241,10 @@ try{
   assert.deepEqual((await c.query('select role,content from session_messages where session_id=$1 order by seq',[a.session])).rows,
    [{role:'user',content:'which?'},{role:'assistant',content:'two'}]);
   assert.equal((await one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,2])).replay,true);
-  // The history a compare sizes on: the owner's conversation only.
-  assert.deepEqual((await one('select fusion_compare_turn_history($1,$2,10) v',[a.actor,a.session])).map(x=>x.content),['which?','two']);
-  assert.deepEqual(await one('select fusion_compare_turn_history($1,$2,10) v',[randomUUID(),a.session]),[]);
+  // The history a compare sizes on (read before the open): the owner's conversation only.
+  const admit=(actor,deps=[])=>one('select fusion_compare_turn_admit($1,$2,10,$3) v',[actor,a.session,JSON.stringify(deps)]);
+  assert.deepEqual((await admit(a.actor)).history.map(x=>x.content),['which?','two']);
+  assert.deepEqual((await admit(randomUUID())).history,[]);
   assert.match(await refusal(one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,1])),/FUSION_COMPARE_ADOPTED/);
   assert.match(await refusal(one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,3])),/FUSION_COMPARE_ADOPTED|FUSION_COMPARE_INVALID/);
   const o2=await open(a,{kind:'compare',pol:comparePolicy(),product:cp});
@@ -361,13 +362,15 @@ try{
   assert.equal(await one("select count(*)::int v from turn_calls where turn_id=$1 and status='ok'",[ob.turnId]),2,'both receipts recorded');
   report.checks.push('deleting a review (draft deletion, account erasure) deletes its saved answers and its raw provider responses; a late receipt keeps billing only; the billing records stay');
  }
- // 12. #1522 review: the 7-day breaker counts the turn path's platform-borne cost and refuses the next compare; a compare's
- // workspace sources are frozen with its record (content deletion finds it by them) and a revoked source refuses it.
+ // 12. #1522 review: the 7-day breaker counts the turn path's platform-borne cost (the read before the open returns it, the
+ // service compares it with the settings); a compare's workspace sources are frozen with its record (content deletion finds it
+ // by them) and a revoked source is refused by the read before the open.
  {
   const a=await account(),cp={question:'q',questionHash:hash('q'),requestHash:hash('r'),snapshotHash:hash('s')};
-  assert.match(await refusal(open(a,{kind:'compare',pol:comparePolicy(),product:{...cp,workspaceDependencies:[{sourceVersionId:randomUUID()}]}})),
-   /FUSION_COMPARE_SOURCE_REVOKED/);
-  assert.equal(await one('select count(*)::int v from fusion_compares where actor_id=$1',[a.actor]),0);
+  const admit=(deps=[])=>one('select fusion_compare_turn_admit($1,$2,10,$3) v',[a.actor,a.session,JSON.stringify(deps)]);
+  assert.match(await refusal(admit([{sourceVersionId:randomUUID()}])),/FUSION_COMPARE_SOURCE_REVOKED/);
+  assert.match(await refusal(admit([{sourceVersionId:'x'}])),/TURN_POLICY_INVALID/);
+  assert.equal((await admit()).positioned,false,'no confirmed positioning');
   assert.match(await refusal(open(a,{kind:'compare',pol:comparePolicy(),product:{...cp,workspaceDependencies:[{sourceVersionId:'x'}]}})),
    /TURN_POLICY_INVALID/);
   const o=await open(a,{kind:'compare',pol:comparePolicy(),product:{...cp,workspaceDependencies:[]}});
@@ -377,13 +380,13 @@ try{
   await close(a,o.turnId,'failed',{refundAll:true,failure:'compare_no_answer'});
   const usage=await one('select fusion_review_breaker_usage($1) v',[a.actor]);
   assert.ok(Number(usage.platformUsd)>=3,JSON.stringify(usage));
-  assert.match(await refusal(open(a,{kind:'compare',pol:comparePolicy(),product:cp})),/FUSION_REVIEW_BREAKER/);
+  assert.ok(Number((await admit()).breaker.platformUsd)>=3,'the read before the open returns the statistic');
   // A refunded jury counts too (no change: everything refunded, the seats' cost borne by the platform).
   const j=await account(),rv=await review(j),t=(await open(j,{product:{reviewId:rv}})).turnId;
   await begin(j,t,1);await record(j,t,1,{n:0.5,actual:0.5,output:seat()});
   await close(j,t,'completed',{product:{state:'completed',outcome:{kind:'no_change'}}});
   assert.ok(Number((await one('select fusion_review_breaker_usage($1) v',[j.actor])).platformUsd)>=0.5);
-  report.checks.push('breaker: refunded compare and jury turns count as platform-borne and refuse the next compare over the line; a compare freezes its workspace sources, a revoked or malformed source refuses it with nothing recorded');
+  report.checks.push('breaker: refunded compare and jury turns count as platform-borne, returned by the read before the open; a compare freezes its workspace sources; a revoked or malformed source is refused before the open, a malformed one by the open too');
  }
  // 13. #1522 review: a complete answer whose cost is not final yet is kept (turn_fusion_output) while the call stays open.
  {
@@ -413,14 +416,15 @@ try{
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.
  {
   for(const f of ['turn_fusion_open','turn_fusion_begin','turn_fusion_record','turn_fusion_close','fusion_review_turn_step',
-   'fusion_compare_turn_adopt','fusion_compare_turn_history','turn_fusion_recovery','turn_fusion_ended_review','turn_fusion_output']){
+   'fusion_compare_turn_adopt','fusion_compare_turn_admit','fusion_review_turn_source','turn_fusion_recovery','turn_fusion_ended_review',
+   'turn_fusion_output']){
    for(const role of ['anon','authenticated'])
     assert.equal(await one(`select bool_or(has_function_privilege($1,p.oid,'execute')) v from pg_proc p where proname=$2`,[role,f]),false,f+' '+role);
    assert.equal(await one(`select bool_or(has_function_privilege('service_role',p.oid,'execute')) v from pg_proc p where proname=$1`,[f]),true,f);
   }
   for(const role of ['anon','authenticated','service_role'])
    assert.equal(await one(`select has_table_privilege($1,'public.fusion_turn_outputs','select') v`,[role]),false);
-  report.checks.push('the ten functions are service role only; no client role reads fusion_turn_outputs');
+  report.checks.push('the eleven functions are service role only; no client role reads fusion_turn_outputs');
  }
  console.log(JSON.stringify(report,null,1));
 }finally{await db.close();}

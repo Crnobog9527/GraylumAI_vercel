@@ -8,8 +8,7 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_open(p_actor_id uuid, p_session_id
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE rv fusion_reviews; cmp fusion_compares; existing turns; opened jsonb; pol jsonb; lvl text; product jsonb;
-  breaker jsonb; settings jsonb; deps jsonb;
+DECLARE rv fusion_reviews; cmp fusion_compares; existing turns; opened jsonb; pol jsonb; lvl text; st jsonb; deps jsonb;
 BEGIN
   IF p_kind NOT IN ('compare','jury','jury_adopt') OR jsonb_typeof(p_product) <> 'object' OR jsonb_typeof(p_policy) <> 'object'
     OR p_policy ?| ARRAY['reviewId','versionId','compareId'] THEN
@@ -20,13 +19,29 @@ BEGIN
   -- chat closing in it and with a content erasure (content_erasure_confirm locks the conversations first, NOWAIT). The review
   -- and compare rows are not locked: they are written last, on the owner key, only if still in the state read here.
   PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
-  -- A jury starts its review record in the same transaction (fusion_review_start, idempotent by request, turn path: no fee),
-  -- so a refused open leaves no review behind, as a refused start never did.
+  -- A jury starts its review record in the same transaction (idempotent by request, turn path: no fee), so a refused open leaves
+  -- no review behind. Its fields were read before the open (fusion_review_turn_source, with the old start's permission checks);
+  -- here, under the account lock, only what must be atomic: one running review per user.
   IF p_kind = 'jury' AND jsonb_typeof(p_product->'start') = 'object' THEN
     IF NOT EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id) THEN
-      IF p_product->'start'->'config'->>'path' IS DISTINCT FROM 'turn' THEN RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023'; END IF;
-      p_product := p_product || jsonb_build_object('reviewId', fusion_review_start(p_actor_id, p_request_id,
-        (p_product->'start'->>'draftId')::uuid, (p_product->'start'->>'sourceVersionId')::uuid, p_product->'start'->'config')->>'reviewId');
+      st := p_product->'start';
+      IF st->'config'->>'path' IS DISTINCT FROM 'turn' OR jsonb_typeof(st->'materials') IS DISTINCT FROM 'object'
+        OR coalesce(st->>'versionHash', '') = '' THEN RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023'; END IF;
+      SELECT * INTO rv FROM fusion_reviews WHERE actor_id = p_actor_id AND request_id = p_request_id;
+      IF rv.id IS NULL THEN
+        IF EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused')) THEN
+          RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE';
+        END IF;
+        INSERT INTO fusion_reviews (actor_id, request_id, draft_id, project_id, source_session_id, source_version_id, version_hash,
+            materials, materials_hash, config, state, round, phase, attempt)
+          VALUES (p_actor_id, p_request_id, (st->>'draftId')::uuid, (st->>'projectId')::uuid, (st->>'sessionId')::uuid,
+            (st->>'sourceVersionId')::uuid, st->>'versionHash', st->'materials',
+            encode(sha256(convert_to((st->'materials')::text, 'UTF8')), 'hex'), st->'config', 'running', 1, 'review', 1)
+          RETURNING * INTO rv;
+      ELSIF rv.draft_id IS DISTINCT FROM (st->>'draftId')::uuid OR rv.source_version_id IS DISTINCT FROM (st->>'sourceVersionId')::uuid THEN
+        RAISE EXCEPTION 'FUSION_REVIEW_CONFLICT';
+      END IF;
+      p_product := p_product || jsonb_build_object('reviewId', rv.id);
     ELSE
       p_product := p_product || jsonb_build_object('reviewId', (SELECT policy->>'reviewId' FROM turns WHERE actor_id = p_actor_id
         AND request_id = p_request_id));
@@ -54,8 +69,8 @@ BEGIN
   END IF;
 
   IF p_kind = 'compare' THEN
-    -- An archived business is read-only (0324): no compare in its conversation, as fusion_compare_begin; nothing is created.
-    PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', p_session_id));
+    -- The business writable (0324), the sources allowed, the positioning and the 7-day breaker were read before the open
+    -- (fusion_compare_turn_admit). Here, under the locks: the bounds, one compare at a time.
     -- 2.7: the columns' bounds together are at most 500 credits, or the compare does not open; at least two models.
     IF coalesce((p_policy->>'gCredits')::numeric, 501) > 500 THEN RAISE EXCEPTION 'TURN_COMPARE_LIMIT' USING ERRCODE='P0001'; END IF;
     IF coalesce((p_policy->'limits'->>'model')::int, 0) < 2 OR coalesce((p_policy->'limits'->>'paidTools')::int, 1) <> 0
@@ -67,26 +82,13 @@ BEGIN
       OR EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused')) THEN
       RAISE EXCEPTION 'TURN_COMPARE_ACTIVE' USING ERRCODE='55P03';
     END IF;
-    -- The 7-day platform cost breaker (§3.6), the same statistic and settings as fusion_compare_begin.
-    breaker := fusion_review_breaker_usage(p_actor_id);
-    SELECT value INTO settings FROM system_settings WHERE key = 'fusion_settings';
-    IF jsonb_typeof(settings) = 'string' THEN settings := (settings #>> '{}')::jsonb; END IF;
-    IF (breaker->>'noDeliveryCalls')::int >= coalesce((settings #>> '{compare,breaker,noDeliveryCalls}')::int, 10)
-      OR (breaker->>'platformUsd')::numeric >= coalesce((settings #>> '{compare,breaker,platformUsd}')::numeric, 2) THEN
-      RAISE EXCEPTION 'FUSION_REVIEW_BREAKER' USING ERRCODE='P0001';
-    END IF;
     -- The workspace sources the columns read, frozen with the record (content_erasure_confirm finds the compare by them when a
-    -- source is deleted); each still allowed. No project lock: a source erasure locks every conversation of the account first
-    -- (NOWAIT), so it either fails while this open holds the conversation, or committed before and is seen here.
+    -- source is deleted).
     deps := coalesce(p_product->'workspaceDependencies', '[]'::jsonb);
     IF jsonb_typeof(deps) <> 'array' OR EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d WHERE jsonb_typeof(d) <> 'object'
         OR coalesce(d->>'sourceVersionId','') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         OR (SELECT count(*) FROM jsonb_object_keys(d)) <> 1) THEN
       RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
-    END IF;
-    IF EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d
-        WHERE NOT coalesce(opc_source_allowed(p_actor_id, (d->>'sourceVersionId')::uuid), false)) THEN
-      RAISE EXCEPTION 'FUSION_COMPARE_SOURCE_REVOKED' USING ERRCODE='42501';
     END IF;
     INSERT INTO fusion_compares (actor_id, request_id, session_id, history_revision, question, question_hash, request_hash,
         snapshot_hash, config, gate_verdict, workspace_dependencies, state)
@@ -106,9 +108,8 @@ BEGIN
       RAISE EXCEPTION 'TURN_COMPARE_ACTIVE' USING ERRCODE='55P03';
     END IF;
     UPDATE fusion_compares SET turn_id = (opened->>'turnId')::bigint WHERE actor_id = p_actor_id AND id = cmp.id;
-    -- The positioning gate of a compare (as turn_open's for a free chat): confirmed positioning, refusals in 24 hours.
+    -- The positioning gate's refusal count in 24 hours (as turn_open's for a free chat; the positioning itself was read before).
     RETURN opened || jsonb_build_object('compareId', cmp.id, 'positioning', jsonb_build_object(
-      'positioned', public.opc_has_confirmed_positioning(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')));
   END IF;
@@ -126,8 +127,8 @@ BEGIN
       RAISE EXCEPTION 'TURN_JURY_VERSION_BLOCKED' USING ERRCODE='P0001';
     END IF;
   ELSE
-    -- jury_adopt: re-finalizing an adopted revision, without a fee (10-20), once per review; not in an archived business.
-    PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('draftId', rv.draft_id));
+    -- jury_adopt: re-finalizing an adopted revision, without a fee (10-20), once per review. The business writable (0324) is read
+    -- before the open by its executor, as a compare's and a jury start's checks.
     IF rv.state <> 'completed' OR rv.outcome->>'kind' IS DISTINCT FROM 'revised' OR rv.adoption->>'state' IS DISTINCT FROM 'recorded'
       OR rv.adoption->>'versionId' IS NULL THEN
       RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023';

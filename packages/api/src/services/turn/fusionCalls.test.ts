@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
-import { answerText, fusionDatabase, fusionPolicy } from './fusionCalls';
+import { answerText, breakerTripped, fusionAdmission, fusionDatabase, fusionPolicy } from './fusionCalls';
 
 const stopLoss = { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 };
 const tomb = { sessionTombstoned: false, accountErasing: false, voiceSourceRevoked: false };
@@ -45,4 +45,34 @@ it('CORE-PATH-V2 V2-7b: the frozen numbers of a fusion turn and the answer text 
   expect(answerText(JSON.stringify({ choices: [{ message: { content: 'hello' } }] }))).toBe('hello');
   expect(answerText(JSON.stringify({ choices: [{ message: { content: '' } }] }))).toBeNull();
   expect(answerText('not json')).toBeNull();
+});
+
+it('CORE-PATH-V2 V2-7b: the old permission chain is read before the open, on the read connection, by the owner keys', async () => {
+  const seen: Array<[string, Record<string, unknown>]> = [];
+  const breaker = { noDeliveryCalls: 0, platformUsd: 0 };
+  const read = { rpc: async (name: string, args: Record<string, unknown>) => {
+    seen.push([name, args]);
+    if (args.p_draft_id === 'archived') return { data: null, error: { message: 'OPC_BUSINESS_ARCHIVED' } };
+    if (args.p_draft_id === 'erased') return { data: null, error: { message: 'CONTENT_ERASED' } };
+    return { data: name === 'fusion_compare_turn_admit' ? { history: [], positioned: true, breaker }
+      : { draftId: 'd', projectId: 'p', sessionId: 's', sourceVersionId: 'v', versionHash: 'h', materials: {}, breaker }, error: null };
+  } };
+  const write = { rpc: async () => { throw new Error('the write connection is not used'); } };
+  const admission = fusionAdmission({ read, write } as never, 'actor');
+  expect((await admission.compare('s', 12, [{ sourceVersionId: 'v' }])).positioned).toBe(true);
+  expect(seen[0]).toEqual(['fusion_compare_turn_admit', { p_actor_id: 'actor', p_session_id: 's', p_limit: 12,
+    p_dependencies: [{ sourceVersionId: 'v' }] }]);
+  expect((await admission.reviewSource({ requestId: 'r', draftId: 'd', sourceVersionId: 'v' })).projectId).toBe('p');
+  expect(seen[1]).toEqual(['fusion_review_turn_source', { p_actor_id: 'actor', p_request_id: 'r', p_draft_id: 'd',
+    p_source_version_id: 'v' }]);
+  // The refusal codes the old start and compare raised are kept.
+  await expect(admission.reviewSource({ requestId: 'r', draftId: 'archived', sourceVersionId: 'v' })).rejects.toMatchObject({ code: 'OPC_BUSINESS_ARCHIVED' });
+  await expect(admission.reviewSource({ requestId: 'r', draftId: 'erased', sourceVersionId: 'v' })).rejects.toMatchObject({ code: 'CONTENT_ERASED' });
+});
+
+it('CORE-PATH-V2 V2-7b: the 7-day breaker trips at either threshold', () => {
+  const limits = { platformUsd: '2', noDeliveryCalls: 10 };
+  expect(breakerTripped({ noDeliveryCalls: 9, platformUsd: '1.99' }, limits)).toBe(false);
+  expect(breakerTripped({ noDeliveryCalls: 10, platformUsd: 0 }, limits)).toBe(true);
+  expect(breakerTripped({ noDeliveryCalls: 0, platformUsd: 2 }, limits)).toBe(true);
 });

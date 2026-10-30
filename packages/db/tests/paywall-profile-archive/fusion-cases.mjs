@@ -151,13 +151,11 @@ export async function fusionArchiveCases({admin:db,connect,report}) {
  assert.ok(finished.columns.every(c=>c.billing.closed),'all runs close without a manual stop or recovery job');
  report.checks.push('concurrent archived dispatch/rotation automatically closes every prepared column and refunds once, no active compare slot');
 
- // CORE-PATH-V2 V2-7b (#1522 review): a compare on the turn path is refused in an archived business before anything is created.
+ // CORE-PATH-V2 V2-7b (#1522 review): a compare on the turn path is refused in an archived business before anything is created
+ // (by the read before the open, fusion_compare_turn_admit; a jury start likewise by fusion_review_turn_source).
  const sixth=await seed();await archive(sixth);
  const before=await wallet(db,sixth.actor);
- const policy={q:100,uTurnUsd:0.2,gCredits:120,minCredits:120,uModelCredits:60,historyItems:0,inputBytes:0,
-  limits:{model:2,paidTools:0,freeTools:0,decisions:0},stopLoss:{limitUsd:1000,p:8,poolSize:8,uFastUsd:1,uBigUsd:5}};
- await assert.rejects(rpc(db,'turn_fusion_open',sixth.actor,sixth.source.sessionId,randomUUID(),'compare',policy,
-  {question:'q',questionHash:sha('q'),requestHash:sha('r'),snapshotHash:sha('s'),workspaceDependencies:[]}),/OPC_BUSINESS_ARCHIVED/);
+ await assert.rejects(rpc(db,'fusion_compare_turn_admit',sixth.actor,sixth.source.sessionId,10,[]),/OPC_BUSINESS_ARCHIVED/);
  assert.equal((await db.query('SELECT count(*)::int n FROM turns WHERE actor_id=$1',[sixth.actor])).rows[0].n,0);
  assert.equal(await wallet(db,sixth.actor),before,'nothing frozen');
  report.checks.push('turn path: a compare in an archived business is refused with no turn, record or freeze');

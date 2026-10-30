@@ -17,7 +17,7 @@ import { ceil12, TurnStop } from './call';
 import { CORE_PATH_SETTING, GATE_CODES, type ChatDeps } from './chat';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { TurnDatabaseError, type TurnClients } from './db';
-import { fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type MemberOutcome } from './fusionCalls';
+import { breakerTripped, fusionAdmission, fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type MemberOutcome } from './fusionCalls';
 import { fusionCall, fusionQuote } from './fusionQuote';
 import type { CounterStore } from './limiter';
 import { callCredits } from './policy';
@@ -70,11 +70,14 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
   if (!key) return emit(fail('TURN_PROVIDER_KEY_UNAVAILABLE'));
 
-  // 1. The history the turn will see, for sizing (turn_open returns the authoritative copy).
-  const read = await deps.clients.read.rpc('fusion_compare_turn_history', { p_actor_id: input.actorId, p_session_id: input.sessionId,
-    p_limit: COMPARE_HISTORY_ITEMS });
-  if (read.error) return emit(fail('TURN_DATABASE_UNAVAILABLE'));
-  const sized = read.data as Array<{ seq: number; role: 'user' | 'assistant'; content: string }>;
+  // 1. Read before the open (fusion_compare_turn_admit): the history the turn will see, for sizing (turn_open returns the
+  // authoritative copy); the business writable, the sources allowed, the positioning and the 7-day breaker.
+  let admit;
+  try { admit = await fusionAdmission(deps.clients, input.actorId).compare(input.sessionId, COMPARE_HISTORY_ITEMS,
+    workspaceDependencies(input.parts)); }
+  catch (error) { return emit(fail(error instanceof TurnDatabaseError ? error.code : 'TURN_DATABASE_UNAVAILABLE')); }
+  if (breakerTripped(admit.breaker, settings.breaker)) return emit(fail('FUSION_REVIEW_BREAKER'));
+  const sized = admit.history;
   const partsWith = (history: Array<{ role: 'user' | 'assistant'; content: string }>, positioningFallback: boolean): CompareParts =>
     ({ ...input.parts, history: history.map(m => ({ role: m.role, text: m.content })), positioningFallback });
 
@@ -112,7 +115,7 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
       question: input.parts.question, questionHash: sha256(input.parts.question), snapshotHash: snapshotHash(partsWith(sized, false)),
       requestHash: sha256(JSON.stringify([input.sessionId, models, input.parts.question, credits])), config: { models },
       // The sources the columns read: content deletion of a source finds this compare by them (content_erasure_confirm).
-      workspaceDependencies: workspaceDependencies(partsWith(sized, false)) } });
+      workspaceDependencies: workspaceDependencies(input.parts) } });
   } catch (error) { return emit(fail(error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED')); }
   const compareId = opened.compareId!;
   emit({ type: 'opened', turnId: opened.turnId, compareId, reservedCredits: opened.reservedCredits, replay: opened.replay });
@@ -127,8 +130,8 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
     let seq = 0;
     // 4. The positioning check, as a free chat: only without a confirmed positioning; never charged to the user.
     let fallback = false;
-    const gate = (opened as { positioning?: { positioned: boolean; refusals24h: number } | null }).positioning;
-    if (gate && !gate.positioned) {
+    const gate = (opened as { positioning?: { refusals24h: number } | null }).positioning;
+    if (gate && !admit.positioned) {
       if (input.parts.skill?.socialMedia) { await close('failed', { refundAll: true, failureCode: 'positioning_required' });
         return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId }); }
       const calls = db.calls(opened.turnId, () => null);

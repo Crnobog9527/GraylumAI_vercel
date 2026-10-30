@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// CORE-PATH-V2 V2-7b (0499): a review on the turn path, started on a real formal report version. turn_fusion_open starts the
-// review record (fusion_review_start, config.path 'turn': no fee) and opens its jury turn in one transaction; a refused open
+// CORE-PATH-V2 V2-7b (0500): a review on the turn path, started on a real formal report version. The start is read first
+// (fusion_review_turn_source: fusion_review_start's checks, read-only), then turn_fusion_open writes the review record
+// (config.path 'turn': no fee) and opens its jury turn in one transaction; a refused open
 // leaves no review; the BILL2 review functions refuse or skip turn-path reviews; the read model shows the turn's calls, the
 // frozen source reads, and the fixed price is settled once by the turn. No model call.
 import assert from 'node:assert/strict';
@@ -33,8 +34,12 @@ const policy = {q:100,uTurnUsd:0.7,gCredits:FEE+HOLD,minCredits:FEE+HOLD,fixedCr
   limits:{model:7,paidTools:0,freeTools:0,decisions:0},stopLoss:{limitUsd:1000,p:8,poolSize:8,uFastUsd:1,uBigUsd:5}};
 const config = {path:'turn',estimateUsd:'0.5',maxRounds:2,fixedPrice:{credits:FEE,holdCredits:HOLD}};
 const NIL = '00000000-0000-0000-0000-000000000000';
-const open = (db,f,request=randomUUID(),cfg=config,pol=policy) => service(db,'turn_fusion_open',f.actor,NIL,request,'jury',
-  JSON.stringify(pol),JSON.stringify({start:{draftId:f.draft,sourceVersionId:f.versionId,config:cfg}}));
+const source = (db,f,request=randomUUID(),version=f.versionId) => service(db,'fusion_review_turn_source',f.actor,request,f.draft,version);
+async function open(db,f,request=randomUUID(),cfg=config,pol=policy) {
+  const {breaker,...fields} = await source(db,f,request);
+  assert.ok(breaker && 'platformUsd' in breaker);
+  return service(db,'turn_fusion_open',f.actor,NIL,request,'jury',JSON.stringify(pol),JSON.stringify({start:{...fields,config:cfg}}));
+}
 
 export async function runFusionTurn({db,report,Client,connectionString}) {
   const connect = async () => { const client = new Client({connectionString}); await client.connect(); return client; };
@@ -100,7 +105,10 @@ export async function runFusionTurn({db,report,Client,connectionString}) {
     const other = await member(db,3000);
     await assert.rejects(open(db,other,randomUUID(),{...config,path:undefined}),/TURN_POLICY_INVALID/);
     assert.equal((await db.query('SELECT count(*)::int n FROM fusion_reviews WHERE actor_id=$1',[other.actor])).rows[0].n,0);
-    report.checks.push('turn path: a refused open (credits below price + hold, not Gold, no turn path) leaves no review and no freeze');
+    // The read before the open refuses what fusion_review_start refused: a version that is not the current formal one.
+    const stale = await member(db,3000);
+    await assert.rejects(source(db,stale,randomUUID(),randomUUID()),/FUSION_REVIEW_STALE/);
+    report.checks.push('turn path: a refused open (credits below price + hold, not Gold, no turn path) leaves no review and no freeze; the read before it refuses a stale version');
   }
   // 3. #1522 review: a review and a compare started at the same time in two conversations of one account exclude each other.
   {

@@ -41,6 +41,36 @@ async function rpc<T>(client: TurnClients['write'], name: string, args: Record<s
   return schema.parse(data);
 }
 
+const breakerUsage = z.object({ noDeliveryCalls: z.number(), platformUsd: z.union([z.number(), z.string()]) }).passthrough();
+const compareAdmit = z.object({ history: z.array(z.object({ seq: z.number().int(), role: z.enum(['user', 'assistant']),
+  content: z.string() })), positioned: z.boolean(), breaker: breakerUsage });
+const reviewSource = z.object({ draftId: z.string(), projectId: z.string(), sessionId: z.string(), sourceVersionId: z.string(),
+  versionHash: z.string(), materials: z.record(z.string(), z.unknown()), breaker: breakerUsage });
+const READ_CODE = /\b((?:TURN|FUSION|OPC)_[A-Z_]+|CONTENT_ERASED)\b/;
+async function read<T>(client: TurnClients['read'], name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
+  const { data, error } = await client.rpc(name, args);
+  if (error) throw new TurnDatabaseError(READ_CODE.exec(error.message ?? '')?.[1] ?? 'TURN_DATABASE_UNAVAILABLE');
+  return schema.parse(data);
+}
+
+/** The 7-day platform cost breaker (§3.6): the statistic read before the open against the administrator's thresholds. */
+export const breakerTripped = (usage: z.infer<typeof breakerUsage>, limits: { platformUsd: string; noDeliveryCalls: number }) =>
+  usage.noDeliveryCalls >= limits.noDeliveryCalls || Number(usage.platformUsd) >= Number(limits.platformUsd);
+
+/**
+ * What a compare or a jury start reads before it opens, on the read connection by the owner's keys (ENGINEERING 5, as V2-7a's
+ * report_source): the old permission chain stays out of turn_fusion_open, which keeps only the checks that must be atomic.
+ */
+export function fusionAdmission(clients: TurnClients, actorId: string) {
+  return {
+    compare: (sessionId: string, limit: number, dependencies: Array<{ sourceVersionId: string }>) => read(clients.read,
+      'fusion_compare_turn_admit', { p_actor_id: actorId, p_session_id: sessionId, p_limit: limit, p_dependencies: dependencies },
+      compareAdmit),
+    reviewSource: (a: { requestId: string; draftId: string; sourceVersionId: string }) => read(clients.read, 'fusion_review_turn_source',
+      { p_actor_id: actorId, p_request_id: a.requestId, p_draft_id: a.draftId, p_source_version_id: a.sourceVersionId }, reviewSource),
+  };
+}
+
 export function fusionDatabase(clients: TurnClients, actorId: string) {
   const w = clients.write, core = turnDatabase(clients);
   return {

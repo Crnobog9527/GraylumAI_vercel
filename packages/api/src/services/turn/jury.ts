@@ -20,7 +20,8 @@ import { readReplyLocale } from '../runtime/replyLanguage';
 import { TurnStop } from './call';
 import { CORE_PATH_SETTING } from './chat';
 import { TurnDatabaseError, type TurnClients } from './db';
-import { fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type GroupMember, type Judged } from './fusionCalls';
+import { breakerTripped, fusionAdmission, fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type GroupMember,
+  type Judged } from './fusionCalls';
 import { fusionCall, fusionQuote, type FusionQuote } from './fusionQuote';
 import type { CounterStore } from './limiter';
 import { callCredits } from './policy';
@@ -150,9 +151,15 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         roles: settings.reviewerModelIds.map(id => settings.reviewerRoles[id] ?? null), summary: settings.summaryModelId,
         opinionTokens: settings.opinionOutputTokens, summaryTokens: settings.summaryOutputTokens, skill,
         requestBytes: estimate.requestBytes, replyLocale };
+      // Read before the open (fusion_review_turn_source): the old start's permission checks and the review record's fields;
+      // turn_fusion_open writes them with the checks that must be atomic. A repeat of this request is not refused as active.
+      const source = await fusionAdmission(deps.clients, actorId).reviewSource(input)
+        .catch(error => { throw new Error(error instanceof TurnDatabaseError ? error.code : 'FUSION_REVIEW_UNAVAILABLE'); });
+      if (breakerTripped(source.breaker, settings.breaker)) throw new Error('FUSION_REVIEW_BREAKER');
       // The conversation is the review's draft conversation, set by the database (NIL here).
       const opened = await db.open({ sessionId: NIL, requestId: input.requestId, kind: 'jury', policy,
-        product: { start: { draftId: input.draftId, sourceVersionId: input.sourceVersionId, config: reviewConfig } } });
+        product: { start: { draftId: source.draftId, projectId: source.projectId, sessionId: source.sessionId,
+          sourceVersionId: source.sourceVersionId, versionHash: source.versionHash, materials: source.materials, config: reviewConfig } } });
       const view = (await record.read(opened.reviewId!))!;
       // Round 1 and the most trimmed summary must fit the per-call byte cap before anything is sent (#962 review).
       if (!opened.replay && !core.fitsWhenSent(view, await core.readSource(view.reviewId), await readReviewSkill(admin, skill))) {
