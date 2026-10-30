@@ -12,7 +12,8 @@ DECLARE rv fusion_reviews; g fusion_billing_groups; k text; res jsonb;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
   SELECT * INTO rv FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id FOR UPDATE;
-  IF rv.id IS NULL THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
+  -- A review on the turn path is billed by its jury turn only (V2-7b): never through a BILL2 group.
+  IF rv.id IS NULL OR rv.config->>'path' = 'turn' THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
   IF rv.state NOT IN ('running','paused') THEN RAISE EXCEPTION 'FUSION_REVIEW_ENDED'; END IF;
   IF rv.round<>p_round OR rv.phase<>p_phase OR rv.attempt<>p_attempt THEN RAISE EXCEPTION 'FUSION_REVIEW_STEP_CONFLICT'; END IF;
   SELECT * INTO g FROM fusion_billing_groups WHERE id=p_group_id AND actor_id=p_actor_id;

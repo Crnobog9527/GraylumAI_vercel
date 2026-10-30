@@ -32,7 +32,8 @@ const runtimeReport = (extra = [], failed = 0) => ({
     file(runtime.files[13], [pass('RUNTIME: compare start holds every column once, streams each column once, settles per column and adopts')]),
     file(runtime.files[14], [pass('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in three writes, settles once')]),
     file(runtime.files[15], [pass('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Skill file, applies the organizer patch')]),
-    file(runtime.files[16], [pass('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes')]),
+    file(runtime.files[16], [pass('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns')]),
+    file(runtime.files[17], [pass('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes')]),
   ],
 });
 
@@ -50,7 +51,7 @@ test('name patterns select the suite prefix and exclude exactly the app-only cas
 test('verification passes only when every non-excluded case passed', () => {
   const result = verifyWithoutAppResults('runtime', runtimeReport());
   assert.deepEqual(result.errors, []);
-  assert.equal(result.passed, 17);
+  assert.equal(result.passed, 18);
   assert.equal(result.skipped, 5);
 });
 

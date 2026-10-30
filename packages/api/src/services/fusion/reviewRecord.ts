@@ -24,9 +24,13 @@ const reviewView = z.object({
   adoption: z.record(z.string(), z.unknown()).nullable().optional(),
   /** The fixed price of the review (0294); null for reviews started before it (per-call billing). */
   fee: reviewFee.nullable().optional(),
+  /** CORE-PATH-V2 V2-7b: the jury turn of a review on the turn path (null on the BILL2 path). */
+  turnId: z.number().int().positive().nullable().optional(),
   calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
     verdict: z.string().nullable(), settled: z.boolean(), state: z.string(),
-    dispatchedAt: z.string().nullable().optional(), settledAt: z.string().nullable().optional() })),
+    dispatchedAt: z.string().nullable().optional(), settledAt: z.string().nullable().optional(),
+    /** The turn call sequence (turn path only). */
+    seq: z.number().int().positive().optional() })),
 });
 export type ReviewView = z.infer<typeof reviewView>;
 const refusals = new Set(['OPC_BUSINESS_ARCHIVED', 'FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',

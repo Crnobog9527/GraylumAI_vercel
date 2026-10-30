@@ -8,9 +8,49 @@ CREATE OR REPLACE FUNCTION public.turn_user_charge(p_actor_id uuid, p_turn_id bi
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE stops integer;
+DECLARE stops integer; t turns;
 BEGIN
-  IF p_refund_all OR (p_kind = 'expired' AND NOT p_delivered) THEN RETURN 0; END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  IF p_refund_all THEN RETURN 0; END IF;
+  -- An erased review or compare (its report, source or conversation deleted) pays nothing, also for an answer that arrived after:
+  -- its body was never kept, so nothing was delivered.
+  IF t.kind IN ('jury','compare') AND p_kind = 'erased' THEN RETURN 0; END IF;
+  IF t.kind = 'jury' THEN
+    -- A review another path ended unfinished (an archived business) refunds everything, whichever job closes its turn first and
+    -- whatever was saved before that end.
+    IF EXISTS (SELECT 1 FROM fusion_reviews r WHERE r.actor_id = p_actor_id AND r.id = (t.policy->>'reviewId')::uuid
+        AND r.state IN ('incomplete','revision_failed')) THEN
+      RETURN 0;
+    END IF;
+    -- The jury's fixed price (Owner 10-17/10-27, V2-7b), as fusion_review_fee_settle_internal: a deliverable revision (a usable
+    -- summary that changes a section) pays the price however the turn ended; an interruption or the 24-hour end pays the known
+    -- usage, at most the price; no change, a failed revision, an incomplete review or an erasure pays nothing.
+    IF EXISTS (SELECT 1 FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.usage->>'deliverable' = 'true')
+      OR EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = p_turn_id AND o.deliverable)
+      -- Closed as delivered: the fact stays on the turn when the answer is deleted before a late cost settles.
+      OR p_delivered THEN
+      RETURN least(coalesce(p_fixed, p_held), p_held);
+    END IF;
+    IF p_kind IN ('interrupted','expired') THEN
+      -- The known usage as turn_close counts it, without a seat or summary judged unusable (format or revision invalid): one
+      -- whose cost was settled later by recovery (status ok) is borne by the platform, as when its cost was known at once.
+      -- The verdict stays on the receipt, so a deletion of the saved answer does not make it chargeable.
+      SELECT ceil((t.policy->>'q')::numeric * coalesce(sum(c.nominal_usd * c.multiplier), 0))::integer INTO p_credits
+      FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
+        AND coalesce(c.answer_verdict, 'usable') = 'usable';
+      RETURN least(p_credits, coalesce(p_fixed, p_held), p_held);
+    END IF;
+    RETURN 0;
+  END IF;
+  IF t.kind = 'compare' THEN
+    -- Each column is rounded on its own (2.7 "各模型各自取整"), as the old per-run settlement did.
+    SELECT coalesce(sum(ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)), 0)::integer INTO p_credits
+    FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
+      -- Only a column with a usable answer is charged: not one refused, empty or broken off, also when recovery settled its cost
+      -- later as ok (the verdict stays on the receipt, also when the saved answer is deleted, turn_fusion_record / _output).
+      AND c.answer_verdict = 'usable';
+  END IF;
+  IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN
     -- 10-27: the first two stops within 24 hours are free; from the third, what was generated, at most the fixed price.
     SELECT count(*) INTO stops FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user

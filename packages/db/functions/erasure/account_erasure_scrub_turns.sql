@@ -35,6 +35,12 @@ BEGIN
    WHERE c.actor_id = p_profile_id;
   counts := counts || jsonb_build_object('turn_call_raw_skipped', n);
 
+  -- The saved review and compare answers (V2-7b): content, deleted with the rest of the account's turn content. They also go with
+  -- their review or compare row (cascade); this covers an answer whose product row erasure removes later or not at all.
+  DELETE FROM fusion_turn_outputs WHERE actor_id = p_profile_id;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  counts := counts || jsonb_build_object('fusion_turn_outputs', n);
+
   UPDATE session_messages SET content = '', content_hash = empty_hash, visible = false, deleted_at = coalesce(deleted_at, now_at)
    WHERE session_id = ANY(session_ids) AND (content <> '' OR visible);
   GET DIAGNOSTICS n = ROW_COUNT;

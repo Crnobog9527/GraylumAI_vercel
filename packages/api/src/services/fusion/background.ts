@@ -4,15 +4,20 @@ import { withPlatformSecretRequest } from '../platformSecrets/request';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
+import { readTurnRouteEnv } from '../../lib/envValidator';
+import { swallow } from '../../lib/swallow';
 import { authoritativeBilling, type BillingRpc } from '../bill2/service';
 import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
-import { newWorkGate } from '../runtime/newWorkGate';
+import { newWorkGate, type RuntimeCallGate } from '../runtime/newWorkGate';
 import { runtimeGateEnvironment } from '../runtime/realHost';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { fusionExecutor } from './executor';
 import { reviewFlow } from './review';
-import { ENDED_STATES } from './reviewRecord';
+import { ENDED_STATES, reviewRecord } from './reviewRecord';
+import { turnClients } from '../turn/db';
+import { juryTurn } from '../turn/jury';
+import { redisCounterStore, type CounterStore } from '../turn/limiter';
 
 /** FUSION-BACKGROUND (Owner 2026-10-15 "现在就做。"): a review advances on the server, one step per function
  * invocation, so the user may leave the page. Each invocation takes the review's advance lease (0258), runs one
@@ -76,10 +81,27 @@ export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: strin
 
 /** One step of one review. Never throws for an expected stop; the caller relays only when next is true. */
 export async function advanceReview(input: { admin: SupabaseClient; reviewId: string; env?: Record<string, string | undefined>;
-  budget?: RuntimeBudget; flow?: (actorId: string, budget: RuntimeBudget) => ReturnType<typeof reviewFlow> }): Promise<AdvanceResult> {
+  budget?: RuntimeBudget; flow?: (actorId: string, budget: RuntimeBudget) => ReturnType<typeof reviewFlow>;
+  /** CORE-PATH-V2 V2-7b: the jury turn's dependencies for a review on the turn path (tests inject them). */
+  jury?: { slots?: CounterStore; transport?: typeof fetch; calls?: RuntimeCallGate } }): Promise<AdvanceResult> {
   return withPlatformSecretRequest(async () => {
     const { admin, reviewId } = input;
     const outcome = await withAdvanceLease(admin, reviewId, async lease => {
+      // A review on the turn path advances through its jury turn (one group per invocation), never through BILL2.
+      const view = await swallow('fusion_review_read_failed', reviewRecord(admin, lease.actorId!).read(reviewId), null,
+        { category: 'billing', reviewId });
+      if (view?.turnId) {
+        try {
+          // The call gate of the turn path: the same namespace as POST /api/turn (no test window on the turn path).
+          return await juryTurn({ admin, clients: turnClients(admin), slots: input.jury?.slots ?? redisCounterStore(),
+            transport: input.jury?.transport, calls: input.jury?.calls ?? newWorkGate(admin, readTurnRouteEnv().environment).calls },
+          lease.actorId!).advance(reviewId);
+        } catch (error) {
+          const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
+          logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
+          return { next: false, reason: 'failed' };
+        }
+      }
       const budget = input.budget ?? createRuntimeBudget();
       const flow = input.flow ? input.flow(lease.actorId!, budget) : serviceReviewFlow(admin, lease.actorId!, budget, input.env);
       try {
@@ -104,7 +126,7 @@ export async function advanceReview(input: { admin: SupabaseClient; reviewId: st
         logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
         return { next: false, reason: 'failed' };
       }
-    }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed'].includes(value.reason));
+    }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed', 'gated'].includes(value.reason));
     return outcome.ran ? outcome.value : { next: false, reason: outcome.reason };
   });
 }

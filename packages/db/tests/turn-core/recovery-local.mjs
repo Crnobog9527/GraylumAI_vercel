@@ -244,16 +244,21 @@ try{
   // A fixed price stays the fixed price across a resume (#1519 review): 500, not 500 + what the paused segment used. A fixed-price
   // turn that pauses is a jury's (a report freezes its whole price at open and never pauses, V2-7a).
   {
-   const f=await account(30);
+   // The balance covers the price (a jury never opens below it, V2-7b), not the second call's temporary bound.
+   const f=await account(520);
    const fp=(o={})=>policy({gCredits:600,fixedCredits:500,minCredits:30,uModelCredits:20,...o});
    const o=await open(f,{kind:'jury',pol:fp()});
    await begin(f,o.turnId,1,{upper:0.02});await record(f,o.turnId,1,{n:0.02});
    assert.equal((await begin(f,o.turnId,2,{upper:0.04})).paused,true);
    await c.query('update profiles set credits=credits+1000 where id=$1',[f.actor]);
+   // A jury leaves its conversation free (V2-7b) and waits between groups, so nothing resumes one today; the turn is set as the
+   // active one here to keep the core's rule under test.
+   await c.query('update runtime_sessions set active_turn_id=$1 where id=$2',[o.turnId,f.session]);
    const n=await open(f,{kind:'jury',resumeOf:o.turnId,pol:fp({limits:{model:2,paidTools:1,freeTools:1}})});
    await begin(f,n.turnId,1);await record(f,n.turnId,1);
+   await c.query(`update turn_calls set usage=coalesce(usage,'{}')||'{"deliverable":true}' where turn_id=$1`,[n.turnId]); // a deliverable revision
    assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[f.actor,n.turnId])).chargedCredits,500);
-   assert.equal(await spends(f),500);assert.equal(await balance(f),530);
+   assert.equal(await spends(f),500);assert.equal(await balance(f),1020);
   }
   // Two resumes in a row (#1519 review): the second carries everything carried before, nothing is lost to a cap.
   {
