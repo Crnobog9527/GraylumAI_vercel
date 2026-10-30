@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
 import { ASK_QUESTION_TOOL, INVALID_REPLY_NOTICE } from '../../shared/agentTurn';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
@@ -44,6 +45,7 @@ export type MentorInput = { actorId: string; sessionId: string; requestId: strin
   organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer };
 
 const MARKER_RESERVE_BYTES = 256;
+const sourceChecked = z.object({ allowed: z.boolean(), businessContext: z.unknown().optional() });
 
 const callPolicy = (q: ChatQuote) => ({ modelId: q.modelId, provider: 'openrouter', account: q.identity.account, model: q.model,
   protocol: 'openrouter-chat-v1' as const, providerLimits: q.providerLimits, upperUsd: q.upperUsd, outputLimit: q.outputLimit,
@@ -81,6 +83,11 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     refundAll?: boolean; failureCode?: string; kindResult?: Record<string, unknown> } = {}) =>
     db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
       refundAll: extra.refundAll, failureCode: extra.failureCode ?? null, kindResult: extra.kindResult });
+  const sourceCheck = async () => {
+    const { data, error } = await deps.clients.read.rpc('mentor_source_check', { p_actor_id: input.actorId, p_session_id: input.sessionId });
+    if (error) throw new Error('TURN_FAILED');
+    return sourceChecked.parse(data);
+  };
   let stopped: TurnStop | undefined;
   const keep = (error: unknown) => { if (error instanceof TurnStop) stopped = error; throw error; };
   // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
@@ -92,6 +99,12 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // 2. The draft state, the Skill text of this step (cached by content hash) and the host state of this turn.
     const state = mentorState(opened.kindContext, input.stepId);
     const ctx = state.context;
+    // The whole source and evidence chain, only for a draft that has one; refused here, nothing was sent and all is refunded.
+    if (ctx.sourceCheck) {
+      const checked = await sourceCheck();
+      if (!checked.allowed) throw new TurnStop('TURN_MENTOR_DENIED');
+      if (checked.businessContext) (ctx.work as Record<string, unknown>).businessContext = checked.businessContext;
+    }
     const { source, binding } = mentorSkillSource(admin, { actorId: input.actorId, moduleId: ctx.moduleId, skillId: ctx.skillId,
       revisionId: ctx.revisionId, packageHash: ctx.packageHash });
     const skill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
@@ -164,11 +177,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       }
     }
 
-    // 6. Close: settle once, save both messages, apply the checklist patches in the same transaction.
+    // 6. Close: settle once, save both messages, apply the checklist patches in the same transaction. A source withdrawn during
+    // this turn keeps the reply but writes nothing to the checklist (the check turn_close made on the old chain); a failed read
+    // counts as withdrawn.
+    const scopeDenied = Boolean(organizer && ctx.sourceCheck && !(await sourceCheck().catch(() => ({ allowed: false }))).allowed);
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
       ...(organizer ? { kindResult: { roundId: ctx.roundId, revisionId: ctx.revisionId, versions: state.versions,
-        organizerInput: captureInput, output: organized } } : {}) });
+        organizerInput: captureInput, output: organized, ...(scopeDenied ? { scopeDenied } : {}) } } : {}) });
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
     emit({ type: 'result', turnId: opened.turnId, body: turn.body, chargedCredits: closed.chargedCredits, settlement: closed.settlement,
       ...(closed.kindResult ? { kindResult: closed.kindResult } : {}) });

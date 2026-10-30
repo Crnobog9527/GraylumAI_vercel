@@ -29,6 +29,11 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 const KNOWN = /\b(TURN_ACCOUNT_DENIED|TURN_SESSION_DENIED|TURN_SESSION_ERASED)\b/;
 
+const refused = (error: { message?: string }) => {
+  const code = KNOWN.exec(error.message ?? '')?.[1];
+  return json(code ? 403 : 503, { error: code ?? 'TURN_VIEW_UNAVAILABLE' });
+};
+
 export async function handleTurnView(request: Request, deps: TurnViewDeps): Promise<Response> {
   const params = Object.fromEntries(new URL(request.url).searchParams);
   const input = viewRequest.safeParse(params);
@@ -37,12 +42,14 @@ export async function handleTurnView(request: Request, deps: TurnViewDeps): Prom
   let actorId: string | null;
   try { actorId = await deps.authenticate(request); } catch { actorId = null; }
   if (!actorId) return json(401, { error: 'TURN_UNAUTHENTICATED' });
+  // The conversation's scope first: the whole old chain, kept off the view itself (V2-5d).
+  const allowed = await deps.clients.read.rpc('session_view_allowed', { p_actor_id: actorId, p_session_id: input.data.sessionId });
+  if (allowed.error) return refused(allowed.error);
+  // A session that is not the actor's answers NULL, and turn_session_view says why; a false is a scope refused.
+  if (allowed.data === false) return json(403, { error: 'TURN_SESSION_DENIED' });
   const { data, error } = await deps.clients.read.rpc('turn_session_view', { p_actor_id: actorId, p_session_id: input.data.sessionId,
     p_after_seq: input.data.afterSeq });
-  if (error) {
-    const code = KNOWN.exec(error.message ?? '')?.[1];
-    return json(code ? 403 : 503, { error: code ?? 'TURN_VIEW_UNAVAILABLE' });
-  }
+  if (error) return refused(error);
   const view = turnView.safeParse(data);
   return view.success ? json(200, view.data) : json(503, { error: 'TURN_VIEW_UNAVAILABLE' });
 }

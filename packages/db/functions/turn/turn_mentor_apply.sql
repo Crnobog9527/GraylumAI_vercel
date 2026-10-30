@@ -14,15 +14,16 @@ DECLARE t turns; d opc_drafts; r artifact_rounds; p artifact_projects; req artif
  changed jsonb:='{}'; fields jsonb:='{}'; discarded jsonb:='[]'; versions jsonb:='{}'; old_steps jsonb;
  protected boolean; material_changed boolean; seq jsonb; suggestion jsonb; patch_index integer:=0;
  withdrawal jsonb; withdrawn jsonb:='{}'; withdraw_index integer:=0; withdraw_reason text; organizer_input jsonb;
- exec_id uuid; exec_at timestamptz; business uuid; written boolean := false;
+ exec_id uuid; exec_at timestamptz; business_id uuid; written boolean := false;
 BEGIN
  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
  IF t.id IS NULL OR t.kind <> 'mentor' THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
- IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false)
+ -- scopeDenied: Node's mentor_source_check before this close (the whole chain, for a draft that needs it).
+ IF d.draft_id IS NULL OR NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) OR p_result->'scopeDenied' = 'true'::jsonb
  THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
- business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
+ SELECT db.business_id INTO business_id FROM opc_draft_businesses db WHERE db.draft_id = d.draft_id;
  -- No lock of its own (main-path rule: only the actor's profile and the session row). turn_close holds this draft's session
  -- row, which opc_information and opc_capture_resolve now take first too (below), so those writers and this one are serialized.
  -- Any other writer of the round (a revision, an erasure) is caught by the optimistic write: the checklist is written only if
@@ -30,7 +31,7 @@ BEGIN
  FOR attempt IN 1..3 LOOP
  -- An archived business is read-only (opc_capture_apply's opc_assert_business_writable): nothing is written, and the turn
  -- itself still settles and keeps its reply. Checked again on every pass.
- IF business IS NOT NULL AND EXISTS (SELECT 1 FROM opc_businesses WHERE id = business AND actor_id = p_actor_id AND archived_at IS NOT NULL) THEN
+ IF business_id IS NOT NULL AND EXISTS (SELECT 1 FROM opc_businesses WHERE id = business_id AND actor_id = p_actor_id AND archived_at IS NOT NULL) THEN
   RETURN jsonb_build_object('result', 'archived');
  END IF;
  changed:='{}'; fields:='{}'; discarded:='[]'; versions:='{}'; withdrawn:='{}'; patch_index:=0; withdraw_index:=0;

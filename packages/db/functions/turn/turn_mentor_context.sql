@@ -9,21 +9,19 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
-  business uuid; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; context jsonb; suggestions jsonb := '{}';
-  suggestion jsonb;
+  b opc_businesses; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; suggestions jsonb := '{}';
+  suggestion jsonb; account_bound boolean;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
-  -- The draft's scope as the old path checked it (runtime_material / runtime_work_projection): an account-strategy draft whose
-  -- base source was withdrawn or deleted, or whose evidence is no longer allowed, is refused.
-  IF NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false) THEN
-    RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501';
-  END IF;
+  -- The draft's own scope, narrow: revoked or tombstoned is refused here. What needs the whole source and evidence chain (an
+  -- account-strategy draft, a business with a source) is mentor_source_check, called by Node before any model call (sourceCheck).
+  IF NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
   -- An archived business is read-only (as opc_assert_business_writable, without its row lock).
-  business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
-  IF business IS NOT NULL AND EXISTS (SELECT 1 FROM opc_businesses WHERE id = business AND actor_id = p_actor_id AND archived_at IS NOT NULL) THEN
-    RAISE EXCEPTION 'TURN_MENTOR_ARCHIVED' USING ERRCODE='42501';
-  END IF;
+  SELECT x.* INTO b FROM opc_draft_businesses db JOIN opc_businesses x ON x.id = db.business_id AND x.actor_id = p_actor_id
+   WHERE db.draft_id = d.draft_id;
+  IF b.archived_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_MENTOR_ARCHIVED' USING ERRCODE='42501'; END IF;
+  account_bound := EXISTS (SELECT 1 FROM opc_account_strategy_drafts WHERE draft_id = d.draft_id);
   SELECT * INTO p FROM artifact_projects WHERE id = d.project_id AND actor_id = p_actor_id;
   SELECT * INTO r FROM artifact_rounds WHERE id = d.round_id AND project_id = p.id;
   IF p.id IS NULL OR r.id IS NULL OR p.erased_at IS NOT NULL OR p.content_deleted_at IS NOT NULL THEN
@@ -86,10 +84,11 @@ BEGIN
     END LOOP;
     steps := jsonb_set(steps, ARRAY[step_id], st || jsonb_build_object('fieldMeta', metas));
   END LOOP;
-  context := opc_business_context(p_actor_id, p_session_id, r.id);
   RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'roundId', r.id, 'mode', d.mode, 'moduleId', p.module_id,
     'skillId', p.skill_id, 'revisionId', r.revision_id, 'packageHash', r.package_hash, 'steps', r.workflow->'steps',
-    'suggestions', suggestions,
+    'suggestions', suggestions, 'sourceCheck', account_bound OR b.current_source_version_id IS NOT NULL,
     'work', jsonb_build_object('projectId', p.id, 'roundId', r.id, 'revisionId', r.revision_id, 'packageHash', r.package_hash,
-      'steps', steps, 'source', NULL) || CASE WHEN context IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext', context) END);
+      'steps', steps, 'source', NULL) || CASE WHEN b.id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext',
+      jsonb_build_object('version', 'opc-business-context.v1', 'businessId', b.id,
+        'name', CASE WHEN b.name = '未命名业务' THEN NULL ELSE b.name END, 'source', NULL)) END);
 END $function$;
