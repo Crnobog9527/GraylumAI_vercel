@@ -10,16 +10,20 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_record(p_actor_id uuid, p_turn_id 
 AS $function$
 DECLARE t turns; r jsonb; o fusion_turn_outputs; gone boolean := false; v_review uuid; v_compare uuid; v_hash text;
 BEGIN
+  -- The conversation in share mode first, then the turn (the close's order: conversation before turn). A deletion of the review
+  -- or compare (content_erasure_confirm: draft, source or conversation deleted) locks the conversations first, NOWAIT: it fails
+  -- while this receipt is written, or committed before and the product is seen gone below. The product row itself is not locked
+  -- (ENGINEERING 5).
+  PERFORM 1 FROM runtime_sessions WHERE actor_id = p_actor_id
+    AND id = (SELECT session_id FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id) FOR SHARE;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023'; END IF;
   v_review := (t.policy->>'reviewId')::uuid; v_compare := (t.policy->>'compareId')::uuid;
-  -- The product row in key-share mode first: a deletion (draft or source deleted, account erased) waits for this receipt and
-  -- then removes the raw response with it (fusion_turn_raw_scrub); one that committed first leaves nothing to keep.
-  IF v_review IS NOT NULL THEN PERFORM 1 FROM fusion_reviews WHERE id = v_review FOR KEY SHARE;
-  ELSE PERFORM 1 FROM fusion_compares WHERE id = v_compare FOR KEY SHARE; END IF;
-  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE id = v_review)
-               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE id = v_compare) END;
+  -- A deletion that committed first leaves nothing to keep; one after this receipt removes the raw response with the product
+  -- (fusion_turn_raw_scrub). An account erasure is the tombstone below (account_erasure_scrub_turns removes the rest).
+  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND id = v_review)
+               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE actor_id = p_actor_id AND id = v_compare) END;
   -- The receipt (billing evidence) is always written; the response text is not once its review or compare is gone.
   r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd, p_usage, p_provider_id, p_payload_hash,
     CASE WHEN gone THEN NULL ELSE p_raw END);

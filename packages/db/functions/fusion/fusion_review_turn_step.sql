@@ -10,7 +10,9 @@ CREATE OR REPLACE FUNCTION public.fusion_review_turn_step(p_actor_id uuid, p_rev
 AS $function$
 DECLARE rv fusion_reviews; key text;
 BEGIN
-  SELECT * INTO rv FROM fusion_reviews WHERE id = p_review_id AND actor_id = p_actor_id FOR NO KEY UPDATE;
+  -- Not locked (ENGINEERING 5): each write below names the step it was read at (round, phase, attempt, live state) and changes
+  -- nothing if the review moved meanwhile; the review is then read again and answered from its new state.
+  SELECT * INTO rv FROM fusion_reviews WHERE id = p_review_id AND actor_id = p_actor_id;
   IF rv.id IS NULL OR rv.turn_id IS NULL THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
   key := format('review:%s:%s:%s', p_from->>'round', p_from->>'phase', p_from->>'attempt');
   IF p_to->>'state' = 'claim' AND EXISTS (SELECT 1 FROM jsonb_array_elements(rv.steps) x WHERE x->>'stepKey' = key) THEN
@@ -25,14 +27,21 @@ BEGIN
         steps = steps || jsonb_build_array(jsonb_build_object('round', rv.round, 'phase', rv.phase, 'attempt', rv.attempt,
           'groupId', md5(rv.turn_id::text || ':' || key)::uuid, 'stepKey', key, 'claimedAt', clock_timestamp(),
           'fromSeq', (p_to->>'fromSeq')::int))
-      WHERE id = rv.id RETURNING * INTO rv;
+      WHERE actor_id = p_actor_id AND id = rv.id AND state IN ('running','paused') AND round = rv.round AND phase = rv.phase
+        AND attempt = rv.attempt AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(steps) x WHERE x->>'stepKey' = key)
+      RETURNING * INTO rv;
+    IF NOT FOUND THEN RETURN fusion_review_turn_step(p_actor_id, p_review_id, p_from, p_to); END IF;
   ELSIF p_to->>'state' = 'running' THEN
     IF coalesce(p_to->>'round','') !~ '^[1-9][0-9]?$' OR p_to->>'phase' NOT IN ('review','summary')
       OR coalesce(p_to->>'attempt','') !~ '^[1-9][0-9]?$' OR (p_to->>'round')::int > coalesce((rv.config->>'maxRounds')::int, 1) THEN
       RAISE EXCEPTION 'FUSION_REVIEW_INVALID';
     END IF;
     UPDATE fusion_reviews SET state = 'running', round = (p_to->>'round')::int, phase = p_to->>'phase', attempt = (p_to->>'attempt')::int,
-        updated_at = clock_timestamp() WHERE id = rv.id RETURNING * INTO rv;
+        updated_at = clock_timestamp()
+      WHERE actor_id = p_actor_id AND id = rv.id AND state IN ('running','paused') AND round = rv.round AND phase = rv.phase
+        AND attempt = rv.attempt
+      RETURNING * INTO rv;
+    IF NOT FOUND THEN RETURN fusion_review_turn_step(p_actor_id, p_review_id, p_from, p_to); END IF;
   ELSE RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
   RETURN fusion_review_view(rv);
 END $function$;

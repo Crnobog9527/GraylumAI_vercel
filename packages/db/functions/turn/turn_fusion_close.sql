@@ -8,19 +8,24 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_close(p_actor_id uuid, p_turn_id b
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; target text := p_product->>'state';
+DECLARE t turns; target text := p_product->>'state'; closed jsonb;
 BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023'; END IF;
+  IF t.kind = 'jury' AND target IS NOT NULL
+    AND target NOT IN ('completed','incomplete','revision_failed','interrupted') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
+  END IF;
+  -- The core close first (it locks the account, the conversation and the turn, in that order); the review or compare row is not
+  -- locked (ENGINEERING 5) but written after, on the owner key and only while still live: one another path ended meanwhile
+  -- keeps that end.
+  closed := turn_close(p_actor_id, p_turn_id, p_close_kind, '[]'::jsonb, p_delivered, p_refund_all, p_failure_code);
   IF t.kind = 'jury' AND target IS NOT NULL THEN
-    IF target NOT IN ('completed','incomplete','revision_failed','interrupted') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023'; END IF;
-    PERFORM 1 FROM fusion_reviews WHERE id = (t.policy->>'reviewId')::uuid FOR NO KEY UPDATE;
     UPDATE fusion_reviews SET state = target, outcome = p_product->'outcome', updated_at = clock_timestamp(), ended_at = clock_timestamp()
-      WHERE id = (t.policy->>'reviewId')::uuid AND actor_id = p_actor_id AND state IN ('running','paused');
+      WHERE actor_id = p_actor_id AND id = (t.policy->>'reviewId')::uuid AND state IN ('running','paused');
   ELSIF t.kind = 'compare' THEN
     UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp()
-      WHERE id = (t.policy->>'compareId')::uuid AND actor_id = p_actor_id AND state = 'running';
+      WHERE actor_id = p_actor_id AND id = (t.policy->>'compareId')::uuid AND state = 'running';
   END IF;
-  RETURN turn_close(p_actor_id, p_turn_id, p_close_kind, '[]'::jsonb, p_delivered, p_refund_all, p_failure_code);
+  RETURN closed;
 END $function$;

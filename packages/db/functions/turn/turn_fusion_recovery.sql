@@ -29,12 +29,11 @@ BEGIN
   FOR item IN SELECT actor_id, id FROM turns WHERE state = 'paused' AND updated_at < now() - interval '24 hours'
       AND kind = 'jury' AND pause_reason = 'awaiting_user' ORDER BY updated_at LIMIT p_limit LOOP
     BEGIN
-      -- Locked in the close's own order (review, account, conversation, turn), then the condition read again: a relay that
-      -- resumed the jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
-      PERFORM 1 FROM fusion_reviews WHERE id = (SELECT (policy->>'reviewId')::uuid FROM turns WHERE actor_id = item.actor_id AND id = item.id)
-        FOR NO KEY UPDATE;
+      -- Locked in the close's own order (account, conversation, turn), then the condition read again: a relay that resumed the
+      -- jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
       PERFORM 1 FROM profiles WHERE id = item.actor_id FOR UPDATE;
-      PERFORM 1 FROM runtime_sessions WHERE id = (SELECT session_id FROM turns WHERE actor_id = item.actor_id AND id = item.id) FOR UPDATE;
+      PERFORM 1 FROM runtime_sessions WHERE actor_id = item.actor_id
+        AND id = (SELECT session_id FROM turns WHERE actor_id = item.actor_id AND id = item.id) FOR UPDATE;
       IF NOT EXISTS (SELECT 1 FROM turns WHERE actor_id = item.actor_id AND id = item.id AND state = 'paused'
           AND pause_reason = 'awaiting_user' AND updated_at < now() - interval '24 hours' FOR UPDATE) THEN
         CONTINUE;
@@ -57,16 +56,17 @@ BEGIN
       RAISE WARNING 'turn_fusion_recovery orphan failed: turn % sqlstate %', item.id, SQLSTATE;
     END;
   END LOOP;
-  FOR item IN SELECT r.id, t.close_kind FROM fusion_reviews r JOIN turns t ON t.actor_id = r.actor_id AND t.id = r.turn_id
+  FOR item IN SELECT r.actor_id, r.id, t.close_kind FROM fusion_reviews r JOIN turns t ON t.actor_id = r.actor_id AND t.id = r.turn_id
       WHERE r.state IN ('running','paused') AND r.turn_id IS NOT NULL AND t.state = 'closed' LIMIT p_limit LOOP
     UPDATE fusion_reviews SET state = CASE WHEN item.close_kind IN ('interrupted','expired') THEN 'interrupted' ELSE 'incomplete' END,
         outcome = coalesce(outcome, jsonb_build_object('kind', item.close_kind)), updated_at = clock_timestamp(), ended_at = clock_timestamp()
-      WHERE id = item.id AND state IN ('running','paused');
+      WHERE actor_id = item.actor_id AND id = item.id AND state IN ('running','paused');
     synced := synced + 1;
   END LOOP;
-  FOR item IN SELECT c.id FROM fusion_compares c JOIN turns t ON t.actor_id = c.actor_id AND t.id = c.turn_id
+  FOR item IN SELECT c.actor_id, c.id FROM fusion_compares c JOIN turns t ON t.actor_id = c.actor_id AND t.id = c.turn_id
       WHERE c.state = 'running' AND c.turn_id IS NOT NULL AND t.state = 'closed' LIMIT p_limit LOOP
-    UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp() WHERE id = item.id AND state = 'running';
+    UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp()
+      WHERE actor_id = item.actor_id AND id = item.id AND state = 'running';
     synced := synced + 1;
   END LOOP;
   RETURN jsonb_build_object('expired', expired, 'orphaned', orphaned, 'synced', synced, 'failed', failed);

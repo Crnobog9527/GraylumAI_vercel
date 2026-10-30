@@ -114,10 +114,11 @@ REVOKE ALL ON FUNCTION public.fusion_turn_raw_scrub() FROM PUBLIC, anon, authent
 
 -- Open a compare, jury or jury adoption turn: the Gold gate and the kind's own rules, the product record, then turn_open in the
 -- same transaction (one round trip). A repeated request answers like turn_open, without the live gates (its freeze exists).
--- Lock order as everywhere on this path: the product row first when there is one (a review, NO KEY UPDATE, so a receipt's
--- output insert never waits on it), then turn_open's / turn_close's profile -> session -> turn -> stop-loss bucket.
-CREATE OR REPLACE FUNCTION public.turn_fusion_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text,
-  p_policy jsonb, p_product jsonb)
+-- Locks (ENGINEERING 5): only the account, the conversation and the turn, in turn_open's / turn_close's order (profile ->
+-- session -> turn -> stop-loss bucket); a receipt takes the conversation in share mode before its turn. Review and compare rows
+-- are never locked: they are written on the owner key, only while still in the state read (a changed one is a conflict or keeps
+-- the other path's end).
+CREATE OR REPLACE FUNCTION public.turn_fusion_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_product jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -130,6 +131,11 @@ BEGIN
     OR p_policy ?| ARRAY['reviewId','versionId','compareId'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
+  -- Only the main path's own locks (ENGINEERING 5): the account, then the conversation, as turn_open and turn_close. The account
+  -- serializes this user's opens (one compare, one review, the request's replay); the conversation serializes the open with a
+  -- chat closing in it and with a content erasure (content_erasure_confirm locks the conversations first, NOWAIT). The review
+  -- and compare rows are not locked: they are written last, on the owner key, only if still in the state read here.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   -- A jury starts its review record in the same transaction (fusion_review_start, idempotent by request, turn path: no fee),
   -- so a refused open leaves no review behind, as a refused start never did.
   IF p_kind = 'jury' AND jsonb_typeof(p_product->'start') = 'object' THEN
@@ -142,16 +148,11 @@ BEGIN
         AND request_id = p_request_id));
     END IF;
   END IF;
-  -- The row the kind serializes on first (a compare's conversation, a jury's review), then the request: two concurrent opens of
-  -- one request make one turn, the second answering as a replay.
-  IF p_kind = 'compare' THEN
-    -- The account before the conversation, as turn_open and turn_close (a free chat closing in this conversation holds them in
-    -- that order; the other order could deadlock with it).
-    PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
-    PERFORM 1 FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
-  ELSE
-    PERFORM 1 FROM fusion_reviews WHERE id = (p_product->>'reviewId')::uuid AND actor_id = p_actor_id FOR NO KEY UPDATE;
+  -- The conversation: a compare's own; a jury's is its review's draft conversation (whatever the caller passed).
+  IF p_kind <> 'compare' THEN
+    p_session_id := (SELECT source_session_id FROM fusion_reviews WHERE id = (p_product->>'reviewId')::uuid AND actor_id = p_actor_id);
   END IF;
+  PERFORM 1 FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
     IF existing.kind <> p_kind THEN RAISE EXCEPTION 'TURN_REQUEST_CONFLICT' USING ERRCODE='22023'; END IF;
@@ -191,16 +192,14 @@ BEGIN
       RAISE EXCEPTION 'FUSION_REVIEW_BREAKER' USING ERRCODE='P0001';
     END IF;
     -- The workspace sources the columns read, frozen with the record (content_erasure_confirm finds the compare by them when a
-    -- source is deleted); each still allowed, under a share lock on its project, as fusion_compare_begin.
+    -- source is deleted); each still allowed. No project lock: a source erasure locks every conversation of the account first
+    -- (NOWAIT), so it either fails while this open holds the conversation, or committed before and is seen here.
     deps := coalesce(p_product->'workspaceDependencies', '[]'::jsonb);
     IF jsonb_typeof(deps) <> 'array' OR EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d WHERE jsonb_typeof(d) <> 'object'
         OR coalesce(d->>'sourceVersionId','') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         OR (SELECT count(*) FROM jsonb_object_keys(d)) <> 1) THEN
       RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
     END IF;
-    PERFORM p.id FROM artifact_projects p JOIN artifact_versions v ON v.project_id = p.id
-      WHERE p.actor_id = p_actor_id AND v.id::text IN (SELECT d->>'sourceVersionId' FROM jsonb_array_elements(deps) d)
-      ORDER BY p.id FOR SHARE OF p;
     IF EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d
         WHERE NOT coalesce(opc_source_allowed(p_actor_id, (d->>'sourceVersionId')::uuid), false)) THEN
       RAISE EXCEPTION 'FUSION_COMPARE_SOURCE_REVOKED' USING ERRCODE='42501';
@@ -222,7 +221,7 @@ BEGIN
       OR EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused')) THEN
       RAISE EXCEPTION 'TURN_COMPARE_ACTIVE' USING ERRCODE='55P03';
     END IF;
-    UPDATE fusion_compares SET turn_id = (opened->>'turnId')::bigint WHERE id = cmp.id;
+    UPDATE fusion_compares SET turn_id = (opened->>'turnId')::bigint WHERE actor_id = p_actor_id AND id = cmp.id;
     -- The positioning gate of a compare (as turn_open's for a free chat): confirmed positioning, refusals in 24 hours.
     RETURN opened || jsonb_build_object('compareId', cmp.id, 'positioning', jsonb_build_object(
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
@@ -230,10 +229,8 @@ BEGIN
         AND r.closed_at > now() - interval '24 hours')));
   END IF;
 
-  SELECT * INTO rv FROM fusion_reviews WHERE id = (p_product->>'reviewId')::uuid AND actor_id = p_actor_id FOR NO KEY UPDATE;
+  SELECT * INTO rv FROM fusion_reviews WHERE id = (p_product->>'reviewId')::uuid AND actor_id = p_actor_id;
   IF rv.id IS NULL THEN RAISE EXCEPTION 'TURN_PRODUCT_DENIED' USING ERRCODE='42501'; END IF;
-  -- The review's draft conversation, whatever the caller passed (p_session_id is only a compare's).
-  p_session_id := rv.source_session_id;
   IF p_kind = 'jury' THEN
     IF rv.state NOT IN ('running','paused') OR rv.turn_id IS NOT NULL OR rv.config->>'path' IS DISTINCT FROM 'turn' THEN RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023'; END IF;
     IF coalesce((p_policy->>'fixedCredits')::int, 0) < 1 OR (p_policy->>'minCredits')::numeric < (p_policy->>'fixedCredits')::numeric THEN
@@ -268,7 +265,11 @@ BEGIN
     RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE' USING ERRCODE='55P03';
   END IF;
   IF p_kind = 'jury' THEN
-    UPDATE fusion_reviews SET turn_id = (opened->>'turnId')::bigint, updated_at = clock_timestamp() WHERE id = rv.id;
+    -- Written only if still as read above (no turn yet, not ended): another path that changed it meanwhile (a business archived
+    -- ends the review) makes this open a conflict, rolled back with its freeze.
+    UPDATE fusion_reviews SET turn_id = (opened->>'turnId')::bigint, updated_at = clock_timestamp()
+      WHERE actor_id = p_actor_id AND id = rv.id AND turn_id IS NULL AND state IN ('running','paused');
+    IF NOT FOUND AND NOT (opened->>'replay')::boolean THEN RAISE EXCEPTION 'TURN_PRODUCT_CONFLICT' USING ERRCODE='22023'; END IF;
     -- A new jury waits for its first group as it waits between groups (paused, awaiting_user): the first begin resumes it, and
     -- a first group that never gets sent (the pause or the call limits refusing it) still ends by the 24-hour rule, refunded.
     IF NOT (opened->>'replay')::boolean THEN
@@ -306,8 +307,7 @@ END $function$;
 -- not stored once the conversation or account is tombstoned or the review/compare is gone (productGone tells Node to stop).
 -- A jury whose last call in flight has its receipt waits for its next group (paused, awaiting_user): the 15-minute crash sweep
 -- skips it, and the 24-hour end applies (2.2).
-CREATE OR REPLACE FUNCTION public.turn_fusion_record(p_actor_id uuid, p_turn_id bigint, p_seq integer, p_status text,
-  p_nominal_usd numeric, p_actual_usd numeric, p_usage jsonb, p_provider_id text, p_payload_hash text, p_raw text, p_output jsonb)
+CREATE OR REPLACE FUNCTION public.turn_fusion_record(p_actor_id uuid, p_turn_id bigint, p_seq integer, p_status text, p_nominal_usd numeric, p_actual_usd numeric, p_usage jsonb, p_provider_id text, p_payload_hash text, p_raw text, p_output jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -315,16 +315,20 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_record(p_actor_id uuid, p_turn_id 
 AS $function$
 DECLARE t turns; r jsonb; o fusion_turn_outputs; gone boolean := false; v_review uuid; v_compare uuid; v_hash text;
 BEGIN
+  -- The conversation in share mode first, then the turn (the close's order: conversation before turn). A deletion of the review
+  -- or compare (content_erasure_confirm: draft, source or conversation deleted) locks the conversations first, NOWAIT: it fails
+  -- while this receipt is written, or committed before and the product is seen gone below. The product row itself is not locked
+  -- (ENGINEERING 5).
+  PERFORM 1 FROM runtime_sessions WHERE actor_id = p_actor_id
+    AND id = (SELECT session_id FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id) FOR SHARE;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023'; END IF;
   v_review := (t.policy->>'reviewId')::uuid; v_compare := (t.policy->>'compareId')::uuid;
-  -- The product row in key-share mode first: a deletion (draft or source deleted, account erased) waits for this receipt and
-  -- then removes the raw response with it (fusion_turn_raw_scrub); one that committed first leaves nothing to keep.
-  IF v_review IS NOT NULL THEN PERFORM 1 FROM fusion_reviews WHERE id = v_review FOR KEY SHARE;
-  ELSE PERFORM 1 FROM fusion_compares WHERE id = v_compare FOR KEY SHARE; END IF;
-  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE id = v_review)
-               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE id = v_compare) END;
+  -- A deletion that committed first leaves nothing to keep; one after this receipt removes the raw response with the product
+  -- (fusion_turn_raw_scrub). An account erasure is the tombstone below (account_erasure_scrub_turns removes the rest).
+  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND id = v_review)
+               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE actor_id = p_actor_id AND id = v_compare) END;
   -- The receipt (billing evidence) is always written; the response text is not once its review or compare is gone.
   r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd, p_usage, p_provider_id, p_payload_hash,
     CASE WHEN gone THEN NULL ELSE p_raw END);
@@ -358,6 +362,9 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_output(p_actor_id uuid, p_turn_id 
 AS $function$
 DECLARE t turns; c turn_calls; o fusion_turn_outputs; gone boolean; tomb jsonb; v_review uuid; v_compare uuid; v_hash text;
 BEGIN
+  -- The conversation in share mode before the turn, as turn_fusion_record (a deletion of the product waits or is seen gone).
+  PERFORM 1 FROM runtime_sessions WHERE actor_id = p_actor_id
+    AND id = (SELECT session_id FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id) FOR SHARE;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury') OR jsonb_typeof(p_output) <> 'object' OR p_output->>'verdict' NOT IN ('usable','format_invalid','revision_invalid') THEN
@@ -368,10 +375,8 @@ BEGIN
     RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501';
   END IF;
   v_review := (t.policy->>'reviewId')::uuid; v_compare := (t.policy->>'compareId')::uuid;
-  IF v_review IS NOT NULL THEN PERFORM 1 FROM fusion_reviews WHERE id = v_review FOR KEY SHARE;
-  ELSE PERFORM 1 FROM fusion_compares WHERE id = v_compare FOR KEY SHARE; END IF;
-  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE id = v_review)
-               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE id = v_compare) END;
+  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND id = v_review)
+               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE actor_id = p_actor_id AND id = v_compare) END;
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF NOT gone AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean THEN
     v_hash := encode(sha256(convert_to(p_output->>'body', 'UTF8')), 'hex');
@@ -390,28 +395,32 @@ END $function$;
 -- turn_close for these kinds, with the product record ended in the same transaction: the review's end state and outcome (the
 -- review read model and the 3-unfinished rule read them) or the compare's finished state. A jury writes no conversation
 -- messages; a compare's answers reach the conversation only when the user adopts one (fusion_compare_turn_adopt).
-CREATE OR REPLACE FUNCTION public.turn_fusion_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_delivered boolean,
-  p_refund_all boolean, p_failure_code text, p_product jsonb DEFAULT '{}'::jsonb)
+CREATE OR REPLACE FUNCTION public.turn_fusion_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_delivered boolean, p_refund_all boolean, p_failure_code text, p_product jsonb DEFAULT '{}'::jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; target text := p_product->>'state';
+DECLARE t turns; target text := p_product->>'state'; closed jsonb;
 BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023'; END IF;
+  IF t.kind = 'jury' AND target IS NOT NULL
+    AND target NOT IN ('completed','incomplete','revision_failed','interrupted') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
+  END IF;
+  -- The core close first (it locks the account, the conversation and the turn, in that order); the review or compare row is not
+  -- locked (ENGINEERING 5) but written after, on the owner key and only while still live: one another path ended meanwhile
+  -- keeps that end.
+  closed := turn_close(p_actor_id, p_turn_id, p_close_kind, '[]'::jsonb, p_delivered, p_refund_all, p_failure_code);
   IF t.kind = 'jury' AND target IS NOT NULL THEN
-    IF target NOT IN ('completed','incomplete','revision_failed','interrupted') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023'; END IF;
-    PERFORM 1 FROM fusion_reviews WHERE id = (t.policy->>'reviewId')::uuid FOR NO KEY UPDATE;
     UPDATE fusion_reviews SET state = target, outcome = p_product->'outcome', updated_at = clock_timestamp(), ended_at = clock_timestamp()
-      WHERE id = (t.policy->>'reviewId')::uuid AND actor_id = p_actor_id AND state IN ('running','paused');
+      WHERE actor_id = p_actor_id AND id = (t.policy->>'reviewId')::uuid AND state IN ('running','paused');
   ELSIF t.kind = 'compare' THEN
     UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp()
-      WHERE id = (t.policy->>'compareId')::uuid AND actor_id = p_actor_id AND state = 'running';
+      WHERE actor_id = p_actor_id AND id = (t.policy->>'compareId')::uuid AND state = 'running';
   END IF;
-  RETURN turn_close(p_actor_id, p_turn_id, p_close_kind, '[]'::jsonb, p_delivered, p_refund_all, p_failure_code);
+  RETURN closed;
 END $function$;
 
 -- The review record of a jury turn: claim the step at the current position (with the first call sequence of its group, so the
@@ -425,7 +434,9 @@ CREATE OR REPLACE FUNCTION public.fusion_review_turn_step(p_actor_id uuid, p_rev
 AS $function$
 DECLARE rv fusion_reviews; key text;
 BEGIN
-  SELECT * INTO rv FROM fusion_reviews WHERE id = p_review_id AND actor_id = p_actor_id FOR NO KEY UPDATE;
+  -- Not locked (ENGINEERING 5): each write below names the step it was read at (round, phase, attempt, live state) and changes
+  -- nothing if the review moved meanwhile; the review is then read again and answered from its new state.
+  SELECT * INTO rv FROM fusion_reviews WHERE id = p_review_id AND actor_id = p_actor_id;
   IF rv.id IS NULL OR rv.turn_id IS NULL THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
   key := format('review:%s:%s:%s', p_from->>'round', p_from->>'phase', p_from->>'attempt');
   IF p_to->>'state' = 'claim' AND EXISTS (SELECT 1 FROM jsonb_array_elements(rv.steps) x WHERE x->>'stepKey' = key) THEN
@@ -440,14 +451,21 @@ BEGIN
         steps = steps || jsonb_build_array(jsonb_build_object('round', rv.round, 'phase', rv.phase, 'attempt', rv.attempt,
           'groupId', md5(rv.turn_id::text || ':' || key)::uuid, 'stepKey', key, 'claimedAt', clock_timestamp(),
           'fromSeq', (p_to->>'fromSeq')::int))
-      WHERE id = rv.id RETURNING * INTO rv;
+      WHERE actor_id = p_actor_id AND id = rv.id AND state IN ('running','paused') AND round = rv.round AND phase = rv.phase
+        AND attempt = rv.attempt AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(steps) x WHERE x->>'stepKey' = key)
+      RETURNING * INTO rv;
+    IF NOT FOUND THEN RETURN fusion_review_turn_step(p_actor_id, p_review_id, p_from, p_to); END IF;
   ELSIF p_to->>'state' = 'running' THEN
     IF coalesce(p_to->>'round','') !~ '^[1-9][0-9]?$' OR p_to->>'phase' NOT IN ('review','summary')
       OR coalesce(p_to->>'attempt','') !~ '^[1-9][0-9]?$' OR (p_to->>'round')::int > coalesce((rv.config->>'maxRounds')::int, 1) THEN
       RAISE EXCEPTION 'FUSION_REVIEW_INVALID';
     END IF;
     UPDATE fusion_reviews SET state = 'running', round = (p_to->>'round')::int, phase = p_to->>'phase', attempt = (p_to->>'attempt')::int,
-        updated_at = clock_timestamp() WHERE id = rv.id RETURNING * INTO rv;
+        updated_at = clock_timestamp()
+      WHERE actor_id = p_actor_id AND id = rv.id AND state IN ('running','paused') AND round = rv.round AND phase = rv.phase
+        AND attempt = rv.attempt
+      RETURNING * INTO rv;
+    IF NOT FOUND THEN RETURN fusion_review_turn_step(p_actor_id, p_review_id, p_from, p_to); END IF;
   ELSE RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
   RETURN fusion_review_view(rv);
 END $function$;
@@ -463,12 +481,14 @@ CREATE OR REPLACE FUNCTION public.fusion_compare_turn_adopt(p_actor_id uuid, p_c
 AS $function$
 DECLARE cmp fusion_compares; s runtime_sessions; o fusion_turn_outputs; head integer;
 BEGIN
-  -- The compare row before the conversation, as turn_fusion_close (compare row, then turn_close's account and conversation).
-  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id FOR NO KEY UPDATE;
+  -- Only the compare's conversation is locked (ENGINEERING 5); the compare row is read again under it (its close and its
+  -- deletion hold the conversation too) and written on its owner key only if still not adopted.
+  SELECT * INTO s FROM runtime_sessions WHERE actor_id = p_actor_id
+    AND id = (SELECT session_id FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id) FOR UPDATE;
+  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id;
   IF cmp.id IS NULL OR cmp.turn_id IS NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
   -- An archived business is read-only (0324), as fusion_compare_adopt.
   PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', cmp.session_id));
-  SELECT * INTO s FROM runtime_sessions WHERE id = cmp.session_id AND actor_id = p_actor_id FOR UPDATE;
   IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
   IF cmp.adoption IS NOT NULL THEN
     IF (cmp.adoption->>'seq')::int = p_seq THEN RETURN cmp.adoption || jsonb_build_object('replay', true); END IF;
@@ -485,7 +505,8 @@ BEGIN
     (s.id, head + 1, 'user', cmp.turn_id, cmp.question, encode(sha256(convert_to(cmp.question, 'UTF8')), 'hex')),
     (s.id, head + 2, 'assistant', cmp.turn_id, o.body, o.body_hash);
   UPDATE fusion_compares SET adoption = jsonb_build_object('state', 'adopted', 'seq', p_seq, 'fromRevision', head, 'toRevision', head + 2),
-      updated_at = clock_timestamp() WHERE id = cmp.id RETURNING * INTO cmp;
+      updated_at = clock_timestamp() WHERE actor_id = p_actor_id AND id = cmp.id AND adoption IS NULL RETURNING * INTO cmp;
+  IF NOT FOUND THEN RAISE EXCEPTION 'FUSION_COMPARE_ADOPTED'; END IF;
   RETURN cmp.adoption || jsonb_build_object('replay', false);
 END $function$;
 
@@ -553,12 +574,11 @@ BEGIN
   FOR item IN SELECT actor_id, id FROM turns WHERE state = 'paused' AND updated_at < now() - interval '24 hours'
       AND kind = 'jury' AND pause_reason = 'awaiting_user' ORDER BY updated_at LIMIT p_limit LOOP
     BEGIN
-      -- Locked in the close's own order (review, account, conversation, turn), then the condition read again: a relay that
-      -- resumed the jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
-      PERFORM 1 FROM fusion_reviews WHERE id = (SELECT (policy->>'reviewId')::uuid FROM turns WHERE actor_id = item.actor_id AND id = item.id)
-        FOR NO KEY UPDATE;
+      -- Locked in the close's own order (account, conversation, turn), then the condition read again: a relay that resumed the
+      -- jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
       PERFORM 1 FROM profiles WHERE id = item.actor_id FOR UPDATE;
-      PERFORM 1 FROM runtime_sessions WHERE id = (SELECT session_id FROM turns WHERE actor_id = item.actor_id AND id = item.id) FOR UPDATE;
+      PERFORM 1 FROM runtime_sessions WHERE actor_id = item.actor_id
+        AND id = (SELECT session_id FROM turns WHERE actor_id = item.actor_id AND id = item.id) FOR UPDATE;
       IF NOT EXISTS (SELECT 1 FROM turns WHERE actor_id = item.actor_id AND id = item.id AND state = 'paused'
           AND pause_reason = 'awaiting_user' AND updated_at < now() - interval '24 hours' FOR UPDATE) THEN
         CONTINUE;
@@ -581,16 +601,17 @@ BEGIN
       RAISE WARNING 'turn_fusion_recovery orphan failed: turn % sqlstate %', item.id, SQLSTATE;
     END;
   END LOOP;
-  FOR item IN SELECT r.id, t.close_kind FROM fusion_reviews r JOIN turns t ON t.actor_id = r.actor_id AND t.id = r.turn_id
+  FOR item IN SELECT r.actor_id, r.id, t.close_kind FROM fusion_reviews r JOIN turns t ON t.actor_id = r.actor_id AND t.id = r.turn_id
       WHERE r.state IN ('running','paused') AND r.turn_id IS NOT NULL AND t.state = 'closed' LIMIT p_limit LOOP
     UPDATE fusion_reviews SET state = CASE WHEN item.close_kind IN ('interrupted','expired') THEN 'interrupted' ELSE 'incomplete' END,
         outcome = coalesce(outcome, jsonb_build_object('kind', item.close_kind)), updated_at = clock_timestamp(), ended_at = clock_timestamp()
-      WHERE id = item.id AND state IN ('running','paused');
+      WHERE actor_id = item.actor_id AND id = item.id AND state IN ('running','paused');
     synced := synced + 1;
   END LOOP;
-  FOR item IN SELECT c.id FROM fusion_compares c JOIN turns t ON t.actor_id = c.actor_id AND t.id = c.turn_id
+  FOR item IN SELECT c.actor_id, c.id FROM fusion_compares c JOIN turns t ON t.actor_id = c.actor_id AND t.id = c.turn_id
       WHERE c.state = 'running' AND c.turn_id IS NOT NULL AND t.state = 'closed' LIMIT p_limit LOOP
-    UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp() WHERE id = item.id AND state = 'running';
+    UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp()
+      WHERE actor_id = item.actor_id AND id = item.id AND state = 'running';
     synced := synced + 1;
   END LOOP;
   RETURN jsonb_build_object('expired', expired, 'orphaned', orphaned, 'synced', synced, 'failed', failed);

@@ -10,6 +10,9 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_output(p_actor_id uuid, p_turn_id 
 AS $function$
 DECLARE t turns; c turn_calls; o fusion_turn_outputs; gone boolean; tomb jsonb; v_review uuid; v_compare uuid; v_hash text;
 BEGIN
+  -- The conversation in share mode before the turn, as turn_fusion_record (a deletion of the product waits or is seen gone).
+  PERFORM 1 FROM runtime_sessions WHERE actor_id = p_actor_id
+    AND id = (SELECT session_id FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id) FOR SHARE;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury') OR jsonb_typeof(p_output) <> 'object' OR p_output->>'verdict' NOT IN ('usable','format_invalid','revision_invalid') THEN
@@ -20,10 +23,8 @@ BEGIN
     RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501';
   END IF;
   v_review := (t.policy->>'reviewId')::uuid; v_compare := (t.policy->>'compareId')::uuid;
-  IF v_review IS NOT NULL THEN PERFORM 1 FROM fusion_reviews WHERE id = v_review FOR KEY SHARE;
-  ELSE PERFORM 1 FROM fusion_compares WHERE id = v_compare FOR KEY SHARE; END IF;
-  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE id = v_review)
-               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE id = v_compare) END;
+  gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND id = v_review)
+               ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE actor_id = p_actor_id AND id = v_compare) END;
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF NOT gone AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean THEN
     v_hash := encode(sha256(convert_to(p_output->>'body', 'UTF8')), 'hex');
