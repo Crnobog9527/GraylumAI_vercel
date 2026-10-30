@@ -113,6 +113,7 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
     -- The freeze covers the carried credits too (the continuation settles them).
+    IF p_kind = 'report' THEN PERFORM public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
