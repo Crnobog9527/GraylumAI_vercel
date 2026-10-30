@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// A non-opening mentor turn as the database sees it (CORE-PATH-V2 plan 3.1): the one read before it, turn_open, three model calls (reply, one continuation, organizer) with
-// their three receipt writes each, turn_close with the organizer's result. An account-strategy draft adds the mentor_source_check before close. The draft comes from the turn-core fixture; real constraints and triggers stay enabled.
+// A non-opening mentor turn as the database sees it (CORE-PATH-V2 plan 3.1): the one read before it, turn_open, three model calls
+// (reply, one continuation, organizer) with their three receipt writes each, turn_close with the organizer's result. An
+// account-strategy draft adds the mentor_source_check before close. The draft comes from the turn-core fixture; real constraints
+// and triggers stay enabled.
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

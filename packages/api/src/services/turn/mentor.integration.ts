@@ -693,3 +693,47 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: pasted links settle in batches, make benchmarks
     expect([table, left]).toEqual([table, 0]);
   }
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const card = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'propose_keywords', { keywords: ['coffee', 'latte art', 'cafe', 'beans', 'roasting', 'barista'] })
+      : prose('gen-reply-' + n, 'Please pick.'));
+  const first = await turn(f, { text: 'Find benchmarks', transport: card.fn, research: tiktokVendors() });
+  const cardId = (first.events.find(e => e.type === 'research_card') as { card: { cardId: string } }).card.cardId;
+  const confirmed = await rest().rpc('research_card_confirm', { a: f.actor, p_card: cardId, p: { selected: ['k0', 'k1', 'k2'] } });
+  const confirmationId = (confirmed.data as { confirmationId: string }).confirmationId;
+  const calls: string[] = [];
+  const route = (kind: string) => tikhubRouteId('tiktok', kind as never);
+  const stub: NonNullable<MentorDeps['research']> = { readKey: async () => 'local-synthetic', vendors: {
+    parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+    tikhub: async (call: { kind: string; keyword?: string; account?: string }) => {
+      calls.push(call.kind + ':' + (call.keyword ?? call.account));
+      const base = { vendor: 'tikhub', route: route(call.kind), outcome: 'ok', reason: null, httpStatus: 200, supplierMayCharge: true,
+        usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
+      if (call.kind === 'keyword_posts') return { ...base, items: Array.from({ length: 20 }, (_, i) => ({ missing: [], fields: { id: `${call.keyword}-${i}`,
+        authorId: `author${call.keyword}${i}`, author: `Author ${i}`, likes: 10, comments: 1, shares: 1, views: 1000, publishedAt: new Date().toISOString() } })) };
+      return { ...base, items: [{ missing: [], fields: { followers: 50000, postsCount: 200 } }] };
+    } } as unknown as VendorCalls };
+  const discover = (args: unknown) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_discover', args) : prose('gen-reply-' + n, 'Still searching.'));
+  const second = await turn(f, { text: 'Go on', transport: discover({ keywordConfirmationId: confirmationId, platforms: ['tiktok'], discoveryId: null }).fn,
+    research: stub });
+  expect(second.events.at(-1)?.type).toBe('result');
+  const stopped = second.events.find(e => e.type === 'research_continue') as { discoveryId: string } | undefined;
+  expect(stopped).toBeTruthy();
+  expect((await db.query('select state,turn_id is not null turn from research_discoveries where id=$1', [stopped!.discoveryId])).rows)
+    .toEqual([{ state: 'running', turn: true }]);
+  const unfinished = await rest().rpc('research_user_unfinished_round', { a: f.actor, s: f.session });
+  expect((unfinished.data as { discoveryId: string }).discoveryId).toBe(stopped!.discoveryId);
+  const sent = calls.length;
+  expect(sent).toBeGreaterThan(5);
+  const third = await turn(f, { text: 'Go on', transport: discover({ keywordConfirmationId: null, platforms: null, discoveryId: stopped!.discoveryId }).fn,
+    research: stub });
+  expect(third.events.at(-1)?.type).toBe('result');
+  // No supplier call was sent twice: the round went on from what the earlier turn paid for.
+  expect(calls.slice(sent).filter(c => c.startsWith('keyword_posts'))).toEqual([]);
+  expect(new Set(calls).size).toBe(calls.length);
+});

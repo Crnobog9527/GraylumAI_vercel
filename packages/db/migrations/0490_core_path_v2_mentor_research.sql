@@ -248,6 +248,49 @@ BEGIN
  RETURN output;
 END $function$;;
 
+CREATE OR REPLACE FUNCTION public.research_user_unfinished_round(a uuid, s uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE d research_discoveries; x runtime_executions; marker text; t turns;
+BEGIN
+  PERFORM research_session_owned(a,s,NULL);
+  SELECT * INTO d FROM research_discoveries WHERE actor_id=a AND session_id=s ORDER BY created_at DESC, id DESC LIMIT 1;
+  IF d.id IS NULL OR d.state<>'running' THEN RETURN NULL; END IF;
+  marker:=d.cursor->>'continueFrom';
+  IF marker IS NULL OR marker !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN RETURN NULL; END IF;
+  -- A round a turn stopped: the marker is that turn's request id.
+  SELECT * INTO t FROM turns WHERE actor_id=a AND session_id=s AND request_id=marker::uuid;
+  IF t.id IS NOT NULL THEN
+    IF t.state<>'closed' OR t.close_kind<>'completed' OR t.closed_at < clock_timestamp() - interval '30 minutes'
+     OR EXISTS(SELECT 1 FROM turns y WHERE y.actor_id=a AND y.session_id=s AND y.id>t.id) THEN RETURN NULL; END IF;
+    RETURN jsonb_build_object('discoveryId',d.id,'executionId',t.request_id,
+      'replies',greatest(1,CASE WHEN jsonb_typeof(d.cursor->'executions')='array' THEN jsonb_array_length(d.cursor->'executions') ELSE 1 END));
+  END IF;
+  SELECT * INTO x FROM runtime_executions WHERE id=marker::uuid AND actor_id=a AND session_id=s;
+  IF x.id IS NULL OR x.state<>'completed' OR x.content_deleted_at IS NOT NULL OR x.erased_at IS NOT NULL
+   OR x.result->>'completeness' IS NOT DISTINCT FROM 'stopped' OR x.result->>'stopped' IS NOT DISTINCT FROM 'true'
+   OR x.created_at < clock_timestamp() - interval '30 minutes' THEN RETURN NULL; END IF;
+  IF EXISTS(SELECT 1 FROM runtime_executions y WHERE y.actor_id=a AND y.session_id=s AND y.id<>x.id
+    AND (y.created_at,y.id)>(x.created_at,x.id)) THEN RETURN NULL; END IF;
+  RETURN jsonb_build_object('discoveryId',d.id,'executionId',x.id,
+    'replies',greatest(1,CASE WHEN jsonb_typeof(d.cursor->'executions')='array' THEN jsonb_array_length(d.cursor->'executions') ELSE 1 END));
+END $function$;;
+
+CREATE OR REPLACE FUNCTION public.opc_draft_identity()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF TG_OP='DELETE' AND public.erasure_business_delete_allowed('opc_drafts',to_jsonb(OLD)) THEN
+    RETURN OLD;
+  END IF;
+ IF TG_OP='DELETE' OR to_jsonb(OLD)-ARRAY['round_id','research_rounds','research_qualified'] IS DISTINCT FROM to_jsonb(NEW)-ARRAY['round_id','research_rounds','research_qualified'] THEN RAISE EXCEPTION 'OPC_IMMUTABLE_DRAFT';END IF;RETURN NEW;
+END $function$;;
+
 CREATE OR REPLACE FUNCTION public.research_benchmark_rounds(a uuid, s uuid)
  RETURNS integer
  LANGUAGE sql

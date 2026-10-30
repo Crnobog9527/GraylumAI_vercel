@@ -52,7 +52,9 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   const fetches = new Map<string, Fetch>(prepared.fetches.map(f => [accountKey(f.platform, f.account), f]));
   const touched = new Set<string>(), shortfalls = new Set<string>();
   const discoveries = new Map<string, DiscoveryRecord & { keywordConfirmationId: string }>();
-  if (prepared.discovery) discoveries.set(prepared.discovery.discoveryId, { ...prepared.discovery, platforms: prepared.discovery.platforms as SocialPlatform[] });
+  if (prepared.discovery) {
+    discoveries.set(prepared.discovery.discoveryId, { ...prepared.discovery, platforms: prepared.discovery.platforms as SocialPlatform[] });
+  }
   const savedDiscoveries = new Set<string>();
   let completedRounds = 0, newlyQualified = 0;
 
@@ -108,7 +110,8 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       if (qualified < 1 || qualified >= REQUIRED_QUALIFIED || rounds < MIN_ROUNDS
         || (prior?.card && rounds <= (prior.card.chosenRounds ?? 0))) return null;
       shortfalls.add(cardId);
-      return { cardId, required: REQUIRED_QUALIFIED, offeredQualified: qualified, offeredRounds: rounds, choice: null, confirmationId: null } satisfies ShortfallCard;
+      return { cardId, required: REQUIRED_QUALIFIED, offeredQualified: qualified, offeredRounds: rounds, choice: null,
+        confirmationId: null } satisfies ShortfallCard;
     },
     async discoveryStart(confirmationId, platforms) {
       for (const d of discoveries.values()) if (d.keywordConfirmationId === confirmationId) return d;
