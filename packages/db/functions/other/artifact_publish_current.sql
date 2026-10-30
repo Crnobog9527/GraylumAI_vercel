@@ -10,6 +10,9 @@ CREATE OR REPLACE FUNCTION public.artifact_publish_current(p_actor_id uuid, p_mo
 AS $function$
 DECLARE snapshot jsonb; actual jsonb; payload jsonb:=jsonb_build_object('expectedSteps',p_expected_steps);
 BEGIN
+ -- V2-5: the positioning draft's session row first (see artifact_transition); then account -> project, as before.
+ PERFORM 1 FROM runtime_sessions s JOIN opc_drafts d ON d.session_id=s.id
+   WHERE d.project_id=p_project_id AND d.actor_id=p_actor_id AND s.actor_id=p_actor_id FOR UPDATE OF s;
  -- Account edits and publication share account -> project lock order.
  PERFORM 1 FROM opc_accounts acct JOIN opc_account_strategy_drafts draft_binding ON draft_binding.account_project_id=acct.project_id JOIN opc_drafts d ON d.draft_id=draft_binding.draft_id
   WHERE d.project_id=p_project_id AND d.round_id=p_round_id AND acct.actor_id=p_actor_id FOR UPDATE OF acct;
