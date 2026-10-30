@@ -1,0 +1,92 @@
+# CORE-PATH-V2 V2-11: the core user journeys against the deployed staging site, with Gemini 3.8 Flash (CORE_E2E_MODEL_ID) and at most
+# 2 US dollars per run (Owner 2026-10-28). A failed run opens an issue.
+# DRAFT, not active (Owner 2026-10-28: for now the controller runs the suite by hand on a machine; automation waits for V2-10).
+# When it is wanted: plan A. Trigger only by workflow_dispatch against the staging branch
+# (`gh workflow run staging-e2e.yml --ref staging`), because then GITHUB_REF is refs/heads/staging and the environment's
+# staging-only branch rule really limits who gets the secrets. deployment_status is NOT usable: Vercel's deployments carry a
+# commit SHA as ref, so GITHUB_REF is empty and that rule can never match. Moving the file to .github/workflows needs the
+# workflow-policy exception (Owner approved this one file) and a separate CI-POLICY change. Secrets live in the environment
+# staging-e2e, names starting CORE_E2E_ only; the old E2E_* secrets there are not used.
+name: Staging core-path e2e
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-path:
+    name: Run core-path journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: staging-e2e
+    permissions:
+      contents: read
+      issues: write
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ secrets.CORE_E2E_BASE_URL }}
+      CORE_E2E_SPEND_DATABASE_URL: ${{ secrets.CORE_E2E_SPEND_DATABASE_URL }}
+      CORE_E2E_GOLD_EMAIL: ${{ secrets.CORE_E2E_GOLD_EMAIL }}
+      CORE_E2E_GOLD_PASSWORD: ${{ secrets.CORE_E2E_GOLD_PASSWORD }}
+      CORE_E2E_PRO_EMAIL: ${{ secrets.CORE_E2E_PRO_EMAIL }}
+      CORE_E2E_PRO_PASSWORD: ${{ secrets.CORE_E2E_PRO_PASSWORD }}
+      VERCEL_BYPASS_COOKIE: ${{ secrets.CORE_E2E_VERCEL_BYPASS }}
+      CORE_E2E_MAX_USD: '2'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run the core-path journeys
+        id: journeys
+        working-directory: apps/web
+        run: |
+          started=$(date +%s)
+          set +e
+          pnpm exec playwright test -c playwright.core-path.config.ts
+          status=$?
+          set -e
+          echo "seconds=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Summary
+        if: ${{ always() }}
+        working-directory: apps/web
+        run: |
+          echo "Duration: ${{ steps.journeys.outputs.seconds }} s" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f test-results/core-path/summary.md ]; then cat test-results/core-path/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: core-path-report
+          path: apps/web/test-results/core-path
+          retention-days: 14
+
+      - name: Open an issue when a journey failed
+        if: ${{ steps.journeys.outputs.status != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body="A core-path journey failed after a staging deployment. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} (duration ${{ steps.journeys.outputs.seconds }} s). The report and traces are in the run artifacts."
+          gh issue create --repo "${GITHUB_REPOSITORY}" --title "Staging core-path e2e failed" --body "$body"

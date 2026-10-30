@@ -23,6 +23,9 @@ export default defineConfig({
   // Test directory
   testDir: './tests/e2e',
 
+  // The staging core-path journeys have their own config (playwright.core-path.config.ts) and paid-call budget.
+  testIgnore: ['**/core-path/**'],
+
   // Keep structured reports and per-test evidence under a stable directory
   outputDir: 'test-results/artifacts',
 
