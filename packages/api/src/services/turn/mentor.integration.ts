@@ -402,7 +402,8 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown
       t.request_id::text=$4 same_id,
       turn_mentor_source_available($1,$2,$4::uuid,(select project_id from opc_drafts where draft_id=$3),(select round_id from opc_drafts where draft_id=$3)) fn,
       (select count(*) from runtime_sessions s where s.id=t.session_id and s.content_deleted_at is null and s.erased_at is null) live,
-      (select prosrc like '%turn_mentor_source_available%' from pg_proc where proname='opc_query' limit 1) patched
+      (select json_agg(json_build_object('ns',p.pronamespace::regnamespace::text,'args',pg_get_function_identity_arguments(p.oid),
+        'patched',p.prosrc like '%turn_mentor_source_available%','len',length(p.prosrc))) from pg_proc p where p.proname='opc_query') overloads
     from turns t where t.actor_id=$1 and t.kind='mentor' order by t.id desc limit 1`,
     [f.actor, f.session, f.draftId, raw?.suggestion?.executionId])).rows[0];
   expect(suggestion, JSON.stringify({ raw, probe, sessionId: shown.sessionId, meta: shown.information['step-0'].meta.goal }))
