@@ -14,7 +14,7 @@ import { turnClients } from './db';
 import type { CounterStore } from './limiter';
 import { RUNTIME_PAYG_SETTING } from './quote';
 import type { TurnEvent } from './sse';
-import { researchSettings } from './tools/testFixtures.test';
+import { researchSettings } from './tools/__tests__/fixtures';
 
 /*
  * CORE-PATH-V2 V2-6 acceptance on the local database with a synthetic OpenRouter and synthetic suppliers (no network, no paid

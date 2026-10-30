@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { libraryTurnReader } from './source';
 import { turnTools, TOOL_UNAVAILABLE } from './index';
-import { ledger } from './testFixtures.test';
+import { ledger } from './__tests__/fixtures';
 import type { ToolPlan } from './types';
 
 const doc = (n: number) => ({ documentId: `00000000-0000-4000-8000-00000000000${n}`, version: 1, title: `file ${n}` });

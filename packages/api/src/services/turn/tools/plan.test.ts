@@ -5,7 +5,7 @@ import { decimal } from '../../bill2/decimal';
 import { turnPolicy } from '../policy';
 import { paidToolBounds, planTurnTools, type PlanInput } from './plan';
 import { fallbackEligible, researchRounds } from './rounds';
-import { policy, researchSettings } from './testFixtures.test';
+import { policy, researchSettings } from './__tests__/fixtures';
 
 function input(over: Partial<PlanInput> = {}, settings = researchSettings()): PlanInput {
   const rows = Object.entries(settings).map(([key, value]) => ({ key, value }));

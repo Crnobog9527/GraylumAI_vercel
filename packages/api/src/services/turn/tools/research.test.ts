@@ -5,7 +5,7 @@ import type { ResearchToolsConfig } from '../../research/vendors/config';
 import type { CounterStore } from '../limiter';
 import { NO_DATA_REASON, researchTools, type ResearchToolsInput } from './research';
 import { supplierSubcall, type SupplierDeps } from './suppliers';
-import { freeSlots, ledger, policy, result } from './testFixtures.test';
+import { freeSlots, ledger, policy, result } from './__tests__/fixtures';
 
 const config: ResearchToolsConfig = {
   version: 1, enabled: true,

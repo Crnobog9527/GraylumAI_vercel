@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { TurnDatabaseError } from '../db';
 import { paidToolCall, settleToolCall, ToolLimitReached } from './meter';
-import { ledger, result } from './testFixtures.test';
+import { ledger, result } from './__tests__/fixtures';
 import type { SubcallReceipt } from './types';
 
 const r = (over: Partial<SubcallReceipt['result']>, costUsd: string | null = '0.001', multiplier = '6'): SubcallReceipt =>
