@@ -117,8 +117,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const state = mentorState(opened.kindContext, input.stepId);
     const ctx = state.context;
     if (checked?.businessContext) (ctx.work as Record<string, unknown>).businessContext = checked.businessContext;
-    if (!await mentorSkillAvailable(admin, { moduleId: ctx.moduleId, skillId: ctx.skillId, revisionId: ctx.revisionId, packageHash: ctx.packageHash }))
-      throw new Error('TURN_SKILL_UNAVAILABLE');
+    const skillId = { moduleId: ctx.moduleId, skillId: ctx.skillId, revisionId: ctx.revisionId, packageHash: ctx.packageHash };
+    if (!await mentorSkillAvailable(admin, skillId)) throw new Error('TURN_SKILL_UNAVAILABLE');
     const { source, binding } = mentorSkillSource(admin, { actorId: input.actorId, moduleId: ctx.moduleId, skillId: ctx.skillId,
       revisionId: ctx.revisionId, packageHash: ctx.packageHash });
     const skill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
