@@ -155,7 +155,8 @@ function scopeAfter(statement, at) {
 const LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b(?:\s+OF\s+([a-z_][a-z0-9_.,\s]*?))?(?=\s*(?:SKIP|NOWAIT|LOOP|\)|$))/gi;
 // What filters the rows: the text after the first WHERE up to the clause that follows it. A key named only in RETURNING, ORDER BY or a
 // later clause does not filter anything.
-const WHERE_END = /\b(?:RETURNING|ORDER\s+BY|GROUP\s+BY|HAVING|WINDOW|LIMIT|OFFSET|FETCH|UNION|INTERSECT|EXCEPT|FOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE|KEY\s+SHARE)|INTO)\b/i;
+const WHERE_END = new RegExp('\\b(?:RETURNING|ORDER\\s+BY|GROUP\\s+BY|HAVING|WINDOW|LIMIT|OFFSET|FETCH|UNION|INTERSECT|EXCEPT|INTO'
+  + '|FOR\\s+(?:NO\\s+KEY\\s+)?(?:UPDATE|SHARE|KEY\\s+SHARE))\\b', 'i');
 export function whereClause(text) {
   const at = text.search(/\bWHERE\b/i);
   if (at < 0) return '';
