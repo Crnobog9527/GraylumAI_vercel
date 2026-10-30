@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-6 (placeholder number 0498; the controller assigns the real one before it is applied): library_turn_read, the read_source tool of a turn on the core
+-- CORE-PATH-V2 V2-6 (number 0427 assigned by the controller): library_turn_read, the read_source tool of a turn on the core
 -- path. Owner 2026-10-28 (ENGINEERING section 5 supplement, #1518): a free read tool may read the user's own material once
 -- per call in the middle of a turn, read-only, by the owner's key, without locks or writes, counted against the turn's limit.
 -- Every query carries the caller's actor key. So this function is STABLE: no row locks (no library_actor, no library_document_read, both of which lock), no inserts.
