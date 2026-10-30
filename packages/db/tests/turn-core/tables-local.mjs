@@ -148,17 +148,17 @@ try{
   const before=await billing();
   await c.query('insert into account_erasure_requests(profile_id,request_id) values($1,$2)',[e.actor,randomUUID()]);
   const first=await one('select account_erasure_scrub_turns($1) v',[e.actor]);
-  assert.deepEqual(first,{turn_call_raw:1,turn_call_raw_skipped:1,session_messages:2,session_messages_skipped:0});
+  assert.deepEqual(first,{turn_call_raw:1,turn_call_raw_skipped:1,fusion_turn_outputs:0,session_messages:2,session_messages_skipped:0});
   assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[closed]),0);
   assert.equal(await one('select count(*)::int v from turn_call_raw where turn_id=$1',[open]),1);
   assert.deepEqual((await c.query("select content,visible,deleted_at is not null d from session_messages where session_id=$1 order by seq",[e.session])).rows,
    [{content:'',visible:false,d:true},{content:'',visible:false,d:true}]);
   assert.deepEqual(await billing(),before,'billing fields are kept');
   assert.deepEqual(await one('select account_erasure_scrub_turns($1) v',[e.actor]),
-   {turn_call_raw:0,turn_call_raw_skipped:1,session_messages:0,session_messages_skipped:0},'repeating changes nothing');
+   {turn_call_raw:0,turn_call_raw_skipped:1,fusion_turn_outputs:0,session_messages:0,session_messages_skipped:0},'repeating changes nothing');
   await c.query("update turns set state='closed',close_kind='completed',closed_at=now() where actor_id=$1 and id=$2",[e.actor,open]);
   assert.deepEqual(await one('select account_erasure_scrub_turns($1) v',[e.actor]),
-   {turn_call_raw:1,turn_call_raw_skipped:0,session_messages:0,session_messages_skipped:0});
+   {turn_call_raw:1,turn_call_raw_skipped:0,fusion_turn_outputs:0,session_messages:0,session_messages_skipped:0});
   assert.deepEqual(await billing(),before);
   for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]])
    assert.equal(await one("select has_function_privilege($1,'public.account_erasure_scrub_turns(uuid)','EXECUTE') v",[role]),want,role);
