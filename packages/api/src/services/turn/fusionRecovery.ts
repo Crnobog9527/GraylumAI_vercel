@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 
 /*
- * CORE-PATH-V2 V2-7b: the fusion-recovery cron's step on turns (turn_fusion_recovery, 0430). A jury waiting 24 hours between
+ * CORE-PATH-V2 V2-7b: the fusion-recovery cron's step on turns (turn_fusion_recovery, 0433). A jury waiting 24 hours between
  * groups ends (the known usage, at most the fixed price; Owner 10-27); a jury whose review was deleted (its draft deleted)
  * is refunded in full; a review or compare whose turn another path closed (runtime-recovery's crash and 24-hour sweeps) ends
  * too. Stalled reviews are kicked by the existing daily backstop (kickStalledReviews), which advances turn-path reviews
