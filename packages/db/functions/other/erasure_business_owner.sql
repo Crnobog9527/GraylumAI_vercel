@@ -43,6 +43,8 @@ BEGIN
  WHEN t IN ('artifact_confirmations','artifact_candidates','agent_slice_links') THEN
   SELECT p.actor_id INTO result FROM artifact_rounds r JOIN artifact_projects p ON p.id=r.project_id
    WHERE r.id=(j->>'round_id')::uuid;
+ -- CORE-PATH-V2 V2-7a2: a report finalized from a turn names its owner on the link.
+ WHEN t='opc_result_links' AND j->>'turn_actor_id' IS NOT NULL THEN RETURN (j->>'turn_actor_id')::uuid;
  WHEN t IN ('runtime_tool_calls','runtime_history_dependencies','opc_result_links') THEN
   SELECT actor_id INTO result FROM runtime_executions WHERE id=(j->>'execution_id')::uuid;
  WHEN t IN ('runtime_scope_material','runtime_session_history','runtime_session_batches') THEN
