@@ -10,7 +10,7 @@ const marked={type:'text',text:'stable',cache_control:{type:'ephemeral'}};
 const plain={type:'text',text:'dynamic'};
 const make=(content:unknown=[marked,plain])=>({model:identity.model,stream:false,store:false,
  messages:[{role:'system',content}],max_tokens:100,provider:openRouterBound(limits,100).routing});
-it.each([[marked],[marked,plain]])('accepts only the first system block and forwards exact bytes',async (...content)=>{
+it.each([[marked],[marked,plain],[marked,marked]])('accepts the marked system block shapes and forwards exact bytes',async (...content)=>{
  const transport=vi.fn<typeof fetch>(async()=>new Response('{}')),credential=vi.fn(async()=> 'SYNTHETIC');
  const input=JSON.stringify(make(content));
  await openRouterAdapter({credential,transport}).dispatch({input},identity);
@@ -18,7 +18,7 @@ it.each([[marked],[marked,plain]])('accepts only the first system block and forw
  expect(transport.mock.calls[0]?.[1]?.body).toBe(input);
 });
 it.each([
- make([plain,marked]),make([marked,marked]),make([marked,plain,plain]),
+ make([plain,marked]),make([marked,plain,plain]),make([marked,marked,marked]),
  make([{...marked,cache_control:{type:'ephemeral',ttl:'5m'}}]),
  make([{...marked,cache_control:{type:'ephemeral',ttl:'1h'}}]),
  make([{...marked,cache_control:{type:'ephemeral',extra:1}}]),

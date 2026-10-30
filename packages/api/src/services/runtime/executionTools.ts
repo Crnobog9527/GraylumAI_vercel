@@ -9,7 +9,7 @@ import {executionMentorHistoryTool,mentorHistoryToolBytes} from './mentorHistory
 import {sourceRuntimeTool} from './sourceRuntimeTool';
 import {withSourceWorkProgress} from './sourceWorkProgress';
 import type {AgentToolEvent} from '../../shared/agentWork';
-import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {promptCacheReserveBytes} from './promptCache';
 import {groundedCardTool,groundedCardToolBytes,type cardSources} from './groundedCard';
 import {askQuestionTool,askQuestionToolBytes,READ_HISTORY_TOOL} from './agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
@@ -42,7 +42,7 @@ export function executionTools(input:{
  const toolBytes=(input.agentTurn?(input.grounded?groundedCardToolBytes():askQuestionToolBytes(input.fiveFields)):
   Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
   (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+(research?.definitionBytes??0)+
-  (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+  (context.historySelection?.markerReserveBytes??promptCacheReserveBytes(context.promptCache));
  // The loads this reply may make: reserved once, in the first history selection only, never in later per-call totals.
  return {tools,toolBytes,catalogReserve:context.skillCatalog?skillCatalogReserveBytes(context.skillCatalog):0};
 }

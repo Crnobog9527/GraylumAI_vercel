@@ -131,7 +131,8 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
       if (page === pages - 1) { report.remaining++; error('ERASURE_PAGE_LIMIT'); break; }
       work = await inventory(work.nextRunId);
     }
-    for (const name of ['account_erasure_scrub_content', 'account_erasure_scrub_runtime']) {
+    // CORE-PATH-V2 (0420): account_erasure_scrub_turns empties the new core-path content; the turn billing records stay.
+    for (const name of ['account_erasure_scrub_content', 'account_erasure_scrub_runtime', 'account_erasure_scrub_turns']) {
       await attempt(async () => {
         const content = contentRemaining(await rpc(name, actor));
         report.remaining += content.remaining;

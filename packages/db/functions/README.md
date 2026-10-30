@@ -13,6 +13,7 @@ One file per function name (overloads share a file), grouped as:
 - `report/` — `report_*`
 - `research/` — `research_*`
 - `voice/` — `voice_*`
+- `turn/` — `turn_*` (CORE-PATH-V2 per-turn core)
 - `other/` — every other `public` function (Owner 2026-10-26: all functions are covered)
 
 The first group whose pattern matches the name wins; a function no pattern matches goes to `other/`.

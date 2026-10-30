@@ -120,6 +120,8 @@ export const runtimeContext=z.object({
  if (host !== (context.inputSelection === 'scope-projection-v2') || host !== (context.historySelection !== undefined) ||
      host && (context.role !== 'skill' || context.providerRequestFormat !== 'agent-turn-v5-stream') ||
      context.promptCache?.version === 'prompt-cache-v2' && !host ||
-     host && context.promptCache?.version === 'prompt-cache-v1')
+     host && context.promptCache?.version !== undefined && context.promptCache.version !== 'prompt-cache-v2' ||
+     // PROMPT-CACHE-ALL: v3 belongs to a free-chat turn (never a Skill matching turn, whose system text changes).
+     context.promptCache?.version === 'prompt-cache-v3' && (context.role !== 'ordinary' || context.matching !== undefined))
   ctx.addIssue({code: 'custom', message: 'RUNTIME_CONTEXT_INVALID'});
 });
