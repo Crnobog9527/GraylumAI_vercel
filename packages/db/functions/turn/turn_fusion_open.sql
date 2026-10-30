@@ -28,6 +28,12 @@ BEGIN
       IF st->'config'->>'path' IS DISTINCT FROM 'turn' OR jsonb_typeof(st->'materials') IS DISTINCT FROM 'object'
         OR coalesce(st->>'versionHash', '') = '' THEN RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023'; END IF;
       SELECT * INTO rv FROM fusion_reviews WHERE actor_id = p_actor_id AND request_id = p_request_id;
+      -- The report version still the user's and not erased, read again under the account lock, as a compare's sources.
+      IF rv.id IS NULL AND NOT EXISTS (SELECT 1 FROM artifact_versions v JOIN artifact_projects p ON p.id = v.project_id
+          WHERE v.id = (st->>'sourceVersionId')::uuid AND p.id = (st->>'projectId')::uuid AND p.actor_id = p_actor_id
+            AND v.erased_at IS NULL) THEN
+        RAISE EXCEPTION 'FUSION_REVIEW_STALE';
+      END IF;
       IF rv.id IS NULL THEN
         IF EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused')) THEN
           RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE';
@@ -89,6 +95,14 @@ BEGIN
         OR coalesce(d->>'sourceVersionId','') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         OR (SELECT count(*) FROM jsonb_object_keys(d)) <> 1) THEN
       RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+    END IF;
+    -- Each source still the user's and not erased, read again under the locks (the full permission was read before the open):
+    -- a source erasure locks the account and its conversations NOWAIT, so one that committed after that read is seen here
+    -- and none can commit while this open holds them; no copy of a deleted source is made.
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d WHERE NOT EXISTS (SELECT 1 FROM artifact_versions v
+        JOIN artifact_projects p ON p.id = v.project_id WHERE v.id = (d->>'sourceVersionId')::uuid AND p.actor_id = p_actor_id
+          AND v.erased_at IS NULL)) THEN
+      RAISE EXCEPTION 'FUSION_COMPARE_SOURCE_REVOKED' USING ERRCODE='42501';
     END IF;
     INSERT INTO fusion_compares (actor_id, request_id, session_id, history_revision, question, question_hash, request_hash,
         snapshot_hash, config, gate_verdict, workspace_dependencies, state)

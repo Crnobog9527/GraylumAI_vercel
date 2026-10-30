@@ -4251,7 +4251,7 @@
   "fn:turn_fusion_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "2b5745934e54",
   "fn:turn_fusion_close(uuid,bigint,text,boolean,boolean,text,jsonb)": "54d394630b16",
   "fn:turn_fusion_ended_review(uuid,bigint,text,jsonb)": "bf70ff2cefce",
-  "fn:turn_fusion_open(uuid,uuid,uuid,text,jsonb,jsonb)": "b65e01673887",
+  "fn:turn_fusion_open(uuid,uuid,uuid,text,jsonb,jsonb)": "842478da1b90",
   "fn:turn_fusion_output(uuid,bigint,integer,jsonb)": "735183e93bc6",
   "fn:turn_fusion_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text,jsonb)": "e4ad5fa1ee48",
   "fn:turn_fusion_recovery(integer)": "d1d17de9bcf7",

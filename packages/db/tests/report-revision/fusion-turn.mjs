@@ -108,7 +108,22 @@ export async function runFusionTurn({db,report,Client,connectionString}) {
     // The read before the open refuses what fusion_review_start refused: a version that is not the current formal one.
     const stale = await member(db,3000);
     await assert.rejects(source(db,stale,randomUUID(),randomUUID()),/FUSION_REVIEW_STALE/);
-    report.checks.push('turn path: a refused open (credits below price + hold, not Gold, no turn path) leaves no review and no freeze; the read before it refuses a stale version');
+    // #1522 review: a source erased between the read before the open and the open is seen under the open's locks: no review,
+    // no compare, no freeze (a copy of a deleted source is never made).
+    const erased = await member(db,5000), request = randomUUID();
+    const {breaker:_b,...fields} = await source(db,erased,request);
+    const comparePolicy = {q:100,uTurnUsd:0.2,gCredits:120,minCredits:120,uModelCredits:60,historyItems:0,inputBytes:0,
+      limits:{model:2,paidTools:0,freeTools:0,decisions:0},stopLoss:policy.stopLoss};
+    const compareOn = deps => service(db,'turn_fusion_open',erased.actor,erased.session,randomUUID(),'compare',JSON.stringify(comparePolicy),
+      JSON.stringify({question:'q',questionHash:hash('q'),requestHash:hash('r'),snapshotHash:hash('s'),workspaceDependencies:deps}));
+    await db.query('UPDATE artifact_versions SET report=NULL,report_hash=NULL,erased_at=now() WHERE id=$1',[erased.versionId]);
+    await assert.rejects(service(db,'turn_fusion_open',erased.actor,NIL,request,'jury',JSON.stringify(policy),
+      JSON.stringify({start:{...fields,config}})),/FUSION_REVIEW_STALE/);
+    await assert.rejects(compareOn([{sourceVersionId:erased.versionId}]),/FUSION_COMPARE_SOURCE_REVOKED/);
+    assert.equal((await db.query('SELECT count(*)::int n FROM fusion_reviews WHERE actor_id=$1',[erased.actor])).rows[0].n,0);
+    assert.equal((await db.query('SELECT count(*)::int n FROM turns WHERE actor_id=$1',[erased.actor])).rows[0].n,0);
+    assert.equal(await wallet(db,erased.actor),5000);
+    report.checks.push('turn path: a refused open (credits below price + hold, not Gold, no turn path) leaves no review and no freeze; the read before it refuses a stale version; a source erased after that read is refused by the open itself (jury and compare)');
   }
   // 3. #1522 review: a review and a compare started at the same time in two conversations of one account exclude each other.
   {
