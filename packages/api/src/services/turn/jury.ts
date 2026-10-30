@@ -112,7 +112,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         summary: sent(`${text.summary}\n\n${text.rubric}${reviewLanguageRule(replyLocale, 'summary')}`) } });
     const sum = (caps: Record<string, { credits: number }>) => Object.values(caps).reduce((total, cap) => total + cap.credits, 0);
     const holdCredits = Math.max(sum(estimate.callCaps.review), sum(estimate.callCaps.debate), sum(estimate.callCaps.summary));
-    return { settings, skill, estimate, q, holdCredits, priceCredits: settings.fixedPriceCredits, replyLocale };
+    return { settings, skill, estimate, q, holdCredits, priceCredits: settings.fixedPriceCredits, replyLocale, quotes: all };
   }
 
   /** Ends the review and its turn in one statement (turn_fusion_close). */
@@ -138,12 +138,12 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
       const replayed = await record.replay(input);
       if (replayed?.turnId) return replayed;
       const coreSetting = await coreSettings(await readAdmissionConfiguration(admin));
-      const { settings, skill, estimate, q, holdCredits, priceCredits, replyLocale } = await plan(input);
+      const { settings, skill, estimate, q, holdCredits, priceCredits, replyLocale, quotes } = await plan(input);
       if (input.acceptedCredits !== undefined && priceCredits !== input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
       const planned = [...Object.values(estimate.callCaps.review), ...Object.values(estimate.callCaps.debate),
         ...Object.values(estimate.callCaps.summary)].map(cap => ({ upperUsd: cap.usd, multiplier: '1' }));
       const policy = fusionPolicy({ q, calls: planned, gCredits: priceCredits + holdCredits, minCredits: priceCredits + holdCredits,
-        fixedCredits: priceCredits, stopLoss: coreSetting.stopLoss });
+        fixedCredits: priceCredits, stopLoss: coreSetting.stopLoss, quotes });
       const reviewConfig = { path: 'turn', estimateUsd: estimate.estimateUsd, estimateCredits: priceCredits,
         fixedPrice: { credits: priceCredits, holdCredits }, callCaps: estimate.callCaps, maxRounds: estimate.rounds,
         reviewers: settings.reviewerModelIds, evidence: true,

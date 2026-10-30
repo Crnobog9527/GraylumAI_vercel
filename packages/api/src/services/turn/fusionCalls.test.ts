@@ -36,7 +36,10 @@ it('CORE-PATH-V2 V2-7b: a receipt carries the judged answer; a deleted review st
 
 it('CORE-PATH-V2 V2-7b: the frozen numbers of a fusion turn and the answer text of a receipt', () => {
   const policy = fusionPolicy({ q: '100', calls: [{ upperUsd: '0.1', multiplier: '6' }, { upperUsd: '0.000000000001', multiplier: '3' }],
-    gCredits: 1680, minCredits: 1680, fixedCredits: 1500, stopLoss, decisionUpperUsd: '0.001' });
+    gCredits: 1680, minCredits: 1680, fixedCredits: 1500, stopLoss, decisionUpperUsd: '0.001',
+    quotes: [{ modelId: 'm1', model: 'anthropic/claude-sonnet-5.5', pricing: { prompt: '1' } }] });
+  // Frozen for recovery (turn_recovery_claim): the model and its nominal prices by model id.
+  expect(policy).toMatchObject({ models: { m1: 'anthropic/claude-sonnet-5.5' }, pricings: { m1: { prompt: '1' } } });
   expect(policy).toMatchObject({ uTurnUsd: 0.101000000001, gCredits: 1680, fixedCredits: 1500, uModelCredits: 60,
     limits: { model: 2, paidTools: 0, freeTools: 0, decisions: 1 }, historyItems: 0 });
   expect(answerText(JSON.stringify({ choices: [{ message: { content: 'hello' } }] }))).toBe('hello');

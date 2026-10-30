@@ -105,7 +105,7 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   const decisionUpper = String((config.data as { decisionUpperUsd?: unknown }).decisionUpperUsd ?? '');
   if (!/^0\.\d{1,12}$/.test(decisionUpper)) return emit(fail('TURN_CORE_DISABLED'));
   const policy = fusionPolicy({ q, calls: columns, gCredits, minCredits: gCredits, stopLoss: config.data.stopLoss,
-    decisionUpperUsd: decisionUpper, historyItems: COMPARE_HISTORY_ITEMS, frozen: { models: models.join(',') } });
+    decisionUpperUsd: decisionUpper, historyItems: COMPARE_HISTORY_ITEMS, quotes });
   let opened;
   try {
     opened = await db.open({ sessionId: input.sessionId, requestId: input.requestId, kind: 'compare', policy, product: {

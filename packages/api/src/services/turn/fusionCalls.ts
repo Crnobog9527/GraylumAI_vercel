@@ -155,7 +155,10 @@ export function fusionPolicy(input: { q: string; calls: Array<{ upperUsd: string
   /** Credits frozen for the user (G_turn) and the start threshold. */
   gCredits: number; minCredits: number; fixedCredits?: number; stopLoss: z.infer<typeof stopLossSettings>;
   /** The positioning check's platform bound (compare): one 'decision' call outside M, in U_turn, never in G (Fable 10-28). */
-  decisionUpperUsd?: string; historyItems?: number; frozen?: Record<string, string | number | boolean> }) {
+  decisionUpperUsd?: string; historyItems?: number; frozen?: Record<string, string | number | boolean>;
+  /** The models the turn may call and their nominal prices, by model id: recovery settles a call whose cost is unknown with
+   * them (turn_recovery_claim reads policy.models / policy.pricings for multi-model kinds). */
+  quotes: ReadonlyArray<{ modelId: string; model: string; pricing: unknown }> }) {
   const SCALE = 10n ** 12n;
   const units = (value: string) => {
     const [whole, fraction = ''] = value.split('.');
@@ -166,7 +169,10 @@ export function fusionPolicy(input: { q: string; calls: Array<{ upperUsd: string
   const fraction = (total % SCALE).toString().padStart(12, '0').replace(/0+$/, '');
   const uModelCredits = Math.max(0, ...input.calls.map(c => callCredits(input.q, c.upperUsd, c.multiplier)));
   return {
-    ...input.frozen, q: Number(input.q), uTurnUsd: Number(`${total / SCALE}${fraction ? '.' + fraction : ''}`),
+    ...input.frozen,
+    models: Object.fromEntries(input.quotes.map(quote => [quote.modelId, quote.model])),
+    pricings: Object.fromEntries(input.quotes.map(quote => [quote.modelId, quote.pricing])),
+    q: Number(input.q), uTurnUsd: Number(`${total / SCALE}${fraction ? '.' + fraction : ''}`),
     gCredits: input.gCredits, minCredits: input.minCredits,
     uModelCredits, ...(input.fixedCredits === undefined ? {} : { fixedCredits: input.fixedCredits }),
     ...(input.decisionUpperUsd === undefined ? {} : { decisionUpperUsd: input.decisionUpperUsd }),
