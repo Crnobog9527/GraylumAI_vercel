@@ -1,8 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -22,6 +25,8 @@ import { tikhubRouteId } from '../research/vendors/tikhub';
 import { researchSettings } from './tools/__tests__/fixtures';
 import { preparedResearch } from './tools/benchmarkStore';
 import { RUNTIME_PAYG_SETTING } from './quote';
+import { MENTOR, ORGANIZER, organized, prose, tiktokVendors, toolCall } from './__tests__/mentorSynthetic';
+import { runTurnRecovery } from './recovery';
 import type { TurnEvent } from './sse';
 
 // The draft is started through the old service (it is not part of a turn); its rate limiter is not under test here.
@@ -40,7 +45,7 @@ const connectionString = process.env.V3_LOCAL_DB!;
 if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connectionString.endsWith('/v3_disposable'))
   throw new Error('isolated runner required');
 const db = new pg.Client({ connectionString });
-const MENTOR = 'anthropic/claude-sonnet-5.5', ORGANIZER = 'anthropic/claude-opus-5.5', ROUTE = 'anthropic';
+const ROUTE = 'anthropic';
 const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
 const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, 'billing_credits_per_usd', 'billing_token_price_multiplier', 'runtime_rw_v2',
   'v3_summary_model_id', 'v3_summary_max_tokens', ...Object.keys(researchSettings())];
@@ -138,22 +143,6 @@ function countingAdmin() {
     global: { fetch: fetcher } }), calls };
 }
 
-// The synthetic OpenRouter: the mentor streams (text, or one tool call); the organizer answers one JSON completion.
-const frame = (id: string, model: string, extra: Record<string, unknown>) =>
-  'data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model, ...extra }) + '\n\n';
-const usage = (id: string, model: string, finish: string) => frame(id, model, { choices: [{ index: 0, delta: {}, finish_reason: finish }] })
-  // A cost inside the call's frozen bound (this fixture's bound is small): above it the model would be blocked (budget_conflict).
-  + frame(id, model, { choices: [], usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cost: 0.000003 } }) + 'data: [DONE]\n\n';
-const streamed = (id: string, body: string) => new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
-const prose = (id: string, text: string) => streamed(id, frame(id, MENTOR, { choices: [{ index: 0, delta: { role: 'assistant', content: text },
-  finish_reason: null }] }) + usage(id, MENTOR, 'stop'));
-const toolCall = (id: string, name: string, args: unknown) => streamed(id, frame(id, MENTOR, { choices: [{ index: 0, delta: { role: 'assistant',
-  tool_calls: [{ index: 0, id: 'call-' + id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }] })
-  + usage(id, MENTOR, 'tool_calls'));
-const organized = (id: string, content: string) => new Response(JSON.stringify({ id, object: 'chat.completion', created: 1, model: ORGANIZER,
-  choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
-  usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cost: 0.000003 } }),
-{ headers: { 'content-type': 'application/json', 'x-generation-id': id } });
 const patch = (value: string) => JSON.stringify({ inputKind: 'answer', notes: [],
   patches: [{ stepId: 'step-0', fieldId: 'goal', value, status: 'provisional', nature: 'fact', basis: 'user_statement' }] });
 
@@ -660,17 +649,6 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a benchmark step without its tools, and a link 
   expect(await credits(f.actor)).toBe(before);
 });
 
-// Synthetic TikTok: a qualifying profile and 25 dated posts per account.
-const tiktokVendors = (): NonNullable<MentorDeps['research']> => ({ readKey: async () => 'local-synthetic', vendors: {
-  parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
-  tikhub: async (call: { platform: string; kind: string; account?: string }) => {
-    const base = { vendor: 'tikhub', route: tikhubRouteId(call.platform as never, call.kind as never), outcome: 'ok', reason: null, httpStatus: 200,
-      supplierMayCharge: true, usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
-    if (call.kind === 'account_profile') return { ...base, items: [{ fields: { followers: 50000, postsCount: 200, nickname: String(call.account) }, missing: [] }] };
-    return { ...base, items: Array.from({ length: 25 }, (_, i) => ({ url: `https://example.test/${call.account}/${i}`, missing: [], fields: { id: `${call.account}-${i}`,
-      views: 1000 + i, likes: 50, comments: 5, shares: 2, publishedAt: new Date(Date.now() - i * 86400000).toISOString() } })) };
-  } } as unknown as VendorCalls });
-
 it('RUNTIME: CORE-PATH-V2 V2-5c: pasted links settle in batches, make benchmarks at close, count one round, and go with the session', async () => {
   const f = await setup();
   await researchOn();
@@ -726,6 +704,46 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: the digest a deleted answer left stops a second
   expect((await db.query(paid, [f.actor])).rows[0].n).toBe(before);
   expect((await db.query('select account,state from research_account_fetches where session_id=$1', [f.session])).rows).toEqual([{ account: null, state: 'failed_charged' }]);
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a process killed mid-turn loses nothing receipted: recovery ends the turn and the next turn pays only for the unreceipted call', async () => {
+  const f = await setup();
+  await researchOn();
+  const accounts = ['aa_one', 'bb_two', 'cc_three'];
+  const here = resolve(fileURLToPath(import.meta.url), '..'), bundle = resolve(here, `../../../.mentor-crash-${randomUUID()}.mjs`);
+  // A real process: bundled, because node cannot import this package's TypeScript by itself.
+  createRequire(resolve(here, '../../../../../apps/web/package.json'))('esbuild').buildSync({ entryPoints: [resolve(here, 'mentorCrash.child.ts')],
+    bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: bundle, logLevel: 'error' });
+  const toolRows = async (status: string) => (await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id
+    where t.actor_id=$1 and c.call_kind='tool' and c.status=$2`, [f.actor, status])).rows[0].n as number;
+  try {
+    const child = spawn(process.execPath, [bundle, JSON.stringify({ actor: f.actor, session: f.session, moduleId: f.moduleId, accounts })],
+      { stdio: ['ignore', 'pipe', 'inherit'], env: process.env });
+    let output = '';
+    child.stdout.on('data', chunk => { output += String(chunk); });
+    const gone = new Promise(done => child.once('exit', (_code, signal) => done(signal)));
+    await expect.poll(() => output, { timeout: 30000 }).toContain('call 6');
+    await expect.poll(() => toolRows('ok'), { timeout: 15000 }).toBe(1);
+    child.kill('SIGKILL');
+    expect(await gone).toBe('SIGKILL');
+  } finally { rmSync(bundle, { force: true }); }
+  expect((await db.query('select state from turns where session_id=$1', [f.session])).rows).toEqual([{ state: 'running' }]);
+  expect((await db.query('select 1 from research_account_fetches where session_id=$1', [f.session])).rows).toEqual([]);
+  // The job's own claim waits 15 minutes without a write.
+  await db.query(`update turns set updated_at=now()-interval '16 minutes' where session_id=$1`, [f.session]);
+  expect((await runTurnRecovery(rest(), Date.now() + 15000)).interrupted).toBe(1);
+  expect((await db.query('select count(*)::int n from turns where session_id=$1 and closed_at is null', [f.session])).rows[0].n).toBe(0);
+
+  const paid: string[] = [];
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_fetch', { accounts: accounts.map(account => ({ platform: 'tiktok', account })), source: { kind: 'user_message', messageId: null } })
+      : prose('gen-reply-' + n, 'Checked.'));
+  const out = await turn(f, { text: 'Check ' + accounts.map(a => `https://www.tiktok.com/@${a}`).join(' '), transport: t.fn,
+    research: tiktokVendors(async call => { paid.push(`${call.account}:${call.kind}`); }) });
+  expect(JSON.stringify(out.events.at(-1))).toContain('"type":"result"');
+  // The five receipted calls are reused; only the call in flight when the process died is sent again (a batch is the loss bound).
+  expect(paid).toEqual(['cc_three:account_posts']);
+  expect((await db.query('select account from research_benchmarks where session_id=$1 order by account', [f.session])).rows.map(r => r.account)).toEqual(accounts);
+}, 120000);
 
 it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
   const f = await setup();
