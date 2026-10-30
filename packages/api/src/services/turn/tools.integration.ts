@@ -15,6 +15,7 @@ import type { CounterStore } from './limiter';
 import { RUNTIME_PAYG_SETTING } from './quote';
 import type { TurnEvent } from './sse';
 import { researchSettings } from './tools/__tests__/fixtures';
+import { tikhubRouteId } from '../research/vendors/tikhub';
 
 /*
  * CORE-PATH-V2 V2-6 acceptance on the local database with a synthetic OpenRouter and synthetic suppliers (no network, no paid
@@ -294,4 +295,28 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a message above the interactive ceiling opens wh
   const tooBig = await turn(f, plain, suppliers(vi.fn()), false, undefined, 'x'.repeat(149_000));
   expect(tooBig.events).toEqual([{ type: 'error', code: 'TURN_INPUT_TOO_LARGE' }]);
   expect(bodies).toHaveLength(1);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-6: a mixed search charges the user for the data only, the stop-loss counts every known cost', async () => {
+  const f = await setup(), bodies: string[] = [];
+  const bucket = (await db.query("select abs(hashtext($1::text)) % 16 b, (now() at time zone 'UTC')::date d", [f.actor])).rows[0];
+  const spent = () => db.query('select coalesce(sum(spent_usd), 0)::numeric s from daily_spend where day=$1 and bucket=$2', [bucket.d, bucket.b])
+    .then(r => Number(r.rows[0].s));
+  const before = await spent();
+  // Two keywords: the first returns data, the second fails and TikHub still bills it (failed_charged, 0.01 each).
+  const route = tikhubRouteId('tiktok', 'keyword_posts')!;
+  const tikhub: VendorCalls['tikhub'] = async call => searchResult({ vendor: 'tikhub', route, usage: { unit: 'call', units: '1' },
+    ...(call.keyword === 'a' ? {} : { outcome: 'failed', reason: 'UPSTREAM_ERROR', supplierMayCharge: true, items: [] }) });
+  const vendors: VendorCalls = { tikhub, parallel: vi.fn(), firecrawl: vi.fn() };
+  const out = await turn(f, searchingModel(bodies, { name: 'social_search', args: { platform: 'tiktok', keywords: ['a', 'b'], limit: null } }),
+    vendors);
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  const tool = (await rows(f.actor)).find(r => r.call_kind === 'tool');
+  expect(tool).toMatchObject({ status: 'ok', n: 0.01, c: 0.02 });
+  const others = (await db.query(`select coalesce(sum(c.nominal_usd), 0)::float8 n from turn_calls c join turns t on t.id=c.turn_id
+    and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind <> 'tool' and c.status='ok'`, [f.actor])).rows[0].n as number;
+  // The user's credits count the data subcall only; the stop-loss counts both subcalls.
+  expect((await db.query('select charged_credits from turns where actor_id=$1', [f.actor])).rows[0].charged_credits)
+    .toBe(await expectedCredits(f.actor));
+  expect(await spent() - before).toBeCloseTo(others + 0.02, 9);
 });
