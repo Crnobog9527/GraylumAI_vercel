@@ -198,11 +198,14 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
       await meter.finishJourney('journey 6: jury (no revised draft)');
       return;
     }
-    // Pick a version for every chapter that needs a decision: the revised text for the first, the original for the rest.
+    // Pick a version for every chapter that needs a decision. Chapters that share a positioning field are linked (choosing for one
+    // chooses for the whole group), so keeping some originals could undo the only adopted revision: adopt the revised text wherever
+    // it is offered, and keep the original only where it is not.
     for (let i = 0; i < count; i += 1) {
       const chapter = chapters.nth(i);
-      if (i === 0) {
-        await chapter.getByRole('radio', { name: '采用修订版' }).check();
+      const revised = chapter.getByRole('radio', { name: '采用修订版' });
+      if (await revised.count()) {
+        await revised.check();
         const wording = chapter.getByRole('checkbox', { name: /只改了表述/ });
         if (await wording.count()) await wording.check();
       } else {
