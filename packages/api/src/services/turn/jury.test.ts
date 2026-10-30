@@ -26,7 +26,7 @@ vi.mock('../membershipEntitlements', () => ({ readMembershipEntitlements: async 
   assertFusionEntitlement: () => { if (m.member() === false) throw new Error('FUSION_MEMBERSHIP_REQUIRED'); } }));
 vi.mock('../models/openRouterKey', async original => ({ ...(await original<typeof import('../models/openRouterKey')>()),
   readOpenRouterKeyOrUnset: async () => 'SYNTHETIC' }));
-import { estimateQuotes, juryTurn } from './jury';
+import { estimateQuotes, juryTurn, samePricing } from './jury';
 
 const REVIEWERS = ['00000000-0000-4000-8000-00000000000a', '00000000-0000-4000-8000-00000000000b', '00000000-0000-4000-8000-00000000000c'];
 const SUMMARY = '00000000-0000-4000-8000-0000000000d0';
@@ -50,6 +50,17 @@ beforeEach(() => {
   m.close.mockResolvedValue({ turnId: 7, closeKind: 'completed', chargedCredits: 1500, settlement: 'done', replay: false });
   m.settings.mockReturnValue({ review: { enabled: true, reviewerModelIds: REVIEWERS, summaryModelId: SUMMARY } });
   m.member.mockReturnValue(true);
+});
+
+describe('jury frozen price', () => {
+  it('compares prices whatever the key order at any depth, as jsonb returns them (#1522 review)', () => {
+    const live = { prompt: '1', tiers: [{ minPromptTokens: 0, prompt: '1', completion: '2', request: undefined }, { minPromptTokens: 9, prompt: '3' }],
+      timeOfDay: { start: 1, end: 2 } };
+    const stored = { timeOfDay: { end: 2, start: 1 }, tiers: [{ completion: '2', minPromptTokens: 0, prompt: '1' }, { prompt: '3', minPromptTokens: 9 }], prompt: '1' };
+    expect(samePricing(stored, live)).toBe(true);
+    expect(samePricing({ ...stored, tiers: [...stored.tiers].reverse() }, live)).toBe(false);
+    expect(samePricing({ ...stored, prompt: '2' }, live)).toBe(false);
+  });
 });
 
 describe('jury estimate quotes', () => {

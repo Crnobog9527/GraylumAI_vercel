@@ -69,9 +69,11 @@ async function panelQuotes(deps: JuryDeps, cfg: { reviewers: string[]; summary: 
     phase === 'fusion_summary' ? summary : reviewers.find(q => q.modelId === modelId)! };
 }
 
-/** Prices as jsonb returned them (key order is not kept) against a live quote's. */
-const samePricing = (frozen: unknown, live: unknown) => {
-  const canonical = (value: unknown) => JSON.stringify(Object.entries((value ?? {}) as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));
+/** Prices as jsonb returned them (no key order kept, at any depth; arrays keep theirs) against a live quote's. */
+export const samePricing = (frozen: unknown, live: unknown) => {
+  const sorted = (value: unknown): unknown => Array.isArray(value) ? value.map(sorted)
+    : value && typeof value === 'object' ? Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sorted(v)]) : value;
+  const canonical = (value: unknown) => JSON.stringify(sorted(JSON.parse(JSON.stringify(value ?? null))));
   return canonical(frozen) === canonical(live);
 };
 
