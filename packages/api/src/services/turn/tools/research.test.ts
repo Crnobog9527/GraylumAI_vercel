@@ -170,3 +170,12 @@ describe('the bound of a call covers requests it may add (YouTube post detail)',
     expect(s.h.writes[0]![1]).toMatchObject({ upperUsd: '0.3', multiplier: '9' });
   });
 });
+
+describe('a supplier answer cut short stays partial', () => {
+  it('keeps the supplier\'s partial and truncated marks in the tool result', async () => {
+    const s = setup(vi.fn(async () => result({ vendor: 'tikhub', route: 'xhs-search', outcome: 'partial', reason: 'ITEM_LIMIT', truncated: true })));
+    const out = JSON.parse(await s.tool('social_search').execute({ platform: 'xiaohongshu', keywords: ['a'], limit: null }, 'c1'));
+    expect(out).toMatchObject({ status: 'partial', reason: 'ITEM_LIMIT', truncated: true });
+    expect(s.h.kinds()).toEqual(['begin', 'record:ok']);
+  });
+});

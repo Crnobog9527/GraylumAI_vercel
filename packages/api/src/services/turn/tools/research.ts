@@ -113,7 +113,7 @@ function planSteps(input: ResearchToolsInput, name: GeneralResearchToolName, arg
 async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planned: Extract<Planned, { steps: Step[] }>) {
   const items: ToolEnvelope['items'] = [];
   const steps = [...planned.steps];
-  let stoppedAt: string | null = null, fetchedAt: string | undefined;
+  let stoppedAt: string | null = null, fetchedAt: string | undefined, cut: string | null = null;
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]!;
     const receipt = await supplierSubcall(input.suppliers, step.request);
@@ -121,13 +121,15 @@ async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planne
     const result = receipt.result;
     if (result.outcome !== 'ok' && result.outcome !== 'partial') { stoppedAt = result.reason ?? result.outcome; break; }
     fetchedAt ??= result.fetchedAt;
+    // A supplier answer cut to its item or byte limit stays partial: the model is told data is missing.
+    if (result.outcome === 'partial' || result.truncated) cut ??= result.reason ?? 'RESULT_TRUNCATED';
     const n = ledger.receipts.length;
     items.push(...result.items.map((item, index) => ({ ...(item.url ? { url: item.url } : {}),
       fields: { ...item.fields, ...step.label, ref: `s${n}#${index + 1}` }, missing: item.missing })));
     const following = planned.next?.(step, result.items);
     if (following) steps.splice(i + 1, 0, following);
   }
-  return { items, stoppedAt, fetchedAt, subcalls: ledger.receipts.filter(r => r.result.outcome !== 'not_sent').length };
+  return { items, stoppedAt, cut, fetchedAt, subcalls: ledger.receipts.filter(r => r.result.outcome !== 'not_sent').length };
 }
 
 /** The bound of one call: its worst-case subcalls at the highest frozen route price, and the highest route multiplier. */
@@ -182,7 +184,8 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       if (outcome === 'unknown') return toolEnvelope({ status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN',
         ...(value.items.length ? { items: value.items } : {}) });
       if (outcome === 'no_data') return toolEnvelope({ status: 'unavailable', reason: NO_DATA_REASON });
-      return toolEnvelope({ status: value.stoppedAt ? 'partial' : 'ok', reason: value.stoppedAt, items: value.items,
+      return toolEnvelope({ status: value.stoppedAt || value.cut ? 'partial' : 'ok', reason: value.stoppedAt ?? value.cut,
+        items: value.items, truncated: value.cut !== null,
         ...(value.fetchedAt ? { fetchedAt: value.fetchedAt } : {}) });
     },
   });
