@@ -19,6 +19,9 @@ BEGIN
  IF substr(p_request_id::text,15,1)='f' THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
  SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND draft_id=p_draft_id;
  IF d.draft_id IS NULL OR NOT bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',p_draft_id)) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
+ -- V2-5: the draft's session row first, the lock a mentor turn's close holds while it writes this checklist (the main-path
+ -- serialization point), so a manual save and a mentor capture never overwrite each other; then the project, as before.
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
  PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
  PERFORM read_skill_package(p_actor_id,(SELECT module_id FROM artifact_projects WHERE id=d.project_id),(SELECT skill_id FROM artifact_projects WHERE id=d.project_id),r.revision_id,r.package_hash,NULL);
