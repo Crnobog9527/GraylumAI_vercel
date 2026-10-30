@@ -165,15 +165,16 @@ export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promi
       // A complete answer whose cost is not final yet (modelCall returned it without a receipt): the answer is kept and
       // judged now; the call stays open for recovery to settle its cost by the provider id (2.5.2).
       const text = answerText(result.value), seq = lastSeq.get(member);
-      if (!text || seq === undefined) return { ok: false, code: 'TURN_CALL_UNKNOWN' };
-      const judged = member.judge(text);
-      // A refused column is saved too (never shown): its cost settled later by recovery is then never charged to the user.
+      if (seq === undefined) return { ok: false, code: 'TURN_CALL_UNKNOWN' };
+      // A completed call without an answer delivers nothing, as one whose cost is known at once (the placeholder is never read).
+      const judged: Judged = text ? member.judge(text) : { verdict: 'no_delivery' };
+      // A refused or empty column is saved too (never shown): its cost settled later by recovery is then never charged to the user.
       try {
-        const kept = await ctx.db.output(ctx.turnId, seq, { phase: member.phase, body: text, verdict: judged.verdict,
+        const kept = await ctx.db.output(ctx.turnId, seq, { phase: member.phase, body: text || '(empty)', verdict: judged.verdict,
           ...(judged.deliverable ? { deliverable: true } : {}) });
         if (kept.productGone || kept.sessionTombstoned || kept.accountErasing) return { ok: false, code: 'TURN_TOMBSTONED' };
       } catch (error) { return { ok: false, code: error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED' }; }
-      return { ok: true, text, verdict: judged.verdict };
+      return text ? { ok: true, text, verdict: judged.verdict } : { ok: true, text: '', verdict: 'no_delivery', empty: true };
     }
     const error = result.reason;
     return { ok: false, code: error instanceof TurnStop || error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED' };

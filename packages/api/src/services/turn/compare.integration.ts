@@ -260,6 +260,18 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: a refusing column whose cost is not final is sa
     where o.actor_id=$1`, [f.actor])).rows.map(r => r.verdict + ':' + r.status).sort()).toEqual(['no_delivery:unknown', 'usable:ok']);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-7b: an empty column whose cost is not final is saved as undelivered, so recovery never charges it (#1522 review)', async () => {
+  const f = await member();
+  const transport: typeof fetch = async (_url, init) => { const body = JSON.parse(String(init?.body));
+    if (body.model !== PAIRS[0][0]) return sse('gen-cmp-' + randomUUID(), body.model, 'A real answer');
+    return new Response(frame('gen-empty', body.model, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-empty' } }); };
+  const events = await compare(f, transport);
+  expect(events.at(-1)).toMatchObject({ type: 'result', settlement: 'pending' });
+  expect((await db.query(`select o.verdict from fusion_turn_outputs o where o.actor_id=$1`, [f.actor])).rows.map(r => r.verdict).sort())
+    .toEqual(['no_delivery', 'usable']);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-7b: a column broken after it started keeps its freeze for recovery and is never sent again', async () => {
   const f = await member();
   let posts = 0;
