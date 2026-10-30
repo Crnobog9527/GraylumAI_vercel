@@ -34,3 +34,12 @@ describe('GET /api/turn: the refresh-recovery read (V2-5b, #595)', () => {
       .toEqual([503, 'TURN_VIEW_UNAVAILABLE']);
   });
 });
+
+describe('handleTurnView scope (V2-5d)', () => {
+  it('checks the scope first and refuses without reading the conversation', async () => {
+    const rpc = vi.fn(async (name: string) => ({ data: name === 'session_view_allowed' ? false : view, error: null }));
+    const res = await handleTurnView(get(`?sessionId=${SESSION}`), deps(rpc as never));
+    expect(res.status).toBe(403);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+});
