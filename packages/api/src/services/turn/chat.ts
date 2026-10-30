@@ -42,7 +42,7 @@ import { fitToolTurn } from './tools/capacity';
  */
 export { CORE_PATH_SETTING } from './settingKeys';
 // decisionUpperUsd: the most one positioning check (Decisions) can cost the platform; it is reserved on the stop-loss (Fable 10-28).
-const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
+export const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
 /** The route's maxDuration (300 s): supplier requests stop in time for the reply (V2-6). */
@@ -61,7 +61,7 @@ export type ChatDeps = {
 export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
-const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
+export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_TOMBSTONED: { kind: 'erased', refundAll: false },
   TURN_CALL_UNKNOWN: { kind: 'interrupted', refundAll: false },
   TURN_PROVIDER_402: { kind: 'failed', refundAll: true },
@@ -75,7 +75,7 @@ const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_USAGE_CONFIGURATION_REQUIRED: { kind: 'failed', refundAll: true },
 };
 /** A refusal of the new-work gate as a turn code: the administrator's pause, a minute or day limit, or limits unavailable. */
-const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
+export const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
   usage_configuration_required: 'TURN_USAGE_CONFIGURATION_REQUIRED' } as const;
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {

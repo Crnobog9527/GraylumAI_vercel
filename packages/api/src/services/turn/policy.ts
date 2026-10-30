@@ -27,7 +27,7 @@ export function callCredits(q: string, upperUsd: string, multiplier: string): nu
 
 export const turnLimits = z.object({ model: z.number().int().min(1).max(16), paidTools: z.number().int().min(0).max(8),
   freeTools: z.number().int().min(0).max(8), decisions: z.number().int().min(0).max(1) }).strict()
-  .refine(l => l.model === 1 + l.paidTools + l.freeTools, 'every tool return is one more model call (2.5.3)');
+  .refine(l => l.model >= 1 + l.paidTools + l.freeTools, 'every tool return is one more model call (2.5.3)');
 export type TurnLimits = z.infer<typeof turnLimits>;
 export const stopLossSettings = z.object({ limitUsd: z.number().positive(), p: z.number().int().min(1),
   poolSize: z.number().int().min(1), uFastUsd: z.number().nonnegative(), uBigUsd: z.number().nonnegative() }).strict();
@@ -36,6 +36,9 @@ export type PolicyInput = {
   q: string; multiplier: string; modelUpperUsd: string; limits: TurnLimits;
   /** One bound per allowed paid tool call (research), in USD; the tool's own multiplier is the model's here. */
   paidToolUpperUsd?: readonly string[];
+  /** Model calls on another model, each with its own bound in USD and multiplier (the mentor's organizer, V2-5). They are in
+   * limits.model beyond the 1 + tools of the main model: limits.model = 1 + paidTools + freeTools + otherModelCalls.length. */
+  otherModelCalls?: ReadonlyArray<{ upperUsd: string; multiplier: string }>;
   /** The Decisions model's upper bound for one positioning check, in USD; required when limits.decisions is 1. */
   decisionUpperUsd?: string;
   stopLoss: z.infer<typeof stopLossSettings>; historyItems: number; inputBytes: number;
@@ -55,11 +58,14 @@ const validThreshold = (credits: number) => {
 
 export function turnPolicy(input: PolicyInput) {
   const limits = turnLimits.parse(input.limits), stopLoss = stopLossSettings.parse(input.stopLoss);
-  const paid = input.paidToolUpperUsd ?? [];
-  if (paid.length !== limits.paidTools || (limits.decisions > 0) !== (input.decisionUpperUsd !== undefined)) throw new Error('TURN_POLICY_INVALID');
+  const paid = input.paidToolUpperUsd ?? [], other = input.otherModelCalls ?? [];
+  if (paid.length !== limits.paidTools || limits.model !== 1 + limits.paidTools + limits.freeTools + other.length
+    || (limits.decisions > 0) !== (input.decisionUpperUsd !== undefined)) throw new Error('TURN_POLICY_INVALID');
   const uModelCredits = callCredits(input.q, input.modelUpperUsd, input.multiplier);
-  const gCredits = limits.model * uModelCredits + paid.reduce((sum, u) => sum + callCredits(input.q, u, input.multiplier), 0);
-  const uTurn = units(input.modelUpperUsd) * BigInt(limits.model) + paid.reduce((sum, u) => sum + units(u), 0n)
+  const own = limits.model - other.length;
+  const gCredits = own * uModelCredits + paid.reduce((sum, u) => sum + callCredits(input.q, u, input.multiplier), 0)
+    + other.reduce((sum, c) => sum + callCredits(input.q, c.upperUsd, c.multiplier), 0);
+  const uTurn = units(input.modelUpperUsd) * BigInt(own) + [...paid, ...other.map(c => c.upperUsd)].reduce((sum, u) => sum + units(u), 0n)
     + (input.decisionUpperUsd === undefined ? 0n : units(input.decisionUpperUsd) * BigInt(limits.decisions));
   return {
     ...input.frozen,
