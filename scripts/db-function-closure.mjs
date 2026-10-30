@@ -138,7 +138,9 @@ function ownSelect(statement, at) {
     else if (ch === ')') nested = Math.max(0, nested - 1);
     else out += nested ? ' ' : ch;
   }
-  return out;
+  // Outside parentheses the "statement" runs on through PL/pgSQL control words (a loop head and its body share one ';'-less stretch):
+  // the lock's own SELECT starts after the last of them.
+  return open < 0 ? out.split(/\b(?:LOOP|THEN|ELSE|BEGIN)\b/i).pop() : out;
 }
 // The text of the statement from `at` up to the parenthesis that closes the group `at` sits in (or the statement end), nested groups blanked.
 function scopeAfter(statement, at) {
@@ -150,7 +152,18 @@ function scopeAfter(statement, at) {
   }
   return out;
 }
-const LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b(?:\s+OF\s+([a-z_][a-z0-9_.,\s]*?))?(?=\s*(?:SKIP|NOWAIT|\)|$))/gi;
+const LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b(?:\s+OF\s+([a-z_][a-z0-9_.,\s]*?))?(?=\s*(?:SKIP|NOWAIT|LOOP|\)|$))/gi;
+// What filters the rows: the text after the first WHERE up to the clause that follows it. A key named only in RETURNING, ORDER BY or a
+// later clause does not filter anything.
+const WHERE_END = /\b(?:RETURNING|ORDER\s+BY|GROUP\s+BY|HAVING|WINDOW|LIMIT|OFFSET|FETCH|UNION|INTERSECT|EXCEPT|FOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE|KEY\s+SHARE)|INTO)\b/i;
+export function whereClause(text) {
+  const at = text.search(/\bWHERE\b/i);
+  if (at < 0) return '';
+  const rest = text.slice(at + 5);
+  const end = rest.search(WHERE_END);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+const hasKey = (text, keys) => new RegExp(`\\b(?:${keys.join('|')})\\b`, 'i').test(whereClause(text));
 
 // Violations of the plan-7.1 rules in one function body. The ledger leaves are exempt from the table lists (ENGINEERING 5: they may
 // lock and write the user's own subscription and credit-package source rows) but not from the session-state rules.
@@ -183,7 +196,7 @@ export function scan(name, body, options = DEFAULTS) {
         if (ctes.has(table)) continue;
         const keys = options.lockKeys[table];
         if (!options.lockTables.includes(table)) found.push(`${name}: row lock on ${table}`);
-        else if (!batch && keys && !new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`, 'i').test(own)) {
+        else if (!batch && keys && !hasKey(own, keys)) {
           found.push(`${name}: row lock on ${table} without ${keys.join(' or ')} in WHERE`);
         }
       }
@@ -198,7 +211,7 @@ export function scan(name, body, options = DEFAULTS) {
       const table = update[1].toLowerCase();
       const keys = options.updateKeys[table] ?? options.kindTables[table];
       if (!keys) found.push(`${name}: UPDATE of ${table}`);
-      else if (!new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`, 'i').test(scopeAfter(statement, update.index))) {
+      else if (!hasKey(scopeAfter(statement, update.index), keys)) {
         found.push(`${name}: UPDATE of ${table} without ${keys.join(' or ')} in WHERE`);
       }
     }

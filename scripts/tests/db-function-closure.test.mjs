@@ -119,6 +119,14 @@ test('SET is a statement, UPDATE ... SET on its own line is not; ledger leaves m
   assert.deepEqual(hits(ledger, 'turn_settle_credits'), [], 'the ledger leaf is exempt from the table lists');
   assert.deepEqual(hits('SET search_path = x;', 'turn_settle_credits'), ['turn_settle_credits: non-LOCAL SET'], 'but not from the session-state rules');
   assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s WHERE id = r;'), []);
+  assert.deepEqual(hits('UPDATE profiles SET credits = 0 WHERE true RETURNING id;'), ['f: UPDATE of profiles without id in WHERE'],
+    'a key named only in RETURNING does not filter');
+  assert.deepEqual(hits('PERFORM 1 FROM profiles WHERE true ORDER BY id FOR UPDATE;'), ['f: row lock on profiles without id in WHERE'],
+    'nor does one in ORDER BY');
+  assert.deepEqual(hits('BEGIN FOR r IN SELECT id FROM secret_things FOR UPDATE LOOP NULL; END LOOP; END;'), ['f: row lock on secret_things'],
+    'a FOR UPDATE that ends in LOOP is still a lock');
+  assert.deepEqual(hits('FOR r IN SELECT id FROM turns WHERE actor_id = a LOOP PERFORM 1 FROM profiles WHERE id = a FOR UPDATE; END LOOP;'), [],
+    'a loop head is not part of the lock inside its body');
   assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s;'), ['f: UPDATE of artifact_rounds without id or project_id in WHERE']);
   assert.deepEqual(hits('UPDATE fusion_reviews SET turn_id = t WHERE actor_id = a AND id = r;'), [], 'a jury review: one row, by its owner key');
   assert.deepEqual(hits('UPDATE fusion_compares SET turn_id = t WHERE state = s;'), ['f: UPDATE of fusion_compares without actor_id or id in WHERE']);
