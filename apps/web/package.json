@@ -24,7 +24,9 @@
     "test:e2e:admin-destructive": "playwright test admin-destructive.spec.ts --project=chromium",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:core-path": "playwright test -c playwright.core-path.config.ts",
+    "test:e2e:core-path:cheap": "playwright test -c playwright.core-path.config.ts --grep @cheap"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.3.1",
