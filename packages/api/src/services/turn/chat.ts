@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import type { AgentInputItem } from '@openai/agents';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
@@ -31,6 +32,7 @@ import type { TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
 import { prepareChatTools, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
+import { fitToolTurn } from './tools/capacity';
 
 /*
  * CORE-PATH-V2 kind=chat (2.7): a free-chat turn without tools (V2-4a; the free tools come in V2-4b). Database work is
@@ -223,6 +225,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       tools: built?.tools ?? [], stream: true,
       // One call per response, and no tool on the request after the last allowed call (runner.ts, 2.5.3).
       ...(built?.tools.length ? { firstToolCallOnly: true, research: { freeChat: 'core-path-v2' }, maxToolCalls: built.maxToolCalls } : {}),
+      // Each tool return adds to the next request: the oldest history goes first, so the turn keeps fitting (V2-6).
+      ...(built?.tools.length && tools ? { filterModelInput: (items: AgentInputItem[], text: string) =>
+        fitToolTurn(items, text, history.length, inputLimit - 8192 - tools!.definitionBytes) } : {}),
       // The history was trimmed above; the SDK appends what this returns to nothing else, so the current message goes last.
       selectHistory: async (items, incoming) => [...items, ...incoming],
       onText: delta => {

@@ -153,3 +153,20 @@ describe('one supplier subcall (3.3.2 item 10: per-supplier in-flight limit with
     expect(tikhub).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('the bound of a call covers requests it may add (YouTube post detail)', () => {
+  it('prices every subcall at the dearest route the call may reach, the detail route included', async () => {
+    const route = (kind: 'account_posts' | 'post_detail', name: string) =>
+      ({ platform: 'youtube' as const, kind, vendor: 'tikhub' as const, route: name, backup: null, maxUnitsPerCall: '1' as const });
+    const yt = { ...config, verifiedPlatforms: ['youtube' as const], routes: [route('account_posts', 'yt-posts'), route('post_detail', 'yt-detail')] };
+    const tikhub = vi.fn(async (call: { kind: string }) => result({ vendor: 'tikhub',
+      route: call.kind === 'post_detail' ? 'yt-detail' : 'yt-posts', items: [{ fields: { id: 'v1' }, missing: [] }] }));
+    const s = setup(tikhub, { config: yt, accounts: { benchmark: [], currentMessage: 'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv' } },
+      { policies: [policy('tikhub', 'yt-posts', '0.001'), policy('tikhub', 'yt-detail', '0.1', '9')] });
+    const out = JSON.parse(await s.tool('social_account').execute({ platform: 'youtube', account: 'UCabcdefghijklmnopqrstuv', posts: null }, 'c1'));
+    expect(out.status).toBe('ok');
+    expect(tikhub).toHaveBeenCalledTimes(2);
+    // 3 subcalls x 0.1 (the detail route), at the detail route's m 9.
+    expect(s.h.writes[0]![1]).toMatchObject({ upperUsd: '0.3', multiplier: '9' });
+  });
+});

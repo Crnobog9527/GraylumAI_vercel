@@ -60,7 +60,9 @@ export function accountAllowed(accounts: ResearchToolsInput['accounts'], platfor
   return accounts.benchmark.some(same) || profileLinksIn(accounts.currentMessage).some(same) ? account : null;
 }
 
-type Planned = { steps: Step[]; next?: (step: Step, items: ResearchItem[]) => Step | undefined } | { refused: string };
+/** `later`: requests that may be added while the call runs (YouTube's post detail); the call's bound covers them too. */
+type Planned = { steps: Step[]; later?: SupplierRequest[]; next?: (step: Step, items: ResearchItem[]) => Step | undefined }
+  | { refused: string };
 
 function planSteps(input: ResearchToolsInput, name: GeneralResearchToolName, args: Record<string, unknown>): Planned {
   const config = input.config;
@@ -85,10 +87,10 @@ function planSteps(input: ResearchToolsInput, name: GeneralResearchToolName, arg
       return request && { request, label: { platform: a.platform, account, dataKind: kind } };
     };
     const first = kinds?.filter(kind => kind !== 'post_detail').map(kind => step(kind));
-    if (!kinds || !first?.length || first.some(item => !item) || (kinds.includes('post_detail') && !step('post_detail', 'x')))
-      return { refused: 'ROUTE_NOT_SUPPORTED' };
+    const detail = kinds?.includes('post_detail') ? step('post_detail', 'x') : undefined;
+    if (!kinds || !first?.length || first.some(item => !item) || detail === null) return { refused: 'ROUTE_NOT_SUPPORTED' };
     // YouTube: post_detail needs a post id from account_posts, so it follows once those came back.
-    return { steps: first as Step[], next: (current, items) => {
+    return { steps: first as Step[], ...(detail ? { later: [detail.request] } : {}), next: (current, items) => {
       if (!kinds.includes('post_detail') || current.request.vendor !== 'tikhub' || current.request.call.kind !== 'account_posts') return;
       const postId = items[0]?.fields.id;
       return typeof postId === 'string' ? step('post_detail', postId) ?? undefined : undefined;
@@ -159,7 +161,8 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       const need = subcallNeed(name, parsed.data as never, input.config);
       const allowance = admitSubcalls(need, subcallsLeft);
       if (allowance.exhausted) return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
-      const bound = callBound(input.suppliers.policies, planned.steps.map(step => step.request), allowance.allowed);
+      const bound = callBound(input.suppliers.policies, [...planned.steps.map(step => step.request), ...planned.later ?? []],
+        allowance.allowed);
       if (!bound) return toolEnvelope({ status: 'unavailable', reason: 'ROUTE_NOT_FROZEN' });
       // Refused here: nothing is written or sent, and the turn stops (the gate's TurnStop passes).
       await input.callGate?.(allowance.allowed);
