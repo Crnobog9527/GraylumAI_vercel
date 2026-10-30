@@ -1,8 +1,24 @@
 {
  "closure": {
-  "turn_open": { "functions": 78, "tables": 53 }
+  "turn_close": {
+   "functions": 79,
+   "tables": 55
+  },
+  "turn_mentor_apply": {
+   "functions": 75,
+   "tables": 50
+  },
+  "turn_mentor_context": {
+   "functions": 75,
+   "tables": 49
+  },
+  "turn_open": {
+   "functions": 79,
+   "tables": 53
+  }
  },
  "rules": [
+  "turn_mentor_apply: UPDATE of artifact_rounds",
   "turn_settle_credits: UPDATE of subscription_credit_grants",
   "turn_settle_credits: non-LOCAL SET",
   "turn_settle_credits: row lock on subscription_credit_grants"
