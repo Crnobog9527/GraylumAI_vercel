@@ -41,27 +41,20 @@ export async function reportCases(t){
   await c.query("update profiles set membership_level='free' where id=$1",[a.actor]);
   await refused(reportPolicy(src),/REPORT_MEMBERSHIP_REQUIRED/);
   await c.query("update profiles set membership_level='gold' where id=$1",[a.actor]);
-  await c.query("update artifact_rounds set steps=jsonb_set(steps,'{s,valid}','false') where id=$1",[src.round]);
-  await refused(reportPolicy(src),/REPORT_CONFIRMATION_REQUIRED/);
-  await c.query("update artifact_rounds set steps=jsonb_set(steps,'{s,valid}','true') where id=$1",[src.round]);
-  await c.query('update research_benchmarks set qualified=false where session_id=$1',[src.session]);
-  await refused(reportPolicy(src),/REPORT_BENCHMARKS_REQUIRED/);
-  await c.query('update research_benchmarks set qualified=true where session_id=$1',[src.session]);
+  // The confirmed facts and the benchmark gate are read by Node before opening (B1); under turn_open's locks the round must be
+  // this conversation's draft: another round of the same account is refused.
+  const elsewhere=await reportSource(a);
+  await refused(reportPolicy(src,{report:{projectId:elsewhere.project,roundId:elsewhere.round,moduleId:src.module}}),/REPORT_SOURCE_CONFLICT/);
   await c.query("update system_settings set value='{\"enabled\":false}' where key='runtime_report_generation'");
   await refused(reportPolicy(src),/REPORT_DISABLED/);
   await c.query("update system_settings set value='{\"enabled\":true}' where key='runtime_report_generation'");
   const poor=await account(520),poorSrc=await reportSource(poor);
   assert.match(await refusal(openReport(poor,poorSrc)),/TURN_INSUFFICIENT_CREDITS/);
   assert.equal(await balance(poor),520,'the fixed price and the call bound must both be covered, or nothing is frozen');
-  // Admitted: the whole 500 + the call bound is frozen; the frozen identity, the source and the benchmark table come back.
+  // Admitted: the whole 500 + the call bound is frozen; nothing of the source comes back (Node read it before opening).
   const o=await openReport(a,src);
   assert.deepEqual([o.reservedCredits,o.history,await balance(a)],[530,[],470]);
-  // The exact shape Node's report turn parses (report.ts reportContext): nothing else is promised.
-  assert.deepEqual(Object.keys(o.kindContext).sort(),['benchmarks','source']);
-  assert.equal(o.kindContext.source.moduleId,src.module);
-  assert.match(o.kindContext.source.snapshotHash,/^[0-9a-f]{64}$/);
-  assert.equal(o.kindContext.benchmarks.rows.length,3);
-  assert.equal(o.kindContext.source.snapshot.steps.s.body,'CONFIRMED_FACTS');
+  assert.equal(o.kindContext,null);
   const policy=await one('select policy v from turns where id=$1',[o.turnId]);
   assert.deepEqual([policy.bucket,policy.fixedCredits,policy.report.roundId],[-1,500,src.round],'a report reserves the large-kind stop-loss row');
   // Its result is only {body}; anything else is refused and changes nothing.
@@ -73,7 +66,7 @@ export async function reportCases(t){
   assert.equal(await one('select state v from turns where id=$1',[o.turnId]),'running');
   await close(a,o.turnId,'failed',{messages:[],delivered:false});
   assert.equal(await balance(a),1000);
-  report.checks.push('report admission in turn_open: switch, today\'s price, one-call shape, the round\'s module, membership, confirmed facts, benchmarks, fixed price + call bound all frozen or nothing; returns identity, source and benchmarks');
+  report.checks.push('report admission in turn_open: switch, today\'s price, one-call shape, the round is this conversation\'s and of the quoted module, membership, fixed price + call bound all frozen or nothing');
  }
  // 2. A complete report pays the fixed price once; its text is the turn's, hidden from the conversation history; a second paid
  // start of the round is refused while it stands. Duplicate submits (same request, a double click) and two at once freeze once.

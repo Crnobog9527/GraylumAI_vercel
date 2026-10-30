@@ -11,7 +11,7 @@ AS $function$
 DECLARE
   s runtime_sessions; t turns; prof profiles; existing turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
-  u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb; report jsonb;
+  u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
   carried integer := 0;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
@@ -111,7 +111,7 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
     -- The freeze covers the carried credits too (the continuation settles them).
-    IF p_kind = 'report' THEN report := public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
+    IF p_kind = 'report' THEN PERFORM public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
@@ -151,6 +151,5 @@ BEGIN
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
-    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor')
-      WHEN 'report' THEN report END);
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
 END $function$;

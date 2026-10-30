@@ -117,6 +117,15 @@ export function turnDatabase(clients: TurnClients) {
     reportRead: (a: { actorId: string; sessionId: string; roundId: string | null; turnId: number | null }) =>
       call(clients.read, 'turn_report_read', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_round_id: a.roundId,
         p_turn_id: a.turnId }, reportTurn.nullable()),
+    // A report's reads before it opens (controller 10-30, B1), on the read client and by the actor's own keys: the confirmed
+    // source of its round, the session's benchmark table, and the benchmark shortfall card (only when the table is short).
+    reportSource: (a: { actorId: string; sessionId: string; projectId: string; roundId: string }) =>
+      call(clients.read, 'report_source', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_project_id: a.projectId,
+        p_round_id: a.roundId }, z.record(z.string(), z.unknown())),
+    benchmarkRows: (a: { actorId: string; sessionId: string }) =>
+      call(clients.read, 'research_benchmark_rows', { a: a.actorId, s: a.sessionId }, z.unknown()),
+    benchmarkShortfall: (a: { actorId: string; sessionId: string }) =>
+      call(clients.read, 'research_user_shortfall', { a: a.actorId, s: a.sessionId }, z.unknown()),
   };
 }
 export type TurnDatabase = ReturnType<typeof turnDatabase>;

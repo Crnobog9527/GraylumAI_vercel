@@ -3,23 +3,20 @@
 
 -- turn_report_admit(uuid,uuid,jsonb)
 CREATE OR REPLACE FUNCTION public.turn_report_admit(p_actor_id uuid, p_session_id uuid, p_policy jsonb)
- RETURNS jsonb
+ RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE flag jsonb; rep jsonb := p_policy->'report'; source jsonb; spec jsonb; item jsonb; scope jsonb; required integer;
-  fixed integer;
+DECLARE rep jsonb := p_policy->'report'; fixed integer; lvl text;
 BEGIN
   -- The stop's frozen fields are written by turn_stop only.
-  IF rep IS NULL OR jsonb_typeof(rep) <> 'object' OR p_policy ?| ARRAY['stoppedAt','stopChargeable','stopAt'] THEN
+  IF rep IS NULL OR jsonb_typeof(rep) <> 'object' OR p_policy ?| ARRAY['stoppedAt','stopChargeable','stopAt']
+    OR rep->>'projectId' !~ '^[0-9a-f-]{36}$' OR rep->>'roundId' !~ '^[0-9a-f-]{36}$' OR rep->>'moduleId' !~ '^[0-9a-f-]{36}$' THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
-  SELECT value::jsonb INTO flag FROM system_settings WHERE key = 'runtime_report_generation';
-  IF flag IS DISTINCT FROM '{"enabled":true}'::jsonb THEN RAISE EXCEPTION 'REPORT_DISABLED' USING ERRCODE='P0001'; END IF;
-  IF jsonb_typeof(rep) <> 'object' OR rep->>'projectId' !~ '^[0-9a-f-]{36}$' OR rep->>'roundId' !~ '^[0-9a-f-]{36}$'
-    OR rep->>'moduleId' !~ '^[0-9a-f-]{36}$' THEN
-    RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+  IF (SELECT value::jsonb FROM system_settings WHERE key = 'runtime_report_generation') IS DISTINCT FROM '{"enabled":true}'::jsonb THEN
+    RAISE EXCEPTION 'REPORT_DISABLED' USING ERRCODE='P0001';
   END IF;
   -- The price the button showed (acceptedCredits, checked by Node against fixedCredits) must be today's price.
   fixed := public.report_fixed_price();
@@ -33,25 +30,16 @@ BEGIN
     OR (p_policy->>'minCredits')::int <> (p_policy->>'gCredits')::int THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
-  PERFORM public.report_membership_check(p_actor_id);
-  source := public.report_source(p_actor_id, p_session_id, (rep->>'projectId')::uuid, (rep->>'roundId')::uuid);
-  spec := source#>'{workflow,reportGeneration}';
-  IF spec IS NULL THEN RAISE EXCEPTION 'REPORT_MANIFEST_REQUIRED' USING ERRCODE='P0001'; END IF;
-  FOR item IN SELECT value FROM jsonb_each(source#>'{snapshot,steps}') LOOP
-    IF item->>'valid' IS DISTINCT FROM 'true' OR item->>'confirmationId' IS NULL OR item->>'body' IS NULL
-      OR item->>'available' = 'false' THEN RAISE EXCEPTION 'REPORT_CONFIRMATION_REQUIRED' USING ERRCODE='P0001'; END IF;
-  END LOOP;
-  -- The model, and so the call's bound, was chosen for the module Node named; it must be the round's, and still offered (the
-  -- Skill text is read from the process cache by package hash).
-  IF source->>'moduleId' IS DISTINCT FROM rep->>'moduleId' OR NOT EXISTS (SELECT 1 FROM modules m WHERE m.id = (source->>'moduleId')::uuid AND m.active) THEN
+  -- Membership (Pro or Gold), from the account row turn_open holds: the same cached level as the jury's Gold gate (V2-7b).
+  SELECT membership_level INTO lvl FROM profiles WHERE id = p_actor_id;
+  IF lvl IS DISTINCT FROM 'pro' AND lvl IS DISTINCT FROM 'gold' THEN RAISE EXCEPTION 'REPORT_MEMBERSHIP_REQUIRED' USING ERRCODE='42501'; END IF;
+  -- The round is this conversation's draft and of the module Node quoted (the model, so the call's bound, is the module's).
+  -- Its confirmed facts and benchmarks were read by Node just before (report_source, research_benchmark_rows) and are not read
+  -- again here (controller 10-30, B1): turn_open re-checks only what its locks must hold.
+  IF NOT EXISTS (SELECT 1 FROM opc_drafts d JOIN artifact_projects p ON p.id = d.project_id AND p.actor_id = p_actor_id
+      WHERE d.actor_id = p_actor_id AND d.session_id = p_session_id AND d.project_id = (rep->>'projectId')::uuid
+        AND d.round_id = (rep->>'roundId')::uuid AND p.module_id = (rep->>'moduleId')::uuid AND p.erased_at IS NULL) THEN
     RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT' USING ERRCODE='P0001';
-  END IF;
-  -- 0268 benchmark gate, or the user's frozen "generate" choice (0320), as report_admission_check.
-  SELECT s.scope INTO scope FROM runtime_sessions s WHERE s.id = p_session_id;
-  required := public.research_benchmark_required(scope, spec);
-  IF public.research_benchmark_qualified(p_actor_id, p_session_id) < required
-    AND NOT public.research_benchmark_shortfall_accepted(p_actor_id, p_session_id, required) THEN
-    RAISE EXCEPTION 'REPORT_BENCHMARKS_REQUIRED' USING ERRCODE='P0001';
   END IF;
   -- One paid report per round: one still going, or a complete one delivered, blocks a new start (a stopped, failed or cut-off
   -- one does not: a new start pays again, Owner 10-17).
@@ -60,6 +48,4 @@ BEGIN
       AND (r.state <> 'closed' OR (r.close_kind = 'completed' AND r.delivered))) THEN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS' USING ERRCODE='P0001';
   END IF;
-  RETURN jsonb_build_object(
-    'source', source, 'benchmarks', public.research_benchmark_rows(p_actor_id, p_session_id));
 END $function$;

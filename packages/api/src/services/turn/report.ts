@@ -1,11 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { snapshotSchema } from '../artifacts/public';
-import { workflowSchema } from '../artifacts/workflow';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
-import { benchmarkReportFacts, benchmarkShortfallNote, completeReportCandidate, confirmedReportFacts, frozenReport, type FrozenReport,
-  reportInstructions, REPORT_INPUT_BYTES, REPORT_REQUEST_INPUT } from '../report/contract';
+import { completeReportCandidate, reportInstructions, REPORT_INPUT_BYTES, REPORT_REQUEST_INPUT } from '../report/contract';
 import { DEFAULT_REPORT_PRICE, REPORT_PRICE_KEY } from '../report/fees';
 import { readAdmissionConfiguration, readAdmissionModule, type ConfigurationRows } from '../runtime/admissionConfiguration';
 import { rowFor } from '../runtime/settingsRows';
@@ -22,14 +19,17 @@ import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
 import { turnSession } from './history';
 import { callCredits, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
+import { readReportSource, type ReportSource } from './reportSource';
 import { reportSkillText } from './reportSkill';
 import type { TurnEvent } from './sse';
 
 /*
  * CORE-PATH-V2 kind=report (2.7, 4.1, 4.4; V2-7a). One long model call (32768 output, no continuation, 10-07) at a fixed price
  * (Owner 10-17: 500 credits, frozen when generating starts, charged only for a complete report; failed, cut off or deleted pays
- * nothing; a new start after that pays again). Database work is the five writes of a one-call turn: turn_open (which admits the
- * report under its locks: price, membership, confirmed source, benchmarks, one per round), the call's three writes, turn_close.
+ * nothing; a new start after that pays again). Database work: two reads before opening on the read client (the round's confirmed
+ * source and the benchmark table; a third, the shortfall card, only when the table is short; controller 10-30, B1), then the five
+ * writes of a one-call turn: turn_open (re-checking under its locks the price, membership, the round's module and one paid
+ * report per round), the call's three writes, turn_close.
  * The prompt is the Skill text (shared, cached by package hash in the process) then the report's facts, each block a cache
  * breakpoint (prompt-cache-v3, 2.9; moved here from #1501, whose old path could not freeze a cache for reports).
  * Stop (the only kind that can be stopped, 10-28): POST /api/turn/stop records it (turn_stop: first two in 24 hours free, the
@@ -46,10 +46,6 @@ export const reportTurnRequest = z.object({
 export type ReportInput = Omit<z.infer<typeof reportTurnRequest>, 'kind'> & { actorId: string };
 
 const OPEN_CODES = /^(REPORT_[A-Z_]+|TURN_[A-Z_]+|STOP_LOSS_REACHED)$/;
-/** What turn_open's report branch returns (its kindContext): the confirmed source and benchmark table, read under its locks. */
-const reportContext = z.object({
-  source: z.object({ snapshot: z.unknown(), workflow: z.unknown(), snapshotHash: z.string() }).passthrough(), benchmarks: z.unknown() });
-
 /** The fixed price from the admission configuration rows (the database checks the same row when it opens the turn). */
 function reportPrice(configuration: ConfigurationRows): number {
   const row = rowFor(configuration, REPORT_PRICE_KEY);
@@ -89,8 +85,16 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
       : 'TURN_QUOTE_UNAVAILABLE' });
   }
   const guard = settings.ok ? settings.identityGuard ?? true : true;
+  // 2. Before anything opens (controller 10-30, B1): the round's confirmed source and the benchmark gate, on the read client.
+  let source: ReportSource;
+  try { source = await readReportSource(db, input); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : OPEN_CODES.test(message) ? message
+      : 'REPORT_UNAVAILABLE' });
+  }
 
-  // 2. Open: one model call, no tools, no history. The user's freeze is the fixed price plus the call's bound (10-17: the
+  // 3. Open: one model call, no tools, no history. The user's freeze is the fixed price plus the call's bound (10-17: the
   // balance must cover both, or nothing opens); the stop-loss reserves the call's bound only (2.5.3).
   const held = price + callCredits(quote.q, quote.upperUsd, quote.multiplier);
   // The start threshold L of a report is its whole freeze (Owner 10-28 restating 10-01 for metered turns; a fixed-price report
@@ -112,8 +116,8 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   const close = (kind: CloseKind, extra: { body?: string; delivered?: boolean; failureCode?: string } = {}) =>
     db.close({ actorId: input.actorId, turnId, kind, delivered: extra.delivered ?? false, failureCode: extra.failureCode ?? null,
       // The report text is the kind's result (turn_report_apply keeps it hidden from history), never a conversation message.
-      // With it, the report identity built from the source turn_open read: the edit and publish chain reads both (V2-7a).
-      messages: [], ...(extra.body === undefined || !frozen ? {} : { kindResult: { body: extra.body, reportGeneration: frozen } }) });
+      // With it, the report identity built from the source read before opening: the report document chain reads both (V2-7a).
+      messages: [], ...(extra.body === undefined ? {} : { kindResult: { body: extra.body, reportGeneration: frozen } }) });
 
   // A dropped stream: was it the user's stop? One read, only then. A stop aborts the provider stream below.
   const abort = new AbortController();
@@ -126,27 +130,16 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   };
   if (clientGone?.aborted) onGone(); else clientGone?.addEventListener('abort', onGone, { once: true });
 
-  let text = '', stopped: TurnStop | undefined, finish: unknown, frozen: FrozenReport | undefined;
+  let text = '', stopped: TurnStop | undefined, finish: unknown;
+  const { frozen } = source;
   try {
-    // 3. The prompt: the Skill text (site-wide per package) then the report's own instructions with the confirmed facts and the
-    // benchmark table that turn_open read under its locks.
-    const parsed = reportContext.safeParse(opened.kindContext);
-    if (!parsed.success) throw new Error('REPORT_SOURCE_CONFLICT');
-    const report = parsed.data;
-    const snapshot = snapshotSchema.parse(report.source.snapshot);
-    const manifest = workflowSchema.parse(report.source.workflow).reportGeneration;
-    if (!manifest) throw new Error('REPORT_MANIFEST_REQUIRED');
-    const facts = confirmedReportFacts(snapshot);
-    const benchmarks = benchmarkReportFacts(report.benchmarks);
-    const shortfall = benchmarkShortfallNote(benchmarks.serialized, Math.max(3, manifest.minQualifiedBenchmarks ?? 3));
-    frozen = frozenReport.parse({ version: 1, projectId: input.projectId, roundId: input.roundId,
-      snapshotHash: report.source.snapshotHash, packageHash: snapshot.packageHash, workflowHash: snapshot.workflowHash,
-      templateHash: snapshot.templateHash, sections: manifest.sections, maxCharacters: manifest.maxCharacters,
-      benchmarkHash: benchmarks.hash, ...(manifest.data ? { data: manifest.data } : {}) });
+    // 4. The prompt: the Skill text (site-wide per package) then the report's own instructions with the confirmed facts and the
+    // benchmark table read before opening.
+    const { snapshot, manifest } = source;
     const skill = await reportSkillText(admin, { actorId: input.actorId, moduleId: input.moduleId, skillId: snapshot.skillId,
       revisionId: snapshot.revisionId, packageHash: snapshot.packageHash, resources: manifest.resources, maxBytes: quote.inputLimit });
     const shared = withBrandIdentity(skill, guard);
-    const instructions = shared + '\n' + reportInstructions(manifest, facts.serialized, benchmarks.serialized, shortfall);
+    const instructions = shared + '\n' + reportInstructions(manifest, source.facts, source.benchmarks, source.shortfall);
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
       quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: false });
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: [], network: 'deny',
@@ -180,7 +173,7 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
       },
     });
     const body = output || text;
-    // 4. Close: a complete report (every heading, within the limit, finished by the model) pays the fixed price; one cut off
+    // 5. Close: a complete report (every heading, within the limit, finished by the model) pays the fixed price; one cut off
     // pays nothing and is kept to read. A stop recorded meanwhile makes it the stopped report (turn_close).
     const delivered = completeReportCandidate(body, finish === 'stop' ? 'complete' : 'length_limit', frozen);
     const closed = await close('completed', { body, delivered });

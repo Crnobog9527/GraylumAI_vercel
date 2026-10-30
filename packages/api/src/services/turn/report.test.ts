@@ -48,7 +48,7 @@ const workflow = { id: 'w', version: 1, kind: 'document', steps: [{ id: 's', tit
   maxLength: 20000, requiresEvidence: false, requiredCapabilities: [], information: [] }],
   report: { id: 'report', version: 1, title: 'Positioning', sections: [{ title: 'Facts', stepId: 's' }] }, planResources: ['report.md'],
   reportGeneration: { resources: ['report.md'], sections: ['One', 'Two'], maxCharacters: 12000 } };
-const kindContext = {
+const pre = {
   source: { snapshotHash: 'e'.repeat(64), workflow, snapshot: { projectId: input.projectId, roundId: ROUND, skillId: uuid(6),
     state: 'draft', currentVersion: 0, revisionId: uuid(7), packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64),
     templateHash: 'd'.repeat(64), workflow, evidence: [], candidates: [], confirmations: [],
@@ -57,7 +57,7 @@ const kindContext = {
   benchmarks: { rows: [], hash: 'f'.repeat(64) } };
 const COMPLETE = '## One\nFirst.\n## Two\nSecond.';
 
-function harness(over: { open?: () => unknown; openError?: string; state?: string;
+function harness(over: { open?: () => unknown; openError?: string; state?: string; sourceError?: string; shortQualified?: number;
   gate?: { message?: { ok: false; reason: string }; calls?: { ok: false; reason: string } } } = {}) {
   const rpc: Array<[string, Record<string, unknown>]> = [];
   const respond = async (name: string, args: Record<string, unknown>) => {
@@ -65,7 +65,13 @@ function harness(over: { open?: () => unknown; openError?: string; state?: strin
     // A refusal comes back as PostgREST's error object, as from the real database.
     if (name === 'turn_open' && over.openError) return { data: null, error: { code: 'P0001', message: over.openError, details: null } };
     if (name === 'turn_open') return { data: over.open?.() ?? { turnId: 9, state: 'running', replay: false, reservedCredits: 530,
-      reservedUsd: 0.3, history: [], kindContext }, error: null };
+      reservedUsd: 0.3, history: [], kindContext: null }, error: null };
+    // The reads before opening (B1): the round's source, the benchmark table (empty here) and the shortfall card the user chose.
+    if (name === 'report_source') return over.sourceError ? { data: null, error: { code: 'P0001', message: over.sourceError } }
+      : { data: { ...pre.source, moduleId: input.moduleId }, error: null };
+    if (name === 'research_benchmark_rows') return { data: pre.benchmarks, error: null };
+    if (name === 'research_user_shortfall') return { data: { rounds: 2, qualified: over.shortQualified ?? 1,
+      card: { cardId: uuid(9), required: 3, choice: 'generate' } }, error: null };
     if (name === 'turn_close') return { data: { turnId: 9, closeKind: args.p_close_kind === 'completed' && over.state === 'stopping'
       ? 'stopped' : args.p_close_kind, chargedCredits: args.p_delivered ? 500 : 0, absorbedCredits: 0, settlement: 'done', replay: false },
       error: null };
@@ -80,7 +86,8 @@ function harness(over: { open?: () => unknown; openError?: string; state?: strin
     transport: (async (_url: string, init: RequestInit) => new Promise((_resolve, reject) =>
       init.signal?.addEventListener('abort', () => reject(new Error('aborted'))))) as unknown as typeof fetch } as unknown as ChatDeps;
   const events: TurnEvent[] = [];
-  return { rpc, deps, events, emit: (e: TurnEvent) => events.push(e), names: () => rpc.map(([n]) => n) };
+  return { rpc, deps, events, emit: (e: TurnEvent) => events.push(e), names: () => rpc.map(([n]) => n).filter(n => n.startsWith('turn_')),
+    args: (name: string) => rpc.find(([n]) => n === name)![1] };
 }
 // The runner: one exchange, its text streamed, the completion's text returned.
 function runs(text: string, finish = 'stop') {
@@ -106,12 +113,12 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     await runReportTurn(t.deps, input, t.emit);
     expect(chatQuote.mock.calls[0]![1]).toMatchObject({ modelId: '20000000-0000-4000-8000-000000000002',
       use: { phase: 'report', requestFormat: 'agent-turn-v5-stream' } });
-    const policy = t.rpc[0]![1].p_policy as Record<string, unknown>;
+    const policy = t.args('turn_open').p_policy as Record<string, unknown>;
     // One call: G = ceil(100 x 0.3 x 6) = 180; the user's freeze is 500 + 180, all of it or nothing.
     expect(policy).toMatchObject({ model: 'anthropic/claude-sonnet-5.5', pricing, fixedCredits: 500, gCredits: 680, minCredits: 680, uModelCredits: 180, uTurnUsd: 0.3, historyItems: 0,
       limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 },
       report: { projectId: input.projectId, roundId: ROUND, moduleId: input.moduleId } });
-    expect(t.rpc[0]![1].p_kind).toBe('report');
+    expect(t.args('turn_open').p_kind).toBe('report');
   });
 
   it('a complete report: five turn writes at most (open, the call, close), two cache blocks, saved and paid once', async () => {
@@ -122,7 +129,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     expect(phase).toBe('report');
     expect(context).toMatchObject({ providerRequestFormat: 'agent-turn-v5-stream', tools: [], network: 'deny',
       promptCache: { version: 'prompt-cache-v3', systemPrefixChars: 'SKILL TEXT'.length, historyMarker: false } });
-    const close = t.rpc[1]![1];
+    const close = t.args('turn_close');
     expect(close).toMatchObject({ p_close_kind: 'completed', p_delivered: true, p_messages: [], p_kind_result: { body: COMPLETE } });
     expect(t.events.at(-1)).toMatchObject({ type: 'result', chargedCredits: 500, closeKind: 'completed', delivered: true });
   });
@@ -131,7 +138,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     for (const [text, finish] of [[COMPLETE, 'length'], ['## One\nOnly one.', 'stop']] as const) {
       const t = harness(); runs(text, finish);
       await runReportTurn(t.deps, input, t.emit);
-      expect(t.rpc[1]![1]).toMatchObject({ p_close_kind: 'completed', p_delivered: false });
+      expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'completed', p_delivered: false });
       expect(t.events.at(-1)).toMatchObject({ type: 'result', chargedCredits: 0, delivered: false });
     }
   });
@@ -142,7 +149,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
       h.call.mockRejectedValueOnce(new TurnStop(stop as 'TURN_PROVIDER_402'));
       h.runtime.mockImplementation(async (o: { exchange: (s: number, b: string) => Promise<string> }) => o.exchange(1, '{}'));
       await runReportTurn(t.deps, input, t.emit);
-      expect(t.rpc[1]![1]).toMatchObject({ p_close_kind: kind });
+      expect(t.args('turn_close')).toMatchObject({ p_close_kind: kind });
       expect(t.events.at(-1)).toMatchObject({ type: 'error', code: stop });
     }
     const r = harness({ open: () => ({ turnId: 9, state: 'running', replay: true, reservedCredits: 530, reservedUsd: 0.3, history: [],
@@ -163,7 +170,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     });
     await runReportTurn(t.deps, input, t.emit, gone.signal);
     expect(t.names()).toEqual(['turn_open', 'turn_report_read', 'turn_close']);
-    expect(t.rpc[2]![1]).toMatchObject({ p_close_kind: 'stopped', p_messages: [], p_kind_result: { body: '## One\nPart' } });
+    expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'stopped', p_messages: [], p_kind_result: { body: '## One\nPart' } });
     expect(t.events.at(-1)).toMatchObject({ type: 'result', closeKind: 'stopped', delivered: false });
   });
 
@@ -175,7 +182,7 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     });
     await runReportTurn(t.deps, input, t.emit, gone.signal);
     expect(t.names()).toEqual(['turn_open', 'turn_report_read', 'turn_close']);
-    expect(t.rpc[2]![1]).toMatchObject({ p_close_kind: 'completed', p_delivered: true });
+    expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'completed', p_delivered: true });
   });
 
   it('a refusal inside turn_open keeps its report code; a short balance is the report\'s own REPORT_CREDITS', async () => {
@@ -206,7 +213,26 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     runs(COMPLETE);
     await runReportTurn(limited.deps, input, limited.emit);
     expect(h.call).not.toHaveBeenCalled();
-    expect(limited.rpc[1]![1]).toMatchObject({ p_close_kind: 'failed' });
+    expect(limited.args('turn_close')).toMatchObject({ p_close_kind: 'failed' });
     expect(limited.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_RATE_LIMITED' });
+  });
+
+  it('reads the source and the benchmark gate before opening, on the read client; a refusal there opens nothing', async () => {
+    const t = harness(); runs(COMPLETE);
+    await runReportTurn(t.deps, input, t.emit);
+    expect(t.rpc.map(([n]) => n).slice(0, 4)).toEqual(['report_source', 'research_benchmark_rows', 'research_user_shortfall', 'turn_open']);
+    expect(t.args('report_source')).toEqual({ p_actor_id: 'actor', p_session_id: SESSION, p_project_id: input.projectId,
+      p_round_id: ROUND });
+    for (const [over, code] of [[{ sourceError: 'REPORT_CONFIRMATION_REQUIRED' }, 'REPORT_CONFIRMATION_REQUIRED'],
+      [{ sourceError: 'REPORT_SOURCE_CONFLICT' }, 'REPORT_SOURCE_CONFLICT'], [{ shortQualified: 0 }, 'REPORT_BENCHMARKS_REQUIRED']] as const) {
+      const r = harness(over);
+      await runReportTurn(r.deps, input, r.emit);
+      expect(r.events).toEqual([{ type: 'error', code }]);
+      expect(r.names()).toEqual([]);
+    }
+    // A round of another module than the quoted one is refused before opening.
+    const other = harness();
+    await runReportTurn(other.deps, { ...input, moduleId: uuid(44) }, other.emit);
+    expect(other.events).toEqual([{ type: 'error', code: 'REPORT_SOURCE_CONFLICT' }]);
   });
 });

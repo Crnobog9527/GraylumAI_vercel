@@ -5,9 +5,10 @@
 -- turn core (docs/launch/tasks/CORE-PATH-V2.md 2.2, 2.5, 2.7, 4.1, 4.4; Owner 10-17 fixed price, 10-27 stop rule, 10-28 only
 -- reports can be stopped). The report's logic is in its own functions; turn_open and turn_close only dispatch to them (the 0421
 -- per-kind hook), rebuilt whole on their latest text on staging (after 0424, with the mentor's dispatch and the recovery's carried freeze kept):
---   turn_report_admit       turn_open, new report: switch, today's fixed price (acceptedCredits), one-call shape, the round's
---                           module, membership, confirmed source, benchmarks, one paid report per round; its result is the
---                           report's kindContext (source and benchmark table)
+--   turn_report_admit       turn_open, new report, under its locks: switch, today's fixed price (acceptedCredits), one-call
+--                           shape, membership (cached level), the round is this conversation's draft and of the quoted module,
+--                           one paid report per round. The confirmed facts and the benchmark table are read by Node just before
+--                           opening (report_source, research_benchmark_rows), not inside turn_open (controller 10-30, B1)
 --   turn_stop               the user's stop of a running report: first two in 24 hours free; from the third it asks, and once
 --                           confirmed charges what was generated (at most the fixed price); the decision is frozen on the turn
 --   turn_report_close_kind  turn_close: a stopping report closes as stopped however the run ended
@@ -26,23 +27,20 @@ SET LOCAL lock_timeout='5s';
 -- Called only from turn_open, after the session, stop-loss bucket and account rows are locked (report_membership_check locks the
 -- account row again, which this transaction already holds).
 CREATE OR REPLACE FUNCTION public.turn_report_admit(p_actor_id uuid, p_session_id uuid, p_policy jsonb)
- RETURNS jsonb
+ RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE flag jsonb; rep jsonb := p_policy->'report'; source jsonb; spec jsonb; item jsonb; scope jsonb; required integer;
-  fixed integer;
+DECLARE rep jsonb := p_policy->'report'; fixed integer; lvl text;
 BEGIN
   -- The stop's frozen fields are written by turn_stop only.
-  IF rep IS NULL OR jsonb_typeof(rep) <> 'object' OR p_policy ?| ARRAY['stoppedAt','stopChargeable','stopAt'] THEN
+  IF rep IS NULL OR jsonb_typeof(rep) <> 'object' OR p_policy ?| ARRAY['stoppedAt','stopChargeable','stopAt']
+    OR rep->>'projectId' !~ '^[0-9a-f-]{36}$' OR rep->>'roundId' !~ '^[0-9a-f-]{36}$' OR rep->>'moduleId' !~ '^[0-9a-f-]{36}$' THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
-  SELECT value::jsonb INTO flag FROM system_settings WHERE key = 'runtime_report_generation';
-  IF flag IS DISTINCT FROM '{"enabled":true}'::jsonb THEN RAISE EXCEPTION 'REPORT_DISABLED' USING ERRCODE='P0001'; END IF;
-  IF jsonb_typeof(rep) <> 'object' OR rep->>'projectId' !~ '^[0-9a-f-]{36}$' OR rep->>'roundId' !~ '^[0-9a-f-]{36}$'
-    OR rep->>'moduleId' !~ '^[0-9a-f-]{36}$' THEN
-    RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+  IF (SELECT value::jsonb FROM system_settings WHERE key = 'runtime_report_generation') IS DISTINCT FROM '{"enabled":true}'::jsonb THEN
+    RAISE EXCEPTION 'REPORT_DISABLED' USING ERRCODE='P0001';
   END IF;
   -- The price the button showed (acceptedCredits, checked by Node against fixedCredits) must be today's price.
   fixed := public.report_fixed_price();
@@ -56,25 +54,16 @@ BEGIN
     OR (p_policy->>'minCredits')::int <> (p_policy->>'gCredits')::int THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
-  PERFORM public.report_membership_check(p_actor_id);
-  source := public.report_source(p_actor_id, p_session_id, (rep->>'projectId')::uuid, (rep->>'roundId')::uuid);
-  spec := source#>'{workflow,reportGeneration}';
-  IF spec IS NULL THEN RAISE EXCEPTION 'REPORT_MANIFEST_REQUIRED' USING ERRCODE='P0001'; END IF;
-  FOR item IN SELECT value FROM jsonb_each(source#>'{snapshot,steps}') LOOP
-    IF item->>'valid' IS DISTINCT FROM 'true' OR item->>'confirmationId' IS NULL OR item->>'body' IS NULL
-      OR item->>'available' = 'false' THEN RAISE EXCEPTION 'REPORT_CONFIRMATION_REQUIRED' USING ERRCODE='P0001'; END IF;
-  END LOOP;
-  -- The model, and so the call's bound, was chosen for the module Node named; it must be the round's, and still offered (the
-  -- Skill text is read from the process cache by package hash).
-  IF source->>'moduleId' IS DISTINCT FROM rep->>'moduleId' OR NOT EXISTS (SELECT 1 FROM modules m WHERE m.id = (source->>'moduleId')::uuid AND m.active) THEN
+  -- Membership (Pro or Gold), from the account row turn_open holds: the same cached level as the jury's Gold gate (V2-7b).
+  SELECT membership_level INTO lvl FROM profiles WHERE id = p_actor_id;
+  IF lvl IS DISTINCT FROM 'pro' AND lvl IS DISTINCT FROM 'gold' THEN RAISE EXCEPTION 'REPORT_MEMBERSHIP_REQUIRED' USING ERRCODE='42501'; END IF;
+  -- The round is this conversation's draft and of the module Node quoted (the model, so the call's bound, is the module's).
+  -- Its confirmed facts and benchmarks were read by Node just before (report_source, research_benchmark_rows) and are not read
+  -- again here (controller 10-30, B1): turn_open re-checks only what its locks must hold.
+  IF NOT EXISTS (SELECT 1 FROM opc_drafts d JOIN artifact_projects p ON p.id = d.project_id AND p.actor_id = p_actor_id
+      WHERE d.actor_id = p_actor_id AND d.session_id = p_session_id AND d.project_id = (rep->>'projectId')::uuid
+        AND d.round_id = (rep->>'roundId')::uuid AND p.module_id = (rep->>'moduleId')::uuid AND p.erased_at IS NULL) THEN
     RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT' USING ERRCODE='P0001';
-  END IF;
-  -- 0268 benchmark gate, or the user's frozen "generate" choice (0320), as report_admission_check.
-  SELECT s.scope INTO scope FROM runtime_sessions s WHERE s.id = p_session_id;
-  required := public.research_benchmark_required(scope, spec);
-  IF public.research_benchmark_qualified(p_actor_id, p_session_id) < required
-    AND NOT public.research_benchmark_shortfall_accepted(p_actor_id, p_session_id, required) THEN
-    RAISE EXCEPTION 'REPORT_BENCHMARKS_REQUIRED' USING ERRCODE='P0001';
   END IF;
   -- One paid report per round: one still going, or a complete one delivered, blocks a new start (a stopped, failed or cut-off
   -- one does not: a new start pays again, Owner 10-17).
@@ -83,8 +72,6 @@ BEGIN
       AND (r.state <> 'closed' OR (r.close_kind = 'completed' AND r.delivered))) THEN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS' USING ERRCODE='P0001';
   END IF;
-  RETURN jsonb_build_object(
-    'source', source, 'benchmarks', public.research_benchmark_rows(p_actor_id, p_session_id));
 END $function$;
 
 -- A report's close kind: a stop the user asked for (turn_stop) is honoured however the run ended (the reply finished first, the
@@ -160,7 +147,7 @@ AS $function$
 DECLARE
   s runtime_sessions; t turns; prof profiles; existing turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
-  u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb; report jsonb;
+  u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
   carried integer := 0;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
@@ -260,7 +247,7 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
     -- The freeze covers the carried credits too (the continuation settles them).
-    IF p_kind = 'report' THEN report := public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
+    IF p_kind = 'report' THEN PERFORM public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
     g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
@@ -300,8 +287,7 @@ BEGIN
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
-    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor')
-      WHEN 'report' THEN report END);
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_stop(p_actor_id uuid, p_turn_id bigint, p_confirmed boolean, p_stop_at integer)
