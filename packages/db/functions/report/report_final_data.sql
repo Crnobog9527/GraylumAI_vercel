@@ -21,11 +21,6 @@ BEGIN
  -- 0268's research_benchmark_report_current, so a refresh either commits first (and this refuses) or waits.
  IF d ? 'benchmarkHash' THEN
   SELECT x.actor_id,x.session_id INTO a,sid FROM runtime_executions x WHERE x.id=(source->>'executionId')::uuid;
-  -- CORE-PATH-V2 V2-7a: a report turn's session, which report_document_source returned (and proved the actor's).
-  IF sid IS NULL THEN
-   sid:=(source->>'sessionId')::uuid;
-   SELECT actor_id INTO a FROM runtime_sessions WHERE id=sid;
-  END IF;
   PERFORM 1 FROM research_account_fetches WHERE session_id=sid FOR SHARE;
   PERFORM 1 FROM research_benchmarks WHERE session_id=sid FOR SHARE;
   IF (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM d->>'benchmarkHash' THEN RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;

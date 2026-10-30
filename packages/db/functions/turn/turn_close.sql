@@ -43,10 +43,13 @@ BEGIN
              coalesce(bool_or(cost_pending), false), coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
         INTO credits, pending, user_pending
       FROM turn_calls WHERE turn_id = p_turn_id;
+      credits := credits + coalesce((t.policy->>'carriedCredits')::int, 0);
       IF t.charged_credits IS NULL AND NOT user_pending THEN
-        charge := CASE WHEN t.kind = 'report' THEN (public.turn_report_settlement(t, t.close_kind, t.delivered, credits, t.reserved_credits, t.closed_at)).charge
+        charge := CASE WHEN t.kind = 'report' THEN (public.turn_report_settlement(t, t.close_kind, t.delivered, credits,
+            t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), t.closed_at)).charge
           ELSE public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
-          coalesce((t.policy->>'closeRefundAll')::boolean, false), credits, t.reserved_credits, (t.policy->>'fixedCredits')::int, t.closed_at) END;
+          coalesce((t.policy->>'closeRefundAll')::boolean, false), credits,
+          t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), (t.policy->>'fixedCredits')::int, t.closed_at) END;
         IF t.policy->>'holdId' IS NOT NULL THEN
           PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
         END IF;
@@ -97,7 +100,10 @@ BEGIN
          coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
     INTO credits, n_total, pending_upper, pending, user_pending
   FROM turn_calls WHERE turn_id = p_turn_id;
-  h := t.reserved_credits;
+  -- Credits a resumed turn carried from the turn it continues (V2-8): settled here, once, under this turn's rule.
+  credits := credits + coalesce((t.policy->>'carriedCredits')::int, 0);
+  -- H: the whole hold, the carried credits included (reserved_credits leaves them out for the calls' own checks).
+  h := t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0);
 
   -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
   UPDATE daily_spend SET spent_usd = spent_usd + n_total,
