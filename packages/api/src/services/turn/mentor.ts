@@ -109,7 +109,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // 3. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
     // The continuation reserve: the largest prepared file as the tool result is embedded in the request (twice JSON-escaped).
-    const toolBytes = groundedCardToolBytes() + skillFileToolBytes() + (opening ? 0 : skillFileReserveBytes(prepared, binding));
+    const toolBytes = (summary ? 0 : groundedCardToolBytes()) + skillFileToolBytes() + (opening ? 0 : skillFileReserveBytes(prepared, binding));
     const left = mentor.inputLimit - Buffer.byteLength(system.instructions) - Buffer.byteLength(userMessage) - toolBytes
       - MARKER_RESERVE_BYTES - 8192;
     const history = trimHistory(projectHistory(projectMentorHistory(opened.history)), Math.max(left, 0));
@@ -117,7 +117,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       cacheWriteUsdPerMillion: mentor.providerLimits.cacheWriteUsdPerMillion, instructions: system.instructions,
       prefixChars: system.prefixChars, historyMarker: !opening }) : undefined;
     let sources: CardSources = cardSources(words, history);
-    const tools = [groundedCardTool(() => sources), mentorSkillFileTool(prepared, binding)];
+    // A step summary is offered no question card (as the old path's admission removed it), not only told not to show one.
+    const tools = [...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding)];
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };

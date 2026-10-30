@@ -471,6 +471,10 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a step summary turn writes the summary and is n
   const system = JSON.stringify(t.bodies[0]!.messages[0]);
   expect(system).toContain('hostTurnContext.stepSummary');
   expect(JSON.parse(t.bodies[0]!.messages.at(-1)!.content as string).hostTurnContext.stepSummary).toMatchObject({ kind: 'step_summary' });
+  // The host offers a summary no question card; the Skill file tool stays.
+  const offered = JSON.stringify(t.bodies[0]!.tools ?? []);
+  expect(offered).not.toContain('ask_question');
+  expect(offered).toContain('read_skill_file');
   // A summary may not be organized.
   expect((await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: true })).events)
     .toEqual([{ type: 'error', code: 'TURN_REQUEST_INVALID' }]);
