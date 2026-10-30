@@ -10,13 +10,13 @@ CREATE OR REPLACE FUNCTION public.fusion_compare_turn_adopt(p_actor_id uuid, p_c
 AS $function$
 DECLARE cmp fusion_compares; s runtime_sessions; o fusion_turn_outputs; head integer;
 BEGIN
-  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id;
+  -- The compare row before the conversation, as turn_fusion_close (compare row, then turn_close's account and conversation).
+  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id FOR NO KEY UPDATE;
   IF cmp.id IS NULL OR cmp.turn_id IS NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
   -- An archived business is read-only (0324), as fusion_compare_adopt.
   PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', cmp.session_id));
   SELECT * INTO s FROM runtime_sessions WHERE id = cmp.session_id AND actor_id = p_actor_id FOR UPDATE;
   IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
-  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id FOR NO KEY UPDATE;
   IF cmp.adoption IS NOT NULL THEN
     IF (cmp.adoption->>'seq')::int = p_seq THEN RETURN cmp.adoption || jsonb_build_object('replay', true); END IF;
     RAISE EXCEPTION 'FUSION_COMPARE_ADOPTED';

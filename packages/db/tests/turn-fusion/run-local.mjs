@@ -196,7 +196,21 @@ try{
   }finally{await q1.end();await q2.end();}
   assert.equal(await one("select count(*)::int v from turns where actor_id=$1 and kind='compare'",[d.actor]),1);
   assert.equal(await one('select count(*)::int v from fusion_compares where actor_id=$1',[d.actor]),1);
-  report.checks.push('concurrency: a jury leaves its draft conversation free (a chat turn opens meanwhile); a compare occupies its conversation; one compare per user, also for two opened at once in two conversations');
+  // #1522 review: a free chat closing in a conversation (turn_close locks the account, then the conversation) while a compare
+  // opens there: the compare takes the account first too, so it waits instead of deadlocking.
+  const k=await account(),closer=await peer(),opener=await peer();
+  try{
+   await closer.query('begin');
+   await closer.query('select 1 from profiles where id=$1 for update',[k.actor]);
+   const opening=open(k,{kind:'compare',pol:comparePolicy(),product:cp,client:opener}).then(v=>({v}),e=>({e:e.message}));
+   await new Promise(r=>setTimeout(r,300));
+   await closer.query("set local lock_timeout='3s'");
+   await closer.query('select 1 from runtime_sessions where id=$1 for update',[k.session]);
+   await closer.query('commit');
+   const opened=await opening;
+   assert.ok(opened.v?.turnId,'the compare opens after the close: '+JSON.stringify(opened));
+  }finally{await closer.end();await opener.end();}
+  report.checks.push('concurrency: a jury leaves its draft conversation free (a chat turn opens meanwhile); a compare occupies its conversation; one compare per user, also for two opened at once in two conversations; a compare opening while a chat closes waits, never deadlocks');
  }
  // 7. Compare: at least two models, bounds <= 500 credits; N columns; each column rounded on its own; a refused column costs
  // nothing; adoption appends the question and the chosen answer once; a conversation that moved on gets a quote.

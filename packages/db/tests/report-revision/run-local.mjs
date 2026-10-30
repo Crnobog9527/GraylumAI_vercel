@@ -43,7 +43,7 @@ const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packag
   'packages/db/migrations/0397_report_fee_terminal_settlement.sql',
   'packages/db/migrations/0412_report_stop_limit.sql',
   // CORE-PATH-V2 V2-7b replaces fusion functions the re-applied migrations above define again (review view, start, claim).
-  'packages/db/migrations/0499_core_path_v2_fusion.sql'];
+  'packages/db/migrations/0500_core_path_v2_fusion.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {

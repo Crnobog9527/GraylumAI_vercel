@@ -30,6 +30,9 @@ BEGIN
   -- The row the kind serializes on first (a compare's conversation, a jury's review), then the request: two concurrent opens of
   -- one request make one turn, the second answering as a replay.
   IF p_kind = 'compare' THEN
+    -- The account before the conversation, as turn_open and turn_close (a free chat closing in this conversation holds them in
+    -- that order; the other order could deadlock with it).
+    PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
     PERFORM 1 FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
   ELSE
     PERFORM 1 FROM fusion_reviews WHERE id = (p_product->>'reviewId')::uuid AND actor_id = p_actor_id FOR NO KEY UPDATE;

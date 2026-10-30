@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-7b (number to be assigned by the controller): compare, jury and jury adoption on the per-turn core
+-- CORE-PATH-V2 V2-7b (placeholder 0500; the number is assigned by the controller before it is applied): compare, jury and jury adoption on the per-turn core
 -- (docs/launch/tasks/CORE-PATH-V2.md sections 2.2, 2.5.3, 2.7, 4.4; Owner rules 10-13, 10-17, 10-20, 10-27).
 --   turn_fusion_open     Gold gate, the kind's rules (compare: >= 2 models, bounds <= 500 credits, one at a time; jury: the
 --                        3-unfinished version rule, the fixed price in the freeze; jury_adopt: once per adopted review, no fee),
@@ -114,8 +114,8 @@ REVOKE ALL ON FUNCTION public.fusion_turn_raw_scrub() FROM PUBLIC, anon, authent
 
 -- Open a compare, jury or jury adoption turn: the Gold gate and the kind's own rules, the product record, then turn_open in the
 -- same transaction (one round trip). A repeated request answers like turn_open, without the live gates (its freeze exists).
--- Lock order as everywhere on this path: product row (NO KEY UPDATE, so a receipt's output insert never waits on it), then
--- turn_open's session -> stop-loss bucket -> profile.
+-- Lock order as everywhere on this path: the product row first when there is one (a review, NO KEY UPDATE, so a receipt's
+-- output insert never waits on it), then turn_open's / turn_close's profile -> session -> turn -> stop-loss bucket.
 CREATE OR REPLACE FUNCTION public.turn_fusion_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text,
   p_policy jsonb, p_product jsonb)
  RETURNS jsonb
@@ -145,6 +145,9 @@ BEGIN
   -- The row the kind serializes on first (a compare's conversation, a jury's review), then the request: two concurrent opens of
   -- one request make one turn, the second answering as a replay.
   IF p_kind = 'compare' THEN
+    -- The account before the conversation, as turn_open and turn_close (a free chat closing in this conversation holds them in
+    -- that order; the other order could deadlock with it).
+    PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
     PERFORM 1 FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
   ELSE
     PERFORM 1 FROM fusion_reviews WHERE id = (p_product->>'reviewId')::uuid AND actor_id = p_actor_id FOR NO KEY UPDATE;
@@ -451,13 +454,13 @@ CREATE OR REPLACE FUNCTION public.fusion_compare_turn_adopt(p_actor_id uuid, p_c
 AS $function$
 DECLARE cmp fusion_compares; s runtime_sessions; o fusion_turn_outputs; head integer;
 BEGIN
-  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id;
+  -- The compare row before the conversation, as turn_fusion_close (compare row, then turn_close's account and conversation).
+  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id AND actor_id = p_actor_id FOR NO KEY UPDATE;
   IF cmp.id IS NULL OR cmp.turn_id IS NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
   -- An archived business is read-only (0324), as fusion_compare_adopt.
   PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', cmp.session_id));
   SELECT * INTO s FROM runtime_sessions WHERE id = cmp.session_id AND actor_id = p_actor_id FOR UPDATE;
   IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
-  SELECT * INTO cmp FROM fusion_compares WHERE id = p_compare_id FOR NO KEY UPDATE;
   IF cmp.adoption IS NOT NULL THEN
     IF (cmp.adoption->>'seq')::int = p_seq THEN RETURN cmp.adoption || jsonb_build_object('replay', true); END IF;
     RAISE EXCEPTION 'FUSION_COMPARE_ADOPTED';
@@ -541,10 +544,11 @@ BEGIN
   FOR item IN SELECT actor_id, id FROM turns WHERE state = 'paused' AND updated_at < now() - interval '24 hours'
       AND kind = 'jury' AND pause_reason = 'awaiting_user' ORDER BY updated_at LIMIT p_limit LOOP
     BEGIN
-      -- Locked in the close's own order (review, conversation, turn), then the condition read again: a relay that resumed the
-      -- jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
+      -- Locked in the close's own order (review, account, conversation, turn), then the condition read again: a relay that
+      -- resumed the jury since the listing (its next group's begin) keeps it; only a turn still waiting 24 hours is ended.
       PERFORM 1 FROM fusion_reviews WHERE id = (SELECT (policy->>'reviewId')::uuid FROM turns WHERE actor_id = item.actor_id AND id = item.id)
         FOR NO KEY UPDATE;
+      PERFORM 1 FROM profiles WHERE id = item.actor_id FOR UPDATE;
       PERFORM 1 FROM runtime_sessions WHERE id = (SELECT session_id FROM turns WHERE actor_id = item.actor_id AND id = item.id) FOR UPDATE;
       IF NOT EXISTS (SELECT 1 FROM turns WHERE actor_id = item.actor_id AND id = item.id AND state = 'paused'
           AND pause_reason = 'awaiting_user' AND updated_at < now() - interval '24 hours' FOR UPDATE) THEN
