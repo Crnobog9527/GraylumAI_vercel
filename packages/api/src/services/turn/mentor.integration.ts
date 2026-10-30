@@ -771,6 +771,12 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a round that finishes makes its candidate card 
   const third = await turn(f, { text: 'More please', transport: say(['propose_more_candidates', { discoveryId: discovery.id }]).fn, research: stub });
   expect(third.events.at(-1)?.type).toBe('result');
   expect(JSON.stringify(third.events)).not.toContain('DISCOVERY_NOT_FOUND');
+  // Asking for the finished round again sends nothing and charges nothing.
+  const rows = async () => (await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool'`, [f.actor])).rows[0].n;
+  const paid = await rows();
+  const again = await turn(f, { text: 'Search again', transport: say(['benchmark_discover', { keywordConfirmationId: null, platforms: null, discoveryId: discovery.id }]).fn, research: stub });
+  expect(again.events.at(-1)?.type).toBe('result');
+  expect(await rows()).toBe(paid);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5c: receipts of a turn that never applied them come back as operations the next turn can parse', async () => {

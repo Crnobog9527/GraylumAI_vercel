@@ -165,6 +165,11 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   return { store,
     /** The operations this batch settled, kept in its receipt so a crash does not lose paid results. */
     operations: () => [...fresh.values()],
+    /** Whether these arguments name a round that finished: its operations were not read, so it must not run again. */
+    finishedRound(args: { discoveryId?: unknown; keywordConfirmationId?: unknown }) {
+      return [...discoveries.values()].some(d => d.state === 'completed'
+        && (d.discoveryId === args.discoveryId || d.keywordConfirmationId === args.keywordConfirmationId));
+    },
     /** What research_turn_apply writes at close; undefined when the turn made nothing. */
     journal() {
       const pasted = (f: Fetch) => [...fresh.values()].some(o => {

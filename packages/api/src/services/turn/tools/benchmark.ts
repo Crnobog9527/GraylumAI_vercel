@@ -38,6 +38,9 @@ import type { ToolCallDeps } from './types';
 const REQUIRED = ['propose_keywords', 'benchmark_discover', 'propose_more_candidates', 'benchmark_fetch'] as const;
 /** No subcall, no row: the model continuation that reads their result is already one of the turn's M. */
 const FREE: readonly string[] = ['propose_keywords', 'propose_more_candidates'];
+/** A finished round is not searched again (its lookups were paid for): the model is pointed at its card instead. */
+const ROUND_FINISHED = toolEnvelope({ status: 'ok', reason: 'ROUND_ALREADY_COMPLETED',
+  nextStep: '这一轮已经搜完，候选卡已经给过用户。请用户在卡上确认；要更多候选用 propose_more_candidates，要换方向就提新的关键词。' });
 const BATCH = 5, LOOKUP_MS = 30_000;
 /** Rows of the one paid tool call: the largest configurable allowance (RUN_MAX_CALLS - 3 = 29) in batches. */
 export const BENCHMARK_ROWS = 6;
@@ -145,6 +148,7 @@ export function turnBenchmarkTools(input: BenchmarkToolsInput) {
     if (used) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });
     used = true;
     try {
+      if (tool.name === 'benchmark_discover' && turnStore.finishedRound(args)) return ROUND_FINISHED;
       if (FREE.includes(tool.name)) return await tool.execute(args, callId);
       await input.callGate(research.subcalls);
       active = { name: tool.name, args: JSON.stringify({ name: tool.name, args }) };

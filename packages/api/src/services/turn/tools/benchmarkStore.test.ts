@@ -62,6 +62,9 @@ it('a finished round stays readable for a follow-up card', async () => {
   const s = make({ discoveries: [{ discoveryId: opId, keywords: ['a'], platforms: ['tiktok'], cursor: { accounts: [] }, state: 'completed',
     keywordConfirmationId: fetchId }] });
   expect(await s.store.discoveryRead(opId)).toMatchObject({ state: 'completed' });
+  expect(s.finishedRound({ discoveryId: opId })).toBe(true);
+  expect(s.finishedRound({ keywordConfirmationId: fetchId })).toBe(true);
+  expect(s.finishedRound({ discoveryId: fetchId, keywordConfirmationId: opId })).toBe(false);
 });
 
 it('a fetch paid before a crash resumes with the same ids instead of paying again', async () => {

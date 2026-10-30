@@ -835,11 +835,10 @@ BEGIN
     'shortfall', research_user_shortfall(a, s),
     'fetches', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'attempt', f.attempt, 'platform', f.platform, 'account', f.account,
         'state', f.state, 'evidence', f.last_success)), '[]'::jsonb) FROM research_account_fetches f WHERE f.actor_id = a AND f.session_id = s AND f.account IS NOT NULL),
-    -- The running round, and the finished rounds a confirmed candidate card came from (a follow-up card reads their candidates).
+    -- Every round of the session: a follow-up card reads a finished round's candidates, and a finished round is never run again.
     'discoveries', (SELECT coalesce(jsonb_agg(jsonb_build_object('discoveryId', x.id, 'keywords', x.keywords, 'platforms', to_jsonb(x.platforms),
         'cursor', x.cursor, 'state', x.state, 'keywordConfirmationId', x.keyword_confirmation_id)), '[]'::jsonb)
-      FROM research_discoveries x WHERE x.actor_id = a AND x.session_id = s AND (x.id = running.id OR x.id IN (
-        SELECT c.discovery_id FROM research_selection_cards c WHERE c.actor_id = a AND c.session_id = s AND c.confirmation_id IS NOT NULL))),
+      FROM research_discoveries x WHERE x.actor_id = a AND x.session_id = s),
     'operations', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'identityHash', o.identity_hash, 'state', o.state, 'result', o.result)), '[]'::jsonb)
       FROM research_operations o JOIN research_plans p ON p.id = o.plan_id
       WHERE p.actor_id = a AND p.session_id = s AND p.discovery_id = running.id AND o.erased_at IS NULL AND p.erased_at IS NULL),
