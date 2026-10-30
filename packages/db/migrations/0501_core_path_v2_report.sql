@@ -1,10 +1,10 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-7a (placeholder number 0501, after 0424 whose turn_open/turn_close it rebuilds; the controller assigns the real one
+-- CORE-PATH-V2 V2-7a (placeholder number 0501, after 0425 whose turn_open (0424's turn_close) it rebuilds; the controller assigns the real one
 -- before it goes to the database): kind=report on the
 -- turn core (docs/launch/tasks/CORE-PATH-V2.md 2.2, 2.5, 2.7, 4.1, 4.4; Owner 10-17 fixed price, 10-27 stop rule, 10-28 only
 -- reports can be stopped). The report's logic is in its own functions; turn_open and turn_close only dispatch to them (the 0421
--- per-kind hook), rebuilt whole on their latest text on staging (after 0424, with the mentor's dispatch and the recovery's carried freeze kept):
+-- per-kind hook), rebuilt whole on their latest text on staging (after 0425: the mentor's dispatch, the recovery's carried freeze and turn_positioned kept):
 --   turn_report_admit       turn_open, new report, under its locks: switch, today's fixed price (acceptedCredits), one-call
 --                           shape, membership (cached level), the round is this conversation's draft and of the quoted module,
 --                           its business is not archived (0324),
@@ -287,7 +287,7 @@ BEGIN
     'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history, 'resumeOf', t.resume_of,
     'replyLanguage', prof.reply_language,
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
-      'positioned', public.opc_has_confirmed_positioning(p_actor_id),
+      'positioned', public.turn_positioned(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here

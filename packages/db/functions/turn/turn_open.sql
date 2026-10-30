@@ -146,7 +146,7 @@ BEGIN
     'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history, 'resumeOf', t.resume_of,
     'replyLanguage', prof.reply_language,
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
-      'positioned', public.opc_has_confirmed_positioning(p_actor_id),
+      'positioned', public.turn_positioned(p_actor_id),
       'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
