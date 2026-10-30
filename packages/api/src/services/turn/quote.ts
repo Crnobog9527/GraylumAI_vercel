@@ -59,8 +59,9 @@ function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoint>[1], 
 }
 
 /** What a quoted call is for: the profile must cover exactly this use (free chat by default; the mentor's Skill call and its
- * organizer use the agent-turn format, V2-5). outputCap: a lower output limit of that use (the organizer's summary limit). */
-export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer'; requestFormat: string;
+ * organizer use the agent-turn format, V2-5; a report its own report phase, V2-7a). outputCap: a lower output limit of that
+ * use (the organizer's summary limit). */
+export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer' | 'report'; requestFormat: string;
   purpose: 'interactive' | 'organize'; outputCap?: number };
 const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_REQUEST_FORMAT, purpose: 'interactive' };
 
@@ -88,8 +89,8 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
   const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag);
   const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens, use.outputCap);
   const reasoning = admitReasoning(row.data, use.purpose, limits.providerSlug, outputLimit);
-  // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): the ordinary purpose, the
-  // free-chat request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
+  // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): its phase and purpose, its
+  // request format, this reasoning variant and output limit, and a context that holds bytes, template and output.
   // A profile approved for another use (e.g. Argon only for fusion_review) never admits a free chat.
   const profile = matchedProfile(parsed.data.profiles,
     { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],

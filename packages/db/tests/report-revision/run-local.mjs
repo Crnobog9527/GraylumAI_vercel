@@ -40,7 +40,9 @@ const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packag
   // 0383 patches 0294's review check and 0295's report hold (ARCH-FIX E1 shared quarantine check).
   'packages/db/migrations/0383_credit_grant_quarantine.sql',
   'packages/db/migrations/0397_report_fee_terminal_settlement.sql',
-  'packages/db/migrations/0412_report_stop_limit.sql'];
+  'packages/db/migrations/0412_report_stop_limit.sql',
+  // V2-7a: report_fee_hold and report_stop as they stand with the turn path (both replayed above in their older text).
+  'packages/db/migrations/0429_core_path_v2_report.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {

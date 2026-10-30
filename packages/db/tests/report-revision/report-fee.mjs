@@ -555,7 +555,14 @@ export async function runReportFee({db,Client,connectionString,report}) {
   assert.equal((await fee(db,capped.id)).charged_credits,500,'800 credits of actual cost are capped at 500');
   assert.equal(await wallet(db,cappedActor.actor),9500);
   await balanced(db,cappedActor.actor,'capped stop');
-  report.checks.push('report stop limit: two free stops, failure excluded, third stop requires confirmation and charges actual cost');
+  // CORE-PATH-V2 V2-7a: the free stops are one count across both paths: two report stops on the turn path leave none here.
+  const crossActor = await seed(db);
+  await setBalance(db,crossActor.actor,10000);
+  for (let i=0;i<2;i++) await db.query(`INSERT INTO turns(actor_id,request_id,kind,state,close_kind,closed_at,stopped_by_user,policy,reserved_credits)
+    VALUES($1,$2,'report','closed','stopped',now(),true,'{}',0)`,[crossActor.actor,randomUUID()]);
+  const crossStop = await execution(db,crossActor);
+  assert.equal((await service(db,'report_stop',crossActor.actor,crossStop.id,null,false)).state,'confirmation_required','turn-path stops count');
+  report.checks.push('report stop limit: two free stops, failure excluded, third stop requires confirmation and charges actual cost; turn-path stops count too');
 
   // A report without a price (admitted before 0295) keeps per-call billing.
   const old = await createFixture(db,{actor:f.actor});

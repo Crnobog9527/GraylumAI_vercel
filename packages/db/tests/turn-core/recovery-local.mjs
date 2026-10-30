@@ -7,8 +7,10 @@ import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
-import {localDb,root} from '../runtime-view-perf/local-db.mjs';
+import {localDb,read,root} from '../runtime-view-perf/local-db.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
+// V2-7a: a report opens only for a Gold account's confirmed round of its own conversation (turn_report_admit).
+db.sql(read('packages/db/tests/content-erasure/fixture.sql'));db.sql(read('packages/db/tests/turn-core/report-fixture.sql'));
 const one=async(sql,args=[],client=c)=>(await client.query(sql,args)).rows[0]?.v;
 const hash=text=>createHash('sha256').update(text).digest('hex');
 const {Client}=createRequire(resolve(root,'package.json'))('pg');
@@ -172,7 +174,9 @@ try{
   assert.equal((await recover(a,j.turnId,'interrupt')).closeKind,'interrupted');
   assert.equal((await recover(b,k.turnId,'expire')).closeKind,'expired');
   assert.equal(await one('select failure_code v from turns where id=$1',[k.turnId]),'recovery_expired');
-  const r=await account(),rep=await open(r,{kind:'report',pol:policy({gCredits:500,fixedCredits:500})});
+  const r=await account(),src=await one('select turn_test.report_source($1) v',[r.actor]);
+  const rep=await open({...r,session:src.session},{kind:'report',pol:policy({gCredits:530,minCredits:530,fixedCredits:500,historyItems:0,
+   limits:{model:1,paidTools:0,freeTools:0},report:{projectId:src.project,roundId:src.round,moduleId:src.module}})});
   await begin(r,rep.turnId,1,{upper:0.5});await record(r,rep.turnId,1,{n:0.2});
   await c.query("update turns set state='stopping',updated_at=now()-interval '16 minutes' where id=$1",[rep.turnId]);
   assert.equal((await claim()).find(i=>i.turnId===rep.turnId)?.action,'interrupt');
@@ -237,15 +241,16 @@ try{
    else{assert.equal(exp.skipped,true);assert.equal(res.state,'running');assert.equal(await balance(x.a),58);}
    report.resumeExpiryRace=won;
   }finally{await p1.end();await p2.end();}
-  // A fixed price stays the fixed price across a resume (#1519 review): 500, not 500 + what the paused segment used.
+  // A fixed price stays the fixed price across a resume (#1519 review): 500, not 500 + what the paused segment used. A fixed-price
+  // turn that pauses is a jury's (a report freezes its whole price at open and never pauses, V2-7a).
   {
    const f=await account(30);
    const fp=(o={})=>policy({gCredits:600,fixedCredits:500,minCredits:30,uModelCredits:20,...o});
-   const o=await open(f,{kind:'report',pol:fp()});
+   const o=await open(f,{kind:'jury',pol:fp()});
    await begin(f,o.turnId,1,{upper:0.02});await record(f,o.turnId,1,{n:0.02});
    assert.equal((await begin(f,o.turnId,2,{upper:0.04})).paused,true);
    await c.query('update profiles set credits=credits+1000 where id=$1',[f.actor]);
-   const n=await open(f,{kind:'report',resumeOf:o.turnId,pol:fp({limits:{model:2,paidTools:1,freeTools:1}})});
+   const n=await open(f,{kind:'jury',resumeOf:o.turnId,pol:fp({limits:{model:2,paidTools:1,freeTools:1}})});
    await begin(f,n.turnId,1);await record(f,n.turnId,1);
    assert.equal((await one("select turn_close($1,$2,'completed','[]',true,false,null) v",[f.actor,n.turnId])).chargedCredits,500);
    assert.equal(await spends(f),500);assert.equal(await balance(f),530);

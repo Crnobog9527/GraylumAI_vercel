@@ -6,7 +6,7 @@ import type { AgentInputItem } from '@openai/agents';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
-import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
+import { readAdmissionConfiguration, type ConfigurationRows } from '../runtime/admissionConfiguration';
 import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
 import { rowFor } from '../runtime/settingsRows';
 import { CORE_PATH_SETTING } from './settingKeys';
@@ -45,6 +45,12 @@ export { CORE_PATH_SETTING } from './settingKeys';
 export const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
+/** The core-path switch and stop-loss parameters from the admission configuration rows, or null when off or not valid. */
+export function readCoreConfig(configuration: ConfigurationRows) {
+  const core = rowFor(configuration, CORE_PATH_SETTING);
+  const config = coreSetting.safeParse(core.error ? null : core.data?.value);
+  return config.success && config.data.enabled ? config.data : null;
+}
 /** The route's maxDuration (300 s): supplier requests stop in time for the reply (V2-6). */
 const TURN_BUDGET_MS = 300_000;
 
@@ -82,9 +88,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const { admin } = deps, db = turnDatabase(deps.clients), started = Date.now();
   // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
   const configuration = readAdmissionConfiguration(admin);
-  const core = rowFor(await configuration, CORE_PATH_SETTING);
-  const config = coreSetting.safeParse(core.error ? null : core.data?.value);
-  if (!config.success || !config.data.enabled) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
+  const config = readCoreConfig(await configuration);
+  if (!config) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   const settings = await readAdmissionSettings(admin, configuration);
   // The one-switch pause and the message limits, before anything is frozen (the old path's admission check).
   const admitted = await deps.newWork.message(input.actorId, Promise.resolve(settings));
@@ -133,7 +138,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
 
   // 2. Open: one model call per tool return plus one (2.5.3), the paid tools' bounds, and the possible positioning check,
   // outside M and the freeze.
-  const decisionUpperUsd = config.data.decisionUpperUsd;
+  const decisionUpperUsd = config.decisionUpperUsd;
   // The start threshold L of this model for a free chat (purpose ordinary), from the admission configuration rows.
   const thresholds = rowFor(await configuration, RESEARCH_THRESHOLDS_KEY);
   const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q,
@@ -142,7 +147,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
     startThresholdCredits: startCredits,
     limits: { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 },
-    paidToolUpperUsd: tools?.plan.paidToolUpperUsd ?? [], stopLoss: config.data.stopLoss,
+    paidToolUpperUsd: tools?.plan.paidToolUpperUsd ?? [], stopLoss: config.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing,
     frozen: { modelId: quote.modelId, model: quote.model } });
   let opened;
