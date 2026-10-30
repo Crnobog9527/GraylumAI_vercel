@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { logSwallowed } from '../../lib/swallow';
+import type { ToolAvailability } from './tools/types';
 
 /*
  * CORE-PATH-V2 2.2: one POST /api/turn is one Server-Sent Events stream. `opened` comes first (the turn is admitted: frozen
@@ -7,7 +8,8 @@ import { logSwallowed } from '../../lib/swallow';
  * a fixed code only; database and provider text never reach the client.
  */
 export type TurnEvent =
-  | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean }
+  // tools: what this turn can use and what was trimmed and why (2.7, V2-6); absent for a turn without tools.
+  | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean; tools?: ToolAvailability }
   | { type: 'text'; delta: string }
   | { type: 'result'; turnId: number; body: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null;
     /** V2-5: what the kind's close did (the mentor's checklist capture: applied fields, versions). */
