@@ -606,11 +606,11 @@ DECLARE
   s runtime_sessions; t turns; prof profiles; existing turns;
   v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
+  carried integer := 0;
 BEGIN
   IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
   END IF;
-  IF p_resume_of IS NOT NULL THEN RAISE EXCEPTION 'TURN_RESUME_NOT_SUPPORTED' USING ERRCODE='0A000'; END IF;
   IF jsonb_typeof(p_policy) <> 'object'
     OR jsonb_typeof(p_policy->'q') <> 'number' OR (p_policy->>'q')::numeric <= 0
     OR jsonb_typeof(p_policy->'uTurnUsd') <> 'number' OR (p_policy->>'uTurnUsd')::numeric < 0
@@ -629,7 +629,7 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits'] THEN
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -641,7 +641,8 @@ BEGIN
   -- 2. The same request again: the turn it opened, unchanged.
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
-    IF existing.session_id IS DISTINCT FROM p_session_id OR existing.kind <> p_kind THEN
+    IF existing.session_id IS DISTINCT FROM p_session_id OR existing.kind <> p_kind
+      OR existing.resume_of IS DISTINCT FROM p_resume_of THEN
       RAISE EXCEPTION 'TURN_REQUEST_CONFLICT' USING ERRCODE='22023';
     END IF;
     -- A replay reads the history too: a deleted conversation or an erasing account is refused here as for a new request,
@@ -657,10 +658,13 @@ BEGIN
     IF EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    -- A jury (or its adoption) runs on the report's draft conversation without occupying it (V2-7b): the conversation stays
-    -- usable while a review advances or waits, as before; one review per user is the review record's own rule.
-    IF s.active_turn_id IS NOT NULL AND p_kind NOT IN ('jury','jury_adopt') THEN
-      RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03';
+    IF p_resume_of IS NULL THEN
+      -- A jury (or its adoption) runs on the report's draft conversation without occupying it (V2-7b): the conversation stays
+      -- usable while a review advances or waits, as before; one review per user is the review record's own rule.
+      IF s.active_turn_id IS NOT NULL AND p_kind NOT IN ('jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+    ELSE
+      -- Resume (V2-8): the paused turn is checked, locked and priced by turn_resume_carry.
+      carried := public.turn_resume_carry(p_actor_id, p_session_id, s.active_turn_id, p_resume_of, p_kind, p_policy);
     END IF;
     -- The same account check as bill2_actor: active and not deleted.
     IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN
@@ -668,6 +672,8 @@ BEGIN
     END IF;
 
     -- 3. Stop-loss (2.5.1): reserve U_turn on the own bucket row first, then read the day's sum, then check with the band B.
+    -- On a resume the paused turn's reservation is still counted here (it is released by its close below): refusing earlier,
+    -- never later.
     IF (p_policy->'stopLoss'->>'p')::int < (p_policy->'stopLoss'->>'poolSize')::int THEN
       RAISE EXCEPTION 'TURN_STOP_LOSS_CONFIG' USING ERRCODE='22023';
     END IF;
@@ -682,6 +688,16 @@ BEGIN
       RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
     END IF;
 
+    -- The paused turn closes before the new freeze is sized: its whole freeze comes back (refund_all; what it would have charged
+    -- is carried above) and counts in the balance read below. Its receipts stay its own for the stop-loss. Not delivered, no
+    -- messages: the turn that continues it saves the conversation.
+    IF p_resume_of IS NOT NULL THEN
+      PERFORM public.turn_close(p_actor_id, p_resume_of, 'failed', '[]'::jsonb, false, true, 'resumed');
+      -- What it carries is not borne by the platform: only what the chain finally does not charge is recorded as absorbed.
+      UPDATE turns SET absorbed_credits = greatest(absorbed_credits - carried, 0)
+        WHERE actor_id = p_actor_id AND id = p_resume_of AND absorbed_credits IS NOT NULL;
+    END IF;
+
     -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The balance is read under the
     -- account lock taken first: two sessions of one account in different stop-loss buckets never size H on the same balance.
     -- The account is checked again here (same lock) before anything is frozen.
@@ -690,19 +706,24 @@ BEGIN
       OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
       RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
     END IF;
-    g := (p_policy->>'gCredits')::int;
+    -- The freeze covers the carried credits too (the continuation settles them).
+    g := (p_policy->>'gCredits')::int + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
     -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
-    IF available < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
+    -- On a resume the carried credits are owed already: the balance left after them must still cover one normal turn.
+    IF available - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
     h := least(g, available);
     IF h > 0 THEN
       SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
     END IF;
 
-    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h);
-    INSERT INTO turns (actor_id, session_id, request_id, kind, state, policy, reserved_credits, reserved_usd, input_bytes)
-      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', frozen, h, u_turn,
+    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h)
+      || CASE WHEN carried > 0 THEN jsonb_build_object('carriedCredits', carried) ELSE '{}'::jsonb END;
+    INSERT INTO turns (actor_id, session_id, request_id, kind, state, resume_of, policy, reserved_credits, reserved_usd, input_bytes)
+      -- reserved_credits is the freeze this turn's calls may use (turn_call_begin pauses on it); the carried part is added back
+      -- at the close (turn_close), and the hold itself is the whole H (policy.heldCredits).
+      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h - carried, u_turn,
         (p_policy->>'inputBytes')::int)
       RETURNING * INTO t;
     IF p_kind NOT IN ('jury','jury_adopt') THEN UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id; END IF;
@@ -717,7 +738,7 @@ BEGIN
   -- 6. What the turn's prompt needs from the account, read here instead of in more round trips: the reply language and, for a
   -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it).
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
-    'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history,
+    'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history, 'resumeOf', t.resume_of,
     'replyLanguage', prof.reply_language,
     'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
       'positioned', public.opc_has_confirmed_positioning(p_actor_id),
