@@ -25,7 +25,9 @@ BEGIN
   gone := CASE WHEN v_review IS NOT NULL THEN NOT EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND id = v_review)
                ELSE NOT EXISTS (SELECT 1 FROM fusion_compares WHERE actor_id = p_actor_id AND id = v_compare) END;
   -- The receipt (billing evidence) is always written; the response text is not once its review or compare is gone.
-  r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd, p_usage, p_provider_id, p_payload_hash,
+  -- A revision whose review is gone was never kept, so it is not a deliverable (the fixed price is not due for it).
+  r := turn_call_record(p_actor_id, p_turn_id, p_seq, p_status, p_nominal_usd, p_actual_usd,
+    CASE WHEN gone THEN coalesce(p_usage, '{}'::jsonb) - 'deliverable' ELSE p_usage END, p_provider_id, p_payload_hash,
     CASE WHEN gone THEN NULL ELSE p_raw END);
   IF jsonb_typeof(p_output) = 'object' AND NOT gone AND NOT (r->>'sessionTombstoned')::boolean AND NOT (r->>'accountErasing')::boolean THEN
     IF p_status NOT IN ('ok','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;

@@ -136,7 +136,12 @@ try{
    assert.equal((await close(a,t,'interrupted')).settlement,'pending');
    await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,t,2,'ok',0.05,0.05,'{}',null,hash('late-seat'),null]);
    return (await close(a,t,'interrupted')).chargedCredits;});
-  assert.deepEqual([noChange,failed,small,large,delivered,late],[0,0,30,FIXED,FIXED,30]);
+  // #1522 review: the report deleted while the summary runs; its revision arrives after: not kept, not charged (erased).
+  const erased=await run(async(a,rv,t)=>{await begin(a,t,1);await c.query('delete from fusion_reviews where id=$1',[rv]);
+   const r=await record(a,t,1,{n:0.05,deliverable:true,output:{phase:'fusion_summary',body:'revised',verdict:'usable'}});
+   assert.equal(r.productGone,true);
+   return (await close(a,t,'erased')).chargedCredits;});
+  assert.deepEqual([noChange,failed,small,large,delivered,late,erased],[0,0,30,FIXED,FIXED,30,0]);
   report.checks.push('jury delivery rule: no change, revision failed and incomplete refund all; interrupted pays min(fixed, known usage) (30, capped at 1500), without a seat judged unusable whose cost came later; a deliverable summary pays the price however it ends');
  }
  // 4. The group's temporary bound (10-13): the freeze above the fixed price covers the calls in flight; a call that does not fit

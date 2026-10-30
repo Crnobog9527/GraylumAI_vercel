@@ -13,6 +13,9 @@ BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF p_refund_all THEN RETURN 0; END IF;
   IF t.kind = 'jury' THEN
+    -- An erased review (its report or conversation deleted) pays nothing, also for a revision that arrived after: its body was
+    -- never kept, so nothing was delivered.
+    IF p_kind = 'erased' THEN RETURN 0; END IF;
     -- The jury's fixed price (Owner 10-17/10-27, V2-7b), as fusion_review_fee_settle_internal: a deliverable revision (a usable
     -- summary that changes a section) pays the price however the turn ended; an interruption or the 24-hour end pays the known
     -- usage, at most the price; no change, a failed revision, an incomplete review or an erasure pays nothing.
