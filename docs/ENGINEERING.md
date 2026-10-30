@@ -177,7 +177,7 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 - 主路径的数据库函数只能读写 `turns`、`turn_calls`、`session_messages`、`runtime_sessions`、`profiles`、`credit_transactions`、`credit_source_entries`、`daily_spend`、`catalog_versions`，以及按 `kind` 需要的草稿/报告/评审表各一行；只允许对本人 `profiles` 和本会话 `runtime_sessions` 加行锁；不得对任何全站共用行加锁。例外（Owner 2026-10-29 批准）：扣积分和结算用到的账本函数（`atomic_pre_deduct`、`turn_settle_credits`、`credit_available`、`credit_source_apply`，含其中按订阅期、积分包记账的来源记录，如 `subscription_credit_grants`）不受这条表白名单限制，按账本叶子计数；结算积分时，这些账本函数还可以锁住用户本人的订阅期和积分包来源记录（Owner 2026-10-29 另行批准），只限本人的行，其他行锁限制照旧。它们只能读写本人的账本行。例外（Owner 2026-10-30 批准）：`kind=mentor` 的回合可以在收轮事务内写本回合对标工具产生的 `research_*` 派生行，只限本人、本回合的行，不加这条之外的行锁；回合中途仍不得写 `research_*`。
 - 全站只读、管理员写的目录（系统设置、模型目录、Skill 包、权益规则）必须通过 `catalogCache` 读取；余额、冻结、墓碑、会话状态、用户写入的数据永不缓存。
 - staging 与正式环境不得有代码分支；环境差异只能是配置（密钥、地址、价格快照、账号积分）。
-- `scripts/check-turn-budget.mjs` 的基线只许变小（调高需 Owner 批准；Owner 2026-10-30 批准导师非开场回合 ≤ 11 → ≤ 12，见计划 3.1）；碰主路径的 PR 描述写明往返/锁/数据库时间的前后值。
+- `scripts/check-turn-budget.mjs` 的基线只许变小（调高需 Owner 批准；Owner 2026-10-30 批准导师非开场回合 ≤ 11 → ≤ 12，2026-10-31 批准账号策略草稿 ≤ 13，见计划 3.1）；碰主路径的 PR 描述写明往返/锁/数据库时间的前后值。
 - 新的业务规则要进主路径时，先问"它属于开轮、回执还是收轮"，只在那一个函数里加分支；需要新表才能表达的，先在 PR 里写一句为什么现有列不够。
 
 ## 6. AI 与 Agent 功能
