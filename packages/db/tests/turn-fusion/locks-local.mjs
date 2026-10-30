@@ -107,6 +107,18 @@ try{
   assert.equal(await one('select credits v from profiles where id=$1',[a.actor]),3000);
   report.checks.push('a review ended by another path before its close: the close settles by that end, the fixed price is not charged');
  }
+ // 3c. The general recovery job closes a jury whose review another path ended unfinished, before fusion-recovery does: refunded.
+ for(const action of ['interrupt','expire']){
+  const a=await account(),o=await open(a);
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);
+  if(action==='interrupt')await c.query("update turns set state='running',pause_reason=null where id=$1",[o.turnId]);
+  await c.query("update fusion_reviews set state='incomplete',ended_at=now() where id=$1",[a.review]);
+  await c.query("update turns set updated_at=now()-interval '25 hours' where id=$1",[o.turnId]);
+  const done=await one('select turn_recover($1,$2,$3) v',[a.actor,o.turnId,action]);
+  assert.equal(done.chargedCredits,0,action+': '+JSON.stringify(done));
+  assert.equal(await one('select credits v from profiles where id=$1',[a.actor]),3000,action);
+ }
+ report.checks.push('turn_recover before fusion-recovery on a review ended unfinished: interrupted or expired, it refunds everything');
  // 4. A deletion of the review (content_erasure_confirm locks the conversations first, NOWAIT) and a receipt: while the receipt
  // holds the conversation the deletion fails fast; a deletion that holds it first makes the receipt wait and see the review
  // gone (the receipt is kept, the answer and the raw body are not).

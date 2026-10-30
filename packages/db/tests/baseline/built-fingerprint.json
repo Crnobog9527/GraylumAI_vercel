@@ -4284,7 +4284,7 @@
   "fn:turn_settle_credits(uuid,uuid,integer,bigint)": "c6d0a1cac83e",
   "fn:turn_stop(uuid,bigint,boolean,integer)": "fb1a893f487f",
   "fn:turn_tombstones(uuid,uuid,jsonb)": "7650ea48b0f5",
-  "fn:turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)": "e2c851d0d4fd",
+  "fn:turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)": "ddddd6aa93b8",
   "fn:voice_billing_scrub(uuid)": "6cf04ac8046a",
   "fn:voice_corpus_limit()": "b41be220f585",
   "fn:voice_current_corpus(uuid)": "9a04476c91ff",
