@@ -29,7 +29,7 @@ BEGIN
     -- (both stamped with clock_timestamp under this turn's row lock, so a receipt and a pass never miss each other).
     IF t.settlement = 'pending' THEN
       marker := clock_timestamp();
-      SELECT coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+      SELECT coalesce(sum(turn_call_spent_usd(call_kind, nominal_usd, actual_usd)) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
              coalesce(sum(upper_usd), 0)
         INTO n_total, pending_upper
       FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
@@ -85,9 +85,10 @@ BEGIN
    WHERE turn_id = p_turn_id AND status IN ('dispatched','identified');
   q := (t.policy->>'q')::numeric;
   -- N = ceil(q x sum(n_i x m_i)) over the known receipts the user pays for (never the positioning check); n_total is the provider
-  -- cost of every receipt, the positioning check and the platform-paid unusable results included, which the stop-loss counts.
+  -- cost of every receipt, the positioning check and the platform-paid unusable results included, which the stop-loss counts; a
+  -- tool receipt counts its whole known supplier cost (turn_call_spent_usd), the subcalls the user does not pay for included.
   SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
-         coalesce(sum(nominal_usd) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+         coalesce(sum(turn_call_spent_usd(call_kind, nominal_usd, actual_usd)) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
          coalesce(sum(upper_usd) FILTER (WHERE cost_pending), 0),
          coalesce(bool_or(cost_pending), false),
          -- Only an unknown model call holds the user's settlement: a third-party tool whose result is unknown is 0 to the user
