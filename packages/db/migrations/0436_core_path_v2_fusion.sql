@@ -633,6 +633,55 @@ END $function$;
 
 -- Closes a jury turn whose review another path already ended (an archived business, 0326): by the review's end, as the jury
 -- itself would have closed it. Used by turn_fusion_recovery; the relay calls the same rule (jury.ts) when it reads such a review.
+-- The general recovery closes a jury through turn_fusion_close, so its charge never reads a review another path is ending.
+CREATE OR REPLACE FUNCTION public.turn_recover(p_actor_id uuid, p_turn_id bigint, p_action text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE t turns; s runtime_sessions; result jsonb; ending text;
+BEGIN
+  IF p_action IS NULL OR p_action NOT IN ('interrupt','expire','settle') THEN
+    RAISE EXCEPTION 'TURN_RECOVERY_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
+  -- Lock order as turn_close: the profile, the session, then the turn.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+  IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
+  -- Re-checked under the locks; turn_close is the only state change.
+  IF p_action = 'interrupt' AND t.state IN ('running','stopping') AND t.updated_at < now() - interval '15 minutes' THEN
+    -- A report its user was stopping closes as stopped (the 24-hour stop rule applies); anything else as interrupted: the known
+    -- receipts settle, an unknown cost keeps its share of the freeze for the settlement pass.
+    ending := CASE WHEN t.state = 'stopping' THEN 'stopped' ELSE 'interrupted' END;
+  ELSIF p_action = 'expire' AND t.state = 'paused' AND t.updated_at < now() - interval '24 hours' THEN
+    -- Owner 10-25/10-27: a paused turn that delivered nothing for 24 hours is refunded in full (expired, not delivered: D = 0);
+    -- refund_all stays false so a jury is charged by its own rule in turn_user_charge (V2-7b).
+    ending := 'expired';
+  ELSIF p_action = 'settle' AND t.state = 'closed' AND t.settlement = 'pending' THEN
+    -- The settlement pass of a closed turn (#1512): what became known since the last pass, counted once. The lease stays: the
+    -- next lookup of what is still unknown waits for it.
+    RETURN public.turn_close(p_actor_id, p_turn_id, t.close_kind) || jsonb_build_object('action', p_action);
+  ELSE
+    UPDATE turns SET recovery_lease_until = NULL WHERE actor_id = p_actor_id AND id = p_turn_id;
+    RETURN jsonb_build_object('turnId', t.id, 'action', p_action, 'skipped', true, 'state', t.state, 'settlement', t.settlement);
+  END IF;
+  -- A jury closes with its review, or by the end another path is committing on it: the charge must not read that review stale.
+  IF t.kind = 'jury' THEN
+    result := public.turn_fusion_close(p_actor_id, p_turn_id, ending, false, false,
+      CASE WHEN ending = 'expired' THEN 'recovery_expired' ELSE 'recovery_interrupted' END,
+      jsonb_build_object('state', 'interrupted', 'outcome', jsonb_build_object('kind', ending)));
+  ELSE
+    result := public.turn_close(p_actor_id, p_turn_id, ending, '[]'::jsonb, false, false,
+      CASE WHEN ending = 'expired' THEN 'recovery_expired' ELSE 'recovery_interrupted' END);
+  END IF;
+  -- Closed now: a cost still unknown is claimed again for the settlement pass without waiting for this lease.
+  UPDATE turns SET recovery_lease_until = NULL WHERE actor_id = p_actor_id AND id = p_turn_id;
+  RETURN result || jsonb_build_object('action', p_action);
+END $function$;
+
 CREATE OR REPLACE FUNCTION public.turn_fusion_ended_review(p_actor_id uuid, p_turn_id bigint, p_state text, p_outcome jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql

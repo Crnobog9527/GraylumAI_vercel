@@ -120,6 +120,26 @@ try{
   assert.equal(await one('select credits v from profiles where id=$1',[a.actor]),3000,action);
  }
  report.checks.push('turn_recover before fusion-recovery on a review ended unfinished: interrupted or expired, it refunds everything');
+ // 3d. The same with the two transactions overlapping: the other path's end is not committed when the recovery reads the review,
+ // so the recovery waits on its write, undoes its close and settles by that end.
+ for(const [action,deliverable] of [['interrupt',false],['interrupt',true],['expire',true]]){
+  const a=await account(),o=await open(a),ender=await peer();
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);
+  if(deliverable)await c.query(`update turn_calls set usage=usage||'{"deliverable":true}' where turn_id=$1`,[o.turnId]);
+  if(action==='interrupt')await c.query("update turns set state='running',pause_reason=null where id=$1",[o.turnId]);
+  await c.query("update turns set updated_at=now()-interval '25 hours' where id=$1",[o.turnId]);
+  try{
+   await ender.query('begin');
+   await ender.query("update fusion_reviews set state='incomplete',ended_at=now() where id=$1",[a.review]);
+   const recovering=settle(one('select turn_recover($1,$2,$3) v',[a.actor,o.turnId,action]));
+   await pause();
+   await ender.query('commit');
+   assert.equal((await recovering).v?.chargedCredits,0,action+': '+JSON.stringify(await recovering));
+  }finally{await ender.end();}
+  assert.equal(await reviewState(a),'incomplete',action);
+  assert.equal(await one('select credits v from profiles where id=$1',[a.actor]),3000,action);
+ }
+ report.checks.push('turn_recover overlapping another path ending the review: it waits, undoes its close and refunds by that end');
  // 4. A deletion of the review (content_erasure_confirm locks the conversations first, NOWAIT) and a receipt: while the receipt
  // holds the conversation the deletion fails fast; a deletion that holds it first makes the receipt wait and see the review
  // gone (the receipt is kept, the answer and the raw body are not).
