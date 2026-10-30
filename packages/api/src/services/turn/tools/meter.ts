@@ -33,7 +33,8 @@ const hasData = (receipt: SubcallReceipt) =>
   (receipt.result.outcome === 'ok' || receipt.result.outcome === 'partial') && receipt.result.items.length > 0;
 
 /**
- * How the subcalls of one call settle (types.ts ToolCallOutcome). `multiplier` is the row's m: the user pays
+ * How the subcalls of one call settle (types.ts ToolCallOutcome); the user's base counts the subcalls with data only.
+ * `multiplier` is the row's m: the user pays
  * ceil(q x n x m) with n = sum(cost_i x m_i / m), so a route with a smaller m than the row's is never overcharged.
  */
 export function settleToolCall(receipts: readonly SubcallReceipt[], multiplier: string): Settlement {
@@ -46,8 +47,11 @@ export function settleToolCall(receipts: readonly SubcallReceipt[], multiplier: 
   if (!sent.some(hasData)) return { outcome: 'no_data', actualUsd: format(actual) };
   const m = decimal(multiplier);
   if (m === 0n) throw new Error('TURN_TOOL_MULTIPLIER_INVALID');
-  // sum(cost_i x m_i) / m, rounded up at 12 digits (the user's base is never rounded down below its true amount).
-  const weighted = sent.reduce((sum, receipt) => sum + decimal(receipt.costUsd) * decimal(receipt.multiplier), 0n);
+  // The user pays only for the subcalls that returned data; a failed one the supplier still billed, or one that came back
+  // empty, is the platform's (RESEARCH-TOOLS failed_charged rule) and stays in actualUsd. sum(cost_i x m_i) / m over those,
+  // rounded up at 12 digits (the user's base is never rounded down below its true amount).
+  const weighted = sent.filter(hasData)
+    .reduce((sum, receipt) => sum + decimal(receipt.costUsd) * decimal(receipt.multiplier), 0n);
   const nominal = (weighted + m - 1n) / m;
   return { outcome: 'delivered', nominalUsd: format(nominal), actualUsd: format(actual) };
 }

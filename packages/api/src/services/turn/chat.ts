@@ -113,7 +113,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // checked again before sending, with everything in them).
   const guard = settings.ok ? settings.identityGuard ?? true : true;
   const requiredBytes = Buffer.byteLength(input.text) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard));
-  if (requiredBytes > Math.min(quote.inputLimit, interactiveBytes)) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
+  // With tools the research ceiling may hold the message; it is checked again below against what the plan allows.
+  if (requiredBytes > (deps.tools ? quote.inputLimit : Math.min(quote.inputLimit, interactiveBytes)))
+    return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
   // V2-6: what this turn's tools may do, from the catalog cache, before anything opens (limits and bounds go into the freeze).
   let tools: ChatToolsSetup | null = null;
   if (deps.tools) {
@@ -125,6 +127,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     } catch { return emit({ type: 'error', code: 'TURN_TOOLS_UNAVAILABLE' }); }
   }
   const inputLimit = tools ? tools.inputLimit : quote.inputLimit;
+  // The ceiling this turn really has (research usable: the research one; otherwise the interactive one), before anything opens.
+  if (tools && requiredBytes + tools.definitionBytes > inputLimit) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
   const toolLimits = tools ? tools.plan.limits : { paidTools: 0, freeTools: 0 };
 
   // 2. Open: one model call per tool return plus one (2.5.3), the paid tools' bounds, and the possible positioning check,

@@ -130,11 +130,11 @@ const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.0000
 const admit = async () => ({ ok: true as const });
 type NewWork = Parameters<typeof runChatTurn>[0]['newWork'];
 async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false,
-  newWork: NewWork = { message: admit, calls: admit }) {
+  newWork: NewWork = { message: admit, calls: admit }, text = 'How should a coffee shop position itself?') {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate }, newWork,
     tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library } },
-  { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text: 'How should a coffee shop position itself?' }, e => events.push(e)));
+  { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text }, e => events.push(e)));
   return { events, calls };
 }
 /** N = ceil(q x sum(n x m)) over the receipts the user pays for: ok rows except the positioning check (q 100, m 6 here). */
@@ -281,4 +281,17 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a balance that opens the turn but not the contin
   // The search is recorded with its cost; nothing was sent for the continuation.
   expect((await rows(f.actor)).map(r => [r.call_kind, r.status])).toEqual([['decision', 'ok'], ['model', 'ok'], ['tool', 'ok']]);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(0);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-6: a message above the interactive ceiling opens when research is usable, never above the research one', async () => {
+  const f = await setup(), bodies: string[] = [];
+  const plain: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); const id = `gen-big-${bodies.length}`;
+    return respond(id, frame(id, { choices: [{ index: 0, delta: { role: 'assistant', content: 'Read.' }, finish_reason: null }] })
+      + frame(id, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + usage(id)); };
+  // 100,000 bytes: over the 90,000 interactive ceiling, inside the 150,000 research one with the tool definitions and reserve.
+  const big = await turn(f, plain, suppliers(vi.fn()), false, undefined, 'x'.repeat(100_000));
+  expect(big.events.at(-1), JSON.stringify(big.events.map(e => e.type))).toMatchObject({ type: 'result', body: 'Read.' });
+  const tooBig = await turn(f, plain, suppliers(vi.fn()), false, undefined, 'x'.repeat(149_000));
+  expect(tooBig.events).toEqual([{ type: 'error', code: 'TURN_INPUT_TOO_LARGE' }]);
+  expect(bodies).toHaveLength(1);
 });

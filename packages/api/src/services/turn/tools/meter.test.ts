@@ -14,8 +14,11 @@ describe('settling one tool call from its subcalls (CORE-PATH-V2 V2-6)', () => {
     expect(settleToolCall([], '6')).toEqual({ outcome: 'not_sent' });
     expect(settleToolCall([r({ outcome: 'not_sent', items: [] }, '0')], '6')).toEqual({ outcome: 'not_sent' });
   });
-  it('data came back: the user pays the summed cost of every subcall of the call', () => {
-    expect(settleToolCall([r({}), r({ items: [] })], '6')).toEqual({ outcome: 'delivered', nominalUsd: '0.002', actualUsd: '0.002' });
+  it('data came back: the user pays for the subcalls with data; billed failures and empty ones stay the platform\'s', () => {
+    expect(settleToolCall([r({}), r({})], '6')).toEqual({ outcome: 'delivered', nominalUsd: '0.002', actualUsd: '0.002' });
+    expect(settleToolCall([r({}), r({ items: [] })], '6')).toEqual({ outcome: 'delivered', nominalUsd: '0.001', actualUsd: '0.002' });
+    expect(settleToolCall([r({}), r({ outcome: 'failed', items: [] })], '6'))
+      .toEqual({ outcome: 'delivered', nominalUsd: '0.001', actualUsd: '0.002' });
   });
   it('a route with a smaller multiplier than the row is weighted down, never overcharged', () => {
     // 0.001 x 6 + 0.001 x 3 = 0.009 credits-base at m 6 → n = 0.0015.
