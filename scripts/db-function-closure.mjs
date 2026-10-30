@@ -136,6 +136,16 @@ function ownSelect(statement, at) {
   }
   return out;
 }
+// The text of the statement from `at` up to the parenthesis that closes the group `at` sits in (or the statement end), nested groups blanked.
+function scopeAfter(statement, at) {
+  let out = '', nested = 0;
+  for (const ch of statement.slice(at)) {
+    if (ch === '(') nested++;
+    else if (ch === ')') { if (nested === 0) break; nested--; }
+    else out += nested ? ' ' : ch;
+  }
+  return out;
+}
 const LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b(?:\s+OF\s+([a-z_][a-z0-9_.,\s]*?))?(?=\s*(?:SKIP|NOWAIT|\)|$))/gi;
 
 // Violations of the plan-7.1 rules in one function body. The ledger leaves are exempt from the table lists (ENGINEERING 5: they may
@@ -148,10 +158,13 @@ export function scan(name, body, options = DEFAULTS) {
   if (/\bpg_try_advisory(?:_xact)?_lock/i.test(code)) found.push(`${name}: advisory lock`);
   if (/\bset_config\s*\([^)]*,\s*false\s*\)/i.test(code)) found.push(`${name}: session-level set_config`);
   if (/\bCREATE\s+(?:GLOBAL\s+|LOCAL\s+)?TEMP(?:ORARY)?\s+TABLE\b/i.test(code)) found.push(`${name}: temporary table`);
+  // PL/pgSQL control words also end a command (IF x THEN SET ..., ELSE SET ..., BEGIN SET ...): split on them as well for the SET check only.
+  for (const command of statements(code.replace(/\b(THEN|ELSE|BEGIN|LOOP)\b/gi, '$1;'))) {
+    if (/^SET\s+(?!LOCAL\b)(?:SESSION\s+)?[a-z_.]+\s*(?:=|\bTO\b)/i.test(command) || /^SET\s+SESSION\b/i.test(command)) {
+      found.push(`${name}: non-LOCAL SET`);
+    }
+  }
   for (const statement of statements(code)) {
-    // A SET statement (not UPDATE ... SET): the statement starts with it, after an optional BEGIN / THEN / ELSE.
-    if (/^(?:(?:BEGIN|THEN|ELSE)\s+)?SET\s+(?!LOCAL\b)(?:SESSION\s+)?[a-z_.]+\s*(?:=|\bTO\b)/i.test(statement)
-      || /^(?:(?:BEGIN|THEN|ELSE)\s+)?SET\s+SESSION\b/i.test(statement)) found.push(`${name}: non-LOCAL SET`);
     if (ledger) continue;
     const ctes = cteNames(statement);
     for (const lock of statement.matchAll(LOCK)) {
@@ -175,14 +188,15 @@ export function scan(name, body, options = DEFAULTS) {
     // and DO UPDATE SET are not an UPDATE of a table.
     const updateStatement = new RegExp(
       '(?<!\\bFOR\\s)(?<!\\bON\\s)(?<!\\bDO\\s)\\bUPDATE\\s+(?:ONLY\\s+)?(?:public\\.)?"?([a-z_][a-z0-9_]*)"?'
-      + '(?:\\s+(?:AS\\s+)?[a-z_][a-z0-9_]*)?\\s+SET\\b', 'i');
-    const update = updateStatement.exec(statement);
-    if (update) {
+      + '(?:\\s+(?:AS\\s+)?[a-z_][a-z0-9_]*)?\\s+SET\\b', 'gi');
+    // Every UPDATE in the statement (a data-modifying CTE and the outer UPDATE alike), each judged by its own WHERE.
+    for (const update of statement.matchAll(updateStatement)) {
       const table = update[1].toLowerCase();
       const keys = options.updateKeys[table] ?? options.kindTables[table];
       if (!keys) found.push(`${name}: UPDATE of ${table}`);
-      else if (!new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`,
-        'i').test(statement)) found.push(`${name}: UPDATE of ${table} without ${keys.join(' or ')} in WHERE`);
+      else if (!new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`, 'i').test(scopeAfter(statement, update.index))) {
+        found.push(`${name}: UPDATE of ${table} without ${keys.join(' or ')} in WHERE`);
+      }
     }
   }
   return found;

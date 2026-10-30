@@ -131,3 +131,18 @@ test('an allowed lock must carry its owner key; a SKIP LOCKED batch claim need n
   assert.deepEqual(hits('WITH due AS (SELECT id FROM turns WHERE state = x LIMIT 5 FOR UPDATE SKIP LOCKED) SELECT id FROM due;'), []);
   assert.deepEqual(hits('BEGIN\n UPDATE turns\n SET state=1 WHERE actor_id=a AND id=b;\nEND;'), []);
 }); 
+
+test('every UPDATE of a statement is judged by its own WHERE, and a SET command inside IF / ELSE / BEGIN is found', () => {
+  const hits = body => scan('f', body, DEFAULTS);
+  assert.deepEqual(hits("WITH moved AS (UPDATE turns SET state='closed' WHERE actor_id=a RETURNING id) UPDATE profiles SET credits=0;"),
+    ['f: UPDATE of profiles without id in WHERE'], 'the CTE\'s owner key does not satisfy the outer UPDATE');
+  assert.deepEqual(hits("WITH moved AS (UPDATE turns SET state='closed' WHERE actor_id=a RETURNING id) UPDATE secret_things SET x=1;"),
+    ['f: UPDATE of secret_things']);
+  assert.deepEqual(hits("WITH moved AS (UPDATE turns SET state='closed' RETURNING id) UPDATE profiles SET credits=0 WHERE id=a;"),
+    ['f: UPDATE of turns without actor_id or id in WHERE'], 'the CTE UPDATE has no WHERE of its own');
+  assert.deepEqual(hits("WITH moved AS (UPDATE turns SET state='closed' WHERE actor_id=a RETURNING id) UPDATE profiles SET credits=0 WHERE id=a;"), []);
+  assert.deepEqual(hits('BEGIN IF should_change THEN SET search_path TO other; END IF; END;'), ['f: non-LOCAL SET']);
+  assert.deepEqual(hits('BEGIN IF a THEN NULL; ELSE SET statement_timeout = 5; END IF; END;'), ['f: non-LOCAL SET']);
+  assert.deepEqual(hits('BEGIN IF a THEN SET LOCAL statement_timeout = 5; END IF; END;'), []);
+  assert.deepEqual(hits('BEGIN IF a THEN\n UPDATE turns\n SET state=1 WHERE actor_id=a AND id=b;\n END IF; END;'), []);
+});
