@@ -4246,7 +4246,7 @@
   "fn:ticket_upload_begin(uuid,uuid,bigint)": "fbdefd61eae8",
   "fn:ticket_upload_finish(uuid,uuid,boolean)": "453c7d2531d5",
   "fn:token_stats_model_alias()": "2d856e4cf9bb",
-  "fn:turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "ebcf6440b203",
+  "fn:turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "8eeaa5f29701",
   "fn:turn_call_identity(uuid,bigint,integer,text)": "40ec987e5d70",
   "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "7b7f361c34f9",
   "fn:turn_call_spent_usd(text,numeric,numeric)": "5d8a4767f2ec",

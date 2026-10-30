@@ -50,9 +50,11 @@ BEGIN
   q := (t.policy->>'q')::numeric;
   IF t.kind = 'jury' THEN
     -- A jury pays its fixed price whatever its calls cost (Owner 10-17); the freeze above it is the temporary bound of the group
-    -- in flight (10-13): only calls still in flight count against it, a finished group's bound is free again (V2-7b).
-    SELECT coalesce((t.policy->>'fixedCredits')::int, 0) + coalesce(sum(ceil(q * upper_usd * multiplier)), 0) INTO used
-    FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision' AND status IN ('dispatched','identified');
+    -- in flight (10-13): only calls still in flight count against it, a finished group's bound is free again (V2-7b). A call
+    -- whose answer is saved and judged has finished, with only its cost pending: it does not hold the next group back.
+    SELECT coalesce((t.policy->>'fixedCredits')::int, 0) + coalesce(sum(ceil(q * k.upper_usd * k.multiplier)), 0) INTO used
+    FROM turn_calls k WHERE k.turn_id = p_turn_id AND k.call_kind <> 'decision' AND k.status IN ('dispatched','identified')
+      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = k.turn_id AND o.seq = k.seq);
   ELSE
     SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
                              WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)

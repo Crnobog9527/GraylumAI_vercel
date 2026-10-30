@@ -423,6 +423,12 @@ try{
   // The receipt arrives later (no deliverable mark in its usage): the settlement still charges the price.
   await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[d.actor,od.turnId,1,'ok',0.05,0.05,'{}',null,hash('late'),null]);
   assert.equal((await close(d,od.turnId,'completed')).chargedCredits,FIXED);
+  // #1522 review: three seats answered and judged with their costs pending fill the bound (3 x 60 = 180); the summary still starts.
+  const w=await account(),rw=await review(w),ow=await open(w,{product:{reviewId:rw}});
+  for(const s of [1,2,3]){await begin(w,ow.turnId,s);await one('select turn_call_identity($1,$2,$3,$4) v',[w.actor,ow.turnId,s,'gen-pending-'+s]);
+   await one('select turn_fusion_output($1,$2,$3,$4) v',[w.actor,ow.turnId,s,JSON.stringify(seat())]);}
+  const next=await begin(w,ow.turnId,4);
+  assert.deepEqual([next.state,next.status],['running','dispatched'],'the next group is not held by answers whose cost alone is pending');
   // #1522 review: a compare column refused under the positioning rule before its cost was final is saved as no_delivery; when
   // recovery settles its cost later (status ok), only the delivered column is charged, and the refusal is never readable.
   const k=await account(),cq={question:'q',questionHash:hash('q'),requestHash:hash('r'),snapshotHash:hash('s'),workspaceDependencies:[]};
