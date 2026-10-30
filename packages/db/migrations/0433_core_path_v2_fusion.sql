@@ -964,6 +964,12 @@ BEGIN
   -- its body was never kept, so nothing was delivered.
   IF t.kind IN ('jury','compare') AND p_kind = 'erased' THEN RETURN 0; END IF;
   IF t.kind = 'jury' THEN
+    -- A review another path ended unfinished (an archived business) refunds everything, whichever job closes its turn first and
+    -- whatever was saved before that end.
+    IF EXISTS (SELECT 1 FROM fusion_reviews r WHERE r.actor_id = p_actor_id AND r.id = (t.policy->>'reviewId')::uuid
+        AND r.state IN ('incomplete','revision_failed')) THEN
+      RETURN 0;
+    END IF;
     -- The jury's fixed price (Owner 10-17/10-27, V2-7b), as fusion_review_fee_settle_internal: a deliverable revision (a usable
     -- summary that changes a section) pays the price however the turn ended; an interruption or the 24-hour end pays the known
     -- usage, at most the price; no change, a failed revision, an incomplete review or an erasure pays nothing.
@@ -974,11 +980,6 @@ BEGIN
       RETURN least(coalesce(p_fixed, p_held), p_held);
     END IF;
     IF p_kind IN ('interrupted','expired') THEN
-      -- A review another path ended unfinished (an archived business) refunds everything, whichever job closes its turn first.
-      IF EXISTS (SELECT 1 FROM fusion_reviews r WHERE r.actor_id = p_actor_id AND r.id = (t.policy->>'reviewId')::uuid
-          AND r.state IN ('incomplete','revision_failed')) THEN
-        RETURN 0;
-      END IF;
       -- The known usage as turn_close counts it, without a seat or summary judged unusable (format or revision invalid): one
       -- whose cost was settled later by recovery (status ok) is borne by the platform, as when its cost was known at once.
       -- The verdict stays on the receipt, so a deletion of the saved answer does not make it chargeable.

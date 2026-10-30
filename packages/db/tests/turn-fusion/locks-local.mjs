@@ -108,9 +108,10 @@ try{
   report.checks.push('a review ended by another path before its close: the close settles by that end, the fixed price is not charged');
  }
  // 3c. The general recovery job closes a jury whose review another path ended unfinished, before fusion-recovery does: refunded.
- for(const action of ['interrupt','expire']){
+ for(const [action,deliverable] of [['interrupt',false],['expire',false],['expire',true]]){
   const a=await account(),o=await open(a);
   await begin(a,o.turnId,1);await record(a,o.turnId,1);
+  if(deliverable)await c.query(`update turn_calls set usage=usage||'{"deliverable":true}' where turn_id=$1`,[o.turnId]);
   if(action==='interrupt')await c.query("update turns set state='running',pause_reason=null where id=$1",[o.turnId]);
   await c.query("update fusion_reviews set state='incomplete',ended_at=now() where id=$1",[a.review]);
   await c.query("update turns set updated_at=now()-interval '25 hours' where id=$1",[o.turnId]);
