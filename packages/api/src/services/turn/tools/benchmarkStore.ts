@@ -56,6 +56,12 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   const savedDiscoveries = new Set<string>();
   let completedRounds = 0, newlyQualified = 0;
 
+  // A fetch this turn made for a link the user pasted: the operation that asked for this very account says so.
+  const pasted = (f: Fetch) => [...fresh.values()].some(o => {
+    const r = o.result as { args?: { source?: { kind?: string } }; call?: { platform?: string; query?: string } } | null;
+    return r?.args?.source?.kind === 'user_message' && r.call?.platform === f.platform
+      && r.call.query?.toLowerCase() === f.account.toLowerCase();
+  });
   const evidence = (discoveryId?: string) => ({
     async open(id: string, identityHash: string, quoteUnits: number) {
       const record = { id, identityHash, state: 'prepared', result: null, quoteUnits, discoveryId: discoveryId ?? null };
@@ -103,7 +109,9 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
     confirmCard: async () => { throw new Error('RESEARCH_SCOPE_DENIED'); },
     async offerShortfall(cardId) {
       const prior = prepared.shortfall;
-      const rounds = (prior?.rounds ?? 0) + completedRounds, qualified = (prior?.qualified ?? 0) + newlyQualified;
+      // As research_benchmark_rounds: one turn is one round, whether it finished a discovery or checked pasted links.
+      const checked = [...touched].some(key => { const f = fetches.get(key)!; return f.state === 'succeeded' && pasted(f); });
+      const rounds = (prior?.rounds ?? 0) + (completedRounds > 0 || checked ? 1 : 0), qualified = (prior?.qualified ?? 0) + newlyQualified;
       if (prior?.card && (prior.card.choice === null || prior.card.choice === 'generate')) return null;
       if (qualified < 1 || qualified >= REQUIRED_QUALIFIED || rounds < MIN_ROUNDS
         || (prior?.card && rounds <= (prior.card.chosenRounds ?? 0))) return null;
@@ -172,11 +180,6 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
     },
     /** What research_turn_apply writes at close; undefined when the turn made nothing. */
     journal() {
-      const pasted = (f: Fetch) => [...fresh.values()].some(o => {
-        const r = o.result as { args?: { source?: { kind?: string } }; call?: { platform?: string; query?: string } } | null;
-        return r?.args?.source?.kind === 'user_message' && r.call?.platform === f.platform
-          && r.call.query?.toLowerCase() === f.account.toLowerCase();
-      });
       const out = { cards: [...cards].map(([id, c]) => ({ id, payload: c.payload })),
         discoveries: [...savedDiscoveries].map(id => { const d = discoveries.get(id)!;
           return { id, keywordConfirmationId: d.keywordConfirmationId, platforms: d.platforms, cursor: d.cursor, state: d.state }; }),

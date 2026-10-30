@@ -88,3 +88,14 @@ it('a pasted link counts only for the account it named', async () => {
   await s.store.fetchFinish(other.fetchId, other.attempt, 'failed', null);
   expect(s.journal()?.fetches.map(f => [f.account, f.pasted]).sort()).toEqual([['a', true], ['b', false]]);
 });
+
+it('a pasted check that succeeded this turn counts toward the shortfall card, once', async () => {
+  const s = make({ shortfall: { rounds: 1, qualified: 0, card: null } });
+  expect(await s.store.offerShortfall(opId)).toBeNull();
+  const claim = await s.store.fetchClaim('tiktok', 'a') as { fetchId: string; attempt: string };
+  const port = s.store.evidence();
+  await port.open(opId, 'a'.repeat(64), 1);
+  await port.finish(opId, opId, 'succeeded', { args: { source: { kind: 'user_message' } }, call: { platform: 'tiktok', query: 'a' } });
+  await s.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', { classification: { qualified: true } });
+  expect(await s.store.offerShortfall(opId)).toMatchObject({ offeredRounds: 2, offeredQualified: 1 });
+});
