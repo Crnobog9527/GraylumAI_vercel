@@ -111,3 +111,11 @@ it('a refresh grant replaces a finished fetch, and is written at close', async (
   await s.store.fetchFinish(claim.fetchId, claim.attempt, 'failed', null);
   expect(s.journal()?.fetches[0]).toMatchObject({ refreshId });
 });
+
+it('accounts that differ only by case stay apart on a case-sensitive platform', async () => {
+  const youtube = make({ fetches: [{ id: fetchId, attempt, platform: 'youtube', account: 'UCabc', state: 'succeeded', evidence: { platform: 'youtube' } }] });
+  expect(await youtube.store.fetchClaim('youtube', 'UCABC')).toMatchObject({ claimed: true });
+  expect(await youtube.store.fetchClaim('youtube', 'UCabc')).toMatchObject({ claimed: false });
+  const tiktok = make({ fetches: [{ id: fetchId, attempt, platform: 'tiktok', account: 'abc', state: 'succeeded', evidence: { platform: 'tiktok' } }] });
+  expect(await tiktok.store.fetchClaim('tiktok', 'ABC')).toMatchObject({ claimed: false });
+});

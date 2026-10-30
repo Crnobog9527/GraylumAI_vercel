@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { canonicalAccount, type CanonicalAccount } from '../../research/tools/accountLinks';
+import { CASE_INSENSITIVE, canonicalAccount, type CanonicalAccount } from '../../research/tools/accountLinks';
 import type { CardPayload, DiscoveryRecord, FetchClaim, RuntimeResearchStore, SelectionCard, ShortfallCard } from '../../research/runtime/store';
 import { stableResearchId } from '../../research/runtime/toolContext';
 import type { SocialPlatform } from '../../research/vendors/types';
@@ -35,7 +35,9 @@ type Fetch = { id: string; attempt: string; platform: string; account: string; s
 
 const REQUIRED_QUALIFIED = 3, MIN_ROUNDS = 2;
 const FETCH_KINDS = ['account_profile', 'account_posts', 'account_relation', 'post_detail'];
-const accountKey = (platform: string, account: string) => `${platform}:${account.toLowerCase()}`;
+/** The account as research_account_key compares it: only some platforms ignore case. */
+const sameCase = (platform: string, account: string) => CASE_INSENSITIVE.has(platform as SocialPlatform) ? account.toLowerCase() : account;
+const accountKey = (platform: string, account: string) => `${platform}:${sameCase(platform, account)}`;
 
 export function turnResearchStore(input: { actorId: string; sessionId: string; requestId: string; text: string; prepared: PreparedResearch;
   /** The user's Refresh this turn answers; prepared.refresh is its grant. */
@@ -63,7 +65,7 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   const pasted = (f: Fetch) => [...fresh.values()].some(o => {
     const r = o.result as { args?: { source?: { kind?: string } }; call?: { platform?: string; query?: string } } | null;
     return r?.args?.source?.kind === 'user_message' && r.call?.platform === f.platform
-      && r.call.query?.toLowerCase() === f.account.toLowerCase();
+      && r.call.query !== undefined && sameCase(f.platform, r.call.query) === sameCase(f.platform, f.account);
   });
   const evidence = (discoveryId?: string) => ({
     async open(id: string, identityHash: string, quoteUnits: number) {
@@ -161,7 +163,7 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
         return { claimed: false, fetchId: found.id, state: found.state as never, evidence: found.evidence };
       if (refreshId) refreshed.set(key, refreshId);
       // Derived, not random: a turn that crashed after paying for this attempt gets the same ids, so its receipts answer (benchmarkFetch).
-      const id = found?.id ?? stableResearchId(sessionId, platform, account.toLowerCase());
+      const id = found?.id ?? stableResearchId(sessionId, platform, sameCase(platform, account));
       const attempt = stableResearchId(id, found?.attempt ?? 'first');
       fetches.set(key, { id, attempt, platform, account, state: 'in_progress', evidence: null });
       const paid = FETCH_KINDS.some(kind => known.has(stableResearchId(id, attempt, kind)));
