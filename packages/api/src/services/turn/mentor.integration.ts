@@ -786,3 +786,19 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: receipts of a turn that never applied them come
   expect(prepared.unapplied).toHaveLength(1);
   expect(prepared.unapplied[0]![0]).toMatchObject({ state: 'succeeded' });
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a pasted link that failed does not count as a round', async () => {
+  const f = await setup();
+  await researchOn();
+  const stub: NonNullable<MentorDeps['research']> = { readKey: async () => 'local-synthetic', vendors: {
+    parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+    tikhub: async () => ({ vendor: 'tikhub', route: tikhubRouteId('tiktok', 'account_profile'), outcome: 'failed', reason: 'UPSTREAM', httpStatus: 500,
+      supplierMayCharge: false, usage: { unit: 'call', units: '0' }, items: [], truncated: false, fetchedAt: new Date().toISOString() }) } as unknown as VendorCalls };
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } })
+      : prose('gen-reply-' + n, 'Could not check it.'));
+  const out = await turn(f, { text: 'Check https://www.tiktok.com/@aa_one', transport: t.fn, research: stub });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect((await db.query('select research_rounds from opc_drafts where draft_id=$1', [f.draftId])).rows[0].research_rounds).toBe(0);
+  expect((await db.query('select pasted_turns from research_account_fetches where session_id=$1', [f.session])).rows[0].pasted_turns).toEqual([]);
+});

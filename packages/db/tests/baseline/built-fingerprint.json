@@ -4115,7 +4115,7 @@
   "fn:research_tools_config_set(jsonb,text[],bigint,uuid)": "73677c4acb8a",
   "fn:research_tools_settings_guard()": "27d76b043a58",
   "fn:research_transition(text,uuid,uuid,uuid,jsonb)": "5c16d1242bae",
-  "fn:research_turn_apply(uuid,turns,jsonb)": "858ca4dfd108",
+  "fn:research_turn_apply(uuid,turns,jsonb)": "55fd65bbf71b",
   "fn:research_user_benchmarks(uuid,uuid)": "ae7c6aacc7ae",
   "fn:research_user_cards(uuid,uuid)": "730276267978",
   "fn:research_user_charge(uuid,uuid,uuid,text)": "43e7695b80b8",

@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { canonicalAccount, type CanonicalAccount } from '../../research/tools/accountLinks';
 import type { CardPayload, DiscoveryRecord, FetchClaim, RuntimeResearchStore, SelectionCard, ShortfallCard } from '../../research/runtime/store';
@@ -34,6 +33,7 @@ type Operation = z.infer<typeof operation>;
 type Fetch = { id: string; attempt: string; platform: string; account: string; state: string; evidence: Record<string, unknown> | null };
 
 const REQUIRED_QUALIFIED = 3, MIN_ROUNDS = 2;
+const FETCH_KINDS = ['account_profile', 'account_posts', 'account_relation', 'post_detail'];
 const accountKey = (platform: string, account: string) => `${platform}:${account.toLowerCase()}`;
 
 export function turnResearchStore(input: { actorId: string; sessionId: string; requestId: string; text: string; prepared: PreparedResearch }) {
@@ -141,9 +141,12 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       const key = accountKey(platform, account), found = fetches.get(key);
       if (found && (found.state === 'in_progress' || (found.state !== 'prepared' && (found.evidence || found.state !== 'failed'))))
         return { claimed: false, fetchId: found.id, state: found.state as never, evidence: found.evidence };
-      const next = { id: found?.id ?? randomUUID(), attempt: randomUUID(), platform, account, state: 'in_progress', evidence: null };
-      fetches.set(key, next);
-      return { claimed: true, fetchId: next.id, attempt: next.attempt };
+      // Derived, not random: a turn that crashed after paying for this attempt gets the same ids, so its receipts answer (benchmarkFetch).
+      const id = found?.id ?? stableResearchId(sessionId, platform, account.toLowerCase());
+      const attempt = stableResearchId(id, found?.attempt ?? 'first');
+      fetches.set(key, { id, attempt, platform, account, state: 'in_progress', evidence: null });
+      const paid = FETCH_KINDS.some(kind => known.has(stableResearchId(id, attempt, kind)));
+      return { claimed: true, fetchId: id, attempt, ...(paid ? { resumed: true as const } : {}) };
     },
     fetchResume: async () => null,
     fetchDispatch: async () => true,
@@ -165,8 +168,9 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
     /** What research_turn_apply writes at close; undefined when the turn made nothing. */
     journal() {
       const pasted = (f: Fetch) => [...fresh.values()].some(o => {
-        const r = o.result as { args?: { source?: { kind?: string } }; call?: { platform?: string } } | null;
-        return r?.args?.source?.kind === 'user_message' && r.call?.platform === f.platform;
+        const r = o.result as { args?: { source?: { kind?: string } }; call?: { platform?: string; query?: string } } | null;
+        return r?.args?.source?.kind === 'user_message' && r.call?.platform === f.platform
+          && r.call.query?.toLowerCase() === f.account.toLowerCase();
       });
       const out = { cards: [...cards].map(([id, c]) => ({ id, payload: c.payload })),
         discoveries: [...savedDiscoveries].map(id => { const d = discoveries.get(id)!;

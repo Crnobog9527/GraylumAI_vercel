@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
+import { stableResearchId } from '../../research/runtime/toolContext';
 import { preparedResearch, turnResearchStore } from './benchmarkStore';
 
 const actorId = '11111111-1111-4111-8111-111111111111', sessionId = '22222222-2222-4222-8222-222222222222';
@@ -61,4 +62,26 @@ it('a finished round stays readable for a follow-up card', async () => {
   const s = make({ discoveries: [{ discoveryId: opId, keywords: ['a'], platforms: ['tiktok'], cursor: { accounts: [] }, state: 'completed',
     keywordConfirmationId: fetchId }] });
   expect(await s.store.discoveryRead(opId)).toMatchObject({ state: 'completed' });
+});
+
+it('a fetch paid before a crash resumes with the same ids instead of paying again', async () => {
+  const first = await make().store.fetchClaim('tiktok', 'a') as { fetchId: string; attempt: string };
+  const again = await make().store.fetchClaim('tiktok', 'a') as { fetchId: string; attempt: string; resumed?: true };
+  expect([again.fetchId, again.attempt]).toEqual([first.fetchId, first.attempt]);
+  expect(again.resumed).toBeUndefined();
+  const paid = { id: stableResearchId(first.fetchId, first.attempt, 'account_profile'), identityHash: 'a'.repeat(64), state: 'succeeded', result: { items: [] } };
+  const resumed = await make({ unapplied: [[paid]] }).store.fetchClaim('tiktok', 'a');
+  expect(resumed).toMatchObject({ claimed: true, fetchId: first.fetchId, attempt: first.attempt, resumed: true });
+});
+
+it('a pasted link counts only for the account it named', async () => {
+  const s = make();
+  const claim = await s.store.fetchClaim('tiktok', 'a') as { fetchId: string; attempt: string };
+  const other = await s.store.fetchClaim('tiktok', 'b') as { fetchId: string; attempt: string };
+  const port = s.store.evidence();
+  await port.open(opId, 'a'.repeat(64), 1);
+  await port.finish(opId, opId, 'succeeded', { args: { source: { kind: 'user_message' } }, call: { platform: 'tiktok', query: 'A' } });
+  await s.store.fetchFinish(claim.fetchId, claim.attempt, 'failed', null);
+  await s.store.fetchFinish(other.fetchId, other.attempt, 'failed', null);
+  expect(s.journal()?.fetches.map(f => [f.account, f.pasted]).sort()).toEqual([['a', true], ['b', false]]);
 });
