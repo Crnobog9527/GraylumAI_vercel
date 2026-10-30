@@ -60,7 +60,8 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   for (const d of prepared.discoveries) discoveries.set(d.discoveryId, { ...d, platforms: d.platforms as SocialPlatform[] });
   const savedDiscoveries = new Set<string>();
   let completedRounds = 0, qualifiedChange = 0;
-  const qualifiedIn = (evidence: Record<string, unknown> | null | undefined) => (evidence?.classification as { qualified?: unknown } | undefined)?.qualified === true;
+  const qualifiedIn = (evidence: Record<string, unknown> | null | undefined) =>
+    (evidence?.classification as { qualified?: unknown } | undefined)?.qualified === true;
   // As research_benchmarks reads last_success: a refresh can take a benchmark away, and only a new success changes the count.
   const qualifiedNow = new Map(prepared.fetches.map(f => [accountKey(f.platform, f.account), qualifiedIn(f.evidence)]));
 
