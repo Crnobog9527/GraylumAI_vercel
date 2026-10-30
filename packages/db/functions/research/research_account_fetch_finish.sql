@@ -74,7 +74,8 @@ BEGIN
   -- A sent attempt ends in any state; an attempt never sent can only end as a (free) failure.
   UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp(),
     last_success=CASE WHEN p_state='succeeded' THEN p_evidence ELSE last_success END,
-    last_success_execution_id=CASE WHEN p_state='succeeded' THEN execution_id ELSE last_success_execution_id END
+    last_success_execution_id=CASE WHEN p_state='succeeded' THEN execution_id ELSE last_success_execution_id END,
+    last_success_turn_id=CASE WHEN p_state='succeeded' THEN turn_id ELSE last_success_turn_id END
   WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt AND (state='in_progress' OR (state='prepared' AND p_state='failed'));
   IF NOT FOUND AND NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt
     AND state=p_state AND evidence IS NOT DISTINCT FROM p_evidence) THEN RAISE EXCEPTION 'RESEARCH_FETCH_CONFLICT';END IF;

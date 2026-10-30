@@ -18,7 +18,8 @@ export const turnRequest = z.discriminatedUnion('kind', [
   // V2-5: the positioning mentor. moduleId is the draft's module (the turn is quoted for its model; turn_open refuses any other);
   // text is the user's words, or the host's opening marker. 8000 characters, as the old mentor request.
   z.object({ kind: z.literal('mentor'), ...common, moduleId: z.string().uuid(), stepId: z.string().min(1).max(128),
-    text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean(), answer: mentorAnswer.optional() }).strict(),
+    text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean(), answer: mentorAnswer.optional(),
+    researchRefreshId: z.string().uuid().optional() }).strict(),
   reportTurnRequest,
 ]);
 
@@ -49,6 +50,6 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
   }
   if (input.kind === 'mentor') return eventStream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
     requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
-    ...(input.answer ? { answer: input.answer } : {}) }, emit));
+    ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) }, emit));
   return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text }, emit));
 }
