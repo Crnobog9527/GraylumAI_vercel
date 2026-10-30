@@ -115,8 +115,7 @@ BEGIN
     END IF;
 
     IF v_period_delta <> 0 THEN
-      UPDATE subscription_credit_grants
-      SET consumed_amount = consumed_amount + v_period_delta,
+      UPDATE subscription_credit_grants SET consumed_amount = consumed_amount + v_period_delta,
           updated_at = now()
       WHERE id = v_charged_grant_id;
       IF NOT FOUND THEN
@@ -136,8 +135,7 @@ BEGIN
     RAISE EXCEPTION '积分不足: 结算将导致负余额 (当前 %, 变动 %)', v_current_balance, v_balance_delta;
   END IF;
   IF v_balance_delta <> 0 THEN
-    UPDATE profiles
-    SET credits = v_balance_after
+    UPDATE profiles SET credits = v_balance_after
     WHERE id = p_user_id;
   END IF;
   -- Conservation: the profile row now holds exactly the computed balance.
