@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { runChatTurn, type ChatDeps } from './chat';
 import { runMentorTurn } from './mentor';
+import { mentorAnswer } from './mentorInput';
 import { eventStream } from './sse';
 import { swallow } from '../../lib/swallow';
 
@@ -16,7 +17,7 @@ export const turnRequest = z.discriminatedUnion('kind', [
   // V2-5: the positioning mentor. moduleId is the draft's module (the turn is quoted for its model; turn_open refuses any other);
   // text is the user's words, or the host's opening marker. 8000 characters, as the old mentor request.
   z.object({ kind: z.literal('mentor'), ...common, moduleId: z.string().uuid(), stepId: z.string().min(1).max(128),
-    text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean() }).strict(),
+    text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean(), answer: mentorAnswer.optional() }).strict(),
 ]);
 
 export type TurnHttpDeps = {
@@ -38,6 +39,7 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
   // A limiter that cannot answer refuses (fails closed).
   if (await swallow('turn_rate_limit_unavailable', deps.rateLimited(actorId), true, { category: 'api' })) return json(429, 'TURN_RATE_LIMITED');
   if (input.kind === 'mentor') return eventStream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
-    requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter }, emit));
+    requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
+    ...(input.answer ? { answer: input.answer } : {}) }, emit));
   return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text }, emit));
 }
