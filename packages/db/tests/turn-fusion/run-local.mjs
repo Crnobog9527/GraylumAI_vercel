@@ -411,7 +411,19 @@ try{
   // The receipt arrives later (no deliverable mark in its usage): the settlement still charges the price.
   await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[d.actor,od.turnId,1,'ok',0.05,0.05,'{}',null,hash('late'),null]);
   assert.equal((await close(d,od.turnId,'completed')).chargedCredits,FIXED);
-  report.checks.push('a complete answer whose cost is not final is saved and judged while its call stays open; repeat is a no-op, a different body conflicts, a settled call refuses; a deliverable revision saved so still pays the fixed price');
+  // #1522 review: a compare column refused under the positioning rule before its cost was final is saved as no_delivery; when
+  // recovery settles its cost later (status ok), only the delivered column is charged, and the refusal is never readable.
+  const k=await account(),cq={question:'q',questionHash:hash('q'),requestHash:hash('r'),snapshotHash:hash('s'),workspaceDependencies:[]};
+  const ok=await open(k,{kind:'compare',pol:comparePolicy(),product:cq});
+  await begin(k,ok.turnId,1);await begin(k,ok.turnId,2);
+  await record(k,ok.turnId,1,{n:0.0021,output:{phase:'fusion_compare',body:'answer',verdict:'usable'}});
+  await one('select turn_call_identity($1,$2,$3,$4) v',[k.actor,ok.turnId,2,'gen-refused']);
+  await one('select turn_fusion_output($1,$2,$3,$4) v',[k.actor,ok.turnId,2,JSON.stringify({phase:'fusion_compare',body:'refused',verdict:'no_delivery'})]);
+  assert.equal((await close(k,ok.turnId,'completed',{delivered:true})).settlement,'pending');
+  await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[k.actor,ok.turnId,2,'ok',0.0021,0.0021,'{}',null,hash('late2'),null]);
+  assert.equal((await close(k,ok.turnId,'completed',{delivered:true})).chargedCredits,2,'only the delivered column (ceil(100 x 0.0021 x 6) = 2)');
+  assert.equal(await one('select fusion_call_output_read($1,$2) v',[k.actor,await one('select call_id v from fusion_turn_outputs where turn_id=$1 and seq=2',[ok.turnId])]),null);
+  report.checks.push('a complete answer whose cost is not final is saved and judged while its call stays open; repeat is a no-op, a different body conflicts, a settled call refuses; a deliverable revision saved so still pays the fixed price; a refused compare column settled later is never charged nor shown');
  }
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.
  {

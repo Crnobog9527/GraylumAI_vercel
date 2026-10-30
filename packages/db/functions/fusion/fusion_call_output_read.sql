@@ -11,8 +11,9 @@ AS $function$
 DECLARE o fusion_call_outputs; s runtime_sessions; v fusion_turn_outputs;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
-  -- An answer saved on the turn path (V2-7b): readable while its turn's conversation exists, as below.
-  SELECT * INTO v FROM fusion_turn_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id;
+  -- An answer saved on the turn path (V2-7b): readable while its turn's conversation exists, as below. A column refused under
+  -- the positioning rule (no_delivery) is kept only for billing and never shown.
+  SELECT * INTO v FROM fusion_turn_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id AND verdict<>'no_delivery';
   IF v.turn_id IS NOT NULL THEN
     SELECT s2.* INTO s FROM runtime_sessions s2 JOIN turns t ON t.session_id=s2.id
       WHERE t.actor_id=p_actor_id AND t.id=v.turn_id FOR SHARE OF s2;

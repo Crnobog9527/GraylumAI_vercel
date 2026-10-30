@@ -15,7 +15,7 @@ BEGIN
     AND id = (SELECT session_id FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id) FOR SHARE;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  IF t.kind NOT IN ('compare','jury') OR jsonb_typeof(p_output) <> 'object' OR p_output->>'verdict' NOT IN ('usable','format_invalid','revision_invalid') THEN
+  IF t.kind NOT IN ('compare','jury') OR jsonb_typeof(p_output) <> 'object' OR p_output->>'verdict' NOT IN ('usable','format_invalid','revision_invalid','no_delivery') THEN
     RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023';
   END IF;
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;

@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS public.fusion_turn_outputs (
   phase text NOT NULL CHECK (phase IN ('fusion_review','fusion_summary','fusion_compare')),
   body text NOT NULL CHECK (octet_length(body) BETWEEN 1 AND 262144),
   body_hash text NOT NULL CHECK (body_hash ~ '^[a-f0-9]{64}$'),
-  verdict text NOT NULL CHECK (verdict IN ('usable','format_invalid','revision_invalid')),
+  -- no_delivery: a compare column refused under the positioning rule whose cost was not final yet; kept so that it is never
+  -- charged when recovery settles the cost (turn_user_charge), and never shown.
+  verdict text NOT NULL CHECK (verdict IN ('usable','format_invalid','revision_invalid','no_delivery')),
   -- A summary that passed the host check and changes a section: the jury's fixed price is due (turn_user_charge), also when
   -- the call's cost was not final when the answer was saved (turn_fusion_output).
   deliverable boolean NOT NULL DEFAULT false CHECK (NOT deliverable OR (verdict = 'usable' AND phase = 'fusion_summary')),
@@ -369,7 +371,7 @@ BEGIN
     AND id = (SELECT session_id FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id) FOR SHARE;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  IF t.kind NOT IN ('compare','jury') OR jsonb_typeof(p_output) <> 'object' OR p_output->>'verdict' NOT IN ('usable','format_invalid','revision_invalid') THEN
+  IF t.kind NOT IN ('compare','jury') OR jsonb_typeof(p_output) <> 'object' OR p_output->>'verdict' NOT IN ('usable','format_invalid','revision_invalid','no_delivery') THEN
     RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023';
   END IF;
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
@@ -921,7 +923,10 @@ BEGIN
   IF t.kind = 'compare' THEN
     -- Each column is rounded on its own (2.7 "各模型各自取整"), as the old per-run settlement did.
     SELECT coalesce(sum(ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)), 0)::integer INTO p_credits
-    FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision';
+    FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
+      -- A column refused under the positioning rule is never charged, also when its cost was settled later by recovery
+      -- (its verdict was saved with the answer, turn_fusion_output).
+      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = c.turn_id AND o.seq = c.seq AND o.verdict = 'no_delivery');
   END IF;
   IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN
@@ -982,8 +987,9 @@ AS $function$
 DECLARE o fusion_call_outputs; s runtime_sessions; v fusion_turn_outputs;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
-  -- An answer saved on the turn path (V2-7b): readable while its turn's conversation exists, as below.
-  SELECT * INTO v FROM fusion_turn_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id;
+  -- An answer saved on the turn path (V2-7b): readable while its turn's conversation exists, as below. A column refused under
+  -- the positioning rule (no_delivery) is kept only for billing and never shown.
+  SELECT * INTO v FROM fusion_turn_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id AND verdict<>'no_delivery';
   IF v.turn_id IS NOT NULL THEN
     SELECT s2.* INTO s FROM runtime_sessions s2 JOIN turns t ON t.session_id=s2.id
       WHERE t.actor_id=p_actor_id AND t.id=v.turn_id FOR SHARE OF s2;

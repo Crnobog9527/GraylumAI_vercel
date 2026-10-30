@@ -166,7 +166,7 @@ export async function runGroup(ctx: GroupContext, members: GroupMember[]): Promi
       const text = answerText(result.value), seq = lastSeq.get(member);
       if (!text || seq === undefined) return { ok: false, code: 'TURN_CALL_UNKNOWN' };
       const judged = member.judge(text);
-      if (judged.verdict === 'no_delivery') return { ok: true, text, verdict: 'no_delivery' };
+      // A refused column is saved too (never shown): its cost settled later by recovery is then never charged to the user.
       try {
         const kept = await ctx.db.output(ctx.turnId, seq, { phase: member.phase, body: text, verdict: judged.verdict,
           ...(judged.deliverable ? { deliverable: true } : {}) });

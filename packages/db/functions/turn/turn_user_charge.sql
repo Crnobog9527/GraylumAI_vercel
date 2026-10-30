@@ -26,7 +26,10 @@ BEGIN
   IF t.kind = 'compare' THEN
     -- Each column is rounded on its own (2.7 "各模型各自取整"), as the old per-run settlement did.
     SELECT coalesce(sum(ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)), 0)::integer INTO p_credits
-    FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision';
+    FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
+      -- A column refused under the positioning rule is never charged, also when its cost was settled later by recovery
+      -- (its verdict was saved with the answer, turn_fusion_output).
+      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = c.turn_id AND o.seq = c.seq AND o.verdict = 'no_delivery');
   END IF;
   IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN
