@@ -25,12 +25,16 @@ export const DEFAULTS = {
   // UPDATE may only name these tables, and the statement must carry the table's owner key.
   // The per-kind draft / report / review tables a turn may write one row of (ENGINEERING 5), with their owner keys. A kind's own PR adds
   // the table it writes, with its owner key, and cites ENGINEERING 5 (aligning with the rule, not relaxing it).
-  kindTables: { artifact_rounds: ['id', 'project_id'] },
+  kindTables: { artifact_rounds: ['id', 'project_id'], fusion_reviews: ['actor_id', 'id'], fusion_compares: ['actor_id', 'id'] },
   updateKeys: {
     turns: ['actor_id', 'id'], profiles: ['id'], runtime_sessions: ['id', 'actor_id'], session_messages: ['session_id'],
     turn_calls: ['turn_id'], daily_spend: ['bucket'], credit_transactions: ['user_id'], credit_source_entries: ['user_id'],
   },
 };
+
+// Listed on their own, never folded into the closure numbers above: a function that is outside the table and lock rules by an Owner
+// decision (ENGINEERING 5). The line says which decision and how big the function's own closure is, so a growth shows.
+export const EXCEPTIONS = { research_turn_apply: 'Owner 2026-10-30: a mentor turn may write its own research_* rows inside turn_close' };
 
 const KEYWORDS = new Set(['if', 'in', 'values', 'select', 'from', 'exists', 'case', 'when', 'and', 'or', 'not', 'on', 'as', 'using',
   'returning', 'coalesce', 'nullif', 'greatest', 'least', 'count', 'sum', 'max', 'min', 'array_agg', 'jsonb_build_object',
@@ -275,6 +279,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     for (const [name, r] of Object.entries(result.roots)) console.log(`  ${name}: ${r.functions} functions, ${r.tables} tables`);
     if (args.includes('--report')) {
       for (const [name, list] of Object.entries(result.reported)) console.log(`  [report] ${name}: ${new Set(list).size} rule hits`);
+    }
+    for (const [name, why] of Object.entries(EXCEPTIONS)) {
+      const c = closure(name, readFunctions(join(process.cwd(), 'packages/db/functions')), readTables(join(process.cwd(), 'packages/db/baseline'),
+        join(process.cwd(), 'packages/db/migrations')));
+      console.log(`EXCEPTION ${name}: ${c.functions.length} functions, ${c.tables.length} tables (${why})`);
     }
     for (const v of known) console.log(`KNOWN (baseline) ${v}`);
     for (const v of failing) console.error(`VIOLATION ${v}`);

@@ -120,6 +120,9 @@ test('SET is a statement, UPDATE ... SET on its own line is not; ledger leaves m
   assert.deepEqual(hits('SET search_path = x;', 'turn_settle_credits'), ['turn_settle_credits: non-LOCAL SET'], 'but not from the session-state rules');
   assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s WHERE id = r;'), []);
   assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s;'), ['f: UPDATE of artifact_rounds without id or project_id in WHERE']);
+  assert.deepEqual(hits('UPDATE fusion_reviews SET turn_id = t WHERE actor_id = a AND id = r;'), [], 'a jury review: one row, by its owner key');
+  assert.deepEqual(hits('UPDATE fusion_compares SET turn_id = t WHERE state = s;'), ['f: UPDATE of fusion_compares without actor_id or id in WHERE']);
+  assert.deepEqual(hits('UPDATE fusion_reviews SET state = s;'), ['f: UPDATE of fusion_reviews without actor_id or id in WHERE']);
 });
 
 test('an allowed lock must carry its owner key; a SKIP LOCKED batch claim need not; a multi-line UPDATE is not a SET command', () => {

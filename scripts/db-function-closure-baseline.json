@@ -1,24 +1,32 @@
 {
  "closure": {
   "turn_close": {
-   "functions": 79,
-   "tables": 55
+   "functions": 25,
+   "tables": 28
   },
-  "turn_mentor_apply": {
-   "functions": 75,
-   "tables": 50
+  "turn_fusion_close": {
+   "functions": 27,
+   "tables": 29
   },
-  "turn_mentor_context": {
-   "functions": 75,
-   "tables": 49
+  "turn_fusion_ended_review": {
+   "functions": 27,
+   "tables": 29
+  },
+  "turn_fusion_open": {
+   "functions": 36,
+   "tables": 32
+  },
+  "turn_fusion_recovery": {
+   "functions": 28,
+   "tables": 29
   },
   "turn_open": {
-   "functions": 85,
-   "tables": 55
+   "functions": 35,
+   "tables": 30
   },
   "turn_recover": {
-   "functions": 80,
-   "tables": 55
+   "functions": 28,
+   "tables": 29
   }
  },
  "rules": []

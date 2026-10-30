@@ -17,12 +17,27 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const BASELINE = join(ROOT, 'scripts/turn-budget-baseline.json');
+const WARMUP_RUNS = 7; // more than the five custom plans plpgsql builds before it settles on a cached one
 const TIME_TOLERANCE = 1.5; // a timing ratchet needs room: wall noise on a shared machine is real; counts have none.
+
+// Relation locks by whose they are (plan 7.1): the main path's own tables, the ledger leaves' tables (grants, packs, orders, billing),
+// and everything else a kind needs (mentor: modules, skills, research_*, artifact_*, opc_*, library ...). Each class has its own ratchet.
+const MAIN = new Set(['turns', 'turn_calls', 'turn_call_raw', 'runtime_sessions', 'profiles', 'daily_spend', 'session_messages',
+  'catalog_versions', 'account_erasure_requests']);
+const LEDGER = /^(credit_|billing_history$|payment_orders$|user_subscriptions$|subscription_|bill2_runs$)/;
+export function lockClass(owner) {
+  const name = owner.replace(/^public\./, '').replace(/_id_seq$/, '');
+  return MAIN.has(name) ? 'main' : LEDGER.test(name) ? 'ledger' : 'mentor';
+}
 
 export function compare(measured, entry) {
   const problems = [];
   for (const key of ['roundTrips', 'relationLocks',
     'hotSeqScans']) if (measured[key] > entry[key]) problems.push(`${key} ${measured[key]} > baseline ${entry[key]}`);
+  for (const [name, n] of Object.entries(measured.lockClasses ?? {})) {
+    const allowed = entry.lockClasses?.[name];
+    if (allowed !== undefined && n > allowed) problems.push(`${name} locks ${n} > baseline ${allowed}`);
+  }
   if (measured.dbTimeMs > entry.dbTimeMs * TIME_TOLERANCE) {
     problems.push(`dbTimeMs ${measured.dbTimeMs} > baseline ${entry.dbTimeMs} x ${TIME_TOLERANCE}`);
   }
@@ -32,6 +47,7 @@ export function compare(measured, entry) {
 // Measures one scenario on an open database client. `harness` supplies the counted call wrapper.
 export async function measure(scenario, client, { noSeqScan = false } = {}) {
   let roundTrips = 0, relationLocks = 0;
+  const lockClasses = {};
   const functions = async () => Object.fromEntries(
     (await client.query('SELECT funcname, total_time FROM pg_stat_user_functions')).rows.map(r => [r.funcname, Number(r.total_time)]));
   const scans = async () => Object.fromEntries((await client.query('SELECT relname, seq_scan FROM pg_stat_user_tables WHERE relname = ANY($1)',
@@ -44,9 +60,13 @@ export async function measure(scenario, client, { noSeqScan = false } = {}) {
     try {
       const marks = args.map((_, i) => `$${i + 1}`).join(',');
       const result = (await client.query(`SELECT ${name}(${marks}) AS v`, args)).rows[0]?.v;
-      const locks = Number((await client.query(`SELECT count(DISTINCT l.relation) v FROM pg_locks l JOIN pg_class k ON k.oid = l.relation
-        WHERE l.pid = pg_backend_pid() AND l.locktype = 'relation' AND k.relnamespace = 'public'::regnamespace`)).rows[0].v);
-      relationLocks = Math.max(relationLocks, locks);
+      const held = (await client.query(`SELECT DISTINCT l.relation, coalesce(i.indrelid::regclass::text, k.relname) AS owner
+        FROM pg_locks l JOIN pg_class k ON k.oid = l.relation LEFT JOIN pg_index i ON i.indexrelid = k.oid
+        WHERE l.pid = pg_backend_pid() AND l.locktype = 'relation' AND k.relnamespace = 'public'::regnamespace`)).rows;
+      relationLocks = Math.max(relationLocks, held.length);
+      const byClass = {};
+      for (const row of held) byClass[lockClass(row.owner)] = (byClass[lockClass(row.owner)] ?? 0) + 1;
+      for (const [name, n] of Object.entries(byClass)) lockClasses[name] = Math.max(lockClasses[name] ?? 0, n);
       await client.query('COMMIT');
       return result;
     } catch (error) { await client.query('ROLLBACK'); throw error; }
@@ -67,7 +87,7 @@ export async function measure(scenario, client, { noSeqScan = false } = {}) {
     dbTimeMs += byFunction[name];
   }
   const hotSeqScans = scenario.tables.reduce((sum, table) => sum + ((afterScans[table] ?? 0) - (beforeScans[table] ?? 0)), 0);
-  return { roundTrips, dbTimeMs: Number(dbTimeMs.toFixed(1)), relationLocks, hotSeqScans, byFunction };
+  return { roundTrips, dbTimeMs: Number(dbTimeMs.toFixed(1)), relationLocks, lockClasses, hotSeqScans, byFunction };
 }
 
 export async function loadScenarios(dir = join(ROOT, 'scripts/turn-budget')) {
@@ -90,7 +110,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     for (const scenario of scenarios) {
       const started = Date.now();
-      // Best of three on time (the counts are identical every time); the scenario sets up its own data each run.
+      // Warm-up runs first: a plpgsql statement is planned afresh (locking every index of its tables) for its first five executions on a
+      // connection and reuses a cached plan after (locking the indexes it uses), so the lock counts read 136, 139, 124 on three runs in a
+      // row. Then best of three on time (the counts are identical once warm); the scenario sets up its own data each run.
+      for (let i = 0; i < WARMUP_RUNS; i++) await measure(scenario, db.client);
       let best = null;
       for (let i = 0; i < 3; i++) {
         const m = await measure(scenario, db.client);
@@ -102,7 +125,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       results[scenario.name] = { path: scenario.path, ...best, seconds };
       const entry = baseline[scenario.name];
       const line = `${scenario.name} (${scenario.path}): ${best.roundTrips} round trips, ${best.dbTimeMs} ms in the database, `
-        + `${best.relationLocks} relations locked at most, ${best.hotSeqScans} hot sequential scans`;
+        + `${best.relationLocks} relations locked at most (${Object.entries(best.lockClasses).map(([c, n]) => `${c} ${n}`).join(', ')}), `
+        + `${best.hotSeqScans} hot sequential scans`;
       if (!entry) console.log(`${line} -- no baseline yet`);
       else if (!entry.enforce) {
         console.log(`${line} -- report only (baseline ${entry.roundTrips}/${entry.dbTimeMs}/${entry.relationLocks}/${entry.hotSeqScans})`);
@@ -120,7 +144,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const old = baseline[name];
       // A baseline only moves down; a first value, or a report-only entry, may be set freely.
       const lower = !old || !old.enforce ? m : Object.fromEntries(Object.entries(m).map(([k, v]) => [k, typeof v === 'number'
-        && typeof old[k] === 'number' ? Math.min(v, old[k]) : v]));
+        && typeof old[k] === 'number' ? Math.min(v, old[k]) : k === 'lockClasses' && old[k] ? Object.fromEntries(Object.entries(v).map(([c, n]) => [c,
+          Math.min(n, old[k][c] ?? n)])) : v]));
       next[name] = { ...lower, enforce: old?.enforce ?? false, path: m.path };
       delete next[name].seconds; delete next[name].byFunction;
     }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compare, loadScenarios, measure } from '../check-turn-budget.mjs';
+import { compare, loadScenarios, lockClass, measure } from '../check-turn-budget.mjs';
 
 const entry = { roundTrips: 5, dbTimeMs: 60, relationLocks: 40, hotSeqScans: 0 };
 
@@ -32,7 +32,10 @@ test('measure counts each call as one round trip, takes the largest lock set and
       queries.push(sql.trim().split(/\s+/).slice(0, 2).join(' '));
       if (/FROM pg_stat_user_functions/.test(sql)) return { rows: [{ funcname: 'f', total_time: queries.filter(q => q === 'SELECT f($1)').length * 2.5 }] };
       if (/FROM pg_stat_user_tables/.test(sql)) return { rows: [{ relname: 't', seq_scan: 3 }] };
-      if (/pg_locks/.test(sql)) return { rows: [{ v: String(queries.filter(q => q === 'SELECT f($1)').length * 10) }] };
+      if (/pg_locks/.test(sql)) {
+        const n = queries.filter(q => q === 'SELECT f($1)').length * 10;
+        return { rows: Array.from({ length: n }, (_, i) => ({ relation: i, owner: i < 5 ? 'turns' : 'credit_transactions' })) };
+      }
       if (/^\s*SELECT f/.test(sql)) return { rows: [{ v: 1 }] };
       return { rows: [] };
     },
@@ -41,6 +44,19 @@ test('measure counts each call as one round trip, takes the largest lock set and
     ['x']); await call('f', ['y']); } }, client);
   assert.equal(result.roundTrips, 2);
   assert.equal(result.relationLocks, 20);
+  assert.deepEqual(result.lockClasses, { main: 5, ledger: 15 });
   assert.equal(result.dbTimeMs, 5);
   assert.equal(result.hotSeqScans, 0);
+});
+
+test('relation locks are classed as main path, ledger or the kind\'s own, and each class has its own ratchet', () => {
+  assert.equal(lockClass('turns'), 'main');
+  assert.equal(lockClass('public.session_messages_id_seq'), 'main');
+  assert.equal(lockClass('subscription_credit_grants'), 'ledger');
+  assert.equal(lockClass('credit_source_entries'), 'ledger');
+  assert.equal(lockClass('research_plans'), 'mentor');
+  const e = { ...entry, lockClasses: { main: 10, mentor: 20 } };
+  assert.deepEqual(compare({ roundTrips: 5, dbTimeMs: 60, relationLocks: 30, hotSeqScans: 0, lockClasses: { main: 10, mentor: 20 } }, e), []);
+  assert.deepEqual(compare({ roundTrips: 5, dbTimeMs: 60, relationLocks: 30, hotSeqScans: 0, lockClasses: { main: 11, mentor: 20 } }, e),
+    ['main locks 11 > baseline 10']);
 });
