@@ -7,11 +7,12 @@ import { turnClients } from './db';
 import { runMentorTurn } from './mentor';
 
 /*
- * The process mentor.integration.ts kills with SIGKILL: a mentor turn whose benchmark_fetch stops inside its sixth supplier call, so the
- * first batch's receipt is written and the second batch never is.
+ * The process mentor.integration.ts kills with SIGKILL: a mentor turn whose benchmark_fetch stops inside its sixth supplier call,
+ * so the first batch's receipt is written and the second batch never is.
  */
-const { actor, session, moduleId, accounts } = JSON.parse(process.argv[2]!) as { actor: string; session: string; moduleId: string; accounts: string[] };
-const admin = createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false } });
+type Input = { rest: string; serviceJwt: string; actor: string; session: string; moduleId: string; accounts: string[] };
+const { rest, serviceJwt, actor, session, moduleId, accounts } = JSON.parse(process.argv[2]!) as Input;
+const admin = createClient(rest, serviceJwt, { auth: { persistSession: false } });
 const admit = async () => ({ ok: true as const });
 let calls = 0, requests = 0;
 const transport: typeof fetch = async (_url, init) => {

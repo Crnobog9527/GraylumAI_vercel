@@ -716,8 +716,8 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a process killed mid-turn loses nothing receipt
   const toolRows = async (status: string) => (await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id
     where t.actor_id=$1 and c.call_kind='tool' and c.status=$2`, [f.actor, status])).rows[0].n as number;
   try {
-    const child = spawn(process.execPath, [bundle, JSON.stringify({ actor: f.actor, session: f.session, moduleId: f.moduleId, accounts })],
-      { stdio: ['ignore', 'pipe', 'inherit'], env: process.env });
+    const child = spawn(process.execPath, [bundle, JSON.stringify({ rest: process.env.V3_LOCAL_REST, serviceJwt: process.env.V3_LOCAL_SERVICE_JWT,
+      actor: f.actor, session: f.session, moduleId: f.moduleId, accounts })], { stdio: ['ignore', 'pipe', 'inherit'] });
     let output = '';
     child.stdout.on('data', chunk => { output += String(chunk); });
     const gone = new Promise(done => child.once('exit', (_code, signal) => done(signal)));
