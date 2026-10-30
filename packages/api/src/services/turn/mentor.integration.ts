@@ -479,3 +479,74 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a step summary turn writes the summary and is n
   expect((await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: true })).events)
     .toEqual([{ type: 'error', code: 'TURN_REQUEST_INVALID' }]);
 });
+
+// V2-5d: the narrow check plus mentor_source_check must answer exactly as the old chain, in every state, allowed or refused.
+const verdicts = async (f: Awaited<ReturnType<typeof setup>>) => {
+  const old = (await db.query("select coalesce(bill2_scope_allowed($1, jsonb_build_object('kind','positioning_draft','draftId',$2::uuid)), false) v",
+    [f.actor, f.draftId])).rows[0].v as boolean;
+  const narrow = (await db.query('select turn_mentor_draft_allowed($1,$2) v', [f.actor, f.draftId])).rows[0].v as boolean;
+  const check = (await db.query('select mentor_source_check($1,$2) v', [f.actor, f.session])).rows[0].v as { allowed: boolean };
+  return { old, fresh: narrow && check.allowed, sessionView: (await db.query('select session_view_allowed($1,$2) v', [f.actor, f.session])).rows[0].v as boolean };
+};
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: the new checks agree with the old chain, allowed and refused', async () => {
+  const allowed = await setup();
+  expect(await verdicts(allowed)).toEqual({ old: true, fresh: true, sessionView: true });
+
+  const revoked = await setup();
+  await db.query('update bill2_drafts set revoked=true where id=$1', [revoked.draftId]);
+  expect(await verdicts(revoked)).toEqual({ old: false, fresh: false, sessionView: false });
+
+  const erased = await setup();
+  await db.query("set session_replication_role=replica");
+  await db.query('update artifact_projects p set erased_at=now() from opc_drafts d where d.project_id=p.id and d.draft_id=$1', [erased.draftId]);
+  await db.query("set session_replication_role=origin");
+  expect((await verdicts(erased)).old).toBe(false);
+  expect((await verdicts(erased)).fresh).toBe(false);
+
+  const other = await setup();
+  const stranger = (await db.query('select count(*) from bill2_drafts where id=$1 and actor_id=$2', [other.draftId, randomUUID()])).rows[0].count;
+  expect(stranger).toBe('0');
+  expect((await db.query('select turn_mentor_draft_allowed($1,$2) v', [randomUUID(), other.draftId])).rows[0].v).toBe(false);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: a draft whose base source is gone is refused before the turn opens', async () => {
+  const f = await setup();
+  await db.query('set session_replication_role=replica');
+  await db.query(`insert into opc_account_strategy_drafts(account_project_id,draft_id,actor_id,base_source_version_id,root_source_version_id,base_account_revision)
+    values($3,$1,$2,$3,$3,1)`, [f.draftId, f.actor, randomUUID()]);
+  await db.query('set session_replication_role=origin');
+  expect(await verdicts(f)).toEqual({ old: false, fresh: false, sessionView: false });
+  const before = await credits(f.actor);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  // Refused before anything was frozen: no turn row at all, and no second open.
+  expect(out.events).toEqual([{ type: 'error', code: 'TURN_MENTOR_DENIED' }]);
+  expect(t.bodies).toEqual([]);
+  expect(await credits(f.actor)).toBe(before);
+  expect((await db.query('select 1 from turns where actor_id=$1', [f.actor])).rows).toEqual([]);
+  expect(out.calls.filter(path => path.includes('mentor_source_check')).length).toBe(1);
+  await expect(db.query(`select turn_mentor_context($1,$2,$3)`, [f.actor, f.session, JSON.stringify({ moduleId: f.moduleId, stepId: 'step-0' })]))
+    .rejects.toThrow('TURN_SOURCE_CHECK_REQUIRED');
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: a plain draft makes no source check round trip', async () => {
+  const f = await setup();
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : prose('gen-reply-' + n, 'Hello.'));
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect(out.calls.filter(path => path.includes('mentor_source_check'))).toEqual([]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: a revoked Skill revision is refused through the catalog cache before any model call, and refunded', async () => {
+  const f = await setup();
+  const round = (await db.query('select r.revision_id from artifact_rounds r join opc_drafts d on d.round_id=r.id where d.draft_id=$1', [f.draftId])).rows[0];
+  await db.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)', [round.revision_id, f.actor]);
+  const before = await credits(f.actor);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_SKILL_UNAVAILABLE' });
+  expect(t.bodies).toEqual([]);
+  expect(await credits(f.actor)).toBe(before);
+});
