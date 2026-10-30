@@ -140,8 +140,26 @@ export async function reportCases(t){
    assert.match(await legacy('charged',{exec:'completed'}),/REPORT_ALREADY_EXISTS/,'charged (a complete report)');
    assert.equal(await legacy('refunded',{exec:'completed'}),'opened','refunded: a new start pays again');
    assert.equal(await legacy('charged',{exec:'cancelled',settle:'user_stop'}),'opened','a charged stop is no report');
+   // The other way: the old path's hold (report_fee_hold, run by runtime_admit under the same session lock) refuses a round
+   // whose turn-path report is still going or was delivered complete; a stopped one does not block it.
+   const oldHold=async(o3,src3)=>{
+    const id=randomUUID();
+    await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+      values($1,$2,$3,$4,$5,0,'running')`,[id,o3.actor,src3.session,randomUUID(),
+      JSON.stringify({reportGeneration:{projectId:src3.project,roundId:src3.round,sections:['One','Two'],maxCharacters:12000}})]);
+    return one("select report_fee_hold(e,'{}'::jsonb)::text v from runtime_executions e where id=$1",[id]).then(()=>'held',e=>e.message);
+   };
+   const n1=await account(2000),s1=await reportSource(n1),t1=await openReport(n1,s1);
+   assert.match(await oldHold(n1,s1),/REPORT_ALREADY_EXISTS/,'a turn-path report still going');
+   await begin(n1,t1.turnId,1,{upper:0.05});await record(n1,t1.turnId,1,{n:0.03});
+   await closeReport(n1,t1.turnId,'completed',{text:body,delivered:true});
+   assert.match(await oldHold(n1,s1),/REPORT_ALREADY_EXISTS/,'a turn-path report delivered complete');
+   const n2=await account(2000),s2=await reportSource(n2),t2=await openReport(n2,s2);
+   await begin(n2,t2.turnId,1,{upper:0.05});await record(n2,t2.turnId,1,{n:0.03});
+   await stop(n2,t2.turnId);await closeReport(n2,t2.turnId,'completed',{text:body,delivered:true});
+   assert.doesNotMatch(await oldHold(n2,s2),/REPORT_ALREADY_EXISTS/,'a stopped turn-path report does not block the old path');
   }
-  report.checks.push('a complete report pays 500 once, its text is stored hidden from history and read back; same request replays, a double click and two concurrent starts freeze once; a standing report blocks a second paid start, on either path (old-path held or charged blocks; refunded or a charged stop does not)');
+  report.checks.push('a complete report pays 500 once, its text is stored hidden from history and read back; same request replays, a double click and two concurrent starts freeze once; a standing report blocks a second paid start, on either path, both ways (old-path held or charged blocks a turn; a turn going or delivered blocks the old hold; refunded or stopped do not)');
  }
  // 3. Nothing delivered pays nothing (Owner 10-17): cut off, failed, interrupted, deleted; settled now even with an unknown cost.
  {

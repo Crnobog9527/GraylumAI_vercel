@@ -16,6 +16,7 @@
 --   turn_report_apply       turn_close's kind result: the report text, hidden from history, cut to what the user saw on a stop
 --   turn_report_settlement  turn_close: what the user pays and whether it waits for an unknown cost (only a charged stop does)
 --   turn_report_read        the report turn of a round (or one turn) with its saved text
+--   report_fee_hold         the old path's hold refuses a round whose report on the turn path is still going or delivered
 --   report_turn_source      the report document chain's seam (plan 2.7, 4.4): report_document_source, report_document (save and
 --                           the archived-business guard) and report_document_data_source read a report turn by its request id
 --                           when there is no old execution; the old path is unchanged. Publishing a turn's report into
@@ -694,6 +695,63 @@ BEGIN
   'generatedBody',e.result->>'body','storedData',stored);
 END $function$;
 
+
+-- The old path's report fee hold (whole function, otherwise unchanged): it also sees the same round's report on the turn path.
+CREATE OR REPLACE FUNCTION public.report_fee_hold(e runtime_executions, billing jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE fee integer:=report_fixed_price(); call_hold numeric:=0; balance integer; quarantine bigint; avail bigint; q record;
+BEGIN
+  IF EXISTS(SELECT 1 FROM report_fees WHERE execution_id=e.id) THEN RETURN; END IF;
+  -- One complete report per round, rechecked under the session lock runtime_admit holds: a second tab that passed the
+  -- host-side check before the first report finished cannot be admitted and charged again (#1102 review). A report
+  -- still going counts too, and so does a finished complete report whose price is not settled yet; one that ended
+  -- without a complete report (its price refunded or about to be) does not.
+  IF EXISTS(SELECT 1 FROM report_fees f JOIN runtime_executions x ON x.id=f.execution_id
+    WHERE x.session_id=e.session_id AND x.id<>e.id
+      AND x.payload#>>'{reportGeneration,projectId}'=e.payload#>>'{reportGeneration,projectId}'
+      AND x.payload#>>'{reportGeneration,roundId}'=e.payload#>>'{reportGeneration,roundId}'
+      AND (f.state='charged' AND f.settle_reason IS DISTINCT FROM 'user_stop'
+        OR (f.state='held' AND (x.state NOT IN ('completed','cancelled')
+          OR (x.result->>'completeness'='complete' AND report_body_complete(x.result->>'body',x.payload->'reportGeneration')))))) THEN
+    RAISE EXCEPTION 'REPORT_ALREADY_EXISTS'; END IF;
+  -- CORE-PATH-V2 V2-7a (#1523 review): the same round's report on the turn path, under the same session lock turn_open takes:
+  -- one still going, or a complete one delivered, blocks this paid start too (turn_report_admit checks the other way). V2-12
+  -- removes the old path and this check with it.
+  IF EXISTS(SELECT 1 FROM turns t WHERE t.session_id=e.session_id AND t.actor_id=e.actor_id AND t.kind='report'
+      AND t.policy#>>'{report,projectId}'=e.payload#>>'{reportGeneration,projectId}'
+      AND t.policy#>>'{report,roundId}'=e.payload#>>'{reportGeneration,roundId}'
+      AND (t.state<>'closed' OR (t.close_kind='completed' AND t.delivered))) THEN
+    RAISE EXCEPTION 'REPORT_ALREADY_EXISTS'; END IF;
+  -- The report call's own temporary hold: its frozen cost bound in credits (released at zero charge).
+  BEGIN
+    call_hold:=ceil(bill2_decimal(billing#>'{limits,costUsd}')*(billing#>>'{rules,creditsPerUsd}')::numeric
+      *coalesce(nullif(billing#>>'{rules,multiplier}','')::numeric,1));
+  EXCEPTION WHEN OTHERS THEN call_hold:=0;
+  END;
+  SELECT credits INTO balance FROM profiles WHERE id=e.actor_id AND status='active' AND is_deleted='false' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_ACTOR_DENIED'; END IF;
+  PERFORM id FROM subscription_credit_grants WHERE user_id=e.actor_id ORDER BY id FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM subscription_credit_grants WHERE user_id=e.actor_id AND accounting_state<>'trusted') THEN
+    RAISE EXCEPTION 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED'; END IF;
+  SELECT coalesce(sum(greatest(g.credits_granted-g.consumed_amount,0)),0) INTO quarantine
+  FROM subscription_credit_grants g WHERE g.user_id=e.actor_id AND g.status='granted' AND g.accounting_state='trusted'
+  AND credit_grant_quarantined(g); -- ARCH-FIX E1
+  avail:=greatest(balance-quarantine,0);
+  IF avail<fee+call_hold THEN RAISE EXCEPTION 'REPORT_CREDITS'; END IF;
+  SELECT * INTO q FROM atomic_pre_deduct(e.actor_id,fee,'Report hold',e.id);
+  IF q.is_idempotent THEN RAISE EXCEPTION 'REPORT_REQUEST_CONFLICT'; END IF;
+  INSERT INTO report_fees(execution_id,actor_id,credits,pre_deduct_id,state) VALUES(e.id,e.actor_id,fee,q.pre_deduct_id,'held');
+  INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,source_type,source_id,
+    idempotency_key,balance_before,balance_after,metadata)
+  VALUES(e.actor_id,-fee,'adjustment','Report hold','adjustment','bill2_reserve','ai_task',e.id::text,
+    'report:'||e.id||':reserve',q.balance_before,q.balance_after,
+    -- Only keys the erasure ledger shape knows (erasure_ledger_metadata): L = price plus the call's temporary hold.
+    jsonb_build_object('sourceType','report','sourceId',e.id::text,'executionId',e.id::text,'preDeductId',q.pre_deduct_id,
+      'nominalReserved',fee,'L',fee+call_hold));
+END $function$;
 
 DO $$
 DECLARE f text;
