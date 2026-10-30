@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-8 (placeholder 0502 from the controller, after 0422 start threshold; the real number is assigned before it is
--- applied): pause, resume and the recovery job on the 0420 turns
+-- CORE-PATH-V2 V2-8 (number 0424 assigned by the controller, after 0423 mentor; turn_open and turn_close are 0423's versions,
+-- whole): pause, resume and the recovery job on the 0420 turns
 -- (docs/launch/tasks/CORE-PATH-V2.md sections 2.2, 2.5, 2.5.2, 3.3.2 item 7, 6.1 row V2-8).
 --   turns.recovery_lease_until  the claim lease of the recovery job: a turn one instance claimed is not claimed by another
 --                       instance until the lease ends (the instance died, or a settlement waits for its next lookup)
@@ -21,7 +21,7 @@
 --                       turn_close, the only function that changes a turn's state: interrupted (stopped for a report that was
 --                       stopping), expired (paused 24 hours: D = 0, the whole freeze back), or the closed-turn settlement pass
 --                       of #1512 (what became known since, counted once). Idempotent: anything not due is skipped.
---   turn_open           whole copy of the 0422 start-threshold version, plus resume_of (2.2, 2.5 "充值后继续"): a turn paused
+--   turn_open           whole copy of the 0423 version (start threshold, mentor context), plus resume_of (2.2, 2.5 "充值后继续"): a turn paused
 --                       for credits continues as a new turn of the same session and kind. In one transaction: the stop-loss
 --                       reserves the new bound; the paused turn closes refunded in full (failed, failure_code resumed) and what
 --                       it would charge (D = min(N, H)) is carried as policy.carriedCredits into the new turn, frozen with it and
@@ -31,7 +31,7 @@
 --                       turn's limits (never more), and the session moves to it. Anything refused (credits still short,
 --                       stop-loss, a model cost not final yet) rolls the whole resume back: the turn stays paused.
 --   turn_resume_carry   the resume check of turn_open (internal): turn_open itself only dispatches to it.
---   turn_close          whole copy of 0421 plus the carried credits in N (close and settlement pass).
+--   turn_close          whole copy of 0423 (mentor result hook) plus the carried credits in N (close and settlement pass).
 -- Unknown costs past 24 hours: unchanged rules (BILL2 0.3): a model call with no final receipt is never presumed free or retried;
 -- the job keeps looking it up by provider id (every 10 minutes for a day, then every 6 hours) and a call without a provider id
 -- waits for review. A third-party tool's unknown cost is 0 to the user already at the close (#1512); its stop-loss share sits on
@@ -40,9 +40,11 @@
 -- turn_recover and turn_close lock profile -> session -> turn -> daily_spend bucket (0421's order, as the erasure functions); a
 -- resume locks profile -> session -> paused turn -> today's bucket -> the paused turn's bucket (same row unless it opened on an
 -- earlier day).
--- Compatibility: one new nullable column nothing reads yet, two new functions only the recovery job calls, and turn_open behaves
--- as before when resume_of is NULL (the V2-4 code always passes NULL). Repeatable: ADD COLUMN IF NOT EXISTS, CREATE OR REPLACE.
--- Recovery: drop the two functions and restore turn_open from 0421 (only resume_of changes); the column may stay or be dropped.
+-- Compatibility: one new nullable column nothing reads yet; three new functions (two only the recovery job calls, one internal to
+-- turn_open); turn_open behaves as before when resume_of is NULL, and turn_close as before when a turn carried nothing (no
+-- carriedCredits in its policy; only a resume sets it). Repeatable: ADD COLUMN IF NOT EXISTS, CREATE OR REPLACE.
+-- Recovery: drop turn_recovery_claim, turn_recover and turn_resume_carry and restore turn_open and turn_close from 0423 (no
+-- resumed turn exists before this migration); the column may stay or be dropped.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -369,10 +371,10 @@ BEGIN
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
-    'kindContext', NULL::jsonb);
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
 END $function$;
 
--- turn_close as of 0421 (#1512/#1516), whole, with one change: the credits a resumed turn carried (policy.carriedCredits, set
+-- turn_close as of 0423 (#1512/#1516/#1520), whole, with one change: the credits a resumed turn carried (policy.carriedCredits, set
 -- only by turn_open) are added to N and to H (reserved_credits leaves them out) in both the close and the settlement pass.
 CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text, p_kind_result jsonb DEFAULT NULL::jsonb)
  RETURNS jsonb
@@ -383,7 +385,7 @@ AS $function$
 DECLARE
   t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
   v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
-  marker timestamptz;
+  marker timestamptz; kind_result jsonb;
 BEGIN
   IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
     RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
@@ -442,9 +444,14 @@ BEGIN
   -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
   -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
   --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
-  -- No kind has one yet, so a result is refused rather than dropped.
+  -- A kind without a branch has its result refused rather than dropped.
   IF p_kind_result IS NOT NULL THEN
-    RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+    IF t.kind = 'mentor' THEN
+      -- V2-5: the organizer's checklist patches; only a delivered completed turn applies them (an erased one saves nothing).
+      IF v_kind = 'completed' AND p_delivered THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+    ELSE
+      RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+    END IF;
   END IF;
 
   -- Calls without a final receipt: their cost is unknown; it is never presumed zero and never retried (2.5.2).
@@ -507,7 +514,7 @@ BEGIN
     WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
   IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
   RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
-    'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false) || tomb;
+    'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false, 'kindResult', kind_result) || tomb;
 END $function$;
 
 DO $$

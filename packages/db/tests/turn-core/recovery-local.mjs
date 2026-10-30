@@ -301,7 +301,9 @@ try{
  {
   const a=await account();
   for(const kind of ['chat','mentor']){
-   const o=await open(a,{kind});
+   // A mentor turn needs the mentor's own context to open (0423); the stop rule only reads the kind, so the turn is relabelled.
+   const o=await open(a);
+   await c.query('update turns set kind=$1 where id=$2',[kind,o.turnId]);
    assert.match(await refusal(close(a,o.turnId,'stopped')),/TURN_STOP_NOT_ALLOWED/);
    await close(a,o.turnId,'completed');
   }

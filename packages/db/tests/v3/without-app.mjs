@@ -18,7 +18,7 @@ export const WITHOUT_APP_SUITES = {
       'src/services/runtime/staleChargedRounds.integration.ts', 'src/services/runtime/positioningRefusal.integration.ts',
       'src/services/fusion/fusion.integration.ts', 'src/services/runtime/researchTurn.integration.ts',
       'src/services/runtime/libraryRead.integration.ts', 'src/services/fusion/compare.integration.ts',
-      'src/services/turn/chat.integration.ts'],
+      'src/services/turn/chat.integration.ts', 'src/services/turn/mentor.integration.ts'],
     prefix: 'RUNTIME: ',
     excluded: [
       {

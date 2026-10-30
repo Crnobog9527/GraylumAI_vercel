@@ -11,7 +11,7 @@ AS $function$
 DECLARE
   t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
   v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
-  marker timestamptz;
+  marker timestamptz; kind_result jsonb;
 BEGIN
   IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
     RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
@@ -70,9 +70,14 @@ BEGIN
   -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
   -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
   --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
-  -- No kind has one yet, so a result is refused rather than dropped.
+  -- A kind without a branch has its result refused rather than dropped.
   IF p_kind_result IS NOT NULL THEN
-    RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+    IF t.kind = 'mentor' THEN
+      -- V2-5: the organizer's checklist patches; only a delivered completed turn applies them (an erased one saves nothing).
+      IF v_kind = 'completed' AND p_delivered THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+    ELSE
+      RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+    END IF;
   END IF;
 
   -- Calls without a final receipt: their cost is unknown; it is never presumed zero and never retried (2.5.2).
@@ -135,5 +140,5 @@ BEGIN
     WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
   IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
   RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
-    'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false) || tomb;
+    'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false, 'kindResult', kind_result) || tomb;
 END $function$;
