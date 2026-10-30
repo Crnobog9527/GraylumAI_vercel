@@ -680,7 +680,7 @@ try{
   assert.equal(await one('select budget_conflict v from turn_calls where turn_id=$1 and seq=2',[ob.turnId]),false);
   report.checks.push('a model call above its bound marks budget_conflict and blocks that model until reviewed; within the bound it does not');
  }
- // 28. V2-3b (0503): turn_positioned, the positioning gate's narrow check, agrees with opc_has_confirmed_positioning on a confirmed
+ // 28. V2-3b (0425): turn_positioned, the positioning gate's narrow check, agrees with opc_has_confirmed_positioning on a confirmed
  // positioning and an unpublished round (an erased source version: the same join condition as the old check); it differs only where the old check re-validates the evidence
  // or the Skill package (controller 10-29: such a positioning counts as positioned). turn_open returns it.
  {

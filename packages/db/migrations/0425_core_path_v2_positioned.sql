@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-3b (placeholder number 0503; the controller assigns the real one at apply): the function closure of turn_open
+-- CORE-PATH-V2 V2-3b (number 0425 assigned by the controller): the function closure of turn_open
 -- (78 functions, 53 tables through opc_has_confirmed_positioning -> opc_source_allowed: evidence checks, Skill package reads and
 -- the old permission chain) cut to what the positioning gate needs (plan 5.2, 7.1; scripts/db-function-closure.mjs).
 --   turn_positioned      new: a confirmed positioning of the account in one query over its business, the current source
