@@ -165,7 +165,7 @@ function transport(reply: Reply) {
 const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
-  organizeAfter?: boolean; newWork?: NewWork; answer?: { optionIndex?: number } }) {
+  organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number } }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
     newWork: input.newWork ?? { message: admit, calls: admit } },
@@ -419,18 +419,18 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: the next turn answers the card; the chosen opti
       basisQuotes: ['coffee or tea'], question: 'Which one first?', options: [{ text: 'Coffee', reason: 'You named it first' },
         { text: 'Tea', reason: 'Fewer rivals' }], recommended: 0 }));
   await turn(f, { text: 'Should I start with coffee or tea?', transport: first.fn });
-  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1",
-    [f.session])).rows[0].content;
+  const { content: saved, seq: cardSeq } = (await db.query(
+    "select content, seq from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1", [f.session])).rows[0];
   expect(JSON.parse(saved)).toMatchObject({ stepId: 'step-0', card: { options: ['Coffee', 'Tea'] } });
   const next = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Tea first'))
     : prose('gen-reply-' + n, 'Tea it is.'));
-  const out = await turn(f, { text: 'Tea', transport: next.fn, answer: { optionIndex: 1 } });
+  const out = await turn(f, { text: 'Tea', transport: next.fn, answer: { sourceSeq: cardSeq, optionIndex: 1 } });
   expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
   expect(JSON.stringify(next.bodies.find(b => b.model === ORGANIZER)!.messages)).toContain('answeredCard');
   expect((await db.query("select content from session_messages where session_id=$1 and role='user' order by seq desc limit 1",
     [f.session])).rows[0].content).toBe('Tea');
-  // An answer to a card the latest reply does not carry is refused, and that turn is refunded.
-  const refused = await turn(f, { text: 'Coffee', transport: next.fn, answer: { optionIndex: 0 } });
+  // An answer to a card the latest reply does not carry (a stale tab still showing it) is refused, and that turn is refunded.
+  const refused = await turn(f, { text: 'Coffee', transport: next.fn, answer: { sourceSeq: cardSeq, optionIndex: 0 } });
   expect(refused.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_ANSWER_SOURCE_DENIED' });
 });
 

@@ -12,8 +12,11 @@ import type { HistoryItem } from './db';
  * opcQuestions.ts): a summary is never organized and answers no card; a checklist event answers no card; an opening answers
  * nothing. An answered card is the card of the conversation's latest mentor reply, which must belong to this step (its saved
  * body carries the step, mentorReplyBody); a chosen option becomes the user's words, as the old path replaced the input.
+ * sourceSeq is the message the user answered (its seq, as GET /api/turn shows it): an answer from a stale tab whose card was
+ * since replaced is refused rather than mapped onto the newer card's options.
  */
-export const mentorAnswer = z.object({ optionIndex: z.number().int().min(0).max(4).optional() }).strict();
+export const mentorAnswer = z.object({ sourceSeq: z.number().int().positive(),
+  optionIndex: z.number().int().min(0).max(4).optional() }).strict();
 export type MentorAnswer = z.infer<typeof mentorAnswer>;
 
 export type MentorTurnInput = { opening: boolean; summary: boolean; updatedFieldIds?: string[]; organize: boolean };
@@ -33,14 +36,17 @@ export function mentorTurnInput(input: { text: string; organizeAfter: boolean; a
   return { opening, summary, ...(updatedFieldIds ? { updatedFieldIds } : {}), organize: opening || (input.organizeAfter && !summary) };
 }
 
-/** The card the user answers, from the latest mentor reply of this step; refused when there is none or the option is out of range. */
+/**
+ * The card the user answers, from the latest mentor reply of this step; refused when there is none, when the user answered
+ * another message, or when the option is out of range.
+ */
 export function mentorAnsweredCard(history: readonly HistoryItem[], stepId: string, answer: MentorAnswer,
   turnId: number): AnsweredCard {
   const last = [...history].reverse().find(m => m.role === 'assistant');
   const card = last ? readAgentTurnBody(last.content).card : null;
   let step: unknown;
   try { step = last ? (JSON.parse(last.content) as { stepId?: unknown }).stepId : undefined; } catch { step = undefined; }
-  if (!card || step !== stepId || (answer.optionIndex !== undefined && answer.optionIndex >= card.options.length))
+  if (!card || step !== stepId || last!.seq !== answer.sourceSeq || (answer.optionIndex !== undefined && answer.optionIndex >= card.options.length))
     throw new Error('TURN_ANSWER_SOURCE_DENIED');
   return { executionId: String(turnId), card, ...(answer.optionIndex === undefined ? {} : { optionIndex: answer.optionIndex }) };
 }
