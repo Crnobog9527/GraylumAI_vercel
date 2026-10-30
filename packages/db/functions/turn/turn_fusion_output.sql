@@ -37,5 +37,11 @@ BEGIN
           p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
   END IF;
+  -- The group's last answer: the jury waits between groups, as turn_fusion_record (recovery looks up the pending costs meanwhile).
+  IF t.kind = 'jury' AND t.state = 'running' AND NOT gone AND NOT EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = p_turn_id
+      AND k.status IN ('dispatched','identified')
+      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs f WHERE f.turn_id = k.turn_id AND f.seq = k.seq)) THEN
+    UPDATE turns SET state = 'paused', pause_reason = 'awaiting_user', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
+  END IF;
   RETURN jsonb_build_object('productGone', gone) || tomb;
 END $function$;

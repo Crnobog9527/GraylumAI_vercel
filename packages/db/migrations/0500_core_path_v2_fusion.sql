@@ -364,8 +364,10 @@ BEGIN
           p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
   END IF;
-  IF t.kind = 'jury' AND t.state = 'running'
-    AND NOT EXISTS (SELECT 1 FROM turn_calls WHERE turn_id = p_turn_id AND status IN ('dispatched','identified')) THEN
+  -- A jury with no call left without an answer waits between groups (an answer whose cost alone is pending counts as finished).
+  IF t.kind = 'jury' AND t.state = 'running' AND NOT EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = p_turn_id
+      AND k.status IN ('dispatched','identified')
+      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs f WHERE f.turn_id = k.turn_id AND f.seq = k.seq)) THEN
     UPDATE turns SET state = 'paused', pause_reason = 'awaiting_user', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
   END IF;
   RETURN r || jsonb_build_object('productGone', gone);
@@ -408,6 +410,12 @@ BEGIN
         VALUES (p_actor_id, p_turn_id, p_seq, v_review, CASE WHEN v_review IS NULL THEN v_compare END, p_output->>'phase',
           p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
+  END IF;
+  -- The group's last answer: the jury waits between groups, as turn_fusion_record (recovery looks up the pending costs meanwhile).
+  IF t.kind = 'jury' AND t.state = 'running' AND NOT gone AND NOT EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = p_turn_id
+      AND k.status IN ('dispatched','identified')
+      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs f WHERE f.turn_id = k.turn_id AND f.seq = k.seq)) THEN
+    UPDATE turns SET state = 'paused', pause_reason = 'awaiting_user', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
   END IF;
   RETURN jsonb_build_object('productGone', gone) || tomb;
 END $function$;
@@ -928,10 +936,10 @@ DECLARE stops integer; t turns;
 BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF p_refund_all THEN RETURN 0; END IF;
+  -- An erased review or compare (its report, source or conversation deleted) pays nothing, also for an answer that arrived after:
+  -- its body was never kept, so nothing was delivered.
+  IF t.kind IN ('jury','compare') AND p_kind = 'erased' THEN RETURN 0; END IF;
   IF t.kind = 'jury' THEN
-    -- An erased review (its report or conversation deleted) pays nothing, also for a revision that arrived after: its body was
-    -- never kept, so nothing was delivered.
-    IF p_kind = 'erased' THEN RETURN 0; END IF;
     -- The jury's fixed price (Owner 10-17/10-27, V2-7b), as fusion_review_fee_settle_internal: a deliverable revision (a usable
     -- summary that changes a section) pays the price however the turn ended; an interruption or the 24-hour end pays the known
     -- usage, at most the price; no change, a failed revision, an incomplete review or an erasure pays nothing.

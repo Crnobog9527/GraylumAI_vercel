@@ -427,8 +427,17 @@ try{
   const w=await account(),rw=await review(w),ow=await open(w,{product:{reviewId:rw}});
   for(const s of [1,2,3]){await begin(w,ow.turnId,s);await one('select turn_call_identity($1,$2,$3,$4) v',[w.actor,ow.turnId,s,'gen-pending-'+s]);
    await one('select turn_fusion_output($1,$2,$3,$4) v',[w.actor,ow.turnId,s,JSON.stringify(seat())]);}
+  assert.deepEqual([(await turnRow(w,ow.turnId)).state,(await turnRow(w,ow.turnId)).pause_reason],['paused','awaiting_user'],
+   'the whole group answered: the wait between groups, also with its costs pending');
   const next=await begin(w,ow.turnId,4);
   assert.deepEqual([next.state,next.status],['running','dispatched'],'the next group is not held by answers whose cost alone is pending');
+  // #1522 review: a compare deleted while its columns run, answers after: dropped, and the erased close charges nothing.
+  const x=await account(),ox=await open(x,{kind:'compare',pol:comparePolicy(),product:{question:'q',questionHash:hash('q'),requestHash:hash('r'),
+   snapshotHash:hash('s'),workspaceDependencies:[]}});
+  await begin(x,ox.turnId,1);await begin(x,ox.turnId,2);await c.query('delete from fusion_compares where id=$1',[ox.compareId]);
+  assert.equal((await record(x,ox.turnId,1,{n:0.05,output:{phase:'fusion_compare',body:'a',verdict:'usable'}})).productGone,true);
+  await record(x,ox.turnId,2,{n:0.05,output:{phase:'fusion_compare',body:'b',verdict:'usable'}});
+  assert.equal((await close(x,ox.turnId,'erased')).chargedCredits,0);
   // #1522 review: a compare column refused under the positioning rule before its cost was final is saved as no_delivery; when
   // recovery settles its cost later (status ok), only the delivered column is charged, and the refusal is never readable.
   const k=await account(),cq={question:'q',questionHash:hash('q'),requestHash:hash('r'),snapshotHash:hash('s'),workspaceDependencies:[]};
