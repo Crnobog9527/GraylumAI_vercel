@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-7b (placeholder 0500; the number is assigned by the controller before it is applied): compare, jury and jury adoption on the per-turn core
+-- CORE-PATH-V2 V2-7b: compare, jury and jury adoption on the per-turn core
 -- (docs/launch/tasks/CORE-PATH-V2.md sections 2.2, 2.5.3, 2.7, 4.4; Owner rules 10-13, 10-17, 10-20, 10-27).
 --   turn_fusion_open     Gold gate, the kind's rules (compare: >= 2 models, bounds <= 500 credits, one at a time; jury: the
 --                        3-unfinished version rule, the fixed price in the freeze; jury_adopt: once per adopted review, no fee),
@@ -34,7 +34,7 @@
 -- old reviews and compares keep turn_id NULL and every old branch unchanged; the changed turn_* branches apply to jury and compare
 -- turns only, which nothing opens before this migration. Repeatable: IF NOT EXISTS / CREATE OR REPLACE throughout.
 -- Recovery: drop the two triggers, the twelve new functions and fusion_turn_outputs, drop the two turn_id columns, and restore the twelve changed
--- functions from the previous migration's files (0421 for turn_*, the generated files for the two fusion functions).
+-- functions from the generated files of the commit before this migration.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 

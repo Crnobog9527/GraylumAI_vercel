@@ -12,7 +12,7 @@ import { callCredits, stopLossSettings } from './policy';
 
 /*
  * CORE-PATH-V2 V2-7b: what compare and jury turns share. The database calls are the five turn steps through their fusion
- * wrappers (turn_fusion_open / _begin / _record / _close, 0499): a receipt and the answer the user sees are written in one
+ * wrappers (turn_fusion_open / _begin / _record / _close, 0430): a receipt and the answer the user sees are written in one
  * statement. A group's calls run in parallel, but turn_call_begin takes consecutive sequences, so the begins are sent one after
  * another, in the order the calls took their sequence; everything after the begin (send, identity, receipt) is parallel.
  */

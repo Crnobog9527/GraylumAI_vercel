@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// CORE-PATH-V2 V2-7b (0500): a review on the turn path, started on a real formal report version. The start is read first
+// CORE-PATH-V2 V2-7b (0430): a review on the turn path, started on a real formal report version. The start is read first
 // (fusion_review_turn_source: fusion_review_start's checks, read-only), then turn_fusion_open writes the review record
 // (config.path 'turn': no fee) and opens its jury turn in one transaction; a refused open
 // leaves no review; the BILL2 review functions refuse or skip turn-path reviews; the read model shows the turn's calls, the
