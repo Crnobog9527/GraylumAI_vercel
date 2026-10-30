@@ -297,7 +297,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
       if (cfg.models && cfg.models[member.modelId] !== quote.model) throw new Error('FUSION_MODEL_DENIED');
       // The price too (policy.pricings): recovery settles a late cost at it, so a call must not be sent at another. A price
       // changed mid-review ends it as a bound exceeded does (price_changed, refunded).
-      if (cfg.pricings && samePricing(cfg.pricings[member.modelId], quote.pricing) === false) throw new Error('FUSION_ESTIMATE_EXCEEDED');
+      if (cfg.pricings && !samePricing(cfg.pricings[member.modelId], quote.pricing)) throw new Error('FUSION_ESTIMATE_EXCEEDED');
       const body = fusionRequestBody(quote.policy as never, member.request, quote.outputLimit, quote.reasoning);
       const call = fusionCall(quote, body);
       const cap = caps[member.modelId];

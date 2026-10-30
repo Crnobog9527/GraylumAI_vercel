@@ -423,6 +423,14 @@ try{
   // The receipt arrives later (no deliverable mark in its usage): the settlement still charges the price.
   await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[d.actor,od.turnId,1,'ok',0.05,0.05,'{}',null,hash('late'),null]);
   assert.equal((await close(d,od.turnId,'completed')).chargedCredits,FIXED);
+  // #1522 review: the same revision, its review deleted before the cost settles: delivered stays on the turn, the price is due.
+  const y=await account(),ry=await review(y),oy=await open(y,{product:{reviewId:ry}});
+  await begin(y,oy.turnId,1);await one('select turn_call_identity($1,$2,$3,$4) v',[y.actor,oy.turnId,1,'gen-summary-2']);
+  await one('select turn_fusion_output($1,$2,$3,$4) v',[y.actor,oy.turnId,1,JSON.stringify({phase:'fusion_summary',body:'revised',verdict:'usable',deliverable:true})]);
+  await close(y,oy.turnId,'completed',{delivered:true,product:{state:'completed',outcome:{kind:'revised'}}});
+  await c.query('delete from fusion_reviews where id=$1',[ry]);
+  await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[y.actor,oy.turnId,1,'ok',0.05,0.05,'{}',null,hash('late-y'),null]);
+  assert.equal((await close(y,oy.turnId,'completed')).chargedCredits,FIXED);
   // #1522 review: three seats answered and judged with their costs pending fill the bound (3 x 60 = 180); the summary still starts.
   const w=await account(),rw=await review(w),ow=await open(w,{product:{reviewId:rw}});
   for(const s of [1,2,3]){await begin(w,ow.turnId,s);await one('select turn_call_identity($1,$2,$3,$4) v',[w.actor,ow.turnId,s,'gen-pending-'+s]);

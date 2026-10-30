@@ -968,7 +968,9 @@ BEGIN
     -- summary that changes a section) pays the price however the turn ended; an interruption or the 24-hour end pays the known
     -- usage, at most the price; no change, a failed revision, an incomplete review or an erasure pays nothing.
     IF EXISTS (SELECT 1 FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.usage->>'deliverable' = 'true')
-      OR EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = p_turn_id AND o.deliverable) THEN
+      OR EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = p_turn_id AND o.deliverable)
+      -- Closed as delivered: the fact stays on the turn when the answer is deleted before a late cost settles.
+      OR p_delivered THEN
       RETURN least(coalesce(p_fixed, p_held), p_held);
     END IF;
     IF p_kind IN ('interrupted','expired') THEN
