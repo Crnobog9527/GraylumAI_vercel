@@ -104,7 +104,8 @@ function countingAdmin() {
 
 const frame = (id: string, extra: Record<string, unknown>) =>
   'data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model: MODEL, ...extra }) + '\n\n';
-const usage = (id: string) => frame(id, { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, cost: 0.006 } })
+// A cost inside the call's frozen bound (this fixture's bound is small; above it the receipt is refused), as chat.integration.ts.
+const usage = (id: string) => frame(id, { choices: [], usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cost: 0.000003 } })
   + 'data: [DONE]\n\n';
 const respond = (id: string, body: string) => new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
 /** The first response calls `tool` (web_search by default); the next one answers. The request bodies are kept for inspection. */

@@ -31,6 +31,7 @@ const runtimeReport = (extra = [], failed = 0) => ({
     file(runtime.files[12], [pass('RUNTIME: library document deleted mid-stream hides late text, deltas and result and keeps no copy')]),
     file(runtime.files[13], [pass('RUNTIME: compare start holds every column once, streams each column once, settles per column and adopts')]),
     file(runtime.files[14], [pass('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in three writes, settles once')]),
+    file(runtime.files[15], [pass('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes')]),
   ],
 });
 
@@ -48,7 +49,7 @@ test('name patterns select the suite prefix and exclude exactly the app-only cas
 test('verification passes only when every non-excluded case passed', () => {
   const result = verifyWithoutAppResults('runtime', runtimeReport());
   assert.deepEqual(result.errors, []);
-  assert.equal(result.passed, 15);
+  assert.equal(result.passed, 16);
   assert.equal(result.skipped, 5);
 });
 
