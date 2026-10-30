@@ -59,7 +59,10 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   const discoveries = new Map<string, DiscoveryRecord & { keywordConfirmationId: string }>();
   for (const d of prepared.discoveries) discoveries.set(d.discoveryId, { ...d, platforms: d.platforms as SocialPlatform[] });
   const savedDiscoveries = new Set<string>();
-  let completedRounds = 0, newlyQualified = 0;
+  let completedRounds = 0, qualifiedChange = 0;
+  const qualifiedIn = (evidence: Record<string, unknown> | null | undefined) => (evidence?.classification as { qualified?: unknown } | undefined)?.qualified === true;
+  // As research_benchmarks reads last_success: a refresh can take a benchmark away, and only a new success changes the count.
+  const qualifiedNow = new Map(prepared.fetches.map(f => [accountKey(f.platform, f.account), qualifiedIn(f.evidence)]));
 
   // A fetch this turn made for a link the user pasted: the operation that asked for this very account says so.
   const pasted = (f: Fetch) => [...fresh.values()].some(o => {
@@ -121,7 +124,7 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       const prior = prepared.shortfall;
       // As research_benchmark_rounds: one turn is one round, whether it finished a discovery or checked pasted links.
       const checked = [...touched].some(key => { const f = fetches.get(key)!; return f.state === 'succeeded' && pasted(f); });
-      const rounds = (prior?.rounds ?? 0) + (completedRounds > 0 || checked ? 1 : 0), qualified = (prior?.qualified ?? 0) + newlyQualified;
+      const rounds = (prior?.rounds ?? 0) + (completedRounds > 0 || checked ? 1 : 0), qualified = (prior?.qualified ?? 0) + qualifiedChange;
       if (prior?.card && (prior.card.choice === null || prior.card.choice === 'generate')) return null;
       if (qualified < 1 || qualified >= REQUIRED_QUALIFIED || rounds < MIN_ROUNDS
         || (prior?.card && rounds <= (prior.card.chosenRounds ?? 0))) return null;
@@ -175,8 +178,10 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       for (const [key, f] of fetches) if (f.id === fetchId && f.attempt === attempt) {
         // Only an attempt that ended is written: a claim the budget stopped before sending leaves nothing.
         fetches.set(key, { ...f, state, evidence: value }); touched.add(key);
-        const qualified = (value?.classification as { qualified?: unknown } | undefined)?.qualified === true;
-        if (state === 'succeeded' && qualified) newlyQualified++;
+        if (state !== 'succeeded') continue;
+        const was = qualifiedNow.get(key) === true, now = qualifiedIn(value);
+        qualifiedChange += Number(now) - Number(was);
+        qualifiedNow.set(key, now);
       }
     },
     refreshCreate: async () => { throw new Error('RESEARCH_REFRESH_INVALID'); },

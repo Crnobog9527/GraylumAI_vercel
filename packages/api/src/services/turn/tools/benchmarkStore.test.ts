@@ -100,6 +100,23 @@ it('a pasted check that succeeded this turn counts toward the shortfall card, on
   expect(await s.store.offerShortfall(opId)).toMatchObject({ offeredRounds: 2, offeredQualified: 1 });
 });
 
+it('a refresh counts by the net change: losing a benchmark brings the shortfall card, a failed refresh changes nothing', async () => {
+  const refreshId = '77777777-7777-4777-8777-777777777777';
+  const fetched = (account: string, qualified: boolean, id: string) => ({ id, attempt, platform: 'tiktok', account, state: 'succeeded', evidence: { classification: { qualified } } });
+  const prepared = { refresh: { platform: 'tiktok', account: 'a', used: false }, shortfall: { rounds: 2, qualified: 3, card: null },
+    fetches: [fetched('a', true, fetchId)] };
+  const lost = turnResearchStore({ actorId, sessionId, requestId, text: 'hi', refreshId, prepared: preparedResearch.parse(prepared) });
+  const claim = await lost.store.fetchClaim('tiktok', 'a', refreshId) as { fetchId: string; attempt: string };
+  expect(await lost.store.offerShortfall(opId)).toBeNull();
+  await lost.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', { classification: { qualified: false } });
+  expect(await lost.store.offerShortfall(opId)).toMatchObject({ offeredQualified: 2 });
+
+  const failed = turnResearchStore({ actorId, sessionId, requestId, text: 'hi', refreshId, prepared: preparedResearch.parse(prepared) });
+  const again = await failed.store.fetchClaim('tiktok', 'a', refreshId) as { fetchId: string; attempt: string };
+  await failed.store.fetchFinish(again.fetchId, again.attempt, 'failed', null);
+  expect(await failed.store.offerShortfall(opId)).toBeNull();
+});
+
 it('a refresh grant replaces a finished fetch, and is written at close', async () => {
   const refreshId = '77777777-7777-4777-8777-777777777777';
   const s = turnResearchStore({ actorId, sessionId, requestId, text: 'hi', refreshId, prepared: preparedResearch.parse({
