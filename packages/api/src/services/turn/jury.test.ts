@@ -131,6 +131,18 @@ describe('jury turn advance', () => {
     expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'in_flight' });
     expect(m.rpc.mock.calls.filter(c => (c[1] as { p_to: { state: string } }).p_to.state === 'running')).toHaveLength(0);
   });
+  it('an answer saved and judged whose cost alone is pending does not hold the step (#1522 review)', async () => {
+    const group = 'g1', claimedStep = { stepKey: 'review:1:review:1', groupId: group, fromSeq: 1 };
+    const pendingCost = REVIEWERS.map((modelId, index) => ({ callId: String(index), groupId: group, modelId, phase: 'fusion_review',
+      state: 'identified', verdict: 'usable', seq: index + 1 }));
+    m.read.mockResolvedValue(view({ steps: [claimedStep], calls: pendingCost }));
+    m.decide.mockResolvedValue({ state: 'running', round: 1, phase: 'summary', attempt: 1 });
+    expect(await jury().advance(view().reviewId)).toMatchObject({ next: true, reason: 'advanced' });
+    // Without a judged answer the same call still waits for recovery.
+    m.read.mockResolvedValue(view({ steps: [claimedStep], calls: pendingCost.map(c => ({ ...c, verdict: null })) }));
+    expect(await jury().advance(view().reviewId)).toMatchObject({ next: false, reason: 'in_flight' });
+  });
+
   it('retries a step nothing of which was sent, then gives up after three attempts; a tombstone closes erased', async () => {
     m.read.mockResolvedValue(view());
     m.runGroup.mockResolvedValue(REVIEWERS.map(() => ({ ok: false, code: 'TURN_PROVIDER_BUSY' })));

@@ -12,8 +12,8 @@
 --   turn_fusion_close    turn_close with the review's end state or the compare's finished state in the same transaction
 --   fusion_review_turn_step   the review record's claim/advance for a jury on the turn path
 --   fusion_compare_turn_adopt the chosen compare answer into the conversation history
---   fusion_compare_turn_admit / fusion_review_turn_source  read before a compare / a jury start opens (read connection,
---                        owner keys): the old permission chain, kept out of turn_fusion_open (read-only)
+--   fusion_compare_turn_admit / fusion_review_turn_source  read before a compare / a jury start opens (one statement,
+--                        owner keys): the old permission chain, kept out of turn_fusion_open (changes no record)
 --   turn_fusion_recovery the fusion-recovery cron's step on turns: 24-hour end, deleted review refund, product sync
 --   turn_fusion_ended_review closes a jury turn whose review another path ended (archived business) by that end
 --   fusion_turn_raw_scrub (trigger on fusion_reviews / fusion_compares) a deleted review or compare deletes its turn's raw
@@ -530,15 +530,16 @@ BEGIN
   RETURN cmp.adoption || jsonb_build_object('replay', false);
 END $function$;
 
--- What a compare reads before it opens, on the read connection by the owner's keys (ENGINEERING 5: the old permission chain
--- stays out of turn_fusion_open, as V2-7a's report_source): the history it sizes its columns on (the same query as turn_open's,
+-- What a compare reads before it opens, by the owner's keys (ENGINEERING 5: the old permission chain stays out of
+-- turn_fusion_open, as V2-7a's report_source). Not STABLE, and called on the write connection: that chain takes short share
+-- locks and keeps its check memo, which a read-only transaction refuses. It changes no record. the history it sizes its columns on (the same query as turn_open's,
 -- which returns the authoritative copy; the compare refuses when they differ), the business still writable (0324), each
 -- workspace source still allowed, the confirmed positioning, and the 7-day breaker statistic (the caller compares it with the
 -- settings). Read-only; between this read and the open a deletion can land (milliseconds, AGENTS 5: logged, not compensated).
 CREATE OR REPLACE FUNCTION public.fusion_compare_turn_admit(p_actor_id uuid, p_session_id uuid, p_limit integer, p_dependencies jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
- STABLE SECURITY DEFINER
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE deps jsonb := coalesce(p_dependencies, '[]'::jsonb);
@@ -567,11 +568,11 @@ END $function$;
 -- writable, the draft not read-only, the current formal version of a generated report, no other review or compare running (a
 -- review of this same request excepted, so a repeated start answers as a replay), the 3-unfinished rule; and the review
 -- record's fields (the draft, its project and conversation, the version and its hash, the materials). turn_fusion_open writes
--- them, under the account lock, with the checks that must be atomic there. Read-only, no lock.
+-- them, under the account lock, with the checks that must be atomic there. Changes no record; not STABLE, as the compare's.
 CREATE OR REPLACE FUNCTION public.fusion_review_turn_source(p_actor_id uuid, p_request_id uuid, p_draft_id uuid, p_source_version_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
- STABLE SECURITY DEFINER
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; ver artifact_versions; m jsonb;

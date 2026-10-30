@@ -235,10 +235,12 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         // A call sent whose outcome is unknown: never sent again; the crash sweep and recovery settle it and end the review.
         if (stops.includes('TURN_CALL_UNKNOWN')) return { next: false, reason: 'in_flight' };
         view = (await record.read(reviewId))!;
-        // A call of this step still dispatched or identified (its receipt failed to save, its outcome unknown) was sent: it is
-        // settled by recovery, never sent again; the step waits instead of retrying.
+        // A call of this step sent but without a judged answer (its receipt failed to save, its outcome unknown) is settled by
+        // recovery, never sent again; the step waits instead of retrying. An answer already saved and judged, whose cost alone
+        // is pending, does not hold the step: the review goes on with it and recovery settles the cost.
         const current = view.steps.find(s => s.stepKey === stepKey(at));
-        if (view.calls.some(c => c.groupId === current?.groupId && ['dispatched', 'identified', 'unknown'].includes(c.state))) {
+        if (view.calls.some(c => c.groupId === current?.groupId && !c.verdict
+          && ['dispatched', 'identified', 'unknown'].includes(c.state))) {
           return { next: false, reason: 'in_flight' };
         }
         // Nothing was sent at all (refused locally, provider busy: every attempt certainly unsent or free), the step is tried
@@ -247,7 +249,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
           await step(reviewId, at, { state: 'running', round: at.round, phase: at.phase, attempt: at.attempt + 1 });
           return { next: true, reason: 'retry', dispatched };
         }
-      } else if (sent.some(c => c.state === 'dispatched' || c.state === 'identified')) {
+      } else if (sent.some(c => !c.verdict && (c.state === 'dispatched' || c.state === 'identified'))) {
         return { next: false, reason: 'in_flight' };
       }
       // Every call of the step has its receipt: the same decision as the BILL2 review (reviewCore.decide).

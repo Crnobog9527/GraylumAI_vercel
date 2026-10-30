@@ -47,17 +47,18 @@ it('CORE-PATH-V2 V2-7b: the frozen numbers of a fusion turn and the answer text 
   expect(answerText('not json')).toBeNull();
 });
 
-it('CORE-PATH-V2 V2-7b: the old permission chain is read before the open, on the read connection, by the owner keys', async () => {
+it('CORE-PATH-V2 V2-7b: the old permission chain is read before the open, on the write connection, by the owner keys', async () => {
   const seen: Array<[string, Record<string, unknown>]> = [];
   const breaker = { noDeliveryCalls: 0, platformUsd: 0 };
-  const read = { rpc: async (name: string, args: Record<string, unknown>) => {
+  const write = { rpc: async (name: string, args: Record<string, unknown>) => {
     seen.push([name, args]);
     if (args.p_draft_id === 'archived') return { data: null, error: { message: 'OPC_BUSINESS_ARCHIVED' } };
     if (args.p_draft_id === 'erased') return { data: null, error: { message: 'CONTENT_ERASED' } };
     return { data: name === 'fusion_compare_turn_admit' ? { history: [], positioned: true, breaker }
       : { draftId: 'd', projectId: 'p', sessionId: 's', sourceVersionId: 'v', versionHash: 'h', materials: {}, breaker }, error: null };
   } };
-  const write = { rpc: async () => { throw new Error('the write connection is not used'); } };
+  // That chain locks and keeps a memo: a read-only connection would refuse it.
+  const read = { rpc: async () => { throw new Error('the read connection is not used'); } };
   const admission = fusionAdmission({ read, write } as never, 'actor');
   expect((await admission.compare('s', 12, [{ sourceVersionId: 'v' }])).positioned).toBe(true);
   expect(seen[0]).toEqual(['fusion_compare_turn_admit', { p_actor_id: 'actor', p_session_id: 's', p_limit: 12,

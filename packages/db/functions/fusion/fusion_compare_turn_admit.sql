@@ -5,7 +5,7 @@
 CREATE OR REPLACE FUNCTION public.fusion_compare_turn_admit(p_actor_id uuid, p_session_id uuid, p_limit integer, p_dependencies jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
- STABLE SECURITY DEFINER
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE deps jsonb := coalesce(p_dependencies, '[]'::jsonb);

@@ -108,6 +108,19 @@ export async function runFusionTurn({db,report,Client,connectionString}) {
     // The read before the open refuses what fusion_review_start refused: a version that is not the current formal one.
     const stale = await member(db,3000);
     await assert.rejects(source(db,stale,randomUUID(),randomUUID()),/FUSION_REVIEW_STALE/);
+    // #1522 review: the old permission chain locks and keeps a memo, so the reads before the open must not be STABLE (PostgREST
+    // would run them in a read-only transaction, which refuses that). Run as the RPC runs them, in a business, with a source.
+    for (const name of ['fusion_compare_turn_admit','fusion_review_turn_source'])
+      assert.equal((await db.query('SELECT provolatile v FROM pg_proc WHERE proname=$1',[name])).rows[0].v,'v',name);
+    const held = await member(db,3000), business = randomUUID();
+    await db.query(`INSERT INTO opc_businesses(id,actor_id,name) VALUES($1,$2,'b')`,[business,held.actor]);
+    await db.query('INSERT INTO opc_draft_businesses(draft_id,business_id) VALUES($1,$2)',[held.draft,business]);
+    const admit = deps => service(db,'fusion_compare_turn_admit',held.actor,held.session,10,JSON.stringify(deps));
+    assert.equal((await source(db,held)).draftId,held.draft);
+    assert.ok(Array.isArray((await admit([{sourceVersionId:held.versionId}])).history));
+    await db.query('UPDATE opc_businesses SET archived_at=now() WHERE id=$1',[business]);
+    await assert.rejects(source(db,held),/OPC_BUSINESS_ARCHIVED/);
+    await assert.rejects(admit([]),/OPC_BUSINESS_ARCHIVED/);
     // #1522 review: a source erased between the read before the open and the open is seen under the open's locks: no review,
     // no compare, no freeze (a copy of a deleted source is never made).
     const erased = await member(db,5000), request = randomUUID();
