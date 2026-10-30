@@ -3,12 +3,13 @@
 -- CORE-PATH-V2 V2-5d: the mentor path without the old permission chain in turn_open / turn_close (docs/launch/tasks/CORE-PATH-V2.md 3.1).
 --   turn_mentor_draft_allowed  the narrow check on the hot path: the draft is the actor's, not revoked, its project not tombstoned.
 --   mentor_source_check        the whole old check, unchanged (bill2_scope_allowed, opc_business_context), as its own read. Node calls
---                              it only for a draft that has an account-strategy binding or a business source (turn_open returns
---                              sourceCheck), before any model call and again before close, so plain drafts pay no round trip.
+--                              it only for a draft that has an account-strategy binding or a business source, before turn_open and
+--                              again after the last model call before turn_close, so plain drafts pay no round trip. turn_open
+--                              refuses such a draft (TURN_SOURCE_CHECK_REQUIRED) unless the policy says it was checked.
 --   session_view_allowed       the whole old scope check of the refresh-recovery read, called first by view.ts.
 --   turn_mentor_context, turn_mentor_apply, turn_session_view  full bodies, with the old chain replaced as above; the business
 --                              context's source is filled in from mentor_source_check.
--- Compatibility: additive functions plus three replaced bodies. The new path takes no user traffic until V2-10 (core_path_v2.enabled),
+-- Compatibility: three new functions plus three replaced bodies. The new path takes no user traffic until V2-10 (core_path_v2.enabled),
 -- so the usual order holds: apply, then merge; between the two, an old Node's mentor turn on the new path would refuse the new field.
 -- Idempotent: CREATE OR REPLACE. Recovery: re-apply the bodies of 0428 and of the migration before it; no data changes.
 CREATE OR REPLACE FUNCTION public.turn_mentor_draft_allowed(p_actor_id uuid, p_draft_id uuid)
@@ -53,18 +54,21 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
 AS $function$
 DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
   b opc_businesses; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; suggestions jsonb := '{}';
-  suggestion jsonb; account_bound boolean;
+  suggestion jsonb;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
   -- The draft's own scope, narrow: revoked or tombstoned is refused here. What needs the whole source and evidence chain (an
-  -- account-strategy draft, a business with a source) is mentor_source_check, called by Node before any model call (sourceCheck).
+  -- account-strategy draft, a business with a source) is mentor_source_check, which Node calls before this turn opens; a draft that needs it is refused unless it ran.
   IF NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
   -- An archived business is read-only (as opc_assert_business_writable, without its row lock).
   SELECT x.* INTO b FROM opc_draft_businesses db JOIN opc_businesses x ON x.id = db.business_id AND x.actor_id = p_actor_id
    WHERE db.draft_id = d.draft_id;
   IF b.archived_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_MENTOR_ARCHIVED' USING ERRCODE='42501'; END IF;
-  account_bound := EXISTS (SELECT 1 FROM opc_account_strategy_drafts WHERE draft_id = d.draft_id);
+  IF p_mentor->'sourceChecked' IS DISTINCT FROM 'true'::jsonb AND (b.current_source_version_id IS NOT NULL
+      OR EXISTS (SELECT 1 FROM opc_account_strategy_drafts WHERE draft_id = d.draft_id)) THEN
+    RAISE EXCEPTION 'TURN_SOURCE_CHECK_REQUIRED' USING ERRCODE='42501';
+  END IF;
   SELECT * INTO p FROM artifact_projects WHERE id = d.project_id AND actor_id = p_actor_id;
   SELECT * INTO r FROM artifact_rounds WHERE id = d.round_id AND project_id = p.id;
   IF p.id IS NULL OR r.id IS NULL OR p.erased_at IS NOT NULL OR p.content_deleted_at IS NOT NULL THEN
@@ -129,7 +133,7 @@ BEGIN
   END LOOP;
   RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'roundId', r.id, 'mode', d.mode, 'moduleId', p.module_id,
     'skillId', p.skill_id, 'revisionId', r.revision_id, 'packageHash', r.package_hash, 'steps', r.workflow->'steps',
-    'suggestions', suggestions, 'sourceCheck', account_bound OR b.current_source_version_id IS NOT NULL,
+    'suggestions', suggestions,
     'work', jsonb_build_object('projectId', p.id, 'roundId', r.id, 'revisionId', r.revision_id, 'packageHash', r.package_hash,
       'steps', steps, 'source', NULL) || CASE WHEN b.id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext',
       jsonb_build_object('version', 'opc-business-context.v1', 'businessId', b.id,

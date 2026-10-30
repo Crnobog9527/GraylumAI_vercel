@@ -7866,6 +7866,30 @@ it("OPC: legacy account revisions repair only untouched answers and retain sourc
  expect((await sql.query("select artifact_evidence_allowed($1,'[]'::jsonb) allowed",[before.projectId])).rows[0].allowed).toBe(false);
 },120000);
 
+it("OPC: V2-5d mentor checks agree with the old chain on a real account strategy draft, allowed and after its evidence is withdrawn",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'scope-check',title:'来源',brief:'账号策略',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'scope-check',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const strategy=await f.service.accountStrategyBegin(account.projectId,randomUUID());
+ const actor=(await sql.query('select actor_id,session_id,project_id from opc_drafts where draft_id=$1',[strategy.draftId])).rows[0];
+ const verdict=async()=>{
+  const q=async(text:string,args:unknown[])=>(await sql.query(text,args)).rows[0].v;
+  const old=await q("select coalesce(bill2_scope_allowed($1,jsonb_build_object('kind','positioning_draft','draftId',$2::uuid)),false) v",[actor.actor_id,strategy.draftId]);
+  const narrow=await q('select turn_mentor_draft_allowed($1,$2) v',[actor.actor_id,strategy.draftId]);
+  const check=await q('select mentor_source_check($1,$2) v',[actor.actor_id,actor.session_id]);
+  return {old,fresh:narrow&&check.allowed,view:await q('select session_view_allowed($1,$2) v',[actor.actor_id,actor.session_id])};
+ };
+ expect(await verdict()).toEqual({old:true,fresh:true,view:true});
+ // Opening without the check is refused for this draft; with it, the context opens.
+ const mentor={moduleId:(await sql.query('select module_id from artifact_projects where id=$1',[actor.project_id])).rows[0].module_id,stepId:f.flow.steps[0]!.id};
+ await expect(sql.query('select turn_mentor_context($1,$2,$3)',[actor.actor_id,actor.session_id,JSON.stringify(mentor)])).rejects.toThrow('TURN_SOURCE_CHECK_REQUIRED');
+ expect((await sql.query('select turn_mentor_context($1,$2,$3) v',[actor.actor_id,actor.session_id,JSON.stringify({...mentor,sourceChecked:true})])).rows[0].v.draftId).toBe(strategy.draftId);
+ await f.artifacts.execute({action:'restrictEvidence',projectId:f.d.projectId,roundId:f.d.roundId,requestId:randomUUID(),evidenceId:f.sourceEvidence!,deleted:true,expiresAt:null});
+ expect(await verdict()).toEqual({old:false,fresh:false,view:false});
+});
+
 it("OPC: account inheritance validates dependency order and revocable local evidence",async()=>{
  const f=await publishedDraft(3,true,true,true);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,

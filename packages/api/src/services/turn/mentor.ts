@@ -46,6 +46,8 @@ export type MentorInput = { actorId: string; sessionId: string; requestId: strin
 
 const MARKER_RESERVE_BYTES = 256;
 const sourceChecked = z.object({ allowed: z.boolean(), businessContext: z.unknown().optional() });
+/** Conversations whose draft needs mentor_source_check: a hint per process, never a permission (turn_open enforces it). */
+const SOURCE_DRAFTS = new Set<string>(), SOURCE_DRAFTS_KEPT = 5000;
 
 const callPolicy = (q: ChatQuote) => ({ modelId: q.modelId, provider: 'openrouter', account: q.identity.account, model: q.model,
   protocol: 'openrouter-chat-v1' as const, providerLimits: q.providerLimits, upperUsd: q.upperUsd, outputLimit: q.outputLimit,
@@ -68,11 +70,31 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   if (input.text.length > 8000 || Buffer.byteLength(input.text) > mentor.inputLimit)
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
 
-  // 1. Open: freeze, read the draft and its checklist in the same transaction.
-  const policy = mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId });
+  // 1. The whole source and evidence chain, for a draft that has one, before anything is frozen; refused here, nothing was charged.
+  // turn_open refuses such a draft unless this ran, so the hint only saves that first refused open.
+  const sourceCheck = async () => {
+    const { data, error } = await deps.clients.read.rpc('mentor_source_check', { p_actor_id: input.actorId, p_session_id: input.sessionId });
+    if (error) throw new Error('TURN_OPEN_FAILED');
+    return sourceChecked.parse(data);
+  };
+  let checked: z.infer<typeof sourceChecked> | undefined;
+  // 2. Open: freeze, read the draft and its checklist in the same transaction.
+  const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
+    policy: mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined }) });
   let opened;
-  try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor', policy }); }
-  catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
+  try {
+    if (SOURCE_DRAFTS.has(input.sessionId)) checked = await sourceCheck();
+    if (checked?.allowed === false) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
+    try { opened = await openTurn(); }
+    catch (error) {
+      if (!(error instanceof TurnDatabaseError) || error.code !== 'TURN_SOURCE_CHECK_REQUIRED' || checked) throw error;
+      if (SOURCE_DRAFTS.size >= SOURCE_DRAFTS_KEPT) SOURCE_DRAFTS.clear();
+      SOURCE_DRAFTS.add(input.sessionId);
+      checked = await sourceCheck();
+      if (!checked.allowed) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
+      opened = await openTurn();
+    }
+  } catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay });
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
 
@@ -83,11 +105,6 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     refundAll?: boolean; failureCode?: string; kindResult?: Record<string, unknown> } = {}) =>
     db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
       refundAll: extra.refundAll, failureCode: extra.failureCode ?? null, kindResult: extra.kindResult });
-  const sourceCheck = async () => {
-    const { data, error } = await deps.clients.read.rpc('mentor_source_check', { p_actor_id: input.actorId, p_session_id: input.sessionId });
-    if (error) throw new Error('TURN_FAILED');
-    return sourceChecked.parse(data);
-  };
   let stopped: TurnStop | undefined;
   const keep = (error: unknown) => { if (error instanceof TurnStop) stopped = error; throw error; };
   // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
@@ -96,15 +113,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]);
   };
   try {
-    // 2. The draft state, the Skill text of this step (cached by content hash) and the host state of this turn.
+    // 3. The draft state, the Skill text of this step (cached by content hash) and the host state of this turn.
     const state = mentorState(opened.kindContext, input.stepId);
     const ctx = state.context;
-    // The whole source and evidence chain, only for a draft that has one; refused here, nothing was sent and all is refunded.
-    if (ctx.sourceCheck) {
-      const checked = await sourceCheck();
-      if (!checked.allowed) throw new TurnStop('TURN_MENTOR_DENIED');
-      if (checked.businessContext) (ctx.work as Record<string, unknown>).businessContext = checked.businessContext;
-    }
+    if (checked?.businessContext) (ctx.work as Record<string, unknown>).businessContext = checked.businessContext;
     const { source, binding } = mentorSkillSource(admin, { actorId: input.actorId, moduleId: ctx.moduleId, skillId: ctx.skillId,
       revisionId: ctx.revisionId, packageHash: ctx.packageHash });
     const skill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
@@ -119,7 +131,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       replyRule: replySettingInstructions(effectiveReplyLocale(opened.replyLanguage)) });
     const userMessage = mentorUserMessage(words, state.scopeMaterial, host);
 
-    // 3. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
+    // 4. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
     // The continuation reserve: the largest prepared file as the tool result is embedded in the request (twice JSON-escaped).
     const toolBytes = (summary ? 0 : groundedCardToolBytes()) + skillFileToolBytes() + (opening ? 0 : skillFileReserveBytes(prepared, binding));
@@ -136,7 +148,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };
 
-    // 4. The mentor's reply (and its continuation after one Skill file). A choice card ends the turn.
+    // 5. The mentor's reply (and its continuation after one Skill file). A choice card ends the turn.
     let text = '', toolCalled = false, cardMessage: string | null | undefined;
     const output = await runRuntime({
       model: mentor.model, instructions: system.instructions, input: userMessage, session: turnSession(history),
@@ -162,7 +174,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // Nothing to show (no prose, no card): nothing was delivered, the user pays nothing.
     if (!turn.card && turn.message === INVALID_REPLY_NOTICE) throw new TurnStop('TURN_CALL_DENIED');
 
-    // 5. The organizer: the checklist patches of this turn, applied by turn_close. A failed organizer call never takes the
+    // 6. The organizer: the checklist patches of this turn, applied by turn_close. A failed organizer call never takes the
     // delivered reply back; its result is then empty (recorded as invalid_output, as the old path recorded a lost organizer).
     let organized: unknown = null, captureInput: unknown;
     if (organizer) {
@@ -177,10 +189,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       }
     }
 
-    // 6. Close: settle once, save both messages, apply the checklist patches in the same transaction. A source withdrawn during
+    // 7. Close: settle once, save both messages, apply the checklist patches in the same transaction. A source withdrawn during
     // this turn keeps the reply but writes nothing to the checklist (the check turn_close made on the old chain); a failed read
     // counts as withdrawn.
-    const scopeDenied = Boolean(organizer && ctx.sourceCheck && !(await sourceCheck().catch(() => ({ allowed: false }))).allowed);
+    const scopeDenied = Boolean(organizer && checked && !(await sourceCheck().catch(() => ({ allowed: false }))).allowed);
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
       ...(organizer ? { kindResult: { roundId: ctx.roundId, revisionId: ctx.revisionId, versions: state.versions,

@@ -23,8 +23,6 @@ export const mentorContextSchema = z.object({
   packageHash: z.string().regex(/^[a-f0-9]{64}$/), steps: z.array(step).min(1).max(32),
   // Pending suggestions' content, for the organizer only (the mentor sees hasPendingSuggestion).
   suggestions: z.record(z.string(), z.record(z.string(), z.object({ value: z.string(), nature: z.unknown(), basis: z.unknown() }))),
-  // A draft with an account-strategy binding or a business source: mentor_source_check runs before any model call (V2-5d).
-  sourceCheck: z.boolean(),
   work: z.object({ roundId: uuid, steps: z.record(z.string(), workStep) }).passthrough(),
 }).strict();
 export type MentorContext = z.infer<typeof mentorContextSchema>;

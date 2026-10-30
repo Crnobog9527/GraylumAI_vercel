@@ -510,7 +510,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5d: the new checks agree with the old chain, allowe
   expect((await db.query('select turn_mentor_draft_allowed($1,$2) v', [randomUUID(), other.draftId])).rows[0].v).toBe(false);
 });
 
-it('RUNTIME: CORE-PATH-V2 V2-5d: a draft whose base source is gone is refused before any model call and refunded', async () => {
+it('RUNTIME: CORE-PATH-V2 V2-5d: a draft whose base source is gone is refused before the turn opens', async () => {
   const f = await setup();
   await db.query('set session_replication_role=replica');
   await db.query(`insert into opc_account_strategy_drafts(account_project_id,draft_id,actor_id,base_source_version_id,root_source_version_id,base_account_revision)
@@ -520,10 +520,14 @@ it('RUNTIME: CORE-PATH-V2 V2-5d: a draft whose base source is gone is refused be
   const before = await credits(f.actor);
   const t = transport(() => { throw new Error('nothing may be sent'); });
   const out = await turn(f, { text: 'Hello', transport: t.fn });
-  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_MENTOR_DENIED' });
+  // Refused before anything was frozen: no turn row at all, and no second open.
+  expect(out.events).toEqual([{ type: 'error', code: 'TURN_MENTOR_DENIED' }]);
   expect(t.bodies).toEqual([]);
   expect(await credits(f.actor)).toBe(before);
+  expect((await db.query('select 1 from turns where actor_id=$1', [f.actor])).rows).toEqual([]);
   expect(out.calls.filter(path => path.includes('mentor_source_check')).length).toBe(1);
+  await expect(db.query(`select turn_mentor_context($1,$2,$3)`, [f.actor, f.session, JSON.stringify({ moduleId: f.moduleId, stepId: 'step-0' })]))
+    .rejects.toThrow('TURN_SOURCE_CHECK_REQUIRED');
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5d: a plain draft makes no source check round trip', async () => {
