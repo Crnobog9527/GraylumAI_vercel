@@ -63,6 +63,8 @@ export interface SubcallContext {
   onSupplierDispatch?: () => void;
   /** The supplier request's timeout, read just before it is sent (ARCH-FIX C1: the round's time left); absent, 60s. */
   timeoutMs?: () => number;
+  /** CORE-PATH-V2: what came back and its priced receipt, once per subcall that got this far (the turn's own ledger). */
+  onResult?: (result: ResearchCallResult, evidence: ReturnType<typeof toolResultEvidence>) => void;
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
@@ -187,6 +189,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   }
 
   const evidence = toolResultEvidence(claim.callId, policy, result, sha256(JSON.stringify(result)));
+  context.onResult?.(result, evidence);
   let storageError: unknown;
   if (researchDispatched !== 'no') {
     try { await context.evidence.finish(operationId, opened.token, OPERATION_STATE[result.outcome], {

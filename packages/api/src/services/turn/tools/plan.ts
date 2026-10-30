@@ -29,9 +29,9 @@ export const READ_SOURCE_CALLS = 2;
 export const RESEARCH_INPUT_BYTES = 150_000;
 /** Request bytes kept for a library read or a loaded Skill and the reply after it. */
 export const FREE_RESULT_RESERVE_BYTES = 24_576;
-const MAX_TOOL_DEFINITIONS = 9;
+export const MAX_TOOL_DEFINITIONS = 9;
 /** Production policy marker: the 2.8 path has no test window; routes are approved by research and price settings. */
-const PRODUCTION = { mode: 'production' } as unknown as StagingPolicy;
+export const PRODUCTION = { mode: 'production' } as unknown as StagingPolicy;
 
 export type ResearchSetup = { config: ResearchToolsConfig; policies: ToolCallPolicy[]; keys: Partial<Record<ResearchVendor, string>> };
 

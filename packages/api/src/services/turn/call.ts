@@ -20,7 +20,8 @@ import { logSwallowed } from '../../lib/swallow';
 export class TurnStop extends Error {
   constructor(readonly code: 'TURN_PAUSED_FOR_CREDITS' | 'TURN_TOMBSTONED' | 'TURN_CALL_UNKNOWN' | 'TURN_PROVIDER_402'
     | 'TURN_CALL_DENIED' | 'TURN_PROVIDER_BUSY' | 'TURN_PROVIDER_LIMIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE'
-    | 'TURN_NEW_CALLS_PAUSED' | 'TURN_RATE_LIMITED' | 'TURN_LIMIT_UNAVAILABLE' | 'TURN_USAGE_CONFIGURATION_REQUIRED') { super(code); }
+    | 'TURN_NEW_CALLS_PAUSED' | 'TURN_RATE_LIMITED' | 'TURN_LIMIT_UNAVAILABLE' | 'TURN_USAGE_CONFIGURATION_REQUIRED'
+    | 'RESEARCH_TOOLS_UNAVAILABLE' | 'RESEARCH_TOOLS_CONTEXT_CAPACITY' | 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY') { super(code); }
 }
 
 type Adapter = { prepareDispatch(input: unknown, identity: CallIdentity, onChunk?: (chunk: string) => void,

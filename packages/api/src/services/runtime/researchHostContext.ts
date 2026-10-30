@@ -42,36 +42,45 @@ async function read(admin: SupabaseClient, name: string, args: Record<string, un
   return result.data;
 }
 
+/** The flow's state as the model sees it, from what was read; `discoveryOf` names a confirmed candidate card's discovery. */
+export async function researchContextFrom(input: { cards: unknown; benchmarks: unknown; shortfall: unknown;
+  discoveryOf: (cardId: string, confirmationId: string) => Promise<string | null> }): Promise<Research> {
+  const cards = z.array(card).parse(input.cards).slice(-MAX_CARDS);
+  const out: Research['cards'] = [];
+  for (const item of cards) {
+    const confirmed = item.confirmationId !== null && item.items !== null;
+    if (item.kind === 'keywords') {
+      out.push({ kind: 'keywords', cardId: item.cardId, confirmationId: item.confirmationId,
+        keywords: confirmed ? z.array(z.string()).parse(item.items) : [] });
+      continue;
+    }
+    const discoveryId = confirmed ? await input.discoveryOf(item.cardId, item.confirmationId!) : null;
+    out.push({ kind: 'candidates', cardId: item.cardId, confirmationId: item.confirmationId, discoveryId,
+      accounts: confirmed ? z.array(account).parse(item.items).map(a => ({ platform: a.platform, account: a.account })) : [] });
+  }
+  const table = benchmarkReportFacts(input.benchmarks);
+  const rows = table.serialized ? z.array(row).parse(JSON.parse(table.serialized)) : [];
+  const qualified = new Set(rows.filter(r => r.qualified).map(r => `${r.platform}:${r.account}`)).size;
+  // Qualified rows first, so a cut keeps what counts toward the report.
+  const shown = [...rows.filter(r => r.qualified), ...rows.filter(r => !r.qualified)].slice(0, MAX_ROWS).map(r => ({
+    platform: r.platform, account: r.account, category: r.category, qualified: r.qualified, excluded: r.excluded,
+    followers: r.followers, medianViews: r.medianViews, engagementRate: r.engagementRate, lastPublishedAt: r.lastPublishedAt }));
+  const parsed = input.shortfall === null ? null : shortfallRead.safeParse(input.shortfall);
+  return researchContextSchema.parse({ note: RESEARCH_CARDS_NOTE, cards: out,
+    benchmarks: { required: POSITIONING_QUALIFIED_BENCHMARKS, qualified, rows: shown },
+    ...(parsed?.success ? { shortfall: shortfallContext(parsed.data) } : {}) });
+}
+
 /** Read only; a read failure leaves it out: without the ids the tools refuse (not_confirmed), so nothing is sent or charged. */
 export async function researchHostContext(admin: SupabaseClient, actorId: string, sessionId: string): Promise<Research | undefined> {
   try {
-    const cards = z.array(card).parse(await read(admin, 'research_user_cards', { a: actorId, s: sessionId })).slice(-MAX_CARDS);
-    const out: Research['cards'] = [];
-    for (const item of cards) {
-      const confirmed = item.confirmationId !== null && item.items !== null;
-      if (item.kind === 'keywords') {
-        out.push({ kind: 'keywords', cardId: item.cardId, confirmationId: item.confirmationId,
-          keywords: confirmed ? z.array(z.string()).parse(item.items) : [] });
-        continue;
-      }
-      const discovery = confirmed ? z.object({ discoveryId: z.string().uuid().nullable() }).passthrough().nullable()
-        .parse(await read(admin, 'research_confirmation_read', { a: actorId, s: sessionId, p_confirmation: item.confirmationId })) : null;
-      out.push({ kind: 'candidates', cardId: item.cardId, confirmationId: item.confirmationId, discoveryId: discovery?.discoveryId ?? null,
-        accounts: confirmed ? z.array(account).parse(item.items).map(a => ({ platform: a.platform, account: a.account })) : [] });
-    }
-    const table = benchmarkReportFacts(await read(admin, 'research_benchmark_rows', { a: actorId, s: sessionId }));
-    const rows = table.serialized ? z.array(row).parse(JSON.parse(table.serialized)) : [];
-    const qualified = new Set(rows.filter(r => r.qualified).map(r => `${r.platform}:${r.account}`)).size;
-    // Qualified rows first, so a cut keeps what counts toward the report.
-    const shown = [...rows.filter(r => r.qualified), ...rows.filter(r => !r.qualified)].slice(0, MAX_ROWS).map(r => ({
-      platform: r.platform, account: r.account, category: r.category, qualified: r.qualified, excluded: r.excluded,
-      followers: r.followers, medianViews: r.medianViews, engagementRate: r.engagementRate, lastPublishedAt: r.lastPublishedAt }));
     // Before 0320 the function does not exist: the turn goes on without the shortfall block, as before.
     const shortfall = await admin.rpc('research_user_shortfall', { a: actorId, s: sessionId }).then(r => r, () => null);
-    const parsed = !shortfall || shortfall.error ? null : shortfallRead.safeParse(shortfall.data);
-    return researchContextSchema.parse({ note: RESEARCH_CARDS_NOTE, cards: out,
-      benchmarks: { required: POSITIONING_QUALIFIED_BENCHMARKS, qualified, rows: shown },
-      ...(parsed?.success ? { shortfall: shortfallContext(parsed.data) } : {}) });
+    return await researchContextFrom({ cards: await read(admin, 'research_user_cards', { a: actorId, s: sessionId }),
+      benchmarks: await read(admin, 'research_benchmark_rows', { a: actorId, s: sessionId }),
+      shortfall: !shortfall || shortfall.error ? null : shortfall.data,
+      discoveryOf: async (_card, confirmationId) => z.object({ discoveryId: z.string().uuid().nullable() }).passthrough().nullable()
+        .parse(await read(admin, 'research_confirmation_read', { a: actorId, s: sessionId, p_confirmation: confirmationId }))?.discoveryId ?? null });
   } catch (error) {
     logger.warn('api', 'OPC research context unavailable', { error: error instanceof Error ? error.message : 'unknown' });
     return undefined;

@@ -12,6 +12,8 @@ import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext }
 import { freezeSharedPromptCache } from '../runtime/promptCache';
 import { replySettingInstructions } from '../runtime/replyLanguage';
 import { runRuntime } from '../runtime/runner';
+import { carriesAccountLink, requiresBenchmarkResearch, researchInputHost } from '../runtime/researchAdmissionGuard';
+import { researchContextFrom, withResearchContext } from '../runtime/researchHostContext';
 import { skillFileToolBytes } from '../runtime/skillFile';
 import type { PricingDeps } from '../runtime/pricingAdmission';
 import { modelCall, TurnStop } from './call';
@@ -26,6 +28,8 @@ import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions,
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
 import type { TurnEvent } from './sse';
+import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
+import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
 
 /*
@@ -40,11 +44,15 @@ export type MentorDeps = {
   admin: SupabaseClient; clients: TurnClients; slots: CounterStore; transport?: typeof fetch; pricing?: PricingDeps;
   /** The one-switch pause and the runtime limits: the message before the turn opens, the call limit before each paid call. */
   newWork: ChatDeps['newWork'];
+  /** Tests and the load-test stub only; production reads the admin Vault and calls the real suppliers. */
+  research?: BenchmarkDeps;
 };
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
   organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer };
 
 const MARKER_RESERVE_BYTES = 256;
+/** Supplier time of a turn: its 300 s minus the reply and the organizer after the last lookup. */
+const MENTOR_RESEARCH_MS = 200_000;
 const sourceChecked = z.object({ allowed: z.boolean(), businessContext: z.unknown().optional(),
   sourceDrafts: z.array(z.string().uuid()).default([]) });
 /** Conversations whose draft needs mentor_source_check: a hint per process, never a permission (turn_open enforces it). */
@@ -61,15 +69,19 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   try { kind = mentorTurnInput(input); } catch { return emit({ type: 'error', code: 'TURN_REQUEST_INVALID' }); }
   const { opening, summary, organize } = kind;
   let catalog;
-  try { catalog = await mentorCatalog(admin, { moduleId: input.moduleId, organize, pricing: deps.pricing }); }
+  try { catalog = await mentorCatalog(admin, { moduleId: input.moduleId, organize, research: !opening && !summary, pricing: deps.pricing }); }
   catch (error) { return emit({ type: 'error', code: error instanceof MentorCatalogError ? error.code : 'TURN_QUOTE_UNAVAILABLE' }); }
-  const { mentor, organizer } = catalog;
+  const { mentor, organizer, research } = catalog;
   // The administrator's pause and the message limit, before anything is frozen (as chat.ts).
   const admitted = await deps.newWork.message(input.actorId, Promise.resolve(catalog.settings));
   if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
   // The product limit is 8000 characters (as the old mentor request); the model's input budget is in bytes, checked apart.
   if (input.text.length > 8000 || Buffer.byteLength(input.text) > mentor.inputLimit)
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
+
+  // A pasted profile link asks for a check: refused before any charge when the check cannot run (as the old admission).
+  const linkTurn = !opening && !summary && carriesAccountLink(input.text);
+  if (linkTurn && !benchmarkReady(research, ['benchmark_fetch'])) return emit({ type: 'error', code: 'RESEARCH_TOOLS_LINK_UNAVAILABLE' });
 
   // 1. The whole source and evidence chain, for a draft that has one, before anything is frozen; refused here, nothing was charged.
   // turn_open refuses such a draft unless this ran, so the hint only saves that first refused open.
@@ -83,9 +95,17 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
     policy: mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
       sourceDrafts: checked?.sourceDrafts ?? [] }) });
-  let opened;
+  let opened, flow: PreparedResearch | undefined, flowRaw: Record<string, unknown> | undefined;
   try {
-    if (SOURCE_DRAFTS.has(input.sessionId)) checked = await sourceCheck();
+    // A turn the benchmark flow may run in: one read gets the check and the flow's state together (plan 3.1).
+    if (!opening && !summary) {
+      const { data, error } = await deps.clients.read.rpc('mentor_turn_prepare', { p_actor_id: input.actorId, p_session_id: input.sessionId,
+        p_research: research !== null });
+      if (error) throw new Error('TURN_OPEN_FAILED');
+      flowRaw = data as Record<string, unknown>;
+      if (flowRaw.source) checked = sourceChecked.parse(flowRaw.source);
+      if (research && checked?.allowed !== false) flow = preparedResearch.parse(flowRaw);
+    } else if (SOURCE_DRAFTS.has(input.sessionId)) checked = await sourceCheck();
     if (checked?.allowed === false) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
     try { opened = await openTurn(); }
     catch (error) {
@@ -97,7 +117,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       opened = await openTurn();
     }
   } catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
-  emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay });
+  emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
+    ...((opened.kindContext as { fallbackEligible?: boolean } | null)?.fallbackEligible ? { fallbackEligible: true } : {}) });
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
 
   let seq = 0;
@@ -114,6 +135,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const gate = await deps.newWork.calls(input.actorId, 1, 'bill2.v2');
     if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]);
   };
+  let benchmark: ReturnType<typeof turnBenchmarkTools> | undefined;
   try {
     // 3. The draft state, the Skill text of this step (cached by content hash) and the host state of this turn.
     const state = mentorState(opened.kindContext, input.stepId);
@@ -129,7 +151,15 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const answered = input.answer ? mentorAnsweredCard(opened.history, input.stepId, input.answer, opened.turnId) : undefined;
     // The user's words of this turn: a chosen option's text replaces the input, as the old path did.
     const words = answeredText(input.text, answered);
-    const host = mentorHost(state, input.stepId, { opening, summary, updatedFieldIds: kind.updatedFieldIds });
+    let host = mentorHost(state, input.stepId, { opening, summary, updatedFieldIds: kind.updatedFieldIds });
+    // The benchmark step cannot go on without its tools; nothing was sent, the whole turn is refunded.
+    const benchmarkStep = !opening && !summary && requiresBenchmarkResearch(host);
+    if (benchmarkStep && !benchmarkReady(research)) throw new TurnStop('RESEARCH_TOOLS_UNAVAILABLE');
+    if (flow && flowRaw && (benchmarkStep || linkTurn)) {
+      const known = flow.cardDiscoveries;
+      host = withResearchContext(researchInputHost(host, true)!, await researchContextFrom({ cards: flowRaw.cards, benchmarks: flowRaw.benchmarks,
+        shortfall: flowRaw.shortfall ?? null, discoveryOf: async card => known[card] ?? null }));
+    }
     const system = mentorSystem({ skillText: skill.text, skillEntryChars: skill.entryChars, brandIdentity: catalog.brandIdentity,
       mode: ctx.mode, host, skillFile: !opening, summary,
       replyRule: replySettingInstructions(effectiveReplyLocale(opened.replyLanguage)) });
@@ -139,15 +169,25 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
     // The continuation reserve: the largest prepared file as the tool result is embedded in the request (twice JSON-escaped).
     const toolBytes = (summary ? 0 : groundedCardToolBytes()) + skillFileToolBytes() + (opening ? 0 : skillFileReserveBytes(prepared, binding));
-    const left = mentor.inputLimit - Buffer.byteLength(system.instructions) - Buffer.byteLength(userMessage) - toolBytes
-      - MARKER_RESERVE_BYTES - 8192;
+    const required = Buffer.byteLength(system.instructions) + Buffer.byteLength(userMessage) + toolBytes + MARKER_RESERVE_BYTES + 8192;
+    // The tools come with room for one result; without it a benchmark or link turn is refused, any other goes on without them.
+    const researchBytes = research ? benchmarkToolBytes(research) : 0;
+    const researchFits = research !== null && flow !== undefined && required + researchBytes <= mentor.inputLimit;
+    if (research && !researchFits && (benchmarkStep || linkTurn))
+      throw new TurnStop(benchmarkStep ? 'RESEARCH_TOOLS_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY');
+    const left = mentor.inputLimit - required - (researchFits ? researchBytes : 0);
     const history = trimHistory(projectHistory(projectMentorHistory(opened.history)), Math.max(left, 0));
     const promptCache = system.prefixChars > 0 ? freezeSharedPromptCache({ real: true, model: mentor.model,
       cacheWriteUsdPerMillion: mentor.providerLimits.cacheWriteUsdPerMillion, instructions: system.instructions,
       prefixChars: system.prefixChars, historyMarker: !opening }) : undefined;
     let sources: CardSources = cardSources(words, history);
     // A step summary is offered no question card (as the old path's admission removed it), not only told not to show one.
-    const tools = [...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding)];
+    benchmark = researchFits ? turnBenchmarkTools({ research: research!, prepared: flow!, deps: deps.research, admin, slots: deps.slots,
+      calls: { db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq }, actorId: input.actorId, sessionId: input.sessionId,
+      requestId: input.requestId, text: words, deadline: Date.now() + MENTOR_RESEARCH_MS, emit,
+      callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
+        if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
+    const tools = [...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []];
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };
@@ -156,7 +196,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     let text = '', toolCalled = false, cardMessage: string | null | undefined;
     const output = await runRuntime({
       model: mentor.model, instructions: system.instructions, input: userMessage, session: turnSession(history),
-      maxOutputTokens: mentor.outputLimit, maxTurns: opening ? 1 : 2, reasoning: mentor.reasoning, tools, stream: true,
+      maxOutputTokens: mentor.outputLimit, maxTurns: opening ? 1 : benchmark ? 3 : 2, reasoning: mentor.reasoning, tools, stream: true,
       allowEmptyResult: true, firstToolCallOnly: true, stopAtToolNames: [ASK_QUESTION_TOOL],
       selectHistory: async (items, incoming) => { sources = cardSources(words, items); return [...items, ...incoming]; },
       onText: delta => { text += delta; if (delta) emit({ type: 'text', delta }); },
@@ -199,10 +239,12 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const rechecked = organizer && checked
       ? await swallow('turn_mentor_source_check_failed', sourceCheck(), { allowed: false, sourceDrafts: [] }, { category: 'ai' }) : null;
     const scopeDenied = rechecked !== null && !rechecked.allowed;
+    const researchMade = benchmark?.journal();
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
-      ...(organizer ? { kindResult: { roundId: ctx.roundId, revisionId: ctx.revisionId, versions: state.versions,
-        organizerInput: captureInput, output: organized, ...(scopeDenied ? { scopeDenied } : {}) } } : {}) });
+      ...(organizer || researchMade ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
+        versions: state.versions, organizerInput: captureInput, output: organized, ...(scopeDenied ? { scopeDenied } : {}) } : {}),
+        ...(researchMade ? { research: researchMade } : {}) } } : {}) });
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
     emit({ type: 'result', turnId: opened.turnId, body: turn.body, chargedCredits: closed.chargedCredits, settlement: closed.settlement,
       ...(closed.kindResult ? { kindResult: closed.kindResult } : {}) });
@@ -212,7 +254,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
-      await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
+      // What the turn's research already paid for is kept even when the reply failed.
+      const made = benchmark?.journal();
+      await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase(),
+        ...(made ? { kindResult: { research: made } } : {}) }), undefined,
         { category: 'ai' });
     }
     emit({ type: 'error', code, turnId: opened.turnId });
