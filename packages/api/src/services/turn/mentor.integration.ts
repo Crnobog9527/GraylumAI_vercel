@@ -449,7 +449,14 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: the refresh-recovery read shows the running tur
   expect(after).toMatchObject({ activeTurn: null, lastTurn: { kind: 'mentor', closeKind: 'completed' } });
   expect(after.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
   expect((await view(after.messages[0].seq)).messages.map((m: { role: string }) => m.role)).toEqual(['assistant']);
-  await expect(db.query('select turn_session_view($1,$2,0) v', [randomUUID(), f.session])).rejects.toThrow(/TURN_SESSION_DENIED/);
+  // Another account's conversation is refused; an unknown account is no account at all.
+  const other = await setup();
+  await expect(db.query('select turn_session_view($1,$2,0) v', [other.actor, f.session])).rejects.toThrow(/TURN_SESSION_DENIED/);
+  await expect(db.query('select turn_session_view($1,$2,0) v', [randomUUID(), f.session])).rejects.toThrow(/TURN_ACCOUNT_DENIED/);
+  // A disabled account reads nothing, although its sign-in is still valid.
+  await db.query("update profiles set status='disabled' where id=$1", [f.actor]);
+  try { await expect(view()).rejects.toThrow(/TURN_ACCOUNT_DENIED/); }
+  finally { await db.query("update profiles set status='active' where id=$1", [f.actor]); }
   // A revoked draft keeps its conversation out of view, as the other reads of it do, although the conversation is not deleted.
   await db.query('update bill2_drafts set revoked=true where id=$1', [f.draftId]);
   await expect(view()).rejects.toThrow(/TURN_SESSION_DENIED/);

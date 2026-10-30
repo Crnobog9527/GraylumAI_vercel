@@ -27,7 +27,7 @@ export type TurnViewDeps = {
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-const KNOWN = /\b(TURN_SESSION_DENIED|TURN_SESSION_ERASED)\b/;
+const KNOWN = /\b(TURN_ACCOUNT_DENIED|TURN_SESSION_DENIED|TURN_SESSION_ERASED)\b/;
 
 export async function handleTurnView(request: Request, deps: TurnViewDeps): Promise<Response> {
   const params = Object.fromEntries(new URL(request.url).searchParams);

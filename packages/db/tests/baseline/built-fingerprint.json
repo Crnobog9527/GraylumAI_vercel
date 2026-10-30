@@ -4223,7 +4223,7 @@
   "fn:turn_recover(uuid,bigint,text)": "118ae98f26ce",
   "fn:turn_recovery_claim(integer)": "c5a94c8c8c58",
   "fn:turn_resume_carry(uuid,uuid,bigint,bigint,text,jsonb)": "c62cc53dff02",
-  "fn:turn_session_view(uuid,uuid,integer)": "fab467447dda",
+  "fn:turn_session_view(uuid,uuid,integer)": "caa38a3b7919",
   "fn:turn_settle_credits(uuid,uuid,integer,bigint)": "3ecf04bd4362",
   "fn:turn_tombstones(uuid,uuid,jsonb)": "7650ea48b0f5",
   "fn:turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)": "87653191b411",

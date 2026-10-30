@@ -28,6 +28,8 @@ describe('GET /api/turn: the refresh-recovery read (V2-5b, #595)', () => {
     expect(await status(`?sessionId=${SESSION}`, deps(undefined, { authenticate: async () => null }))).toEqual([401, 'TURN_UNAUTHENTICATED']);
     expect(await status(`?sessionId=${SESSION}`, deps(vi.fn(async () => ({ data: null, error: { message: 'TURN_SESSION_DENIED' } })))))
       .toEqual([403, 'TURN_SESSION_DENIED']);
+    expect(await status(`?sessionId=${SESSION}`, deps(vi.fn(async () => ({ data: null, error: { message: 'TURN_ACCOUNT_DENIED' } })))))
+      .toEqual([403, 'TURN_ACCOUNT_DENIED']);
     expect(await status(`?sessionId=${SESSION}`, deps(vi.fn(async () => ({ data: null, error: { message: 'connection reset' } })))))
       .toEqual([503, 'TURN_VIEW_UNAVAILABLE']);
   });

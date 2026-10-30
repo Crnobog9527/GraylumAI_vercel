@@ -10,7 +10,7 @@
 --   opc_capture_resolve  0423 unchanged except that such a suggestion can be accepted, ignored or dismissed; an old-path
 --                        execution id keeps the old checks exactly.
 --   turn_session_view    the refresh-recovery read: the conversation's running turn (state, pause), its latest closed turn and
---                        the visible messages after a sequence number, under the session's scope check. Read only, no locks.
+--                        the visible messages after a sequence number, for an active account under the session's scope check. Read only, no locks.
 -- Compatibility: additive; old-path suggestions keep exactly their rules. Repeatable: CREATE OR REPLACE throughout.
 -- Recovery: re-apply 0423's opc_query and opc_capture_resolve and drop turn_mentor_source_available; no data changes.
 BEGIN;
@@ -234,6 +234,10 @@ CREATE OR REPLACE FUNCTION public.turn_session_view(p_actor_id uuid, p_session_i
 AS $function$
 DECLARE s runtime_sessions; a turns; l turns;
 BEGIN
+  -- A disabled or deleted account reads nothing, as every other read (bill2_actor) and turn_open refuse it.
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_actor_id AND status = 'active' AND is_deleted::text = 'false') THEN
+    RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
+  END IF;
   SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id;
   IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
   IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
