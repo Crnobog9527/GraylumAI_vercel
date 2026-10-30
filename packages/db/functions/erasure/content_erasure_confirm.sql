@@ -16,7 +16,7 @@ AS $function$
 
 DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
  refs uuid[]; rounds uuid[]; chats uuid[]; research_ids uuid[]; research_plan_ids uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
- remaining bigint:=0; deleted boolean; deleted_runs text[]; deleted_pre text[];
+ remaining bigint:=0; deleted boolean; deleted_runs text[]; deleted_pre text[]; linked uuid[];
 BEGIN
  PERFORM bill2_actor(a);
  -- Runtime writers use session -> execution -> run. NOWAIT prevents inverse
@@ -70,9 +70,12 @@ BEGIN
  chats:=ARRAY(SELECT c.conversation_id FROM artifact_chats c JOIN conversations v ON v.id=c.conversation_id
   WHERE c.project_id=ANY(projects) AND v.user_id=a);
  PERFORM id FROM conversations WHERE id=ANY(chats) ORDER BY id FOR UPDATE NOWAIT;
+ -- CORE-PATH-V2 V2-7a2: evidence linked to these runs, or to a turn of these conversations.
+ linked:=ARRAY(SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids))
+  ||ARRAY(SELECT l.evidence_id FROM opc_result_links l JOIN turns t ON t.actor_id=l.turn_actor_id AND t.id=l.turn_id WHERE t.actor_id=a AND t.session_id=ANY(sessions));
  research_ids:=ARRAY(SELECT DISTINCT o.id FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
   JOIN artifact_evidence e ON e.operation_id=o.id WHERE p.actor_id=a AND
-   (e.project_id=ANY(projects) OR e.id IN (SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids))));
+   (e.project_id=ANY(projects) OR e.id=ANY(linked)));
  -- 0263 runtime research: conversation searches have no artifact evidence.
  research_plan_ids:=ARRAY(SELECT p.id FROM research_plans p WHERE p.actor_id=a AND (p.session_id=ANY(sessions) OR p.execution_id=ANY(ids) OR p.discovery_id IN (
    SELECT d.id FROM research_discoveries d JOIN research_selection_cards c ON c.confirmation_id=d.keyword_confirmation_id
@@ -90,6 +93,8 @@ BEGIN
  END IF;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO refs FROM jsonb_array_elements_text(scope->'references') v;
  refs:=refs||ids||sessions||projects||versions||contents||rounds;
+ -- CORE-PATH-V2 V2-7a2: a report turn's request id is its executionId in the edit and publish requests, which hold the edited text.
+ refs:=refs||ARRAY(SELECT request_id FROM turns WHERE actor_id=a AND session_id=ANY(sessions) AND kind='report');
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
  PERFORM id FROM bill2_runs WHERE id IN (SELECT billing_run_id FROM runtime_executions WHERE id=ANY(ids))
   ORDER BY id FOR UPDATE NOWAIT;
@@ -326,7 +331,7 @@ BEGIN
    WHERE NOT EXISTS(SELECT 1 FROM research_operations o WHERE o.plan_id=p.id
     AND o.id::text=item->>'operationId' AND o.erased_at IS NOT NULL));
  UPDATE artifact_evidence SET payload=NULL,content_hash=NULL,erased_at=stamp WHERE erased_at IS NULL AND
-  (project_id=ANY(projects) OR id IN (SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids)));
+  (project_id=ANY(projects) OR id=ANY(linked));
  UPDATE artifact_requests SET payload=(SELECT jsonb_object_agg(key,value) FROM jsonb_each(coalesce(payload,'{}'))
   WHERE key IN ('sliceExecution','slicePhase')),response=NULL,erased_at=stamp WHERE erased_at IS NULL AND
   EXISTS(SELECT 1 FROM artifact_projects p WHERE p.id=artifact_requests.project_id AND p.actor_id=a)
