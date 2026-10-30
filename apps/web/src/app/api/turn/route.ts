@@ -6,6 +6,7 @@ import { withCatalogRequest } from '@repo/api/src/services/runtime/catalogCache'
 import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
 import { checkRateLimit } from '@repo/api/src/services/redisRateLimiter';
 import { handleTurnRequest } from '@repo/api/src/services/turn/http';
+import { handleTurnView } from '@repo/api/src/services/turn/view';
 import { redisCounterStore } from '@repo/api/src/services/turn/limiter';
 import { turnClients } from '@repo/api/src/services/turn/db';
 import { newWorkGate } from '@repo/api/src/services/runtime/newWorkGate';
@@ -15,25 +16,39 @@ export const runtime = 'nodejs';
 // One turn per invocation, streamed to the end (CORE-PATH-V2 2.2); the same ceiling as the runtime stream.
 export const maxDuration = 300;
 
+/** The signed-in account of a turn request: a bearer token, or the session cookie. */
+function authenticator(request: NextRequest, url: string, anon: string) {
+  return async (req: Request) => {
+    const bearer = req.headers.get('authorization');
+    const auth = bearer?.startsWith('Bearer ')
+      ? createClient(url, anon, { auth: { persistSession: false }, global: { headers: { Authorization: bearer } } })
+      : createServerClient(url, anon, {
+        cookieOptions: resolveSupabaseCookieOptions(new URL(request.url).hostname.toLowerCase()),
+        cookies: { getAll: () => request.cookies.getAll(), setAll: () => {} },
+      });
+    const { data } = await auth.auth.getUser();
+    return data.user?.id ?? null;
+  };
+}
+
 /** CORE-PATH-V2 POST /api/turn (V2-4a: kind chat). Off until system_settings core_path_v2.enabled; the page switches in V2-10. */
 export async function POST(request: NextRequest) {
   const { url, anonKey: anon, serviceKey: service, databaseHost, environment } = readTurnRouteEnv();
   if (!url || !anon || !service) return new Response(JSON.stringify({ error: 'TURN_CONFIGURATION' }), { status: 503 });
   const admin = createClient(url, service, { auth: { persistSession: false } });
   return withPlatformSecretRequest(() => withCatalogRequest(() => handleTurnRequest(request, {
-    async authenticate(req) {
-      const bearer = req.headers.get('authorization');
-      const auth = bearer?.startsWith('Bearer ')
-        ? createClient(url, anon, { auth: { persistSession: false }, global: { headers: { Authorization: bearer } } })
-        : createServerClient(url, anon, {
-          cookieOptions: resolveSupabaseCookieOptions(new URL(request.url).hostname.toLowerCase()),
-          cookies: { getAll: () => request.cookies.getAll(), setAll: () => {} },
-        });
-      const { data } = await auth.auth.getUser();
-      return data.user?.id ?? null;
-    },
+    authenticate: authenticator(request, url, anon),
     rateLimited: async actorId => !(await checkRateLimit(actorId, 'ai_stream')).success,
     databaseHost: { declared: databaseHost, actual: new URL(url).host },
     chat: { admin, clients: turnClients(admin), slots: redisCounterStore(), newWork: newWorkGate(admin, environment) },
   })));
+}
+
+/** CORE-PATH-V2 GET /api/turn?sessionId=&afterSeq= (V2-5b): the refresh-recovery read of a conversation's turn (#595). */
+export async function GET(request: NextRequest) {
+  const { url, anonKey: anon, serviceKey: service, databaseHost } = readTurnRouteEnv();
+  if (!url || !anon || !service) return new Response(JSON.stringify({ error: 'TURN_CONFIGURATION' }), { status: 503 });
+  const admin = createClient(url, service, { auth: { persistSession: false } });
+  return handleTurnView(request, { authenticate: authenticator(request, url, anon),
+    databaseHost: { declared: databaseHost, actual: new URL(url).host }, clients: turnClients(admin) });
 }

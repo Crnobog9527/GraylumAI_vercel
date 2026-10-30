@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -163,12 +165,13 @@ function transport(reply: Reply) {
 const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
-  organizeAfter?: boolean; newWork?: NewWork }) {
+  organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number } }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
     newWork: input.newWork ?? { message: admit, calls: admit } },
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
-      text: input.text, organizeAfter: input.organizeAfter ?? true }, e => events.push(e)));
+      text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}) },
+    e => events.push(e)));
   return { events, calls };
 }
 const credits = async (actor: string) => (await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits as number;
@@ -378,4 +381,101 @@ it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start p
   expect((await db.query('select state,pause_reason,close_kind from turns where actor_id=$1', [f.actor])).rows)
     .toEqual([{ state: 'paused', pause_reason: 'waiting_credits', close_kind: null }]);
   expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown by opc_query and can be accepted', async () => {
+  const f = await setup();
+  // capture.integration.ts reloads the 0159/0182 definitions of the checklist functions and restores only 0199's patches, so a
+  // later file in the same database can see an old opc_query; this migration (idempotent) restores the current definitions.
+  const migrations = resolve(import.meta.dirname, '../../../../db/migrations');
+  await db.query(readFileSync(resolve(migrations, readdirSync(migrations).find(name => name.endsWith('_core_path_v2_mentor_b.sql'))!), 'utf8'));
+  // A draft whose fields were initialised (as agentCorePlanB's fixture does): opc_capture_resolve merges into st.information.
+  await db.query(`update artifact_rounds r set steps=(select jsonb_object_agg(s.key, s.value || jsonb_build_object('information',
+      (select jsonb_object_agg(f->>'id', jsonb_build_object('value','','status','unknown','nature','unknown'))
+       from jsonb_array_elements(r.workflow->'steps') w, jsonb_array_elements(w->'information') f where w->>'id'=s.key)))
+    from jsonb_each(r.steps) s) where r.id=(select round_id from opc_drafts where draft_id=$1)`, [f.draftId]);
+  const t = transport(async (body, n) => {
+    if (body.model !== ORGANIZER) return prose('gen-reply-' + n, 'Noted.');
+    await db.query(`update artifact_rounds r set steps=jsonb_set(r.steps,'{step-0,version}',to_jsonb((r.steps->'step-0'->>'version')::int+1))
+      from opc_drafts d where d.round_id=r.id and d.draft_id=$1`, [f.draftId]);
+    return organized('gen-org-' + n, patch('Sell coffee to students'));
+  });
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  expect((out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>).kindResult).toMatchObject({ result: 'suggested' });
+  const shown = (await db.query('select opc_query($1,$2) v', [f.actor, f.draftId])).rows[0].v;
+  const suggestion = shown.information['step-0'].meta.goal.suggestion;
+  expect(suggestion).toMatchObject({ value: 'Sell coffee to students' });
+  const version = (await f.steps())['step-0'].version;
+  const resolved = (await db.query('select opc_capture_resolve($1,$2,$3,$4,$5,$6,$7,$8,$9) v', [f.actor, f.draftId, randomUUID(), 'step-0', 'goal',
+    suggestion.executionId, suggestion.hash, 'accept', version])).rows[0].v;
+  expect(resolved).toMatchObject({ result: 'accept' });
+  expect((await f.steps())['step-0'].information.goal).toMatchObject({ value: 'Sell coffee to students' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: the next turn answers the card; the chosen option is the words, the organizer sees answeredCard', async () => {
+  const f = await setup();
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : toolCall('gen-card-' + n, 'ask_question', { intent: 'grounded_comparison', requestQuote: 'coffee or tea',
+      basisQuotes: ['coffee or tea'], question: 'Which one first?', options: [{ text: 'Coffee', reason: 'You named it first' },
+        { text: 'Tea', reason: 'Fewer rivals' }], recommended: 0 }));
+  await turn(f, { text: 'Should I start with coffee or tea?', transport: first.fn });
+  const { content: saved, seq: cardSeq } = (await db.query(
+    "select content, seq from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1", [f.session])).rows[0];
+  expect(JSON.parse(saved)).toMatchObject({ stepId: 'step-0', card: { options: ['Coffee', 'Tea'] } });
+  const next = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Tea first'))
+    : prose('gen-reply-' + n, 'Tea it is.'));
+  const out = await turn(f, { text: 'Tea', transport: next.fn, answer: { sourceSeq: cardSeq, optionIndex: 1 } });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(JSON.stringify(next.bodies.find(b => b.model === ORGANIZER)!.messages)).toContain('answeredCard');
+  expect((await db.query("select content from session_messages where session_id=$1 and role='user' order by seq desc limit 1",
+    [f.session])).rows[0].content).toBe('Tea');
+  // An answer to a card the latest reply does not carry (a stale tab still showing it) is refused, and that turn is refunded.
+  const refused = await turn(f, { text: 'Coffee', transport: next.fn, answer: { sourceSeq: cardSeq, optionIndex: 0 } });
+  expect(refused.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_ANSWER_SOURCE_DENIED' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: the refresh-recovery read shows the running turn, then its saved messages', async () => {
+  const f = await setup();
+  const view = async (afterSeq = 0) => (await db.query('select turn_session_view($1,$2,$3) v', [f.actor, f.session, afterSeq])).rows[0].v;
+  let during: unknown;
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }));
+    during = await view();
+    return prose('gen-reply-' + n, 'Noted.');
+  });
+  await turn(f, { text: 'I want to sell coffee', transport: t.fn });
+  expect(during).toMatchObject({ activeTurn: { kind: 'mentor', state: 'running' }, messages: [] });
+  const after = await view();
+  expect(after).toMatchObject({ activeTurn: null, lastTurn: { kind: 'mentor', closeKind: 'completed' } });
+  expect(after.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
+  expect((await view(after.messages[0].seq)).messages.map((m: { role: string }) => m.role)).toEqual(['assistant']);
+  // Another account's conversation is refused; an unknown account is no account at all.
+  const other = await setup();
+  await expect(db.query('select turn_session_view($1,$2,0) v', [other.actor, f.session])).rejects.toThrow(/TURN_SESSION_DENIED/);
+  await expect(db.query('select turn_session_view($1,$2,0) v', [randomUUID(), f.session])).rejects.toThrow(/TURN_ACCOUNT_DENIED/);
+  // A disabled account reads nothing, although its sign-in is still valid.
+  await db.query("update profiles set status='disabled' where id=$1", [f.actor]);
+  try { await expect(view()).rejects.toThrow(/TURN_ACCOUNT_DENIED/); }
+  finally { await db.query("update profiles set status='active' where id=$1", [f.actor]); }
+  // A revoked draft keeps its conversation out of view, as the other reads of it do, although the conversation is not deleted.
+  await db.query('update bill2_drafts set revoked=true where id=$1', [f.draftId]);
+  await expect(view()).rejects.toThrow(/TURN_SESSION_DENIED/);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: a step summary turn writes the summary and is never organized', async () => {
+  const f = await setup();
+  const t = transport(() => prose('gen-summary', 'Step summary: goal is still missing.'));
+  const out = await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: false });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(t.bodies.map(b => b.model)).toEqual([MENTOR]);
+  const system = JSON.stringify(t.bodies[0]!.messages[0]);
+  expect(system).toContain('hostTurnContext.stepSummary');
+  expect(JSON.parse(t.bodies[0]!.messages.at(-1)!.content as string).hostTurnContext.stepSummary).toMatchObject({ kind: 'step_summary' });
+  // The host offers a summary no question card; the Skill file tool stays.
+  const offered = JSON.stringify(t.bodies[0]!.tools ?? []);
+  expect(offered).not.toContain('ask_question');
+  expect(offered).toContain('read_skill_file');
+  // A summary may not be organized.
+  expect((await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: true })).events)
+    .toEqual([{ type: 'error', code: 'TURN_REQUEST_INVALID' }]);
 });
