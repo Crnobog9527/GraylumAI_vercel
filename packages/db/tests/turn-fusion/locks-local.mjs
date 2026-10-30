@@ -78,18 +78,21 @@ try{
  // 3. The same while the jury closes: the close settles its turn, and the review keeps the other path's end.
  {
   const a=await account(),o=await open(a),ender=await peer();
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);
   try{
    await ender.query('begin');
    await ender.query("update fusion_reviews set state='incomplete',ended_at=now() where id=$1",[a.review]);
-   const closing=settle(one('select turn_fusion_close($1,$2,$3,$4,$5,$6,$7) v',[a.actor,o.turnId,'interrupted',false,false,null,
-    JSON.stringify({state:'interrupted',outcome:{kind:'stopped'}})]));
+   const closing=settle(one('select turn_fusion_close($1,$2,$3,$4,$5,$6,$7) v',[a.actor,o.turnId,'completed',true,false,null,
+    JSON.stringify({state:'completed',outcome:{kind:'revised'}})]));
    await pause();
    await ender.query('commit');
    const closed=await closing;
    assert.ok(closed.v && !closed.e,'the turn closes: '+JSON.stringify(closed));
+   assert.equal(closed.v.chargedCredits,0,'that end settles the turn: the price is not charged');
   }finally{await ender.end();}
   assert.equal(await reviewState(a),'incomplete','the other path\'s end is not overwritten');
-  report.checks.push('a review ended by another path while its jury closes: the turn closes, the review keeps the other end');
+  assert.equal(await one('select credits v from profiles where id=$1',[a.actor]),3000,'everything refunded');
+  report.checks.push('a review ended by another path while its jury closes: the close is undone and that end settles the turn, refunded');
  }
  // 3b. Ended by another path before the close starts: the close settles by that end (incomplete refunds), whatever the caller holds.
  {

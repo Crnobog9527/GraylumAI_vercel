@@ -4255,7 +4255,7 @@
   "fn:turn_call_spent_usd(text,numeric,numeric)": "5d8a4767f2ec",
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "671d5e47130c",
   "fn:turn_fusion_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "2b5745934e54",
-  "fn:turn_fusion_close(uuid,bigint,text,boolean,boolean,text,jsonb)": "27b8f70e783f",
+  "fn:turn_fusion_close(uuid,bigint,text,boolean,boolean,text,jsonb)": "84f8ac84fdf2",
   "fn:turn_fusion_ended_review(uuid,bigint,text,jsonb)": "bf70ff2cefce",
   "fn:turn_fusion_open(uuid,uuid,uuid,text,jsonb,jsonb)": "842478da1b90",
   "fn:turn_fusion_output(uuid,bigint,integer,jsonb)": "ed21e6345531",

@@ -24,15 +24,24 @@ BEGIN
     END IF;
   END IF;
   -- The core close first (it locks the account, the conversation and the turn, in that order); the review or compare row is not
-  -- locked (ENGINEERING 5) but written after, on the owner key and only while still live: one another path ended meanwhile
-  -- keeps that end.
-  closed := turn_close(p_actor_id, p_turn_id, p_close_kind, '[]'::jsonb, p_delivered, p_refund_all, p_failure_code);
-  IF t.kind = 'jury' AND target IS NOT NULL THEN
-    UPDATE fusion_reviews SET state = target, outcome = p_product->'outcome', updated_at = clock_timestamp(), ended_at = clock_timestamp()
-      WHERE actor_id = p_actor_id AND id = (t.policy->>'reviewId')::uuid AND state IN ('running','paused');
-  ELSIF t.kind = 'compare' THEN
-    UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp()
-      WHERE actor_id = p_actor_id AND id = (t.policy->>'compareId')::uuid AND state = 'running';
-  END IF;
+  -- locked (ENGINEERING 5) but written after, on the owner key and only while still live. A review another path ended meanwhile
+  -- (its write waited here for that end to commit) undoes this close, and that end settles the turn instead.
+  BEGIN
+    closed := turn_close(p_actor_id, p_turn_id, p_close_kind, '[]'::jsonb, p_delivered, p_refund_all, p_failure_code);
+    IF t.kind = 'jury' AND target IS NOT NULL THEN
+      UPDATE fusion_reviews SET state = target, outcome = p_product->'outcome', updated_at = clock_timestamp(), ended_at = clock_timestamp()
+        WHERE actor_id = p_actor_id AND id = (t.policy->>'reviewId')::uuid AND state IN ('running','paused');
+      IF NOT FOUND AND NOT coalesce((closed->>'replay')::boolean, false) AND EXISTS (SELECT 1 FROM fusion_reviews
+          WHERE actor_id = p_actor_id AND id = (t.policy->>'reviewId')::uuid) THEN
+        RAISE EXCEPTION 'TURN_REVIEW_ENDED_ELSEWHERE' USING ERRCODE='GR001';
+      END IF;
+    ELSIF t.kind = 'compare' THEN
+      UPDATE fusion_compares SET state = 'finished', updated_at = clock_timestamp()
+        WHERE actor_id = p_actor_id AND id = (t.policy->>'compareId')::uuid AND state = 'running';
+    END IF;
+  EXCEPTION WHEN SQLSTATE 'GR001' THEN
+    SELECT * INTO ended FROM fusion_reviews WHERE actor_id = p_actor_id AND id = (t.policy->>'reviewId')::uuid;
+    RETURN turn_fusion_ended_review(p_actor_id, p_turn_id, ended.state, ended.outcome);
+  END;
   RETURN closed;
 END $function$;
