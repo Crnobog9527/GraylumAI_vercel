@@ -72,8 +72,15 @@ try{
   }
   const a=await account(),rv=await review(a),o=await open(a,{product:{reviewId:rv}});
   assert.equal(o.reservedCredits,FIXED+180);assert.equal(o.reviewId,rv);
+  // #1522 review: a new jury waits for its first group (paused, awaiting_user), so the 24-hour rule covers a group never sent.
+  assert.deepEqual(await one("select jsonb_build_array(state,pause_reason) v from turns where id=$1",[o.turnId]),['paused','awaiting_user']);
+  await c.query("update turns set updated_at=now()-interval '25 hours' where id=$1",[o.turnId]);
+  await one('select turn_fusion_recovery(50) v');
+  assert.deepEqual([(await one('select close_kind v from turns where id=$1',[o.turnId])),await one('select charged_credits v from turns where id=$1',[o.turnId])],
+   ['expired',0],'a first group never sent: ended at 24 hours, fixed price and bound refunded');
+  assert.equal(await one('select credits v from profiles where id=$1',[a.actor]),3000);
   assert.equal(await one('select turn_id::int v from fusion_reviews where id=$1',[rv]),o.turnId);
-  report.checks.push('Gold only: Free and Pro are refused for review and compare with nothing frozen and no turn; Gold freezes the fixed price plus the group bound');
+  report.checks.push('Gold only: Free and Pro are refused for review and compare with nothing frozen and no turn; Gold freezes the fixed price plus the group bound; a new jury waits for its first group and ends refunded at 24 hours if it is never sent');
  }
  // 2. Normal jury: three seats in parallel (one begin each, in sequence), the wait between groups, the summary, the fixed
  // price once; the seats' costs are recorded for the platform only; the review record and its read model follow the turn.

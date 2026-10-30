@@ -267,7 +267,16 @@ BEGIN
       AND state IN ('running','paused','stopping')) THEN
     RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE' USING ERRCODE='55P03';
   END IF;
-  IF p_kind = 'jury' THEN UPDATE fusion_reviews SET turn_id = (opened->>'turnId')::bigint, updated_at = clock_timestamp() WHERE id = rv.id; END IF;
+  IF p_kind = 'jury' THEN
+    UPDATE fusion_reviews SET turn_id = (opened->>'turnId')::bigint, updated_at = clock_timestamp() WHERE id = rv.id;
+    -- A new jury waits for its first group as it waits between groups (paused, awaiting_user): the first begin resumes it, and
+    -- a first group that never gets sent (the pause or the call limits refusing it) still ends by the 24-hour rule, refunded.
+    IF NOT (opened->>'replay')::boolean THEN
+      UPDATE turns SET state = 'paused', pause_reason = 'awaiting_user', updated_at = now()
+        WHERE actor_id = p_actor_id AND id = (opened->>'turnId')::bigint AND state = 'running';
+      opened := opened || jsonb_build_object('state', 'paused');
+    END IF;
+  END IF;
   RETURN opened || jsonb_build_object('reviewId', rv.id);
 END $function$;
 
