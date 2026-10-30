@@ -756,10 +756,7 @@ AS $function$
 DECLARE a uuid := p_actor_id; s uuid := t.session_id; item jsonb; f research_account_fetches; n bigint := t.id; key text;
 BEGIN
   -- Replayed by a repeated close: every write below is keyed by the ids Node chose during the turn.
-  FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'cards', '[]')) LOOP
-    PERFORM research_card_create(a, (item->>'id')::uuid, s, NULL, item->'payload');
-    UPDATE research_selection_cards SET turn_actor_id = a, turn_id = n WHERE id = (item->>'id')::uuid AND actor_id = a AND execution_id IS NULL;
-  END LOOP;
+  -- The discovery first: a candidate card names it, and a short card needs its completed state.
   FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'discoveries', '[]')) LOOP
     INSERT INTO research_discoveries(id, actor_id, session_id, turn_actor_id, turn_id, keyword_confirmation_id, platforms, keywords, cursor, state)
     SELECT (item->>'id')::uuid, a, s, a, n, c.confirmation_id, ARRAY(SELECT jsonb_array_elements_text(item->'platforms')), c.confirmed_items,
@@ -770,6 +767,10 @@ BEGIN
     IF NOT FOUND AND NOT EXISTS (SELECT 1 FROM research_discoveries WHERE id = (item->>'id')::uuid AND actor_id = a AND session_id = s) THEN
       RAISE EXCEPTION 'RESEARCH_NOT_CONFIRMED';
     END IF;
+  END LOOP;
+  FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'cards', '[]')) LOOP
+    PERFORM research_card_create(a, (item->>'id')::uuid, s, NULL, item->'payload');
+    UPDATE research_selection_cards SET turn_actor_id = a, turn_id = n WHERE id = (item->>'id')::uuid AND actor_id = a AND execution_id IS NULL;
   END LOOP;
   FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'operations', '[]')) LOOP
     INSERT INTO research_plans(id, actor_id, budget_units, max_operations, operations, reserved_units, session_id, discovery_id, turn_actor_id, turn_id)
@@ -833,13 +834,16 @@ BEGIN
     'shortfall', research_user_shortfall(a, s),
     'fetches', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'attempt', f.attempt, 'platform', f.platform, 'account', f.account,
         'state', f.state, 'evidence', f.last_success)), '[]'::jsonb) FROM research_account_fetches f WHERE f.actor_id = a AND f.session_id = s AND f.account IS NOT NULL),
-    'discovery', CASE WHEN running.id IS NULL THEN NULL ELSE jsonb_build_object('discoveryId', running.id, 'keywords', running.keywords,
-      'platforms', to_jsonb(running.platforms), 'cursor', running.cursor, 'state', running.state, 'keywordConfirmationId', running.keyword_confirmation_id) END,
+    -- The running round, and the finished rounds a confirmed candidate card came from (a follow-up card reads their candidates).
+    'discoveries', (SELECT coalesce(jsonb_agg(jsonb_build_object('discoveryId', x.id, 'keywords', x.keywords, 'platforms', to_jsonb(x.platforms),
+        'cursor', x.cursor, 'state', x.state, 'keywordConfirmationId', x.keyword_confirmation_id)), '[]'::jsonb)
+      FROM research_discoveries x WHERE x.actor_id = a AND x.session_id = s AND (x.id = running.id OR x.id IN (
+        SELECT c.discovery_id FROM research_selection_cards c WHERE c.actor_id = a AND c.session_id = s AND c.confirmation_id IS NOT NULL))),
     'operations', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'identityHash', o.identity_hash, 'state', o.state, 'result', o.result)), '[]'::jsonb)
       FROM research_operations o JOIN research_plans p ON p.id = o.plan_id
       WHERE p.actor_id = a AND p.session_id = s AND p.discovery_id = running.id AND o.erased_at IS NULL AND p.erased_at IS NULL),
     -- Receipts of a turn that ended before it could apply them (a crash): their lookups are paid, so they are reused, not resent.
-    'unapplied', (SELECT coalesce(jsonb_agg(r.body), '[]'::jsonb) FROM turns t JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool'
+    'unapplied', (SELECT coalesce(jsonb_agg(r.body::jsonb), '[]'::jsonb) FROM turns t JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool'
       JOIN turn_call_raw r ON r.turn_id = c.turn_id AND r.seq = c.seq
       WHERE t.actor_id = a AND t.session_id = s AND t.kind = 'mentor' AND t.opened_at > clock_timestamp() - interval '1 day'
         AND NOT EXISTS (SELECT 1 FROM research_plans p WHERE p.actor_id = a AND p.turn_id = t.id)));

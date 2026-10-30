@@ -10,10 +10,7 @@ AS $function$
 DECLARE a uuid := p_actor_id; s uuid := t.session_id; item jsonb; f research_account_fetches; n bigint := t.id; key text;
 BEGIN
   -- Replayed by a repeated close: every write below is keyed by the ids Node chose during the turn.
-  FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'cards', '[]')) LOOP
-    PERFORM research_card_create(a, (item->>'id')::uuid, s, NULL, item->'payload');
-    UPDATE research_selection_cards SET turn_actor_id = a, turn_id = n WHERE id = (item->>'id')::uuid AND actor_id = a AND execution_id IS NULL;
-  END LOOP;
+  -- The discovery first: a candidate card names it, and a short card needs its completed state.
   FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'discoveries', '[]')) LOOP
     INSERT INTO research_discoveries(id, actor_id, session_id, turn_actor_id, turn_id, keyword_confirmation_id, platforms, keywords, cursor, state)
     SELECT (item->>'id')::uuid, a, s, a, n, c.confirmation_id, ARRAY(SELECT jsonb_array_elements_text(item->'platforms')), c.confirmed_items,
@@ -24,6 +21,10 @@ BEGIN
     IF NOT FOUND AND NOT EXISTS (SELECT 1 FROM research_discoveries WHERE id = (item->>'id')::uuid AND actor_id = a AND session_id = s) THEN
       RAISE EXCEPTION 'RESEARCH_NOT_CONFIRMED';
     END IF;
+  END LOOP;
+  FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'cards', '[]')) LOOP
+    PERFORM research_card_create(a, (item->>'id')::uuid, s, NULL, item->'payload');
+    UPDATE research_selection_cards SET turn_actor_id = a, turn_id = n WHERE id = (item->>'id')::uuid AND actor_id = a AND execution_id IS NULL;
   END LOOP;
   FOR item IN SELECT * FROM jsonb_array_elements(coalesce(p->'operations', '[]')) LOOP
     INSERT INTO research_plans(id, actor_id, budget_units, max_operations, operations, reserved_units, session_id, discovery_id, turn_actor_id, turn_id)

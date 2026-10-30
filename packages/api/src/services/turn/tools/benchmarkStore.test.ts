@@ -46,3 +46,19 @@ it('only this turn\'s own message authorizes a pasted link', async () => {
   expect(await s.store.authorization.userMessage(scope, opId)).toBeNull();
   expect(await s.store.authorization.userMessage({ userId: opId, sessionId }, requestId)).toBeNull();
 });
+
+it('a claim the budget stopped before sending is not written at close', async () => {
+  const s = make();
+  const claim = await s.store.fetchClaim('tiktok', 'a');
+  expect(claim).toMatchObject({ claimed: true });
+  expect(s.journal()).toBeUndefined();
+  const { fetchId: id, attempt: a } = claim as { fetchId: string; attempt: string };
+  await s.store.fetchFinish(id, a, 'failed', null);
+  expect(s.journal()?.fetches).toHaveLength(1);
+});
+
+it('a finished round stays readable for a follow-up card', async () => {
+  const s = make({ discoveries: [{ discoveryId: opId, keywords: ['a'], platforms: ['tiktok'], cursor: { accounts: [] }, state: 'completed',
+    keywordConfirmationId: fetchId }] });
+  expect(await s.store.discoveryRead(opId)).toMatchObject({ state: 'completed' });
+});

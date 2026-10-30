@@ -20,6 +20,7 @@ import type { ResearchCallResult } from '../research/vendors/types';
 import { parallelRoute } from '../research/vendors/parallel';
 import { tikhubRouteId } from '../research/vendors/tikhub';
 import { researchSettings } from './tools/__tests__/fixtures';
+import { preparedResearch } from './tools/benchmarkStore';
 import { RUNTIME_PAYG_SETTING } from './quote';
 import type { TurnEvent } from './sse';
 
@@ -180,8 +181,9 @@ async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string;
   return { events, calls };
 }
 // V2-5c: the research settings on top of the mentor's, and synthetic suppliers (no network, no paid call).
-async function researchOn() {
-  const settings = researchSettings() as Record<string, { thresholds?: unknown[] }>;
+async function researchOn(limits?: { maxSubcallsPerRound: number; discoverSubcalls: number }) {
+  const settings = researchSettings() as Record<string, { thresholds?: unknown[]; limits?: unknown }>;
+  if (limits) settings.research_tools_config!.limits = limits;
   settings.billing_payg_start_thresholds!.thresholds!.push({ model: MENTOR, purpose: 'skill', typicalUsd: '0.04' },
     { model: ORGANIZER, purpose: 'attached_organizer', typicalUsd: '0.01' });
   for (const [key, value] of Object.entries(settings)) await db.query(
@@ -736,4 +738,51 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is conti
   // No supplier call was sent twice: the round went on from what the earlier turn paid for.
   expect(calls.slice(sent).filter(c => c.startsWith('keyword_posts'))).toEqual([]);
   expect(new Set(calls).size).toBe(calls.length);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a round that finishes makes its candidate card at close, and the next turn can follow it up', async () => {
+  const f = await setup();
+  await researchOn({ maxSubcallsPerRound: 26, discoverSubcalls: 26 });
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const say = (args: [string, unknown]) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', args[0], args[1]) : prose('gen-reply-' + n, 'Done.'));
+  const first = await turn(f, { text: 'Find benchmarks', transport: say(['propose_keywords', { keywords: ['coffee', 'latte art', 'cafe', 'beans', 'roasting', 'barista'] }]).fn,
+    research: tiktokVendors() });
+  const keywordCard = (first.events.find(e => e.type === 'research_card') as { card: { cardId: string } }).card.cardId;
+  const keywords = await rest().rpc('research_card_confirm', { a: f.actor, p_card: keywordCard, p: { selected: ['k0', 'k1', 'k2'] } });
+  const stub: NonNullable<MentorDeps['research']> = { readKey: async () => 'local-synthetic', vendors: {
+    parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+    tikhub: async (call: { kind: string; keyword?: string; account?: string }) => {
+      const base = { vendor: 'tikhub', route: tikhubRouteId('tiktok', call.kind as never), outcome: 'ok', reason: null, httpStatus: 200, supplierMayCharge: true,
+        usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
+      if (call.kind === 'keyword_posts') return { ...base, items: Array.from({ length: 5 }, (_, i) => ({ missing: [], fields: { id: `${call.keyword}-${i}`,
+        authorId: `author${String(call.keyword).replace(/\W/g, '')}${i}`, author: `Author ${i}`, likes: 10, comments: 1, shares: 1, views: 1000, publishedAt: new Date().toISOString() } })) };
+      return { ...base, items: [{ missing: [], fields: { followers: 50000, postsCount: 200 } }] };
+    } } as unknown as VendorCalls };
+  const second = await turn(f, { text: 'Go on', transport: say(['benchmark_discover', { keywordConfirmationId: (keywords.data as { confirmationId: string }).confirmationId,
+    platforms: ['tiktok'], discoveryId: null }]).fn, research: stub });
+  expect(second.events.at(-1)?.type).toBe('result');
+  const candidates = (second.events.find(e => e.type === 'research_card') as { card: { cardId: string; kind: string; options: Array<{ id: string; selectable: boolean }> } }).card;
+  expect(candidates.kind).toBe('candidates');
+  const discovery = (await db.query("select id,state from research_discoveries where session_id=$1", [f.session])).rows[0];
+  expect(discovery.state).toBe('completed');
+  const picks = candidates.options.filter(o => o.selectable).slice(0, 3).map(o => o.id);
+  expect((await rest().rpc('research_card_confirm', { a: f.actor, p_card: candidates.cardId, p: { selected: picks } })).error).toBeNull();
+  const third = await turn(f, { text: 'More please', transport: say(['propose_more_candidates', { discoveryId: discovery.id }]).fn, research: stub });
+  expect(third.events.at(-1)?.type).toBe('result');
+  expect(JSON.stringify(third.events)).not.toContain('DISCOVERY_NOT_FOUND');
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: receipts of a turn that never applied them come back as operations the next turn can parse', async () => {
+  const f = await setup();
+  await researchOn();
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'web_search', { query: 'coffee', mode: 'fast' }) : prose('gen-reply-' + n, 'Found.'));
+  await turn(f, { text: 'Look up coffee', transport: t.fn, research: vendors(async () => webResult()) });
+  // As if the close never wrote them.
+  await db.query('update research_plans set turn_id=null where session_id=$1', [f.session]);
+  const raw = (await db.query('select mentor_turn_prepare($1,$2,true) v', [f.actor, f.session])).rows[0].v;
+  const prepared = preparedResearch.parse(raw);
+  expect(prepared.unapplied).toHaveLength(1);
+  expect(prepared.unapplied[0]![0]).toMatchObject({ state: 'succeeded' });
 });

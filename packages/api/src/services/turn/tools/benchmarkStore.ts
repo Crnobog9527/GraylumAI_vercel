@@ -21,8 +21,8 @@ export const preparedResearch = z.object({
   cardDiscoveries: z.record(z.string(), uuid).default({}),
   fetches: z.array(z.object({ id: uuid, attempt: uuid, platform: z.string(), account: z.string(), state: z.string(),
     evidence: z.record(z.string(), z.unknown()).nullable() })).default([]),
-  discovery: z.object({ discoveryId: uuid, keywords: z.array(z.string()), platforms: z.array(z.string()), cursor: z.record(z.string(), z.unknown()),
-    state: z.enum(['running', 'completed']), keywordConfirmationId: uuid }).nullable().default(null),
+  discoveries: z.array(z.object({ discoveryId: uuid, keywords: z.array(z.string()), platforms: z.array(z.string()),
+    cursor: z.record(z.string(), z.unknown()), state: z.enum(['running', 'completed']), keywordConfirmationId: uuid })).default([]),
   operations: z.array(operation).default([]),
   // Batches of a turn that ended before applying them: each is a list of operations.
   unapplied: z.array(z.array(operation)).default([]),
@@ -52,9 +52,7 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   const fetches = new Map<string, Fetch>(prepared.fetches.map(f => [accountKey(f.platform, f.account), f]));
   const touched = new Set<string>(), shortfalls = new Set<string>();
   const discoveries = new Map<string, DiscoveryRecord & { keywordConfirmationId: string }>();
-  if (prepared.discovery) {
-    discoveries.set(prepared.discovery.discoveryId, { ...prepared.discovery, platforms: prepared.discovery.platforms as SocialPlatform[] });
-  }
+  for (const d of prepared.discoveries) discoveries.set(d.discoveryId, { ...d, platforms: d.platforms as SocialPlatform[] });
   const savedDiscoveries = new Set<string>();
   let completedRounds = 0, newlyQualified = 0;
 
@@ -144,14 +142,15 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       if (found && (found.state === 'in_progress' || (found.state !== 'prepared' && (found.evidence || found.state !== 'failed'))))
         return { claimed: false, fetchId: found.id, state: found.state as never, evidence: found.evidence };
       const next = { id: found?.id ?? randomUUID(), attempt: randomUUID(), platform, account, state: 'in_progress', evidence: null };
-      fetches.set(key, next); touched.add(key);
+      fetches.set(key, next);
       return { claimed: true, fetchId: next.id, attempt: next.attempt };
     },
     fetchResume: async () => null,
     fetchDispatch: async () => true,
     async fetchFinish(fetchId, attempt, state, value) {
       for (const [key, f] of fetches) if (f.id === fetchId && f.attempt === attempt) {
-        fetches.set(key, { ...f, state, evidence: value });
+        // Only an attempt that ended is written: a claim the budget stopped before sending leaves nothing.
+        fetches.set(key, { ...f, state, evidence: value }); touched.add(key);
         const qualified = (value?.classification as { qualified?: unknown } | undefined)?.qualified === true;
         if (state === 'succeeded' && qualified) newlyQualified++;
       }
