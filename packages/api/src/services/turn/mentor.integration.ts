@@ -393,7 +393,17 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown
   expect((out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>).kindResult).toMatchObject({ result: 'suggested' });
   const shown = (await db.query('select opc_query($1,$2) v', [f.actor, f.draftId])).rows[0].v;
   const suggestion = shown.information['step-0'].meta.goal.suggestion;
-  expect(suggestion).toMatchObject({ value: 'Sell coffee to students' });
+  const raw = (await f.steps())['step-0'].fieldMeta.goal;
+  const probe = (await db.query(`select t.id, t.close_kind, t.session_id=$2 same_session,
+      (select count(*) from session_messages m where m.session_id=t.session_id and m.turn_id=t.id and m.visible) msgs,
+      (select count(*) from artifact_requests c join opc_drafts d on d.project_id=c.project_id and d.draft_id=$3
+        where c.action='opc_capture' and c.round_id=d.round_id
+          and c.request_id=overlay(md5('opc_capture:'||t.request_id::text) placing 'f' from 13 for 1)::uuid) caps,
+      t.request_id::text=$4 same_id
+    from turns t where t.actor_id=$1 and t.kind='mentor' order by t.id desc limit 1`,
+    [f.actor, f.session, f.draftId, raw?.suggestion?.executionId])).rows[0];
+  expect(suggestion, JSON.stringify({ raw, probe, sessionId: shown.sessionId, meta: shown.information['step-0'].meta.goal }))
+    .toMatchObject({ value: 'Sell coffee to students' });
   const version = (await f.steps())['step-0'].version;
   const resolved = (await db.query('select opc_capture_resolve($1,$2,$3,$4,$5,$6,$7,$8,$9) v', [f.actor, f.draftId, randomUUID(), 'step-0', 'goal',
     suggestion.executionId, suggestion.hash, 'accept', version])).rows[0].v;
