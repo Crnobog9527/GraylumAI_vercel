@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ASK_QUESTION_TOOL, INVALID_REPLY_NOTICE } from '../../shared/agentTurn';
-import { isOpeningInput } from '../../shared/opcQuestions';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { agentTurnResult } from '../runtime/agentTurnResult';
@@ -21,6 +20,7 @@ import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { mentorHost, mentorOrganizerInput, mentorState, resourcesOf } from './mentorContext';
+import { answeredText, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
@@ -41,7 +41,7 @@ export type MentorDeps = {
   newWork: ChatDeps['newWork'];
 };
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
-  organizeAfter: boolean };
+  organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer };
 
 const MARKER_RESERVE_BYTES = 256;
 
@@ -51,9 +51,10 @@ const callPolicy = (q: ChatQuote) => ({ modelId: q.modelId, provider: 'openroute
 
 export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
-  const opening = isOpeningInput(input.text);
-  // An opening is always organized (it may carry a mentor proposal for an agent_proposal field), as the old path did.
-  const organize = opening || input.organizeAfter;
+  // The kind of turn: an opening, a step summary, a checklist-updated event, an answer to a card, or the user's words (V2-5b).
+  let kind;
+  try { kind = mentorTurnInput(input); } catch { return emit({ type: 'error', code: 'TURN_REQUEST_INVALID' }); }
+  const { opening, summary, organize } = kind;
   let catalog;
   try { catalog = await mentorCatalog(admin, { moduleId: input.moduleId, organize, pricing: deps.pricing }); }
   catch (error) { return emit({ type: 'error', code: error instanceof MentorCatalogError ? error.code : 'TURN_QUOTE_UNAVAILABLE' }); }
@@ -96,10 +97,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const skill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
     // Everything later steps may read, prepared now: no database read between model calls.
     const prepared = await prepareMentorFiles(source, binding, Boolean(organizer));
-    const host = mentorHost(state, input.stepId, opening);
+    const answered = input.answer ? mentorAnsweredCard(opened.history, input.stepId, input.answer, opened.turnId) : undefined;
+    // The user's words of this turn: a chosen option's text replaces the input, as the old path did.
+    const words = answeredText(input.text, answered);
+    const host = mentorHost(state, input.stepId, { opening, summary, updatedFieldIds: kind.updatedFieldIds });
     const system = mentorSystem({ skillText: skill.text, skillEntryChars: skill.entryChars, brandIdentity: catalog.brandIdentity,
-      mode: ctx.mode, host, skillFile: !opening, replyRule: replySettingInstructions(effectiveReplyLocale(opened.replyLanguage)) });
-    const userMessage = mentorUserMessage(input.text, state.scopeMaterial, host);
+      mode: ctx.mode, host, skillFile: !opening, summary,
+      replyRule: replySettingInstructions(effectiveReplyLocale(opened.replyLanguage)) });
+    const userMessage = mentorUserMessage(words, state.scopeMaterial, host);
 
     // 3. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
@@ -111,7 +116,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const promptCache = system.prefixChars > 0 ? freezeSharedPromptCache({ real: true, model: mentor.model,
       cacheWriteUsdPerMillion: mentor.providerLimits.cacheWriteUsdPerMillion, instructions: system.instructions,
       prefixChars: system.prefixChars, historyMarker: !opening }) : undefined;
-    let sources: CardSources = cardSources(input.text, history);
+    let sources: CardSources = cardSources(words, history);
     const tools = [groundedCardTool(() => sources), mentorSkillFileTool(prepared, binding)];
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
@@ -123,7 +128,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       model: mentor.model, instructions: system.instructions, input: userMessage, session: turnSession(history),
       maxOutputTokens: mentor.outputLimit, maxTurns: opening ? 1 : 2, reasoning: mentor.reasoning, tools, stream: true,
       allowEmptyResult: true, firstToolCallOnly: true, stopAtToolNames: [ASK_QUESTION_TOOL],
-      selectHistory: async (items, incoming) => { sources = cardSources(input.text, items); return [...items, ...incoming]; },
+      selectHistory: async (items, incoming) => { sources = cardSources(words, items); return [...items, ...incoming]; },
       onText: delta => { text += delta; if (delta) emit({ type: 'text', delta }); },
       exchange: async (_sequence, body, onChunk) => {
         text = ''; cardMessage = undefined;
@@ -147,7 +152,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // delivered reply back; its result is then empty (recorded as invalid_output, as the old path recorded a lost organizer).
     let organized: unknown = null, captureInput: unknown;
     if (organizer) {
-      const capture = mentorOrganizerInput(state, host, input.text);
+      const capture = mentorOrganizerInput(state, host, words, answered);
       captureInput = capture.value;
       try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), gate: callGate,
         template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
@@ -160,7 +165,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 
     // 6. Close: settle once, save both messages, apply the checklist patches in the same transaction.
     const closed = await close('completed', { delivered: true,
-      messages: [{ role: 'user', content: input.text }, { role: 'assistant', content: turn.body }],
+      messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
       ...(organizer ? { kindResult: { roundId: ctx.roundId, revisionId: ctx.revisionId, versions: state.versions,
         organizerInput: captureInput, output: organized } } : {}) });
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });

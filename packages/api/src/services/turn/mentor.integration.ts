@@ -163,12 +163,13 @@ function transport(reply: Reply) {
 const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
-  organizeAfter?: boolean; newWork?: NewWork }) {
+  organizeAfter?: boolean; newWork?: NewWork; answer?: { optionIndex?: number } }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
     newWork: input.newWork ?? { message: admit, calls: admit } },
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
-      text: input.text, organizeAfter: input.organizeAfter ?? true }, e => events.push(e)));
+      text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}) },
+    e => events.push(e)));
   return { events, calls };
 }
 const credits = async (actor: string) => (await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits as number;
@@ -398,4 +399,40 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown
     suggestion.executionId, suggestion.hash, 'accept', version])).rows[0].v;
   expect(resolved).toMatchObject({ result: 'accept' });
   expect((await f.steps())['step-0'].information.goal).toMatchObject({ value: 'Sell coffee to students' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: the next turn answers the card; the chosen option is the words, the organizer sees answeredCard', async () => {
+  const f = await setup();
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : toolCall('gen-card-' + n, 'ask_question', { intent: 'grounded_comparison', requestQuote: 'coffee or tea',
+      basisQuotes: ['coffee or tea'], question: 'Which one first?', options: [{ text: 'Coffee', reason: 'You named it first' },
+        { text: 'Tea', reason: 'Fewer rivals' }], recommended: 0 }));
+  await turn(f, { text: 'Should I start with coffee or tea?', transport: first.fn });
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1",
+    [f.session])).rows[0].content;
+  expect(JSON.parse(saved)).toMatchObject({ stepId: 'step-0', card: { options: ['Coffee', 'Tea'] } });
+  const next = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Tea first'))
+    : prose('gen-reply-' + n, 'Tea it is.'));
+  const out = await turn(f, { text: 'Tea', transport: next.fn, answer: { optionIndex: 1 } });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(JSON.stringify(next.bodies.find(b => b.model === ORGANIZER)!.messages)).toContain('answeredCard');
+  expect((await db.query("select content from session_messages where session_id=$1 and role='user' order by seq desc limit 1",
+    [f.session])).rows[0].content).toBe('Tea');
+  // An answer to a card the latest reply does not carry is refused, and that turn is refunded.
+  const refused = await turn(f, { text: 'Coffee', transport: next.fn, answer: { optionIndex: 0 } });
+  expect(refused.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_ANSWER_SOURCE_DENIED' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: a step summary turn writes the summary and is never organized', async () => {
+  const f = await setup();
+  const t = transport(() => prose('gen-summary', 'Step summary: goal is still missing.'));
+  const out = await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: false });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(t.bodies.map(b => b.model)).toEqual([MENTOR]);
+  const system = JSON.stringify(t.bodies[0]!.messages[0]);
+  expect(system).toContain('hostTurnContext.stepSummary');
+  expect(JSON.parse(t.bodies[0]!.messages.at(-1)!.content as string).hostTurnContext.stepSummary).toMatchObject({ kind: 'step_summary' });
+  // A summary may not be organized.
+  expect((await turn(f, { text: 'HOST_STEP_SUMMARY:v1', transport: t.fn, organizeAfter: true })).events)
+    .toEqual([{ type: 'error', code: 'TURN_REQUEST_INVALID' }]);
 });
