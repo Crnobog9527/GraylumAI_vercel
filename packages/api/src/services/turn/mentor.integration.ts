@@ -379,3 +379,25 @@ it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start p
     .toEqual([{ state: 'paused', pause_reason: 'waiting_credits', close_kind: null }]);
   expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown by opc_query and can be accepted', async () => {
+  const f = await setup();
+  const t = transport(async (body, n) => {
+    if (body.model !== ORGANIZER) return prose('gen-reply-' + n, 'Noted.');
+    await db.query(`update artifact_rounds r set steps=jsonb_set(r.steps,'{step-0,version}',to_jsonb((r.steps->'step-0'->>'version')::int+1))
+      from opc_drafts d where d.round_id=r.id and d.draft_id=$1`, [f.draftId]);
+    return organized('gen-org-' + n, patch('Sell coffee to students'));
+  });
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  expect((out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>).kindResult).toMatchObject({ result: 'suggested' });
+  const shown = (await db.query('select opc_query($1,$2) v', [f.actor, f.draftId])).rows[0].v;
+  const suggestion = shown.information['step-0'].meta.goal.suggestion;
+  expect(suggestion).toMatchObject({ value: 'Sell coffee to students' });
+  const version = (await f.steps())['step-0'].version;
+  const resolved = (await db.query('select opc_capture_resolve($1,$2,$3,$4,$5,$6,$7,$8,$9) v', [f.actor, f.draftId, randomUUID(), 'step-0', 'goal',
+    suggestion.executionId, suggestion.hash, 'accept', version])).rows[0].v;
+  expect(resolved).toMatchObject({ result: 'accept' });
+  expect((await f.steps())['step-0'].information.goal).toMatchObject({ value: 'Sell coffee to students' });
+  // Deleting the conversation takes the suggestions of its turns out of view.
+  await db.query("update session_messages set visible=false where session_id=$1", [f.session]);
+});
