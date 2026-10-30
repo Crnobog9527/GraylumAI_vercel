@@ -21,7 +21,8 @@ BEGIN
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
  -- scopeDenied: Node's mentor_source_check before this close (the whole chain, for a draft that needs it).
- IF d.draft_id IS NULL OR NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) OR p_result->'scopeDenied' = 'true'::jsonb
+ IF d.draft_id IS NULL OR NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) OR NOT turn_mentor_source_live(d.draft_id)
+  OR p_result->'scopeDenied' = 'true'::jsonb
  THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
  SELECT db.business_id INTO business_id FROM opc_draft_businesses db WHERE db.draft_id = d.draft_id;
  -- No lock of its own (main-path rule: only the actor's profile and the session row). turn_close holds this draft's session

@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
+DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; spec jsonb; v_step text := p_mentor->>'stepId';
   b opc_businesses; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; suggestions jsonb := '{}';
   suggestion jsonb;
 BEGIN
@@ -38,15 +38,7 @@ BEGIN
              WHERE (r.steps->dep->>'valid')::boolean IS DISTINCT FROM true) THEN
     RAISE EXCEPTION 'TURN_MENTOR_DEPENDENCIES_UNCONFIRMED' USING ERRCODE='42501';
   END IF;
-  -- The Skill revision of the round, under the same rules as read_skill_package: an active module of that Skill, a published
-  -- directory Skill, the round's exact package, not revoked. The package itself is then read by content hash (process cache).
-  SELECT * INTO m FROM modules WHERE id = p.module_id AND skill_id = p.skill_id AND active IS TRUE;
-  IF m.id IS NULL
-    OR NOT EXISTS (SELECT 1 FROM skills WHERE id = p.skill_id AND status = 'published' AND content_kind = 'directory')
-    OR NOT EXISTS (SELECT 1 FROM skill_packages WHERE skill_id = p.skill_id AND revision_id = r.revision_id AND package_hash = r.package_hash)
-    OR EXISTS (SELECT 1 FROM skill_revision_revocations WHERE revision_id = r.revision_id) THEN
-    RAISE EXCEPTION 'TURN_SKILL_UNAVAILABLE' USING ERRCODE='42501';
-  END IF;
+  -- The Skill revision of the round is mentor_skill_available, read through the Skill catalog cache before any model call.
   -- The work projection the mentor sees: runtime_work_projection's per-field provenance and protection, computed here without
   -- its runtime_executions/opc_turns join (V2-12 drops those): a pending suggestion is one the field still carries.
   steps := r.steps;

@@ -23,7 +23,7 @@ import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog
 import { mentorHost, mentorOrganizerInput, mentorState, resourcesOf } from './mentorContext';
 import { answeredText, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
-import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
+import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
 import type { TurnEvent } from './sse';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -117,6 +117,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const state = mentorState(opened.kindContext, input.stepId);
     const ctx = state.context;
     if (checked?.businessContext) (ctx.work as Record<string, unknown>).businessContext = checked.businessContext;
+    if (!await mentorSkillAvailable(admin, { moduleId: ctx.moduleId, skillId: ctx.skillId, revisionId: ctx.revisionId, packageHash: ctx.packageHash }))
+      throw new Error('TURN_SKILL_UNAVAILABLE');
     const { source, binding } = mentorSkillSource(admin, { actorId: input.actorId, moduleId: ctx.moduleId, skillId: ctx.skillId,
       revisionId: ctx.revisionId, packageHash: ctx.packageHash });
     const skill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
@@ -192,7 +194,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // 7. Close: settle once, save both messages, apply the checklist patches in the same transaction. A source withdrawn during
     // this turn keeps the reply but writes nothing to the checklist (the check turn_close made on the old chain); a failed read
     // counts as withdrawn.
-    const scopeDenied = Boolean(organizer && checked && !(await sourceCheck().catch(() => ({ allowed: false }))).allowed);
+    const scopeDenied = Boolean(organizer && checked && !(await swallow('turn_mentor_source_check_failed', sourceCheck(), { allowed: false }, { category: 'ai' })).allowed);
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
       ...(organizer ? { kindResult: { roundId: ctx.roundId, revisionId: ctx.revisionId, versions: state.versions,

@@ -538,3 +538,15 @@ it('RUNTIME: CORE-PATH-V2 V2-5d: a plain draft makes no source check round trip'
   expect(out.events.at(-1)?.type).toBe('result');
   expect(out.calls.filter(path => path.includes('mentor_source_check'))).toEqual([]);
 });
+
+it('RUNTIME: CORE-PATH-V2 V2-5d: a revoked Skill revision is refused through the catalog cache before any model call, and refunded', async () => {
+  const f = await setup();
+  const round = (await db.query('select r.revision_id from artifact_rounds r join opc_drafts d on d.round_id=r.id where d.draft_id=$1', [f.draftId])).rows[0];
+  await db.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)', [round.revision_id, f.actor]);
+  const before = await credits(f.actor);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const out = await turn(f, { text: 'Hello', transport: t.fn });
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_SKILL_UNAVAILABLE' });
+  expect(t.bodies).toEqual([]);
+  expect(await credits(f.actor)).toBe(before);
+});

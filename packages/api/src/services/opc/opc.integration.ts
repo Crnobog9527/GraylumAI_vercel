@@ -7890,6 +7890,20 @@ it("OPC: V2-5d mentor checks agree with the old chain on a real account strategy
  expect(await verdict()).toEqual({old:false,fresh:false,view:false});
 });
 
+it("OPC: V2-5d a source draft revoked after the check stops the close write and the refresh read",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,
+  body:[{id:randomUUID(),platform:'x',account:'scope-race',title:'来源',brief:'账号策略',day:'2026-09-26'}]});
+ await f.service.handoff({draftId:f.d.draftId,requestId:randomUUID(),planId:plan.planId,accounts:[{platform:'x',account:'scope-race',expectedRevision:null}]});
+ const account=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts[0];
+ const strategy=await f.service.accountStrategyBegin(account.projectId,randomUUID());
+ const row=(await sql.query('select actor_id,session_id from opc_drafts where draft_id=$1',[strategy.draftId])).rows[0];
+ expect((await sql.query('select mentor_source_check($1,$2) v',[row.actor_id,row.session_id])).rows[0].v.allowed).toBe(true);
+ await sql.query('select bill2_revoke_draft($1,$2)',[row.actor_id,f.d.draftId]);
+ expect((await sql.query('select turn_mentor_source_live($1) v',[strategy.draftId])).rows[0].v).toBe(false);
+ await expect(sql.query('select turn_session_view($1,$2,0)',[row.actor_id,row.session_id])).rejects.toThrow('TURN_SESSION_DENIED');
+});
+
 it("OPC: account inheritance validates dependency order and revocable local evidence",async()=>{
  const f=await publishedDraft(3,true,true,true);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,

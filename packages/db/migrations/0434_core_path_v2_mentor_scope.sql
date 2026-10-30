@@ -2,10 +2,12 @@
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2 V2-5d: the mentor path without the old permission chain in turn_open / turn_close (docs/launch/tasks/CORE-PATH-V2.md 3.1).
 --   turn_mentor_draft_allowed  the narrow check on the hot path: the draft is the actor's, not revoked, its project not tombstoned.
+--   turn_mentor_source_live    on turn_close and the refresh read: an account-strategy draft's source drafts not revoked.
 --   mentor_source_check        the whole old check, unchanged (bill2_scope_allowed, opc_business_context), as its own read. Node calls
 --                              it only for a draft that has an account-strategy binding or a business source, before turn_open and
 --                              again after the last model call before turn_close, so plain drafts pay no round trip. turn_open
 --                              refuses such a draft (TURN_SOURCE_CHECK_REQUIRED) unless the policy says it was checked.
+--   mentor_skill_available     the Skill checks of turn_mentor_context, read through the Skill catalog cache.
 --   session_view_allowed       the whole old scope check of the refresh-recovery read, called first by view.ts.
 --   turn_mentor_context, turn_mentor_apply, turn_session_view  full bodies, with the old chain replaced as above; the business
 --                              context's source is filled in from mentor_source_check.
@@ -23,6 +25,20 @@ AS $function$
       WHERE d.draft_id = p_draft_id AND p.actor_id = p_actor_id AND p.erased_at IS NOT NULL)
 $function$;
 
+-- An account-strategy draft's own sources, in the same transaction as what the check guards: a source draft revoked after
+-- mentor_source_check still stops the close write and the refresh read (the deep evidence checks stay in mentor_source_check).
+CREATE OR REPLACE FUNCTION public.turn_mentor_source_live(p_draft_id uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT NOT EXISTS (SELECT 1 FROM opc_account_strategy_drafts a
+    JOIN artifact_versions v ON v.id IN (a.base_source_version_id, a.root_source_version_id)
+    JOIN opc_drafts sd ON sd.project_id = v.project_id JOIN bill2_drafts b ON b.id = sd.draft_id
+    WHERE a.draft_id = p_draft_id AND (b.revoked OR v.erased_at IS NOT NULL))
+$function$;
+
 CREATE OR REPLACE FUNCTION public.mentor_source_check(p_actor_id uuid, p_session_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -36,6 +52,21 @@ BEGIN
   THEN RETURN jsonb_build_object('allowed', false); END IF;
   RETURN jsonb_build_object('allowed', true, 'businessContext', opc_business_context(p_actor_id, p_session_id, d.round_id));
 END $function$;
+
+-- The Skill revision of a round, under the same rules as read_skill_package: an active module of that Skill, a published directory
+-- Skill, the round's exact package, not revoked. Administrator-written catalog rows: Node reads this through catalogRead (group
+-- skills), whose version every one of these tables raises.
+CREATE OR REPLACE FUNCTION public.mentor_skill_available(p_module_id uuid, p_skill_id uuid, p_revision_id uuid, p_package_hash text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT EXISTS (SELECT 1 FROM modules WHERE id = p_module_id AND skill_id = p_skill_id AND active IS TRUE)
+    AND EXISTS (SELECT 1 FROM skills WHERE id = p_skill_id AND status = 'published' AND content_kind = 'directory')
+    AND EXISTS (SELECT 1 FROM skill_packages WHERE skill_id = p_skill_id AND revision_id = p_revision_id AND package_hash = p_package_hash)
+    AND NOT EXISTS (SELECT 1 FROM skill_revision_revocations WHERE revision_id = p_revision_id)
+$function$;
 
 CREATE OR REPLACE FUNCTION public.session_view_allowed(p_actor_id uuid, p_session_id uuid)
  RETURNS boolean
@@ -52,7 +83,7 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
+DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; spec jsonb; v_step text := p_mentor->>'stepId';
   b opc_businesses; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; suggestions jsonb := '{}';
   suggestion jsonb;
 BEGIN
@@ -82,15 +113,7 @@ BEGIN
              WHERE (r.steps->dep->>'valid')::boolean IS DISTINCT FROM true) THEN
     RAISE EXCEPTION 'TURN_MENTOR_DEPENDENCIES_UNCONFIRMED' USING ERRCODE='42501';
   END IF;
-  -- The Skill revision of the round, under the same rules as read_skill_package: an active module of that Skill, a published
-  -- directory Skill, the round's exact package, not revoked. The package itself is then read by content hash (process cache).
-  SELECT * INTO m FROM modules WHERE id = p.module_id AND skill_id = p.skill_id AND active IS TRUE;
-  IF m.id IS NULL
-    OR NOT EXISTS (SELECT 1 FROM skills WHERE id = p.skill_id AND status = 'published' AND content_kind = 'directory')
-    OR NOT EXISTS (SELECT 1 FROM skill_packages WHERE skill_id = p.skill_id AND revision_id = r.revision_id AND package_hash = r.package_hash)
-    OR EXISTS (SELECT 1 FROM skill_revision_revocations WHERE revision_id = r.revision_id) THEN
-    RAISE EXCEPTION 'TURN_SKILL_UNAVAILABLE' USING ERRCODE='42501';
-  END IF;
+  -- The Skill revision of the round is mentor_skill_available, read through the Skill catalog cache before any model call.
   -- The work projection the mentor sees: runtime_work_projection's per-field provenance and protection, computed here without
   -- its runtime_executions/opc_turns join (V2-12 drops those): a pending suggestion is one the field still carries.
   steps := r.steps;
@@ -159,7 +182,8 @@ BEGIN
  exec_id := t.request_id; exec_at := t.opened_at;
  SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = t.session_id;
  -- scopeDenied: Node's mentor_source_check before this close (the whole chain, for a draft that needs it).
- IF d.draft_id IS NULL OR NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) OR p_result->'scopeDenied' = 'true'::jsonb
+ IF d.draft_id IS NULL OR NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) OR NOT turn_mentor_source_live(d.draft_id)
+  OR p_result->'scopeDenied' = 'true'::jsonb
  THEN RETURN jsonb_build_object('result', 'denied_binding'); END IF;
  SELECT db.business_id INTO business_id FROM opc_draft_businesses db WHERE db.draft_id = d.draft_id;
  -- No lock of its own (main-path rule: only the actor's profile and the session row). turn_close holds this draft's session
@@ -330,7 +354,12 @@ BEGIN
   SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id;
   IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
   IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
-  -- The conversation's scope (a revoked draft, a withdrawn source) is session_view_allowed, called first by Node (view.ts).
+  -- The conversation's whole scope is session_view_allowed, called first by Node (view.ts); a draft revoked since then is refused
+  -- here, in the same snapshot as the messages.
+  IF s.scope->>'kind' = 'positioning_draft' AND NOT (turn_mentor_draft_allowed(p_actor_id, (s.scope->>'draftId')::uuid)
+      AND turn_mentor_source_live((s.scope->>'draftId')::uuid)) THEN
+    RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
   IF s.active_turn_id IS NOT NULL THEN SELECT * INTO a FROM turns WHERE actor_id = p_actor_id AND id = s.active_turn_id; END IF;
   SELECT * INTO l FROM turns WHERE session_id = p_session_id AND actor_id = p_actor_id AND state = 'closed'
     ORDER BY opened_at DESC LIMIT 1;
@@ -349,8 +378,11 @@ END $function$;;
 DO $$
 BEGIN
   EXECUTE 'REVOKE ALL ON FUNCTION public.turn_mentor_draft_allowed(uuid,uuid) FROM PUBLIC, anon, authenticated, service_role';
+  EXECUTE 'REVOKE ALL ON FUNCTION public.turn_mentor_source_live(uuid) FROM PUBLIC, anon, authenticated, service_role';
   EXECUTE 'REVOKE ALL ON FUNCTION public.mentor_source_check(uuid,uuid) FROM PUBLIC, anon, authenticated, service_role';
   EXECUTE 'GRANT EXECUTE ON FUNCTION public.mentor_source_check(uuid,uuid) TO service_role';
+  EXECUTE 'REVOKE ALL ON FUNCTION public.mentor_skill_available(uuid,uuid,uuid,text) FROM PUBLIC, anon, authenticated, service_role';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION public.mentor_skill_available(uuid,uuid,uuid,text) TO service_role';
   EXECUTE 'REVOKE ALL ON FUNCTION public.session_view_allowed(uuid,uuid) FROM PUBLIC, anon, authenticated, service_role';
   EXECUTE 'GRANT EXECUTE ON FUNCTION public.session_view_allowed(uuid,uuid) TO service_role';
 END $$;
