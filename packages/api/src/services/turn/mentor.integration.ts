@@ -450,6 +450,9 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: the refresh-recovery read shows the running tur
   expect(after.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
   expect((await view(after.messages[0].seq)).messages.map((m: { role: string }) => m.role)).toEqual(['assistant']);
   await expect(db.query('select turn_session_view($1,$2,0) v', [randomUUID(), f.session])).rejects.toThrow(/TURN_SESSION_DENIED/);
+  // A revoked draft keeps its conversation out of view, as the other reads of it do, although the conversation is not deleted.
+  await db.query('update bill2_drafts set revoked=true where id=$1', [f.draftId]);
+  await expect(view()).rejects.toThrow(/TURN_SESSION_DENIED/);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5b: a step summary turn writes the summary and is never organized', async () => {
