@@ -72,7 +72,7 @@ export const mentorResearchBounds = (research: MentorResearch, modelMultiplier: 
 const highestMultiplier = (policies: readonly ToolCallPolicy[]) =>
   policies.reduce((max, p) => decimal(p.multiplier) > decimal(max) ? p.multiplier : max, policies[0]!.multiplier);
 
-export type BenchmarkToolsInput = { research: MentorResearch; prepared: PreparedResearch; deps?: BenchmarkDeps; admin: SupabaseClient;
+export type BenchmarkToolsInput = { research: MentorResearch; prepared: PreparedResearch; refreshId?: string; deps?: BenchmarkDeps; admin: SupabaseClient;
   slots: CounterStore; calls: ToolCallDeps; actorId: string; sessionId: string; requestId: string; text: string; deadline: number;
   emit: (event: ResearchTurnEvent) => void;
   /** The one-switch pause and the call limits for this call's subcalls; throws TurnStop to refuse. */
@@ -85,7 +85,7 @@ export function turnBenchmarkTools(input: BenchmarkToolsInput) {
   const { research: { research, tools: names, policies } } = input;
   const scope = { userId: input.actorId, sessionId: input.sessionId, executionId: input.requestId };
   const turnStore = turnResearchStore({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text,
-    prepared: input.prepared });
+    prepared: input.prepared, ...(input.refreshId ? { refreshId: input.refreshId } : {}) });
   const { store } = turnStore;
   const left = () => input.deadline - Date.now();
   const multiplier = highestMultiplier(policies);

@@ -171,12 +171,14 @@ function transport(reply: Reply) {
 const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
-  organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number }; research?: MentorDeps['research'] }) {
+  organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number }; research?: MentorDeps['research'];
+  researchRefreshId?: string }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
     newWork: input.newWork ?? { message: admit, calls: admit }, ...(input.research ? { research: input.research } : {}) },
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
-      text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}) },
+      text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}),
+      ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) },
     e => events.push(e)));
   return { events, calls };
 }
@@ -558,7 +560,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5d: a plain draft makes no source check round trip'
   const out = await turn(f, { text: 'Hello', transport: t.fn });
   expect(out.events.at(-1)?.type).toBe('result');
   expect(out.calls.filter(path => path.includes('mentor_source_check'))).toEqual([]);
-  expect((await db.query('select mentor_turn_prepare($1,$2,false) v', [f.actor, f.session])).rows[0].v.source).toBeNull();
+  expect((await db.query('select mentor_turn_prepare($1,$2,false,null) v', [f.actor, f.session])).rows[0].v.source).toBeNull();
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5d: a revoked Skill revision is refused through the catalog cache before any model call, and refunded', async () => {
@@ -612,7 +614,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a keyword card is free, reaches the page at clo
   expect((await db.query(`select 1 from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool'`, [f.actor])).rows).toEqual([]);
   const confirmed = await rest().rpc('research_card_confirm', { a: f.actor, p_card: card!.card.cardId, p: { selected: ['k0', 'k1', 'k2'] } });
   expect(confirmed.error).toBeNull();
-  const prepared = await rest().rpc('mentor_turn_prepare', { p_actor_id: f.actor, p_session_id: f.session, p_research: true });
+  const prepared = await rest().rpc('mentor_turn_prepare', { p_actor_id: f.actor, p_session_id: f.session, p_research: true, p_refresh: null });
   expect((prepared.data as { cards: Array<{ items: string[] }> }).cards[0]!.items).toEqual(['coffee', 'latte art', 'cafe']);
 });
 
@@ -787,7 +789,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: receipts of a turn that never applied them come
   await turn(f, { text: 'Look up coffee', transport: t.fn, research: vendors(async () => webResult()) });
   // As if the close never wrote them.
   await db.query('update research_plans set turn_id=null where session_id=$1', [f.session]);
-  const raw = (await db.query('select mentor_turn_prepare($1,$2,true) v', [f.actor, f.session])).rows[0].v;
+  const raw = (await db.query('select mentor_turn_prepare($1,$2,true,null) v', [f.actor, f.session])).rows[0].v;
   const prepared = preparedResearch.parse(raw);
   expect(prepared.unapplied).toHaveLength(1);
   expect(prepared.unapplied[0]![0]).toMatchObject({ state: 'succeeded' });
@@ -807,4 +809,29 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a pasted link that failed does not count as a r
   expect(out.events.at(-1)?.type).toBe('result');
   expect((await db.query('select research_rounds from opc_drafts where draft_id=$1', [f.draftId])).rows[0].research_rounds).toBe(0);
   expect((await db.query('select pasted_turns from research_account_fetches where session_id=$1', [f.session])).rows[0].pasted_turns).toEqual([]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: Refresh on a turn-made benchmark fetches it again once, and a used grant is refused', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const say = (name: string, args: unknown) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', name, args) : prose('gen-reply-' + n, 'Done.'));
+  await turn(f, { text: 'Check https://www.tiktok.com/@aa_one', research: tiktokVendors(),
+    transport: say('benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } }).fn });
+  const grant = await rest().rpc('research_refresh_create', { a: f.actor, s: f.session, p_platform: 'tiktok', p_account: 'aa_one' });
+  expect(grant.error).toBeNull();
+  const refreshId = grant.data as string;
+  const rows = async () => (await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`, [f.actor])).rows[0].n;
+  const before = await rows();
+  const out = await turn(f, { text: 'Refresh it', researchRefreshId: refreshId, research: tiktokVendors(),
+    transport: say('benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'refresh', refreshId } }).fn });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect(await rows()).toBeGreaterThan(before);
+  expect((await db.query('select used_at is not null used,used_turn_id is not null turn from research_refresh_grants where id=$1', [refreshId])).rows)
+    .toEqual([{ used: true, turn: true }]);
+  const t = transport(() => { throw new Error('nothing may be sent'); });
+  const again = await turn(f, { text: 'Refresh it', researchRefreshId: refreshId, research: tiktokVendors(), transport: t.fn });
+  expect(again.events).toEqual([{ type: 'error', code: 'TURN_REFRESH_INVALID' }]);
+  expect(t.bodies).toEqual([]);
 });

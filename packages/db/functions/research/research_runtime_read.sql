@@ -37,8 +37,9 @@ BEGIN
       SELECT 1 FROM research_account_fetches f WHERE f.actor_id=a AND f.session_id=s AND f.refresh_id=g.id
       AND f.state='prepared' AND f.platform=g.platform AND f.account_key=encode(sha256(convert_to(s::text||':'||research_account_key(g.platform,g.account),'utf8')),'hex')))
     INTO v FROM research_refresh_grants g
-    JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
-    WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    LEFT JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s
+    AND (g.source_turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
     AND (g.used_execution_id IS NULL OR EXISTS(SELECT 1 FROM runtime_executions u WHERE u.id=g.used_execution_id
       AND u.actor_id=a AND u.session_id=s AND u.content_deleted_at IS NULL AND u.erased_at IS NULL));
   WHEN 'selected' THEN

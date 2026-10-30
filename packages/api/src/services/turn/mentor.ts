@@ -12,6 +12,10 @@ import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext }
 import { freezeSharedPromptCache } from '../runtime/promptCache';
 import { replySettingInstructions } from '../runtime/replyLanguage';
 import { runRuntime } from '../runtime/runner';
+import { RESEARCH_REFRESH_NOTE } from '../runtime/hostTurn';
+import { withResearchRefresh } from '../opc/researchRefresh';
+import { canonicalAccount } from '../research/tools/accountLinks';
+import type { SocialPlatform } from '../research/vendors/types';
 import { carriesAccountLink, requiresBenchmarkResearch, researchInputHost } from '../runtime/researchAdmissionGuard';
 import { researchContextFrom, withResearchContext } from '../runtime/researchHostContext';
 import { skillFileToolBytes } from '../runtime/skillFile';
@@ -48,7 +52,8 @@ export type MentorDeps = {
   research?: BenchmarkDeps;
 };
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
-  organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer };
+  organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer;
+  /** V2-5c: the user pressed Refresh on one benchmark account. */ researchRefreshId?: string };
 
 const MARKER_RESERVE_BYTES = 256;
 /** Supplier time of a turn: its 300 s minus the reply and the organizer after the last lookup. */
@@ -79,6 +84,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   if (input.text.length > 8000 || Buffer.byteLength(input.text) > mentor.inputLimit)
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
 
+  // A Refresh needs a turn that can run the tools; refused before any charge.
+  if (input.researchRefreshId && (opening || summary)) return emit({ type: 'error', code: 'TURN_REQUEST_INVALID' });
+  if (input.researchRefreshId && !benchmarkReady(research, ['benchmark_fetch'])) return emit({ type: 'error', code: 'RESEARCH_TOOLS_UNAVAILABLE' });
   // A pasted profile link asks for a check: refused before any charge when the check cannot run (as the old admission).
   const linkTurn = !opening && !summary && carriesAccountLink(input.text);
   if (linkTurn && !benchmarkReady(research, ['benchmark_fetch'])) return emit({ type: 'error', code: 'RESEARCH_TOOLS_LINK_UNAVAILABLE' });
@@ -100,11 +108,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // A turn the benchmark flow may run in: one read gets the check and the flow's state together (plan 3.1).
     if (!opening && !summary) {
       const { data, error } = await deps.clients.read.rpc('mentor_turn_prepare', { p_actor_id: input.actorId, p_session_id: input.sessionId,
-        p_research: research !== null });
+        p_research: research !== null, p_refresh: input.researchRefreshId ?? null });
       if (error) throw new Error('TURN_OPEN_FAILED');
       flowRaw = data as Record<string, unknown>;
       if (flowRaw.source) checked = sourceChecked.parse(flowRaw.source);
       if (research && checked?.allowed !== false) flow = preparedResearch.parse(flowRaw);
+      // Another user's, a deleted answer's or an already used grant reads as null or used.
+      if (input.researchRefreshId && checked?.allowed !== false && (!flow?.refresh || flow.refresh.used))
+        return emit({ type: 'error', code: 'TURN_REFRESH_INVALID' });
     } else if (SOURCE_DRAFTS.has(input.sessionId)) checked = await sourceCheck();
     if (checked?.allowed === false) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
     try { opened = await openTurn(); }
@@ -155,7 +166,13 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // The benchmark step cannot go on without its tools; nothing was sent, the whole turn is refunded.
     const benchmarkStep = !opening && !summary && requiresBenchmarkResearch(host);
     if (benchmarkStep && !benchmarkReady(research)) throw new TurnStop('RESEARCH_TOOLS_UNAVAILABLE');
-    if (flow && flowRaw && (benchmarkStep || linkTurn)) {
+    if (flow?.refresh && input.researchRefreshId) {
+      const account = canonicalAccount(flow.refresh.platform as SocialPlatform, flow.refresh.account);
+      if (!account) throw new TurnStop('TURN_CALL_DENIED');
+      host = withResearchRefresh(host, { refreshId: input.researchRefreshId, platform: flow.refresh.platform as SocialPlatform, account,
+        note: RESEARCH_REFRESH_NOTE });
+    }
+    if (flow && flowRaw && (benchmarkStep || linkTurn || input.researchRefreshId)) {
       const known = flow.cardDiscoveries;
       host = withResearchContext(researchInputHost(host, true)!, await researchContextFrom({ cards: flowRaw.cards, benchmarks: flowRaw.benchmarks,
         shortfall: flowRaw.shortfall ?? null, discoveryOf: async card => known[card] ?? null }));
@@ -173,7 +190,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // The tools come with room for one result; without it a benchmark or link turn is refused, any other goes on without them.
     const researchBytes = research ? benchmarkToolBytes(research) : 0;
     const researchFits = research !== null && flow !== undefined && required + researchBytes <= mentor.inputLimit;
-    if (research && !researchFits && (benchmarkStep || linkTurn))
+    if (research && !researchFits && (benchmarkStep || linkTurn || input.researchRefreshId))
       throw new TurnStop(benchmarkStep ? 'RESEARCH_TOOLS_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY');
     const left = mentor.inputLimit - required - (researchFits ? researchBytes : 0);
     const history = trimHistory(projectHistory(projectMentorHistory(opened.history)), Math.max(left, 0));
@@ -182,7 +199,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       prefixChars: system.prefixChars, historyMarker: !opening }) : undefined;
     let sources: CardSources = cardSources(words, history);
     // A step summary is offered no question card (as the old path's admission removed it), not only told not to show one.
-    benchmark = researchFits ? turnBenchmarkTools({ research: research!, prepared: flow!, deps: deps.research, admin, slots: deps.slots,
+    benchmark = researchFits ? turnBenchmarkTools({ research: research!, prepared: flow!, deps: deps.research,
+      ...(input.researchRefreshId ? { refreshId: input.researchRefreshId } : {}), admin, slots: deps.slots,
       calls: { db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq }, actorId: input.actorId, sessionId: input.sessionId,
       requestId: input.requestId, text: words, deadline: Date.now() + MENTOR_RESEARCH_MS, emit,
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');

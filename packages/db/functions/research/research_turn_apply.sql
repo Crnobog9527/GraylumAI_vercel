@@ -46,6 +46,10 @@ BEGIN
       WHERE research_account_fetches.actor_id = a AND research_account_fetches.attempt <> excluded.attempt
     RETURNING * INTO f;
     IF f.id IS NULL THEN CONTINUE; END IF; -- This attempt was applied by an earlier close.
+    IF item ? 'refreshId' THEN
+      UPDATE research_refresh_grants SET used_at = coalesce(used_at, clock_timestamp()), used_turn_id = n
+       WHERE id = (item->>'refreshId')::uuid AND actor_id = a AND session_id = s;
+    END IF;
     PERFORM research_account_fetch_finish(a, f.id, f.attempt, item->>'state', nullif(item->'evidence', 'null'::jsonb));
     -- Only a check that succeeded counts as a round (Owner 10-27).
     IF (item->'pasted') = 'true'::jsonb AND item->>'state' = 'succeeded' THEN

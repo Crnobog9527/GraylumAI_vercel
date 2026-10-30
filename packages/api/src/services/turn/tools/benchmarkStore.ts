@@ -25,6 +25,7 @@ export const preparedResearch = z.object({
   operations: z.array(operation).default([]),
   // Batches of a turn that ended before applying them: each is a list of operations.
   unapplied: z.array(z.array(operation)).default([]),
+  refresh: z.object({ platform: z.string(), account: z.string(), used: z.boolean() }).nullable().default(null),
   shortfall: z.object({ rounds: z.number(), qualified: z.number(), card: z.object({ cardId: uuid, choice: z.enum(['continue', 'generate']).nullable(),
     chosenRounds: z.number().nullable().optional() }).passthrough().nullable() }).passthrough().nullable().default(null),
 });
@@ -36,7 +37,9 @@ const REQUIRED_QUALIFIED = 3, MIN_ROUNDS = 2;
 const FETCH_KINDS = ['account_profile', 'account_posts', 'account_relation', 'post_detail'];
 const accountKey = (platform: string, account: string) => `${platform}:${account.toLowerCase()}`;
 
-export function turnResearchStore(input: { actorId: string; sessionId: string; requestId: string; text: string; prepared: PreparedResearch }) {
+export function turnResearchStore(input: { actorId: string; sessionId: string; requestId: string; text: string; prepared: PreparedResearch;
+  /** The user's Refresh this turn answers; prepared.refresh is its grant. */
+  refreshId?: string }) {
   const { prepared, actorId, sessionId, requestId } = input;
   const same = (other: { userId: string; sessionId: string }) => other.userId === actorId && other.sessionId === sessionId;
   const confirmed = (id: string, kind: 'keywords' | 'candidates') => prepared.cards.find(c => c.confirmationId === id && c.kind === kind);
@@ -50,7 +53,7 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
   for (const batch of prepared.unapplied) for (const o of batch) if (!known.has(o.id)) { known.set(o.id, o); fresh.set(o.id, o); }
   const tokens = new Map<string, Operation>(), cards = new Map<string, { kind: string; card: SelectionCard; payload: CardPayload }>();
   const fetches = new Map<string, Fetch>(prepared.fetches.map(f => [accountKey(f.platform, f.account), f]));
-  const touched = new Set<string>(), shortfalls = new Set<string>();
+  const touched = new Set<string>(), shortfalls = new Set<string>(), refreshed = new Map<string, string>();
   const discoveries = new Map<string, DiscoveryRecord & { keywordConfirmationId: string }>();
   for (const d of prepared.discoveries) discoveries.set(d.discoveryId, { ...d, platforms: d.platforms as SocialPlatform[] });
   const savedDiscoveries = new Set<string>();
@@ -88,7 +91,12 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
         return card?.items ? accounts(card.items) : null;
       },
       userMessage: async (other, id) => same(other) && id === requestId ? input.text : null,
-      refreshGrant: async () => null,
+      refreshGrant: async (other, id) => {
+        const grant = same(other) && id === input.refreshId ? prepared.refresh : null;
+        if (!grant) return null;
+        const account = canonicalAccount(grant.platform as SocialPlatform, grant.account);
+        return account ? { platform: grant.platform as SocialPlatform, account, used: grant.used } : null;
+      },
     },
     evidence,
     cancelUnsentPlan: async () => {},
@@ -145,10 +153,13 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       return accounts(prepared.cards.filter(c => c.kind === 'candidates' && c.items && prepared.cardDiscoveries[c.cardId] === discoveryId)
         .flatMap(c => c.items as unknown[]));
     },
-    async fetchClaim(platform, account): Promise<FetchClaim> {
+    async fetchClaim(platform, account, refreshId): Promise<FetchClaim> {
       const key = accountKey(platform, account), found = fetches.get(key);
-      if (found && (found.state === 'in_progress' || (found.state !== 'prepared' && (found.evidence || found.state !== 'failed'))))
+      // A refresh may replace a finished fetch, once; an attempt the supplier charged for and failed is never resent.
+      if (refreshId && (!found || found.state === 'failed_charged')) throw new Error('RESEARCH_REFRESH_INVALID');
+      if (found && (found.state === 'in_progress' || (!refreshId && found.state !== 'prepared' && (found.evidence || found.state !== 'failed'))))
         return { claimed: false, fetchId: found.id, state: found.state as never, evidence: found.evidence };
+      if (refreshId) refreshed.set(key, refreshId);
       // Derived, not random: a turn that crashed after paying for this attempt gets the same ids, so its receipts answer (benchmarkFetch).
       const id = found?.id ?? stableResearchId(sessionId, platform, account.toLowerCase());
       const attempt = stableResearchId(id, found?.attempt ?? 'first');
@@ -183,8 +194,10 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       const out = { cards: [...cards].map(([id, c]) => ({ id, payload: c.payload })),
         discoveries: [...savedDiscoveries].map(id => { const d = discoveries.get(id)!;
           return { id, keywordConfirmationId: d.keywordConfirmationId, platforms: d.platforms, cursor: d.cursor, state: d.state }; }),
-        operations: [...fresh.values()], fetches: [...touched].map(key => { const f = fetches.get(key)!;
-          return { ...f, pasted: pasted(f) }; }), shortfalls: [...shortfalls].map(id => ({ id })) };
+        operations: [...fresh.values()],
+        fetches: [...touched].map(key => { const f = fetches.get(key)!;
+          return { ...f, pasted: pasted(f), ...(refreshed.has(key) ? { refreshId: refreshed.get(key) } : {}) }; }),
+        shortfalls: [...shortfalls].map(id => ({ id })) };
       return Object.values(out).some(list => list.length) ? out : undefined;
     } };
 }

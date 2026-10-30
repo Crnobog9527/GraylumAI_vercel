@@ -99,3 +99,15 @@ it('a pasted check that succeeded this turn counts toward the shortfall card, on
   await s.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', { classification: { qualified: true } });
   expect(await s.store.offerShortfall(opId)).toMatchObject({ offeredRounds: 2, offeredQualified: 1 });
 });
+
+it('a refresh grant replaces a finished fetch, and is written at close', async () => {
+  const refreshId = '77777777-7777-4777-8777-777777777777';
+  const s = turnResearchStore({ actorId, sessionId, requestId, text: 'hi', refreshId, prepared: preparedResearch.parse({
+    refresh: { platform: 'tiktok', account: 'homeideas', used: false },
+    fetches: [{ id: fetchId, attempt, platform: 'tiktok', account: 'homeideas', state: 'succeeded', evidence: { platform: 'tiktok' } }] }) });
+  expect(await s.store.authorization.refreshGrant({ userId: actorId, sessionId }, refreshId)).toMatchObject({ account: 'homeideas', used: false });
+  expect(await s.store.authorization.refreshGrant({ userId: actorId, sessionId }, opId)).toBeNull();
+  const claim = await s.store.fetchClaim('tiktok', 'homeideas', refreshId) as { fetchId: string; attempt: string };
+  await s.store.fetchFinish(claim.fetchId, claim.attempt, 'failed', null);
+  expect(s.journal()?.fetches[0]).toMatchObject({ refreshId });
+});

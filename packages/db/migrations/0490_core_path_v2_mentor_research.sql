@@ -21,6 +21,17 @@ ALTER TABLE public.research_benchmarks ADD COLUMN IF NOT EXISTS turn_actor_id uu
 ALTER TABLE public.research_benchmarks ALTER COLUMN execution_id DROP NOT NULL;
 ALTER TABLE public.research_benchmark_shortfalls ADD COLUMN IF NOT EXISTS turn_actor_id uuid, ADD COLUMN IF NOT EXISTS turn_id bigint;
 ALTER TABLE public.research_benchmark_shortfalls ALTER COLUMN execution_id DROP NOT NULL;
+ALTER TABLE public.research_refresh_grants ADD COLUMN IF NOT EXISTS source_turn_id bigint, ADD COLUMN IF NOT EXISTS used_turn_id bigint;
+DO $$
+DECLARE c text;
+BEGIN
+  FOR c IN SELECT conname FROM pg_constraint WHERE conrelid = 'public.research_refresh_grants'::regclass AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%used_execution_id%' LOOP
+    EXECUTE format('ALTER TABLE public.research_refresh_grants DROP CONSTRAINT %I', c);
+  END LOOP;
+END $$;
+ALTER TABLE public.research_refresh_grants ADD CONSTRAINT research_refresh_grants_used_check
+  CHECK ((used_at IS NULL) = (used_execution_id IS NULL AND used_turn_id IS NULL));
 ALTER TABLE public.opc_drafts ADD COLUMN IF NOT EXISTS research_rounds integer NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS research_qualified integer NOT NULL DEFAULT 0;
 
@@ -190,8 +201,9 @@ BEGIN
       SELECT 1 FROM research_account_fetches f WHERE f.actor_id=a AND f.session_id=s AND f.refresh_id=g.id
       AND f.state='prepared' AND f.platform=g.platform AND f.account_key=encode(sha256(convert_to(s::text||':'||research_account_key(g.platform,g.account),'utf8')),'hex')))
     INTO v FROM research_refresh_grants g
-    JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
-    WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    LEFT JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s
+    AND (g.source_turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
     AND (g.used_execution_id IS NULL OR EXISTS(SELECT 1 FROM runtime_executions u WHERE u.id=g.used_execution_id
       AND u.actor_id=a AND u.session_id=s AND u.content_deleted_at IS NULL AND u.erased_at IS NULL));
   WHEN 'selected' THEN
@@ -277,6 +289,23 @@ BEGIN
     AND (y.created_at,y.id)>(x.created_at,x.id)) THEN RETURN NULL; END IF;
   RETURN jsonb_build_object('discoveryId',d.id,'executionId',x.id,
     'replies',greatest(1,CASE WHEN jsonb_typeof(d.cursor->'executions')='array' THEN jsonb_array_length(d.cursor->'executions') ELSE 1 END));
+END $function$;;
+
+CREATE OR REPLACE FUNCTION public.research_refresh_create(a uuid, s uuid, p_platform text, p_account text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE g uuid; src uuid; src_turn bigint;
+BEGIN
+  PERFORM research_session_owned(a,s,NULL);
+  SELECT last_success_execution_id, last_success_turn_id INTO src, src_turn FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
+    AND account_key=encode(sha256(convert_to(s::text||':'||research_account_key(p_platform,p_account),'utf8')),'hex') AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress','failed_charged');
+  IF src IS NULL AND src_turn IS NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
+  INSERT INTO research_refresh_grants(actor_id,session_id,platform,account,source_execution_id,source_turn_id)
+    VALUES(a,s,p_platform,p_account,src,src_turn) RETURNING id INTO g;
+  RETURN g;
 END $function$;;
 
 CREATE OR REPLACE FUNCTION public.opc_draft_identity()
@@ -792,6 +821,10 @@ BEGIN
       WHERE research_account_fetches.actor_id = a AND research_account_fetches.attempt <> excluded.attempt
     RETURNING * INTO f;
     IF f.id IS NULL THEN CONTINUE; END IF; -- This attempt was applied by an earlier close.
+    IF item ? 'refreshId' THEN
+      UPDATE research_refresh_grants SET used_at = coalesce(used_at, clock_timestamp()), used_turn_id = n
+       WHERE id = (item->>'refreshId')::uuid AND actor_id = a AND session_id = s;
+    END IF;
     PERFORM research_account_fetch_finish(a, f.id, f.attempt, item->>'state', nullif(item->'evidence', 'null'::jsonb));
     -- Only a check that succeeded counts as a round (Owner 10-27).
     IF (item->'pasted') = 'true'::jsonb AND item->>'state' = 'succeeded' THEN
@@ -811,13 +844,13 @@ END $function$;
 
 -- The one read before a non-opening mentor turn: the source check (mentor_source_check) and, when the flow may run, what it continues
 -- from. No write, no lock beyond a read.
-CREATE OR REPLACE FUNCTION public.mentor_turn_prepare(p_actor_id uuid, p_session_id uuid, p_research boolean)
+CREATE OR REPLACE FUNCTION public.mentor_turn_prepare(p_actor_id uuid, p_session_id uuid, p_research boolean, p_refresh uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE a uuid := p_actor_id; s uuid := p_session_id; d opc_drafts; source jsonb; running research_discoveries;
+DECLARE a uuid := p_actor_id; s uuid := p_session_id; d opc_drafts; source jsonb;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = a AND session_id = s;
   IF d.draft_id IS NULL THEN RETURN jsonb_build_object('source', jsonb_build_object('allowed', false)); END IF;
@@ -828,8 +861,9 @@ BEGIN
     source := mentor_source_check(a, s);
   END IF;
   IF NOT p_research OR source->'allowed' = 'false'::jsonb THEN RETURN jsonb_build_object('source', source); END IF;
-  SELECT * INTO running FROM research_discoveries WHERE actor_id = a AND session_id = s AND state = 'running' ORDER BY created_at DESC, id DESC LIMIT 1;
   RETURN jsonb_build_object('source', source, 'cards', research_user_cards(a, s),
+    -- The user's Refresh of one account: null when it is not theirs, is used, or its answer was deleted.
+    'refresh', CASE WHEN p_refresh IS NULL THEN NULL ELSE research_runtime_read(a, s, NULL, 'refresh', p_refresh) END,
     'cardDiscoveries', (SELECT coalesce(jsonb_object_agg(c.id, c.discovery_id), '{}'::jsonb) FROM research_selection_cards c
       WHERE c.actor_id = a AND c.session_id = s AND c.discovery_id IS NOT NULL), 'benchmarks', research_benchmark_rows(a, s),
     'shortfall', research_user_shortfall(a, s),
@@ -841,7 +875,8 @@ BEGIN
       FROM research_discoveries x WHERE x.actor_id = a AND x.session_id = s),
     'operations', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'identityHash', o.identity_hash, 'state', o.state, 'result', o.result)), '[]'::jsonb)
       FROM research_operations o JOIN research_plans p ON p.id = o.plan_id
-      WHERE p.actor_id = a AND p.session_id = s AND p.discovery_id = running.id AND o.erased_at IS NULL AND p.erased_at IS NULL),
+      WHERE p.actor_id = a AND p.session_id = s AND o.erased_at IS NULL AND p.erased_at IS NULL
+        AND p.discovery_id IN (SELECT x.id FROM research_discoveries x WHERE x.actor_id = a AND x.session_id = s AND x.state = 'running')),
     -- Receipts of a turn that ended before it could apply them (a crash): their lookups are paid, so they are reused, not resent.
     'unapplied', (SELECT coalesce(jsonb_agg(r.body::jsonb), '[]'::jsonb) FROM turns t JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool'
       JOIN turn_call_raw r ON r.turn_id = c.turn_id AND r.seq = c.seq
@@ -1005,6 +1040,6 @@ END $function$;;
 DO $$
 BEGIN
   EXECUTE 'REVOKE ALL ON FUNCTION public.research_turn_apply(uuid,turns,jsonb) FROM PUBLIC, anon, authenticated, service_role';
-  EXECUTE 'REVOKE ALL ON FUNCTION public.mentor_turn_prepare(uuid,uuid,boolean) FROM PUBLIC, anon, authenticated, service_role';
-  EXECUTE 'GRANT EXECUTE ON FUNCTION public.mentor_turn_prepare(uuid,uuid,boolean) TO service_role';
+  EXECUTE 'REVOKE ALL ON FUNCTION public.mentor_turn_prepare(uuid,uuid,boolean,uuid) FROM PUBLIC, anon, authenticated, service_role';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION public.mentor_turn_prepare(uuid,uuid,boolean,uuid) TO service_role';
 END $$;

@@ -38,7 +38,7 @@ export const mentorScenario = ({ name, accountBound, research = null }) => ({
     return { actor, source };
   },
   async run({ call, state: { actor, source } }) {
-    await call('mentor_turn_prepare', [actor, source.session, true]);
+    await call('mentor_turn_prepare', [actor, source.session, true, null]);
     const policy = { q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30, historyItems: 100, inputBytes: 1000,
       limits: { model: 3, paidTools: 0, freeTools: 1 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
       mentor: { moduleId: source.module, stepId: 's', sourceChecked: accountBound } };
