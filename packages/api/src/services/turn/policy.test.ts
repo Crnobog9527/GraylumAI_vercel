@@ -41,4 +41,13 @@ describe('turn policy (CORE-PATH-V2 2.5.3, Fable 10-28)', () => {
     expect(startThresholdCredits({ version: 'v1', thresholds: [{ model: 'm/a', purpose: 'ordinary', typicalUsd: '1', credits: 3 }] },
       'm/a', 'ordinary', '100', '3')).toBeUndefined(); // both forms: invalid, never a guess
   });
+
+  it('V2-5: a call on another model (the mentor organizer) has its own bound and multiplier, in M, G and U_turn', () => {
+    const p = turnPolicy({ ...base, limits: { model: 3, paidTools: 0, freeTools: 1, decisions: 0 },
+      otherModelCalls: [{ upperUsd: '0.01', multiplier: '2' }] });
+    // 2 x 30 (mentor) + ceil(100 x 0.01 x 2) = 62 credits; 2 x 0.05 + 0.01 USD.
+    expect(p).toMatchObject({ gCredits: 62, uModelCredits: 30, uTurnUsd: 0.11 });
+    expect(() => turnPolicy({ ...base, limits: { model: 2, paidTools: 0, freeTools: 1, decisions: 0 },
+      otherModelCalls: [{ upperUsd: '0.01', multiplier: '2' }] })).toThrow('TURN_POLICY_INVALID');
+  });
 });
