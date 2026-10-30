@@ -61,13 +61,15 @@ export type PaidToolCall = { toolName: string; requestHash: string; upperUsd: st
 /** Collects one call's subcall receipts while it runs. */
 export type SubcallLedger = { add(receipt: SubcallReceipt): void; readonly receipts: readonly SubcallReceipt[] };
 
+/** One open receipt row: subcalls add to it until it is settled. */
+export type ToolRow = SubcallLedger & { settle(raw?: unknown): Promise<ToolCallOutcome> };
+
 /**
- * One paid tool call: begin, run (which sends the subcalls and adds their receipts), settle, record. A pause or tombstone
- * found by begin stops the turn (TurnStop); a used-up limit throws ToolLimitReached before anything is written. `run` may
- * throw: whatever it already sent is still settled first (an unknown outcome is left for turn_close), then the error passes.
+ * Opens one paid tool row (turn_call_begin): a pause or tombstone found by begin stops the turn (TurnStop); a used-up limit throws
+ * ToolLimitReached before anything is written. `settle` writes its receipt; `raw` replaces the default raw body (a benchmark batch
+ * keeps what the turn needs to reuse it after a crash).
  */
-export async function paidToolCall<T>(deps: ToolCallDeps, call: PaidToolCall,
-  run: (ledger: SubcallLedger) => Promise<T>): Promise<{ value: T; outcome: ToolCallOutcome }> {
+export async function openToolRow(deps: ToolCallDeps, call: PaidToolCall): Promise<ToolRow> {
   const seq = deps.nextSeq();
   const base = { actorId: deps.actorId, turnId: deps.turnId, seq };
   let begun;
@@ -82,25 +84,34 @@ export async function paidToolCall<T>(deps: ToolCallDeps, call: PaidToolCall,
     providerId: null, payloadHash: call.requestHash, raw: null });
   if (begun.paused) throw new TurnStop('TURN_PAUSED_FOR_CREDITS');
   if (tombstoned(begun)) { await notSent(); throw new TurnStop('TURN_TOMBSTONED'); }
-
   const receipts: SubcallReceipt[] = [];
+  return { receipts, add: receipt => { receipts.push(receipt); }, async settle(body) {
+    const settled = settleToolCall(receipts, call.multiplier);
+    // The receipt keeps what each subcall was and returned (counts, outcome, cost); the items themselves go to the raw body.
+    const usage = { subcalls: receipts.length, outcome: settled.outcome, vendors: [...new Set(receipts.map(r => r.result.vendor))],
+      results: receipts.map(r => ({ route: r.result.route, outcome: r.result.outcome, reason: r.result.reason, items: r.result.items.length,
+        units: r.result.usage.units, costUsd: r.costUsd })) };
+    const raw = body !== undefined ? JSON.stringify(body) : receipts.length ? JSON.stringify(receipts.map(r => r.result)) : null;
+    const payloadHash = sha256(raw ?? call.requestHash);
+    if (settled.outcome === 'not_sent') await notSent();
+    else if (settled.outcome !== 'unknown') {
+      const recorded = await deps.db.record({ ...base, status: settled.outcome === 'delivered' ? 'ok' : 'unusable',
+        nominalUsd: settled.outcome === 'delivered' ? settled.nominalUsd : null, actualUsd: settled.actualUsd, usage, providerId: null,
+        payloadHash, raw });
+      if (tombstoned(recorded)) throw new TurnStop('TURN_TOMBSTONED');
+    }
+    return settled.outcome;
+  } };
+}
+
+/** One paid tool call: one row, begin, run, settle. `run` may throw: what it sent is settled first, then the error passes. */
+export async function paidToolCall<T>(deps: ToolCallDeps, call: PaidToolCall,
+  run: (ledger: SubcallLedger) => Promise<T>): Promise<{ value: T; outcome: ToolCallOutcome }> {
+  const row = await openToolRow(deps, call);
   let value: T, failure: unknown, failed = false;
-  try { value = await run({ add: receipt => { receipts.push(receipt); }, receipts }); }
+  try { value = await run(row); }
   catch (error) { failure = error; failed = true; }
-  const settled = settleToolCall(receipts, call.multiplier);
-  // The receipt keeps what each subcall was and returned (counts, outcome, cost); the items themselves go to the raw body.
-  const usage = { subcalls: receipts.length, outcome: settled.outcome, vendors: [...new Set(receipts.map(r => r.result.vendor))],
-    results: receipts.map(r => ({ route: r.result.route, outcome: r.result.outcome, reason: r.result.reason, items: r.result.items.length,
-      units: r.result.usage.units, costUsd: r.costUsd })) };
-  const raw = receipts.length ? JSON.stringify(receipts.map(r => r.result)) : null;
-  const payloadHash = sha256(raw ?? call.requestHash);
-  if (settled.outcome === 'not_sent') await notSent();
-  else if (settled.outcome !== 'unknown') {
-    const recorded = await deps.db.record({ ...base, status: settled.outcome === 'delivered' ? 'ok' : 'unusable',
-      nominalUsd: settled.outcome === 'delivered' ? settled.nominalUsd : null, actualUsd: settled.actualUsd, usage, providerId: null,
-      payloadHash, raw });
-    if (tombstoned(recorded)) throw new TurnStop('TURN_TOMBSTONED');
-  }
+  const outcome = await row.settle();
   if (failed) throw failure;
-  return { value: value!, outcome: settled.outcome };
+  return { value: value!, outcome };
 }

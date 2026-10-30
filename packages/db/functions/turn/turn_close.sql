@@ -76,8 +76,10 @@ BEGIN
   -- A kind without a branch has its result refused rather than dropped.
   IF p_kind_result IS NOT NULL THEN
     IF t.kind = 'mentor' THEN
+      -- V2-5c: what this turn's research made, on any close that saves anything (paid lookups stay paid when the reply failed).
+      IF v_kind <> 'erased' AND p_kind_result ? 'research' THEN PERFORM public.research_turn_apply(p_actor_id, t, p_kind_result->'research'); END IF;
       -- V2-5: the organizer's checklist patches; only a delivered completed turn applies them (an erased one saves nothing).
-      IF v_kind = 'completed' AND p_delivered THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+      IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'organizerInput' THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
     ELSIF t.kind = 'report' THEN
       PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
     ELSE

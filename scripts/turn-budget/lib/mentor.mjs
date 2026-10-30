@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// A mentor turn as the database sees it (CORE-PATH-V2 plan 3.1): turn_open, three model calls (reply, one continuation, organizer) with
-// their three receipt writes each, turn_close with the organizer's result. `sourceCheck` adds the two mentor_source_check reads of a
-// draft that needs them (V2-5d). The draft comes from the turn-core fixture; real constraints and triggers stay enabled.
+// A non-opening mentor turn as the database sees it (CORE-PATH-V2 plan 3.1): the one read before it, turn_open, three model calls
+// (reply, one continuation, organizer) with their three receipt writes each, turn_close with the organizer's result. An
+// account-strategy draft adds the mentor_source_check before close. The draft comes from the turn-core fixture; real constraints
+// and triggers stay enabled.
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -10,7 +11,13 @@ const ROOT = resolve(import.meta.dirname, '../../..');
 const read = path => readFileSync(resolve(ROOT, path), 'utf8');
 const hash = text => createHash('sha256').update(text).digest('hex');
 
-export const mentorScenario = ({ name, accountBound }) => ({
+// A close that writes one reply's research (V2-5c): staging's largest reply was 27 operations, 188 KB.
+const researchJournal = (operations, bytes) => ({ operations: Array.from({ length: operations }, () => { const id = randomUUID();
+  const item = { url: 'https://example.test/a', fields: { title: 't'.repeat(180) }, missing: [] };
+  return { id, identityHash: 'a'.repeat(64), quoteUnits: 1000, state: 'succeeded', discoveryId: null,
+    result: { outcome: 'ok', items: Array.from({ length: Math.ceil(bytes / JSON.stringify(item).length) }, () => item), cost: { actual: 0.001 } } }; }) });
+
+export const mentorScenario = ({ name, accountBound, research = null }) => ({
   name, path: 'new',
   tables: ['turns', 'turn_calls', 'session_messages', 'runtime_sessions', 'profiles', 'credit_transactions', 'opc_drafts', 'artifact_rounds'],
   async setup({ client }) {
@@ -31,7 +38,7 @@ export const mentorScenario = ({ name, accountBound }) => ({
     return { actor, source };
   },
   async run({ call, state: { actor, source } }) {
-    if (accountBound) await call('mentor_source_check', [actor, source.session]);
+    await call('mentor_turn_prepare', [actor, source.session, true, null]);
     const policy = { q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30, historyItems: 100, inputBytes: 1000,
       limits: { model: 3, paidTools: 0, freeTools: 1 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
       mentor: { moduleId: source.module, stepId: 's', sourceChecked: accountBound } };
@@ -44,6 +51,7 @@ export const mentorScenario = ({ name, accountBound }) => ({
     if (accountBound) await call('mentor_source_check', [actor, source.session]);
     await call('turn_close', [actor, turnId, 'completed', JSON.stringify([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }]),
       true, false, null, JSON.stringify({ roundId: source.round, revisionId: source.revision, versions: { s: 1 },
-        organizerInput: { captureFormat: 'v2', userInput: 'hi' }, output: { inputKind: 'answer', patches: [], notes: [] } })]);
+        organizerInput: { captureFormat: 'v2', userInput: 'hi' }, output: { inputKind: 'answer', patches: [], notes: [] },
+        ...(research ? { research: researchJournal(research.operations, research.bytes) } : {}) })]);
   },
 });

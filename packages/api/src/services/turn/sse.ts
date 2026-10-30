@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { logSwallowed } from '../../lib/swallow';
+import type { ResearchTurnEvent } from '../../shared/researchTurn';
 import type { ToolAvailability } from './tools/types';
 
 /*
@@ -9,8 +10,12 @@ import type { ToolAvailability } from './tools/types';
  */
 export type TurnEvent =
   // tools: what this turn can use and what was trimmed and why (2.7, V2-6); absent for a turn without tools.
-  | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean; tools?: ToolAvailability }
+  | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean; tools?: ToolAvailability;
+    /** Fallback B (Owner 10-20): the user may generate with what exists; the counts are the draft's (V2-5c). */
+    fallbackEligible?: boolean }
   | { type: 'text'; delta: string }
+  // V2-5c: the mentor's benchmark flow (a lookup's progress, a selection card, a round to continue), as the old stream sent them.
+  | ResearchTurnEvent
   | { type: 'result'; turnId: number; body: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null;
     /** V2-5: what the kind's close did (the mentor's checklist capture: applied fields, versions). */
     kindResult?: unknown;

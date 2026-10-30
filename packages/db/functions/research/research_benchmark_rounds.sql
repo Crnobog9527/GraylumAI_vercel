@@ -10,8 +10,9 @@ CREATE OR REPLACE FUNCTION public.research_benchmark_rounds(a uuid, s uuid)
 AS $function$
   SELECT (
     SELECT count(*) FROM research_discoveries d
-    JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
-    WHERE d.actor_id=a AND d.session_id=s AND d.state='completed' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    LEFT JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE d.actor_id=a AND d.session_id=s AND d.state='completed'
+      AND (d.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
   )::integer + (
     SELECT count(*) FROM runtime_executions x
     WHERE x.actor_id=a AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
@@ -19,5 +20,10 @@ AS $function$
         WHERE f.actor_id=a AND f.session_id=s AND x.id=ANY(f.pasted_executions))
       AND NOT EXISTS (SELECT 1 FROM research_discoveries d
         WHERE d.execution_id=x.id AND d.actor_id=a AND d.session_id=s AND d.state='completed')
-  )::integer
+  )::integer + (
+    -- A turn's pasted-link check, unless that turn also completed a discovery (one turn, one round, as above).
+    SELECT count(DISTINCT p)::integer FROM research_account_fetches f CROSS JOIN LATERAL unnest(f.pasted_turns) p
+    WHERE f.actor_id=a AND f.session_id=s AND NOT EXISTS (SELECT 1 FROM research_discoveries d
+      WHERE d.turn_id=p AND d.actor_id=a AND d.session_id=s AND d.state='completed')
+  )
 $function$;

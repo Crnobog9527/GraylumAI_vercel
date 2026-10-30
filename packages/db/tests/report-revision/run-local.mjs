@@ -45,7 +45,7 @@ const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packag
   // V2-7a: report_fee_hold and report_stop as they stand with the turn path (both replayed above in their older text).
   'packages/db/migrations/0429_core_path_v2_report.sql',
   // CORE-PATH-V2 V2-7b replaces fusion functions the re-applied migrations above define again (review view, start, claim).
-  'packages/db/migrations/0433_core_path_v2_fusion.sql'];
+  'packages/db/migrations/0436_core_path_v2_fusion.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {

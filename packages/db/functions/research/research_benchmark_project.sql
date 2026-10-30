@@ -10,7 +10,7 @@ AS $function$
 DECLARE e jsonb:=f.last_success; m jsonb; c jsonb; refs jsonb:='{}'; ops uuid[]:='{}'; key text; ref text; item jsonb;
   ok boolean:=true; expected double precision; actual double precision; viewed text[]; rated text[]; analyzed_refs text[]; analyzed_count integer;
 BEGIN
-  IF e IS NULL OR f.last_success_execution_id IS NULL OR f.account IS NULL OR f.last_success_attempt IS NULL THEN
+  IF e IS NULL OR (f.last_success_execution_id IS NULL AND f.last_success_turn_id IS NULL) OR f.account IS NULL OR f.last_success_attempt IS NULL THEN
     DELETE FROM research_benchmarks WHERE fetch_id=f.id;
     RETURN;
   END IF;
@@ -158,10 +158,10 @@ BEGIN
   END IF;
   -- Any check that could not be evaluated (a missing item) counts as failed, never as unknown.
   ok:=coalesce(ok,false);
-  INSERT INTO research_benchmarks AS b(fetch_id,actor_id,session_id,execution_id,platform,account,followers,median_views,
+  INSERT INTO research_benchmarks AS b(fetch_id,actor_id,session_id,execution_id,turn_actor_id,turn_id,platform,account,followers,median_views,
     engagement_rate,posts_per_week,last_published_at,earliest_published_at,posts_analyzed,whole_history,category,qualified,
     excluded,refs,operation_ids,missing,fetched_at)
-  VALUES(f.id,f.actor_id,f.session_id,f.last_success_execution_id,f.platform,f.account,
+  VALUES(f.id,f.actor_id,f.session_id,f.last_success_execution_id,f.turn_actor_id,f.last_success_turn_id,f.platform,f.account,
     CASE WHEN ok THEN (m->'followers'->>'value')::numeric END,CASE WHEN ok THEN (m->'medianViews'->>'value')::numeric END,
     CASE WHEN ok THEN (m->'engagementRate'->>'value')::numeric END,CASE WHEN ok THEN (m->'postsPerWeek'->>'value')::numeric END,
     CASE WHEN ok THEN (m->'lastPublishedAt'->>'value')::timestamptz END,
@@ -177,7 +177,7 @@ BEGIN
         FROM unnest(ARRAY['account_profile','account_posts','account_relation','post_detail']) k)
         OR o.id=ANY(research_benchmark_post_operations(f.id,f.last_success_attempt)))) x ORDER BY x),
     ARRAY(SELECT jsonb_array_elements_text(m->'missing')),(e->>'fetchedAt')::timestamptz)
-  ON CONFLICT (fetch_id) DO UPDATE SET execution_id=excluded.execution_id,account=excluded.account,
+  ON CONFLICT (fetch_id) DO UPDATE SET execution_id=excluded.execution_id,turn_actor_id=excluded.turn_actor_id,turn_id=excluded.turn_id,account=excluded.account,
     followers=excluded.followers,median_views=excluded.median_views,engagement_rate=excluded.engagement_rate,
     posts_per_week=excluded.posts_per_week,last_published_at=excluded.last_published_at,
     earliest_published_at=excluded.earliest_published_at,posts_analyzed=excluded.posts_analyzed,whole_history=excluded.whole_history,

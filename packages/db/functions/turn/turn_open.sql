@@ -68,6 +68,12 @@ BEGIN
       -- A jury (or its adoption) runs on the report's draft conversation without occupying it (V2-7b): the conversation stays
       -- usable while a review advances or waits, as before; one review per user is the review record's own rule.
       IF s.active_turn_id IS NOT NULL AND p_kind NOT IN ('jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+      -- V2-5c: the mentor's read before this turn is bound to it: a turn that closed since then makes that read stale (it could pay
+      -- again for what that turn fetched, or use a grant it spent). Under this session's lock, so no close can slip in after it.
+      IF p_kind = 'mentor' AND p_policy->'mentor'->>'preparedAt' IS NOT NULL AND EXISTS (SELECT 1 FROM turns x
+          WHERE x.actor_id = p_actor_id AND x.session_id = p_session_id AND x.closed_at > (p_policy->'mentor'->>'preparedAt')::timestamptz) THEN
+        RAISE EXCEPTION 'TURN_PREPARE_STALE' USING ERRCODE='55P03';
+      END IF;
     ELSE
       -- Resume (V2-8): the paused turn is checked, locked and priced by turn_resume_carry.
       carried := public.turn_resume_carry(p_actor_id, p_session_id, s.active_turn_id, p_resume_of, p_kind, p_policy);

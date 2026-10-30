@@ -10,7 +10,7 @@ export interface CanonicalAccount {
 }
 
 /** Handles on these platforms are case-insensitive, so the lower-case form is the canonical one. */
-const CASE_INSENSITIVE: ReadonlySet<SocialPlatform> = new Set(['tiktok', 'x', 'instagram']);
+export const CASE_INSENSITIVE: ReadonlySet<SocialPlatform> = new Set(['tiktok', 'x', 'instagram']);
 
 /** First path segments that are site pages, not accounts. */
 const X_RESERVED = new Set(['home', 'explore', 'i', 'search', 'settings', 'intent', 'share', 'hashtag',

@@ -38,7 +38,7 @@ BEGIN
   FROM turn_calls WHERE turn_id = p_turn_id AND status NOT IN ('not_sent','rejected','no_charge_402');
   IF (p_call_kind = 'model' AND n_model >= (t.policy->'limits'->>'model')::int)
     OR (p_call_kind = 'decision' AND n_decision >= coalesce((t.policy->'limits'->>'decisions')::int, 0))
-    OR (p_call_kind = 'tool' AND p_paid AND n_paid >= (t.policy->'limits'->>'paidTools')::int)
+    OR (p_call_kind = 'tool' AND p_paid AND n_paid >= coalesce((t.policy->'limits'->>'toolRows')::int, (t.policy->'limits'->>'paidTools')::int))
     OR (p_call_kind = 'tool' AND NOT p_paid AND n_free >= (t.policy->'limits'->>'freeTools')::int)
     OR (p_call_kind = 'tool' AND NOT p_paid AND p_upper_usd <> 0) OR (p_paid AND p_upper_usd <= 0) THEN
     RAISE EXCEPTION 'TURN_CALL_LIMIT' USING ERRCODE='22023';

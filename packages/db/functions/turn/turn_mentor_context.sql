@@ -86,6 +86,8 @@ BEGIN
   RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'roundId', r.id, 'mode', d.mode, 'moduleId', p.module_id,
     'skillId', p.skill_id, 'revisionId', r.revision_id, 'packageHash', r.package_hash, 'steps', r.workflow->'steps',
     'suggestions', suggestions,
+    -- Fallback B (Owner 10-20, 10-27): at least one qualified benchmark and two confirmed search rounds; turn_close keeps the counts.
+    'fallbackEligible', d.research_qualified >= 1 AND d.research_rounds >= 2,
     'work', jsonb_build_object('projectId', p.id, 'roundId', r.id, 'revisionId', r.revision_id, 'packageHash', r.package_hash,
       'steps', steps, 'source', NULL) || CASE WHEN b.id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext',
       jsonb_build_object('version', 'opc-business-context.v1', 'businessId', b.id,

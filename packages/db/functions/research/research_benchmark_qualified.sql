@@ -9,6 +9,6 @@ CREATE OR REPLACE FUNCTION public.research_benchmark_qualified(a uuid, s uuid)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   SELECT count(*)::integer FROM research_benchmarks b
-  JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
-  WHERE b.actor_id=a AND b.session_id=s AND b.qualified AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+  LEFT JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
+  WHERE b.actor_id=a AND b.session_id=s AND b.qualified AND (b.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
 $function$;

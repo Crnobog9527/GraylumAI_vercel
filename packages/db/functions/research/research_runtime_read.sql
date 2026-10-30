@@ -15,43 +15,45 @@ BEGIN
   WHEN 'operation' THEN
     SELECT jsonb_build_object('identityHash',o.identity_hash,'state',o.state,'result',o.result,'executionId',p.execution_id) INTO v
     FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
-    JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s
+    LEFT JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s
     WHERE o.id=p_id AND p.actor_id=a AND p.session_id=s AND o.erased_at IS NULL AND p.erased_at IS NULL
-    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+    AND (p.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL));
   WHEN 'plan' THEN
     SELECT jsonb_build_object('executionId',p.execution_id,'discoveryId',p.discovery_id,'operations',p.operations,
       'budgetUnits',p.budget_units,'cancelled',p.cancelled) INTO v FROM research_plans p
-    JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s
+    LEFT JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s
     WHERE p.id=p_id AND p.actor_id=a AND p.session_id=s AND p.erased_at IS NULL
-    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+    AND (p.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL));
   WHEN 'discovery' THEN
     SELECT jsonb_build_object('discoveryId',d.id,'keywords',d.keywords,'platforms',d.platforms,'cursor',d.cursor,'state',d.state)
     INTO v FROM research_discoveries d
     JOIN research_selection_cards c ON c.confirmation_id=d.keyword_confirmation_id AND c.actor_id=a
-    JOIN runtime_executions src ON src.id=c.execution_id AND src.content_deleted_at IS NULL AND src.erased_at IS NULL
-    JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
-    WHERE d.id=p_id AND d.actor_id=a AND d.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+    LEFT JOIN runtime_executions src ON src.id=c.execution_id
+    LEFT JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE (c.turn_id IS NOT NULL OR (src.id IS NOT NULL AND src.content_deleted_at IS NULL AND src.erased_at IS NULL))
+      AND d.id=p_id AND d.actor_id=a AND d.session_id=s AND (d.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL));
   WHEN 'refresh' THEN
     SELECT jsonb_build_object('platform',g.platform,'account',g.account,'used',g.used_at IS NOT NULL AND NOT EXISTS(
       SELECT 1 FROM research_account_fetches f WHERE f.actor_id=a AND f.session_id=s AND f.refresh_id=g.id
       AND f.state='prepared' AND f.platform=g.platform AND f.account_key=encode(sha256(convert_to(s::text||':'||research_account_key(g.platform,g.account),'utf8')),'hex')))
     INTO v FROM research_refresh_grants g
-    JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
-    WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    LEFT JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s
+    AND (g.source_turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
     AND (g.used_execution_id IS NULL OR EXISTS(SELECT 1 FROM runtime_executions u WHERE u.id=g.used_execution_id
       AND u.actor_id=a AND u.session_id=s AND u.content_deleted_at IS NULL AND u.erased_at IS NULL));
   WHEN 'selected' THEN
     SELECT coalesce(jsonb_agg(item),'[]'::jsonb) INTO v FROM research_selection_cards c
-    JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
+    LEFT JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
     CROSS JOIN LATERAL jsonb_array_elements(c.confirmed_items) item
     WHERE c.actor_id=a AND c.session_id=s AND c.discovery_id=p_id AND c.kind='candidates' AND c.confirmation_id IS NOT NULL
-    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+    AND (c.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL));
   WHEN 'card' THEN
     SELECT jsonb_build_object('cardId',c.id,'kind',c.kind,'options',c.options,'minSelect',c.min_select,'maxSelect',c.max_select,
       'confirmationId',c.confirmation_id,'items',c.confirmed_items)
     INTO v FROM research_selection_cards c
-    JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
-    WHERE c.id=p_id AND c.actor_id=a AND c.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+    LEFT JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE c.id=p_id AND c.actor_id=a AND c.session_id=s AND (c.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL));
   ELSE RAISE EXCEPTION 'RESEARCH_READ_INVALID';
   END CASE;
   RETURN v;

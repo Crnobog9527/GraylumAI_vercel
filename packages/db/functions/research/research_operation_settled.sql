@@ -11,4 +11,6 @@ AS $function$
   SELECT o.state IN ('succeeded','failed','cancelled')
     OR (o.bill2_call_id IS NOT NULL AND o.state IN ('prepared','dispatched','unknown')
       AND EXISTS(SELECT 1 FROM bill2_calls c WHERE c.id=o.bill2_call_id AND c.settled_at IS NOT NULL))
+    -- A turn's operation is written at close: its unknown cost is the turn's receipt, kept on turn_calls for recovery.
+    OR EXISTS(SELECT 1 FROM research_plans p WHERE p.id=o.plan_id AND p.turn_id IS NOT NULL)
 $function$;
