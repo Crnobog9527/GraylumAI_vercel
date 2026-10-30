@@ -121,3 +121,13 @@ test('SET is a statement, UPDATE ... SET on its own line is not; ledger leaves m
   assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s WHERE id = r;'), []);
   assert.deepEqual(hits('UPDATE artifact_rounds SET steps = s;'), ['f: UPDATE of artifact_rounds without id or project_id in WHERE']);
 });
+
+test('an allowed lock must carry its owner key; a SKIP LOCKED batch claim need not; a multi-line UPDATE is not a SET command', () => {
+  const hits = body => scan('f', body, DEFAULTS);
+  assert.deepEqual(hits('BEGIN\n PERFORM id FROM profiles FOR UPDATE;\nEND;'), ['f: row lock on profiles without id in WHERE']);
+  assert.deepEqual(hits('SELECT 1 FROM runtime_sessions s WHERE s.scope = x FOR UPDATE OF s;'),
+    ['f: row lock on runtime_sessions without id or actor_id in WHERE']);
+  assert.deepEqual(hits('SELECT 1 FROM turns WHERE actor_id = a AND request_id = r FOR UPDATE;'), []);
+  assert.deepEqual(hits('WITH due AS (SELECT id FROM turns WHERE state = x LIMIT 5 FOR UPDATE SKIP LOCKED) SELECT id FROM due;'), []);
+  assert.deepEqual(hits('BEGIN\n UPDATE turns\n SET state=1 WHERE actor_id=a AND id=b;\nEND;'), []);
+}); 

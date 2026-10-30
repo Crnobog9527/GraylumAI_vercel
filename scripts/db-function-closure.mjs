@@ -20,9 +20,11 @@ export const DEFAULTS = {
   leaves: ['atomic_pre_deduct', 'turn_settle_credits', 'credit_available', 'credit_source_apply'],
   // Row locks (FOR UPDATE / FOR SHARE ...) may only name these objects.
   lockTables: ['runtime_sessions', 'profiles', 'turns'],
+  // ...and the lock's own SELECT must carry the owner key of the table (SKIP LOCKED batch claims excepted).
+  lockKeys: { profiles: ['id'], runtime_sessions: ['id', 'actor_id'], turns: ['actor_id', 'id'] },
   // UPDATE may only name these tables, and the statement must carry the table's owner key.
-  // The per-kind draft / report / review tables a turn may write one row of (ENGINEERING 5), with their owner keys. Adding a table
-  // needs the Owner's approval.
+  // The per-kind draft / report / review tables a turn may write one row of (ENGINEERING 5), with their owner keys. A kind's own PR adds
+  // the table it writes, with its owner key, and cites ENGINEERING 5 (aligning with the rule, not relaxing it).
   kindTables: { artifact_rounds: ['id', 'project_id'] },
   updateKeys: {
     turns: ['actor_id', 'id'], profiles: ['id'], runtime_sessions: ['id', 'actor_id'], session_messages: ['session_id'],
@@ -158,7 +160,16 @@ export function scan(name, body, options = DEFAULTS) {
         .map(m => ({ table: m[1].toLowerCase(), alias: (m[2] ?? '').toLowerCase() })).filter(f => !ctes.has(f.table));
       const named = lock[1] ? lock[1].split(',').map(x => x.trim().split('.').pop().toLowerCase()) : null;
       const targets = named ? named.map(n => from.find(f => f.alias === n || f.table === n)?.table ?? n) : from.map(f => f.table);
-      for (const table of targets) if (!ctes.has(table) && !options.lockTables.includes(table)) found.push(`${name}: row lock on ${table}`);
+      // A batch claim (SKIP LOCKED) takes whatever is due across owners by design; every other lock names its owner.
+      const batch = /^\s*SKIP\s+LOCKED/i.test(statement.slice(lock.index + lock[0].length));
+      for (const table of targets) {
+        if (ctes.has(table)) continue;
+        const keys = options.lockKeys[table];
+        if (!options.lockTables.includes(table)) found.push(`${name}: row lock on ${table}`);
+        else if (!batch && keys && !new RegExp(`\\bWHERE\\b[\\s\\S]*\\b(?:${keys.join('|')})\\b`, 'i').test(own)) {
+          found.push(`${name}: row lock on ${table} without ${keys.join(' or ')} in WHERE`);
+        }
+      }
     }
     // UPDATE <table> [[AS] alias] SET, anywhere in the statement: it may follow BEGIN, THEN, ELSE or a WITH list. FOR UPDATE, ON UPDATE
     // and DO UPDATE SET are not an UPDATE of a table.
