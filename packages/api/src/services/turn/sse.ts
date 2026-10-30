@@ -10,8 +10,10 @@ export type TurnEvent =
   | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean }
   | { type: 'text'; delta: string }
   | { type: 'result'; turnId: number; body: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null;
-      /** A report: how it closed (completed, or stopped by its user) and whether it is a complete report. */
-      closeKind?: string; delivered?: boolean }
+    /** V2-5: what the kind's close did (the mentor's checklist capture: applied fields, versions). */
+    kindResult?: unknown;
+    /** A report: how it closed (completed, or stopped by its user) and whether it is a complete report. */
+    closeKind?: string; delivered?: boolean }
   | { type: 'error'; code: string; turnId?: number };
 
 const CODE = /^[A-Z][A-Z0-9_]{2,63}$/;

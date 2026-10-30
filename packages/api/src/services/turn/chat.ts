@@ -38,7 +38,7 @@ import { swallow } from '../../lib/swallow';
  */
 export { CORE_PATH_SETTING } from './settingKeys';
 // decisionUpperUsd: the most one positioning check (Decisions) can cost the platform; it is reserved on the stop-loss (Fable 10-28).
-const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
+export const coreSetting = z.object({ enabled: z.boolean(), stopLoss: stopLossSettings,
   decisionUpperUsd: z.string().regex(/^0\.\d{1,12}$/) }).strict();
 export const HISTORY_ITEMS = 100;
 /** The core-path switch and stop-loss parameters from the admission configuration rows, or null when off or not valid. */
@@ -59,7 +59,7 @@ export type ChatDeps = {
 export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
-const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
+export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_TOMBSTONED: { kind: 'erased', refundAll: false },
   TURN_CALL_UNKNOWN: { kind: 'interrupted', refundAll: false },
   TURN_PROVIDER_402: { kind: 'failed', refundAll: true },

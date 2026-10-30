@@ -35,7 +35,9 @@ export type Begun = z.infer<typeof begun>;
 const recorded = tombstones.extend({ status: z.string(), creditsLow: z.boolean() });
 export type Recorded = z.infer<typeof recorded>;
 const closed = z.object({ turnId: z.number().int().positive(), closeKind: z.string(), chargedCredits: z.number().int().nullable(),
-  absorbedCredits: z.number().int().nullable(), settlement: z.enum(['pending', 'done']).nullable(), replay: z.boolean() })
+  absorbedCredits: z.number().int().nullable(), settlement: z.enum(['pending', 'done']).nullable(), replay: z.boolean(),
+  // What the kind's close function returned (the mentor's checklist capture), when it has one.
+  kindResult: z.unknown().optional() })
   .and(tombstones.partial());
 export type Closed = z.infer<typeof closed>;
 

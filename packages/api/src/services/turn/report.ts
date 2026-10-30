@@ -82,7 +82,7 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     const budgets = await readPurposeBudgets(admin, configuration);
     quote = await chatQuote(admin, { configuration: await configuration, modelId,
       inputBytes: budgets?.report.inputBytes ?? REPORT_INPUT_BYTES, deps: deps.pricing,
-      use: { phase: 'report', requestFormat: AGENT_TURN_REQUEST_FORMAT } });
+      use: { phase: 'report', requestFormat: AGENT_TURN_REQUEST_FORMAT, purpose: 'interactive' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     return emit({ type: 'error', code: error instanceof QuoteError ? error.code : /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message

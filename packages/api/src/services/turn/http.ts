@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { runChatTurn, type ChatDeps } from './chat';
 import { reportTurnRequest, runReportTurn } from './report';
+import { runMentorTurn } from './mentor';
 import { eventStream } from './sse';
 import { swallow } from '../../lib/swallow';
 
@@ -10,11 +11,15 @@ import { swallow } from '../../lib/swallow';
  * shape, the deployment's declared database host against the host it actually connects to (2.8: the only environment check
  * left, refusing a deployment that points at the wrong database), the signed-in account and the request rate limit.
  */
-export const chatTurnRequest = z.object({
-  kind: z.literal('chat'), sessionId: z.string().uuid(), requestId: z.string().uuid(),
-  text: z.string().trim().min(1).max(200_000),
-}).strict();
-export const turnRequest = z.discriminatedUnion('kind', [chatTurnRequest, reportTurnRequest]);
+const common = { sessionId: z.string().uuid(), requestId: z.string().uuid() };
+export const turnRequest = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('chat'), ...common, text: z.string().trim().min(1).max(200_000) }).strict(),
+  // V2-5: the positioning mentor. moduleId is the draft's module (the turn is quoted for its model; turn_open refuses any other);
+  // text is the user's words, or the host's opening marker. 8000 characters, as the old mentor request.
+  z.object({ kind: z.literal('mentor'), ...common, moduleId: z.string().uuid(), stepId: z.string().min(1).max(128),
+    text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean() }).strict(),
+  reportTurnRequest,
+]);
 
 export type TurnHttpDeps = {
   authenticate: (request: Request) => Promise<string | null>;
@@ -41,5 +46,7 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
       projectId: input.projectId, roundId: input.roundId, acceptedCredits: input.acceptedCredits };
     return eventStream(emit => runReportTurn(deps.chat, report, emit, gone.signal), () => gone.abort());
   }
+  if (input.kind === 'mentor') return eventStream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
+    requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter }, emit));
   return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text }, emit));
 }
