@@ -450,6 +450,9 @@ try{
   await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[k.actor,ok.turnId,2,'ok',0.0021,0.0021,'{}',null,hash('late2'),null]);
   assert.equal((await close(k,ok.turnId,'completed',{delivered:true})).chargedCredits,2,'only the delivered column (ceil(100 x 0.0021 x 6) = 2)');
   assert.equal(await one('select fusion_call_output_read($1,$2) v',[k.actor,await one('select call_id v from fusion_turn_outputs where turn_id=$1 and seq=2',[ok.turnId])]),null);
+  // ...and the 7-day breaker still counts it, though its turn charged something and its receipt says ok.
+  const borne=await one('select fusion_review_breaker_usage($1) v',[k.actor]);
+  assert.deepEqual([borne.noDeliveryCalls,Number(borne.platformUsd)],[1,0.0021]);
   report.checks.push('a complete answer whose cost is not final is saved and judged while its call stays open; repeat is a no-op, a different body conflicts, a settled call refuses; a deliverable revision saved so still pays the fixed price; a refused compare column settled later is never charged nor shown');
  }
  // 11. Only the service role calls the new functions; clients cannot read the saved answers.

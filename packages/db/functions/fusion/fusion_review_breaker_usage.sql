@@ -19,10 +19,12 @@ AS $function$
     FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id LEFT JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
     WHERE r.actor_id=a AND r.fusion_group_id IS NOT NULL AND c.created_at>=clock_timestamp()-interval '7 days') o,
   (SELECT count(*) FILTER (WHERE c.status IN ('rejected','no_charge_402')
-      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery')) n,
+      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery') OR f.verdict='no_delivery') n,
     coalesce(sum(coalesce(c.actual_usd,c.nominal_usd,0)) FILTER (WHERE c.status='unusable'
-      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0)),0) usd
+      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0) OR f.verdict<>'usable'),0) usd
     FROM turn_calls c JOIN turns t ON t.actor_id=c.actor_id AND t.id=c.turn_id
+    -- A verdict saved before the cost was final: recovery records such a call as ok, but the platform bears it.
+    LEFT JOIN fusion_turn_outputs f ON f.turn_id=c.turn_id AND f.seq=c.seq
     WHERE c.actor_id=a AND t.kind IN ('compare','jury') AND c.call_kind='model'
       AND c.dispatched_at>=clock_timestamp()-interval '7 days') t;
 $function$;

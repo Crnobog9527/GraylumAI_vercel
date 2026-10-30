@@ -3651,7 +3651,7 @@
   "fn:fusion_review_archive_reconcile(uuid,jsonb)": "86ffa3eb4f49",
   "fn:fusion_review_available(uuid,integer)": "7bac72c3f324",
   "fn:fusion_review_breaker_clear(uuid,uuid,text)": "20a42268d2b9",
-  "fn:fusion_review_breaker_usage(uuid)": "31e3eeaad128",
+  "fn:fusion_review_breaker_usage(uuid)": "301c301c2917",
   "fn:fusion_review_claim(uuid,uuid,integer,text,integer,uuid,jsonb)": "ae2cd4b381d4",
   "fn:fusion_review_close(uuid,uuid,text)": "c0706e1a2e0b",
   "fn:fusion_review_end_paused(interval,integer)": "1e4738d3d4e3",
