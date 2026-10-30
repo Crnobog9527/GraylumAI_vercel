@@ -69,6 +69,12 @@ async function panelQuotes(deps: JuryDeps, cfg: { reviewers: string[]; summary: 
     phase === 'fusion_summary' ? summary : reviewers.find(q => q.modelId === modelId)! };
 }
 
+/** Prices as jsonb returned them (key order is not kept) against a live quote's. */
+const samePricing = (frozen: unknown, live: unknown) => {
+  const canonical = (value: unknown) => JSON.stringify(Object.entries((value ?? {}) as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));
+  return canonical(frozen) === canonical(live);
+};
+
 /** The quotes estimateReview reads, one per model (it matches by model id): a model that is both a reviewer and the summary
  * keeps the larger of its two output limits, since each phase's bound takes the smaller of that limit and its own tokens. */
 export function estimateQuotes(quotes: readonly FusionQuote[]) {
@@ -157,7 +163,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
       const policy = fusionPolicy({ q, calls: planned, gCredits: priceCredits + holdCredits, minCredits: priceCredits + holdCredits,
         fixedCredits: priceCredits, stopLoss: coreSetting.stopLoss, quotes });
       const reviewConfig = { path: 'turn', models: Object.fromEntries(quotes.map(quote => [quote.modelId, quote.model])),
-        estimateUsd: estimate.estimateUsd, estimateCredits: priceCredits,
+        pricings: Object.fromEntries(quotes.map(quote => [quote.modelId, quote.pricing])), estimateUsd: estimate.estimateUsd, estimateCredits: priceCredits,
         fixedPrice: { credits: priceCredits, holdCredits }, callCaps: estimate.callCaps, maxRounds: estimate.rounds,
         reviewers: settings.reviewerModelIds, evidence: true,
         roles: settings.reviewerModelIds.map(id => settings.reviewerRoles[id] ?? null), summary: settings.summaryModelId,
@@ -289,6 +295,9 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
       // The route frozen at the start (policy.models): recovery checks a late receipt against it, so a model record re-pointed
       // since never gets another paid call of this review.
       if (cfg.models && cfg.models[member.modelId] !== quote.model) throw new Error('FUSION_MODEL_DENIED');
+      // The price too (policy.pricings): recovery settles a late cost at it, so a call must not be sent at another. A price
+      // changed mid-review ends it as a bound exceeded does (price_changed, refunded).
+      if (cfg.pricings && samePricing(cfg.pricings[member.modelId], quote.pricing) === false) throw new Error('FUSION_ESTIMATE_EXCEEDED');
       const body = fusionRequestBody(quote.policy as never, member.request, quote.outputLimit, quote.reasoning);
       const call = fusionCall(quote, body);
       const cap = caps[member.modelId];

@@ -21,6 +21,8 @@ export const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().
   evidence: z.boolean().optional(), roles: z.array(z.enum(REVIEWER_ROLES).nullable()).optional(),
   /** The turn path's frozen provider route of each model (absent on BILL2 reviews). */
   models: z.record(z.string(), z.string()).optional(),
+  /** The turn path's frozen nominal price of each model. */
+  pricings: z.record(z.string(), z.unknown()).optional(),
   /** "最多消耗 X 积分" (§3.2), shown before the user agrees; absent on reviews started before it was recorded. */
   estimateCredits: z.number().int().positive().optional(),
   /** Each call's credit and dollar bounds by phase and model, frozen with that maximum (absent on older reviews: no cap). */

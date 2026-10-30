@@ -138,6 +138,15 @@ describe('jury turn advance', () => {
     expect(m.close).toHaveBeenCalledWith(expect.objectContaining({ refundAll: true, product: expect.objectContaining({ state: 'incomplete' }) }));
   });
 
+  it('a price changed since the start ends the review refunded: recovery settles at the frozen price (#1522 review)', async () => {
+    const frozen = { input: '1', output: '2' };
+    m.read.mockResolvedValue(view({ config: { ...cfg, pricings: Object.fromEntries(REVIEWERS.map(id => [id, frozen])) } }));
+    expect(await jury().advance(view().reviewId)).toMatchObject({ next: false, reason: 'ended' });
+    expect(m.runGroup).not.toHaveBeenCalled();
+    expect(m.close).toHaveBeenCalledWith(expect.objectContaining({ refundAll: true, product: expect.objectContaining({
+      state: 'incomplete', outcome: expect.objectContaining({ kind: 'price_changed' }) }) }));
+  });
+
   it('a review ended while its group ran is settled by that end, not by the answers just saved (#1522 review)', async () => {
     m.read.mockResolvedValueOnce(view()).mockResolvedValue(view({ state: 'incomplete', outcome: { kind: 'source_archived' }, fee: { state: 'held' } }));
     expect(await jury().advance(view().reviewId)).toMatchObject({ next: false, reason: 'ended' });
