@@ -7910,6 +7910,25 @@ it("OPC: V2-5d a source draft revoked after the check stops the open, the close 
  await expect(sql.query('select turn_session_view($1,$2,0)',[row.actor_id,row.session_id])).rejects.toThrow('TURN_SESSION_DENIED');
 });
 
+it("OPC: V2-5c a free chat reads benchmarks a turn made, through the workspace source",async()=>{
+ const f=await publishedDraft(6,true,true);
+ const row=(await sql.query('select actor_id,session_id from opc_drafts where draft_id=$1',[f.d.draftId])).rows[0];
+ const fetchId=randomUUID();
+ await sql.query(`insert into research_account_fetches(id,actor_id,session_id,turn_actor_id,turn_id,platform,account,account_key,state)
+  values($1,$2,$3,$2,1,'tiktok','turn_made',$4,'failed')`,[fetchId,row.actor_id,row.session_id,randomUUID().replace(/-/g,'').padEnd(64,'0')]);
+ await sql.query(`insert into research_benchmarks(fetch_id,actor_id,session_id,turn_actor_id,turn_id,platform,account,followers,posts_analyzed,last_published_at,category,qualified,refs,operation_ids,missing,fetched_at)
+  values($1,$2,$3,$2,1,'tiktok','turn_made',50000,20,now(),'imitable',true,'{}','{}','{}',now())`,[fetchId,row.actor_id,row.session_id]);
+ const chatDraft=(await sql.query('select bill2_create_draft($1) v',[row.actor_id])).rows[0].v;
+ const chat=randomUUID();
+ await sql.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+  [chat,row.actor_id,JSON.stringify({kind:'positioning_draft',draftId:chatDraft}),randomUUID()]);
+ const index=(await sql.query("select runtime_workspace_source($1,$2,'') v",[row.actor_id,chat])).rows[0].v;
+ const entry=index.entries.find((e:{kind:string})=>e.kind==='benchmarks');
+ expect(entry?.producedBy).toEqual([{turnId:1}]);
+ const accounts=(await sql.query('select research_chat_benchmark_accounts($1,$2,null) v',[row.actor_id,chat])).rows[0].v;
+ expect(JSON.stringify(accounts)).toContain('turn_made');
+});
+
 it("OPC: account inheritance validates dependency order and revocable local evidence",async()=>{
  const f=await publishedDraft(3,true,true,true);
  const plan=await f.service.savePlan({draftId:f.d.draftId,requestId:randomUUID(),expectedVersion:0,sourceVersionId:f.sourceVersionId,

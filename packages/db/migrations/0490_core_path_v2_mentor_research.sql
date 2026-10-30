@@ -308,6 +308,165 @@ BEGIN
   RETURN g;
 END $function$;;
 
+CREATE OR REPLACE FUNCTION public.research_operation_settled(o research_operations)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT o.state IN ('succeeded','failed','cancelled')
+    OR (o.bill2_call_id IS NOT NULL AND o.state IN ('prepared','dispatched','unknown')
+      AND EXISTS(SELECT 1 FROM bill2_calls c WHERE c.id=o.bill2_call_id AND c.settled_at IS NOT NULL))
+    -- A turn's operation is written at close: its unknown cost is the turn's receipt, kept on turn_calls for recovery.
+    OR EXISTS(SELECT 1 FROM research_plans p WHERE p.id=o.plan_id AND p.turn_id IS NOT NULL)
+$function$;;
+
+CREATE OR REPLACE FUNCTION public.runtime_workspace_source(p_actor_id uuid, p_session_id uuid, p_query text DEFAULT ''::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE entries jsonb;entry jsonb;body text;version_id uuid;cap integer:=4000;produced jsonb;strategy jsonb;fit jsonb;profile jsonb;
+BEGIN
+ IF NOT runtime_workspace_session(p_actor_id,p_session_id) THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_DENIED';END IF;
+ IF length(coalesce(p_query,''))>2000 THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_QUERY_DENIED';END IF;
+ -- Metadata is requested by the model, not loaded into every conversation.
+ SELECT coalesce(jsonb_agg(x.entry ORDER BY x.rank,x.id),'[]') INTO entries FROM (
+  SELECT 0 rank,b.id::text id,jsonb_build_object('id',b.id,'kind','positioning','name',b.name,'confirmedAt',v.created_at,'sourceVersionId',b.current_source_version_id)
+   -- 0301: a finalized report with strategy data is read by its own id; it takes none of the 40 places.
+   ||CASE WHEN opc_strategy_data(b.current_source_version_id) IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('strategyReport',
+    jsonb_build_object('id','strategy_report:'||b.id,'use','Finalized report strategy data with these confirmed fields: next steps, '
+     ||'this week, 30-day plan and metrics, monetization, audience, benchmarks, assumptions.')) END entry
+  FROM opc_businesses b JOIN artifact_versions v ON v.id=b.current_source_version_id WHERE b.actor_id=p_actor_id AND b.erased_at IS NULL AND b.current_source_version_id IS NOT NULL
+   AND opc_source_allowed(p_actor_id,b.current_source_version_id)
+  UNION ALL
+  SELECT 1,s.session_id::text,jsonb_build_object('id',s.session_id,'kind','benchmarks','name',b.name,'sessionId',s.session_id,
+   'accounts',s.accounts,'qualified',s.qualified,'fetchedAt',s.fetched_at,'sourceVersionId',b.current_source_version_id,
+   'producedBy',s.produced_by,
+   'use','Real public data of benchmark accounts fetched during positioning research; numbers come only from this table.')
+  FROM opc_businesses b CROSS JOIN LATERAL (
+   SELECT d.session_id,count(*)::int accounts,(count(*) FILTER (WHERE rb.qualified))::int qualified,max(rb.fetched_at) fetched_at,
+    jsonb_agg(DISTINCT jsonb_strip_nulls(jsonb_build_object('executionId',rb.execution_id,'turnId',rb.turn_id))) produced_by
+   FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id AND d.actor_id=p_actor_id
+    AND d.project_id=(SELECT cv.project_id FROM artifact_versions cv WHERE cv.id=b.current_source_version_id)
+   JOIN runtime_sessions rs ON rs.id=d.session_id AND rs.actor_id=p_actor_id AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL
+   JOIN research_benchmarks rb ON rb.session_id=d.session_id AND rb.actor_id=p_actor_id
+   LEFT JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=d.session_id
+   WHERE db.business_id=b.id AND (rb.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)) GROUP BY d.session_id ORDER BY max(rb.fetched_at) DESC,d.session_id LIMIT 1) s
+  WHERE b.actor_id=p_actor_id AND b.erased_at IS NULL AND b.current_source_version_id IS NOT NULL
+   AND opc_source_allowed(p_actor_id,b.current_source_version_id)
+  UNION ALL
+  SELECT 2,ac.project_id::text,jsonb_build_object('id',ac.project_id,'kind','strategy','platform',ac.platform,'account',coalesce((SELECT display_name FROM opc_account_ui WHERE actor_id=p_actor_id AND account_project_id=ac.project_id),ac.account_key),'sourceVersionId',ac.source_version_id)
+  FROM opc_accounts ac WHERE ac.actor_id=p_actor_id AND opc_source_allowed(p_actor_id,ac.source_version_id)
+  UNION ALL
+  SELECT 2,i.work_item_id::text,jsonb_build_object('id',i.work_item_id,'kind','topic','platform',ac.platform,'account',coalesce((SELECT display_name FROM opc_account_ui WHERE actor_id=p_actor_id AND account_project_id=ac.project_id),ac.account_key),'title',coalesce((SELECT title FROM opc_item_edits WHERE work_item_id=i.work_item_id),p.work_title),'sourceVersionId',i.source_version_id)
+  FROM opc_items i JOIN opc_accounts ac ON ac.project_id=i.account_project_id JOIN artifact_projects p ON p.id=i.work_item_id AND p.actor_id=p_actor_id
+  WHERE ac.actor_id=p_actor_id AND opc_source_allowed(p_actor_id,i.source_version_id)
+  ORDER BY rank,id LIMIT 40
+ ) x;
+ -- B2 own posts: no changes to the existing directory entries or dependencies.
+ DECLARE post_entries jsonb:='[]';days integer:=0;chosen jsonb;
+ BEGIN
+  IF (SELECT value='true'::jsonb FROM system_settings WHERE key='chat_my_posts_enabled')
+   AND (SELECT value='true'::jsonb FROM system_settings WHERE key='publish_monitor_enabled') THEN
+   days:=runtime_workspace_post_window(p_actor_id);
+   SELECT jsonb_agg(jsonb_build_object('id','my_posts:'||d,'kind','my_posts','name','我的作品 · '||d||' 天',
+    'windowDays',d,'use','Saved own post metrics, free to read. Default 14 days. At most two reads per answer.') ORDER BY d)
+    INTO post_entries FROM unnest(ARRAY[14,30,90]) d WHERE d=14 OR d<=days;
+  END IF;
+  IF coalesce(p_query,'')='' THEN
+   RETURN jsonb_build_object('kind','workspace_index','entries',entries||post_entries,'limit',40+jsonb_array_length(post_entries),
+    'dependencies',(SELECT coalesce(jsonb_agg(DISTINCT x->>'sourceVersionId'),'[]') FROM jsonb_array_elements(entries) x));
+  END IF;
+  IF p_query IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN
+   SELECT x INTO chosen FROM jsonb_array_elements(post_entries) x WHERE x->>'id'=CASE WHEN p_query='my_posts' THEN 'my_posts:14' ELSE p_query END;
+   IF chosen IS NULL THEN RETURN jsonb_build_object('kind','unavailable','dependencies','[]'::jsonb);END IF;
+   -- The current claim is already journaled: a third attempt must stop before the host calls PR-3a's data reader.
+   IF (SELECT count(*) FROM runtime_sessions active_s JOIN runtime_tool_calls t ON t.execution_id=active_s.active_execution
+    WHERE active_s.id=p_session_id AND active_s.actor_id=p_actor_id AND t.name='read_source'
+     AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90'))>2 THEN
+    RETURN jsonb_build_object('kind','unavailable','reason','read_limit','dependencies','[]'::jsonb,'note','本条回答的作品读取次数已用完');
+   END IF;
+   RETURN jsonb_build_object('kind','workspace_posts_request','windowDays',(chosen->>'windowDays')::int,'entitled',days>0,'review',coalesce((SELECT value='true'::jsonb
+   FROM system_settings WHERE key='publish_monitor_review_enabled'),false)); -- PR6 review descriptor
+  END IF;
+ END;
+ IF coalesce(p_query,'')='' THEN
+  RETURN jsonb_build_object('kind','workspace_index','entries',entries,'limit',40,'dependencies',(SELECT coalesce(jsonb_agg(DISTINCT x->>'sourceVersionId'),'[]') FROM jsonb_array_elements(entries) x));
+ END IF;
+ -- 0301: one read gives the confirmed fields and both strategy groups; over 48000 bytes whole strategy fields are
+ -- dropped in the fixed order (listed in strategyDropped), never the confirmed fields and never a cut JSON.
+ IF p_query LIKE 'strategy\_report:%' THEN
+  SELECT x INTO entry FROM jsonb_array_elements(entries) x WHERE x->>'kind'='positioning' AND x->'strategyReport'->>'id'=p_query;
+  strategy:=CASE WHEN entry IS NULL THEN NULL ELSE opc_strategy_data((entry->>'sourceVersionId')::uuid) END;
+  IF strategy IS NULL THEN RETURN jsonb_build_object('kind','unavailable','dependencies','[]'::jsonb);END IF;
+  version_id:=(entry->>'sourceVersionId')::uuid;profile:=opc_profile(version_id);
+  fit:=report_strategy_fit(strategy->'data',report_strategy_fields(),greatest(0,48000-octet_length(coalesce(profile,'null'::jsonb)::text)));
+  RETURN jsonb_build_object('kind','workspace_source',
+   'identity',(entry-'strategyReport')||jsonb_build_object('id',p_query,'kind','strategy_report','positioningId',entry->'id'),
+   'body',jsonb_build_object('profile',profile,'strategy',fit->'strategy','strategyTextEdited',strategy->'textEdited',
+    'strategyDropped',fit->'dropped','use',opc_strategy_use()),
+   'truncated',jsonb_array_length(fit->'dropped')>0,'dependencies',jsonb_build_array(version_id));
+ END IF;
+ SELECT x INTO entry FROM jsonb_array_elements(entries) x WHERE x->>'id'=p_query;
+ IF entry IS NULL THEN RETURN jsonb_build_object('kind','unavailable','dependencies','[]'::jsonb);END IF;
+ version_id:=(entry->>'sourceVersionId')::uuid;
+ IF entry->>'kind' IN ('strategy','positioning') THEN body:=opc_profile(version_id)::text;
+ ELSIF entry->>'kind'='benchmarks' THEN
+  -- 0299 unchanged: one statement, one snapshot. The rows (same projection as research_benchmark_table: live answers of
+  -- this session, at most 30, same order) and the answers they came from are computed together, so producedBy always
+  -- describes the body even if a content erasure commits meanwhile.
+  SELECT coalesce(jsonb_agg(jsonb_build_object('platform',b.platform,'account',b.account,'followers',b.followers,
+    'medianViews',b.median_views,'engagementRate',b.engagement_rate,'postsPerWeek',b.posts_per_week,
+    'lastPublishedAt',b.last_published_at,'postsAnalyzed',b.posts_analyzed,'category',b.category,'qualified',b.qualified,
+    'excluded',b.excluded,'missing',to_jsonb(b.missing),'fetchedAt',b.fetched_at)
+    ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account),'[]'::jsonb)::text,
+   coalesce(jsonb_agg(DISTINCT jsonb_strip_nulls(jsonb_build_object('executionId',b.execution_id,'turnId',b.turn_id))),'[]'::jsonb) INTO body,produced
+  FROM (SELECT rb.* FROM research_benchmarks rb
+    LEFT JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=rb.session_id
+    WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid
+      AND (rb.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
+    ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account LIMIT 30) b;
+  cap:=8000;
+  RETURN jsonb_build_object('kind','workspace_source','identity',entry-'producedBy'-'accounts'-'qualified'-'fetchedAt','body',left(body,cap),'truncated',length(body)>cap,
+   'producedBy',produced,'dependencies',jsonb_build_array(version_id));
+ ELSE SELECT coalesce((SELECT ed.brief FROM opc_item_edits ed WHERE ed.work_item_id=i.work_item_id),i.brief) INTO body FROM opc_items i WHERE i.work_item_id=(entry->>'id')::uuid;END IF;
+ RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,'dependencies',jsonb_build_array(version_id));
+END $function$;;
+
+CREATE OR REPLACE FUNCTION public.runtime_workspace_benchmark_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE a uuid;s uuid;sessions uuid[];one jsonb;
+BEGIN
+ -- A read of one benchmark table ('workspace_source') or an index listing one ('workspace_index'): both carry producedBy.
+ IF NEW.name<>'read_source' OR NEW.result IS NULL THEN RETURN NEW;END IF;
+ IF NEW.result->>'kind'='workspace_source' AND NEW.result#>>'{identity,kind}'='benchmarks' THEN
+  sessions:=ARRAY[(NEW.result#>>'{identity,sessionId}')::uuid];
+ ELSIF NEW.result->>'kind'='workspace_index' THEN
+  sessions:=ARRAY(SELECT (e->>'sessionId')::uuid FROM jsonb_array_elements(NEW.result->'entries') e WHERE e->>'kind'='benchmarks');
+ END IF;
+ IF coalesce(cardinality(sessions),0)=0 THEN RETURN NEW;END IF;
+ SELECT actor_id INTO a FROM runtime_executions WHERE id=NEW.execution_id;
+ PERFORM p.id FROM artifact_projects p JOIN opc_drafts od ON od.project_id=p.id
+  WHERE od.session_id=ANY(sessions) AND p.actor_id=a ORDER BY p.id FOR SHARE OF p;
+ FOR one IN SELECT x FROM jsonb_array_elements(CASE WHEN NEW.result->>'kind'='workspace_index'
+   THEN (SELECT coalesce(jsonb_agg(e),'[]') FROM jsonb_array_elements(NEW.result->'entries') e WHERE e->>'kind'='benchmarks')
+   ELSE jsonb_build_array(NEW.result||jsonb_build_object('sessionId',NEW.result#>>'{identity,sessionId}')) END) x LOOP
+  s:=(one->>'sessionId')::uuid;
+  IF NOT EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=s AND rs.actor_id=a AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL)
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(one->'producedBy','[]'::jsonb)) i
+    WHERE i ? 'executionId' AND NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=(i->>'executionId')::uuid AND x.actor_id=a
+     AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
+  THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
+ END LOOP;
+ RETURN NEW;
+END $function$;;
+
 CREATE OR REPLACE FUNCTION public.opc_draft_identity()
  RETURNS trigger
  LANGUAGE plpgsql

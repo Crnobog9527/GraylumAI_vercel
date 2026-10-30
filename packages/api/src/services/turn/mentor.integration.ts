@@ -642,6 +642,9 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: an unknown supplier result is not the user\'s, 
   expect(unknown.events.at(-1)?.type).toBe('result');
   const rows = (await db.query(`select c.status from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool'`, [g.actor])).rows;
   expect(rows.map(r => r.status)).toEqual(['unknown']);
+  // Its cost stays on the receipt: the operation does not hold up deleting the conversation.
+  expect((await db.query(`select research_operation_settled(o) v from research_operations o join research_plans p on p.id=o.plan_id where p.session_id=$1`,
+    [g.session])).rows).toEqual([{ v: true }]);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5c: a benchmark step without its tools, and a link that cannot be checked, are refused with nothing sent', async () => {
