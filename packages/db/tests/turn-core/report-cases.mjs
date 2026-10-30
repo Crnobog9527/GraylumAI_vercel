@@ -43,6 +43,26 @@ export async function reportCases(t){
   await c.query("update profiles set membership_level='gold' where id=$1",[a.actor]);
   // The confirmed facts and the benchmark gate are read by Node before opening (B1); under turn_open's locks the round must be
   // this conversation's draft: another round of the same account is refused.
+  // Membership (#1523 review): Node calls report_membership_check before opening, which reads the subscription's period end, not
+  // only the cached level. A Gold-level account whose Stripe subscription ended is refused there; the active one passes.
+  {
+   const m=await account(1000);
+   await c.query("update profiles set membership_level='gold' where id=$1",[m.actor]);
+   const plan=await one("select id v from membership_plans where level='gold' limit 1")
+    ??await one("insert into membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes) values('Report turn fixture','gold',true,true,1048576) returning id v");
+   const sub=randomUUID(),external='turn-report-'+sub;
+   await c.query(`insert into user_subscriptions(id,user_id,membership_plan_id,stripe_subscription_id,status,billing_cycle,current_period_end,
+     payment_channel,merchant_namespace,payment_mode,contract_snapshot) values($1,$2,$3,$4,'active','monthly',now()+interval '1 month','stripe','turn-report','test',$5)`,
+    [sub,m.actor,plan,external,JSON.stringify({version:1,item_type:'membership_plan',item_id:plan,item_updated_at:'2026-10-05T00:00:00Z',
+     billing_cycle:'monthly',currency:'usd',unit:'major',price:'19.99',discount:'0.00',tax_behavior:'unspecified',credits:100,bonus_credits:0})]);
+   await c.query(`insert into payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,subscription_id)
+     values('stripe','turn-report','test','subscription',$1,$2)`,[external,sub]);
+   const check=async()=>{await c.query('set role service_role');
+    try{return await one('select report_membership_check($1)::text v',[m.actor]);}finally{await c.query('reset role');}};
+   await check();
+   await c.query("update user_subscriptions set current_period_end=now()-interval '1 second' where id=$1",[sub]);
+   assert.match(await refusal(check()),/REPORT_MEMBERSHIP_REQUIRED/,'an ended subscription is refused although the cached level is gold');
+  }
   // An archived business is read-only (0324): its draft's report does not open (nothing frozen); unarchived, it does.
   const business=await one("insert into opc_businesses(actor_id,name) values($1,'archived business') returning id v",[a.actor]);
   await c.query('insert into opc_draft_businesses(draft_id,business_id) values($1,$2)',[src.draft,business]);

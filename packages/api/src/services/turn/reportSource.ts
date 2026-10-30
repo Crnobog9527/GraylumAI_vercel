@@ -7,8 +7,10 @@ import { benchmarkReportFacts, benchmarkShortfallNote, confirmedReportFacts, fro
 import type { TurnDatabase } from './db';
 
 /*
- * CORE-PATH-V2 V2-7a, controller 10-30 (B1): what a report reads before it opens, on the read client and by the actor's own
- * keys, so turn_open's closure stays the core path's. The round's confirmed source (report_source: every step confirmed, its
+ * CORE-PATH-V2 V2-7a, controller 10-30 (B1): what a report reads before it opens, by the actor's own keys, so turn_open's
+ * closure stays the core path's. The membership check of the old admission (report_membership_check: payment facts, refunds and
+ * the subscription's period end; on the write client, as it takes the account's own row lock), then on the read client the
+ * round's confirmed source (report_source: every step confirmed, its
  * evidence still readable, the round bound to this conversation), the session's benchmark table, and the benchmark gate of the
  * old report admission (enough qualified accounts, or the user's frozen "generate" choice after a short sample, 0268/0320).
  * turn_open re-checks under its locks only the round's module, the membership level and one paid report per round. The reads
@@ -24,6 +26,9 @@ const shortfallRead = z.object({ rounds: z.number().int(), qualified: z.number()
 
 export async function readReportSource(db: TurnDatabase, input: { actorId: string; sessionId: string; projectId: string;
   roundId: string; moduleId: string }): Promise<ReportSource> {
+  // Membership as the old admission checked it (#1523 review): the cached level alone may outlive an expired or refunded
+  // subscription; turn_open re-checks the cached level under its locks.
+  await db.reportMembership(input);
   const source = await db.reportSource(input);
   const snapshot = snapshotSchema.parse(source.snapshot);
   const manifest = workflowSchema.parse(source.workflow).reportGeneration;

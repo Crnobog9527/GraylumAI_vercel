@@ -58,6 +58,7 @@ const pre = {
 const COMPLETE = '## One\nFirst.\n## Two\nSecond.';
 
 function harness(over: { open?: () => unknown; openError?: string; state?: string; sourceError?: string; shortQualified?: number;
+  membershipError?: string;
   gate?: { message?: { ok: false; reason: string }; calls?: { ok: false; reason: string } } } = {}) {
   const rpc: Array<[string, Record<string, unknown>]> = [];
   const respond = async (name: string, args: Record<string, unknown>) => {
@@ -69,6 +70,8 @@ function harness(over: { open?: () => unknown; openError?: string; state?: strin
     // The reads before opening (B1): the round's source, the benchmark table (empty here) and the shortfall card the user chose.
     if (name === 'report_source') return over.sourceError ? { data: null, error: { code: 'P0001', message: over.sourceError } }
       : { data: { ...pre.source, moduleId: input.moduleId }, error: null };
+    if (name === 'report_membership_check') return over.membershipError
+      ? { data: null, error: { code: 'P0001', message: over.membershipError } } : { data: null, error: null };
     if (name === 'research_benchmark_rows') return { data: pre.benchmarks, error: null };
     if (name === 'research_user_shortfall') return { data: { rounds: 2, qualified: over.shortQualified ?? 1,
       card: { cardId: uuid(9), required: 3, choice: 'generate' } }, error: null };
@@ -220,10 +223,13 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
   it('reads the source and the benchmark gate before opening, on the read client; a refusal there opens nothing', async () => {
     const t = harness(); runs(COMPLETE);
     await runReportTurn(t.deps, input, t.emit);
-    expect(t.rpc.map(([n]) => n).slice(0, 4)).toEqual(['report_source', 'research_benchmark_rows', 'research_user_shortfall', 'turn_open']);
+    expect(t.rpc.map(([n]) => n).slice(0, 5)).toEqual(['report_membership_check', 'report_source', 'research_benchmark_rows',
+      'research_user_shortfall', 'turn_open']);
     expect(t.args('report_source')).toEqual({ p_actor_id: 'actor', p_session_id: SESSION, p_project_id: input.projectId,
       p_round_id: ROUND });
-    for (const [over, code] of [[{ sourceError: 'REPORT_CONFIRMATION_REQUIRED' }, 'REPORT_CONFIRMATION_REQUIRED'],
+    for (const [over, code] of [[{ membershipError: 'REPORT_MEMBERSHIP_REQUIRED' }, 'REPORT_MEMBERSHIP_REQUIRED'],
+      [{ membershipError: 'REPORT_ENTITLEMENTS_UNAVAILABLE' }, 'REPORT_ENTITLEMENTS_UNAVAILABLE'],
+      [{ sourceError: 'REPORT_CONFIRMATION_REQUIRED' }, 'REPORT_CONFIRMATION_REQUIRED'],
       [{ sourceError: 'REPORT_SOURCE_CONFLICT' }, 'REPORT_SOURCE_CONFLICT'], [{ shortQualified: 0 }, 'REPORT_BENCHMARKS_REQUIRED']] as const) {
       const r = harness(over);
       await runReportTurn(r.deps, input, r.emit);

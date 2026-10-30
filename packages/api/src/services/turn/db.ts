@@ -119,6 +119,10 @@ export function turnDatabase(clients: TurnClients) {
         p_turn_id: a.turnId }, reportTurn.nullable()),
     // A report's reads before it opens (controller 10-30, B1), on the read client and by the actor's own keys: the confirmed
     // source of its round, the session's benchmark table, and the benchmark shortfall card (only when the table is short).
+    // The report membership check of the old admission (payment facts, refunds, the subscription's period end; never only the
+    // cached level): on the write client, as it takes the account's own row lock to serialize with paid fulfilment.
+    reportMembership: (a: { actorId: string }) =>
+      call(w, 'report_membership_check', { p_actor_id: a.actorId }, z.unknown()),
     reportSource: (a: { actorId: string; sessionId: string; projectId: string; roundId: string }) =>
       call(clients.read, 'report_source', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_project_id: a.projectId,
         p_round_id: a.roundId }, z.record(z.string(), z.unknown())),
