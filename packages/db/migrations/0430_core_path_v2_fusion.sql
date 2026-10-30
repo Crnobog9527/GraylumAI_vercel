@@ -438,13 +438,20 @@ CREATE OR REPLACE FUNCTION public.turn_fusion_close(p_actor_id uuid, p_turn_id b
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; target text := p_product->>'state'; closed jsonb;
+DECLARE t turns; target text := p_product->>'state'; closed jsonb; ended fusion_reviews;
 BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   IF t.kind NOT IN ('compare','jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023'; END IF;
   IF t.kind = 'jury' AND target IS NOT NULL
     AND target NOT IN ('completed','incomplete','revision_failed','interrupted') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
+  END IF;
+  -- A review another path ended already (an archived business): that end settles the turn, not the answers the caller holds.
+  IF t.kind = 'jury' AND target IS NOT NULL AND t.state <> 'closed' THEN
+    SELECT * INTO ended FROM fusion_reviews WHERE actor_id = p_actor_id AND id = (t.policy->>'reviewId')::uuid;
+    IF ended.id IS NOT NULL AND ended.state NOT IN ('running','paused') THEN
+      RETURN turn_fusion_ended_review(p_actor_id, p_turn_id, ended.state, ended.outcome);
+    END IF;
   END IF;
   -- The core close first (it locks the account, the conversation and the turn, in that order); the review or compare row is not
   -- locked (ENGINEERING 5) but written after, on the owner key and only while still live: one another path ended meanwhile

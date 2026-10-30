@@ -131,6 +131,14 @@ describe('jury turn advance', () => {
     expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'in_flight' });
     expect(m.rpc.mock.calls.filter(c => (c[1] as { p_to: { state: string } }).p_to.state === 'running')).toHaveLength(0);
   });
+  it('a review ended while its group ran is settled by that end, not by the answers just saved (#1522 review)', async () => {
+    m.read.mockResolvedValueOnce(view()).mockResolvedValue(view({ state: 'incomplete', outcome: { kind: 'source_archived' }, fee: { state: 'held' } }));
+    expect(await jury().advance(view().reviewId)).toMatchObject({ next: false, reason: 'ended' });
+    expect(m.decide).not.toHaveBeenCalled();
+    expect(m.close).not.toHaveBeenCalled();
+    expect(m.rpc).toHaveBeenCalledWith('turn_fusion_ended_review', expect.objectContaining({ p_state: 'incomplete' }));
+  });
+
   it('an answer saved and judged whose cost alone is pending does not hold the step (#1522 review)', async () => {
     const group = 'g1', claimedStep = { stepKey: 'review:1:review:1', groupId: group, fromSeq: 1 };
     const pendingCost = REVIEWERS.map((modelId, index) => ({ callId: String(index), groupId: group, modelId, phase: 'fusion_review',

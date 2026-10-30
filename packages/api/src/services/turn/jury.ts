@@ -127,6 +127,17 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
     delivered: deliverable, refundAll: state === 'incomplete' || state === 'revision_failed',
     failureCode: state === 'completed' ? null : `review_${String(outcome.kind ?? state)}`.slice(0, 120), product: { state, outcome } });
 
+  /** Ended by another path (an archived business ends the review on read): its turn closes by that end now, so an incomplete
+   * review refunds at once instead of waiting for the 24-hour end (turn_fusion_ended_review; idempotent). */
+  const endedElsewhere = async (view: ReviewView): Promise<JuryAdvance> => {
+    if (view.fee?.state === 'held') {
+      const closed = await admin.rpc('turn_fusion_ended_review', { p_actor_id: actorId, p_turn_id: view.turnId, p_state: view.state,
+        p_outcome: view.outcome ?? {} });
+      if (closed.error) throw new TurnDatabaseError('TURN_DATABASE_UNAVAILABLE');
+    }
+    return { next: false, reason: 'ended' };
+  };
+
   return {
     /** What a start freezes, without creating anything ("最多消耗 X 积分" shows the price; the balance must cover price + hold). */
     async estimate(input: { draftId: string; sourceVersionId: string }) {
@@ -172,16 +183,7 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
     async advance(reviewId: string): Promise<JuryAdvance> {
       let view = await record.read(reviewId);
       if (!view?.turnId) return { next: false, reason: 'not_turn_path' };
-      if (ENDED_STATES.has(view.state)) {
-        // Ended by another path (an archived business ends the review on read): its turn closes by that end now, so an
-        // incomplete review refunds at once instead of waiting for the 24-hour end (turn_fusion_ended_review; idempotent).
-        if (view.fee?.state === 'held') {
-          const closed = await admin.rpc('turn_fusion_ended_review', { p_actor_id: actorId, p_turn_id: view.turnId, p_state: view.state,
-            p_outcome: view.outcome ?? {} });
-          if (closed.error) throw new TurnDatabaseError('TURN_DATABASE_UNAVAILABLE');
-        }
-        return { next: false, reason: 'ended' };
-      }
+      if (ENDED_STATES.has(view.state)) return endedElsewhere(view);
       const src = await core.readSource(reviewId);
       const cfg = config.parse(view.config);
       const at: ReviewPosition = { round: view.round, phase: view.phase, attempt: view.attempt };
@@ -235,6 +237,8 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
         // A call sent whose outcome is unknown: never sent again; the crash sweep and recovery settle it and end the review.
         if (stops.includes('TURN_CALL_UNKNOWN')) return { next: false, reason: 'in_flight' };
         view = (await record.read(reviewId))!;
+        // Ended meanwhile (the business archived while the group ran): that end settles it, not the answers just saved.
+        if (ENDED_STATES.has(view.state)) return endedElsewhere(view);
         // A call of this step sent but without a judged answer (its receipt failed to save, its outcome unknown) is settled by
         // recovery, never sent again; the step waits instead of retrying. An answer already saved and judged, whose cost alone
         // is pending, does not hold the step: the review goes on with it and recovery settles the cost.

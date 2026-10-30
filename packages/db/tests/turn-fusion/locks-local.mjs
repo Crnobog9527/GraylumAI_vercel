@@ -91,6 +91,19 @@ try{
   assert.equal(await reviewState(a),'incomplete','the other path\'s end is not overwritten');
   report.checks.push('a review ended by another path while its jury closes: the turn closes, the review keeps the other end');
  }
+ // 3b. Ended by another path before the close starts: the close settles by that end (incomplete refunds), whatever the caller holds.
+ {
+  const a=await account(),o=await open(a);
+  await begin(a,o.turnId,1);
+  await record(a,o.turnId,1);
+  await c.query("update fusion_reviews set state='incomplete',outcome='{\"kind\":\"source_archived\"}',ended_at=now() where id=$1",[a.review]);
+  const closed=await one('select turn_fusion_close($1,$2,$3,$4,$5,$6,$7) v',[a.actor,o.turnId,'completed',true,false,null,
+   JSON.stringify({state:'completed',outcome:{kind:'revised'}})]);
+  assert.equal(closed.chargedCredits,0,'no fixed price for a review ended elsewhere');
+  assert.equal(await reviewState(a),'incomplete');
+  assert.equal(await one('select credits v from profiles where id=$1',[a.actor]),3000);
+  report.checks.push('a review ended by another path before its close: the close settles by that end, the fixed price is not charged');
+ }
  // 4. A deletion of the review (content_erasure_confirm locks the conversations first, NOWAIT) and a receipt: while the receipt
  // holds the conversation the deletion fails fast; a deletion that holds it first makes the receipt wait and see the review
  // gone (the receipt is kept, the answer and the raw body are not).
