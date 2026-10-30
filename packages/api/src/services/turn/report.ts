@@ -4,7 +4,7 @@ import { snapshotSchema } from '../artifacts/public';
 import { workflowSchema } from '../artifacts/workflow';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
-import { benchmarkReportFacts, benchmarkShortfallNote, completeReportCandidate, confirmedReportFacts, frozenReport,
+import { benchmarkReportFacts, benchmarkShortfallNote, completeReportCandidate, confirmedReportFacts, frozenReport, type FrozenReport,
   reportInstructions, REPORT_INPUT_BYTES, REPORT_REQUEST_INPUT } from '../report/contract';
 import { DEFAULT_REPORT_PRICE, REPORT_PRICE_KEY } from '../report/fees';
 import { readAdmissionConfiguration, readAdmissionModule, type ConfigurationRows } from '../runtime/admissionConfiguration';
@@ -112,7 +112,8 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   const close = (kind: CloseKind, extra: { body?: string; delivered?: boolean; failureCode?: string } = {}) =>
     db.close({ actorId: input.actorId, turnId, kind, delivered: extra.delivered ?? false, failureCode: extra.failureCode ?? null,
       // The report text is the kind's result (turn_report_apply keeps it hidden from history), never a conversation message.
-      messages: [], ...(extra.body === undefined ? {} : { kindResult: { body: extra.body } }) });
+      // With it, the report identity built from the source turn_open read: the edit and publish chain reads both (V2-7a).
+      messages: [], ...(extra.body === undefined || !frozen ? {} : { kindResult: { body: extra.body, reportGeneration: frozen } }) });
 
   // A dropped stream: was it the user's stop? One read, only then. A stop aborts the provider stream below.
   const abort = new AbortController();
@@ -125,7 +126,7 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
   };
   if (clientGone?.aborted) onGone(); else clientGone?.addEventListener('abort', onGone, { once: true });
 
-  let text = '', stopped: TurnStop | undefined, finish: unknown;
+  let text = '', stopped: TurnStop | undefined, finish: unknown, frozen: FrozenReport | undefined;
   try {
     // 3. The prompt: the Skill text (site-wide per package) then the report's own instructions with the confirmed facts and the
     // benchmark table that turn_open read under its locks.
@@ -138,7 +139,7 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     const facts = confirmedReportFacts(snapshot);
     const benchmarks = benchmarkReportFacts(report.benchmarks);
     const shortfall = benchmarkShortfallNote(benchmarks.serialized, Math.max(3, manifest.minQualifiedBenchmarks ?? 3));
-    const frozen = frozenReport.parse({ version: 1, projectId: input.projectId, roundId: input.roundId,
+    frozen = frozenReport.parse({ version: 1, projectId: input.projectId, roundId: input.roundId,
       snapshotHash: report.source.snapshotHash, packageHash: snapshot.packageHash, workflowHash: snapshot.workflowHash,
       templateHash: snapshot.templateHash, sections: manifest.sections, maxCharacters: manifest.maxCharacters,
       benchmarkHash: benchmarks.hash, ...(manifest.data ? { data: manifest.data } : {}) });

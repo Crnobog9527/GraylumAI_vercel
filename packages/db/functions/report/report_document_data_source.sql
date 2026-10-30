@@ -8,12 +8,18 @@ CREATE OR REPLACE FUNCTION public.report_document_data_source(a uuid, eid uuid)
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE source jsonb;e runtime_executions;stored jsonb;
+DECLARE source jsonb;e runtime_executions;stored jsonb;nt jsonb;
 BEGIN
  source:=report_document_source(a,eid);
  SELECT * INTO e FROM runtime_executions WHERE id=eid AND actor_id=a;
  SELECT report#>'{generatedReport,data}' INTO stored FROM artifact_versions
   WHERE id=(source->>'versionId')::uuid AND erased_at IS NULL;
+ -- CORE-PATH-V2 V2-7a: a report turn has no old execution; its frozen report identity and text are the turn's.
+ IF e.id IS NULL THEN
+  nt:=report_turn_source(a,eid);
+  RETURN jsonb_build_object('sessionId',nt->>'sessionId','benchmarkHash',nt#>>'{spec,benchmarkHash}',
+   'generatedBody',nt->>'body','storedData',stored);
+ END IF;
  RETURN jsonb_build_object('sessionId',e.session_id,'benchmarkHash',e.payload#>>'{reportGeneration,benchmarkHash}',
   'generatedBody',e.result->>'body','storedData',stored);
 END $function$;

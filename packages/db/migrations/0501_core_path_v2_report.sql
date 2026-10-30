@@ -14,6 +14,9 @@
 --   turn_report_apply       turn_close's kind result: the report text, hidden from history, cut to what the user saw on a stop
 --   turn_report_settlement  turn_close: what the user pays and whether it waits for an unknown cost (only a charged stop does)
 --   turn_report_read        the report turn of a round (or one turn) with its saved text
+--   report_turn_source      the edit and publish chain's seam (plan 2.7, 4.4: a report is still published into artifact_versions):
+--                           report_document_source, report_document (save), report_document_data_source and report_final_data
+--                           read a report turn by its request id when there is no old execution; the old path is unchanged
 -- Compatibility: nothing calls kind=report until the page switches (V2-10); other kinds are unchanged; the old report path is
 -- untouched. Repeatable: CREATE OR REPLACE throughout. Recovery: re-apply 0421's turn_open and turn_close, drop the new functions.
 BEGIN;
@@ -105,7 +108,15 @@ CREATE OR REPLACE FUNCTION public.turn_report_apply(t turns, p_kind text, p_resu
 AS $function$
 DECLARE body text; next_seq integer;
 BEGIN
-  IF jsonb_typeof(p_result) <> 'object' OR jsonb_typeof(p_result->'body') <> 'string' OR (SELECT count(*) FROM jsonb_object_keys(p_result)) <> 1 THEN
+  -- {body, reportGeneration}: the text and the report identity Node built from the source turn_open read (the frozen report of
+  -- the old path); it must name this turn's own round, and is what the edit and publish chain reads (report_turn_source).
+  IF jsonb_typeof(p_result) <> 'object' OR jsonb_typeof(p_result->'body') <> 'string'
+    OR jsonb_typeof(p_result->'reportGeneration') <> 'object'
+    OR (SELECT count(*) FROM jsonb_object_keys(p_result)) <> 2
+    OR p_result#>>'{reportGeneration,projectId}' IS DISTINCT FROM t.policy#>>'{report,projectId}'
+    OR p_result#>>'{reportGeneration,roundId}' IS DISTINCT FROM t.policy#>>'{report,roundId}'
+    OR jsonb_typeof(p_result#>'{reportGeneration,sections}') <> 'array'
+    OR jsonb_typeof(p_result#>'{reportGeneration,maxCharacters}') <> 'number' THEN
     RAISE EXCEPTION 'TURN_KIND_RESULT_INVALID' USING ERRCODE='22023';
   END IF;
   IF p_kind NOT IN ('completed','stopped') OR t.session_id IS NULL THEN RETURN; END IF;
@@ -114,6 +125,9 @@ BEGIN
   SELECT coalesce(max(seq), 0) + 1 INTO next_seq FROM session_messages WHERE session_id = t.session_id;
   INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash, visible)
     VALUES (t.session_id, next_seq, 'assistant', t.id, body, encode(sha256(convert_to(body, 'UTF8')), 'hex'), false);
+  -- turn_close's last update keeps the policy column as it is now, so this stays with the closed turn.
+  UPDATE turns SET policy = policy || jsonb_build_object('reportGeneration', p_result->'reportGeneration')
+    WHERE actor_id = t.actor_id AND id = t.id;
 END $function$;
 
 -- What the user pays for a report and whether that waits for an unknown provider cost (Owner 10-17: a complete report pays the
@@ -475,12 +489,216 @@ BEGIN
     'openedAt', t.opened_at, 'closedAt', t.closed_at);
 END $function$;
 
+-- CORE-PATH-V2 V2-7a: the report turn of a request id (the page's handle for a report, as an execution id is on the old path):
+-- its session, the report identity frozen at its close (turn_report_apply), its saved text and how it ended. NULL when the actor
+-- has no closed report turn of that request with a kept report.
+CREATE OR REPLACE FUNCTION public.report_turn_source(a uuid, eid uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT jsonb_build_object('turnId', t.id, 'sessionId', t.session_id, 'spec', t.policy->'reportGeneration',
+    'body', (SELECT m.content FROM session_messages m WHERE m.session_id = t.session_id AND m.turn_id = t.id
+      AND m.role = 'assistant' AND m.deleted_at IS NULL ORDER BY m.seq DESC LIMIT 1),
+    -- A complete report only when it closed completed and delivered; a stopped or cut-off one is kept to read, never published.
+    'completeness', CASE WHEN t.close_kind = 'completed' AND t.delivered THEN 'complete'
+      WHEN t.close_kind = 'stopped' THEN 'stopped' ELSE 'length_limit' END,
+    'completed', t.close_kind IN ('completed','stopped'))
+  FROM turns t
+  WHERE t.actor_id = a AND t.request_id = eid AND t.kind = 'report' AND t.state = 'closed' AND t.policy ? 'reportGeneration'
+$function$;
+
+CREATE OR REPLACE FUNCTION public.report_document_source(a uuid, eid uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE e runtime_executions;p artifact_projects;r artifact_rounds;source jsonb;spec jsonb;
+ q artifact_requests;v artifact_versions;body text;revision bigint:=0;item jsonb;sid uuid;
+ nt jsonb;gen_body text;gen_completeness text;gen_done boolean;
+BEGIN
+ PERFORM bill2_actor(a);
+ PERFORM id FROM profiles WHERE id=a FOR SHARE;
+ SELECT session_id INTO sid FROM runtime_executions WHERE id=eid AND actor_id=a;
+ -- CORE-PATH-V2 V2-7a: a report generated on the turn path is found by its turn's request id (the page's handle for it).
+ IF sid IS NULL THEN nt:=report_turn_source(a,eid); sid:=(nt->>'sessionId')::uuid; END IF;
+ IF sid IS NULL THEN RAISE EXCEPTION 'REPORT_EXECUTION_REQUIRED'; END IF;
+ PERFORM id FROM runtime_sessions WHERE id=sid AND actor_id=a FOR UPDATE;
+ IF nt IS NULL THEN
+  SELECT * INTO e FROM runtime_executions WHERE id=eid AND actor_id=a FOR UPDATE;
+  PERFORM content_erasure_runtime_check(a,eid);
+  spec:=e.payload->'reportGeneration';
+  gen_body:=e.result->>'body';gen_completeness:=e.result->>'completeness';gen_done:=e.state='completed';
+ ELSE
+  -- Read again under the session lock; a deleted conversation or an erasing account has no report to edit or publish.
+  nt:=report_turn_source(a,eid);
+  IF nt IS NULL OR (turn_tombstones(a,sid,'{}'::jsonb)->>'sessionTombstoned')::boolean
+   OR (turn_tombstones(a,sid,'{}'::jsonb)->>'accountErasing')::boolean THEN RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
+  spec:=nt->'spec';
+  gen_body:=nt->>'body';gen_completeness:=nt->>'completeness';gen_done:=(nt->>'completed')::boolean;
+ END IF;
+ IF spec IS NULL OR jsonb_typeof(spec)<>'object' THEN RAISE EXCEPTION 'REPORT_EXECUTION_REQUIRED'; END IF;
+ SELECT * INTO p FROM artifact_projects WHERE id=(spec->>'projectId')::uuid AND actor_id=a FOR UPDATE;
+ SELECT * INTO r FROM artifact_rounds WHERE id=(spec->>'roundId')::uuid AND project_id=p.id;
+ IF p.id IS NULL OR r.id IS NULL THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
+ IF p.erased_at IS NOT NULL OR p.content_deleted_at IS NOT NULL OR r.erased_at IS NOT NULL THEN
+  RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
+ source:=report_source(a,sid,p.id,r.id);
+ IF source->>'snapshotHash' IS DISTINCT FROM spec->>'snapshotHash'
+  OR r.package_hash IS DISTINCT FROM spec->>'packageHash'
+  OR r.workflow_hash IS DISTINCT FROM spec->>'workflowHash'
+  OR r.template_hash IS DISTINCT FROM spec->>'templateHash'
+  OR r.workflow#>'{reportGeneration,sections}' IS DISTINCT FROM spec->'sections'
+  OR r.workflow#>'{reportGeneration,maxCharacters}' IS DISTINCT FROM spec->'maxCharacters' THEN
+  RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
+ FOR item IN SELECT value FROM jsonb_each(source#>'{snapshot,steps}') LOOP
+  IF item->>'valid' IS DISTINCT FROM 'true' OR item->>'confirmationId' IS NULL OR item->>'body' IS NULL
+   OR item->>'available'='false' THEN RAISE EXCEPTION 'REPORT_CONFIRMATION_REQUIRED'; END IF;
+ END LOOP;
+ SELECT * INTO q FROM artifact_requests WHERE project_id=p.id AND round_id=r.id AND action='report_edit'
+  AND payload->>'executionId'=eid::text AND erased_at IS NULL
+  ORDER BY (response->>'revision')::bigint DESC LIMIT 1;
+ body:=coalesce(q.payload->>'body',gen_body,'');
+ revision:=coalesce((q.response->>'revision')::bigint,0);
+ SELECT * INTO v FROM artifact_versions WHERE project_id=p.id AND round_id=r.id AND erased_at IS NULL;
+ RETURN jsonb_build_object('executionId',eid,'projectId',p.id,'roundId',r.id,'moduleId',p.module_id,'skillId',p.skill_id,
+  'draftId',(SELECT draft_id FROM opc_drafts WHERE actor_id=a AND project_id=p.id AND round_id=r.id),
+  'revision',revision,'body',body,'bodyHash',encode(sha256(convert_to(body,'utf8')),'hex'),
+  'manuallyEdited',revision>0,'completeness',gen_completeness,'state',r.state,'sessionId',sid,
+  'candidate',coalesce(gen_done AND gen_completeness='complete'
+    AND report_body_complete(gen_body,spec) AND report_body_complete(body,spec),false),
+  'finalized',v.id IS NOT NULL,'versionId',v.id,'version',v.version,
+  'next',CASE WHEN v.id IS NOT NULL AND EXISTS(SELECT 1 FROM opc_drafts WHERE actor_id=a AND project_id=p.id AND round_id=r.id)
+   THEN jsonb_build_object('kind','first_week_topics','draftId',
+    (SELECT draft_id FROM opc_drafts WHERE actor_id=a AND project_id=p.id AND round_id=r.id),'sourceVersionId',v.id) ELSE NULL END);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.report_document(p_actor_id uuid, p_execution_id uuid, p_action text, p_request_id uuid DEFAULT NULL::uuid, p_expected_revision bigint DEFAULT NULL::bigint, p_body text DEFAULT NULL::text, p_expected_body_hash text DEFAULT NULL::text, p_report_data jsonb DEFAULT NULL::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE source jsonb;request jsonb;prior artifact_requests;result jsonb;pid uuid;rid uuid;spec jsonb;generated text;parts jsonb;
+BEGIN
+ -- 0324 archived business guard
+ -- CORE-PATH-V2 V2-7a: a report turn has no old execution; its conversation names the business the same way.
+ IF p_action IS DISTINCT FROM 'read' THEN PERFORM opc_assert_business_writable(p_actor_id,
+  CASE WHEN EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=p_execution_id AND x.actor_id=p_actor_id)
+   THEN jsonb_build_object('executionId',p_execution_id)
+   ELSE jsonb_build_object('sessionId',report_turn_source(p_actor_id,p_execution_id)->>'sessionId') END); END IF;
+
+ IF p_action IS NULL OR p_action NOT IN ('read','save','finalize') THEN RAISE EXCEPTION 'REPORT_BODY_INVALID'; END IF;
+ source:=report_document_source(p_actor_id,p_execution_id);
+ pid:=(source->>'projectId')::uuid;rid:=(source->>'roundId')::uuid;
+ IF p_action='read' THEN RETURN source; END IF;
+ IF p_request_id IS NULL OR p_expected_revision IS NULL OR p_expected_revision<0 THEN
+  RAISE EXCEPTION 'REPORT_BODY_INVALID'; END IF;
+ IF p_action='save' THEN
+  request:=jsonb_build_object('executionId',p_execution_id,'expectedRevision',p_expected_revision,'body',p_body);
+  SELECT * INTO prior FROM artifact_requests WHERE project_id=pid AND request_id=p_request_id;
+  IF FOUND THEN
+   IF prior.erased_at IS NOT NULL THEN RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
+   IF prior.round_id IS DISTINCT FROM rid OR prior.action<>'report_edit' OR prior.payload IS DISTINCT FROM request THEN
+    RAISE EXCEPTION 'REPORT_REQUEST_CONFLICT'; END IF;
+   -- Return the current document, never a stale body paired with a newer revision.
+   RETURN source;
+  END IF;
+  IF source->>'finalized'='true' OR source->>'state'<>'draft' THEN RAISE EXCEPTION 'REPORT_ALREADY_FINALIZED'; END IF;
+  IF (source->>'revision')::bigint<>p_expected_revision THEN RAISE EXCEPTION 'REPORT_VERSION_CONFLICT'; END IF;
+  SELECT x.payload->'reportGeneration',x.result->>'body' INTO spec,generated FROM runtime_executions x WHERE x.id=p_execution_id;
+  -- CORE-PATH-V2 V2-7a: or the report turn of that request id (report_document_source has already proved it is the actor's).
+  IF spec IS NULL THEN
+   SELECT n->'spec',n->>'body' INTO spec,generated FROM report_turn_source(p_actor_id,p_execution_id) n;
+  END IF;
+  parts:=report_body_parts(p_body);
+  IF p_body IS NULL OR btrim(parts->>'text')='' OR char_length(parts->>'text')>(spec->>'maxCharacters')::integer
+   OR parts->>'block' IS DISTINCT FROM report_body_parts(generated)->>'block' THEN
+   RAISE EXCEPTION 'REPORT_BODY_INVALID'; END IF;
+  INSERT INTO artifact_requests(project_id,request_id,round_id,action,payload,response)
+   VALUES(pid,p_request_id,rid,'report_edit',request,jsonb_build_object('revision',p_expected_revision+1));
+ ELSE
+  request:=jsonb_build_object('reportExecutionId',p_execution_id,'reportRevision',p_expected_revision,'reportBodyHash',p_expected_body_hash);
+  SELECT * INTO prior FROM artifact_requests WHERE project_id=pid AND request_id=p_request_id;
+  IF FOUND THEN
+   IF prior.erased_at IS NOT NULL THEN RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
+   IF prior.round_id IS DISTINCT FROM rid OR prior.action<>'publish' OR prior.payload IS DISTINCT FROM request THEN
+    RAISE EXCEPTION 'REPORT_REQUEST_CONFLICT'; END IF;
+   RETURN source;
+  END IF;
+  IF source->>'finalized'='true' OR source->>'state'<>'draft' THEN RAISE EXCEPTION 'REPORT_ALREADY_FINALIZED'; END IF;
+  IF source->>'candidate' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'REPORT_NOT_COMPLETE'; END IF;
+  IF (source->>'revision')::bigint<>p_expected_revision OR source->>'bodyHash' IS DISTINCT FROM p_expected_body_hash THEN
+   RAISE EXCEPTION 'REPORT_VERSION_CONFLICT'; END IF;
+  PERFORM set_config('graylum.report_data',coalesce(p_report_data::text,''),true);
+  result:=artifact_transition(p_actor_id,(source->>'moduleId')::uuid,(source->>'skillId')::uuid,
+   'publish',pid,rid,p_request_id,request);
+  PERFORM set_config('graylum.report_data','',true);
+ END IF;
+ RETURN report_document_source(p_actor_id,p_execution_id);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.report_document_data_source(a uuid, eid uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE source jsonb;e runtime_executions;stored jsonb;nt jsonb;
+BEGIN
+ source:=report_document_source(a,eid);
+ SELECT * INTO e FROM runtime_executions WHERE id=eid AND actor_id=a;
+ SELECT report#>'{generatedReport,data}' INTO stored FROM artifact_versions
+  WHERE id=(source->>'versionId')::uuid AND erased_at IS NULL;
+ -- CORE-PATH-V2 V2-7a: a report turn has no old execution; its frozen report identity and text are the turn's.
+ IF e.id IS NULL THEN
+  nt:=report_turn_source(a,eid);
+  RETURN jsonb_build_object('sessionId',nt->>'sessionId','benchmarkHash',nt#>>'{spec,benchmarkHash}',
+   'generatedBody',nt->>'body','storedData',stored);
+ END IF;
+ RETURN jsonb_build_object('sessionId',e.session_id,'benchmarkHash',e.payload#>>'{reportGeneration,benchmarkHash}',
+  'generatedBody',e.result->>'body','storedData',stored);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.report_final_data(source jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE raw text:=current_setting('graylum.report_data',true);d jsonb;a uuid;sid uuid;
+BEGIN
+ IF raw IS NULL OR raw='' THEN RETURN '{}'::jsonb; END IF;
+ d:=raw::jsonb;
+ IF jsonb_typeof(d) IS DISTINCT FROM 'object' OR d->>'bodyHash' IS DISTINCT FROM source->>'bodyHash'
+  OR d->'dataVersion' IS DISTINCT FROM '1'::jsonb OR jsonb_typeof(d->'data') IS DISTINCT FROM 'object'
+  OR jsonb_typeof(d->'dropped') IS DISTINCT FROM 'array' OR jsonb_typeof(d->'textEdited') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(d->'validatedAt') IS DISTINCT FROM 'string' OR octet_length(d::text)>65536
+  OR report_body_parts(source->>'body')->>'block' IS NULL THEN
+  RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
+ -- Benchmark numbers were taken from the table with this hash: it must still be the table now. Same locks and order as
+ -- 0268's research_benchmark_report_current, so a refresh either commits first (and this refuses) or waits.
+ IF d ? 'benchmarkHash' THEN
+  SELECT x.actor_id,x.session_id INTO a,sid FROM runtime_executions x WHERE x.id=(source->>'executionId')::uuid;
+  -- CORE-PATH-V2 V2-7a: a report turn's session, which report_document_source returned (and proved the actor's).
+  IF sid IS NULL THEN
+   sid:=(source->>'sessionId')::uuid;
+   SELECT actor_id INTO a FROM runtime_sessions WHERE id=sid;
+  END IF;
+  PERFORM 1 FROM research_account_fetches WHERE session_id=sid FOR SHARE;
+  PERFORM 1 FROM research_benchmarks WHERE session_id=sid FOR SHARE;
+  IF (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM d->>'benchmarkHash' THEN RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
+ END IF;
+ RETURN jsonb_build_object('data',d-'bodyHash'-'benchmarkHash');
+END $function$;
+
 DO $$
 DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
     'turn_report_admit(uuid,uuid,jsonb)', 'turn_report_close_kind(turns,text)', 'turn_report_apply(turns,text,jsonb)',
-    'turn_report_settlement(turns,text,boolean,integer,integer,timestamp with time zone)',
+    'turn_report_settlement(turns,text,boolean,integer,integer,timestamp with time zone)', 'report_turn_source(uuid,uuid)',
     'turn_open(uuid,uuid,uuid,text,jsonb,bigint)', 'turn_stop(uuid,bigint,boolean,integer)',
     'turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)', 'turn_report_read(uuid,uuid,uuid,bigint)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);

@@ -3,7 +3,7 @@
 // pay nothing, the user's stop (turn_stop: first two in 24 hours free, then confirmed and charged what was generated, at most the
 // fixed price; what the user saw is what is kept), the hidden report text and turn_report_read.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 
 export async function reportCases(t){
  const {c,one,open,begin,identity,record,close,balance,account,reportSource,reportPolicy,openReport,refusal,peer,report}=t;
@@ -11,8 +11,16 @@ export async function reportCases(t){
   client.query('select turn_stop($1,$2,$3,$4) v',[a.actor,turn,confirmed,stopAt]).then(r=>r.rows[0].v);
  const read=(a,src,turn=null)=>one('select turn_report_read($1,$2,$3,$4) v',[a.actor,src.session,src.round,turn]);
  // A report's close: its text is the kind result (turn_report_apply), never a conversation message.
- const closeReport=(a,turn,kind,{text=null,delivered=false}={})=>
-  one("select turn_close($1,$2,$3,'[]',$4,false,null,$5) v",[a.actor,turn,kind,delivered,text===null?null:JSON.stringify({body:text})]);
+ // With it, the report identity Node builds from the source turn_open read (frozenReport), which the publish chain reads.
+ const identityOf=async(a,turn)=>{
+  const {session_id:session,policy}=(await c.query('select session_id,policy from turns where id=$1',[turn])).rows[0];
+  const source=await one('select report_source($1,$2,$3,$4) v',[a.actor,session,policy.report.projectId,policy.report.roundId]);
+  return {version:1,projectId:policy.report.projectId,roundId:policy.report.roundId,evidenceIds:[],snapshotHash:source.snapshotHash,
+   packageHash:'b'.repeat(64),workflowHash:'c'.repeat(64),templateHash:'d'.repeat(64),sections:['One','Two'],maxCharacters:12000};
+ };
+ const closeReport=async(a,turn,kind,{text=null,delivered=false}={})=>
+  one("select turn_close($1,$2,$3,'[]',$4,false,null,$5) v",[a.actor,turn,kind,delivered,
+   text===null?null:JSON.stringify({body:text,reportGeneration:await identityOf(a,turn)})]);
  const body='## One\nFirst part of the report.\n## Two\nSecond part.';
  // 1. Admission: everything is checked inside turn_open, under the open's locks, and a refusal freezes nothing.
  {
@@ -57,7 +65,9 @@ export async function reportCases(t){
   const policy=await one('select policy v from turns where id=$1',[o.turnId]);
   assert.deepEqual([policy.bucket,policy.fixedCredits,policy.report.roundId],[-1,500,src.round],'a report reserves the large-kind stop-loss row');
   // Its result is only {body}; anything else is refused and changes nothing.
-  for(const bad of [{body:1},{body:'x',extra:1},['x']])
+  const own=await identityOf(a,o.turnId);
+  for(const bad of [{body:1},{body:'x'},{body:'x',reportGeneration:own,extra:1},['x'],
+   {body:'x',reportGeneration:{...own,roundId:randomUUID()}},{body:'x',reportGeneration:{...own,sections:'One'}}])
    assert.match(await refusal(one("select turn_close($1,$2,'completed','[]',true,false,null,$3) v",[a.actor,o.turnId,JSON.stringify(bad)])),
     /TURN_KIND_RESULT_INVALID/);
   assert.equal(await one('select state v from turns where id=$1',[o.turnId]),'running');
@@ -182,5 +192,44 @@ export async function reportCases(t){
    assert.deepEqual(charged,told.map(v=>v.chargeable?120:0),'each close charges what its stop said');
   }finally{await p1.end();await p2.end();}
   report.checks.push('two stops at once with one free stop left: exactly one free, and each close charges what its stop told the user');
+ }
+
+ // 6. Plan 2.7/4.4 (#1523 review): a report generated on the turn path is edited, published and written to artifact_versions
+ // through the existing chain, by its turn's request id; a stopped or cut-off one is readable but never published; the old
+ // path's executions are untouched (packages/db/tests/report-finalization).
+ {
+  const doc=(a,id,action,request=null,revision=null,body=null,hash=null)=>
+   one('select report_document($1,$2,$3,$4,$5,$6,$7,null) v',[a.actor,id,action,request,revision,body,hash]);
+  const sha=text=>createHash('sha256').update(text).digest('hex');
+  const a=await account(1000),src=await reportSource(a),request=randomUUID();
+  const o=await openReport(a,src,{request});
+  await begin(a,o.turnId,1,{upper:0.05});await record(a,o.turnId,1,{n:0.03});
+  await closeReport(a,o.turnId,'completed',{text:body,delivered:true});
+  const policy=await one('select policy v from turns where id=$1',[o.turnId]);
+  assert.equal(policy.reportGeneration.roundId,src.round,'the report identity is frozen with the closed turn');
+  const read=await doc(a,request,'read');
+  assert.deepEqual([read.body,read.candidate,read.finalized,read.completeness,read.revision],[body,true,false,'complete',0]);
+  const edited=body.replace('Second part.','Second part, edited.');
+  const saved=await doc(a,request,'save',randomUUID(),0,edited);
+  assert.deepEqual([saved.body,saved.revision,saved.manuallyEdited],[edited,1,true]);
+  const published=await doc(a,request,'finalize',randomUUID(),1,null,sha(edited));
+  assert.deepEqual([published.finalized,published.version],[true,1]);
+  const formal=(await c.query('select report from artifact_versions where id=$1',[published.versionId])).rows[0].report;
+  assert.equal(formal.generatedReport.body,edited);assert.equal(formal.generatedReport.manuallyEdited,true);
+  // Someone else's request id, or a turn that is not a kept report, has nothing to open.
+  assert.match(await refusal(doc(await account(),request,'read')),/REPORT_EXECUTION_REQUIRED/);
+  // A stopped report: readable, not a candidate, so it cannot be published.
+  const b=await account(1000),srcB=await reportSource(b),stopRequest=randomUUID();
+  const s1=await openReport(b,srcB,{request:stopRequest});
+  await begin(b,s1.turnId,1,{upper:0.05});await record(b,s1.turnId,1,{n:0.03});
+  await stop(b,s1.turnId,{stopAt:9});
+  await closeReport(b,s1.turnId,'completed',{text:body,delivered:true});
+  const stoppedDoc=await doc(b,stopRequest,'read');
+  assert.deepEqual([stoppedDoc.body,stoppedDoc.candidate,stoppedDoc.completeness],[body.slice(0,9),false,'stopped']);
+  assert.match(await refusal(doc(b,stopRequest,'finalize',randomUUID(),0,null,sha(body.slice(0,9)))),/REPORT_NOT_COMPLETE/);
+  // A deleted conversation: the report can no longer be opened.
+  await c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[srcB.session]);
+  assert.match(await refusal(doc(b,stopRequest,'read')),/CONTENT_ERASED|REPORT_EXECUTION_REQUIRED/);
+  report.checks.push('a turn-path report is read, edited and published into artifact_versions by its request id; a stopped one is readable but not publishable; another account or a deleted conversation cannot open it');
  }
 }
