@@ -715,17 +715,24 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a process killed mid-turn loses nothing receipt
     bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: bundle, logLevel: 'error' });
   const toolRows = async (status: string) => (await db.query(`select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id
     where t.actor_id=$1 and c.call_kind='tool' and c.status=$2`, [f.actor, status])).rows[0].n as number;
+  let child: ReturnType<typeof spawn> | undefined, gone: Promise<unknown> = Promise.resolve();
   try {
-    const child = spawn(process.execPath, [bundle, JSON.stringify({ rest: process.env.V3_LOCAL_REST, serviceJwt: process.env.V3_LOCAL_SERVICE_JWT,
+    child = spawn(process.execPath, [bundle, JSON.stringify({ rest: process.env.V3_LOCAL_REST, serviceJwt: process.env.V3_LOCAL_SERVICE_JWT,
       actor: f.actor, session: f.session, moduleId: f.moduleId, accounts })], { stdio: ['ignore', 'pipe', 'inherit'] });
     let output = '';
-    child.stdout.on('data', chunk => { output += String(chunk); });
-    const gone = new Promise(done => child.once('exit', (_code, signal) => done(signal)));
+    child.stdout!.on('data', chunk => { output += String(chunk); });
+    const running = child;
+    gone = new Promise(done => running.once('exit', (_code, signal) => done(signal)));
     await expect.poll(() => output, { timeout: 30000 }).toContain('call 6');
     await expect.poll(() => toolRows('ok'), { timeout: 15000 }).toBe(1);
     child.kill('SIGKILL');
     expect(await gone).toBe('SIGKILL');
-  } finally { rmSync(bundle, { force: true }); }
+  } finally {
+    // A failed wait above must not leave the child running: it never ends by itself.
+    child?.kill('SIGKILL');
+    await gone;
+    rmSync(bundle, { force: true });
+  }
   expect((await db.query('select state from turns where session_id=$1', [f.session])).rows).toEqual([{ state: 'running' }]);
   expect((await db.query('select 1 from research_account_fetches where session_id=$1', [f.session])).rows).toEqual([]);
   // The job's own claim waits 15 minutes without a write.
