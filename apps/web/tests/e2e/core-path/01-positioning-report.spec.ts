@@ -131,8 +131,12 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
       const outline = reportDialog(page).getByRole('navigation', { name: '报告目录' });
       const start = reportDialog(page).getByRole('button', { name: /^(生成完整报告|重新生成)/ });
       await expect(outline.or(start).first()).toBeVisible({ timeout: 60_000 });
-      written = await outline.isVisible();
-      alreadyFinal = written && (await reportDialog(page).getByRole('button', { name: '定稿', exact: true }).count()) === 0;
+      // The outline also shows for a report that was stopped part-way (it keeps the chapters written so far), so it does not mean
+      // "complete": a complete report has the finalize button, or (finalized) has neither it nor the regenerate button.
+      const canFinalize = (await reportDialog(page).getByRole('button', { name: '定稿', exact: true }).count()) > 0;
+      const canRegenerate = (await reportDialog(page).getByRole('button', { name: /^(生成完整报告|重新生成)/ }).count()) > 0;
+      written = (await outline.isVisible()) && (canFinalize || !canRegenerate);
+      alreadyFinal = written && !canFinalize;
     }
     if (!written) {
       await startReport(page);
