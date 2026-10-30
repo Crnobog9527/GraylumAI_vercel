@@ -200,6 +200,12 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: the daily summary counts old charges and turn t
   expect(paid).toEqual({ count: 2, credits: 13, turnOtherCredits: charged - 6 });
   expect(paid.credits - 7 + paid.turnOtherCredits).toBe(await settled());
   expect(await summary()).toEqual(paid);
+  // As the meter charges: a partial result with data counts, an empty one does not.
+  const results = [{ outcome: 'partial', items: 2 }, { outcome: 'ok', items: 0 }, { outcome: 'ok', items: 1 }];
+  const receipt = (usage: unknown) => db.query(`update turn_calls set usage=usage||$1 where actor_id=$2 and call_kind='tool'`, [JSON.stringify(usage), f.actor]);
+  await receipt({ results });
+  expect(await summary()).toEqual({ ...paid, count: 3 });
+  await receipt({ results: results.slice(2) });
   // A search that returned nothing is not charged: only the turn's model calls move.
   await turn(g, searchingModel([]), suppliers(vi.fn(async () => searchResult({ items: [], reason: 'NO_RESULTS' }))));
   expect(await summary()).toEqual({ count: 2, credits: 13, turnOtherCredits: charged - 6 + await modelCredits(g.actor) });
