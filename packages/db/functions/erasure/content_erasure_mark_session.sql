@@ -61,6 +61,9 @@ BEGIN
    WHERE o.actor_id=a AND m.session_id<>target AND m.erased_at IS NULL
     AND (content_erasure_references(m.request,refs) OR content_erasure_references(m.content,refs)));
  UPDATE runtime_sessions SET content_deleted_at=clock_timestamp() WHERE id=target RETURNING content_deleted_at INTO stamp;
+ -- CORE-PATH-V2: the conversation's messages leave the visible history now (one indexed update, still under the session
+ -- lock turn_close appends under); their text is cleared with the rest of the conversation by content_erasure_confirm.
+ UPDATE session_messages SET visible=false,deleted_at=stamp WHERE session_id=target AND (visible OR deleted_at IS NULL);
  -- Off-database erasure manifest (0227): recorded at the marker's time, in the same transaction;
  -- the later cleanup's own note keeps this first time.
  PERFORM erasure_manifest_note('session',target,a,stamp);
