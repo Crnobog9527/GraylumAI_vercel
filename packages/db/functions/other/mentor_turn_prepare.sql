@@ -31,6 +31,8 @@ BEGIN
     'discoveries', (SELECT coalesce(jsonb_agg(jsonb_build_object('discoveryId', x.id, 'keywords', x.keywords, 'platforms', to_jsonb(x.platforms),
         'cursor', x.cursor, 'state', x.state, 'keywordConfirmationId', x.keyword_confirmation_id)), '[]'::jsonb)
       FROM research_discoveries x WHERE x.actor_id = a AND x.session_id = s),
+    -- turn_open refuses this read if a turn of the session closed after it: what is below would be stale, and could pay twice.
+    'preparedAt', (SELECT coalesce(max(t.closed_at), 'epoch'::timestamptz) FROM turns t WHERE t.actor_id = a AND t.session_id = s),
     'operations', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'identityHash', o.identity_hash, 'state', o.state, 'result', o.result)), '[]'::jsonb)
       FROM research_operations o JOIN research_plans p ON p.id = o.plan_id
       WHERE p.actor_id = a AND p.session_id = s AND o.erased_at IS NULL AND p.erased_at IS NULL

@@ -83,7 +83,8 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
 
 /** The frozen numbers of one mentor turn (G_turn, U_turn, the call limits) and what turn_mentor_context checks. */
 export function mentorPolicy(catalog: MentorCatalog,
-  input: { opening: boolean; stepId: string; moduleId: string; sourceChecked: boolean; sourceDrafts: readonly string[] }) {
+  input: { opening: boolean; stepId: string; moduleId: string; sourceChecked: boolean; sourceDrafts: readonly string[];
+    preparedAt?: string }) {
   const { mentor, organizer, research } = catalog;
   const freeTools = input.opening ? 0 : 1, paid = research ? mentorResearchBounds(research, mentor.multiplier) : [];
   // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).
@@ -98,5 +99,6 @@ export function mentorPolicy(catalog: MentorCatalog,
   // V2-8: recovery prices a call whose cost is unknown with the model and price table frozen here, per model id (two models).
   models: Object.fromEntries([mentor, ...(organizer ? [organizer] : [])].map(q => [q.modelId, q.model])),
   pricings: Object.fromEntries([mentor, ...(organizer ? [organizer] : [])].map(q => [q.modelId, q.pricing])),
-  mentor: { moduleId: input.moduleId, stepId: input.stepId, sourceChecked: input.sourceChecked, sourceDrafts: input.sourceDrafts } };
+  mentor: { moduleId: input.moduleId, stepId: input.stepId, sourceChecked: input.sourceChecked, sourceDrafts: input.sourceDrafts,
+    ...(input.preparedAt ? { preparedAt: input.preparedAt } : {}) } };
 }

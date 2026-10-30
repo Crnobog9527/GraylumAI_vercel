@@ -172,9 +172,16 @@ const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
   organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number }; research?: MentorDeps['research'];
-  researchRefreshId?: string }) {
+  researchRefreshId?: string; afterPrepare?: () => Promise<void> }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runMentorTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
+  const clients = turnClients(admin);
+  let hook = input.afterPrepare;
+  const read = hook ? { rpc: async (name: string, args: unknown) => {
+    const result = await clients.read.rpc(name, args as never);
+    if (name === 'mentor_turn_prepare' && hook) { const run = hook; hook = undefined; await run(); }
+    return result;
+  } } as unknown as typeof clients.read : clients.read;
+  await withCatalogRequest(() => runMentorTurn({ admin, clients: { ...clients, read }, slots, transport: input.transport,
     newWork: input.newWork ?? { message: admit, calls: admit }, ...(input.research ? { research: input.research } : {}) },
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
       text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}),
@@ -834,4 +841,21 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: Refresh on a turn-made benchmark fetches it aga
   const again = await turn(f, { text: 'Refresh it', researchRefreshId: refreshId, research: tiktokVendors(), transport: t.fn });
   expect(again.events).toEqual([{ type: 'error', code: 'TURN_REFRESH_INVALID' }]);
   expect(t.bodies).toEqual([]);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a turn that closed after this read makes it stale: it is read again, so nothing is paid twice', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const fetch = () => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_fetch', { accounts: [{ platform: 'tiktok', account: 'aa_one' }], source: { kind: 'user_message', messageId: null } })
+      : prose('gen-reply-' + n, 'Done.'));
+  const text = 'Check https://www.tiktok.com/@aa_one';
+  const out = await turn(f, { text, transport: fetch().fn, research: tiktokVendors(),
+    // The other request of this conversation fetches the account and closes between this read and this open.
+    afterPrepare: async () => { await turn(f, { text, transport: fetch().fn, research: tiktokVendors() }); } });
+  expect(out.events.at(-1)?.type).toBe('result');
+  expect(out.calls.filter(path => path.includes('mentor_turn_prepare')).length).toBe(2);
+  const rows = (await db.query(`select c.status from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`, [f.actor])).rows;
+  expect(rows.length).toBe(1);
 });

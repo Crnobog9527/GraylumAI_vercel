@@ -102,30 +102,40 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   // 2. Open: freeze, read the draft and its checklist in the same transaction.
   const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
     policy: mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
-      sourceDrafts: checked?.sourceDrafts ?? [] }) });
+      sourceDrafts: checked?.sourceDrafts ?? [], ...(typeof flowRaw?.preparedAt === 'string' ? { preparedAt: flowRaw.preparedAt } : {}) }) });
   let opened, flow: PreparedResearch | undefined, flowRaw: Record<string, unknown> | undefined;
+  // A turn the benchmark flow may run in: one read gets the check and the flow's state together (plan 3.1).
+  const prepare = async () => {
+    const { data, error } = await deps.clients.read.rpc('mentor_turn_prepare', { p_actor_id: input.actorId, p_session_id: input.sessionId,
+      p_research: research !== null, p_refresh: input.researchRefreshId ?? null });
+    if (error) throw new Error('TURN_OPEN_FAILED');
+    flowRaw = data as Record<string, unknown>;
+    checked = flowRaw.source ? sourceChecked.parse(flowRaw.source) : undefined;
+    flow = research && checked?.allowed !== false ? preparedResearch.parse(flowRaw) : undefined;
+    // Another user's, a deleted answer's or an already used grant reads as null or used.
+    return !(input.researchRefreshId && checked?.allowed !== false && (!flow?.refresh || flow.refresh.used));
+  };
   try {
-    // A turn the benchmark flow may run in: one read gets the check and the flow's state together (plan 3.1).
-    if (!opening && !summary) {
-      const { data, error } = await deps.clients.read.rpc('mentor_turn_prepare', { p_actor_id: input.actorId, p_session_id: input.sessionId,
-        p_research: research !== null, p_refresh: input.researchRefreshId ?? null });
-      if (error) throw new Error('TURN_OPEN_FAILED');
-      flowRaw = data as Record<string, unknown>;
-      if (flowRaw.source) checked = sourceChecked.parse(flowRaw.source);
-      if (research && checked?.allowed !== false) flow = preparedResearch.parse(flowRaw);
-      // Another user's, a deleted answer's or an already used grant reads as null or used.
-      if (input.researchRefreshId && checked?.allowed !== false && (!flow?.refresh || flow.refresh.used))
-        return emit({ type: 'error', code: 'TURN_REFRESH_INVALID' });
-    } else if (SOURCE_DRAFTS.has(input.sessionId)) checked = await sourceCheck();
+    const fresh = !opening && !summary;
+    if (fresh && !await prepare()) return emit({ type: 'error', code: 'TURN_REFRESH_INVALID' });
+    if (!fresh && SOURCE_DRAFTS.has(input.sessionId)) checked = await sourceCheck();
     if (checked?.allowed === false) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
     try { opened = await openTurn(); }
     catch (error) {
-      if (!(error instanceof TurnDatabaseError) || error.code !== 'TURN_SOURCE_CHECK_REQUIRED' || checked) throw error;
-      if (SOURCE_DRAFTS.size >= SOURCE_DRAFTS_KEPT) SOURCE_DRAFTS.clear();
-      SOURCE_DRAFTS.add(input.sessionId);
-      checked = await sourceCheck();
-      if (!checked.allowed) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
-      opened = await openTurn();
+      if (!(error instanceof TurnDatabaseError)) throw error;
+      // A turn closed since the read: read again, once. The next stale read is refused like a busy session.
+      if (error.code === 'TURN_PREPARE_STALE' && fresh) {
+        if (!await prepare()) return emit({ type: 'error', code: 'TURN_REFRESH_INVALID' });
+        if ((checked as typeof checked | undefined)?.allowed === false) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
+        opened = await openTurn();
+      } else {
+        if (error.code !== 'TURN_SOURCE_CHECK_REQUIRED' || checked) throw error;
+        if (SOURCE_DRAFTS.size >= SOURCE_DRAFTS_KEPT) SOURCE_DRAFTS.clear();
+        SOURCE_DRAFTS.add(input.sessionId);
+        checked = await sourceCheck();
+        if (!checked.allowed) return emit({ type: 'error', code: 'TURN_MENTOR_DENIED' });
+        opened = await openTurn();
+      }
     }
   } catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
