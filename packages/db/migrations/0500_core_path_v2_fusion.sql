@@ -931,7 +931,14 @@ BEGIN
       OR EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = p_turn_id AND o.deliverable) THEN
       RETURN least(coalesce(p_fixed, p_held), p_held);
     END IF;
-    IF p_kind IN ('interrupted','expired') THEN RETURN least(p_credits, coalesce(p_fixed, p_held), p_held); END IF;
+    IF p_kind IN ('interrupted','expired') THEN
+      -- The known usage as turn_close counts it, without a seat or summary judged unusable (format or revision invalid): one
+      -- whose cost was settled later by recovery (status ok) is borne by the platform, as when its cost was known at once.
+      SELECT ceil((t.policy->>'q')::numeric * coalesce(sum(c.nominal_usd * c.multiplier), 0))::integer INTO p_credits
+      FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
+        AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = c.turn_id AND o.seq = c.seq AND o.verdict <> 'usable');
+      RETURN least(p_credits, coalesce(p_fixed, p_held), p_held);
+    END IF;
     RETURN 0;
   END IF;
   IF t.kind = 'compare' THEN

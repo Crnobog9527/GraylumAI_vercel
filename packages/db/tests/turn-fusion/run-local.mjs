@@ -129,8 +129,15 @@ try{
    return (await close(a,t,'interrupted')).chargedCredits;});
   const delivered=await run(async(a,rv,t)=>{await begin(a,t,1);await record(a,t,1,{n:0.01,deliverable:true});
    return (await close(a,t,'interrupted')).chargedCredits;});
-  assert.deepEqual([noChange,failed,small,large,delivered],[0,0,30,FIXED,FIXED]);
-  report.checks.push('jury delivery rule: no change, revision failed and incomplete refund all; interrupted pays min(fixed, known usage) (30, capped at 1500); a deliverable summary pays the price however it ends');
+  // #1522 review: a seat judged unusable before its cost was final, settled later by recovery (ok), is not in the usage paid.
+  const late=await run(async(a,rv,t)=>{await begin(a,t,1);await record(a,t,1,{n:0.05,output:seat()});await begin(a,t,2);
+   await one('select turn_call_identity($1,$2,$3,$4) v',[a.actor,t,2,'gen-late-seat']);
+   await one('select turn_fusion_output($1,$2,$3,$4) v',[a.actor,t,2,JSON.stringify({phase:'fusion_review',body:'x',verdict:'format_invalid'})]);
+   assert.equal((await close(a,t,'interrupted')).settlement,'pending');
+   await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,t,2,'ok',0.05,0.05,'{}',null,hash('late-seat'),null]);
+   return (await close(a,t,'interrupted')).chargedCredits;});
+  assert.deepEqual([noChange,failed,small,large,delivered,late],[0,0,30,FIXED,FIXED,30]);
+  report.checks.push('jury delivery rule: no change, revision failed and incomplete refund all; interrupted pays min(fixed, known usage) (30, capped at 1500), without a seat judged unusable whose cost came later; a deliverable summary pays the price however it ends');
  }
  // 4. The group's temporary bound (10-13): the freeze above the fixed price covers the calls in flight; a call that does not fit
  // waits for credits before it is sent; a finished group's bound is free again.
