@@ -123,6 +123,14 @@ describe('jury turn advance', () => {
     expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'in_flight' });
     expect(m.runGroup).not.toHaveBeenCalled();
   });
+  it('a step whose call was sent but whose receipt failed to save is never retried (#1522 review)', async () => {
+    m.read.mockResolvedValueOnce(view()).mockResolvedValue(view({
+      steps: [{ round: 1, phase: 'review', attempt: 1, groupId: 'g', stepKey: 'review:1:review:1', claimedAt: 'x' }],
+      calls: [{ groupId: 'g', state: 'identified', seq: 1 }] }));
+    m.runGroup.mockResolvedValueOnce(REVIEWERS.map(() => ({ ok: false, code: 'TURN_DATABASE_UNAVAILABLE' })));
+    expect(await jury().advance('r')).toMatchObject({ next: false, reason: 'in_flight' });
+    expect(m.rpc.mock.calls.filter(c => (c[1] as { p_to: { state: string } }).p_to.state === 'running')).toHaveLength(0);
+  });
   it('retries a step nothing of which was sent, then gives up after three attempts; a tombstone closes erased', async () => {
     m.read.mockResolvedValue(view());
     m.runGroup.mockResolvedValue(REVIEWERS.map(() => ({ ok: false, code: 'TURN_PROVIDER_BUSY' })));
