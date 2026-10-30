@@ -14,9 +14,10 @@
 --   turn_report_apply       turn_close's kind result: the report text, hidden from history, cut to what the user saw on a stop
 --   turn_report_settlement  turn_close: what the user pays and whether it waits for an unknown cost (only a charged stop does)
 --   turn_report_read        the report turn of a round (or one turn) with its saved text
---   report_turn_source      the edit and publish chain's seam (plan 2.7, 4.4: a report is still published into artifact_versions):
---                           report_document_source, report_document (save), report_document_data_source and report_final_data
---                           read a report turn by its request id when there is no old execution; the old path is unchanged
+--   report_turn_source      the report document chain's seam (plan 2.7, 4.4): report_document_source, report_document (save and
+--                           the archived-business guard) and report_document_data_source read a report turn by its request id
+--                           when there is no old execution; the old path is unchanged. Publishing a turn's report into
+--                           artifact_versions (its evidence link in opc_result_links and the erasure rules) is V2-7a2
 -- Compatibility: nothing calls kind=report until the page switches (V2-10); other kinds are unchanged; the old report path is
 -- untouched. Repeatable: CREATE OR REPLACE throughout. Recovery: re-apply 0421's turn_open and turn_close, drop the new functions.
 BEGIN;
@@ -662,36 +663,6 @@ BEGIN
   'generatedBody',e.result->>'body','storedData',stored);
 END $function$;
 
-CREATE OR REPLACE FUNCTION public.report_final_data(source jsonb)
- RETURNS jsonb
- LANGUAGE plpgsql
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE raw text:=current_setting('graylum.report_data',true);d jsonb;a uuid;sid uuid;
-BEGIN
- IF raw IS NULL OR raw='' THEN RETURN '{}'::jsonb; END IF;
- d:=raw::jsonb;
- IF jsonb_typeof(d) IS DISTINCT FROM 'object' OR d->>'bodyHash' IS DISTINCT FROM source->>'bodyHash'
-  OR d->'dataVersion' IS DISTINCT FROM '1'::jsonb OR jsonb_typeof(d->'data') IS DISTINCT FROM 'object'
-  OR jsonb_typeof(d->'dropped') IS DISTINCT FROM 'array' OR jsonb_typeof(d->'textEdited') IS DISTINCT FROM 'array'
-  OR jsonb_typeof(d->'validatedAt') IS DISTINCT FROM 'string' OR octet_length(d::text)>65536
-  OR report_body_parts(source->>'body')->>'block' IS NULL THEN
-  RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
- -- Benchmark numbers were taken from the table with this hash: it must still be the table now. Same locks and order as
- -- 0268's research_benchmark_report_current, so a refresh either commits first (and this refuses) or waits.
- IF d ? 'benchmarkHash' THEN
-  SELECT x.actor_id,x.session_id INTO a,sid FROM runtime_executions x WHERE x.id=(source->>'executionId')::uuid;
-  -- CORE-PATH-V2 V2-7a: a report turn's session, which report_document_source returned (and proved the actor's).
-  IF sid IS NULL THEN
-   sid:=(source->>'sessionId')::uuid;
-   SELECT actor_id INTO a FROM runtime_sessions WHERE id=sid;
-  END IF;
-  PERFORM 1 FROM research_account_fetches WHERE session_id=sid FOR SHARE;
-  PERFORM 1 FROM research_benchmarks WHERE session_id=sid FOR SHARE;
-  IF (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM d->>'benchmarkHash' THEN RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
- END IF;
- RETURN jsonb_build_object('data',d-'bodyHash'-'benchmarkHash');
-END $function$;
 
 DO $$
 DECLARE f text;

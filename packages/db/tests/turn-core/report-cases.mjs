@@ -3,7 +3,7 @@
 // pay nothing, the user's stop (turn_stop: first two in 24 hours free, then confirmed and charged what was generated, at most the
 // fixed price; what the user saw is what is kept), the hidden report text and turn_report_read.
 import assert from 'node:assert/strict';
-import {createHash,randomUUID} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 
 export async function reportCases(t){
  const {c,one,open,begin,identity,record,close,balance,account,reportSource,reportPolicy,openReport,refusal,peer,report}=t;
@@ -194,13 +194,13 @@ export async function reportCases(t){
   report.checks.push('two stops at once with one free stop left: exactly one free, and each close charges what its stop told the user');
  }
 
- // 6. Plan 2.7/4.4 (#1523 review): a report generated on the turn path is edited, published and written to artifact_versions
- // through the existing chain, by its turn's request id; a stopped or cut-off one is readable but never published; the old
- // path's executions are untouched (packages/db/tests/report-finalization).
+ // 6. Plan 2.7/4.4 (#1523 review, controller A1): a report generated on the turn path is read and edited through the existing
+ // report document chain, by its turn's request id; a stopped or cut-off one is readable but never a publish candidate. Publishing
+ // it into artifact_versions (the evidence link in opc_result_links and the erasure rules) is V2-7a2. The old path's executions
+ // are untouched (packages/db/tests/report-finalization).
  {
   const doc=(a,id,action,request=null,revision=null,body=null,hash=null)=>
    one('select report_document($1,$2,$3,$4,$5,$6,$7,null) v',[a.actor,id,action,request,revision,body,hash]);
-  const sha=text=>createHash('sha256').update(text).digest('hex');
   const a=await account(1000),src=await reportSource(a),request=randomUUID();
   const o=await openReport(a,src,{request});
   await begin(a,o.turnId,1,{upper:0.05});await record(a,o.turnId,1,{n:0.03});
@@ -212,10 +212,7 @@ export async function reportCases(t){
   const edited=body.replace('Second part.','Second part, edited.');
   const saved=await doc(a,request,'save',randomUUID(),0,edited);
   assert.deepEqual([saved.body,saved.revision,saved.manuallyEdited],[edited,1,true]);
-  const published=await doc(a,request,'finalize',randomUUID(),1,null,sha(edited));
-  assert.deepEqual([published.finalized,published.version],[true,1]);
-  const formal=(await c.query('select report from artifact_versions where id=$1',[published.versionId])).rows[0].report;
-  assert.equal(formal.generatedReport.body,edited);assert.equal(formal.generatedReport.manuallyEdited,true);
+  assert.equal((await doc(a,request,'read')).candidate,true,'still a publish candidate after the edit');
   // Someone else's request id, or a turn that is not a kept report, has nothing to open.
   assert.match(await refusal(doc(await account(),request,'read')),/REPORT_EXECUTION_REQUIRED/);
   // A stopped report: readable, not a candidate, so it cannot be published.
@@ -226,10 +223,9 @@ export async function reportCases(t){
   await closeReport(b,s1.turnId,'completed',{text:body,delivered:true});
   const stoppedDoc=await doc(b,stopRequest,'read');
   assert.deepEqual([stoppedDoc.body,stoppedDoc.candidate,stoppedDoc.completeness],[body.slice(0,9),false,'stopped']);
-  assert.match(await refusal(doc(b,stopRequest,'finalize',randomUUID(),0,null,sha(body.slice(0,9)))),/REPORT_NOT_COMPLETE/);
   // A deleted conversation: the report can no longer be opened.
   await c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[srcB.session]);
   assert.match(await refusal(doc(b,stopRequest,'read')),/CONTENT_ERASED|REPORT_EXECUTION_REQUIRED/);
-  report.checks.push('a turn-path report is read, edited and published into artifact_versions by its request id; a stopped one is readable but not publishable; another account or a deleted conversation cannot open it');
+  report.checks.push('a turn-path report is read and edited by its request id (publishing is V2-7a2); a stopped one is readable, never a candidate; another account or a deleted conversation cannot open it');
  }
 }
