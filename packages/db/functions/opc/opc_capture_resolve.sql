@@ -21,6 +21,9 @@ BEGIN
  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',p_draft_id)),false)
  THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ -- V2-5: the draft's session row first, the lock a mentor turn's close holds while it writes this checklist (the main-path
+ -- serialization point), so a manual save and a mentor capture never overwrite each other; then the project, as before.
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
  PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;

@@ -22,12 +22,15 @@ BEGIN
  -- 0324 archived business guard
  IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id,'executionId',p_execution_id)); END IF;
 
- -- Match existing OPC lock order; never acquire a runtime session/run update lock.
+ -- Lock order: the draft's session row, then the project (V2-5: the session row is the one serialization point every checklist
+ -- writer shares with a mentor turn's close, which holds it; opc_information and opc_capture_resolve take it the same way).
+ -- Never a run update lock.
  PERFORM bill2_actor(p_actor_id);
  SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND (draft_id=p_draft_id OR
   (p_draft_id IS NULL AND session_id=(SELECT session_id FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id)));
  IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)),false)
  THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
  SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  -- Refresh the draft after waiting: a concurrent revision may have advanced it.
  SELECT * INTO d FROM opc_drafts WHERE draft_id=d.draft_id AND actor_id=p_actor_id;

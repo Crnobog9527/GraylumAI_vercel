@@ -8,11 +8,12 @@
 --                        the Skill package as opc_source_allowed does: a positioning whose evidence or Skill package later
 --                        becomes unreadable still counts as positioned (controller 2026-10-29: a technical scope decision; the
 --                        gate only decides whether a free chat runs the positioning check).
---   turn_open            whole rebuild from 0422 as applied: calls turn_positioned instead of opc_has_confirmed_positioning
+--   turn_open            whole rebuild from 0423 as applied (with the mentor context): calls turn_positioned instead of
+--                        opc_has_confirmed_positioning
 --   turn_settle_credits  whole rebuild from 0421 as applied, unchanged in effect: each UPDATE keeps its SET on the same line (the
 --                        closure check reads a line that starts with SET as a session SET statement)
 -- Compatibility: nothing else calls turn_positioned; turn_open returns the same keys. Repeatable: CREATE OR REPLACE.
--- Recovery: re-run 0422's turn_open and 0421's turn_settle_credits; drop turn_positioned. No data changes.
+-- Recovery: re-run 0423's turn_open and 0421's turn_settle_credits; drop turn_positioned. No data changes.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -166,7 +167,7 @@ BEGIN
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
-    'kindContext', NULL::jsonb);
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_settle_credits(p_user_id uuid, p_pre_deduct_id uuid, p_actual_credits integer, p_turn_id bigint)
