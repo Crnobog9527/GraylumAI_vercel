@@ -50,7 +50,11 @@ BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false)
   THEN RETURN jsonb_build_object('allowed', false); END IF;
-  RETURN jsonb_build_object('allowed', true, 'businessContext', opc_business_context(p_actor_id, p_session_id, d.round_id));
+  -- The source drafts behind an account-strategy draft: turn_open refuses them if revoked since this read (same table as its own check).
+  RETURN jsonb_build_object('allowed', true, 'businessContext', opc_business_context(p_actor_id, p_session_id, d.round_id),
+    'sourceDrafts', (SELECT coalesce(jsonb_agg(DISTINCT sd.draft_id), '[]'::jsonb) FROM opc_account_strategy_drafts a
+      JOIN artifact_versions v ON v.id IN (a.base_source_version_id, a.root_source_version_id)
+      JOIN opc_drafts sd ON sd.project_id = v.project_id WHERE a.draft_id = d.draft_id));
 END $function$;
 
 -- The Skill revision of a round, under the same rules as read_skill_package: an active module of that Skill, a published directory
@@ -92,6 +96,10 @@ BEGIN
   -- The draft's own scope, narrow: revoked or tombstoned is refused here. What needs the whole source and evidence chain (an
   -- account-strategy draft, a business with a source) is mentor_source_check, which Node calls before this turn opens; a draft that needs it is refused unless it ran.
   IF NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
+  IF EXISTS (SELECT 1 FROM bill2_drafts WHERE actor_id = p_actor_id AND revoked
+      AND id IN (SELECT value::uuid FROM jsonb_array_elements_text(coalesce(p_mentor->'sourceDrafts', '[]')))) THEN
+    RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501';
+  END IF;
   -- An archived business is read-only (as opc_assert_business_writable, without its row lock).
   SELECT x.* INTO b FROM opc_draft_businesses db JOIN opc_businesses x ON x.id = db.business_id AND x.actor_id = p_actor_id
    WHERE db.draft_id = d.draft_id;

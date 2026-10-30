@@ -45,7 +45,8 @@ export type MentorInput = { actorId: string; sessionId: string; requestId: strin
   organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer };
 
 const MARKER_RESERVE_BYTES = 256;
-const sourceChecked = z.object({ allowed: z.boolean(), businessContext: z.unknown().optional() });
+const sourceChecked = z.object({ allowed: z.boolean(), businessContext: z.unknown().optional(),
+  sourceDrafts: z.array(z.string().uuid()).default([]) });
 /** Conversations whose draft needs mentor_source_check: a hint per process, never a permission (turn_open enforces it). */
 const SOURCE_DRAFTS = new Set<string>(), SOURCE_DRAFTS_KEPT = 5000;
 
@@ -80,7 +81,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   let checked: z.infer<typeof sourceChecked> | undefined;
   // 2. Open: freeze, read the draft and its checklist in the same transaction.
   const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
-    policy: mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined }) });
+    policy: mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
+      sourceDrafts: checked?.sourceDrafts ?? [] }) });
   let opened;
   try {
     if (SOURCE_DRAFTS.has(input.sessionId)) checked = await sourceCheck();
@@ -195,7 +197,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // this turn keeps the reply but writes nothing to the checklist (the check turn_close made on the old chain); a failed read
     // counts as withdrawn.
     const rechecked = organizer && checked
-      ? await swallow('turn_mentor_source_check_failed', sourceCheck(), { allowed: false }, { category: 'ai' }) : null;
+      ? await swallow('turn_mentor_source_check_failed', sourceCheck(), { allowed: false, sourceDrafts: [] }, { category: 'ai' }) : null;
     const scopeDenied = rechecked !== null && !rechecked.allowed;
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],

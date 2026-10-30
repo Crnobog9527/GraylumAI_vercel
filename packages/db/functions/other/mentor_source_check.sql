@@ -13,5 +13,9 @@ BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false)
   THEN RETURN jsonb_build_object('allowed', false); END IF;
-  RETURN jsonb_build_object('allowed', true, 'businessContext', opc_business_context(p_actor_id, p_session_id, d.round_id));
+  -- The source drafts behind an account-strategy draft: turn_open refuses them if revoked since this read (same table as its own check).
+  RETURN jsonb_build_object('allowed', true, 'businessContext', opc_business_context(p_actor_id, p_session_id, d.round_id),
+    'sourceDrafts', (SELECT coalesce(jsonb_agg(DISTINCT sd.draft_id), '[]'::jsonb) FROM opc_account_strategy_drafts a
+      JOIN artifact_versions v ON v.id IN (a.base_source_version_id, a.root_source_version_id)
+      JOIN opc_drafts sd ON sd.project_id = v.project_id WHERE a.draft_id = d.draft_id));
 END $function$;

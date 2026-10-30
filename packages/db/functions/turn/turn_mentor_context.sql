@@ -17,6 +17,10 @@ BEGIN
   -- The draft's own scope, narrow: revoked or tombstoned is refused here. What needs the whole source and evidence chain (an
   -- account-strategy draft, a business with a source) is mentor_source_check, which Node calls before this turn opens; a draft that needs it is refused unless it ran.
   IF NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
+  IF EXISTS (SELECT 1 FROM bill2_drafts WHERE actor_id = p_actor_id AND revoked
+      AND id IN (SELECT value::uuid FROM jsonb_array_elements_text(coalesce(p_mentor->'sourceDrafts', '[]')))) THEN
+    RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501';
+  END IF;
   -- An archived business is read-only (as opc_assert_business_writable, without its row lock).
   SELECT x.* INTO b FROM opc_draft_businesses db JOIN opc_businesses x ON x.id = db.business_id AND x.actor_id = p_actor_id
    WHERE db.draft_id = d.draft_id;
