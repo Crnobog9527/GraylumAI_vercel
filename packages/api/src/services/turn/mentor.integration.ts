@@ -398,6 +398,4 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown
     suggestion.executionId, suggestion.hash, 'accept', version])).rows[0].v;
   expect(resolved).toMatchObject({ result: 'accept' });
   expect((await f.steps())['step-0'].information.goal).toMatchObject({ value: 'Sell coffee to students' });
-  // Deleting the conversation takes the suggestions of its turns out of view.
-  await db.query("update session_messages set visible=false where session_id=$1", [f.session]);
 });
