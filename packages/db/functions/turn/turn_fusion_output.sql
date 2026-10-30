@@ -37,6 +37,11 @@ BEGIN
           p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
   END IF;
+  -- A verdict that excludes the call from what the user pays stays on the receipt (no text): the saved answer can be deleted
+  -- with its product before recovery settles the cost.
+  IF NOT gone AND p_output->>'verdict' <> 'usable' THEN
+    UPDATE turn_calls SET unusable_verdict = p_output->>'verdict' WHERE turn_id = p_turn_id AND seq = p_seq;
+  END IF;
   -- The group's last answer: the jury waits between groups, as turn_fusion_record (recovery looks up the pending costs meanwhile).
   IF t.kind = 'jury' AND t.state = 'running' AND NOT gone AND NOT EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = p_turn_id
       AND k.status IN ('dispatched','identified')

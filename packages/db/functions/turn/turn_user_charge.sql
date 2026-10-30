@@ -26,9 +26,10 @@ BEGIN
     IF p_kind IN ('interrupted','expired') THEN
       -- The known usage as turn_close counts it, without a seat or summary judged unusable (format or revision invalid): one
       -- whose cost was settled later by recovery (status ok) is borne by the platform, as when its cost was known at once.
+      -- The verdict stays on the receipt, so a deletion of the saved answer does not make it chargeable.
       SELECT ceil((t.policy->>'q')::numeric * coalesce(sum(c.nominal_usd * c.multiplier), 0))::integer INTO p_credits
       FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
-        AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = c.turn_id AND o.seq = c.seq AND o.verdict <> 'usable');
+        AND c.unusable_verdict IS NULL;
       RETURN least(p_credits, coalesce(p_fixed, p_held), p_held);
     END IF;
     RETURN 0;
@@ -38,8 +39,8 @@ BEGIN
     SELECT coalesce(sum(ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)), 0)::integer INTO p_credits
     FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
       -- A column refused under the positioning rule is never charged, also when its cost was settled later by recovery
-      -- (its verdict was saved with the answer, turn_fusion_output).
-      AND NOT EXISTS (SELECT 1 FROM fusion_turn_outputs o WHERE o.turn_id = c.turn_id AND o.seq = c.seq AND o.verdict = 'no_delivery');
+      -- (its verdict stays on the receipt, also when the saved answer is deleted, turn_fusion_output).
+      AND c.unusable_verdict IS NULL;
   END IF;
   IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN

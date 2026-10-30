@@ -450,6 +450,16 @@ try{
   await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[k.actor,ok.turnId,2,'ok',0.0021,0.0021,'{}',null,hash('late2'),null]);
   assert.equal((await close(k,ok.turnId,'completed',{delivered:true})).chargedCredits,2,'only the delivered column (ceil(100 x 0.0021 x 6) = 2)');
   assert.equal(await one('select fusion_call_output_read($1,$2) v',[k.actor,await one('select call_id v from fusion_turn_outputs where turn_id=$1 and seq=2',[ok.turnId])]),null);
+  // #1522 review: the same, with the compare deleted (a source erased) before recovery settles: the verdict stays on the receipt.
+  const v=await account(),ov=await open(v,{kind:'compare',pol:comparePolicy(),product:cq});
+  await begin(v,ov.turnId,1);await begin(v,ov.turnId,2);
+  await record(v,ov.turnId,1,{n:0.0021,output:{phase:'fusion_compare',body:'answer',verdict:'usable'}});
+  await one('select turn_call_identity($1,$2,$3,$4) v',[v.actor,ov.turnId,2,'gen-refused-2']);
+  await one('select turn_fusion_output($1,$2,$3,$4) v',[v.actor,ov.turnId,2,JSON.stringify({phase:'fusion_compare',body:'refused',verdict:'no_delivery'})]);
+  await close(v,ov.turnId,'completed',{delivered:true});
+  await c.query('delete from fusion_compares where id=$1',[ov.compareId]);
+  await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[v.actor,ov.turnId,2,'ok',0.0021,0.0021,'{}',null,hash('late3'),null]);
+  assert.equal((await close(v,ov.turnId,'completed',{delivered:true})).chargedCredits,2,'the refused column stays free');
   // ...and the 7-day breaker still counts it, though its turn charged something and its receipt says ok.
   const borne=await one('select fusion_review_breaker_usage($1) v',[k.actor]);
   assert.deepEqual([borne.noDeliveryCalls,Number(borne.platformUsd)],[1,0.0021]);
