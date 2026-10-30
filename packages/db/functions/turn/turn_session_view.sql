@@ -17,9 +17,12 @@ BEGIN
   SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id;
   IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
   IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
-  -- The conversation's scope as every other read checks it (runtime_session_context): a revoked draft, or an account-strategy
-  -- draft whose source is no longer allowed, keeps its messages out of view although the conversation itself is not deleted.
-  IF NOT coalesce(bill2_scope_allowed(p_actor_id, s.scope), false) THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  -- The conversation's whole scope is session_view_allowed, called first by Node (view.ts); a draft revoked since then is refused
+  -- here, in the same snapshot as the messages.
+  IF s.scope->>'kind' = 'positioning_draft' AND NOT (turn_mentor_draft_allowed(p_actor_id, (s.scope->>'draftId')::uuid)
+      AND turn_mentor_source_live((s.scope->>'draftId')::uuid)) THEN
+    RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
   IF s.active_turn_id IS NOT NULL THEN SELECT * INTO a FROM turns WHERE actor_id = p_actor_id AND id = s.active_turn_id; END IF;
   SELECT * INTO l FROM turns WHERE session_id = p_session_id AND actor_id = p_actor_id AND state = 'closed'
     ORDER BY opened_at DESC LIMIT 1;

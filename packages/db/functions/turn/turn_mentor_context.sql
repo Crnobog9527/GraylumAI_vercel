@@ -8,21 +8,26 @@ CREATE OR REPLACE FUNCTION public.turn_mentor_context(p_actor_id uuid, p_session
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; m modules; spec jsonb; v_step text := p_mentor->>'stepId';
-  business uuid; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; context jsonb; suggestions jsonb := '{}';
+DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; spec jsonb; v_step text := p_mentor->>'stepId';
+  b opc_businesses; st jsonb; step_id text; field_id text; metas jsonb; steps jsonb; suggestions jsonb := '{}';
   suggestion jsonb;
 BEGIN
   SELECT * INTO d FROM opc_drafts WHERE actor_id = p_actor_id AND session_id = p_session_id;
   IF d.draft_id IS NULL THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
-  -- The draft's scope as the old path checked it (runtime_material / runtime_work_projection): an account-strategy draft whose
-  -- base source was withdrawn or deleted, or whose evidence is no longer allowed, is refused.
-  IF NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)), false) THEN
+  -- The draft's own scope, narrow: revoked or tombstoned is refused here. What needs the whole source and evidence chain (an
+  -- account-strategy draft, a business with a source) is mentor_source_check, which Node calls before this turn opens; a draft that needs it is refused unless it ran.
+  IF NOT turn_mentor_draft_allowed(p_actor_id, d.draft_id) THEN RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501'; END IF;
+  IF EXISTS (SELECT 1 FROM bill2_drafts WHERE actor_id = p_actor_id AND revoked
+      AND id IN (SELECT value::uuid FROM jsonb_array_elements_text(coalesce(p_mentor->'sourceDrafts', '[]')))) THEN
     RAISE EXCEPTION 'TURN_MENTOR_DENIED' USING ERRCODE='42501';
   END IF;
   -- An archived business is read-only (as opc_assert_business_writable, without its row lock).
-  business := opc_target_business(p_actor_id, jsonb_build_object('draftId', d.draft_id));
-  IF business IS NOT NULL AND EXISTS (SELECT 1 FROM opc_businesses WHERE id = business AND actor_id = p_actor_id AND archived_at IS NOT NULL) THEN
-    RAISE EXCEPTION 'TURN_MENTOR_ARCHIVED' USING ERRCODE='42501';
+  SELECT x.* INTO b FROM opc_draft_businesses db JOIN opc_businesses x ON x.id = db.business_id AND x.actor_id = p_actor_id
+   WHERE db.draft_id = d.draft_id;
+  IF b.archived_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_MENTOR_ARCHIVED' USING ERRCODE='42501'; END IF;
+  IF p_mentor->'sourceChecked' IS DISTINCT FROM 'true'::jsonb AND (b.current_source_version_id IS NOT NULL
+      OR EXISTS (SELECT 1 FROM opc_account_strategy_drafts WHERE draft_id = d.draft_id)) THEN
+    RAISE EXCEPTION 'TURN_SOURCE_CHECK_REQUIRED' USING ERRCODE='42501';
   END IF;
   SELECT * INTO p FROM artifact_projects WHERE id = d.project_id AND actor_id = p_actor_id;
   SELECT * INTO r FROM artifact_rounds WHERE id = d.round_id AND project_id = p.id;
@@ -37,15 +42,7 @@ BEGIN
              WHERE (r.steps->dep->>'valid')::boolean IS DISTINCT FROM true) THEN
     RAISE EXCEPTION 'TURN_MENTOR_DEPENDENCIES_UNCONFIRMED' USING ERRCODE='42501';
   END IF;
-  -- The Skill revision of the round, under the same rules as read_skill_package: an active module of that Skill, a published
-  -- directory Skill, the round's exact package, not revoked. The package itself is then read by content hash (process cache).
-  SELECT * INTO m FROM modules WHERE id = p.module_id AND skill_id = p.skill_id AND active IS TRUE;
-  IF m.id IS NULL
-    OR NOT EXISTS (SELECT 1 FROM skills WHERE id = p.skill_id AND status = 'published' AND content_kind = 'directory')
-    OR NOT EXISTS (SELECT 1 FROM skill_packages WHERE skill_id = p.skill_id AND revision_id = r.revision_id AND package_hash = r.package_hash)
-    OR EXISTS (SELECT 1 FROM skill_revision_revocations WHERE revision_id = r.revision_id) THEN
-    RAISE EXCEPTION 'TURN_SKILL_UNAVAILABLE' USING ERRCODE='42501';
-  END IF;
+  -- The Skill revision of the round is mentor_skill_available, read through the Skill catalog cache before any model call.
   -- The work projection the mentor sees: runtime_work_projection's per-field provenance and protection, computed here without
   -- its runtime_executions/opc_turns join (V2-12 drops those): a pending suggestion is one the field still carries.
   steps := r.steps;
@@ -86,10 +83,11 @@ BEGIN
     END LOOP;
     steps := jsonb_set(steps, ARRAY[step_id], st || jsonb_build_object('fieldMeta', metas));
   END LOOP;
-  context := opc_business_context(p_actor_id, p_session_id, r.id);
   RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'roundId', r.id, 'mode', d.mode, 'moduleId', p.module_id,
     'skillId', p.skill_id, 'revisionId', r.revision_id, 'packageHash', r.package_hash, 'steps', r.workflow->'steps',
     'suggestions', suggestions,
     'work', jsonb_build_object('projectId', p.id, 'roundId', r.id, 'revisionId', r.revision_id, 'packageHash', r.package_hash,
-      'steps', steps, 'source', NULL) || CASE WHEN context IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext', context) END);
+      'steps', steps, 'source', NULL) || CASE WHEN b.id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('businessContext',
+      jsonb_build_object('version', 'opc-business-context.v1', 'businessId', b.id,
+        'name', CASE WHEN b.name = '未命名业务' THEN NULL ELSE b.name END, 'source', NULL)) END);
 END $function$;
