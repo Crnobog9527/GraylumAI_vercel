@@ -423,6 +423,24 @@ it('RUNTIME: CORE-PATH-V2 V2-5b: the next turn answers the card; the chosen opti
   expect(refused.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_ANSWER_SOURCE_DENIED' });
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-5b: the refresh-recovery read shows the running turn, then its saved messages', async () => {
+  const f = await setup();
+  const view = async (afterSeq = 0) => (await db.query('select turn_session_view($1,$2,$3) v', [f.actor, f.session, afterSeq])).rows[0].v;
+  let during: unknown;
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }));
+    during = await view();
+    return prose('gen-reply-' + n, 'Noted.');
+  });
+  await turn(f, { text: 'I want to sell coffee', transport: t.fn });
+  expect(during).toMatchObject({ activeTurn: { kind: 'mentor', state: 'running' }, messages: [] });
+  const after = await view();
+  expect(after).toMatchObject({ activeTurn: null, lastTurn: { kind: 'mentor', closeKind: 'completed' } });
+  expect(after.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
+  expect((await view(after.messages[0].seq)).messages.map((m: { role: string }) => m.role)).toEqual(['assistant']);
+  await expect(db.query('select turn_session_view($1,$2,0) v', [randomUUID(), f.session])).rejects.toThrow(/TURN_SESSION_DENIED/);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5b: a step summary turn writes the summary and is never organized', async () => {
   const f = await setup();
   const t = transport(() => prose('gen-summary', 'Step summary: goal is still missing.'));

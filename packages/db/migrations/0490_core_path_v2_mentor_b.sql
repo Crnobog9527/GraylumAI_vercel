@@ -9,6 +9,8 @@
 --   opc_query            0423 unchanged except that such suggestions (and withdrawn suggestions) are no longer hidden.
 --   opc_capture_resolve  0423 unchanged except that such a suggestion can be accepted, ignored or dismissed; an old-path
 --                        execution id keeps the old checks exactly.
+--   turn_session_view    the refresh-recovery read: the conversation's running turn (state, pause), its latest closed turn and
+--                        the visible messages after a sequence number. Read only, no locks.
 -- Compatibility: additive; old-path suggestions keep exactly their rules. Repeatable: CREATE OR REPLACE throughout.
 -- Recovery: re-apply 0423's opc_query and opc_capture_resolve and drop turn_mentor_source_available; no data changes.
 BEGIN;
@@ -222,9 +224,39 @@ BEGIN
  RETURN response;
 END $function$;
 
+-- The refresh-recovery read (Owner 10-02, #595): after a reload the page shows that this conversation's turn is still running and,
+-- once it closed, the messages it saved, without the user doing anything. Read only, no locks; any kind of turn.
+CREATE OR REPLACE FUNCTION public.turn_session_view(p_actor_id uuid, p_session_id uuid, p_after_seq integer DEFAULT 0)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions; a turns; l turns;
+BEGIN
+  SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id;
+  IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
+  IF s.active_turn_id IS NOT NULL THEN SELECT * INTO a FROM turns WHERE actor_id = p_actor_id AND id = s.active_turn_id; END IF;
+  SELECT * INTO l FROM turns WHERE session_id = p_session_id AND actor_id = p_actor_id AND state = 'closed'
+    ORDER BY opened_at DESC LIMIT 1;
+  RETURN jsonb_build_object(
+    'activeTurn', CASE WHEN a.id IS NULL THEN NULL ELSE jsonb_build_object('turnId', a.id, 'kind', a.kind, 'state', a.state,
+      'pauseReason', a.pause_reason, 'openedAt', a.opened_at, 'updatedAt', a.updated_at) END,
+    'lastTurn', CASE WHEN l.id IS NULL THEN NULL ELSE jsonb_build_object('turnId', l.id, 'kind', l.kind, 'closeKind', l.close_kind,
+      'failureCode', l.failure_code, 'settlement', l.settlement, 'chargedCredits', l.charged_credits, 'closedAt', l.closed_at) END,
+    'messages', (SELECT coalesce(jsonb_agg(jsonb_build_object('seq', m.seq, 'role', m.role, 'turnId', m.turn_id, 'content', m.content)
+        ORDER BY m.seq), '[]'::jsonb)
+      FROM (SELECT seq, role, turn_id, content FROM session_messages
+            WHERE session_id = p_session_id AND visible AND deleted_at IS NULL AND seq > greatest(coalesce(p_after_seq, 0), 0)
+            ORDER BY seq LIMIT 50) m));
+END $function$;
+
 DO $$
 BEGIN
   EXECUTE 'REVOKE ALL ON FUNCTION public.turn_mentor_source_available(uuid,uuid,uuid,uuid,uuid) FROM PUBLIC, anon, authenticated, service_role';
+  EXECUTE 'REVOKE ALL ON FUNCTION public.turn_session_view(uuid,uuid,integer) FROM PUBLIC, anon, authenticated, service_role';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION public.turn_session_view(uuid,uuid,integer) TO service_role';
 END $$;
 
 COMMIT;
