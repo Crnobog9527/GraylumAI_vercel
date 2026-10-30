@@ -10,8 +10,8 @@ CREATE OR REPLACE FUNCTION public.fusion_review_breaker_usage(a uuid)
 AS $function$
   -- Platform-borne outcomes of the last 7 days (§3.3 breaker), on both paths: the BILL2 groups, and the compare and jury turns
   -- of CORE-PATH-V2 (V2-7b): calls that delivered nothing (a provider refusal, a 402, an answer refused under the fallback rule)
-  -- and the provider cost of calls whose result was unusable or whose turn refunded everything. unusable_verdict: judged before
-  -- the cost was final; recovery records such a call as ok, but the platform bears it.
+  -- and the provider cost of calls whose result was unusable or whose turn refunded everything. answer_verdict: recovery records a
+  -- call whose cost came late as ok, but the platform bears one without a usable answer (a compare column broken off has none).
   SELECT jsonb_build_object('noDeliveryCalls', o.n + t.n, 'platformUsd', o.usd + t.usd)
   FROM (SELECT count(*) FILTER (WHERE c.fusion_verdict='no_delivery') n,
     coalesce(sum(coalesce(c.selected_cost_usd,0)) FILTER (WHERE c.fusion_verdict IN
@@ -20,9 +20,10 @@ AS $function$
     FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id LEFT JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
     WHERE r.actor_id=a AND r.fusion_group_id IS NOT NULL AND c.created_at>=clock_timestamp()-interval '7 days') o,
   (SELECT count(*) FILTER (WHERE c.status IN ('rejected','no_charge_402')
-      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery') OR c.unusable_verdict='no_delivery') n,
+      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery') OR c.answer_verdict='no_delivery' OR (t.kind='compare' AND c.status='ok' AND c.answer_verdict IS NULL)) n,
     coalesce(sum(coalesce(c.actual_usd,c.nominal_usd,0)) FILTER (WHERE c.status='unusable'
-      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0) OR c.unusable_verdict IS NOT NULL),0) usd
+      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0) OR c.answer_verdict<>'usable'
+      OR (t.kind='compare' AND c.status='ok' AND c.answer_verdict IS NULL)),0) usd
     FROM turn_calls c JOIN turns t ON t.actor_id=c.actor_id AND t.id=c.turn_id
     WHERE c.actor_id=a AND t.kind IN ('compare','jury') AND c.call_kind='model'
       AND c.dispatched_at>=clock_timestamp()-interval '7 days') t;

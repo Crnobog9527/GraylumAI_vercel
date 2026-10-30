@@ -460,6 +460,15 @@ try{
   await c.query('delete from fusion_compares where id=$1',[ov.compareId]);
   await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[v.actor,ov.turnId,2,'ok',0.0021,0.0021,'{}',null,hash('late3'),null]);
   assert.equal((await close(v,ov.turnId,'completed',{delivered:true})).chargedCredits,2,'the refused column stays free');
+  // #1522 review: a column broken off (no answer saved, cost settled later as ok) is not charged either, and the platform bears it.
+  const b=await account(),ob=await open(b,{kind:'compare',pol:comparePolicy(),product:cq});
+  await begin(b,ob.turnId,1);await begin(b,ob.turnId,2);
+  await record(b,ob.turnId,1,{n:0.0021,output:{phase:'fusion_compare',body:'answer',verdict:'usable'}});
+  await one('select turn_call_identity($1,$2,$3,$4) v',[b.actor,ob.turnId,2,'gen-broken']);
+  await close(b,ob.turnId,'completed',{delivered:true});
+  await one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[b.actor,ob.turnId,2,'ok',0.0021,0.0021,'{}',null,hash('late4'),null]);
+  assert.equal((await close(b,ob.turnId,'completed',{delivered:true})).chargedCredits,2,'the broken column is not charged');
+  assert.equal(Number((await one('select fusion_review_breaker_usage($1) v',[b.actor])).platformUsd),0.0021);
   // ...and the 7-day breaker still counts it, though its turn charged something and its receipt says ok.
   const borne=await one('select fusion_review_breaker_usage($1) v',[k.actor]);
   assert.deepEqual([borne.noDeliveryCalls,Number(borne.platformUsd)],[1,0.0021]);

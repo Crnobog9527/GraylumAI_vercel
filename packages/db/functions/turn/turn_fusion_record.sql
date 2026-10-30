@@ -40,6 +40,7 @@ BEGIN
         VALUES (p_actor_id, p_turn_id, p_seq, v_review, CASE WHEN v_review IS NULL THEN v_compare END, p_output->>'phase',
           p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
+    UPDATE turn_calls SET answer_verdict = p_output->>'verdict' WHERE turn_id = p_turn_id AND seq = p_seq;
   END IF;
   -- A jury with no call left without an answer waits between groups (an answer whose cost alone is pending counts as finished).
   IF t.kind = 'jury' AND t.state = 'running' AND NOT EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = p_turn_id

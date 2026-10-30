@@ -29,7 +29,7 @@ BEGIN
       -- The verdict stays on the receipt, so a deletion of the saved answer does not make it chargeable.
       SELECT ceil((t.policy->>'q')::numeric * coalesce(sum(c.nominal_usd * c.multiplier), 0))::integer INTO p_credits
       FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
-        AND c.unusable_verdict IS NULL;
+        AND coalesce(c.answer_verdict, 'usable') = 'usable';
       RETURN least(p_credits, coalesce(p_fixed, p_held), p_held);
     END IF;
     RETURN 0;
@@ -38,9 +38,9 @@ BEGIN
     -- Each column is rounded on its own (2.7 "各模型各自取整"), as the old per-run settlement did.
     SELECT coalesce(sum(ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)), 0)::integer INTO p_credits
     FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
-      -- A column refused under the positioning rule is never charged, also when its cost was settled later by recovery
-      -- (its verdict stays on the receipt, also when the saved answer is deleted, turn_fusion_output).
-      AND c.unusable_verdict IS NULL;
+      -- Only a column with a usable answer is charged: not one refused, empty or broken off, also when recovery settled its cost
+      -- later as ok (the verdict stays on the receipt, also when the saved answer is deleted, turn_fusion_record / _output).
+      AND c.answer_verdict = 'usable';
   END IF;
   IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN

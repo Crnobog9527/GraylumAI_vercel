@@ -38,10 +38,10 @@
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
--- A verdict excluding a call from what the user pays, when it was judged before its cost was final: billing evidence without text,
--- so it stays when the saved answer is deleted with its product (turn_call_record replaces usage, so it has its own column).
-ALTER TABLE public.turn_calls ADD COLUMN IF NOT EXISTS unusable_verdict text
-  CHECK (unusable_verdict IN ('format_invalid','revision_invalid','no_delivery'));
+-- The verdict of a compare or jury call's saved answer: billing evidence without text, so it stays when the answer is deleted with
+-- its product and recovery settles the cost later (turn_call_record replaces usage, so it has its own column).
+ALTER TABLE public.turn_calls ADD COLUMN IF NOT EXISTS answer_verdict text
+  CHECK (answer_verdict IN ('usable','format_invalid','revision_invalid','no_delivery'));
 -- The product records point at their turn; the reviews and compares of the old path keep turn_id NULL and their old functions.
 ALTER TABLE public.fusion_reviews ADD COLUMN IF NOT EXISTS turn_id bigint;
 ALTER TABLE public.fusion_compares ADD COLUMN IF NOT EXISTS turn_id bigint;
@@ -367,6 +367,7 @@ BEGIN
         VALUES (p_actor_id, p_turn_id, p_seq, v_review, CASE WHEN v_review IS NULL THEN v_compare END, p_output->>'phase',
           p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
+    UPDATE turn_calls SET answer_verdict = p_output->>'verdict' WHERE turn_id = p_turn_id AND seq = p_seq;
   END IF;
   -- A jury with no call left without an answer waits between groups (an answer whose cost alone is pending counts as finished).
   IF t.kind = 'jury' AND t.state = 'running' AND NOT EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = p_turn_id
@@ -415,11 +416,8 @@ BEGIN
           p_output->>'body', v_hash, p_output->>'verdict', coalesce((p_output->>'deliverable')::boolean, false));
     END IF;
   END IF;
-  -- A verdict that excludes the call from what the user pays stays on the receipt (no text): the saved answer can be deleted
-  -- with its product before recovery settles the cost.
-  IF NOT gone AND p_output->>'verdict' <> 'usable' THEN
-    UPDATE turn_calls SET unusable_verdict = p_output->>'verdict' WHERE turn_id = p_turn_id AND seq = p_seq;
-  END IF;
+  -- The verdict stays on the receipt (no text): the saved answer can be deleted with its product before recovery settles the cost.
+  IF NOT gone THEN UPDATE turn_calls SET answer_verdict = p_output->>'verdict' WHERE turn_id = p_turn_id AND seq = p_seq; END IF;
   -- The group's last answer: the jury waits between groups, as turn_fusion_record (recovery looks up the pending costs meanwhile).
   IF t.kind = 'jury' AND t.state = 'running' AND NOT gone AND NOT EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = p_turn_id
       AND k.status IN ('dispatched','identified')
@@ -970,7 +968,7 @@ BEGIN
       -- The verdict stays on the receipt, so a deletion of the saved answer does not make it chargeable.
       SELECT ceil((t.policy->>'q')::numeric * coalesce(sum(c.nominal_usd * c.multiplier), 0))::integer INTO p_credits
       FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
-        AND c.unusable_verdict IS NULL;
+        AND coalesce(c.answer_verdict, 'usable') = 'usable';
       RETURN least(p_credits, coalesce(p_fixed, p_held), p_held);
     END IF;
     RETURN 0;
@@ -979,9 +977,9 @@ BEGIN
     -- Each column is rounded on its own (2.7 "各模型各自取整"), as the old per-run settlement did.
     SELECT coalesce(sum(ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)), 0)::integer INTO p_credits
     FROM turn_calls c WHERE c.turn_id = p_turn_id AND c.status = 'ok' AND c.call_kind <> 'decision'
-      -- A column refused under the positioning rule is never charged, also when its cost was settled later by recovery
-      -- (its verdict stays on the receipt, also when the saved answer is deleted, turn_fusion_output).
-      AND c.unusable_verdict IS NULL;
+      -- Only a column with a usable answer is charged: not one refused, empty or broken off, also when recovery settled its cost
+      -- later as ok (the verdict stays on the receipt, also when the saved answer is deleted, turn_fusion_record / _output).
+      AND c.answer_verdict = 'usable';
   END IF;
   IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN
@@ -1326,8 +1324,8 @@ CREATE OR REPLACE FUNCTION public.fusion_review_breaker_usage(a uuid)
 AS $function$
   -- Platform-borne outcomes of the last 7 days (§3.3 breaker), on both paths: the BILL2 groups, and the compare and jury turns
   -- of CORE-PATH-V2 (V2-7b): calls that delivered nothing (a provider refusal, a 402, an answer refused under the fallback rule)
-  -- and the provider cost of calls whose result was unusable or whose turn refunded everything. unusable_verdict: judged before
-  -- the cost was final; recovery records such a call as ok, but the platform bears it.
+  -- and the provider cost of calls whose result was unusable or whose turn refunded everything. answer_verdict: recovery records a
+  -- call whose cost came late as ok, but the platform bears one without a usable answer (a compare column broken off has none).
   SELECT jsonb_build_object('noDeliveryCalls', o.n + t.n, 'platformUsd', o.usd + t.usd)
   FROM (SELECT count(*) FILTER (WHERE c.fusion_verdict='no_delivery') n,
     coalesce(sum(coalesce(c.selected_cost_usd,0)) FILTER (WHERE c.fusion_verdict IN
@@ -1336,9 +1334,10 @@ AS $function$
     FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id LEFT JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
     WHERE r.actor_id=a AND r.fusion_group_id IS NOT NULL AND c.created_at>=clock_timestamp()-interval '7 days') o,
   (SELECT count(*) FILTER (WHERE c.status IN ('rejected','no_charge_402')
-      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery') OR c.unusable_verdict='no_delivery') n,
+      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery') OR c.answer_verdict='no_delivery' OR (t.kind='compare' AND c.status='ok' AND c.answer_verdict IS NULL)) n,
     coalesce(sum(coalesce(c.actual_usd,c.nominal_usd,0)) FILTER (WHERE c.status='unusable'
-      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0) OR c.unusable_verdict IS NOT NULL),0) usd
+      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0) OR c.answer_verdict<>'usable'
+      OR (t.kind='compare' AND c.status='ok' AND c.answer_verdict IS NULL)),0) usd
     FROM turn_calls c JOIN turns t ON t.actor_id=c.actor_id AND t.id=c.turn_id
     WHERE c.actor_id=a AND t.kind IN ('compare','jury') AND c.call_kind='model'
       AND c.dispatched_at>=clock_timestamp()-interval '7 days') t;
