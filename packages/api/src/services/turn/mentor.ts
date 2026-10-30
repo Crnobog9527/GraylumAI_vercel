@@ -194,7 +194,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // 7. Close: settle once, save both messages, apply the checklist patches in the same transaction. A source withdrawn during
     // this turn keeps the reply but writes nothing to the checklist (the check turn_close made on the old chain); a failed read
     // counts as withdrawn.
-    const scopeDenied = Boolean(organizer && checked && !(await swallow('turn_mentor_source_check_failed', sourceCheck(), { allowed: false }, { category: 'ai' })).allowed);
+    const rechecked = organizer && checked
+      ? await swallow('turn_mentor_source_check_failed', sourceCheck(), { allowed: false }, { category: 'ai' }) : null;
+    const scopeDenied = rechecked !== null && !rechecked.allowed;
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
       ...(organizer ? { kindResult: { roundId: ctx.roundId, revisionId: ctx.revisionId, versions: state.versions,
