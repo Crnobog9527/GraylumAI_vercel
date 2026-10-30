@@ -22,7 +22,7 @@ const historyItem = z.object({ seq: z.number().int().positive(), role: z.enum(['
 export type HistoryItem = z.infer<typeof historyItem>;
 const opened = z.object({ turnId: z.number().int().positive(), state: z.enum(['running', 'paused', 'closed', 'stopping', 'opening']),
   replay: z.boolean(), reservedCredits: z.number().int().nonnegative(), reservedUsd: z.coerce.number().nonnegative(),
-  history: z.array(historyItem),
+  history: z.array(historyItem), resumeOf: z.number().int().positive().nullable().optional(),
   // Read by turn_open with the account row: the reply language setting and, for a free chat, the positioning gate.
   replyLanguage: z.unknown().optional(),
   positioning: z.object({ positioned: z.boolean(), refusals24h: z.number().int().nonnegative() }).nullable().optional(),
@@ -40,6 +40,19 @@ const closed = z.object({ turnId: z.number().int().positive(), closeKind: z.stri
   kindResult: z.unknown().optional() })
   .and(tombstones.partial());
 export type Closed = z.infer<typeof closed>;
+
+export type RecoveryAction = 'interrupt' | 'expire' | 'settle';
+export type ClaimAction = RecoveryAction | 'lookup';
+const recoveryClaim = z.array(z.object({ actorId: z.string().uuid(), turnId: z.number().int().positive(),
+  action: z.enum(['interrupt', 'expire', 'settle', 'lookup']),
+  /** settle, lookup: the model costs not final yet, to look up by provider id (lookup: of a turn paused for credits). */
+  /** model and pricing are the ones the turn froze at open (policy), never the catalog's current values. */
+  calls: z.array(z.object({ seq: z.number().int().positive(), providerId: z.string().min(1), model: z.string().nullable(),
+    pricing: z.unknown().nullable().optional(), upperUsd: z.coerce.string() })) })).max(50);
+export type RecoveryItem = z.infer<typeof recoveryClaim>[number];
+const recovered = z.object({ action: z.enum(['interrupt', 'expire', 'settle']), skipped: z.boolean().optional(),
+  closeKind: z.string().optional(), settlement: z.enum(['pending', 'done']).nullable().optional() }).passthrough();
+export type Recovered = z.infer<typeof recovered>;
 
 export type CallKind = 'model' | 'tool' | 'decision';
 export type CallStatus = 'ok' | 'not_sent' | 'rejected' | 'no_charge_402' | 'unusable';
@@ -59,9 +72,10 @@ async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: 
 export function turnDatabase(clients: TurnClients) {
   const w = clients.write;
   return {
-    open: (a: { actorId: string; sessionId: string; requestId: string; kind: string; policy: Record<string, unknown> }) =>
+    /** resumeOf: the session's turn paused for credits, continued by this one (V2-8); its limits are what that turn has left. */
+    open: (a: { actorId: string; sessionId: string; requestId: string; kind: string; policy: Record<string, unknown>; resumeOf?: number }) =>
       call(w, 'turn_open', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_request_id: a.requestId, p_kind: a.kind,
-        p_policy: a.policy, p_resume_of: null }, opened),
+        p_policy: a.policy, p_resume_of: a.resumeOf ?? null }, opened),
     begin: (a: { actorId: string; turnId: number; seq: number; callKind: CallKind; modelId: string | null; toolName: string | null;
       paid: boolean | null; requestHash: string; upperUsd: string; multiplier: string }) =>
       call(w, 'turn_call_begin', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_call_kind: a.callKind,
@@ -82,6 +96,10 @@ export function turnDatabase(clients: TurnClients) {
       call(w, 'turn_close', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_close_kind: a.kind, p_messages: a.messages,
         p_delivered: a.delivered, p_refund_all: a.refundAll ?? false, p_failure_code: a.failureCode ?? null,
         p_kind_result: a.kindResult ?? null }, closed),
+    /** The recovery job (V2-8): claim up to 50 turns under a lease, then recover each one in its own transaction. */
+    claimRecovery: (limit: number) => call(w, 'turn_recovery_claim', { p_limit: limit }, recoveryClaim),
+    recover: (a: { actorId: string; turnId: number; action: RecoveryAction }) =>
+      call(w, 'turn_recover', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_action: a.action }, recovered),
   };
 }
 export type TurnDatabase = ReturnType<typeof turnDatabase>;

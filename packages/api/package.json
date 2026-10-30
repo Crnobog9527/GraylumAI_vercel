@@ -71,6 +71,7 @@
     "./src/services/turn/view": "./src/services/turn/view.ts",
     "./src/services/turn/limiter": "./src/services/turn/limiter.ts",
     "./src/services/turn/db": "./src/services/turn/db.ts",
+    "./src/services/turn/recovery": "./src/services/turn/recovery.ts",
     "./src/services/runtime/newWorkGate": "./src/services/runtime/newWorkGate.ts",
     "./src/services/redisRateLimiter": "./src/services/redisRateLimiter.ts",
     "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts",
