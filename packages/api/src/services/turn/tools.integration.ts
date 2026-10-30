@@ -183,6 +183,29 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the con
     'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/turn_close']);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-5c: the daily summary counts old charges and turn tool receipts once each, and settled credits add up', async () => {
+  const f = await setup(), g = await setup(), bodies: string[] = [];
+  // The database's clock, after the turns of the cases before this one.
+  const start = (await db.query('select clock_timestamp() t')).rows[0].t as Date;
+  // An old-path operation charged 7 credits, next to the turn's own operations, which carry no charge.
+  const plan = randomUUID();
+  await db.query(`insert into research_plans(id,actor_id,budget_units,max_operations,operations) values($1,$2,1,1,'["x"]')`, [plan, f.actor]);
+  await db.query(`insert into research_operations(id,plan_id,identity_hash,quote_units,dispatch_token,state,charged_credits,charged_at)
+    values($1,$2,$3,0,$4,'succeeded',7,now())`, [randomUUID(), plan, 'a'.repeat(64), randomUUID()]);
+  await turn(f, searchingModel(bodies), suppliers(vi.fn(async () => searchResult())));
+  const summary = async () => (await db.query('select research_billing_summary($1,$2) v', [start, new Date(start.getTime() + 3600000)])).rows[0].v;
+  const settled = async () => (await db.query(`select coalesce(-sum(amount),0)::int n from billing_history where operation_type='settle' and created_at>=$1`, [start])).rows[0].n as number;
+  const charged = await expectedCredits(f.actor), paid = await summary();
+  // The search: 0.01 x m 6 x q 100 = 6 credits, one successful subcall, and 7 + 6 with the old charge.
+  expect(paid).toEqual({ count: 2, credits: 13, turnOtherCredits: charged - 6 });
+  expect(paid.credits - 7 + paid.turnOtherCredits).toBe(await settled());
+  expect(await summary()).toEqual(paid);
+  // A search that returned nothing is not charged: only the turn's model calls move.
+  await turn(g, searchingModel([]), suppliers(vi.fn(async () => searchResult({ items: [], reason: 'NO_RESULTS' }))));
+  expect(await summary()).toEqual({ count: 2, credits: 13, turnOtherCredits: charged - 6 + await modelCredits(g.actor) });
+  expect((await summary()).credits - 7 + (await summary()).turnOtherCredits).toBe(await settled());
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-6: a search that returns nothing is said plainly and not charged; the platform cost is kept', async () => {
   const f = await setup(), bodies: string[] = [];
   const out = await turn(f, searchingModel(bodies), suppliers(vi.fn(async () => searchResult({ items: [], reason: 'NO_RESULTS' }))));
