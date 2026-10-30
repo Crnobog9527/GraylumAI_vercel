@@ -249,7 +249,21 @@ export async function reportCases(t){
     await closeReport(a,y.turnId,'completed',{text:body,delivered:true})].map(v=>v.chargedCredits);
    assert.deepEqual(charged,told.map(v=>v.chargeable?120:0),'each close charges what its stop said');
   }finally{await p1.end();await p2.end();}
-  report.checks.push('two stops at once with one free stop left: exactly one free, and each close charges what its stop told the user');
+  // The free stops are one count across both paths (#1523 review): two stops on the old path leave none here.
+  {
+   const o=await account(2000),src=await reportSource(o);
+   for(let i=0;i<2;i++){
+    const hold=await one("select pre_deduct_id v from atomic_pre_deduct($1,10,'old stop fixture',$2)",[o.actor,randomUUID()]),id=randomUUID();
+    await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state) values($1,$2,$3,$4,'{}',0,'cancelled')`,
+     [id,o.actor,src.session,randomUUID()]);
+    await c.query(`insert into report_fees(execution_id,actor_id,credits,pre_deduct_id,state,charged_credits,settle_reason,settled_at,user_stopped_at)
+      values($1,$2,10,$3,'refunded',0,'user_stop',now(),now())`,[id,o.actor,hold]);
+   }
+   const t=await openReport(o,src);
+   await begin(o,t.turnId,1,{upper:0.05});
+   assert.deepEqual([(await stop(o,t.turnId)).state],['confirmation_required'],'the two old-path stops used the free ones');
+  }
+  report.checks.push('two stops at once with one free stop left: exactly one free, and each close charges what its stop told the user; old-path stops count against the free stops');
  }
 
  // 6. Plan 2.7/4.4 (#1523 review, controller A1): a report generated on the turn path is read and edited through the existing

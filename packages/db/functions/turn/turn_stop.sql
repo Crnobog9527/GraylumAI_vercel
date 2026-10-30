@@ -27,6 +27,8 @@ BEGIN
   IF t.state <> 'running' THEN RAISE EXCEPTION 'TURN_NOT_RUNNING' USING ERRCODE='55000'; END IF;
   SELECT count(*) INTO n FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user AND r.id <> p_turn_id
     AND coalesce(r.closed_at, (r.policy->>'stoppedAt')::timestamptz) > now() - interval '24 hours';
+  -- While both paths exist the free stops are one count (#1523 review): report_stop counts these turns too. V2-12 removes this.
+  n := n + (SELECT count(*) FROM report_fees f WHERE f.actor_id = p_actor_id AND f.user_stopped_at > now() - interval '24 hours');
   IF n >= 2 AND NOT coalesce(p_confirmed, false) THEN
     RETURN jsonb_build_object('turnId', t.id, 'state', 'confirmation_required', 'chargeable', true,
       'fixedCredits', (t.policy->>'fixedCredits')::int, 'replay', false);

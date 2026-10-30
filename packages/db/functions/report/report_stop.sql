@@ -33,6 +33,9 @@ BEGIN
        AND (d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status='deleting')) THEN
    SELECT count(*) INTO n FROM report_fees WHERE actor_id=p_actor_id
      AND user_stopped_at>clock_timestamp()-interval '24 hours';
+   -- CORE-PATH-V2 V2-7a (#1523 review): one count across both paths, under the same account lock as turn_stop. V2-12 removes it.
+   n:=n+(SELECT count(*) FROM turns r WHERE r.actor_id=p_actor_id AND r.kind='report' AND r.stopped_by_user
+     AND coalesce(r.closed_at,(r.policy->>'stoppedAt')::timestamptz)>clock_timestamp()-interval '24 hours');
    IF n>=2 AND NOT coalesce(p_confirmed,false) THEN RETURN jsonb_build_object('state','confirmation_required'); END IF;
    UPDATE report_fees SET user_stopped_at=clock_timestamp(),stop_chargeable=(n>=2) WHERE execution_id=e.id;
  END IF;

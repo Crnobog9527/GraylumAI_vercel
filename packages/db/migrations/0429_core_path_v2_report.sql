@@ -16,6 +16,7 @@
 --   turn_report_settlement  turn_close: what the user pays and whether it waits for an unknown cost (only a charged stop does)
 --   turn_report_read        the report turn of a round (or one turn) with its saved text
 --   report_fee_hold         the old path's hold refuses a round whose report on the turn path is still going or delivered
+--   report_stop             the old path's stop counts the turn path's stops in the same 24 hours (turn_stop counts the old ones)
 --   report_turn_source      the report document chain's seam (plan 2.7, 4.4): report_document_source, report_document (save and
 --                           the archived-business guard) and report_document_data_source read a report turn by its request id
 --                           when there is no old execution; the old path is unchanged. Publishing a turn's report into
@@ -331,6 +332,8 @@ BEGIN
   IF t.state <> 'running' THEN RAISE EXCEPTION 'TURN_NOT_RUNNING' USING ERRCODE='55000'; END IF;
   SELECT count(*) INTO n FROM turns r WHERE r.actor_id = p_actor_id AND r.kind = 'report' AND r.stopped_by_user AND r.id <> p_turn_id
     AND coalesce(r.closed_at, (r.policy->>'stoppedAt')::timestamptz) > now() - interval '24 hours';
+  -- While both paths exist the free stops are one count (#1523 review): report_stop counts these turns too. V2-12 removes this.
+  n := n + (SELECT count(*) FROM report_fees f WHERE f.actor_id = p_actor_id AND f.user_stopped_at > now() - interval '24 hours');
   IF n >= 2 AND NOT coalesce(p_confirmed, false) THEN
     RETURN jsonb_build_object('turnId', t.id, 'state', 'confirmation_required', 'chargeable', true,
       'fixedCredits', (t.policy->>'fixedCredits')::int, 'replay', false);
@@ -750,6 +753,49 @@ BEGIN
     -- Only keys the erasure ledger shape knows (erasure_ledger_metadata): L = price plus the call's temporary hold.
     jsonb_build_object('sourceType','report','sourceId',e.id::text,'executionId',e.id::text,'preDeductId',q.pre_deduct_id,
       'nominalReserved',fee,'L',fee+call_hold));
+END $function$;
+
+-- The old path's stop (whole function, otherwise unchanged): the 24-hour free stops are one count across both paths.
+CREATE OR REPLACE FUNCTION public.report_stop(p_actor_id uuid, p_execution_id uuid, p_stop jsonb, p_confirmed boolean)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE e runtime_executions; s runtime_sessions; b bill2_runs; f report_fees; n integer; v jsonb;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id;
+ IF e.id IS NULL THEN RAISE EXCEPTION 'RUNTIME_EXECUTION_DENIED'; END IF;
+ SELECT * INTO s FROM runtime_sessions WHERE id=e.session_id AND actor_id=p_actor_id FOR UPDATE;
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id FOR UPDATE;
+ SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE;
+ IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM report_fees WHERE execution_id=e.id AND actor_id=p_actor_id) THEN
+   IF p_stop IS NULL THEN RETURN runtime_cancel(p_actor_id,e.id); END IF;
+   RETURN runtime_execution(p_actor_id,e.id,'stop',p_stop);
+ END IF;
+ PERFORM 1 FROM profiles WHERE id=p_actor_id FOR UPDATE;
+ SELECT * INTO f FROM report_fees WHERE execution_id=e.id AND actor_id=p_actor_id FOR UPDATE;
+ IF f.user_stopped_at IS NULL AND f.state='held' AND e.state NOT IN ('completed','cancelled') AND e.result IS NULL
+   AND e.unavailable_reason IS NULL AND e.failure_code IS NULL AND NOT b.closed AND NOT b.cancel_requested
+   AND NOT b.conflict AND b.outcome IS DISTINCT FROM 'confirmed_failure'
+   AND NOT runtime_workspace_posts_history_erased(e.id)
+   AND NOT runtime_voice_source_gone(e.id)
+   AND NOT EXISTS(SELECT 1 FROM runtime_library_references r LEFT JOIN library_documents d
+     ON d.id=r.document_id AND d.actor_id=r.actor_id WHERE r.execution_id=e.id
+       AND (d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status='deleting')) THEN
+   SELECT count(*) INTO n FROM report_fees WHERE actor_id=p_actor_id
+     AND user_stopped_at>clock_timestamp()-interval '24 hours';
+   -- CORE-PATH-V2 V2-7a (#1523 review): one count across both paths, under the same account lock as turn_stop. V2-12 removes it.
+   n:=n+(SELECT count(*) FROM turns r WHERE r.actor_id=p_actor_id AND r.kind='report' AND r.stopped_by_user
+     AND coalesce(r.closed_at,(r.policy->>'stoppedAt')::timestamptz)>clock_timestamp()-interval '24 hours');
+   IF n>=2 AND NOT coalesce(p_confirmed,false) THEN RETURN jsonb_build_object('state','confirmation_required'); END IF;
+   UPDATE report_fees SET user_stopped_at=clock_timestamp(),stop_chargeable=(n>=2) WHERE execution_id=e.id;
+ END IF;
+ IF p_stop IS NULL THEN v:=runtime_cancel(p_actor_id,e.id);
+ ELSE v:=runtime_execution(p_actor_id,e.id,'stop',p_stop); END IF;
+ RETURN v;
 END $function$;
 
 DO $$
