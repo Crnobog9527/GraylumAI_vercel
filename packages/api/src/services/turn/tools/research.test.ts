@@ -179,3 +179,13 @@ describe('a supplier answer cut short stays partial', () => {
     expect(s.h.kinds()).toEqual(['begin', 'record:ok']);
   });
 });
+
+describe('refs are unique across the research calls of a turn', () => {
+  it('numbers each call, then each subcall and item', async () => {
+    const s = setup(vi.fn(async () => result({ vendor: 'tikhub', route: 'xhs-search' })));
+    const first = JSON.parse(await s.tool('social_search').execute({ platform: 'xiaohongshu', keywords: ['a', 'b'], limit: null }, 'c1'));
+    const second = JSON.parse(await s.tool('social_search').execute({ platform: 'xiaohongshu', keywords: ['c'], limit: null }, 'c2'));
+    const refs = [...first.items, ...second.items].map((item: { fields: { ref: string } }) => item.fields.ref);
+    expect(refs).toEqual(['c1s1#1', 'c1s2#1', 'c2s1#1']);
+  });
+});

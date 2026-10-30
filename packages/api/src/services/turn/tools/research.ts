@@ -110,7 +110,8 @@ function planSteps(input: ResearchToolsInput, name: GeneralResearchToolName, arg
 }
 
 /** Runs the steps in order; stops at the first one without data; returns what came back. */
-async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planned: Extract<Planned, { steps: Step[] }>) {
+/** `call`: this tool call's number in the turn, so refs never repeat across calls (`c<call>s<subcall>#<item>`). */
+async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planned: Extract<Planned, { steps: Step[] }>, call: number) {
   const items: ToolEnvelope['items'] = [];
   const steps = [...planned.steps];
   let stoppedAt: string | null = null, fetchedAt: string | undefined, cut: string | null = null;
@@ -125,7 +126,7 @@ async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planne
     if (result.outcome === 'partial' || result.truncated) cut ??= result.reason ?? 'RESULT_TRUNCATED';
     const n = ledger.receipts.length;
     items.push(...result.items.map((item, index) => ({ ...(item.url ? { url: item.url } : {}),
-      fields: { ...item.fields, ...step.label, ref: `s${n}#${index + 1}` }, missing: item.missing })));
+      fields: { ...item.fields, ...step.label, ref: `c${call}s${n}#${index + 1}` }, missing: item.missing })));
     const following = planned.next?.(step, result.items);
     if (following) steps.splice(i + 1, 0, following);
   }
@@ -143,7 +144,7 @@ export function callBound(policies: readonly ToolCallPolicy[], requests: readonl
 }
 
 export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
-  let calls = 0, subcallsLeft = input.maxSubcalls;
+  let calls = 0, started = 0, subcallsLeft = input.maxSubcalls;
   const fastOnly = fastSearchOnly(input.config);
   const make = (name: GeneralResearchToolName): RuntimeTool => ({
     name, description: researchToolDescription(name, true), parameters: researchToolParameters(name, fastOnly),
@@ -171,7 +172,7 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       let metered;
       try {
         metered = await paidToolCall(input.calls, { toolName: name, requestHash: sha256(canonical({ name, args: parsed.data })),
-          upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger => runSteps(input, ledger, planned));
+          upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger => runSteps(input, ledger, planned, ++started));
       } catch (error) {
         if (error instanceof ToolLimitReached) { calls = input.maxCalls; return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' }); }
         throw error;
