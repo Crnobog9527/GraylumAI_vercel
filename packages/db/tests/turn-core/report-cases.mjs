@@ -120,7 +120,28 @@ export async function reportCases(t){
    assert.match(String(both.find(r=>r.status==='rejected').reason),/TURN_SESSION_BUSY/);
    assert.equal(await balance(b),470);
   }finally{await p1.end();await p2.end();}
-  report.checks.push('a complete report pays 500 once, its text is stored hidden from history and read back; same request replays, a double click and two concurrent starts freeze once; a standing report blocks a second paid start');
+  // The same round's report on the old path (#1523 review): one still going, charged, or complete and not settled yet blocks
+  // a new start here, by report_fee_hold's rule; one refunded, or charged for a user stop, does not.
+  {
+   const legacy=async(state,{exec='running',settle=null,complete=false}={})=>{
+    const o2=await account(2000),src2=await reportSource(o2),id=randomUUID();
+    const hold=await one("select pre_deduct_id v from atomic_pre_deduct($1,500,'old report fixture',$2)",[o2.actor,randomUUID()]);
+    await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result)
+      values($1,$2,$3,$4,$5,0,$6,$7)`,[id,o2.actor,src2.session,randomUUID(),
+      JSON.stringify({reportGeneration:{projectId:src2.project,roundId:src2.round,sections:['One','Two'],maxCharacters:12000}}),exec,
+      complete?JSON.stringify({body,completeness:'complete'}):null]);
+    await c.query(`insert into report_fees(execution_id,actor_id,credits,pre_deduct_id,state,charged_credits,settle_reason,settled_at)
+      values($1,$2,500,$3,$4,$5,$6,$7)`,[id,o2.actor,hold,state,state==='held'?null:state==='charged'?500:0,
+      state==='held'?null:settle??'settled',state==='held'?null:new Date().toISOString()]);
+    return openReport(o2,src2).then(()=>'opened',e=>e.message);
+   };
+   assert.match(await legacy('held'),/REPORT_ALREADY_EXISTS/,'an old-path report still going');
+   assert.match(await legacy('held',{exec:'completed',complete:true}),/REPORT_ALREADY_EXISTS/,'complete, price not settled yet');
+   assert.match(await legacy('charged',{exec:'completed'}),/REPORT_ALREADY_EXISTS/,'charged (a complete report)');
+   assert.equal(await legacy('refunded',{exec:'completed'}),'opened','refunded: a new start pays again');
+   assert.equal(await legacy('charged',{exec:'cancelled',settle:'user_stop'}),'opened','a charged stop is no report');
+  }
+  report.checks.push('a complete report pays 500 once, its text is stored hidden from history and read back; same request replays, a double click and two concurrent starts freeze once; a standing report blocks a second paid start, on either path (old-path held or charged blocks; refunded or a charged stop does not)');
  }
  // 3. Nothing delivered pays nothing (Owner 10-17): cut off, failed, interrupted, deleted; settled now even with an unknown cost.
  {

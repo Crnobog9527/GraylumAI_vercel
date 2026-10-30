@@ -8,7 +8,7 @@
 --   turn_report_admit       turn_open, new report, under its locks: switch, today's fixed price (acceptedCredits), one-call
 --                           shape, membership (cached level), the round is this conversation's draft and of the quoted module,
 --                           its business is not archived (0324),
---                           one paid report per round. The confirmed facts and the benchmark table are read by Node just before
+--                           one paid report per round (on either path while both exist). The confirmed facts and the benchmark table are read by Node just before
 --                           opening (report_source, research_benchmark_rows), not inside turn_open (controller 10-30, B1)
 --   turn_stop               the user's stop of a running report: first two in 24 hours free; from the third it asks, and once
 --                           confirmed charges what was generated (at most the fixed price); the decision is frozen on the turn
@@ -75,6 +75,17 @@ BEGIN
   IF EXISTS (SELECT 1 FROM turns r WHERE r.session_id = p_session_id AND r.actor_id = p_actor_id AND r.kind = 'report'
       AND r.policy#>>'{report,roundId}' = rep->>'roundId'
       AND (r.state <> 'closed' OR (r.close_kind = 'completed' AND r.delivered))) THEN
+    RAISE EXCEPTION 'REPORT_ALREADY_EXISTS' USING ERRCODE='P0001';
+  END IF;
+  -- The same round's report on the old path (#1523 review): while both paths exist, a report still going there, charged, or
+  -- complete with its price not settled yet blocks a new paid start here too, by report_fee_hold's own rule. V2-12 drops this
+  -- with the old tables.
+  IF EXISTS (SELECT 1 FROM report_fees f JOIN runtime_executions x ON x.id = f.execution_id AND x.actor_id = p_actor_id
+      WHERE f.actor_id = p_actor_id AND x.session_id = p_session_id
+        AND x.payload#>>'{reportGeneration,projectId}' = rep->>'projectId' AND x.payload#>>'{reportGeneration,roundId}' = rep->>'roundId'
+        AND (f.state = 'charged' AND f.settle_reason IS DISTINCT FROM 'user_stop'
+          OR (f.state = 'held' AND (x.state NOT IN ('completed','cancelled')
+            OR (x.result->>'completeness' = 'complete' AND public.report_body_complete(x.result->>'body', x.payload->'reportGeneration')))))) THEN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS' USING ERRCODE='P0001';
   END IF;
 END $function$;
