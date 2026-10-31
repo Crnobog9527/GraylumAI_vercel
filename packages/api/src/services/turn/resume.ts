@@ -25,6 +25,8 @@ const completion = (body: string | null): string | null => {
 export type StoredTool = { status: 'ok' | 'unusable'; results: unknown[] };
 export class TurnReplay {
   private readonly models: string[] = [];
+  /** How many model completions the replay holds when it starts: the first of them is the turn's own first call. */
+  readonly replayedModels: number;
   private readonly tools: Array<{ name: string } & StoredTool> = [];
   constructor(calls: ResumeRead['calls']) {
     for (const call of calls) {
@@ -39,6 +41,7 @@ export class TurnReplay {
         this.tools.push({ name: call.toolName, status: call.status, results });
       }
     }
+    this.replayedModels = Math.min(this.models.length, 1);
   }
   /** The stored answer of the next model call, or null: that call is real. */
   model(): string | null { return this.models.shift() ?? null; }
@@ -51,9 +54,11 @@ export class TurnReplay {
 }
 
 /** The limits of a resumed turn: what the paused one has left, and every tool return still has its model call (turnPolicy's rule). */
-export function resumeLimits(full: TurnLimits, left: ResumeRead['limits'], otherModelCalls = 0): TurnLimits {
-  const room = Math.max(left.model - otherModelCalls - 1, 0);
+export function resumeLimits(full: TurnLimits, left: ResumeRead['limits'], otherModelCalls = 0, replayedModels = 0): TurnLimits {
+  // The turn's first model call is real unless its receipt answers it; a tool return needs one more real call either way.
+  const room = Math.max(left.model - otherModelCalls - (replayedModels ? 0 : 1), 0);
   const freeTools = Math.min(full.freeTools, Math.max(left.freeTools, 0), room);
   const paidTools = Math.min(full.paidTools, Math.max(left.paidTools, 0), room - freeTools);
-  return { model: 1 + paidTools + freeTools + otherModelCalls, paidTools, freeTools, decisions: Math.min(full.decisions, Math.max(left.decisions, 0)) };
+  return { model: (replayedModels ? 0 : 1) + paidTools + freeTools + otherModelCalls, paidTools, freeTools,
+    decisions: Math.min(full.decisions, Math.max(left.decisions, 0)), ...(replayedModels ? { replayedModels } : {}) };
 }

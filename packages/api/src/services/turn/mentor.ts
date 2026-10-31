@@ -107,7 +107,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   // 2. Open: freeze, read the draft and its checklist in the same transaction.
   const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
     ...(input.resume ? { resumeOf: input.resume.of } : {}),
-    policy: mentorPolicy(catalog, { ...(resume ? { left: resume.limits } : {}), opening,
+    policy: mentorPolicy(catalog, { ...(resume ? { left: resume.limits, replayedModels: replay?.replayedModels ?? 0 } : {}), opening,
       stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
       sourceDrafts: checked?.sourceDrafts ?? [], ...(typeof flowRaw?.preparedAt === 'string' ? { preparedAt: flowRaw.preparedAt } : {}) }) });
   let opened, flow: PreparedResearch | undefined, flowRaw: Record<string, unknown> | undefined;

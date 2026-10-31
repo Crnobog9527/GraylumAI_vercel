@@ -152,8 +152,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // A resume keeps to what the paused turn has left and replays its receipts.
   const resume = input.resume?.read;
   const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 };
-  const frozenLimits = resume ? resumeLimits(limits, resume.limits) : limits;
   const replay = resume ? new TurnReplay(resume.calls) : undefined;
+  const frozenLimits = resume ? resumeLimits(limits, resume.limits, 0, replay?.replayedModels) : limits;
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
     ...(frozenLimits.decisions ? { decisionUpperUsd } : {}),
     startThresholdCredits: startCredits,

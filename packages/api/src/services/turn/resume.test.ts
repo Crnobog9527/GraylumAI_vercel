@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
+import { turnLimits } from './policy';
 import { resumeLimits, TurnReplay } from './resume';
 
 const model = (text: string) => JSON.stringify({ choices: [{ message: { content: text } }] });
@@ -32,6 +33,17 @@ describe('the limits of a resumed turn', () => {
     expect(resumeLimits(full, { model: 3, paidTools: 2, freeTools: 1, decisions: 0 }))
       .toEqual({ model: 3, paidTools: 1, freeTools: 1, decisions: 0 });
     expect(resumeLimits(full, { model: 1, paidTools: 2, freeTools: 1, decisions: 0 })).toMatchObject({ model: 1, paidTools: 0, freeTools: 0 });
+  });
+  it('a model request already answered by its receipt does not take a model call: the tool it asked for can still run', () => {
+    // Paused after the model asked for a search and before the search ran: one model call (the continuation) and one search are left.
+    const limits = resumeLimits({ model: 2, paidTools: 1, freeTools: 0, decisions: 0 }, { model: 1, paidTools: 1, freeTools: 0, decisions: 0 }, 0, 1);
+    expect(limits).toEqual({ model: 1, paidTools: 1, freeTools: 0, decisions: 0, replayedModels: 1 });
+    expect(turnLimits.parse(limits)).toEqual(limits);
+    // Nothing replayed: the first call is real, so the same count leaves no room for the search.
+    expect(resumeLimits({ model: 2, paidTools: 1, freeTools: 0, decisions: 0 }, { model: 1, paidTools: 1, freeTools: 0, decisions: 0 }))
+      .toMatchObject({ model: 1, paidTools: 0 });
+    expect(new TurnReplay([row(1, 'model', model('a'))]).replayedModels).toBe(1);
+    expect(new TurnReplay([]).replayedModels).toBe(0);
   });
   it('holds room for the organizer, and a negative count left is none', () => {
     expect(resumeLimits({ model: 3, paidTools: 0, freeTools: 1, decisions: 0 }, { model: 2, paidTools: -2, freeTools: 1, decisions: 0 }, 1))

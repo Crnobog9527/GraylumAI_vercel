@@ -85,7 +85,8 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
 /** The frozen numbers of one mentor turn (G_turn, U_turn, the call limits) and what turn_mentor_context checks. */
 export function mentorPolicy(catalog: MentorCatalog,
   input: { opening: boolean; stepId: string; moduleId: string; sourceChecked: boolean; sourceDrafts: readonly string[];
-    preparedAt?: string; /** A resume: what the paused turn has left (resume.ts). */ left?: ResumeRead['limits'] }) {
+    preparedAt?: string; /** A resume: what the paused turn has left, and whether its first model call is replayed (resume.ts). */
+    left?: ResumeRead['limits']; replayedModels?: number }) {
   const { organizer, research } = catalog;
   const mentor = catalog.mentor;
   const freeTools = input.opening ? 0 : 1, paid = research ? mentorResearchBounds(research, mentor.multiplier) : [];
@@ -93,7 +94,7 @@ export function mentorPolicy(catalog: MentorCatalog,
     ...(research ? { toolRows: BENCHMARK_ROWS } : {}) };
   // Paused at the organizer, the reply's calls are used up: the organizer is the turn's one model call left.
   const onlyOrganizer = Boolean(input.left && organizer && input.left.model <= 1);
-  const left = input.left && !onlyOrganizer ? resumeLimits(full, input.left, organizer ? 1 : 0) : null;
+  const left = input.left && !onlyOrganizer ? resumeLimits(full, input.left, organizer ? 1 : 0, input.replayedModels) : null;
   // A benchmark call settles in several rows: what is left of them is what it may still write (turn_resume_read counts rows).
   const resumedRows = left?.paidTools && research ? Math.min(BENCHMARK_ROWS, input.left!.paidTools) : 0;
   // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).

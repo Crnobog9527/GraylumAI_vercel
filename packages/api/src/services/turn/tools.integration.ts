@@ -365,6 +365,29 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume continues from the receipts: no model 
   expect(bodies).toHaveLength(2);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-10: paused after the model asked for a search and before it ran, a resume runs the search and goes on', async () => {
+  const f = await setup(), bodies: string[] = [];
+  const parallel = vi.fn(async () => searchResult());
+  const asking = searchingModel(bodies);
+  // The freeze runs out while the first reply comes back: the search's turn_call_begin finds nothing left and pauses the turn there.
+  const first: typeof fetch = async (url, init) => {
+    const response = await asking(url, init);
+    if (bodies.length === 1) await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+    return response;
+  };
+  const out = await turn(f, first, suppliers(parallel));
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'error', code: 'TURN_PAUSED_FOR_CREDITS' });
+  expect(parallel).not.toHaveBeenCalled();
+  const { id } = (await db.query("select id::int id from turns where actor_id=$1 and state='paused'", [f.actor])).rows[0];
+  await db.query('update profiles set credits=credits+100 where id=$1', [f.actor]);
+  const resumed = await turn(f, asking, suppliers(parallel), false, undefined, undefined, id);
+  expect(resumed.events.at(-1), JSON.stringify(resumed.events)).toMatchObject({ type: 'result', body: 'Answer from the search.' });
+  // The first answer came from its receipt; the search ran once, in the resume; one more model call read its result.
+  expect(parallel).toHaveBeenCalledTimes(1);
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1]).toContain('Coffee guide');
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-6: a message above the interactive ceiling opens when research is usable, never above the research one', async () => {
   const f = await setup(), bodies: string[] = [];
   const plain: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); const id = `gen-big-${bodies.length}`;

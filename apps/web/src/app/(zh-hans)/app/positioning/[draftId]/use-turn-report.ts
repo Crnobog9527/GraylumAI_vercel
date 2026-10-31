@@ -30,8 +30,9 @@ export function turnReportStatus(report: TurnReport): ReportStatus {
 
 export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
   const [report, setReport] = useState<TurnReport | null | undefined>(undefined), [failed, setFailed] = useState(false);
+  // A report already written stays readable whatever the switch says now (a rollback must not hide a paid report); `on` only
+  // decides whether a new one starts here.
   const refetch = useCallback(async () => {
-    if (!on) return { data: null };
     try {
       const query = `sessionId=${encodeURIComponent(sessionId)}&roundId=${encodeURIComponent(roundId)}`;
       const response = await fetcher(`/api/turn/report?${query}`, { cache: "no-store" });
@@ -40,15 +41,15 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
       setReport(next); setFailed(false);
       return { data: next ? turnReportStatus(next) : null };
     } catch { setFailed(true); return { data: null }; }
-  }, [on, sessionId, roundId]);
+  }, [sessionId, roundId]);
   useEffect(() => { void refetch(); }, [refetch]);
   const status = report ? turnReportStatus(report) : null, turning = useRef(false);
   const progressing = reportProgressing(status);
   useEffect(() => {
-    if (!on || !progressing) return;
+    if (!progressing) return;
     const timer = setInterval(() => { if (!turning.current) void refetch(); }, READ_MS);
     return () => clearInterval(timer);
-  }, [on, progressing, refetch]);
+  }, [progressing, refetch]);
   const server: ServerReport = report !== undefined ? { kind: "known", executionId: report?.requestId ?? null }
     : failed ? { kind: "failed" } : { kind: "pending" };
 
