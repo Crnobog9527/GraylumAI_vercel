@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
+import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from '../runtime/libraryAdmission';
 import type { PositioningClassifier } from '../runtime/positioningGate';
 import type { VendorCalls } from '../research/runtime/subcall';
 import type { ResearchCallResult } from '../research/vendors/types';
@@ -31,7 +32,7 @@ const MODEL = 'anthropic/claude-sonnet-5.5', ROUTE = 'anthropic';
 const slots: CounterStore = { take: async () => 1, drop: async () => undefined };
 const RESEARCH_KEYS = Object.keys(researchSettings());
 const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, 'primary_model_id', 'billing_credits_per_usd', 'billing_token_price_multiplier',
-  'runtime_rw_v2', ...RESEARCH_KEYS];
+  'runtime_rw_v2', LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY, ...RESEARCH_KEYS];
 let saved: Array<{ key: string; value: unknown }> = [];
 beforeAll(async () => {
   await db.connect();
@@ -80,6 +81,8 @@ async function setup(maxTools = 9, account: { credits?: number; typicalUsd?: str
     decisionUpperUsd: '0.001' });
   await set(RUNTIME_PAYG_SETTING, { version: 1, enabled: true, policyVersion: 'core-path-test', profiles: [profile(maxTools)] });
   await set('primary_model_id', modelId);
+  await set(LIBRARY_AGENT_READ_KEY, true);
+  await set(LIBRARY_RETRIEVAL_KEY, true);
   await set('billing_credits_per_usd', 100);
   await set('billing_token_price_multiplier', 6);
   await set('runtime_rw_v2', { catalogCache: true });

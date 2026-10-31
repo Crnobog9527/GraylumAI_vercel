@@ -8,6 +8,8 @@ import type { VendorCalls } from '../../research/runtime/subcall';
 import { researchToolBytes } from '../../runtime/researchAdmission';
 import { FREE_CHAT_RESEARCH } from '../../runtime/researchTurn';
 import { chatResearchEnabled } from '../../runtime/freeChatResearch';
+import { admitLibraryRetrieval } from '../../runtime/libraryAdmission';
+import { libraryAddendum } from '../../runtime/primaryInstructions';
 import { loadSkillToolBytes } from '../../runtime/loadSkillTool';
 import { skillCatalogInstructions, type SkillCatalogEntry } from '../../runtime/skillCatalog';
 import type { ConfigurationRows } from '../../runtime/settingsRows';
@@ -30,10 +32,13 @@ import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
 export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
   skills?: (actorId: string) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills }>;
-  /** Offer read_source over the user's own library (library_turn_read through the read client); tests may give their own. */
+  /** The confirmed voice of the catalog's writing Skills: a per-user system paragraph, and the version turn_open freezes. */
+  voice?: (actorId: string, catalog: SkillCatalogEntry[]) => Promise<{ text: string; versionId?: string } | undefined>;
+  /** Offer read_source over the user's own library (library_turn_read through the read client) while the two library switches are
+   *  on; tests may give their own reader. */
   library?: boolean | ((actorId: string, sessionId: string) => SourceReader);
   /** Accounts from the user's benchmark table that social_account may look up. */
-  benchmarkAccounts?: (actorId: string) => Promise<CanonicalAccount[]>;
+  benchmarkAccounts?: (actorId: string, sessionId: string) => Promise<CanonicalAccount[]>;
   /** Tests and the load-test stub only; production reads the admin Vault and calls the real suppliers. */
   readKey?: SecretReader; vendors?: VendorCalls;
 };
@@ -42,13 +47,20 @@ export type ChatToolsSetup = {
   plan: ToolPlan; research: ResearchSetup | null; inputLimit: number;
   /** Request bytes of the offered tool definitions (the history may not take them). */
   definitionBytes: number;
-  /** Appended to the shared (cached) instructions: fixed per session. */
-  sharedInstructions: string;
+  /** Appended to the shared (cached) instructions: fixed per session. `gated`: an account without a confirmed positioning. */
+  sharedInstructions: (gated: boolean) => string;
+  /** The per-user segment's part (2.9 rule 3): the catalog voice. */
+  userInstructions: string;
+  /** Frozen into the turn: revoking this version stops the turn (voice tombstone). */
+  voiceVersionId?: string;
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
-    onStop: (stop: TurnStop) => void }): Promise<ReturnType<typeof turnTools>>;
+    onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']> }): Promise<ReturnType<typeof turnTools>>;
 };
+
+/** POSITIONING-GATE: an account without a confirmed positioning neither sees nor loads a social-media Skill. */
+const allowedSkills = (catalog: readonly SkillCatalogEntry[], gated: boolean) => gated ? catalog.filter(entry => !entry.social) : catalog;
 
 /** Leave this much of the turn's 300 s for the reply after the last supplier answer. */
 const REPLY_RESERVE_MS = 60_000;
@@ -66,16 +78,22 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   // The research lookups are offered only while the admin's chat research switch is on (a configuration change, not a turn's).
   const researchOn = await swallow('turn_tools_research_switch_unavailable',
     chatResearchEnabled(input.admin, input.configuration), false);
-  for (const group of [input.tools.library ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
+  const library = input.tools.library === true ? await swallow('turn_tools_library_switch_unavailable',
+    admitLibraryRetrieval(input.admin, true, 'ordinary', [], input.configuration), false) : Boolean(input.tools.library);
+  for (const group of [library ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
     researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : []]) if (offered.length + group.length <= input.maxTools) offered.push(...group);
   const research = offered.filter(name => (GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) as typeof GENERAL_RESEARCH_TOOLS[number][];
   const skillOffered = offered.includes('load_skill'), sourceOffered = offered.includes('read_source');
   const definitionBytes = (research.length ? researchToolBytes(research, false, true) : 0) + (skillOffered ? loadSkillToolBytes() : 0)
     + (sourceOffered ? Buffer.byteLength(READ_SOURCE_DESCRIPTION) + 256 : 0);
-  const catalogText = skillOffered ? skillCatalogInstructions(skills!.catalog) : '';
+  const catalog = skillOffered ? skills!.catalog : [];
+  const catalogText = skillCatalogInstructions(catalog);
+  const libraryText = libraryAddendum(false, sourceOffered);
+  const voice = input.tools.voice && catalog.length
+    ? await swallow('turn_tools_voice_unavailable', input.tools.voice(input.actorId, catalog), undefined) : undefined;
   const { plan, research: setup } = await planTurnTools({ admin: input.admin, configuration: input.configuration, offered,
     freeReady: { load_skill: Boolean(skills?.prepared.size) },
-    requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText),
+    requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText + libraryText + (voice?.text ?? '')),
     // A turn whose research is usable may use the research ceiling; otherwise the interactive one (Owner 10-17 / 10-27).
     inputBytes: Math.min(input.quotedBytes, input.interactiveBytes),
     researchInputBytes: Math.min(input.quotedBytes, RESEARCH_INPUT_BYTES), modelMultiplier: input.modelMultiplier,
@@ -84,10 +102,11 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   // Without usable research the turn keeps the interactive ceiling (the free tools were sized against it).
   const inputLimit = researchUsable ? Math.min(input.quotedBytes, RESEARCH_INPUT_BYTES) : Math.min(input.quotedBytes, input.interactiveBytes);
   const benchmark = setup && input.tools.benchmarkAccounts ? await swallow('turn_tools_benchmark_accounts_unavailable',
-    input.tools.benchmarkAccounts(input.actorId), []) : [];
+    input.tools.benchmarkAccounts(input.actorId, input.sessionId), []) : [];
   return {
     plan, research: setup, inputLimit, definitionBytes,
-    sharedInstructions: researchInstructions(plan) + catalogText,
+    sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated)),
+    userInstructions: voice?.text ?? '', ...(voice?.versionId ? { voiceVersionId: voice.versionId } : {}),
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
       ...(sourceOffered ? { libraryRetrieval: true } : {}) },
@@ -95,8 +114,11 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       const built = turnTools({ plan, calls, research: setup, callGate: extra.callGate,
         suppliers: { slots: extra.slots, timeLeft: () => extra.deadline - Date.now() - REPLY_RESERVE_MS,
           ...(input.tools.vendors ? { vendors: input.tools.vendors } : {}) },
-        accounts: { benchmark, currentMessage: extra.currentMessage },
-        ...(skillOffered ? { skills: skills!.prepared } : {}),
+        accounts: { benchmark, currentMessage: extra.currentMessage }, onCall: extra.onCall,
+        ...(skillOffered ? { skills: new Map(allowedSkills(catalog, extra.gated).flatMap(entry => {
+          const prepared = skills!.prepared.get(entry.name);
+          return prepared === undefined ? [] : [[entry.name, prepared] as const];
+        })) } : {}),
         ...(sourceOffered ? { readSource: typeof input.tools.library === 'function' ? input.tools.library(input.actorId, input.sessionId)
           : libraryTurnReader(input.read, input.actorId, input.sessionId) } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.

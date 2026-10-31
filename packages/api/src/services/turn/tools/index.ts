@@ -7,7 +7,7 @@ import type { RuntimeTool } from '../../runtime/runner';
 import type { VendorCalls } from '../../research/runtime/subcall';
 import type { CounterStore } from '../limiter';
 import { LOAD_SKILL_CALLS, READ_SOURCE_CALLS, type ResearchSetup } from './plan';
-import { researchTools } from './research';
+import { researchTools, type ResearchToolsInput } from './research';
 import { researchRounds } from './rounds';
 import { READ_SOURCE_GUIDE } from './source';
 import { skillFileTool } from '../../runtime/skillFile';
@@ -43,6 +43,7 @@ export type TurnToolsInput = {
   callGate?: (subcalls: number) => Promise<void>;
   accounts?: { benchmark: readonly CanonicalAccount[]; currentMessage: string };
   skills?: PreparedSkills; skillFiles?: PreparedSkillFiles; readSource?: SourceReader;
+  onCall?: ResearchToolsInput['onCall'];
 };
 
 /** The extra instructions of a turn whose research tools are usable (frozen with the tools, so stable within a session). */
@@ -67,6 +68,7 @@ export function turnTools(input: TurnToolsInput): TurnTools {
     suppliers: { keys: input.research?.keys ?? {}, policies: input.research?.policies ?? [], ...input.suppliers },
     accounts: input.accounts ?? { benchmark: [], currentMessage: '' },
     ...(input.callGate ? { callGate: input.callGate } : {}),
+    ...(input.onCall ? { onCall: input.onCall } : {}),
     onOutcome: (_name, outcome, sent) => {
       outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
       if (outcome !== 'not_sent') paidCalls++;

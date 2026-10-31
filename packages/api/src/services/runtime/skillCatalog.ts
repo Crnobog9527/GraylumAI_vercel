@@ -26,6 +26,8 @@ export const catalogEntry = z.object({
   // VOICE: the module is flagged "使用用户文风" (modules.uses_user_voice), read with the module row here so admission needs no extra
   // database read; present only when true.
   usesVoice: z.literal(true).optional(),
+  // POSITIONING-GATE: a social-media Skill, for the core path, which learns at turn_open whether the account may see it.
+  social: z.literal(true).optional(),
 }).strict();
 export const skillCatalog = z.array(catalogEntry).max(MAX_CATALOG_ENTRIES);
 export type SkillCatalogEntry = z.infer<typeof catalogEntry>;
@@ -145,7 +147,8 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
       if (resultBytes > limits.maxResultBytes) continue;
       // Names are what the model calls; a duplicate name would be ambiguous, so the first (lowest module id) wins.
       if (catalog.some(other => other.name === entry.name)) continue;
-      catalog.push(catalogEntry.parse({ ...entry, resultBytes, ...(row.uses_user_voice === true ? { usesVoice: true } : {}) }));
+      catalog.push(catalogEntry.parse({ ...entry, resultBytes, ...(row.uses_user_voice === true ? { usesVoice: true } : {}),
+        ...(row.social_media_related !== false ? { social: true } : {}) }));
       if (catalog.length >= MAX_CATALOG_ENTRIES) return catalog;
     }
   }
