@@ -191,6 +191,7 @@ test('every read of a free read carries the owner key itself; one filtered branc
   assert.deepEqual(unownedReads('SELECT 1 FROM b_t WHERE actor_id = p_actor_id AND (id = 1 OR id = 2);', tables), []);
   assert.deepEqual(unownedReads('SELECT 1 FROM a_t x LEFT JOIN b_t y ON y.actor_id = x.actor_id AND x.actor_id = p_actor_id;', tables), ['a_t', 'b_t']);
   assert.deepEqual(unownedReads('SELECT 1 FROM a_t x LEFT JOIN b_t y ON y.id = x.id WHERE x.actor_id = p_actor_id AND y.actor_id = x.actor_id;', tables), []);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t d, b_t s WHERE d.actor_id = p_actor_id;', tables), ['a_t']);
   assert.deepEqual(unownedReads('SELECT 1 FROM a_t r WHERE r.profile_id = p_actor_id; SELECT 1 FROM unnest(z) w;', tables), []);
 });
 

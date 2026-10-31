@@ -255,6 +255,8 @@ export function unownedReads(code, tableNames) {
     for (const ref of statement.matchAll(TABLE_REF)) {
       const table = ref[1].toLowerCase();
       if (!tableNames.has(table) || ctes.has(table)) continue;
+      // A comma join hides the next table from TABLE_REF: refused outright, a free read spells its joins.
+      if (/^\s*,/.test(statement.slice(ref.index + ref[0].length))) { found.add(table); continue; }
       const before = ownSelect(statement, ref.index).split(SET_OPERATION).pop();
       const scope = before + scopeAfter(statement, ref.index).split(SET_OPERATION)[0];
       const refs = [...scope.matchAll(TABLE_REF)].filter(m => tableNames.has(m[1].toLowerCase()))
