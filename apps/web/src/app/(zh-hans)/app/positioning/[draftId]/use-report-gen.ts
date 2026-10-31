@@ -53,6 +53,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     : latest.isError ? { kind: "failed" } : { kind: "pending" };
   // The execution this page started, until the server read names it.
   const [pinned, setPinned] = useState<ReportPin | null>(null);
+  const streamPath = useRef<"turn" | "old" | null>(null);
   // Explicit reads after a start or a refusal, ordered against the pin by generation (report-gen.ts).
   const generation = useRef(0);
   const [fresh, setFresh] = useState<FreshRead | null>(null);
@@ -119,7 +120,10 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     let events: AsyncIterable<AgentTurnEvent> | null = null;
     try {
       // Once the turn is open a new start needs a new request id; until then the same one replays an unconfirmed start.
-      events = turnBody ? turn.events(turnBody, () => save({ requestId: id, executionId: id }))
+      streamPath.current = turnBody ? "turn" : "old";
+      // The report is shown once the server opened it: a start refused before that creates nothing to show or to retry against.
+      events = turnBody ? turn.events(turnBody, () => { save({ requestId: id, executionId: id });
+        setPinned({ executionId: id, generation: ++generation.current }); setReopened(null); })
         : await utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL });
       const { result } = await readAgentTurn(events, {
         executionId: id,
@@ -163,8 +167,6 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const requestId = nextRequestId(record, () => crypto.randomUUID());
     save({ requestId });
     if (turn.on) {
-      setPinned({ executionId: requestId, generation: ++generation.current });
-      setReopened(null);
       await stream(requestId, { kind: "report", sessionId, requestId, moduleId, projectId, roundId, acceptedCredits: price });
       return;
     }
@@ -197,7 +199,10 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     answer?.(confirmed);
   };
   useEffect(() => () => { stopAnswer.current?.(false); stopAnswer.current = null; }, []);
-  const cancelReport = turn.status || (turn.on && streaming) ? (request: { stopAt?: number; confirmed?: boolean }) => turn.stop(request) : cancel.mutateAsync;
+  // The stop goes where the stream being read came from, not where the switch points: an old-path report resumed with the switch on
+  // is still an execution (runtime.cancel); a report with no stream here is a turn if the turn read found it.
+  const cancelReport = (request: { stopAt?: number; confirmed?: boolean }) =>
+    streamPath.current === "turn" || (streamPath.current !== "old" && turn.status) ? turn.stop(request) : cancel.mutateAsync(request as never);
   const latestStop = useRef({ cancel: cancelReport as (request: never) => Promise<{ state?: string } | undefined>, refetch: reread });
   latestStop.current = { cancel: cancelReport as never, refetch: reread };
   const stopper = useMemo(() => reportStopController({
