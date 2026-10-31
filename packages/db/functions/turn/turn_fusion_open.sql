@@ -67,16 +67,19 @@ BEGIN
     RETURN opened || jsonb_build_object('reviewId', existing.policy->'reviewId', 'compareId', existing.policy->'compareId');
   END IF;
 
-  -- Review and compare are Gold only (record D, 10-20): the cached membership level and the plan's own switch.
+  -- Review and compare are Gold only (record D, 10-20): the cached membership level, under the account lock. The plan's own switch:
+  -- a compare's was read before the open (fusion_compare_turn_admit); it is the administrator's setting, not this user's state.
   SELECT membership_level INTO lvl FROM profiles WHERE id = p_actor_id;
-  IF lvl IS DISTINCT FROM 'gold' OR NOT EXISTS (SELECT 1 FROM membership_plans mp WHERE mp.level = lvl
-      AND CASE WHEN p_kind = 'compare' THEN mp.allow_fusion_compare ELSE mp.allow_fusion_review END) THEN
-    RAISE EXCEPTION 'TURN_MEMBERSHIP_REQUIRED' USING ERRCODE='42501';
+  IF lvl IS DISTINCT FROM 'gold' THEN RAISE EXCEPTION 'TURN_MEMBERSHIP_REQUIRED' USING ERRCODE='42501'; END IF;
+  IF p_kind <> 'compare' THEN
+    IF NOT EXISTS (SELECT 1 FROM membership_plans mp WHERE mp.level = lvl AND mp.allow_fusion_review) THEN
+      RAISE EXCEPTION 'TURN_MEMBERSHIP_REQUIRED' USING ERRCODE='42501';
+    END IF;
   END IF;
 
   IF p_kind = 'compare' THEN
-    -- The business writable (0324), the sources allowed, the positioning and the 7-day breaker were read before the open
-    -- (fusion_compare_turn_admit). Here, under the locks: the bounds, one compare at a time.
+    -- The plan's switch, the business writable (0324), the sources allowed, the positioning and the 7-day breaker were read before
+    -- the open (fusion_compare_turn_admit). Here, under the locks: the bounds, one compare at a time.
     -- 2.7: the columns' bounds together are at most 500 credits, or the compare does not open; at least two models.
     IF coalesce((p_policy->>'gCredits')::numeric, 501) > 500 THEN RAISE EXCEPTION 'TURN_COMPARE_LIMIT' USING ERRCODE='P0001'; END IF;
     IF coalesce((p_policy->'limits'->>'model')::int, 0) < 2 OR coalesce((p_policy->'limits'->>'paidTools')::int, 1) <> 0

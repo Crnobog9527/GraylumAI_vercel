@@ -10,6 +10,11 @@ CREATE OR REPLACE FUNCTION public.fusion_compare_turn_admit(p_actor_id uuid, p_s
 AS $function$
 DECLARE deps jsonb := coalesce(p_dependencies, '[]'::jsonb);
 BEGIN
+  -- The plan's own switch for this user's level (the level itself is checked again under the account lock, turn_fusion_open).
+  IF NOT EXISTS (SELECT 1 FROM profiles u JOIN membership_plans mp ON mp.level = u.membership_level
+      WHERE u.id = p_actor_id AND mp.allow_fusion_compare) THEN
+    RAISE EXCEPTION 'TURN_MEMBERSHIP_REQUIRED' USING ERRCODE='42501';
+  END IF;
   PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('sessionId', p_session_id));
   IF jsonb_typeof(deps) <> 'array' OR EXISTS (SELECT 1 FROM jsonb_array_elements(deps) d WHERE jsonb_typeof(d) <> 'object'
       OR coalesce(d->>'sourceVersionId','') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') THEN

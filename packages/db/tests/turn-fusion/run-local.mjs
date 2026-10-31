@@ -256,7 +256,13 @@ try{
   // The history a compare sizes on (read before the open): the owner's conversation only.
   const admit=(actor,deps=[])=>one('select fusion_compare_turn_admit($1,$2,10,$3) v',[actor,a.session,JSON.stringify(deps)]);
   assert.deepEqual((await admit(a.actor)).history.map(x=>x.content),['which?','two']);
-  assert.deepEqual((await admit(randomUUID())).history,[]);
+  const stranger=await account(0,'gold');
+  assert.deepEqual((await admit(stranger.actor)).history,[]);
+  // The plan's switch is read here, before the open (0440): Gold is refused when the administrator turned compare off. The Gold level
+  // itself stays with the open (section 1), under the account lock.
+  await c.query(`update membership_plans set allow_fusion_compare=false where level='gold'`);
+  assert.match(await refusal(admit(a.actor)),/TURN_MEMBERSHIP_REQUIRED/);
+  await c.query(`update membership_plans set allow_fusion_compare=true where level='gold'`);
   assert.match(await refusal(one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,1])),/FUSION_COMPARE_ADOPTED/);
   assert.match(await refusal(one('select fusion_compare_turn_adopt($1,$2,$3) v',[a.actor,o.compareId,3])),/FUSION_COMPARE_ADOPTED|FUSION_COMPARE_INVALID/);
   const o2=await open(a,{kind:'compare',pol:comparePolicy(),product:cp});

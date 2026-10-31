@@ -71,7 +71,7 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   if (!key) return emit(fail('TURN_PROVIDER_KEY_UNAVAILABLE'));
 
   // 1. Read before the open (fusion_compare_turn_admit): the history the turn will see, for sizing (turn_open returns the
-  // authoritative copy); the business writable, the sources allowed, the positioning and the 7-day breaker.
+  // authoritative copy); the plan's switch, the business writable, the sources allowed, the positioning and the 7-day breaker.
   let admit;
   try { admit = await fusionAdmission(deps.clients, input.actorId).compare(input.sessionId, COMPARE_HISTORY_ITEMS,
     workspaceDependencies(input.parts)); }
