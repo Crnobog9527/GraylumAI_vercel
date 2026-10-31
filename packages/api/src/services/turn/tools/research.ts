@@ -183,7 +183,8 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       let metered;
       try {
         metered = await paidToolCall(input.calls, { toolName: name, requestHash: sha256(canonical({ name, args: parsed.data })),
-          upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger => runSteps(input, ledger, planned, ++started, { toolName: name, args: parsed.data as Record<string, unknown> }));
+          upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger =>
+            runSteps(input, ledger, planned, ++started, { toolName: name, args: parsed.data as Record<string, unknown> }));
       } catch (error) {
         if (error instanceof ToolLimitReached) { calls = input.maxCalls; return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' }); }
         throw error;
