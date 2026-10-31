@@ -45,11 +45,14 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
   useEffect(() => { void refetch(); }, [refetch]);
   const status = report ? turnReportStatus(report) : null, turning = useRef(false);
   const progressing = reportProgressing(status);
+  // A report being written is read until it closes; a read that failed is read again until it answers (a paid report must not wait
+  // for a reload to show).
+  const reading = progressing || failed;
   useEffect(() => {
-    if (!progressing) return;
+    if (!reading) return;
     const timer = setInterval(() => { if (!turning.current) void refetch(); }, READ_MS);
     return () => clearInterval(timer);
-  }, [progressing, refetch]);
+  }, [reading, refetch]);
   const server: ServerReport = report !== undefined ? { kind: "known", executionId: report?.requestId ?? null }
     : failed ? { kind: "failed" } : { kind: "pending" };
 
