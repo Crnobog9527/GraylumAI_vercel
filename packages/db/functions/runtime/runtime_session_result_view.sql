@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.runtime_session_result_view(r runtime_session_
  SET search_path TO 'public', 'pg_temp'
 AS $function$
  SELECT jsonb_build_object('id',r.id,'familyId',r.family_id,'version',r.version,'versions',p_versions,
-  'resultType',r.result_type,'title',r.title,'body',r.body,'sourceExecutionId',r.source_execution_id,
+  'resultType',r.result_type,'title',r.title,'body',r.body,'sourceExecutionId',r.source_execution_id,'sourceTurnId',r.source_turn_id,
   'sourceAvailable',r.source_execution_id IS NULL OR runtime_history_available(r.source_execution_id),
   'createdAt',r.created_at)
 $function$;

@@ -19,6 +19,10 @@ export const sessionResultSave = z.object({
   // null saves the whole reply; otherwise the text must appear in the reply verbatim (checked in SQL).
   excerpt: body.nullable().default(null),
 }).strict();
+/** CORE-PATH-V2: the same save for a reply written by a turn; the turn's saved message is what it is checked against. */
+export const sessionResultSaveTurn = z.object({
+  sessionId: uuid, turnId: z.number().int().positive(), requestId: uuid, resultType, title, excerpt: body.nullable().default(null),
+}).strict();
 export const sessionResultEdit = z.object({
   familyId: uuid, requestId: uuid, expectedVersion: z.number().int().min(1).max(50), title, body,
 }).strict();
@@ -26,7 +30,8 @@ export const sessionResultFamily = z.object({ familyId: uuid }).strict();
 
 export const sessionResult = z.object({
   id: uuid, familyId: uuid, version: z.number().int().positive(), versions: z.number().int().positive(),
-  resultType, title: z.string(), body: z.string(), sourceExecutionId: uuid.nullable(), sourceAvailable: z.boolean(),
+  resultType, title: z.string(), body: z.string(), sourceExecutionId: uuid.nullable(), sourceTurnId: z.number().int().positive().nullable().default(null),
+  sourceAvailable: z.boolean(),
   createdAt: z.string(),
 }).strict();
 export type SessionResult = z.infer<typeof sessionResult>;
@@ -75,6 +80,13 @@ export function sessionResultsService(database: Database, actorId: string) {
       const v = sessionResultSave.parse(input);
       return sessionResult.parse(await call(database, 'runtime_session_result_save', {
         p_actor_id: actorId, p_session_id: v.sessionId, p_execution_id: v.executionId, p_request_id: v.requestId,
+        p_result_type: v.resultType, p_title: v.title, p_excerpt: v.excerpt,
+      }));
+    },
+    saveTurn: async (input: z.input<typeof sessionResultSaveTurn>) => {
+      const v = sessionResultSaveTurn.parse(input);
+      return sessionResult.parse(await call(database, 'runtime_session_result_save_turn', {
+        p_actor_id: actorId, p_session_id: v.sessionId, p_turn_id: v.turnId, p_request_id: v.requestId,
         p_result_type: v.resultType, p_title: v.title, p_excerpt: v.excerpt,
       }));
     },

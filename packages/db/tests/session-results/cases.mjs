@@ -19,6 +19,19 @@ async function freeChat(db) {
 const save = (db,f,extra={}) => rpc(db,'runtime_session_result_save',f.actor,f.session,extra.execution??f.execution,
   extra.request??randomUUID(),extra.type??'script',extra.title??null,extra.excerpt===undefined?null:extra.excerpt);
 
+/** A turn of this conversation that closed `closeKind` (null: still running) and saved REPLY as its assistant message. */
+async function turnReply(db,f,closeKind='completed') {
+  const {rows:[turn]} = await db.query(`INSERT INTO turns(actor_id,session_id,request_id,kind,state,close_kind,closed_at)
+    VALUES($1,$2,$3,'chat',$4,$5,CASE WHEN $5::text IS NULL THEN NULL ELSE now() END) RETURNING id`,
+    [f.actor,f.session,randomUUID(),closeKind?'closed':'running',closeKind]);
+  const {rows:[{seq}]} = await db.query('SELECT coalesce(max(seq),0)+1 seq FROM session_messages WHERE session_id=$1',[f.session]);
+  await db.query("INSERT INTO session_messages(session_id,seq,role,turn_id,content,content_hash) VALUES($1,$2,'assistant',$3,$4,repeat('a',64))",
+    [f.session,seq,turn.id,REPLY]);
+  return Number(turn.id);
+}
+const saveTurn = (db,actor,session,turn,extra={}) => rpc(db,'runtime_session_result_save_turn',actor,session,turn,
+  extra.request??randomUUID(),extra.type??'script',extra.title??null,extra.excerpt===undefined?null:extra.excerpt);
+
 export async function runCases({db,Client,connectionString,report}) {
   const failures = [];
   const check = async (name,run) => {try {await run();report.checks.push(name);} catch (error) {failures.push(name+': '+(error.stack??error));}};
@@ -47,6 +60,31 @@ export async function runCases({db,Client,connectionString,report}) {
     await assert.rejects(save(db,f,{excerpt:'   '}),/SESSION_RESULT_INVALID/);
     const list = await rpc(db,'runtime_session_results_list',f.actor,f.session);
     assert.deepEqual(list.map(r=>r.id),[whole.id,part.id]);
+  });
+
+  await check('V2 a completed turn saves its reply or an excerpt, checked against session_messages; replay is idempotent', async () => {
+    const f = await freeChat(db), turn = await turnReply(db,f);
+    const whole = await saveTurn(db,f.actor,f.session,turn);
+    assert.deepEqual([whole.body,whole.sourceTurnId,whole.sourceExecutionId,whole.sourceAvailable],[REPLY,turn,null,true]);
+    const request = randomUUID();
+    const part = await saveTurn(db,f.actor,f.session,turn,{request,type:'copy',excerpt:'明天六点见。'});
+    assert.equal((await saveTurn(db,f.actor,f.session,turn,{request,type:'copy',excerpt:'明天六点见。'})).id,part.id,'replay');
+    await assert.rejects(saveTurn(db,f.actor,f.session,turn,{request,type:'copy',excerpt:'明天六点'}),/SESSION_RESULT_REQUEST_CONFLICT/);
+    await assert.rejects(saveTurn(db,f.actor,f.session,turn,{excerpt:'不在回复里的话'}),/SESSION_RESULT_INVALID/);
+    assert.deepEqual((await rpc(db,'runtime_session_results_list',f.actor,f.session)).map(r=>r.id),[whole.id,part.id]);
+  });
+
+  await check('V2 refuses another account\'s turn, a turn of another conversation, and any turn that did not complete', async () => {
+    const f = await freeChat(db), other = await freeChat(db), turn = await turnReply(db,f);
+    await assert.rejects(saveTurn(db,other.actor,f.session,turn),/SESSION_RESULT_NOT_FOUND/,'another account in this conversation');
+    await assert.rejects(saveTurn(db,other.actor,other.session,turn),/SESSION_RESULT_SOURCE/,'this turn through its own conversation');
+    const running = await turnReply(db,f,null);
+    await assert.rejects(saveTurn(db,f.actor,f.session,running),/SESSION_RESULT_SOURCE/,'still running');
+    for (const closeKind of ['failed','interrupted','expired','erased'])
+      await assert.rejects(saveTurn(db,f.actor,f.session,await turnReply(db,f,closeKind)),/SESSION_RESULT_SOURCE/,closeKind);
+    await db.query('UPDATE session_messages SET deleted_at=now() WHERE session_id=$1 AND turn_id=$2',[f.session,turn]);
+    await assert.rejects(saveTurn(db,f.actor,f.session,turn),/SESSION_RESULT_SOURCE/,'a deleted message is no source');
+    assert.equal(await count(db,'session_id=$1',[f.session]),0);
   });
 
   await check('C1 refuses another account, a topic or positioning session, and an unavailable reply', async () => {
@@ -161,7 +199,8 @@ export async function runCases({db,Client,connectionString,report}) {
   await check('C1 table and functions are closed to client roles', async () => {
     for (const role of ['anon','authenticated']) for (const statement of [
       'SELECT * FROM runtime_session_results',
-      `SELECT runtime_session_results_list('${randomUUID()}','${randomUUID()}')`]) {
+      `SELECT runtime_session_results_list('${randomUUID()}','${randomUUID()}')`,
+      `SELECT runtime_session_result_save_turn('${randomUUID()}','${randomUUID()}',1,'${randomUUID()}','body',NULL,NULL)`]) {
       await db.query('BEGIN');
       try {
         await db.query(`SET LOCAL ROLE ${role}`);
