@@ -183,6 +183,50 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the con
     'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/turn_close']);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-5c: the daily summary counts old charges and turn tool receipts once each, and settled credits add up', async () => {
+  const f = await setup(), g = await setup(), bodies: string[] = [];
+  // The database's clock, after the turns of the cases before this one.
+  const start = (await db.query('select clock_timestamp() t')).rows[0].t as Date;
+  // An old-path operation charged 7 credits, next to the turn's own operations, which carry no charge.
+  const plan = randomUUID();
+  await db.query(`insert into research_plans(id,actor_id,budget_units,max_operations,operations) values($1,$2,1,1,'["x"]')`, [plan, f.actor]);
+  await db.query(`insert into research_operations(id,plan_id,identity_hash,quote_units,dispatch_token,state,charged_credits,charged_at)
+    values($1,$2,$3,0,$4,'succeeded',7,now())`, [randomUUID(), plan, 'a'.repeat(64), randomUUID()]);
+  await turn(f, searchingModel(bodies), suppliers(vi.fn(async () => searchResult())));
+  const summary = async () => (await db.query('select research_billing_summary($1,$2) v', [start, new Date(start.getTime() + 3600000)])).rows[0].v;
+  const settled = async () => (await db.query(`select coalesce(-sum(amount),0)::int n from billing_history where operation_type='settle' and created_at>=$1`, [start])).rows[0].n as number;
+  const charged = await expectedCredits(f.actor), paid = await summary();
+  // The search: 0.01 x m 6 x q 100 = 6 credits, one successful subcall, and 7 + 6 with the old charge.
+  expect(paid).toEqual({ count: 2, credits: 13, turnOtherCredits: charged - 6 });
+  expect(paid.credits - 7 + paid.turnOtherCredits).toBe(await settled());
+  expect(await summary()).toEqual(paid);
+  // As the meter charges: a partial result with data counts, an empty one does not.
+  const results = [{ outcome: 'partial', items: 2 }, { outcome: 'ok', items: 0 }, { outcome: 'ok', items: 1 }];
+  const receipt = (usage: unknown) => db.query(`update turn_calls set usage=usage||$1 where actor_id=$2 and call_kind='tool'`, [JSON.stringify(usage), f.actor]);
+  await receipt({ results });
+  expect(await summary()).toEqual({ ...paid, count: 3 });
+  await receipt({ results: results.slice(2) });
+  // A search that returned nothing is not charged: only the turn's model calls move.
+  await turn(g, searchingModel([]), suppliers(vi.fn(async () => searchResult({ items: [], reason: 'NO_RESULTS' }))));
+  expect(await summary()).toEqual({ count: 2, credits: 13, turnOtherCredits: charged - 6 + await modelCredits(g.actor) });
+  expect((await summary()).credits - 7 + (await summary()).turnOtherCredits).toBe(await settled());
+  // The search returned data, then the model failed and the whole turn was refunded: the platform bore that search.
+  const h = await setup(), before = await summary(), searched = searchingModel([]);
+  let modelCall = 0;
+  const failing: typeof fetch = async (url, init) => (++modelCall === 1 ? searched(url, init)
+    : new Response(JSON.stringify({ error: { code: 402, message: 'Insufficient credits', metadata: { limit_source: 'openrouter_credits' } } }), { status: 402, headers: { 'content-type': 'application/json' } }));
+  await turn(h, failing, suppliers(vi.fn(async () => searchResult()))).catch(() => undefined);
+  expect((await rows(h.actor)).find(r => r.call_kind === 'tool')).toMatchObject({ status: 'ok' });
+  expect((await db.query(`select amount from billing_history where user_id=$1 and operation_type='settle'`, [h.actor])).rows).toEqual([{ amount: 0 }]);
+  expect(await summary()).toEqual(before);
+  // Account erasure scrubs the ledger row after the settlement: the day's numbers do not move.
+  await db.query(`update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1`, [f.actor]);
+  await db.query(`insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now())`, [f.actor, randomUUID()]);
+  expect((await db.query(`select account_erasure_scrub_ledger($1,'billing_history') v`, [f.actor])).rows[0].v).toMatchObject({ manualReview: 0, remaining: 0 });
+  expect((await db.query(`select metadata ? 'turnId' kept from billing_history where user_id=$1 and operation_type='settle'`, [f.actor])).rows).toEqual([{ kept: false }]);
+  expect(await summary()).toEqual(before);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-6: a search that returns nothing is said plainly and not charged; the platform cost is kept', async () => {
   const f = await setup(), bodies: string[] = [];
   const out = await turn(f, searchingModel(bodies), suppliers(vi.fn(async () => searchResult({ items: [], reason: 'NO_RESULTS' }))));

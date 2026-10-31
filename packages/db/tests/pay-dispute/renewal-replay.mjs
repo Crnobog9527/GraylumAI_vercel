@@ -2,10 +2,11 @@
 // REL-1 core 6③: a previous period's dispute and the next period's renewal at the same time, with Stripe's usual
 // replays (the same renewal invoice and dispute events delivered again), then the dispute won and withdrawn.
 // Freeze once, never deliver a renewal twice, and leave the right balance and membership after the withdrawal.
+import {addUtcMonths} from '../utc-months.mjs';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 export async function renewalReplayCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd}) {
- const priorStart=new Date(start);priorStart.setUTCMonth(priorStart.getUTCMonth()-1);
+ const priorStart=addUtcMonths(start,-1);
  const credits=user=>v('SELECT credits v FROM profiles WHERE id=$1',[user]);
  const freezes=order=>v(`SELECT count(*)::int v FROM credit_transactions WHERE source_order_id=$1 AND reason_code='dispute_freeze'`,[order]);
  const disputes=order=>v('SELECT count(*)::int v FROM payment_disputes WHERE order_id=$1',[order]);

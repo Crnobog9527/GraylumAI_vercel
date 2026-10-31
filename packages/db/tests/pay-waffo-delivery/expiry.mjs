@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 
@@ -31,7 +32,7 @@ async function payTerm({admin,service},user,plan,method,offer,version,start,end)
 }
 const newUser=async admin=>{const id=randomUUID();await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[id]);return id;};
 const secondsAgo=ms=>new Date(Math.floor((Date.now()-ms)/1000)*1000);
-const plusMonth=d=>{const e=new Date(d);e.setUTCMonth(e.getUTCMonth()+1);return e;};
+const plusMonth=d=>addUtcMonths(d,1);
 
 /** Before 0221: ended wallet and Waffo card terms whose cached level was never lowered (staging state). */
 export async function seedEndedMemberships({admin,service}) {

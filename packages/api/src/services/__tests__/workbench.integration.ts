@@ -264,9 +264,9 @@ aiTest('AI: research uses canonical credits and recovers settlement without fetc
  const chargedAt=(await sql.query('select charged_at from research_operations where id=$1',[operationId])).rows[0].charged_at;
  const start=new Date(chargedAt).toISOString(),end=new Date(new Date(chargedAt).getTime()+1000).toISOString();
  const totals=await db.rpc('research_billing_summary',{p_start:start,p_end:end});
- expect(totals.error).toBeNull();expect(totals.data).toEqual({count:1,credits:5});
+ expect(totals.error).toBeNull();expect(totals.data).toEqual({count:1,credits:5,turnOtherCredits:0});
  const excluded=await db.rpc('research_billing_summary',{p_start:start,p_end:start});
- expect(excluded.error).toBeNull();expect(excluded.data).toEqual({count:0,credits:0});
+ expect(excluded.error).toBeNull();expect(excluded.data).toEqual({count:0,credits:0,turnOtherCredits:0});
  expect((await denied.rpc('research_billing_summary',{p_start:start,p_end:end})).error).not.toBeNull();
  expect((await db.rpc('research_billing_summary',{p_start:end,p_end:start})).error).not.toBeNull();
 

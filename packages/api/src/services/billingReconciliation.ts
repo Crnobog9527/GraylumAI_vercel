@@ -36,7 +36,7 @@ export interface BillingReconciliationSummary {
   purchaseCredits: number;
   webSearchCount: number;
   researchSettledCredits?: number;
-  researchSettledCount?: number;
+  researchSettledCount?: number; turnOtherCredits?: number;
   reportFixedPriceCredits?: number;
   fusionReviewFixedPriceCredits?: number;
   settledCalls?: number;
@@ -1744,11 +1744,11 @@ export async function runDailyBillingReconciliation(
       readDailyBillingTotals(supabase, enforcementStart, end),
       readDailyBillingCreditSources(supabase, enforcementStart, end),
     ]);
-  const { creditTransactions, research, reportFixedPriceCredits, fusionReviewFixedPriceCredits } = creditSources;
+  const { creditTransactions, research, turnOtherCredits, reportFixedPriceCredits, fusionReviewFixedPriceCredits } = creditSources;
 
   const { successfulAiRequests, tokenStatsCount, tokenStatsCredits } = totals;
   const webSearchCount = totals.webSearchCount + research.count;
-  const accountedCredits=tokenStatsCredits+research.credits+reportFixedPriceCredits+fusionReviewFixedPriceCredits;
+  const accountedCredits=tokenStatsCredits+research.credits+turnOtherCredits+reportFixedPriceCredits+fusionReviewFixedPriceCredits;
 
   const settledCredits = Math.abs(totals.settleCredits);
 
@@ -1775,7 +1775,7 @@ export async function runDailyBillingReconciliation(
     purchaseCredits,
     webSearchCount,
     researchSettledCount:research.count,
-    researchSettledCredits:research.credits,
+    researchSettledCredits:research.credits,turnOtherCredits,
     reportFixedPriceCredits,
     fusionReviewFixedPriceCredits,
     settledCalls: totals.calls.settledCalls,
@@ -1790,10 +1790,10 @@ export async function runDailyBillingReconciliation(
     mismatches.push(`AI success logs (${successfulAiRequests}) do not match token stats rows (${tokenStatsCount})`);
   }
   if (settledCredits !== accountedCredits) {
-    mismatches.push(`Billing settle credits (${settledCredits}) do not match token stats, research, and fixed price credits (${accountedCredits})`);
+    mismatches.push(`Billing settle credits (${settledCredits}) do not match token stats, research, turns, and fixed price credits (${accountedCredits})`);
   }
   if (deductionCredits < accountedCredits) {
-    mismatches.push(`Credit deductions (${deductionCredits}) are lower than token stats, research, and fixed price credits (${accountedCredits})`);
+    mismatches.push(`Credit deductions (${deductionCredits}) are lower than token stats, research, turns, and fixed price credits (${accountedCredits})`);
   }
   if (totals.completedPaymentOrders > 0 && purchaseCredits <= 0) {
     mismatches.push(`Completed payment orders (${totals.completedPaymentOrders}) have no matching purchase credits`);

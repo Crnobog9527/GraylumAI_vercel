@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths,latestMonthEnd} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 export async function projectionCases({admin,service}) {
@@ -80,8 +81,7 @@ export async function projectionCases({admin,service}) {
   const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card',
    'standard','fixture','test',1,'terms-v1',$3) o`,[user,active.item_id,
    JSON.stringify([{kind:'email',key_version:'test-v1',digest:user.replaceAll('-','').repeat(2)}])])).rows[0];
-  const t=(await admin.query(`SELECT now()-interval '1 month'-make_interval(hours=>$1) AS start`,[hoursAgo])).rows[0];
-  t.finish=(await admin.query("SELECT (($1::timestamptz AT TIME ZONE 'UTC')+interval '1 month') AT TIME ZONE 'UTC' AS v",[t.start])).rows[0].v;
+  const t={finish:latestMonthEnd(new Date(Date.now()-hoursAgo*3600000))};t.start=addUtcMonths(t.finish,-1);
   await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,t.start]);
   await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
    VALUES('waffo','fixture','test','checkout',$1,$2)`,[`grace_${o.id}`,o.id]);
