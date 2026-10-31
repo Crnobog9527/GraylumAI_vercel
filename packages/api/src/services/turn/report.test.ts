@@ -177,6 +177,47 @@ describe('kind=report on the turn core (CORE-PATH-V2 V2-7a)', () => {
     expect(t.events.at(-1)).toMatchObject({ type: 'result', closeKind: 'stopped', delivered: false });
   });
 
+  // Vercel never reports the dropped stream (staging turn 28): no client signal here, only the stop's flag.
+  it('the stop reaches a running turn with no word of the dropped stream: its flag aborts the provider call, no database read', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const t = harness(), looks: number[] = [];
+      const stopSignal = { raise: async () => undefined, raised: async (id: number) => { looks.push(id); return looks.length === 2; } };
+      h.call.mockImplementation(async () => {
+        const request = h.transports[0]!('https://openrouter.test', {});
+        await vi.advanceTimersByTimeAsync(2000);
+        await vi.advanceTimersByTimeAsync(2000);
+        try { await request; } catch { throw new TurnStop('TURN_CALL_UNKNOWN'); }
+        return '';
+      });
+      h.runtime.mockImplementation(async (o: { exchange: (s: number, b: string) => Promise<string>; onText: (d: string) => void }) => {
+        o.onText('## One\nPart'); return o.exchange(1, '{}');
+      });
+      await runReportTurn(t.deps, input, t.emit, undefined, stopSignal);
+      expect(looks).toHaveLength(2);
+      expect(t.names()).toEqual(['turn_open', 'turn_close']);
+      expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'stopped', p_kind_result: { body: '## One\nPart' } });
+      expect(t.events.at(-1)).toMatchObject({ type: 'result', closeKind: 'stopped', delivered: false });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a flag that cannot be read never stops a report, and the looking ends with the turn', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const t = harness(); runs(COMPLETE);
+      const raised = vi.fn(async () => { throw new Error('redis down'); });
+      h.call.mockImplementation(async () => { await vi.advanceTimersByTimeAsync(2000); return JSON.stringify({ choices: [{ finish_reason: 'stop' }] }); });
+      h.runtime.mockImplementation(async (o: { exchange: (s: number, b: string) => Promise<string>; onText: (d: string) => void }) => {
+        await o.exchange(1, '{}'); o.onText(COMPLETE); return COMPLETE;
+      });
+      await runReportTurn(t.deps, input, t.emit, undefined, { raise: async () => undefined, raised });
+      expect(raised).toHaveBeenCalledTimes(1);
+      expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'completed', p_delivered: true });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('a stream dropped without a stop (the page closed) changes nothing: the report runs to its end', async () => {
     const t = harness({ state: 'running' }), gone = new AbortController();
     runs(COMPLETE);
