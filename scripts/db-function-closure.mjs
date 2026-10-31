@@ -265,6 +265,8 @@ function namedRow(filters, alias, keys, alone) {
   for (const m of filters.matchAll(/([a-z_][a-z0-9_.]*)\s*=\s*([a-z_][a-z0-9_.]*)/gi)) {
     // Alone in its select, v.id and id are the same column.
     const [left, right] = [m[1], m[2]].map(name => (alone ? name.toLowerCase().replace(`${alias}.`, '') : name.toLowerCase()));
+    // NOT v.id = x reads every other row.
+    if (/\bNOT\s*$/i.test(filters.slice(0, m.index))) continue;
     if (left !== right && (new RegExp(`^(?:${side})$`).test(left) || new RegExp(`^(?:${side})$`).test(right))) return true;
   }
   return false;
