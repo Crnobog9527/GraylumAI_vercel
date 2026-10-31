@@ -374,9 +374,9 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | Postgres 往返——回合自己的（不含 Auth 和 OpenRouter；每次模型调用 3 次、工具 2 次是钱的证据，2.5.2） | ≤ 5（无工具）；每多一轮免费工具 +5（工具 2 + 续轮 3），上限 M 按 2.5.3；未确认定位的账号另 +2（定位检查 begin/record） | ≤ 11；非开场回合 ≤ 12（Owner 2026-10-30 批准，开轮前 1 次只读）；账号策略草稿 ≤ 13（Owner 2026-10-31 批准，收轮前 1 次复查来源） | ≤ 5 | 计数的 Supabase 客户端包装，跑三条标准回合（无工具自由对话、导师、报告）后断言；工具回合另按 2.5.3 公式断言 |
 | Postgres 往返——每个请求固定的 2 次 | `catalog_versions_snapshot`（0419，目录缓存的版本检查）+ `platform_secret_read`（OR-1：平台密钥每次 fresh 读，安全规定不动） | 同 | 同 | 单独一行计数、固定 = 2；V2-4a 本机实测自由对话合计 7（已定位）/ 9（未定位），今天 41 |
 | 每轮数据库时间（本机 Docker，单用户） | ≤ 60 ms | ≤ 120 ms | ≤ 60 ms | `pg_stat_statements` 前后差 |
-| `turn_open` 事务内关系锁数——主路径自己的表（`turns`、`runtime_sessions`、`profiles`、`daily_spend`、`session_messages`、墓碑表及其索引/TOAST） | ≤ 40（V2-3 本机实测 18） | ≤ 40 | ≤ 40 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法），按表归类 |
+| `turn_open` 事务内关系锁数——主路径自己的表（`turns`、`runtime_sessions`、`profiles`、`daily_spend`、`session_messages`、墓碑表及其索引/TOAST） | ≤ 42（V2-3 本机实测 18；Owner 2026-10-31 批准，只许变小） | ≤ 42 | ≤ 42 | 事务内不提交时数 `pg_locks`（db-rw-c 套件办法），按表归类 |
 | `turn_open` 事务内关系锁数——账本叶子（`atomic_pre_deduct`、`credit_available` 碰到的 grants/积分包/订单/账单表） | 棘轮：只许变小（V2-3 本机基线 38，其中 `bill2_runs` 9 把来自 `billing_history` 的注销账本守卫触发器，V2-12 改读 `turns` 后消失） | 同 | 同 | 同上，单独一行记录；口径和 7.1"账本叶子不展开"一致。合计（本机 56）也记录，对比今天的 90–130 |
-| 任一主路径函数静态可达函数 / 表 | ≤ 15 / ≤ 10 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
+| 按回合类型统计的单个主路径函数静态可达函数 / 表（Owner 2026-10-31 批准；`research_turn_apply` 单列） | ≤ 15 / ≤ 18 | 同 | 同 | 静态闭包脚本（架构窗口 10-27 的脚本进仓库 `scripts/db-function-closure.mjs`） |
 | 行锁 | 0 把全站共用行锁；只允许本人 `profiles`、本会话 `sessions` | 同 | 同 | 静态扫描 `FOR UPDATE|FOR SHARE` 对象白名单 |
 | 热表无顺序扫描 | 0 | 0 | 0 | 三条回合 + 定时任务认领语句的 `EXPLAIN`，对 `turns`/`turn_calls`/`session_messages`/`credit_transactions`/`runtime_sessions` 断言无 Seq Scan |
 | 全站共用行的写/锁 | 0（止损的大额行 `bucket=-1` 除外，只给报告/对比/评审团） | 同 | 同 | 静态扫描：`UPDATE`/`FOR UPDATE` 只许白名单表，WHERE 必须带所有者键或 bucket |
@@ -639,7 +639,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | P-1 | `feat(PROMPT-CACHE)` 合 #1501 | 报告/评审团/对比的断点（改 base 到 staging，补复审）；#1500、#1502 关闭，改动迁入 V2-4/V2-5 | high | Claude | — | 0.5 天 | 现有单测；不改主路径 |
 | V2-1 | `chore(CORE-PATH-V2)` 守门工具与压测桩 | `scripts/check-turn-budget.mjs`（往返/锁/数据库时间/EXPLAIN 无顺序扫描断言，棘轮基线）；`scripts/db-function-closure.mjs`（闭包 + 行锁白名单 + 会话级状态禁用扫描）；`scripts/loadtest/openrouter-stub.mjs` + 100 账号重置脚本 + 单机外推压测脚本（3.3.3，500/2000/5000 虚拟用户、记 k 与等待事件）；对旧路径跑一次基线存档 | low | Codex | — | 3.5 天 | 脚本进 CI 的 db-suites job（实测时长写进 PR，≥8 分钟余量）；基线文件提交 |
 | V2-2 | `feat(CORE-PATH-V2)` 新表迁移 | 5.1 节四张表 + `runtime_sessions` 新列；不动旧表；主键与唯一键按 3.3.2 的"可分区"约束设计（按所有者哈希可分区、时间列可做保留期清理） | high（迁移） | Claude | — | 2 天 | 回放两次结构不变；指纹更新；总控上库；迁移注释写明未来分区方案 |
-| V2-3 | `feat(CORE-PATH-V2)` 核心函数 | `turn_open`、`turn_call_begin`/`turn_call_identity`/`turn_call_record`、`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、**冻结只影响可用余额一次**（2.5.4：开轮 H=400 后 `credits` 与 `credit_available` 都是 600，另一会话开轮看到 600）、402、未知成本（发出后无最终回执：不退冻结、不释放日限预占、`cost_pending`；恢复按 provider_id 补结；工具例外 0 结算）、评审团固定价交付判定（修订稿→全价、无需修改→全退、中断→min(固定价,已知用量)）、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 40、闭包 ≤ 15/10；EXPLAIN 无顺序扫描；总控上库 |
+| V2-3 | `feat(CORE-PATH-V2)` 核心函数 | `turn_open`、`turn_call_begin`/`turn_call_identity`/`turn_call_record`、`turn_close` + 恢复入口；DB 套件 `packages/db/tests/turn-core/`：幂等（重复 request_id、重复 seq、重复 close）、并发（同会话两轮、同账号多会话、开轮与删除竞争、开轮与注销竞争）、守恒 C+E=N、余额不负、**冻结只影响可用余额一次**（2.5.4：开轮 H=400 后 `credits` 与 `credit_available` 都是 600，另一会话开轮看到 600）、402、未知成本（发出后无最终回执：不退冻结、不释放日限预占、`cost_pending`；恢复按 provider_id 补结；工具例外 0 结算）、评审团固定价交付判定（修订稿→全价、无需修改→全退、中断→min(固定价,已知用量)）、停止（只有报告能停，普通对话拒绝；报告 24 小时规则）、暂停与 24 小时退、评审团分组、对比上限 500、墓碑中止、文风来源撤销、止损（2.5.1：P 个并发开轮在日限附近全天预占不超 L、`spent ≤ reserved` 不变量；P 小于声明池大小时拒绝；崩溃回合由恢复 close 回补；跨天回补开轮当天）；全部函数只用事务级锁、不 SET 会话变量（Supavisor 事务模式兼容，3.3 节） | high（迁移） | Claude | V2-2 | 5 天 | 套件进 `run-local-suites`；锁数 ≤ 42、闭包 按回合类型 ≤ 15 / ≤ 18（Owner 2026-10-31 批准）；EXPLAIN 无顺序扫描；总控上库 |
 | V2-4 | `feat(CORE-PATH-V2)` Node 核心 + 自由对话 | `services/turn/`：`POST /api/turn` SSE、状态机、runner 接线、回执、目录缓存接入、提示词拼装层（prompt-cache-v3 + 2.9 节 8 条 + #1500 迁入）、黄金字节测试、`kind=chat`（含 Decisions 前置检查、加载 Skill 工具）；读/写客户端分开的接缝（`readClient`/`writeClient`，今天都指主库，3.3.2 第 5 条）；OpenRouter 按模型并发上限；重试只限 `not_sent`/`rejected`、SDK `maxRetries:0`（2.5.2）；回执与结果容量沿用 `responseCapacity.ts`（532480 / 4194304 / 262144） | high | Claude | V2-3 | 6.5 天 | `check-turn-budget` 自由对话 ≤ 5；黄金字节；runtime 集成套件里自由对话场景等效迁移，**含 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不二次 POST、不零退"**，以及 `runnerRetrieval.test.ts` 的"两次资料库读取、三次模型请求"（三次模型调用都在开轮的 G_turn/U_turn 内、各自三步回执，最后一次后不再提供工具）；`mentorOutput.test.ts` 等容量边界测试迁入；并发上限与退避单测 |
 | V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 11；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
 | V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file`；TikHub/Parallel/Firecrawl/monid 按供应商并发上限 + 退避（复用 V2-4 的 Redis 计数） | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试；供应商限流退避单测 |
@@ -687,9 +687,9 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 进 CI 的 `scripts/check-turn-budget.mjs`（本机 Docker 库，桩模型）：
 - 跑三条标准回合（自由对话、导师、报告），断言 3.1 节的往返、锁数、数据库时间；数字只许变小，基线 `scripts/turn-budget-baseline.json`
   和代码大小基线一样是棘轮，手动调高需要 Owner 批准。
-- `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：闭包 ≤ 15 函数 / ≤ 10 表（**账本叶子不展开**：`atomic_pre_deduct`、`turn_settle_credits`、
+- `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：按回合类型统计，闭包 ≤ 15 函数 / ≤ 18 表（Owner 2026-10-31 批准；**账本叶子不展开**：`atomic_pre_deduct`、`turn_settle_credits`、
   `credit_available`、`credit_source_apply` 四个按名字计 1、不递归进去，它们只碰本人的 `profiles`/grants/积分包行，列表写死在脚本里、加名字要 Owner 批准；
-  锁数断言同口径：主路径自己的表 ≤ 40，账本叶子的锁单独一行、棘轮只许变小，合计也记录）；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`，
+  锁数断言同口径：主路径自己的表 ≤ 42（Owner 2026-10-31 批准，只许变小），账本叶子的锁单独一行、棘轮只许变小，合计也记录）；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`，
   且 WHERE 带所有者键；`UPDATE` 的表只许白名单（上述三张 + `daily_spend` 带 bucket、`session_messages`、`turn_calls`）；
   禁止 `pg_advisory_lock(`、`pg_advisory_xact_lock(`、非 LOCAL 的 `SET `、`CREATE TEMP`（Supavisor 事务模式与"无全站热点"两条，3.3.2）。
 - `EXPLAIN` 断言：三条标准回合和定时任务认领语句对热表无 Seq Scan（3.1 节）。
@@ -717,7 +717,7 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 | 搁置项 | 处置 |
 |---|---|
 | DB-RW PR-D（历史可用标记）、PR-E（每轮写合并）、PR-F（结算异步） | **不再做**：目标由 `session_messages.visible`、三类写入、收轮一次结算直接达成。已上库的 PR-B（0419 `catalog_versions` + `catalogCache`）**保留并成为主路径依赖**；PR-A（0416）的索引保留、开关函数随旧路径删；PR-C（0418 `admitSplit`）随旧路径删 |
-| 权限链分支化（chain-branch） | 不再做：新函数闭包 ≤ 10 表，没有对象 |
+| 权限链分支化（chain-branch） | 不再做：新函数闭包受 3.1 表数上限约束，没有对象 |
 | 提示缓存 #1500（自由对话 v3） | **改写后并入 V2-4**：它的三个假设（system = 前缀 + 按用户段；工具跨轮不变；每轮状态只在 user 消息）新路径全部成立并写成硬约束（2.9 节），但冻结位置从 `admission.ts` 挪到新拼装层；`promptCache.ts`/`cacheMessages.ts`/adapter 形状白名单与 ≤3 标记上限按文件迁移，单测随迁。原 PR 关闭 |
 | 提示缓存 #1501（报告/评审团/对比） | **直接合**（P-1，开工前第一件事）：报告、评审团、对比的请求体拼装在 V2-7 之前不动；V2-7 接核时保留断点位置。先改 base 到 staging、补 Codex 复审 |
 | 提示缓存 #1502（导师历史标记 + SKILL.md 断点） | **按新路径改写**（V2-5）：三个断点规则不变，hostTurnContext/材料位置、历史投影占位算法按 2.9 节第 3、5 条重写；`hostTurnAdmission.test.ts` 的断言作为 V2-5 验收原样迁入。原 PR 关闭 |
