@@ -228,7 +228,39 @@ export function scan(name, body, options = DEFAULTS) {
 
 const WRITE = /\b(?:INSERT\s+INTO|UPDATE\s+(?:ONLY\s+)?[a-z_."]+(?:\s+(?:AS\s+)?[a-z_]+)?\s+SET|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE)\b/i;
 const ANY_LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b/i;
-const DB_CALL = /(?<!\b(?:Buffer|Array|Object|Set|Map))\.(rpc|from)\(\s*(['"`])?([a-z_0-9]*)/gi;
+// The name counts only as a whole string literal: a concatenated or interpolated first argument is not a name this check can read.
+const DB_CALL = /(?<!\b(?:Buffer|Array|Object|Set|Map))\.(rpc|from)\(\s*(?:(['"`])([a-z_0-9]*)\2\s*[,)])?/gi;
+const SET_OPERATION = /\b(?:UNION|INTERSECT|EXCEPT)\b/i;
+const TABLE_REF = /\b(?:FROM|JOIN)\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?/gi;
+const NOT_ALIAS = /^(?:where|join|on|left|right|inner|outer|cross|full|group|order|limit|union|intersect|except|for|using|natural)$/i;
+
+// Tables of each select in `code` that are not held to the owner: directly (<alias>.actor_id = p_actor_id, profile_id for a table keyed
+// by the profile) or through an equal owner column of a table in the same select that is. One filtered branch does not vouch for another.
+export function unownedReads(code, tableNames) {
+  const found = new Set();
+  for (const statement of statements(code)) {
+    const ctes = cteNames(statement);
+    for (const ref of statement.matchAll(TABLE_REF)) {
+      const table = ref[1].toLowerCase();
+      if (!tableNames.has(table) || ctes.has(table)) continue;
+      const before = ownSelect(statement, ref.index).split(SET_OPERATION).pop();
+      const scope = before + scopeAfter(statement, ref.index).split(SET_OPERATION)[0];
+      const refs = [...scope.matchAll(TABLE_REF)].filter(m => tableNames.has(m[1].toLowerCase()))
+        .map(m => ({ table: m[1].toLowerCase(), alias: (m[2] && !NOT_ALIAS.test(m[2]) ? m[2] : m[1]).toLowerCase() }));
+      const keyed = new Set([...scope.matchAll(/(?:\b([a-z_][a-z0-9_]*)\.)?\b(?:actor_id|profile_id)\s*=\s*p_actor_id\b/gi)]
+        .flatMap(m => (m[1] ? [m[1].toLowerCase()] : refs.length === 1 ? [refs[0].alias] : [])));
+      const links = [...scope.matchAll(/\b([a-z_][a-z0-9_]*)\.actor_id\s*=\s*([a-z_][a-z0-9_]*)\.actor_id\b/gi)]
+        .map(m => [m[1].toLowerCase(), m[2].toLowerCase()]);
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const [a, b] of links) if (keyed.has(a) !== keyed.has(b)) { keyed.add(a); keyed.add(b); grew = true; }
+      }
+      const alias = (ref[2] && !NOT_ALIAS.test(ref[2]) ? ref[2] : ref[1]).toLowerCase();
+      if (!keyed.has(alias)) found.add(table);
+    }
+  }
+  return [...found].sort();
+}
 
 // A free read must stay what the rule allows, all the way down: read-only volatility, no write or lock in anything it reaches, and the
 // owner's key as its first argument and in its filters.
@@ -239,7 +271,7 @@ export function freeReadViolations(functions, tableNames, names = FREE_READS) {
     if (!defs) { found.push(`${name}: free read has no function`); continue; }
     for (const { head, body } of defs) {
       if (!/\(\s*p_actor_id\s+uuid\b/i.test(head)) found.push(`${name}: free read without p_actor_id first`);
-      if (!/\bactor_id\s*=\s*p_actor_id\b/i.test(stripCode(body))) found.push(`${name}: free read does not filter by actor_id`);
+      for (const table of unownedReads(stripCode(body), tableNames)) found.push(`${name}: free read of ${table} without the owner key`);
     }
     for (const reached of closure(name, functions, tableNames, []).functions) {
       for (const { head, body } of functions.get(reached) ?? []) {
@@ -265,7 +297,7 @@ export function toolCallViolations(toolsDir, names = FREE_READS) {
     for (const m of text.matchAll(DB_CALL)) {
       const line = text.slice(0, m.index).split('\n').length;
       const where = `${file.slice(toolsDir.length + 1)}:${line}`;
-      if (m[1] !== 'rpc' || !m[2] || !names.includes(m[3])) found.push(`${where}: tool calls the database outside the free reads (.${m[1]})`);
+      if (m[1] !== 'rpc' || !names.includes(m[3])) found.push(`${where}: tool calls the database outside the free reads (.${m[1]})`);
       else if (!/\bread$/.test(text.slice(0, m.index))) found.push(`${where}: free read ${m[3]} not through the read client`);
     }
   }
