@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
-const mocks = vi.hoisted(() => ({ handle: vi.fn(async (_request: unknown, _deps: unknown) => new Response('ok')) }));
+const mocks = vi.hoisted(() => ({ handle: vi.fn<(request: unknown, deps: unknown) => Promise<Response>>(async () => new Response('ok')) }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ client: 'stub' }) }));
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ client: 'stub' }) }));
 vi.mock('@repo/api/src/services/turn/http', () => ({ handleTurnRequest: mocks.handle }));
