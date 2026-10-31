@@ -351,9 +351,12 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume continues from the receipts: no model 
   expect((await rows(f.actor)).map(r => [r.call_kind, r.status]))
     .toEqual([['decision', 'ok'], ['model', 'ok'], ['model', 'ok'], ['tool', 'ok']]);
   // Every receipt counted once: the user pays what the freeze held (D = min(N, H), 2.5.4), the platform bears the rest, as recorded.
+  // Each turn rounds its own receipts up, so the two turns can come to one credit more than the sum rounded once; never a call's worth.
   const paid = (await db.query('select sum(coalesce(charged_credits,0))::int c, sum(coalesce(absorbed_credits,0))::int a from turns where actor_id=$1',
     [f.actor])).rows[0];
-  expect(paid.c + paid.a).toBe(await expectedCredits(f.actor));
+  const once = await expectedCredits(f.actor);
+  expect(paid.c + paid.a).toBeGreaterThanOrEqual(once);
+  expect(paid.c + paid.a).toBeLessThanOrEqual(once + 1);
   expect((await db.query("select state,close_kind,failure_code from turns where actor_id=$1 and id=$2", [f.actor, id])).rows[0])
     .toEqual({ state: 'closed', close_kind: 'failed', failure_code: 'resumed' });
   // Someone else's, or a turn no longer paused, is refused before anything opens.

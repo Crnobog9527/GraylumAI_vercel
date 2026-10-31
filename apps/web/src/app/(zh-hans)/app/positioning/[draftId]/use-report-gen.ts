@@ -118,7 +118,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     setLive(startLiveReply(id));
     let events: AsyncIterable<AgentTurnEvent> | null = null;
     try {
-      events = turnBody ? turn.events(turnBody) : await utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL });
+      // Once the turn is open a new start needs a new request id; until then the same one replays an unconfirmed start.
+      events = turnBody ? turn.events(turnBody, () => save({ requestId: id, executionId: id })) : await utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL });
       const { result } = await readAgentTurn(events, {
         executionId: id,
         onProgress: (execution, event) => {
@@ -137,7 +138,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
       if (!events) retryAttach(id);
     } finally {
       setStreaming(false);
-      await reread();
+      await (turnBody ? turn.refetch() : reread());
       setLive(null);
     }
   };

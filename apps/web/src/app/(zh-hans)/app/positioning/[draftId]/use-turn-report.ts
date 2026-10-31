@@ -54,12 +54,12 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
 
   const abort = useRef<AbortController | null>(null), turnId = useRef<number | null>(null);
   /** The report's events; its stream stays this page's until a recorded stop drops it. */
-  async function* events(body: unknown): AsyncGenerator<AgentTurnEvent> {
+  async function* events(body: unknown, onOpened: () => void): AsyncGenerator<AgentTurnEvent> {
     const controller = abort.current = new AbortController();
     turning.current = true;
     try {
       for await (const event of mentorTurnEvents(body, (request, onEvent) => runTurn(request, onEvent, { fetch: fetcher, signal: controller.signal }))) {
-        if (event.type === "admitted") turnId.current = Number(event.executionId.slice(5));
+        if (event.type === "admitted") { turnId.current = Number(event.executionId.slice(5)); onOpened(); }
         else yield event;
       }
     } finally { turning.current = false; }
