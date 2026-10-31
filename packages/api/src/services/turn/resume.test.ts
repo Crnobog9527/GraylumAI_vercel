@@ -42,7 +42,17 @@ describe('the limits of a resumed turn', () => {
     // Nothing replayed: the first call is real, so the same count leaves no room for the search.
     expect(resumeLimits({ model: 2, paidTools: 1, freeTools: 0, decisions: 0 }, { model: 1, paidTools: 1, freeTools: 0, decisions: 0 }))
       .toMatchObject({ model: 1, paidTools: 0 });
-    expect(new TurnReplay([row(1, 'model', model('a'))]).replayedModels).toBe(1);
+    const asks = JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'web_search' } }] } }] });
+    expect(new TurnReplay([row(1, 'model', asks)]).replayedModels).toBe(1);
+    // The tool ran and the paused turn waits for the final reply: that model call is real, so it keeps its place in the limits.
+    expect(new TurnReplay([row(1, 'model', asks), row(2, 'tool', '[]', 'web_search')]).replayedModels).toBe(0);
+    expect(resumeLimits({ model: 2, paidTools: 1, freeTools: 0, decisions: 0 }, { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }, 0, 0))
+      .toEqual({ model: 1, paidTools: 0, freeTools: 0, decisions: 0 });
+    expect(turnLimits.parse(resumeLimits({ model: 2, paidTools: 1, freeTools: 0, decisions: 0 }, { model: 1, paidTools: 0, freeTools: 0, decisions: 0 })))
+      .toMatchObject({ model: 1 });
+    // A free tool's request leaves no result to wait for.
+    const reads = JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'read_source' } }] } }] });
+    expect(new TurnReplay([row(1, 'model', reads)]).replayedModels).toBe(0);
     expect(new TurnReplay([]).replayedModels).toBe(0);
   });
   it('holds room for the organizer, and a negative count left is none', () => {

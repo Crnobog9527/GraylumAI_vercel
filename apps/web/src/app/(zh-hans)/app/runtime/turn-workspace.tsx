@@ -30,11 +30,10 @@ import workStyles from './runtime-work.module.css';
 
 /*
  * CORE-PATH-V2 V2-10: the free conversation on the turn path (core_path_v2.enabled). Each user message and the reply saved with it
- * (session_messages) is one turn of the transcript, after whatever the old path already holds. An ordinary conversation has no
+ * (session_messages) is one turn of the transcript. A conversation with old-path history never gets here (page.tsx). An ordinary conversation has no
  * stop: a turn runs to its close (Owner 10-28).
  */
-type OldTurn = { executionId: string; input: string | null; body: string | null; primaryBody: string | null };
-export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldTurns: readonly OldTurn[] }) {
+export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const utils = trpc.useUtils();
   const results = trpc.opc.sessionResults.useQuery({ sessionId }, { retry: false });
   // The conversation's compares stay as they are: their cards run, stop and adopt on the compare router, whichever path the
@@ -116,11 +115,8 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
     <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
       <RuntimeHeader title="工作对话"/>
       <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
-        {!oldTurns.length && !messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
+        {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
         <section className={workStyles.transcript}>
-          {oldTurns.map(turn => <RuntimeTurnView key={turn.executionId} userText={turn.input}>
-            <RuntimeReply text={turn.body ?? turn.primaryBody ?? ''} available={Boolean(turn.body ?? turn.primaryBody)}/>
-          </RuntimeTurnView>)}
           {turns.map(reply => <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
             {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []}/>}
             <RuntimeReply text={reply.content}/>

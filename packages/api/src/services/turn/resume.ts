@@ -17,6 +17,16 @@ export const resumeRead = z.object({ kind: z.string(),
     status: z.enum(['ok', 'unusable']), body: z.string().nullable() })) });
 export type ResumeRead = z.infer<typeof resumeRead>;
 
+/** Tools that run without a receipt (no row, no cost): a request for one is never "waiting for its result" at a pause. */
+const FREE_TOOLS = new Set(['load_skill', 'read_source', 'read_skill_file', 'ask_question']);
+const requestedPaidTool = (completion: string): boolean => {
+  try {
+    const calls = (JSON.parse(completion) as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string } }> } }> })
+      .choices?.[0]?.message?.tool_calls ?? [];
+    return calls.some(call => !FREE_TOOLS.has(call.function?.name ?? ''));
+  } catch { return false; }
+};
+
 const completion = (body: string | null): string | null => {
   if (!body) return null;
   try { return Array.isArray((JSON.parse(body) as { choices?: unknown }).choices) ? body : null; } catch { return null; }
@@ -25,23 +35,27 @@ const completion = (body: string | null): string | null => {
 export type StoredTool = { status: 'ok' | 'unusable'; results: unknown[] };
 export class TurnReplay {
   private readonly models: string[] = [];
-  /** How many model completions the replay holds when it starts: the first of them is the turn's own first call. */
+  /** 1 when the last replayed model reply asked for a paid tool whose result the replay does not hold: that request is replayed, so
+   * it is not a model call this turn makes, and the tool it asked for is the next real call. Otherwise 0. */
   readonly replayedModels: number;
   private readonly tools: Array<{ name: string } & StoredTool> = [];
   constructor(calls: ResumeRead['calls']) {
+    let waiting = false;
     for (const call of calls) {
       if (call.callKind === 'model') {
         const stored = completion(call.body);
         if (!stored) break;
         this.models.push(stored);
+        waiting = requestedPaidTool(stored);
       } else {
         let results: unknown;
         try { results = JSON.parse(call.body ?? 'null'); } catch { results = null; }
         if (!Array.isArray(results) || !call.toolName) break;
         this.tools.push({ name: call.toolName, status: call.status, results });
+        waiting = false;
       }
     }
-    this.replayedModels = Math.min(this.models.length, 1);
+    this.replayedModels = waiting ? 1 : 0;
   }
   /** The stored answer of the next model call, or null: that call is real. */
   model(): string | null { return this.models.shift() ?? null; }

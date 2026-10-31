@@ -91,8 +91,10 @@ function RuntimePath({routeSession,routeModule}:{routeSession:string;routeModule
  const onTurns=Boolean(routeSession&&choices.data?.corePathV2);
  const view=trpc.runtime.view.useQuery({sessionId:routeSession},{enabled:onTurns});
  if(onTurns&&!view.data&&!view.error)return <p>正在读取工作…</p>;
- if(onTurns&&view.data?.scope?.kind==='positioning_draft')return <TurnWorkspace sessionId={routeSession}
-  oldTurns={(view.data.executions as Array<{executionId:string;input:string|null;body:string|null;primaryBody:string|null}>)}/>;
+ // A conversation that already holds old-path history stays on the old path: the turn path reads session_messages only, so it would
+ // show the earlier talk without the model having it. V2-12 moves that history before the old path goes.
+ const oldHistory=Boolean((view.data?.executions as unknown[]|undefined)?.length);
+ if(onTurns&&view.data?.scope?.kind==='positioning_draft'&&!oldHistory)return <TurnWorkspace sessionId={routeSession}/>;
  return <RuntimeWorkspace routeSession={routeSession} routeModule={routeModule}/>;
 }
 function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeModule:string}){
