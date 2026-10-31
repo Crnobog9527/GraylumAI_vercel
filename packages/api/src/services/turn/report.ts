@@ -21,6 +21,7 @@ import { callCredits, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import { readReportSource, type ReportSource } from './reportSource';
 import { reportSkillText } from './reportSkill';
+import { redisReportStopSignal, type ReportStopSignal } from './reportStopSignal';
 import type { TurnEvent } from './sse';
 
 /*
@@ -33,9 +34,11 @@ import type { TurnEvent } from './sse';
  * The prompt is the Skill text (shared, cached by package hash in the process) then the report's facts, each block a cache
  * breakpoint (prompt-cache-v3, 2.9; moved here from #1501, whose old path could not freeze a cache for reports).
  * Stop (the only kind that can be stopped, 10-28): POST /api/turn/stop records it (turn_stop: first two in 24 hours free, the
- * third and later after the user's confirmation charge what was generated, at most the fixed price); the page then drops this
- * stream, and the dropped stream makes this turn read its state once: a stopped turn aborts the provider stream and closes as
- * stopped with what was generated (turn_close keeps what the user saw). A stream dropped without a stop changes nothing.
+ * third and later after the user's confirmation charge what was generated, at most the fixed price) and raises a Redis flag this
+ * turn looks for every two seconds during the provider call (reportStopSignal.ts: Vercel does not report a dropped stream to a
+ * running function). A stopped turn aborts the provider stream and closes as stopped with what was generated (turn_close keeps
+ * what the user saw). Where the platform does report a dropped stream, the turn reads its state once, which also covers a flag
+ * that could not be raised. A stream dropped without a stop changes nothing.
  */
 export const reportTurnRequest = z.object({
   kind: z.literal('report'), sessionId: z.string().uuid(), requestId: z.string().uuid(),
@@ -45,6 +48,7 @@ export const reportTurnRequest = z.object({
 }).strict();
 export type ReportInput = Omit<z.infer<typeof reportTurnRequest>, 'kind'> & { actorId: string };
 
+const STOP_LOOK_MS = 2000;
 const OPEN_CODES = /^(REPORT_[A-Z_]+|TURN_[A-Z_]+|STOP_LOSS_REACHED)$/;
 /** The fixed price from the admission configuration rows (the database checks the same row when it opens the turn). */
 function reportPrice(configuration: ConfigurationRows): number {
@@ -57,7 +61,7 @@ function reportPrice(configuration: ConfigurationRows): number {
 }
 
 export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (event: TurnEvent) => void,
-  clientGone?: AbortSignal): Promise<void> {
+  clientGone?: AbortSignal, stopSignal: ReportStopSignal = redisReportStopSignal()): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
   // 1. The catalog (cached): switch, price, module and its report model, input budget, the quote of the one call.
   const configuration = readAdmissionConfiguration(admin);
@@ -129,6 +133,18 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
       roundId: null, turnId }).then(turn => { if (turn?.state === 'stopping') abort.abort(); }), undefined, { category: 'api' });
   };
   if (clientGone?.aborted) onGone(); else clientGone?.addEventListener('abort', onGone, { once: true });
+  // The stop's flag, looked for only while the provider call runs. Unreadable: the next look tries again; the miss is logged.
+  let watch: ReturnType<typeof setInterval> | undefined, looking = false;
+  const watchForStop = () => {
+    watch = setInterval(() => {
+      if (looking) return;
+      looking = true;
+      void swallow('turn_report_stop_look_failed', stopSignal.raised(turnId), false, { category: 'api' }).then(raised => {
+        looking = false;
+        if (raised) { clearInterval(watch); abort.abort(); }
+      });
+    }, STOP_LOOK_MS);
+  };
 
   let text = '', stopped: TurnStop | undefined, finish: unknown;
   const { frozen } = source;
@@ -166,6 +182,7 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
         // The pause and the call limits again before the paid call: nothing is written or sent when refused.
         const gate = await deps.newWork.calls(input.actorId, 1, 'bill2.v2');
         if (!gate.ok) { stopped = new TurnStop(GATE_CODES[gate.reason]); throw stopped; }
+        watchForStop();
         return modelCall(callDeps, quote, request, onChunk)
           .then(completion => { finish = (JSON.parse(completion) as { choices?: Array<{ finish_reason?: unknown }> })
             .choices?.[0]?.finish_reason; return completion; })
@@ -195,6 +212,7 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     }
     emit({ type: 'error', code, turnId });
   } finally {
+    clearInterval(watch);
     clientGone?.removeEventListener('abort', onGone);
     await stopRead;
   }
