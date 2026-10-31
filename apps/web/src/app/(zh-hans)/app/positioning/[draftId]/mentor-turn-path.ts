@@ -41,7 +41,8 @@ export function mentorTurnBody(request: MentorRequest, ids: { sessionId: string;
   const sourceSeq = request.answerSource ? history.executions.find(e => e.executionId === request.answerSource!.executionId)?.replySeq : undefined;
   return { kind: "mentor", ...ids, requestId: request.requestId, stepId: request.stepId, text: request.input,
     organizeAfter: request.organizeAfter ?? false,
-    ...(sourceSeq === undefined ? {} : { answer: { sourceSeq, ...(request.answerSource!.optionIndex === undefined ? {} : { optionIndex: request.answerSource!.optionIndex }) } }),
+    ...(sourceSeq === undefined ? {} : { answer: { sourceSeq,
+      ...(request.answerSource!.optionIndex === undefined ? {} : { optionIndex: request.answerSource!.optionIndex }) } }),
     ...(request.researchRefreshId ? { researchRefreshId: request.researchRefreshId } : {}) };
 }
 
