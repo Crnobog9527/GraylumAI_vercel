@@ -9,7 +9,7 @@ function deps(answer: (name: string, args: Record<string, unknown>) => { data?: 
   const client = { rpc: async (name: string, args: Record<string, unknown>) => { calls.push([name, args]);
     const a = answer(name, args); return { data: a.data ?? null, error: a.error ?? null }; }, from: () => { throw new Error('no'); } };
   return { calls, deps: { authenticate: async () => 'actor', databaseHost: { declared: 'db.test', actual: 'db.test' },
-    clients: { write: client, read: client }, ...over } as unknown as ReportHttpDeps };
+    clients: { write: client, read: client }, stopSignal: { raise: async () => undefined, raised: async () => false }, ...over } as unknown as ReportHttpDeps };
 }
 const post = (body: unknown) => new Request('https://app.test/api/turn/stop', { method: 'POST', body: JSON.stringify(body) });
 const answerOf = async (res: Response) => [res.status, await res.json()];
@@ -24,6 +24,19 @@ describe('report stop and read (CORE-PATH-V2 V2-7a)', () => {
       .toEqual([200, { turnId: 9, state: 'stopping', chargeable: true, replay: false }]);
     expect(d.calls).toEqual([['turn_stop', { p_actor_id: 'actor', p_turn_id: 9, p_confirmed: false, p_stop_at: 12 }],
       ['turn_stop', { p_actor_id: 'actor', p_turn_id: 9, p_confirmed: true, p_stop_at: 12 }]]);
+  });
+
+  it('raises the flag for the running turn only once the stop is recorded, and a failed flag does not fail the stop', async () => {
+    const raised: number[] = [], stopSignal = { raise: async (id: number) => { raised.push(id); }, raised: async () => false };
+    const asked = deps(() => ({ data: { turnId: 9, state: 'confirmation_required', chargeable: true, fixedCredits: 500, replay: false } }), { stopSignal });
+    await handleTurnStop(post({ turnId: 9 }), asked.deps);
+    expect(raised).toEqual([]);
+    const stopping = deps(() => ({ data: { turnId: 9, state: 'stopping', chargeable: false, replay: false } }), { stopSignal });
+    await handleTurnStop(post({ turnId: 9 }), stopping.deps);
+    expect(raised).toEqual([9]);
+    const down = deps(() => ({ data: { turnId: 9, state: 'stopping', chargeable: false, replay: false } }),
+      { stopSignal: { raise: async () => { throw new Error('redis down'); }, raised: async () => false } });
+    expect((await answerOf(await handleTurnStop(post({ turnId: 9 }), down.deps)))[0]).toBe(200);
   });
 
   it('refuses: bad shape, no account, wrong database, a chat (no stop), someone else\'s turn; database text never leaks', async () => {
