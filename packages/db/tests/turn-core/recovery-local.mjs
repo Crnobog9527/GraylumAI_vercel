@@ -33,8 +33,8 @@ const begin=(a,turn,seq,{kind='model',paid=null,upper=0.02,tool=null}={})=>
  one('select turn_call_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',
   [a.actor,turn,seq,kind,kind==='tool'?null:randomUUID(),kind==='tool'?(tool??'research_search'):null,paid,hash('r'+turn+seq),upper,6]);
 const identity=(a,turn,seq,id='gen-'+seq)=>one('select turn_call_identity($1,$2,$3,$4) v',[a.actor,turn,seq,id]);
-const record=(a,turn,seq,{n=0.01}={})=>
- one("select turn_call_record($1,$2,$3,'ok',$4,$4,'{}',null,$5,'body') v",[a.actor,turn,seq,n,hash('p'+turn+seq)]);
+const record=(a,turn,seq,{n=0.01,raw='body'}={})=>
+ one("select turn_call_record($1,$2,$3,'ok',$4,$4,'{}',null,$5,$6) v",[a.actor,turn,seq,n,hash('p'+turn+seq),raw]);
 const close=(a,turn,kind='completed')=>one("select turn_close($1,$2,$3,'[]',false,false,null) v",[a.actor,turn,kind]);
 const claim=(limit=50,client=c)=>one('select turn_recovery_claim($1) v',[limit],client);
 const recover=(a,turn,action,client=c)=>one('select turn_recover($1,$2,$3) v',[a.actor,turn,action],client);
@@ -183,6 +183,39 @@ try{
   const stopped=await recover(r,rep.turnId,'interrupt');
   assert.deepEqual([stopped.closeKind,stopped.chargedCredits],['stopped',0],'the first stop in 24 hours is free');
   report.checks.push('jury turns are recovered too (interrupt; expire after 24 h paused awaiting_user with refund_all false); a stuck stopping report closes as stopped under the 24-hour stop rule');
+ }
+ // 4b. What a resume replays (V2-10): the paused turn's receipts through the turns it continued, what its limits leave, and the same
+ // refusals as the resume itself. Reading writes nothing.
+ {
+  const a=await account(30),o=await open(a,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});
+  await begin(a,o.turnId,1,{upper:0.02});
+  await record(a,o.turnId,1,{n:0.02,raw:JSON.stringify({choices:[{message:{tool_calls:[{function:{arguments:'{"q":"early"}'}}]}}]})});
+  await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.01});await record(a,o.turnId,2,{n:0.01,raw:'[{"vendor":"v"}]'});
+  assert.equal((await begin(a,o.turnId,3,{upper:0.04})).paused,true);
+  const before=await turn(a,o.turnId);
+  const read=await one('select turn_resume_read($1,$2,$3) v',[a.actor,a.session,o.turnId]);
+  assert.deepEqual(read.limits,{model:2,paidTools:0,freeTools:1,decisions:0});
+  assert.deepEqual(read.calls.map(x=>[x.seq,x.callKind,x.body]),[[1,'model',read.calls[0].body],[2,'tool','[{"vendor":"v"}]']]);
+  assert.deepEqual(await turn(a,o.turnId),before,'reading changes nothing');
+  const other=await account();
+  assert.match(await refusal(one('select turn_resume_read($1,$2,$3) v',[other.actor,other.session,o.turnId])),/TURN_RESUME_DENIED/);
+  assert.match(await refusal(one('select turn_resume_read($1,$2,$3) v',[other.actor,a.session,o.turnId])),/TURN_SESSION_DENIED/);
+  const running=await account(),r=await open(running);
+  assert.match(await refusal(one('select turn_resume_read($1,$2,$3) v',[running.actor,running.session,r.turnId])),/TURN_RESUME_DENIED/);
+  // A deleted conversation has no breakpoint: its receipts' bodies are gone with it, and the read is refused.
+  const marked=async at=>{await c.query("set session_replication_role=replica");
+   await c.query('update runtime_sessions set content_deleted_at=$2 where id=$1',[a.session,at]);await c.query("set session_replication_role=origin");};
+  await marked(new Date());
+  assert.match(await refusal(one('select turn_resume_read($1,$2,$3) v',[a.actor,a.session,o.turnId])),/TURN_SESSION_ERASED/);
+  await marked(null);
+  // The view shows the paid call behind a reply, under the turn that saved it, with what was asked.
+  await c.query("insert into session_messages(session_id,seq,role,turn_id,content,content_hash) values($1,1,'assistant',$2,'好',repeat('a',64))",[a.session,o.turnId]);
+  await c.query("set session_replication_role=replica");
+  await c.query(`update runtime_sessions set scope=jsonb_build_object('kind','work_item','workItemId',gen_random_uuid()) where id=$1`,[a.session]);
+  await c.query("set session_replication_role=origin");
+  const view=await one('select turn_session_view($1,$2,0) v',[a.actor,a.session]);
+  assert.deepEqual(view.calls.map(x=>[x.turnId,x.seq,x.status,x.arguments]),[[o.turnId,2,'ok','{"q":"early"}']]);
+  report.checks.push('turn_resume_read gives limits and receipts, writes nothing, refuses as a resume; the view lists paid calls');
  }
  // 5. Resume after a top-up (2.2): the paused turn closes and charges its known receipt once, the new turn freezes for what is
  // left of the limits; refusals roll back and keep the turn paused.
