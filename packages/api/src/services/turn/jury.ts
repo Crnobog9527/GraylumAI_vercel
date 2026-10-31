@@ -47,7 +47,7 @@ const TRANSIENT = new Set(['TURN_DATABASE_UNAVAILABLE', 'TURN_PROVIDER_KEY_UNAVA
   'TURN_BILLING_UNIT_UNAVAILABLE']);
 const ATTEMPTS = 3, NIL = '00000000-0000-0000-0000-000000000000';
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
-const codeOf = (error: unknown) => error instanceof QuoteError || error instanceof TurnStop || error instanceof TurnDatabaseError
+export const codeOf = (error: unknown) => error instanceof QuoteError || error instanceof TurnStop || error instanceof TurnDatabaseError
   ? error.code : error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'TURN_FAILED';
 
 async function coreSettings(configuration: ConfigurationRows) {

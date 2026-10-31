@@ -6,20 +6,28 @@ import { handleTurnRequest, type TurnHttpDeps } from './http';
 const run = vi.hoisted(() => vi.fn());
 const report = vi.hoisted(() => vi.fn());
 const mentor = vi.hoisted(() => vi.fn());
+const compare = vi.hoisted(() => vi.fn());
+const juryStart = vi.hoisted(() => vi.fn());
+const loadParts = vi.hoisted(() => vi.fn());
 vi.mock('./chat', () => ({ runChatTurn: run }));
 vi.mock('./mentor', () => ({ runMentorTurn: mentor }));
+vi.mock('./compare', () => ({ runCompareTurn: compare }));
+vi.mock('./jury', async original => ({ ...await original<object>(), juryTurn: () => ({ start: juryStart }) }));
+vi.mock('../fusion/compareLoad', async original => ({ ...await original<object>(), loadCompareTurnParts: loadParts }));
 vi.mock('./report', async original => ({ ...await original<object>(), runReportTurn: report }));
 
 const SESSION = '00000000-0000-4000-8000-000000000001', REQUEST = '00000000-0000-4000-8000-000000000002';
+const DRAFT = '00000000-0000-4000-8000-000000000003', VERSION = '00000000-0000-4000-8000-000000000004';
 const post = (body: unknown) => new Request('https://app.test/api/turn', { method: 'POST', body: JSON.stringify(body) });
 const valid = { kind: 'chat', sessionId: SESSION, requestId: REQUEST, text: 'Hello' };
 const deps = (over: Partial<TurnHttpDeps> = {}): TurnHttpDeps => ({
   authenticate: async () => 'actor-1', rateLimited: async () => false,
-  databaseHost: { declared: 'db.test', actual: 'db.test' }, chat: {} as ChatDeps, ...over,
+  databaseHost: { declared: 'db.test', actual: 'db.test' }, chat: { newWork: {} } as ChatDeps,
+  userClient: () => ({}) as never, handReview: () => {}, ...over,
 });
 
 describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
-  beforeEach(() => { run.mockReset(); report.mockReset(); });
+  beforeEach(() => { run.mockReset(); report.mockReset(); compare.mockReset(); juryStart.mockReset(); loadParts.mockReset(); });
 
   it('refuses before any turn work: bad shape, wrong or undeclared database host, no account, rate limited', async () => {
     const status = async (body: unknown, d: TurnHttpDeps) => {
@@ -101,5 +109,64 @@ describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
       stepId: 'step-0', text: 'Refresh it', organizeAfter: true, researchRefreshId: refresh }), deps());
     await res.text();
     expect(mentor.mock.calls[0]![1]).toMatchObject({ researchRefreshId: refresh });
+  });
+
+  const comparing = { kind: 'compare', sessionId: SESSION, requestId: REQUEST, question: ' Which? ', modelIds: [DRAFT, VERSION] };
+  const reviewing = { kind: 'jury', requestId: REQUEST, draftId: DRAFT, sourceVersionId: VERSION, acceptedCredits: 1500 };
+
+  it('V2-7b: compare and jury share the entry checks; nothing outside their shape reaches a turn', async () => {
+    const status = async (body: unknown, d = deps()) => {
+      const res = await handleTurnRequest(post(body), d);
+      return [res.status, (await res.json()).error];
+    };
+    const invalid = [400, 'TURN_REQUEST_INVALID'];
+    expect(await status({ ...comparing, question: '  ' })).toEqual(invalid);
+    expect(await status({ ...comparing, modelIds: [] })).toEqual(invalid);
+    expect(await status({ ...comparing, modelIds: Array(9).fill(DRAFT) })).toEqual(invalid);
+    expect(await status({ ...comparing, modelIds: ['gpt'] })).toEqual(invalid);
+    expect(await status({ ...reviewing, sessionId: SESSION })).toEqual(invalid);
+    expect(await status({ ...reviewing, acceptedCredits: 0 })).toEqual(invalid);
+    // Adopting a revised report is not a turn (Owner 10-20): no such kind.
+    expect(await status({ ...reviewing, kind: 'jury_adopt' })).toEqual(invalid);
+    expect(await status(comparing, deps({ authenticate: async () => null }))).toEqual([401, 'TURN_UNAUTHENTICATED']);
+    expect(await status(reviewing, deps({ rateLimited: async () => true }))).toEqual([429, 'TURN_RATE_LIMITED']);
+    expect(compare).not.toHaveBeenCalled();
+    expect(juryStart).not.toHaveBeenCalled();
+  });
+
+  it('V2-7b: a compare streams its columns, its parts read only when the executor asks', async () => {
+    loadParts.mockResolvedValue({ question: 'Which?' });
+    compare.mockImplementation(async (_deps, input, emit) => {
+      expect(loadParts).not.toHaveBeenCalled();
+      expect(await input.parts()).toEqual({ question: 'Which?' });
+      expect(input).toMatchObject({ actorId: 'actor-1', sessionId: SESSION, requestId: REQUEST, modelIds: [DRAFT, VERSION] });
+      emit({ type: 'opened', turnId: 3, compareId: DRAFT, reservedCredits: 2, replay: false });
+      emit({ type: 'column', index: 1, delta: 'A' });
+      emit({ type: 'result', turnId: 3, compareId: DRAFT, chargedCredits: 1, settlement: 'done' });
+    });
+    const text = await (await handleTurnRequest(post(comparing), deps())).text();
+    expect(text).toContain('event: column');
+    expect(text).toContain('"compareId"');
+    expect(loadParts.mock.calls[0]![1]).toEqual({ sessionId: SESSION, question: 'Which?', skill: undefined });
+  });
+
+  it('V2-7b: a jury start answers once and hands the review to the server; an ended or refused one is not handed over', async () => {
+    const handReview = vi.fn();
+    const view = { reviewId: DRAFT, turnId: 9, state: 'paused', config: { fixedPrice: { credits: 1500, holdCredits: 40 } } };
+    juryStart.mockResolvedValueOnce(view);
+    const text = await (await handleTurnRequest(post(reviewing), deps({ handReview }))).text();
+    expect(juryStart).toHaveBeenCalledWith({ requestId: REQUEST, draftId: DRAFT, sourceVersionId: VERSION, acceptedCredits: 1500 });
+    expect(text).toContain('event: review');
+    expect(text).toContain('"reservedCredits":1540');
+    expect(handReview).toHaveBeenCalledExactlyOnceWith(DRAFT);
+
+    handReview.mockClear();
+    juryStart.mockResolvedValueOnce({ ...view, state: 'incomplete' });
+    expect(await (await handleTurnRequest(post(reviewing), deps({ handReview }))).text()).toContain('"state":"incomplete"');
+    juryStart.mockRejectedValueOnce(new Error('FUSION_REVIEW_ESTIMATE_CHANGED'));
+    expect(await (await handleTurnRequest(post(reviewing), deps({ handReview }))).text()).toContain('FUSION_REVIEW_ESTIMATE_CHANGED');
+    juryStart.mockResolvedValueOnce({ ...view, turnId: null });
+    expect(await (await handleTurnRequest(post(reviewing), deps({ handReview }))).text()).toContain('TURN_REQUEST_CONFLICT');
+    expect(handReview).not.toHaveBeenCalled();
   });
 });

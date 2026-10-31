@@ -11,6 +11,7 @@ import type { RuntimeCallGate } from '../runtime/newWorkGate';
 import type { PositioningClassifier } from '../runtime/positioningGate';
 import { POSITIONING_MARKER } from '../runtime/positioningFallback';
 import { CORE_PATH_SETTING } from './chat';
+import { loadCompareTurnParts } from '../fusion/compareLoad';
 import { runCompareTurn, type CompareEvent } from './compare';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
@@ -148,6 +149,13 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns, each bou
   expect(JSON.stringify(anthropic[2]!.content)).toContain('cache_control');
   expect(JSON.stringify(anthropic[3]!.content)).not.toContain('cache_control');
   expect(JSON.stringify(bodies.find(b => b.model === PAIRS[1][0]))).not.toContain('cache_control');
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: the parts POST /api/turn reads are what a column is sent, on a conversation of the turn path', async () => {
+  const f = await member();
+  const read = await loadCompareTurnParts({ admin, user: admin, actorId: f.actor }, { sessionId: f.session, question: 'Which plan?' });
+  expect(read).toMatchObject({ skill: null, workspace: [], references: [], question: 'Which plan?' });
+  expect('scopeMaterial' in read).toBe(false);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-7b: a repeated compare request never calls again; only Gold compares', async () => {
