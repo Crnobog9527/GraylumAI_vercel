@@ -18,16 +18,19 @@ import { swallow } from '../../lib/swallow';
  * left, refusing a deployment that points at the wrong database), the signed-in account and the request rate limit.
  */
 const common = { sessionId: z.string().uuid(), requestId: z.string().uuid() };
+// The turn paused for credits that this request continues; the user's words come again, a paused turn saved none.
+const resumeOf = z.number().int().positive().optional();
 export const turnRequest = z.discriminatedUnion('kind', [
   // V2-10: what the composer chose for this message: a Skill the model loads first, library documents it reads first.
   z.object({ kind: z.literal('chat'), ...common, text: z.string().trim().min(1).max(200_000), moduleId: z.string().uuid().optional(),
+    resumeOf,
     references: z.array(z.object({ kind: z.literal('library_document'), documentId: z.string().uuid(),
       version: z.number().int().positive() }).strict()).min(1).max(8).optional() }).strict(),
   // V2-5: the positioning mentor. moduleId is the draft's module (the turn is quoted for its model; turn_open refuses any other);
   // text is the user's words, or the host's opening marker. 8000 characters, as the old mentor request.
   z.object({ kind: z.literal('mentor'), ...common, moduleId: z.string().uuid(), stepId: z.string().min(1).max(128),
     text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean(), answer: mentorAnswer.optional(),
-    researchRefreshId: z.string().uuid().optional() }).strict(),
+    researchRefreshId: z.string().uuid().optional(), resumeOf }).strict(),
   reportTurnRequest,
   // V2-7b: as the old compare request. Everything else is read and checked on the server (compare.ts).
   z.object({ kind: z.literal('compare'), ...common, question: z.string().trim().min(1).max(20_000),
@@ -93,8 +96,9 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
   if (input.kind === 'jury') return eventStream(emit => runJuryStart(deps, actorId, input, emit));
   if (input.kind === 'mentor') return eventStream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
     requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
-    ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) }, emit));
+    ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}),
+    ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}) }, emit));
   const chosen = { ...(input.moduleId ? { moduleId: input.moduleId } : {}), ...(input.references ? { references: input.references } : {}) };
   return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text,
-    ...(Object.keys(chosen).length ? { chosen } : {}) }, emit));
+    ...(Object.keys(chosen).length ? { chosen } : {}), ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}) }, emit));
 }

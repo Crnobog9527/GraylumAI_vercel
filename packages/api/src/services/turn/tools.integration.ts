@@ -134,11 +134,11 @@ const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.0000
 const admit = async () => ({ ok: true as const });
 type NewWork = Parameters<typeof runChatTurn>[0]['newWork'];
 async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false,
-  newWork: NewWork = { message: admit, calls: admit }, text = 'How should a coffee shop position itself?') {
+  newWork: NewWork = { message: admit, calls: admit }, text = 'How should a coffee shop position itself?', resumeOf?: number) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate }, newWork,
     tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library } },
-  { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text }, e => events.push(e)));
+  { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text, ...(resumeOf ? { resumeOf } : {}) }, e => events.push(e)));
   return { events, calls };
 }
 /** N = ceil(q x sum(n x m)) over the receipts the user pays for: ok rows except the positioning check (q 100, m 6 here). */
@@ -329,6 +329,31 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a balance that opens the turn but not the contin
   // The search is recorded with its cost; nothing was sent for the continuation.
   expect((await rows(f.actor)).map(r => [r.call_kind, r.status])).toEqual([['decision', 'ok'], ['model', 'ok'], ['tool', 'ok']]);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(0);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-10: a resume continues from the receipts: no model call or search again, the work charged once', async () => {
+  const f = await setup(9, { credits: 3, typicalUsd: '0.001' }), bodies: string[] = [];
+  const parallel = vi.fn(async () => searchResult());
+  await turn(f, searchingModel(bodies), suppliers(parallel));
+  const { id } = (await db.query("select id::int id from turns where actor_id=$1 and state='paused'", [f.actor])).rows[0];
+  await db.query('update profiles set credits=100 where id=$1', [f.actor]);
+  const out = await turn(f, searchingModel(bodies), suppliers(parallel), false, undefined, undefined, id);
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result', body: 'Answer from the search.' });
+  expect(parallel).toHaveBeenCalledTimes(1);
+  // The first answer came from its receipt: only the continuation reached the model, carrying the stored search result.
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1]).toContain('Coffee guide');
+  // One decision, one model call and one search on the paused turn; one model call on the resumed one, and nothing doubled.
+  expect((await rows(f.actor)).map(r => [r.call_kind, r.status]))
+    .toEqual([['decision', 'ok'], ['model', 'ok'], ['tool', 'ok'], ['model', 'ok']]);
+  const charged = (await db.query("select coalesce(sum(charged_credits),0)::int c from turns where actor_id=$1", [f.actor])).rows[0].c;
+  expect(charged).toBe(await expectedCredits(f.actor));
+  expect((await db.query("select state,close_kind,failure_code from turns where actor_id=$1 and id=$2", [f.actor, id])).rows[0])
+    .toEqual({ state: 'closed', close_kind: 'failed', failure_code: 'resumed' });
+  // Someone else's, or a turn no longer paused, is refused before anything opens.
+  const again = await turn(f, searchingModel(bodies), suppliers(parallel), false, undefined, undefined, id);
+  expect(again.events).toEqual([{ type: 'error', code: 'TURN_RESUME_DENIED' }]);
+  expect(bodies).toHaveLength(2);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-6: a message above the interactive ceiling opens when research is usable, never above the research one', async () => {

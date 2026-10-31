@@ -30,6 +30,7 @@ import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
+import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
 import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
@@ -64,7 +65,8 @@ export type ChatDeps = {
   /** V2-6: the tools a free chat offers; absent, the turn has none (V2-4a). */
   tools?: ChatToolDeps;
 };
-export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string; chosen?: ChatSelection };
+export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string; chosen?: ChatSelection;
+  /** The turn paused for credits this one continues (resume.ts). */ resumeOf?: number };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
@@ -147,14 +149,25 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q,
     quote.multiplier);
   if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
-  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
+  // A resume keeps to what the paused turn has left and replays its receipts; a bad resume is refused before anything changes.
+  let resume: ResumeRead | undefined;
+  if (input.resumeOf) {
+    try { resume = await db.resumeRead({ actorId: input.actorId, sessionId: input.sessionId, turnId: input.resumeOf }); }
+    catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_RESUME_DENIED' }); }
+    if (resume.kind !== 'chat') return emit({ type: 'error', code: 'TURN_RESUME_DENIED' });
+  }
+  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 };
+  const frozenLimits = resume ? resumeLimits(limits, resume.limits) : limits;
+  const replay = resume ? new TurnReplay(resume.calls) : undefined;
+  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
+    ...(frozenLimits.decisions ? { decisionUpperUsd } : {}),
     startThresholdCredits: startCredits,
-    limits: { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 },
-    paidToolUpperUsd: tools?.plan.paidToolUpperUsd ?? [], stopLoss: config.stopLoss,
+    limits: frozenLimits, paidToolUpperUsd: (tools?.plan.paidToolUpperUsd ?? []).slice(0, frozenLimits.paidTools), stopLoss: config.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing,
     frozen: { modelId: quote.modelId, model: quote.model, ...(tools?.voiceVersionId ? { voiceVersionId: tools.voiceVersionId } : {}) } });
   let opened;
-  try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
+  try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy,
+    ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}) }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
     ...(tools ? { tools: { available: tools.plan.available, trimmed: tools.plan.trimmed } } : {}) });
@@ -176,7 +189,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // (charge_user=false); the platform's cost is its real one, or the upper bound when the response reported none.
     let fallback = false;
     const gate = opened.positioning;
-    if (gate && !gate.positioned) {
+    // A resume asked this already: it continues under the fallback rule, which holds back a refusal either way.
+    if (gate && !gate.positioned && resume) fallback = true;
+    else if (gate && !gate.positioned) {
       const decision = await db.begin({ actorId: input.actorId, turnId: opened.turnId, seq: ++seq, callKind: 'decision',
         modelId: quote.modelId, toolName: null, paid: null, requestHash: sha256(input.text), upperUsd: decisionUpperUsd,
         multiplier: quote.multiplier });
@@ -230,7 +245,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     let text = '', sentChars = 0, holding = fallback;
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
-        callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q } }) : null;
+        callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q }, ...(replay ? { replay } : {}) }) : null;
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),
       maxOutputTokens: quote.outputLimit, maxTurns: 1 + (built?.maxToolCalls ?? 0), reasoning: quote.reasoning,
@@ -255,6 +270,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, inputLimit); }
         catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
+        const stored = replay?.model();
+        if (stored) return stored;
         // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
         await callGate(1);
         return modelCall(callDeps, quote, request, onChunk)

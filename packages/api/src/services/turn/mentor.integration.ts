@@ -161,7 +161,7 @@ const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
   organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number }; research?: MentorDeps['research'];
-  researchRefreshId?: string; afterPrepare?: () => Promise<void> }) {
+  researchRefreshId?: string; afterPrepare?: () => Promise<void>; resumeOf?: number }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   const clients = turnClients(admin);
   let hook = input.afterPrepare;
@@ -174,7 +174,8 @@ async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string;
     newWork: input.newWork ?? { message: admit, calls: admit }, ...(input.research ? { research: input.research } : {}) },
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
       text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}),
-      ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) },
+      ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}),
+      ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}) },
     e => events.push(e)));
   return { events, calls };
 }
@@ -400,6 +401,30 @@ it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start p
   expect((await db.query('select state,pause_reason,close_kind from turns where actor_id=$1', [f.actor])).rows)
     .toEqual([{ state: 'paused', pause_reason: 'waiting_credits', close_kind: null }]);
   expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-10: a resume at the organizer keeps the reply: it is not written again, and the checklist is organized', async () => {
+  const f = await setup();
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, patch('Sell coffee to students'));
+    await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+    return prose('gen-reply-' + n, 'Good. Who buys it?');
+  });
+  await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  const { id } = (await db.query("select id::int id from turns where actor_id=$1 and state='paused'", [f.actor])).rows[0];
+  const before = await db.query('select sum(charged_credits) c from turns where actor_id=$1', [f.actor]);
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn, resumeOf: id });
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(t.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
+  expect(out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('')).toContain('Good. Who buys it?');
+  const saved = await db.query("select content from session_messages where session_id=$1 and role='assistant'", [f.session]);
+  expect(saved.rows).toHaveLength(1);
+  expect(saved.rows[0].content).toContain('Good. Who buys it?');
+  expect((await f.steps())['step-0'].information?.goal?.value ?? '').not.toBe('');
+  expect(before.rows[0].c).toBeNull();
+  // Two model receipts in all: the reply, charged once through the chain, and the organizer.
+  expect((await db.query("select count(*)::int n from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='model' and c.status='ok'",
+    [f.actor])).rows[0].n).toBe(2);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown by opc_query and can be accepted', async () => {

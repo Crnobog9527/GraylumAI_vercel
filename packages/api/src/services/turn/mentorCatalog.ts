@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { resumeLimits, type ResumeRead } from './resume';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { assertSeparateSummaryModel, summaryPolicy } from '../artifacts/summaryPolicy';
 import { readAdmissionConfiguration, readAdmissionModule } from '../runtime/admissionConfiguration';
@@ -84,16 +85,25 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
 /** The frozen numbers of one mentor turn (G_turn, U_turn, the call limits) and what turn_mentor_context checks. */
 export function mentorPolicy(catalog: MentorCatalog,
   input: { opening: boolean; stepId: string; moduleId: string; sourceChecked: boolean; sourceDrafts: readonly string[];
-    preparedAt?: string }) {
-  const { mentor, organizer, research } = catalog;
+    preparedAt?: string; /** A resume: what the paused turn has left (resume.ts). */ left?: ResumeRead['limits'] }) {
+  const { organizer, research } = catalog;
+  const mentor = catalog.mentor;
   const freeTools = input.opening ? 0 : 1, paid = research ? mentorResearchBounds(research, mentor.multiplier) : [];
+  const full = { model: 1 + (research ? 1 : 0) + freeTools + (organizer ? 1 : 0), paidTools: research ? 1 : 0, freeTools, decisions: 0,
+    ...(research ? { toolRows: BENCHMARK_ROWS } : {}) };
+  // Paused at the organizer, the reply's calls are used up: the organizer is the turn's one model call left.
+  const onlyOrganizer = Boolean(input.left && organizer && input.left.model <= 1);
+  const left = input.left && !onlyOrganizer ? resumeLimits(full, input.left, organizer ? 1 : 0) : null;
+  // A benchmark call settles in several rows: what is left of them is what it may still write (turn_resume_read counts rows).
+  const resumedRows = left?.paidTools && research ? Math.min(BENCHMARK_ROWS, input.left!.paidTools) : 0;
   // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).
-  return { ...turnPolicy({ q: mentor.q, multiplier: mentor.multiplier, modelUpperUsd: mentor.upperUsd,
+  const priced = onlyOrganizer ? organizer! : mentor;
+  return { ...turnPolicy({ q: mentor.q, multiplier: priced.multiplier, modelUpperUsd: priced.upperUsd,
     startThresholdCredits: catalog.startCredits, pricing: mentor.pricing,
-    limits: { model: 1 + (research ? 1 : 0) + freeTools + (organizer ? 1 : 0), paidTools: research ? 1 : 0, freeTools, decisions: 0,
-      ...(research ? { toolRows: BENCHMARK_ROWS } : {}) },
-    paidToolUpperUsd: paid,
-    otherModelCalls: organizer ? [{ upperUsd: organizer.upperUsd, multiplier: organizer.multiplier }] : [],
+    limits: onlyOrganizer ? { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }
+      : left ? { ...left, ...(resumedRows ? { toolRows: resumedRows } : {}) } : full,
+    paidToolUpperUsd: onlyOrganizer ? [] : left ? paid.slice(0, resumedRows) : paid,
+    otherModelCalls: !onlyOrganizer && organizer ? [{ upperUsd: organizer.upperUsd, multiplier: organizer.multiplier }] : [],
     stopLoss: catalog.config.stopLoss, historyItems: HISTORY_ITEMS, inputBytes: mentor.inputLimit,
     frozen: { modelId: mentor.modelId, model: mentor.model, ...(organizer ? { organizerModelId: organizer.modelId } : {}) } }),
   // V2-8: recovery prices a call whose cost is unknown with the model and price table frozen here, per model id (two models).

@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { TurnReplay } from '../resume';
 import { swallow } from '../../../lib/swallow';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CanonicalAccount } from '../../research/tools/accountLinks';
@@ -58,7 +59,8 @@ export type ChatToolsSetup = {
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
-    onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']> }): Promise<ReturnType<typeof turnTools>>;
+    onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']>;
+    replay?: TurnReplay }): Promise<ReturnType<typeof turnTools>>;
 };
 
 export type ChatSelection = { moduleId?: string; references?: ReadonlyArray<{ documentId: string; version: number }> };
@@ -132,7 +134,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       const built = turnTools({ plan, calls, research: setup, callGate: extra.callGate,
         suppliers: { slots: extra.slots, timeLeft: () => extra.deadline - Date.now() - REPLY_RESERVE_MS,
           ...(input.tools.vendors ? { vendors: input.tools.vendors } : {}) },
-        accounts: { benchmark, currentMessage: extra.currentMessage }, onCall: extra.onCall,
+        accounts: { benchmark, currentMessage: extra.currentMessage }, onCall: extra.onCall, ...(extra.replay ? { replay: extra.replay } : {}),
         ...(skillOffered ? { skills: new Map(allowedSkills(catalog, extra.gated).flatMap(entry => {
           const prepared = skills!.prepared.get(entry.name);
           return prepared === undefined ? [] : [[entry.name, prepared] as const];

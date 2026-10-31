@@ -26,6 +26,7 @@ import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } fro
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
+import { TurnReplay, type ResumeRead } from './resume';
 import { mentorHost, mentorOrganizerInput, mentorState, resourcesOf } from './mentorContext';
 import { answeredText, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
@@ -53,7 +54,8 @@ export type MentorDeps = {
 };
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
   organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer;
-  /** V2-5c: the user pressed Refresh on one benchmark account. */ researchRefreshId?: string };
+  /** V2-5c: the user pressed Refresh on one benchmark account. */ researchRefreshId?: string;
+  /** The turn paused for credits this one continues (resume.ts). */ resumeOf?: number };
 
 const MARKER_RESERVE_BYTES = 256;
 /** Supplier time of a turn: its 300 s minus the reply and the organizer after the last lookup. */
@@ -98,10 +100,19 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     if (error) throw new Error('TURN_OPEN_FAILED');
     return sourceChecked.parse(data);
   };
+  // A resume keeps to what the paused turn has left and replays its receipts: the reply survives a pause at the organizer.
+  let resume: ResumeRead | undefined;
+  if (input.resumeOf) {
+    try { resume = await db.resumeRead({ actorId: input.actorId, sessionId: input.sessionId, turnId: input.resumeOf }); }
+    catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_RESUME_DENIED' }); }
+    if (resume.kind !== 'mentor') return emit({ type: 'error', code: 'TURN_RESUME_DENIED' });
+  }
+  const replay = resume ? new TurnReplay(resume.calls) : undefined;
   let checked: z.infer<typeof sourceChecked> | undefined;
   // 2. Open: freeze, read the draft and its checklist in the same transaction.
   const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
-    policy: mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
+    ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}),
+    policy: mentorPolicy(catalog, { ...(resume ? { left: resume.limits } : {}), opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
       sourceDrafts: checked?.sourceDrafts ?? [], ...(typeof flowRaw?.preparedAt === 'string' ? { preparedAt: flowRaw.preparedAt } : {}) }) });
   let opened, flow: PreparedResearch | undefined, flowRaw: Record<string, unknown> | undefined;
   // A turn the benchmark flow may run in: one read gets the check and the flow's state together (plan 3.1).
@@ -233,10 +244,16 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         const request = openRouterRequestBody(body, { context, policy: callPolicy(mentor) as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, mentor.inputLimit); }
         catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
-        await callGate().catch(keep);
-        return modelCall(callDeps(mentor), mentor, request, onChunk).then(response => {
+        const stored = replay?.model();
+        if (!stored) await callGate().catch(keep);
+        return (stored ? Promise.resolve(stored) : modelCall(callDeps(mentor), mentor, request, onChunk)).then(response => {
           const message = JSON.parse(response)?.choices?.[0]?.message, call = message?.tool_calls?.[0];
           toolCalled = Boolean(message?.tool_calls?.length);
+          // A replayed reply did not stream; it is shown whole, as what was written before the pause.
+          if (stored && typeof message?.content === 'string' && message.content) {
+            text = message.content;
+            emit({ type: 'text', delta: text });
+          }
           if (call?.function?.name === ASK_QUESTION_TOOL) cardMessage = groundedCardFallback(call.function.arguments);
           return response;
         }, keep);
