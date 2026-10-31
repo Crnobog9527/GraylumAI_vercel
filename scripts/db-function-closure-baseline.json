@@ -1,11 +1,4 @@
 {
- "closure": {
-  "turn_fusion_open[compare]": {
-   "tables": 19
-  },
-  "turn_open[report]": {
-   "tables": 19
-  }
- },
+ "closure": {},
  "rules": []
 }

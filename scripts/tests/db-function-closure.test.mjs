@@ -240,3 +240,20 @@ test('the repository holds: library_turn_read is a free read and the tools call 
   const result = analyze();
   assert.deepEqual(result.violations.filter(v => /free read|tool calls|library_turn_read/.test(v)), []);
 });
+
+test('pruneForKind drops the WHEN branches of CASE p_kind that other kinds take, and keeps what it cannot judge', () => {
+  const simple = "x := CASE p_kind WHEN 'mentor' THEN mentor_fn(a) WHEN 'report', 'review' THEN rep_fn(CASE WHEN q THEN 1 ELSE 2 END) ELSE other_fn() END;";
+  const seen = (body, kind, names) => names.filter(n => pruneForKind(body, kind, true).includes(n));
+  const names = ['mentor_fn', 'rep_fn', 'other_fn'];
+  assert.deepEqual(seen(simple, 'mentor', names), ['mentor_fn']);
+  assert.deepEqual(seen(simple, 'review', names), ['rep_fn']);
+  assert.deepEqual(seen(simple, 'chat', names), ['other_fn']);
+  // A WHEN value that is not only string literals cannot be judged: every branch stays, ELSE included.
+  const open = "x := CASE p_kind WHEN 'mentor' THEN mentor_fn() WHEN some_var THEN rep_fn() ELSE other_fn() END;";
+  assert.deepEqual(seen(open, 'chat', names), ['rep_fn', 'other_fn']);
+  assert.deepEqual(seen(open, 'mentor', names), ['mentor_fn', 'rep_fn']);
+  // p_kind that is not the turn kind, and a searched CASE, are left alone.
+  assert.deepEqual(names.filter(n => pruneForKind(simple, 'chat').includes(n)), names);
+  const searched = "x := CASE WHEN a THEN mentor_fn() ELSE other_fn() END;";
+  assert.deepEqual(seen(searched, 'chat', ['mentor_fn', 'other_fn']), ['mentor_fn', 'other_fn']);
+});
