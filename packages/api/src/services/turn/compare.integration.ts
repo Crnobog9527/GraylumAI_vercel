@@ -11,6 +11,7 @@ import type { RuntimeCallGate } from '../runtime/newWorkGate';
 import type { PositioningClassifier } from '../runtime/positioningGate';
 import { POSITIONING_MARKER } from '../runtime/positioningFallback';
 import { CORE_PATH_SETTING } from './chat';
+import type { ShownQuote } from '../fusion/compareAdmission';
 import { loadCompareTurnParts } from '../fusion/compareLoad';
 import { runCompareTurn, type CompareEvent } from './compare';
 import { turnClients } from './db';
@@ -99,13 +100,13 @@ const sse = (id: string, model: string, text: string, cost = 0.0021) => new Resp
   { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
 const parts = (question: string) => ({ skill: null, workspace: [], references: [], question, replyLocale: 'en' as const });
 async function compare(f: { actor: string; session: string }, transport: typeof fetch, input: { requestId?: string; question?: string;
-  gate?: PositioningClassifier; calls?: RuntimeCallGate } = {}) {
+  gate?: PositioningClassifier; calls?: RuntimeCallGate; shown?: ShownQuote } = {}) {
   const events: CompareEvent[] = [];
   await withCatalogRequest(() => runCompareTurn({ admin, clients: turnClients(admin), slots, transport,
     newWork: { message: async () => ({ ok: true }), calls: input.calls ?? (async () => ({ ok: true })) },
     // The synthetic Decisions check: allowed, reporting a provider cost (as the free-chat tests).
     gate: { classify: input.gate ?? (async ({ onCost }) => { onCost?.(0.00002); return 'allow'; }) } },
-  { actorId: f.actor, sessionId: f.session, requestId: input.requestId ?? randomUUID(), modelIds: models,
+  { actorId: f.actor, sessionId: f.session, requestId: input.requestId ?? randomUUID(), modelIds: models, ...(input.shown ? { shown: input.shown } : {}),
     parts: parts(input.question ?? 'Which plan?') }, e => events.push(e)));
   return events;
 }
@@ -156,6 +157,20 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: the parts POST /api/turn reads are what a colum
   const read = await loadCompareTurnParts({ admin, user: admin, actorId: f.actor }, { sessionId: f.session, question: 'Which plan?' });
   expect(read).toMatchObject({ skill: null, workspace: [], references: [], question: 'Which plan?' });
   expect('scopeMaterial' in read).toBe(false);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-7b: a quote the user saw below the real bound refuses before anything is frozen; a covering one opens', async () => {
+  const f = await member();
+  const transport: typeof fetch = async () => { throw new Error('nothing may be sent'); };
+  const bound = (await compare(f, async (_url, init) => sse('gen-cmp-' + randomUUID(), JSON.parse(String(init?.body)).model, 'A'))).at(-1);
+  expect(bound).toMatchObject({ type: 'result' });
+  const row = (await db.query('select reserved_credits g from turns where actor_id=$1', [f.actor])).rows[0];
+  const columns = (credits: number) => models.map(modelId => ({ modelId, credits, usd: '1' }));
+  const g = await member();
+  const low = await compare(g, transport, { shown: { credits: row.g - 1, columns: columns(1) } });
+  expect(low).toEqual([{ type: 'error', code: 'FUSION_COMPARE_PRICE_CHANGED' }]);
+  expect(await credits(g.actor)).toBe(1000);
+  expect((await db.query('select count(*)::int n from turns where actor_id=$1', [g.actor])).rows[0].n).toBe(0);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-7b: a repeated compare request never calls again; only Gold compares', async () => {
