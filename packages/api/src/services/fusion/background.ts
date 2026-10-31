@@ -169,6 +169,19 @@ export async function kickAdvance(origin: string, reviewId: string, hop = 0,
   }
 }
 
+/** Hands a review to the server (FUSION-BACKGROUND, Owner 2026-10-15): after the response, a fresh invocation
+ * advances it step by step, so the user may leave. Without the relay (no server secret, a local run) one step runs
+ * here after the response instead; the page's next read hands it over again. */
+export function handReviewToServer(ctx: { scheduleAfter?: (task: () => Promise<unknown>) => void; origin?: string;
+  supabaseAdmin?: SupabaseClient | null }, reviewId: string) {
+  const admin = ctx.supabaseAdmin, origin = ctx.origin;
+  if (!ctx.scheduleAfter || !admin) return;
+  ctx.scheduleAfter(async () => {
+    if (origin && await kickAdvance(origin, reviewId)) return;
+    await advanceReview({ admin, reviewId });
+  });
+}
+
 /** Daily backstop: kicks reviews that stopped moving (each at most once a day, 0258), within a time limit. */
 export async function kickStalledReviews(admin: SupabaseClient, origin: string, options: { timeLimitMs?: number;
   now?: () => number; kick?: typeof kickAdvance } = {}) {
