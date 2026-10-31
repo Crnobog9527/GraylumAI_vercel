@@ -21,6 +21,8 @@ import {StagingAccessError,stagingProcedureError} from '../services/runtime/stag
 import {stagingTransport} from '../services/runtime/stagingTransport';
 import { runtimeExecutor } from '../services/runtime/execute';
 import {newWorkGate} from '../services/runtime/newWorkGate';
+import {readAdmissionConfiguration} from '../services/runtime/admissionConfiguration';
+import {readCoreConfig} from '../services/turn/chat';
 import {realContract,runtimeGateEnvironment} from '../services/runtime/realHost';
 import {realHostMode} from '../services/runtime/productionEnvironment';
 import {runtimeActor} from '../services/runtime/actor';
@@ -164,7 +166,9 @@ export const runtimeRouter=router({
   // MODEL-IDENTITY-GUARD: opaque id plus display label only; never model_id or provider.
   const ordered=await defaultModelFirst(ctx.supabaseAdmin!,offered,choiceSettings);
   const choices=publicModelChoices(ordered,{surface:'user'});
-  return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:realContract(ctx.real).host.mode};
+  // CORE-PATH-V2 V2-10: which path this page sends on; an unreadable setting keeps the old one.
+  const corePathV2=Boolean(readCoreConfig(await readAdmissionConfiguration(ctx.supabaseAdmin!)));
+  return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:realContract(ctx.real).host.mode,corePathV2};
  }),
  start:procedure.input(z.object({requestId:z.string().uuid(),scope:z.unknown()}).strict()).mutation(({ctx,input})=>ctx.admission.start(input.requestId,input.scope)),
  saveMaterial:procedure.input(runtimeMaterialInput).mutation(({ctx,input})=>ctx.admission.saveMaterial(input)),
