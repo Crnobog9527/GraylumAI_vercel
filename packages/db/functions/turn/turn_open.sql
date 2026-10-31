@@ -104,10 +104,7 @@ BEGIN
     -- is carried above) and counts in the balance read below. Its receipts stay its own for the stop-loss. Not delivered, no
     -- messages: the turn that continues it saves the conversation.
     IF p_resume_of IS NOT NULL THEN
-      PERFORM public.turn_close(p_actor_id, p_resume_of, 'failed', '[]'::jsonb, false, true, 'resumed');
-      -- What it carries is not borne by the platform: only what the chain finally does not charge is recorded as absorbed.
-      UPDATE turns SET absorbed_credits = greatest(absorbed_credits - carried, 0)
-        WHERE actor_id = p_actor_id AND id = p_resume_of AND absorbed_credits IS NOT NULL;
+      PERFORM public.turn_resume_close(p_actor_id, p_resume_of, carried);
     END IF;
 
     -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The balance is read under the
