@@ -9,39 +9,96 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_claim(p_limit integer D
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE a uuid;s social_monitor_settings;r social_review_runs;base timestamptz;out jsonb:='[]';
- cfg jsonb;mid text;cap text;session jsonb;
+ cfg jsonb;mid text;cap text;session jsonb;coach boolean;biz uuid;held boolean;cad text;stages jsonb;
+ prof social_coach_profiles;last_month timestamptz;last_quarter timestamptz;
 BEGIN
  -- Missing user settings are OFF. No creation time or migration time can silently opt a user into paid work.
  IF p_limit NOT BETWEEN 1 AND 20 THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID';END IF;
+ coach:=coalesce((SELECT value='true'::jsonb FROM system_settings WHERE key='publish_monitor_coach_enabled'),false);
+ SELECT value#>>'{}' INTO mid FROM system_settings WHERE key='publish_monitor_review_model_id';
+ IF mid IS NULL OR mid='' THEN SELECT value#>>'{}' INTO mid FROM system_settings WHERE key='primary_model_id';END IF;
+ SELECT value#>>'{}' INTO cap FROM system_settings WHERE key='publish_monitor_review_max_usd';
  FOR a IN SELECT actor_id FROM social_review_runs WHERE status='claimed' AND lease_expires_at<=clock_timestamp()
   UNION SELECT actor_id FROM social_monitor_settings WHERE auto_review_enabled ORDER BY actor_id LOOP
   EXIT WHEN jsonb_array_length(out)>=p_limit;
   SELECT * INTO s FROM social_monitor_settings WHERE actor_id=a FOR UPDATE SKIP LOCKED;
   IF NOT FOUND THEN CONTINUE;END IF;
-  SELECT * INTO r FROM social_review_runs WHERE actor_id=a AND status='claimed' ORDER BY created_at LIMIT 1 FOR UPDATE;
-  IF FOUND THEN
+  IF NOT coach THEN
+   SELECT * INTO r FROM social_review_runs WHERE actor_id=a AND status='claimed' ORDER BY created_at LIMIT 1 FOR UPDATE;
+   IF FOUND THEN
+    IF r.lease_expires_at>clock_timestamp() THEN CONTINUE;END IF;
+    UPDATE social_review_runs SET lease_token=gen_random_uuid(),lease_expires_at=clock_timestamp()+interval '5 minutes'
+     WHERE id=r.id RETURNING * INTO r;
+   ELSE
+    IF NOT publish_monitor_review_allowed(a) THEN CONTINUE;END IF;
+    SELECT greatest(s.auto_review_enabled_at,coalesce(max(finished_at),s.auto_review_enabled_at)) INTO base
+     FROM social_review_runs WHERE actor_id=a AND status IN ('completed','skipped');
+    IF base+interval '7 days'>clock_timestamp() THEN CONTINUE;END IF;
+    INSERT INTO social_review_runs(actor_id,period_start,status,lease_expires_at,lease_token,runtime_request_id,model_id,max_cost_usd)
+    VALUES(a,(base+interval '7 days')::date,'claimed',clock_timestamp()+interval '5 minutes',gen_random_uuid(),gen_random_uuid(),
+     CASE WHEN mid~'^[0-9a-fA-F-]{36}$' THEN mid::uuid END,
+     CASE WHEN cap~'^(0|[1-9][0-9]{0,3})(\.[0-9]{1,6})?$' THEN cap::numeric ELSE 0 END)
+    ON CONFLICT(actor_id,business_id,period_start,cadence) DO NOTHING RETURNING * INTO r;
+    IF NOT FOUND THEN CONTINUE;END IF;
+    session:=runtime_start(a,r.runtime_request_id,'{"scope":{"kind":"positioning_draft"}}');
+    UPDATE social_review_runs SET runtime_session_id=(session->>'sessionId')::uuid WHERE id=r.id RETURNING * INTO r;
+   END IF;
+   out:=out||jsonb_build_array(jsonb_build_object('id',r.id,'actorId',a,'token',r.lease_token,
+    'requestId',r.runtime_request_id,'sessionId',r.runtime_session_id,'modelId',r.model_id,'maxCostUsd',r.max_cost_usd::text));
+   CONTINUE;
+  END IF;
+  -- Coach mode: one paid review at a time per user. Expired claims of any brand are taken over first.
+  held:=false;
+  FOR r IN SELECT * FROM social_review_runs WHERE actor_id=a AND status='claimed' ORDER BY created_at FOR UPDATE LOOP
+   held:=true;
+   EXIT WHEN jsonb_array_length(out)>=p_limit;
    IF r.lease_expires_at>clock_timestamp() THEN CONTINUE;END IF;
    UPDATE social_review_runs SET lease_token=gen_random_uuid(),lease_expires_at=clock_timestamp()+interval '5 minutes'
     WHERE id=r.id RETURNING * INTO r;
-  ELSE
-   IF NOT publish_monitor_review_allowed(a) THEN CONTINUE;END IF;
+   out:=out||jsonb_build_array(publish_monitor_review_claim_item(r));
+  END LOOP;
+  IF held OR NOT publish_monitor_review_allowed(a) THEN CONTINUE;END IF;
+  FOR biz IN SELECT DISTINCT c.business_id FROM social_connections c JOIN opc_businesses b ON b.id=c.business_id
+   AND b.actor_id=a AND b.erased_at IS NULL AND b.archived_at IS NULL
+   WHERE c.actor_id=a AND c.role='own' AND c.status IN ('connected','reauth_required','quarantined') ORDER BY 1 LOOP
+   EXIT WHEN jsonb_array_length(out)>=p_limit;
+   SELECT coalesce(jsonb_object_agg(project_id::text,stage),'{}') INTO stages FROM opc_accounts
+    WHERE actor_id=a AND business_id=biz AND erased_at IS NULL;
+   -- First sight of a brand: the confirmed positioning version and its pillars as extracted candidates.
+   INSERT INTO social_coach_profiles(actor_id,business_id,strategy_version_id,pillars,pillars_source,strategy_check_stages)
+   SELECT a,biz,b.current_source_version_id,coalesce(x.pillars,'[]'),CASE WHEN x.pillars IS NOT NULL THEN 'extracted' END,stages
+   FROM opc_businesses b LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('key','p'||n,'name',left(btrim(p),40),
+     'definition',left(btrim(p),200)) ORDER BY n) pillars
+    FROM artifact_versions v,jsonb_array_elements_text(CASE WHEN jsonb_typeof(v.report#>'{generatedReport,data,data,content,pillars}')
+     ='array' THEN v.report#>'{generatedReport,data,data,content,pillars}' ELSE '[]' END) WITH ORDINALITY q(p,n)
+    WHERE v.id=b.current_source_version_id AND n<=6 AND btrim(p)<>'') x ON true
+   WHERE b.id=biz
+   ON CONFLICT(actor_id,business_id) DO NOTHING;
+   SELECT * INTO prof FROM social_coach_profiles WHERE actor_id=a AND business_id=biz FOR UPDATE;
+   -- Old per-user rows count for every brand, so turning the coach on never adds an early review.
    SELECT greatest(s.auto_review_enabled_at,coalesce(max(finished_at),s.auto_review_enabled_at)) INTO base
-    FROM social_review_runs WHERE actor_id=a AND status IN ('completed','skipped');
+    FROM social_review_runs WHERE actor_id=a AND (business_id=biz OR business_id IS NULL)
+     AND status IN ('completed','skipped') AND cadence<>'chat';
    IF base+interval '7 days'>clock_timestamp() THEN CONTINUE;END IF;
-   SELECT value#>>'{}' INTO mid FROM system_settings WHERE key='publish_monitor_review_model_id';
-   IF mid IS NULL OR mid='' THEN SELECT value#>>'{}' INTO mid FROM system_settings WHERE key='primary_model_id';END IF;
-   SELECT value#>>'{}' INTO cap FROM system_settings WHERE key='publish_monitor_review_max_usd';
-   INSERT INTO social_review_runs(actor_id,period_start,status,lease_expires_at,lease_token,runtime_request_id,model_id,max_cost_usd)
-   VALUES(a,(base+interval '7 days')::date,'claimed',clock_timestamp()+interval '5 minutes',gen_random_uuid(),gen_random_uuid(),
-    CASE WHEN mid~'^[0-9a-fA-F-]{36}$' THEN mid::uuid END,
+   SELECT coalesce(max(finished_at) FILTER (WHERE cadence IN ('monthly','quarterly')),s.auto_review_enabled_at),
+    coalesce(max(finished_at) FILTER (WHERE cadence='quarterly'),s.auto_review_enabled_at) INTO last_month,last_quarter
+    FROM social_review_runs WHERE actor_id=a AND business_id=biz AND status='completed';
+   cad:=CASE WHEN prof.strategy_check_stages IS DISTINCT FROM stages AND prof.strategy_check_stages IS NOT NULL
+     OR last_quarter+interval '91 days'<=clock_timestamp() THEN 'quarterly'
+    WHEN last_month+interval '28 days'<=clock_timestamp() THEN 'monthly' ELSE 'weekly' END;
+   INSERT INTO social_review_runs(actor_id,business_id,cadence,period_start,status,lease_expires_at,lease_token,runtime_request_id,
+    model_id,max_cost_usd)
+   VALUES(a,biz,cad,(base+interval '7 days')::date,'claimed',clock_timestamp()+interval '5 minutes',gen_random_uuid(),
+    gen_random_uuid(),CASE WHEN mid~'^[0-9a-fA-F-]{36}$' THEN mid::uuid END,
     CASE WHEN cap~'^(0|[1-9][0-9]{0,3})(\.[0-9]{1,6})?$' THEN cap::numeric ELSE 0 END)
-   ON CONFLICT(actor_id,period_start) DO NOTHING RETURNING * INTO r;
+   ON CONFLICT(actor_id,business_id,period_start,cadence) DO NOTHING RETURNING * INTO r;
    IF NOT FOUND THEN CONTINUE;END IF;
    session:=runtime_start(a,r.runtime_request_id,'{"scope":{"kind":"positioning_draft"}}');
    UPDATE social_review_runs SET runtime_session_id=(session->>'sessionId')::uuid WHERE id=r.id RETURNING * INTO r;
-  END IF;
-  out:=out||jsonb_build_array(jsonb_build_object('id',r.id,'actorId',a,'token',r.lease_token,
-   'requestId',r.runtime_request_id,'sessionId',r.runtime_session_id,'modelId',r.model_id,'maxCostUsd',r.max_cost_usd::text));
+   out:=out||jsonb_build_array(publish_monitor_review_claim_item(r));
+   -- One new review per user per batch; the next brand waits for this one to finish.
+   EXIT;
+  END LOOP;
  END LOOP;
  RETURN out;
 END $function$;

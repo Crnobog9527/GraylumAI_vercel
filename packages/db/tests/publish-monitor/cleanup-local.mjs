@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { closeAccount } from '../erasure-b2a/cases.mjs';
-import { fixtureSql } from './fixtures.mjs';
+import { fixtureSql, laterRedefinitions } from './fixtures.mjs';
 
 const migrationPath = 'packages/db/migrations/0265_publish_monitor_provider_cleanup.sql';
 const rpcs = ['publish_monitor_connect_callback(uuid,uuid,jsonb)', 'publish_monitor_cleanup_claim(integer,integer)',
@@ -70,7 +70,7 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
+  for (const path of [migrationPath, ...laterRedefinitions('0265')]) await c.query(read(path));
   assert.deepEqual(await v(catalogSql), before);
   report.checks.push('0265 reapplication preserves the complete catalog');
 

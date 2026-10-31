@@ -9,6 +9,7 @@ import {randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 import {createFixture,receipt as recordReceipt} from '../payg/fixture.mjs';
 import {rpc as nativeRpc} from '../erasure-b2a/cases.mjs';
+import {laterRedefinitions} from '../publish-monitor/fixtures.mjs';
 
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 async function service(client,work){
@@ -18,7 +19,7 @@ async function service(client,work){
 const rpc=(client,...args)=>service(client,()=>nativeRpc(client,...args));
 const receipt=(client,...args)=>service(client,()=>recordReceipt(client,...args));
 const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
-const migration=read('packages/db/migrations/0401_publish_monitor_review_interruption.sql');
+const MIGRATION_PATH='packages/db/migrations/0401_publish_monitor_review_interruption.sql';
 const rollback=read('packages/db/tests/publish-monitor-interruption/rollback.sql');
 const body=sql=>sql.replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,'');
 const step=(r,action,reason=null)=>rpc(c,'publish_monitor_review_step',r.id,r.token,action,reason);
@@ -61,11 +62,13 @@ const ledger=(f)=>one(`SELECT jsonb_build_object('balance',p.credits,'sum',
  'holds',(SELECT count(*) FROM bill2_calls WHERE run_id=r.id AND settled_at IS NULL),
  'spends',(SELECT count(*) FROM credit_transactions WHERE bill2_run_id=r.id AND reason_code='bill2_spend')) v
  FROM profiles p JOIN bill2_runs r ON r.actor_id=p.id WHERE r.id=$1`,[f.run]);
-async function expire(f){
+// 0407 retries an interruption up to three attempts; these scenarios are about the last one, which ends the period.
+async function expire(f,attempt=3){
+ await c.query('UPDATE social_review_runs SET attempt=$2 WHERE id=$1',[f.review.id,attempt]);
  assert.equal((await step(f.review,'observe')).expired,true);
  const cancelled=await rpc(c,'runtime_cancel',f.actor,f.execution);
  assert.ok(['cancelled','cost_pending'].includes(cancelled.state));
- await step(f.review,'skip','RUNTIME_INTERRUPTED');
+ return step(f.review,'skip','RUNTIME_INTERRUPTED');
 }
 try{
  await c.query(`INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,
@@ -89,6 +92,19 @@ try{
  assert.equal(await one('SELECT status v FROM social_review_runs WHERE id=$1',[f.review.id]),'claimed');
  await c.query('ROLLBACK');
  report.checks.push('RED: old observe leaves the released charged review claimed without a deadline or recoverable user');
+ // 0407: an earlier attempt is retried with a new request; its settled actual cost comes off the same review's cap.
+ await c.query('BEGIN');
+ const cap=await one('SELECT max_cost_usd::text v FROM social_review_runs WHERE id=$1',[f.review.id]);
+ assert.equal((await expire(f,1)).state,'retrying');
+ const retried=(await c.query('SELECT * FROM social_review_runs WHERE id=$1',[f.review.id])).rows[0];
+ const cost=Number(await one('SELECT provider_cost_usd v FROM bill2_runs WHERE id=$1',[f.run]));
+ assert.equal(retried.status,'claimed');assert.equal(retried.attempt,2);assert.notEqual(retried.runtime_request_id,f.review.requestId);
+ assert.deepEqual(retried.prior_bill2_run_ids,[f.run]);assert.ok(cost>0);
+ assert.equal(await one('SELECT ($1::numeric-provider_cost_usd)::text v FROM bill2_runs WHERE id=$2',[cap,f.run]),
+  await one('SELECT max_cost_usd::text v FROM social_review_runs WHERE id=$1',[f.review.id]));
+ assert.deepEqual(await ledger(f),{balance:995,sum:995,charged:5,theoretical:5,absorbed:0,closed:true,state:'settled',holds:0,spends:1});
+ await c.query('ROLLBACK');
+ report.checks.push('0407: an interrupted attempt is retried once more with a new request, its settled 5 credits kept and its cost off the cap');
  await expire(f);
  const final=await ledger(f);
  assert.deepEqual(final,{balance:995,sum:995,charged:5,theoretical:5,absorbed:0,closed:true,state:'settled',holds:0,spends:1});
@@ -186,6 +202,7 @@ try{
  report.checks.push('late receipt recovery makes the paid saved report visible; completion beats skip and replay never charges twice');
  // Finalization must not read an execution row while its owner is still committing it.
  const busy=await fixture();await debit(busy);await stale(busy);
+ await c.query('UPDATE social_review_runs SET attempt=3 WHERE id=$1',[busy.review.id]);
  await rpc(c,'runtime_cancel',busy.actor,busy.execution);
  const params=c.connectionParameters;
  const writer=new c.constructor({connectionString:`postgres://postgres@127.0.0.1:${params.port}/${params.database}`});
@@ -201,7 +218,10 @@ try{
  report.checks.push('a concurrent result writer makes skip retry without waiting; retry terminates only the empty result');
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
- const before=await one(catalog);await c.query(migration);await c.query(migration);assert.deepEqual(await one(catalog),before);
+ // Later redefinitions (0407 step) replay after it, as in the publish-monitor suites (MAINT-P1).
+ const before=await one(catalog);
+ for(const _ of [1,2])for(const path of [MIGRATION_PATH,...laterRedefinitions('0401')])await c.query(read(path));
+ assert.deepEqual(await one(catalog),before);
  report.checks.push('0401 reapplies twice without catalog or accounting changes');
  const permissions=(await c.query(`SELECT role,has_function_privilege(role,'publish_monitor_review_step(uuid,uuid,text,text)','EXECUTE') allowed
   FROM unnest(ARRAY['anon','authenticated','service_role']) role ORDER BY role`)).rows;
