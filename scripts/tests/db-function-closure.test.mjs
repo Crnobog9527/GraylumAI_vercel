@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { analyze, closure, readFunctions, readTables, scan, stripCode, DEFAULTS } from '../db-function-closure.mjs';
+import { analyze, closure, freeReadViolations, readFunctions, readTables, scan, stripCode, toolCallViolations, DEFAULTS } from '../db-function-closure.mjs';
 
 const fn = (name, body) => `CREATE OR REPLACE FUNCTION public.${name}()\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\n${body}\n$function$;\n`;
 function repo(files, tables = ['profiles', 'turns', 'runtime_sessions', 'turn_calls', 'daily_spend', 'catalog_versions', 'secret_things', 'a_t', 'b_t']) {
@@ -156,4 +156,35 @@ test('every UPDATE of a statement is judged by its own WHERE, and a SET command 
   assert.deepEqual(hits('BEGIN IF a THEN NULL; ELSE SET statement_timeout = 5; END IF; END;'), ['f: non-LOCAL SET']);
   assert.deepEqual(hits('BEGIN IF a THEN SET LOCAL statement_timeout = 5; END IF; END;'), []);
   assert.deepEqual(hits('BEGIN IF a THEN\n UPDATE turns\n SET state=1 WHERE actor_id=a AND id=b;\n END IF; END;'), []);
+});
+
+test('a free read stays read-only, lock-free and keyed by its owner, all the way down', () => {
+  const read = (attrs, body) => `CREATE OR REPLACE FUNCTION public.f(p_actor_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n ${attrs}\nAS $function$\n${body}\n$function$;\n`;
+  const hits = text => {
+    const root = repo({ 'library/f.sql': text, 'library/g.sql': read('STABLE', 'UPDATE a_t SET id = 1 WHERE id = 2;').replace('f(p_actor_id', 'g(p_actor_id') });
+    return freeReadViolations(readFunctions(join(root, 'packages/db/functions')), new Set(['a_t']), ['f']);
+  };
+  assert.deepEqual(hits(read('STABLE SECURITY DEFINER', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')), []);
+  assert.match(hits(read('', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')).join(), /not STABLE/);
+  assert.match(hits(read('STABLE', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id FOR UPDATE;')).join(), /row lock in f/);
+  assert.match(hits(read('STABLE', 'SELECT 1 FROM a_t WHERE id = 1;')).join(), /does not filter/);
+  assert.match(hits(read('STABLE', 'PERFORM g(p_actor_id); SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')).join(), /write in g/);
+  assert.match(hits(fn('f', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;').replace('f()', 'f(p_other uuid)')).join(), /p_actor_id first/);
+  assert.deepEqual(freeReadViolations(new Map(), new Set(), ['gone']), ['gone: free read has no function']);
+});
+
+test('the tool layer calls only the free reads, through the read client', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tools-'));
+  const hits = text => { writeFileSync(join(dir, 'x.ts'), text); return toolCallViolations(dir, ['f']); };
+  assert.deepEqual(hits("await read.rpc('f', {}); Buffer.from(x); Array.from({ length: 2 });"), []);
+  assert.match(hits("await read.rpc('g', {});").join(), /outside the free reads/);
+  assert.match(hits("await admin.from('turns').select();").join(), /outside the free reads/);
+  assert.match(hits('await read.rpc(name, {});').join(), /outside the free reads/);
+  assert.match(hits("await write.rpc('f', {});").join(), /not through the read client/);
+  assert.deepEqual(toolCallViolations(join(dir, 'absent')), []);
+});
+
+test('the repository holds: library_turn_read is a free read and the tools call nothing else', () => {
+  const result = analyze();
+  assert.deepEqual(result.violations.filter(v => /free read|tool calls|library_turn_read/.test(v)), []);
 });
