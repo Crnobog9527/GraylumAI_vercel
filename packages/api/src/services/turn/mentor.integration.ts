@@ -418,7 +418,8 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume at the organizer keeps the reply: it i
   const out = await turn(f, { text: 'ignored: the paused turn kept what was asked', transport: t.fn, resumeOf: id });
   expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
   expect(t.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
-  expect(out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('')).toContain('Good. Who buys it?');
+  // The replayed reply reaches the page once: the runner streams the receipt, nothing else sends it again.
+  expect(out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('')).toBe('Good. Who buys it?');
   const saved = await db.query("select content from session_messages where session_id=$1 and role='assistant'", [f.session]);
   expect(saved.rows).toHaveLength(1);
   expect(saved.rows[0].content).toContain('Good. Who buys it?');

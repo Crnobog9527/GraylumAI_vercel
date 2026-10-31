@@ -227,12 +227,16 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const restored = next.restore;
     if (restored) setLive(current => finishReportStop(current, restored, phase));
   };
+  // A report still being written that this page did not start (a reload, another device) has no stream here, but it can be stopped:
+  // the stop names its turn, and what the page showed is what the stopped report keeps.
+  const stopsWithoutStream = Boolean(turn.status && !live && !streaming && shown?.state === "running");
   const stop = async () => {
-    if (!live || live.stopped || (stopper.executionId() === live.executionId && stopper.phase() === "sending")) return;
-    stopBuffer.current = live;
-    setLive({ ...live, stopped: true, stalled: true });
-    await stopper.stop(live);
-    finishStop(live.executionId);
+    const reply = live ?? (stopsWithoutStream && shown ? { ...startLiveReply(shown.executionId), text: shown.body ?? "" } : null);
+    if (!reply || reply.stopped || (stopper.executionId() === reply.executionId && stopper.phase() === "sending")) return;
+    stopBuffer.current = reply;
+    setLive({ ...reply, stopped: true, stalled: true });
+    await stopper.stop(reply);
+    finishStop(reply.executionId);
   };
   const retryStop = async () => {
     const id = stopper.executionId();
@@ -249,6 +253,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     start: () => void run("start"),
     restart: () => void run("restart"),
     stop: () => void stop(),
+    /** A report written on, with no stream on this page, can still be stopped. */
+    canStopWithoutStream: stopsWithoutStream,
     stopConfirmation,
     confirmStop: () => answerStop(true),
     cancelStop: () => answerStop(false),

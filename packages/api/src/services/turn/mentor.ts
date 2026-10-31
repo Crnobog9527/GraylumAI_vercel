@@ -245,11 +245,6 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         return (stored ? Promise.resolve(stored) : modelCall(callDeps(mentor), mentor, request, onChunk)).then(response => {
           const message = JSON.parse(response)?.choices?.[0]?.message, call = message?.tool_calls?.[0];
           toolCalled = Boolean(message?.tool_calls?.length);
-          // A replayed reply did not stream; it is shown whole, as what was written before the pause.
-          if (stored && typeof message?.content === 'string' && message.content) {
-            text = message.content;
-            emit({ type: 'text', delta: text });
-          }
           if (call?.function?.name === ASK_QUESTION_TOOL) cardMessage = groundedCardFallback(call.function.arguments);
           return response;
         }, keep);

@@ -143,7 +143,8 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
     actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] });
   else if (report.starting) notices.push({ id: "report-starting", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
   else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true,
-    text: report.reopened && !view.body && status?.state !== "cost_pending" ? REPORT_REOPENED_NOTICE : view.notice });
+    text: report.reopened && !view.body && status?.state !== "cost_pending" ? REPORT_REOPENED_NOTICE : view.notice,
+    ...(report.canStopWithoutStream ? { actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] } : {}) });
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });
   const charge = !report.live && !working ? reportFeeText(status?.fee) : null;

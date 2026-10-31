@@ -48,7 +48,7 @@ export function useMentorTurnPath(sessionId: string | undefined) {
     notices(stream: (open: () => Promise<AsyncIterable<AgentTurnEvent>>) => void): ChatNotice[] {
       if (!paused) return [];
       return [{ id: "turn-paused", tone: "warning", text: TURN_PAUSED_NOTICE, actions: [{ label: TURN_CONTINUE, onClick: () => stream(async () =>
-        mentorTurnEvents({ kind: "resume", sessionId, requestId: crypto.randomUUID(), resumeOf: paused.turnId })) }] }];
+        readAfter(mentorTurnEvents({ kind: "resume", sessionId, requestId: crypto.randomUUID(), resumeOf: paused.turnId }))) }] }];
     },
     /** The draft as the old path read it, plus the turn path's bindings. */
     draft<T extends { turns?: unknown[] } | undefined>(draft: T): T {
