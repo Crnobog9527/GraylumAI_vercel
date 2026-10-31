@@ -82,7 +82,17 @@
 <a id="changes"></a><a id="conflicts"></a>
 ## 2. 本版的新决定和被取代的旧规则
 
-### 2.1 Owner 的新决定（2026-09-27 起，2026-10-31 更新）
+### 2.1 Owner 的新决定（2026-09-27 起，2026-11-01 更新）
+
+**2026-11-01：主路径免费只读扫描放宽（CORE-PATH-V2，规则变更）**
+
+Owner 原话（2026-11-01，总控-15 转达）：
+
+> 同意放宽
+
+选项原文（总控-15 当次提出）：主路径免费只读扫描放宽，允许经本人记录按 id 关联的无所有者列表和全站目录表，其余要求不变。
+
+落实：取代 2026-10-28 ENGINEERING 第 5 节补充和 #1536 扫描里“免费只读碰到的每张表都带所有者键”的要求，只放宽这两类表，名单写死在 `scripts/db-function-closure.mjs`：① 必须从已验证属于本人的行按 id 关联下来的表：`artifact_versions`、`artifact_rounds`、`artifact_evidence`、`opc_items`、`opc_item_edits`、`opc_draft_businesses`；② 全站只读目录表：`modules`、`skills`、`skill_packages`、`skill_revisions`、`skill_revision_revocations`。第一个参数 `p_actor_id`、全程 STABLE、不写、不加锁、入口按所有者验证，全部保留。名单外的无所有者表必须失败，加表要 Owner 批准。为的是让自由对话能读用户自己的定位、策略和选题。
 
 **2026-10-31：主路径闭包上限按回合类型算，主路径关系锁上限 42（CORE-PATH-V2，规则变更）**
 
