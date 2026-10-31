@@ -305,6 +305,52 @@ try{
    assert.equal((await recover(g.a,n.turnId,'expire')).chargedCredits,0);
    assert.equal(await spends(g.a),0);assert.equal(await balance(g.a),130);
   }
+  // turn_resume_close is turn_close's refund-all close without the kind hooks (0438): the same paused turn, with a tool whose cost
+  // is unknown, closed both ways ends the same, and the same late tool receipt settles the same.
+  {
+   const pausedWithTool=async()=>{
+    const a=await account(30),o=await open(a,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});
+    await begin(a,o.turnId,1,{upper:0.02});await record(a,o.turnId,1,{n:0.02});
+    await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.01});await identity(a,o.turnId,2);
+    assert.equal((await begin(a,o.turnId,3,{upper:0.04})).paused,true);
+    await c.query('update profiles set credits=credits+100 where id=$1',[a.actor]);
+    return {a,id:o.turnId};
+   };
+   const closed=async(p)=>({
+    turn:(await c.query(`select state,pause_reason,close_kind,failure_code,charged_credits,settlement,stopped_by_user,delivered,
+      policy ? 'closeRefundAll' refund_flag,closed_at=updated_at same_mark from turns where actor_id=$1 and id=$2`,[p.a.actor,p.id])).rows[0],
+    calls:(await c.query('select seq,status,cost_pending from turn_calls where turn_id=$1 order by seq',[p.id])).rows,
+    active:await one('select active_turn_id::int v from runtime_sessions where id=$1',[p.a.session])});
+   const absorbed=p=>one('select absorbed_credits v from turns where actor_id=$1 and id=$2',[p.a.actor,p.id]);
+   const day=()=>c.query('select coalesce(sum(reserved_usd),0)::float8 r,coalesce(sum(spent_usd),0)::float8 s from daily_spend where day=(now() at time zone \'UTC\')::date').then(x=>x.rows[0]);
+   const moved=(from,to)=>({r:+(to.r-from.r).toFixed(6),s:+(to.s-from.s).toFixed(6)});
+   const pol=policy({gCredits:60,minCredits:20,uModelCredits:20,limits:{model:1,paidTools:0,freeTools:1}});
+   const x=await pausedWithTool(),y=await pausedWithTool();
+   const d0=await day();
+   const next=await open(x.a,{resumeOf:x.id,pol});
+   const d1=await day();
+   await one("select turn_close($1,$2,'failed','[]',false,true,'resumed') v",[y.a.actor,y.id]);
+   const d2=await day();
+   const [cx,cy]=[await closed(x),await closed(y)];
+   assert.deepEqual(cx.turn,cy.turn);assert.deepEqual(cx.calls,cy.calls);
+   assert.deepEqual(cx.calls.map(k=>[k.seq,k.status,k.cost_pending]).slice(0,2),[[1,'ok',false],[2,'unknown',true]]);
+   assert.equal(cy.active,null);assert.equal(cx.active,next.turnId);
+   assert.equal(cx.turn.settlement,'pending');
+   assert.equal(await absorbed(y),12);assert.equal(await absorbed(x),0,'what is carried is not absorbed');
+   // The new turn's reservation (0.1) aside, the stop-loss moved the same; the new hold (72) aside, so did the balance.
+   const [mx,my]=[moved(d0,d1),moved(d1,d2)];
+   assert.deepEqual({r:+(mx.r-0.1).toFixed(6),s:mx.s},my);
+   assert.equal((await balance(x.a))+72,await balance(y.a));
+   for(const p of [x,y]){
+    await one("select turn_call_record($1,$2,2,'ok',0.01,0.01,'{}',null,$3,'body') v",[p.a.actor,p.id,hash('late'+p.id)]);
+    await recover(p.a,p.id,'settle');
+   }
+   const [lx,ly]=[await closed(x),await closed(y)];
+   assert.deepEqual(lx,{...ly,active:next.turnId});assert.equal(lx.turn.settlement,'done');
+   assert.equal(lx.turn.charged_credits,0);
+   assert.equal(await one("select coalesce(has_function_privilege('service_role','public.turn_resume_close(uuid,bigint,integer)','execute'),false) v"),false);
+   report.checks.push('turn_resume_close matches turn_close on the same paused turn (state, calls, stop-loss, balance, late tool receipt); internal to turn_open');
+  }
   report.checks.push('resume after top-up: the paused turn is refunded and its 12 carried into the new turn (charged once with it); a fixed price stays 500 across a resume; two resumes in a row carry everything (24 = 12 + 6 + 6); a model cost not final yet holds the resume until the recovery lookup records its receipt; an expired continuation refunds the whole chain, the new turn freezes within what is left of the limits; short credits, too many calls, wrong state/kind/session refused and rolled back; replay idempotent; a resume racing the 24-hour expiry has one winner');
  }
  // 6. Ordinary chat and mentor turns cannot be stopped (the old stop-round scenario, now a refusal); reports can.
