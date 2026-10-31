@@ -56,6 +56,35 @@ describe('general research tools on the turn core (CORE-PATH-V2 V2-6)', () => {
     expect(s.h.writes[1]![1]).toMatchObject({ nominalUsd: '0.002', actualUsd: '0.002' });
   });
 
+  it('every subcall reports its line in the mentor\'s research_call format, with what it settled at', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const emit = (event: Record<string, unknown>) => events.push(event);
+    const tikhub = vi.fn(async (call: { keyword?: string }) => result({ vendor: 'tikhub', route: 'xhs-search',
+      items: call.keyword === 'a' ? [{ fields: { title: 'a' }, missing: [] }] : [] }));
+    await setup(tikhub, { onCall: { emit, q: '100' } }).tool('social_search')
+      .execute({ platform: 'xiaohongshu', keywords: ['a', 'b'], limit: null }, 'c1');
+    expect(events.map(e => [e.query, e.state, e.credits])).toEqual([['a', 'running', undefined], ['a', 'succeeded', '0.6'],
+      ['b', 'running', undefined], ['b', 'succeeded', '0']]);
+    expect(events[1]).toMatchObject({ type: 'research_call', toolName: 'social_search', platform: 'xiaohongshu', dataKind: 'keyword_posts',
+      args: { platform: 'xiaohongshu', keywords: ['a', 'b'] }, callId: events[0]!.callId, evidenceId: events[0]!.callId });
+    expect(events[2]!.callId).not.toBe(events[0]!.callId);
+  });
+
+  it('research_call: unknown has no amount yet; a refused call or a subcall never sent reports no charge', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const onCall = { emit: (event: Record<string, unknown>) => events.push(event), q: '100' };
+    await setup(vi.fn(async () => { throw new Error('reset'); }), { onCall }).tool('social_search')
+      .execute({ platform: 'xiaohongshu', keywords: ['a'], limit: null }, 'c1');
+    expect(events[1]).toMatchObject({ state: 'unknown', credits: null });
+    events.length = 0;
+    await setup(vi.fn(), { onCall }, { keys: {} }).tool('web_search').execute({ query: 'x', mode: 'fast' }, 'c1');
+    expect(events[1]).toMatchObject({ state: 'failed', platform: 'web', dataKind: 'web_search' });
+    expect(events[1]).not.toHaveProperty('credits');
+    events.length = 0;
+    await setup(vi.fn(), { onCall }).tool('social_account').execute({ platform: 'tiktok', account: 'stranger', posts: null }, 'c1');
+    expect(events).toEqual([]);
+  });
+
   it('a search that returns nothing is an explicit no-data result the user is not charged for', async () => {
     const s = setup(vi.fn(async () => result({ vendor: 'tikhub', route: 'xhs-search', items: [], reason: 'NO_RESULTS' })));
     const out = parse(await s.tool('social_search').execute({ platform: 'xiaohongshu', keywords: ['冷门词'], limit: null }, 'c1'));

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { decimal } from '../../bill2/decimal';
 import type { ToolCallPolicy } from '../../bill2/toolBilling';
 import { canonicalAccount, profileLinksIn, type CanonicalAccount } from '../../research/tools/accountLinks';
@@ -9,9 +9,11 @@ import { BENCHMARK_ROUTE_KINDS, selectRoute, type ResearchToolsConfig } from '..
 import { parallelModeFor } from '../../research/vendors/parallel';
 import type { ResearchItem, SocialKind, SocialPlatform } from '../../research/vendors/types';
 import type { SupplierRequest } from '../../research/runtime/subcall';
+import { callDisplay } from '../../research/runtime/toolContext';
+import type { ResearchTurnEvent } from '../../../shared/researchTurn';
 import { INVALID_RESEARCH_ARGUMENTS, fastSearchOnly, researchToolDescription, researchToolParameters } from '../../runtime/researchRuntimeTool';
 import type { RuntimeTool } from '../../runtime/runner';
-import { paidToolCall, ToolLimitReached, type SubcallLedger } from './meter';
+import { paidToolCall, subcallCredits, ToolLimitReached, type SubcallLedger } from './meter';
 import { routePolicy, supplierSubcall, type SupplierDeps } from './suppliers';
 import type { GeneralResearchToolName, ToolCallDeps, ToolCallOutcome } from './types';
 
@@ -41,6 +43,8 @@ export type ResearchToolsInput = {
   onOutcome?: (name: GeneralResearchToolName, outcome: ToolCallOutcome, subcalls: number) => void;
   /** The one-switch pause and the call limits for this call's subcalls (newWorkGate); throws TurnStop to refuse. */
   callGate?: (subcalls: number) => Promise<void>;
+  /** One line per subcall for the page (the mentor's `research_call` format), and the turn's credits per USD for its amount. */
+  onCall?: { emit: (event: Extract<ResearchTurnEvent, { type: 'research_call' }>) => void; q: string };
 };
 
 type Step = { request: SupplierRequest; label: ResearchItem['fields'] };
@@ -111,15 +115,22 @@ function planSteps(input: ResearchToolsInput, name: GeneralResearchToolName, arg
 
 /** Runs the steps in order; stops at the first one without data; returns what came back. */
 /** `call`: this tool call's number in the turn, so refs never repeat across calls (`c<call>s<subcall>#<item>`). */
-async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planned: Extract<Planned, { steps: Step[] }>, call: number) {
+async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planned: Extract<Planned, { steps: Step[] }>, call: number,
+  tool: { toolName: string; args: Record<string, unknown> }) {
   const items: ToolEnvelope['items'] = [];
   const steps = [...planned.steps];
   let stoppedAt: string | null = null, fetchedAt: string | undefined, cut: string | null = null;
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]!;
+    const line = { callId: randomUUID(), ...tool, ...callDisplay(step.request) };
+    input.onCall?.emit({ type: 'research_call', ...line, state: 'running' });
     const receipt = await supplierSubcall(input.suppliers, step.request);
     ledger.add(receipt);
     const result = receipt.result;
+    const answered = ['ok', 'partial'].includes(result.outcome) ? 'succeeded' as const : 'failed' as const;
+    input.onCall?.emit({ type: 'research_call', ...line, ...result.outcome === 'not_sent' ? { state: 'failed' as const } : {
+      state: result.outcome === 'unknown' ? 'unknown' as const : answered,
+      evidenceId: line.callId, credits: subcallCredits(receipt, input.onCall.q) } });
     if (result.outcome !== 'ok' && result.outcome !== 'partial') { stoppedAt = result.reason ?? result.outcome; break; }
     fetchedAt ??= result.fetchedAt;
     // A supplier answer cut to its item or byte limit stays partial: the model is told data is missing.
@@ -172,7 +183,8 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       let metered;
       try {
         metered = await paidToolCall(input.calls, { toolName: name, requestHash: sha256(canonical({ name, args: parsed.data })),
-          upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger => runSteps(input, ledger, planned, ++started));
+          upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger =>
+            runSteps(input, ledger, planned, ++started, { toolName: name, args: parsed.data as Record<string, unknown> }));
       } catch (error) {
         if (error instanceof ToolLimitReached) { calls = input.maxCalls; return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' }); }
         throw error;
