@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { analyze, closure, readFunctions, readTables, scan, stripCode, DEFAULTS } from '../db-function-closure.mjs';
+import { analyze, closure, freeReadViolations, readFunctions, readTables, scan, stripCode, toolCallViolations, unownedReads, DEFAULTS } from '../db-function-closure.mjs';
 
 const fn = (name, body) => `CREATE OR REPLACE FUNCTION public.${name}()\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\n${body}\n$function$;\n`;
 function repo(files, tables = ['profiles', 'turns', 'runtime_sessions', 'turn_calls', 'daily_spend', 'catalog_versions', 'secret_things', 'a_t', 'b_t']) {
@@ -156,4 +156,59 @@ test('every UPDATE of a statement is judged by its own WHERE, and a SET command 
   assert.deepEqual(hits('BEGIN IF a THEN NULL; ELSE SET statement_timeout = 5; END IF; END;'), ['f: non-LOCAL SET']);
   assert.deepEqual(hits('BEGIN IF a THEN SET LOCAL statement_timeout = 5; END IF; END;'), []);
   assert.deepEqual(hits('BEGIN IF a THEN\n UPDATE turns\n SET state=1 WHERE actor_id=a AND id=b;\n END IF; END;'), []);
+});
+
+test('a free read stays read-only, lock-free and keyed by its owner, all the way down', () => {
+  const read = (attrs, body) => `CREATE OR REPLACE FUNCTION public.f(p_actor_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n ${attrs}\nAS $function$\n${body}\n$function$;\n`;
+  const hits = text => {
+    const root = repo({ 'library/f.sql': text, 'library/g.sql': read('STABLE', 'UPDATE a_t SET id = 1 WHERE id = 2;').replace('f(p_actor_id', 'g(p_actor_id') });
+    return freeReadViolations(readFunctions(join(root, 'packages/db/functions')), new Set(['a_t']), ['f']);
+  };
+  assert.deepEqual(hits(read('STABLE SECURITY DEFINER', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')), []);
+  assert.match(hits(read('', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')).join(), /not STABLE/);
+  assert.match(hits(read('STABLE', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id FOR UPDATE;')).join(), /row lock in f/);
+  assert.match(hits(read('STABLE', 'SELECT 1 FROM a_t WHERE id = 1;')).join(), /a_t without the owner key/);
+  const helper = read('STABLE', 'PERFORM h(p_actor_id); SELECT 1 FROM a_t WHERE actor_id = p_actor_id;');
+  const root = repo({ 'library/f.sql': helper, 'library/h.sql': read('STABLE', 'SELECT 1 FROM a_t;').replace('f(p_actor_id', 'h(p_actor_id') });
+  assert.match(freeReadViolations(readFunctions(join(root, 'packages/db/functions')), new Set(['a_t']), ['f']).join(), /a_t without the owner key in h/);
+  assert.match(hits(read('STABLE', 'PERFORM g(p_actor_id); SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')).join(), /write in g/);
+  assert.match(hits(fn('f', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;').replace('f()', 'f(p_other uuid)')).join(), /p_actor_id first/);
+  assert.deepEqual(freeReadViolations(new Map(), new Set(), ['gone']), ['gone: free read has no function']);
+});
+
+test('every read of a free read carries the owner key itself; one filtered branch does not vouch for another', () => {
+  const tables = new Set(['a_t', 'b_t']);
+  const owned = 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id';
+  assert.deepEqual(unownedReads(`${owned}; SELECT 1 FROM b_t WHERE id = 1;`, tables), ['b_t']);
+  assert.deepEqual(unownedReads(`IF x THEN ${owned}; ELSE SELECT (SELECT 1 FROM b_t);END IF;`, tables), ['b_t']);
+  assert.deepEqual(unownedReads(`${owned} UNION ALL SELECT 1 FROM b_t WHERE id = 1;`, tables), ['b_t']);
+  assert.deepEqual(unownedReads(`SELECT 1 FROM b_t WHERE id IN (${owned});`, tables), ['b_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t x JOIN b_t y ON y.id = x.id WHERE x.actor_id = p_actor_id;', tables), ['b_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t x JOIN b_t y ON y.actor_id = x.actor_id WHERE x.actor_id = p_actor_id;', tables), []);
+  assert.deepEqual(unownedReads('SELECT actor_id = p_actor_id AS is_owner FROM b_t WHERE id = 1;', tables), ['b_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM b_t WHERE id = 1 ORDER BY actor_id = p_actor_id;', tables), ['b_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM b_t WHERE actor_id = p_actor_id OR id = 1;', tables), ['b_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM b_t WHERE actor_id = p_actor_id AND (id = 1 OR id = 2);', tables), []);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t x LEFT JOIN b_t y ON y.actor_id = x.actor_id AND x.actor_id = p_actor_id;', tables), ['a_t', 'b_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t x LEFT JOIN b_t y ON y.id = x.id WHERE x.actor_id = p_actor_id AND y.actor_id = x.actor_id;', tables), []);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t d, b_t s WHERE d.actor_id = p_actor_id;', tables), ['a_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t r WHERE r.profile_id = p_actor_id; SELECT 1 FROM unnest(z) w;', tables), []);
+});
+
+test('the tool layer calls only the free reads, through the read client', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tools-'));
+  const hits = text => { writeFileSync(join(dir, 'x.ts'), text); return toolCallViolations(dir, ['f']); };
+  assert.deepEqual(hits("await read.rpc('f', {}); Buffer.from(x); Array.from({ length: 2 });"), []);
+  assert.match(hits("await read.rpc('g', {});").join(), /outside the free reads/);
+  assert.match(hits("await admin.from('turns').select();").join(), /outside the free reads/);
+  assert.match(hits('await read.rpc(name, {});').join(), /outside the free reads/);
+  assert.match(hits("await read.rpc('f' + '_other', {});").join(), /outside the free reads/);
+  assert.match(hits('await read.rpc(`f${x}`, {});').join(), /outside the free reads/);
+  assert.match(hits("await write.rpc('f', {});").join(), /not through the read client/);
+  assert.deepEqual(toolCallViolations(join(dir, 'absent')), []);
+});
+
+test('the repository holds: library_turn_read is a free read and the tools call nothing else', () => {
+  const result = analyze();
+  assert.deepEqual(result.violations.filter(v => /free read|tool calls|library_turn_read/.test(v)), []);
 });
