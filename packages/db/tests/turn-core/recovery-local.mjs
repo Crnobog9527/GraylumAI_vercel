@@ -219,8 +219,12 @@ try{
   await c.query("set session_replication_role=replica");
   await c.query(`update runtime_sessions set scope=jsonb_build_object('kind','work_item','workItemId',gen_random_uuid()) where id=$1`,[a.session]);
   await c.query("set session_replication_role=origin");
+  // A benchmark lookup settles in several rows: a later row names the same question.
+  await c.query("set session_replication_role=replica");
+  await c.query(`insert into turn_calls select (x.r).* from (select jsonb_populate_record(c,'{"seq":5}') r from turn_calls c where turn_id=$1 and seq=2) x`,[o.turnId]);
+  await c.query("set session_replication_role=origin");
   const view=await one('select turn_session_view($1,$2,0) v',[a.actor,a.session]);
-  assert.deepEqual(view.calls.map(x=>[x.turnId,x.seq,x.status,x.arguments]),[[o.turnId,2,'ok','{"q":"early"}']]);
+  assert.deepEqual(view.calls.map(x=>[x.turnId,x.seq,x.status,x.arguments]),[[o.turnId,2,'ok','{"q":"early"}'],[o.turnId,5,'ok','{"q":"early"}']]);
   assert.deepEqual(view.messages.map(m=>m.content),['好'],'the saved input is no message');
   // A 24-hour expiry ends the paused turn, and what it kept goes with it.
   await age(a,o.turnId,'25 hours');
@@ -243,6 +247,11 @@ try{
   assert.equal(await one("select (policy->>'carriedCredits')::int v from turns where id=$1",[r.turnId]),12,'only the replayed call is carried');
   assert.equal((await c.query("select absorbed_credits a from turns where id=$1",[o.turnId])).rows[0].a,12,'the first attempt is absorbed');
   assert.equal(await one("select count(*)::int v from session_messages where session_id=$1",[a.session]),0,'the saved input ended with the paused turn');
+  // The continuation made that call again and pauses in turn: its own receipts follow the first turn's good ones, nothing is lost.
+  await begin(a,r.turnId,1,{upper:0.02});await record(a,r.turnId,1,{n:0.02,raw:'{"choices":[{"message":{"content":"y"}}]}'});
+  await c.query("update turns set state='paused',pause_reason='waiting_credits' where id=$1",[r.turnId]);
+  assert.deepEqual((await one('select turn_resume_read($1,$2,$3) v',[a.actor,a.session,r.turnId])).calls.map(x=>x.body),
+   ['{"choices":[{"message":{"content":"x"}}]}','{"choices":[{"message":{"content":"y"}}]}']);
   report.checks.push('a receipt that cannot be replayed carries no charge and is absorbed; the saved input ends with the turn');
  }
  // 5. Resume after a top-up (2.2): the paused turn closes and charges its known receipt once, the new turn freezes for what is
