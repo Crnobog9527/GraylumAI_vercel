@@ -56,6 +56,16 @@ export function settleToolCall(receipts: readonly SubcallReceipt[], multiplier: 
   return { outcome: 'delivered', nominalUsd: format(nominal), actualUsd: format(actual) };
 }
 
+/**
+ * The user's unrounded credits for one subcall, for the `research_call` line: what settleToolCall bills it at (0 without data),
+ * or null while its price is unknown. q is the turn's credits per USD.
+ */
+export function subcallCredits(receipt: SubcallReceipt, q: string): string | null {
+  if (receipt.result.outcome === 'unknown' || receipt.costUsd === null) return null;
+  if (!hasData(receipt)) return '0';
+  return format(decimal(receipt.costUsd) * decimal(receipt.multiplier) * decimal(q) / DECIMAL_SCALE / DECIMAL_SCALE);
+}
+
 export type PaidToolCall = { toolName: string; requestHash: string; upperUsd: string; multiplier: string };
 
 /** Collects one call's subcall receipts while it runs. */

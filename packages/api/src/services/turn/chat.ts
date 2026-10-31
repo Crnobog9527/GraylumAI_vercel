@@ -149,7 +149,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     limits: { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 },
     paidToolUpperUsd: tools?.plan.paidToolUpperUsd ?? [], stopLoss: config.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing,
-    frozen: { modelId: quote.modelId, model: quote.model } });
+    frozen: { modelId: quote.modelId, model: quote.model, ...(tools?.voiceVersionId ? { voiceVersionId: tools.voiceVersionId } : {}) } });
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
@@ -205,9 +205,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // without a confirmed positioning, the primary model's fallback rule: "Decisions 先判断，主模型兜底"), both cached. The
     // positioning-page redirect is only for an account that has a positioning (as admission.ts).
     const gated = Boolean(gate && !gate.positioned);
-    const shared = withBrandIdentity(freeChatInstructions(!gated), guard) + (tools?.sharedInstructions ?? '');
+    const shared = withBrandIdentity(freeChatInstructions(!gated), guard) + (tools?.sharedInstructions(gated) ?? '');
     const instructions = shared + '\n' + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage))
-      + (fallback ? POSITIONING_FALLBACK_INSTRUCTIONS : '');
+      + (fallback ? POSITIONING_FALLBACK_INSTRUCTIONS : '') + (tools?.userInstructions ?? '');
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
       quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: true });
     const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, textStream: PLAIN_TEXT_STREAM, tools: [],
@@ -227,7 +227,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     let text = '', sentChars = 0, holding = fallback;
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
-        callGate, onStop: stop => { stopped ??= stop; } }) : null;
+        callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q } }) : null;
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),
       maxOutputTokens: quote.outputLimit, maxTurns: 1 + (built?.maxToolCalls ?? 0), reasoning: quote.reasoning,
