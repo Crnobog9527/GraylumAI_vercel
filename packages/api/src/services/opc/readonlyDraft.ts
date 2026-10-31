@@ -86,6 +86,7 @@ export async function draftReadResponse(raw: any, rpc: (name: string, args: Reco
 
 type Clients = { auth: { getUser(): Promise<{ data: { user: { id: string } | null } }> } };
 /** CORE-PATH-V2 V2-10: with the draft's module, which the page names on a mentor turn. A read-only draft has no turn. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the RPC result is the untyped opc_query projection.
 export async function draftReadWithModule(raw: any, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>, user: Clients,
   admin: { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: { moduleId?: string } | null }> }) {
   const response = await draftReadResponse(raw, rpc);

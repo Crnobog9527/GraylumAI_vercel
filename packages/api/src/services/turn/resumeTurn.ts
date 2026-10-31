@@ -35,6 +35,7 @@ export async function runResumedTurn(deps: ChatDeps, input: { actorId: string; s
     const { text, chosen } = asked.data;
     return runChatTurn(deps, { ...ids, text, ...(chosen ? { chosen: { ...chosen } as never } : {}) }, emit);
   }
-  const { kind: _kind, ...mentor } = asked.data;
-  return runMentorTurn(deps as never, { ...ids, ...mentor } as never, emit);
+  const { moduleId, stepId, text, organizeAfter, answer, researchRefreshId } = asked.data;
+  return runMentorTurn(deps as never, { ...ids, moduleId, stepId, text, organizeAfter, ...(answer ? { answer } : {}),
+    ...(researchRefreshId ? { researchRefreshId } : {}) } as never, emit);
 }
