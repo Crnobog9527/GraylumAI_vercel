@@ -11,6 +11,8 @@ import {
   rememberStop, sendStop, stopFollowUpDelay, stopFollowUpTarget, stopAvailable, stoppedHere,
 } from "./stop-reply";
 
+export { useMentorTurnPath } from "./use-mentor-turn-path";
+
 function tabStorage() {
   try {
     return typeof window === "undefined" ? null : window.sessionStorage;

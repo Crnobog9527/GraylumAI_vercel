@@ -13,6 +13,7 @@ import { callDisplay } from '../../research/runtime/toolContext';
 import type { ResearchTurnEvent } from '../../../shared/researchTurn';
 import { INVALID_RESEARCH_ARGUMENTS, fastSearchOnly, researchToolDescription, researchToolParameters } from '../../runtime/researchRuntimeTool';
 import type { RuntimeTool } from '../../runtime/runner';
+import type { TurnReplay } from '../resume';
 import { paidToolCall, subcallCredits, ToolLimitReached, type SubcallLedger } from './meter';
 import { routePolicy, supplierSubcall, type SupplierDeps } from './suppliers';
 import type { GeneralResearchToolName, ToolCallDeps, ToolCallOutcome } from './types';
@@ -33,6 +34,8 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_key, item)
 export const NO_DATA_REASON = 'NO_DATA_RETURNED';
 
 export type ResearchToolsInput = {
+  /** A resume: the receipts that answer calls already paid for (resume.ts). */
+  replay?: TurnReplay;
   calls: ToolCallDeps; suppliers: SupplierDeps; config: ResearchToolsConfig;
   /** The tools this turn may use (ToolPlan.available ∩ research); offered-but-trimmed tools answer unavailable. */
   names: readonly GeneralResearchToolName[]; offered: readonly GeneralResearchToolName[];
@@ -115,8 +118,15 @@ function planSteps(input: ResearchToolsInput, name: GeneralResearchToolName, arg
 
 /** Runs the steps in order; stops at the first one without data; returns what came back. */
 /** `call`: this tool call's number in the turn, so refs never repeat across calls (`c<call>s<subcall>#<item>`). */
+type SupplierReceipt = Awaited<ReturnType<typeof supplierSubcall>>;
+/** A replayed call adds to no row: it only keeps the count runSteps numbers its items by. */
+const replayLedger = (): SubcallLedger => {
+  const receipts: Parameters<SubcallLedger['add']>[0][] = [];
+  return { receipts, add: receipt => { receipts.push(receipt); } };
+};
+
 async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planned: Extract<Planned, { steps: Step[] }>, call: number,
-  tool: { toolName: string; args: Record<string, unknown> }) {
+  tool: { toolName: string; args: Record<string, unknown> }, stored?: readonly SupplierReceipt['result'][]) {
   const items: ToolEnvelope['items'] = [];
   const steps = [...planned.steps];
   let stoppedAt: string | null = null, fetchedAt: string | undefined, cut: string | null = null;
@@ -124,7 +134,8 @@ async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planne
     const step = steps[i]!;
     const line = { callId: randomUUID(), ...tool, ...callDisplay(step.request) };
     input.onCall?.emit({ type: 'research_call', ...line, state: 'running' });
-    const receipt = await supplierSubcall(input.suppliers, step.request);
+    const result0 = stored?.[i];
+    const receipt = result0 ? { result: result0, costUsd: null, multiplier: '1' } as SupplierReceipt : await supplierSubcall(input.suppliers, step.request);
     ledger.add(receipt);
     const result = receipt.result;
     const answered = ['ok', 'partial'].includes(result.outcome) ? 'succeeded' as const : 'failed' as const;
@@ -178,10 +189,16 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       const bound = callBound(input.suppliers.policies, [...planned.steps.map(step => step.request), ...planned.later ?? []],
         allowance.allowed);
       if (!bound) return toolEnvelope({ status: 'unavailable', reason: 'ROUTE_NOT_FROZEN' });
-      // Refused here: nothing is written or sent, and the turn stops (the gate's TurnStop passes).
-      await input.callGate?.(allowance.allowed);
+      // A resume: the paused turn paid for this call; its supplier results answer it, with no row and no request (resume.ts).
+      const stored = input.replay?.tool(name);
       let metered;
-      try {
+      if (stored) {
+        metered = { value: await runSteps(input, replayLedger(), planned, ++started,
+          { toolName: name, args: parsed.data as Record<string, unknown> }, stored.results as SupplierReceipt['result'][]),
+          outcome: (stored.status === 'ok' ? 'delivered' : 'no_data') as ToolCallOutcome };
+      } else try {
+        // Refused here: nothing is written or sent, and the turn stops (the gate's TurnStop passes).
+        await input.callGate?.(allowance.allowed);
         metered = await paidToolCall(input.calls, { toolName: name, requestHash: sha256(canonical({ name, args: parsed.data })),
           upperUsd: bound.upperUsd, multiplier: bound.multiplier }, ledger =>
             runSteps(input, ledger, planned, ++started, { toolName: name, args: parsed.data as Record<string, unknown> }));

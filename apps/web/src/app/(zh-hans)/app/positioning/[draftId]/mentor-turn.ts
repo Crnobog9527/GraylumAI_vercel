@@ -33,7 +33,8 @@ export type MentorStepEnvelope<Information> = {
   executionId?: string;
 };
 
-const EXECUTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// An execution of the old path (a uuid) or a turn of the CORE-PATH-V2 path (`turn:<id>`, mentor-turn-path.ts).
+const EXECUTION_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|turn:[1-9][0-9]{0,17})$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

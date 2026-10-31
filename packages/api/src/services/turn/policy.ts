@@ -28,8 +28,10 @@ export function callCredits(q: string, upperUsd: string, multiplier: string): nu
 export const turnLimits = z.object({ model: z.number().int().min(1).max(16), paidTools: z.number().int().min(0).max(8),
   freeTools: z.number().int().min(0).max(8), decisions: z.number().int().min(0).max(1),
   /** Receipt rows paidTools may use (a benchmark call settles in batches); absent: one row per call. Adds no model call. */
-  toolRows: z.number().int().min(1).max(16).optional() }).strict()
-  .refine(l => l.model >= 1 + l.paidTools + l.freeTools, 'every tool return is one more model call (2.5.3)');
+  toolRows: z.number().int().min(1).max(16).optional(),
+  /** A resume whose first model call is answered by its receipt (resume.ts): that call is not a call this turn makes. */
+  replayedModels: z.number().int().min(0).max(1).optional() }).strict()
+  .refine(l => l.model + (l.replayedModels ?? 0) >= 1 + l.paidTools + l.freeTools, 'every tool return is one more model call (2.5.3)');
 export type TurnLimits = z.infer<typeof turnLimits>;
 export const stopLossSettings = z.object({ limitUsd: z.number().positive(), p: z.number().int().min(1),
   poolSize: z.number().int().min(1), uFastUsd: z.number().nonnegative(), uBigUsd: z.number().nonnegative() }).strict();
@@ -61,7 +63,8 @@ const validThreshold = (credits: number) => {
 export function turnPolicy(input: PolicyInput) {
   const limits = turnLimits.parse(input.limits), stopLoss = stopLossSettings.parse(input.stopLoss);
   const paid = input.paidToolUpperUsd ?? [], other = input.otherModelCalls ?? [];
-  if (paid.length !== (limits.toolRows ?? limits.paidTools) || limits.model !== 1 + limits.paidTools + limits.freeTools + other.length
+  if (paid.length !== (limits.toolRows ?? limits.paidTools)
+    || limits.model + (limits.replayedModels ?? 0) !== 1 + limits.paidTools + limits.freeTools + other.length
     || (limits.decisions > 0) !== (input.decisionUpperUsd !== undefined)) throw new Error('TURN_POLICY_INVALID');
   const uModelCredits = callCredits(input.q, input.modelUpperUsd, input.multiplier);
   const own = limits.model - other.length;

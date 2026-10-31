@@ -1,7 +1,7 @@
 "use client";
 import { type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { use, useEffect, useRef, useState, type ReactNode } from "react";
+import { useMemo, use, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
@@ -32,7 +32,7 @@ import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry, useOpeningFailureNotice } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
-import { useLiveReply } from "./use-live-reply";
+import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
@@ -62,7 +62,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
-  const list = trpc.opc.list.useQuery();
+  const list = trpc.opc.list.useQuery(), turnPath = useMentorTurnPath(read.data?.sessionId);
   const prepareStep = trpc.opc.prepareStep.useMutation();
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
@@ -71,11 +71,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const streamTurn=(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>
     live.stream(open,{executionId,onAdmitted,onFinished:()=>void utils.credits.getBalance.invalidate(),
       onResult:result=>{const notice=turnResultNotice(result);if(notice)setError(notice);}});
-  const execute={mutateAsync:(input:{executionId:string})=>
-    streamTurn(()=>utils.client.runtime.executeStream.mutate({...input,textProtocol:TEXT_PROTOCOL}),input.executionId)};
+  const execute={mutateAsync:(input:{executionId:string})=>turnPath.owns(input.executionId)?turnPath.settled(input.executionId)
+    :streamTurn(()=>utils.client.runtime.executeStream.mutate({...input,textProtocol:TEXT_PROTOCOL}),input.executionId)};
   /** A mentor turn in one request: admission, then the same execution stream (AC-1). */
   const mentorTurn=(request:MentorRequest,onAdmitted?:(id:string)=>void)=>
-    streamTurn(()=>utils.client.opc.mentorTurnStream.mutate({...request,textProtocol:TEXT_PROTOCOL}),undefined,onAdmitted);
+    streamTurn(turnPath.open(request,read.data,()=>utils.client.opc.mentorTurnStream.mutate({...request,textProtocol:TEXT_PROTOCOL})),undefined,onAdmitted);
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>
@@ -119,9 +119,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planAccount, setPlanAccount] = useState("");
   const [planStart, setPlanStart] = useState(() => new Date().toISOString().slice(0, 10));
   const [planDays, setPlanDays] = useState(7);
-  const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
+  const history = turnPath.withOld(trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
-      refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
+      refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) }));
   const research = useResearchCalls(read.data?.sessionId);
   const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal, stale = live.reopenGraceOver;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
@@ -222,7 +222,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const bindTopic = trpc.opc.consentTopicWorkspace.useMutation();
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
-  const d = read.data,
+  const d = useMemo(() => turnPath.draft(read.data), [read.data, turnPath.turns]), // eslint-disable-line react-hooks/exhaustive-deps
     snap = d?.snapshot,
     latest = d?.plans?.[0];
   /** Utterances the mentor classified as non-answers in one step: never confirmed as content. */
@@ -420,16 +420,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const question = d.information[step.id].schema[0] as { id: string } | undefined;
     if (!question) return;
     const turns = (d.turns ?? []) as Array<{ stepId: string; roundId?: string | null; kind: string }>;
-    // One opening per step and round. Any turn of this step in this round (an
-    // earlier opening, or a conversation started on an older page) means the
-    // step is already open. A turn from an older round never suppresses the
-    // current round's opening: the round is part of the request identity.
-    // A projection without round ownership keeps the previous round-blind behaviour.
-    const sameRound = (turn: { roundId?: string | null }) =>
-      !Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId;
-    if (turns.some(turn => turn.stepId === step.id && sameRound(turn) &&
-      (turn.kind === "mentor" || turn.kind === "organizer" || turn.kind === "opening")))
-      return;
+    if (turnPath.stepOpened(turns, step.id, d.roundId)) return;
     // A retained explicit mentor request already owns this step's next turn.
     if (sessionStorage.getItem("opc-step:" + draftId + ":" + step.id)) return;
     if (sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + step.id)) return;
@@ -1203,7 +1194,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns} {...research.panel}
                     disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
                     onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
-                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
+                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...turnPath.notices(open => void run(() => streamTurn(open))),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
@@ -1324,7 +1315,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
-      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId} published={snap.state === "published"}
+      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} moduleId={read.data.moduleId}
+        sessionId={read.data.sessionId} published={snap.state === "published"}
         projectId={d.projectId} roundId={d.roundId} report={d.report} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
         onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.

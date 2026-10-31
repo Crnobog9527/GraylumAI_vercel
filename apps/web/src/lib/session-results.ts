@@ -11,7 +11,7 @@ export const RESULT_TYPE_LABEL: Record<ResultType, string> = {
 
 export type SessionResultItem = {
   id: string; familyId: string; version: number; versions: number; resultType: ResultType; title: string; body: string;
-  sourceExecutionId: string | null; sourceAvailable: boolean; createdAt: string;
+  sourceExecutionId: string | null; sourceTurnId?: number | null; sourceAvailable: boolean; createdAt: string;
 };
 
 /** Fixed type order; only non-empty groups, items in saved order. */
@@ -39,15 +39,15 @@ export async function saveRequestId(executionId: string, type: ResultType, text:
  * check does not depend on either: the same reply and the same text are never saved twice (an edited result keeps its
  * own text and is not matched).
  */
-export function savedFromReply(items: readonly SessionResultItem[], executionId: string, text: string) {
-  return items.find(item => item.sourceExecutionId === executionId && item.body === text);
+export function savedFromReply(items: readonly SessionResultItem[], source: string | number, text: string) {
+  return items.find(item => (item.sourceExecutionId === source || item.sourceTurnId === source) && item.body === text);
 }
 
 /** Why this save must not be sent, or '' when it may go: invalid text, or already saved from this reply. */
-export function saveProblem(reply: string, text: string, items: readonly SessionResultItem[], executionId: string) {
+export function saveProblem(reply: string, text: string, items: readonly SessionResultItem[], source: string | number) {
   const problem = excerptProblem(reply, text);
   if (problem) return problem;
-  const already = savedFromReply(items, executionId, text);
+  const already = savedFromReply(items, source, text);
   return already ? `这段内容已经保存在成果夹里（${RESULT_TYPE_LABEL[already.resultType]}「${already.title}」），不会重复保存。` : '';
 }
 

@@ -14,21 +14,24 @@ import {
  * (the AI never writes here); editing adds a version; deleting removes one result, never the reply.
  */
 /** Under a completed reply: confirm type, title and the exact text before saving. */
-export function SaveReplyButton({ sessionId, executionId, reply, savedItems, onOpenResults }: {
-  sessionId: string; executionId: string; reply: string; savedItems: readonly SessionResultItem[]; onOpenResults?(): void;
-}) {
+export function SaveReplyButton({ sessionId, executionId, turnId, reply, savedItems, onOpenResults }: {
+  sessionId: string; reply: string; savedItems: readonly SessionResultItem[]; onOpenResults?(): void;
+} & ({ executionId: string; turnId?: undefined } | { turnId: number; executionId?: undefined })) {
   const utils = trpc.useUtils();
-  const save = trpc.opc.sessionResultSave.useMutation();
+  const save = trpc.opc.sessionResultSave.useMutation(), saveTurn = trpc.opc.sessionResultSaveTurn.useMutation();
   const [open, setOpen] = useState(false), [type, setType] = useState<ResultType>('body');
   const [title, setTitle] = useState(''), [text, setText] = useState(reply), [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   async function confirm() {
-    const problem = saveProblem(reply, text, savedItems, executionId);
+    const source = turnId ?? executionId!;
+    const problem = saveProblem(reply, text, savedItems, source);
     if (problem) { setError(problem); return; }
     setError(''); setSaved('');
     try {
-      const result = await save.mutateAsync({ sessionId, executionId, requestId: await saveRequestId(executionId, type, text),
-        resultType: type, title: title.trim() || null, excerpt: text === reply ? null : text });
+      const fields = { sessionId, requestId: await saveRequestId(String(source), type, text), resultType: type,
+        title: title.trim() || null, excerpt: text === reply ? null : text };
+      const result = turnId !== undefined ? await saveTurn.mutateAsync({ ...fields, turnId })
+        : await save.mutateAsync({ ...fields, executionId: executionId! });
       setOpen(false);
       setSaved(savedNotice(type, title.trim() || (result as Partial<SessionResultItem> | undefined)?.title || ''));
     } catch (cause) { setError(resultErrorText(cause)); }
@@ -39,7 +42,7 @@ export function SaveReplyButton({ sessionId, executionId, reply, savedItems, onO
     {savedItems.length ? '再存一段到成果夹' : '保存到成果夹'}</Button>
     {saved && <p role="status" className="text-xs text-[var(--text-secondary)]">{saved}
       {onOpenResults && <Button size="sm" variant="link" onClick={onOpenResults}>查看成果夹</Button>}</p>}</div>;
-  return <SaveReplyForm type={type} title={title} text={text} error={error} pending={save.isPending}
+  return <SaveReplyForm type={type} title={title} text={text} error={error} pending={save.isPending || saveTurn.isPending}
     onType={setType} onTitle={setTitle} onText={setText} onConfirm={() => void confirm()} onCancel={() => setOpen(false)}/>;
 }
 

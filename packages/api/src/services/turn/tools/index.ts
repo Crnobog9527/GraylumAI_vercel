@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { TurnReplay } from '../resume';
 import type { CanonicalAccount } from '../../research/tools/accountLinks';
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
 import { FREE_CHAT_RESEARCH_INSTRUCTIONS } from '../../runtime/freeChatResearch';
@@ -36,6 +37,7 @@ export const READ_SOURCE_DESCRIPTION = 'Read the user\'s own library documents. 
 export type SourceReader = (query: string) => Promise<{ text: string }>;
 
 export type TurnToolsInput = {
+  replay?: TurnReplay;
   plan: ToolPlan; calls: ToolCallDeps;
   research: ResearchSetup | null;
   suppliers: { slots: CounterStore; timeLeft?: () => number; vendors?: VendorCalls };
@@ -69,6 +71,7 @@ export function turnTools(input: TurnToolsInput): TurnTools {
     accounts: input.accounts ?? { benchmark: [], currentMessage: '' },
     ...(input.callGate ? { callGate: input.callGate } : {}),
     ...(input.onCall ? { onCall: input.onCall } : {}),
+    ...(input.replay ? { replay: input.replay } : {}),
     onOutcome: (_name, outcome, sent) => {
       outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
       if (outcome !== 'not_sent') paidCalls++;

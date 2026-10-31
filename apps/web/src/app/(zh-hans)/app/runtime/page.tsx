@@ -45,6 +45,7 @@ import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
 import { useRuntimeViewBusy, useRuntimeViewPolling, useRuntimeViewSettled, useRuntimeViewStreaming } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
+import { TurnWorkspace } from './turn-workspace';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, placeCompareCards, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
@@ -82,7 +83,19 @@ function RuntimeRoute(){
  const params=useSearchParams();
  const routeSession=params.get('session')??'';
  const routeModule=params.get('module')??'';
- return <RuntimeWorkspace key={routeSession||'new:'+routeModule} routeSession={routeSession} routeModule={routeModule}/>;
+ return <RuntimePath key={routeSession||'new:'+routeModule} routeSession={routeSession} routeModule={routeModule}/>;
+}
+/** CORE-PATH-V2 V2-10: with core_path_v2.enabled a free conversation runs on the turn path; work items stay on the old one until V2-10b. */
+function RuntimePath({routeSession,routeModule}:{routeSession:string;routeModule:string}){
+ const choices=trpc.runtime.choices.useQuery(routeSession?{sessionId:routeSession}:undefined,{staleTime:RUNTIME_CHOICES_STALE_MS});
+ const onTurns=Boolean(routeSession&&choices.data?.corePathV2);
+ const view=trpc.runtime.view.useQuery({sessionId:routeSession},{enabled:onTurns});
+ if(onTurns&&!view.data&&!view.error)return <p>正在读取工作…</p>;
+ // A conversation that already holds old-path history stays on the old path: the turn path reads session_messages only, so it would
+ // show the earlier talk without the model having it. V2-12 moves that history before the old path goes.
+ const oldHistory=Boolean((view.data?.executions as unknown[]|undefined)?.length);
+ if(onTurns&&view.data?.scope?.kind==='positioning_draft'&&!oldHistory)return <TurnWorkspace sessionId={routeSession}/>;
+ return <RuntimeWorkspace routeSession={routeSession} routeModule={routeModule}/>;
 }
 function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeModule:string}){
  const utils=trpc.useUtils();

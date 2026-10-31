@@ -30,7 +30,8 @@ import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
-import { prepareChatTools, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
+import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
+import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 
@@ -64,7 +65,8 @@ export type ChatDeps = {
   /** V2-6: the tools a free chat offers; absent, the turn has none (V2-4a). */
   tools?: ChatToolDeps;
 };
-export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string };
+export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string; chosen?: ChatSelection;
+  /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead } };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
@@ -126,11 +128,14 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (deps.tools) {
     try {
       tools = await prepareChatTools({ admin, read: deps.clients.read, configuration, tools: deps.tools, actorId: input.actorId,
-        sessionId: input.sessionId,
+        sessionId: input.sessionId, ...(input.chosen ? { chosen: input.chosen } : {}),
         requiredBytes, interactiveBytes, quotedBytes: quote.inputLimit, modelMultiplier: quote.multiplier,
         defaultMultiplier: quote.defaultMultiplier, maxTools: quote.maxTools });
     } catch { return emit({ type: 'error', code: 'TURN_TOOLS_UNAVAILABLE' }); }
   }
+  // What the user chose for this message (V2-10): refused before anything opens, never dropped silently.
+  const chosen = input.chosen ? tools?.selection(input.chosen) ?? { refused: 'TURN_SKILL_UNAVAILABLE' } : { note: '' };
+  if ('refused' in chosen) return emit({ type: 'error', code: chosen.refused });
   const inputLimit = tools ? tools.inputLimit : quote.inputLimit;
   // The ceiling this turn really has (research usable: the research one; otherwise the interactive one), before anything opens.
   if (tools && requiredBytes + tools.definitionBytes > inputLimit) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
@@ -144,14 +149,20 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q,
     quote.multiplier);
   if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
-  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, decisionUpperUsd,
+  // A resume keeps to what the paused turn has left and replays its receipts.
+  const resume = input.resume?.read;
+  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 };
+  const replay = resume ? new TurnReplay(resume.calls) : undefined;
+  const frozenLimits = resume ? resumeLimits(limits, resume.limits, 0, replay?.replayedModels) : limits;
+  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
+    ...(frozenLimits.decisions ? { decisionUpperUsd } : {}),
     startThresholdCredits: startCredits,
-    limits: { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 },
-    paidToolUpperUsd: tools?.plan.paidToolUpperUsd ?? [], stopLoss: config.stopLoss,
+    limits: frozenLimits, paidToolUpperUsd: (tools?.plan.paidToolUpperUsd ?? []).slice(0, frozenLimits.paidTools), stopLoss: config.stopLoss,
     historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing,
     frozen: { modelId: quote.modelId, model: quote.model, ...(tools?.voiceVersionId ? { voiceVersionId: tools.voiceVersionId } : {}) } });
   let opened;
-  try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy }); }
+  try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy,
+    ...(input.resume ? { resumeOf: input.resume.of } : {}) }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
     ...(tools ? { tools: { available: tools.plan.available, trimmed: tools.plan.trimmed } } : {}) });
@@ -173,7 +184,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // (charge_user=false); the platform's cost is its real one, or the upper bound when the response reported none.
     let fallback = false;
     const gate = opened.positioning;
-    if (gate && !gate.positioned) {
+    // A resume asked this already: it continues under the fallback rule, which holds back a refusal either way.
+    if (gate && !gate.positioned && resume) fallback = true;
+    else if (gate && !gate.positioned) {
       const decision = await db.begin({ actorId: input.actorId, turnId: opened.turnId, seq: ++seq, callKind: 'decision',
         modelId: quote.modelId, toolName: null, paid: null, requestHash: sha256(input.text), upperUsd: decisionUpperUsd,
         multiplier: quote.multiplier });
@@ -218,7 +231,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
     // The tool definitions and the room kept for tool results are part of what the history may not take (V2-6).
-    const current = input.text + (tools?.plan.note ?? '');
+    const current = input.text + chosen.note + (tools?.plan.note ?? '');
     const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192
       - (tools ? tools.plan.reserveBytes + tools.definitionBytes : 0);
     const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
@@ -227,7 +240,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     let text = '', sentChars = 0, holding = fallback;
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
-        callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q } }) : null;
+        callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q }, ...(replay ? { replay } : {}) }) : null;
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),
       maxOutputTokens: quote.outputLimit, maxTurns: 1 + (built?.maxToolCalls ?? 0), reasoning: quote.reasoning,
@@ -252,6 +265,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, inputLimit); }
         catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
+        const stored = replay?.model();
+        if (stored) return stored;
         // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
         await callGate(1);
         return modelCall(callDeps, quote, request, onChunk)
@@ -272,6 +287,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   } catch (error) {
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     // Paused for credits: the turn waits (recovery or a resume closes it); everything else closes now.
+    // The resume needs nothing from the browser. A save that fails leaves it to expire: runResumedTurn refunds it.
+    if (code === 'TURN_PAUSED_FOR_CREDITS') await swallow('turn_pause_save_failed', db.pauseSave({ actorId: input.actorId,
+      turnId: opened.turnId, input: { kind: 'chat', text: input.text, ...(input.chosen ? { chosen: input.chosen } : {}) } }), false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
