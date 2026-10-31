@@ -219,6 +219,12 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: the daily summary counts old charges and turn t
   expect((await rows(h.actor)).find(r => r.call_kind === 'tool')).toMatchObject({ status: 'ok' });
   expect((await db.query(`select amount from billing_history where user_id=$1 and operation_type='settle'`, [h.actor])).rows).toEqual([{ amount: 0 }]);
   expect(await summary()).toEqual(before);
+  // Account erasure scrubs the ledger row after the settlement: the day's numbers do not move.
+  await db.query(`update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1`, [f.actor]);
+  await db.query(`insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now())`, [f.actor, randomUUID()]);
+  expect((await db.query(`select account_erasure_scrub_ledger($1,'billing_history') v`, [f.actor])).rows[0].v).toMatchObject({ manualReview: 0, remaining: 0 });
+  expect((await db.query(`select metadata ? 'turnId' kept from billing_history where user_id=$1 and operation_type='settle'`, [f.actor])).rows).toEqual([{ kept: false }]);
+  expect(await summary()).toEqual(before);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-6: a search that returns nothing is said plainly and not charged; the platform cost is kept', async () => {

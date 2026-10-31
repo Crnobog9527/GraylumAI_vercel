@@ -13,8 +13,12 @@ BEGIN
  RETURN (
   WITH old AS (SELECT count(*) n,coalesce(sum(charged_credits),0) credits FROM research_operations
    WHERE state='succeeded' AND charged_at>=p_start AND charged_at<p_end),
-  settled AS (SELECT -b.amount credits,(b.metadata->>'turnId')::bigint turn_id FROM billing_history b
-   WHERE b.operation_type='settle' AND b.created_at>=p_start AND b.created_at<p_end AND b.metadata->>'turnId' ~ '^[0-9]{1,18}$'),
+  -- Account erasure keeps preDeductId but drops turnId from the ledger row; the turn stays and still names that hold.
+  settled AS (SELECT -b.amount credits,coalesce(CASE WHEN b.metadata->>'turnId' ~ '^[0-9]{1,18}$' THEN (b.metadata->>'turnId')::bigint END,e.id) turn_id
+   FROM billing_history b
+   LEFT JOIN turns e ON b.content_erased_at IS NOT NULL AND e.actor_id=b.user_id AND e.policy->>'holdId'=b.metadata->>'preDeductId'
+   WHERE b.operation_type='settle' AND b.created_at>=p_start AND b.created_at<p_end
+    AND (b.metadata->>'turnId' ~ '^[0-9]{1,18}$' OR e.id IS NOT NULL)),
   split AS (SELECT s.credits,least(s.credits,coalesce(r.credits,0)) tool,CASE WHEN least(s.credits,coalesce(r.credits,0))>0 THEN r.n ELSE 0 END n FROM settled s
    LEFT JOIN turns t ON t.id=s.turn_id
    -- As turn_close: a tool receipt that arrived after the close is not the user's.
