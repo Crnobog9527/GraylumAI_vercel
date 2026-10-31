@@ -282,6 +282,8 @@ const releasedRefusals = new WeakSet<object>();
 /** Refused before admission (an HTTP 4xx before the `admitted` event): no execution exists, so nothing is kept.
  * A pending earlier organizer is a wait, not a refusal: its request stays for the payg-wait resume. */
 export function isRefusedBeforeAdmission(error: unknown, admitted: boolean): boolean {
+  // The turn path's refusals (mentor-turn-path.ts TurnRefused): `kept` is the server's word that nothing was stored or charged.
+  if (!admitted && error instanceof Error && error.name === "TurnRefused" && (error as { kept?: boolean }).kept === true) return true;
   return !admitted && ["opc.mentorTurnStream", "opc.prepareStep"].includes(definiteRefusal(error)?.path ?? "")
     && !isOrganizerPendingError(error);
 }

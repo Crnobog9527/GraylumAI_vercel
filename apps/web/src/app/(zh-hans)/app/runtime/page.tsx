@@ -46,6 +46,7 @@ import { usePaygResume } from '@/lib/use-payg-resume';
 import { useRuntimeViewBusy, useRuntimeViewPolling, useRuntimeViewSettled, useRuntimeViewStreaming } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
 import { TurnWorkspace } from './turn-workspace';
+import { useHasTurnMessages } from './use-has-turn-messages';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, placeCompareCards, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
@@ -88,7 +89,10 @@ function RuntimeRoute(){
 /** CORE-PATH-V2 V2-10: with core_path_v2.enabled a free conversation runs on the turn path; work items stay on the old one until V2-10b. */
 function RuntimePath({routeSession,routeModule}:{routeSession:string;routeModule:string}){
  const choices=trpc.runtime.choices.useQuery(routeSession?{sessionId:routeSession}:undefined,{staleTime:RUNTIME_CHOICES_STALE_MS});
- const onTurns=Boolean(routeSession&&choices.data?.corePathV2);
+ // A conversation the turn path already holds replies of moves to it after a rollback: reading them needs no switch, and the old
+ // workspace could not show them (the probe is one read; the old workspace shows until it answers).
+ const held=useHasTurnMessages(routeSession);
+ const onTurns=Boolean(routeSession&&(choices.data?.corePathV2||held.has));
  const view=trpc.runtime.view.useQuery({sessionId:routeSession},{enabled:onTurns});
  if(onTurns&&!view.data&&!view.error)return <p>正在读取工作…</p>;
  // A conversation that already holds old-path history stays on the old path: the turn path reads session_messages only, so it would

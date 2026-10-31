@@ -19,11 +19,12 @@ export function useMentorTurnPath(sessionId: string | undefined) {
   const on = Boolean(sessionId && choices.data?.corePathV2);
   const [view, setView] = useState<TurnView | null>(null);
   const reload = useCallback(async () => {
-    if (!on || !sessionId) return null;
+    // Read whatever the switch says: a rollback must not hide replies the turn path already saved and charged.
+    if (!sessionId) return null;
     const next = await readTurnView(sessionId, fetcher);
     if (next) setView(next);
     return next;
-  }, [on, sessionId]);
+  }, [sessionId]);
   useEffect(() => { void reload(); }, [reload]);
   const active = Boolean(view?.activeTurn);
   useEffect(() => {
@@ -62,7 +63,7 @@ export function useMentorTurnPath(sessionId: string | undefined) {
     },
     /** The old view, with this conversation's turns after its executions; refetching reads both. */
     withOld<T extends { data?: unknown; refetch: () => Promise<unknown> }>(old: T): T {
-      if (!on) return old;
+      if (!on && !projected.executions.length) return old;
       // One object per change: the page's effects depend on this data.
       if (merged.current.old !== old.data || merged.current.projected !== projected) {
         const data = old.data as { executions?: unknown[]; activeExecution?: string | null } | undefined;

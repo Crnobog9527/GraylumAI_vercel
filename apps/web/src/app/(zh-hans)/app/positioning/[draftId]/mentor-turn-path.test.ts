@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { STREAM_INTERRUPTED } from "./mentor-turn";
-import { envelopeWithExecution, parseStepEnvelope } from "./mentor-turn";
+import { envelopeWithExecution, isRefusedBeforeAdmission, parseStepEnvelope } from "./mentor-turn";
 import { envelopeExecution } from "./step-recovery";
 import { mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, TurnRefused } from "./mentor-turn-path";
 
@@ -65,6 +65,12 @@ describe("mentor on the turn path", () => {
     expect(envelopeWithExecution(raw, "r1", "turn:abc")).toBeNull();
     const history = turnHistory(view([{ seq: 1, role: "user", turnId: 4, content: "我做健身" }, reply(2, 4)]));
     expect(envelopeExecution(history as never, parseStepEnvelope(kept!)!)?.executionId).toBe("turn:4");
+  });
+  it("a refusal before admission releases the retained request; one after admission does not", () => {
+    const refused = new TurnRefused("TURN_INPUT_TOO_LARGE", "太长", true);
+    expect(isRefusedBeforeAdmission(refused, false)).toBe(true);
+    expect(isRefusedBeforeAdmission(refused, true)).toBe(false);
+    expect(isRefusedBeforeAdmission(new TurnRefused("TURN_FAILED", "未完成", false), false)).toBe(false);
   });
   it("reads every page of saved messages", async () => {
     const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ seq: from + i, role: "user", turnId: 1, content: "" }));

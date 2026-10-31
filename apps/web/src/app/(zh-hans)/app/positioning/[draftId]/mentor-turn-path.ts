@@ -61,7 +61,7 @@ export function mentorTurnBody(request: MentorRequest, ids: { sessionId: string;
 
 /** A turn the server refused or ended, with its fixed notice; `kept` proves nothing was stored. */
 export class TurnRefused extends Error {
-  constructor(readonly code: string, text: string, readonly kept: boolean) { super(text); }
+  constructor(readonly code: string, text: string, readonly kept: boolean) { super(text); this.name = "TurnRefused"; }
 }
 
 const refused = (code: string) => { const { text, kept } = turnCodeNotice(code); return new TurnRefused(code, text, kept); };
@@ -101,6 +101,9 @@ export async function readTurnView(sessionId: string, fetcher: typeof fetch): Pr
       const response = await fetcher(`/api/turn?sessionId=${encodeURIComponent(sessionId)}&afterSeq=${afterSeq}`, { cache: "no-store" });
       if (!response.ok) return null;
       page = await response.json() as TurnView;
+      // Not the view (a stub, a proxy page): nothing to show, and nothing to break the page with.
+      if (!page || !Array.isArray(page.messages)) return null;
+      page = { ...page, calls: Array.isArray(page.calls) ? page.calls : [] };
     } catch { return null; }
     merged = merged ? { ...page, messages: [...merged.messages, ...page.messages], calls: [...merged.calls, ...page.calls] } : page;
     if (page.messages.length < 50) return merged;
