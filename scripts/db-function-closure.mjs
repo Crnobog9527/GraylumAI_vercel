@@ -243,7 +243,7 @@ const ANY_LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b/i;
 // The name counts only as a whole string literal: a concatenated or interpolated first argument is not a name this check can read.
 const DB_CALL = /(?<!\b(?:Buffer|Array|Object|Set|Map))\.(rpc|from)\(\s*(?:(['"`])([a-z_0-9]*)\2\s*[,)])?/gi;
 const SET_OPERATION = /\b(?:UNION|INTERSECT|EXCEPT)\b/i;
-const TABLE_REF = /\b(?:FROM|JOIN)\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?/gi;
+const TABLE_REF = /\b(?:FROM|JOIN)\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?(?:\s+(?:AS\s+)?"?([a-z_][a-z0-9_]*)"?)?/gi;
 const NOT_ALIAS = /^(?:where|join|on|left|right|inner|outer|cross|full|group|order|limit|union|intersect|except|for|using|natural)$/i;
 
 // The ON and WHERE text of one select: what actually limits its rows, not its output list or later clauses. Parenthesised groups are
@@ -305,6 +305,18 @@ export function unownedReads(code, tableNames, { linked = FREE_READ_LINKED, cata
   return [...found].sort();
 }
 
+// Whether the function itself rejects or filters by the owner: a comparison with p_actor_id that sits in a WHERE, an ON or an IF,
+// not one that only computes a value (a select list, ORDER BY, RETURNING).
+function checksOwner(code) {
+  for (const statement of statements(code)) {
+    for (const m of statement.matchAll(/\b(?:actor_id|profile_id)\s*=\s*p_actor_id\b/gi)) {
+      const kinds = [...ownSelect(statement, m.index).matchAll(/\b(SELECT|WHERE|ON|IF|ELSIF|ORDER\s+BY|GROUP\s+BY|HAVING|RETURNING|LIMIT|FROM|JOIN)\b/gi)];
+      if (/^(?:WHERE|ON|IF|ELSIF)$/i.test(kinds.at(-1)?.[1] ?? '')) return true;
+    }
+  }
+  return false;
+}
+
 // A free read must stay what the rule allows, all the way down: read-only volatility, no write or lock in anything it reaches, and the
 // owner's key as its first argument and in its filters.
 export function freeReadViolations(functions, tableNames, names = FREE_READS) {
@@ -314,7 +326,7 @@ export function freeReadViolations(functions, tableNames, names = FREE_READS) {
     if (!defs) { found.push(`${name}: free read has no function`); continue; }
     for (const { head, body } of defs) {
       if (!/\(\s*p_actor_id\s+uuid\b/i.test(head)) found.push(`${name}: free read without p_actor_id first`);
-      if (!/\b(?:actor_id|profile_id)\s*=\s*p_actor_id\b/i.test(stripCode(body))) found.push(`${name}: free read without an owner check of its own`);
+      if (!checksOwner(stripCode(body))) found.push(`${name}: free read without an owner check of its own`);
     }
     for (const reached of closure(name, functions, tableNames, []).functions) {
       for (const { head, body } of functions.get(reached) ?? []) {

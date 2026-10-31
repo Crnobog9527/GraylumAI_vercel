@@ -232,6 +232,10 @@ test('only the listed tables may go without an owner column, and a linked one on
   // A linked table does not vouch for an owned one, and a catalog comma join cannot hide a table.
   assert.deepEqual(reads('SELECT 1 FROM v_t v JOIN o_t o ON o.id = v.id WHERE v.id = item;'), ['o_t']);
   assert.deepEqual(reads('SELECT 1 FROM c_t c, x_t x WHERE c.key = k;'), ['c_t']);
+  // A quoted alias does not hide the comma join behind a catalog table.
+  assert.deepEqual(reads('SELECT 1 FROM c_t AS "c", x_t x WHERE c.key = k;'), ['c_t']);
+  assert.deepEqual(reads('SELECT 1 FROM v_t "v", x_t x WHERE v.id = item;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM o_t "o" JOIN v_t "v" ON v.id = o.version_id WHERE o.actor_id = p_actor_id;'), []);
 });
 
 test('the repository\'s own catalog list leaves site settings out: a free read of system_settings fails', () => {
@@ -246,6 +250,10 @@ test('a free read checks the owner itself, even when it reaches only listed tabl
   const hits = body => freeReadViolations(readFunctions(join(repo({ 'library/f.sql': read(body) }), 'packages/db/functions')), new Set(['skills']), ['f']);
   assert.match(hits('SELECT 1 FROM skills WHERE id = 1;').join(), /without an owner check/);
   assert.deepEqual(hits('SELECT 1 FROM skills WHERE id = 1; SELECT 1 FROM profiles WHERE profile_id = p_actor_id;'), []);
+  // Computing the comparison is not checking it.
+  assert.match(hits('SELECT actor_id = p_actor_id AS is_owner FROM skills;').join(), /without an owner check/);
+  assert.match(hits('SELECT 1 FROM skills ORDER BY actor_id = p_actor_id;').join(), /without an owner check/);
+  assert.deepEqual(hits('IF NOT EXISTS (SELECT 1 FROM profiles WHERE profile_id = p_actor_id) THEN RETURN; END IF; SELECT 1 FROM skills;'), []);
 });
 
 test('every read of a free read carries the owner key itself; one filtered branch does not vouch for another', () => {
