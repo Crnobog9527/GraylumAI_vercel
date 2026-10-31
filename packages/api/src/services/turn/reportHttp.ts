@@ -2,12 +2,13 @@
 import { z } from 'zod';
 import { swallow } from '../../lib/swallow';
 import { turnDatabase, TurnDatabaseError, type TurnClients } from './db';
+import { redisReportStopSignal, type ReportStopSignal } from './reportStopSignal';
 
 /*
  * CORE-PATH-V2 V2-7a: the report's two requests besides its turn. POST /api/turn/stop records the user's stop (turn_stop):
  * the first two stops within 24 hours are free; from the third the answer is `confirmation_required` until the page sends
  * the same stop with confirmed:true, and the stop then charges what was generated, at most the fixed price. After `stopping`
- * the page drops the turn's stream, which makes the turn abort its provider call and close as stopped. GET /api/turn/report
+ * a Redis flag tells the running turn to abort its provider call and close as stopped. GET /api/turn/report
  * reads the newest report of a round (or one turn) with its saved text, for a reload or after a stop.
  */
 export const stopRequest = z.object({
@@ -22,6 +23,7 @@ export type ReportHttpDeps = {
   authenticate: (request: Request) => Promise<string | null>;
   databaseHost: { declared: string | undefined; actual: string };
   clients: TurnClients;
+  stopSignal?: ReportStopSignal;
 };
 
 const json = (status: number, body: unknown) =>
@@ -48,6 +50,9 @@ export async function handleTurnStop(request: Request, deps: ReportHttpDeps): Pr
   try {
     const stopped = await turnDatabase(deps.clients).stop({ actorId, turnId: input.turnId, confirmed: input.confirmed === true,
       stopAt: input.stopAt ?? null });
+    // Recorded either way: an unraised flag only lets the report run to its end, and it still closes as stopped.
+    if (stopped.state === 'stopping') await swallow('turn_report_stop_raise_failed',
+      (deps.stopSignal ?? redisReportStopSignal()).raise(input.turnId), undefined, { category: 'api' });
     return json(200, stopped);
   } catch (error) { return failed(error); }
 }
