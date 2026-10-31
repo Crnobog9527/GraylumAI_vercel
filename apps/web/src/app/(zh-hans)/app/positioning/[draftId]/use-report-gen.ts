@@ -47,8 +47,9 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   };
   const choices = trpc.runtime.choices.useQuery({ sessionId }, { staleTime: RUNTIME_CHOICES_STALE_MS });
   const turn = useTurnReport(Boolean(choices.data?.corePathV2), sessionId, roundId);
-  const latest = trpc.runtime.reportLatest.useQuery({ sessionId, projectId, roundId }, { retry: 1, enabled: !turn.on });
-  const server: ServerReport = turn.on ? turn.server : latest.isSuccess ? { kind: "known", executionId: latest.data.executionId }
+  // A report written before the switch stays readable: the old reads answer until this round has a turn report.
+  const latest = trpc.runtime.reportLatest.useQuery({ sessionId, projectId, roundId }, { retry: 1, enabled: !turn.status });
+  const server: ServerReport = turn.status ? turn.server : latest.isSuccess ? { kind: "known", executionId: latest.data.executionId }
     : latest.isError ? { kind: "failed" } : { kind: "pending" };
   // The execution this page started, until the server read names it.
   const [pinned, setPinned] = useState<ReportPin | null>(null);
@@ -56,7 +57,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const generation = useRef(0);
   const [fresh, setFresh] = useState<FreshRead | null>(null);
   const readLatest = async () => {
-    if (turn.on) { await turn.refetch(); return; }
+    if ((await turn.refetch()).data) return;
     const own = ++generation.current;
     try {
       const data = await utils.client.runtime.reportLatest.query({ sessionId, projectId, roundId });
@@ -74,11 +75,11 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const [streaming, setStreaming] = useState(false);
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const status = trpc.runtime.reportStatus.useQuery({ executionId: executionId ?? "" }, {
-    enabled: Boolean(executionId) && !turn.on,
+    enabled: Boolean(executionId) && !turn.status,
     refetchInterval: query => !streaming && reportProgressing(query.state.data) ? POLL_MS : false,
   });
-  const shown = turn.on ? turn.status : status.data && status.data.executionId === executionId ? status.data : null;
-  const reread = () => turn.on ? turn.refetch() : status.refetch();
+  const shown = turn.status ?? (status.data && status.data.executionId === executionId ? status.data : null);
+  const reread = () => turn.status || streaming ? turn.refetch() : status.refetch();
   // The status read settles the fixed price (0295: charged or refunded): the cached balance is stale until it is read again.
   const settledFee = shown?.fee && shown.fee.state !== "held" ? shown.fee.state : null;
   useEffect(() => { if (settledFee) void utils.credits.getBalance.invalidate(); }, [settledFee, executionId, utils]);
@@ -144,11 +145,11 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   useEffect(() => { latestStream.current = stream; });
   useEffect(() => {
     const id = shown?.executionId;
-    if (turn.on || streaming || !id || !reportAttachable(shown) || attached.current.has(id)) return;
+    if (turn.status || streaming || !id || !reportAttachable(shown) || attached.current.has(id)) return;
     attached.current.add(id);
     setReopened(id);
     void latestStream.current(id);
-  }, [streaming, shown, retryRound, turn.on]);
+  }, [streaming, shown, retryRound, turn.status]);
 
   const working = start.isPending || streaming;
   const offer = generationOffer({ canGenerate, working, server, executionId, status: shown });
@@ -194,7 +195,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     answer?.(confirmed);
   };
   useEffect(() => () => { stopAnswer.current?.(false); stopAnswer.current = null; }, []);
-  const cancelReport = turn.on ? (request: { stopAt?: number; confirmed?: boolean }) => turn.stop(request) : cancel.mutateAsync;
+  const cancelReport = turn.status || (turn.on && streaming) ? (request: { stopAt?: number; confirmed?: boolean }) => turn.stop(request) : cancel.mutateAsync;
   const latestStop = useRef({ cancel: cancelReport as (request: never) => Promise<{ state?: string } | undefined>, refetch: reread });
   latestStop.current = { cancel: cancelReport as never, refetch: reread };
   const stopper = useMemo(() => reportStopController({

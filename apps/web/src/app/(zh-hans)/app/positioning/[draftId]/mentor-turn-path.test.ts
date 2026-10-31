@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { STREAM_INTERRUPTED } from "./mentor-turn";
 import { mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, TurnRefused } from "./mentor-turn-path";
 
-const view = (messages: unknown[], activeTurn: unknown = null) => ({ activeTurn, lastTurn: null, messages }) as never;
+const view = (messages: unknown[], activeTurn: unknown = null) => ({ activeTurn, lastTurn: null, messages, calls: [] }) as never;
 const reply = (seq: number, turnId: number, stepId = "s1") => ({ seq, role: "assistant", turnId, content: JSON.stringify({ format: "agent-turn.v1", message: "好", card: null, stepId }) });
 
 describe("mentor on the turn path", () => {
@@ -47,6 +47,13 @@ describe("mentor on the turn path", () => {
     const drain = async (opener: Parameters<typeof mentorTurnEvents>[1]) => { for await (const _ of mentorTurnEvents({}, opener)) void _; };
     await expect(drain(async () => ({ state: "refused", code: "TURN_INSUFFICIENT_CREDITS", status: 200 }))).rejects.toBeInstanceOf(TurnRefused);
     await expect(drain(async () => ({ state: "lost" }))).rejects.toThrow(STREAM_INTERRUPTED);
+  });
+  it("keeps the calls of every page: a later page never drops an earlier reply's rows", async () => {
+    const call = (turnId: number) => ({ turnId, seq: 2, toolName: "web_search", status: "ok", usage: {}, q: 100, multiplier: "6", arguments: null });
+    const full = Array.from({ length: 50 }, (_, i) => ({ seq: i + 1, role: "user", turnId: 1, content: "" }));
+    const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("afterSeq=0")
+      ? { activeTurn: null, lastTurn: null, messages: full, calls: [call(1)] } : { activeTurn: null, lastTurn: null, messages: [], calls: [] })));
+    expect((await readTurnView("s", fetcher as never))?.calls.map(c => c.turnId)).toEqual([1]);
   });
   it("reads every page of saved messages", async () => {
     const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ seq: from + i, role: "user", turnId: 1, content: "" }));

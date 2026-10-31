@@ -13,7 +13,8 @@ import type { TurnEvent } from './sse';
  */
 const reference = z.object({ kind: z.literal('library_document'), documentId: z.string().uuid(), version: z.number().int().positive() });
 const saved = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('chat'), text: z.string(), chosen: z.object({ moduleId: z.string().optional(), references: z.array(reference).optional() }).optional() }),
+  z.object({ kind: z.literal('chat'), text: z.string(),
+    chosen: z.object({ moduleId: z.string().optional(), references: z.array(reference).optional() }).optional() }),
   z.object({ kind: z.literal('mentor'), moduleId: z.string(), stepId: z.string(), text: z.string(), organizeAfter: z.boolean(),
     answer: mentorAnswer.optional(), researchRefreshId: z.string().optional() }),
 ]);

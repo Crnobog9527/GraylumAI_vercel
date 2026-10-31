@@ -102,7 +102,7 @@ export async function readTurnView(sessionId: string, fetcher: typeof fetch): Pr
       if (!response.ok) return null;
       page = await response.json() as TurnView;
     } catch { return null; }
-    merged = merged ? { ...page, messages: [...merged.messages, ...page.messages] } : page;
+    merged = merged ? { ...page, messages: [...merged.messages, ...page.messages], calls: [...merged.calls, ...page.calls] } : page;
     if (page.messages.length < 50) return merged;
     afterSeq = page.messages.at(-1)!.seq;
   }

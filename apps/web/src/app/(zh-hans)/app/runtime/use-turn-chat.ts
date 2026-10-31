@@ -25,7 +25,10 @@ export function withResearchRow(rows: readonly WorkItem[], call: ResearchCall): 
 export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }> };
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
-export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: typeof fetch = (...args) => globalThis.fetch(...args)) {
+/** One function for the page's life: `read` depends on it, and a new one per render would read without end. */
+const browserFetch: typeof fetch = (...args) => globalThis.fetch(...args);
+
+export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: typeof fetch = browserFetch) {
   const [view, setView] = useState<TurnView | null>(null), [viewFailed, setViewFailed] = useState(false);
   const [live, setLive] = useState<LiveTurn | null>(null), [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<{ code: string; text: string } | null>(null);
