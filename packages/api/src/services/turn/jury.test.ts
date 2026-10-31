@@ -7,16 +7,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * moves the review and how the turn is closed (fixed-price delivery, refunds, waiting, unknown results).
  */
 const m = vi.hoisted(() => ({ settings: vi.fn(), member: vi.fn(), read: vi.fn(), decide: vi.fn(), buildMembers: vi.fn(), runGroup: vi.fn(), close: vi.fn(), rpc: vi.fn(),
-  callsAt: vi.fn() }));
+  callsAt: vi.fn(), replay: vi.fn(), open: vi.fn(), admission: vi.fn() }));
 vi.mock('../fusion/reviewRecord', async original => ({ ...(await original<typeof import('../fusion/reviewRecord')>()),
-  reviewRecord: () => ({ read: m.read, replay: vi.fn() }) }));
+  reviewRecord: () => ({ read: m.read, replay: m.replay }) }));
 vi.mock('../fusion/reviewCore', async original => ({ ...(await original<typeof import('../fusion/reviewCore')>()),
   reviewCore: () => ({ readSource: async () => ({ body: 'b', sections: ['One'], maxCharacters: 100, declared: [] }),
     callsAt: m.callsAt, buildMembers: m.buildMembers, decide: m.decide,
     phaseOf: (at: { round: number; phase: string }) => at.phase === 'summary' ? 'summary' : at.round > 1 ? 'debate' : 'review',
     opinionRules: async () => ({ sections: ['One'] }), revisionInput: () => ({}) }) }));
 vi.mock('./fusionCalls', async original => ({ ...(await original<typeof import('./fusionCalls')>()),
-  runGroup: m.runGroup, fusionDatabase: () => ({ close: m.close }) }));
+  runGroup: m.runGroup, fusionDatabase: () => ({ close: m.close, open: m.open }),
+  fusionCoreSetting: { safeParse: (value: unknown) => ({ success: true, data: value }) } }));
+vi.mock('../runtime/admissionConfiguration', async original => ({ ...(await original<typeof import('../runtime/admissionConfiguration')>()),
+  readAdmissionConfiguration: async () => m.admission() }));
 vi.mock('./fusionQuote', () => ({ fusionQuote: async (_a: unknown, i: { modelId: string }) => ({ modelId: i.modelId, q: '100',
   multiplier: '6', outputLimit: 100, reasoning: {}, policy: {} }), fusionCall: (quote: object) => ({ ...quote, upperUsd: '0.01' }) }));
 vi.mock('../fusion/request', async original => ({ ...(await original<typeof import('../fusion/request')>()), fusionRequestBody: () => '{}' }));
@@ -26,6 +29,7 @@ vi.mock('../membershipEntitlements', () => ({ readMembershipEntitlements: async 
   assertFusionEntitlement: () => { if (m.member() === false) throw new Error('FUSION_MEMBERSHIP_REQUIRED'); } }));
 vi.mock('../models/openRouterKey', async original => ({ ...(await original<typeof import('../models/openRouterKey')>()),
   readOpenRouterKeyOrUnset: async () => 'SYNTHETIC' }));
+import { CORE_PATH_SETTING } from './chat';
 import { estimateQuotes, juryTurn, samePricing } from './jury';
 
 const REVIEWERS = ['00000000-0000-4000-8000-00000000000a', '00000000-0000-4000-8000-00000000000b', '00000000-0000-4000-8000-00000000000c'];
@@ -50,6 +54,35 @@ beforeEach(() => {
   m.close.mockResolvedValue({ turnId: 7, closeKind: 'completed', chargedCredits: 1500, settlement: 'done', replay: false });
   m.settings.mockReturnValue({ review: { enabled: true, reviewerModelIds: REVIEWERS, summaryModelId: SUMMARY } });
   m.member.mockReturnValue(true);
+});
+
+describe('a jury start', () => {
+  const input = { requestId: '00000000-0000-4000-8000-000000000002', draftId: '00000000-0000-4000-8000-000000000003',
+    sourceVersionId: '00000000-0000-4000-8000-000000000004' };
+  const starting = (message?: (actorId: string, read: Promise<unknown>) => Promise<unknown>) => juryTurn({ admin,
+    clients: { write: admin, read: admin } as never, slots: { take: async () => 1, drop: async () => undefined },
+    calls: async () => ({ ok: true }), message: message as never }, 'actor');
+  const rows = { data: [{ key: CORE_PATH_SETTING, value: { enabled: true } }], error: null };
+
+  it('a paused platform or a message limit refuses a new review: nothing opens, nothing is frozen (#1545 review)', async () => {
+    m.replay.mockResolvedValue(null);
+    m.admission.mockResolvedValue(rows);
+    const message = vi.fn(async () => ({ ok: false, reason: 'paused' }));
+    await expect(starting(message).start(input)).rejects.toThrow('TURN_NEW_CALLS_PAUSED');
+    expect(message).toHaveBeenCalledOnce();
+    expect(m.open).not.toHaveBeenCalled();
+    // Without the gate a start refuses rather than opening unchecked.
+    await expect(starting().start(input)).rejects.toThrow('TURN_LIMIT_UNAVAILABLE');
+    expect(m.open).not.toHaveBeenCalled();
+  });
+
+  it('a repeat of the request finds its review even while new work is paused (#1545 review)', async () => {
+    m.replay.mockResolvedValue(view());
+    const message = vi.fn(async () => ({ ok: false, reason: 'paused' }));
+    await expect(starting(message).start(input)).resolves.toMatchObject({ turnId: 7 });
+    expect(message).not.toHaveBeenCalled();
+    expect(m.open).not.toHaveBeenCalled();
+  });
 });
 
 describe('jury frozen price', () => {

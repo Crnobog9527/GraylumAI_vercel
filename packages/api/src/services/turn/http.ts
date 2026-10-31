@@ -56,7 +56,7 @@ async function runJuryStart(deps: TurnHttpDeps, actorId: string, input: Extract<
   const { requestId, draftId, sourceVersionId, acceptedCredits } = input;
   let view;
   try {
-    view = await juryTurn({ admin, clients, slots, transport, pricing, calls: newWork.calls }, actorId)
+    view = await juryTurn({ admin, clients, slots, transport, pricing, calls: newWork.calls, message: newWork.message }, actorId)
       .start({ requestId, draftId, sourceVersionId, ...(acceptedCredits === undefined ? {} : { acceptedCredits }) });
   } catch (error) { return emit({ type: 'error', code: codeOf(error) }); }
   // A request id already used on the old review path has no turn: it is not this request.

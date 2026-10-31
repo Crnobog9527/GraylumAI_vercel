@@ -15,10 +15,10 @@ import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readAdmissionConfiguration, type ConfigurationRows } from '../runtime/admissionConfiguration';
 import { rowFor } from '../runtime/settingsRows';
 import type { PricingDeps } from '../runtime/pricingAdmission';
-import type { RuntimeCallGate } from '../runtime/newWorkGate';
+import { readAdmissionSettings, type RuntimeCallGate } from '../runtime/newWorkGate';
 import { readReplyLocale } from '../runtime/replyLanguage';
 import { TurnStop } from './call';
-import { CORE_PATH_SETTING } from './chat';
+import { CORE_PATH_SETTING, GATE_CODES, type ChatDeps } from './chat';
 import { TurnDatabaseError, type TurnClients } from './db';
 import { breakerTripped, fusionAdmission, fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type GroupMember,
   type Judged } from './fusionCalls';
@@ -40,7 +40,9 @@ import { QuoteError } from './quote';
 export type JuryDeps = { admin: SupabaseClient; clients: TurnClients; slots: CounterStore; transport?: typeof fetch;
   pricing?: PricingDeps; sleep?: (ms: number) => Promise<void>;
   /** The one-switch pause and the account's call limits before every seat call (runtime/newWorkGate.ts). */
-  calls: RuntimeCallGate };
+  calls: RuntimeCallGate;
+  /** The pause and the message limit before a new review freezes credits, as a compare; only a start needs it, and refuses without it. */
+  message?: ChatDeps['newWork']['message'] };
 export type JuryAdvance = { next: boolean; reason: string; dispatched?: number };
 const GATED = new Set(['TURN_NEW_CALLS_PAUSED', 'TURN_RATE_LIMITED', 'TURN_LIMIT_UNAVAILABLE', 'TURN_USAGE_CONFIGURATION_REQUIRED']);
 const TRANSIENT = new Set(['TURN_DATABASE_UNAVAILABLE', 'TURN_PROVIDER_KEY_UNAVAILABLE', 'TURN_PRICE_UNAVAILABLE',
@@ -157,7 +159,11 @@ export function juryTurn(deps: JuryDeps, actorId: string) {
     async start(input: { requestId: string; draftId: string; sourceVersionId: string; acceptedCredits?: number }): Promise<ReviewView> {
       const replayed = await record.replay(input);
       if (replayed?.turnId) return replayed;
-      const coreSetting = await coreSettings(await readAdmissionConfiguration(admin));
+      const configuration = await readAdmissionConfiguration(admin);
+      const coreSetting = await coreSettings(configuration);
+      if (!deps.message) throw new Error('TURN_LIMIT_UNAVAILABLE');
+      const admitted = await deps.message(actorId, readAdmissionSettings(admin, Promise.resolve(configuration)));
+      if (!admitted.ok) throw new Error(GATE_CODES[admitted.reason]);
       const { settings, skill, estimate, q, holdCredits, priceCredits, replyLocale, quotes } = await plan(input);
       if (input.acceptedCredits !== undefined && priceCredits !== input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
       const planned = [...Object.values(estimate.callCaps.review), ...Object.values(estimate.callCaps.debate),
