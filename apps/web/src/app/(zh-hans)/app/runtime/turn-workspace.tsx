@@ -2,6 +2,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
+import { AgentWorkStatus } from '@/components/chat-display/agent-work-status';
 import {
   RuntimeEmptyState, RuntimeHeader, RuntimePendingMessage, RuntimeReply, RuntimeTurnView,
 } from '@/components/chat-display/runtime-messages';
@@ -89,6 +90,7 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
             <RuntimeReply text={turn.body ?? turn.primaryBody ?? ''} available={Boolean(turn.body ?? turn.primaryBody)}/>
           </RuntimeTurnView>)}
           {turns.map(reply => <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
+            {chat.rows?.turnId === reply.turnId && <AgentWorkStatus items={chat.rows.rows}/>}
             <RuntimeReply text={reply.content}/>
             {results.data && reply.turnId !== null && <SaveReplyButton sessionId={sessionId} turnId={reply.turnId} reply={reply.content}
               savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}
@@ -97,6 +99,7 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
           {pendingText !== null && <>
             {pendingText && <RuntimePendingMessage text={pendingText} sending={chat.sending}/>}
             <RuntimeTurnView>
+              <AgentWorkStatus items={chat.live?.rows ?? []}/>
               {chat.live?.trimmed.map(line => <ChatInlineNotice key={line} tone="status">{line}</ChatInlineNotice>)}
               <RuntimeReply text={chat.live?.text || '正在回复…'} streaming/>
             </RuntimeTurnView>
