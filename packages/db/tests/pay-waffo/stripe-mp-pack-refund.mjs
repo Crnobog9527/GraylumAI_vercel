@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -28,7 +29,7 @@ export async function stripeMpPackRefundCases({admin,service}) {
     const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
     const m=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','gold_first30',
       'fixture','test',$3,'terms-v1',$4) o`,[user,plan,version,JSON.stringify([{kind:'email',key_version:'test-v1',digest}])])).rows[0];
-    const start=new Date(Math.floor(Date.now()/1000)*1000-120000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+    const start=new Date(Math.floor(Date.now()/1000)*1000-120000),end=addUtcMonths(start,1);
     await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[m.id,new Date(start.getTime()-60000)]);
     assert.equal((await service.query('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[m.id,'fixture',await bind(user,m),
       `in_${m.id}`,m.amount_total,'usd',new Date(start.getTime()+6000),`sub_${m.id}`,start,end])).rows[0].v.state,'fulfilled');

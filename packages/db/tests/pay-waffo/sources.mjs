@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 const hash=v=>createHash('sha256').update(v).digest('hex');
@@ -10,8 +11,8 @@ export async function sourceCases({admin}) {
   for(const [channel,cycle] of [['waffo','monthly'],['waffo','yearly'],['stripe','yearly']]) {
     const user=randomUUID(),sub=randomUUID(),order=randomUUID(),grant=randomUUID(),tx=randomUUID();
     const start=new Date(Math.floor(Date.now()/1000)*1000-86400000);
-    const monthEnd=new Date(start); monthEnd.setUTCMonth(monthEnd.getUTCMonth()+1);
-    const termEnd=new Date(start); termEnd.setUTCMonth(termEnd.getUTCMonth()+(cycle==='yearly'?12:1));
+    const monthEnd=addUtcMonths(start,1);
+    const termEnd=addUtcMonths(start,(cycle==='yearly'?12:1));
     const snap={version:1,item_type:'membership_plan',item_id:plan,item_updated_at:'2026-10-01T00:00:00Z',
       billing_cycle:cycle,currency:'usd',unit:'major',price:'69.00',discount:'0.00',tax_behavior:'inclusive',credits:cycle==='yearly'?1200:100,bonus_credits:0};
     await admin.query('INSERT INTO profiles(id,credits) VALUES($1,100)',[user]);

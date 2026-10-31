@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -22,7 +23,7 @@ export async function stripeMpFulfillCases({admin,service,connect}) {
     return {o,user,checkout};
   };
   // Stripe's subscription item period: anchor time-of-day kept, calendar month (Jan 31 -> Feb 28 handled by SQL).
-  const start=new Date(Math.floor(Date.now()/1000)*1000-60000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+  const start=new Date(Math.floor(Date.now()/1000)*1000-60000),end=addUtcMonths(start,1);
   const paid=new Date(start.getTime()+6000);
   const fulfill=(db,f,{amount=f.o.amount_total,subscription=`sub_${f.o.id}`,from=start,to=end,payment=`in_${f.o.id}`}={})=>db.query(
     'SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',

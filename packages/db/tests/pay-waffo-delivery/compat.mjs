@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 
@@ -43,7 +44,7 @@ export async function verifyAfterStripeRouting({admin,service},legacy) {
     AND channel='stripe' AND membership_plan_id IS NOT NULL`)).rows.map(r=>r.price_usage);
   assert.deepEqual(usage,['subscription'],'existing Stripe membership prices are recurring');
   // Renewal and stop of the existing Waffo subscription still work.
-  const renewalEnd=new Date(legacy.end);renewalEnd.setUTCMonth(renewalEnd.getUTCMonth()+1);
+  const renewalEnd=addUtcMonths(legacy.end,1);
   const renewed=(await service.query(`SELECT pay_waffo_renew_subscription($1,'fixture',$2,6900,'usd',$3,$4,$5) v`,
     [legacy.subscription,`renew_${legacy.order}`,new Date(Math.floor(Date.now()/1000)*1000),legacy.end,renewalEnd])).rows[0].v;
   assert.equal(renewed.duplicate,false);
