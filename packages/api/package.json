@@ -70,6 +70,7 @@
     "./src/services/turn/http": "./src/services/turn/http.ts",
     "./src/services/turn/sse": "./src/services/turn/sse.ts",
     "./src/services/turn/tools/types": "./src/services/turn/tools/types.ts",
+    "./src/services/turn/fusionHttp": "./src/services/turn/fusionHttp.ts",
     "./src/services/turn/reportHttp": "./src/services/turn/reportHttp.ts",
     "./src/services/turn/view": "./src/services/turn/view.ts",
     "./src/services/turn/chatToolDeps": "./src/services/turn/chatToolDeps.ts",
