@@ -35,5 +35,20 @@ BEGIN
         ORDER BY m.seq), '[]'::jsonb)
       FROM (SELECT seq, role, turn_id, content FROM session_messages
             WHERE session_id = p_session_id AND visible AND deleted_at IS NULL AND seq > greatest(coalesce(p_after_seq, 0), 0)
-            ORDER BY seq LIMIT 50) m));
+            ORDER BY seq LIMIT 50) m),
+    -- The paid tool calls behind those replies, for the work rows a reload shows again (Owner 10-02): a reply's own turn and the
+    -- paused turns it continued. What was asked is the tool call in the model receipt just before; a receipt that holds none
+    -- gives null. Owner's key only; nothing is written.
+    'calls', (WITH RECURSIVE shown AS (
+        SELECT DISTINCT m.turn_id AS reply, m.turn_id AS id FROM (SELECT seq, turn_id FROM session_messages
+            WHERE session_id = p_session_id AND visible AND deleted_at IS NULL AND seq > greatest(coalesce(p_after_seq, 0), 0)
+            ORDER BY seq LIMIT 50) m
+        UNION ALL
+        SELECT x.reply, t.resume_of FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id WHERE t.resume_of IS NOT NULL)
+      SELECT coalesce(jsonb_agg(jsonb_build_object('turnId', x.reply, 'seq', c.seq, 'toolName', c.tool_name, 'status', c.status,
+          'usage', c.usage, 'q', t.policy->'q', 'multiplier', c.multiplier,
+          'arguments', (SELECT r.body::jsonb #>> '{choices,0,message,tool_calls,0,function,arguments}' FROM turn_call_raw r
+            WHERE r.turn_id = c.turn_id AND r.seq = c.seq - 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
+      FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id AND t.session_id = p_session_id
+      JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool' AND c.upper_usd > 0 AND c.status IN ('ok', 'unusable')));
 END $function$;
