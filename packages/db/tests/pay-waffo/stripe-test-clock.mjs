@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 
@@ -13,8 +14,7 @@ export async function stripeTestClockCases({admin,service,connect},method='card'
     membership_plan_id,billing_cycle,is_current,offer_kind,price_usage)
     VALUES('stripe','fixture','test','price','price_clock_pro',$1,'monthly',true,'standard','subscription')
     ON CONFLICT DO NOTHING`,[plan]);
-  const start=new Date(Math.floor(Date.now()/1000)*1000),month=(date,n=1)=>{
-    const d=new Date(date);d.setUTCMonth(d.getUTCMonth()+n);return d;};
+  const start=new Date(Math.floor(Date.now()/1000)*1000),month=(date,n=1)=>addUtcMonths(date,n);
   const fixture=async()=>{
     const user=randomUUID();await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
     const digest=JSON.stringify([{kind:'email',key_version:'test-v1',digest:user.replaceAll('-','').repeat(2)}]);

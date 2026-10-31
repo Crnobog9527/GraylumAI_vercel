@@ -3,6 +3,7 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -59,7 +60,7 @@ export async function stripeMpAnnualRefundCases({admin,service,connect}) {
    {orderId:o.id,userId:user,method,merchant:'fixture',mode:'test',providerRequest:{fixture:true}},expiry]);
   await service.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',`cs_${o.id}`,expiry]);
   const end=new Date(start);
-  if(o.billing_cycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1);else end.setUTCMonth(end.getUTCMonth()+1);
+  if(o.billing_cycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1);else end.setTime(addUtcMonths(end,1));
   const recurring=['card','card_cn'].includes(method),paidAt=new Date(start.getTime()+(recurring?1000:0));
   assert.equal((await one('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',
    [o.id,'fixture',`cs_${o.id}`,recurring?`in_${o.id}`:`pi_${o.id}`,o.amount_total,'usd',paidAt,

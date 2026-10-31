@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths,latestMonthEnd} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -17,7 +18,7 @@ export async function membershipExpiryStripeCases({admin,service}) {
   const version=current.version+1;
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:true},alipay:{enabled:true,annualVerified:true},version}]);
-  const month=(date,n=1)=>{const d=new Date(date);d.setUTCMonth(d.getUTCMonth()+n);return d;};
+  const month=(date,n=1)=>addUtcMonths(date,n);
   const level=async user=>(await admin.query('SELECT membership_level FROM profiles WHERE id=$1',[user])).rows[0].membership_level;
   const pay=async(user,plan,method,start,end)=>{
     const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,'standard','fixture',
@@ -38,7 +39,7 @@ export async function membershipExpiryStripeCases({admin,service}) {
   // Gold card whose first month ended two hours ago (still renewing, inside the 24-hour grace).
   const goldCard=async()=>{
     const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
-    const end=new Date(Math.floor(Date.now()/1000)*1000-2*3600000),start=month(end,-1);
+    const end=latestMonthEnd(new Date(Math.floor(Date.now()/1000)*1000-2*3600000)),start=month(end,-1);
     const f=await pay(user,gold,'card',start,end);
     await admin.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[user]);
     return {...f,end};
