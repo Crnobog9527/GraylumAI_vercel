@@ -347,9 +347,9 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume continues from the receipts: no model 
   // The first answer came from its receipt: only the continuation reached the model, carrying the stored search result.
   expect(bodies).toHaveLength(2);
   expect(bodies[1]).toContain('Coffee guide');
-  // One decision, one model call and one search on the paused turn; one model call on the resumed one, and nothing doubled.
+  // One decision, one model call and one search on the paused turn; one model call on the resumed one (by seq, per turn).
   expect((await rows(f.actor)).map(r => [r.call_kind, r.status]))
-    .toEqual([['decision', 'ok'], ['model', 'ok'], ['tool', 'ok'], ['model', 'ok']]);
+    .toEqual([['decision', 'ok'], ['model', 'ok'], ['model', 'ok'], ['tool', 'ok']]);
   const charged = (await db.query("select coalesce(sum(charged_credits),0)::int c from turns where actor_id=$1", [f.actor])).rows[0].c;
   expect(charged).toBe(await expectedCredits(f.actor));
   expect((await db.query("select state,close_kind,failure_code from turns where actor_id=$1 and id=$2", [f.actor, id])).rows[0])
