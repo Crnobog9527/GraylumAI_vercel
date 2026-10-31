@@ -2,14 +2,18 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
-import { RuntimeEmptyState, RuntimeHeader, RuntimePendingMessage, RuntimeReply, RuntimeTurnView } from '@/components/chat-display/runtime-messages';
+import {
+  RuntimeEmptyState, RuntimeHeader, RuntimePendingMessage, RuntimeReply, RuntimeTurnView,
+} from '@/components/chat-display/runtime-messages';
 import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
 import { WorkComposer } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
-import { clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor } from './send-input';
+import {
+  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor,
+} from './send-input';
 import { positioningRequiredNotice } from './positioning-required';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 import { useTurnChat } from './use-turn-chat';
@@ -34,10 +38,13 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
   async function send(text = input) {
     if (!text.trim() || chat.busy) return;
     // An unconfirmed earlier send of the same text keeps its request id, so the server replays instead of charging twice.
-    const url = new URL(location.href), requestId = requestIdFor(url.searchParams.get('request'), readPending(localStorage, sessionId), text, undefined, []);
+    const url = new URL(location.href);
+    const requestId = requestIdFor(url.searchParams.get('request'), readPending(localStorage, sessionId), text, undefined, []);
     url.searchParams.set('request', requestId); history.replaceState(null, '', url);
     rememberPending(localStorage, sessionId, { requestId, text, input: text, references: [] });
-    const restore = clearForSend(setInput, text, saved => { localStorage.setItem('opc-runtime-input:' + sessionId, saved); markPendingRestored(localStorage, sessionId); });
+    const restore = clearForSend(setInput, text, saved => {
+      localStorage.setItem('opc-runtime-input:' + sessionId, saved); markPendingRestored(localStorage, sessionId);
+    });
     setOutgoing(text);
     const answer = await chat.send(text, requestId);
     setOutgoing(null);
@@ -64,7 +71,8 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
   useEffect(() => {
     const node = scrollArea.current;
     if (!node || signature === undefined) return;
-    scrollState.current = followTranscript(node, scrollState.current, 'opc-runtime-scroll:' + sessionId, signature + (chat.live?.text.length ?? ''), () => null);
+    scrollState.current = followTranscript(node, scrollState.current, 'opc-runtime-scroll:' + sessionId,
+      signature + (chat.live?.text.length ?? ''), () => null);
   }, [sessionId, signature, chat.live?.text.length]);
 
   const notices = chat.notice?.text === POSITIONING_REQUIRED_NOTICE ? [positioningRequiredNotice('turn-positioning')]

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ToolAvailability } from '@repo/api/src/services/turn/tools/types';
 import type { TurnView } from '@repo/api/src/services/turn/view';
 import { runTurn } from '@/lib/turn-stream';
+import { readTurnView } from '@/app/(zh-hans)/app/positioning/[draftId]/mentor-turn-path';
 import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
 
 /*
@@ -15,13 +16,6 @@ const READ_MS = 3000;
 export type LiveTurn = { text: string; trimmed: string[] };
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
-async function readView(sessionId: string, fetcher: typeof fetch): Promise<TurnView | null> {
-  try {
-    const response = await fetcher(`/api/turn?sessionId=${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
-    return response.ok ? await response.json() as TurnView : null;
-  } catch { return null; }
-}
-
 export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: typeof fetch = (...args) => globalThis.fetch(...args)) {
   const [view, setView] = useState<TurnView | null>(null), [viewFailed, setViewFailed] = useState(false);
   const [live, setLive] = useState<LiveTurn | null>(null), [sending, setSending] = useState(false);
@@ -31,7 +25,7 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const read = useCallback(async () => {
-    const next = await readView(sessionId, fetcher);
+    const next = await readTurnView(sessionId, fetcher);
     if (!alive.current) return null;
     setViewFailed(!next);
     if (next) setView(next);
