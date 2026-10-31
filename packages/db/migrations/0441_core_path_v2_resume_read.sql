@@ -60,9 +60,13 @@ BEGIN
       SELECT coalesce(jsonb_agg(jsonb_build_object('turnId', x.reply, 'seq', c.seq, 'toolName', c.tool_name, 'status', c.status,
           'usage', c.usage, 'q', t.policy->'q', 'multiplier', c.multiplier,
           -- The model call that asked: a benchmark lookup settles in several rows, so not always the row just before.
-          'arguments', (SELECT r.body::jsonb #>> '{choices,0,message,tool_calls,0,function,arguments}' FROM turn_call_raw r
-            JOIN turn_calls m ON m.turn_id = r.turn_id AND m.seq = r.seq
-            WHERE r.turn_id = c.turn_id AND r.seq < c.seq AND m.call_kind = 'model' ORDER BY r.seq DESC LIMIT 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
+          -- Along the resume chain: a resumed turn's first real call may follow the model receipt of the turn it continued.
+          'arguments', (WITH RECURSIVE up AS (SELECT t.id AS id, 0 AS depth, t.resume_of AS previous
+              UNION ALL SELECT p.id, u.depth + 1, p.resume_of FROM up u JOIN turns p ON p.actor_id = p_actor_id AND p.id = u.previous)
+            SELECT r.body::jsonb #>> '{choices,0,message,tool_calls,0,function,arguments}' FROM up u
+              JOIN turn_calls m ON m.turn_id = u.id AND m.call_kind = 'model' AND (u.depth > 0 OR m.seq < c.seq)
+              JOIN turn_call_raw r ON r.turn_id = m.turn_id AND r.seq = m.seq
+              ORDER BY u.depth, m.seq DESC LIMIT 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
       FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id AND t.session_id = p_session_id
       JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool' AND c.upper_usd > 0 AND c.status IN ('ok', 'unusable')));
 END $function$;

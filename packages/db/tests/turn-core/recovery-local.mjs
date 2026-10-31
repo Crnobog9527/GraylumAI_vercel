@@ -254,6 +254,23 @@ try{
    ['{"choices":[{"message":{"content":"x"}}]}','{"choices":[{"message":{"content":"y"}}]}']);
   report.checks.push('a receipt that cannot be replayed carries no charge and is absorbed; the saved input ends with the turn');
  }
+ // 4d. A continuation's first real tool call follows the model receipt of the turn it continued: what was asked is found along the chain.
+ {
+  const a=await account(30),o=await open(a,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});
+  await begin(a,o.turnId,1,{upper:0.02});
+  await record(a,o.turnId,1,{n:0.02,raw:JSON.stringify({choices:[{message:{tool_calls:[{function:{arguments:'{"q":"chain"}'}}]}}]})});
+  assert.equal((await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.04})).paused,true);
+  await c.query('update profiles set credits=credits+100 where id=$1',[a.actor]);
+  const k=await open(a,{resumeOf:o.turnId,pol:policy({gCredits:60,minCredits:10,uModelCredits:20,limits:{model:2,paidTools:1,freeTools:0}})});
+  await begin(a,k.turnId,1,{kind:'tool',paid:true,upper:0.01});await record(a,k.turnId,1,{n:0.01,raw:'[{"vendor":"v"}]'});
+  await c.query("insert into session_messages(session_id,seq,role,turn_id,content,content_hash) values($1,1,'assistant',$2,'后',repeat('b',64))",[a.session,k.turnId]);
+  await c.query("set session_replication_role=replica");
+  await c.query(`update runtime_sessions set scope=jsonb_build_object('kind','work_item','workItemId',gen_random_uuid()) where id=$1`,[a.session]);
+  await c.query("set session_replication_role=origin");
+  const chained=await one('select turn_session_view($1,$2,0) v',[a.actor,a.session]);
+  assert.deepEqual(chained.calls.map(x=>[x.turnId,x.seq,x.arguments]),[[k.turnId,1,'{"q":"chain"}']]);
+  report.checks.push('a continuation\'s tool call finds its question in the continued turn\'s model receipt');
+ }
  // 5. Resume after a top-up (2.2): the paused turn closes and charges its known receipt once, the new turn freezes for what is
  // left of the limits; refusals roll back and keep the turn paused.
  {
