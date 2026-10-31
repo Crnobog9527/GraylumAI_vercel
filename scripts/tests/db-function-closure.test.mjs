@@ -257,3 +257,13 @@ test('pruneForKind drops the WHEN branches of CASE p_kind that other kinds take,
   const searched = "x := CASE WHEN a THEN mentor_fn() ELSE other_fn() END;";
   assert.deepEqual(seen(searched, 'chat', ['mentor_fn', 'other_fn']), ['mentor_fn', 'other_fn']);
 });
+
+test('pruneForKind reads neither an IF inside a CASE branch nor a keyword inside a string as the CASE own', () => {
+  const inner = "CASE p_kind WHEN 'mentor' THEN IF v_flag THEN PERFORM helper_a(); ELSE PERFORM helper_b(); END IF; WHEN 'report' THEN PERFORM rep_fn(); END CASE;";
+  const has = (body, kind, n) => pruneForKind(body, kind, true).includes(n);
+  assert.ok(has(inner, 'mentor', 'helper_a') && has(inner, 'mentor', 'helper_b') && !has(inner, 'mentor', 'rep_fn'));
+  const text = "SELECT CASE p_kind WHEN 'mentor' THEN concat('ELSE', helper_a()) ELSE helper_b() END;";
+  assert.ok(has(text, 'mentor', 'helper_a') && !has(text, 'mentor', 'helper_b') && has(text, 'chat', 'helper_b'));
+  const ifString = "IF p_kind = 'x' THEN PERFORM a_fn('END IF'); END IF; PERFORM b_fn();";
+  assert.ok(has(ifString, 'chat', 'b_fn') && !has(ifString, 'chat', 'a_fn'));
+});
