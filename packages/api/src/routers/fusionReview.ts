@@ -15,7 +15,7 @@ import { StagingAccessError, stagingProcedureError } from '../services/runtime/s
 import { reportRevisionService } from '../services/report/revisionSync';
 import { fusionExecutor } from '../services/fusion/executor';
 import { reviewFlow } from '../services/fusion/review';
-import { advanceReview, kickAdvance, withAdvanceLease } from '../services/fusion/background';
+import { handReviewToServer, withAdvanceLease } from '../services/fusion/background';
 import { ENDED_STATES, reviewState } from '../services/fusion/reviewRecord';
 import { adoptionChoices } from '../services/fusion/reviewAdoption';
 import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
@@ -88,19 +88,6 @@ const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
   } catch (cause) { throw reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path); }
 });
 
-/** Hands a review to the server (FUSION-BACKGROUND, Owner 2026-10-15): after the response, a fresh invocation
- * advances it step by step, so the user may leave. Without the relay (no server secret, a local run) one step runs
- * here after the response instead; the page's next read hands it over again. */
-function handToServer(ctx: { scheduleAfter?: (task: () => Promise<unknown>) => void; origin?: string;
-  supabaseAdmin?: SupabaseClient | null }, reviewId: string) {
-  const admin = ctx.supabaseAdmin, origin = ctx.origin;
-  if (!ctx.scheduleAfter || !admin) return;
-  ctx.scheduleAfter(async () => {
-    if (origin && await kickAdvance(origin, reviewId)) return;
-    await advanceReview({ admin, reviewId });
-  });
-}
-
 const mineCursor = z.object({ createdAt: z.string().datetime({ offset: true }), reviewId: uuid }).strict();
 const mineInput = z.object({ limit: z.number().int().min(1).max(50).default(10), draftId: uuid.optional(),
   cursor: mineCursor.optional() }).strict();
@@ -129,14 +116,14 @@ export const fusionReviewRouter = router({
     const started = ctx.replayed ?? await (async () => {
       try { return await (await liveFlow(ctx)).start(input); } catch (cause) { throw unwrap(cause, path); }
     })();
-    if (!ENDED_STATES.has(started.state)) handToServer(ctx, started.reviewId);
+    if (!ENDED_STATES.has(started.state)) handReviewToServer(ctx, started.reviewId);
     return started;
   }),
   /** The page only reads now (FUSION-BACKGROUND): returns the review as it stands and hands it to the server again
    * (a no-op while the server holds it). No call is claimed or returned for the page to dispatch. */
   continue: reader.input(review).mutation(async ({ ctx, input }) => {
     const view = await ctx.flow.read(input.reviewId);
-    if (!ENDED_STATES.has(view.state)) handToServer(ctx, input.reviewId);
+    if (!ENDED_STATES.has(view.state)) handReviewToServer(ctx, input.reviewId);
     return { review: view, calls: [] as typeof view.calls, background: true as const };
   }),
   /** Kept for old pages: runs only under the advance lease, so it never races the server; refused calmly otherwise. */

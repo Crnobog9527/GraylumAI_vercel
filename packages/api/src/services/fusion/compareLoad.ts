@@ -88,6 +88,15 @@ async function loadWorkspace(admin: SupabaseClient, actorId: string, sessionId: 
   return sources;
 }
 
+/** What a compare on the turn path reads before its open: the columns' Skill, sources and language. The history is turn_open's
+ * (session_messages), and an ordinary turn on this path sends no work material, so a column gets none either. */
+export async function loadCompareTurnParts(deps: { admin: SupabaseClient; user: SupabaseClient; actorId: string },
+  input: Pick<CompareRequestInput, 'sessionId' | 'question' | 'skill'>) {
+  const [skill, workspace, replyLocale] = await Promise.all([input.skill ? loadSkill(deps.admin, deps.user, input.skill) : null,
+    loadWorkspace(deps.admin, deps.actorId, input.sessionId), readReplyLocale(deps.admin, deps.actorId)]);
+  return { skill, workspace, references: [], question: input.question, replyLocale };
+}
+
 /** Reads everything a compare freezes (FUSION-COMPARE §3.2): the conversation history and work material from one
  * transaction (fusion_compare_context), the selected Skill through the ordinary user-scoped checks, and the confirmed
  * workspace sources. Library references are not offered in the first version (compareStart refuses them). */
