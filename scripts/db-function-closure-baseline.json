@@ -1,31 +1,10 @@
 {
  "closure": {
-  "turn_close": {
-   "functions": 25,
-   "tables": 28
-  },
-  "turn_fusion_close": {
-   "functions": 27,
-   "tables": 29
-  },
-  "turn_fusion_ended_review": {
-   "functions": 27,
-   "tables": 29
-  },
-  "turn_fusion_open": {
-   "functions": 16,
-   "tables": 22
-  },
-  "turn_fusion_recovery": {
-   "functions": 28,
-   "tables": 29
-  },
-  "turn_open": {
+  "turn_fusion_open[compare]": {
    "tables": 19
   },
-  "turn_recover": {
-   "functions": 28,
-   "tables": 29
+  "turn_open[report]": {
+   "tables": 19
   }
  },
  "rules": []

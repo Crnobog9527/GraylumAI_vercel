@@ -11,11 +11,13 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { kindsOf, pruneForKind } from './db-function-kinds.mjs';
 
 export const DEFAULTS = {
   enforceDir: 'packages/db/functions/turn',
+  // Per turn kind, for one main path function at a time (Owner 2026-10-31, option A; was 15 / 10 over all kinds at once).
   maxFunctions: 15,
-  maxTables: 10,
+  maxTables: 18,
   // The ledger leaves: counted as one function each, never entered (plan 7.1). Adding a name needs the Owner's approval.
   leaves: ['atomic_pre_deduct', 'turn_settle_credits', 'credit_available', 'credit_source_apply'],
   // Row locks (FOR UPDATE / FOR SHARE ...) may only name these objects.
@@ -104,18 +106,20 @@ export function tablesOf(body, tableNames) {
   return out;
 }
 
-// Reachable functions and tables from `root`; a leaf is counted and not entered.
-export function closure(root, functions, tableNames, leaves = DEFAULTS.leaves) {
+// Reachable functions and tables from `root`; a leaf is counted and not entered. With `kind`, branches that kind cannot take are
+// dropped (db-function-kinds.mjs); `apart` names (the EXCEPTIONS) are neither counted nor entered -- they are listed on their own.
+export function closure(root, functions, tableNames, leaves = DEFAULTS.leaves, { kind = null, apart = Object.keys(EXCEPTIONS) } = {}) {
   const functionNames = new Set(functions.keys());
   const seenFunctions = new Set(), seenTables = new Set(), stack = [root];
   while (stack.length) {
     const name = stack.pop();
-    if (seenFunctions.has(name) || !functions.has(name)) continue;
+    if (seenFunctions.has(name) || !functions.has(name) || (apart.includes(name) && name !== root)) continue;
     seenFunctions.add(name);
     if (leaves.includes(name) && name !== root) continue;
     for (const { body } of functions.get(name)) {
-      for (const callee of callsOf(body, functionNames)) if (callee !== name) stack.push(callee);
-      for (const table of tablesOf(body, tableNames)) seenTables.add(table);
+      const text = kind ? pruneForKind(body, kind) : body;
+      for (const callee of callsOf(text, functionNames)) if (callee !== name) stack.push(callee);
+      for (const table of tablesOf(text, tableNames)) seenTables.add(table);
     }
   }
   return { functions: [...seenFunctions].sort(), tables: [...seenTables].sort() };
@@ -230,11 +234,17 @@ export function analyze({ root = process.cwd(), functionsDir = 'packages/db/func
   const result = { functions: functions.size, tables: tables.size, enforcedDirPresent: existsSync(join(root, enforceDir)), roots: {}, violations: [] };
   const rootNames = roots.length ? roots : [...enforced.keys()];
   for (const name of rootNames) {
-    const c = closure(name, functions, tables, options.leaves);
-    result.roots[name] = { functions: c.functions.length, tables: c.tables.length, reachableFunctions: c.functions, reachableTables: c.tables };
-    if (enforced.has(name)) {
-      if (c.functions.length > options.maxFunctions) result.violations.push(`${name}: ${c.functions.length} reachable functions (max ${options.maxFunctions})`);
-      if (c.tables.length > options.maxTables) result.violations.push(`${name}: ${c.tables.length} reachable tables (max ${options.maxTables})`);
+    // One closure per turn kind; a function that no kind test touches counts once under its own name, otherwise each kind is `name[kind]`.
+    const perKind = kindsOf(name).map(kind => [kind, closure(name, functions, tables, options.leaves, { kind })]);
+    const key = c => `${c.functions}|${c.tables}`;
+    const same = perKind.every(([, c]) => key(c) === key(perKind[0][1]));
+    for (const [kind, c] of same ? [[null, perKind[0][1]]] : perKind) {
+      const label = kind ? `${name}[${kind}]` : name;
+      result.roots[label] = { functions: c.functions.length, tables: c.tables.length, reachableFunctions: c.functions, reachableTables: c.tables };
+      if (!enforced.has(name)) continue;
+      for (const [what, n, max] of [['functions', c.functions.length, options.maxFunctions], ['tables', c.tables.length, options.maxTables]]) {
+        if (n > max) result.violations.push(`${label}: ${n} reachable ${what} (max ${max})`);
+      }
     }
   }
   for (const [name, defs] of enforced) for (const def of defs.filter(d => d.file.startsWith(enforceAbs))) result.violations.push(...scan(name, def.body,

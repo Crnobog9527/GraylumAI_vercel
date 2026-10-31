@@ -57,7 +57,7 @@ jobs:
         run: node scripts/check-no-skill-source.mjs
 
       # CORE-PATH-V2 V2-1: the main path's database functions. Functions under packages/db/functions/turn must stay within
-      # 15 functions / 10 tables and free of hot-row locks and session state; every other function is only reported.
+      # 15 functions / 18 tables per turn kind and free of hot-row locks and session state; every other function is only reported.
       - name: Check main-path function closure and rules
         run: node scripts/db-function-closure.mjs
 
