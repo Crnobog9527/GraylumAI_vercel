@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -24,7 +25,7 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
     const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,$4,'fixture',
       'test',$5,'terms-v1',$6) o`,[user,plan,method,method==='card'?'gold_first30':'standard',version,terms(digest)])).rows[0];
     const cs=await checkout(user,o,method);
-    const start=new Date(Math.floor(Date.now()/1000)*1000-60000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+    const start=new Date(Math.floor(Date.now()/1000)*1000-60000),end=addUtcMonths(start,1);
     const paid=(await service.query('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[o.id,'fixture',cs,
       `in_${o.id}`,o.amount_total,'usd',new Date(start.getTime()+6000),`sub_${o.id}`,start,end])).rows[0].v;
     assert.equal(paid.state,'fulfilled',JSON.stringify(paid));

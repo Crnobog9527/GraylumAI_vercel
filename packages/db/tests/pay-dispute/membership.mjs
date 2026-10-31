@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths,latestMonthEnd} from '../utc-months.mjs';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
@@ -37,7 +38,7 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
   await c.query('SELECT pay_waffo_grant_period($1,1)',[order]);
   return {user,order,sub,start,end,providerSub:'sub_'+sub.replaceAll('-','')};
  };
- const start=new Date(Date.now()-60000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+ const start=latestMonthEnd(new Date(Date.now()-60000)),end=addUtcMonths(start,1);
  // Missing event subscription identity is derived from the mapped order's scoped provider ref.
  const derived=await member(start,end);
  await c.query('UPDATE payment_orders SET dispute_subscription_key=NULL WHERE id=$1',[derived.order]);
@@ -131,9 +132,9 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
  report.checks.push('withdrawn current-period dispute permits fresh monthly refund approval and claim without loosening active-hold guard');
  }
  // A previous period's freeze cannot take a separately paid current period away.
- const priorStart=new Date(start);priorStart.setUTCMonth(priorStart.getUTCMonth()-1);
+ const priorStart=addUtcMonths(start,-1);
  const next=await member(priorStart,start);
- const nextEnd=new Date(start);nextEnd.setUTCMonth(nextEnd.getUTCMonth()+1);
+ const nextEnd=addUtcMonths(start,1);
  const renewed=await v('SELECT pay_dispute_renew($1) v',[{subscription:next.sub,subscriptionId:next.providerSub,
   merchant:'fixture',mode:'test',invoiceId:'in_next_'+next.sub.replaceAll('-',''),paymentIntentId:'pi_next_'+next.sub.replaceAll('-',''),
   amount:1000,currency:'usd',paidAt:start,start,end:nextEnd}]);
@@ -175,7 +176,7 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
   } finally {await connection.end();}
  }
  report.checks.push('real two-connection prior-dispute/next-renewal races in both commit orders preserve delivered periods or require refund');
- const annualStart=new Date(start);annualStart.setUTCMonth(annualStart.getUTCMonth()-1);
+ const annualStart=addUtcMonths(start,-1);
  const annualEnd=new Date(annualStart);annualEnd.setUTCFullYear(annualEnd.getUTCFullYear()+1);
  const annual=await member(annualStart,annualEnd,'yearly');await receive(annual,{subscriptionId:annual.providerSub});
  assert.equal(await v('SELECT pay_waffo_grant_period($1,2) v',[annual.order]),0);
