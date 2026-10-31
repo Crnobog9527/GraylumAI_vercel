@@ -116,6 +116,9 @@ export async function readTurnView(sessionId: string, fetcher: typeof fetch): Pr
     let page: TurnView;
     try {
       const response = await fetcher(`/api/turn?sessionId=${encodeURIComponent(sessionId)}&afterSeq=${afterSeq}`, { cache: "no-store" });
+      // A refusal (not signed in, not this account's, a deleted conversation) is an answer: there is nothing to show, and reading again
+      // would change nothing. Only a failed or unavailable read (network, 5xx) is worth reading again.
+      if (response.status >= 400 && response.status < 500) return merged ?? { activeTurn: null, lastTurn: null, messages: [], calls: [] };
       if (!response.ok) return null;
       page = await response.json() as TurnView;
       // Not the view (a stub, a proxy page): nothing to show, and nothing to break the page with.

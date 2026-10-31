@@ -20,16 +20,20 @@ const fetcher: typeof fetch = (...args) => globalThis.fetch(...args);
 export function useMentorTurnPath(sessionId: string | undefined, draftId: string) {
   const choices = trpc.runtime.choices.useQuery(sessionId ? { sessionId } : undefined, { enabled: Boolean(sessionId), staleTime: RUNTIME_CHOICES_STALE_MS });
   const on = Boolean(sessionId && choices.data?.corePathV2);
-  const [view, setView] = useState<TurnView | null>(null);
+  const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
+  // The old path's mentor turns of this draft (opc.read) and the new path's: a draft that began on the old path stays on it.
+  const oldMentorTurns = useRef(0);
   const reload = useCallback(async () => {
     // Read whatever the switch says: a rollback must not hide replies the turn path already saved and charged.
     if (!sessionId) return null;
     const next = await readTurnView(sessionId, fetcher);
+    setFailed(!next);
     if (next) setView(next);
     return next;
   }, [sessionId]);
   useEffect(() => { void reload(); }, [reload]);
-  const active = Boolean(view?.activeTurn);
+  // A read that failed (the first, or the one after a stream ended) is read again until it answers; a turn running is read until it closes.
+  const active = Boolean(view?.activeTurn) || failed;
   useEffect(() => {
     if (!active || view?.activeTurn?.pauseReason) return;
     const timer = setInterval(() => void reload(), READ_MS);
@@ -57,11 +61,13 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
     },
     /** The draft as the old path read it, plus the turn path's bindings. */
     draft<T extends { turns?: unknown[] } | undefined>(draft: T): T {
+      oldMentorTurns.current = draft?.turns?.length ?? 0;
       return draft && { ...draft, turns: [...(draft.turns ?? []), ...projected.turns] };
     },
     /** The stream of one mentor request: POST /api/turn with the switch on, the old stream otherwise. */
     open<T>(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined, old: () => Promise<T>) {
-      if (!on) return old;
+      // The new path reads session_messages only: a draft with mentor talk on the old path would show it and the model would not have it.
+      if (!on || oldMentorTurns.current > 0) return old;
       return async () => readAfter(mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! },
         history.current)));
     },

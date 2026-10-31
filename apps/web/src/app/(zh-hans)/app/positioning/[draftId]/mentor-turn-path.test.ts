@@ -82,6 +82,12 @@ describe("mentor on the turn path", () => {
     expect(releaseResumedRequests(storage, "d", "turn:4")).toBe(1);
     expect([...store.keys()]).toEqual(["opc-step:d:s2"]);
   });
+  it("a refused read is an answer (nothing to show, nothing to read again); a failed one is read again", async () => {
+    const status = (code: number) => vi.fn(async () => new Response("{}", { status: code })) as never;
+    expect(await readTurnView("s", status(403))).toMatchObject({ messages: [], calls: [], activeTurn: null });
+    expect(await readTurnView("s", status(503))).toBeNull();
+    expect(await readTurnView("s", vi.fn(async () => { throw new Error("network"); }) as never)).toBeNull();
+  });
   it("reads every page of saved messages", async () => {
     const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ seq: from + i, role: "user", turnId: 1, content: "" }));
     const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(view(url.endsWith("afterSeq=0") ? page(1, 50) : page(51, 3)))));
