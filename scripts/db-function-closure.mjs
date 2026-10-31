@@ -38,6 +38,12 @@ export const DEFAULTS = {
 // decision (ENGINEERING 5). The line says which decision and how big the function's own closure is, so a growth shows.
 export const EXCEPTIONS = { research_turn_apply: 'Owner 2026-10-30: a mentor turn may write its own research_* rows inside turn_close' };
 
+// The one kind of database call a turn's tools may make between model calls (ENGINEERING 5, Owner 2026-10-28): a free read of the user's
+// own material, by the owner's key, through the read client, with no lock, no write and no turn_calls row. Adding a name needs that rule
+// to cover it; freeReadViolations holds each name to it.
+export const FREE_READS = ['library_turn_read'];
+export const TOOLS_DIR = 'packages/api/src/services/turn/tools';
+
 const KEYWORDS = new Set(['if', 'in', 'values', 'select', 'from', 'exists', 'case', 'when', 'and', 'or', 'not', 'on', 'as', 'using',
   'returning', 'coalesce', 'nullif', 'greatest', 'least', 'count', 'sum', 'max', 'min', 'array_agg', 'jsonb_build_object',
   'jsonb_build_array', 'jsonb_array_elements', 'to_jsonb', 'now', 'clock_timestamp', 'lateral', 'any', 'all', 'set', 'where']);
@@ -70,7 +76,7 @@ export function readFunctions(functionsDir) {
       const end = rest.indexOf(open[1], bodyStart);
       const body = rest.slice(bodyStart, end < 0 ? undefined : end);
       const list = functions.get(match[1].toLowerCase()) ?? [];
-      list.push({ file, body });
+      list.push({ file, head: rest.slice(0, open.index), body });
       functions.set(match[1].toLowerCase(), list);
     }
   }
@@ -224,6 +230,99 @@ export function scan(name, body, options = DEFAULTS) {
   return found;
 }
 
+const WRITE = /\b(?:INSERT\s+INTO|UPDATE\s+(?:ONLY\s+)?[a-z_."]+(?:\s+(?:AS\s+)?[a-z_]+)?\s+SET|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE)\b/i;
+const ANY_LOCK = /\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b/i;
+// The name counts only as a whole string literal: a concatenated or interpolated first argument is not a name this check can read.
+const DB_CALL = /(?<!\b(?:Buffer|Array|Object|Set|Map))\.(rpc|from)\(\s*(?:(['"`])([a-z_0-9]*)\2\s*[,)])?/gi;
+const SET_OPERATION = /\b(?:UNION|INTERSECT|EXCEPT)\b/i;
+const TABLE_REF = /\b(?:FROM|JOIN)\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?/gi;
+const NOT_ALIAS = /^(?:where|join|on|left|right|inner|outer|cross|full|group|order|limit|union|intersect|except|for|using|natural)$/i;
+
+// The ON and WHERE text of one select: what actually limits its rows, not its output list or later clauses. Parenthesised groups are
+// already blank here, so an OR left in the text is a top-level one and could let any row through: such a select proves nothing.
+function rowFilters(scope) {
+  const tail = scope.slice(Math.max(0, scope.search(/\bFROM\b/i)));
+  // The ON of an outer join keeps the rows of its preserved side whatever it says: there only WHERE limits the rows.
+  const start = tail.search(/\b(?:LEFT|RIGHT|FULL)\b/i) < 0 ? tail.search(/\b(?:ON|WHERE)\b/i) : tail.search(/\bWHERE\b/i);
+  if (start < 0) return '';
+  const rest = tail.slice(start), end = rest.search(WHERE_END);
+  const filters = end < 0 ? rest : rest.slice(0, end);
+  return /\bOR\b/i.test(filters) ? '' : filters;
+}
+
+// Tables of each select in `code` that are not held to the owner: directly (<alias>.actor_id = p_actor_id, profile_id for a table keyed
+// by the profile) or through an equal owner column of a table in the same select that is. One filtered branch does not vouch for another.
+export function unownedReads(code, tableNames) {
+  const found = new Set();
+  for (const statement of statements(code)) {
+    const ctes = cteNames(statement);
+    for (const ref of statement.matchAll(TABLE_REF)) {
+      const table = ref[1].toLowerCase();
+      if (!tableNames.has(table) || ctes.has(table)) continue;
+      // A comma join hides the next table from TABLE_REF: refused outright, a free read spells its joins.
+      if (/^\s*,/.test(statement.slice(ref.index + ref[0].length))) { found.add(table); continue; }
+      const before = ownSelect(statement, ref.index).split(SET_OPERATION).pop();
+      const scope = before + scopeAfter(statement, ref.index).split(SET_OPERATION)[0];
+      const refs = [...scope.matchAll(TABLE_REF)].filter(m => tableNames.has(m[1].toLowerCase()))
+        .map(m => ({ table: m[1].toLowerCase(), alias: (m[2] && !NOT_ALIAS.test(m[2]) ? m[2] : m[1]).toLowerCase() }));
+      const filters = rowFilters(scope);
+      const keyed = new Set([...filters.matchAll(/(?:\b([a-z_][a-z0-9_]*)\.)?\b(?:actor_id|profile_id)\s*=\s*p_actor_id\b/gi)]
+        .flatMap(m => (m[1] ? [m[1].toLowerCase()] : refs.length === 1 ? [refs[0].alias] : [])));
+      const links = [...filters.matchAll(/\b([a-z_][a-z0-9_]*)\.actor_id\s*=\s*([a-z_][a-z0-9_]*)\.actor_id\b/gi)]
+        .map(m => [m[1].toLowerCase(), m[2].toLowerCase()]);
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const [a, b] of links) if (keyed.has(a) !== keyed.has(b)) { keyed.add(a); keyed.add(b); grew = true; }
+      }
+      const alias = (ref[2] && !NOT_ALIAS.test(ref[2]) ? ref[2] : ref[1]).toLowerCase();
+      if (!keyed.has(alias)) found.add(table);
+    }
+  }
+  return [...found].sort();
+}
+
+// A free read must stay what the rule allows, all the way down: read-only volatility, no write or lock in anything it reaches, and the
+// owner's key as its first argument and in its filters.
+export function freeReadViolations(functions, tableNames, names = FREE_READS) {
+  const found = [];
+  for (const name of names) {
+    const defs = functions.get(name);
+    if (!defs) { found.push(`${name}: free read has no function`); continue; }
+    for (const { head, body } of defs) {
+      if (!/\(\s*p_actor_id\s+uuid\b/i.test(head)) found.push(`${name}: free read without p_actor_id first`);
+    }
+    for (const reached of closure(name, functions, tableNames, []).functions) {
+      for (const { head, body } of functions.get(reached) ?? []) {
+        const code = stripCode(body);
+        for (const table of unownedReads(code, tableNames)) found.push(`${name}: reaches a read of ${table} without the owner key in ${reached}`);
+        if (!/\b(?:STABLE|IMMUTABLE)\b/i.test(head)) found.push(`${name}: reaches ${reached}, not STABLE or IMMUTABLE`);
+        if (WRITE.test(code)) found.push(`${name}: reaches a write in ${reached}`);
+        if (ANY_LOCK.test(code)) found.push(`${name}: reaches a row lock in ${reached}`);
+      }
+    }
+  }
+  return found;
+}
+
+// What the tool layer calls in the database. Everything else a tool needs came from turn_open or the catalog cache (ENGINEERING 5).
+export function toolCallViolations(toolsDir, names = FREE_READS) {
+  const found = [];
+  if (!existsSync(toolsDir)) return found;
+  const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory()
+    ? (entry.name === '__tests__' ? [] : walk(join(dir, entry.name)))
+    : entry.name.endsWith('.ts') && !/\.(?:test|integration)\.ts$/.test(entry.name) ? [join(dir, entry.name)] : []);
+  for (const file of walk(toolsDir)) {
+    const text = readFileSync(file, 'utf8');
+    for (const m of text.matchAll(DB_CALL)) {
+      const line = text.slice(0, m.index).split('\n').length;
+      const where = `${file.slice(toolsDir.length + 1)}:${line}`;
+      if (m[1] !== 'rpc' || !names.includes(m[3])) found.push(`${where}: tool calls the database outside the free reads (.${m[1]})`);
+      else if (!/\bread$/.test(text.slice(0, m.index))) found.push(`${where}: free read ${m[3]} not through the read client`);
+    }
+  }
+  return found;
+}
+
 export function analyze({ root = process.cwd(), functionsDir = 'packages/db/functions', migrationsDir = 'packages/db/migrations',
   baselineDir = 'packages/db/baseline',
   roots = [], enforceDir = DEFAULTS.enforceDir, options = DEFAULTS } = {}) {
@@ -249,6 +348,7 @@ export function analyze({ root = process.cwd(), functionsDir = 'packages/db/func
   }
   for (const [name, defs] of enforced) for (const def of defs.filter(d => d.file.startsWith(enforceAbs))) result.violations.push(...scan(name, def.body,
     options));
+  if (existsSync(join(root, TOOLS_DIR))) result.violations.push(...freeReadViolations(functions, tables), ...toolCallViolations(join(root, TOOLS_DIR)));
   // Report-only scan of the roots that are not enforced: what the old path would trip.
   result.reported = {};
   for (const name of rootNames.filter(n => !enforced.has(n))) {
