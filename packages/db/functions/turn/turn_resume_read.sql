@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.turn_resume_read(p_actor_id uuid, p_session_id
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE s runtime_sessions; t turns; n_model integer; n_paid integer; n_free integer; n_decision integer;
+DECLARE s runtime_sessions; t turns; n_model integer; n_paid integer; n_free integer; n_decision integer; broke integer;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_actor_id AND status = 'active' AND is_deleted::text = 'false') THEN
     RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
@@ -20,15 +20,18 @@ BEGIN
   -- As turn_resume_carry, which checks all of this again under the locks.
   IF t.id IS NULL OR s.active_turn_id IS DISTINCT FROM t.id OR t.state IS DISTINCT FROM 'paused'
     OR t.pause_reason IS DISTINCT FROM 'waiting_credits' THEN RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000'; END IF;
+  -- A call that will be made again does not use up the limits (turn_resume_carry counts the same way).
+  broke := public.turn_resume_break(p_actor_id, t.id);
   SELECT count(*) FILTER (WHERE call_kind = 'model'), count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd > 0),
          count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd = 0), count(*) FILTER (WHERE call_kind = 'decision')
     INTO n_model, n_paid, n_free, n_decision
-  FROM turn_calls WHERE turn_id = t.id AND status NOT IN ('not_sent','rejected','no_charge_402');
+  FROM turn_calls WHERE turn_id = t.id AND status NOT IN ('not_sent','rejected','no_charge_402') AND (seq < broke OR call_kind = 'decision');
   RETURN jsonb_build_object('kind', t.kind,
     'limits', jsonb_build_object('model', (t.policy->'limits'->>'model')::int - n_model,
       'paidTools', coalesce((t.policy->'limits'->>'toolRows')::int, (t.policy->'limits'->>'paidTools')::int) - n_paid, 'freeTools', (t.policy->'limits'->>'freeTools')::int - n_free,
       'decisions', greatest(coalesce((t.policy->'limits'->>'decisions')::int, 0) - n_decision, 0)),
     'decided', EXISTS (SELECT 1 FROM turn_calls WHERE turn_id = t.id AND call_kind = 'decision' AND status = 'ok'),
+    'input', (SELECT m.content::jsonb FROM session_messages m WHERE m.session_id = s.id AND m.turn_id = t.id AND NOT m.visible LIMIT 1),
     'calls', (WITH RECURSIVE chain AS (
         SELECT t.id AS id, t.resume_of AS previous
         UNION ALL
@@ -36,6 +39,6 @@ BEGIN
       SELECT coalesce(jsonb_agg(jsonb_build_object('seq', c.seq, 'callKind', c.call_kind, 'toolName', c.tool_name, 'status', c.status,
           'body', r.body) ORDER BY c.turn_id, c.seq), '[]'::jsonb)
       FROM chain x JOIN turn_calls c ON c.turn_id = x.id AND c.call_kind IN ('model', 'tool') AND c.status IN ('ok', 'unusable')
-        AND NOT (c.call_kind = 'tool' AND c.upper_usd = 0)
+        AND NOT (c.call_kind = 'tool' AND c.upper_usd = 0) AND c.seq < public.turn_resume_break(p_actor_id, c.turn_id)
       LEFT JOIN turn_call_raw r ON r.turn_id = c.turn_id AND r.seq = c.seq));
 END $function$;

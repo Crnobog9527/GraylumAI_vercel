@@ -35,6 +35,7 @@ BEGIN
       settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END,
       stopped_by_user = false, delivered = false, failure_code = 'resumed'
     WHERE actor_id = p_actor_id AND id = p_turn_id;
+  DELETE FROM session_messages WHERE session_id = t.session_id AND turn_id = p_turn_id AND NOT visible;
   UPDATE runtime_sessions SET active_turn_id = NULL
     WHERE id = t.session_id AND actor_id = p_actor_id AND active_turn_id = p_turn_id;
 END $function$;

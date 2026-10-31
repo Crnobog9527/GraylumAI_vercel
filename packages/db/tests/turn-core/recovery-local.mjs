@@ -33,7 +33,7 @@ const begin=(a,turn,seq,{kind='model',paid=null,upper=0.02,tool=null}={})=>
  one('select turn_call_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',
   [a.actor,turn,seq,kind,kind==='tool'?null:randomUUID(),kind==='tool'?(tool??'research_search'):null,paid,hash('r'+turn+seq),upper,6]);
 const identity=(a,turn,seq,id='gen-'+seq)=>one('select turn_call_identity($1,$2,$3,$4) v',[a.actor,turn,seq,id]);
-const record=(a,turn,seq,{n=0.01,raw='body'}={})=>
+const record=(a,turn,seq,{n=0.01,raw='[{"choices":[]}]'}={})=>
  one("select turn_call_record($1,$2,$3,'ok',$4,$4,'{}',null,$5,$6) v",[a.actor,turn,seq,n,hash('p'+turn+seq),raw]);
 const close=(a,turn,kind='completed')=>one("select turn_close($1,$2,$3,'[]',false,false,null) v",[a.actor,turn,kind]);
 const claim=(limit=50,client=c)=>one('select turn_recovery_claim($1) v',[limit],client);
@@ -208,14 +208,42 @@ try{
   await marked(new Date());
   assert.match(await refusal(one('select turn_resume_read($1,$2,$3) v',[a.actor,a.session,o.turnId])),/TURN_SESSION_ERASED/);
   await marked(null);
+  // What the user asked is saved once at the pause, hidden from every reader, and given back to the resume.
+  assert.equal(await one('select turn_pause_save($1,$2,$3) v',[a.actor,o.turnId,JSON.stringify({kind:'chat',text:'早起'})]),true);
+  assert.equal(await one('select turn_pause_save($1,$2,$3) v',[a.actor,o.turnId,JSON.stringify({kind:'chat',text:'again'})]),true);
+  assert.deepEqual((await one('select turn_resume_read($1,$2,$3) v',[a.actor,a.session,o.turnId])).input,{kind:'chat',text:'早起'});
+  assert.equal(await one('select count(*)::int v from session_messages where session_id=$1',[a.session]),1,'saved once');
+  assert.equal(await one('select turn_pause_save($1,$2,$3) v',[running.actor,r.turnId,'{}']),false,'only at a pause');
   // The view shows the paid call behind a reply, under the turn that saved it, with what was asked.
-  await c.query("insert into session_messages(session_id,seq,role,turn_id,content,content_hash) values($1,1,'assistant',$2,'好',repeat('a',64))",[a.session,o.turnId]);
+  await c.query("insert into session_messages(session_id,seq,role,turn_id,content,content_hash) values($1,2,'assistant',$2,'好',repeat('a',64))",[a.session,o.turnId]);
   await c.query("set session_replication_role=replica");
   await c.query(`update runtime_sessions set scope=jsonb_build_object('kind','work_item','workItemId',gen_random_uuid()) where id=$1`,[a.session]);
   await c.query("set session_replication_role=origin");
   const view=await one('select turn_session_view($1,$2,0) v',[a.actor,a.session]);
   assert.deepEqual(view.calls.map(x=>[x.turnId,x.seq,x.status,x.arguments]),[[o.turnId,2,'ok','{"q":"early"}']]);
+  assert.deepEqual(view.messages.map(m=>m.content),['好'],'the saved input is no message');
+  // A 24-hour expiry ends the paused turn, and what it kept goes with it.
+  await age(a,o.turnId,'25 hours');
+  await one("select turn_close($1,$2,'expired','[]',false,true,'expired') v",[a.actor,o.turnId]);
+  assert.equal(await one("select count(*)::int v from session_messages where session_id=$1 and not visible",[a.session]),0);
   report.checks.push('turn_resume_read gives limits and receipts, writes nothing, refuses as a resume; the view lists paid calls');
+ }
+ // 4c. A receipt with no completion (finished by the recovery lookup) cannot be replayed: that call runs again and the user pays for
+ // it once. The first attempt carries nothing; it stays the platform's, recorded as absorbed. The saved input goes with the resume.
+ {
+  const a=await account(30),o=await open(a,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});
+  await begin(a,o.turnId,1,{upper:0.02});await record(a,o.turnId,1,{n:0.02,raw:'{"choices":[{"message":{"content":"x"}}]}'});
+  await begin(a,o.turnId,2,{upper:0.02});await record(a,o.turnId,2,{n:0.02,raw:'{"data":{"model":"m"}}'});
+  assert.equal((await begin(a,o.turnId,3,{upper:0.04})).paused,true);
+  await one('select turn_pause_save($1,$2,$3) v',[a.actor,o.turnId,'{"kind":"chat","text":"hi"}']);
+  await c.query('update profiles set credits=credits+100 where id=$1',[a.actor]);
+  const read=await one('select turn_resume_read($1,$2,$3) v',[a.actor,a.session,o.turnId]);
+  assert.deepEqual([read.calls.map(x=>x.seq),read.limits.model],[[1],2],'the unreplayable call is not replayed and uses no limit');
+  const r=await open(a,{resumeOf:o.turnId,pol:policy({gCredits:40,minCredits:10,uModelCredits:20,limits:{model:2,paidTools:0,freeTools:1}})});
+  assert.equal(await one("select (policy->>'carriedCredits')::int v from turns where id=$1",[r.turnId]),12,'only the replayed call is carried');
+  assert.equal((await c.query("select absorbed_credits a from turns where id=$1",[o.turnId])).rows[0].a,12,'the first attempt is absorbed');
+  assert.equal(await one("select count(*)::int v from session_messages where session_id=$1",[a.session]),0,'the saved input ended with the paused turn');
+  report.checks.push('a receipt that cannot be replayed carries no charge and is absorbed; the saved input ends with the turn');
  }
  // 5. Resume after a top-up (2.2): the paused turn closes and charges its known receipt once, the new turn freezes for what is
  // left of the limits; refusals roll back and keep the turn paused.
