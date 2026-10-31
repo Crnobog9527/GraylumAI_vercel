@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { STREAM_INTERRUPTED } from "./mentor-turn";
 import { envelopeWithExecution, isRefusedBeforeAdmission, parseStepEnvelope } from "./mentor-turn";
 import { envelopeExecution } from "./step-recovery";
-import { mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, TurnRefused } from "./mentor-turn-path";
+import { releaseResumedRequests, mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, TurnRefused } from "./mentor-turn-path";
 
 const view = (messages: unknown[], activeTurn: unknown = null) => ({ activeTurn, lastTurn: null, messages, calls: [] }) as never;
 const reply = (seq: number, turnId: number, stepId = "s1") => ({ seq, role: "assistant", turnId, content: JSON.stringify({ format: "agent-turn.v1", message: "好", card: null, stepId }) });
@@ -71,6 +71,16 @@ describe("mentor on the turn path", () => {
     expect(isRefusedBeforeAdmission(refused, false)).toBe(true);
     expect(isRefusedBeforeAdmission(refused, true)).toBe(false);
     expect(isRefusedBeforeAdmission(new TurnRefused("TURN_FAILED", "未完成", false), false)).toBe(false);
+  });
+  it("releases the request record of a turn that was continued, and only that one", () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (key: string) => store.get(key) ?? null, removeItem: (key: string) => void store.delete(key),
+      key: (index: number) => [...store.keys()][index] ?? null, get length() { return store.size; } };
+    const request = (requestId: string) => ({ draftId: "d", stepId: "s1", purpose: "mentor", requestId, input: "x" });
+    store.set("opc-step:d:s1", JSON.stringify({ request: request("r1"), executionId: "turn:4" }));
+    store.set("opc-step:d:s2", JSON.stringify({ request: request("r2"), executionId: "turn:9" }));
+    expect(releaseResumedRequests(storage, "d", "turn:4")).toBe(1);
+    expect([...store.keys()]).toEqual(["opc-step:d:s2"]);
   });
   it("reads every page of saved messages", async () => {
     const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ seq: from + i, role: "user", turnId: 1, content: "" }));

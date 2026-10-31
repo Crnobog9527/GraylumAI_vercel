@@ -5,7 +5,8 @@ import type { TurnEvent } from "@repo/api/src/services/turn/sse";
 import type { TurnView } from "@repo/api/src/services/turn/view";
 import { runTurn } from "@/lib/turn-stream";
 import { turnCodeNotice } from "@/app/(zh-hans)/app/runtime/turn-notices";
-import { STREAM_INTERRUPTED, type MentorExecution, type MentorRequest, type MentorTurn } from "./mentor-turn";
+import { stepEnvelopeKey } from "./step-recovery";
+import { parseStepEnvelope, STREAM_INTERRUPTED, type MentorExecution, type MentorRequest, type MentorTurn } from "./mentor-turn";
 
 /*
  * CORE-PATH-V2 V2-10: the positioning page on POST /api/turn. The page and its recovery work on executions and on the draft's turn
@@ -57,6 +58,22 @@ export function mentorTurnBody(request: MentorRequest, ids: { sessionId: string;
     ...(sourceSeq === undefined ? {} : { answer: { sourceSeq,
       ...(request.answerSource!.optionIndex === undefined ? {} : { optionIndex: request.answerSource!.optionIndex }) } }),
     ...(request.researchRefreshId ? { researchRefreshId: request.researchRefreshId } : {}) };
+}
+
+/**
+ * The request records kept for a turn that has since been continued. The continuation is a new turn and the reply is saved under
+ * it, so recovery would never match the old record to a saved reply: once the continuation succeeded the record is released.
+ */
+export function releaseResumedRequests(storage: Pick<Storage, "getItem" | "removeItem" | "key" | "length">, draftId: string,
+  pausedExecutionId: string): number {
+  const prefix = stepEnvelopeKey(draftId, ""), keys: string[] = [];
+  for (let index = 0; index < storage.length; index++) { const key = storage.key(index); if (key?.startsWith(prefix)) keys.push(key); }
+  let released = 0;
+  for (const key of keys) {
+    const raw = storage.getItem(key);
+    if (raw && parseStepEnvelope(raw)?.executionId === pausedExecutionId) { storage.removeItem(key); released++; }
+  }
+  return released;
 }
 
 /** A turn the server refused or ended, with its fixed notice; `kept` proves nothing was stored. */

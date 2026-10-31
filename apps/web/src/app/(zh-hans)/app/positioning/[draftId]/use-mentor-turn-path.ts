@@ -8,13 +8,16 @@ import type { TurnView } from "@repo/api/src/services/turn/view";
 import { trpc } from "@/trpc/client";
 import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
 import type { MentorRequest } from "./mentor-turn";
-import { isTurnExecution, mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, type TurnHistory } from "./mentor-turn-path";
+import {
+  isTurnExecution, releaseResumedRequests, turnExecutionId, mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory,
+  type TurnHistory,
+} from "./mentor-turn-path";
 
 const READ_MS = 3000;
 const fetcher: typeof fetch = (...args) => globalThis.fetch(...args);
 
 /** CORE-PATH-V2 V2-10: the turn path's side of the positioning page. Off, it adds nothing and the page runs on the old path. */
-export function useMentorTurnPath(sessionId: string | undefined) {
+export function useMentorTurnPath(sessionId: string | undefined, draftId: string) {
   const choices = trpc.runtime.choices.useQuery(sessionId ? { sessionId } : undefined, { enabled: Boolean(sessionId), staleTime: RUNTIME_CHOICES_STALE_MS });
   const on = Boolean(sessionId && choices.data?.corePathV2);
   const [view, setView] = useState<TurnView | null>(null);
@@ -35,8 +38,8 @@ export function useMentorTurnPath(sessionId: string | undefined) {
 
   /** However the stream ends (a pause for credits, a dropped connection), the page reads the turn's state: that is what shows the
    * continue offer, or the reply the server saved. */
-  async function* readAfter<T>(events: AsyncGenerator<T>): AsyncGenerator<T> {
-    try { yield* events; } finally { void reload(); }
+  async function* readAfter<T>(events: AsyncGenerator<T>, onDone?: () => void): AsyncGenerator<T> {
+    try { yield* events; onDone?.(); } finally { void reload(); }
   }
 
   const projected = useMemo(() => view ? turnHistory(view) : { executions: [], turns: [], activeExecution: null }, [view]);
@@ -49,7 +52,8 @@ export function useMentorTurnPath(sessionId: string | undefined) {
     notices(stream: (open: () => Promise<AsyncIterable<AgentTurnEvent>>) => void): ChatNotice[] {
       if (!paused) return [];
       return [{ id: "turn-paused", tone: "warning", text: TURN_PAUSED_NOTICE, actions: [{ label: TURN_CONTINUE, onClick: () => stream(async () =>
-        readAfter(mentorTurnEvents({ kind: "resume", sessionId, requestId: crypto.randomUUID(), resumeOf: paused.turnId }))) }] }];
+        readAfter(mentorTurnEvents({ kind: "resume", sessionId, requestId: crypto.randomUUID(), resumeOf: paused.turnId }),
+          () => releaseResumedRequests(sessionStorage, draftId, turnExecutionId(paused.turnId)))) }] }];
     },
     /** The draft as the old path read it, plus the turn path's bindings. */
     draft<T extends { turns?: unknown[] } | undefined>(draft: T): T {

@@ -62,7 +62,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
-  const list = trpc.opc.list.useQuery(), turnPath = useMentorTurnPath(read.data?.sessionId);
+  const list = trpc.opc.list.useQuery(), turnPath = useMentorTurnPath(read.data?.sessionId, draftId);
   const prepareStep = trpc.opc.prepareStep.useMutation();
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
