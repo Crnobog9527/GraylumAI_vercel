@@ -148,7 +148,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     attached.current.add(id);
     setReopened(id);
     void latestStream.current(id);
-  }, [streaming, shown, retryRound]);
+  }, [streaming, shown, retryRound, turn.on]);
 
   const working = start.isPending || streaming;
   const offer = generationOffer({ canGenerate, working, server, executionId, status: shown });

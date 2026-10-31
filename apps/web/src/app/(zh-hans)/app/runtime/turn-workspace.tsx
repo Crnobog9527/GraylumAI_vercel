@@ -67,7 +67,7 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
   const messages = chat.view?.messages ?? [];
   const turns = messages.filter(m => m.role === 'assistant');
   const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;
-  const signature = transcriptSignature(messages.map(m => m.seq).join('|'), outgoing);
+  const signature = transcriptSignature(messages.map(m => m.seq).join('|'), outgoing ? { text: outgoing } : null);
   useEffect(() => {
     const node = scrollArea.current;
     if (!node || signature === undefined) return;
