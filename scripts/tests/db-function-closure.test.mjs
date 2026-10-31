@@ -240,3 +240,38 @@ test('the repository holds: library_turn_read is a free read and the tools call 
   const result = analyze();
   assert.deepEqual(result.violations.filter(v => /free read|tool calls|library_turn_read/.test(v)), []);
 });
+
+test('pruneForKind drops the WHEN branches of CASE p_kind that other kinds take, and keeps what it cannot judge', () => {
+  const simple = "x := CASE p_kind WHEN 'mentor' THEN mentor_fn(a) WHEN 'report', 'review' THEN rep_fn(CASE WHEN q THEN 1 ELSE 2 END) ELSE other_fn() END;";
+  const seen = (body, kind, names) => names.filter(n => pruneForKind(body, kind, true).includes(n));
+  const names = ['mentor_fn', 'rep_fn', 'other_fn'];
+  assert.deepEqual(seen(simple, 'mentor', names), ['mentor_fn']);
+  assert.deepEqual(seen(simple, 'review', names), ['rep_fn']);
+  assert.deepEqual(seen(simple, 'chat', names), ['other_fn']);
+  // A WHEN value that is not only string literals cannot be judged: every branch stays, ELSE included.
+  const open = "x := CASE p_kind WHEN 'mentor' THEN mentor_fn() WHEN some_var THEN rep_fn() ELSE other_fn() END;";
+  assert.deepEqual(seen(open, 'chat', names), ['rep_fn', 'other_fn']);
+  assert.deepEqual(seen(open, 'mentor', names), ['mentor_fn', 'rep_fn']);
+  // p_kind that is not the turn kind, and a searched CASE, are left alone.
+  assert.deepEqual(names.filter(n => pruneForKind(simple, 'chat').includes(n)), names);
+  const searched = "x := CASE WHEN a THEN mentor_fn() ELSE other_fn() END;";
+  assert.deepEqual(seen(searched, 'chat', ['mentor_fn', 'other_fn']), ['mentor_fn', 'other_fn']);
+});
+
+test('pruneForKind reads neither an IF inside a CASE branch nor a keyword inside a string as the CASE own', () => {
+  const inner = "CASE p_kind WHEN 'mentor' THEN IF v_flag THEN PERFORM helper_a(); ELSE PERFORM helper_b(); END IF; WHEN 'report' THEN PERFORM rep_fn(); END CASE;";
+  const has = (body, kind, n) => pruneForKind(body, kind, true).includes(n);
+  assert.ok(has(inner, 'mentor', 'helper_a') && has(inner, 'mentor', 'helper_b') && !has(inner, 'mentor', 'rep_fn'));
+  const text = "SELECT CASE p_kind WHEN 'mentor' THEN concat('ELSE', helper_a()) ELSE helper_b() END;";
+  assert.ok(has(text, 'mentor', 'helper_a') && !has(text, 'mentor', 'helper_b') && has(text, 'chat', 'helper_b'));
+  const ifString = "IF p_kind = 'x' THEN PERFORM a_fn('END IF'); END IF; PERFORM b_fn();";
+  assert.ok(has(ifString, 'chat', 'b_fn') && !has(ifString, 'chat', 'a_fn'));
+});
+
+test('pruneForKind does not read END LOOP as the end of a CASE, and keeps every branch around a nested BEGIN block', () => {
+  const loop = "CASE p_kind WHEN 'mentor' THEN CASE v_flag WHEN true THEN LOOP PERFORM helper_a(); EXIT; END LOOP; ELSE PERFORM helper_b(); END CASE; ELSE PERFORM helper_c(); END CASE;";
+  const has = (body, kind, n) => pruneForKind(body, kind, true).includes(n);
+  assert.ok(has(loop, 'mentor', 'helper_a') && has(loop, 'mentor', 'helper_b') && !has(loop, 'mentor', 'helper_c'));
+  const block = "CASE p_kind WHEN 'mentor' THEN BEGIN PERFORM helper_a(); END; ELSE PERFORM helper_c(); END CASE;";
+  assert.ok(has(block, 'mentor', 'helper_a') && has(block, 'mentor', 'helper_c'));
+});

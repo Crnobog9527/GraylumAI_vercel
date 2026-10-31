@@ -38,9 +38,43 @@ export function judge(cond, kind, pKind = false) {
   return { tests: tests.length, holds, pure: tests.length > 0 && rest === '' };
 }
 
+// `CASE <kind> WHEN 'a', 'b' THEN x ... ELSE y END` (the simple form): the WHEN branches whose literals do not include `kind` are dead,
+// and so is the ELSE once a WHEN took the kind. A WHEN whose value is not only string literals is left in and takes nothing.
+const CASE_PART = /\b(END\s+CASE|END\s+IF|END\s+LOOP|BEGIN|IF|CASE|END|WHEN|ELSE|THEN)\b/gi;
+// `code` is the body with string contents blanked (same offsets as `text`), so a word inside a string is never read as a keyword.
+function deadCaseBranches(code, text, from, kind) {
+  const dead = [];
+  let depth = 0, ifDepth = 0, taken = false, branch = null;
+  const close = at => { if (branch) { if (branch.dead) dead.push([branch.start, at]); branch = null; } };
+  CASE_PART.lastIndex = from;
+  for (let m = CASE_PART.exec(code); m; m = CASE_PART.exec(code)) {
+    const word = m[1].toUpperCase().replace(/\s+/g, ' ');
+    // An IF inside a branch has its own ELSE; it is not the CASE's.
+    // END LOOP ends a loop, not the CASE; a nested BEGIN block has an END of its own that is not told apart here: keep every branch.
+    if (word === 'END LOOP') continue;
+    if (word === 'BEGIN') return [];
+    if (word === 'IF') ifDepth++;
+    else if (word === 'END IF') ifDepth--;
+    else if (word === 'CASE') depth++;
+    else if (word === 'END' || word === 'END CASE') { if (depth === 0) { close(m.index); break; } depth--; }
+    else if (depth === 0 && ifDepth === 0 && word === 'WHEN') {
+      close(m.index);
+      const then = /\bTHEN\b/i.exec(code.slice(m.index + 4));
+      if (!then) break;
+      const values = text.slice(m.index + 4, m.index + 4 + then.index);
+      const plain = /^\s*'[^']*'(\s*,\s*'[^']*')*\s*$/.test(values);
+      const has = plain && literals(values).includes(kind);
+      branch = { start: m.index + 4 + then.index + then[0].length, dead: plain && !has };
+      if (has) taken = true;
+    } else if (depth === 0 && ifDepth === 0 && word === 'ELSE') { close(m.index); branch = { start: m.index + 4, dead: taken }; }
+  }
+  return dead;
+}
+
 // The function body without the IF branches that `kind` cannot take.
 export function pruneForKind(body, kind, pKind = false) {
   const text = stripComments(body);
+  const code = text.replace(/'(?:[^']|'')*'/g, q => `'${' '.repeat(q.length - 2)}'`);
   const dead = [];
   const stack = [];
   const closeBranch = (frame, at) => { if (frame.start !== null) { if (frame.dead) dead.push([frame.start, at]); frame.start = null; } };
@@ -50,11 +84,11 @@ export function pruneForKind(body, kind, pKind = false) {
     if (j.pure && j.holds) frame.taken = true;
     frame.start = condEnd;
   };
-  for (const m of text.matchAll(TOKEN)) {
+  for (const m of code.matchAll(TOKEN)) {
     const word = m[1].toUpperCase().replace(/\s+/g, ' ');
     const top = stack[stack.length - 1];
     if (word === 'IF') {
-      const then = /\bTHEN\b/i.exec(text.slice(m.index + 2));
+      const then = /\bTHEN\b/i.exec(code.slice(m.index + 2));
       if (!then) continue;
       const condEnd = m.index + 2 + then.index + then[0].length;
       const frame = { type: 'if', taken: false, start: null, dead: false };
@@ -62,7 +96,7 @@ export function pruneForKind(body, kind, pKind = false) {
       stack.push(frame);
     } else if (word === 'ELSIF' && top?.type === 'if') {
       closeBranch(top, m.index);
-      const then = /\bTHEN\b/i.exec(text.slice(m.index + 5));
+      const then = /\bTHEN\b/i.exec(code.slice(m.index + 5));
       if (!then) continue;
       const condEnd = m.index + 5 + then.index + then[0].length;
       open(top, condEnd, text.slice(m.index + 5, condEnd - then[0].length));
@@ -73,7 +107,11 @@ export function pruneForKind(body, kind, pKind = false) {
     } else if (word === 'END IF' && top?.type === 'if') {
       closeBranch(top, m.index);
       stack.pop();
-    } else if (word === 'CASE') stack.push({ type: 'case' });
+    } else if (word === 'CASE') {
+      stack.push({ type: 'case' });
+      const simple = /^\s*(t\.kind|p_kind)\s+WHEN\b/i.exec(code.slice(m.index + 4));
+      if (simple && (pKind || !/^p_/i.test(simple[1]))) dead.push(...deadCaseBranches(code, text, m.index + 4 + simple[0].length - 4, kind));
+    }
     else if ((word === 'END' || word === 'END CASE') && top?.type === 'case') stack.pop();
   }
   let out = '', from = 0;
