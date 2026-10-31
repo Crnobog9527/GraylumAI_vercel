@@ -1,6 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
+import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
 import { trpc } from "@/trpc/client";
+import { TurnRefused } from "./mentor-turn-path";
+import { useTurnReport } from "./use-turn-report";
 import { usePaygResume } from "@/lib/use-payg-resume";
 import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
@@ -29,10 +33,10 @@ const POLL_MS = 5000;
  * Reading a saved report never depends on the switch or membership; `canGenerate` (switch on and
  * every step confirmed) only allows a new paid start.
  */
-export function useReportGen(input: { draftId: string; sessionId: string; projectId: string; roundId: string; canGenerate: boolean;
+export function useReportGen(input: { draftId: string; sessionId: string; projectId: string; roundId: string; moduleId?: string | null; canGenerate: boolean;
   /** The fixed price the button shows (0295): sent with the start, which is refused if the price changed meanwhile. */
   price?: number | null }) {
-  const { draftId, sessionId, projectId, roundId, canGenerate, price } = input;
+  const { draftId, sessionId, projectId, roundId, moduleId, canGenerate, price } = input;
   const key = reportRecordKey(draftId, roundId);
   const utils = trpc.useUtils();
   const [record, setRecord] = useState<ReportRecord | null>(null);
@@ -41,8 +45,10 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     writeReportRecord(localStore(), key, next);
     setRecord(next);
   };
-  const latest = trpc.runtime.reportLatest.useQuery({ sessionId, projectId, roundId }, { retry: 1 });
-  const server: ServerReport = latest.isSuccess ? { kind: "known", executionId: latest.data.executionId }
+  const choices = trpc.runtime.choices.useQuery({ sessionId }, { staleTime: RUNTIME_CHOICES_STALE_MS });
+  const turn = useTurnReport(Boolean(choices.data?.corePathV2), sessionId, roundId);
+  const latest = trpc.runtime.reportLatest.useQuery({ sessionId, projectId, roundId }, { retry: 1, enabled: !turn.on });
+  const server: ServerReport = turn.on ? turn.server : latest.isSuccess ? { kind: "known", executionId: latest.data.executionId }
     : latest.isError ? { kind: "failed" } : { kind: "pending" };
   // The execution this page started, until the server read names it.
   const [pinned, setPinned] = useState<ReportPin | null>(null);
@@ -50,6 +56,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const generation = useRef(0);
   const [fresh, setFresh] = useState<FreshRead | null>(null);
   const readLatest = async () => {
+    if (turn.on) { await turn.refetch(); return; }
     const own = ++generation.current;
     try {
       const data = await utils.client.runtime.reportLatest.query({ sessionId, projectId, roundId });
@@ -67,10 +74,11 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const [streaming, setStreaming] = useState(false);
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const status = trpc.runtime.reportStatus.useQuery({ executionId: executionId ?? "" }, {
-    enabled: Boolean(executionId),
+    enabled: Boolean(executionId) && !turn.on,
     refetchInterval: query => !streaming && reportProgressing(query.state.data) ? POLL_MS : false,
   });
-  const shown = status.data && status.data.executionId === executionId ? status.data : null;
+  const shown = turn.on ? turn.status : status.data && status.data.executionId === executionId ? status.data : null;
+  const reread = () => turn.on ? turn.refetch() : status.refetch();
   // The status read settles the fixed price (0295: charged or refunded): the cached balance is stale until it is read again.
   const settledFee = shown?.fee && shown.fee.state !== "held" ? shown.fee.state : null;
   useEffect(() => { if (settledFee) void utils.credits.getBalance.invalidate(); }, [settledFee, executionId, utils]);
@@ -78,7 +86,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const refusal = reportResultRefusal(result);
     if (refusal) setRefusal(refusal);
   };
-  const payg = usePaygResume(() => status.refetch(), refuse);
+  const payg = usePaygResume(reread, refuse);
 
   // A reload or a lost stream: attach to the same execution. The server replays, never calls twice.
   const attached = useRef(new Set<string>());
@@ -104,12 +112,12 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   // The execution this page attached to without starting it (a reload, another tab): the server streams no text
   // already written, so the dialog says the report is still being written in the background.
   const [reopened, setReopened] = useState<string | null>(null);
-  const stream = async (id: string) => {
+  const stream = async (id: string, turnBody?: unknown) => {
     setStreaming(true);
     setLive(startLiveReply(id));
-    let events: Awaited<ReturnType<typeof utils.client.runtime.executeStream.mutate>> | null = null;
+    let events: AsyncIterable<AgentTurnEvent> | null = null;
     try {
-      events = await utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL });
+      events = turnBody ? turn.events(turnBody) : await utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL });
       const { result } = await readAgentTurn(events, {
         executionId: id,
         onProgress: (execution, event) => {
@@ -122,12 +130,13 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
       refuse(result);
       // Still unfinished on the server (an ambiguous failure): attach to the same execution again.
       if (needsReattach(result)) retryAttach(id);
-    } catch {
+    } catch (cause) {
+      if (cause instanceof TurnRefused) setRefusal(reportStartRefusal(new Error(cause.code)));
       // Never opened: try the same execution again later. A lost open stream: the saved status tells.
       if (!events) retryAttach(id);
     } finally {
       setStreaming(false);
-      await status.refetch();
+      await reread();
       setLive(null);
     }
   };
@@ -135,7 +144,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   useEffect(() => { latestStream.current = stream; });
   useEffect(() => {
     const id = shown?.executionId;
-    if (streaming || !id || !reportAttachable(shown) || attached.current.has(id)) return;
+    if (turn.on || streaming || !id || !reportAttachable(shown) || attached.current.has(id)) return;
     attached.current.add(id);
     setReopened(id);
     void latestStream.current(id);
@@ -150,6 +159,12 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     // A start or 重新生成 whose answer never came resends the same request until the server answers.
     const requestId = nextRequestId(record, () => crypto.randomUUID());
     save({ requestId });
+    if (turn.on) {
+      setPinned({ executionId: requestId, generation: ++generation.current });
+      setReopened(null);
+      await stream(requestId, { kind: "report", sessionId, requestId, moduleId, projectId, roundId, acceptedCredits: price });
+      return;
+    }
     try {
       const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId,
         acceptedCredits: price }));
@@ -179,18 +194,19 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     answer?.(confirmed);
   };
   useEffect(() => () => { stopAnswer.current?.(false); stopAnswer.current = null; }, []);
-  const latestStop = useRef({ cancel: cancel.mutateAsync, refetch: status.refetch });
-  latestStop.current = { cancel: cancel.mutateAsync, refetch: status.refetch };
+  const cancelReport = turn.on ? (request: { stopAt?: number; confirmed?: boolean }) => turn.stop(request) : cancel.mutateAsync;
+  const latestStop = useRef({ cancel: cancelReport as (request: never) => Promise<{ state?: string } | undefined>, refetch: reread });
+  latestStop.current = { cancel: cancelReport as never, refetch: reread };
   const stopper = useMemo(() => reportStopController({
     cancel: async request => {
-      const result = await latestStop.current.cancel(request);
+      const result = await latestStop.current.cancel(request as never);
       if (result?.state !== "confirmation_required") return result;
       const confirmed = await new Promise<boolean>(resolve => {
         stopAnswer.current = resolve;
         setStopConfirmation(true);
       });
       if (!confirmed) return { state: "confirmation_declined" };
-      return latestStop.current.cancel({ ...request, confirmed: true });
+      return latestStop.current.cancel({ ...request, confirmed: true } as never);
     },
     reread: async () => (await latestStop.current.refetch()).data?.state ?? null,
     schedule: (delay, callback) => timers.current?.schedule(delay, callback),

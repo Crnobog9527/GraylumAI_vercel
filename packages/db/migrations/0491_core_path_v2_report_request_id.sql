@@ -1,0 +1,31 @@
+-- Copyright (c) 2026 Grayscale Luminary LLC.
+-- All rights reserved. This code is proprietary and confidential.
+-- CORE-PATH-V2 V2-10: a report's page names it by its request id (report_document takes that id for a turn), so a reload on any device
+-- finds the document. Read only; an added key, which the running API's parser drops.
+CREATE OR REPLACE FUNCTION public.turn_report_read(p_actor_id uuid, p_session_id uuid, p_round_id uuid, p_turn_id bigint)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE t turns; body text; visible boolean;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = p_session_id AND s.actor_id = p_actor_id) THEN
+    RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO t FROM turns r WHERE r.session_id = p_session_id AND r.actor_id = p_actor_id AND r.kind = 'report'
+      AND (p_turn_id IS NULL OR r.id = p_turn_id) AND (p_round_id IS NULL OR r.policy#>>'{report,roundId}' = p_round_id::text)
+    ORDER BY r.opened_at DESC, r.id DESC LIMIT 1;
+  IF t.id IS NULL THEN RETURN NULL; END IF;
+  visible := NOT (turn_tombstones(p_actor_id, p_session_id, '{}'::jsonb)->>'sessionTombstoned')::boolean
+    AND NOT (turn_tombstones(p_actor_id, p_session_id, '{}'::jsonb)->>'accountErasing')::boolean;
+  IF visible THEN
+    SELECT m.content INTO body FROM session_messages m
+     WHERE m.session_id = p_session_id AND m.turn_id = t.id AND m.role = 'assistant' AND m.deleted_at IS NULL
+     ORDER BY m.seq DESC LIMIT 1;
+  END IF;
+  RETURN jsonb_build_object('turnId', t.id, 'requestId', t.request_id, 'state', t.state, 'closeKind', t.close_kind, 'delivered', t.delivered AND t.close_kind = 'completed',
+    'chargedCredits', t.charged_credits, 'settlement', t.settlement, 'fixedCredits', (t.policy->>'fixedCredits')::int,
+    'stopChargeable', (t.policy->>'stopChargeable')::boolean, 'report', t.policy->'report', 'body', body,
+    'openedAt', t.opened_at, 'closedAt', t.closed_at);
+END $function$;

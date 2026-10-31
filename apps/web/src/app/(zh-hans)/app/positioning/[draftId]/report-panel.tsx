@@ -36,7 +36,7 @@ import { savedFormalEditable, savedFormalReport, savedFormalStrategy, type Forma
 import { ReportBenchmarkGate } from "./report-benchmark-gate";
 
 type Props = {
-  draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
+  draftId: string; sessionId: string; projectId: string; roundId: string; moduleId?: string | null; confirmed: boolean; busy: boolean;
   /** The formal version's report (opc.read): the jury entry next to this one, and its saved text (savedFormalReport). */
   report?: FormalReport;
   /** This round is published (a formal version), not a revision in progress. */

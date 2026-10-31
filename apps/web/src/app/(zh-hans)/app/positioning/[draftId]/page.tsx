@@ -1315,7 +1315,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
-      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId} published={snap.state === "published"}
+      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} moduleId={read.data.moduleId}
+        sessionId={read.data.sessionId} published={snap.state === "published"}
         projectId={d.projectId} roundId={d.roundId} report={d.report} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
         onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
