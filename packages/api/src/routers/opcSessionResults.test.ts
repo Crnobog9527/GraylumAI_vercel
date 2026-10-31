@@ -17,7 +17,7 @@ function fixture(result: {data?: unknown; error?: {code: string; message: string
   return {caller:opcRouter.createCaller(ctx), rpc};
 }
 const item = {id:id(3), familyId:id(3), version:1, versions:1, resultType:'script', title:'早起口播稿', body:'今天早起……',
-  sourceExecutionId:id(2), sourceAvailable:true, createdAt:'2026-10-23T00:00:00Z'};
+  sourceExecutionId:id(2), sourceTurnId:null, sourceAvailable:true, createdAt:'2026-10-23T00:00:00Z'};
 
 it('saves a reply excerpt for the session owner: the actor comes from the session, not the input', async () => {
   const f = fixture({data:item});
@@ -26,10 +26,18 @@ it('saves a reply excerpt for the session owner: the actor comes from the sessio
   expect(f.rpc).toHaveBeenCalledExactlyOnceWith('runtime_session_result_save', {p_actor_id:id(9), p_session_id:id(1),
     p_execution_id:id(2), p_request_id:id(4), p_result_type:'script', p_title:null, p_excerpt:'今天早起'});
 });
+it('saves from a turn with the same owner rule: the actor comes from the session, not the input', async () => {
+  const saved = {...item, sourceExecutionId:null, sourceTurnId:7};
+  const f = fixture({data:saved});
+  await expect(f.caller.sessionResultSaveTurn({sessionId:id(1), turnId:7, requestId:id(4), resultType:'script',
+    title:null, excerpt:null})).resolves.toEqual(saved);
+  expect(f.rpc).toHaveBeenCalledExactlyOnceWith('runtime_session_result_save_turn', {p_actor_id:id(9), p_session_id:id(1),
+    p_turn_id:7, p_request_id:id(4), p_result_type:'script', p_title:null, p_excerpt:null});
+});
 it('lists, edits, reads versions and deletes through the owner-checked functions', async () => {
   let f = fixture({data:[item]});
   await expect(f.caller.sessionResults({sessionId:id(1)})).resolves.toEqual([item]);
-  expect(f.rpc).toHaveBeenCalledWith('runtime_session_results_list', {p_actor_id:id(9), p_session_id:id(1)});
+  expect(f.rpc).toHaveBeenCalledWith('runtime_session_results_list_turns', {p_actor_id:id(9), p_session_id:id(1)});
   f = fixture({data:{...item, id:id(5), version:2, versions:2, sourceExecutionId:null}});
   await f.caller.sessionResultEdit({familyId:id(3), requestId:id(6), expectedVersion:1, title:'改过', body:'新稿'});
   expect(f.rpc).toHaveBeenCalledWith('runtime_session_result_edit', {p_actor_id:id(9), p_family_id:id(3),
