@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
+import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { AgentWorkStatus } from '@/components/chat-display/agent-work-status';
 import {
   RuntimeEmptyState, RuntimeHeader, RuntimePendingMessage, RuntimeReply, RuntimeTurnView,
@@ -20,7 +20,7 @@ import {
 } from '@/components/opc/composer-references';
 import { positioningRequiredNotice } from './positioning-required';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
-import { TURN_PAUSED_NOTICE } from './turn-notices';
+import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from './turn-notices';
 import { workRowsOf } from './turn-work-rows';
 import { useTurnChat } from './use-turn-chat';
 import workStyles from './runtime-work.module.css';
@@ -99,7 +99,7 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
   const notices = chat.notice?.text === POSITIONING_REQUIRED_NOTICE ? [positioningRequiredNotice('turn-positioning')]
     : chat.notice && !paused ? [{ id: 'turn-notice', tone: 'warning' as const, text: chat.notice.text }]
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
-      actions: [{ label: CHAT_ACTION.continue, onClick: () => void chat.resume() }] }] : [];
+      actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];
   const pendingText = outgoing ?? (chat.view?.activeTurn && !paused ? '' : null);
   return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen} onToggleRight={() => setPanelOpen(open => !open)}
     right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>

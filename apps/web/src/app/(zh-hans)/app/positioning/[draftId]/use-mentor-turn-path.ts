@@ -2,8 +2,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
-import { CHAT_ACTION, type ChatNotice } from "@/components/chat/ChatInlineNotice";
-import { TURN_PAUSED_NOTICE } from "@/app/(zh-hans)/app/runtime/turn-notices";
+import type { ChatNotice } from "@/components/chat/ChatInlineNotice";
+import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from "@/app/(zh-hans)/app/runtime/turn-notices";
 import type { TurnView } from "@repo/api/src/services/turn/view";
 import { trpc } from "@/trpc/client";
 import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
@@ -41,7 +41,7 @@ export function useMentorTurnPath(sessionId: string | undefined) {
     /** 继续 after a pause for credits: the server has what was asked, so any device can press it. */
     notices(stream: (open: () => Promise<AsyncIterable<AgentTurnEvent>>) => void): ChatNotice[] {
       if (!paused) return [];
-      return [{ id: "turn-paused", tone: "warning", text: TURN_PAUSED_NOTICE, actions: [{ label: CHAT_ACTION.continue, onClick: () => stream(async () =>
+      return [{ id: "turn-paused", tone: "warning", text: TURN_PAUSED_NOTICE, actions: [{ label: TURN_CONTINUE, onClick: () => stream(async () =>
         mentorTurnEvents({ kind: "resume", sessionId, requestId: crypto.randomUUID(), resumeOf: paused.turnId })) }] }];
     },
     /** The draft as the old path read it, plus the turn path's bindings. */

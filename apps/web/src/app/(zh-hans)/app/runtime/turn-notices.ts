@@ -6,6 +6,7 @@ import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
  * CORE-PATH-V2 V2-10: what the page says for a turn's fixed codes and for its `opened` event. `kept` marks a code that proves the
  * message was not stored, so its text goes back into the box; any other outcome may have been processed and is read back instead.
  */
+export const TURN_CONTINUE = '继续';
 export const TURN_PAUSED_NOTICE = '积分不足，这一轮已暂停，已完成的部分不会重复扣费。充值后点继续。超过 24 小时未继续会自动退回。';
 const REFUSED: Record<string, string> = {
   TURN_INSUFFICIENT_CREDITS: '积分不足，这条消息没有发送，也没有扣费。充值后可以再次发送。',
