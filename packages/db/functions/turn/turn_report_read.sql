@@ -24,7 +24,7 @@ BEGIN
      WHERE m.session_id = p_session_id AND m.turn_id = t.id AND m.role = 'assistant' AND m.deleted_at IS NULL
      ORDER BY m.seq DESC LIMIT 1;
   END IF;
-  RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'closeKind', t.close_kind, 'delivered', t.delivered AND t.close_kind = 'completed',
+  RETURN jsonb_build_object('turnId', t.id, 'requestId', t.request_id, 'state', t.state, 'closeKind', t.close_kind, 'delivered', t.delivered AND t.close_kind = 'completed',
     'chargedCredits', t.charged_credits, 'settlement', t.settlement, 'fixedCredits', (t.policy->>'fixedCredits')::int,
     'stopChargeable', (t.policy->>'stopChargeable')::boolean, 'report', t.policy->'report', 'body', body,
     'openedAt', t.opened_at, 'closedAt', t.closed_at);

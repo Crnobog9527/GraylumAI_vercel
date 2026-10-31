@@ -78,7 +78,7 @@ function harness(over: { open?: () => unknown; openError?: string; state?: strin
     if (name === 'turn_close') return { data: { turnId: 9, closeKind: args.p_close_kind === 'completed' && over.state === 'stopping'
       ? 'stopped' : args.p_close_kind, chargedCredits: args.p_delivered ? 500 : 0, absorbedCredits: 0, settlement: 'done', replay: false },
       error: null };
-    if (name === 'turn_report_read') return { data: { turnId: 9, state: over.state ?? 'running', closeKind: null, delivered: false,
+    if (name === 'turn_report_read') return { data: { turnId: 9, requestId: '00000000-0000-4000-8000-000000000009', state: over.state ?? 'running', closeKind: null, delivered: false,
       chargedCredits: null, settlement: null, fixedCredits: 500, stopChargeable: false, report: null, body: null,
       openedAt: 'x', closedAt: null }, error: null };
     return { data: null, error: { message: 'unexpected ' + name } };

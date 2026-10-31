@@ -57,7 +57,8 @@ const stopped = z.object({ turnId: z.number().int().positive(), state: z.enum(['
   chargeable: z.boolean(), replay: z.boolean(), closeKind: z.string().nullable().optional(),
   chargedCredits: z.number().int().nullable().optional(), fixedCredits: z.number().int().optional() });
 export type Stopped = z.infer<typeof stopped>;
-const reportTurn = z.object({ turnId: z.number().int().positive(), state: z.enum(['opening', 'running', 'stopping', 'paused', 'closed']),
+const reportTurn = z.object({ turnId: z.number().int().positive(), requestId: z.string().uuid(),
+  state: z.enum(['opening', 'running', 'stopping', 'paused', 'closed']),
   closeKind: z.string().nullable(), delivered: z.boolean(), chargedCredits: z.number().int().nullable(),
   settlement: z.enum(['pending', 'done']).nullable(), fixedCredits: z.number().int().nullable(), stopChargeable: z.boolean().nullable(),
   report: z.record(z.string(), z.unknown()).nullable(), body: z.string().nullable(), openedAt: z.string(), closedAt: z.string().nullable() });
