@@ -9,4 +9,7 @@ CREATE OR REPLACE FUNCTION public.runtime_session_result_turn_view(r runtime_ses
  SET search_path TO 'public', 'pg_temp'
 AS $function$
  SELECT runtime_session_result_view(r,p_versions)||jsonb_build_object('sourceTurnId',r.source_turn_id)
+  -- A saved turn's reply can go later (a deleted voice version hides it); the saved text stays, and the folder says the source is gone.
+  ||CASE WHEN r.source_turn_id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('sourceAvailable',EXISTS(SELECT 1 FROM session_messages m
+    WHERE m.session_id=r.session_id AND m.turn_id=r.source_turn_id AND m.role='assistant' AND m.visible AND m.deleted_at IS NULL)) END
 $function$;

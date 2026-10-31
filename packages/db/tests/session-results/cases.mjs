@@ -75,6 +75,15 @@ export async function runCases({db,Client,connectionString,report}) {
     assert.equal('sourceTurnId' in (await rpc(db,'runtime_session_results_list',f.actor,f.session))[0],false,'the old read keeps its shape for the running API');
   });
 
+  await check('V2 a reply hidden after the save keeps the saved text and reads as source-unavailable', async () => {
+    const f = await freeChat(db), turn = await turnReply(db,f);
+    const saved = await saveTurn(db,f.actor,f.session,turn);
+    assert.equal(saved.sourceAvailable,true);
+    await db.query('UPDATE session_messages SET visible=false WHERE session_id=$1 AND turn_id=$2',[f.session,turn]);
+    const [row] = await rpc(db,'runtime_session_results_list_turns',f.actor,f.session);
+    assert.deepEqual([row.id,row.body,row.sourceAvailable],[saved.id,REPLY,false]);
+  });
+
   await check('V2 refuses another account\'s turn, a turn of another conversation, and any turn that did not complete', async () => {
     const f = await freeChat(db), other = await freeChat(db), turn = await turnReply(db,f);
     await assert.rejects(saveTurn(db,other.actor,f.session,turn),/SESSION_RESULT_NOT_FOUND/,'another account in this conversation');
