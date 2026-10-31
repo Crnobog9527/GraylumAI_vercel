@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { analyze, closure, freeReadViolations, readFunctions, readTables, scan, stripCode, toolCallViolations, unownedReads, DEFAULTS } from '../db-function-closure.mjs';
+import { analyze, closure, FREE_READ_CATALOG, freeReadViolations, readFunctions, readTables, scan, stripCode, toolCallViolations, unownedReads, DEFAULTS } from '../db-function-closure.mjs';
 
 const fn = (name, body) => `CREATE OR REPLACE FUNCTION public.${name}()\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\n${body}\n$function$;\n`;
 function repo(files, tables = ['profiles', 'turns', 'runtime_sessions', 'turn_calls', 'daily_spend', 'catalog_versions', 'secret_things', 'a_t', 'b_t']) {
@@ -232,6 +232,13 @@ test('only the listed tables may go without an owner column, and a linked one on
   // A linked table does not vouch for an owned one, and a catalog comma join cannot hide a table.
   assert.deepEqual(reads('SELECT 1 FROM v_t v JOIN o_t o ON o.id = v.id WHERE v.id = item;'), ['o_t']);
   assert.deepEqual(reads('SELECT 1 FROM c_t c, x_t x WHERE c.key = k;'), ['c_t']);
+});
+
+test('the repository\'s own catalog list leaves site settings out: a free read of system_settings fails', () => {
+  assert.equal(FREE_READ_CATALOG.includes('system_settings'), false);
+  assert.deepEqual(unownedReads('SELECT value FROM system_settings WHERE key = k;', new Set(['system_settings'])), ['system_settings']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM skills s JOIN system_settings c ON c.key = s.name WHERE s.id = 1;',
+    new Set(['skills', 'system_settings'])), ['system_settings']);
 });
 
 test('a free read checks the owner itself, even when it reaches only listed tables', () => {

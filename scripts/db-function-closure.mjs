@@ -49,7 +49,7 @@ export const FREE_READ_LINKED = {
   artifact_versions: ['id'], artifact_rounds: ['id'], artifact_evidence: ['id'], opc_items: ['work_item_id', 'account_project_id'],
   opc_item_edits: ['work_item_id'], opc_draft_businesses: ['draft_id', 'business_id'],
 };
-export const FREE_READ_CATALOG = ['modules', 'skills', 'skill_packages', 'skill_revisions', 'skill_revision_revocations', 'system_settings'];
+export const FREE_READ_CATALOG = ['modules', 'skills', 'skill_packages', 'skill_revisions', 'skill_revision_revocations'];
 export const TOOLS_DIR = 'packages/api/src/services/turn/tools';
 
 const KEYWORDS = new Set(['if', 'in', 'values', 'select', 'from', 'exists', 'case', 'when', 'and', 'or', 'not', 'on', 'as', 'using',
