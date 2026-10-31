@@ -210,6 +210,15 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: the daily summary counts old charges and turn t
   await turn(g, searchingModel([]), suppliers(vi.fn(async () => searchResult({ items: [], reason: 'NO_RESULTS' }))));
   expect(await summary()).toEqual({ count: 2, credits: 13, turnOtherCredits: charged - 6 + await modelCredits(g.actor) });
   expect((await summary()).credits - 7 + (await summary()).turnOtherCredits).toBe(await settled());
+  // The search returned data, then the model failed and the whole turn was refunded: the platform bore that search.
+  const h = await setup(), before = await summary(), searched = searchingModel([]);
+  let modelCall = 0;
+  const failing: typeof fetch = async (url, init) => (++modelCall === 1 ? searched(url, init)
+    : new Response(JSON.stringify({ error: { code: 402, message: 'Insufficient credits', metadata: { limit_source: 'openrouter_credits' } } }), { status: 402, headers: { 'content-type': 'application/json' } }));
+  await turn(h, failing, suppliers(vi.fn(async () => searchResult()))).catch(() => undefined);
+  expect((await rows(h.actor)).find(r => r.call_kind === 'tool')).toMatchObject({ status: 'ok' });
+  expect((await db.query(`select amount from billing_history where user_id=$1 and operation_type='settle'`, [h.actor])).rows).toEqual([{ amount: 0 }]);
+  expect(await summary()).toEqual(before);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-6: a search that returns nothing is said plainly and not charged; the platform cost is kept', async () => {

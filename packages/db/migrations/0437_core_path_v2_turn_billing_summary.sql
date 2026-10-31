@@ -2,7 +2,8 @@
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2: the daily reconciliation counts what turns settle. A turn writes one billing_history settle row and no token_stats
 -- or per-operation charge, so research_billing_summary now also splits each settled turn by its receipts:
---   count             the old path's charged operations, plus the supplier subcalls the user paid for: returned data (tools/meter.ts).
+--   count             the old path's charged operations, plus the supplier subcalls the user paid for: returned data
+--                     (tools/meter.ts), in a turn whose settlement charged its tools. A fully refunded turn counts none: the platform bore them.
 --   credits           the old path's charged credits, plus the tool part of each turn's settlement: ceil(q x sum(n x m)) over the tool
 --                     receipts turn_close charged, at most what was settled. The two paths cannot overlap: only the old path sets
 --                     research_operations.charged_at; research_turn_apply writes operations without a charge.
@@ -21,7 +22,7 @@ BEGIN
    WHERE state='succeeded' AND charged_at>=p_start AND charged_at<p_end),
   settled AS (SELECT -b.amount credits,(b.metadata->>'turnId')::bigint turn_id FROM billing_history b
    WHERE b.operation_type='settle' AND b.created_at>=p_start AND b.created_at<p_end AND b.metadata->>'turnId' ~ '^[0-9]{1,18}$'),
-  split AS (SELECT s.credits,least(s.credits,coalesce(r.credits,0)) tool,coalesce(r.n,0) n FROM settled s
+  split AS (SELECT s.credits,least(s.credits,coalesce(r.credits,0)) tool,CASE WHEN least(s.credits,coalesce(r.credits,0))>0 THEN r.n ELSE 0 END n FROM settled s
    LEFT JOIN turns t ON t.id=s.turn_id
    -- As turn_close: a tool receipt that arrived after the close is not the user's.
    LEFT JOIN LATERAL (SELECT ceil((t.policy->>'q')::numeric*sum(k.nominal_usd*k.multiplier))::integer credits,

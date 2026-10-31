@@ -4129,7 +4129,7 @@
   "fn:research_benchmark_shortfall_view(research_benchmark_shortfalls)": "030c5179a633",
   "fn:research_benchmark_sync()": "a11cc91d1e59",
   "fn:research_benchmark_table(uuid,uuid)": "15a8d4531bfb",
-  "fn:research_billing_summary(timestamp with time zone,timestamp with time zone)": "50a104da0d29",
+  "fn:research_billing_summary(timestamp with time zone,timestamp with time zone)": "ce523cb83e9a",
   "fn:research_cancel(uuid,uuid)": "eed19976d2ba",
   "fn:research_card_confirm(uuid,uuid,jsonb)": "6570eed06955",
   "fn:research_card_create(uuid,uuid,uuid,uuid,jsonb)": "cf25ae59b2c3",

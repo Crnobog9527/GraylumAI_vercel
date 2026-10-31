@@ -15,7 +15,7 @@ BEGIN
    WHERE state='succeeded' AND charged_at>=p_start AND charged_at<p_end),
   settled AS (SELECT -b.amount credits,(b.metadata->>'turnId')::bigint turn_id FROM billing_history b
    WHERE b.operation_type='settle' AND b.created_at>=p_start AND b.created_at<p_end AND b.metadata->>'turnId' ~ '^[0-9]{1,18}$'),
-  split AS (SELECT s.credits,least(s.credits,coalesce(r.credits,0)) tool,coalesce(r.n,0) n FROM settled s
+  split AS (SELECT s.credits,least(s.credits,coalesce(r.credits,0)) tool,CASE WHEN least(s.credits,coalesce(r.credits,0))>0 THEN r.n ELSE 0 END n FROM settled s
    LEFT JOIN turns t ON t.id=s.turn_id
    -- As turn_close: a tool receipt that arrived after the close is not the user's.
    LEFT JOIN LATERAL (SELECT ceil((t.policy->>'q')::numeric*sum(k.nominal_usd*k.multiplier))::integer credits,
