@@ -47,8 +47,10 @@ BEGIN
         SELECT x.reply, t.resume_of FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id WHERE t.resume_of IS NOT NULL)
       SELECT coalesce(jsonb_agg(jsonb_build_object('turnId', x.reply, 'seq', c.seq, 'toolName', c.tool_name, 'status', c.status,
           'usage', c.usage, 'q', t.policy->'q', 'multiplier', c.multiplier,
+          -- The model call that asked: a benchmark lookup settles in several rows, so not always the row just before.
           'arguments', (SELECT r.body::jsonb #>> '{choices,0,message,tool_calls,0,function,arguments}' FROM turn_call_raw r
-            WHERE r.turn_id = c.turn_id AND r.seq = c.seq - 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
+            JOIN turn_calls m ON m.turn_id = r.turn_id AND m.seq = r.seq
+            WHERE r.turn_id = c.turn_id AND r.seq < c.seq AND m.call_kind = 'model' ORDER BY r.seq DESC LIMIT 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
       FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id AND t.session_id = p_session_id
       JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool' AND c.upper_usd > 0 AND c.status IN ('ok', 'unusable')));
 END $function$;

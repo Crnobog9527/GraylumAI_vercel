@@ -8,12 +8,10 @@ CREATE OR REPLACE FUNCTION public.turn_resume_break(p_actor_id uuid, p_turn_id b
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE previous bigint; found_at integer;
+DECLARE found_at integer;
 BEGIN
-  -- The first call of this turn a resume cannot answer from its receipt (no limit: 2147483647). After a break earlier in the chain
-  -- nothing of this turn is replayed either. Keep in step with resume.ts.
-  SELECT resume_of INTO previous FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
-  IF previous IS NOT NULL AND public.turn_resume_break(p_actor_id, previous) < 2147483647 THEN RETURN 0; END IF;
+  -- The first call of this turn a resume cannot answer from its receipt (none: 2147483647). Each turn of a chain has its own: what a
+  -- turn made after an earlier turn's break is exactly the calls that break made again, so it follows that turn's good receipts.
   SELECT min(c.seq) INTO found_at FROM turn_calls c LEFT JOIN turn_call_raw r ON r.turn_id = c.turn_id AND r.seq = c.seq
    WHERE c.turn_id = p_turn_id AND c.status IN ('ok','unusable') AND c.call_kind IN ('model','tool')
      AND NOT (c.call_kind = 'tool' AND c.upper_usd = 0)

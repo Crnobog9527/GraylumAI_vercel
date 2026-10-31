@@ -59,8 +59,10 @@ BEGIN
         SELECT x.reply, t.resume_of FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id WHERE t.resume_of IS NOT NULL)
       SELECT coalesce(jsonb_agg(jsonb_build_object('turnId', x.reply, 'seq', c.seq, 'toolName', c.tool_name, 'status', c.status,
           'usage', c.usage, 'q', t.policy->'q', 'multiplier', c.multiplier,
+          -- The model call that asked: a benchmark lookup settles in several rows, so not always the row just before.
           'arguments', (SELECT r.body::jsonb #>> '{choices,0,message,tool_calls,0,function,arguments}' FROM turn_call_raw r
-            WHERE r.turn_id = c.turn_id AND r.seq = c.seq - 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
+            JOIN turn_calls m ON m.turn_id = r.turn_id AND m.seq = r.seq
+            WHERE r.turn_id = c.turn_id AND r.seq < c.seq AND m.call_kind = 'model' ORDER BY r.seq DESC LIMIT 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
       FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id AND t.session_id = p_session_id
       JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool' AND c.upper_usd > 0 AND c.status IN ('ok', 'unusable')));
 END $function$;
@@ -71,12 +73,10 @@ CREATE OR REPLACE FUNCTION public.turn_resume_break(p_actor_id uuid, p_turn_id b
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE previous bigint; found_at integer;
+DECLARE found_at integer;
 BEGIN
-  -- The first call of this turn a resume cannot answer from its receipt (no limit: 2147483647). After a break earlier in the chain
-  -- nothing of this turn is replayed either. Keep in step with resume.ts.
-  SELECT resume_of INTO previous FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
-  IF previous IS NOT NULL AND public.turn_resume_break(p_actor_id, previous) < 2147483647 THEN RETURN 0; END IF;
+  -- The first call of this turn a resume cannot answer from its receipt (none: 2147483647). Each turn of a chain has its own: what a
+  -- turn made after an earlier turn's break is exactly the calls that break made again, so it follows that turn's good receipts.
   SELECT min(c.seq) INTO found_at FROM turn_calls c LEFT JOIN turn_call_raw r ON r.turn_id = c.turn_id AND r.seq = c.seq
    WHERE c.turn_id = p_turn_id AND c.status IN ('ok','unusable') AND c.call_kind IN ('model','tool')
      AND NOT (c.call_kind = 'tool' AND c.upper_usd = 0)
