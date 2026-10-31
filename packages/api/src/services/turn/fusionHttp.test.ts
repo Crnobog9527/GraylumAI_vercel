@@ -94,7 +94,8 @@ describe('POST /api/turn/compare', () => {
   const valid = { sessionId: SESSION, question: ' Which? ', modelIds: [MODEL_A, MODEL_B], requestId: REQUEST, shown };
 
   it('needs the quote the user saw, and the entry checks', async () => {
-    const { shown: _omitted, ...without } = valid;
+    const without: Partial<typeof valid> = { ...valid };
+    delete without.shown;
     expect((await start(without)).status).toBe(400);
     expect((await start({ ...valid, shown: { credits: 4, columns: [] } })).status).toBe(400);
     expect((await start({ ...valid, shown: { ...shown, extra: 1 } })).status).toBe(400);
