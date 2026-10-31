@@ -168,6 +168,9 @@ test('a free read stays read-only, lock-free and keyed by its owner, all the way
   assert.match(hits(read('', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')).join(), /not STABLE/);
   assert.match(hits(read('STABLE', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id FOR UPDATE;')).join(), /row lock in f/);
   assert.match(hits(read('STABLE', 'SELECT 1 FROM a_t WHERE id = 1;')).join(), /a_t without the owner key/);
+  const helper = read('STABLE', 'PERFORM h(p_actor_id); SELECT 1 FROM a_t WHERE actor_id = p_actor_id;');
+  const root = repo({ 'library/f.sql': helper, 'library/h.sql': read('STABLE', 'SELECT 1 FROM a_t;').replace('f(p_actor_id', 'h(p_actor_id') });
+  assert.match(freeReadViolations(readFunctions(join(root, 'packages/db/functions')), new Set(['a_t']), ['f']).join(), /a_t without the owner key in h/);
   assert.match(hits(read('STABLE', 'PERFORM g(p_actor_id); SELECT 1 FROM a_t WHERE actor_id = p_actor_id;')).join(), /write in g/);
   assert.match(hits(fn('f', 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id;').replace('f()', 'f(p_other uuid)')).join(), /p_actor_id first/);
   assert.deepEqual(freeReadViolations(new Map(), new Set(), ['gone']), ['gone: free read has no function']);
@@ -186,6 +189,8 @@ test('every read of a free read carries the owner key itself; one filtered branc
   assert.deepEqual(unownedReads('SELECT 1 FROM b_t WHERE id = 1 ORDER BY actor_id = p_actor_id;', tables), ['b_t']);
   assert.deepEqual(unownedReads('SELECT 1 FROM b_t WHERE actor_id = p_actor_id OR id = 1;', tables), ['b_t']);
   assert.deepEqual(unownedReads('SELECT 1 FROM b_t WHERE actor_id = p_actor_id AND (id = 1 OR id = 2);', tables), []);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t x LEFT JOIN b_t y ON y.actor_id = x.actor_id AND x.actor_id = p_actor_id;', tables), ['a_t', 'b_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM a_t x LEFT JOIN b_t y ON y.id = x.id WHERE x.actor_id = p_actor_id AND y.actor_id = x.actor_id;', tables), []);
   assert.deepEqual(unownedReads('SELECT 1 FROM a_t r WHERE r.profile_id = p_actor_id; SELECT 1 FROM unnest(z) w;', tables), []);
 });
 

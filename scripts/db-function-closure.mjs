@@ -238,7 +238,8 @@ const NOT_ALIAS = /^(?:where|join|on|left|right|inner|outer|cross|full|group|ord
 // already blank here, so an OR left in the text is a top-level one and could let any row through: such a select proves nothing.
 function rowFilters(scope) {
   const tail = scope.slice(Math.max(0, scope.search(/\bFROM\b/i)));
-  const start = tail.search(/\b(?:ON|WHERE)\b/i);
+  // The ON of an outer join keeps the rows of its preserved side whatever it says: there only WHERE limits the rows.
+  const start = tail.search(/\b(?:LEFT|RIGHT|FULL)\b/i) < 0 ? tail.search(/\b(?:ON|WHERE)\b/i) : tail.search(/\bWHERE\b/i);
   if (start < 0) return '';
   const rest = tail.slice(start), end = rest.search(WHERE_END);
   const filters = end < 0 ? rest : rest.slice(0, end);
@@ -283,11 +284,11 @@ export function freeReadViolations(functions, tableNames, names = FREE_READS) {
     if (!defs) { found.push(`${name}: free read has no function`); continue; }
     for (const { head, body } of defs) {
       if (!/\(\s*p_actor_id\s+uuid\b/i.test(head)) found.push(`${name}: free read without p_actor_id first`);
-      for (const table of unownedReads(stripCode(body), tableNames)) found.push(`${name}: free read of ${table} without the owner key`);
     }
     for (const reached of closure(name, functions, tableNames, []).functions) {
       for (const { head, body } of functions.get(reached) ?? []) {
         const code = stripCode(body);
+        for (const table of unownedReads(code, tableNames)) found.push(`${name}: reaches a read of ${table} without the owner key in ${reached}`);
         if (!/\b(?:STABLE|IMMUTABLE)\b/i.test(head)) found.push(`${name}: reaches ${reached}, not STABLE or IMMUTABLE`);
         if (WRITE.test(code)) found.push(`${name}: reaches a write in ${reached}`);
         if (ANY_LOCK.test(code)) found.push(`${name}: reaches a row lock in ${reached}`);
