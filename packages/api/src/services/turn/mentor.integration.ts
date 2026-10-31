@@ -17,6 +17,7 @@ import { publishSkillPackage } from '../skills/publication';
 import { CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
+import { runResumedTurn } from './resumeTurn';
 import { runMentorTurn, type MentorDeps } from './mentor';
 import type { VendorCalls } from '../research/runtime/subcall';
 import type { ResearchCallResult } from '../research/vendors/types';
@@ -170,12 +171,13 @@ async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string;
     if (name === 'mentor_turn_prepare' && hook) { const run = hook; hook = undefined; await run(); }
     return result;
   } } as unknown as typeof clients.read : clients.read;
-  await withCatalogRequest(() => runMentorTurn({ admin, clients: { ...clients, read }, slots, transport: input.transport,
-    newWork: input.newWork ?? { message: admit, calls: admit }, ...(input.research ? { research: input.research } : {}) },
+  const deps = { admin, clients: { ...clients, read }, slots, transport: input.transport,
+    newWork: input.newWork ?? { message: admit, calls: admit }, ...(input.research ? { research: input.research } : {}) };
+  await withCatalogRequest(() => input.resumeOf ? runResumedTurn(deps, { actorId: f.actor, sessionId: f.session, requestId: randomUUID(),
+    resumeOf: input.resumeOf }, e => events.push(e)) : runMentorTurn(deps,
     { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), moduleId: input.moduleId ?? f.moduleId, stepId: 'step-0',
       text: input.text, organizeAfter: input.organizeAfter ?? true, ...(input.answer ? { answer: input.answer } : {}),
-      ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}),
-      ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}) },
+      ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) },
     e => events.push(e)));
   return { events, calls };
 }
@@ -413,7 +415,7 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume at the organizer keeps the reply: it i
   await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
   const { id } = (await db.query("select id::int id from turns where actor_id=$1 and state='paused'", [f.actor])).rows[0];
   const before = await db.query('select sum(charged_credits) c from turns where actor_id=$1', [f.actor]);
-  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn, resumeOf: id });
+  const out = await turn(f, { text: 'ignored: the paused turn kept what was asked', transport: t.fn, resumeOf: id });
   expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
   expect(t.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
   expect(out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('')).toContain('Good. Who buys it?');

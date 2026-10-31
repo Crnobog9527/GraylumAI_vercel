@@ -6,7 +6,7 @@ import { handleTurnView, type TurnViewDeps } from './view';
 const SESSION = '00000000-0000-4000-8000-000000000001';
 const get = (query: string) => new Request('https://app.test/api/turn' + query);
 const view = { activeTurn: { turnId: 7, kind: 'mentor', state: 'running', pauseReason: null, openedAt: 't', updatedAt: 't' }, lastTurn: null,
-  messages: [] };
+  messages: [], calls: [] };
 const deps = (rpc: (...args: never[]) => Promise<unknown> = async () => ({ data: view, error: null }),
   over: Partial<TurnViewDeps> = {}): TurnViewDeps => ({
   authenticate: async () => 'actor-1', databaseHost: { declared: 'db.test', actual: 'db.test' },

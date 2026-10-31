@@ -6,6 +6,7 @@ import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
  * CORE-PATH-V2 V2-10: what the page says for a turn's fixed codes and for its `opened` event. `kept` marks a code that proves the
  * message was not stored, so its text goes back into the box; any other outcome may have been processed and is read back instead.
  */
+export const TURN_PAUSED_NOTICE = '积分不足，这一轮已暂停，已完成的部分不会重复扣费。充值后点继续。超过 24 小时未继续会自动退回。';
 const REFUSED: Record<string, string> = {
   TURN_INSUFFICIENT_CREDITS: '积分不足，这条消息没有发送，也没有扣费。充值后可以再次发送。',
   TURN_RATE_LIMITED: '发送太频繁，这条消息没有发送。请稍后再试。',
@@ -20,6 +21,9 @@ const REFUSED: Record<string, string> = {
   TURN_ACCOUNT_ERASING: '账号正在注销，无法发送消息。',
   TURN_SKILL_UNAVAILABLE: '所选技能现在用不了，这条消息没有发送，也没有扣费。可以换一个技能，或不选技能再发送。',
   TURN_REFERENCES_UNAVAILABLE: '引用的资料现在读不了，这条消息没有发送，也没有扣费。可以去掉引用再发送。',
+  TURN_RESUME_COST_PENDING: '上一步的费用还在核对，请稍后再点继续。',
+  TURN_RESUME_DENIED: '这一轮已经结束，请刷新后查看结果。',
+  TURN_RESUME_INPUT_LOST: '这一轮无法继续，已全额退回积分。请重新发送。',
   TURN_UNAUTHENTICATED: '登录已过期，请重新登录后再发送。',
   POSITIONING_REQUIRED: POSITIONING_REQUIRED_NOTICE,
 };
@@ -27,6 +31,7 @@ const FAILED: Record<string, string> = {
   TURN_TOMBSTONED: '这个对话已删除，本轮回复没有保存。',
   TURN_PROVIDER_402: '模型服务暂时不可用，本轮已全额退回积分。',
   TURN_PROVIDER_BUSY: '模型服务繁忙，本轮已全额退回积分。请稍后再试。',
+  TURN_PAUSED_FOR_CREDITS: TURN_PAUSED_NOTICE,
   TURN_CALL_UNKNOWN: '模型回复中断，正在核对本轮结果，已用积分以记录为准。',
 };
 const GENERIC = '这条消息没有完成。请刷新后查看结果，不要重复发送相同内容。';

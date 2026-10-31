@@ -24,7 +24,7 @@ export type ChatNotice = {
 };
 
 /** The only action names on the chat surfaces. */
-export const CHAT_ACTION = { retry: '重试', stop: '停止' } as const;
+export const CHAT_ACTION = { retry: '重试', stop: '停止', continue: '继续' } as const;
 
 /** Status under an optimistic user bubble until the server records the turn. */
 export function pendingSendLabel(sending: boolean) {

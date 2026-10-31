@@ -12,7 +12,7 @@ import type { TurnLimits } from './policy';
  */
 export const resumeRead = z.object({ kind: z.string(),
   limits: z.object({ model: z.number().int(), paidTools: z.number().int(), freeTools: z.number().int(), decisions: z.number().int() }),
-  decided: z.boolean(),
+  decided: z.boolean(), input: z.unknown(),
   calls: z.array(z.object({ seq: z.number().int(), callKind: z.enum(['model', 'tool']), toolName: z.string().nullable(),
     status: z.enum(['ok', 'unusable']), body: z.string().nullable() })) });
 export type ResumeRead = z.infer<typeof resumeRead>;

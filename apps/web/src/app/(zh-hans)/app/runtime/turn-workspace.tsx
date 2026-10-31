@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useEffect, useRef, useState } from 'react';
-import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { AgentWorkStatus } from '@/components/chat-display/agent-work-status';
 import {
   RuntimeEmptyState, RuntimeHeader, RuntimePendingMessage, RuntimeReply, RuntimeTurnView,
@@ -20,6 +20,8 @@ import {
 } from '@/components/opc/composer-references';
 import { positioningRequiredNotice } from './positioning-required';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
+import { TURN_PAUSED_NOTICE } from './turn-notices';
+import { workRowsOf } from './turn-work-rows';
 import { useTurnChat } from './use-turn-chat';
 import workStyles from './runtime-work.module.css';
 
@@ -92,9 +94,13 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
       signature + (chat.live?.text.length ?? ''), () => null);
   }, [sessionId, signature, chat.live?.text.length]);
 
+  const workRows = useMemo(() => workRowsOf(chat.view?.calls ?? []), [chat.view?.calls]);
+  const paused = chat.paused && !chat.sending;
   const notices = chat.notice?.text === POSITIONING_REQUIRED_NOTICE ? [positioningRequiredNotice('turn-positioning')]
-    : chat.notice ? [{ id: 'turn-notice', tone: 'warning' as const, text: chat.notice.text }] : [];
-  const pendingText = outgoing ?? (chat.view?.activeTurn ? '' : null);
+    : chat.notice && !paused ? [{ id: 'turn-notice', tone: 'warning' as const, text: chat.notice.text }]
+    : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
+      actions: [{ label: CHAT_ACTION.continue, onClick: () => void chat.resume() }] }] : [];
+  const pendingText = outgoing ?? (chat.view?.activeTurn && !paused ? '' : null);
   return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen} onToggleRight={() => setPanelOpen(open => !open)}
     right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
     <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
@@ -106,7 +112,7 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
             <RuntimeReply text={turn.body ?? turn.primaryBody ?? ''} available={Boolean(turn.body ?? turn.primaryBody)}/>
           </RuntimeTurnView>)}
           {turns.map(reply => <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
-            {chat.rows?.turnId === reply.turnId && <AgentWorkStatus items={chat.rows.rows}/>}
+            {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []}/>}
             <RuntimeReply text={reply.content}/>
             {results.data && reply.turnId !== null && <SaveReplyButton sessionId={sessionId} turnId={reply.turnId} reply={reply.content}
               savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}

@@ -16,6 +16,9 @@ const turnView = z.object({
     settlement: z.enum(['pending', 'done']).nullable(), chargedCredits: z.number().int().nullable(), closedAt: z.string() }).nullable(),
   messages: z.array(z.object({ seq: z.number().int().positive(), role: z.enum(['user', 'assistant']), turnId: z.number().int().nullable(),
     content: z.string() })),
+  // The paid tool calls behind these replies, for the work rows after a reload. Absent until migration 0441.
+  calls: z.array(z.object({ turnId: z.number().int(), seq: z.number().int(), toolName: z.string().nullable(), status: z.string(),
+    usage: z.unknown(), q: z.unknown(), multiplier: z.unknown(), arguments: z.string().nullable() })).default([]),
 });
 export type TurnView = z.infer<typeof turnView>;
 

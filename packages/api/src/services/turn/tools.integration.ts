@@ -10,6 +10,7 @@ import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from '../runtime/librar
 import type { PositioningClassifier } from '../runtime/positioningGate';
 import type { VendorCalls } from '../research/runtime/subcall';
 import type { ResearchCallResult } from '../research/vendors/types';
+import { runResumedTurn } from './resumeTurn';
 import { runChatTurn, CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
 import type { CounterStore } from './limiter';
@@ -136,9 +137,11 @@ type NewWork = Parameters<typeof runChatTurn>[0]['newWork'];
 async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false,
   newWork: NewWork = { message: admit, calls: admit }, text = 'How should a coffee shop position itself?', resumeOf?: number) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate }, newWork,
-    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library } },
-  { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text, ...(resumeOf ? { resumeOf } : {}) }, e => events.push(e)));
+  const deps = { admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate }, newWork,
+    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library } };
+  const ids = { actorId: f.actor, sessionId: f.session, requestId: randomUUID() };
+  await withCatalogRequest(() => resumeOf ? runResumedTurn(deps, { ...ids, resumeOf }, e => events.push(e))
+    : runChatTurn(deps, { ...ids, text }, e => events.push(e)));
   return { events, calls };
 }
 /** N = ceil(q x sum(n x m)) over the receipts the user pays for: ok rows except the positioning check (q 100, m 6 here). */
@@ -170,6 +173,7 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the con
   const tools = bodies.map(b => JSON.stringify(JSON.parse(b).tools));
   expect(tools[0]).toBe(tools[1]);
   expect(bodies[1]).toContain('Coffee guide');
+  expect(bodies[1]).toContain('How should a coffee shop position itself?');
   const t = (await db.query('select reserved_credits,charged_credits,settlement from turns where actor_id=$1', [f.actor])).rows[0];
   // Both model calls and the search (0.01 x m 6 x q 100 = 6 credits of it), within the freeze.
   const n = await expectedCredits(f.actor);

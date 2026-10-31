@@ -28,7 +28,6 @@ export type SendAnswer = 'done' | 'kept' | 'unknown';
 export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: typeof fetch = (...args) => globalThis.fetch(...args)) {
   const [view, setView] = useState<TurnView | null>(null), [viewFailed, setViewFailed] = useState(false);
   const [live, setLive] = useState<LiveTurn | null>(null), [sending, setSending] = useState(false);
-  const [rows, setRows] = useState<{ turnId: number; rows: WorkItem[] } | null>(null);
   const [notice, setNotice] = useState<{ code: string; text: string } | null>(null);
   const alive = useRef(true), settled = useRef(onSettled);
   useEffect(() => { settled.current = onSettled; }, [onSettled]);
@@ -44,7 +43,8 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   useEffect(() => { void read(); }, [read]);
 
   // Until the active turn closes, on this page or another: a reload, a dropped stream, a second tab.
-  const active = Boolean(view?.activeTurn) && !sending;
+  // A pause waits for the user; nothing moves it, so it is not read again.
+  const active = Boolean(view?.activeTurn) && view?.activeTurn?.pauseReason !== 'waiting_credits' && !sending;
   useEffect(() => {
     if (!active) return;
     let wasActive = true;
@@ -54,12 +54,12 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     return () => clearInterval(timer);
   }, [active, read]);
 
-  const send = useCallback(async (text: string, requestId: string, chosen: TurnChoice = {}): Promise<SendAnswer> => {
+  const run = useCallback(async (body: Record<string, unknown>): Promise<SendAnswer> => {
     setSending(true); setNotice(null); setLive({ text: '', trimmed: [], rows: [] });
-    let tools: ToolAvailability | undefined, turnId = 0, made: WorkItem[] = [];
-    const outcome = await runTurn({ kind: 'chat', sessionId, requestId, text, ...chosen }, event => {
+    let tools: ToolAvailability | undefined, made: WorkItem[] = [];
+    const outcome = await runTurn({ sessionId, ...body }, event => {
       if (!alive.current) return;
-      if (event.type === 'opened') { turnId = event.turnId; tools = event.tools;
+      if (event.type === 'opened') { tools = event.tools;
         setLive(old => ({ text: old?.text ?? '', trimmed: trimmedToolNotices(tools), rows: old?.rows ?? [] })); }
       if (event.type === 'research_call') {
         made = withResearchRow(made, event);
@@ -69,7 +69,6 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     }, { fetch: fetcher });
     await read();
     if (!alive.current) return 'unknown';
-    if (turnId && made.length) setRows({ turnId, rows: made });
     setSending(false); setLive(null); settled.current();
     if (outcome.state === 'lost') return 'unknown';
     const code = outcome.state === 'refused' ? outcome.code : outcome.last.type === 'error' ? outcome.last.code : null;
@@ -78,7 +77,12 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     setNotice({ code, text: said });
     return kept ? 'kept' : 'unknown';
   }, [sessionId, fetcher, read]);
+  const send = useCallback((text: string, requestId: string, chosen: TurnChoice = {}) =>
+    run({ kind: 'chat', requestId, text, ...chosen }), [run]);
+  /** 继续 after a pause for credits: the server has what was asked, so any device can press it. */
+  const resume = useCallback(() => view?.activeTurn ? run({ kind: 'resume', requestId: crypto.randomUUID(), resumeOf: view.activeTurn.turnId })
+    : Promise.resolve<SendAnswer>('done'), [run, view?.activeTurn]);
 
-  return { view, viewFailed, live, sending, notice, rows, send, reload: read,
+  return { view, viewFailed, live, sending, notice, send, resume, paused: view?.activeTurn?.pauseReason === 'waiting_credits', reload: read,
     busy: sending || Boolean(view?.activeTurn), clearNotice: () => setNotice(null) };
 }

@@ -44,7 +44,8 @@ export function turnHistory(view: TurnView): TurnHistory & { turns: MentorTurn[]
     if (stepId) turns.push({ executionId, stepId, ...round, questionId: null, kind: isOpeningInput(input ?? "") ? "opening" : "mentor" });
   }
   const active = view.activeTurn ? turnExecutionId(view.activeTurn.turnId) : null;
-  if (active) executions.push({ executionId: active, input: null, body: null, primaryBody: null, summary: null, state: "running" });
+  if (active) executions.push({ executionId: active, input: null, body: null, primaryBody: null, summary: null,
+    state: view.activeTurn?.pauseReason === "waiting_credits" ? "waiting_credits" : "running" });
   return { executions, turns, activeExecution: active };
 }
 

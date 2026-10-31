@@ -55,7 +55,7 @@ export type MentorDeps = {
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
   organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer;
   /** V2-5c: the user pressed Refresh on one benchmark account. */ researchRefreshId?: string;
-  /** The turn paused for credits this one continues (resume.ts). */ resumeOf?: number };
+  /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead } };
 
 const MARKER_RESERVE_BYTES = 256;
 /** Supplier time of a turn: its 300 s minus the reply and the organizer after the last lookup. */
@@ -101,18 +101,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     return sourceChecked.parse(data);
   };
   // A resume keeps to what the paused turn has left and replays its receipts: the reply survives a pause at the organizer.
-  let resume: ResumeRead | undefined;
-  if (input.resumeOf) {
-    try { resume = await db.resumeRead({ actorId: input.actorId, sessionId: input.sessionId, turnId: input.resumeOf }); }
-    catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_RESUME_DENIED' }); }
-    if (resume.kind !== 'mentor') return emit({ type: 'error', code: 'TURN_RESUME_DENIED' });
-  }
+  const resume = input.resume?.read;
   const replay = resume ? new TurnReplay(resume.calls) : undefined;
   let checked: z.infer<typeof sourceChecked> | undefined;
   // 2. Open: freeze, read the draft and its checklist in the same transaction.
   const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
-    ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}),
-    policy: mentorPolicy(catalog, { ...(resume ? { left: resume.limits } : {}), opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
+    ...(input.resume ? { resumeOf: input.resume.of } : {}),
+    policy: mentorPolicy(catalog, { ...(resume ? { left: resume.limits } : {}), opening,
+      stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
       sourceDrafts: checked?.sourceDrafts ?? [], ...(typeof flowRaw?.preparedAt === 'string' ? { preparedAt: flowRaw.preparedAt } : {}) }) });
   let opened, flow: PreparedResearch | undefined, flowRaw: Record<string, unknown> | undefined;
   // A turn the benchmark flow may run in: one read gets the check and the flow's state together (plan 3.1).
@@ -296,6 +292,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   } catch (error) {
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code
       : error instanceof Error && /^TURN_[A-Z_]+$/.test(error.message) ? error.message : 'TURN_FAILED';
+    if (code === 'TURN_PAUSED_FOR_CREDITS') await swallow('turn_pause_save_failed', db.pauseSave({ actorId: input.actorId,
+      turnId: opened.turnId, input: { kind: 'mentor', moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
+        ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) } }),
+    false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.

@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
+import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agentTurn";
+import { CHAT_ACTION, type ChatNotice } from "@/components/chat/ChatInlineNotice";
+import { TURN_PAUSED_NOTICE } from "@/app/(zh-hans)/app/runtime/turn-notices";
 import type { TurnView } from "@repo/api/src/services/turn/view";
 import { trpc } from "@/trpc/client";
 import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
@@ -25,16 +27,23 @@ export function useMentorTurnPath(sessionId: string | undefined) {
   useEffect(() => { void reload(); }, [reload]);
   const active = Boolean(view?.activeTurn);
   useEffect(() => {
-    if (!active) return;
+    if (!active || view?.activeTurn?.pauseReason) return;
     const timer = setInterval(() => void reload(), READ_MS);
     return () => clearInterval(timer);
-  }, [active, reload]);
+  }, [active, view?.activeTurn?.pauseReason, reload]);
 
   const projected = useMemo(() => view ? turnHistory(view) : { executions: [], turns: [], activeExecution: null }, [view]);
   const history = useRef<TurnHistory>(projected);
   history.current = projected;
   const merged = useRef<{ old?: unknown; projected?: unknown; data?: unknown }>({});
+  const paused = view?.activeTurn?.pauseReason === "waiting_credits" ? view.activeTurn : null;
   return { on, turns: projected.turns, owns: isTurnExecution, stepOpened,
+    /** 继续 after a pause for credits: the server has what was asked, so any device can press it. */
+    notices(stream: (open: () => Promise<AsyncIterable<AgentTurnEvent>>) => void): ChatNotice[] {
+      if (!paused) return [];
+      return [{ id: "turn-paused", tone: "warning", text: TURN_PAUSED_NOTICE, actions: [{ label: CHAT_ACTION.continue, onClick: () => stream(async () =>
+        mentorTurnEvents({ kind: "resume", sessionId, requestId: crypto.randomUUID(), resumeOf: paused.turnId })) }] }];
+    },
     /** The draft as the old path read it, plus the turn path's bindings. */
     draft<T extends { turns?: unknown[] } | undefined>(draft: T): T {
       return draft && { ...draft, turns: [...(draft.turns ?? []), ...projected.turns] };

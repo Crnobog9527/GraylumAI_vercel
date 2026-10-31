@@ -66,7 +66,7 @@ export type ChatDeps = {
   tools?: ChatToolDeps;
 };
 export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string; chosen?: ChatSelection;
-  /** The turn paused for credits this one continues (resume.ts). */ resumeOf?: number };
+  /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead } };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
@@ -149,13 +149,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q,
     quote.multiplier);
   if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
-  // A resume keeps to what the paused turn has left and replays its receipts; a bad resume is refused before anything changes.
-  let resume: ResumeRead | undefined;
-  if (input.resumeOf) {
-    try { resume = await db.resumeRead({ actorId: input.actorId, sessionId: input.sessionId, turnId: input.resumeOf }); }
-    catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_RESUME_DENIED' }); }
-    if (resume.kind !== 'chat') return emit({ type: 'error', code: 'TURN_RESUME_DENIED' });
-  }
+  // A resume keeps to what the paused turn has left and replays its receipts.
+  const resume = input.resume?.read;
   const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 };
   const frozenLimits = resume ? resumeLimits(limits, resume.limits) : limits;
   const replay = resume ? new TurnReplay(resume.calls) : undefined;
@@ -167,7 +162,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     frozen: { modelId: quote.modelId, model: quote.model, ...(tools?.voiceVersionId ? { voiceVersionId: tools.voiceVersionId } : {}) } });
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat', policy,
-    ...(input.resumeOf ? { resumeOf: input.resumeOf } : {}) }); }
+    ...(input.resume ? { resumeOf: input.resume.of } : {}) }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
     ...(tools ? { tools: { available: tools.plan.available, trimmed: tools.plan.trimmed } } : {}) });
@@ -292,6 +287,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   } catch (error) {
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     // Paused for credits: the turn waits (recovery or a resume closes it); everything else closes now.
+    // The resume needs nothing from the browser. A save that fails leaves it to expire: runResumedTurn refunds it.
+    if (code === 'TURN_PAUSED_FOR_CREDITS') await swallow('turn_pause_save_failed', db.pauseSave({ actorId: input.actorId,
+      turnId: opened.turnId, input: { kind: 'chat', text: input.text, ...(input.chosen ? { chosen: input.chosen } : {}) } }), false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
