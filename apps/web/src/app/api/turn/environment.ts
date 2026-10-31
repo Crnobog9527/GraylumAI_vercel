@@ -6,21 +6,25 @@ import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 /** CORE-PATH-V2: what every /api/turn request needs: the service client, the signed-in account, the declared database host. */
 export function turnEnvironment(request: NextRequest):
-  { admin: SupabaseClient; authenticate: (req: Request) => Promise<string | null>; databaseHost: { declared: string | undefined; actual: string } }
+  { admin: SupabaseClient; authenticate: (req: Request) => Promise<string | null>; userClient: () => SupabaseClient;
+    databaseHost: { declared: string | undefined; actual: string } }
   | null {
   const { url, anonKey: anon, serviceKey: service, databaseHost } = readTurnRouteEnv();
   if (!url || !anon || !service) return null;
+  const userClient = (): SupabaseClient => {
+    const bearer = request.headers.get('authorization');
+    return bearer?.startsWith('Bearer ')
+      ? createClient(url, anon, { auth: { persistSession: false }, global: { headers: { Authorization: bearer } } })
+      : createServerClient(url, anon, {
+        cookieOptions: resolveSupabaseCookieOptions(new URL(request.url).hostname.toLowerCase()),
+        cookies: { getAll: () => request.cookies.getAll(), setAll: () => {} },
+      });
+  };
   return {
     admin: createClient(url, service, { auth: { persistSession: false } }),
-    async authenticate(req) {
-      const bearer = req.headers.get('authorization');
-      const auth = bearer?.startsWith('Bearer ')
-        ? createClient(url, anon, { auth: { persistSession: false }, global: { headers: { Authorization: bearer } } })
-        : createServerClient(url, anon, {
-          cookieOptions: resolveSupabaseCookieOptions(new URL(request.url).hostname.toLowerCase()),
-          cookies: { getAll: () => request.cookies.getAll(), setAll: () => {} },
-        });
-      const { data } = await auth.auth.getUser();
+    userClient,
+    async authenticate() {
+      const { data } = await userClient().auth.getUser();
       return data.user?.id ?? null;
     },
     databaseHost: { declared: databaseHost, actual: new URL(url).host },

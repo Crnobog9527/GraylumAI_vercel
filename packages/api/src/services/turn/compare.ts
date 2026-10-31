@@ -2,11 +2,10 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logSwallowed } from '../../lib/swallow';
-import { compareRequest, assertCompareFits, snapshotHash, workspaceDependencies, type CompareParts } from '../fusion/compareSnapshot';
+import { compareRequest, snapshotHash, workspaceDependencies, type CompareParts } from '../fusion/compareSnapshot';
 import { columnStreamer } from '../fusion/compareStream';
-import { decimal, DECIMAL_SCALE } from '../bill2/decimal';
 import { fusionRequestBody } from '../fusion/request';
-import { assertCompareAllowed } from '../fusion/compareAdmission';
+import { assertCompareAllowed, assertQuoteCovers, type ShownQuote } from '../fusion/compareAdmission';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readAdmissionConfiguration } from '../runtime/admissionConfiguration';
 import { rowFor } from '../runtime/settingsRows';
@@ -18,6 +17,7 @@ import { CORE_PATH_SETTING, GATE_CODES, type ChatDeps } from './chat';
 import { readAdmissionSettings } from '../runtime/newWorkGate';
 import { TurnDatabaseError, type TurnClients } from './db';
 import { breakerTripped, fusionAdmission, fusionCoreSetting, fusionDatabase, fusionPolicy, runGroup, type MemberOutcome } from './fusionCalls';
+import { priceCompareColumns } from './compareQuote';
 import { fusionCall, fusionQuote } from './fusionQuote';
 import type { CounterStore } from './limiter';
 import { callCredits } from './policy';
@@ -46,6 +46,8 @@ export type CompareTurnDeps = { admin: SupabaseClient; clients: TurnClients; slo
   newWork: Pick<ChatDeps['newWork'], 'message' | 'calls'> };
 export type CompareTurnParts = Omit<CompareParts, 'history' | 'positioningFallback'>;
 export type CompareTurnInput = { actorId: string; sessionId: string; requestId: string; modelIds: string[];
+  /** The estimate the user agreed to: the turn never freezes more (FUSION-COMPARE §3.1). */
+  shown?: ShownQuote;
   /** Everything a column is sent except the history (read here) and the fallback rule (decided here); a reader runs after the gates. */
   parts: CompareTurnParts | (() => Promise<CompareTurnParts>) };
 
@@ -85,27 +87,23 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   const partsWith = (history: Array<{ role: 'user' | 'assistant'; content: string }>, positioningFallback: boolean): CompareParts =>
     ({ ...parts, history: history.map(m => ({ role: m.role, text: m.content })), positioningFallback });
 
-  // 2. Quotes and the exact request of every column, priced with the fallback rule (the larger of the two possible requests).
-  let quotes, columns;
+  // 2. Quotes and the exact request of every column (priceCompareColumns, the estimate's computation), and what the user agreed to.
+  let quotes, priced;
   try {
     quotes = await Promise.all(models.map(modelId => fusionQuote(admin, { configuration, modelId, phase: 'fusion_compare',
       outputTokens: settings.answerOutputTokens, key, deps: deps.pricing })));
-    const request = compareRequest(partsWith(sized, true));
-    assertCompareFits(request);
-    columns = quotes.map(quote => fusionCall(quote, fusionRequestBody(quote.policy as never, request, quote.outputLimit, quote.reasoning)));
+    priced = priceCompareColumns({ quotes, parts: partsWith(sized, true), answerTokens: settings.answerOutputTokens, maxBudgetUsd: settings.maxBudgetUsd });
+    if (priced.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
+    if (priced.overBudget) throw new Error('FUSION_BUDGET_EXCEEDED');
+    if (input.shown) assertQuoteCovers(priced.columns, input.shown);
   } catch (error) {
     // A known refusal code (quote, reasoning, price snapshot, request shape) is passed on; anything else stays generic.
     return emit(fail(error instanceof QuoteError || error instanceof TurnStop ? error.code
       : error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message) ? error.message : 'TURN_QUOTE_UNAVAILABLE'));
   }
-  const q = quotes[0]!.q;
-  const credits = columns.map(c => callCredits(q, c.upperUsd, c.multiplier));
-  const gCredits = credits.reduce((a, b) => a + b, 0);
-  // The single-compare budget (Owner 10-26) holds both ways, as overCompareBudget: the columns' provider cost bounds, and what
-  // the user may pay (each column rounded on its own) against the budget converted at q.
-  const usd = columns.reduce((sum, c) => sum + decimal(c.upperUsd), 0n);
-  if (settings.maxBudgetUsd === null || usd > decimal(settings.maxBudgetUsd)
-    || BigInt(gCredits) > decimal(settings.maxBudgetUsd) * decimal(q) / (DECIMAL_SCALE * DECIMAL_SCALE)) return emit(fail('FUSION_BUDGET_EXCEEDED'));
+  const { q, credits: gCredits } = priced;
+  const columns = priced.columns.map(column => column.call);
+  const credits = priced.columns.map(column => column.upperCredits);
 
   // 3. Open: Gold, >= 2 models, <= 500 credits, one compare at a time; the compare record; the freeze of every column.
   const db = fusionDatabase(deps.clients, input.actorId);
