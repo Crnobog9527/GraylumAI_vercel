@@ -16,7 +16,7 @@ import { callCredits, stopLossSettings } from './policy';
  * statement. A group's calls run in parallel, but turn_call_begin takes consecutive sequences, so the begins are sent one after
  * another, in the order the calls took their sequence; everything after the begin (send, identity, receipt) is parallel.
  */
-export type FusionKind = 'compare' | 'jury' | 'jury_adopt';
+export type FusionKind = 'compare' | 'jury';
 export type Verdict = 'usable' | 'format_invalid' | 'revision_invalid' | 'no_delivery';
 export type Judged = { verdict: Verdict; deliverable?: boolean };
 export type GroupMember = { call: ModelCall; body: string; phase: FusionPhase; judge: (text: string) => Judged;
