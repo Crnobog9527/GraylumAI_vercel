@@ -28,7 +28,7 @@ export function scrubText(value: string): string {
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'blog', 'callback', 'chat',
   'advance', 'fusion', 'connect', 'contact', 'cookies', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance', 'founders',
-  'cleanup',
+  'cleanup', 'compare', 'estimate',
   'forgot-password', 'fusion-recovery', 'graylum-vs-chatgpt', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'payment-notices', 'performance',
   'plan', 'positioning', 'postforme', 'preview', 'publish', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refund', 'refund-policy', 'refunds',
