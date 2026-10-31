@@ -53,11 +53,15 @@ export type ChatToolsSetup = {
   userInstructions: string;
   /** Frozen into the turn: revoking this version stops the turn (voice tombstone). */
   voiceVersionId?: string;
+  /** What the user chose for this message, as a line for the model, or the code that refuses it before anything opens. */
+  selection(chosen: ChatSelection): { note: string } | { refused: string };
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
     onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']> }): Promise<ReturnType<typeof turnTools>>;
 };
+
+export type ChatSelection = { moduleId?: string; references?: ReadonlyArray<{ documentId: string; version: number }> };
 
 /** POSITIONING-GATE: an account without a confirmed positioning neither sees nor loads a social-media Skill. */
 const allowedSkills = (catalog: readonly SkillCatalogEntry[], gated: boolean) => gated ? catalog.filter(entry => !entry.social) : catalog;
@@ -67,7 +71,7 @@ const REPLY_RESERVE_MS = 60_000;
 
 export async function prepareChatTools(input: { admin: SupabaseClient; read: TurnClients['read'];
   configuration: Promise<ConfigurationRows>; tools: ChatToolDeps;
-  actorId: string; sessionId: string; requiredBytes: number; interactiveBytes: number; quotedBytes: number;
+  actorId: string; sessionId: string; requiredBytes: number; interactiveBytes: number; quotedBytes: number; chosen?: ChatSelection;
   modelMultiplier: string; defaultMultiplier: string;
   /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
   maxTools: number }): Promise<ChatToolsSetup> {
@@ -107,6 +111,20 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
     plan, research: setup, inputLimit, definitionBytes,
     sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated)),
     userInstructions: voice?.text ?? '', ...(voice?.versionId ? { voiceVersionId: voice.versionId } : {}),
+    selection(chosen) {
+      let note = '';
+      if (chosen.moduleId) {
+        // A chosen Skill never silently falls back to a turn without it (as the old page's "不会自动换用其他功能").
+        const entry = catalog.find(item => item.moduleId === chosen.moduleId);
+        if (!entry || !plan.available.includes('load_skill') || !skills?.prepared.has(entry.name)) return { refused: 'TURN_SKILL_UNAVAILABLE' };
+        note += `\nThe user chose the Skill "${entry.name}" for this message: call load_skill with that name first.`;
+      }
+      if (chosen.references?.length) {
+        if (!plan.available.includes('read_source')) return { refused: 'TURN_REFERENCES_UNAVAILABLE' };
+        note += `\nThe user attached ${chosen.references.map((_item, index) => `doc-${index + 1}`).join(', ')}: read them with read_source before answering.`;
+      }
+      return { note };
+    },
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
       ...(sourceOffered ? { libraryRetrieval: true } : {}) },
@@ -120,7 +138,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
           return prepared === undefined ? [] : [[entry.name, prepared] as const];
         })) } : {}),
         ...(sourceOffered ? { readSource: typeof input.tools.library === 'function' ? input.tools.library(input.actorId, input.sessionId)
-          : libraryTurnReader(input.read, input.actorId, input.sessionId) } : {}) });
+          : libraryTurnReader(input.read, input.actorId, input.sessionId, input.chosen?.references) } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
       const tools: RuntimeTool[] = built.tools.map(tool => ({ ...tool, async execute(args, callId) {
         try { return await tool.execute(args, callId); }

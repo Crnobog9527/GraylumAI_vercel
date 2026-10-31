@@ -13,8 +13,11 @@ import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-r
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
 import {
-  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor,
+  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor, saveDraftReferences,
 } from './send-input';
+import {
+  COMPOSER_REFERENCES_ENABLED, referenceRequest, referencesNamedIn, type LibraryReference,
+} from '@/components/opc/composer-references';
 import { positioningRequiredNotice } from './positioning-required';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 import { useTurnChat } from './use-turn-chat';
@@ -33,23 +36,36 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
   const [input, setInput] = useState(''), [outgoing, setOutgoing] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
   const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
-  useEffect(() => { setInput(openingDraftWithReferences(localStorage, sessionId).text); }, [sessionId]);
+  const [skillId, setSkillId] = useState(''), [references, setReferences] = useState<LibraryReference[]>([]);
+  useEffect(() => {
+    const draft = openingDraftWithReferences(localStorage, sessionId);
+    setInput(draft.text); setSkillId(localStorage.getItem('opc-runtime-skill:' + sessionId) ?? '');
+    setReferences(COMPOSER_REFERENCES_ENABLED ? referencesNamedIn(draft.text, draft.references) : []);
+  }, [sessionId]);
+  const updateReferences = (next: LibraryReference[]) => { setReferences(next); saveDraftReferences(localStorage, sessionId, next); };
+  const chooseSkill = (id: string) => {
+    setSkillId(id);
+    if (id) localStorage.setItem('opc-runtime-skill:' + sessionId, id); else localStorage.removeItem('opc-runtime-skill:' + sessionId);
+  };
   const update = (value: string) => { setInput(value); localStorage.setItem('opc-runtime-input:' + sessionId, value); };
 
   async function send(text = input) {
     if (!text.trim() || chat.busy) return;
     // An unconfirmed earlier send of the same text keeps its request id, so the server replays instead of charging twice.
     const url = new URL(location.href);
-    const requestId = requestIdFor(url.searchParams.get('request'), readPending(localStorage, sessionId), text, undefined, []);
+    const sent = COMPOSER_REFERENCES_ENABLED ? referencesNamedIn(text, references) : [];
+    const requestId = requestIdFor(url.searchParams.get('request'), readPending(localStorage, sessionId), text, undefined, sent);
     url.searchParams.set('request', requestId); history.replaceState(null, '', url);
-    rememberPending(localStorage, sessionId, { requestId, text, input: text, references: [] });
+    rememberPending(localStorage, sessionId, { requestId, text, input: text, references: sent });
+    setReferences([]);
     const restore = clearForSend(setInput, text, saved => {
       localStorage.setItem('opc-runtime-input:' + sessionId, saved); markPendingRestored(localStorage, sessionId);
     });
     setOutgoing(text);
-    const answer = await chat.send(text, requestId);
+    const answer = await chat.send(text, requestId, { ...(skillId ? { moduleId: skillId } : {}),
+      ...(sent.length ? { references: referenceRequest(sent) } : {}) });
     setOutgoing(null);
-    if (answer === 'kept') restore();
+    if (answer === 'kept') { restore(); updateReferences(sent); }
     if (answer !== 'unknown') {
       forgetPending(localStorage, sessionId);
       const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);
@@ -109,7 +125,8 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
         </section>
       </div>
       <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
-        <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId} references={false}/>
+        <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
+          skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}/>
       </div></footer>
     </main>
   </WorkspaceFrame>;

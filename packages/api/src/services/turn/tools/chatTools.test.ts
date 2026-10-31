@@ -66,4 +66,14 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
     await prepare({ voice });
     expect(voice).not.toHaveBeenCalled();
   });
+
+  it('a chosen Skill or attached document is one line for the model, or a refusal before anything opens (V2-10)', async () => {
+    const setup = await prepare({ skills });
+    expect(setup.selection({ moduleId: actorId })).toEqual({ note: expect.stringContaining('"Hooks"') });
+    expect(setup.selection({ moduleId: sessionId })).toEqual({ refused: 'TURN_SKILL_UNAVAILABLE' });
+    expect(setup.selection({ references: [{ documentId: sessionId, version: 1 }] })).toEqual({ refused: 'TURN_REFERENCES_UNAVAILABLE' });
+    expect(setup.selection({})).toEqual({ note: '' });
+    const off = await prepare({});
+    expect(off.selection({ moduleId: actorId })).toEqual({ refused: 'TURN_SKILL_UNAVAILABLE' });
+  });
 });

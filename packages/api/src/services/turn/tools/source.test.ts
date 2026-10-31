@@ -36,4 +36,12 @@ describe('read_source: one read-only query per call, no row (Owner 10-28, ENGINE
     expect(h.writes).toEqual([]);
     expect(tools.summary().freeCalls).toBe(2);
   });
+
+  it('numbers the documents the user attached first, so doc-1 reads the first of them (V2-10)', async () => {
+    const rpc = vi.fn(async () => ({ data: {}, error: null }));
+    const read = libraryTurnReader({ rpc } as never, 'actor', 'session', [{ documentId: 'first', version: 2 }, { documentId: 'second', version: 1 }]);
+    await read('doc-1');
+    expect(rpc).toHaveBeenCalledWith('library_turn_read', expect.objectContaining({ p_query: 'doc-1',
+      p_refs: [{ ref: 'doc-1', documentId: 'first', version: 2 }, { ref: 'doc-2', documentId: 'second', version: 1 }] }));
+  });
 });

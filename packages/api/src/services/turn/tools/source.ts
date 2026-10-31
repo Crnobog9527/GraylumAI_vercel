@@ -17,8 +17,11 @@ const MAX_REFS = 30;
 const document = z.object({ documentId: z.string().uuid(), version: z.number().int().positive() }).passthrough();
 
 export type SourceRead = { text: string };
-export function libraryTurnReader(read: TurnClients['read'], actorId: string, sessionId: string) {
-  const refs: Array<{ ref: string; documentId: string; version: number }> = [];
+/** `attached`: the documents the user named on this message, numbered first (doc-1, doc-2, ...); the database checks each on read. */
+export function libraryTurnReader(read: TurnClients['read'], actorId: string, sessionId: string,
+  attached: ReadonlyArray<{ documentId: string; version: number }> = []) {
+  const refs: Array<{ ref: string; documentId: string; version: number }> = attached.slice(0, MAX_REFS)
+    .map((item, index) => ({ ref: `doc-${index + 1}`, documentId: item.documentId, version: item.version }));
   const number = (item: z.infer<typeof document>) => {
     let known = refs.find(r => r.documentId === item.documentId && r.version === item.version);
     if (!known && refs.length < MAX_REFS) refs.push(known = { ref: `doc-${refs.length + 1}`, documentId: item.documentId, version: item.version });

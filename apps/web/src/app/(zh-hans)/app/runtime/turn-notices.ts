@@ -18,6 +18,8 @@ const REFUSED: Record<string, string> = {
   TURN_SESSION_DENIED: '无法访问这个对话。',
   TURN_ACCOUNT_DENIED: '当前账号无法发送消息。',
   TURN_ACCOUNT_ERASING: '账号正在注销，无法发送消息。',
+  TURN_SKILL_UNAVAILABLE: '所选技能现在用不了，这条消息没有发送，也没有扣费。可以换一个技能，或不选技能再发送。',
+  TURN_REFERENCES_UNAVAILABLE: '引用的资料现在读不了，这条消息没有发送，也没有扣费。可以去掉引用再发送。',
   TURN_UNAUTHENTICATED: '登录已过期，请重新登录后再发送。',
   POSITIONING_REQUIRED: POSITIONING_REQUIRED_NOTICE,
 };

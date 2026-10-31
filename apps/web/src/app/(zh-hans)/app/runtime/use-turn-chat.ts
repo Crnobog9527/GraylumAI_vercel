@@ -22,6 +22,7 @@ export function withResearchRow(rows: readonly WorkItem[], call: ResearchCall): 
   const row = workItemFromResearchCall(call);
   return rows.some(old => old.id === row.id) ? rows.map(old => old.id === row.id ? row : old) : [...rows, row];
 }
+export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }> };
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
 export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: typeof fetch = (...args) => globalThis.fetch(...args)) {
@@ -53,10 +54,10 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     return () => clearInterval(timer);
   }, [active, read]);
 
-  const send = useCallback(async (text: string, requestId: string): Promise<SendAnswer> => {
+  const send = useCallback(async (text: string, requestId: string, chosen: TurnChoice = {}): Promise<SendAnswer> => {
     setSending(true); setNotice(null); setLive({ text: '', trimmed: [], rows: [] });
     let tools: ToolAvailability | undefined, turnId = 0, made: WorkItem[] = [];
-    const outcome = await runTurn({ kind: 'chat', sessionId, requestId, text }, event => {
+    const outcome = await runTurn({ kind: 'chat', sessionId, requestId, text, ...chosen }, event => {
       if (!alive.current) return;
       if (event.type === 'opened') { turnId = event.turnId; tools = event.tools;
         setLive(old => ({ text: old?.text ?? '', trimmed: trimmedToolNotices(tools), rows: old?.rows ?? [] })); }

@@ -30,7 +30,7 @@ import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
-import { prepareChatTools, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
+import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 
@@ -64,7 +64,7 @@ export type ChatDeps = {
   /** V2-6: the tools a free chat offers; absent, the turn has none (V2-4a). */
   tools?: ChatToolDeps;
 };
-export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string };
+export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string; chosen?: ChatSelection };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
@@ -126,11 +126,14 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (deps.tools) {
     try {
       tools = await prepareChatTools({ admin, read: deps.clients.read, configuration, tools: deps.tools, actorId: input.actorId,
-        sessionId: input.sessionId,
+        sessionId: input.sessionId, ...(input.chosen ? { chosen: input.chosen } : {}),
         requiredBytes, interactiveBytes, quotedBytes: quote.inputLimit, modelMultiplier: quote.multiplier,
         defaultMultiplier: quote.defaultMultiplier, maxTools: quote.maxTools });
     } catch { return emit({ type: 'error', code: 'TURN_TOOLS_UNAVAILABLE' }); }
   }
+  // What the user chose for this message (V2-10): refused before anything opens, never dropped silently.
+  const chosen = input.chosen ? tools?.selection(input.chosen) ?? { refused: 'TURN_SKILL_UNAVAILABLE' } : { note: '' };
+  if ('refused' in chosen) return emit({ type: 'error', code: chosen.refused });
   const inputLimit = tools ? tools.inputLimit : quote.inputLimit;
   // The ceiling this turn really has (research usable: the research one; otherwise the interactive one), before anything opens.
   if (tools && requiredBytes + tools.definitionBytes > inputLimit) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
@@ -218,7 +221,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
     // The tool definitions and the room kept for tool results are part of what the history may not take (V2-6).
-    const current = input.text + (tools?.plan.note ?? '');
+    const current = input.text + chosen.note + (tools?.plan.note ?? '');
     const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192
       - (tools ? tools.plan.reserveBytes + tools.definitionBytes : 0);
     const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
