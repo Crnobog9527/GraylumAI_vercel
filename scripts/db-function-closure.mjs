@@ -42,6 +42,14 @@ export const EXCEPTIONS = { research_turn_apply: 'Owner 2026-10-30: a mentor tur
 // own material, by the owner's key, through the read client, with no lock, no write and no turn_calls row. Adding a name needs that rule
 // to cover it; freeReadViolations holds each name to it.
 export const FREE_READS = ['library_turn_read'];
+// The only tables a free read may reach without an owner column (Owner 2026-11-01, ENGINEERING 5). Listed by name on purpose: any other
+// table with no owner column fails. Linked tables hold rows of a row already proved the owner's, and each select must name the row by
+// one of the listed keys. Catalog tables are the site-wide, admin-written, read-only ones.
+export const FREE_READ_LINKED = {
+  artifact_versions: ['id'], artifact_rounds: ['id'], artifact_evidence: ['id'], opc_items: ['work_item_id', 'account_project_id'],
+  opc_item_edits: ['work_item_id'], opc_draft_businesses: ['draft_id', 'business_id'],
+};
+export const FREE_READ_CATALOG = ['modules', 'skills', 'skill_packages', 'skill_revisions', 'skill_revision_revocations', 'system_settings'];
 export const TOOLS_DIR = 'packages/api/src/services/turn/tools';
 
 const KEYWORDS = new Set(['if', 'in', 'values', 'select', 'from', 'exists', 'case', 'when', 'and', 'or', 'not', 'on', 'as', 'using',
@@ -250,9 +258,21 @@ function rowFilters(scope) {
   return /\bOR\b/i.test(filters) ? '' : filters;
 }
 
+// Whether the filters pick rows of `alias` by one of its keys, compared with something else (x.id = y.other_id, not x.id = x.id).
+function namedRow(filters, alias, keys, alone) {
+  if (!keys.length) return false;
+  const names = keys.join('|'), side = `\\b${alias}\\.(?:${names})\\b${alone ? `|\\b(?:${names})\\b` : ''}`;
+  for (const m of filters.matchAll(/([a-z_][a-z0-9_.]*)\s*=\s*([a-z_][a-z0-9_.]*)/gi)) {
+    const [left, right] = [m[1].toLowerCase(), m[2].toLowerCase()];
+    if (left !== right && (new RegExp(`^(?:${side})$`).test(left) || new RegExp(`^(?:${side})$`).test(right))) return true;
+  }
+  return false;
+}
+
 // Tables of each select in `code` that are not held to the owner: directly (<alias>.actor_id = p_actor_id, profile_id for a table keyed
 // by the profile) or through an equal owner column of a table in the same select that is. One filtered branch does not vouch for another.
-export function unownedReads(code, tableNames) {
+// A listed catalog table needs no key; a listed linked table needs its row named by one of its keys, and vouches for nothing else.
+export function unownedReads(code, tableNames, { linked = FREE_READ_LINKED, catalog = FREE_READ_CATALOG } = {}) {
   const found = new Set();
   for (const statement of statements(code)) {
     const ctes = cteNames(statement);
@@ -261,6 +281,7 @@ export function unownedReads(code, tableNames) {
       if (!tableNames.has(table) || ctes.has(table)) continue;
       // A comma join hides the next table from TABLE_REF: refused outright, a free read spells its joins.
       if (/^\s*,/.test(statement.slice(ref.index + ref[0].length))) { found.add(table); continue; }
+      if (catalog.includes(table)) continue;
       const before = ownSelect(statement, ref.index).split(SET_OPERATION).pop();
       const scope = before + scopeAfter(statement, ref.index).split(SET_OPERATION)[0];
       const refs = [...scope.matchAll(TABLE_REF)].filter(m => tableNames.has(m[1].toLowerCase()))
@@ -275,7 +296,7 @@ export function unownedReads(code, tableNames) {
         for (const [a, b] of links) if (keyed.has(a) !== keyed.has(b)) { keyed.add(a); keyed.add(b); grew = true; }
       }
       const alias = (ref[2] && !NOT_ALIAS.test(ref[2]) ? ref[2] : ref[1]).toLowerCase();
-      if (!keyed.has(alias)) found.add(table);
+      if (!keyed.has(alias) && !namedRow(filters, alias, Object.hasOwn(linked, table) ? linked[table] : [], refs.length === 1)) found.add(table);
     }
   }
   return [...found].sort();
@@ -290,6 +311,7 @@ export function freeReadViolations(functions, tableNames, names = FREE_READS) {
     if (!defs) { found.push(`${name}: free read has no function`); continue; }
     for (const { head, body } of defs) {
       if (!/\(\s*p_actor_id\s+uuid\b/i.test(head)) found.push(`${name}: free read without p_actor_id first`);
+      if (!/\b(?:actor_id|profile_id)\s*=\s*p_actor_id\b/i.test(stripCode(body))) found.push(`${name}: free read without an owner check of its own`);
     }
     for (const reached of closure(name, functions, tableNames, []).functions) {
       for (const { head, body } of functions.get(reached) ?? []) {

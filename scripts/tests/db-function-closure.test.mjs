@@ -204,6 +204,36 @@ test('a free read stays read-only, lock-free and keyed by its owner, all the way
   assert.deepEqual(freeReadViolations(new Map(), new Set(), ['gone']), ['gone: free read has no function']);
 });
 
+test('only the listed tables may go without an owner column, and a linked one only by its key', () => {
+  const lists = { linked: { v_t: ['id'], i_t: ['work_item_id'] }, catalog: ['c_t'] };
+  const tables = new Set(['o_t', 'v_t', 'i_t', 'c_t', 'x_t']);
+  const reads = sql => unownedReads(sql, tables, lists);
+  assert.deepEqual(reads('SELECT 1 FROM o_t o JOIN v_t v ON v.id = o.version_id WHERE o.actor_id = p_actor_id;'), []);
+  assert.deepEqual(reads('SELECT * INTO v FROM v_t WHERE id = version_id;'), []);
+  assert.deepEqual(reads('SELECT 1 FROM i_t WHERE work_item_id = item;'), []);
+  assert.deepEqual(reads('SELECT 1 FROM c_t WHERE key = k;'), []);
+  // Reverse: a table outside the lists fails whatever it is joined to or filtered by.
+  assert.deepEqual(reads('SELECT 1 FROM x_t WHERE id = item;'), ['x_t']);
+  assert.deepEqual(reads('SELECT 1 FROM o_t o JOIN x_t x ON x.id = o.version_id WHERE o.actor_id = p_actor_id;'), ['x_t']);
+  assert.deepEqual(unownedReads('SELECT 1 FROM v_t WHERE id = item;', tables), ['v_t']);
+  // A linked table without its key, or by another column, or by itself, proves nothing.
+  assert.deepEqual(reads('SELECT 1 FROM v_t;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM v_t WHERE state = s;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM v_t v WHERE v.id = v.id;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM v_t WHERE id = item OR state = s;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM i_t WHERE id = item;'), ['i_t']);
+  // A linked table does not vouch for an owned one, and a catalog comma join cannot hide a table.
+  assert.deepEqual(reads('SELECT 1 FROM v_t v JOIN o_t o ON o.id = v.id WHERE v.id = item;'), ['o_t']);
+  assert.deepEqual(reads('SELECT 1 FROM c_t c, x_t x WHERE c.key = k;'), ['c_t']);
+});
+
+test('a free read checks the owner itself, even when it reaches only listed tables', () => {
+  const read = body => `CREATE OR REPLACE FUNCTION public.f(p_actor_id uuid)\n RETURNS void\n LANGUAGE plpgsql\n STABLE\nAS $function$\n${body}\n$function$;\n`;
+  const hits = body => freeReadViolations(readFunctions(join(repo({ 'library/f.sql': read(body) }), 'packages/db/functions')), new Set(['skills']), ['f']);
+  assert.match(hits('SELECT 1 FROM skills WHERE id = 1;').join(), /without an owner check/);
+  assert.deepEqual(hits('SELECT 1 FROM skills WHERE id = 1; SELECT 1 FROM profiles WHERE profile_id = p_actor_id;'), []);
+});
+
 test('every read of a free read carries the owner key itself; one filtered branch does not vouch for another', () => {
   const tables = new Set(['a_t', 'b_t']);
   const owned = 'SELECT 1 FROM a_t WHERE actor_id = p_actor_id';
