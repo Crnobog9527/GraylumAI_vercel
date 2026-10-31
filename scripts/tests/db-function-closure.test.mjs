@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { pruneForKind, kindsOf } from '../db-function-kinds.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -156,6 +157,33 @@ test('every UPDATE of a statement is judged by its own WHERE, and a SET command 
   assert.deepEqual(hits('BEGIN IF a THEN NULL; ELSE SET statement_timeout = 5; END IF; END;'), ['f: non-LOCAL SET']);
   assert.deepEqual(hits('BEGIN IF a THEN SET LOCAL statement_timeout = 5; END IF; END;'), []);
   assert.deepEqual(hits('BEGIN IF a THEN\n UPDATE turns\n SET state=1 WHERE actor_id=a AND id=b;\n END IF; END;'), []);
+});
+
+test('pruneForKind drops branches another kind takes, and keeps what it cannot judge', () => {
+  const body = `BEGIN
+    IF t.kind = 'mentor' THEN PERFORM mentor_fn(); ELSIF t.kind = 'report' THEN PERFORM report_fn(); ELSE PERFORM other_fn(); END IF;
+    IF p_kind = 'report' OR x THEN PERFORM mixed_fn(); END IF;
+    IF t.kind <> 'report' THEN PERFORM skip_rep_fn(); END IF;
+    PERFORM CASE WHEN a THEN b ELSE c END;
+  END;`;
+  const seen = kind => ['mentor_fn', 'report_fn', 'other_fn', 'mixed_fn', 'skip_rep_fn'].filter(n => pruneForKind(body, kind).includes(n));
+  assert.deepEqual(seen('mentor'), ['mentor_fn', 'mixed_fn', 'skip_rep_fn']);
+  assert.deepEqual(seen('report'), ['report_fn', 'mixed_fn']);
+  assert.deepEqual(seen('chat'), ['other_fn', 'mixed_fn', 'skip_rep_fn']);
+});
+
+test('kindsOf limits the fusion functions to the kinds they accept', () => {
+  assert.deepEqual(kindsOf('turn_fusion_open'), ['compare', 'jury', 'jury_adopt']);
+  assert.deepEqual(kindsOf('turn_fusion_recovery'), ['jury', 'jury_adopt']);
+  assert.ok(kindsOf('turn_close').includes('chat'));
+});
+
+test('pruneForKind keeps an outer NOT and a p_kind that is not the turn kind', () => {
+  const negated = "IF NOT (t.kind = 'mentor') THEN PERFORM a_fn(); ELSE PERFORM b_fn(); END IF;";
+  for (const kind of ['chat', 'mentor']) assert.ok(['a_fn', 'b_fn'].every(n => pruneForKind(negated, kind).includes(n)));
+  const reason = "IF p_kind <> 'stopped' THEN PERFORM c_fn(); END IF;";
+  assert.ok(pruneForKind(reason, 'stopped').includes('c_fn'));
+  assert.ok(!pruneForKind(reason, 'stopped', true).includes('c_fn'));
 });
 
 test('a free read stays read-only, lock-free and keyed by its owner, all the way down', () => {
