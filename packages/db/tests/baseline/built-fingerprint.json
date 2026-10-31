@@ -4306,7 +4306,7 @@
   "fn:turn_report_admit(uuid,uuid,jsonb)": "1ae85e40df2d",
   "fn:turn_report_apply(turns,text,jsonb)": "5350de5453ba",
   "fn:turn_report_close_kind(turns,text)": "0aaaafdd2738",
-  "fn:turn_report_read(uuid,uuid,uuid,bigint)": "07ed7a5cae92",
+  "fn:turn_report_read(uuid,uuid,uuid,bigint)": "6121865cbd1b",
   "fn:turn_report_settlement(turns,text,boolean,integer,integer,timestamp with time zone)": "3493797c2b63",
   "fn:turn_resume_carry(uuid,uuid,bigint,bigint,text,jsonb)": "c62cc53dff02",
   "fn:turn_resume_close(uuid,bigint,integer)": "18d9e823ddbd",

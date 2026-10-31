@@ -54,7 +54,8 @@ describe('report stop and read (CORE-PATH-V2 V2-7a)', () => {
   });
 
   it('reads the newest report of a round with its saved text', async () => {
-    const turn = { turnId: 9, state: 'closed', closeKind: 'stopped', delivered: false, chargedCredits: 0, settlement: 'done',
+    const turn = { turnId: 9, requestId: '00000000-0000-4000-8000-000000000009', state: 'closed', closeKind: 'stopped', delivered: false,
+      chargedCredits: 0, settlement: 'done',
       fixedCredits: 500, stopChargeable: false, report: { roundId: ROUND }, body: '## One', openedAt: 'a', closedAt: 'b' };
     const d = deps(() => ({ data: turn }));
     const res = await handleReportRead(new Request(`https://app.test/api/turn/report?sessionId=${SESSION}&roundId=${ROUND}`), d.deps);
