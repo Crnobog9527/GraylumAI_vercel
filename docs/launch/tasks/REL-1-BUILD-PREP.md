@@ -269,6 +269,7 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 2. **每日签到会在正式站自动发积分**（缺省每天 5–25、每月满勤加 50），个人中心有入口；没找到 Owner 关于上线开不开签到、给多少的决定。需要 Owner 一句话。
 3. **`support_email` 会公开显示**：REL-1 B11 说它和页面显示的客服邮箱"是两回事"，但代码里关于我们、无障碍、博客、维护页、登录页都读这个值。填一个只收告警的私人邮箱会被公开。建议 B11 改写，邮箱由 Owner 选。
 4. **套餐和积分包怎么写入正式库没说清**：空库没有这几行；Owner 10-25 定了"会员价格后台改只读、改价走迁移"。B3 要写明用哪份 SQL（建议照 staging 种子文件结构另出正式版，总控审核）。
+   已定：用 [production_non_secret_baseline.sql](../../../packages/db/seeds/production_non_secret_baseline.sql) 写入 B3/B7 非密钥配置；建库日替换占位、Owner 批准后由总控执行。
 5. **4 个写作 Skill 只有 2 个在 staging 发布过**：分镜、剪辑建议从没在 staging 发布和验收，B7 却要在正式勾"使用用户文风"。要么先在 staging 发布验收，要么 Owner 确认这两个上线时不发。
 6. **`chat_my_posts_enabled`**：~~staging 是关的，REL-1 B7 列了但没写取值。~~ 已定（10-26）：正式 `true`，见第 1 部分。
 7. **`v3_summary_max_tokens`**：staging 4096、缺省 2048，正式取哪个没有记录。
