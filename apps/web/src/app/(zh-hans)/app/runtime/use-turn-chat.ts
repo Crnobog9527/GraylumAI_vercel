@@ -46,6 +46,13 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   useEffect(() => { void read(); }, [read]);
 
   // Until the active turn closes, on this page or another: a reload, a dropped stream, a second tab.
+  // A read that failed (the first one, or the one after a send) is read again until it answers: the turn goes on without this page.
+  const unread = viewFailed || !view;
+  useEffect(() => {
+    if (!unread) return;
+    const timer = setInterval(() => void read(), READ_MS);
+    return () => clearInterval(timer);
+  }, [unread, read]);
   // A pause waits for the user; nothing moves it, so it is not read again.
   const active = Boolean(view?.activeTurn) && view?.activeTurn?.pauseReason !== 'waiting_credits' && !sending;
   useEffect(() => {

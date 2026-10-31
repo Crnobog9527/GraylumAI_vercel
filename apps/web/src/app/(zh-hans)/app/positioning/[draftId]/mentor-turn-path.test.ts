@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { STREAM_INTERRUPTED } from "./mentor-turn";
+import { envelopeWithExecution, parseStepEnvelope } from "./mentor-turn";
+import { envelopeExecution } from "./step-recovery";
 import { mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, TurnRefused } from "./mentor-turn-path";
 
 const view = (messages: unknown[], activeTurn: unknown = null) => ({ activeTurn, lastTurn: null, messages, calls: [] }) as never;
@@ -54,6 +56,15 @@ describe("mentor on the turn path", () => {
     const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("afterSeq=0")
       ? { activeTurn: null, lastTurn: null, messages: full, calls: [call(1)] } : { activeTurn: null, lastTurn: null, messages: [], calls: [] })));
     expect((await readTurnView("s", fetcher as never))?.calls.map(c => c.turnId)).toEqual([1]);
+  });
+  it("keeps a turn id in the retained request, and recovery finds the saved reply by it", () => {
+    const raw = JSON.stringify({ request: { draftId: "d", stepId: "s1", purpose: "mentor", requestId: "r1", input: "我做健身" } });
+    const kept = envelopeWithExecution(raw, "r1", "turn:4");
+    expect(kept).not.toBeNull();
+    expect(parseStepEnvelope(kept!)?.executionId).toBe("turn:4");
+    expect(envelopeWithExecution(raw, "r1", "turn:abc")).toBeNull();
+    const history = turnHistory(view([{ seq: 1, role: "user", turnId: 4, content: "我做健身" }, reply(2, 4)]));
+    expect(envelopeExecution(history as never, parseStepEnvelope(kept!)!)?.executionId).toBe("turn:4");
   });
   it("reads every page of saved messages", async () => {
     const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ seq: from + i, role: "user", turnId: 1, content: "" }));
