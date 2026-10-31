@@ -13,6 +13,9 @@ export function kindsOf(root) {
   return root.startsWith('turn_fusion_') ? ['compare', 'jury', 'jury_adopt'] : KINDS;
 }
 
+// `p_kind` is the turn's kind only in these functions; elsewhere it is the close reason (completed, stopped ...) or something else.
+export const P_KIND_IS_TURN_KIND = new Set(['turn_open', 'turn_fusion_open']);
+
 const KIND_TEST = /(?<![\w.])(?:t\.|p_)?kind\s+(NOT\s+IN|IN|<>|!=|=)\s*(\([^)]*\)|'[^']*')/gi;
 const TOKEN = /\b(END\s+IF|END\s+LOOP|END\s+CASE|ELSIF|IF|ELSE|THEN|CASE|END)\b/gi;
 
@@ -21,27 +24,28 @@ export const stripComments = sql => sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replac
 const literals = text => [...text.matchAll(/'([^']*)'/g)].map(m => m[1]);
 
 // { tests: how many kind tests the condition holds, holds: whether `kind` passes them all, pure: the condition is only kind tests }
-export function judge(cond, kind) {
-  if (/\bOR\b/i.test(cond)) return { tests: 0, holds: true, pure: false };
-  const tests = [...cond.matchAll(KIND_TEST)];
+export function judge(cond, kind, pKind = false) {
+  // OR, and a NOT that is not part of NOT IN, are not evaluated: the branch stays.
+  if (/\bOR\b/i.test(cond) || /\bNOT\b(?!\s+IN\b)/i.test(cond)) return { tests: 0, holds: true, pure: false };
+  const tests = [...cond.matchAll(KIND_TEST)].filter(m => pKind || !/^p_/i.test(m[0]));
   let holds = true;
   for (const [, op, rhs] of tests) {
     const inList = literals(rhs).includes(kind);
     const positive = /^(IN|=)$/i.test(op.replace(/\s+/g, ' '));
     if (positive !== inList) holds = false;
   }
-  const rest = cond.replace(KIND_TEST, ' ').replace(/\b(AND|NOT)\b|[()\s]/gi, '');
+  const rest = cond.replace(KIND_TEST, x => (tests.some(t => t[0] === x) ? ' ' : x)).replace(/\b(AND|NOT)\b|[()\s]/gi, '');
   return { tests: tests.length, holds, pure: tests.length > 0 && rest === '' };
 }
 
 // The function body without the IF branches that `kind` cannot take.
-export function pruneForKind(body, kind) {
+export function pruneForKind(body, kind, pKind = false) {
   const text = stripComments(body);
   const dead = [];
   const stack = [];
   const closeBranch = (frame, at) => { if (frame.start !== null) { if (frame.dead) dead.push([frame.start, at]); frame.start = null; } };
   const open = (frame, condEnd, cond) => {
-    const j = judge(cond, kind);
+    const j = judge(cond, kind, pKind);
     frame.dead = (j.tests > 0 && !j.holds) || frame.taken;
     if (j.pure && j.holds) frame.taken = true;
     frame.start = condEnd;

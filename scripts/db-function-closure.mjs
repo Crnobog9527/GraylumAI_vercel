@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { kindsOf, pruneForKind } from './db-function-kinds.mjs';
+import { kindsOf, pruneForKind, P_KIND_IS_TURN_KIND } from './db-function-kinds.mjs';
 
 export const DEFAULTS = {
   enforceDir: 'packages/db/functions/turn',
@@ -117,7 +117,7 @@ export function closure(root, functions, tableNames, leaves = DEFAULTS.leaves, {
     seenFunctions.add(name);
     if (leaves.includes(name) && name !== root) continue;
     for (const { body } of functions.get(name)) {
-      const text = kind ? pruneForKind(body, kind) : body;
+      const text = kind ? pruneForKind(body, kind, P_KIND_IS_TURN_KIND.has(name)) : body;
       for (const callee of callsOf(text, functionNames)) if (callee !== name) stack.push(callee);
       for (const table of tablesOf(text, tableNames)) seenTables.add(table);
     }

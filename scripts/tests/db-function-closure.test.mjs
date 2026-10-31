@@ -177,3 +177,11 @@ test('kindsOf limits the fusion functions to the kinds they accept', () => {
   assert.deepEqual(kindsOf('turn_fusion_recovery'), ['jury', 'jury_adopt']);
   assert.ok(kindsOf('turn_close').includes('chat'));
 });
+
+test('pruneForKind keeps an outer NOT and a p_kind that is not the turn kind', () => {
+  const negated = "IF NOT (t.kind = 'mentor') THEN PERFORM a_fn(); ELSE PERFORM b_fn(); END IF;";
+  for (const kind of ['chat', 'mentor']) assert.ok(['a_fn', 'b_fn'].every(n => pruneForKind(negated, kind).includes(n)));
+  const reason = "IF p_kind <> 'stopped' THEN PERFORM c_fn(); END IF;";
+  assert.ok(pruneForKind(reason, 'stopped').includes('c_fn'));
+  assert.ok(!pruneForKind(reason, 'stopped', true).includes('c_fn'));
+});
