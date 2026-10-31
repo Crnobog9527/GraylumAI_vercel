@@ -135,7 +135,7 @@ async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planne
     const line = { callId: randomUUID(), ...tool, ...callDisplay(step.request) };
     input.onCall?.emit({ type: 'research_call', ...line, state: 'running' });
     const result0 = stored?.[i];
-    const receipt = result0 ? { result: result0, costUsd: '0' } as SupplierReceipt : await supplierSubcall(input.suppliers, step.request);
+    const receipt = result0 ? { result: result0, costUsd: null, multiplier: '1' } as SupplierReceipt : await supplierSubcall(input.suppliers, step.request);
     ledger.add(receipt);
     const result = receipt.result;
     const answered = ['ok', 'partial'].includes(result.outcome) ? 'succeeded' as const : 'failed' as const;
