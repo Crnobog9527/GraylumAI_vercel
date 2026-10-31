@@ -209,7 +209,7 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 旧设计只在收轮累加，开轮看不到在途回合，并发时超额没有上界。改法：
 
 表 `daily_spend(day, bucket smallint, reserved_usd, spent_usd)`：`bucket 0–15` 按 `actor_id` 哈希分摊给普通回合（chat、mentor、review）；
-`bucket=-1` 是"大额行"，只给单轮上界大的 kind（report、compare、jury、jury_adopt）用，它们是 Gold 功能、量少，串行无妨。
+`bucket=-1` 是"大额行"，只给单轮上界大的 kind（report、compare、jury）用，它们是 Gold 功能、量少，串行无妨。
 目录缓存提供：日限 L；`P` = 数据库最大并发事务数（= 连接池大小，staging 现在 8，必须 ≥ 实际池大小）；
 `U_fast` = 普通回合的单轮上界最大值（导师 2 次调用 + 整理，按 150000 字节输入、32768 输出和当前最贵普通模型算，约 1–1.5 美元）；
 `U_big` = 大额 kind 的单轮上界最大值（评审团 4 席或对比 N 模型，约 5 美元量级）。预留带 `B = (P−1)×U_fast + U_big`。
@@ -332,7 +332,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | 定位导师 | kind=mentor；Skill 包从缓存按 module→revision→packageHash 取；hostTurnContext 由 `turn_open` 返回的草稿摘要拼；`fallbackEligible` 按轮次计数算好返回（修核心缺陷：兜底卡从未显示） | 两次模型调用 + `read_skill_file`（进程缓存，不计费、不写库）+ 整理调用 | 整理结果与研究轮次计数在同一事务写 `opc_drafts`（替代 `opc_capture_apply` 独立往返）；对标工具的 `research_*` 派生行也在收轮同一事务写（Owner 2026-10-30 选 A） |
 | 报告 | kind=report；冻结固定 500（+ 本次调用临时上界）；会员/草稿/确认/价格一致（`acceptedCredits`）检查搬进 kind 分支 | 一次长调用（32768 输出上限，不续写） | 成功 D=500；停止按 24 小时规则；结果写 `artifact_versions`（不变） |
 | 对比 | kind=compare；G_turn=Σ各模型上界，用户合计上限 500 积分，超则拒开轮；Gold 门槛 | N 个并行调用各一条回执 | 各模型各自取整 |
-| 评审团 | kind=jury；**用户侧冻结 = 固定价 1500 积分 + 当前这一组调用的临时上界**（10-17 规则）；平台侧 U_turn = 全部席位与汇总调用的成本上界之和（给 2.5.1 的日限用）；Gold 门槛；同版本 3 次未完成则拒 | 席位调用各一条回执——**只记供应商成本和名义费用，用于平台记账与报表，不按席向用户收费**；格式不合格 `status='unusable'`；每组结束后释放该组临时上界、下一组开始前再冻结下一组的（10-13 规则）；两组之间 `paused(awaiting_user)` | **用户按固定价结算，交付判定沿用 `fusion_review_fee_settle_internal`**：拿到可用修订稿（汇总判定 usable 或 outcome=revised）→ 扣固定价；无需修改（no_change）、修订失败、未完成 → 全退；中断或 24 小时自动结束 → 扣 min(固定价, 已发出调用的已知名义用量折算积分)，其余退（现有 `stopped/interrupted` 分支，也是 10-27"已交付部分按实际扣、未用押金退"的落实）；采纳修订另起 `kind=jury_adopt`（不加费） |
+| 评审团 | kind=jury；**用户侧冻结 = 固定价 1500 积分 + 当前这一组调用的临时上界**（10-17 规则）；平台侧 U_turn = 全部席位与汇总调用的成本上界之和（给 2.5.1 的日限用）；Gold 门槛；同版本 3 次未完成则拒 | 席位调用各一条回执——**只记供应商成本和名义费用，用于平台记账与报表，不按席向用户收费**；格式不合格 `status='unusable'`；每组结束后释放该组临时上界、下一组开始前再冻结下一组的（10-13 规则）；两组之间 `paused(awaiting_user)` | **用户按固定价结算，交付判定沿用 `fusion_review_fee_settle_internal`**：拿到可用修订稿（汇总判定 usable 或 outcome=revised）→ 扣固定价；无需修改（no_change）、修订失败、未完成 → 全退；中断或 24 小时自动结束 → 扣 min(固定价, 已发出调用的已知名义用量折算积分)，其余退（现有 `stopped/interrupted` 分支，也是 10-27"已交付部分按实际扣、未用押金退"的落实）；采纳后重定稿走 R14，不开回合（不加费、不调用模型、可反复修改，10-20） |
 | 周复盘（上线后） | kind=review；定时任务代替用户发起；G_turn 由 1 美元换算 | 同自由对话 | 同自由对话 |
 
 ### 2.8 staging = 正式
@@ -543,7 +543,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | 报告由模型写、12000 字、Skill 模板定结构（项 22/25）；两种形态、结构化 9000 字（REPORT-VISUAL） | `kind=report`；结果写 `artifact_versions` | 保留 |
 | 后台可单独指定报告模型（10-10）；单次输出 32768 不续写（10-07） | 目录；常量 | 保留 |
 | 旧版本报告可看可导出（10-12）；已评审徽章代码判断（10-20） | `artifact_versions` 不变 | 保留 |
-| 评审团 3 席固定视角 + 汇总、默认 1 轮、代码合并去重、引文核对（10-20/10-14）；模型 Sonnet/GPT-6.1 Sol/Gemini 4 Argon/Opus（10-25）；逐章选择一次（10-14）；三次未完成暂停该版本（10-20）；采纳后可编辑重定稿不加费（10-20） | `kind=jury`；合并、引文核对是 Node 纯函数；`jury_adopt` | 保留 |
+| 评审团 3 席固定视角 + 汇总、默认 1 轮、代码合并去重、引文核对（10-20/10-14）；模型 Sonnet/GPT-6.1 Sol/Gemini 4 Argon/Opus（10-25）；逐章选择一次（10-14）；三次未完成暂停该版本（10-20）；采纳后可编辑重定稿不加费（10-20） | `kind=jury`；合并、引文核对是 Node 纯函数；采纳后重定稿走 R14，不开回合 | 保留 |
 | 评审、对比只给 Gold，非 Gold 弹付费墙（记录 D、10-20） | `turn_open` 查会员等级 | 保留 |
 | 对比默认勾选、最少 ≥2、第一条消息就支持对比（项 50、10-24） | 前端 + `kind=compare` | 保留 |
 
@@ -644,12 +644,12 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | V2-5 | `feat(CORE-PATH-V2)` 定位导师 | `kind=mentor`：Skill 包缓存、hostTurnContext、提问卡/确认卡、整理入收轮、兜底资格、#1502 的三断点按新结构重写、黄金字节 | high | Claude | V2-4 | 5 天 | 预算导师 ≤ 11；`hostTurnAdmission.test.ts` 断言等效迁入；换步骤第一断点哈希不变 |
 | V2-6 | `feat(CORE-PATH-V2)` 研究与 Skill 工具接核 | 研究工具回执计量、子调用计数、容量裁剪明示（`opened` 事件）、研究轮次计数（含贴链接核对）、`read_source`/`load_skill`/`read_skill_file`；TikHub/Parallel/Firecrawl/monid 按供应商并发上限 + 退避（复用 V2-4 的 Redis 计数） | high | Codex | V2-4 | 4 天 | `payg-three-tools`、`research-tools` 场景等效迁移；未知结果 0 结算测试；供应商限流退避单测 |
 | V2-7a | `feat(CORE-PATH-V2)` 报告 | `kind=report`：固定价、`acceptedCredits` 校验、会员门槛、停止（唯一允许停止的 kind）与 24 小时防刷、前端停止确认与第 3 次扣费说明（修核心缺陷 1⑤ J2/J3）、`artifact_versions` 写入、#1501 断点保留 | high | Codex | V2-4 | 3.5 天 | `report`、`report-stop` 场景迁移；24 小时 3 次停止测试；双击只扣一次 |
-| V2-7b | `feat(CORE-PATH-V2)` 对比与评审团 | `kind=compare`/`jury`/`jury_adopt`：并行调用、分组暂停、押金、Gold 门槛、三次未完成、`fusion-recovery` 改读 `turns` | high | Claude | V2-4 | 5 天 | fusion 套件场景迁移；24 小时自动结束测试 |
+| V2-7b | `feat(CORE-PATH-V2)` 对比与评审团 | `kind=compare`/`jury`（采纳后重定稿走 R14，不开回合）：并行调用、分组暂停、押金、Gold 门槛、三次未完成、`fusion-recovery` 改读 `turns` | high | Claude | V2-4 | 5 天 | fusion 套件场景迁移；24 小时自动结束测试 |
 | V2-8 | `feat(CORE-PATH-V2)` 暂停/恢复/定时任务 | `runtime-recovery` 定时任务改读 `turns`（15 分钟中断、24 小时暂停、未知成本补结），按批认领（`FOR UPDATE SKIP LOCKED`、每批 ≤50、可多实例并行、幂等）；普通对话停止入口删除、服务端拒绝 | high | Codex | V2-3、V2-4 | 3 天 | `bill2-stuck`、`stop-round`（改为"普通对话不能停"的拒绝断言）场景迁移；崩溃恢复集成测试；两个实例同时跑定时任务不重复处理 |
 | V2-9 | `feat(CORE-PATH-V2)` 删除与注销接新表 | 会话删除墓碑化、内容清除投影、注销投影、文风来源撤销、`content_erasure_runtime_check` 替换 | high | Codex | V2-3 | 4 天 | erasure 套件逐条等效迁移；长对话（≥100 轮）删除 < 1 秒 |
-| V2-10 | `feat(CORE-PATH-V2)` 前端切换 | `/app` 对话工作区改调 `/api/turn` SSE；`opened` 事件渲染（工具可用性、裁剪说明、兜底卡）；右侧成果夹；普通对话去掉停止按钮（报告保留）；`core_path_v2.enabled` 开关 | ordinary | Claude | V2-5、V2-6、V2-7、V2-8 | 4 天 | 浏览器验证（Codex 验收批次）；旧 e2e 全过 |
+| V2-10 | `feat(CORE-PATH-V2)` 前端切换 | `/app` 对话工作区改调 `/api/turn` SSE；`opened` 事件渲染（工具可用性、裁剪说明、兜底卡）；右侧成果夹；普通对话去掉停止按钮（报告保留）；`core_path_v2.enabled` 开关 | ordinary | Claude | V2-5、V2-6、V2-7、V2-8 | 4 天 | 浏览器验证（Codex 验收批次）；旧 e2e 全过；实测新路径评审走到采纳后的 R14 接口 |
 | V2-11 | `test(CORE-PATH-V2)` 核心路径 e2e | `apps/web/tests/e2e/core-path/`：① 定位三步到定稿报告；② 自由对话 + 加载 Skill + 一次研究；③ 报告停止与 24 小时防刷（第 3 次看到扣费说明）、普通对话无停止按钮；④ 删除对话（长对话）与注销；⑤ 对比；⑥ 评审团到逐章选择。新 workflow `staging-e2e.yml`：staging 每次部署成功后跑，模型用 **Claude Haiku 5.5**（Owner 10-28 批准），每次运行 ≤ 0.5 美元，失败开 issue | high（CI） | Codex | V2-10 | 4 天 | 在 staging 跑通一次并附报告与实际花费 |
-| V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | **先**改 `content_erasure_ledger_owned`（V2-3 本机实测定位：`atomic_pre_deduct` 往 `billing_history` 插行 → 触发器 `zz_erasure_ledger_guard` → `erasure_ledger_guard()` → 它在第 23/28 行按 run_ids/pre_ids 查 `bill2_runs`，9 把锁全来自这里；`credit_available` 本身 0 把），把按 `bill2_runs` 判断账本归属改为按 `turns`（整段 CREATE OR REPLACE，同一迁移里排在 DROP 之前，并把 erasure-ledger 套件里"账本行归属"的断言改成按 `turns`；**`credit_available` 不改、也不减 `turns.reserved_credits`**，预扣已在 `profiles.credits` 里，2.5.4）；再 DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
+| V2-12 | `chore(CORE-PATH-V2)` 删除旧路径 | **先**改 `content_erasure_ledger_owned`（V2-3 本机实测定位：`atomic_pre_deduct` 往 `billing_history` 插行 → 触发器 `zz_erasure_ledger_guard` → `erasure_ledger_guard()` → 它在第 23/28 行按 run_ids/pre_ids 查 `bill2_runs`，9 把锁全来自这里；`credit_available` 本身 0 把），把按 `bill2_runs` 判断账本归属改为按 `turns`（整段 CREATE OR REPLACE，同一迁移里排在 DROP 之前，并把 erasure-ledger 套件里"账本行归属"的断言改成按 `turns`；**`credit_available` 不改、也不减 `turns.reserved_credits`**，预扣已在 `profiles.credits` 里，2.5.4）；再 DROP 旧表旧函数（一个迁移）；删 `services/runtime`、`services/bill2`、测试窗口、`productionPolicy`/`stagingPolicy`、`runtime_rw_v2`、`core_path_v2.enabled`；清理 `turn_fusion_open` 里无入口可达的 `jury_adopt` 门槛（含每个评审一次的限制）与 `turns.kind` 的这个取值；删对应测试套件（场景已迁移的）；更新 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json` | high（迁移） | Claude | V2-11、V2-13 通过 | 5 天 | 全部 CI 过；函数数 ≤ 450；指纹更新；总控上库 |
 | V2-13 | `docs(CORE-PATH-V2)` 100 人验收与外推 | 3.2 节 staging 压测 + 3.3.3 单机 500/2000/5000 外推压测，报告进 `docs/validation/core-path-v2/`（含 k 值、等待事件、不确定性）；MASTER_PLAN §2.1 记录结果 | ordinary | Codex | V2-10 | 3 天 | 3.1 节通过线；k 在 500→5000 不变（±15%） |
 
 ### 6.2 顺序与并行
