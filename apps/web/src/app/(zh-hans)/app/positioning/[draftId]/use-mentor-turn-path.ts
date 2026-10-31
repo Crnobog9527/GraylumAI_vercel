@@ -32,6 +32,12 @@ export function useMentorTurnPath(sessionId: string | undefined) {
     return () => clearInterval(timer);
   }, [active, view?.activeTurn?.pauseReason, reload]);
 
+  /** However the stream ends (a pause for credits, a dropped connection), the page reads the turn's state: that is what shows the
+   * continue offer, or the reply the server saved. */
+  async function* readAfter<T>(events: AsyncGenerator<T>): AsyncGenerator<T> {
+    try { yield* events; } finally { void reload(); }
+  }
+
   const projected = useMemo(() => view ? turnHistory(view) : { executions: [], turns: [], activeExecution: null }, [view]);
   const history = useRef<TurnHistory>(projected);
   history.current = projected;
@@ -51,7 +57,8 @@ export function useMentorTurnPath(sessionId: string | undefined) {
     /** The stream of one mentor request: POST /api/turn with the switch on, the old stream otherwise. */
     open<T>(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined, old: () => Promise<T>) {
       if (!on) return old;
-      return async () => mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! }, history.current));
+      return async () => readAfter(mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! },
+        history.current)));
     },
     /** The old view, with this conversation's turns after its executions; refetching reads both. */
     withOld<T extends { data?: unknown; refetch: () => Promise<unknown> }>(old: T): T {

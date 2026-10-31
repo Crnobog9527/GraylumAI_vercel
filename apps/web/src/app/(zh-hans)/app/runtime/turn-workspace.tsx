@@ -12,6 +12,9 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
+import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
+import { CompareButton } from '@/components/fusion-compare/ComparePicker';
+import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import {
   clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor, saveDraftReferences,
 } from './send-input';
@@ -34,6 +37,10 @@ type OldTurn = { executionId: string; input: string | null; body: string | null;
 export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldTurns: readonly OldTurn[] }) {
   const utils = trpc.useUtils();
   const results = trpc.opc.sessionResults.useQuery({ sessionId }, { retry: false });
+  // The conversation's compares stay as they are: their cards run, stop and adopt on the compare router, whichever path the
+  // conversation's turns take. Cards follow the history (a saved message has no clock to place one by).
+  const compare = useCompareThread(sessionId);
+  const choices = trpc.runtime.choices.useQuery({ sessionId }, { staleTime: RUNTIME_CHOICES_STALE_MS });
   const chat = useTurnChat(sessionId, () => { void utils.credits.getBalance.invalidate(); void utils.opc.conversations.invalidate(); });
   const [input, setInput] = useState(''), [outgoing, setOutgoing] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
@@ -83,6 +90,9 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, input, chat.view, chat.busy]);
 
+  const chosenSkill = choices.data?.skills.find(skill => skill.moduleId === skillId);
+  const compareSkill = { ready: Boolean(choices.data && (!skillId || chosenSkill)),
+    skill: chosenSkill ? { kind: 'skill' as const, moduleId: chosenSkill.moduleId, revisionId: chosenSkill.revisionId } : undefined };
   const messages = chat.view?.messages ?? [];
   const turns = messages.filter(m => m.role === 'assistant');
   const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;
@@ -118,6 +128,8 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
               savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}
               onOpenResults={() => { setPanelOpen(true); setReveal(count => count + 1); }}/>}
           </RuntimeTurnView>)}
+          <CompareThread cards={compare.cards} names={compare.names} onQuote={update}
+            onAdopted={() => { void compare.refresh(); void chat.reload(); }}/>
           {pendingText !== null && <>
             {pendingText && <RuntimePendingMessage text={pendingText} sending={chat.sending}/>}
             <RuntimeTurnView>
@@ -131,6 +143,10 @@ export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldT
         </section>
       </div>
       <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
+        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill}
+          blockedReason={COMPOSER_REFERENCES_ENABLED && referencesNamedIn(input, references).length
+            ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。' : undefined}
+          onStarted={compareId => { update(''); compare.add(compareId); void compare.refresh(); }} onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
           skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}/>
       </div></footer>
