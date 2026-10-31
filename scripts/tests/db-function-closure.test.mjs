@@ -220,6 +220,9 @@ test('only the listed tables may go without an owner column, and a linked one on
   assert.deepEqual(reads('SELECT 1 FROM v_t;'), ['v_t']);
   assert.deepEqual(reads('SELECT 1 FROM v_t WHERE state = s;'), ['v_t']);
   assert.deepEqual(reads('SELECT 1 FROM v_t v WHERE v.id = v.id;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM v_t v WHERE v.id = id;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM v_t v WHERE id = v.id;'), ['v_t']);
+  assert.deepEqual(reads('SELECT 1 FROM v_t v WHERE v.id = item;'), []);
   assert.deepEqual(reads('SELECT 1 FROM v_t WHERE id = item OR state = s;'), ['v_t']);
   assert.deepEqual(reads('SELECT 1 FROM i_t WHERE id = item;'), ['i_t']);
   // A linked table does not vouch for an owned one, and a catalog comma join cannot hide a table.

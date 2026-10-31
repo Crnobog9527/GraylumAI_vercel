@@ -263,7 +263,8 @@ function namedRow(filters, alias, keys, alone) {
   if (!keys.length) return false;
   const names = keys.join('|'), side = `\\b${alias}\\.(?:${names})\\b${alone ? `|\\b(?:${names})\\b` : ''}`;
   for (const m of filters.matchAll(/([a-z_][a-z0-9_.]*)\s*=\s*([a-z_][a-z0-9_.]*)/gi)) {
-    const [left, right] = [m[1].toLowerCase(), m[2].toLowerCase()];
+    // Alone in its select, v.id and id are the same column.
+    const [left, right] = [m[1], m[2]].map(name => (alone ? name.toLowerCase().replace(`${alias}.`, '') : name.toLowerCase()));
     if (left !== right && (new RegExp(`^(?:${side})$`).test(left) || new RegExp(`^(?:${side})$`).test(right))) return true;
   }
   return false;
