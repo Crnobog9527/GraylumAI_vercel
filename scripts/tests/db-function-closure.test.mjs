@@ -267,3 +267,11 @@ test('pruneForKind reads neither an IF inside a CASE branch nor a keyword inside
   const ifString = "IF p_kind = 'x' THEN PERFORM a_fn('END IF'); END IF; PERFORM b_fn();";
   assert.ok(has(ifString, 'chat', 'b_fn') && !has(ifString, 'chat', 'a_fn'));
 });
+
+test('pruneForKind does not read END LOOP as the end of a CASE, and keeps every branch around a nested BEGIN block', () => {
+  const loop = "CASE p_kind WHEN 'mentor' THEN CASE v_flag WHEN true THEN LOOP PERFORM helper_a(); EXIT; END LOOP; ELSE PERFORM helper_b(); END CASE; ELSE PERFORM helper_c(); END CASE;";
+  const has = (body, kind, n) => pruneForKind(body, kind, true).includes(n);
+  assert.ok(has(loop, 'mentor', 'helper_a') && has(loop, 'mentor', 'helper_b') && !has(loop, 'mentor', 'helper_c'));
+  const block = "CASE p_kind WHEN 'mentor' THEN BEGIN PERFORM helper_a(); END; ELSE PERFORM helper_c(); END CASE;";
+  assert.ok(has(block, 'mentor', 'helper_a') && has(block, 'mentor', 'helper_c'));
+});

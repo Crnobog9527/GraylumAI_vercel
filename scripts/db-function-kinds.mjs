@@ -40,7 +40,7 @@ export function judge(cond, kind, pKind = false) {
 
 // `CASE <kind> WHEN 'a', 'b' THEN x ... ELSE y END` (the simple form): the WHEN branches whose literals do not include `kind` are dead,
 // and so is the ELSE once a WHEN took the kind. A WHEN whose value is not only string literals is left in and takes nothing.
-const CASE_PART = /\b(END\s+CASE|END\s+IF|IF|CASE|END|WHEN|ELSE|THEN)\b/gi;
+const CASE_PART = /\b(END\s+CASE|END\s+IF|END\s+LOOP|BEGIN|IF|CASE|END|WHEN|ELSE|THEN)\b/gi;
 // `code` is the body with string contents blanked (same offsets as `text`), so a word inside a string is never read as a keyword.
 function deadCaseBranches(code, text, from, kind) {
   const dead = [];
@@ -50,6 +50,9 @@ function deadCaseBranches(code, text, from, kind) {
   for (let m = CASE_PART.exec(code); m; m = CASE_PART.exec(code)) {
     const word = m[1].toUpperCase().replace(/\s+/g, ' ');
     // An IF inside a branch has its own ELSE; it is not the CASE's.
+    // END LOOP ends a loop, not the CASE; a nested BEGIN block has an END of its own that is not told apart here: keep every branch.
+    if (word === 'END LOOP') continue;
+    if (word === 'BEGIN') return [];
     if (word === 'IF') ifDepth++;
     else if (word === 'END IF') ifDepth--;
     else if (word === 'CASE') depth++;
