@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { STREAM_INTERRUPTED } from "./mentor-turn";
-import { mentorTurnBody, mentorTurnEvents, readTurnView, turnHistory, TurnRefused } from "./mentor-turn-path";
+import { mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, TurnRefused } from "./mentor-turn-path";
 
 const view = (messages: unknown[], activeTurn: unknown = null) => ({ activeTurn, lastTurn: null, messages }) as never;
 const reply = (seq: number, turnId: number, stepId = "s1") => ({ seq, role: "assistant", turnId, content: JSON.stringify({ format: "agent-turn.v1", message: "好", card: null, stepId }) });
@@ -13,6 +13,18 @@ describe("mentor on the turn path", () => {
     expect(history.turns).toEqual([{ executionId: "turn:4", stepId: "s1", questionId: null, kind: "mentor" }]);
     expect(history.executions.map(e => [e.executionId, e.state, e.input])).toEqual([["turn:4", "completed", "我做健身"], ["turn:5", "running", null]]);
     expect(history.activeExecution).toBe("turn:5");
+  });
+  it("binds a reply to its round; a reply saved without one still reads", () => {
+    const withRound = { seq: 2, role: "assistant", turnId: 4, content: JSON.stringify({ message: "好", stepId: "s1", roundId: "r1" }) };
+    expect(turnHistory(view([withRound])).turns).toEqual([{ executionId: "turn:4", stepId: "s1", roundId: "r1", questionId: null, kind: "mentor" }]);
+    expect(Object.hasOwn(turnHistory(view([reply(2, 4)])).turns[0]!, "roundId")).toBe(false);
+  });
+  it("a new round opens its step: an older round's turn does not count, this round's and a roundless one do", () => {
+    const turn = (roundId?: string) => ({ stepId: "s1", kind: "mentor", ...(roundId ? { roundId } : {}) });
+    expect(stepOpened([turn("old")], "s1", "new")).toBe(false);
+    expect(stepOpened([turn("new")], "s1", "new")).toBe(true);
+    expect(stepOpened([turn()], "s1", "new")).toBe(true);
+    expect(stepOpened([turn("new")], "s2", "new")).toBe(false);
   });
   it("names an answered card by the message it answered, and carries the refresh grant", () => {
     const history = turnHistory(view([reply(2, 4)]));

@@ -6,7 +6,7 @@ import type { TurnView } from "@repo/api/src/services/turn/view";
 import { trpc } from "@/trpc/client";
 import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
 import type { MentorRequest } from "./mentor-turn";
-import { isTurnExecution, mentorTurnBody, mentorTurnEvents, readTurnView, turnHistory, type TurnHistory } from "./mentor-turn-path";
+import { isTurnExecution, mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory, type TurnHistory } from "./mentor-turn-path";
 
 const READ_MS = 3000;
 const fetcher: typeof fetch = (...args) => globalThis.fetch(...args);
@@ -34,7 +34,7 @@ export function useMentorTurnPath(sessionId: string | undefined) {
   const history = useRef<TurnHistory>(projected);
   history.current = projected;
   const merged = useRef<{ old?: unknown; projected?: unknown; data?: unknown }>({});
-  return { on, turns: projected.turns, owns: isTurnExecution,
+  return { on, turns: projected.turns, owns: isTurnExecution, stepOpened,
     /** The draft as the old path read it, plus the turn path's bindings. */
     draft<T extends { turns?: unknown[] } | undefined>(draft: T): T {
       return draft && { ...draft, turns: [...(draft.turns ?? []), ...projected.turns] };

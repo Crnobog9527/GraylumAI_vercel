@@ -420,16 +420,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const question = d.information[step.id].schema[0] as { id: string } | undefined;
     if (!question) return;
     const turns = (d.turns ?? []) as Array<{ stepId: string; roundId?: string | null; kind: string }>;
-    // One opening per step and round. Any turn of this step in this round (an
-    // earlier opening, or a conversation started on an older page) means the
-    // step is already open. A turn from an older round never suppresses the
-    // current round's opening: the round is part of the request identity.
-    // A projection without round ownership keeps the previous round-blind behaviour.
-    const sameRound = (turn: { roundId?: string | null }) =>
-      !Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId;
-    if (turns.some(turn => turn.stepId === step.id && sameRound(turn) &&
-      (turn.kind === "mentor" || turn.kind === "organizer" || turn.kind === "opening")))
-      return;
+    if (turnPath.stepOpened(turns, step.id, d.roundId)) return;
     // A retained explicit mentor request already owns this step's next turn.
     if (sessionStorage.getItem("opc-step:" + draftId + ":" + step.id)) return;
     if (sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + step.id)) return;

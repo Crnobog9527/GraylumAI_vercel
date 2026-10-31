@@ -17,19 +17,31 @@ export const turnExecutionId = (turnId: number) => `turn:${turnId}`;
 export const isTurnExecution = (id: string) => id.startsWith("turn:");
 export type TurnHistory = { executions: (MentorExecution & { replySeq?: number })[]; activeExecution: string | null };
 
-const stepOf = (body: string) => {
-  try { const step = (JSON.parse(body) as { stepId?: unknown }).stepId; return typeof step === "string" ? step : null; }
-  catch { return null; }
+/** The step and round a saved reply names; a reply saved before rounds were written has no round. */
+const placeOf = (body: string) => {
+  try {
+    const { stepId, roundId } = JSON.parse(body) as { stepId?: unknown; roundId?: unknown };
+    return { stepId: typeof stepId === "string" ? stepId : null, ...(typeof roundId === "string" ? { roundId } : {}) };
+  } catch { return { stepId: null }; }
 };
+
+/**
+ * One opening per step and round. Any turn of this step in this round means the step is already open; a turn of an older round
+ * never suppresses the current round's opening. A turn without a round keeps the round-blind behaviour.
+ */
+export function stepOpened(turns: readonly { stepId: string; roundId?: string | null; kind: string }[], stepId: string, roundId: string | null) {
+  return turns.some(turn => turn.stepId === stepId && (!Object.hasOwn(turn, "roundId") || turn.roundId === roundId)
+    && ["mentor", "organizer", "opening"].includes(turn.kind));
+}
 
 export function turnHistory(view: TurnView): TurnHistory & { turns: MentorTurn[] } {
   const executions: TurnHistory["executions"] = [], turns: MentorTurn[] = [];
   for (const reply of view.messages) {
     if (reply.role !== "assistant" || reply.turnId === null) continue;
-    const executionId = turnExecutionId(reply.turnId), stepId = stepOf(reply.content);
+    const executionId = turnExecutionId(reply.turnId), { stepId, ...round } = placeOf(reply.content);
     const input = view.messages.find(message => message.role === "user" && message.turnId === reply.turnId)?.content ?? null;
     executions.push({ executionId, input, body: reply.content, primaryBody: reply.content, summary: null, state: "completed", replySeq: reply.seq });
-    if (stepId) turns.push({ executionId, stepId, questionId: null, kind: isOpeningInput(input ?? "") ? "opening" : "mentor" });
+    if (stepId) turns.push({ executionId, stepId, ...round, questionId: null, kind: isOpeningInput(input ?? "") ? "opening" : "mentor" });
   }
   const active = view.activeTurn ? turnExecutionId(view.activeTurn.turnId) : null;
   if (active) executions.push({ executionId: active, input: null, body: null, primaryBody: null, summary: null, state: "running" });

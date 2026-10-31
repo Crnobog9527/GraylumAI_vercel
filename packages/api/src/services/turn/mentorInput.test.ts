@@ -22,7 +22,8 @@ describe('mentor turn kinds (V2-5b, the old path rules)', () => {
   });
 
   it('an answer binds to the card of the latest mentor reply of this step; a chosen option becomes the words', () => {
-    const reply = mentorReplyBody(agentTurnBody('', card as never), 'step-0');
+    const reply = mentorReplyBody(agentTurnBody('', card as never), 'step-0', 'round-1');
+    expect(JSON.parse(reply)).toMatchObject({ stepId: 'step-0', roundId: 'round-1' });
     const history = [item('user', 'Coffee or tea?', 1), item('assistant', reply, 2)];
     const answered = mentorAnsweredCard(history, 'step-0', { sourceSeq: 2, optionIndex: 1 }, 7);
     expect(answered).toMatchObject({ optionIndex: 1, card: { options: ['Coffee', 'Tea'] } });
@@ -30,7 +31,7 @@ describe('mentor turn kinds (V2-5b, the old path rules)', () => {
     expect(answeredText('my own words', mentorAnsweredCard(history, 'step-0', { sourceSeq: 2 }, 7))).toBe('my own words');
     expect(() => mentorAnsweredCard(history, 'step-1', { sourceSeq: 2, optionIndex: 0 }, 7)).toThrow('TURN_ANSWER_SOURCE_DENIED');
     expect(() => mentorAnsweredCard(history, 'step-0', { sourceSeq: 2, optionIndex: 4 }, 7)).toThrow('TURN_ANSWER_SOURCE_DENIED');
-    const later = [...history, item('user', 'x', 3), item('assistant', mentorReplyBody(agentTurnBody('prose', null), 'step-0'), 4)];
+    const later = [...history, item('user', 'x', 3), item('assistant', mentorReplyBody(agentTurnBody('prose', null), 'step-0', 'round-1'), 4)];
     expect(() => mentorAnsweredCard(later, 'step-0', { sourceSeq: 4 }, 7)).toThrow('TURN_ANSWER_SOURCE_DENIED');
     // A stale tab answers the card it saw after a newer card replaced it: refused, not mapped onto the newer card's options.
     const newer = [...history, item('user', 'x', 3), item('assistant', reply, 4)];

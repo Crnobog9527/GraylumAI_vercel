@@ -269,7 +269,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const scopeDenied = rechecked !== null && !rechecked.allowed;
     const researchMade = benchmark?.journal();
     const closed = await close('completed', { delivered: true,
-      messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
+      messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId, ctx.roundId) }],
       ...(organizer || researchMade ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
         versions: state.versions, organizerInput: captureInput, output: organized, ...(scopeDenied ? { scopeDenied } : {}) } : {}),
         ...(researchMade ? { research: researchMade } : {}) } } : {}) });

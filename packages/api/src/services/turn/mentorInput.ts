@@ -56,7 +56,7 @@ export function answeredText(text: string, answered: AnsweredCard | undefined): 
   return answered?.optionIndex === undefined ? text : answered.card.options[answered.optionIndex]!;
 }
 
-/** A saved mentor reply: the agent-turn body plus the step it belongs to (readers of the body ignore the extra key). */
-export function mentorReplyBody(body: string, stepId: string): string {
-  return JSON.stringify({ ...(JSON.parse(body) as Record<string, unknown>), stepId });
+/** A saved mentor reply: the agent-turn body plus the step and round it belongs to (readers of the body ignore the extra keys). */
+export function mentorReplyBody(body: string, stepId: string, roundId: string): string {
+  return JSON.stringify({ ...(JSON.parse(body) as Record<string, unknown>), stepId, roundId });
 }
