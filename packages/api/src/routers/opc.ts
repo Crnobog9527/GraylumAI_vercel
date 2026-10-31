@@ -13,7 +13,8 @@ import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../servic
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import { realHostMode } from "../services/runtime/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
-import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultsList, sessionResultsService } from "../services/opc/sessionResults";
+import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultSaveTurn, sessionResultsList,
+  sessionResultsService } from "../services/opc/sessionResults";
 import {
   opcService,
   opcStart,
@@ -205,6 +206,8 @@ export const opcRouter = router({
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).versions(input)),
   sessionResultSave: procedure.input(sessionResultSave)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).save(input)),
+  sessionResultSaveTurn: procedure.input(sessionResultSaveTurn)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).saveTurn(input)),
   sessionResultEdit: procedure.input(sessionResultEdit)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).edit(input)),
   sessionResultDelete: procedure.input(sessionResultFamily)
