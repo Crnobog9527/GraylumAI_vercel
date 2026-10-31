@@ -44,9 +44,10 @@ export type CompareTurnDeps = { admin: SupabaseClient; clients: TurnClients; slo
   pricing?: PricingDeps; gate?: PositioningGatePolicy;
   /** The runtime rate limits and the one-switch pause, before the compare opens (message) and before each paid call (calls). */
   newWork: Pick<ChatDeps['newWork'], 'message' | 'calls'> };
+export type CompareTurnParts = Omit<CompareParts, 'history' | 'positioningFallback'>;
 export type CompareTurnInput = { actorId: string; sessionId: string; requestId: string; modelIds: string[];
-  /** Everything a column is sent except the history (read here) and the fallback rule (decided here). */
-  parts: Omit<CompareParts, 'history' | 'positioningFallback'> };
+  /** Everything a column is sent except the history (read here) and the fallback rule (decided here); a reader runs after the gates. */
+  parts: CompareTurnParts | (() => Promise<CompareTurnParts>) };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const fail = (code: string): CompareEvent => ({ type: 'error', code });
@@ -69,17 +70,20 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   catch (error) { return emit(fail(error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message) ? error.message : 'FUSION_COMPARE_UNAVAILABLE')); }
   const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
   if (!key) return emit(fail('TURN_PROVIDER_KEY_UNAVAILABLE'));
+  let parts;
+  try { parts = typeof input.parts === 'function' ? await input.parts() : input.parts; }
+  catch (error) { return emit(fail(error instanceof Error && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.message) ? error.message : 'FUSION_COMPARE_UNAVAILABLE')); }
 
   // 1. Read before the open (fusion_compare_turn_admit): the history the turn will see, for sizing (turn_open returns the
   // authoritative copy); the business writable, the sources allowed, the positioning and the 7-day breaker.
   let admit;
   try { admit = await fusionAdmission(deps.clients, input.actorId).compare(input.sessionId, COMPARE_HISTORY_ITEMS,
-    workspaceDependencies(input.parts)); }
+    workspaceDependencies(parts)); }
   catch (error) { return emit(fail(error instanceof TurnDatabaseError ? error.code : 'TURN_DATABASE_UNAVAILABLE')); }
   if (breakerTripped(admit.breaker, settings.breaker)) return emit(fail('FUSION_REVIEW_BREAKER'));
   const sized = admit.history;
   const partsWith = (history: Array<{ role: 'user' | 'assistant'; content: string }>, positioningFallback: boolean): CompareParts =>
-    ({ ...input.parts, history: history.map(m => ({ role: m.role, text: m.content })), positioningFallback });
+    ({ ...parts, history: history.map(m => ({ role: m.role, text: m.content })), positioningFallback });
 
   // 2. Quotes and the exact request of every column, priced with the fallback rule (the larger of the two possible requests).
   let quotes, columns;
@@ -112,10 +116,10 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
   let opened;
   try {
     opened = await db.open({ sessionId: input.sessionId, requestId: input.requestId, kind: 'compare', policy, product: {
-      question: input.parts.question, questionHash: sha256(input.parts.question), snapshotHash: snapshotHash(partsWith(sized, false)),
-      requestHash: sha256(JSON.stringify([input.sessionId, models, input.parts.question, credits])), config: { models },
+      question: parts.question, questionHash: sha256(parts.question), snapshotHash: snapshotHash(partsWith(sized, false)),
+      requestHash: sha256(JSON.stringify([input.sessionId, models, parts.question, credits])), config: { models },
       // The sources the columns read: content deletion of a source finds this compare by them (content_erasure_confirm).
-      workspaceDependencies: workspaceDependencies(input.parts) } });
+      workspaceDependencies: workspaceDependencies(parts) } });
   } catch (error) { return emit(fail(error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED')); }
   const compareId = opened.compareId!;
   emit({ type: 'opened', turnId: opened.turnId, compareId, reservedCredits: opened.reservedCredits, replay: opened.replay });
@@ -132,16 +136,16 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
     let fallback = false;
     const gate = (opened as { positioning?: { refusals24h: number } | null }).positioning;
     if (gate && !admit.positioned) {
-      if (input.parts.skill?.socialMedia) { await close('failed', { refundAll: true, failureCode: 'positioning_required' });
+      if (parts.skill?.socialMedia) { await close('failed', { refundAll: true, failureCode: 'positioning_required' });
         return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId }); }
       const calls = db.calls(opened.turnId, () => null);
       const begun = await calls.begin({ actorId: input.actorId, turnId: opened.turnId, seq: ++seq, callKind: 'decision',
-        modelId: quotes[0]!.modelId, toolName: null, paid: null, requestHash: sha256(input.parts.question),
+        modelId: quotes[0]!.modelId, toolName: null, paid: null, requestHash: sha256(parts.question),
         upperUsd: decisionUpper, multiplier: quotes[0]!.multiplier });
       if (begun.sessionTombstoned || begun.accountErasing) throw new TurnStop('TURN_TOMBSTONED');
       let refused = false;
       const spent: { sent: boolean; cost: string | null } = { sent: false, cost: null };
-      try { fallback = await judgePositioning(deps.gate ?? {}, { text: input.parts.question, apiKey: key,
+      try { fallback = await judgePositioning(deps.gate ?? {}, { text: parts.question, apiKey: key,
         onCost: usdCost => { spent.sent = true; spent.cost = usdCost === null ? null : ceil12(usdCost.toFixed(15)); } },
         gate.refusals24h >= POSITIONING_REFUSAL_CAP); }
       catch { refused = true; }
