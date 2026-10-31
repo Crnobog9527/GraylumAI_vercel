@@ -71,7 +71,8 @@ export async function runCases({db,Client,connectionString,report}) {
     assert.equal((await saveTurn(db,f.actor,f.session,turn,{request,type:'copy',excerpt:'明天六点见。'})).id,part.id,'replay');
     await assert.rejects(saveTurn(db,f.actor,f.session,turn,{request,type:'copy',excerpt:'明天六点'}),/SESSION_RESULT_REQUEST_CONFLICT/);
     await assert.rejects(saveTurn(db,f.actor,f.session,turn,{excerpt:'不在回复里的话'}),/SESSION_RESULT_INVALID/);
-    assert.deepEqual((await rpc(db,'runtime_session_results_list',f.actor,f.session)).map(r=>r.id),[whole.id,part.id]);
+    assert.deepEqual((await rpc(db,'runtime_session_results_list_turns',f.actor,f.session)).map(r=>[r.id,r.sourceTurnId]),[[whole.id,turn],[part.id,turn]]);
+    assert.equal('sourceTurnId' in (await rpc(db,'runtime_session_results_list',f.actor,f.session))[0],false,'the old read keeps its shape for the running API');
   });
 
   await check('V2 refuses another account\'s turn, a turn of another conversation, and any turn that did not complete', async () => {
@@ -200,6 +201,7 @@ export async function runCases({db,Client,connectionString,report}) {
     for (const role of ['anon','authenticated']) for (const statement of [
       'SELECT * FROM runtime_session_results',
       `SELECT runtime_session_results_list('${randomUUID()}','${randomUUID()}')`,
+      `SELECT runtime_session_results_list_turns('${randomUUID()}','${randomUUID()}')`,
       `SELECT runtime_session_result_save_turn('${randomUUID()}','${randomUUID()}',1,'${randomUUID()}','body',NULL,NULL)`]) {
       await db.query('BEGIN');
       try {

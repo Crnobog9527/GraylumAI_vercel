@@ -37,7 +37,7 @@ it('saves from a turn with the same owner rule: the actor comes from the session
 it('lists, edits, reads versions and deletes through the owner-checked functions', async () => {
   let f = fixture({data:[item]});
   await expect(f.caller.sessionResults({sessionId:id(1)})).resolves.toEqual([item]);
-  expect(f.rpc).toHaveBeenCalledWith('runtime_session_results_list', {p_actor_id:id(9), p_session_id:id(1)});
+  expect(f.rpc).toHaveBeenCalledWith('runtime_session_results_list_turns', {p_actor_id:id(9), p_session_id:id(1)});
   f = fixture({data:{...item, id:id(5), version:2, versions:2, sourceExecutionId:null}});
   await f.caller.sessionResultEdit({familyId:id(3), requestId:id(6), expectedVersion:1, title:'改过', body:'新稿'});
   expect(f.rpc).toHaveBeenCalledWith('runtime_session_result_edit', {p_actor_id:id(9), p_family_id:id(3),

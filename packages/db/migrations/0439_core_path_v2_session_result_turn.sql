@@ -5,17 +5,33 @@
 -- verbatim excerpt, as runtime_session_result_save). Only the conversation's owner, and only a turn that closed completed.
 ALTER TABLE public.runtime_session_results ADD COLUMN IF NOT EXISTS source_turn_id bigint;
 
-CREATE OR REPLACE FUNCTION public.runtime_session_result_view(r runtime_session_results, p_versions integer)
+-- runtime_session_result_view keeps its shape: the running API parses it strictly and this migration lands before the new API. The
+-- turn path's own reads add sourceTurnId on top.
+CREATE OR REPLACE FUNCTION public.runtime_session_result_turn_view(r runtime_session_results, p_versions integer)
  RETURNS jsonb
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
- SELECT jsonb_build_object('id',r.id,'familyId',r.family_id,'version',r.version,'versions',p_versions,
-  'resultType',r.result_type,'title',r.title,'body',r.body,'sourceExecutionId',r.source_execution_id,'sourceTurnId',r.source_turn_id,
-  'sourceAvailable',r.source_execution_id IS NULL OR runtime_history_available(r.source_execution_id),
-  'createdAt',r.created_at)
+ SELECT runtime_session_result_view(r,p_versions)||jsonb_build_object('sourceTurnId',r.source_turn_id)
 $function$;
+
+CREATE OR REPLACE FUNCTION public.runtime_session_results_list_turns(p_actor_id uuid, p_session_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted::text='false') THEN
+  RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';END IF;
+ s:=runtime_session_results_session(p_actor_id,p_session_id);
+ RETURN coalesce((SELECT jsonb_agg(runtime_session_result_turn_view(r,n.versions) ORDER BY n.first_at,r.family_id)
+  FROM (SELECT family_id,max(version) latest,count(*)::integer versions,min(created_at) first_at
+        FROM runtime_session_results WHERE session_id=s.id AND actor_id=p_actor_id GROUP BY family_id) n
+  JOIN runtime_session_results r ON r.family_id=n.family_id AND r.version=n.latest),'[]'::jsonb);
+END $function$;
 
 CREATE OR REPLACE FUNCTION public.runtime_session_result_save_turn(p_actor_id uuid, p_session_id uuid, p_turn_id bigint, p_request_id uuid,
  p_result_type text, p_title text, p_excerpt text)
@@ -57,8 +73,11 @@ BEGIN
   INSERT INTO runtime_session_results(id,actor_id,session_id,family_id,version,result_type,title,body,source_turn_id,request_id)
    VALUES(r.id,p_actor_id,s.id,r.id,1,p_result_type,clean,saved,t.id,p_request_id) RETURNING * INTO r;
  END IF;
- RETURN runtime_session_result_view(r,(SELECT count(*)::integer FROM runtime_session_results WHERE family_id=r.family_id));
+ RETURN runtime_session_result_turn_view(r,(SELECT count(*)::integer FROM runtime_session_results WHERE family_id=r.family_id));
 END $function$;
 
-REVOKE ALL ON FUNCTION public.runtime_session_result_save_turn(uuid,uuid,bigint,uuid,text,text,text) FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION public.runtime_session_result_save_turn(uuid,uuid,bigint,uuid,text,text,text) TO service_role;
+REVOKE ALL ON FUNCTION public.runtime_session_result_turn_view(runtime_session_results,integer) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.runtime_session_result_save_turn(uuid,uuid,bigint,uuid,text,text,text),
+ public.runtime_session_results_list_turns(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_session_result_save_turn(uuid,uuid,bigint,uuid,text,text,text),
+ public.runtime_session_results_list_turns(uuid,uuid) TO service_role;

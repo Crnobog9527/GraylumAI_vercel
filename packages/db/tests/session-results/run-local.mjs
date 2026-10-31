@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {readFileSync,readdirSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
@@ -46,8 +46,6 @@ try {
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
  ok(sql(migration));
- // The turn path's migration restates 0338's result view with sourceTurnId; repeating the two in order must converge.
- ok(sql(read('packages/db/migrations/'+readdirSync(resolve(root,'packages/db/migrations')).find(f=>f.endsWith('_core_path_v2_session_result_turn.sql')))));
  assert.deepEqual(snapshot(),finalCatalog,'repeat 0338 preserves complete catalog');
  const interrupted=sql(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'C1_TEST_ROLLBACK'; END $$; COMMIT;"));
  assert.notEqual(interrupted.status,0);assert.match(interrupted.stderr,/C1_TEST_ROLLBACK/);

@@ -41,5 +41,5 @@ BEGIN
   INSERT INTO runtime_session_results(id,actor_id,session_id,family_id,version,result_type,title,body,source_turn_id,request_id)
    VALUES(r.id,p_actor_id,s.id,r.id,1,p_result_type,clean,saved,t.id,p_request_id) RETURNING * INTO r;
  END IF;
- RETURN runtime_session_result_view(r,(SELECT count(*)::integer FROM runtime_session_results WHERE family_id=r.family_id));
+ RETURN runtime_session_result_turn_view(r,(SELECT count(*)::integer FROM runtime_session_results WHERE family_id=r.family_id));
 END $function$;

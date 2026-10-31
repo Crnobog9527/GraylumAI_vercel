@@ -69,7 +69,7 @@ export function sessionResultsService(database: Database, actorId: string) {
     list: async (input: z.infer<typeof sessionResultsList>) => {
       const sessionId = sessionResultsList.parse(input).sessionId;
       try {
-        return z.array(sessionResult).parse(await call(database, 'runtime_session_results_list',
+        return z.array(sessionResult).parse(await call(database, 'runtime_session_results_list_turns',
           { p_actor_id: actorId, p_session_id: sessionId }));
       } catch (cause) {
         if (cause instanceof Error && cause.message === 'OPC_RESULT_NOT_FOUND') return null;
