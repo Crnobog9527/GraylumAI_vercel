@@ -689,7 +689,7 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
   和代码大小基线一样是棘轮，手动调高需要 Owner 批准。
 - `scripts/db-function-closure.mjs` 扫 `packages/db/functions/turn/`：按回合类型统计，闭包 ≤ 15 函数 / ≤ 18 表（Owner 2026-10-31 批准；**账本叶子不展开**：`atomic_pre_deduct`、`turn_settle_credits`、
   `credit_available`、`credit_source_apply` 四个按名字计 1、不递归进去，它们只碰本人的 `profiles`/grants/积分包行，列表写死在脚本里、加名字要 Owner 批准；
-  锁数断言同口径：主路径自己的表 ≤ 40，账本叶子的锁单独一行、棘轮只许变小，合计也记录）；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`，
+  锁数断言同口径：主路径自己的表 ≤ 42（Owner 2026-10-31 批准，只许变小），账本叶子的锁单独一行、棘轮只许变小，合计也记录）；`FOR UPDATE/FOR SHARE` 只允许 `runtime_sessions`、`profiles`、`turns`，
   且 WHERE 带所有者键；`UPDATE` 的表只许白名单（上述三张 + `daily_spend` 带 bucket、`session_messages`、`turn_calls`）；
   禁止 `pg_advisory_lock(`、`pg_advisory_xact_lock(`、非 LOCAL 的 `SET `、`CREATE TEMP`（Supavisor 事务模式与"无全站热点"两条，3.3.2）。
 - `EXPLAIN` 断言：三条标准回合和定时任务认领语句对热表无 Seq Scan（3.1 节）。
