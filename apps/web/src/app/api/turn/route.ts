@@ -7,6 +7,7 @@ import { withCatalogRequest } from '@repo/api/src/services/runtime/catalogCache'
 import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
 import { checkRateLimit } from '@repo/api/src/services/redisRateLimiter';
 import { handReviewToServer } from '@repo/api/src/services/fusion/background';
+import { chatToolDeps } from '@repo/api/src/services/turn/chatToolDeps';
 import { handleTurnRequest } from '@repo/api/src/services/turn/http';
 import { handleTurnView } from '@repo/api/src/services/turn/view';
 import { redisCounterStore } from '@repo/api/src/services/turn/limiter';
@@ -46,7 +47,8 @@ export async function POST(request: NextRequest) {
     authenticate: authenticator(request, url, anon),
     rateLimited: async actorId => !(await checkRateLimit(actorId, 'ai_stream')).success,
     databaseHost: { declared: databaseHost, actual: new URL(url).host },
-    chat: { admin, clients: turnClients(admin), slots: redisCounterStore(), newWork: newWorkGate(admin, environment) },
+    chat: { admin, clients: turnClients(admin), slots: redisCounterStore(), newWork: newWorkGate(admin, environment),
+      tools: chatToolDeps(admin, () => userClient(request, url, anon)) },
     userClient: () => userClient(request, url, anon),
     handReview: reviewId => handReviewToServer({ scheduleAfter: task => after(task), origin: new URL(request.url).origin,
       supabaseAdmin: admin }, reviewId),
