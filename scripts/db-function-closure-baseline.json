@@ -13,16 +13,15 @@
    "tables": 29
   },
   "turn_fusion_open": {
-   "functions": 36,
-   "tables": 32
+   "functions": 16,
+   "tables": 22
   },
   "turn_fusion_recovery": {
    "functions": 28,
    "tables": 29
   },
   "turn_open": {
-   "functions": 35,
-   "tables": 30
+   "tables": 19
   },
   "turn_recover": {
    "functions": 28,
