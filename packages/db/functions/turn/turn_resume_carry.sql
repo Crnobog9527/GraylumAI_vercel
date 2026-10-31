@@ -31,7 +31,9 @@ BEGIN
     INTO n_model, n_paid, n_free, n_decision
   FROM turn_calls WHERE turn_id = p_resume_of AND status NOT IN ('not_sent','rejected','no_charge_402');
   IF (p_policy->'limits'->>'model')::int > (prior.policy->'limits'->>'model')::int - n_model
-    OR (p_policy->'limits'->>'paidTools')::int > (prior.policy->'limits'->>'paidTools')::int - n_paid
+    -- Rows, not calls: a benchmark call settles in several (limits.toolRows, as turn_call_begin counts them).
+    OR coalesce((p_policy->'limits'->>'toolRows')::int, (p_policy->'limits'->>'paidTools')::int)
+       > coalesce((prior.policy->'limits'->>'toolRows')::int, (prior.policy->'limits'->>'paidTools')::int) - n_paid
     OR (p_policy->'limits'->>'freeTools')::int > (prior.policy->'limits'->>'freeTools')::int - n_free
     OR coalesce((p_policy->'limits'->>'decisions')::int, 0) > coalesce((prior.policy->'limits'->>'decisions')::int, 0) - n_decision THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';

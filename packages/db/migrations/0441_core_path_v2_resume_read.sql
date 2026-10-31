@@ -7,6 +7,8 @@
 --                     receipt is the whole completion, a paid tool's is what its suppliers returned, and a free tool costs nothing
 --                     to run again. Nothing is written at the pause.
 --   turn_session_view adds `calls`: the paid tool calls behind the shown replies, so a reload keeps the work rows.
+--   turn_resume_carry counts a benchmark call's rows against limits.toolRows, as turn_call_begin does; by paidTools alone a mentor
+--                     paused after one could never be resumed.
 CREATE OR REPLACE FUNCTION public.turn_session_view(p_actor_id uuid, p_session_id uuid, p_after_seq integer DEFAULT 0)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -82,7 +84,7 @@ BEGIN
   FROM turn_calls WHERE turn_id = t.id AND status NOT IN ('not_sent','rejected','no_charge_402');
   RETURN jsonb_build_object('kind', t.kind,
     'limits', jsonb_build_object('model', (t.policy->'limits'->>'model')::int - n_model,
-      'paidTools', (t.policy->'limits'->>'paidTools')::int - n_paid, 'freeTools', (t.policy->'limits'->>'freeTools')::int - n_free,
+      'paidTools', coalesce((t.policy->'limits'->>'toolRows')::int, (t.policy->'limits'->>'paidTools')::int) - n_paid, 'freeTools', (t.policy->'limits'->>'freeTools')::int - n_free,
       'decisions', greatest(coalesce((t.policy->'limits'->>'decisions')::int, 0) - n_decision, 0)),
     'decided', EXISTS (SELECT 1 FROM turn_calls WHERE turn_id = t.id AND call_kind = 'decision' AND status = 'ok'),
     'calls', (WITH RECURSIVE chain AS (
@@ -94,6 +96,54 @@ BEGIN
       FROM chain x JOIN turn_calls c ON c.turn_id = x.id AND c.call_kind IN ('model', 'tool') AND c.status IN ('ok', 'unusable')
         AND NOT (c.call_kind = 'tool' AND c.upper_usd = 0)
       LEFT JOIN turn_call_raw r ON r.turn_id = c.turn_id AND r.seq = c.seq));
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.turn_resume_carry(p_actor_id uuid, p_session_id uuid, p_active_turn_id bigint, p_resume_of bigint, p_kind text, p_policy jsonb)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE prior turns; n_model integer; n_paid integer; n_free integer; n_decision integer; carried integer;
+BEGIN
+  -- Resume (2.2): only this session's turn paused for credits, by the same kind. Locked after the session (as turn_close).
+  IF p_active_turn_id IS DISTINCT FROM p_resume_of THEN RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000'; END IF;
+  SELECT * INTO prior FROM turns WHERE actor_id = p_actor_id AND id = p_resume_of FOR UPDATE;
+  IF prior.id IS NULL OR prior.state IS DISTINCT FROM 'paused' OR prior.pause_reason IS DISTINCT FROM 'waiting_credits'
+    OR prior.kind <> p_kind OR prior.session_id IS DISTINCT FROM p_session_id THEN
+    RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000';
+  END IF;
+  -- A model call whose cost is not final yet would be lost to the carry (the paused turn is refunded in full when it closes):
+  -- the resume waits until its receipt arrives. A third-party tool's unknown cost is 0 to the user (2.5.2), so it does not wait.
+  IF EXISTS (SELECT 1 FROM turn_calls WHERE turn_id = p_resume_of AND call_kind = 'model'
+             AND status IN ('dispatched','identified','unknown')) THEN
+    RAISE EXCEPTION 'TURN_RESUME_COST_PENDING' USING ERRCODE='55000';
+  END IF;
+  -- What is left of the paused turn's frozen limits, counted as turn_call_begin counts them: the new turn may use no more.
+  SELECT count(*) FILTER (WHERE call_kind = 'model'),
+         count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd > 0),
+         count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd = 0),
+         count(*) FILTER (WHERE call_kind = 'decision')
+    INTO n_model, n_paid, n_free, n_decision
+  FROM turn_calls WHERE turn_id = p_resume_of AND status NOT IN ('not_sent','rejected','no_charge_402');
+  IF (p_policy->'limits'->>'model')::int > (prior.policy->'limits'->>'model')::int - n_model
+    -- Rows, not calls: a benchmark call settles in several (limits.toolRows, as turn_call_begin counts them).
+    OR coalesce((p_policy->'limits'->>'toolRows')::int, (p_policy->'limits'->>'paidTools')::int)
+       > coalesce((prior.policy->'limits'->>'toolRows')::int, (prior.policy->'limits'->>'paidTools')::int) - n_paid
+    OR (p_policy->'limits'->>'freeTools')::int > (prior.policy->'limits'->>'freeTools')::int - n_free
+    OR coalesce((p_policy->'limits'->>'decisions')::int, 0) > coalesce((prior.policy->'limits'->>'decisions')::int, 0) - n_decision THEN
+    RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+  END IF;
+  -- What the paused turn would charge now (D = min(N, H), N over its known receipts plus what it carried itself). It is not
+  -- charged there: it is carried into the turn that continues it and settled with it, once, by that turn's rule (a fixed
+  -- price stays the fixed price; an expiry refunds the whole chain).
+  SELECT least(ceil((prior.policy->>'q')::numeric * coalesce(sum(nominal_usd * multiplier)
+           FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer
+           + coalesce((prior.policy->>'carriedCredits')::int, 0),
+         prior.reserved_credits + coalesce((prior.policy->>'carriedCredits')::int, 0))
+    INTO carried
+  FROM turn_calls WHERE turn_id = p_resume_of;
+  RETURN carried;
 END $function$;
 
 REVOKE ALL ON FUNCTION public.turn_resume_read(uuid,uuid,bigint) FROM PUBLIC, anon, authenticated, service_role;

@@ -26,7 +26,7 @@ BEGIN
   FROM turn_calls WHERE turn_id = t.id AND status NOT IN ('not_sent','rejected','no_charge_402');
   RETURN jsonb_build_object('kind', t.kind,
     'limits', jsonb_build_object('model', (t.policy->'limits'->>'model')::int - n_model,
-      'paidTools', (t.policy->'limits'->>'paidTools')::int - n_paid, 'freeTools', (t.policy->'limits'->>'freeTools')::int - n_free,
+      'paidTools', coalesce((t.policy->'limits'->>'toolRows')::int, (t.policy->'limits'->>'paidTools')::int) - n_paid, 'freeTools', (t.policy->'limits'->>'freeTools')::int - n_free,
       'decisions', greatest(coalesce((t.policy->'limits'->>'decisions')::int, 0) - n_decision, 0)),
     'decided', EXISTS (SELECT 1 FROM turn_calls WHERE turn_id = t.id AND call_kind = 'decision' AND status = 'ok'),
     'calls', (WITH RECURSIVE chain AS (
