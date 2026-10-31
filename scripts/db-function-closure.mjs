@@ -234,6 +234,17 @@ const SET_OPERATION = /\b(?:UNION|INTERSECT|EXCEPT)\b/i;
 const TABLE_REF = /\b(?:FROM|JOIN)\s+(?:ONLY\s+)?(?:public\.)?"?([a-z_][a-z0-9_]*)"?(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?/gi;
 const NOT_ALIAS = /^(?:where|join|on|left|right|inner|outer|cross|full|group|order|limit|union|intersect|except|for|using|natural)$/i;
 
+// The ON and WHERE text of one select: what actually limits its rows, not its output list or later clauses. Parenthesised groups are
+// already blank here, so an OR left in the text is a top-level one and could let any row through: such a select proves nothing.
+function rowFilters(scope) {
+  const tail = scope.slice(Math.max(0, scope.search(/\bFROM\b/i)));
+  const start = tail.search(/\b(?:ON|WHERE)\b/i);
+  if (start < 0) return '';
+  const rest = tail.slice(start), end = rest.search(WHERE_END);
+  const filters = end < 0 ? rest : rest.slice(0, end);
+  return /\bOR\b/i.test(filters) ? '' : filters;
+}
+
 // Tables of each select in `code` that are not held to the owner: directly (<alias>.actor_id = p_actor_id, profile_id for a table keyed
 // by the profile) or through an equal owner column of a table in the same select that is. One filtered branch does not vouch for another.
 export function unownedReads(code, tableNames) {
@@ -247,9 +258,10 @@ export function unownedReads(code, tableNames) {
       const scope = before + scopeAfter(statement, ref.index).split(SET_OPERATION)[0];
       const refs = [...scope.matchAll(TABLE_REF)].filter(m => tableNames.has(m[1].toLowerCase()))
         .map(m => ({ table: m[1].toLowerCase(), alias: (m[2] && !NOT_ALIAS.test(m[2]) ? m[2] : m[1]).toLowerCase() }));
-      const keyed = new Set([...scope.matchAll(/(?:\b([a-z_][a-z0-9_]*)\.)?\b(?:actor_id|profile_id)\s*=\s*p_actor_id\b/gi)]
+      const filters = rowFilters(scope);
+      const keyed = new Set([...filters.matchAll(/(?:\b([a-z_][a-z0-9_]*)\.)?\b(?:actor_id|profile_id)\s*=\s*p_actor_id\b/gi)]
         .flatMap(m => (m[1] ? [m[1].toLowerCase()] : refs.length === 1 ? [refs[0].alias] : [])));
-      const links = [...scope.matchAll(/\b([a-z_][a-z0-9_]*)\.actor_id\s*=\s*([a-z_][a-z0-9_]*)\.actor_id\b/gi)]
+      const links = [...filters.matchAll(/\b([a-z_][a-z0-9_]*)\.actor_id\s*=\s*([a-z_][a-z0-9_]*)\.actor_id\b/gi)]
         .map(m => [m[1].toLowerCase(), m[2].toLowerCase()]);
       for (let grew = true; grew;) {
         grew = false;
