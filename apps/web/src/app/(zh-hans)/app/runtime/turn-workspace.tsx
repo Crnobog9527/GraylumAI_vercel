@@ -1,0 +1,105 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+'use client';
+import { useEffect, useRef, useState } from 'react';
+import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
+import { RuntimeEmptyState, RuntimeHeader, RuntimePendingMessage, RuntimeReply, RuntimeTurnView } from '@/components/chat-display/runtime-messages';
+import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
+import { WorkComposer } from '@/components/opc/work-composer';
+import { WorkspaceFrame } from '@/components/opc/workspace-frame';
+import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
+import composerStyles from '@/components/opc/work-composer.module.css';
+import { trpc } from '@/trpc/client';
+import { clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor } from './send-input';
+import { positioningRequiredNotice } from './positioning-required';
+import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
+import { useTurnChat } from './use-turn-chat';
+import workStyles from './runtime-work.module.css';
+
+/*
+ * CORE-PATH-V2 V2-10: the free conversation on the turn path (core_path_v2.enabled). Each user message and the reply saved with it
+ * (session_messages) is one turn of the transcript, after whatever the old path already holds. An ordinary conversation has no
+ * stop: a turn runs to its close (Owner 10-28).
+ */
+type OldTurn = { executionId: string; input: string | null; body: string | null; primaryBody: string | null };
+export function TurnWorkspace({ sessionId, oldTurns }: { sessionId: string; oldTurns: readonly OldTurn[] }) {
+  const utils = trpc.useUtils();
+  const results = trpc.opc.sessionResults.useQuery({ sessionId }, { retry: false });
+  const chat = useTurnChat(sessionId, () => { void utils.credits.getBalance.invalidate(); void utils.opc.conversations.invalidate(); });
+  const [input, setInput] = useState(''), [outgoing, setOutgoing] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
+  const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
+  useEffect(() => { setInput(openingDraftWithReferences(localStorage, sessionId).text); }, [sessionId]);
+  const update = (value: string) => { setInput(value); localStorage.setItem('opc-runtime-input:' + sessionId, value); };
+
+  async function send(text = input) {
+    if (!text.trim() || chat.busy) return;
+    // An unconfirmed earlier send of the same text keeps its request id, so the server replays instead of charging twice.
+    const url = new URL(location.href), requestId = requestIdFor(url.searchParams.get('request'), readPending(localStorage, sessionId), text, undefined, []);
+    url.searchParams.set('request', requestId); history.replaceState(null, '', url);
+    rememberPending(localStorage, sessionId, { requestId, text, input: text, references: [] });
+    const restore = clearForSend(setInput, text, saved => { localStorage.setItem('opc-runtime-input:' + sessionId, saved); markPendingRestored(localStorage, sessionId); });
+    setOutgoing(text);
+    const answer = await chat.send(text, requestId);
+    setOutgoing(null);
+    if (answer === 'kept') restore();
+    if (answer !== 'unknown') {
+      forgetPending(localStorage, sessionId);
+      const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);
+    }
+  }
+  // The marker records one explicit send on the start page, never mere navigation; consumed on this attempt.
+  const initial = useRef(false);
+  useEffect(() => {
+    if (initial.current || !input.trim() || !chat.view || chat.busy) return;
+    const marker = sessionStorage.getItem('opc-runtime-send:' + sessionId);
+    if (!marker || new URL(location.href).searchParams.get('request') !== marker) return;
+    initial.current = true; sessionStorage.removeItem('opc-runtime-send:' + sessionId); void send();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, input, chat.view, chat.busy]);
+
+  const messages = chat.view?.messages ?? [];
+  const turns = messages.filter(m => m.role === 'assistant');
+  const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;
+  const signature = transcriptSignature(messages.map(m => m.seq).join('|'), outgoing);
+  useEffect(() => {
+    const node = scrollArea.current;
+    if (!node || signature === undefined) return;
+    scrollState.current = followTranscript(node, scrollState.current, 'opc-runtime-scroll:' + sessionId, signature + (chat.live?.text.length ?? ''), () => null);
+  }, [sessionId, signature, chat.live?.text.length]);
+
+  const notices = chat.notice?.text === POSITIONING_REQUIRED_NOTICE ? [positioningRequiredNotice('turn-positioning')]
+    : chat.notice ? [{ id: 'turn-notice', tone: 'warning' as const, text: chat.notice.text }] : [];
+  const pendingText = outgoing ?? (chat.view?.activeTurn ? '' : null);
+  return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen} onToggleRight={() => setPanelOpen(open => !open)}
+    right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
+    <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
+      <RuntimeHeader title="工作对话"/>
+      <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
+        {!oldTurns.length && !messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
+        <section className={workStyles.transcript}>
+          {oldTurns.map(turn => <RuntimeTurnView key={turn.executionId} userText={turn.input}>
+            <RuntimeReply text={turn.body ?? turn.primaryBody ?? ''} available={Boolean(turn.body ?? turn.primaryBody)}/>
+          </RuntimeTurnView>)}
+          {turns.map(reply => <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
+            <RuntimeReply text={reply.content}/>
+            {results.data && reply.turnId !== null && <SaveReplyButton sessionId={sessionId} turnId={reply.turnId} reply={reply.content}
+              savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}
+              onOpenResults={() => { setPanelOpen(true); setReveal(count => count + 1); }}/>}
+          </RuntimeTurnView>)}
+          {pendingText !== null && <>
+            {pendingText && <RuntimePendingMessage text={pendingText} sending={chat.sending}/>}
+            <RuntimeTurnView>
+              {chat.live?.trimmed.map(line => <ChatInlineNotice key={line} tone="status">{line}</ChatInlineNotice>)}
+              <RuntimeReply text={chat.live?.text || '正在回复…'} streaming/>
+            </RuntimeTurnView>
+          </>}
+          <ChatNoticeList notices={notices}/>
+          {chat.viewFailed && <ChatInlineNotice tone="warning">暂时读取不到对话记录，页面会继续重试。</ChatInlineNotice>}
+        </section>
+      </div>
+      <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
+        <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId} references={false}/>
+      </div></footer>
+    </main>
+  </WorkspaceFrame>;
+}
