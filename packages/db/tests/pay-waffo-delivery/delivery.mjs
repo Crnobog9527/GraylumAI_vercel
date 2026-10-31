@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 export async function deliveryCases({admin,service,connect}) {
@@ -36,7 +37,7 @@ export async function deliveryCases({admin,service,connect}) {
     const end=new Date(start);
     if(offer==='gold_first30') end.setUTCDate(end.getUTCDate()+30);
     else if(cycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1);
-    else end.setUTCMonth(end.getUTCMonth()+1);
+    else end.setTime(addUtcMonths(end,1));
     const args=[o.id,'fixture',checkout,`payment_${o.id}`,o.amount_total,'usd',start,method==='card'?`sub_${o.id}`:null,start,end];
     const pay=async(db=service,a=args)=>(await db.query('SELECT pay_waffo_fulfill_payment('+a.map((_,i)=>'$'+(i+1)).join(',')+') v',a)).rows[0].v;
     await assert.rejects(()=>pay(service,[...args.slice(0,4),1,...args.slice(5)]),/PAYMENT_FACT_MISMATCH/);
@@ -48,7 +49,7 @@ export async function deliveryCases({admin,service,connect}) {
     assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,8970);
     if(method==='card') {
       const subscription=results[0].subscriptionId ?? results[1].subscriptionId;
-      const renewalEnd=new Date(end);renewalEnd.setUTCMonth(renewalEnd.getUTCMonth()+1);
+      const renewalEnd=addUtcMonths(end,1);
       const payment=`renew_${o.id}`,paid=new Date(Math.floor(Date.now()/1000)*1000);
       const renew=async(db)=>(await db.query(`SELECT pay_waffo_renew_subscription($1,'fixture',$2,6900,'usd',$3,$4,$5) v`,
         [subscription,payment,paid,end,renewalEnd])).rows[0].v;
@@ -107,8 +108,7 @@ export async function deliveryCases({admin,service,connect}) {
   }
   for(const closed of [false,true]) {
     const {o,user,checkout}=await fixture();
-    const start=new Date(Math.floor(Date.now()/1000)*1000),end=new Date(start);
-    end.setUTCMonth(end.getUTCMonth()+1);
+    const start=new Date(Math.floor(Date.now()/1000)*1000),end=addUtcMonths(start,1);
     if(closed) await admin.query("UPDATE profiles SET is_deleted='true' WHERE id=$1",[user]);
     else await service.query("SELECT pay_waffo_observe_qualification($1,'fixture','test',$2,'closed_unpaid',NULL,0,'usd',NULL)",[o.id,checkout]);
     const applied=(await service.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,6900,'usd',$4,NULL,$4,$5) v`,
