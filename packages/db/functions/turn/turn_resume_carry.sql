@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.turn_resume_carry(p_actor_id uuid, p_session_i
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE prior turns; n_model integer; n_paid integer; n_free integer; n_decision integer; carried integer;
+DECLARE prior turns; n_model integer; n_paid integer; n_free integer; n_decision integer; carried integer; broke integer;
 BEGIN
   -- Resume (2.2): only this session's turn paused for credits, by the same kind. Locked after the session (as turn_close).
   IF p_active_turn_id IS DISTINCT FROM p_resume_of THEN RAISE EXCEPTION 'TURN_RESUME_DENIED' USING ERRCODE='55000'; END IF;
@@ -23,15 +23,19 @@ BEGIN
              AND status IN ('dispatched','identified','unknown')) THEN
     RAISE EXCEPTION 'TURN_RESUME_COST_PENDING' USING ERRCODE='55000';
   END IF;
-  -- What is left of the paused turn's frozen limits, counted as turn_call_begin counts them: the new turn may use no more.
+  -- What is left of the paused turn's frozen limits, counted as turn_call_begin counts them: the new turn may use no more. From the
+  -- first receipt that cannot be replayed the calls are made again: they use no limit and carry no charge.
+  broke := public.turn_resume_break(p_actor_id, p_resume_of);
   SELECT count(*) FILTER (WHERE call_kind = 'model'),
          count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd > 0),
          count(*) FILTER (WHERE call_kind = 'tool' AND upper_usd = 0),
          count(*) FILTER (WHERE call_kind = 'decision')
     INTO n_model, n_paid, n_free, n_decision
-  FROM turn_calls WHERE turn_id = p_resume_of AND status NOT IN ('not_sent','rejected','no_charge_402');
+  FROM turn_calls WHERE turn_id = p_resume_of AND status NOT IN ('not_sent','rejected','no_charge_402') AND (seq < broke OR call_kind = 'decision');
   IF (p_policy->'limits'->>'model')::int > (prior.policy->'limits'->>'model')::int - n_model
-    OR (p_policy->'limits'->>'paidTools')::int > (prior.policy->'limits'->>'paidTools')::int - n_paid
+    -- Rows, not calls: a benchmark call settles in several (limits.toolRows, as turn_call_begin counts them).
+    OR coalesce((p_policy->'limits'->>'toolRows')::int, (p_policy->'limits'->>'paidTools')::int)
+       > coalesce((prior.policy->'limits'->>'toolRows')::int, (prior.policy->'limits'->>'paidTools')::int) - n_paid
     OR (p_policy->'limits'->>'freeTools')::int > (prior.policy->'limits'->>'freeTools')::int - n_free
     OR coalesce((p_policy->'limits'->>'decisions')::int, 0) > coalesce((prior.policy->'limits'->>'decisions')::int, 0) - n_decision THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
@@ -40,7 +44,7 @@ BEGIN
   -- charged there: it is carried into the turn that continues it and settled with it, once, by that turn's rule (a fixed
   -- price stays the fixed price; an expiry refunds the whole chain).
   SELECT least(ceil((prior.policy->>'q')::numeric * coalesce(sum(nominal_usd * multiplier)
-           FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer
+           FILTER (WHERE status = 'ok' AND call_kind <> 'decision' AND seq < broke), 0))::integer
            + coalesce((prior.policy->>'carriedCredits')::int, 0),
          prior.reserved_credits + coalesce((prior.policy->>'carriedCredits')::int, 0))
     INTO carried
