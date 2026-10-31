@@ -56,6 +56,11 @@ jobs:
       - name: Check no Skill source in public repository
         run: node scripts/check-no-skill-source.mjs
 
+      # CORE-PATH-V2 V2-1: the main path's database functions. Functions under packages/db/functions/turn must stay within
+      # 15 functions / 10 tables and free of hot-row locks and session state; every other function is only reported.
+      - name: Check main-path function closure and rules
+        run: node scripts/db-function-closure.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -549,6 +554,11 @@ jobs:
       # of the two shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
       - name: Integration — Database behaviour suites (run-local)
         run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/2
+
+      # CORE-PATH-V2 V2-1: turn budget, on the same database image in each shard (about half a minute); the old path's numbers
+      # are reported against scripts/turn-budget-baseline.json, a scenario marked "enforce": true may not exceed its baseline.
+      - name: Check turn budget (database round trips, time, locks)
+        run: node scripts/check-turn-budget.mjs --ci
 
   unit-check:
     name: Unit Tests

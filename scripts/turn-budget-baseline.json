@@ -1,0 +1,54 @@
+{
+ "old:free-chat": {
+  "path": "old",
+  "roundTrips": 8,
+  "dbTimeMs": 50,
+  "relationLocks": 132,
+  "lockClasses": {
+   "main": 17,
+   "mentor": 97,
+   "ledger": 40
+  },
+  "hotSeqScans": 0,
+  "enforce": false
+ },
+ "new:mentor-account-strategy": {
+  "path": "new",
+  "roundTrips": 13,
+  "dbTimeMs": 120,
+  "relationLocks": 158,
+  "lockClasses": {
+   "main": 42,
+   "mentor": 124,
+   "ledger": 40
+  },
+  "hotSeqScans": 0,
+  "enforce": true
+ },
+ "new:mentor-plain": {
+  "path": "new",
+  "roundTrips": 12,
+  "dbTimeMs": 120,
+  "relationLocks": 122,
+  "lockClasses": {
+   "main": 42,
+   "mentor": 55,
+   "ledger": 40
+  },
+  "hotSeqScans": 0,
+  "enforce": true
+ },
+ "new:mentor-research-close": {
+  "path": "new",
+  "roundTrips": 12,
+  "dbTimeMs": 120,
+  "relationLocks": 145,
+  "lockClasses": {
+   "main": 42,
+   "mentor": 63,
+   "ledger": 40
+  },
+  "hotSeqScans": 0,
+  "enforce": true
+ }
+}
