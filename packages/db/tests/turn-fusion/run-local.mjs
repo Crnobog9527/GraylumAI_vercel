@@ -304,6 +304,14 @@ try{
   const refunded=await read(a.actor,f.compareId);
   assert.equal(refunded.chargedCredits,0);
   assert.deepEqual(refunded.columns.map(x=>[x.billing.closed,x.billing.chargedCredits,x.billing.netChargedCredits]),[[true,0,0],[true,0,0]],'a refunded turn shows no column cost');
+  // A receipt above the frozen amount is capped by the turn's charge: the columns together never show more than was charged.
+  const g=await open(a,{kind:'compare',pol:comparePolicy({gCredits:120,minCredits:120}),product:{...cp,requestHash:hash('r7d'),config:{models:models.slice(0,2)}}});
+  for(const [i,id] of models.slice(0,2).entries())await one('select turn_fusion_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,g.turnId,i+1,'model',id,null,null,hash('r7d'+i),0.1,m]);
+  for(const s of [1,2])await record(a,g.turnId,s,{n:0.15,output:{phase:'fusion_compare',body:'y'+s,verdict:'usable'}});
+  const capped=await close(a,g.turnId,'completed',{delivered:true}),over=await read(a.actor,g.compareId);
+  assert.equal(over.chargedCredits,capped.chargedCredits);
+  assert.equal(over.columns.reduce((n,x)=>n+x.billing.chargedCredits,0),capped.chargedCredits,'the columns add up to the actual charge');
+  assert.ok(over.columns[0].billing.chargedCredits>=over.columns[1].billing.chargedCredits&&over.columns[1].billing.chargedCredits<90,'the later column takes the shortfall');
   // Refused: another account reads nothing and lists nothing; an unknown compare reads nothing; a client role cannot call.
   assert.equal(await read(b.actor),null);
   assert.deepEqual(await list(b.actor,a.session),[]);

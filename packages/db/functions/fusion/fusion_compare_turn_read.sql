@@ -22,28 +22,34 @@ BEGIN
   -- A turn closed with nothing charged (refunded in full: failed, or no column delivered) shows no column cost either, whatever
   -- the receipts say: the columns follow the turn's own settlement, never a recomputation from the receipts alone.
   paid := closed AND coalesce(t.charged_credits, 0) > 0;
-  SELECT coalesce(jsonb_agg(col ORDER BY idx), '[]'::jsonb) INTO cols FROM (
+  -- Each column's cost is its receipt's own rounding, but the columns together never exceed what the turn actually charged (a
+  -- receipt above the frozen amount is capped by turn_user_charge): earlier columns are filled first, in order.
+  SELECT coalesce(jsonb_agg(z.col || jsonb_build_object('billing', (z.col->'billing')
+      || jsonb_build_object('chargedCredits', z.cap, 'netChargedCredits', z.cap)) ORDER BY z.idx), '[]'::jsonb) INTO cols FROM (
+    SELECT y.idx, y.col, CASE WHEN paid THEN least(y.raw, greatest(t.charged_credits
+      - coalesce(sum(y.raw) OVER (ORDER BY y.idx ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0), 0)) ELSE 0 END cap
+    FROM (
     SELECT i.idx, jsonb_build_object('column', i.idx, 'runId', coalesce(c.seq::text, i.idx::text), 'modelId', m.model_id,
       'body', CASE WHEN c.answer_verdict = 'usable' THEN o.body END,
       'billing', CASE WHEN c.seq IS NULL THEN jsonb_build_object('closed', closed, 'state', CASE WHEN closed THEN 'settled' ELSE 'held' END,
           'reservedCredits', 0, 'chargedCredits', 0, 'netChargedCredits', 0)
         ELSE jsonb_build_object('closed', closed, 'state', CASE WHEN closed THEN 'settled' ELSE 'held' END,
           'reservedCredits', ceil((t.policy->>'q')::numeric * c.upper_usd * c.multiplier)::integer,
-          'chargedCredits', CASE WHEN paid AND c.status = 'ok' AND c.answer_verdict = 'usable'
-            THEN ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)::integer ELSE 0 END,
-          'netChargedCredits', CASE WHEN paid AND c.status = 'ok' AND c.answer_verdict = 'usable'
-            THEN ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)::integer ELSE 0 END) END,
+          'chargedCredits', 0, 'netChargedCredits', 0) END,
       'call', CASE WHEN c.seq IS NULL THEN NULL ELSE jsonb_build_object('callId', c.seq, 'state', c.status, 'dispatched', true,
         'settled', c.settled_at IS NOT NULL,
         'verdict', coalesce(c.answer_verdict, CASE WHEN c.status IN ('not_sent','rejected','no_charge_402','unusable') THEN 'unusable'
           WHEN c.status = 'ok' THEN 'no_delivery' END),
-        'inFlight', c.status IN ('dispatched','identified')) END) col
+        'inFlight', c.status IN ('dispatched','identified')) END) col,
+      CASE WHEN c.status = 'ok' AND c.answer_verdict = 'usable'
+        THEN ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)::integer ELSE 0 END raw
     FROM jsonb_array_elements_text(fc.config->'models') WITH ORDINALITY AS m(model_id, ord)
     CROSS JOIN LATERAL (SELECT (m.ord - 1)::integer idx) i
     LEFT JOIN LATERAL (SELECT * FROM turn_calls x WHERE x.actor_id = p_actor_id AND x.turn_id = fc.turn_id AND x.call_kind = 'model'
       AND x.model_id = m.model_id::uuid ORDER BY x.seq DESC LIMIT 1) c ON true
     LEFT JOIN fusion_turn_outputs o ON o.actor_id = p_actor_id AND o.turn_id = fc.turn_id AND o.seq = c.seq AND o.verdict = 'usable'
-  ) x(idx, col);
+    ) y
+  ) z;
   RETURN fusion_compare_view(fc) || jsonb_build_object('turnId', fc.turn_id, 'question', fc.question, 'columns', cols,
     'chargedCredits', CASE WHEN closed THEN coalesce(t.charged_credits, 0) ELSE 0 END);
 END $function$;
