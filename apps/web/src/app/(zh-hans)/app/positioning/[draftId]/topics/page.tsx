@@ -148,7 +148,7 @@ function TopicWorkspaceContent() {
   const sessionId = read.data && !read.data.conversationDeleted && workspace.data?.bound ? workspace.data.sessionId : '';
   const viewPolling = useRuntimeViewPolling();
   const oldView = trpc.runtime.view.useQuery({ sessionId }, { enabled: Boolean(sessionId), ...viewPolling.options });
-  const turnPath = useTopicTurnPath(sessionId, oldView.data?.executions as unknown[] | undefined);
+  const turnPath = useTopicTurnPath(sessionId, oldView.data?.executions as unknown[] | undefined, oldView.isSuccess || oldView.isError);
   const view = (turnPath.on ? { data: turnPath.data, refetch: turnPath.refetch } : oldView) as unknown as typeof oldView;
   const bind = trpc.opc.consentTopicWorkspace.useMutation();
   const turn = trpc.opc.topicTurn.useMutation(), execute = trpc.runtime.execute.useMutation();
@@ -297,7 +297,12 @@ function TopicWorkspaceContent() {
             if (turnPath.on) {
               const id = op.request.requestId; reached = true; setOutgoing(old => old && { ...old, executionId: id });
               const told = await turnPath.send(op.request, op.candidateAtSend); if (told.notice) setError(told.notice);
-              if (told.keepInput) { setOutgoing(null); back(); } else stored(id, op.request.input);
+              if (told.keepInput) {
+                // Refused: no turn opened. The record stops the opening sending itself again on a later visit.
+                setOutgoing(null); back(); localStorage.setItem(storageKey + ':rejected:' + id, JSON.stringify(op));
+                localStorage.removeItem(storageKey); setPending(null); await view.refetch(); return;
+              }
+              stored(id, op.request.input);
             } else {
             const admitted = await turn.mutateAsync(op.request);
             // Q1: the previous organizer answered instead; nothing was stored and the input stays in the box.
@@ -349,7 +354,7 @@ function TopicWorkspaceContent() {
   }
 
   async function send() {
-    if (!sessionId || !input.trim() || pending) return;
+    if (!sessionId || !input.trim() || pending || !turnPath.decided) return;
     const visible = candidate ?? (topicDraft.data?.body?.length
       ? { body: topicDraft.data.body as PlanItem[], requestId: topicDraft.data.draftVersionId ?? '' } : null);
     await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() }, candidateAtSend:visible?structuredClone(visible):null }, true);
@@ -357,7 +362,7 @@ function TopicWorkspaceContent() {
 
   const opening = workspace.data?.opening as (ChatRequest & { executionId?: string | null }) | null | undefined;
   const refusedOpening = useTopicOpening({ opening, storageKey, executions: view.data?.executions,
-    ready: Boolean(sessionId && view.data && !busy && !pending && workspace.data?.sourceAllowed), send: request => void perform({ kind: 'chat', request }) });
+    ready: Boolean(sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed), send: request => void perform({ kind: 'chat', request }) });
 
   async function stop(executionId: string) {
     setError(''); // 已停止 from the click on, and after a reload; a failed stop keeps it until a re-read proves otherwise
@@ -590,7 +595,7 @@ function TopicWorkspaceContent() {
           <footer className={composerStyles.zone}>
             <div className={composerStyles.wrap}>
               <WorkComposer references={false} maxLength={8000} value={input} onChange={updateInput}
-                sendDisabled={busy||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
+                sendDisabled={busy||!turnPath.decided||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
                 onSend={skill=>{if(skill)void free.send(input,skill);else void send();}}/>
               <p className={composerStyles.note}>
                 候选会自动保存；只有你明确采用的具体选题才会进入资料库。

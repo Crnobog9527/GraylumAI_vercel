@@ -17,6 +17,8 @@ import { topicFailureMessage } from './topic-notices';
  * stays on the old path, as a free conversation (V2-10). Only a report can be stopped: a running topic turn offers no stop.
  */
 const READ_MS = 3000;
+/** A turn from another tab starts without this page: an idle workspace still looks now and then. */
+const IDLE_READ_MS = 30000;
 const fetcher: typeof fetch = (...args) => globalThis.fetch(...args);
 export const TOPIC_TURN_URL = '/api/turn/topic';
 const FIELDS = { contentAvailable: true, unavailableReason: null };
@@ -49,22 +51,32 @@ export function turnRunningNotice(e: { executionId: string; state: string }): Ch
   return e.state === 'running' ? { id: e.executionId, tone: 'status', busy: true, text: '正在回复…' } : null;
 }
 
-export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unknown[] | undefined) {
+/** Nothing is sent before the path is known: an old-path opening would keep this conversation on the old path for good. */
+export const topicPathDecided = (read: { choices: boolean; old: boolean; turns: boolean }) => read.choices && read.old && read.turns;
+
+export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unknown[] | undefined, oldSettled: boolean) {
   const choices = trpc.runtime.choices.useQuery(sessionId ? { sessionId } : undefined, { enabled: Boolean(sessionId), staleTime: RUNTIME_CHOICES_STALE_MS });
-  const [view, setView] = useState<TurnView | null>(null);
+  const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
   const refetch = useCallback(async () => {
     if (!sessionId) return null;
     const next = await readTurnView(sessionId, fetcher);
+    setFailed(!next);
     if (next) setView(next);
     return next;
   }, [sessionId]);
   useEffect(() => { void refetch(); }, [refetch]);
-  const active = Boolean(view?.activeTurn);
+  // A failed read is read again: the reply is saved whatever this page saw. Focus covers the idle gap.
+  const quick = Boolean(view?.activeTurn) || failed;
   useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => void refetch(), READ_MS);
+    if (!sessionId) return;
+    const timer = setInterval(() => void refetch(), quick ? READ_MS : IDLE_READ_MS);
     return () => clearInterval(timer);
-  }, [active, refetch]);
+  }, [sessionId, quick, refetch]);
+  useEffect(() => {
+    const onFocus = () => void refetch();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refetch]);
   // Replies the turn path already saved and charged stay readable whatever the switch says now.
   const held = Boolean(view?.messages.length || view?.activeTurn);
   const on = held || Boolean(choices.data?.corePathV2 && oldExecutions && !oldExecutions.length);
@@ -75,5 +87,6 @@ export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unkn
     await refetch();
     return topicSendOutcome(outcome);
   };
-  return { on, data, refetch, send };
+  const decided = topicPathDecided({ choices: choices.isSuccess || choices.isError, old: oldSettled, turns: Boolean(view) });
+  return { on, decided, data, refetch, send };
 }
