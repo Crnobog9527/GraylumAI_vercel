@@ -434,7 +434,8 @@ it('RUNTIME: CORE-PATH-V2 V2-10b C2: a package needs its claim and freezes its m
   const claimed = await admin.rpc('opc_video_material_prepare', { p_actor_id: f.actor, p_work_item_id: w.item, p_request_id: request, p_source_script_id: script,
     p_storyboard: true, p_editing: false, p_expected_storyboard_version: 0, p_expected_editing_version: 0 });
   expect(claimed.error).toBeNull();
-  expect(await send('Other', randomUUID())).toEqual([{ type: 'error', code: 'OPC_CONTENT_BINDING' }]);
+  // A claim that has not opened holds nobody back: a turn reads the material and uses none of it up.
+  expect((await send('Other', randomUUID())).at(-1)).toMatchObject({ type: 'result' });
   expect((await send('[OPC_VIDEO_PACKAGE_V1] storyboard', request)).at(-1)).toMatchObject({ type: 'result' });
   expect(bodies.at(-1)).toContain('已定稿口播稿：SAVED_SCRIPT');
   const frozen = (await policyOf(request)).workMaterial, revision = (claimed.data as { revision: number }).revision;
