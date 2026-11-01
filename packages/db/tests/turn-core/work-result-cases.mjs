@@ -19,12 +19,25 @@ export async function workResultCases(t){
  const counts=async f=>(await c.query(`select (select count(*) from artifact_versions v join artifact_projects p on p.id=v.project_id
    where p.actor_id=$1 and p.work_kind='result')::int versions,
   (select count(*) from opc_result_links where turn_actor_id=$1 and step_id='result')::int links`,[f.actor])).rows[0];
+ // A published Skill whose manifest names its hash, as a real package's does (the shared fixture's manifest is empty and immutable).
+ const published=async actor=>{
+  const skillId=randomUUID(),moduleId=randomUUID(),revisionId=randomUUID(),hash='b'.repeat(64),entry='a'.repeat(64);
+  await c.query('begin'); // one now(): the published row must match its revision's time
+  await c.query("insert into skills(id,skill_key,content_kind) values($1,$2,'directory')",[skillId,'work-'+skillId]);
+  await c.query("insert into modules(id,title,skill_id,active) values($1,'Work fixture',$2,true)",[moduleId,skillId]);
+  await c.query("insert into skill_revisions(id,skill_id,version,content,content_hash,published_by) values($1,$2,1,'fixture',$3,$4)",[revisionId,skillId,entry,actor]);
+  await c.query(`insert into skill_packages(revision_id,skill_id,request_id,manifest,package_hash,entry_hash,expected_version,actor_id)
+   values($1,$2,$3,$4,$5,$6,0,$7)`,[revisionId,skillId,randomUUID(),JSON.stringify({packageHash:hash}),hash,entry,actor]);
+  await c.query(`update skills set status='published',published_version=1,published_content='fixture',published_content_hash=$2,
+   published_at=now(),published_by=$3 where id=$1`,[skillId,entry,actor]);
+  await c.query('commit');
+  return {moduleId,skillId,revisionId};};
  const workspace=async(credits=1000)=>{const a=await account(credits);
   const f=await one('select d7_test.artifacts($1) v',[a.actor]);
   // As opc_handoff binds a work item to its account: what bill2_scope_allowed asks of a work_item conversation.
   await c.query(`update artifact_projects w set source_project_id=i.account_project_id from opc_items i
    where i.work_item_id=w.id and w.id=$1`,[f.workItem]);
-  return {a,f,skill:{moduleId:f.module,skillId:f.skill,revisionId:f.revision},actor:a.actor};};
+  return {a,f,skill:await published(a.actor),actor:a.actor};};
  const finished=async(w,{workSkill=w.skill,kind='completed',text='WORK_RESULT_BODY',delivered=true}={})=>{
   const o=await open(w.a,{session:w.f.session,pol:policy(workSkill?{workSkill}:{})});
   await begin(w.a,o.turnId,1);await record(w.a,o.turnId,1);
