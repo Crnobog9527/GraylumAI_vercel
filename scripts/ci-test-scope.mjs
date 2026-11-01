@@ -1,10 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Decides whether a CI run may skip the two slow database jobs ("Run database behaviour suites" and "Run billing and recovery
-// integration tests"). Everything else in CI always runs. The default is the full suite; a run skips only when it is a pull request
-// into staging and every changed file is on the allow-list below (Owner 2026-11-01: pure front-end and documentation PRs).
-// Usage (CI): node scripts/ci-test-scope.mjs   -- reads GITHUB_EVENT_NAME / GITHUB_BASE_REF, writes full=true|false to $GITHUB_OUTPUT.
+// integration tests"). Everything else in CI always runs. The default is the full suite; a run skips only when it is
+//   - a draft pull request (Owner 2026-11-01: a draft runs the quick checks only; marking it ready runs the pull_request event again), or
+//   - a pull request into staging whose changed files are all on the allow-list below (Owner 2026-11-01: pure front-end and docs PRs).
+// Usage (CI): node scripts/ci-test-scope.mjs   -- reads GITHUB_EVENT_NAME / GITHUB_BASE_REF / GITHUB_EVENT_PATH, writes full=true|false to $GITHUB_OUTPUT.
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const WEB_UI_ROOTS = ['apps/web/src/components/', 'apps/web/src/app/'];
@@ -29,8 +30,10 @@ export function isSkippablePath(path) {
 }
 
 // { full, reason }. Unknown, missing or empty input always means the full suite.
-export function decide({ eventName, baseRef, files }) {
+// `draft` is true only when the event says so; anything else counts as a ready pull request.
+export function decide({ eventName, baseRef, files, draft }) {
   if (eventName !== 'pull_request') return { full: true, reason: `event is ${eventName || 'unknown'}, not a pull request` };
+  if (draft === true) return { full: false, reason: 'the pull request is a draft; the database jobs run when it is marked ready' };
   if (baseRef !== 'staging') return { full: true, reason: `pull request base is ${baseRef || 'unknown'}, not staging` };
   if (!Array.isArray(files)) return { full: true, reason: 'the changed-file list is unavailable' };
   if (files.length === 0) return { full: true, reason: 'the changed-file list is empty' };
@@ -50,10 +53,20 @@ export function changedFiles(git = (...args) => execFileSync('git', args, { enco
   }
 }
 
+// The pull_request payload's draft flag, read from the event file the runner provides (no expression interpolation). Unreadable means false.
+export function isDraft(eventPath, read = path => readFileSync(path, 'utf8')) {
+  try {
+    return JSON.parse(read(eventPath))?.pull_request?.draft === true;
+  } catch {
+    return false;
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const eventName = process.env.GITHUB_EVENT_NAME;
   const baseRef = process.env.GITHUB_BASE_REF;
-  const { full, reason } = decide({ eventName, baseRef, files: eventName === 'pull_request' ? changedFiles() : null });
+  const draft = eventName === 'pull_request' && process.env.GITHUB_EVENT_PATH ? isDraft(process.env.GITHUB_EVENT_PATH) : false;
+  const { full, reason } = decide({ eventName, baseRef, draft, files: eventName === 'pull_request' && !draft ? changedFiles() : null });
   console.log(`full=${full}: ${reason}`);
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `full=${full}\n`);
 }

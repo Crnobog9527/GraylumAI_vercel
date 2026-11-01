@@ -89,7 +89,7 @@ def required_event_configuration_failures(file, event_name, configuration)
       failures << "#{file}: required #{event_name} trigger must not use #{forbidden_filter}"
     end
   end
-  if event_name == 'pull_request' && configuration.key?('types')
+  if event_name == 'pull_request' && configuration.key?('types') && !required_pull_request_types?(configuration['types'])
     failures << "#{file}: required pull_request trigger must not use types"
   elsif event_name == 'push' && configuration.key?('types')
     failures << "#{file}: required push trigger configuration is invalid"
@@ -123,6 +123,14 @@ def required_event_configuration_failures(file, event_name, configuration)
   end
 
   failures
+end
+
+# The default pull_request activity types plus ready_for_review (Owner 2026-11-01: a draft pull request skips the slow database jobs and
+# runs them when it is marked ready). Listing types is otherwise forbidden because a narrower list would stop a required check running.
+REQUIRED_PULL_REQUEST_TYPES = %w[opened ready_for_review reopened synchronize].freeze
+
+def required_pull_request_types?(types)
+  types.is_a?(Array) && types.all? { |type| type.is_a?(String) } && types.sort == REQUIRED_PULL_REQUEST_TYPES
 end
 
 def required_workflow_trigger_failures(file, events)

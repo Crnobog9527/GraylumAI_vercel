@@ -169,7 +169,10 @@ class CIWorkflowsTest < Minitest::Test
     [@ci,@security].each do |workflow|
       events=workflow['on'] || workflow[true]
       %w[pull_request push].each do |event|
-        assert_equal ['branches'], events.fetch(event).keys
+        # CI alone also lists the pull_request types: the default three plus ready_for_review, so marking a draft ready runs CI again.
+        expected_keys = workflow.equal?(@ci) && event == 'pull_request' ? ['branches', 'types'] : ['branches']
+        assert_equal expected_keys, events.fetch(event).keys
+        assert_equal %w[opened ready_for_review reopened synchronize], events[event]['types'].sort if expected_keys.include?('types')
         assert_includes events[event]['branches'], 'staging'
       end
       assert_equal [{'cron'=>'0 9 * * 1'}], events.fetch('schedule')
