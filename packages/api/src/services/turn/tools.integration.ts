@@ -324,7 +324,8 @@ it('RUNTIME: CORE-PATH-V2 V2-6 B: read_source reads the workspace and own posts 
   expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
   expect(bodies[1]).toContain('WORKSPACE_CANARY');
   expect(bodies[1]).not.toContain('DRAFT_WORKSPACE_CANARY');
-  expect((await rows(f.actor)).map(r => r.call_kind)).toEqual(['decision', 'model', 'model']);
+  // This account has a confirmed positioning, so there is no decision check either.
+  expect((await rows(f.actor)).map(r => r.call_kind)).toEqual(['model', 'model']);
   expect(out.calls).toContain('rpc/workspace_turn_read');
   // Refused: another account, with the owner's version list, its own conversation or the owner's.
   expect(await free(other.actor, other.session, '', [main.version])).toEqual({ kind: 'workspace_index', entries: [] });

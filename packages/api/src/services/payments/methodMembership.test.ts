@@ -164,7 +164,7 @@ describe('method membership read projection', () => {
     expect(f.queries[1]?.gt).toHaveBeenCalledWith('entitlement_end', '2026-10-13T12:00:00.000Z');
   });
   it('never shows a one-time purchase as renewing and fails closed on a missing subscription row', async () => {
-    const once = { id: 'o1', subscription_id: 's1', auto_renew: false, entitlement_end: '2026-11-01T00:00:00.000Z' };
+    const once = { id: 'o1', subscription_id: 's1', auto_renew: false, entitlement_end: '2099-11-01T00:00:00.000Z' };
     const ok = await readMethodMembership(fixture(undefined, null, [once], [{ id: 's1', cancel_at_period_end: 'false' }]).db, 'actor');
     expect(ok.memberships[0]?.auto_renew).toBe(false);
     await expect(readMethodMembership(fixture(undefined, null, [once], []).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
