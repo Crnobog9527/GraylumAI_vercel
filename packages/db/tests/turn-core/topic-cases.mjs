@@ -63,6 +63,8 @@ export async function topicCases(t){
   const reply='Here you go\n```json\n'+JSON.stringify([proposal])+'\n```';
   const {request,closed}=await topicTurn(a,src,reply);
   assert.equal(closed.chargedCredits,6,'by usage: ceil(q x n x m), once');
+  const shown=await one('select turn_session_view($1,$2,0) v',[a.actor,src.topicSession]);
+  assert.deepEqual(shown.messages.map(m=>m.requestId),[request,request],'each message names its handle');
   assert.equal(await balance(a),994);
   const edited={...proposal,title:'USER_EDIT'};
   const first=await save(a,src,request,[edited]);

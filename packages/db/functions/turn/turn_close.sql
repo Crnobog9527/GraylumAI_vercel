@@ -82,6 +82,8 @@ BEGIN
       IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'organizerInput' THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
     ELSIF t.kind = 'report' THEN
       PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'plan' THEN
+      PERFORM public.turn_plan_apply(t, v_kind, p_kind_result);
     ELSE
       RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
     END IF;

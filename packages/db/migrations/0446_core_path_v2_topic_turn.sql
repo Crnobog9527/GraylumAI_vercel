@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-10b B (provisional number 0446; the controller sets the final one before it is applied; functions rebuilt whole on
--- their text as staging has it after 0442): the topic workspace on the turn path. A topic turn is kind=chat in the workspace's
+-- CORE-PATH-V2 V2-10b B (provisional number 0446, applied after A's migration; the controller sets the final one; functions rebuilt
+-- whole on their text as staging has it after 0445): the topic workspace on the turn path. A topic turn is kind=chat in the workspace's
 -- conversation (one metered call, the ordinary start threshold; turn_open is unchanged). Its saved reply feeds the topic draft and
 -- the adoption, which only knew executions. As for a report (0429, 0432), the page's handle stays one uuid: an execution id, or a
 -- turn's request id.
@@ -16,6 +16,7 @@
 --   turn_open, runtime_admit, runtime_admit_commit
 --                          one request id on one path only while both exist: each refuses, under the conversation's lock, a request the
 --                          other holds (turn_open for a topic turn, the old admission for any turn), so no retry pays twice
+--   turn_session_view      each message names its turn's request id, the page's handle of a reply
 --   topic_turn_source      what a topic turn reads before it opens, on the read client (the old prepareTopicTurn checks: writable,
 --                          bound workspace, allowed source, the Skill resources, the frozen material)
 -- Compatibility: old code reads execution_id only and ignores turn rows, and nothing writes one until the page switches.
@@ -870,7 +871,7 @@ DECLARE
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
   carried integer := 0;
 BEGIN
-  IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
+  IF p_kind NOT IN ('chat','mentor','report','plan','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
   END IF;
   IF jsonb_typeof(p_policy) <> 'object'
@@ -1018,7 +1019,8 @@ BEGIN
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
-    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor')
+      WHEN 'plan' THEN public.turn_plan_context(p_actor_id, p_session_id, p_policy) END);
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.runtime_admit_commit(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb, p_pre jsonb)
@@ -1242,6 +1244,65 @@ BEGIN
  -- 0295 report price
  IF p_payload ? 'reportGeneration' THEN PERFORM report_fee_hold(e,p_billing); END IF;
  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.turn_session_view(p_actor_id uuid, p_session_id uuid, p_after_seq integer DEFAULT 0)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions; a turns; l turns;
+BEGIN
+  -- A disabled or deleted account reads nothing, as every other read (bill2_actor) and turn_open refuse it.
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_actor_id AND status = 'active' AND is_deleted::text = 'false') THEN
+    RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id;
+  IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
+  -- The conversation's whole scope is session_view_allowed, called first by Node (view.ts); a draft revoked since then is refused
+  -- here, in the same snapshot as the messages.
+  IF s.scope->>'kind' = 'positioning_draft' AND NOT (turn_mentor_draft_allowed(p_actor_id, (s.scope->>'draftId')::uuid)
+      AND turn_mentor_source_live((s.scope->>'draftId')::uuid)) THEN
+    RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF s.active_turn_id IS NOT NULL THEN SELECT * INTO a FROM turns WHERE actor_id = p_actor_id AND id = s.active_turn_id; END IF;
+  SELECT * INTO l FROM turns WHERE session_id = p_session_id AND actor_id = p_actor_id AND state = 'closed'
+    ORDER BY opened_at DESC LIMIT 1;
+  RETURN jsonb_build_object(
+    'activeTurn', CASE WHEN a.id IS NULL THEN NULL ELSE jsonb_build_object('turnId', a.id, 'kind', a.kind, 'state', a.state,
+      'pauseReason', a.pause_reason, 'openedAt', a.opened_at, 'updatedAt', a.updated_at) END,
+    'lastTurn', CASE WHEN l.id IS NULL THEN NULL ELSE jsonb_build_object('turnId', l.id, 'kind', l.kind, 'closeKind', l.close_kind,
+      'failureCode', l.failure_code, 'settlement', l.settlement, 'chargedCredits', l.charged_credits, 'closedAt', l.closed_at) END,
+    'messages', (SELECT coalesce(jsonb_agg(jsonb_build_object('seq', m.seq, 'role', m.role, 'turnId', m.turn_id, 'content', m.content,
+          -- The page's handle of a topic reply (V2-10b): its turn's request id, what the topic draft and the adoption name.
+          'requestId', (SELECT r.request_id FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id))
+        ORDER BY m.seq), '[]'::jsonb)
+      FROM (SELECT seq, role, turn_id, content FROM session_messages
+            WHERE session_id = p_session_id AND visible AND deleted_at IS NULL AND seq > greatest(coalesce(p_after_seq, 0), 0)
+            ORDER BY seq LIMIT 50) m),
+    -- The paid tool calls behind those replies, for the work rows a reload shows again (Owner 10-02): a reply's own turn and the
+    -- paused turns it continued. What was asked is the tool call in the model receipt just before; a receipt that holds none
+    -- gives null. Owner's key only; nothing is written.
+    'calls', (WITH RECURSIVE shown AS (
+        SELECT DISTINCT m.turn_id AS reply, m.turn_id AS id FROM (SELECT seq, turn_id FROM session_messages
+            WHERE session_id = p_session_id AND visible AND deleted_at IS NULL AND seq > greatest(coalesce(p_after_seq, 0), 0)
+            ORDER BY seq LIMIT 50) m
+        UNION ALL
+        SELECT x.reply, t.resume_of FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id WHERE t.resume_of IS NOT NULL)
+      SELECT coalesce(jsonb_agg(jsonb_build_object('turnId', x.reply, 'seq', c.seq, 'toolName', c.tool_name, 'status', c.status,
+          'usage', c.usage, 'q', t.policy->'q', 'multiplier', c.multiplier,
+          -- The model call that asked: a benchmark lookup settles in several rows, so not always the row just before.
+          -- Along the resume chain: a resumed turn's first real call may follow the model receipt of the turn it continued.
+          'arguments', (WITH RECURSIVE up AS (SELECT t.id AS id, 0 AS depth, t.resume_of AS previous
+              UNION ALL SELECT p.id, u.depth + 1, p.resume_of FROM up u JOIN turns p ON p.actor_id = p_actor_id AND p.id = u.previous)
+            SELECT r.body::jsonb #>> '{choices,0,message,tool_calls,0,function,arguments}' FROM up u
+              JOIN turn_calls m ON m.turn_id = u.id AND m.call_kind = 'model' AND (u.depth > 0 OR m.seq < c.seq)
+              JOIN turn_call_raw r ON r.turn_id = m.turn_id AND r.seq = m.seq
+              ORDER BY u.depth, m.seq DESC LIMIT 1)) ORDER BY t.id, c.seq), '[]'::jsonb)
+      FROM shown x JOIN turns t ON t.actor_id = p_actor_id AND t.id = x.id AND t.session_id = p_session_id
+      JOIN turn_calls c ON c.turn_id = t.id AND c.call_kind = 'tool' AND c.upper_usd > 0 AND c.status IN ('ok', 'unusable')));
 END $function$;
 
 DO $$
