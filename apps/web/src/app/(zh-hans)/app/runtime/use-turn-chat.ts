@@ -28,7 +28,8 @@ export const closedTurnSeen = (seen: number | null | undefined, view: Pick<TurnV
   const id = view ? view.lastTurn?.turnId ?? null : undefined;
   return { changed: id !== undefined && id !== seen, id };
 };
-export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }> };
+export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }>;
+  /** A work item's conversation (V2-10b): the server reads its checks, method and brief. */ workItem?: boolean };
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
 /** One function for the page's life: `read` depends on it, and a new one per render would read without end. */

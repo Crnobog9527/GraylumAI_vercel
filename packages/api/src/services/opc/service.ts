@@ -25,8 +25,9 @@ import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenIn
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
 import {positioningMentorInstructions} from './existingPositioning';
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
-export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+import { turnContentService } from './turnContent';
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentFromTurn, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoResultsFromTurn, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
@@ -441,19 +442,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_source_content_id: v.sourceContentId,
       });
     },
-    contentManualSave: (value: unknown) => {
-      const v = opcContentManualSave.parse(value);
-      return rpc("opc_content_manual_save", {
-        p_work_item_id: v.workItemId,
-        p_request_id: v.requestId,
-        p_expected_version: v.expectedVersion,
-        p_source_content_id: v.sourceContentId,
-        p_kind: v.kind,
-        p_status: v.status,
-        p_title: v.title,
-        p_body: v.body,
-      });
-    },
+    ...turnContentService(rpc),
     videoPackage: (value: unknown) => {
       const v = opcVideoPackage.parse(value);
       return rpc("opc_video_package_from_execution", {

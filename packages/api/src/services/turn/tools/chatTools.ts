@@ -35,7 +35,7 @@ import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
  */
 export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
-  skills?: (actorId: string, pin?: WorkSkill) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills }>;
+  skills?: (actorId: string, pin?: WorkSkill) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills; contentSource?: 'script' | 'storyboard' }>;
   /** The confirmed voice of the catalog's writing Skills: a per-user system paragraph, and the version turn_open freezes. */
   voice?: (actorId: string, catalog: SkillCatalogEntry[]) => Promise<{ text: string; versionId?: string } | undefined>;
   /** Offer read_source over the user's own library (library_turn_read through the read client) while the two library switches are
@@ -60,7 +60,7 @@ export type ChatToolsSetup = {
   /** Frozen into the turn: revoking this version stops the turn (voice tombstone). */
   voiceVersionId?: string;
   /** What the user chose for this message, as a line for the model, or the code that refuses it before anything opens. */
-  selection(chosen: ChatSelection): { note: string; skill?: WorkSkill } | { refused: string };
+  selection(chosen: ChatSelection): { note: string; skill?: WorkSkill; contentSource?: 'script' | 'storyboard' } | { refused: string };
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean; workspaceContext?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
@@ -146,7 +146,9 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
         if (!plan.available.includes('read_source')) return { refused: 'TURN_REFERENCES_UNAVAILABLE' };
         note += `\nThe user attached ${chosen.references.map((_item, index) => `doc-${index + 1}`).join(', ')}: read them with read_source before answering.`;
       }
-      return { note, ...(skill ? { skill } : {}) };
+      // Only the pinned Skill: the saved content a derived work method reads (workflow.yaml contentSource).
+      const contentSource = skill && skill.moduleId === input.pin?.moduleId ? skills?.contentSource : undefined;
+      return { note, ...(skill ? { skill } : {}), ...(contentSource ? { contentSource } : {}) };
     },
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
