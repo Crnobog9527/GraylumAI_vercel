@@ -26,7 +26,7 @@ import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '..
 import { trpc } from '@/trpc/client';
 import { opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
-import { parseAdoption, parseCandidate, topicAdoptionNotice } from './topic-candidate';
+import { lastReplyAdoptionNotice, parseAdoption, parseCandidate } from './topic-candidate';
 import { refuseTopic, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
@@ -420,7 +420,7 @@ function TopicWorkspaceContent() {
   const pendingOutgoing = outgoing && !executions?.some(e => e.executionId === outgoing.executionId) ? outgoing : null;
   // Everything about the latest turn sits directly under it, in the conversation.
   const lastReply = executions?.filter(e => e.state === 'completed').at(-1);
-  const stuckAdoption = topicAdoptionNotice(lastReply && { input: lastReply.input, body: lastReply.body ?? lastReply.primaryBody }, candidate?.body ?? null, adoptedItemIds);
+  const stuckAdoption = lastReplyAdoptionNotice(sessionId, lastReply, candidate?.body ?? null, adoptedItemIds);
   const tailNotices: ChatNotice[] = [
     ...(pending ? [{ id: 'pending', tone: 'warning' as const, label: '待确认的操作', actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void perform(pending) }],
       text: '上一项操作的结果尚未确认（完整原请求已冻结）。重试会核对原消息、保存或采纳，不新建身份。' }] : []),

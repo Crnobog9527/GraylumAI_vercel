@@ -23,8 +23,11 @@ describe('natural-language topic adoption consent', () => {
   it('refuses an instruction that is not in force yet', () => {
     for (const message of ['等我确认后，采用第一条', '采用第一条，等我确认后再保存', '如果可以，采用第一条', '明天再采用第一条', '采用第一条，之后再说'])
       expect(consentedTopicIds(message, ids)).toBeNull();
-    // A title is a quote: its words do not count.
+    // A title quoted after its own ordinal is a quote; the same words elsewhere are the user's.
     expect(consentedTopicIds('请采用第一条 如果等你有空 作为选题', ids, ['如果等你有空', 'b', 'c'])).toEqual(['one']);
+    expect(consentedTopicIds('不要采用第一条', ids, ['不要', 'b', 'c'])).toBeNull();
+    expect(consentedTopicIds('如果可以，采用第一条', ids, ['如果可以', 'b', 'c'])).toBeNull();
+    expect(consentedTopicIds('采用第二条 如果等你有空', ids, ['如果等你有空', 'b', 'c'])).toBeNull();
   });
   it('refuses questions, vague agreement, negation and out-of-range selection', () => {
     for (const message of ['不要采用第一条', '采用第一条吗？', '好，继续', '先看看第二条', '采用第四条', '别人说采用第一条',

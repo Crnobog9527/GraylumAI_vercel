@@ -3,9 +3,22 @@
 // A model reply can identify candidate IDs, but it cannot authorize a write.
 // Only an unambiguous instruction in the persisted user turn may do that. The instruction may sit in one clause of a longer message
 // and name the topic's title too; a message with a question, a negation or a condition anywhere consents to nothing.
+const numerals: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+function ordinal(value: string): number {
+  if (/^\d+$/.test(value)) return Number(value);
+  if (numerals[value]) return numerals[value];
+  const tens = value.match(/^([一二])?十([一二三四五六七八九])?$/);
+  return tens ? (tens[1] ? numerals[tens[1]] : 1) * 10 + (tens[2] ? numerals[tens[2]] : 0) : NaN;
+}
+
 export function consentedTopicIds(input: string | null, candidateIds: string[], titles: readonly string[] = []): string[] | null {
-  // The title is the user's quote, not their words: what it says neither asks nor refuses.
-  const message = titles.reduce((text, title) => title ? text.split(title).join('') : text, input?.trim() ?? '');
+  // A title quoted right after its own ordinal is the user's quote, not their words: what it says neither asks nor refuses. The same
+  // words anywhere else are the user's.
+  const message = titles.reduce((text, title, index) => {
+    if (!title) return text;
+    const quoted = new RegExp('(第\\s*([一二三四五六七八九十两\\d]+)\\s*条(?:选题|内容)?)\\s*[《“"「]?' + title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[》”"」]?', 'g');
+    return text.replace(quoted, (whole: string, head: string, number: string) => ordinal(number) === index + 1 ? head : whole);
+  }, input?.trim() ?? '');
   if (/[?？吗]|不要|不用|别|先不|暂不|是否/.test(message)) return null;
   // Not yet in force: a condition or a later time anywhere keeps it from being consent now.
   if (/等|后|待|稍|回头|如果|假如|要是|若|再|考虑|看看/.test(message)) return null;
@@ -18,13 +31,6 @@ export function consentedTopicIds(input: string | null, candidateIds: string[], 
   if (!match || candidateIds.length === 0) return null;
   const selection = match[1].trim();
   if (/^(?:全部|所有)(?:选题|内容)?$/.test(selection)) return [...candidateIds];
-  const numerals: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
-  function ordinal(value: string): number {
-    if (/^\d+$/.test(value)) return Number(value);
-    if (numerals[value]) return numerals[value];
-    const tens = value.match(/^([一二])?十([一二三四五六七八九])?$/);
-    return tens ? (tens[1] ? numerals[tens[1]] : 1) * 10 + (tens[2] ? numerals[tens[2]] : 0) : NaN;
-  }
   const token = /第\s*([一二三四五六七八九十两\d]+)\s*条(?:选题|内容)?/g;
   const parts = [...selection.matchAll(token)];
   if (!parts.length || !/^#(?:\s*(?:、|,|，|和|及|与|以及)\s*#)*$/.test(selection.replace(token, '#'))) return null;

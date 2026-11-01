@@ -14,16 +14,19 @@ describe('topic candidates and adoption in a reply', () => {
   });
   it('turns 60 and 61 on staging: a weekday, a display name and a capitalised platform are no candidate, and the page says so', () => {
     expect(parseCandidate(block([{ ...item, platform: 'TikTok', account: 'Prep Ahead（拟用名称）', day: '周四' }]))).toBeNull();
-    expect(topicAdoptionNotice({ input: '请采用第一条', body: adopt }, null, new Set())).toContain('没有采用');
+    expect(topicAdoptionNotice({ input: '请采用第一条', body: adopt }, null, new Set(), false)).toContain('没有采用');
   });
   it('says nothing unasked: no action, already adopted, or an adoption the page carries out', () => {
     const shown = [{ id, title: 'One hour' }];
-    expect(topicAdoptionNotice({ input: '好', body: 'plain' }, shown, new Set())).toBeNull();
-    expect(topicAdoptionNotice({ input: '采用第一条', body: adopt }, shown, new Set([id]))).toBeNull();
-    expect(topicAdoptionNotice({ input: '采用第一条', body: adopt }, shown, new Set())).toBeNull();
-    expect(topicAdoptionNotice(undefined, shown, new Set())).toBeNull();
+    expect(topicAdoptionNotice({ input: '好', body: 'plain' }, shown, new Set(), true)).toBeNull();
+    expect(topicAdoptionNotice({ input: '采用第一条', body: adopt }, shown, new Set([id]), true)).toBeNull();
+    expect(topicAdoptionNotice({ input: '采用第一条', body: adopt }, shown, new Set(), true)).toBeNull();
+    expect(topicAdoptionNotice(undefined, shown, new Set(), true)).toBeNull();
   });
   it('a reply that adopts without the user saying so is refused, out loud', () => {
-    expect(topicAdoptionNotice({ input: '好，继续', body: adopt }, [{ id, title: 'One hour' }], new Set())).toContain('没有采用');
+    expect(topicAdoptionNotice({ input: '好，继续', body: adopt }, [{ id, title: 'One hour' }], new Set(), true)).toContain('没有采用');
+  });
+  it('opened in another browser the page cannot act, so it says so even when the user did consent', () => {
+    expect(topicAdoptionNotice({ input: '采用第一条', body: adopt }, [{ id, title: 'One hour' }], new Set(), false)).toContain('没有采用');
   });
 });

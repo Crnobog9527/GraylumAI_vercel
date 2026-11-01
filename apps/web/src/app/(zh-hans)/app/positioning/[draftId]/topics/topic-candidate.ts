@@ -63,16 +63,34 @@ export function parseAdoption(text: string | null | undefined): string[] | null 
   return null;
 }
 
+/** Whether this browser kept the candidate the user saw when they sent this message, as the adoption needs. */
+export function adoptionContextHeld(sessionId: string, executionId: string, candidate: unknown): boolean {
+  try {
+    const frozen = JSON.parse(localStorage.getItem('opc-topic-adoption-context:' + sessionId + ':' + executionId) ?? 'null') as { body?: unknown } | null;
+    return Boolean(frozen) && JSON.stringify(frozen?.body) === JSON.stringify(candidate);
+  } catch { return false; }
+}
+
 /**
  * What the page says when the last reply carries an adoption the page did not carry out: the reply may read as done, and nothing else
  * would tell the user that nothing was adopted. Null when there is nothing to say (no such reply, or its items are adopted).
+ * canCarryOut: this browser holds the candidate the user saw when they sent it; the page acts only then.
  */
 export function topicAdoptionNotice(reply: { input: string | null; body: string | null } | undefined,
-  candidate: readonly { id: string; title: string }[] | null, adopted: ReadonlySet<string>): string | null {
+  candidate: readonly { id: string; title: string }[] | null, adopted: ReadonlySet<string>, canCarryOut: boolean): string | null {
   const ids = parseAdoption(reply?.body);
   if (!reply || !ids || ids.every(id => adopted.has(id))) return null;
   if (!candidate) return '这次没有采用：上一条选题的格式不完整，没能保存成候选。请让教练重新给出选题。';
   const consented = consentedTopicIds(reply.input, candidate.map(item => item.id), candidate.map(item => item.title));
-  if (consented?.length === ids.length && consented.every(id => ids.includes(id))) return null;
+  if (canCarryOut && consented?.length === ids.length && consented.every(id => ids.includes(id))) return null;
   return '这次没有采用：系统没能确认你要采用哪一条。请在选题卡片上点采用，或直接发送“采用第一条”。';
+}
+
+/** The notice for the latest completed reply of the page: this browser's saved candidate decides whether the page could act on it. */
+type Reply = { executionId: string; input: string | null; body: string | null; primaryBody: string | null };
+export function lastReplyAdoptionNotice(sessionId: string, reply: Reply | undefined,
+  candidate: readonly { id: string; title: string }[] | null, adopted: ReadonlySet<string>): string | null {
+  if (!reply) return null;
+  return topicAdoptionNotice({ input: reply.input, body: reply.body ?? reply.primaryBody }, candidate, adopted,
+    adoptionContextHeld(sessionId, reply.executionId, candidate));
 }
