@@ -114,11 +114,13 @@ class CIWorkflowsTest < Minitest::Test
     end
   end
   # Owner 2026-11-01: the suites the pull request CI excludes run every night, outside the required checks.
-  def test_nightly_excluded_suites_run_on_a_schedule_only_and_are_never_a_required_check
+  # GitHub fires schedule / workflow_dispatch only from the default branch (main), so the run is triggered by pushes to staging instead.
+  def test_excluded_suites_run_on_pushes_to_staging_only_and_are_never_a_required_check
     nightly = YAML.safe_load(File.read("#{ROOT}/workflows/nightly-db-suites.yml"))
     events = nightly['on'] || nightly[true]
-    assert_equal ['schedule'], events.keys
-    assert_equal 1, events.fetch('schedule').length
+    assert_equal ['push'], events.keys
+    assert_equal({'branches'=>['staging']}, events.fetch('push'))
+    assert_equal({'group'=>'excluded-db-suites','cancel-in-progress'=>true}, nightly.fetch('concurrency'))
     assert_equal({'contents'=>'read'}, nightly.fetch('permissions'))
     job = nightly.fetch('jobs').fetch('excluded-suites')
     required = GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']
