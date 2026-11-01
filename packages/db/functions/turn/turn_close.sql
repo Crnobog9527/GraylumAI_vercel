@@ -50,9 +50,7 @@ BEGIN
           ELSE public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
           coalesce((t.policy->>'closeRefundAll')::boolean, false), credits,
           t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), (t.policy->>'fixedCredits')::int, t.closed_at) END;
-        IF t.policy->>'holdId' IS NOT NULL THEN
-          PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
-        END IF;
+        PERFORM public.turn_settle_holds(p_actor_id, t, charge);
         t.charged_credits := charge; t.absorbed_credits := greatest(credits - charge, 0);
       END IF;
       UPDATE turns SET charged_credits = t.charged_credits, absorbed_credits = t.absorbed_credits,
@@ -82,6 +80,8 @@ BEGIN
       IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'organizerInput' THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
     ELSIF t.kind = 'report' THEN
       PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'plan' THEN
+      PERFORM public.turn_plan_apply(t, v_kind, p_kind_result);
     ELSE
       RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
     END IF;
@@ -124,12 +124,10 @@ BEGIN
       (t.policy->>'fixedCredits')::int, marker);
   END IF;
 
-  -- Credits: settled once; with an unknown model cost the whole freeze waits for recovery (one freeze is settled exactly once).
+  -- Credits: settled once, each freeze of the turn exactly once; with an unknown model cost they all wait for recovery.
   -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
   -- settlement of the same freeze returns the first one.
-  IF NOT user_pending AND t.policy->>'holdId' IS NOT NULL THEN
-    PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, charge, p_turn_id);
-  END IF;
+  IF NOT user_pending THEN PERFORM public.turn_settle_holds(p_actor_id, t, charge); END IF;
 
   -- What a paused turn kept for its resume ends with it (the 24-hour expiry closes here).
   IF t.state = 'paused' THEN DELETE FROM session_messages WHERE session_id = t.session_id AND turn_id = p_turn_id AND NOT visible; END IF;

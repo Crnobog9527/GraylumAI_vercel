@@ -14,7 +14,7 @@ AS $function$
 
 -- R9 erasure content
 
-DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
+DECLARE scope jsonb; turn_ids bigint[]; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
  refs uuid[]; rounds uuid[]; chats uuid[]; research_ids uuid[]; research_plan_ids uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
  remaining bigint:=0; deleted boolean; deleted_runs text[]; deleted_pre text[]; linked uuid[];
 BEGIN
@@ -60,6 +60,7 @@ BEGIN
  SELECT coalesce(array_agg(v::uuid),'{}') INTO projects FROM jsonb_array_elements_text(scope->'projects') v;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO versions FROM jsonb_array_elements_text(scope->'versions') v;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO contents FROM jsonb_array_elements_text(scope->'contents') v;
+ SELECT coalesce(array_agg(v::bigint),'{}') INTO turn_ids FROM jsonb_array_elements_text(scope->'turns') v;
  -- Existing UI writers lock their item/account before updating private settings.
  PERFORM work_item_id FROM opc_items WHERE work_item_id=ANY(projects) ORDER BY work_item_id FOR UPDATE NOWAIT;
  PERFORM project_id FROM opc_accounts WHERE project_id=ANY(projects) ORDER BY project_id FOR UPDATE NOWAIT;
@@ -95,6 +96,9 @@ BEGIN
  refs:=refs||ids||sessions||projects||versions||contents||rounds;
  -- CORE-PATH-V2 V2-7a2: a report turn's request id is its executionId in the edit and publish requests, which hold the edited text.
  refs:=refs||ARRAY(SELECT request_id FROM turns WHERE actor_id=a AND session_id=ANY(sessions) AND kind='report');
+ -- CORE-PATH-V2 V2-10b: a topic turn's request id is its executionId in the topic drafts and the adoption requests.
+ refs:=refs||ARRAY(SELECT t.request_id FROM turns t JOIN opc_topic_workspaces w ON w.session_id=t.session_id AND w.actor_id=a
+  WHERE t.actor_id=a AND t.session_id=ANY(sessions) AND t.kind='chat');
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
  PERFORM id FROM bill2_runs WHERE id IN (SELECT billing_run_id FROM runtime_executions WHERE id=ANY(ids))
   ORDER BY id FOR UPDATE NOWAIT;
@@ -231,6 +235,14 @@ BEGIN
  DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions) AND r.turn_id=t.id;
  UPDATE session_messages SET content='',content_hash=encode(sha256(''::bytea),'hex'),visible=false,deleted_at=coalesce(deleted_at,stamp)
   WHERE session_id=ANY(sessions) AND (content<>'' OR visible);
+ -- The turns behind deleted content (content_erasure_scope), in conversations that stay. One still running would write its receipt and
+ -- reply after this cleanup, and the conversation has no tombstone to stop it: the delete waits for it (retryable).
+ IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND t.state<>'closed' AND NOT t.session_id=ANY(sessions)) THEN
+  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
+ END IF;
+ DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND r.turn_id=t.id;
+ UPDATE session_messages m SET content='',content_hash=encode(sha256(''::bytea),'hex'),visible=false,deleted_at=coalesce(m.deleted_at,stamp)
+  FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND m.session_id=t.session_id AND m.turn_id=t.id AND (m.content<>'' OR m.visible);
  UPDATE opc_content_versions SET body=NULL,title=NULL,erased_at=stamp WHERE id=ANY(contents) AND erased_at IS NULL;
  -- System capture fields and suggestions carry exact execution provenance. Preserve
  -- unrelated manual fields and independently saved published bodies.
@@ -252,11 +264,13 @@ BEGIN
  UPDATE opc_handoffs SET payload=NULL,result=NULL,erased_at=stamp WHERE actor_id=a AND erased_at IS NULL
   AND (content_erasure_references(payload,refs) OR content_erasure_references(result,refs));
  UPDATE opc_topic_draft_versions SET request=NULL,body=NULL,erased_at=stamp WHERE actor_id=a AND erased_at IS NULL
-  AND (source_version_id=ANY(versions) OR request_id=ANY(ids)
+  AND (source_version_id=ANY(versions) OR request_id=ANY(refs)
    OR content_erasure_references(request,refs) OR content_erasure_references(body,refs)
    OR request_id IN (SELECT event.request_id FROM opc_data_events event WHERE event.actor_id=a
-    AND event.action='topic_draft' AND event.execution_id=ANY(ids)));
+    AND event.action='topic_draft' AND (event.execution_id=ANY(ids)
+     OR event.turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions)))));
  DELETE FROM opc_data_events WHERE actor_id=a AND (execution_id=ANY(ids) OR project_id=ANY(projects)
+  OR turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions))
   OR target_project_id=ANY(projects) OR source_version_id=ANY(versions));
  -- Frozen source bodies and request caches are system copies, not independent saved content.
  UPDATE opc_turns t SET input_hash=NULL,erased_at=stamp WHERE t.erased_at IS NULL AND

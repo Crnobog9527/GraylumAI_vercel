@@ -65,7 +65,12 @@ const reportTurn = z.object({ turnId: z.number().int().positive(), requestId: z.
   report: z.record(z.string(), z.unknown()).nullable(), body: z.string().nullable(), openedAt: z.string(), closedAt: z.string().nullable() });
 export type ReportTurn = z.infer<typeof reportTurn>;
 const workCheck = z.object({ work: z.object({ moduleId: z.string().uuid(), skillId: z.string().uuid(), revisionId: z.string().uuid(),
-  brief: z.string().nullable(), material: z.string().nullable() }).nullable() });
+  brief: z.string().nullable(), material: z.string().nullable(), videoPackage: z.boolean(), materialRevision: z.number().int().nullable(),
+  materialHash: z.string().nullable() }).nullable() });
+const workSource = z.discriminatedUnion('status', [z.object({ status: z.literal('none') }),
+  z.object({ status: z.literal('refused'), code: z.string() }),
+  z.object({ status: z.literal('ready'), contentId: z.string().uuid(), kind: z.enum(['script', 'storyboard']), version: z.number().int().positive(),
+    body: z.string(), bytes: z.number() })]);
 export type WorkItemTurn = NonNullable<z.infer<typeof workCheck>['work']>;
 
 export type CallKind = 'model' | 'tool' | 'decision';
@@ -77,7 +82,7 @@ export class TurnDatabaseError extends Error {
   constructor(readonly code: string) { super(code); }
 }
 // A kind's own refusals (a report's REPORT_*, an archived business, V2-7a) keep their codes too.
-const KNOWN = /\b(TURN_[A-Z_]+|REPORT_[A-Z_]+|STOP_LOSS_REACHED|OPC_BUSINESS_ARCHIVED|OPC_VIDEO_TYPE_REQUIRED)\b/;
+const KNOWN = /\b(TURN_[A-Z_]+|REPORT_[A-Z_]+|STOP_LOSS_REACHED|OPC_BUSINESS_ARCHIVED|OPC_VIDEO_TYPE_REQUIRED|OPC_CONTENT_BINDING)\b/;
 /** The freeze (atomic_pre_deduct) refuses an account whose credit sources it cannot tell apart (PRE_DEDUCT_*): nothing was frozen or
  * charged, and the page says so instead of "database unavailable". The database's own text never reaches the page. */
 export const CREDIT_ACCOUNT_REVIEW = 'TURN_CREDIT_ACCOUNT_REVIEW';
@@ -97,11 +102,17 @@ export function turnDatabase(clients: TurnClients) {
     open: (a: { actorId: string; sessionId: string; requestId: string; kind: string; policy: Record<string, unknown>; resumeOf?: number }) =>
       call(w, 'turn_open', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_request_id: a.requestId, p_kind: a.kind,
         p_policy: a.policy, p_resume_of: a.resumeOf ?? null }, opened),
-    begin: (a: { actorId: string; turnId: number; seq: number; callKind: CallKind; modelId: string | null; toolName: string | null;
-      paid: boolean | null; requestHash: string; upperUsd: string; multiplier: string }) =>
-      call(w, 'turn_call_begin', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_call_kind: a.callKind,
+    begin: async (a: { actorId: string; turnId: number; seq: number; callKind: CallKind; modelId: string | null; toolName: string | null;
+      paid: boolean | null; requestHash: string; upperUsd: string; multiplier: string }) => {
+      const once = () => call(w, 'turn_call_begin', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_call_kind: a.callKind,
         p_model_id: a.modelId, p_tool_name: a.toolName, p_paid: a.paid, p_request_hash: a.requestHash, p_upper_usd: a.upperUsd,
-        p_multiplier: a.multiplier }, begun),
+        p_multiplier: a.multiplier }, begun);
+      // A call raced this one after its look at the freeze: nothing was written; the next attempt takes the account first.
+      for (let attempt = 1; ; attempt++) {
+        try { return await once(); }
+        catch (error) { if (attempt >= 3 || !(error instanceof TurnDatabaseError) || error.code !== 'TURN_HOLD_RETRY') throw error; }
+      }
+    },
     identity: (a: { actorId: string; turnId: number; seq: number; providerId: string }) =>
       call(w, 'turn_call_identity', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_provider_id: a.providerId },
         z.object({ status: z.string() })),
@@ -137,8 +148,13 @@ export function turnDatabase(clients: TurnClients) {
     // A report's reads before it opens (controller 10-30, B1), on the read client and by the actor's own keys: the confirmed
     // source of its round, the session's benchmark table, and the benchmark shortfall card (only when the table is short).
     /** A work_item conversation, read before a turn opens; refuses an archived business and a script request on a non-video item. */
-    workCheck: (a: { actorId: string; sessionId: string; videoRequired: boolean }) =>
-      call(clients.read, 'opc_work_check', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_video_required: a.videoRequired }, workCheck),
+    workCheck: (a: { actorId: string; sessionId: string; videoRequired: boolean; requestId: string }) =>
+      call(clients.read, 'opc_work_check', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_video_required: a.videoRequired,
+        p_request_id: a.requestId }, workCheck),
+    workVerify: (a: { actorId: string; turnId: number }) =>
+      call(clients.read, 'opc_work_verify', { p_actor_id: a.actorId, p_turn_id: a.turnId }, z.boolean()),
+    workSource: (a: { actorId: string; sessionId: string; kind: 'script' | 'storyboard' }) =>
+      call(clients.read, 'opc_work_source', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_kind: a.kind }, workSource),
     // The report membership check of the old admission (payment facts, refunds, the subscription's period end; never only the
     // cached level): on the write client, as it takes the account's own row lock to serialize with paid fulfilment.
     reportMembership: (a: { actorId: string }) =>

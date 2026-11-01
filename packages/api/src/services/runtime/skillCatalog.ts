@@ -42,6 +42,15 @@ export async function entryInstructions(source: SkillSource, entry: Pick<SkillCa
   return (await activateFreeChatSkill(source, descriptor, { maxContextBytes: maxBytes, withResources: false })).instructions;
 }
 
+/** The saved content a package's Skill derives from (workflow.yaml contentSource; V2-10b C2): the immutable package is the authority. */
+export async function entryContentSource(source: SkillSource, entry: Pick<SkillCatalogEntry, 'packageId' | 'revisionId' | 'packageHash'>,
+  maxBytes: number) {
+  const descriptor = (await source.list()).find(d => d.revisionId === entry.revisionId && d.packageHash === entry.packageHash
+    && d.packageId === entry.packageId);
+  if (!descriptor) throw new Error('RUNTIME_SKILL_LOAD_DENIED');
+  return (await activateFreeChatSkill(source, descriptor, { maxContextBytes: maxBytes, withResources: false })).contentSource;
+}
+
 /**
  * Bytes one load adds to the request: the tool returns the result as a JSON string, which the SDK then serializes again
  * into the next request, so quotes, backslashes and control characters are escaped twice (as skillFile.ts measures too).

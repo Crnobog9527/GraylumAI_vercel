@@ -26,11 +26,13 @@ export function ConfirmedItems({ title, items }: { title: string; items: string[
  * Keyword selection card (plan §1.2 step 1): keep, edit or add keywords, then confirm once. No benchmark search
  * runs before this confirmation. After it the card is a read-only echo of the confirmed keywords.
  */
-export function KeywordCardView({ card, confirmation: saved, disabled = false, onConfirm }: {
+export function KeywordCardView({ card, confirmation: saved, disabled = false, busy = false, onConfirm }: {
   card: KeywordCard;
   /** The host's stored confirmation, when the card was already confirmed. */
   confirmation?: CardConfirmation | null;
   disabled?: boolean;
+  /** The conversation is still answering: says why nothing can be edited yet. */
+  busy?: boolean;
   onConfirm: (submission: KeywordSubmission) => Promise<CardConfirmation>;
 }) {
   const [draft, setDraft] = useState<KeywordDraft>(() => initialKeywordDraft(card));
@@ -57,6 +59,7 @@ export function KeywordCardView({ card, confirmation: saved, disabled = false, o
       <p className={styles.head}>关键词选择</p>
       <p className={styles.title}>用哪些关键词找对标账号？</p>
       <p className={styles.hint}>勾选要用的关键词，可以直接改字，也可以补充。确认后才会开始搜索。</p>
+      {busy && !pending && <p className={styles.hint} role="status">AI 还在整理这一轮的回复，回复完成后就可以修改。</p>}
       <div role="group" aria-label="关键词" className={styles.list}>
         {card.options.map(option => {
           const checked = draft.selected.includes(option.id);

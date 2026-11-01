@@ -22,7 +22,25 @@ export function withResearchRow(rows: readonly WorkItem[], call: ResearchCall): 
   const row = workItemFromResearchCall(call);
   return rows.some(old => old.id === row.id) ? rows.map(old => old.id === row.id ? row : old) : [...rows, row];
 }
-export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }> };
+/** Whether a view shows a turn closed that the page has not yet acted on (`seen`: the last one it did; undefined before the first read). */
+export const closedTurnSeen = (seen: number | null | undefined, view: Pick<TurnView, 'lastTurn'> | null):
+  { changed: boolean; id: number | null | undefined } => {
+  const id = view ? view.lastTurn?.turnId ?? null : undefined;
+  return { changed: id !== undefined && id !== seen, id };
+};
+export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }>;
+  /** A work item's conversation (V2-10b): the server reads its checks, method and brief. */ workItem?: boolean };
+/**
+ * A refusal before the stream, or an error event without a turn whose code is a definite refusal: no turn was opened, so nothing was
+ * stored or charged. The codes of a failed database call are not: turn_open may have committed and its answer been lost (the turn and its
+ * freeze exist, and the error carries no turn), so those stay unknown until the view says otherwise.
+ */
+const OPEN_UNKNOWN = new Set(['TURN_DATABASE_UNAVAILABLE', 'TURN_OPEN_FAILED', 'TURN_FAILED']);
+export function neverOpened(outcome: { state: 'refused' } | { state: 'finished'; last: { type: string; turnId?: number; code?: string } }): boolean {
+  if (outcome.state === 'refused') return true;
+  const { last } = outcome;
+  return last.type === 'error' && last.turnId === undefined && !OPEN_UNKNOWN.has(last.code ?? '');
+}
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
 /** One function for the page's life: `read` depends on it, and a new one per render would read without end. */
@@ -53,6 +71,16 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     const timer = setInterval(() => void read(), READ_MS);
     return () => clearInterval(timer);
   }, [unread, read]);
+  // However a turn's close is learned (the stream, a poll, the first read after a reload), the balance is read again: a page opened
+  // while the turn ran asked for it while the turn's freeze was held, and nothing else would ask again.
+  const lastClosed = useRef<number | null | undefined>(undefined);
+  const closedNow = closedTurnSeen(lastClosed.current, view);
+  useEffect(() => {
+    const now = closedTurnSeen(lastClosed.current, view);
+    if (!now.changed) return;
+    lastClosed.current = now.id;
+    settled.current();
+  }, [view, closedNow.id]);
   // A pause waits for the user; nothing moves it, so it is not read again.
   const active = Boolean(view?.activeTurn) && view?.activeTurn?.pauseReason !== 'waiting_credits' && !sending;
   useEffect(() => {
@@ -85,7 +113,9 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     if (!code || code === 'TURN_REQUEST_REPLAYED') return 'done';
     const { text: said, kept } = turnCodeNotice(code);
     setNotice({ code, text: said });
-    return kept ? 'kept' : 'unknown';
+    // An error event carries its turn only once one is open: without it (or refused before the stream) nothing was stored or charged,
+    // whatever the code says, so the words and any claim made for them are given back instead of waiting to be verified.
+    return kept || neverOpened(outcome) ? 'kept' : 'unknown';
   }, [sessionId, fetcher, read]);
   const send = useCallback((text: string, requestId: string, chosen: TurnChoice = {}) =>
     run({ kind: 'chat', requestId, text, ...chosen }), [run]);

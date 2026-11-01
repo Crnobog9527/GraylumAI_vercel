@@ -26,9 +26,7 @@ BEGIN
       reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
     WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
   marker := clock_timestamp();
-  IF t.policy->>'holdId' IS NOT NULL THEN
-    PERFORM public.turn_settle_credits(p_actor_id, (t.policy->>'holdId')::uuid, 0, p_turn_id);
-  END IF;
+  PERFORM public.turn_settle_holds(p_actor_id, t, 0);
   -- What it carries is not borne by the platform: only what the chain finally does not charge is recorded as absorbed.
   UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = 'failed', closed_at = marker, updated_at = marker,
       charged_credits = 0, absorbed_credits = greatest(credits - p_carried, 0),

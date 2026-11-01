@@ -434,10 +434,13 @@ it('RUNTIME: CORE-PATH-V2 V2-10: paused after the model asked for a search and b
   const f = await setup(), bodies: string[] = [];
   const parallel = vi.fn(async () => searchResult());
   const asking = searchingModel(bodies);
-  // The freeze runs out while the first reply comes back: the search's turn_call_begin finds nothing left and pauses the turn there.
+  // The balance runs out while the first reply comes back: the search's turn_call_begin finds nothing left and pauses the turn there.
   const first: typeof fetch = async (url, init) => {
     const response = await asking(url, init);
-    if (bodies.length === 1) await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+    if (bodies.length === 1) {
+      await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+      await db.query('update profiles set credits=0 where id=$1', [f.actor]); // nothing left to top up from (Owner 11-01)
+    }
     return response;
   };
   const out = await turn(f, first, suppliers(parallel));

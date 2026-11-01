@@ -15,6 +15,8 @@ vi.mock('./compare', () => ({ runCompareTurn: compare }));
 vi.mock('./jury', async original => ({ ...await original<object>(), juryTurn: () => ({ start: juryStart }) }));
 vi.mock('../fusion/compareLoad', async original => ({ ...await original<object>(), loadCompareTurnParts: loadParts }));
 vi.mock('./report', async original => ({ ...await original<object>(), runReportTurn: report }));
+const plan = vi.hoisted(() => vi.fn());
+vi.mock('./plan', async original => ({ ...await original<object>(), runPlanTurn: plan }));
 
 const SESSION = '00000000-0000-4000-8000-000000000001', REQUEST = '00000000-0000-4000-8000-000000000002';
 const DRAFT = '00000000-0000-4000-8000-000000000003', VERSION = '00000000-0000-4000-8000-000000000004';
@@ -85,6 +87,15 @@ describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
     await reader.cancel();
     finish();
     await vi.waitFor(() => expect(closed).toBe(true));
+  });
+
+  it('a plan (V2-10b) gets its own input; another field is refused', async () => {
+    plan.mockReset(); plan.mockImplementation(async (_deps, _input, emit) => emit({ type: 'error', code: 'TURN_PLAN_DENIED' }));
+    const body = { ...valid, kind: 'plan', moduleId: valid.sessionId, stepId: 's', text: 'one week' };
+    expect((await handleTurnRequest(post({ ...body, extra: 1 }), deps())).status).toBe(400);
+    const res = await handleTurnRequest(post(body), deps());
+    expect(await res.text()).toContain('TURN_PLAN_DENIED');
+    expect(plan.mock.calls[0]![1]).toMatchObject({ sessionId: valid.sessionId, requestId: valid.requestId, moduleId: valid.sessionId, stepId: 's', text: 'one week' });
   });
 
   it('a report (V2-7a) gets its own input and hears when the page drops the stream; a chat never does', async () => {

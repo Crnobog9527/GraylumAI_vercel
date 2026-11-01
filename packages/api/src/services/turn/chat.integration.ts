@@ -281,7 +281,7 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: the balance is held against the start threshold
   const policy = (await db.query('select policy from turns where actor_id=$1', [f.actor])).rows[0].policy;
   expect(policy.minCredits).toBe(24);
   expect(policy.gCredits).toBeLessThan(24);
-  expect(out.events[0]).toMatchObject({ reservedCredits: policy.gCredits });
+  expect(out.events[0]).toMatchObject({ reservedCredits: policy.holdCredits });
   const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   expect(result.settlement).toBe('done');
   expect(result.chargedCredits).toBeLessThanOrEqual(policy.gCredits);
@@ -319,7 +319,7 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: the one-switch pause and the call limits refuse
 
 // A work item as opc_handoff leaves it: a published Skill, the positioning version it came from, its account and item, and its
 // conversation with the brief frozen by runtime_material. The item is an article.
-async function workItem(actor: string) {
+async function workItem(actor: string, contentType = 'article') {
   const skillId = randomUUID(), moduleId = randomUUID(), revisionId = randomUUID(), source = randomUUID(), round = randomUUID(), version = randomUUID();
   const account = randomUUID(), item = randomUUID(), key = randomUUID(), plan = randomUUID(), business = randomUUID(), session = randomUUID();
   const hash = 'b'.repeat(64), entry = 'a'.repeat(64);
@@ -351,14 +351,14 @@ async function workItem(actor: string) {
   await db.query("insert into opc_accounts(project_id,actor_id,platform,account_key,source_version_id,business_id) values($1,$2,'fixture',$3,$4,$5)",
     [account, actor, 'work-' + account, version, business]);
   await db.query('insert into opc_plans(id,draft_id,version,source_version_id,request_id,request,body) values($1,$2,1,$3,$4,$5,$6)',
-    [plan, draft, version, randomUUID(), JSON.stringify({ sourceVersionId: version }), JSON.stringify([{ id: key, contentType: 'article' }])]);
+    [plan, draft, version, randomUUID(), JSON.stringify({ sourceVersionId: version }), JSON.stringify([{ id: key, contentType }])]);
   await db.query("insert into opc_items(work_item_id,plan_id,item_key,account_project_id,source_version_id,brief,day) values($1,$2,$3,$4,$5,'brief',current_date)",
     [item, plan, key, account, version]);
   await db.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
     [session, actor, JSON.stringify({ kind: 'work_item', projectId: account, workItemId: item }), randomUUID()]);
   await db.query("insert into runtime_scope_material(session_id,revision,request_id,request,content,content_hash) values($1,1,$2,'{}',$3,repeat('f',64))",
     [session, randomUUID(), JSON.stringify({ brief: 'WORK_BRIEF', material: 'WORK_MATERIAL', work: {} })]);
-  return { session, business, skill: { moduleId, skillId, revisionId } };
+  return { session, business, item, skill: { moduleId, skillId, revisionId } };
 }
 
 it('RUNTIME: CORE-PATH-V2 V2-10b: a work turn reads its checks, brief and bound Skill before opening, and its result saves by the turn', async () => {
@@ -401,4 +401,44 @@ it('RUNTIME: CORE-PATH-V2 V2-10b: a work turn reads its checks, brief and bound 
   expect(await send('Again')).toEqual([{ type: 'error', code: 'OPC_BUSINESS_ARCHIVED' }]);
   expect(bodies).toHaveLength(1);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(balance);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-10b C2: a package needs its claim and freezes its material; a derived Skill reads and freezes its saved source', async () => {
+  const f = await setup(), w = await workItem(f.actor, 'video');
+  const entry = { name: 'Work method', description: 'The method', ...w.skill, packageId: w.skill.skillId, packageHash: 'b'.repeat(64), resultBytes: 10 };
+  const bodies: string[] = [];
+  const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); return sse('gen-c2-' + bodies.length, ['{"storyboard":"S"}']); };
+  const { admin } = countingAdmin();
+  const send = async (text: string, requestId: string, contentSource?: 'script') => {
+    const events: TurnEvent[] = [];
+    await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate },
+      newWork: { message: admit, calls: admit },
+      tools: { skills: async () => ({ catalog: [entry], prepared: new Map([[entry.name, 'method text']]), ...(contentSource ? { contentSource } : {}) }) } },
+    { actorId: f.actor, sessionId: w.session, requestId, text, workItem: true, chosen: { moduleId: w.skill.moduleId } }, e => { events.push(e); }));
+    return events;
+  };
+  const policyOf = async (requestId: string) => (await db.query('select policy from turns where actor_id=$1 and request_id=$2', [f.actor, requestId])).rows[0].policy;
+  expect(await send('[OPC_VIDEO_PACKAGE_V1] storyboard', randomUUID())).toEqual([{ type: 'error', code: 'OPC_CONTENT_BINDING' }]);
+  expect(bodies).toHaveLength(0);
+  expect(await send('Derive', randomUUID(), 'script')).toEqual([{ type: 'error', code: 'RUNTIME_CONTENT_SOURCE_MISSING' }]);
+  const script = randomUUID(), request = randomUUID();
+  await db.query("insert into opc_content_versions(id,actor_id,work_item_id,kind,version,status,body,request_id) values($1,$2,$3,'script',1,'final','SAVED_SCRIPT',$4)",
+    [script, f.actor, w.item, randomUUID()]);
+  // A derived Skill: the database's version goes to the model, is frozen, and is not saved with the message.
+  const derived = randomUUID();
+  expect((await send('Derive', derived, 'script')).at(-1)).toMatchObject({ type: 'result' });
+  expect(bodies.at(-1)).toContain('SAVED_SCRIPT');
+  expect((await policyOf(derived)).workSource).toEqual({ contentId: script, kind: 'script' });
+  expect(JSON.stringify((await db.query('select content from session_messages where session_id=$1', [w.session])).rows)).not.toContain('SAVED_SCRIPT');
+  // The claim: its revision is what the package reads and freezes.
+  const claimed = await admin.rpc('opc_video_material_prepare', { p_actor_id: f.actor, p_work_item_id: w.item, p_request_id: request, p_source_script_id: script,
+    p_storyboard: true, p_editing: false, p_expected_storyboard_version: 0, p_expected_editing_version: 0 });
+  expect(claimed.error).toBeNull();
+  // A claim that has not opened holds nobody back: a turn reads the material and uses none of it up.
+  expect((await send('Other', randomUUID())).at(-1)).toMatchObject({ type: 'result' });
+  expect((await send('[OPC_VIDEO_PACKAGE_V1] storyboard', request)).at(-1)).toMatchObject({ type: 'result' });
+  expect(bodies.at(-1)).toContain('已定稿口播稿：SAVED_SCRIPT');
+  const frozen = (await policyOf(request)).workMaterial, revision = (claimed.data as { revision: number }).revision;
+  expect(frozen.revision).toBe(revision);
+  expect(frozen.hash).toBe((claimed.data as { hash: string }).hash);
 });

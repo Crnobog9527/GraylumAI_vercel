@@ -9,8 +9,16 @@ CREATE OR REPLACE FUNCTION public.turn_call_begin(p_actor_id uuid, p_turn_id big
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE t turns; c turn_calls; q numeric; used integer; need integer; n_model integer; n_paid integer; n_free integer;
-  n_decision integer;
+  n_decision integer; bound integer; held boolean := false; step integer; hold uuid; spent numeric; usd_step numeric; total numeric;
 BEGIN
+  -- A turn that tops up (holdCredits): looked at first without any lock. Only a call the freeze does not cover takes the account,
+  -- so in turn_close's order (profile, session, turn); every other call never touches the profile.
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  IF t.policy ? 'holdCredits' AND t.state = 'running' AND p_call_kind <> 'decision' AND public.turn_hold_short(t, p_upper_usd, p_multiplier) THEN
+    PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+    PERFORM 1 FROM runtime_sessions WHERE id = t.session_id FOR UPDATE;
+    held := true;
+  END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO c FROM turn_calls WHERE turn_id = p_turn_id AND seq = p_seq;
@@ -64,9 +72,48 @@ BEGIN
   -- A jury adoption is free to the user (10-20): nothing is frozen and nothing needs to be.
   need := CASE WHEN p_call_kind = 'decision' OR t.kind = 'jury_adopt' THEN 0
     ELSE least(ceil(q * p_upper_usd * p_multiplier), coalesce((t.policy->>'minCredits')::numeric, ceil(q * p_upper_usd * p_multiplier))) END;
+  -- The freeze does not cover this call's bound G_i: freeze more, only what the balance holds and never beyond G_turn. One top-up per
+  -- call, named by its turn and seq; a repeated begin returned above. Only what is still short after it pauses, as before.
+  IF t.policy ? 'holdCredits' AND p_call_kind <> 'decision' THEN
+    bound := ceil(q * p_upper_usd * p_multiplier);
+    IF t.reserved_credits - used < bound THEN
+      -- A call between the look above and this lock used the freeze: the caller asks again, with the account taken first.
+      IF NOT held THEN RAISE EXCEPTION 'TURN_HOLD_RETRY' USING ERRCODE='40001'; END IF;
+      step := least(greatest(bound - (t.reserved_credits - used), (t.policy->>'holdCredits')::int),
+        greatest((t.policy->>'gCredits')::int - t.reserved_credits, 0), greatest(public.credit_available(p_actor_id), 0));
+      IF step > 0 THEN
+        SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, step, 'AI turn freeze top-up',
+          md5('turn-top-up:'||p_actor_id||':'||p_turn_id||':'||p_seq)::uuid);
+        UPDATE turns SET reserved_credits = reserved_credits + step,
+            policy = jsonb_set(policy, '{topUps}', coalesce(policy->'topUps', '[]'::jsonb) || jsonb_build_object('holdId', hold, 'credits', step))
+          WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
+      END IF;
+    END IF;
+  END IF;
   IF t.reserved_credits - used < need THEN
     UPDATE turns SET state = 'paused', pause_reason = 'waiting_credits', updated_at = now() WHERE actor_id = p_actor_id AND id = p_turn_id;
     RETURN jsonb_build_object('state', 'paused', 'paused', true) || turn_tombstones(p_actor_id, t.session_id, t.policy);
+  END IF;
+  -- The stop-loss the same way (2.5.1, Owner 11-01): every call's bound is reserved before it is sent. Last before the insert: the
+  -- bucket row is held shortest, turn then bucket as turn_close. Own bucket first, then the day's sum, then the check of turn_open;
+  -- the refusal rolls this begin back (no call row, no freeze). The row of the turn's open day, as its close releases.
+  IF t.policy ? 'holdUsd' AND p_upper_usd > 0 THEN
+    SELECT coalesce(sum(CASE WHEN status = 'ok' THEN turn_call_spent_usd(call_kind, nominal_usd, actual_usd)
+                             WHEN status = 'unusable' THEN coalesce(actual_usd, 0)
+                             WHEN status IN ('dispatched','identified','unknown') THEN upper_usd ELSE 0 END), 0) INTO spent
+    FROM turn_calls WHERE turn_id = p_turn_id;
+    IF t.reserved_usd - spent < p_upper_usd THEN
+      usd_step := greatest(p_upper_usd - (t.reserved_usd - spent),
+        least((t.policy->>'holdUsd')::numeric, greatest((t.policy->>'uTurnUsd')::numeric - t.reserved_usd, 0)));
+      UPDATE daily_spend SET reserved_usd = reserved_usd + usd_step
+        WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+      SELECT sum(reserved_usd + spent_usd) INTO total FROM daily_spend WHERE day = (t.policy->>'day')::date;
+      IF total + ((t.policy->'stopLoss'->>'p')::numeric - 1) * (t.policy->'stopLoss'->>'uFastUsd')::numeric
+          + (t.policy->'stopLoss'->>'uBigUsd')::numeric > (t.policy->'stopLoss'->>'limitUsd')::numeric THEN
+        RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
+      END IF;
+      UPDATE turns SET reserved_usd = reserved_usd + usd_step WHERE actor_id = p_actor_id AND id = p_turn_id;
+    END IF;
   END IF;
   INSERT INTO turn_calls (actor_id, turn_id, seq, call_kind, model_id, tool_name, request_hash, upper_usd, multiplier)
     VALUES (p_actor_id, p_turn_id, p_seq, p_call_kind, p_model_id, p_tool_name, p_request_hash, p_upper_usd, p_multiplier);

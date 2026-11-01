@@ -21,6 +21,13 @@ describe('GET /api/turn: the refresh-recovery read (V2-5b, #595)', () => {
     expect(rpc).toHaveBeenCalledWith('turn_session_view', { p_actor_id: 'actor-1', p_session_id: SESSION, p_after_seq: 4 });
   });
 
+  it('keeps the request id of each message: the topic page\'s handle of a reply (V2-10b)', async () => {
+    const requestId = '00000000-0000-4000-8000-000000000002';
+    const message = { seq: 1, role: 'assistant', turnId: 7, content: 'text', requestId };
+    const res = await handleTurnView(get('?sessionId=' + SESSION), deps(async () => ({ data: { ...view, messages: [message] }, error: null })));
+    expect((await res.json()).messages).toEqual([message]);
+  });
+
   it('refuses a bad request, the wrong database, no account; a denial and an outage are fixed codes', async () => {
     const status = async (query: string, d: TurnViewDeps) => { const r = await handleTurnView(get(query), d); return [r.status, (await r.json()).error]; };
     expect(await status('?sessionId=nope', deps())).toEqual([400, 'TURN_REQUEST_INVALID']);

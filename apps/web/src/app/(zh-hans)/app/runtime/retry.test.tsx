@@ -9,11 +9,12 @@ vi.mock('@/components/opc/content-editor',()=>({ContentEditor:()=>null}));
 vi.mock('@/components/opc/query-notice',()=>({QueryNotice:({retry}:{retry:()=>Promise<unknown>})=>{state.retry=retry;return null;}}));
 vi.mock('@/trpc/client',()=>{
  const namespace=(group:string)=>new Proxy({}, {get:(_,name)=>({
-  useQuery:()=>({data:group==='runtime'&&name==='view'&&state.session?{scope:{kind:state.kind},executions:[]}:undefined,error:group==='runtime'&&name==='choices'?{message:'temporary outage'}:null,refetch:async()=>{state.calls.push(group+'.'+String(name));}}),
+  useQuery:()=>({isSuccess:group==='runtime'&&name==='choices',data:group==='runtime'&&name==='view'&&state.session?{scope:{kind:state.kind},executions:[]}:undefined,error:group==='runtime'&&name==='choices'?{message:'temporary outage'}:null,refetch:async()=>{state.calls.push(group+'.'+String(name));}}),
   useMutation:()=>({isPending:false,mutateAsync:vi.fn()}),
  })});
  return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),fusionCompare:namespace('fusionCompare'),useUtils:()=>({})}};
 });
+vi.mock('./use-has-turn-messages',()=>({useHasTurnMessages:()=>({loaded:true,has:false})}));
 import RuntimePage from './page';
 beforeEach(()=>{state.session='';state.kind='';state.calls=[];state.retry=undefined;});
 it.each([

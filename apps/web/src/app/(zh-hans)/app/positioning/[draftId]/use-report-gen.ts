@@ -76,7 +76,9 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const [streaming, setStreaming] = useState(false);
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const status = trpc.runtime.reportStatus.useQuery({ executionId: executionId ?? "" }, {
-    enabled: Boolean(executionId) && !turn.status,
+    // A turn-path report is read on the turn routes only: the old status read would answer a request id it does not know
+    // (REPORT_UNAVAILABLE), and it waits for the turn read to say there is no turn report before it is asked about one.
+    enabled: Boolean(executionId) && !turn.status && turn.known && streamPath.current !== "turn",
     refetchInterval: query => !streaming && reportProgressing(query.state.data) ? POLL_MS : false,
   });
   const shown = turn.status ?? (status.data && status.data.executionId === executionId ? status.data : null);
@@ -161,7 +163,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const offer = generationOffer({ canGenerate, working, server, executionId, status: shown });
   const run = async (kind: "start" | "restart") => {
     // No price on the button, no paid start: the request must carry the price the user was shown.
-    if (working || offer !== kind || typeof price !== "number") return;
+    // The path is the switch's: a paid start before it has answered would go to the old path.
+    if (working || offer !== kind || typeof price !== "number" || !(choices.isSuccess || choices.isError)) return;
     setRefusal(null);
     // A start or 重新生成 whose answer never came resends the same request until the server answers.
     const requestId = nextRequestId(record, () => crypto.randomUUID());

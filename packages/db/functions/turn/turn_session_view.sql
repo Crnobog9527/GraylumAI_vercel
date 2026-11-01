@@ -31,7 +31,13 @@ BEGIN
       'pauseReason', a.pause_reason, 'openedAt', a.opened_at, 'updatedAt', a.updated_at) END,
     'lastTurn', CASE WHEN l.id IS NULL THEN NULL ELSE jsonb_build_object('turnId', l.id, 'kind', l.kind, 'closeKind', l.close_kind,
       'failureCode', l.failure_code, 'settlement', l.settlement, 'chargedCredits', l.charged_credits, 'closedAt', l.closed_at) END,
-    'messages', (SELECT coalesce(jsonb_agg(jsonb_build_object('seq', m.seq, 'role', m.role, 'turnId', m.turn_id, 'content', m.content)
+    'messages', (SELECT coalesce(jsonb_agg(jsonb_build_object('seq', m.seq, 'role', m.role, 'turnId', m.turn_id, 'content', m.content,
+          -- The page's handle of a topic reply (V2-10b): its turn's request id, what the topic draft and the adoption name.
+          'requestId', (SELECT r.request_id FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id),
+          -- A Skill reply of a work item (V2-10b C2): what the page offers to adopt.
+          'workSkill', (SELECT r.policy ? 'workSkill' FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id),
+          -- The request a resumed turn continues: what a video package is named by.
+          'rootRequestId', opc_turn_root_request(p_actor_id, m.turn_id))
         ORDER BY m.seq), '[]'::jsonb)
       FROM (SELECT seq, role, turn_id, content FROM session_messages
             WHERE session_id = p_session_id AND visible AND deleted_at IS NULL AND seq > greatest(coalesce(p_after_seq, 0), 0)

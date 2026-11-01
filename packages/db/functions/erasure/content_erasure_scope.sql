@@ -11,7 +11,7 @@ AS $function$
 -- R9 erasure preview
 
 DECLARE sessions uuid[]:='{}'; executions uuid[]:='{}'; projects uuid[]:='{}'; versions uuid[]:='{}';
- content_ids uuid[]:='{}'; refs uuid[]:='{}';
+ content_ids uuid[]:='{}'; refs uuid[]:='{}'; turn_ids bigint[]:='{}';
  root_e runtime_executions;root_s runtime_sessions;root_p artifact_projects;root_c opc_content_versions;
  deleted boolean:=false;more uuid[];n integer;preserved bigint;dependents jsonb;
 BEGIN
@@ -87,8 +87,25 @@ BEGIN
   executions:=ARRAY(SELECT DISTINCT x FROM unnest(executions||more) x ORDER BY x);
   EXIT WHEN cardinality(executions)=n;
  END LOOP;
+ -- CORE-PATH-V2 V2-10b C2: the turns of the same dependency, by what a turn can hold: the producing turn of a selected version, a turn
+ -- given a script as material (any turn that read a claimed revision) or as source, every turn of a conversation in scope; then, as
+ -- runtime_history_dependencies for an execution, every later turn of those conversations, whose history held the reply.
+ turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND (t.session_id=ANY(sessions)
+   OR t.id IN (SELECT c.turn_id FROM opc_content_versions c WHERE c.actor_id=a AND c.id=ANY(content_ids) AND c.turn_id IS NOT NULL)
+   OR t.request_id IN (SELECT b.request_id FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.source_script_id=ANY(refs))
+   OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.session_id=t.session_id AND b.source_script_id=ANY(refs)
+    AND b.material_revision::text=t.policy#>>'{workMaterial,revision}')
+   OR t.policy#>>'{workSource,contentId}'=ANY(refs::text[])
+   OR t.session_id IN (SELECT rs.id FROM runtime_sessions rs WHERE rs.actor_id=a AND content_erasure_references(rs.scope,refs)))
+  ORDER BY t.id);
+ -- A resumed turn's raw responses before the pause are on the turns it continues.
+ WITH RECURSIVE chain(id,resume_of) AS (SELECT t.id,t.resume_of FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids)
+   UNION SELECT p.id,p.resume_of FROM chain c JOIN turns p ON p.actor_id=a AND p.id=c.resume_of)
+ SELECT coalesce(array_agg(id ORDER BY id),'{}') INTO turn_ids FROM chain;
+ turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND EXISTS(SELECT 1 FROM turns src
+   WHERE src.actor_id=a AND src.id=ANY(turn_ids) AND src.session_id=t.session_id AND src.id<=t.id) ORDER BY t.id);
  SELECT count(*) INTO preserved FROM opc_content_versions c0 WHERE c0.actor_id=a AND c0.erased_at IS NULL
-  AND NOT c0.id=ANY(content_ids) AND (c0.execution_id=ANY(executions) OR c0.source_content_id=ANY(content_ids));
+  AND NOT c0.id=ANY(content_ids) AND (c0.execution_id=ANY(executions) OR c0.turn_id=ANY(turn_ids) OR c0.source_content_id=ANY(content_ids));
  preserved:=preserved+(SELECT count(*) FROM artifact_versions v WHERE NOT v.project_id=ANY(projects)
   AND EXISTS(SELECT 1 FROM artifact_projects p0 WHERE p0.id=v.project_id AND p0.actor_id=a)
   AND (EXISTS(SELECT 1 FROM artifact_work_references r WHERE r.project_id=v.project_id AND r.source_version_id=ANY(versions))
@@ -103,7 +120,7 @@ BEGIN
   UNION SELECT 'reference',r.project_id FROM artifact_work_references r JOIN artifact_projects p ON p.id=r.project_id
    WHERE p.actor_id=a AND r.source_version_id=ANY(versions)
   UNION SELECT 'content',c.id FROM opc_content_versions c WHERE c.actor_id=a AND NOT c.id=ANY(content_ids)
-   AND (c.execution_id=ANY(executions) OR c.id=ANY(refs))
+   AND (c.execution_id=ANY(executions) OR c.turn_id=ANY(turn_ids) OR c.id=ANY(refs))
  ) affected;
  -- Canonical sets make the preview hash independent of query plans and physical row order.
  SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO sessions FROM unnest(sessions) id WHERE id IS NOT NULL;
@@ -113,10 +130,11 @@ BEGIN
  SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO content_ids FROM unnest(content_ids) id WHERE id IS NOT NULL;
  SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO refs FROM unnest(refs) id WHERE id IS NOT NULL;
  RETURN jsonb_build_object('kind',k,'id',target,'alreadyDeleted',deleted,
-  'sessions',to_jsonb(sessions),'executions',to_jsonb(executions),'projects',to_jsonb(projects),
+  'sessions',to_jsonb(sessions),'executions',to_jsonb(executions),'turns',to_jsonb(turn_ids),'projects',to_jsonb(projects),
   'versions',to_jsonb(versions),'contents',to_jsonb(content_ids),'references',to_jsonb(refs),
   'affectedSources',dependents,'preservedSavedVersions',preserved,
   'dataEvents',coalesce((SELECT jsonb_agg(jsonb_build_array(request_id,item_key,created_at) ORDER BY request_id,item_key)
    FROM opc_data_events WHERE actor_id=a AND (execution_id=ANY(executions) OR project_id=ANY(projects)
+    OR turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions))
     OR target_project_id=ANY(projects) OR source_version_id=ANY(versions))),'[]'::jsonb));
 END $function$;

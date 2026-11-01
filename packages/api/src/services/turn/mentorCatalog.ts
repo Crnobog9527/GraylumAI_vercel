@@ -99,7 +99,7 @@ export function mentorPolicy(catalog: MentorCatalog,
   const resumedRows = left?.paidTools && research ? Math.min(BENCHMARK_ROWS, input.left!.paidTools) : 0;
   // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).
   const priced = onlyOrganizer ? organizer! : mentor;
-  return { ...turnPolicy({ q: mentor.q, multiplier: priced.multiplier, modelUpperUsd: priced.upperUsd,
+  return { ...turnPolicy({ topUp: true, q: mentor.q, multiplier: priced.multiplier, modelUpperUsd: priced.upperUsd,
     startThresholdCredits: catalog.startCredits, pricing: mentor.pricing,
     limits: onlyOrganizer ? { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }
       : left ? { ...left, ...(resumedRows ? { toolRows: resumedRows } : {}) } : full,

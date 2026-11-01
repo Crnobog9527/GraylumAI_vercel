@@ -80,6 +80,22 @@ export function markPendingRestored(storage: DraftStorage, sessionId: string) {
   if (pending) storage.setItem(pendingKey(sessionId), JSON.stringify({ ...pending, restored: true }));
 }
 
+/** The turn path knows what it holds: a send whose request id the saved conversation carries is stored, however long ago the same words were
+ * asked; anything else (a turn still running, a send that never arrived) is not confirmed, and its put-back text stays. */
+type SeenView = { messages: { role: string; requestId?: string | null }[] };
+export function pendingSeen(pending: Pick<PendingSend, 'requestId'>, view: SeenView): 'stored' | 'unknown' {
+  return view.messages.some(message => message.role === 'user' && message.requestId === pending.requestId) ? 'stored' : 'unknown';
+}
+
+/**
+ * The box without the text that was put back in front of it, and the blank line that joined it to a newer draft. Only the whole put-back
+ * text goes: a box the user has edited since (the text with more typed straight after it) is theirs and stays as it is.
+ */
+export function withoutSentText(input: string, text: string) {
+  if (input === text) return '';
+  return input.startsWith(text + '\n\n') ? input.slice(text.length + 2) : input;
+}
+
 export function readPending(storage: DraftStorage, sessionId: string): PendingSend | null {
   try {
     const value = JSON.parse(storage.getItem(pendingKey(sessionId)) ?? 'null');

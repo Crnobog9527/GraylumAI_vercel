@@ -263,8 +263,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), gate: callGate,
         template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
       catch (error) {
-        // A deletion ends the turn; a credit pause keeps it waiting (not closed, so a resume can still organize this reply).
-        if (error instanceof TurnStop && (error.code === 'TURN_TOMBSTONED' || error.code === 'TURN_PAUSED_FOR_CREDITS')) throw error;
+        // A deletion ends the turn; a credit pause keeps it waiting (not closed, so a resume can still organize this reply); the
+        // stop-loss closes it failed with everything refunded (ENGINEERING 5).
+        if (error instanceof TurnStop && (error.code === 'TURN_TOMBSTONED' || error.code === 'TURN_PAUSED_FOR_CREDITS'
+          || error.code === 'STOP_LOSS_REACHED')) throw error;
         logSwallowed('turn_mentor_organizer_failed', error, { category: 'ai' });
       }
     }

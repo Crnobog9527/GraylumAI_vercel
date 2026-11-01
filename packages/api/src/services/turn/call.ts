@@ -6,7 +6,7 @@ import { openRouterEvidence } from '../bill2/openRouterEvidence';
 import { openRouterRejection } from '../bill2/openRouterRejection';
 import { nominalCost, type NominalPricing } from '../../shared/nominalPricing';
 import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
-import { tombstoned, type TurnDatabase } from './db';
+import { tombstoned, TurnDatabaseError, type TurnDatabase } from './db';
 import { logSwallowed } from '../../lib/swallow';
 
 /*
@@ -20,9 +20,13 @@ import { logSwallowed } from '../../lib/swallow';
 export class TurnStop extends Error {
   constructor(readonly code: 'TURN_PAUSED_FOR_CREDITS' | 'TURN_TOMBSTONED' | 'TURN_CALL_UNKNOWN' | 'TURN_PROVIDER_402'
     | 'TURN_CALL_DENIED' | 'TURN_PROVIDER_BUSY' | 'TURN_PROVIDER_LIMIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE'
-    | 'TURN_NEW_CALLS_PAUSED' | 'TURN_RATE_LIMITED' | 'TURN_LIMIT_UNAVAILABLE' | 'TURN_USAGE_CONFIGURATION_REQUIRED'
-    | 'RESEARCH_TOOLS_UNAVAILABLE' | 'RESEARCH_TOOLS_CONTEXT_CAPACITY' | 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY') { super(code); }
+    | 'TURN_NEW_CALLS_PAUSED' | 'TURN_RATE_LIMITED' | 'TURN_LIMIT_UNAVAILABLE' | 'TURN_USAGE_CONFIGURATION_REQUIRED' | 'TURN_WORK_SOURCE_ERASED'
+    | 'RESEARCH_TOOLS_UNAVAILABLE' | 'RESEARCH_TOOLS_CONTEXT_CAPACITY' | 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY'
+    | 'STOP_LOSS_REACHED') { super(code); }
 }
+/** The stop-loss refusing a call mid-turn (turn_call_begin): a stop, so the SDK's wrapping keeps the code; nothing was written. */
+export const stopLossStop = (error: unknown) =>
+  error instanceof TurnDatabaseError && error.code === 'STOP_LOSS_REACHED' ? new TurnStop('STOP_LOSS_REACHED') : error;
 
 type Adapter = { prepareDispatch(input: unknown, identity: CallIdentity, onChunk?: (chunk: string) => void,
   onIdentity?: (id: string) => void): Promise<() => Promise<TransportObservation>> };
@@ -56,7 +60,8 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
   for (let attempt = 1; ; attempt++) {
     const seq = deps.nextSeq();
     const begun = await deps.db.begin({ actorId: deps.actorId, turnId: deps.turnId, seq, callKind: 'model', modelId: call.modelId,
-      toolName: null, paid: null, requestHash, upperUsd: call.upperUsd, multiplier: call.multiplier });
+      toolName: null, paid: null, requestHash, upperUsd: call.upperUsd, multiplier: call.multiplier })
+      .catch((error: unknown) => { throw stopLossStop(error); });
     const notSent = () => deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'not_sent', nominalUsd: null,
       actualUsd: null, usage: {}, providerId: null, payloadHash: requestHash, raw: null });
     if (begun.paused) throw new TurnStop('TURN_PAUSED_FOR_CREDITS');

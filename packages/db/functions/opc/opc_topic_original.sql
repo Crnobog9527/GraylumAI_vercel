@@ -8,14 +8,18 @@ CREATE OR REPLACE FUNCTION public.opc_topic_original(a uuid, did uuid, vid uuid,
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE e runtime_executions;w opc_topic_workspaces;d opc_drafts;raw text;part text[];candidate jsonb;result jsonb;
+DECLARE e runtime_executions;w opc_topic_workspaces;d opc_drafts;raw text;part text[];candidate jsonb;result jsonb;source_turn jsonb;source_session uuid;
 BEGIN
- e:=opc_data_execution(a,eid);
+ -- CORE-PATH-V2 V2-10b: eid is an old execution, or a turn path topic turn's request id (the page's handle, as for a report).
+ IF opc_data_source_turn(a,eid) IS NULL THEN
+  e:=opc_data_execution(a,eid);source_session:=e.session_id;raw:=coalesce(e.result->>'body',e.primary_result->>'body');
+ ELSE
+  source_turn:=opc_data_turn(a,eid);source_session:=(source_turn->>'sessionId')::uuid;raw:=source_turn->>'body';
+ END IF;
  SELECT * INTO d FROM opc_drafts WHERE draft_id=did AND actor_id=a;
  SELECT * INTO w FROM opc_topic_workspaces WHERE draft_id=did AND actor_id=a;
- IF d.draft_id IS NULL OR w.session_id IS DISTINCT FROM e.session_id OR w.source_version_id IS DISTINCT FROM vid
+ IF d.draft_id IS NULL OR w.session_id IS DISTINCT FROM source_session OR w.source_version_id IS DISTINCT FROM vid
   OR NOT opc_source_allowed(a,vid) THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_INVALID';END IF;
- raw:=coalesce(e.result->>'body',e.primary_result->>'body');
  IF raw IS NULL THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_INVALID';END IF;
  FOR part IN SELECT regexp_matches(raw,'```(?:json)?\s*(\[[\s\S]*?\])\s*```','g') LOOP
   BEGIN

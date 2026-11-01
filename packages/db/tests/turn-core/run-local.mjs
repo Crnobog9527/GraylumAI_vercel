@@ -9,8 +9,13 @@ import {randomUUID,createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {localDb,read,root} from '../runtime-view-perf/local-db.mjs';
+import {planCases} from './plan-cases.mjs';
 import {reportCases} from './report-cases.mjs';
+import {topicAccountCases,topicCases} from './topic-cases.mjs';
 import {reportFinalCases} from './report-final-cases.mjs';
+import {workContentCases} from './work-content-cases.mjs';
+import {holdCases} from './hold-cases.mjs';
+import {stopLossCases} from './stop-loss-cases.mjs';
 import {workResultCases} from './work-result-cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 // V2-7a: a report opens only for a Gold account's confirmed round (turn_report_admit); the fixture builds one per call.
@@ -729,6 +734,8 @@ try{
  }
  // V2-7a: kind=report (report-cases.mjs).
  await reportCases({c,one,open,begin,identity,record,close,balance,account,reportSource,reportPolicy,openReport,refusal,peer,report});
+ await topicCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
+ await planCases({c,one,open,begin,identity,record,close,balance,account,reportSource,policy,refusal,peer,report});
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
@@ -737,9 +744,9 @@ try{
    'turn_report_read(uuid,uuid,uuid,bigint)'])
    for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]])
     assert.equal(await one("select has_function_privilege($1,$2,'EXECUTE') v",[role,'public.'+fn]),want,`${fn} ${role}`);
-  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)','turn_positioned(uuid)',
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint,integer)','turn_tombstones(uuid,uuid,jsonb)','turn_positioned(uuid)',
    'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)'])
-  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)',
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint,integer)','turn_tombstones(uuid,uuid,jsonb)',
    'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)',
    'turn_report_admit(uuid,uuid,jsonb)'])
    assert.equal(await one("select has_function_privilege('service_role',$1,'EXECUTE') v",['public.'+fn]),false,fn);
@@ -788,6 +795,10 @@ try{
   report.checks.push(`a report's turn_open: ${core} relation locks on core-path tables (<= 40), ${report.reportOpenRelationLocks.source} on its source reads, ${report.reportOpenRelationLocks.ledger} in the ledger leaves`);
  }
  await reportFinalCases({c,one,open,begin,record,account,reportSource,reportPolicy,refusal,report});
+ await topicAccountCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
  await workResultCases({c,db,one,open,begin,record,close,account,policy,refusal,report});
+ await holdCases({c,one,open,begin,record,close,balance,account,policy,refusal,peer,report});
+ await stopLossCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
+ await workContentCases({c,one,open,begin,record,close,account,policy,refusal,report});
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

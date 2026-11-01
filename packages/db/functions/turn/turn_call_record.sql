@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.turn_call_record(p_actor_id uuid, p_turn_id bi
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; c turn_calls; q numeric; used integer; next_need integer; tomb jsonb;
+DECLARE t turns; c turn_calls; q numeric; used integer; next_need integer; tomb jsonb; more integer := 0;
 BEGIN
   IF p_status NOT IN ('ok','not_sent','rejected','no_charge_402','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
   -- Lock the turn row before reading the call: turn_close may be marking it unknown, or the same receipt may arrive twice.
@@ -55,5 +55,9 @@ BEGIN
   FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
   -- credits_low: the same rule that pauses the next call (turn_call_begin): the remaining freeze below the start threshold L.
   next_need := coalesce((t.policy->>'minCredits')::int, (t.policy->>'uModelCredits')::int, 0);
-  RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits - used < next_need) || tomb;
+  -- A turn that tops up can still freeze the balance: what is low is the two together. Never in the way of a receipt.
+  IF t.policy ? 'holdCredits' THEN
+    BEGIN more := greatest(public.credit_available(p_actor_id), 0); EXCEPTION WHEN raise_exception THEN more := 0; END;
+  END IF;
+  RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits + more - used < next_need) || tomb;
 END $function$;

@@ -30,6 +30,9 @@ BEGIN
    SELECT * INTO e FROM runtime_executions WHERE id=c.execution_id AND actor_id=a;
    IF e.id IS NULL OR (e.content_deleted_at IS NULL AND NOT runtime_history_available(e.id)) THEN RETURN false; END IF;
   END IF;
+  -- A deleted conversation leaves the version readable, as a deleted execution does; an account being erased does not.
+  IF c.turn_id IS NOT NULL AND EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=a AND t.id=c.turn_id
+    AND (turn_tombstones(a,t.session_id,'{}'::jsonb)->>'accountErasing')::boolean) THEN RETURN false; END IF;
   seen:=array_append(seen,current_id);current_id:=c.source_content_id;first_row:=false;
  END LOOP;
 EXCEPTION WHEN insufficient_privilege OR raise_exception THEN RETURN false;

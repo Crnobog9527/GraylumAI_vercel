@@ -33,13 +33,24 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
   // below proves the final structure is unchanged.
   if(/ai_models/.test(replay)&&/\bapi_key\b/.test(replay)&&!/DROP COLUMN api_key/.test(replay))
    ok(sql('ALTER TABLE public.ai_models ADD COLUMN IF NOT EXISTS api_key text;'));
+  // 0385 patches the body of claim_daily_checkin (the INSERT it adds an idempotency key to), and the later 0396 drops the function (daily
+  // check-in retired, Owner 2026-10-26). On the final catalog it is gone, so the historical replay of 0385 gets a stand-in that carries
+  // only the text 0385 anchors on; the replayed 0396 drops it again and the catalog comparison below proves the final structure is unchanged.
+  if(/claim_daily_checkin/.test(replay)&&!/DROP FUNCTION IF EXISTS public\.claim_daily_checkin/.test(replay))
+   ok(sql(`CREATE OR REPLACE FUNCTION public.claim_daily_checkin(p_user_id uuid) RETURNS void LANGUAGE plpgsql AS $stub$
+    DECLARE v_total_reward_credits integer := 0; v_today date := current_date;
+    BEGIN
+     IF false THEN
+      INSERT INTO credit_transactions ( user_id, amount, type, description ) VALUES ( p_user_id, v_total_reward_credits, 'checkin', 'stand-in' );
+     END IF;
+    END $stub$;`));
   const replayResult=sql(superseded.skip?superseded.rest:replay);
   // An anchored patch refuses (an error code containing PATCH, or SOURCE_MISMATCH, or 0328's own gate refusal) when a still
-  // later migration already rewrote the text it anchors on (0307 after 0338, 0328 after 0329/0330/0335). Only those named
+  // later migration already rewrote the text it anchors on (0307 after 0338, 0328 after 0329/0330/0335, 0391 after any later rewrite of atomic_pre_deduct / bill2_payg_claim). Only those named
   // refusals are tolerated, never for the re-applied migration
   // itself, each one is printed and recorded, and the catalog equality below must still hold.
   const refusal=replayResult.status!==0&&tail[i].name!==base
-   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
+   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
   if(refusal){const reason=tail[i].name+': anchored patch refused on the final catalog ('+refusal[1]+'), a later migration rewrote its anchor; not replayed';
    console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
   else ok(replayResult);
