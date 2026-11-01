@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-10b A (number 0445 set by the controller): kind=plan, the first-week
+-- CORE-PATH-V2 V2-10b A (number 0448 set by the controller): kind=plan, the first-week
 -- plan of a published positioning, on the turn core. Same product as the old path (opc.prepareStep purpose=plan, BILL2 operation=plan):
 -- metered, no fixed price, no membership gate; a body that is not a usable plan is still charged by usage (controller 11-01).
 -- The plan's logic is in its own functions; turn_open and turn_close only dispatch to them, rebuilt whole on their text as staging
