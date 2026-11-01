@@ -161,7 +161,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const offer = generationOffer({ canGenerate, working, server, executionId, status: shown });
   const run = async (kind: "start" | "restart") => {
     // No price on the button, no paid start: the request must carry the price the user was shown.
-    if (working || offer !== kind || typeof price !== "number") return;
+    // The path is the switch's: a paid start before it has answered would go to the old path.
+    if (working || offer !== kind || typeof price !== "number" || !(choices.isSuccess || choices.isError)) return;
     setRefusal(null);
     // A start or 重新生成 whose answer never came resends the same request until the server answers.
     const requestId = nextRequestId(record, () => crypto.randomUUID());
