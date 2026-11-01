@@ -98,3 +98,15 @@ test('the positioning gate path answers low risk, other paths and bad input are 
   assert.equal((await post(base, { stream: true })).status, 400, 'a model is required');
   assert.equal((await fetch(`${base}/anything`)).status, 404);
 });
+
+test('the mentor organizer call answers a valid organization object, streamed and not', async t => {
+  const base = await start(t, { firstByteMs: 5, intervalMs: 1 });
+  const messages = [{ role: 'system', content: 'organize' }, { role: 'user', content: 'checklist\n\nPrimary assistant reply:\nhello' }];
+  const plain = await (await post(base, { model: 'm', messages })).json();
+  assert.deepEqual(JSON.parse(plain.choices[0].message.content), { inputKind: 'answer', patches: [], notes: [] });
+  const streamed = await (await post(base, { model: 'm', messages, stream: true })).text();
+  const text = streamed.split('\n').filter(l => l.startsWith('data: {')).map(l => JSON.parse(l.slice(6)).choices[0]?.delta?.content ?? '').join('');
+  assert.deepEqual(JSON.parse(text), { inputKind: 'answer', patches: [], notes: [] });
+  const ordinary = await (await post(base, { model: 'm', messages: [{ role: 'user', content: 'hi' }] })).json();
+  assert.match(ordinary.choices[0].message.content, /^(测试)+$/);
+});
