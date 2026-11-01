@@ -14,7 +14,7 @@ export async function workResultCases(t){
  const asService=async(run,client=c)=>{await client.query('set role service_role');
   try{return await run();}finally{await client.query('reset role');}};
  const save=(a,turn,client=c)=>asService(()=>one('select opc_work_result_turn($1,$2) v',[a.actor,turn],client),client);
- const check=(a,session,video=false)=>asService(()=>c.query('select opc_work_check($1,$2,$3)',[a.actor,session,video]));
+ const check=(a,session,video=false)=>asService(()=>one('select opc_work_check($1,$2,$3) v',[a.actor,session,video]));
  const list=(a,f)=>asService(()=>one('select opc_work_results($1,$2) v',[a.actor,f.session]));
  const counts=async f=>(await c.query(`select (select count(*) from artifact_versions v join artifact_projects p on p.id=v.project_id
    where p.actor_id=$1 and p.work_kind='result')::int versions,
@@ -46,8 +46,27 @@ export async function workResultCases(t){
  // Before opening: allowed, then an archived business and a script request on a non-video item, each refused; a read writes nothing.
  {
   const w=await workspace();
-  await check(w.a,w.f.session,true);
-  await check({actor:randomUUID()},w.f.session,true); // another account: nothing to read here, turn_open refuses it
+  // The bound Skill revision, not the module's latest: a newer published revision does not move a work item.
+  const bound=await check(w.a,w.f.session,true);
+  assert.deepEqual([bound.work.moduleId,bound.work.skillId,bound.work.revisionId],[w.f.module,w.f.skill,w.f.revision]);
+  assert.equal(bound.work.brief,null,'no material saved yet');
+  const newer=randomUUID();
+  await c.query('begin');
+  await c.query("insert into skill_revisions(id,skill_id,version,content,content_hash,published_by) values($1,$2,2,'newer',$3,$4)",[newer,w.f.skill,'c'.repeat(64),w.actor]);
+  await c.query(`insert into skill_packages(revision_id,skill_id,request_id,manifest,package_hash,entry_hash,expected_version,actor_id)
+   values($1,$2,$3,'{}',$4,$5,1,$6)`,[newer,w.f.skill,randomUUID(),'d'.repeat(64),'c'.repeat(64),w.actor]);
+  await c.query(`update skills set published_version=2,published_content='newer',published_content_hash=$2,published_at=now() where id=$1`,[w.f.skill,'c'.repeat(64)]);
+  await c.query('commit');
+  assert.equal((await check(w.a,w.f.session,true)).work.revisionId,w.f.revision,'the item keeps the revision it came from');
+  // The newest material not revoked is what the turn reads.
+  for(const revision of [1,2]) await c.query(`insert into runtime_scope_material(session_id,revision,request_id,request,content,content_hash)
+   values($1,$2,$3,'{}',$4,$5)`,[w.f.session,revision,randomUUID(),JSON.stringify({brief:'BRIEF_'+revision,material:'MATERIAL_'+revision,work:{}}),'e'.repeat(64)]);
+  assert.deepEqual(await check(w.a,w.f.session,false).then(r=>[r.work.brief,r.work.material]),['BRIEF_2','MATERIAL_2']);
+  await c.query('update runtime_scope_material set revoked=true where session_id=$1 and revision=2',[w.f.session]);
+  assert.equal((await check(w.a,w.f.session,false)).work.brief,'BRIEF_1');
+  assert.deepEqual(await check({actor:randomUUID()},w.f.session,true),{work:null},'another account reads nothing; turn_open refuses it');
+  const free=await account();
+  assert.deepEqual(await check(free,free.session,true),{work:null},'a free conversation has no work item');
   // An article item of the same plan's business: the fixture's item is a video with a saved script, whose type cannot change.
   const article=randomUUID(),item=randomUUID(),planId=randomUUID(),articleSession=randomUUID();
   await c.query(`insert into artifact_projects(id,actor_id,module_id,skill_id,account,work_title) values($1,$2,$3,$4,$5,'article')`,

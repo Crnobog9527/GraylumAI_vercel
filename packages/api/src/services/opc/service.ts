@@ -269,8 +269,8 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_request_id: uuid.parse(requestId),
         p_expected_round_id: uuid.parse(expectedRoundId),
       }),
-    saveWorkResult: (executionId: string) =>
-      rpc("opc_work_result", { p_execution_id: uuid.parse(executionId) }),
+    saveWorkResult: (id: string | { turnId: number }) => typeof id === "object" ? rpc("opc_work_result_turn", { p_turn_id: id.turnId })
+      : rpc("opc_work_result", { p_execution_id: uuid.parse(id) }),
     workResults: (sessionId: string) =>
       rpc("opc_work_results", { p_session_id: uuid.parse(sessionId) }),
     catalog: async () => {

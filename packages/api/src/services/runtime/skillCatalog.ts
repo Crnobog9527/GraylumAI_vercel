@@ -114,6 +114,25 @@ export async function discoverSkillCatalog(user: SupabaseClient, admin: Supabase
   return entries;
 }
 
+/**
+ * One exact revision of a Skill as a catalog entry, whatever the catalog itself would list: a work item keeps the method it came
+ * from (CORE-PATH-V2 V2-10b), which may be an older revision or the positioning package the catalog leaves out. Null when that
+ * revision is not readable or too large: the caller refuses, never falling back to another revision.
+ */
+export async function pinnedCatalogEntry(source: SkillSource, pin: { moduleId: string; skillId: string; revisionId: string },
+  maxResultBytes: number, usesVoice = false): Promise<SkillCatalogEntry | null> {
+  try {
+    const item = (await discoverSkills(source)).find(found => found.selection.revisionId === pin.revisionId);
+    if (!item) return null;
+    const entry = { name: item.public.name.slice(0, 80), description: item.public.description.slice(0, DESCRIPTION_CHARS),
+      moduleId: pin.moduleId, skillId: pin.skillId, packageId: item.selection.packageId, revisionId: pin.revisionId,
+      packageHash: item.selection.packageHash };
+    const resultBytes = serializedResultBytes(loadSkillResult(entry, await entryInstructions(source, entry, maxResultBytes)));
+    if (resultBytes > maxResultBytes) return null;
+    return catalogEntry.parse({ ...entry, resultBytes, ...(usesVoice ? { usesVoice: true } : {}) });
+  } catch { return null; }
+}
+
 async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
   limits: { maxResultBytes: number; excludeSocial: boolean }): Promise<SkillCatalogEntry[]> {
   const visible = await userVisibleModules(user, { limit: 65, orderById: true });
