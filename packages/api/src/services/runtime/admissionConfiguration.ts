@@ -3,6 +3,7 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
+import { REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {RUNTIME_RATE_LIMIT_KEY} from './rateLimitSettings';
 import {MODEL_IDENTITY_GUARD_KEY} from '../modelIdentity/guardSetting';
@@ -35,7 +36,7 @@ export async function readAdmissionConfiguration(admin: SupabaseClient): Promise
     return await catalogRead(admin, 'settings', 'admission', () => admin.from('system_settings').select('key,value,raw:value::text').in('key', [
       RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY, 'primary_model_id', RESEARCH_TOOLS_KEY,
       PURPOSE_BUDGET_KEY, SUMMARY_MODEL_SETTING, SUMMARY_OUTPUT_SETTING,
-      LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY, OWN_POSTS_SWITCH, 'publish_monitor_enabled',
+      LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY, OWN_POSTS_SWITCH, 'publish_monitor_enabled', REVIEW_SWITCH,
       PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier,
       CHAT_RESEARCH_KEY, RESEARCH_THRESHOLDS_KEY, PROVIDER_PRICES_KEY, RW_V2_KEY, CORE_PATH_SETTING, RUNTIME_PAYG_SETTING,
       REPORT_PRICE_KEY,
