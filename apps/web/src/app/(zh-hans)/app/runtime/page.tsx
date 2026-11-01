@@ -84,7 +84,7 @@ function RuntimePath({routeSession,routeModule}:{routeSession:string;routeModule
  // No workspace renders before the path is decided: the old one would consume the first-send marker and prepare a run on the old path.
  const path=runtimePathChoice({routeSession,choicesSettled:choices.isSuccess||choices.isError,corePathV2:Boolean(choices.data?.corePathV2),
   heldLoaded:held.loaded,held:held.has,viewSettled:Boolean(view.data)||Boolean(view.error),
-  scopeKind:view.data?.scope?.kind,oldHistory:Boolean((view.data?.executions as unknown[]|undefined)?.length)});
+  scopeKind:view.data?.scope?.kind});
  if(path==='loading')return <p>正在读取工作…</p>;
  if(path==='turn')return <TurnWorkspace sessionId={routeSession}/>;
  if(path==='work')return <WorkItemWorkspace sessionId={routeSession} workItemId={view.data!.scope!.workItemId}/>;

@@ -240,6 +240,16 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
   第 4 节。
 - 往 CI 加测试或测试套件时，PR 描述写明加入后该 job 的实测总时长，离 30 分钟上限至少留 8 分钟；
   不够就拆成并行 job。不许调大超时时间：调大超时算放宽 CI，要 Owner 批准（2026-10-26 #1404 教训）。
+- CI 默认跑全套。只有一种情况跳过数据库和计费测试（"Run database behaviour suites" 两组和 "Run billing and recovery
+  integration tests"，Owner 2026-11-01 批准）：目标分支是 `staging` 的 PR，并且改动的**每个文件**都在白名单里。
+  白名单只有：`docs/**`、`*.md`，以及 `apps/web/src/components/**` 和 `apps/web/src/app/**` 下的页面、组件、样式
+  （`.tsx`、`.css`）和它们的测试（`.test.ts`、`.test.tsx`）。`apps/web/src/app/api/**`、`route`/`middleware`/`proxy` 文件、
+  `apps/web/src` 下的其他目录、`packages/**`、`supabase/**`、`scripts/**`、`.github/**`、依赖和锁文件都不在白名单里，
+  混进一个就跑全套。push 到 `staging`/`main`、定时任务、目标是 `main` 的 PR，以及拿不到改动列表、列表为空时，一律全套。
+  判定写在 `scripts/ci-test-scope.mjs`（测试在 `scripts/tests/ci-test-scope.test.mjs`）；改白名单等于改规则，要 Owner 批准。
+  lint、类型检查、单元测试、构建与安全 E2E、全部安全检查在任何情况下都照跑。必需检查名字不变："Unit Tests" 只接受
+  判定任务成功且判定为"不用全套"时的跳过，失败、取消和其他原因的跳过仍然是红的
+  （`.github/scripts/test-ci-workflows.rb` 逐一检查）。同一个 PR 推新版本会取消旧运行，push 到 `staging` 不取消。
 - 作为门槛的检查（代码大小、类型检查、测试等）不能接管道或用别的方式吞掉失败（例如接 `| tail`
   后再提交推送）：要单独运行看退出码，或者用 `set -o pipefail`。检查没过不能提交推送
   （2026-10-13 #900 教训）。

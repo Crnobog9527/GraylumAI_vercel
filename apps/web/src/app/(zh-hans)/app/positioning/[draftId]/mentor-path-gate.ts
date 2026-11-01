@@ -10,7 +10,7 @@ export function mentorPathReady(input: { hasSession: boolean; choicesSettled: bo
   return input.hasSession && input.choicesSettled && input.viewLoaded;
 }
 
-export type PathGate = { ready: boolean; on: boolean; oldMentorTurns: number };
+export type PathGate = { ready: boolean; on: boolean };
 const STEP_MS = 100, LIMIT_MS = 30_000;
 
 /** Waits for the gate, then says whether this turn goes on the turn path. Never answers "old" for a gate that was not ready. */
@@ -20,7 +20,7 @@ export async function mentorOnTurnPath(gate: () => PathGate, wait: (ms: number) 
     if (waited >= limitMs) throw new Error("TURN_PATH_UNDECIDED");
     await wait(STEP_MS);
   }
-  const now = gate();
-  // The new path reads session_messages only: a draft with mentor talk on the old path would show it and the model would not have it.
-  return now.on && now.oldMentorTurns === 0;
+  // With the switch on every draft's mentor talk runs on the turn path, one with old-path turns included (test data only: the real
+  // database is built new, plan 5.4); it sees only its new messages. V2-12 removes the old path.
+  return gate().on;
 }

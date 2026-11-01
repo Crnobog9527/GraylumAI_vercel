@@ -44,7 +44,7 @@ import { TYPE_LABEL, WorkAdoptAction, WorkResultAction, WorkTypeChoice, WorkVide
 import workStyles from './runtime-work.module.css';
 
 /*
- * CORE-PATH-V2 V2-10b C2: a work item's conversation on the turn path; one with old-path history stays on the old workspace (page.tsx).
+ * CORE-PATH-V2 V2-10b C2: a work item's conversation on the turn path (page.tsx).
  * The steps are the old page's: confirm the type, guide, adopt a reply, then storyboard and editing on an explicit choice. Each saved
  * step freezes its request in this browser first, so a repeat or a reload resumes that request and never makes a second one.
  * A turn runs to its close: an ordinary work turn has no stop (Owner 10-28).

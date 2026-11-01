@@ -17,7 +17,6 @@ export type RuntimePathInput = {
   /** `runtime.view` has answered (data or error); only read once the conversation is on the turn path. */
   viewSettled: boolean;
   scopeKind?: string;
-  oldHistory: boolean;
 };
 
 export function runtimePathChoice(input: RuntimePathInput): 'loading' | 'turn' | 'work' | 'old' {
@@ -26,8 +25,7 @@ export function runtimePathChoice(input: RuntimePathInput): 'loading' | 'turn' |
   if (!input.choicesSettled || !input.heldLoaded) return 'loading';
   if (!input.corePathV2 && !input.held) return 'old';
   if (!input.viewSettled) return 'loading';
-  // A conversation that already holds old-path history stays on the old path: the turn path reads session_messages only, so it would
-  // show the earlier talk without the model having it. V2-12 removes the old path with it.
-  if (input.oldHistory) return 'old';
+  // With the switch on every free conversation and work item runs on the turn path, also one that holds old-path history (test data only:
+  // the real database is built new, plan 5.4): it reads session_messages, so it sees only its new messages. V2-12 removes the old path.
   return input.scopeKind === 'positioning_draft' ? 'turn' : input.scopeKind === 'work_item' ? 'work' : 'old';
 }
