@@ -10,6 +10,7 @@
 --   turn_settle_holds     the charge fills the first freeze, then the top-ups in order; every freeze settles, an unused one returns in full.
 --   turn_settle_credits   p_part: a top-up's rows have their own idempotency keys (turn:<id>:part<n>:spend); part 0 keeps the old keys.
 --   turn_close, turn_resume_close   settle through turn_settle_holds. turn_call_record: creditsLow also counts the balance.
+--   research_billing_summary   one row per turn however many parts it settled in; after an account erasure a top-up still finds its turn.
 -- Fixed-price kinds (report, compare, jury, jury_adopt) and plan carry no holdCredits: their paths do not change.
 -- Compatible: turns without holdCredits behave as before; old code sends none. Repeatable: DROP of the old signature, CREATE OR REPLACE.
 -- Recovery: stop sending holdCredits (Node), then re-apply the previous functions once no open turn has policy.topUps.
@@ -756,6 +757,37 @@ BEGIN
     BEGIN more := greatest(public.credit_available(p_actor_id), 0); EXCEPTION WHEN raise_exception THEN more := 0; END;
   END IF;
   RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits + more - used < next_need) || tomb;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.research_billing_summary(p_start timestamp with time zone, p_end timestamp with time zone)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+ IF p_start IS NULL OR p_end IS NULL OR NOT isfinite(p_start) OR NOT isfinite(p_end) OR p_end<p_start OR p_end-p_start>interval '31 days' THEN RAISE EXCEPTION 'invalid reconciliation window'; END IF;
+ RETURN (
+  WITH old AS (SELECT count(*) n,coalesce(sum(charged_credits),0) credits FROM research_operations
+   WHERE state='succeeded' AND charged_at>=p_start AND charged_at<p_end),
+  -- Account erasure keeps preDeductId but drops turnId from the ledger row; the turn stays and still names that hold, or its top-up.
+  -- One row per turn: a turn with top-ups settles in parts, and its tools are counted once.
+  settled AS (SELECT sum(-b.amount)::integer credits,coalesce(CASE WHEN b.metadata->>'turnId' ~ '^[0-9]{1,18}$' THEN (b.metadata->>'turnId')::bigint END,e.id) turn_id
+   FROM billing_history b
+   LEFT JOIN turns e ON b.content_erased_at IS NOT NULL AND e.actor_id=b.user_id AND (e.policy->>'holdId'=b.metadata->>'preDeductId'
+     OR e.policy->'topUps' @> jsonb_build_array(jsonb_build_object('holdId',b.metadata->>'preDeductId')))
+   WHERE b.operation_type='settle' AND b.created_at>=p_start AND b.created_at<p_end
+    AND (b.metadata->>'turnId' ~ '^[0-9]{1,18}$' OR e.id IS NOT NULL)
+   GROUP BY 2),
+  split AS (SELECT s.credits,least(s.credits,coalesce(r.credits,0)) tool,CASE WHEN least(s.credits,coalesce(r.credits,0))>0 THEN r.n ELSE 0 END n FROM settled s
+   LEFT JOIN turns t ON t.id=s.turn_id
+   -- As turn_close: a tool receipt that arrived after the close is not the user's.
+   LEFT JOIN LATERAL (SELECT ceil((t.policy->>'q')::numeric*sum(k.nominal_usd*k.multiplier))::integer credits,
+     sum((SELECT count(*) FROM jsonb_array_elements(coalesce(k.usage->'results','[]')) x WHERE x->>'outcome' IN ('ok','partial') AND (x->>'items')::integer>0))::integer n
+    FROM turn_calls k WHERE k.turn_id=t.id AND k.call_kind='tool' AND k.status='ok' AND k.settled_at<=t.closed_at) r ON true)
+  SELECT jsonb_build_object('count',o.n+coalesce(sum(p.n),0),'credits',o.credits+coalesce(sum(p.tool),0),
+    'turnOtherCredits',coalesce(sum(p.credits-p.tool),0))
+  FROM old o LEFT JOIN split p ON true GROUP BY o.n,o.credits);
 END $function$;
 
 REVOKE ALL ON FUNCTION public.turn_settle_credits(uuid,uuid,integer,bigint,integer) FROM PUBLIC, anon, authenticated, service_role;

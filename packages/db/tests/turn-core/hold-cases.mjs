@@ -183,6 +183,24 @@ export async function holdCases(t){
   assert.equal((await record(b,k.turnId,1)).creditsLow,true,'6 left, no balance');
   await close(b,k.turnId);
  }
+ // The billing summary: a turn settled in parts counts its tool once, and still does once an erasure took turnId off the ledger rows.
+ {
+  const summary=()=>one("select research_billing_summary(now()-interval '1 day',now()+interval '1 minute') v");
+  const a=await account(1000),before=await summary(),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1,{n:0.02,actual:0.02});
+  await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.01});await record(a,o.turnId,2,{n:0.01,actual:0.01});
+  await c.query("update turn_calls set usage=$3 where turn_id=$1 and seq=$2",[o.turnId,2,JSON.stringify({results:[{outcome:'ok',items:3}]})]);
+  await begin(a,o.turnId,3);await record(a,o.turnId,3);
+  assert.equal((await close(a,o.turnId)).chargedCredits,24);
+  assert.equal(await settles(a),3,'the charge crossed into the top-ups');
+  const delta=now=>[now.count-before.count,now.credits-before.credits,now.turnOtherCredits-before.turnOtherCredits];
+  assert.deepEqual(delta(await summary()),[1,6,18]);
+  await c.query("update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1",[a.actor]);
+  await c.query("insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now()-interval '1 minute')",[a.actor,randomUUID()]);
+  await one("select account_erasure_scrub_ledger($1,'billing_history',100) v",[a.actor]);
+  assert.equal(await one("select count(*)::int v from billing_history where user_id=$1 and operation_type='settle' and metadata ? 'turnId'",[a.actor]),0,'the erasure took turnId off');
+  assert.deepEqual(delta(await summary()),[1,6,18],'the same after an erasure');
+ }
  // The ledger: sources and records reconcile for this run's accounts.
  {
   const r=await one("select billing_reconcile_day(now()-interval '1 day',now()+interval '1 minute') v");
