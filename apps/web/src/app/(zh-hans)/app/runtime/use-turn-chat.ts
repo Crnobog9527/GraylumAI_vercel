@@ -7,6 +7,7 @@ import { runTurn } from '@/lib/turn-stream';
 import type { ResearchCall } from '@/components/research/research-model';
 import { workItemFromResearchCall, type WorkItem } from '@/components/chat-display/agent-work-model';
 import { readTurnView } from '@/app/(zh-hans)/app/positioning/[draftId]/mentor-turn-path';
+import { turnBusyForCredits } from '@/components/opc/credits-label';
 import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
 
 /*
@@ -123,6 +124,9 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   const resume = useCallback(() => view?.activeTurn ? run({ kind: 'resume', requestId: crypto.randomUUID(), resumeOf: view.activeTurn.turnId })
     : Promise.resolve<SendAnswer>('done'), [run, view?.activeTurn]);
 
-  return { view, viewFailed, live, sending, notice, send, resume, paused: view?.activeTurn?.pauseReason === 'waiting_credits', reload: read,
-    busy: sending || Boolean(view?.activeTurn), clearNotice: () => setNotice(null) };
+  const busy = sending || Boolean(view?.activeTurn), paused = view?.activeTurn?.pauseReason === 'waiting_credits';
+  // What the sidebar balance is told: the conversation's own state, so every page on this hook keeps the turn's freeze out of the balance.
+  const creditsBusy = turnBusyForCredits({ viewRead: view !== null, viewFailed, busy, paused });
+  return { view, viewFailed, live, sending, notice, send, resume, paused, reload: read,
+    busy, creditsBusy, clearNotice: () => setNotice(null) };
 }
