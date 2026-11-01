@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.fusion_compare_turn_read(p_actor_id uuid, p_co
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE fc fusion_compares; t turns; closed boolean; cols jsonb;
+DECLARE fc fusion_compares; t turns; closed boolean; paid boolean; cols jsonb;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_actor_id AND status = 'active' AND is_deleted::text = 'false') THEN
     RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
@@ -19,6 +19,9 @@ BEGIN
       AND content_deleted_at IS NULL AND erased_at IS NULL) THEN RETURN NULL; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = fc.turn_id;
   closed := t.state = 'closed' AND t.settlement IS DISTINCT FROM 'pending';
+  -- A turn closed with nothing charged (refunded in full: failed, or no column delivered) shows no column cost either, whatever
+  -- the receipts say: the columns follow the turn's own settlement, never a recomputation from the receipts alone.
+  paid := closed AND coalesce(t.charged_credits, 0) > 0;
   SELECT coalesce(jsonb_agg(col ORDER BY idx), '[]'::jsonb) INTO cols FROM (
     SELECT i.idx, jsonb_build_object('column', i.idx, 'runId', coalesce(c.seq::text, i.idx::text), 'modelId', m.model_id,
       'body', CASE WHEN c.answer_verdict = 'usable' THEN o.body END,
@@ -26,9 +29,9 @@ BEGIN
           'reservedCredits', 0, 'chargedCredits', 0, 'netChargedCredits', 0)
         ELSE jsonb_build_object('closed', closed, 'state', CASE WHEN closed THEN 'settled' ELSE 'held' END,
           'reservedCredits', ceil((t.policy->>'q')::numeric * c.upper_usd * c.multiplier)::integer,
-          'chargedCredits', CASE WHEN closed AND c.status = 'ok' AND c.answer_verdict = 'usable'
+          'chargedCredits', CASE WHEN paid AND c.status = 'ok' AND c.answer_verdict = 'usable'
             THEN ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)::integer ELSE 0 END,
-          'netChargedCredits', CASE WHEN closed AND c.status = 'ok' AND c.answer_verdict = 'usable'
+          'netChargedCredits', CASE WHEN paid AND c.status = 'ok' AND c.answer_verdict = 'usable'
             THEN ceil((t.policy->>'q')::numeric * c.nominal_usd * c.multiplier)::integer ELSE 0 END) END,
       'call', CASE WHEN c.seq IS NULL THEN NULL ELSE jsonb_build_object('callId', c.seq, 'state', c.status, 'dispatched', true,
         'settled', c.settled_at IS NOT NULL,
