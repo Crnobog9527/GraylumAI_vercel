@@ -14,6 +14,7 @@ const REFUSED: Record<string, string> = {
   TURN_RATE_LIMITED: '发送太频繁，这条消息没有发送。请稍后再试。',
   TURN_NEW_CALLS_PAUSED: '服务暂时暂停了新请求，这条消息没有发送，也没有扣费。',
   TURN_LIMIT_UNAVAILABLE: '暂时无法确认用量，这条消息没有发送，也没有扣费。请稍后再试。',
+  STOP_LOSS_REACHED: '今天服务的用量已达上限，这条消息没有发送，也没有扣费。请稍后再试。',
   TURN_SESSION_BUSY: '这个对话还有一轮回复没结束，请等它完成后再发送。',
   TURN_INPUT_TOO_LARGE: '这条消息太长，超过了模型的输入上限。请缩短后再发送。',
   TURN_CORE_DISABLED: '对话服务正在切换，请刷新页面后再试。',
