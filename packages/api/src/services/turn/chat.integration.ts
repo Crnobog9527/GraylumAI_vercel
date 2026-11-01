@@ -281,7 +281,7 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: the balance is held against the start threshold
   const policy = (await db.query('select policy from turns where actor_id=$1', [f.actor])).rows[0].policy;
   expect(policy.minCredits).toBe(24);
   expect(policy.gCredits).toBeLessThan(24);
-  expect(out.events[0]).toMatchObject({ reservedCredits: policy.gCredits });
+  expect(out.events[0]).toMatchObject({ reservedCredits: policy.holdCredits });
   const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   expect(result.settlement).toBe('done');
   expect(result.chargedCredits).toBeLessThanOrEqual(policy.gCredits);

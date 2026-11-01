@@ -40,9 +40,10 @@ export async function mentorActor(client, { accountBound }) {
 }
 
 // `between(seq)` runs where the model call is (the load run waits there); the scenario passes nothing.
-export async function mentorTurn(call, { actor, source }, { accountBound, research = null, between = async () => {} }) {
+export async function mentorTurn(call, { actor, source }, { accountBound, research = null, holdCredits = null, between = async () => {} }) {
   await call('mentor_turn_prepare', [actor, source.session, true, null]);
-  const policy = { q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30, historyItems: 100, inputBytes: 1000,
+  const policy = { ...(holdCredits ? { holdCredits } : {}), q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30,
+    historyItems: 100, inputBytes: 1000,
     limits: { model: 3, paidTools: 0, freeTools: 1 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
     mentor: { moduleId: source.module, stepId: 's', sourceChecked: accountBound } };
   const { turnId } = await call('turn_open', [actor, source.session, randomUUID(), 'mentor', JSON.stringify(policy)]);
@@ -59,12 +60,12 @@ export async function mentorTurn(call, { actor, source }, { accountBound, resear
       ...(research ? { research: researchJournal(research.operations, research.bytes) } : {}) })]);
 }
 
-export const mentorScenario = ({ name, accountBound, research = null }) => ({
+export const mentorScenario = ({ name, accountBound, research = null, holdCredits = null }) => ({
   name, path: 'new',
   tables: ['turns', 'turn_calls', 'session_messages', 'runtime_sessions', 'profiles', 'credit_transactions', 'opc_drafts', 'artifact_rounds'],
   async setup({ client }) {
     await mentorFixtures(client);
     return mentorActor(client, { accountBound });
   },
-  async run({ call, state }) { await mentorTurn(call, state, { accountBound, research }); },
+  async run({ call, state }) { await mentorTurn(call, state, { accountBound, research, holdCredits }); },
 });

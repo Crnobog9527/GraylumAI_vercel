@@ -390,11 +390,12 @@ it('RUNTIME: CORE-PATH-V2 V2-5: the one-switch pause refuses before anything ope
 
 it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start pauses the turn (waiting for credits), never closes it', async () => {
   const f = await setup();
-  // The freeze capped by the balance, made deterministic: while the reply streams, this turn's freeze is set to nothing left, so
-  // the organizer's turn_call_begin finds the remaining freeze below min(G_org, L) and pauses the turn.
+  // The balance run out, made deterministic: while the reply streams, this turn's freeze and the balance are set to nothing left, so
+  // the organizer's turn_call_begin has nothing to top up from, finds the freeze below min(G_org, L) and pauses the turn.
   const t = transport(async (body, n) => {
     if (body.model === ORGANIZER) return organized('gen-org-' + n, patch('Sell coffee to students'));
     await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+    await db.query('update profiles set credits=0 where id=$1', [f.actor]); // nothing left to top up from (Owner 11-01)
     return prose('gen-reply-' + n, 'Good. Who buys it?');
   });
   const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
@@ -410,11 +411,13 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume at the organizer keeps the reply: it i
   const t = transport(async (body, n) => {
     if (body.model === ORGANIZER) return organized('gen-org-' + n, patch('Sell coffee to students'));
     await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+    await db.query('update profiles set credits=0 where id=$1', [f.actor]); // nothing left to top up from (Owner 11-01)
     return prose('gen-reply-' + n, 'Good. Who buys it?');
   });
   await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
   const { id } = (await db.query("select id::int id from turns where actor_id=$1 and state='paused'", [f.actor])).rows[0];
   const before = await db.query('select sum(charged_credits) c from turns where actor_id=$1', [f.actor]);
+  await db.query('update profiles set credits=credits+1000 where id=$1', [f.actor]);
   const out = await turn(f, { text: 'ignored: the paused turn kept what was asked', transport: t.fn, resumeOf: id });
   expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
   expect(t.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);

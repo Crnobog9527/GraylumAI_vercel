@@ -210,6 +210,7 @@ try {
   sql(read('packages/db/migrations/0416_db_rw_a_shared_row_locks.sql')); // DB-RW-A removes shared row locks from claim, admit and the permission chain
   sql(read('packages/db/migrations/0449_core_path_v2_topic_turn.sql')); // V2-10b runtime_admit refuses a request the turn path holds
   sql(read('packages/db/migrations/0450_core_path_v2_work_item_content.sql')); // V2-10b C2 rewrites what 0449 replays (content_erasure_*)
+  sql(read('packages/db/migrations/0451_core_path_v2_hold_top_up.sql')); // the hold top-up rewrites turn_open, which 0449 replays
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

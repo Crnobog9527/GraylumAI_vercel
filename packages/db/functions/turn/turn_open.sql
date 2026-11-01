@@ -35,7 +35,11 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits'] THEN
+    -- holdCredits: only a chat or mentor turn freezes less than G and tops up (turn_call_begin); a fixed-price kind keeps H = G.
+    OR (p_policy ? 'holdCredits' AND (p_kind NOT IN ('chat','mentor') OR jsonb_typeof(p_policy->'holdCredits') <> 'number'
+      OR (p_policy->>'holdCredits')::numeric <> floor((p_policy->>'holdCredits')::numeric)
+      OR (p_policy->>'holdCredits')::numeric < 1 OR (p_policy->>'holdCredits')::numeric > (p_policy->>'gCredits')::numeric))
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits','topUps'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -113,7 +117,8 @@ BEGIN
       PERFORM public.turn_resume_close(p_actor_id, p_resume_of, carried);
     END IF;
 
-    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The balance is read under the
+    -- 4. Credits: H = min(the first freeze, available), the first freeze being G_turn, or one call's bound where the turn tops up
+    -- (Owner 11-01: "选 A 补冻"); below the start threshold the turn does not open. The balance is read under the
     -- account lock taken first: two sessions of one account in different stop-loss buckets never size H on the same balance.
     -- The account is checked again here (same lock) before anything is frozen.
     SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
@@ -123,7 +128,7 @@ BEGIN
     END IF;
     -- The freeze covers the carried credits too (the continuation settles them).
     IF p_kind = 'report' THEN PERFORM public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
-    g := (p_policy->>'gCredits')::int + carried;
+    g := coalesce((p_policy->>'holdCredits')::int, (p_policy->>'gCredits')::int) + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
     -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
