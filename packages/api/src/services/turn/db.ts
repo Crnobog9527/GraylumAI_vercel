@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { resumeRead } from './resume';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -115,6 +116,12 @@ export function turnDatabase(clients: TurnClients) {
     stop: (a: { actorId: string; turnId: number; confirmed: boolean; stopAt: number | null }) =>
       call(w, 'turn_stop', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_confirmed: a.confirmed, p_stop_at: a.stopAt }, stopped),
     /** A report turn of a round (newest, or by id), with its saved text. */
+    /** At a pause, once: what the user asked, for the resume (resume.ts). */
+    pauseSave: (a: { actorId: string; turnId: number; input: Record<string, unknown> }) =>
+      call(clients.write, 'turn_pause_save', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_input: a.input }, z.boolean()),
+    /** What a resume replays (resume.ts): read once before it opens. */
+    resumeRead: (a: { actorId: string; sessionId: string; turnId: number }) =>
+      call(clients.read, 'turn_resume_read', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_turn_id: a.turnId }, resumeRead),
     reportRead: (a: { actorId: string; sessionId: string; roundId: string | null; turnId: number | null }) =>
       call(clients.read, 'turn_report_read', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_round_id: a.roundId,
         p_turn_id: a.turnId }, reportTurn.nullable()),

@@ -62,6 +62,15 @@ describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
     expect(body).not.toContain('relation');
   });
 
+  it('carries what the composer chose for the message, and refuses a malformed reference (V2-10)', async () => {
+    run.mockResolvedValue(undefined);
+    const documentId = '00000000-0000-4000-8000-000000000009', moduleId = '00000000-0000-4000-8000-000000000008';
+    const references = [{ kind: 'library_document', documentId, version: 2 }];
+    await (await handleTurnRequest(post({ ...valid, moduleId, references }), deps())).text();
+    expect(run.mock.calls[0]![1]).toMatchObject({ chosen: { moduleId, references } });
+    expect((await handleTurnRequest(post({ ...valid, references: [{ documentId }] }), deps())).status).toBe(400);
+  });
+
   it('keeps the turn running to its close after the client goes away', async () => {
     let finish!: () => void, closed = false;
     run.mockImplementation(async (_deps, _input, emit) => {

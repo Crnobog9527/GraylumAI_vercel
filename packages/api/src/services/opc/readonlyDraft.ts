@@ -83,3 +83,16 @@ export async function draftReadResponse(raw: any, rpc: (name: string, args: Reco
   }
   return withStepConfirmation(await withReportFlag(raw, rpc));
 }
+
+type Clients = { auth: { getUser(): Promise<{ data: { user: { id: string } | null } }> } };
+/** CORE-PATH-V2 V2-10: with the draft's module, which the page names on a mentor turn. A read-only draft has no turn. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the RPC result is the untyped opc_query projection.
+export async function draftReadWithModule(raw: any, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>, user: Clients,
+  admin: { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: { moduleId?: string } | null }> }) {
+  const response = await draftReadResponse(raw, rpc);
+  if (raw.conversationDeleted) return { ...response, moduleId: null };
+  const actor = (await user.auth.getUser()).data.user?.id;
+  const resolved = actor ? await admin.rpc('artifact_query', { p_actor_id: actor, p_action: 'resolve', p_project_id: raw.projectId,
+    p_round_id: raw.roundId }) : null;
+  return { ...response, moduleId: resolved?.data?.moduleId ?? null };
+}
