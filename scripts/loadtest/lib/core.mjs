@@ -42,7 +42,11 @@ export function parseSse(text) {
 export function outcomeOf(events) {
   const error = events.find(e => e.type === 'error');
   const result = events.find(e => e.type === 'result');
-  return { ok: Boolean(result) && !error, code: error?.code ?? (result ? null : 'NO_RESULT'), replay: Boolean(events.find(e => e.type === 'opened')?.replay) };
+  // A mentor close whose organization was refused or conflicted still sends `result`; it is not a successful organized turn.
+  const kind = result && result.kindResult ? JSON.stringify(result.kindResult) : '';
+  const refused = /invalid_output|"conflict"/.test(kind) ? 'ORGANIZER_NOT_APPLIED' : null;
+  return { ok: Boolean(result) && !error && !refused, code: error?.code ?? refused ?? (result ? null : 'NO_RESULT'),
+    replay: Boolean(events.find(e => e.type === 'opened')?.replay) };
 }
 
 // records: [{ op: 'chat.turn' | 'coach.turn' | ..., ok, ms, firstByteMs?, code? }]. Only turn operations count as turns.

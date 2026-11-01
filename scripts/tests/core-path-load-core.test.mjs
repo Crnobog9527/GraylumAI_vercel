@@ -127,3 +127,10 @@ test('no wait samples is unknown, never a pass', () => {
   const lock = checks.find(c => c.name === 'LWLock:LockManager %');
   assert.deepEqual([lock.ok, lock.known], [false, false]);
 });
+
+test('a mentor result whose organization was refused or conflicted is a failed turn', () => {
+  const result = kindResult => parseSse(`event: result\ndata: ${JSON.stringify({ turnId: 1, kindResult })}\n\n`);
+  assert.equal(outcomeOf(result({ result: 'applied' })).ok, true);
+  assert.deepEqual([outcomeOf(result({ result: 'invalid_output' })).ok, outcomeOf(result({ result: 'invalid_output' })).code], [false, 'ORGANIZER_NOT_APPLIED']);
+  assert.equal(outcomeOf(result({ result: 'conflict' })).code, 'ORGANIZER_NOT_APPLIED');
+});

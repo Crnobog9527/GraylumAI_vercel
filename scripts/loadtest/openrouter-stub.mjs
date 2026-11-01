@@ -5,6 +5,8 @@
 //                                   A call whose tools include `read_skill_file` and that carries no tool result yet answers with
 //                                   that tool call (the coach's first call); the call that follows a tool result is the shorter
 //                                   `secondChunks` reply (~4 s); every other call is the full `chunks` reply (~6 s).
+//                                   The mentor's organizer call (its input carries "Primary assistant reply:") answers a valid empty
+//                                   organization object, so the turn's close applies it instead of recording invalid_output.
 //   GET  /api/v1/generation?id=     the receipt of a finished generation (ids start with `gen-load-`).
 //   POST /api/alpha/decisions       the positioning gate's answer ("own account social media operations", low).
 // Usage figures stay far below the frozen quote (prompt = request bytes / 8, cost = 0.9 x the call's own `provider.max_price`
@@ -14,6 +16,8 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const REQUEST_LIMIT = 2_000_000;
+export const ORGANIZER_MARK = 'Primary assistant reply:'; // organizerInput() in packages/api/src/services/turn/mentorPrompt.ts
+export const ORGANIZER_REPLY = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
 
@@ -65,9 +69,13 @@ export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 90, s
     const hadToolResult = messages.slice(lastUser + 1).some(message => message?.role === 'tool');
     const skillTool = tools.find(tool => tool?.function?.name === toolName);
     const callTool = Boolean(skillTool) && !hadToolResult;
-    const count = hadToolResult ? secondChunks : chunks;
+    const lastText = String(messages[lastUser]?.content ?? '');
+    const organizer = !skillTool && lastText.includes(ORGANIZER_MARK);
+    const pieces = organizer ? ORGANIZER_REPLY.match(/.{1,6}/g) : null;
+    const count = organizer ? pieces.length : hadToolResult ? secondChunks : chunks;
     const toolArguments = callTool ? JSON.stringify(argumentsFor(skillTool)) : '';
-    const completionTokens = callTool ? Math.max(1, toolArguments.length) : count * 2; // '测试' = 2 characters per chunk
+    // '测试' = 2 characters per chunk
+    const completionTokens = callTool ? Math.max(1, toolArguments.length) : organizer ? ORGANIZER_REPLY.length : count * 2;
     const promptTokens = Math.max(1, Math.floor(Buffer.byteLength(raw) / 8));
     const price = body.provider?.max_price ?? {};
     const cost = Number((((promptTokens * (Number(price.prompt) || 0) + completionTokens * (Number(price.completion) || 0)) / 1e6) * 0.9).toFixed(8));
@@ -82,7 +90,7 @@ export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 90, s
       await sleep(firstByteMs + (callTool ? 0 : count * intervalMs));
       generations.set(id, receipt);
       const message = callTool ? { role: 'assistant', content: null, tool_calls: [{ id: toolCall.id, type: 'function', function: toolCall.function }] }
-        : { role: 'assistant', content: '测试'.repeat(count) };
+        : { role: 'assistant', content: organizer ? ORGANIZER_REPLY : '测试'.repeat(count) };
       res.writeHead(200, { 'content-type': 'application/json', 'x-generation-id': id });
       res.end(JSON.stringify({ id, model, object: 'chat.completion', created, choices: [{ index: 0, finish_reason: receipt.finish_reason, message }], usage }));
       return;
@@ -95,7 +103,7 @@ export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 90, s
     res.write(': OPENROUTER PROCESSING\n\n');
     if (callTool) res.write(frame([{ index: 0, delta: { role: 'assistant', content: null, tool_calls: [toolCall] }, finish_reason: null }]));
     else for (let i = 0; i < count && !res.destroyed; i++) {
-      res.write(frame([{ index: 0, delta: i === 0 ? { role: 'assistant', content: '测试' } : { content: '测试' }, finish_reason: null }]));
+      res.write(frame([{ index: 0, delta: i === 0 ? { role: 'assistant', content: pieces?.[i] ?? '测试' } : { content: pieces?.[i] ?? '测试' }, finish_reason: null }]));
       await sleep(Math.max(0, start + firstByteMs + (i + 1) * intervalMs - Date.now()));
     }
     if (res.destroyed) return;
