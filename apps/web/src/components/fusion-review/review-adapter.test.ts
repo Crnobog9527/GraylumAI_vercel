@@ -69,6 +69,8 @@ describe('fixed-price charge line (0294)', () => {
     ({ credits: 1500, state, chargedCredits, reason });
   it('says what the review actually cost', () => {
     expect(feeText(fee('charged', 1500, 'revised'))).toBe('本次评审实际扣了 1,500 积分。');
+    // The turn path reports the close kind: a delivered revision is 'completed' (staging 2026-11-01 showed it as ended midway).
+    expect(feeText(fee('charged', 1500, 'completed'))).toBe('本次评审实际扣了 1,500 积分。');
     expect(feeText(fee('refunded', 0, 'incomplete'))).toBe('没有生成修订稿，1,500 积分已全额退回。');
     expect(feeText(fee('charged', 120, 'stopped'))).toBe('评审中途结束，按已经发出的部分实际扣了 120 积分（本次评审价格 1,500 积分）。');
     expect(feeText(fee('held', null, null))).toMatch(/还在结算/);
