@@ -21,6 +21,12 @@ BEGIN
   RETURN jsonb_build_object('kind', 'unavailable', 'reason', 'source_deleted');
  END IF;
 
+ -- A revoked draft or an erased version is dropped at every read, not only at turn start: the list from turn_open can be minutes old.
+ -- (The deeper chain, evidence and result-link tombstones, is the check before turn_open; the next turn sees any change there.)
+ SELECT coalesce(array_agg(v.id), '{}') INTO p_allowed FROM artifact_versions v
+  WHERE v.id = ANY(p_allowed) AND v.erased_at IS NULL
+   AND NOT EXISTS (SELECT 1 FROM opc_drafts d JOIN bill2_drafts bd ON bd.id = d.draft_id AND bd.actor_id = p_actor_id
+    WHERE d.actor_id = p_actor_id AND d.project_id = v.project_id AND bd.revoked);
  -- The same directory as runtime_workspace_source, over the versions the check before turn_open allowed.
  SELECT coalesce(jsonb_agg(x.entry ORDER BY x.rank, x.id), '[]') INTO entries FROM (
   SELECT 0 rank, b.id::text id, jsonb_build_object('id', b.id, 'kind', 'positioning', 'name', b.name, 'confirmedAt', v.created_at,

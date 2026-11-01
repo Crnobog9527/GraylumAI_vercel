@@ -4339,7 +4339,7 @@
   "fn:voice_scrub_touch(uuid)": "51a77d7e1001",
   "fn:voice_state(uuid)": "663842a46bea",
   "fn:voice_version_view(voice_profile_versions)": "51d7b86fe9ec",
-  "fn:workspace_turn_read(uuid,uuid,text,uuid[])": "10af9cb9069b",
+  "fn:workspace_turn_read(uuid,uuid,text,uuid[])": "9c4c44bad6ae",
   "fnacl:account_erasure_activity_safe(text,text,timestamp with time zone,xid,xid,timestamp with time zone)": "341a58cafc38",
   "fnacl:account_erasure_assert_closed(uuid)": "341a58cafc38",
   "fnacl:account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean,boolean,boolean)": "6d080cde71ba",

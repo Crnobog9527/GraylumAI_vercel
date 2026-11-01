@@ -333,7 +333,10 @@ it('RUNTIME: CORE-PATH-V2 V2-6 B: read_source reads the workspace and own posts 
   expect(await free(other.actor, f.session, main.business, [main.version])).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
   // A version the check before turn_open left out is not read, even by its owner.
   expect(await free(f.actor, f.session, main.business, [])).toEqual({ kind: 'unavailable' });
+  // Revoked after the list was made: the free read itself refuses it (the list is not a lasting permission).
   await db.query('update bill2_drafts set revoked=true where id=$1', [main.draft]);
+  expect(await free(f.actor, f.session, main.business, [main.version])).toEqual({ kind: 'unavailable' });
+  expect(await free(f.actor, f.session, '', [main.version])).toEqual({ kind: 'workspace_index', entries: [] });
   expect(await sources(f.actor)).toEqual([]);
 
   // Own posts: another account's rows never come back, however it asks.
