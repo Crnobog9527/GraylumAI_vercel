@@ -26,6 +26,7 @@ import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '..
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
+import { turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
   topicTurnShows } from './topic-notices';
@@ -146,16 +147,15 @@ function TopicWorkspaceContent() {
     { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), refetchInterval: 30000 });
   const sessionId = read.data && !read.data.conversationDeleted && workspace.data?.bound ? workspace.data.sessionId : '';
   const viewPolling = useRuntimeViewPolling();
-  const view = trpc.runtime.view.useQuery({ sessionId }, { enabled: Boolean(sessionId), ...viewPolling.options });
+  const oldView = trpc.runtime.view.useQuery({ sessionId }, { enabled: Boolean(sessionId), ...viewPolling.options });
+  const turnPath = useTopicTurnPath(sessionId, oldView.data?.executions as unknown[] | undefined);
+  const view = (turnPath.on ? { data: turnPath.data, refetch: turnPath.refetch } : oldView) as unknown as typeof oldView;
   const bind = trpc.opc.consentTopicWorkspace.useMutation();
-  const turn = trpc.opc.topicTurn.useMutation();
-  const execute = trpc.runtime.execute.useMutation();
+  const turn = trpc.opc.topicTurn.useMutation(), execute = trpc.runtime.execute.useMutation();
   const payg = usePaygResume(() => view.refetch());
   const cancel = trpc.runtime.cancel.useMutation();
-  const savePlan = trpc.opc.savePlan.useMutation();
-  const handoff = trpc.opc.handoff.useMutation();
-  const saveDraft = trpc.opc.saveTopicDraft.useMutation();
-  const adoptTopics = trpc.opc.adoptTopics.useMutation();
+  const savePlan = trpc.opc.savePlan.useMutation(), handoff = trpc.opc.handoff.useMutation();
+  const saveDraft = trpc.opc.saveTopicDraft.useMutation(), adoptTopics = trpc.opc.adoptTopics.useMutation();
   const queryUtils = trpc.useUtils();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
@@ -233,18 +233,10 @@ function TopicWorkspaceContent() {
    * account. The list carries the authoritative current revision.
    */
   const accountList = trpc.opc.list.useQuery();
-  const accounts = (accountList.data?.accounts ?? []) as Array<{
-    platform: string; account: string; revision: number;
-  }>;
+  const accounts = (accountList.data?.accounts ?? []) as Array<{ platform: string; account: string; revision: number }>;
 
-  const executions = view.data?.executions as
-    | Array<{
-        executionId: string;
-        state: string;
-        input: string | null; body: string | null; primaryBody: string | null;
-        contentAvailable: boolean; unavailableReason?: string | null;
-      } & PaygViewFields & StopSignals>
-    | undefined;
+  const executions = view.data?.executions as Array<{ executionId: string; state: string; input: string | null; body: string | null;
+    primaryBody: string | null; contentAvailable: boolean; unavailableReason?: string | null } & PaygViewFields & StopSignals> | undefined;
 
   const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
   useEffect(()=>{
@@ -302,6 +294,11 @@ function TopicWorkspaceContent() {
         try {
           if (op.kind === 'chat') {
             setOutgoing({ text: op.request.input });
+            if (turnPath.on) {
+              const id = op.request.requestId; reached = true; setOutgoing(old => old && { ...old, executionId: id });
+              const told = await turnPath.send(op.request, op.candidateAtSend); if (told.notice) setError(told.notice);
+              if (told.keepInput) { setOutgoing(null); back(); } else stored(id, op.request.input);
+            } else {
             const admitted = await turn.mutateAsync(op.request);
             // Q1: the previous organizer answered instead; nothing was stored and the input stays in the box.
             if (!payg.admitted(admitted)) { setOutgoing(null); back(); localStorage.removeItem(storageKey); setPending(null); return; }
@@ -310,6 +307,7 @@ function TopicWorkspaceContent() {
             const outcome = topicTurnOutcome(await execute.mutateAsync({ executionId: admitted.executionId }));
             if (outcome.notice) { setError(outcome.notice); setExplained({ id: admitted.executionId, text: outcome.notice }); }
             if (outcome.keepInput) back(); else stored(op.request.requestId, op.request.input);
+            }
           } else if (op.kind === 'save') {
             const result = await savePlan.mutateAsync(op.request);
             editCandidate(null);
@@ -484,7 +482,8 @@ function TopicWorkspaceContent() {
     ...(error && !topicTurnShows(executions?.at(-1), error) ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
     ...payg.blockedNotices(executions, busy), ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
-  const openTurnNotice = (e: NonNullable<typeof executions>[number]) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
+  const openTurnNotice = (e: NonNullable<typeof executions>[number]) => turnPath.on ? turnRunningNotice(e)
+    : topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
     userStopped: userStopIds(tabSession(), sessionId, [e]).length > 0, stopping: cancel.isPending, explained: topicExplained(explained, e.executionId, error),
     onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
   const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];

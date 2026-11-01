@@ -33,6 +33,8 @@ import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRet
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
+import { planTurnState, readPlanTurn, runPlanTurn, usePlanTurn } from "./plan-turn-path";
+import { turnCodeNotice } from "@/app/(zh-hans)/app/runtime/turn-notices";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
@@ -218,6 +220,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     { draftId, requestId: retainedPlan?.requestId ?? "" },
     { enabled: Boolean(retainedPlan?.requestId) },
   );
+  const retainedTurn = usePlanTurn(read.data?.sessionId, retainedPlan?.requestId);
   /** The bound topic workspace of this draft (the consented entry target). */
   const bindTopic = trpc.opc.consentTopicWorkspace.useMutation();
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
@@ -853,18 +856,21 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * same request can be replayed instead of paying for a second call.
    */
   async function runPlanRequest(request: PlanRequest, sourceRoundId: string | null = d.roundId) {
-      const state = await utils.opc.planRequestState.fetch({ draftId, requestId: request.requestId });
-      if (!state.executionId && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
+      // V2-10b: a request with a turn stays there; a new one takes the turn path when it is on; an old one stays where it is.
+      const ids = { sessionId: read.data?.sessionId as string, moduleId: read.data?.moduleId as string };
+      const turned = await readPlanTurn(ids.sessionId, request.requestId).catch(() => null);
+      const state = turned ? { executionId: null, state: null }
+        : await utils.opc.planRequestState.fetch({ draftId, requestId: request.requestId });
+      if (!turned && !state.executionId && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
         setNotice("原请求属于旧定位轮次，服务端尚无可恢复执行；已保留记录，没有按新定位生成。请核对后另行选择新请求。");
         throw new Error("OPC_OLD_REQUEST_NOT_ADMITTED");
       }
-      const prepared = state.executionId ? { executionId: state.executionId }
+      const onTurn = Boolean(turned) || (turnPath.on && !state.executionId);
+      const prepared = onTurn ? null : state.executionId ? { executionId: state.executionId }
         : await prepareStep.mutateAsync(request);
-      if (state.state !== "completed") await execute.mutateAsync({ executionId: prepared.executionId });
-      const candidate = await utils.opc.planResult.fetch({
-        draftId,
-        executionId: prepared.executionId,
-      });
+      if (prepared && state.state !== "completed") await execute.mutateAsync({ executionId: prepared.executionId });
+      const candidate = prepared ? await utils.opc.planResult.fetch({ draftId, executionId: prepared.executionId })
+        : await runPlanTurn(request, ids, turned).catch(cause => { setNotice(turnCodeNotice((cause as Error).message).text); throw cause; });
       if (!candidate.valid) {
         // This execution completed and returned a body that cannot be used as
         // a plan. It is safe to create a new request after the user edits the
@@ -947,14 +953,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
   /** The server's identity/lifecycle projection for the retained request. */
-  const retainedStateData = retainedState.data as
-    | {
-        admitted?: boolean;
-        state?: string | null;
-        hasResult?: boolean;
-        materialRevoked?: boolean;
-      }
-    | undefined;
+  const retainedStateData = (retainedTurn ? planTurnState(retainedTurn) : retainedState.data) as
+    { admitted?: boolean; state?: string | null; hasResult?: boolean; materialRevoked?: boolean } | undefined;
   if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d) return <main className="p-6" role="alert">
     {read.error?.data?.code==="NOT_FOUND"?"找不到这份定位，它可能已被删除。":"无法读取这份定位，请检查登录和访问权限。"}<Link href="/app/positioning">返回定位列表</Link></main>;

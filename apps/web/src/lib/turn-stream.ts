@@ -33,10 +33,10 @@ export function turnEventDecoder(onEvent: (event: TurnEvent) => void) {
 
 /** Sends one turn and hands each event to `onEvent`. A refused request names its fixed code; a dropped stream is `lost`. */
 export async function runTurn(request: unknown, onEvent: (event: TurnEvent) => void,
-  deps: { fetch: typeof fetch; signal?: AbortSignal } = { fetch: (...args) => globalThis.fetch(...args) }): Promise<TurnOutcome> {
+  deps: { fetch: typeof fetch; signal?: AbortSignal; url?: string } = { fetch: (...args) => globalThis.fetch(...args) }): Promise<TurnOutcome> {
   let last: Extract<TurnEvent, { type: 'result' | 'error' }> | null = null;
   try {
-    const response = await deps.fetch('/api/turn', { method: 'POST', headers: { 'content-type': 'application/json' },
+    const response = await deps.fetch(deps.url ?? '/api/turn', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(request), ...(deps.signal ? { signal: deps.signal } : {}) });
     if (!response.ok || !response.body) {
       const body = await response.json().catch(() => null) as { error?: string } | null;

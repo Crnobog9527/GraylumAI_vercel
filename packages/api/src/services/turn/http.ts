@@ -10,6 +10,7 @@ import { reportTurnRequest, runReportTurn } from './report';
 import { runMentorTurn } from './mentor';
 import { runResumedTurn } from './resumeTurn';
 import { mentorAnswer } from './mentorInput';
+import { planTurnRequest, runPlanTurn } from './plan';
 import { eventStream, type StreamEvent } from './sse';
 import { swallow } from '../../lib/swallow';
 
@@ -32,6 +33,7 @@ export const turnRequest = z.discriminatedUnion('kind', [
   // V2-10: continue a turn paused for credits. What the user asked was saved at the pause, so any device can send this.
   z.object({ kind: z.literal('resume'), ...common, resumeOf: z.number().int().positive() }).strict(),
   reportTurnRequest,
+  planTurnRequest,
   // V2-7b: as the old compare request. Everything else is read and checked on the server (compare.ts).
   z.object({ kind: z.literal('compare'), ...common, question: z.string().trim().min(1).max(20_000),
     modelIds: z.array(z.string().uuid()).min(1).max(8), skill: compareSkillInput.optional() }).strict(),
@@ -90,6 +92,8 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
       projectId: input.projectId, roundId: input.roundId, acceptedCredits: input.acceptedCredits };
     return eventStream(emit => runReportTurn(deps.chat, report, emit, gone.signal), () => gone.abort());
   }
+  if (input.kind === 'plan') return eventStream(emit => runPlanTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId,
+    moduleId: input.moduleId, stepId: input.stepId, text: input.text }, emit));
   if (input.kind === 'compare') {
     const { sessionId, question, skill } = input;
     return eventStream(emit => runCompareTurn(deps.chat, { actorId, sessionId, requestId: input.requestId, modelIds: input.modelIds,

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-/** The first-week plan's own rules. The old path repeats them in service.ts until V2-12 removes it. */
+/** The first-week plan's own rules, on both paths until V2-12 removes the old one. */
 export const PLAN_INSTRUCTIONS = "Create a first-week content plan candidate from the confirmed positioning version and the confirmed target " +
   "platform/account/time constraints given below. Return only a JSON array (no code fence). Each item has id (UUID), platform (lowercase " +
   "platform slug), account (lowercase account handle), title, brief, day (YYYY-MM-DD). The user is not required to author topic rows: you " +
