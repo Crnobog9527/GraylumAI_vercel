@@ -7,23 +7,24 @@
 import assert from 'node:assert/strict';
 import { buildSnapshot, localDb, snapshotFromEnv } from '../runtime-view-perf/local-db.mjs';
 
-// One hash over every function body, column, index, constraint and trigger outside the system schemas, plus the row count of every table.
-const FINGERPRINT = `
-  select md5(string_agg(x, E'\\n' order by x)) from (
+// TOAST tables are skipped: their names carry object IDs, which differ between any two builds.
+// Every function body (hashed), column, index, constraint and trigger outside the system schemas, plus the row count of every table, one line each.
+const PARTS = `
+  select x from (
     select 'f ' || p.oid::regprocedure || ' ' || md5(pg_get_functiondef(p.oid)) as x from pg_proc p
-      join pg_namespace n on n.oid = p.pronamespace where n.nspname not in ('pg_catalog', 'information_schema') and p.prokind in ('f', 'p')
+      join pg_namespace n on n.oid = p.pronamespace where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname not like 'pg_toast%' and p.prokind in ('f', 'p')
     union all select 'c ' || c.oid::regclass || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod) from pg_attribute a
       join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname not in ('pg_catalog', 'information_schema') and c.relkind in ('r', 'v', 'm') and a.attnum > 0 and not a.attisdropped
+      where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname not like 'pg_toast%' and c.relkind in ('r', 'v', 'm') and a.attnum > 0 and not a.attisdropped
     union all select 'i ' || i.indexrelid::regclass || ' ' || pg_get_indexdef(i.indexrelid) from pg_index i
-      join pg_class c on c.oid = i.indrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname not in ('pg_catalog', 'information_schema')
+      join pg_class c on c.oid = i.indrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname not like 'pg_toast%'
     union all select 'k ' || k.conrelid::regclass || ' ' || k.conname || ' ' || pg_get_constraintdef(k.oid) from pg_constraint k
-      join pg_namespace n on n.oid = k.connamespace where n.nspname not in ('pg_catalog', 'information_schema')
+      join pg_namespace n on n.oid = k.connamespace where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname not like 'pg_toast%'
     union all select 't ' || t.tgrelid::regclass || ' ' || t.tgname from pg_trigger t where not t.tgisinternal
     union all select 'r ' || c.oid::regclass || ' ' || (xpath('/row/n/text()', query_to_xml(format('select count(*) as n from %s', c.oid::regclass), false, true, '')))[1]::text
       from pg_class c join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname not like 'pg_toast%' and c.relkind = 'r'
-  ) parts`;
+      where n.nspname not in ('pg_catalog', 'information_schema') and n.nspname not like 'pg_toast%' and n.nspname not like 'pg_toast%' and c.relkind = 'r'
+  ) parts order by x`;
 
 const own = snapshotFromEnv() ? null : await buildSnapshot();
 const snapshot = snapshotFromEnv() ?? own;
@@ -38,12 +39,14 @@ try {
 
   const fresh = await start({ snapshot: null }); // the full replay of the repository files, for comparison
   assert.equal(fresh.fromSnapshot, false);
-  const hash = async db => (await db.client.query(FINGERPRINT)).rows[0].md5;
-  const [snapshotHash, freshHash] = [await hash(first), await hash(fresh)];
-  assert.match(snapshotHash, /^[0-9a-f]{32}$/, 'the catalog hash must exist');
-  assert.equal(snapshotHash, freshHash, 'structure and seed rows of the snapshot differ from a fresh build');
+  const parts = async db => (await db.client.query(PARTS)).rows.map(row => row.x);
+  const [snapshotParts, freshParts] = [await parts(first), await parts(fresh)];
+  assert.ok(snapshotParts.length > 1000, 'the catalog listing must exist');
+  const onlyIn = (list, other) => list.filter(line => !other.includes(line)).slice(0, 15);
+  assert.deepEqual([onlyIn(snapshotParts, freshParts), onlyIn(freshParts, snapshotParts)], [[], []],
+    'structure and seed rows of the snapshot differ from a fresh build (first lines only in the snapshot, then only in the fresh build)');
   assert.equal(first.build.passed, fresh.build.passed);
-  report.checks.push(`snapshot and fresh build agree on ${first.build.passed} applied files and on the catalog hash`);
+  report.checks.push(`snapshot and fresh build agree on ${first.build.passed} applied files and on all ${snapshotParts.length} catalog and row-count lines`);
 
   const writes = ["create table isolation_probe(v int)", "insert into isolation_probe values (1)", "create role isolation_probe_role",
     "alter database perf set statement_timeout = '13s'", "alter system set work_mem = '7MB'", "select pg_reload_conf()"];
