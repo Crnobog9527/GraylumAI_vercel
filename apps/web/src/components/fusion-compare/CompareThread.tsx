@@ -58,7 +58,7 @@ export function useCompareThread(sessionId: string | null) {
     : [...old, { compareId, state: 'running', createdAt: new Date().toISOString(), ...(turn ? { turn } : {}) }]);
   // `loaded`: the list has been answered (or failed for good): until then it is not yet known which cancelled turns are adopted answers.
   const loaded = !sessionId || (list.isFetched && turnList.isFetched);
-  return { cards, names, adoptedExecutions, add, loaded, refresh: () => Promise.all([list.refetch(), turnList.refetch()]) };
+  return { cards, names, adoptedExecutions, add, loaded, refresh: async (): Promise<void> => { await Promise.all([list.refetch(), turnList.refetch()]); } };
 }
 
 /** One card per compare, oldest first; `onAdopted` lets the page re-read its history, `onQuote` prefills the composer. */
