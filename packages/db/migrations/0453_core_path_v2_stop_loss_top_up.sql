@@ -9,8 +9,9 @@
 -- turns.reserved_usd is now what the turn reserved so far: turn_close and turn_resume_close release it unchanged, since every call was covered.
 -- Only when the reservation moves: the limit check itself is the same. Fixed-price kinds and plan carry no holdUsd.
 -- Compatible: a turn without holdUsd behaves as before (old code, turns open across the apply). uFastUsd must be raised before this applies,
--- and the Node code sending holdUsd comes after it. Repeatable: CREATE OR REPLACE. Recovery: stop sending holdUsd (Node), then re-apply 0451's
--- two functions; a turn already open with holdUsd then simply stops topping up and its close still releases what it reserved.
+-- and the Node code sending holdUsd comes after it. Repeatable: CREATE OR REPLACE. Recovery: stop sending holdUsd (Node); keep these functions until no
+-- turn with holdUsd is left unclosed (state <> 'closed'; running ones end or are interrupted within minutes, paused ones expire within 24 hours), since
+-- 0451's begin would let them call on with no reservation; only then re-apply 0451's two functions.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
