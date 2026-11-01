@@ -37,6 +37,8 @@ export function plan({ series, stage, mix = MIX }) {
   return stages.map((vus, i) => ({ index: i + 1, vus, kinds: kindsOf(vus, mix) }));
 }
 
+export const hasTextDelta = text => parseSse(text).some(e => e.type === 'text' && typeof e.delta === 'string' && e.delta.length > 0);
+
 async function turnRequest(base, account, body, started) {
   const response = await fetch(`${base}/api/turn`, { method: 'POST', headers: { authorization: `Bearer ${account.token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body) });
@@ -47,8 +49,9 @@ async function turnRequest(base, account, body, started) {
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (firstByteMs === null && value?.length) firstByteMs = Date.now() - started;
     text += decoder.decode(value, { stream: true });
+    // First-token latency is the first non-empty `text` event (plan 3.1), not the first chunk: `opened` comes before the model is called.
+    if (firstByteMs === null && hasTextDelta(text)) firstByteMs = Date.now() - started;
   }
   const outcome = outcomeOf(parseSse(text));
   return { ok: outcome.ok, code: outcome.code, firstByteMs };
@@ -79,7 +82,7 @@ export async function runStage({ base, accounts, kinds, record, deadline, stoppe
       const body = kind === 'chat'
         ? { kind: 'chat', sessionId: account.sessionId, requestId: randomUUID(), text: `load round ${n + 1}: how do I start a workplace channel?` }
         : { kind: 'mentor', sessionId: account.sessionId, requestId: randomUUID(), moduleId: account.moduleId, stepId: account.stepId ?? 'step-1',
-          text: `load round ${n + 1}: I train people at work and want customers.`, organizeAfter: false };
+          text: `load round ${n + 1}: I train people at work and want customers.`, organizeAfter: true };
       await timed(vu, `${kind}.turn`, started => turnRequest(base, account, body, started));
       await sleep(thinkMs());
     }

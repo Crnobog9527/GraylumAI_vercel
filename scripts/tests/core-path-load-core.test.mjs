@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { STAGES, THINK_S, kindsOf, thinkMs, percentile, parseSse, outcomeOf, summarizeStage, summarizeWaits, judgeStage, baselineValid,
   capacityWords } from '../loadtest/lib/core.mjs';
-import { assertStaging, shouldAbort, plan } from '../loadtest/core-path-load.mjs';
+import { assertStaging, shouldAbort, plan, hasTextDelta } from '../loadtest/core-path-load.mjs';
 import { assertAllowedDatabase } from '../loadtest/sample-waits.mjs';
 
 test('the stage plan is the one of plan 3.2 and the mix is 5:3:2', () => {
@@ -109,4 +109,12 @@ test('the driver without --go only prints the plan and sends nothing', async () 
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /30 -> 50 -> 75 -> 100 -> 50 -> 100 users/);
   assert.match(r.stdout, /dry run/);
+});
+
+test('first-token latency starts at the first non-empty text event, not at `opened`', () => {
+  const opened = 'event: opened\ndata: {"turnId":1,"replay":false}\n\n';
+  assert.equal(hasTextDelta(opened), false);
+  assert.equal(hasTextDelta(opened + 'event: text\ndata: {"delta":""}\n\n'), false);
+  assert.equal(hasTextDelta(opened + 'event: text\ndata: {"delta":"a"}\n\n'), true);
+  assert.equal(hasTextDelta(opened + 'event: text\ndata: {"del'), false);
 });

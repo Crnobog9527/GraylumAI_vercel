@@ -47,3 +47,15 @@ test('the report states whether k holds, with the failures and the uncertainties
   assert.match(report([level(500, 0.01, 0.1, 2), level(5000, 0.01)]), /turns failed/);
   assert.match(report([level(500, 0.01)]), /at least two levels/);
 });
+
+test('a level with no completed turn is reported, not fatal, and is left out of the arithmetic', async () => {
+  const { report } = await import('../loadtest/extrapolate.mjs');
+  const level = (users, k, turns, failed) => ({ users, rhythm: 'load', k, turns, turnsPerUserMinute: 0.9, statementMsPerTurn: 8, walBytesPerTurn: 1,
+    rowsWrittenPerTurn: 1, failed, cpus: '2', memory: '1g', sharedBuffers: '1GB', pool: 16, waits: { lockManagerPercent: 0, tuplePercent: 0 } });
+  const text = report([level(500, 0.01, 100, 0), level(2000, 0.01, 400, 0), level(5000, null, 0, 900)]);
+  assert.match(text, /5000 users: 900 failed, no completed turn/);
+  assert.match(text, /\| 5000 \| 0 \| 0\.9 \| n\/a \|/);
+  assert.match(text, /holds/);
+  const few = report([level(500, 0.01, 100, 0), level(5000, null, 0, 900)]);
+  assert.match(few, /5000 users: 900 failed/);
+});
