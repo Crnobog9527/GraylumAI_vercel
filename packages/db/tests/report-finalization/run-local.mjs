@@ -49,6 +49,9 @@ try {
  ok(sql(migration));
  assert.deepEqual(snapshot(),finalCatalog,'repeat 0206 preserves complete catalog');
  report.checks.push('0206 applied twice after current staging; complete catalog unchanged');
+ // Replaying 0206 on top of the final chain brings back its seven-argument report_document, which 0300 dropped for the eight-argument one;
+ // with both present the cases below cannot call it without types ("is not unique"). Drop the replayed leftover, as 0300 does.
+ ok(sql('DROP FUNCTION IF EXISTS public.report_document(uuid,uuid,text,uuid,bigint,text,text)'));
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

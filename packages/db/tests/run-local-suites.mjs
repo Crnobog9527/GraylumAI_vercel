@@ -3,7 +3,10 @@
 // PostgreSQL container (packages/db/tests/<dir>/*run-local*.mjs). Every suite found is run, one after
 // another, unless it is listed in local-suites-excluded.json (reason + date; the list may only shrink,
 // see scripts/tests/local-suites.test.mjs). A new suite is therefore in CI the day it is added.
-// Usage: node packages/db/tests/run-local-suites.mjs --ci | --local-only [--list] [--only <dir[,dir]>] [--jobs N] [--shard K/N]
+// Usage: node packages/db/tests/run-local-suites.mjs --ci | --local-only [--excluded] [--list] [--only <dir[,dir]>] [--jobs N] [--shard K/N]
+// --excluded (nightly, .github/workflows/nightly-db-suites.yml): run the suites the list excludes instead of the others. Entries whose reason
+// starts with "not a suite:" (helper modules, templates, wrappers) are skipped. Many of these suites refuse to start when CI is set, so the
+// nightly workflow runs `env -u CI ... --local-only --excluded`; run it only on a throwaway checkout, some suites rewrite tracked result files.
 // Each suite is started with the same flag (--ci / --local-only) and must accept it. --shard K/N keeps every
 // N-th suite starting at the K-th, so CI can spread the suites over N parallel jobs (each runs its own share).
 // Database build snapshot (Owner 2026-11-01): when two or more of the chosen suites start their database through localDb()
@@ -11,7 +14,7 @@
 // committed as a local image, and each of those suites starts its own fresh container from that image. A suite that needs the real
 // build chain (credit-sources seeds data in the middle of it) or does its own build still replays the files itself.
 import { spawn } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -33,18 +36,22 @@ export const usesLocalDb = (suite, dir = testsDir) => /\blocalDb\(/.test(readFil
 export const loadExcluded = (dir = testsDir) =>
   JSON.parse(readFileSync(resolve(dir, 'local-suites-excluded.json'), 'utf8'));
 
+// An excluded entry that is not a test at all (nothing to run nightly).
+export const NOT_A_SUITE = /^not a suite:/;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   const mode = args[0];
   const ci = mode === '--ci';
   if (!(ci ? process.env.CI : mode === '--local-only' && !process.env.CI)) {
-    throw new Error('Usage: run-local-suites.mjs --ci (CI only) | --local-only (not in CI) [--list] [--only <dir[,dir]>]');
+    throw new Error('Usage: run-local-suites.mjs --ci (CI only) | --local-only (not in CI) [--excluded] [--list] [--only <dir[,dir]>]');
   }
   const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : null;
   const excluded = loadExcluded().suites;
   const [shard, shards] = args.includes('--shard') ? args[args.indexOf('--shard') + 1].split('/').map(Number) : [1, 1];
   if (!(shards >= 1 && shard >= 1 && shard <= shards)) throw new Error('--shard must be K/N with 1 <= K <= N');
-  const suites = discoverSuites().filter(suite => !(suite in excluded)
+  const nightly = args.includes('--excluded');
+  const suites = discoverSuites().filter(suite => (nightly ? suite in excluded && !NOT_A_SUITE.test(excluded[suite]) : !(suite in excluded))
     && (!only || only.includes(suite.split('/')[0]) || only.includes(suite)))
     .filter((_, index) => index % shards === shard - 1);
   if (args.includes('--list')) {
@@ -100,6 +107,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`\n${'suite'.padEnd(50)} result  seconds`);
     for (const { suite, seconds, passed } of results.sort((x, y) => x.suite.localeCompare(y.suite))) console.log(`${suite.padEnd(50)} ${passed ? 'PASS  ' : 'FAIL  '}  ${seconds}`);
     console.log(`total ${results.reduce((sum, item) => sum + item.seconds, 0)}s over ${results.length} suites`);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      const rows = results.sort((x, y) => x.suite.localeCompare(y.suite)).map(({ suite, seconds, passed }) => `| ${suite} | ${passed ? 'pass' : '**FAIL**'} | ${seconds} |`);
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Database suites${nightly ? ' (nightly, excluded list)' : ''} ${shard}/${shards}\n\n| suite | result | seconds |\n| --- | --- | --- |\n${rows.join('\n')}\n`);
+    }
     if (results.some(item => !item.passed)) process.exitCode = 1;
   }
 }

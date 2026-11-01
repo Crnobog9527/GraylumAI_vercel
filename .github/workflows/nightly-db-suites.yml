@@ -1,0 +1,64 @@
+# Nightly run of the database suites that pull request CI does not run (packages/db/tests/local-suites-excluded.json).
+# Owner 2026-11-01: not a required check and never blocks a merge; a red run is a report, and the list only shrinks as suites are fixed.
+# Secretless and read-only like the rest of CI. The checkout is thrown away: some suites rewrite tracked result files and nothing is committed.
+name: Nightly database suites
+
+on:
+  schedule:
+    - cron: '30 10 * * *'
+
+concurrency:
+  group: nightly-db-suites-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  excluded-suites:
+    name: Run excluded database suites (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The same digest-pinned images as the pull request jobs, pulled with the same bounded retry.
+      - name: Pull pinned service images
+        run: |
+          set -euo pipefail
+          images="$(node --input-type=module -e 'const m = await import("./packages/db/tests/v3/images.mjs"); console.log(Object.values(m).join("\n"))')"
+          for image in $images; do
+            for attempt in 1 2 3 4 5; do
+              if docker pull --quiet "$image"; then break; fi
+              if [ "$attempt" -eq 5 ]; then echo "Failed to pull $image" >&2; exit 1; fi
+              sleep $((attempt * 15))
+            done
+          done
+
+      # Many of these suites refuse to start when CI is set (they accept only --local-only), so the runner starts without it.
+      - name: Integration — Excluded database suites (report)
+        run: env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded --shard ${{ matrix.shard }}/4

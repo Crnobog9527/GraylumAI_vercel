@@ -53,7 +53,14 @@ export async function pendingReceiptCases({c,report}){
  await c.query('SET ROLE service_role');
  try{await rpc(c,'publish_monitor_disconnect',f.actor,connection);}finally{await c.query('RESET ROLE');}
  assert.equal(await one('SELECT runtime_workspace_posts_history_visible($1) v',[child]),false);
- assert.deepEqual(await rpc(c,'runtime_session_items',f.actor,started.sessionId,execution,'read',null,10,null),[]);
+ // 0384 (DB-100 C3, Owner 2026-10-25): while this reply is still running and its dispatch window (265 s) has not passed, a history read skips the
+ // lineage walk, so the reply keeps seeing its own earlier item; the next provider request is fenced (RUNTIME_CONTEXT_REVOKED, below) and
+ // a new reply or descendant never sees it (runtime_workspace_posts_history_visible above). Outside the window the read walks the lineage again.
+ const sessionItems=()=>rpc(c,'runtime_session_items',f.actor,started.sessionId,execution,'read',null,10,null);
+ assert.deepEqual((await sessionItems()).map(row=>row.item.content),['OWN_POST_HISTORY_PRIVATE']);
+ await c.query("UPDATE bill2_runs SET runtime_dispatch_deadline=clock_timestamp()-interval '1 second' WHERE id=$1",[f.run]);
+ assert.deepEqual(await sessionItems(),[]);
+ await c.query("UPDATE bill2_runs SET runtime_dispatch_deadline=clock_timestamp()+interval '265 seconds' WHERE id=$1",[f.run]);
  report.checks.push('before erasure, revoked own-post data is excluded from new model history and transitive dependencies');
  assert.equal(await one('SELECT closed v FROM bill2_runs WHERE id=$1',[f.run]),false);
  const receipts=()=>one('SELECT jsonb_agg(to_jsonb(r)) v FROM bill2_receipts r JOIN bill2_calls bc ON bc.id=r.call_id WHERE bc.run_id=$1',[f.run]);

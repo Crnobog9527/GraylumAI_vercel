@@ -5,12 +5,12 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { discoverSuites, loadExcluded } from '../../packages/db/tests/run-local-suites.mjs';
+import { NOT_A_SUITE, discoverSuites, loadExcluded } from '../../packages/db/tests/run-local-suites.mjs';
 import { judgeVolatility, loadAllow } from '../../packages/db/tests/baseline/volatility-check.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 // Ratchets: lowering these is the point of the work; raising them needs a reviewed reason.
-const MAX_EXCLUDED_SUITES = 86;
+const MAX_EXCLUDED_SUITES = 85;
 const MAX_VOLATILITY_ALLOWED = 0;
 const REQUIRED_IN_CI = ['pay-dispute', 'pay-waffo', 'pay-waffo-delivery', 'monthly-refund', 'package-refund',
   'erasure-run', 'erasure-completion', 'bill-unit', 'credit-sources', 'publish-monitor', 'report-revision',
@@ -66,4 +66,20 @@ test('ci.yml runs the unified entry and no individual run-local suite step', () 
   assert.ok(!/run: node packages\/db\/tests\/(?!run-local-suites)[\w-]+\/run-local\.mjs --ci/.test(ci),
     'single run-local steps belong in run-local-suites.mjs');
   assert.ok(existsSync(resolve(root, 'packages/db/tests/local-suites-excluded.json')));
+});
+
+// Owner 2026-11-01: the excluded suites run nightly (.github/workflows/nightly-db-suites.yml); entries that are not tests are skipped there.
+test('"not a suite:" entries are real files that run no test, and the nightly list is every other excluded suite', () => {
+  const { suites } = loadExcluded();
+  const notSuites = Object.keys(suites).filter(suite => NOT_A_SUITE.test(suites[suite]));
+  assert.ok(notSuites.length > 0);
+  for (const suite of notSuites) assert.ok(existsSync(resolve(root, 'packages/db/tests', suite)), `${suite} does not exist (remove the entry)`);
+  const nightly = Object.keys(suites).filter(suite => !NOT_A_SUITE.test(suites[suite]));
+  assert.equal(nightly.length + notSuites.length, Object.keys(suites).length);
+  assert.ok(nightly.every(suite => !/(^|\/)local-db\.mjs$|local-rate-limit(-cases|-case-report|-images|-test-setup)?\.mjs$/.test(suite)));
+});
+
+test('a suite for a retired feature is deleted, not left excluded (daily check-in, migration 0396)', () => {
+  assert.ok(!existsSync(resolve(root, 'packages/db/tests/pay-replay')));
+  assert.ok(!('pay-replay/run-local.mjs' in loadExcluded().suites));
 });

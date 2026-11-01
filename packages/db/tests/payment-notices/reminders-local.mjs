@@ -173,7 +173,7 @@ try {
   const proUser = await fx.profile(), prior = await order(proUser, { method: 'card_cn', offer: 'standard' });
   const proSub = (await rowOrder(prior)).subscription_id;
   const proPlan = randomUUID();
-  await bypass("INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES($1,'Pro fixture','pro',false,false,0)", [proPlan]);
+  await bypass("INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,positioning_profile_limit) VALUES($1,'Pro fixture','pro',false,false,0,3)", [proPlan]);
   await bypass("UPDATE user_subscriptions SET membership_plan_id=$2,cancel_at_period_end='true' WHERE id=$1", [proSub, proPlan]);
   await bypass("UPDATE payment_orders SET item_id=$2,purchase_membership_level='pro',merchant_namespace='notice-fixture' WHERE id=$1", [prior, proPlan]);
   await bypass("UPDATE user_subscriptions SET merchant_namespace='notice-fixture' WHERE id=$1", [proSub]);
