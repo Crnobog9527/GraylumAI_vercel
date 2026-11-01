@@ -58,7 +58,7 @@ export const currentFinalScript = (versions: readonly ContentVersion[]) =>
   versions.filter(v => v.kind === 'script' && v.status === 'final').sort((a, b) => b.version - a.version)[0] ?? null;
 
 /** The turn a final script came from: manual revisions keep their written ancestor; chain length is not a validity limit. A version from
- *  an old execution has no turn here: a conversation with old history stays on the old path. */
+ *  an old execution has no turn here (test data only: the real database is built new). */
 export function scriptSourceTurn(versions: readonly ContentVersion[], script: ContentVersion | null): number | null {
   const byId = new Map(versions.filter(v => v.kind === 'script').map(v => [v.id, v]));
   const seen = new Set<string>();

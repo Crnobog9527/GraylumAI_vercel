@@ -2,7 +2,9 @@
 'use client';
 import { trpc } from '@/trpc/client';
 import type { useTurnChat } from './use-turn-chat';
-import { latestVersion, replyOfRequest, SCRIPT_REJECTIONS, VIDEO_REJECTIONS, type ContentVersion, type ScriptOperation, type VideoOperation } from './work-turn-path';
+import {
+  latestVersion, replyOfRequest, SCRIPT_REJECTIONS, VIDEO_REJECTIONS, type ContentVersion, type ScriptOperation, type VideoOperation,
+} from './work-turn-path';
 
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : '');
 type WorkItem = { workItemId: string; revision: number; title: string; brief?: string | null; day: string };
@@ -97,8 +99,9 @@ export function useWorkItemSteps({ chat, library, versions, workItem, isVideo, v
       localStorage.removeItem(videoKey);
       await library.refetch();
     } catch (cause) {
-      if (VIDEO_REJECTIONS.has(message(cause))) await rejected('视频工作请求已明确拒绝（' + message(cause) + '），请刷新后核对最新版本。');
-      else {
+      if (VIDEO_REJECTIONS.has(message(cause))) {
+        await rejected('视频工作请求已明确拒绝（' + message(cause) + '），请刷新后核对最新版本。');
+      } else {
         storeVideo({ ...op, held: true });
         setError('视频工作请求状态待核实。完整原请求已保留；再次选择会用同一请求继续，不会新建请求。');
       }
