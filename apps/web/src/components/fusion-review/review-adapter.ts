@@ -125,7 +125,8 @@ export function feeText(fee: ReviewFee): string | null {
   if (fee.state === 'held') return `本次评审 ${n(fee.credits)} 积分，还在结算，已经发出的评审结算完就会更新。`;
   if (fee.state === 'refunded') return `没有生成修订稿，${n(fee.credits)} 积分已全额退回。`;
   const charged = fee.chargedCredits ?? fee.credits;
-  if (fee.reason === 'revised') return `本次评审实际扣了 ${n(charged)} 积分。`;
+  // 'revised' on the BILL2 path; on the turn path (V2-7b) the reason is the turn's close kind, 'completed' for a delivered revision.
+  if (fee.reason === 'revised' || fee.reason === 'completed') return `本次评审实际扣了 ${n(charged)} 积分。`;
   return `评审中途结束，按已经发出的部分实际扣了 ${n(charged)} 积分（本次评审价格 ${n(fee.credits)} 积分）。`;
 }
 
