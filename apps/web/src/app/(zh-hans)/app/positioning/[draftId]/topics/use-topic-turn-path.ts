@@ -46,6 +46,12 @@ export function topicSendOutcome(outcome: Awaited<ReturnType<typeof runTurn>>): 
   return { notice: code.startsWith('OPC_') ? topicFailureMessage(new Error(code)) : told.text, keepInput: told.kept || turnId === undefined };
 }
 
+/** Refused, no turn opened: the record stops an opening sending itself again on a later visit. */
+export function refuseTopicRequest(storage: Pick<Storage, 'setItem' | 'removeItem'>, key: string, op: { request: { requestId: string } }) {
+  storage.setItem(key + ':rejected:' + op.request.requestId, JSON.stringify(op));
+  storage.removeItem(key);
+}
+
 /** A topic turn cannot be stopped: while it runs the page only says so. */
 export function turnRunningNotice(e: { executionId: string; state: string }): ChatNotice | null {
   return e.state === 'running' ? { id: e.executionId, tone: 'status', busy: true, text: '正在回复…' } : null;

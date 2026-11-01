@@ -26,7 +26,7 @@ import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '..
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
-import { turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
+import { refuseTopicRequest, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
   topicTurnShows } from './topic-notices';
@@ -153,10 +153,8 @@ function TopicWorkspaceContent() {
   const bind = trpc.opc.consentTopicWorkspace.useMutation();
   const turn = trpc.opc.topicTurn.useMutation(), execute = trpc.runtime.execute.useMutation();
   const payg = usePaygResume(() => view.refetch());
-  const cancel = trpc.runtime.cancel.useMutation();
-  const savePlan = trpc.opc.savePlan.useMutation(), handoff = trpc.opc.handoff.useMutation();
-  const saveDraft = trpc.opc.saveTopicDraft.useMutation(), adoptTopics = trpc.opc.adoptTopics.useMutation();
-  const queryUtils = trpc.useUtils();
+  const cancel = trpc.runtime.cancel.useMutation(), savePlan = trpc.opc.savePlan.useMutation(), handoff = trpc.opc.handoff.useMutation();
+  const saveDraft = trpc.opc.saveTopicDraft.useMutation(), adoptTopics = trpc.opc.adoptTopics.useMutation(), queryUtils = trpc.useUtils();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending || payg.busy;
@@ -297,11 +295,7 @@ function TopicWorkspaceContent() {
             if (turnPath.on) {
               const id = op.request.requestId; reached = true; setOutgoing(old => old && { ...old, executionId: id });
               const told = await turnPath.send(op.request, op.candidateAtSend); if (told.notice) setError(told.notice);
-              if (told.keepInput) {
-                // Refused: no turn opened. The record stops the opening sending itself again on a later visit.
-                setOutgoing(null); back(); localStorage.setItem(storageKey + ':rejected:' + id, JSON.stringify(op));
-                localStorage.removeItem(storageKey); setPending(null); await view.refetch(); return;
-              }
+              if (told.keepInput) { setOutgoing(null); back(); refuseTopicRequest(localStorage, storageKey, op); setPending(null); return; }
               stored(id, op.request.input);
             } else {
             const admitted = await turn.mutateAsync(op.request);
@@ -362,7 +356,8 @@ function TopicWorkspaceContent() {
 
   const opening = workspace.data?.opening as (ChatRequest & { executionId?: string | null }) | null | undefined;
   const refusedOpening = useTopicOpening({ opening, storageKey, executions: view.data?.executions,
-    ready: Boolean(sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed), send: request => void perform({ kind: 'chat', request }) });
+    ready: Boolean(sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
+    send: request => void perform({ kind: 'chat', request }) });
 
   async function stop(executionId: string) {
     setError(''); // 已停止 from the click on, and after a reload; a failed stop keeps it until a re-read proves otherwise
