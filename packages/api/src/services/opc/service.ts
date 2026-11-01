@@ -4,6 +4,7 @@ import {assertCompleteStepResult,STEP_ENVELOPE_INSTRUCTION,opcSaveResult} from '
 export {opcSaveResult} from './stepOutput';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from "../runtime/waitingOrganizer";
 import {StagingAccessError} from "../runtime/stagingErrors";
+import {PLAN_INSTRUCTIONS} from "./planPrompt";
 import {TOPIC_WORKSPACE_INSTRUCTION} from "./topicInstructions";
 import { throwOpcRpcError } from "./contentBindingError";
 import { capturePending, capturePendingInput, captureResolveInput } from "./capture";
@@ -160,10 +161,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
           if (priorOpening) return priorOpening;
         }
       }
-      const instruction =
-        v.purpose === "plan"
-          ? "Create a first-week content plan candidate from the confirmed positioning version and the confirmed target platform/account/time constraints given below. Return only a JSON array (no code fence). Each item has id (UUID), platform (lowercase platform slug), account (lowercase account handle), title, brief, day (YYYY-MM-DD). The user is not required to author topic rows: you produce the topics, dates, titles and briefs. You may PROPOSE concrete account names, but a proposed account name is not a registered, existing or verified external account, and you must never state or imply that it exists, is available, is registered or has been checked. Use only the confirmed positioning and the supplied constraints; where a user-owned fact is genuinely missing, say so in the brief rather than inventing it. "
-          : "";
+      const instruction = v.purpose === "plan" ? PLAN_INSTRUCTIONS : "";
       const complete = state.schema
         .filter((f: { required: boolean }) => f.required)
         .every((f: { id: string }) =>
