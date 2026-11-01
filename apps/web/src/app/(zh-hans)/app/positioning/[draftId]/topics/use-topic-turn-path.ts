@@ -47,7 +47,7 @@ export function topicSendOutcome(outcome: Awaited<ReturnType<typeof runTurn>>): 
 }
 
 /** Refused, no turn opened: the record stops an opening sending itself again on a later visit. */
-export function refuseTopicRequest(storage: Pick<Storage, 'setItem' | 'removeItem'>, key: string, op: { request: { requestId: string } }) {
+export function refuseTopic(storage: Pick<Storage, 'setItem' | 'removeItem'>, key: string, op: { request: { requestId: string } }) {
   storage.setItem(key + ':rejected:' + op.request.requestId, JSON.stringify(op));
   storage.removeItem(key);
 }

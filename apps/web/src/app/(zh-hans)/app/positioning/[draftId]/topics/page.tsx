@@ -26,7 +26,7 @@ import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '..
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
-import { refuseTopicRequest, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
+import { refuseTopic, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
   topicTurnShows } from './topic-notices';
@@ -296,7 +296,7 @@ function TopicWorkspaceContent() {
               const id = op.request.requestId; reached = true; setOutgoing(old => old && { ...old, executionId: id });
               const told = await turnPath.send(op.request, op.candidateAtSend); if (told.notice) setError(told.notice);
               if (told.unknown) { setOutgoing(null); throw new Error('TURN_STREAM_LOST'); } // Kept: a repeat sends the same request.
-              if (told.keepInput) { setOutgoing(null); back(); refuseTopicRequest(localStorage, storageKey, op); setPending(null); return; } stored(id, op.request.input);
+              if (told.keepInput) { setOutgoing(null); back(); refuseTopic(localStorage, storageKey, op); setPending(null); return; } stored(id, op.request.input);
             } else {
             const admitted = await turn.mutateAsync(op.request);
             // Q1: the previous organizer answered instead; nothing was stored and the input stays in the box.
