@@ -46,7 +46,8 @@ export type PolicyInput = {
   /** The Decisions model's upper bound for one positioning check, in USD; required when limits.decisions is 1. */
   decisionUpperUsd?: string;
   stopLoss: z.infer<typeof stopLossSettings>; historyItems: number; inputBytes: number;
-  /** Chat and mentor (Owner 11-01): freeze one model call plus the largest paid tool at the open; turn_call_begin tops up. */
+  /** Chat and mentor (Owner 11-01): freeze and reserve one model call plus the largest paid tool at the open (the reservation also
+   *  covers the positioning check); turn_call_begin tops up both. */
   topUp?: boolean;
   /** The start threshold L in credits (startThresholdCredits): the turn opens when the balance covers it, the freeze is
    *  H = min(G_turn, A), and a call pauses only below min(G_i, L) (Owner 10-01, restated 10-28; migration 0422). */
@@ -74,14 +75,18 @@ export function turnPolicy(input: PolicyInput) {
     + other.reduce((sum, c) => sum + callCredits(input.q, c.upperUsd, c.multiplier), 0);
   const holdCredits = Math.min(gCredits, Math.max(uModelCredits, ...other.map(c => callCredits(input.q, c.upperUsd, c.multiplier)))
     + Math.max(0, ...paid.map(u => callCredits(input.q, u, input.multiplier))));
+  const decisions = input.decisionUpperUsd === undefined ? 0n : units(input.decisionUpperUsd) * BigInt(limits.decisions);
   const uTurn = units(input.modelUpperUsd) * BigInt(own) + [...paid, ...other.map(c => c.upperUsd)].reduce((sum, u) => sum + units(u), 0n)
-    + (input.decisionUpperUsd === undefined ? 0n : units(input.decisionUpperUsd) * BigInt(limits.decisions));
+    + decisions;
+  const largest = (values: readonly bigint[]) => values.reduce((max, u) => u > max ? u : max, 0n);
+  const firstUsd = largest([units(input.modelUpperUsd), ...other.map(c => units(c.upperUsd))]) + largest(paid.map(units)) + decisions;
+  const holdUsd = firstUsd < uTurn ? firstUsd : uTurn;
   return {
     ...input.frozen,
     q: Number(input.q), multiplier: input.multiplier, modelUpperUsd: input.modelUpperUsd,
     ...(input.decisionUpperUsd === undefined ? {} : { decisionUpperUsd: input.decisionUpperUsd }),
     ...(input.pricing ? { pricing: input.pricing } : {}),
-    uTurnUsd: Number(format(uTurn)), gCredits, uModelCredits, ...(input.topUp ? { holdCredits } : {}),
+    uTurnUsd: Number(format(uTurn)), gCredits, uModelCredits, ...(input.topUp ? { holdCredits, holdUsd: Number(format(holdUsd)) } : {}),
     // The start threshold L (BILL-PAYG): what the balance must cover to start; below it mid-turn the turn pauses.
     minCredits: validThreshold(input.startThresholdCredits),
     limits, stopLoss, historyItems: input.historyItems, inputBytes: input.inputBytes,
