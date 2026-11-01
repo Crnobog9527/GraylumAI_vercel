@@ -56,8 +56,6 @@ export type PendingSend = {
   references?: LibraryReference[];
   /** True once the text was put back in the box, so a reload does not add it a second time. */
   restored?: boolean;
-  /** True once the server was seen to hold this send (turn path), so the put-back text was taken out again. */
-  seen?: boolean;
 };
 
 export function rememberPending(storage: DraftStorage, sessionId: string,
@@ -82,24 +80,20 @@ export function markPendingRestored(storage: DraftStorage, sessionId: string) {
   if (pending) storage.setItem(pendingKey(sessionId), JSON.stringify({ ...pending, restored: true }));
 }
 
-/** The turn path knows what it holds: after a reload, a send whose turn is running or stored is not lost, and its text must not stay in the box. */
-type SeenView = { activeTurn: { openedAt: string } | null; lastTurn: { closedAt: string } | null; messages: { role: string; content: string }[] };
-export function pendingSeen(pending: Pick<PendingSend, 'text' | 'at'>, view: SeenView, skewMs = 60_000): 'stored' | 'running' | 'unknown' {
-  // The clock of this browser and the server's differ a little: a turn opened just before the send was recorded still counts.
-  const after = (iso: string) => Date.parse(iso) >= pending.at - skewMs;
-  if (view.activeTurn && after(view.activeTurn.openedAt)) return 'running';
-  const lastAsked = [...view.messages].reverse().find(message => message.role === 'user');
-  return lastAsked && lastAsked.content.trim() === pending.text.trim() && view.lastTurn && after(view.lastTurn.closedAt) ? 'stored' : 'unknown';
+/** The turn path knows what it holds: a send whose request id the saved conversation carries is stored, however long ago the same words were
+ * asked; anything else (a turn still running, a send that never arrived) is not confirmed, and its put-back text stays. */
+type SeenView = { messages: { role: string; requestId?: string | null }[] };
+export function pendingSeen(pending: Pick<PendingSend, 'requestId'>, view: SeenView): 'stored' | 'unknown' {
+  return view.messages.some(message => message.role === 'user' && message.requestId === pending.requestId) ? 'stored' : 'unknown';
 }
 
-/** The box without the text that was put back in front of it (and the blank lines that joined it to a newer draft). */
+/**
+ * The box without the text that was put back in front of it, and the blank line that joined it to a newer draft. Only the whole put-back
+ * text goes: a box the user has edited since (the text with more typed straight after it) is theirs and stays as it is.
+ */
 export function withoutSentText(input: string, text: string) {
-  return input.startsWith(text) ? input.slice(text.length).replace(/^\s+/, '') : input;
-}
-
-export function markPendingSeen(storage: DraftStorage, sessionId: string) {
-  const pending = readPending(storage, sessionId);
-  if (pending) storage.setItem(pendingKey(sessionId), JSON.stringify({ ...pending, seen: true }));
+  if (input === text) return '';
+  return input.startsWith(text + '\n\n') ? input.slice(text.length + 2) : input;
 }
 
 export function readPending(storage: DraftStorage, sessionId: string): PendingSend | null {

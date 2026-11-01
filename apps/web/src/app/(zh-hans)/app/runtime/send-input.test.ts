@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import {
-  clearForSend, forgetPending, markPendingRestored, markPendingSeen, openingDraft, pendingSeen, readPending, rememberPending, requestIdFor,
+  clearForSend, forgetPending, markPendingRestored, openingDraft, pendingSeen, readPending, rememberPending, requestIdFor,
   restoredDraft, withoutSentText,
 } from './send-input';
 
@@ -106,34 +106,21 @@ it('gives an edited resend a new id instead of the address id of the unanswered 
   expect(requestIdFor(null, null, '任何内容', () => 'fresh')).toBe('fresh');
 });
 
-const at = Date.parse('2026-11-01T10:00:00Z');
-const quiet = { activeTurn: null, lastTurn: null, messages: [] as { role: string; content: string }[] };
-it('a send whose turn is running or stored on the server is seen after a reload, a lost one is not', () => {
-  const pending = { text: '第二条', at };
-  // Running: opened at about the time of the send (a minute either way covers the clocks).
-  expect(pendingSeen(pending, { ...quiet, activeTurn: { openedAt: '2026-11-01T10:00:01Z' } })).toBe('running');
-  // An older turn that is still running says nothing about this send.
-  expect(pendingSeen(pending, { ...quiet, activeTurn: { openedAt: '2026-11-01T09:00:00Z' } })).toBe('unknown');
-  // Stored: the last asked text is the sent text and its turn closed after the send.
-  const stored = { activeTurn: null, lastTurn: { closedAt: '2026-11-01T10:00:09Z' },
-    messages: [{ role: 'user', content: '第一条' }, { role: 'assistant', content: 'a' }, { role: 'user', content: ' 第二条 ' }, { role: 'assistant', content: 'b' }] };
-  expect(pendingSeen(pending, stored)).toBe('stored');
-  // The same words asked earlier (a turn closed long before the send) do not make a lost send stored.
-  expect(pendingSeen(pending, { ...stored, lastTurn: { closedAt: '2026-11-01T08:00:00Z' } })).toBe('unknown');
-  expect(pendingSeen(pending, { ...stored, messages: stored.messages.slice(0, 2) })).toBe('unknown');
-  expect(pendingSeen(pending, quiet)).toBe('unknown');
+const view = (...asked: Array<[string, string | null]>) => ({ messages: asked.flatMap(([content, requestId]) => [
+  { role: 'user', content, requestId }, { role: 'assistant', content: 'a', requestId }]) });
+it('a send is stored only when the saved conversation carries its request id, never by its words or its time', () => {
+  const pending = { requestId: 'r2' };
+  expect(pendingSeen(pending, view(['第一条', 'r1'], ['第二条', 'r2']))).toBe('stored');
+  // The same words asked a minute ago under another request id: this send may never have arrived.
+  expect(pendingSeen(pending, view(['第二条', 'r1']))).toBe('unknown');
+  expect(pendingSeen(pending, view(['第二条', null]))).toBe('unknown');
+  expect(pendingSeen(pending, { messages: [] })).toBe('unknown');
 });
 
-it('takes the put-back text out of the box, keeping a newer draft typed after it', () => {
+it('takes the whole put-back text out of the box, keeping a newer draft after it, and leaves an edited box alone', () => {
   expect(withoutSentText('第二条', '第二条')).toBe('');
   expect(withoutSentText('第二条\n\n新的草稿', '第二条')).toBe('新的草稿');
+  // The user edited the put-back text before the answer came: it is theirs.
+  expect(withoutSentText('第二条再加一句', '第二条')).toBe('第二条再加一句');
   expect(withoutSentText('另一段', '第二条')).toBe('另一段');
-});
-
-it('marks a pending send seen without touching the rest of its record', () => {
-  const store = new Map<string, string>();
-  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
-  rememberPending(storage, 's', { requestId: 'r', text: '第二条', input: '第二条' });
-  markPendingSeen(storage, 's');
-  expect(readPending(storage, 's')).toMatchObject({ requestId: 'r', text: '第二条', seen: true });
 });

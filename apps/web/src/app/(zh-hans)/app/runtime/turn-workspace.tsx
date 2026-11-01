@@ -16,7 +16,7 @@ import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import {
-  clearForSend, forgetPending, markPendingRestored, markPendingSeen, openingDraftWithReferences, pendingSeen, readPending, rememberPending,
+  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, pendingSeen, readPending, rememberPending,
   requestIdFor, saveDraftReferences, withoutSentText,
 } from './send-input';
 import {
@@ -58,18 +58,18 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   };
   const update = (value: string) => { setInput(value); localStorage.setItem('opc-runtime-input:' + sessionId, value); };
 
-  // After a reload the server says what it holds: a send whose turn is running or stored is not lost, so its text goes out of the box
-  // again (the page put it back in case the send was lost) and the user is not tempted to send it twice.
+  // After a reload the server says what it holds: a send it stored (its request id is in the saved conversation) is not lost, so its text goes
+  // out of the box again (the page put it back in case the send was lost) and the user is not tempted to send it twice.
   useEffect(() => {
     if (!chat.view || chat.sending) return;
     const pending = readPending(localStorage, sessionId);
-    if (!pending?.restored || pending.seen) return;
-    const seen = pendingSeen(pending, chat.view);
-    if (seen === 'unknown') return;
+    if (!pending?.restored || pendingSeen(pending, chat.view) !== 'stored') return;
     setInput(current => { const next = withoutSentText(current, pending.text); localStorage.setItem('opc-runtime-input:' + sessionId, next); return next; });
     const sent = new Set((pending.references ?? []).map(reference => reference.documentId));
     if (sent.size) updateReferences(references.filter(reference => !sent.has(reference.documentId)));
-    if (seen === 'stored') forgetPending(localStorage, sessionId); else markPendingSeen(localStorage, sessionId);
+    forgetPending(localStorage, sessionId);
+    // The request id left in the address belongs to this send: a later send must not reuse it (the server would replay, not send).
+    const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.view, chat.sending, sessionId]);
 
