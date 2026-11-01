@@ -4,7 +4,8 @@
 //   LOADTEST_BASE_URL         the staging app URL
 //   LOADTEST_ALLOWED_HOST     the exact host of that URL; the driver refuses any other
 //   LOADTEST_ACCOUNTS_FILE    a JSON file OUTSIDE the repository: { "accounts": [{ "token", "sessionId", "moduleId"?, "stepId"? }] },
-//                             one account per user (100 for the full run); tokens are read here and never printed or logged
+//                             one account per user (100 for the full run); tokens are read here and never printed or logged.
+//                             `cookie` (optional): the session cookie header; tRPC reads (library) need it, POST /api/turn uses the token
 // Without --go it only prints the plan (a dry run); a run needs --go, which the controller gives after the switch to the new path.
 // Usage: node scripts/loadtest/core-path-load.mjs --out <dir outside the repository> [--series | --stage 30] [--go] [--cooldown-ms 600000]
 //   [--mix chat:5,coach:3,library:2]
@@ -57,9 +58,9 @@ async function turnRequest(base, account, body, started) {
   return { ok: outcome.ok, code: outcome.code, firstByteMs };
 }
 
-async function readRequest(base, account, path, input) {
+export async function readRequest(base, account, path, input) {
   const response = await fetch(`${base}/api/trpc/${path}?batch=1&input=${encodeURIComponent(JSON.stringify({ 0: input }))}`,
-    { headers: { authorization: `Bearer ${account.token}` } });
+    { headers: { authorization: `Bearer ${account.token}`, ...(account.cookie ? { cookie: account.cookie } : {}) } });
   return { ok: response.ok, code: response.ok ? null : `HTTP_${response.status}` };
 }
 

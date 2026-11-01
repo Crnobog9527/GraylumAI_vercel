@@ -3,7 +3,7 @@
 计划出处：`docs/launch/tasks/CORE-PATH-V2.md` 第 3.1（通过线）、3.2（100 人 staging 验收）、3.3.3（单机 500/2000/5000 外推）节。
 这里只放**怎么跑**。结果写进同目录的报告，格式见 `REPORT-TEMPLATE.md`；旧路径基线见 `baseline-old-path.md`。
 
-**状态：脚本已写好，只做过本机演练（20 人、10 人、桩计时）。没有对 staging 跑过任何压测。** staging 压测由总控在切换到新路径之后通知才开。
+**状态：100 人 staging 压测已在 2026-11-01（UTC）跑过一批，结果见 `result-20261101.md`。** 单机 500/2000/5000 仍只做过本机演练。
 
 ## 1. 有什么
 
@@ -42,8 +42,9 @@ node scripts/loadtest/core-path-load.mjs --series --go --out "$OUT"
 ```
 
 - 每档 2.5 分钟（含 10 秒爬坡）；档间冷却至少 10 分钟（`--cooldown-ms` 只能调大）。
-- 账号文件 `LOADTEST_ACCOUNTS_FILE`：每个用户一个令牌和一个已建好的会话（教练用户另带 `moduleId`/`stepId`）。
-  **会话和草稿怎么建要等 V2-10 的页面入口定下来再接**，现在驱动只读文件，不替账号建会话。
+- 账号文件 `LOADTEST_ACCOUNTS_FILE`：每个用户一个令牌和一个已建好的会话（教练用户另带 `moduleId`/`stepId`）；
+  资料库读取走 tRPC，要带会话 cookie（字段 `cookie`），回合接口只认令牌。
+  会话和草稿用账号自己的令牌建：聊天会话 `runtime.start`（scope `positioning_draft`），教练草稿 `opc.start`（mode `mentor`，registration 取 `opc.catalog` 第一项，moduleId 取同一项，stepId 取其第一步）；本批用的本机脚本不进仓库，现驱动仍只读文件，不替账号建会话。
 - 每档结束后在 Supabase 报表读 CPU 均值、内存、交换区，填进报告；驱动不抓这些。
 - 30 人基线和上一批差 > 10% 本批作废（`baselineValid`）；本批是首批就写"无可比基线"。
 - 判定用 `judgeStage`（失败 0、57014 为 0、整轮 p95 ≤ 桩回复 + 2 秒、CPU 均值 < 60%、交换区不涨、`LWLock:LockManager` < 2%）；

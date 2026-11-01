@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { STAGES, THINK_S, kindsOf, thinkMs, percentile, parseSse, outcomeOf, summarizeStage, summarizeWaits, judgeStage, baselineValid,
   capacityWords } from '../loadtest/lib/core.mjs';
-import { assertStaging, shouldAbort, plan, hasTextDelta } from '../loadtest/core-path-load.mjs';
+import { assertStaging, shouldAbort, plan, hasTextDelta, readRequest } from '../loadtest/core-path-load.mjs';
 import { assertAllowedDatabase } from '../loadtest/sample-waits.mjs';
 
 test('the stage plan is the one of plan 3.2 and the mix is 5:3:2', () => {
@@ -133,4 +133,17 @@ test('a mentor result whose organization was refused or conflicted is a failed t
   assert.equal(outcomeOf(result({ result: 'applied' })).ok, true);
   assert.deepEqual([outcomeOf(result({ result: 'invalid_output' })).ok, outcomeOf(result({ result: 'invalid_output' })).code], [false, 'ORGANIZER_NOT_APPLIED']);
   assert.equal(outcomeOf(result({ result: 'conflict' })).code, 'ORGANIZER_NOT_APPLIED');
+});
+
+test('a library read carries the account cookie when the accounts file has one (tRPC authenticates by cookie, /api/turn by token)', async () => {
+  const sent = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { sent.push(init.headers); return { ok: true }; };
+  try {
+    await readRequest('http://127.0.0.1:1', { token: 't', cookie: 'a=b' }, 'library.list', {});
+    await readRequest('http://127.0.0.1:1', { token: 't' }, 'library.list', {});
+  } finally { globalThis.fetch = real; }
+  assert.equal(sent[0].cookie, 'a=b');
+  assert.equal(sent[0].authorization, 'Bearer t');
+  assert.equal('cookie' in sent[1], false);
 });
