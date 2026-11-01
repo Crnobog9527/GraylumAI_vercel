@@ -4,7 +4,7 @@ import path from 'node:path';
 import { requireAccounts } from './support/accounts';
 import { resultsDirectory } from './support/config';
 import { expect, test } from './support/fixtures';
-import { buildReadyDraft, stopsInLast24h } from './support/positioning';
+import { buildReadyDraft, resumeReadyDraft, stopsInLast24h } from './support/positioning';
 import { expectBalanceBack, expectThirteenChapters, finalizeReport, REPORT_PRICE, reportDialog, startReport, stopButton, waitForReportDone } from './support/report';
 import { latestReportSettlement, readCredits } from './support/ui';
 
@@ -28,6 +28,14 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     test.setTimeout(30 * 60_000);
     // Reuse a draft whose three steps are already confirmed (CORE_E2E_DRAFT_URL, a path like /app/positioning/<id>): the benchmark
     // search is the costly part of the run, so a follow-up run of the later journeys does not repeat it.
+    if (process.env.CORE_E2E_RESUME_DRAFT_URL) {
+      const { page } = await openAs('gold');
+      draftUrl = await resumeReadyDraft(page, meter, new URL(process.env.CORE_E2E_RESUME_DRAFT_URL, process.env.PLAYWRIGHT_BASE_URL).toString());
+      await mkdir(resultsDirectory, { recursive: true });
+      await writeFile(path.join(resultsDirectory, 'ready-draft.txt'), new URL(draftUrl).pathname);
+      await meter.finishJourney('journey 1a: resumed three steps');
+      return;
+    }
     if (process.env.CORE_E2E_DRAFT_URL) {
       draftUrl = new URL(process.env.CORE_E2E_DRAFT_URL, process.env.PLAYWRIGHT_BASE_URL).toString();
       return;

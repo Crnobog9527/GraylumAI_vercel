@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { coreSql } from './db';
 import { gotoWithBypass } from '../../support/deploymentProtection';
@@ -78,6 +78,11 @@ export async function completeBenchmarkStep(page: Page, meter: SpendMeter) {
   }
   await expect(candidates).toBeVisible({ timeout: 60_000 });
   await meter.checkpoint('benchmark search');
+  await chooseBenchmarks(page, meter, candidates);
+}
+
+/** The candidate card onward: tick accounts, confirm, wait for the benchmark table (and the shortfall card if it comes). */
+export async function chooseBenchmarks(page: Page, meter: SpendMeter, candidates: Locator) {
   // Nothing is ticked at first and the button stays off until the card's minimum is reached: tick accounts until it turns on.
   const confirmChoice = candidates.getByRole('button', { name: '确认选择' });
   // Reference-only accounts ("头部账号", "只作参考") have a disabled box; the others are ticked one by one, counted by "已选 N 个".
@@ -119,6 +124,18 @@ export async function buildReadyDraft(page: Page, meter: SpendMeter): Promise<st
   await expect(stepNav(page).getByRole('button').first()).toBeVisible();
   await completeStep(page, meter, 'step 1', PERSONA.intro);
   await completeBenchmarkStep(page, meter);
+  await completeStep(page, meter, 'step 2', '请根据对标结果给出可行性和平台选择，我同意你的建议。');
+  await completeStep(page, meter, 'step 3', '请给出定位、资料包、第一个月计划和变现方案，我同意你的建议。');
+  await expect(stepNav(page).getByRole('button').filter({ hasText: '✓' })).toHaveCount(3);
+  return url;
+}
+
+/** Continues a draft that stopped inside step 2 at its candidate card (CORE_E2E_RESUME_DRAFT_URL): no new draft, no new search. */
+export async function resumeReadyDraft(page: Page, meter: SpendMeter, url: string): Promise<string> {
+  await gotoWithBypass(page, new URL(url).pathname);
+  const candidates = page.locator('section[aria-label="对标候选账号"], section[aria-label="补选对标账号"]').first();
+  await expect(candidates).toBeVisible({ timeout: 60_000 });
+  await chooseBenchmarks(page, meter, candidates);
   await completeStep(page, meter, 'step 2', '请根据对标结果给出可行性和平台选择，我同意你的建议。');
   await completeStep(page, meter, 'step 3', '请给出定位、资料包、第一个月计划和变现方案，我同意你的建议。');
   await expect(stepNav(page).getByRole('button').filter({ hasText: '✓' })).toHaveCount(3);
