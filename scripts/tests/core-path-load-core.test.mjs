@@ -118,3 +118,12 @@ test('first-token latency starts at the first non-empty text event, not at `open
   assert.equal(hasTextDelta(opened + 'event: text\ndata: {"delta":"a"}\n\n'), true);
   assert.equal(hasTextDelta(opened + 'event: text\ndata: {"del'), false);
 });
+
+test('no wait samples is unknown, never a pass', () => {
+  const w = summarizeWaits([]);
+  assert.equal(w.lockManagerPercent, null);
+  const checks = judgeStage({ summary: { failedTurns: 0, failedOther: 0, codes: {}, p95Ms: 7000 }, waits: w,
+    metrics: { cpuMeanPercent: 40, swapStartMb: 1, swapEndMb: 1 }, replySeconds: 6 });
+  const lock = checks.find(c => c.name === 'LWLock:LockManager %');
+  assert.deepEqual([lock.ok, lock.known], [false, false]);
+});

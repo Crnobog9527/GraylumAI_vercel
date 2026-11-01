@@ -7,9 +7,11 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { K_TOLERANCE, UNCERTAINTIES, kStable, waitsFlat, capacityTable, magnitude } from './lib/extrapolate.mjs';
 
+const waitShare = w => (w.lockManagerPercent === null || w.tuplePercent === null ? null : w.lockManagerPercent + w.tuplePercent);
+
 export function report(results, rhythm = 'load') {
   const levels = results.filter(r => r.rhythm === rhythm).sort((a, b) => a.users - b.users)
-    .map(r => ({ users: r.users, k: r.k, waitPercent: r.waits.lockManagerPercent + r.waits.tuplePercent, r }));
+    .map(r => ({ users: r.users, k: r.k, waitPercent: waitShare(r.waits), r }));
   // A level with no completed turn has no k: it is listed (with its failures) and left out of the stability and capacity arithmetic.
   const valid = levels.filter(l => Number.isFinite(l.k));
   const missing = levels.filter(l => !Number.isFinite(l.k)).map(l => `${l.users} users: ${l.r.failed} failed, no completed turn`);

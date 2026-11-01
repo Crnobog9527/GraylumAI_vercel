@@ -59,3 +59,7 @@ test('a level with no completed turn is reported, not fatal, and is left out of 
   const few = report([level(500, 0.01, 100, 0), level(5000, null, 0, 900)]);
   assert.match(few, /5000 users: 900 failed/);
 });
+
+test('a level without wait samples makes the lock-wait question undecidable', () => {
+  assert.equal(waitsFlat([{ waitPercent: 0.1 }, { waitPercent: null }, { waitPercent: 0.2 }]).flat, null);
+});

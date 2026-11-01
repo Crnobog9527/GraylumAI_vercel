@@ -65,9 +65,10 @@ export function summarizeWaits(samples) {
     for (const [name, n] of Object.entries(s.waits ?? {})) { total[name] = (total[name] ?? 0) + n; waiting += n; }
     for (const [type, n] of Object.entries(s.locks ?? {})) locks[type] = Math.max(locks[type] ?? 0, n);
   }
-  const share = name => (waiting ? (100 * (total[name] ?? 0)) / waiting : 0);
-  return { samples: samples.length, waitingBackends: waiting, lockManagerPercent: Number(share('LWLock:LockManager').toFixed(2)),
-    tuplePercent: Number(share('Lock:tuple').toFixed(2)), maxLocks: locks,
+  // No sample means not measured, not zero: the shares are null and a verdict on them is unknown.
+  const share = name => (waiting ? (100 * (total[name] ?? 0)) / waiting : null);
+  return { samples: samples.length, waitingBackends: waiting, lockManagerPercent: waiting ? Number(share('LWLock:LockManager').toFixed(2)) : null,
+    tuplePercent: waiting ? Number(share('Lock:tuple').toFixed(2)) : null, maxLocks: locks,
     top: Object.entries(total).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, n]) => ({ name, percent: Number(share(name).toFixed(1)) })) };
 }
 
@@ -83,7 +84,7 @@ export function judgeStage({ summary, waits, metrics, replySeconds }, line = PAS
     check('turn p95 seconds', p95s, p95s !== null && p95s <= replySeconds + line.p95OverReplySeconds, replySeconds + line.p95OverReplySeconds),
     check('database CPU mean %', metrics?.cpuMeanPercent ?? null, (metrics?.cpuMeanPercent ?? Infinity) < line.cpuMeanPercent, line.cpuMeanPercent),
     check('swap growth MB', swap, swap !== null && swap <= 0, 0),
-    check('LWLock:LockManager %', waits ? waits.lockManagerPercent : null, (waits?.lockManagerPercent ?? Infinity) < line.lockManagerPercent,
+    check('LWLock:LockManager %', waits?.lockManagerPercent ?? null, (waits?.lockManagerPercent ?? Infinity) < line.lockManagerPercent,
       line.lockManagerPercent),
   ];
 }

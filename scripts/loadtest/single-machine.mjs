@@ -112,7 +112,8 @@ export async function run(opts) {
           else await mentorTurn(call, user, { accountBound: false, between: wait(modelMs) });
           records.push({ kind: kinds[i], ok: true, ms: Date.now() - t0 });
         } catch (error) { records.push({ kind: kinds[i], ok: false, ms: Date.now() - t0, code: String(error.code ?? error.message).slice(0, 60) }); }
-        await sleep(thinkFor(opts.rhythm, Math.random) * opts.stubScale);
+        // Thinking never runs past the end of the measurement: after the deadline only the turns already started are waited for.
+        await sleep(Math.min(thinkFor(opts.rhythm, Math.random) * opts.stubScale, Math.max(0, deadline - Date.now())));
       }
     }));
     const seconds = (Date.now() - started) / 1000;

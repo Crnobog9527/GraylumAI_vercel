@@ -42,7 +42,9 @@ export function kStable(levels, tolerance = K_TOLERANCE) {
 
 // Lock-wait share per level must stay under the limit AND not climb with users (last level not above the first by more than the limit).
 export function waitsFlat(levels, limit = WAIT_SHARE_LIMIT) {
-  const shares = levels.map(l => l.waitPercent).filter(Number.isFinite);
+  // A level whose waits were not sampled makes the question undecidable; it is not read as zero.
+  if (levels.some(l => !Number.isFinite(l.waitPercent))) return { flat: null, max: null };
+  const shares = levels.map(l => l.waitPercent);
   if (shares.length < 2) return { flat: null, max: shares[0] ?? null };
   const max = Math.max(...shares);
   return { flat: max < limit && shares[shares.length - 1] - shares[0] <= limit, max: Number(max.toFixed(2)) };
