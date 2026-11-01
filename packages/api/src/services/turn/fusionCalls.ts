@@ -6,7 +6,7 @@ import type { FusionPhase } from '../fusion/models';
 import type { RuntimeCallGate } from '../runtime/newWorkGate';
 import { modelCall, TurnStop, type ModelCall } from './call';
 import { GATE_CODES } from './chat';
-import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
+import { turnDatabase, turnDatabaseCode, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import type { CounterStore } from './limiter';
 import { callCredits, stopLossSettings } from './policy';
 
@@ -37,7 +37,7 @@ const outputSaved = z.object({ productGone: z.boolean(), ...tombstones });
 const KNOWN = /\b((?:TURN|FUSION)_[A-Z_]+|STOP_LOSS_REACHED)\b/;
 async function rpc<T>(client: TurnClients['write'], name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
   const { data, error } = await client.rpc(name, args);
-  if (error) throw new TurnDatabaseError(KNOWN.exec(error.message ?? '')?.[1] ?? 'TURN_DATABASE_UNAVAILABLE');
+  if (error) throw new TurnDatabaseError(turnDatabaseCode(error.message, KNOWN));
   return schema.parse(data);
 }
 
