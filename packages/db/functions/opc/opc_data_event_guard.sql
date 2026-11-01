@@ -9,7 +9,8 @@ CREATE OR REPLACE FUNCTION public.opc_data_event_guard()
 AS $function$
 BEGIN
  IF TG_OP='UPDATE' THEN RAISE EXCEPTION 'OPC_DATA_IMMUTABLE';END IF;
- PERFORM opc_data_execution(NEW.actor_id,NEW.execution_id);
+ IF NEW.turn_id IS NOT NULL THEN PERFORM opc_data_turn(NEW.actor_id,opc_data_event_source(NEW));
+ ELSE PERFORM opc_data_execution(NEW.actor_id,NEW.execution_id); END IF;
  IF NEW.project_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM artifact_projects
   WHERE id=NEW.project_id AND actor_id=NEW.actor_id AND erased_at IS NULL AND content_deleted_at IS NULL)
  THEN RAISE EXCEPTION 'OPC_DATA_SOURCE_DENIED';END IF;

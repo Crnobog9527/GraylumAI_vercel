@@ -10,6 +10,7 @@ import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {localDb,read,root} from '../runtime-view-perf/local-db.mjs';
 import {reportCases} from './report-cases.mjs';
+import {topicCases} from './topic-cases.mjs';
 import {reportFinalCases} from './report-final-cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 // V2-7a: a report opens only for a Gold account's confirmed round (turn_report_admit); the fixture builds one per call.
@@ -728,6 +729,7 @@ try{
  }
  // V2-7a: kind=report (report-cases.mjs).
  await reportCases({c,one,open,begin,identity,record,close,balance,account,reportSource,reportPolicy,openReport,refusal,peer,report});
+ await topicCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',

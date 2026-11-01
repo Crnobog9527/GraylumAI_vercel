@@ -95,6 +95,9 @@ BEGIN
  refs:=refs||ids||sessions||projects||versions||contents||rounds;
  -- CORE-PATH-V2 V2-7a2: a report turn's request id is its executionId in the edit and publish requests, which hold the edited text.
  refs:=refs||ARRAY(SELECT request_id FROM turns WHERE actor_id=a AND session_id=ANY(sessions) AND kind='report');
+ -- CORE-PATH-V2 V2-10b: a topic turn's request id is its executionId in the topic drafts and the adoption requests.
+ refs:=refs||ARRAY(SELECT t.request_id FROM turns t JOIN opc_topic_workspaces w ON w.session_id=t.session_id AND w.actor_id=a
+  WHERE t.actor_id=a AND t.session_id=ANY(sessions) AND t.kind='chat');
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
  PERFORM id FROM bill2_runs WHERE id IN (SELECT billing_run_id FROM runtime_executions WHERE id=ANY(ids))
   ORDER BY id FOR UPDATE NOWAIT;
@@ -252,11 +255,13 @@ BEGIN
  UPDATE opc_handoffs SET payload=NULL,result=NULL,erased_at=stamp WHERE actor_id=a AND erased_at IS NULL
   AND (content_erasure_references(payload,refs) OR content_erasure_references(result,refs));
  UPDATE opc_topic_draft_versions SET request=NULL,body=NULL,erased_at=stamp WHERE actor_id=a AND erased_at IS NULL
-  AND (source_version_id=ANY(versions) OR request_id=ANY(ids)
+  AND (source_version_id=ANY(versions) OR request_id=ANY(refs)
    OR content_erasure_references(request,refs) OR content_erasure_references(body,refs)
    OR request_id IN (SELECT event.request_id FROM opc_data_events event WHERE event.actor_id=a
-    AND event.action='topic_draft' AND event.execution_id=ANY(ids)));
+    AND event.action='topic_draft' AND (event.execution_id=ANY(ids)
+     OR event.turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions)))));
  DELETE FROM opc_data_events WHERE actor_id=a AND (execution_id=ANY(ids) OR project_id=ANY(projects)
+  OR turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions))
   OR target_project_id=ANY(projects) OR source_version_id=ANY(versions));
  -- Frozen source bodies and request caches are system copies, not independent saved content.
  UPDATE opc_turns t SET input_hash=NULL,erased_at=stamp WHERE t.erased_at IS NULL AND
