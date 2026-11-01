@@ -35,7 +35,7 @@ import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
  */
 export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
-  skills?: (actorId: string) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills }>;
+  skills?: (actorId: string, pin?: WorkSkill) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills }>;
   /** The confirmed voice of the catalog's writing Skills: a per-user system paragraph, and the version turn_open freezes. */
   voice?: (actorId: string, catalog: SkillCatalogEntry[]) => Promise<{ text: string; versionId?: string } | undefined>;
   /** Offer read_source over the user's own library (library_turn_read through the read client) while the two library switches are
@@ -60,7 +60,7 @@ export type ChatToolsSetup = {
   /** Frozen into the turn: revoking this version stops the turn (voice tombstone). */
   voiceVersionId?: string;
   /** What the user chose for this message, as a line for the model, or the code that refuses it before anything opens. */
-  selection(chosen: ChatSelection): { note: string } | { refused: string };
+  selection(chosen: ChatSelection): { note: string; skill?: WorkSkill } | { refused: string };
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean; workspaceContext?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
@@ -68,6 +68,8 @@ export type ChatToolsSetup = {
     replay?: TurnReplay }): Promise<ReturnType<typeof turnTools>>;
 };
 
+/** A Skill by its exact revision: frozen in a work item's turn, so its result names the method that wrote it. */
+export type WorkSkill = { moduleId: string; skillId: string; revisionId: string };
 export type ChatSelection = { moduleId?: string; references?: ReadonlyArray<{ documentId: string; version: number }> };
 
 /** POSITIONING-GATE: an account without a confirmed positioning neither sees nor loads a social-media Skill. */
@@ -80,11 +82,11 @@ const REPLY_RESERVE_MS = 60_000;
 
 export async function prepareChatTools(input: { admin: SupabaseClient; read: TurnClients['read'];
   configuration: Promise<ConfigurationRows>; tools: ChatToolDeps;
-  actorId: string; sessionId: string; requiredBytes: number; interactiveBytes: number; quotedBytes: number; chosen?: ChatSelection;
+  actorId: string; sessionId: string; pin?: WorkSkill; requiredBytes: number; interactiveBytes: number; quotedBytes: number; chosen?: ChatSelection;
   modelMultiplier: string; defaultMultiplier: string;
   /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
   maxTools: number }): Promise<ChatToolsSetup> {
-  const skills = input.tools.skills ? await swallow('turn_tools_skills_unavailable', input.tools.skills(input.actorId), null) : null;
+  const skills = input.tools.skills ? await swallow('turn_tools_skills_unavailable', input.tools.skills(input.actorId, input.pin), null) : null;
   // Whole groups in this order, each only if it still fits the profile's ceiling; the result depends on configuration only,
   // so it is the same on every turn of the session (2.9 rule 2).
   const offered: TurnToolName[] = [];
@@ -132,18 +134,19 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
     userInstructions: (voice?.text ?? '') + workspaceText + (plan.sourceRoom?.strategy ? WORKSPACE_STRATEGY_INSTRUCTIONS : '')
       + (plan.sourceRoom?.posts ? postsText : ''), ...(voice?.versionId ? { voiceVersionId: voice.versionId } : {}),
     selection(chosen) {
-      let note = '';
+      let note = '', skill: WorkSkill | undefined;
       if (chosen.moduleId) {
         // A chosen Skill never silently falls back to a turn without it (as the old page's "不会自动换用其他功能").
         const entry = catalog.find(item => item.moduleId === chosen.moduleId);
         if (!entry || !plan.available.includes('load_skill') || !skills?.prepared.has(entry.name)) return { refused: 'TURN_SKILL_UNAVAILABLE' };
         note += `\nThe user chose the Skill "${entry.name}" for this message: call load_skill with that name first.`;
+        skill = { moduleId: entry.moduleId, skillId: entry.skillId, revisionId: entry.revisionId };
       }
       if (chosen.references?.length) {
         if (!plan.available.includes('read_source')) return { refused: 'TURN_REFERENCES_UNAVAILABLE' };
         note += `\nThe user attached ${chosen.references.map((_item, index) => `doc-${index + 1}`).join(', ')}: read them with read_source before answering.`;
       }
-      return { note };
+      return { note, ...(skill ? { skill } : {}) };
     },
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),

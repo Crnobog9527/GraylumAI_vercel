@@ -316,3 +316,89 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: the one-switch pause and the call limits refuse
     .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);
   expect((await db.query('select credits from profiles where id=$1', [limited.actor])).rows[0].credits).toBe(1000);
 });
+
+// A work item as opc_handoff leaves it: a published Skill, the positioning version it came from, its account and item, and its
+// conversation with the brief frozen by runtime_material. The item is an article.
+async function workItem(actor: string) {
+  const skillId = randomUUID(), moduleId = randomUUID(), revisionId = randomUUID(), source = randomUUID(), round = randomUUID(), version = randomUUID();
+  const account = randomUUID(), item = randomUUID(), key = randomUUID(), plan = randomUUID(), business = randomUUID(), session = randomUUID();
+  const hash = 'b'.repeat(64), entry = 'a'.repeat(64);
+  await db.query('begin'); // one now(): a published skill must match its revision's time
+  await db.query("insert into skills(id,skill_key,content_kind) values($1,$2,'directory')", [skillId, 'work-' + skillId]);
+  await db.query("insert into modules(id,title,skill_id,active) values($1,'Work method',$2,true)", [moduleId, skillId]);
+  await db.query("insert into skill_revisions(id,skill_id,version,content,content_hash,published_by) values($1,$2,1,'method',$3,$4)", [revisionId, skillId, entry, actor]);
+  await db.query(`insert into skill_packages(revision_id,skill_id,request_id,manifest,package_hash,entry_hash,expected_version,actor_id)
+    values($1,$2,$3,$4,$5,$6,0,$7)`, [revisionId, skillId, randomUUID(), JSON.stringify({ packageHash: hash }), hash, entry, actor]);
+  await db.query(`update skills set status='published',published_version=1,published_content='method',published_content_hash=$2,published_at=now(),
+    published_by=$3 where id=$1`, [skillId, entry, actor]);
+  await db.query('commit');
+  await db.query(`insert into artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version) values
+    ($1,$4,$5,$6,$7,'source',1),($2,$4,$5,$6,$8,'account',0),($3,$4,$5,$6,$9,'item',0)`,
+  [source, account, item, actor, moduleId, skillId, 'source-' + source, 'account-' + account, 'item-' + item]);
+  await db.query('update artifact_projects set source_project_id=$2 where id=$1', [item, account]);
+  await db.query(`insert into artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,state,steps)
+    values($1,$2,$3,$4,'{}',repeat('c',64),repeat('d',64),'published','{}')`, [round, source, revisionId, hash]);
+  await db.query(`insert into artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)
+    values($1,$2,$3,1,'{}',repeat('e',64),'[]')`, [version, source, round]);
+  const draft = (await db.query('select bill2_create_draft($1) v', [actor])).rows[0].v as string;
+  const registration = 'work-' + randomUUID(), start = randomUUID();
+  await db.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+    [start, actor, JSON.stringify({ kind: 'positioning_draft', draftId: draft }), randomUUID()]);
+  await db.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label) values($1,$2,$3,$4,'{}','Work')", [registration, moduleId, skillId, revisionId]);
+  await db.query("insert into opc_drafts values($1,$2,$3,$4,$5,$6,$7,'manual')", [draft, actor, source, round, start, randomUUID(), registration]);
+  await db.query("insert into opc_businesses(id,actor_id,name,current_source_version_id) values($1,$2,'business',$3)", [business, actor, version]);
+  await db.query('insert into opc_draft_businesses values($1,$2)', [draft, business]);
+  await db.query("insert into opc_accounts(project_id,actor_id,platform,account_key,source_version_id,business_id) values($1,$2,'fixture',$3,$4,$5)",
+    [account, actor, 'work-' + account, version, business]);
+  await db.query('insert into opc_plans(id,draft_id,version,source_version_id,request_id,request,body) values($1,$2,1,$3,$4,$5,$6)',
+    [plan, draft, version, randomUUID(), JSON.stringify({ sourceVersionId: version }), JSON.stringify([{ id: key, contentType: 'article' }])]);
+  await db.query("insert into opc_items(work_item_id,plan_id,item_key,account_project_id,source_version_id,brief,day) values($1,$2,$3,$4,$5,'brief',current_date)",
+    [item, plan, key, account, version]);
+  await db.query("insert into runtime_sessions(id,actor_id,scope,start_request_id,start_payload) values($1,$2,$3,$4,'{}')",
+    [session, actor, JSON.stringify({ kind: 'work_item', projectId: account, workItemId: item }), randomUUID()]);
+  await db.query("insert into runtime_scope_material(session_id,revision,request_id,request,content,content_hash) values($1,1,$2,'{}',$3,repeat('f',64))",
+    [session, randomUUID(), JSON.stringify({ brief: 'WORK_BRIEF', material: 'WORK_MATERIAL', work: {} })]);
+  return { session, business, skill: { moduleId, skillId, revisionId } };
+}
+
+it('RUNTIME: CORE-PATH-V2 V2-10b: a work turn reads its checks, brief and bound Skill before opening, and its result saves by the turn', async () => {
+  const f = await setup(), w = await workItem(f.actor);
+  const entry = { name: 'Work method', description: 'The method', ...w.skill, packageId: w.skill.skillId, packageHash: 'b'.repeat(64), resultBytes: 10 };
+  const pins: unknown[] = [], bodies: string[] = [];
+  const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); return sse('gen-work-' + bodies.length, ['Saved ', 'body']); };
+  const { admin, calls } = countingAdmin();
+  const send = async (text: string, requestId = randomUUID()) => {
+    const events: TurnEvent[] = [];
+    await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate },
+      newWork: { message: admit, calls: admit },
+      tools: { skills: async (_actor, pin) => { pins.push(pin); return { catalog: [entry], prepared: new Map([[entry.name, 'method text']]) }; } } },
+    { actorId: f.actor, sessionId: w.session, requestId, text, workItem: true, chosen: { moduleId: w.skill.moduleId } }, e => { events.push(e); }));
+    return events;
+  };
+  // Refused before anything opens: a script request on an article.
+  expect(await send('[OPC_SCRIPT_V1] draft')).toEqual([{ type: 'error', code: 'OPC_VIDEO_TYPE_REQUIRED' }]);
+  expect((await db.query('select count(*)::int n from turns where actor_id=$1', [f.actor])).rows[0].n).toBe(0);
+  // Allowed: the bound revision is asked for and frozen, the brief goes to the model as data and is not saved with the message.
+  const requestId = randomUUID(), events = await send('Write it', requestId);
+  expect(events.at(-1), JSON.stringify(events)).toMatchObject({ type: 'result' });
+  expect(pins.at(-1)).toEqual(w.skill);
+  expect(bodies[0]).toContain('WORK_BRIEF');
+  const turnId = (events.at(-1) as Extract<TurnEvent, { type: 'result' }>).turnId;
+  const row = (await db.query('select policy from turns where actor_id=$1 and id=$2', [f.actor, turnId])).rows[0];
+  expect(row.policy.workSkill).toEqual(w.skill);
+  expect((await db.query('select role,content from session_messages where session_id=$1 order by seq', [w.session])).rows)
+    .toEqual([{ role: 'user', content: 'Write it' }, { role: 'assistant', content: 'Saved body' }]);
+  // The same request replays: no second turn, no second call to the model.
+  expect((await send('Write it', requestId)).at(-1)).toMatchObject({ type: 'error', code: 'TURN_REQUEST_REPLAYED' });
+  expect(bodies).toHaveLength(1);
+  expect(calls.filter(call => call === 'rpc/opc_work_check').length).toBeGreaterThanOrEqual(3);
+  const saved = await admin.rpc('opc_work_result_turn', { p_actor_id: f.actor, p_turn_id: turnId });
+  expect(saved.error).toBeNull();
+  expect((await admin.rpc('opc_work_result_turn', { p_actor_id: f.actor, p_turn_id: turnId })).data).toEqual(saved.data);
+  // Archived: refused before anything opens, nothing sent or frozen.
+  await db.query('update opc_businesses set archived_at=now() where id=$1', [w.business]);
+  const balance = (await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits;
+  expect(await send('Again')).toEqual([{ type: 'error', code: 'OPC_BUSINESS_ARCHIVED' }]);
+  expect(bodies).toHaveLength(1);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(balance);
+});

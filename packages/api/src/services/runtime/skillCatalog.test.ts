@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {it,expect,beforeEach,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
-import {clearSkillCatalogCache,discoverSkillCatalog,serializedResultBytes} from './skillCatalog';
+import {clearSkillCatalogCache,discoverSkillCatalog,moduleUsesVoice,pinnedCatalogEntry,serializedResultBytes} from './skillCatalog';
+import {databaseSkillSource} from '../skills/databaseSource';
+import {withPinnedSkill} from '../turn/tools/skills';
 import {clearSkillResourceCache,packageHash,sha256} from '../skills/loader';
 
 const skillState={status:'published',version:1};
@@ -154,4 +156,34 @@ it('measures a load as the doubly serialized result, so quotes and backslashes c
  expect(serializedResultBytes(plain)).toBeGreaterThan(Buffer.byteLength(JSON.stringify(plain)));
  expect(serializedResultBytes(quoted)-serializedResultBytes(plain)).toBeGreaterThan(
   Buffer.byteLength(JSON.stringify(quoted))-Buffer.byteLength(JSON.stringify(plain)));
+});
+
+it('CORE-PATH-V2 V2-10b: a work item keeps its bound revision, even of a package the catalog leaves out, and never falls back', async () => {
+ const {user,admin}=clients();
+ const positioning=catalog[5]!,alpha=catalog[0]!;
+ const pin={moduleId:positioning.module,skillId:positioning.skill,revisionId:positioning.revision};
+ const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:pin.moduleId,skillId:pin.skillId,revisionId:pin.revisionId});
+ const listed=await discoverSkillCatalog(user,admin,{maxResultBytes:8192,excludeSocial:false});
+ expect(listed.some(entry=>entry.moduleId===pin.moduleId)).toBe(false);
+ const entry=await pinnedCatalogEntry(source,pin,8192);
+ expect(entry).toMatchObject({...pin,name:positioning.name});
+ // In place of what the catalog lists for that module: a newer listed revision does not stay beside it.
+ const newer={...listed[0]!,moduleId:pin.moduleId,revisionId:id(99)};
+ const pinned=withPinnedSkill([listed[0]!,newer],pin,entry);
+ expect(pinned.filter(item=>item.moduleId===pin.moduleId).map(item=>item.revisionId)).toEqual([pin.revisionId]);
+ expect(pinned.map(item=>item.moduleId)).toContain(alpha.module);
+ // A revision that cannot be read: nothing is offered for the module, so a chosen Skill is refused, not swapped for another.
+ expect(await pinnedCatalogEntry(source,{...pin,revisionId:id(99)},8192)).toBeNull();
+ expect(withPinnedSkill([newer],pin,null)).toEqual([]);
+});
+
+it('CORE-PATH-V2 V2-10b: a pinned Skill keeps the voice its module asks for, read from the module; unreadable throws', async () => {
+ const module=(result:unknown)=>({from:()=>({select:()=>({eq:()=>({single:async()=>result})})})}) as unknown as SupabaseClient;
+ expect(await moduleUsesVoice(module({data:{uses_user_voice:true},error:null}),id(6))).toBe(true);
+ expect(await moduleUsesVoice(module({data:{uses_user_voice:null},error:null}),id(6))).toBe(false);
+ await expect(moduleUsesVoice(module({data:null,error:{message:'denied'}}),id(6))).rejects.toThrow('RUNTIME_CATALOG_UNAVAILABLE');
+ const {user,admin}=clients(),positioning=catalog[5]!;
+ const pin={moduleId:positioning.module,skillId:positioning.skill,revisionId:positioning.revision};
+ const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:pin.moduleId,skillId:pin.skillId,revisionId:pin.revisionId});
+ expect(await pinnedCatalogEntry(source,pin,8192,true)).toMatchObject({usesVoice:true});
 });
