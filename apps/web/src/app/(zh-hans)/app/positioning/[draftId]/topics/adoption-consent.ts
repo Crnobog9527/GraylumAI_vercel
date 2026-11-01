@@ -1,12 +1,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 // A model reply can identify candidate IDs, but it cannot authorize a write.
-// Only an unambiguous instruction in the persisted user turn may do that.
-export function consentedTopicIds(input: string | null, candidateIds: string[]): string[] | null {
+// Only an unambiguous instruction in the persisted user turn may do that. The instruction may sit in one clause of a longer message
+// and name the topic's title too; a message with a question or a negation anywhere consents to nothing.
+export function consentedTopicIds(input: string | null, candidateIds: string[], titles: readonly string[] = []): string[] | null {
   const message = input?.trim() ?? '';
-  const match = message.match(/^(?:请|帮我|我要|我想|现在|只|就|把|将|\s)*(?:采用|采纳)\s*(.*?)\s*[。！!]*$/);
+  if (/[?？吗]|不要|不用|别|先不|暂不|是否/.test(message)) return null;
+  const clauses = message.split(/[，,。！!；;\n]+/).filter(clause => /采用|采纳/.test(clause));
+  if (clauses.length !== 1) return null;
+  const match = clauses[0].trim().match(/^(?:请|帮我|我要|我想|现在|只|就|把|将|\s)*(?:采用|采纳)\s*(.*?)\s*(?:作为选题|吧|就好|即可)?$/);
   if (!match || candidateIds.length === 0) return null;
-  const selection = match[1].trim();
+  const selection = titles.reduce((text, title) => title ? text.split(title).join('') : text, match[1]).trim();
   if (/^(?:全部|所有)(?:选题|内容)?$/.test(selection)) return [...candidateIds];
   const numerals: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
   function ordinal(value: string): number {

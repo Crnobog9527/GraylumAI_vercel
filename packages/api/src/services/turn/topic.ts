@@ -104,7 +104,8 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
     const shared = withBrandIdentity(skill, guard);
     const instructions = shared + '\n' + TOPIC_WORKSPACE_INSTRUCTION + '\n'
       + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage));
-    const current = runtimeScopeInput(input.text, material);
+    // The date, for the plan's calendar days; in the message, so the shared prompt stays cached.
+    const current = runtimeScopeInput(`Today is ${new Date().toISOString().slice(0, 10)}.\n\n${input.text}`, material);
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
       quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: false });
     const request: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: [], network: 'deny',

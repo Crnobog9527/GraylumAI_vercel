@@ -10,6 +10,14 @@ describe('natural-language topic adoption consent', () => {
     expect(consentedTopicIds('采用第一条和第三条选题', ids)).toEqual(['one','three']);
     expect(consentedTopicIds('采用全部选题', ids)).toEqual(ids);
   });
+  it('finds the instruction in a longer message, with the topic title around it (turn 61 on staging)', () => {
+    const titles = ['One hour of prep for a week of baby meals', 'Second', 'Third'];
+    expect(consentedTopicIds('三条都做短视频，请采用第一条 One hour of prep for a week of baby meals 作为选题。', ids, titles)).toEqual(['one']);
+    expect(consentedTopicIds('好的，采用第二条吧', ids)).toEqual(['two']);
+    expect(consentedTopicIds('采用第一条 some other words', ids, titles)).toBeNull();
+    expect(consentedTopicIds('采用第一条，再采用第二条', ids)).toBeNull();
+    expect(consentedTopicIds('先别采用，采用第一条', ids)).toBeNull();
+  });
   it('refuses questions, vague agreement, negation and out-of-range selection', () => {
     for (const message of ['不要采用第一条', '采用第一条吗？', '好，继续', '先看看第二条', '采用第四条', '别人说采用第一条',
       '采用第一条和', '采用和第一条', '采用第一条和选题']) {

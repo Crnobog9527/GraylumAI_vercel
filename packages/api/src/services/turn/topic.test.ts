@@ -79,7 +79,10 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     await runTopicTurn(t.deps, input, t.emit);
     const run = h.runtime.mock.calls[0]![0] as Run;
     expect(run.instructions.startsWith("SKILL TEXT\nThis turn runs inside the user's first-week topic workspace")).toBe(true);
-    expect(JSON.parse(run.input)).toMatchObject({ userRequest: input.text, scopeMaterial: { revision: 1, content: { material: 'CONFIRMED' } } });
+    expect(run.instructions).toContain('YYYY-MM-DD');
+    expect(String(run.input)).toMatch(/Today is \d{4}-\d{2}-\d{2}/);
+    expect(JSON.parse(run.input).userRequest).toContain(input.text);
+    expect(JSON.parse(run.input)).toMatchObject({ scopeMaterial: { revision: 1, content: { material: 'CONFIRMED' } } });
     expect([run.maxTurns, run.tools]).toEqual([1, []]);
   });
 
