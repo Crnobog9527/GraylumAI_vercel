@@ -3659,7 +3659,7 @@
   "fn:fusion_compare_turn_admit(uuid,uuid,integer,jsonb)": "dfa406857725",
   "fn:fusion_compare_turn_adopt(uuid,uuid,integer)": "6daa8980e73b",
   "fn:fusion_compare_turn_list(uuid,uuid)": "5eb45ae45a73",
-  "fn:fusion_compare_turn_read(uuid,uuid)": "2bab0defffe4",
+  "fn:fusion_compare_turn_read(uuid,uuid)": "9e35f1ada0f3",
   "fn:fusion_compare_unjudged(integer)": "ec7518fb64ef",
   "fn:fusion_compare_view(fusion_compares)": "0b2a6aed6ed7",
   "fn:fusion_group_admit(uuid,uuid,text,uuid,jsonb)": "dfca26b10212",

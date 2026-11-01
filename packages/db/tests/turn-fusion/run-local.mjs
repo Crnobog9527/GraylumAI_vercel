@@ -296,6 +296,14 @@ try{
   assert.equal(done.chargedCredits,4);assert.equal(done.state,'finished');assert.equal(done.turnId,o.turnId);
   const cards=await list(a.actor,a.session);
   assert.deepEqual(cards.map(x=>[x.compareId,x.turnId,x.question]),[[o.compareId,o.turnId,'which?']]);
+  // A compare closed with a full refund (failed after answers were saved) charges nothing, and neither does any column.
+  const f=await open(a,{kind:'compare',pol:comparePolicy({limits:{model:2,paidTools:0,freeTools:0,decisions:0}}),product:{...cp,requestHash:hash('r7c'),config:{models:models.slice(0,2)}}});
+  for(const [i,id] of models.slice(0,2).entries())await one('select turn_fusion_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,f.turnId,i+1,'model',id,null,null,hash('r7c'+i),0.1,m]);
+  for(const s of [1,2])await record(a,f.turnId,s,{n:0.0021,output:{phase:'fusion_compare',body:'x'+s,verdict:'usable'}});
+  await close(a,f.turnId,'failed',{refundAll:true,failure:'turn_failed'});
+  const refunded=await read(a.actor,f.compareId);
+  assert.equal(refunded.chargedCredits,0);
+  assert.deepEqual(refunded.columns.map(x=>[x.billing.closed,x.billing.chargedCredits,x.billing.netChargedCredits]),[[true,0,0],[true,0,0]],'a refunded turn shows no column cost');
   // Refused: another account reads nothing and lists nothing; an unknown compare reads nothing; a client role cannot call.
   assert.equal(await read(b.actor),null);
   assert.deepEqual(await list(b.actor,a.session),[]);
