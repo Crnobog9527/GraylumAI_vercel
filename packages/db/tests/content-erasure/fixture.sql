@@ -11,7 +11,7 @@ BEGIN
  INSERT INTO modules(id,title,skill_id,active) VALUES(m,'D7 fixture',sk,true);
  INSERT INTO skill_revisions(id,skill_id,version,content,content_hash,published_by) VALUES(rev,sk,1,'fixture',repeat('a',64),a);
  INSERT INTO skill_packages(revision_id,skill_id,request_id,manifest,package_hash,entry_hash,expected_version,actor_id)
- VALUES(rev,sk,gen_random_uuid(),'{}',repeat('b',64),repeat('a',64),0,a);
+ VALUES(rev,sk,gen_random_uuid(),jsonb_build_object('packageHash',repeat('b',64)),repeat('b',64),repeat('a',64),0,a);
  UPDATE skills SET status='published',published_version=1,published_content='fixture',published_content_hash=repeat('a',64),published_at=now(),published_by=a WHERE id=sk;
  INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version)
  VALUES(p,a,m,sk,'source-'||p,'source private title',1),(ac,a,m,sk,'account-'||ac,'account title',0),(wi,a,m,sk,'work-'||wi,'independent title',0);
