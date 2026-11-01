@@ -22,6 +22,12 @@ export function withResearchRow(rows: readonly WorkItem[], call: ResearchCall): 
   const row = workItemFromResearchCall(call);
   return rows.some(old => old.id === row.id) ? rows.map(old => old.id === row.id ? row : old) : [...rows, row];
 }
+/** Whether a view shows a turn closed that the page has not yet acted on (`seen`: the last one it did; undefined before the first read). */
+export const closedTurnSeen = (seen: number | null | undefined, view: Pick<TurnView, 'lastTurn'> | null):
+  { changed: boolean; id: number | null | undefined } => {
+  const id = view ? view.lastTurn?.turnId ?? null : undefined;
+  return { changed: id !== undefined && id !== seen, id };
+};
 export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }> };
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
@@ -53,6 +59,16 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     const timer = setInterval(() => void read(), READ_MS);
     return () => clearInterval(timer);
   }, [unread, read]);
+  // However a turn's close is learned (the stream, a poll, the first read after a reload), the balance is read again: a page opened
+  // while the turn ran asked for it while the turn's freeze was held, and nothing else would ask again.
+  const lastClosed = useRef<number | null | undefined>(undefined);
+  const closedNow = closedTurnSeen(lastClosed.current, view);
+  useEffect(() => {
+    const now = closedTurnSeen(lastClosed.current, view);
+    if (!now.changed) return;
+    lastClosed.current = now.id;
+    settled.current();
+  }, [view, closedNow.id]);
   // A pause waits for the user; nothing moves it, so it is not read again.
   const active = Boolean(view?.activeTurn) && view?.activeTurn?.pauseReason !== 'waiting_credits' && !sending;
   useEffect(() => {
