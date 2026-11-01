@@ -6,6 +6,10 @@
 // Usage: node packages/db/tests/run-local-suites.mjs --ci | --local-only [--list] [--only <dir[,dir]>] [--jobs N] [--shard K/N]
 // Each suite is started with the same flag (--ci / --local-only) and must accept it. --shard K/N keeps every
 // N-th suite starting at the K-th, so CI can spread the suites over N parallel jobs (each runs its own share).
+// Database build snapshot (Owner 2026-11-01): when two or more of the chosen suites start their database through localDb()
+// (runtime-view-perf/local-db.mjs), the repository files are replayed into one database once, the container is stopped cleanly and
+// committed as a local image, and each of those suites starts its own fresh container from that image. A suite that needs the real
+// build chain (credit-sources seeds data in the middle of it) or does its own build still replays the files itself.
 import { spawn } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -22,6 +26,9 @@ export function discoverSuites(dir = testsDir) {
       .map(file => `${entry.name}/${file}`))
     .sort();
 }
+
+// True when the suite file starts its database through localDb().
+export const usesLocalDb = (suite, dir = testsDir) => /\blocalDb\(/.test(readFileSync(resolve(dir, suite), 'utf8'));
 
 export const loadExcluded = (dir = testsDir) =>
   JSON.parse(readFileSync(resolve(dir, 'local-suites-excluded.json'), 'utf8'));
@@ -47,12 +54,28 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // once; output is buffered per suite and printed when it ends. --jobs N (default 4, the CI runner's CPU count) bounds the load.
     const jobs = Number(args.includes('--jobs') ? args[args.indexOf('--jobs') + 1] : 4);
     const results = [];
+    const sharing = suites.filter(suite => usesLocalDb(suite));
+    let snapshot = null;
+    if (sharing.length >= 2) {
+      const started = Date.now();
+      try {
+        const { buildSnapshot } = await import('./runtime-view-perf/local-db.mjs');
+        snapshot = await buildSnapshot();
+        console.log(`database snapshot built once in ${Math.round((Date.now() - started) / 1000)}s for ${sharing.length} suites`);
+      } catch (error) {
+        console.log(`::warning::database snapshot failed, each suite builds its own: ${String(error.message).slice(0, 500)}`);
+      }
+    }
+    const suiteEnv = snapshot ? { ...process.env, GRAYLUM_DB_SNAPSHOT_IMAGE: snapshot.image, GRAYLUM_DB_SNAPSHOT_BUILD: JSON.stringify(snapshot.build) } : process.env;
+    const removeSnapshot = () => { snapshot?.remove(); snapshot = null; };
+    process.on('SIGINT', () => { removeSnapshot(); process.exit(130); });
+    process.on('SIGTERM', () => { removeSnapshot(); process.exit(143); });
     const queue = [...suites];
     const worker = async () => {
       for (let suite = queue.shift(); suite; suite = queue.shift()) {
         const started = Date.now();
         const run = await new Promise(done => {
-          const child = spawn(process.execPath, [resolve(testsDir, suite), mode], { cwd: root, timeout: 20 * 60 * 1000 });
+          const child = spawn(process.execPath, [resolve(testsDir, suite), mode], { cwd: root, env: suiteEnv, timeout: 20 * 60 * 1000 });
           let out = '';
           child.stdout.on('data', chunk => { out += chunk; });
           child.stderr.on('data', chunk => { out += chunk; });
@@ -66,7 +89,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       }
     };
     const wall = Date.now();
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(jobs, suites.length)) }, worker));
+    try {
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(jobs, suites.length)) }, worker));
+    } finally {
+      removeSnapshot();
+    }
     console.log(`wall clock ${Math.round((Date.now() - wall) / 1000)}s with ${jobs} at a time`);
     console.log(`\n${'suite'.padEnd(50)} result  seconds`);
     for (const { suite, seconds, passed } of results.sort((x, y) => x.suite.localeCompare(y.suite))) console.log(`${suite.padEnd(50)} ${passed ? 'PASS  ' : 'FAIL  '}  ${seconds}`);
