@@ -12,18 +12,19 @@ class CIWorkflowsTest < Minitest::Test
     @security = YAML.safe_load(File.read("#{ROOT}/workflows/security.yml"))
   end
   GATES = {'lint-check'=>['Lint & Type Check','lint-and-type'], 'typecheck'=>['TypeScript Check','lint-and-type'],
-           'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration',
-                                        'DB_SUITES_RESULT'=>'db-suites','CONTRACTS_RESULT'=>'ci-contracts','LEDGER_RESULT'=>'migration-ledger'}],
            'security-unit-tests'=>['Security Unit Tests',{'WORK_RESULT'=>'test','CONTRACTS_RESULT'=>'ci-contracts',
                                                           'LEDGER_RESULT'=>'migration-ledger'}],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
+  # Unit Tests is the one gate that may accept a skipped worker (the two database jobs, only when the scope job says so), so it has its own truth table.
+  UNIT_GATE = {'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration','DB_SUITES_RESULT'=>'db-suites','CONTRACTS_RESULT'=>'ci-contracts',
+               'LEDGER_RESULT'=>'migration-ledger','SCOPE_RESULT'=>'scope'}.freeze
   INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
                       'node packages/db/tests/payg/run-runtime.mjs --ci',
                       'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
                       'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql,packages/db/tests/runtime-view-perf/fixture.sql,packages/db/tests/content-erasure/fixture.sql,packages/db/tests/content-erasure-perf/fixture.sql,packages/db/tests/content-erasure-perf/assertions.sql'].freeze
   def test_required_context_names_unique
     names = [@ci, @security].flat_map { |w| w.fetch('jobs').values.map { |j| j.fetch('name') } }
-    (GATES.values.map(&:first) + ['Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
+    (GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
       assert_equal 1, names.count(name), name
     end
   end
@@ -49,6 +50,74 @@ class CIWorkflowsTest < Minitest::Test
         refute work.key?('continue-on-error')
       end
     end
+  end
+  RESULTS = ['success', 'failure', 'cancelled', 'skipped', '', 'invalid'].freeze
+  def unit_gate_passes?(step, env)
+    _, _, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'))
+    status.success?
+  end
+  # Owner 2026-11-01: only pull requests whose files are all on the allow-list skip the two database jobs. The gate must accept
+  # exactly that skip and still go red for every failed, cancelled or unexplained one.
+  def test_unit_tests_gate_accepts_only_the_scope_approved_skip
+    job = @ci.fetch('jobs').fetch('unit-check')
+    assert_equal 'Unit Tests', job.fetch('name'); assert_equal 'always()', job.fetch('if')
+    assert_equal UNIT_GATE.values, job.fetch('needs')
+    assert_equal 1, job.fetch('steps').length
+    step = job.fetch('steps').first
+    assert_equal UNIT_GATE.transform_values { |worker| "${{ needs.#{worker}.result }}" }.merge('SCOPE_FULL'=>'${{ needs.scope.outputs.full }}'), step.fetch('env')
+    base = {'WORK_RESULT'=>'success','INTEGRATION_RESULT'=>'success','DB_SUITES_RESULT'=>'success','CONTRACTS_RESULT'=>'success',
+            'LEDGER_RESULT'=>'success','SCOPE_RESULT'=>'success','SCOPE_FULL'=>'true'}
+    assert unit_gate_passes?(step, base)
+    # The three always-required workers and the scope job itself: nothing but success passes, whatever the scope says.
+    %w[WORK_RESULT CONTRACTS_RESULT LEDGER_RESULT SCOPE_RESULT].each do |key|
+      RESULTS.each do |result|
+        %w[true false].each do |full|
+          assert_equal result == 'success', unit_gate_passes?(step, base.merge(key=>result, 'SCOPE_FULL'=>full)), "#{key}=#{result} full=#{full}"
+        end
+      end
+    end
+    # The two database jobs: success always passes; skipped passes only when scope succeeded and said "false".
+    RESULTS.product(RESULTS, RESULTS, ['true', 'false', '', 'invalid']).each do |integration, db_suites, scope, full|
+      env = base.merge('INTEGRATION_RESULT'=>integration, 'DB_SUITES_RESULT'=>db_suites, 'SCOPE_RESULT'=>scope, 'SCOPE_FULL'=>full)
+      allowed_skip = scope == 'success' && full == 'false'
+      ok = ->(result) { result == 'success' || (result == 'skipped' && allowed_skip) }
+      expected = scope == 'success' && ok.call(integration) && ok.call(db_suites)
+      assert_equal expected, unit_gate_passes?(step, env), env.inspect
+    end
+    UNIT_GATE.each_value do |worker|
+      work = @ci.fetch('jobs').fetch(worker)
+      refute work.key?('continue-on-error')
+    end
+  end
+  def test_scope_job_gates_exactly_the_two_database_jobs
+    jobs = @ci.fetch('jobs')
+    scope = jobs.fetch('scope')
+    assert_equal 'Decide test scope', scope.fetch('name')
+    refute scope.key?('needs'); refute scope.key?('if'); refute scope.key?('continue-on-error'); refute scope.key?('env')
+    assert_equal({'full'=>'${{ steps.scope.outputs.full }}'}, scope.fetch('outputs'))
+    assert_equal({'contents'=>'read'}, scope.fetch('permissions'))
+    checkout = scope.fetch('steps').first
+    assert_equal 0, checkout.fetch('with').fetch('fetch-depth')
+    assert_equal false, checkout.fetch('with').fetch('persist-credentials')
+    decide = scope.fetch('steps').find { |step| step['id'] == 'scope' }
+    assert_equal 'node scripts/ci-test-scope.mjs', decide.fetch('run')
+    refute decide.key?('if'); refute decide.key?('env')
+    %w[integration db-suites].each do |id|
+      assert_equal ['scope'], jobs.fetch(id).fetch('needs'), id
+      assert_equal "needs.scope.outputs.full == 'true'", jobs.fetch(id).fetch('if'), id
+    end
+    # Every other job runs unconditionally: the skip covers the two database jobs only.
+    gated = %w[integration db-suites unit-check lint-check typecheck security-unit-tests build security-e2e-tests]
+    (jobs.keys - gated).each do |id|
+      refute jobs.fetch(id).key?('if'), id
+      refute jobs.fetch(id).key?('needs'), id
+    end
+  end
+  def test_a_newer_push_to_the_same_pull_request_cancels_the_older_run_but_a_push_to_a_branch_never_does
+    concurrency = @ci.fetch('concurrency')
+    assert_equal "${{ github.event_name == 'pull_request' }}", concurrency.fetch('cancel-in-progress')
+    assert_includes concurrency.fetch('group'), "github.event.pull_request.number"
+    assert_includes concurrency.fetch('group'), 'github.sha'
   end
   def test_integration_worker_runs_billing_and_recovery_without_secrets
     steps = @ci.fetch('jobs').fetch('integration').fetch('steps')
@@ -129,7 +198,7 @@ class CIWorkflowsTest < Minitest::Test
     %w[auth-bootstrap checkout-cancellation skill-runtime year-calendar refund-race billing-cron].each do |suite|
       refute_includes runs, "pnpm test:ci:#{suite}"
     end
-    refute @ci['jobs'].key?('scope')
+    # The only scoping job allowed is the Owner-approved one (2026-11-01), which gates just the two database jobs: test_scope_job_gates_exactly_the_two_database_jobs.
     assert_equal 1, runs.count('node scripts/check-code-size.mjs')
     lint_runs = @ci['jobs']['lint-and-type']['steps'].map { |step| step['run'] }
     assert_includes lint_runs, 'node scripts/check-code-size.mjs'

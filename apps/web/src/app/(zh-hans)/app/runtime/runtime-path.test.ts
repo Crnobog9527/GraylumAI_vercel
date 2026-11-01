@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { runtimePathChoice, type RuntimePathInput } from './runtime-path';
 
 const base: RuntimePathInput = { routeSession: 's1', choicesSettled: true, corePathV2: true, heldLoaded: true, held: false, viewSettled: true,
-  scopeKind: 'positioning_draft', oldHistory: false };
+  scopeKind: 'positioning_draft' };
 const choose = (over: Partial<RuntimePathInput>) => runtimePathChoice({ ...base, ...over });
 
 describe('which workspace a conversation opens in', () => {
@@ -18,8 +18,7 @@ describe('which workspace a conversation opens in', () => {
     expect(choose({ viewSettled: false })).toBe('loading');
     expect(choose({})).toBe('turn');
   });
-  it('keeps a conversation with old-path history, a work item or a failed view on the old workspace', () => {
-    expect(choose({ oldHistory: true })).toBe('old');
+  it('opens every free conversation on the turn path with the switch on, old-path history or not; a work item or a failed view stays old', () => {
     expect(choose({ scopeKind: 'work_item' })).toBe('old');
     expect(choose({ scopeKind: undefined })).toBe('old');
   });
