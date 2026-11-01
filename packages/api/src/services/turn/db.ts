@@ -64,6 +64,9 @@ const reportTurn = z.object({ turnId: z.number().int().positive(), requestId: z.
   settlement: z.enum(['pending', 'done']).nullable(), fixedCredits: z.number().int().nullable(), stopChargeable: z.boolean().nullable(),
   report: z.record(z.string(), z.unknown()).nullable(), body: z.string().nullable(), openedAt: z.string(), closedAt: z.string().nullable() });
 export type ReportTurn = z.infer<typeof reportTurn>;
+const workCheck = z.object({ work: z.object({ moduleId: z.string().uuid(), skillId: z.string().uuid(), revisionId: z.string().uuid(),
+  brief: z.string().nullable(), material: z.string().nullable() }).nullable() });
+export type WorkItemTurn = NonNullable<z.infer<typeof workCheck>['work']>;
 
 export type CallKind = 'model' | 'tool' | 'decision';
 export type CallStatus = 'ok' | 'not_sent' | 'rejected' | 'no_charge_402' | 'unusable';
@@ -74,7 +77,7 @@ export class TurnDatabaseError extends Error {
   constructor(readonly code: string) { super(code); }
 }
 // A kind's own refusals (a report's REPORT_*, an archived business, V2-7a) keep their codes too.
-const KNOWN = /\b(TURN_[A-Z_]+|REPORT_[A-Z_]+|STOP_LOSS_REACHED|OPC_BUSINESS_ARCHIVED)\b/;
+const KNOWN = /\b(TURN_[A-Z_]+|REPORT_[A-Z_]+|STOP_LOSS_REACHED|OPC_BUSINESS_ARCHIVED|OPC_VIDEO_TYPE_REQUIRED)\b/;
 /** The freeze (atomic_pre_deduct) refuses an account whose credit sources it cannot tell apart (PRE_DEDUCT_*): nothing was frozen or
  * charged, and the page says so instead of "database unavailable". The database's own text never reaches the page. */
 export const CREDIT_ACCOUNT_REVIEW = 'TURN_CREDIT_ACCOUNT_REVIEW';
@@ -133,6 +136,9 @@ export function turnDatabase(clients: TurnClients) {
         p_turn_id: a.turnId }, reportTurn.nullable()),
     // A report's reads before it opens (controller 10-30, B1), on the read client and by the actor's own keys: the confirmed
     // source of its round, the session's benchmark table, and the benchmark shortfall card (only when the table is short).
+    /** A work_item conversation, read before a turn opens; refuses an archived business and a script request on a non-video item. */
+    workCheck: (a: { actorId: string; sessionId: string; videoRequired: boolean }) =>
+      call(clients.read, 'opc_work_check', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_video_required: a.videoRequired }, workCheck),
     // The report membership check of the old admission (payment facts, refunds, the subscription's period end; never only the
     // cached level): on the write client, as it takes the account's own row lock to serialize with paid fulfilment.
     reportMembership: (a: { actorId: string }) =>
