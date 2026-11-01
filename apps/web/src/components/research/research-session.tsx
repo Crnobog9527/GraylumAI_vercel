@@ -208,11 +208,11 @@ export function ResearchSessionPanel({ settledTurns, onSend, continuation = null
   const toSend = useMemo(() => continuationToSend(continuation, stored), [continuation, stored]);
   const counts = autoContinue ? roundCounts(autoContinue.sentPerRound, stored) : null;
   const decision = autoContinue && counts
-    ? autoContinueDecision(toSend, autoContinue.sentFor, counts, props.disabled) : "none";
+    ? autoContinueDecision(toSend, autoContinue.sentFor, counts, Boolean(props.disabled)) : "none";
   // A stored round may have been cached while the panel waited, and the user may have sent something else since: ask the host
   // again right before sending, and only send the turn it still reports and while the conversation still takes a message.
-  const disabledNow = useRef(props.disabled);
-  disabledNow.current = props.disabled;
+  const disabledNow = useRef(Boolean(props.disabled));
+  disabledNow.current = Boolean(props.disabled);
   const checking = useRef(new Set<string>());
   // The confirmation below may still be in flight when the user leaves this step or page: a panel that is gone sends nothing.
   const mounted = useRef(true);
@@ -255,11 +255,11 @@ export function ResearchSessionPanel({ settledTurns, onSend, continuation = null
     <>
       {decision === "limit"
         ? <p className={styles.hint}>已经自动接着搜了 {AUTO_CONTINUE_LIMIT} 次，回复"继续"可以接着搜完这一轮。</p>
-        : batch > 0 && props.disabled && <p className={styles.hint} role="status">正在扩大搜索，第 {batch + 1} 批…已经查过的不会重复收费。</p>}
+        : batch > 0 && Boolean(props.disabled) && <p className={styles.hint} role="status">正在扩大搜索，第 {batch + 1} 批…已经查过的不会重复收费。</p>}
       <ResearchSessionCards {...props} onConfirmed={confirmation => void onSend(researchConfirmedInput(confirmation))}/>
-      <ResearchShortfallCard sessionId={sessionId} disabled={props.disabled}
+      <ResearchShortfallCard sessionId={sessionId} disabled={Boolean(props.disabled)}
         onChosen={(choice, qualified) => void onSend(shortfallChoiceInput(choice, qualified))}/>
-      <ResearchSessionBenchmarks sessionId={sessionId} disabled={props.disabled}
+      <ResearchSessionBenchmarks sessionId={sessionId} disabled={Boolean(props.disabled)}
         onRefresh={async grant => void onSend(researchRefreshInput(grant.platform, grant.account), grant.refreshId)}/>
     </>
   );
