@@ -115,7 +115,9 @@ export async function buildReadyDraft(page: Page, meter: SpendMeter): Promise<st
 /** How many reports this account has stopped in the last 24 hours (the third stop asks for confirmation). */
 export async function stopsInLast24h(actorId: string): Promise<number> {
   const rows = await coreSql()<Array<{ n: string }>>`
-    select count(*)::text as n from report_fees f
-    where f.actor_id = ${actorId}::uuid and f.user_stopped_at > now() - interval '24 hours'`;
+    select ((select count(*) from report_fees f
+        where f.actor_id = ${actorId}::uuid and f.user_stopped_at > now() - interval '24 hours')
+      + (select count(*) from turns t
+        where t.actor_id = ${actorId}::uuid and t.kind = 'report' and t.stopped_by_user and t.closed_at > now() - interval '24 hours'))::text as n`;
   return Number(rows[0]?.n ?? 0);
 }

@@ -77,7 +77,7 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     }
 
     // The settlement already in the ledger before this report starts: the one for this report must be a different one.
-    const settledBefore = (await latestReportSettlement(page))?.executionId ?? null;
+    const settledBefore = (await latestReportSettlement(page, gold.id))?.executionId ?? null;
     // The next stop asks first. "继续生成" keeps the report going; "确认停止" charges the part already written.
     await startReport(page);
     await stopButton(page).click();
@@ -96,7 +96,7 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     // later, so the balance alone would read a charge of about 500. (On staging the status line stayed at "已停止，正在保存已显示的内容…"
     // for minutes while the ledger was already right; the notice text is noted, not asserted.)
     const newSettlement = async () => {
-      const entry = await latestReportSettlement(page);
+      const entry = await latestReportSettlement(page, gold.id);
       return entry !== null && entry.executionId !== settledBefore && entry.outcome === 'user_stop' ? entry : null;
     };
     await expect.poll(newSettlement, { timeout: 180_000, intervals: [3000, 5000] }).not.toBeNull();

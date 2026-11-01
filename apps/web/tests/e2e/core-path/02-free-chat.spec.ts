@@ -16,10 +16,9 @@ test('journey 2: free chat loads a Skill, runs one research lookup and finishes 
 
   const session = await startFreeChat(page,
     '请先用搜索工具查一下小红书上“15 分钟快手晚餐”最近的热门笔记，再用图文与文章这个技能帮我写一篇 150 字以内的小红书图文笔记。');
-  // Plan CORE-PATH-V2 §2.2: an ordinary conversation has no stop; only a report can be stopped. The current path still
-  // offers one, so this is asserted from V2-10 on (CORE_E2E_PATH=v2) and only noted until then.
-  if (process.env.CORE_E2E_PATH === 'v2') await expect(page.getByRole('button', { name: '停止', exact: true })).toHaveCount(0);
-  else test.info().annotations.push({ type: 'note', description: 'no-stop assertion for ordinary chats waits for the v2 path' });
+  // Plan CORE-PATH-V2 §2.2: an ordinary conversation has no stop; only a report can be stopped. Checked while the reply is
+  // still being written (the page says "正在回复…" until the first text arrives).
+  await expect(page.getByRole('button', { name: '停止', exact: true })).toHaveCount(0);
   await waitForRuntimeTurn(page, 240_000);
 
   // A research row means the tool ran. Whether the supplier returned data is a separate question: "done" has data, "missing" is
@@ -29,9 +28,12 @@ test('journey 2: free chat loads a Skill, runs one research lookup and finishes 
   await expect(work.first()).toContainText(/搜索|网页|账号/);
   test.info().annotations.push({ type: 'research-state', description: String(await work.first().getAttribute('data-work-state')) });
 
+  // The tool journal: the turn path keeps it in turn_calls, the old path in runtime_tool_calls (both are read until V2-12).
   const loaded = await coreSql()<Array<{ n: string }>>`
-    select count(*)::text as n from runtime_tool_calls t join runtime_executions e on e.id = t.execution_id
-    where e.session_id = ${session}::uuid and t.name = 'load_skill'`;
+    select ((select count(*) from runtime_tool_calls t join runtime_executions e on e.id = t.execution_id
+        where e.session_id = ${session}::uuid and t.name = 'load_skill')
+      + (select count(*) from turn_calls c join turns u on u.id = c.turn_id and u.actor_id = c.actor_id
+        where u.session_id = ${session}::uuid and c.tool_name = 'load_skill'))::text as n`;
   expect(Number(loaded[0]?.n ?? 0), 'a Skill was loaded automatically').toBeGreaterThanOrEqual(1);
 
   await page.goto('/app/profile?tab=credits');

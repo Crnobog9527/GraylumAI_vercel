@@ -15,6 +15,8 @@ const progress = (page: Page) => page.locator('ul[aria-label="这一轮的进度
 /** A free-chat turn is done when the progress list is gone, the composer is usable again and the reply is saved. */
 export async function waitForRuntimeTurn(page: Page, timeoutMs = 150_000) {
   await expect(progress(page)).toHaveCount(0, { timeout: timeoutMs });
+  // On the turn path (CORE-PATH-V2 V2-10) the streaming reply is a placeholder "正在回复…" and there is no progress list.
+  await expect(page.getByText('正在回复…')).toHaveCount(0, { timeout: timeoutMs });
   await expect(page.getByRole('button', { name: '保存到成果夹' }).last()).toBeVisible({ timeout: 60_000 });
 }
 
@@ -30,7 +32,7 @@ export async function startFreeChat(page: Page, firstMessage: string): Promise<s
 }
 
 /** The refusal a provider's rejection shows; it is free ("没有扣积分") and the product's own way of saying "try again". */
-const unavailableNotice = (page: Page) => page.getByText('服务暂时不可用，没有扣积分。');
+const unavailableNotice = (page: Page) => page.getByText(/服务暂时不可用，没有扣积分。|模型服务暂时不可用，本轮已全额退回积分。|模型服务繁忙，本轮已全额退回积分。/);
 
 /**
  * Sends one message and waits for its reply. A provider rejection ("服务暂时不可用，没有扣积分") is an observed, free
@@ -45,10 +47,12 @@ export async function sendRuntimeMessage(page: Page, text: string, meter?: Spend
     await runtimeBox(page).click();
     await page.keyboard.insertText(text);
     await page.getByRole('button', { name: '发送', exact: true }).click();
+    // An ordinary conversation has no stop (Owner 2026-10-28): not while the reply is being written either.
+    await expect(page.getByRole('button', { name: '停止', exact: true })).toHaveCount(0);
     await expect.poll(async () => (await replies.count() > before ? 'reply' : await unavailableNotice(page).count() > refusalsBefore ? 'refused' : 'waiting'),
       { timeout: 150_000, intervals: [1000, 2000] }).not.toBe('waiting');
     if ((await replies.count()) > before) break;
-    test.info().annotations.push({ type: 'provider-rejected', description: `${label}: 服务暂时不可用，没有扣积分 (attempt ${attempt})` });
+    test.info().annotations.push({ type: 'provider-rejected', description: `${label}: provider rejection, no charge (attempt ${attempt})` });
     expect(attempt, `${label} was refused twice`).toBeLessThan(2);
     await expect(progress(page)).toHaveCount(0, { timeout: 60_000 });
   }

@@ -6,6 +6,7 @@
 
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { coreSql } from './db';
 import type { SpendMeter } from './spend';
 
 /** The user's credit balance, read the way the app reads it (credits.getBalance), not from rendered text. */
@@ -26,7 +27,14 @@ export interface ReportSettlement { executionId: string; consumedCredits: number
  * consumed and what was given back. The balance alone cannot tell it, because the 500 hold leaves the balance before the refund
  * comes back.
  */
-export async function latestReportSettlement(page: Page): Promise<ReportSettlement | null> {
+export async function latestReportSettlement(page: Page, actorId?: string): Promise<ReportSettlement | null> {
+  // The turn path (CORE-PATH-V2) closes a report turn with its own charge; read it from the turns table when the account is known.
+  const turn = actorId ? await latestReportTurn(actorId) : null;
+  if (turn) return turn;
+  return latestLedgerSettlement(page);
+}
+
+async function latestLedgerSettlement(page: Page): Promise<ReportSettlement | null> {
   const input = encodeURIComponent(JSON.stringify({ limit: 20, actualOnly: true }));
   const body = await page.evaluate(async query => (await fetch(`/api/trpc/credits.getCreditTransactions?input=${query}`, { credentials: 'include' })).json(), input);
   const items = ((body as { result?: { data?: { items?: Array<{ created_at: string; metadata?: Record<string, unknown> }> } } }).result?.data?.items) ?? [];
@@ -35,6 +43,19 @@ export async function latestReportSettlement(page: Page): Promise<ReportSettleme
   const { consumedCredits, refundedCredits, nominalReserved, outcome, executionId } = entry.metadata as Record<string, number | string>;
   return { executionId: String(executionId ?? ''), consumedCredits: Number(consumedCredits), refundedCredits: Number(refundedCredits ?? 0), nominalReserved: Number(nominalReserved ?? 0),
     outcome: String(outcome ?? ''), createdAt: entry.created_at };
+}
+
+/** The newest settled report turn of the account: what it charged out of what was held (turn path). */
+async function latestReportTurn(actorId: string): Promise<ReportSettlement | null> {
+  const rows = await coreSql()<Array<{ id: string; close_kind: string | null; charged: number | null; reserved: number; closed_at: string }>>`
+    select id::text, close_kind, charged_credits as charged, reserved_credits as reserved, closed_at::text
+    from turns where actor_id = ${actorId}::uuid and kind = 'report' and state = 'closed' and settlement = 'done'
+    order by id desc limit 1`;
+  const row = rows[0];
+  if (!row) return null;
+  const consumed = row.charged ?? 0;
+  return { executionId: `turn:${row.id}`, consumedCredits: consumed, refundedCredits: Math.max(0, row.reserved - consumed), nominalReserved: row.reserved,
+    outcome: row.close_kind === 'stopped' ? 'user_stop' : String(row.close_kind ?? ''), createdAt: row.closed_at };
 }
 
 /** The composer is a ProseMirror editor: type into it, never fill(). */
@@ -67,6 +88,8 @@ export async function sendAndWait(page: Page, text: string, meter?: SpendMeter, 
   await page.keyboard.insertText(text);
   await expect(sendButton(page)).toBeEnabled();
   await sendButton(page).click();
+  // A coach turn is an ordinary conversation turn: it has no stop while it is written (hasNoUserStop, Owner 2026-10-28).
+  await expect(stopNotice(page)).toHaveCount(0);
   await expect(async () => {
     expect(await assistantMessages(page).count()).toBeGreaterThan(before);
     await expect(stopNotice(page)).toHaveCount(0);
