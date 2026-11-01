@@ -34,6 +34,10 @@ vi.mock("@/trpc/client", () => {
 });
 // The jury entry has its own tests; here it only needs to stay out of the way.
 vi.mock("@/components/fusion-review/JuryEntry", () => ({ JuryEntry: () => null }));
+// The turn path's saved-report read has answered ("no turn report"): the old status read is asked only after it (use-report-gen.ts).
+vi.mock("./use-turn-report", async importOriginal => ({ ...await importOriginal<typeof import("./use-turn-report")>(),
+  useTurnReport: () => ({ on: false, known: true, server: { kind: "known", executionId: null }, status: null,
+    refetch: async () => ({ data: null }), events: async function* () {}, stop: async () => { throw new Error("TURN_STOP_FAILED"); } }) }));
 import { ReportEntry } from "./report-panel";
 
 const props = { draftId: "d", sessionId: "s", projectId: "p", roundId: "r", busy: false, onTopics: () => {} };
