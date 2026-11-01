@@ -82,6 +82,9 @@ export async function completeBenchmarkStep(page: Page, meter: SpendMeter) {
   const confirmChoice = candidates.getByRole('button', { name: '确认选择' });
   // Reference-only accounts ("头部账号", "只作参考") have a disabled box; the others are ticked one by one, counted by "已选 N 个".
   const boxes = candidates.getByRole('checkbox');
+  // The card first appears with every box and the button disabled (trace 2026-11-01: all 12 boxes read disabled for ~15 s after it
+  // showed up, then turned on by themselves), so wait until a box can be ticked instead of reading the state once.
+  await expect(candidates.locator('input[type="checkbox"]:enabled').first()).toBeVisible({ timeout: 60_000 });
   // The card can be re-rendered while the turn that produced it is still closing, which drops ticks made in that window
   // ("已选 0 个" after ticking). So tick, wait until the count has held steady, and only then press the button; tick again
   // from the card's own state if a re-render wiped the choice.
