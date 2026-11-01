@@ -126,7 +126,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
       actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];
   const pendingText = outgoing ?? (chat.view?.activeTurn && !paused ? '' : null);
-  return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen} onToggleRight={() => setPanelOpen(open => !open)}
+  return <WorkspaceFrame area="chat" revealRight={reveal} turnBusy={chat.busy && !chat.paused} rightOpen={panelOpen}
+    onToggleRight={() => setPanelOpen(open => !open)}
     right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
     <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
       <RuntimeHeader title="工作对话"/>
