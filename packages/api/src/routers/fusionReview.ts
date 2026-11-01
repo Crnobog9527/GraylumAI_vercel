@@ -19,6 +19,8 @@ import { handReviewToServer, withAdvanceLease } from '../services/fusion/backgro
 import { ENDED_STATES, reviewState } from '../services/fusion/reviewRecord';
 import { adoptionChoices } from '../services/fusion/reviewAdoption';
 import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
+import { readAdmissionConfiguration } from '../services/runtime/admissionConfiguration';
+import { readCoreConfig } from '../services/turn/chat';
 import { loadVersionMarks } from '../services/fusion/versionMarks';
 
 const uuid = z.string().uuid();
@@ -162,7 +164,9 @@ export const fusionReviewRouter = router({
   detail: reader.input(review).query(({ ctx, input }) => ctx.flow.detail(input.reviewId)),
   /** Whether the review is switched on, so the positioning page shows no entry (and no error) when it is off.
    * Membership and balance are still checked by start; a failed settings read reads as off. */
-  available: reader.query(async ({ ctx }) => ({ enabled: await readFusionSettings(ctx.admin).then(s => s.review.enabled === true, () => false) })),
+  // corePathV2: which path a start goes on (CORE-PATH-V2 V2-10); an unreadable setting keeps the old one.
+  available: reader.query(async ({ ctx }) => ({ enabled: await readFusionSettings(ctx.admin).then(s => s.review.enabled === true, () => false),
+    corePathV2: await readAdmissionConfiguration(ctx.admin).then(c => Boolean(readCoreConfig(c)), () => false) })),
   /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */
   panel: reader.query(async ({ ctx }) => {
     const names = (await readFusionSettings(ctx.admin)).review.displayNames;

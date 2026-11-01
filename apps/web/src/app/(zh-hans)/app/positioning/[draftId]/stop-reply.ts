@@ -90,8 +90,12 @@ export function rememberStop(storage: TabStore | null, draftId: string, executio
  * history shows), one whose stream already delivered its final result, or
  * one that ended without a result.
  */
+/** A turn of the CORE-PATH-V2 path (`turn:<id>`) is an ordinary conversation: it has no user stop (Owner 10-28). */
+export const hasNoUserStop = (executionId: string) => executionId.startsWith("turn:");
+
 export function stopAvailable(reply: LiveReply | null, recorded: StopView | undefined, settled: boolean) {
-  return Boolean(reply && !reply.stopped && !reply.finished && reply.phase !== "incomplete" && !settled && !stopSaving(recorded));
+  return Boolean(reply && !hasNoUserStop(reply.executionId) && !reply.stopped && !reply.finished
+    && reply.phase !== "incomplete" && !settled && !stopSaving(recorded));
 }
 
 /** True when a `runtime.cancel` stop answer still waits for the in-flight call (`stopping`). */

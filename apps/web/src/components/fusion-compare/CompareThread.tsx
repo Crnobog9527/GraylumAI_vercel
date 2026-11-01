@@ -5,7 +5,9 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { CompareCard } from './CompareCard';
 
-export type CompareCardRow = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null };
+export type CompareCardRow = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null;
+  /** A compare of the turn path (CORE-PATH-V2 V2-10): read, adopted and followed on its own routes, never stopped by a button. */
+  turn?: boolean };
 type Card = CompareCardRow;
 
 /** The listed cards plus the compares this tab started that the list does not (yet) have: a failed list read must not hide a
@@ -40,24 +42,29 @@ export function useCompareThread(sessionId: string | null) {
   // not stay hidden after a transient failure.
   const list = trpc.fusionCompare.list.useQuery({ sessionId: sessionId ?? '' }, { enabled: Boolean(sessionId), retry: 2,
     retryDelay: 1000, refetchInterval: query => (query.state.status === 'error' ? 5000 : false) });
-  const data = list.data as { cards: Card[]; names: Record<string, string> } | undefined;
+  const turnList = trpc.fusionCompare.turnList.useQuery({ sessionId: sessionId ?? '' }, { enabled: Boolean(sessionId), retry: 2,
+    retryDelay: 1000, refetchInterval: query => (query.state.status === 'error' ? 5000 : false) });
+  const old = list.data as { cards: Card[]; names: Record<string, string> } | undefined;
+  const turned = turnList.data as { cards: Card[]; names: Record<string, string> } | undefined;
+  const data = old || turned ? { cards: [...(old?.cards ?? []), ...(turned?.cards ?? []).map(card => ({ ...card, turn: true }))]
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)), names: { ...old?.names, ...turned?.names } } : undefined;
   // Compares this tab started: shown from the start response itself, so a failed list read cannot hide a group that holds credits.
   const [started, setStarted] = useState<Card[]>([]);
   const cards = withStarted(data?.cards ?? [], started);
   // Real model names of exactly the models these cards used (server-resolved), not today's allowlist.
   const names = data?.names ?? {};
   const adoptedExecutions = new Set(cards.map(card => card.adoption?.executionId).filter((id): id is string => Boolean(id)));
-  const add = (compareId: string) => setStarted(old => old.some(card => card.compareId === compareId) ? old
-    : [...old, { compareId, state: 'running', createdAt: new Date().toISOString() }]);
+  const add = (compareId: string, turn = false) => setStarted(old => old.some(card => card.compareId === compareId) ? old
+    : [...old, { compareId, state: 'running', createdAt: new Date().toISOString(), ...(turn ? { turn } : {}) }]);
   // `loaded`: the list has been answered (or failed for good): until then it is not yet known which cancelled turns are adopted answers.
-  const loaded = !sessionId || list.isFetched;
-  return { cards, names, adoptedExecutions, add, loaded, refresh: () => list.refetch() };
+  const loaded = !sessionId || (list.isFetched && turnList.isFetched);
+  return { cards, names, adoptedExecutions, add, loaded, refresh: async (): Promise<void> => { await Promise.all([list.refetch(), turnList.refetch()]); } };
 }
 
 /** One card per compare, oldest first; `onAdopted` lets the page re-read its history, `onQuote` prefills the composer. */
 export function CompareThread({ cards, names, onAdopted, onQuote }: {
   cards: Card[]; names: Record<string, string>; onAdopted: () => void; onQuote: (text: string) => void;
 }) {
-  return <>{cards.map(card => <CompareCard key={card.compareId} compareId={card.compareId} names={names}
+  return <>{cards.map(card => <CompareCard key={card.compareId} compareId={card.compareId} names={names} turn={card.turn === true}
     onAdopted={onAdopted} onQuote={onQuote} />)}</>;
 }
