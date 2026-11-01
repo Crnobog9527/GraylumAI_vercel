@@ -56,6 +56,13 @@ describe('read_source over the workspace and own posts (CORE-PATH-V2 V2-6 B)', (
     expect(tight.rpc).not.toHaveBeenCalled();
   });
 
+  it('refused: a second strategy report in one answer (room was kept for one)', async () => {
+    const { rpc, read } = reader({});
+    await read(`strategy_report:${id}`);
+    expect(await parsed(read(`strategy_report:${id}`))).toEqual({ kind: 'unavailable' });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
   it('library queries go to the library reader; without one nothing is read', async () => {
     const library = vi.fn(async () => ({ text: '{"kind":"library_index"}' }));
     expect(await parsed(reader({}, library).read('search:coffee'))).toEqual({ kind: 'library_index' });

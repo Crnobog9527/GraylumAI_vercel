@@ -5,7 +5,7 @@ import type { SocialPlatform } from '../research/vendors/types';
 import { discoverSkillCatalog } from '../runtime/skillCatalog';
 import { admitCatalogVoice } from '../runtime/voiceCatalog';
 import { swallow } from '../../lib/swallow';
-import { readMembershipEntitlements } from '../membershipEntitlements';
+import { readOwnDataTier } from '../membershipEntitlements';
 import { REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
 import { rowFor } from '../runtime/settingsRows';
 import { admitOwnPosts } from '../runtime/workspacePosts';
@@ -38,7 +38,7 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
     async workspace(actorId, configuration) {
       const postsOn = await admitOwnPosts(admin, true, 'ordinary', [], configuration);
       const [sources, tier] = await Promise.all([admin.rpc('opc_workspace_sources', { p_actor_id: actorId }),
-        postsOn ? swallow('turn_tools_posts_tier_unavailable', readMembershipEntitlements(admin, actorId), null) : null]);
+        postsOn ? swallow('turn_tools_posts_tier_unavailable', readOwnDataTier(admin, actorId), null) : null]);
       if (sources.error) throw new Error('TURN_WORKSPACE_UNAVAILABLE');
       return { sources: sources.data as string[], strategy: true, posts: !tier ? null : { windowDays: tier.ownDataWindowDays,
         benchmarks: tier.level === 'gold' && tier.allowBenchmarkMonitor,

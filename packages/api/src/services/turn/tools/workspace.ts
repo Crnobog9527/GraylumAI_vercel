@@ -42,7 +42,7 @@ async function readPosts(read: TurnClients['read'], actorId: string, sessionId: 
 export function workspaceTurnReader(read: TurnClients['read'], actorId: string, sessionId: string, access: WorkspaceAccess,
   library?: (query: string) => Promise<SourceRead>) {
   const windows = !access.posts ? [] : [14, 30, 90].filter(days => days === 14 || days <= access.posts!.windowDays);
-  let postReads = 0;
+  let postReads = 0, strategyReads = 0;
   const workspace = async (query: string) => {
     const { data, error } = await read.rpc('workspace_turn_read', { p_actor_id: actorId, p_session_id: sessionId, p_query: query,
       p_allowed: access.sources });
@@ -66,7 +66,8 @@ export function workspaceTurnReader(read: TurnClients['read'], actorId: string, 
       return readPosts(read, actorId, sessionId, access.posts, days);
     }
     if (WORKSPACE_ID.test(query)) {
-      if (query.startsWith('strategy_report:') && !access.strategy) return UNAVAILABLE;
+      // Room was kept for one strategy result (up to 52000 bytes), whatever the read limit is.
+      if (query.startsWith('strategy_report:') && (!access.strategy || ++strategyReads > 1)) return UNAVAILABLE;
       return { text: JSON.stringify(await workspace(query)) };
     }
     return library ? library(query) : UNAVAILABLE;

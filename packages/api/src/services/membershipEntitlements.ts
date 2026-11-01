@@ -2,6 +2,7 @@
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { catalogRead } from './runtime/catalogCache';
 import { refreshStripeTestClockUser } from './payments/stripeTestClock';
 import { evaluateAction, getState, loadLatestMembershipFacts } from './membershipEligibility';
 import {
@@ -26,9 +27,10 @@ function unavailable(): never {
 
 async function readPlan(client: SupabaseClient, level: MembershipLevel) {
   // is_active is a catalog/checkout switch, not revocation of previously granted membership.
-  const { data, error } = await client.from('membership_plans')
+  // Site-wide, admin-written: through the catalog cache (a change to membership_plans bumps the settings version).
+  const { data, error } = await catalogRead(client, 'settings', 'membership-plan:' + level, () => client.from('membership_plans')
     .select('id,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,positioning_profile_limit')
-    .eq('level', level).limit(2);
+    .eq('level', level).limit(2));
   const parsed = z.array(planSchema).length(1).safeParse(data);
   if (error || !parsed.success) unavailable();
   return parsed.data[0]!;
@@ -81,9 +83,24 @@ export async function readPositioningProfileEntitlement(client: SupabaseClient, 
 // PUBLISH-MONITOR fields (0240) are read separately and fail closed, so a database without 0240 (deployment
 // window) or a bad value only switches these new features off and never blocks the existing entitlements.
 async function readPublishPlan(client: SupabaseClient, planId: string) {
-  const { data, error } = await client.from('membership_plans').select(PUBLISH_COLUMNS).eq('id', planId).limit(2);
+  const { data, error } = await catalogRead(client, 'settings', 'membership-publish:' + planId,
+    () => client.from('membership_plans').select(PUBLISH_COLUMNS).eq('id', planId).limit(2));
   const parsed = z.array(publishPlanSchema).length(1).safeParse(data);
   return error || !parsed.success ? PUBLISH_CLOSED : parsed.data[0]!;
+}
+
+/** The own post data window and benchmark right, for the free chat's tools (before turn_open): the member's state is read live, the plan
+ *  columns come from the catalog cache, and nothing else of the full entitlements (no Fusion setting) is read. */
+export async function readOwnDataTier(client: SupabaseClient, profileId: string) {
+  try {
+    const current = await resolveCurrentMembership(client, profileId);
+    const publish = await readPublishPlan(client, current.plan.id);
+    return Object.freeze({ level: current.level, ownDataWindowDays: publish.own_data_window_days,
+      allowBenchmarkMonitor: publish.allow_benchmark_monitor });
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    unavailable();
+  }
 }
 
 // A fresh read for a NEW action. This projection is not a Runtime admission token: consumers

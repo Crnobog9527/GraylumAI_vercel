@@ -12,9 +12,13 @@
 -- the two 2026-11-01 lists) and do not read system_settings or profiles. A session that is not the caller's own live one, or an
 -- account being erased, reads nothing. The window and the review flags are not model input: read_source only ever passes
 -- what Node resolved from the membership tier.
--- Compatibility: all three are new and unused until the code that offers them ships; old code keeps working unchanged.
+-- The own-data tier is read from membership_plans before turn_open through the catalog cache (ENGINEERING section 5: site-wide
+-- admin-written catalogs), so a change to that table now bumps the 'settings' catalog version like system_settings does, with the
+-- same three triggers 0419 installs (they write nothing but the version row; membership_plans is changed only by admins).
+-- Compatibility: the functions are new and unused until the code that offers them ships; old code keeps working unchanged.
 -- Repeatable: CREATE OR REPLACE. Recovery: DROP FUNCTION public.posts_turn_read(uuid,uuid,integer,boolean,boolean);
--- DROP FUNCTION public.workspace_turn_read(uuid,uuid,text,uuid[]); DROP FUNCTION public.opc_workspace_sources(uuid); no data changes.
+-- DROP FUNCTION public.workspace_turn_read(uuid,uuid,text,uuid[]); DROP FUNCTION public.opc_workspace_sources(uuid);
+-- DROP TRIGGER catalog_versions_insert_delete / _change / _truncate ON public.membership_plans; no data changes.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -214,5 +218,15 @@ BEGIN
 END $function$;
 REVOKE ALL ON FUNCTION public.posts_turn_read(uuid, uuid, integer, boolean, boolean) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.posts_turn_read(uuid, uuid, integer, boolean, boolean) TO service_role;
+
+DROP TRIGGER IF EXISTS catalog_versions_insert_delete ON public.membership_plans;
+DROP TRIGGER IF EXISTS catalog_versions_change ON public.membership_plans;
+DROP TRIGGER IF EXISTS catalog_versions_truncate ON public.membership_plans;
+CREATE TRIGGER catalog_versions_insert_delete AFTER INSERT OR DELETE ON public.membership_plans
+ FOR EACH ROW EXECUTE FUNCTION public.catalog_versions_bump('settings');
+CREATE TRIGGER catalog_versions_change AFTER UPDATE ON public.membership_plans
+ FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION public.catalog_versions_bump('settings');
+CREATE TRIGGER catalog_versions_truncate AFTER TRUNCATE ON public.membership_plans
+ FOR EACH STATEMENT EXECUTE FUNCTION public.catalog_versions_bump('settings');
 
 COMMIT;
