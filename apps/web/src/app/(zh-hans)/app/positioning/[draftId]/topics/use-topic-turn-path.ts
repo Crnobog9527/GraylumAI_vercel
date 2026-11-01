@@ -95,7 +95,10 @@ export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unkn
     if (candidate) localStorage.setItem(`opc-topic-adoption-context:${sessionId}:${request.requestId}`, JSON.stringify(candidate));
     const outcome = await runTurn(request, () => undefined, { fetch: fetcher, url: TOPIC_TURN_URL });
     const next = await refetch();
-    return { ...topicSendOutcome(outcome), unknown: outcome.state === 'lost' && !topicRequestSeen(next, request.requestId) };
+    const told = topicSendOutcome(outcome), seen = topicRequestSeen(next, request.requestId);
+    // A turn that failed saved nothing: its words go back in the box, or they would be nowhere.
+    const failed = outcome.state === 'finished' && outcome.last.type === 'error' && outcome.last.code !== 'TURN_REQUEST_REPLAYED' && !seen;
+    return { ...told, keepInput: told.keepInput || failed, unknown: outcome.state === 'lost' && !seen };
   };
   const decided = topicPathDecided({ choices: choices.isSuccess || choices.isError, old: oldSettled, turns: Boolean(view) });
   return { on, decided, data, refetch, send };
