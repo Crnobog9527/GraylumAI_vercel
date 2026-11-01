@@ -24,8 +24,9 @@ import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
 import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
-import { consentedTopicIds } from './adoption-consent';
+import { opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
+import { consentedForCandidate } from './adoption-consent';
+import { lastReplyAdoptionNotice, parseAdoption, parseCandidate } from './topic-candidate';
 import { refuseTopic, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
@@ -58,62 +59,6 @@ type Operation = { kind: 'chat'; request: ChatRequest; candidateAtSend?: Candida
 // and identity conflicts retain the whole original envelope, never just its ID.
 const definiteRejections = new Set(['OPC_BUSINESS_CONFLICT', 'OPC_BUSINESS_DENIED', 'OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_TOPIC_ALREADY_ADOPTED', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
 
-/** The last JSON array the Agent offered as the first-week plan, if any. */
-function parseCandidate(text: string | null | undefined): PlanItem[] | null {
-  if (!text) return null;
-  const blocks = [...text.matchAll(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/g)].map(
-    (m) => m[1],
-  );
-  const trimmed = text.trim();
-  const bodies = trimmed.startsWith('[') && trimmed.endsWith(']')
-    ? [...blocks, trimmed]
-    : blocks;
-  for (let i = bodies.length - 1; i >= 0; i -= 1) {
-    try {
-      const parsed = JSON.parse(bodies[i]);
-      if (!Array.isArray(parsed) || !parsed.length || parsed.length > 28) continue;
-      const items = parsed.map((raw) => {
-        const item = raw as Record<string, unknown>;
-        const value = (key: string) =>
-          typeof item?.[key] === 'string' ? (item[key] as string).trim() : '';
-        const candidate = {
-          id: value('id'),
-          platform: value('platform'),
-          account: value('account'),
-          title: value('title'),
-          brief: value('brief'),
-          day: value('day'),
-          ...(value('contentType')?{contentType:planItem.shape.contentType.parse(value('contentType'))} : {}),
-        };
-        if (
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate.id) ||
-          !/^[a-z0-9_-]{1,32}$/.test(candidate.platform) ||
-          !/^[a-z0-9][a-z0-9._:-]{0,127}$/.test(candidate.account) ||
-          !candidate.title || candidate.title.length > 160 ||
-          !candidate.brief || candidate.brief.length > 2000 ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(candidate.day)
-        )
-          throw new Error('invalid item');
-        return candidate;
-      });
-      return items;
-    } catch {
-      /* not this block */
-    }
-  }
-  return null;
-}
-
-function parseAdoption(text: string | null | undefined): string[] | null {
-  if (!text) return null;
-  for (const match of [...text.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g)].reverse()) {
-    try {
-      const value = JSON.parse(match[1]) as { action?: unknown; itemIds?: unknown };
-      if (value.action === 'adopt' && Array.isArray(value.itemIds) && value.itemIds.length > 0 && value.itemIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id))) return [...new Set(value.itemIds as string[])];
-    } catch { /* not an adoption block */ }
-  }
-  return null;
-}
 function TopicWorkspaceContent() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
@@ -448,7 +393,7 @@ function TopicWorkspaceContent() {
       try { if (JSON.stringify((JSON.parse(stored) as CandidateSnapshot).body)!==JSON.stringify(frozen.body)) return; }
       catch { return; }
     }
-    const consented = consentedTopicIds(action.input, frozen.body.map(item => item.id));
+    const consented = consentedForCandidate(action.input, frozen.body);
     if (!consented || consented.length !== ids.length || consented.some(id => !ids.includes(id))) return;
     const request = adoptionRequest(frozen, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
     if (!request) return;
@@ -474,12 +419,15 @@ function TopicWorkspaceContent() {
   const lastOpen = Boolean(executions?.length && !['completed', 'cancelled'].includes(executions.at(-1)!.state));
   const pendingOutgoing = outgoing && !executions?.some(e => e.executionId === outgoing.executionId) ? outgoing : null;
   // Everything about the latest turn sits directly under it, in the conversation.
+  const lastReply = executions?.filter(e => e.state === 'completed').at(-1);
+  const stuckAdoption = lastReplyAdoptionNotice(sessionId, lastReply, candidate?.body ?? null, adoptedItemIds);
   const tailNotices: ChatNotice[] = [
     ...(pending ? [{ id: 'pending', tone: 'warning' as const, label: '待确认的操作', actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void perform(pending) }],
       text: '上一项操作的结果尚未确认（完整原请求已冻结）。重试会核对原消息、保存或采纳，不新建身份。' }] : []),
     ...(busy && !lastOpen ? [{ id: 'busy', tone: 'status' as const, busy: true, text: '正在处理，请稍候…' }] : []),
     ...(notice ? [{ id: 'notice', tone: 'success' as const, text: notice }] : []),
     ...(error && !topicTurnShows(executions?.at(-1), error) ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
+    ...(stuckAdoption && !busy && !pending ? [{ id: 'adoption', tone: 'warning' as const, text: stuckAdoption }] : []),
     ...payg.blockedNotices(executions, busy), ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
   const openTurnNotice = (e: NonNullable<typeof executions>[number]) => turnPath.on ? turnRunningNotice(e)
