@@ -14,7 +14,7 @@ DECLARE
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
   carried integer := 0;
 BEGIN
-  IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
+  IF p_kind NOT IN ('chat','mentor','report','plan','compare','jury','jury_adopt','review') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
   END IF;
   IF jsonb_typeof(p_policy) <> 'object'
@@ -73,6 +73,12 @@ BEGIN
       IF p_kind = 'mentor' AND p_policy->'mentor'->>'preparedAt' IS NOT NULL AND EXISTS (SELECT 1 FROM turns x
           WHERE x.actor_id = p_actor_id AND x.session_id = p_session_id AND x.closed_at > (p_policy->'mentor'->>'preparedAt')::timestamptz) THEN
         RAISE EXCEPTION 'TURN_PREPARE_STALE' USING ERRCODE='55P03';
+      END IF;
+      -- V2-10b: a topic turn's request id admitted on the old path, under this session's lock (runtime_admit refuses the other way).
+      -- V2-12 drops this with the old table.
+      IF p_kind = 'chat' AND p_policy ? 'topic' AND EXISTS (SELECT 1 FROM runtime_executions e
+          WHERE e.actor_id = p_actor_id AND e.request_id = p_request_id) THEN
+        RAISE EXCEPTION 'TURN_TOPIC_REQUEST_CONFLICT' USING ERRCODE='22023';
       END IF;
     ELSE
       -- Resume (V2-8): the paused turn is checked, locked and priced by turn_resume_carry.
@@ -156,5 +162,6 @@ BEGIN
         AND r.closed_at > now() - interval '24 hours')) END,
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
-    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor')
+      WHEN 'plan' THEN public.turn_plan_context(p_actor_id, p_session_id, p_policy) END);
 END $function$;

@@ -11,7 +11,8 @@ export const root = resolve(import.meta.dirname, '../../../..');
 export const read = path => readFileSync(resolve(root, path), 'utf8');
 // beforeApply(path, sql): optional, runs synchronously before each repository file is applied (sql(text) runs
 // psql on the build database), so a suite can seed data at the point in the chain it is about.
-export async function localDb({ beforeApply } = {}) {
+// dockerArgs / postgresArgs (CORE-PATH-V2 single-machine load run): extra `docker run` options (cpus, memory) and extra `postgres -c` settings.
+export async function localDb({ beforeApply, dockerArgs = [], postgresArgs = [] } = {}) {
   // MAINT-P1: --local-only on a developer machine, --ci in CI (run-local-suites.mjs); never the other way round.
   const ci = process.argv[2] === '--ci';
   assert.equal(process.argv[2], ci ? '--ci' : '--local-only');
@@ -29,8 +30,8 @@ export async function localDb({ beforeApply } = {}) {
   const close = async () => { await client?.end(); ok(docker(['rm', '-f', '-v', name])); };
   try {
     ok(docker(['run', '-d', '--pull=never', '--name', name, '-p', '127.0.0.1::5432',
-      '-e', 'POSTGRES_DB=perf', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', POSTGRES_IMAGE,
-      '-c', 'track_functions=all']));
+      '-e', 'POSTGRES_DB=perf', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', ...dockerArgs, POSTGRES_IMAGE,
+      '-c', 'track_functions=all', ...postgresArgs]));
     for (let i=0;i<300;i++) {
       if (docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'perf']).status===0) break;
       await new Promise(r=>setTimeout(r,200));
@@ -48,6 +49,6 @@ export async function localDb({ beforeApply } = {}) {
     assert.match(address,/^127\.0\.0\.1:\d+$/);
     client=new Client({connectionString:`postgres://postgres@${address}/perf`});
     await client.connect();
-    return {client,build,close,sql:input=>ok(sql(input))};
+    return {client,build,close,sql:input=>ok(sql(input)),address,exec:args=>ok(docker(['exec',name,...args]))};
   } catch(e) {await close();throw e;}
 }

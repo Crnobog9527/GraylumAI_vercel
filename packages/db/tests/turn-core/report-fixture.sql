@@ -46,3 +46,27 @@ END $$;
 -- The report switch (runtime_report_generation) is on for this local database only.
 INSERT INTO system_settings(key, value) VALUES ('runtime_report_generation', '{"enabled":true}')
   ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+-- V2-10b: a published positioning with its bound topic workspace: its conversation, its frozen material, an account to adopt into.
+CREATE OR REPLACE FUNCTION turn_test.topic_source(a uuid) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE src jsonb := turn_test.report_source(a); v uuid := gen_random_uuid(); sid uuid := gen_random_uuid(); d uuid := (src->>'draft')::uuid;
+  bus uuid := gen_random_uuid(); ac uuid := gen_random_uuid();
+BEGIN
+  UPDATE artifact_rounds SET state = 'published' WHERE id = (src->>'round')::uuid;
+  UPDATE artifact_projects SET current_version = 1 WHERE id = (src->>'project')::uuid;
+  INSERT INTO artifact_versions(id, project_id, round_id, version, report, report_hash, evidence_ids)
+    VALUES (v, (src->>'project')::uuid, (src->>'round')::uuid, 1, '{"body":"CONFIRMED"}', repeat('e', 64), '[]');
+  INSERT INTO runtime_sessions(id, actor_id, scope, start_request_id, start_payload)
+    VALUES (sid, a, jsonb_build_object('kind', 'positioning_topic', 'draftId', d), gen_random_uuid(), '{}');
+  INSERT INTO runtime_scope_material(session_id, revision, request_id, request, content, content_hash)
+    VALUES (sid, 1, gen_random_uuid(), '{}', '{"brief":"topic","material":"CONFIRMED"}', repeat('f', 64));
+  INSERT INTO opc_topic_workspaces(draft_id, actor_id, request_id, source_version_id, source_hash, module_id, skill_id, revision_id,
+      package_hash, session_id, material_revision)
+    VALUES (d, a, gen_random_uuid(), v, repeat('e', 64), (src->>'module')::uuid, (src->>'skill')::uuid, (src->>'revision')::uuid,
+      repeat('b', 64), sid, 1);
+  INSERT INTO opc_businesses(id, actor_id, name, current_source_version_id) VALUES (bus, a, 'topic business', v);
+  INSERT INTO opc_draft_businesses VALUES (d, bus);
+  INSERT INTO artifact_projects(id, actor_id, module_id, skill_id, account) VALUES (ac, a, (src->>'module')::uuid, (src->>'skill')::uuid, 'topic-' || ac);
+  INSERT INTO opc_accounts(project_id, actor_id, platform, account_key, source_version_id, business_id)
+    VALUES (ac, a, 'tiktok', 'topic-' || ac, v, bus);
+  RETURN src || jsonb_build_object('topicSession', sid, 'version', v, 'business', bus, 'platform', 'tiktok', 'account', 'topic-' || ac);
+END $$;

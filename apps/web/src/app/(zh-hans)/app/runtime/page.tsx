@@ -45,6 +45,7 @@ import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
 import { useRuntimeViewBusy, useRuntimeViewPolling, useRuntimeViewSettled, useRuntimeViewStreaming } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
+import { runtimePathChoice } from './runtime-path';
 import { TurnWorkspace } from './turn-workspace';
 import { useHasTurnMessages } from './use-has-turn-messages';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
@@ -94,11 +95,12 @@ function RuntimePath({routeSession,routeModule}:{routeSession:string;routeModule
  const held=useHasTurnMessages(routeSession);
  const onTurns=Boolean(routeSession&&(choices.data?.corePathV2||held.has));
  const view=trpc.runtime.view.useQuery({sessionId:routeSession},{enabled:onTurns});
- if(onTurns&&!view.data&&!view.error)return <p>正在读取工作…</p>;
- // A conversation that already holds old-path history stays on the old path: the turn path reads session_messages only, so it would
- // show the earlier talk without the model having it. V2-12 moves that history before the old path goes.
- const oldHistory=Boolean((view.data?.executions as unknown[]|undefined)?.length);
- if(onTurns&&view.data?.scope?.kind==='positioning_draft'&&!oldHistory)return <TurnWorkspace sessionId={routeSession}/>;
+ // No workspace renders before the path is decided: the old one would consume the first-send marker and prepare a run on the old path.
+ const path=runtimePathChoice({routeSession,choicesSettled:choices.isSuccess||choices.isError,corePathV2:Boolean(choices.data?.corePathV2),
+  heldLoaded:held.loaded,held:held.has,viewSettled:Boolean(view.data)||Boolean(view.error),
+  scopeKind:view.data?.scope?.kind});
+ if(path==='loading')return <p>正在读取工作…</p>;
+ if(path==='turn')return <TurnWorkspace sessionId={routeSession}/>;
  return <RuntimeWorkspace routeSession={routeSession} routeModule={routeModule}/>;
 }
 function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeModule:string}){

@@ -6,6 +6,7 @@ import { runTurn } from "@/lib/turn-stream";
 import { mentorTurnEvents } from "./mentor-turn-path";
 import { reportProgressing, type ReportStatus, type ServerReport } from "./report-gen";
 import { turnReportStop, type TurnStopAnswer } from "./turn-report-stop";
+import { waitForTurnId } from "./turn-id-wait";
 
 /*
  * CORE-PATH-V2 V2-10: the report on the turn path. A report turn is known by its request id: that is the id report_document takes, so the
@@ -27,6 +28,10 @@ export function turnReportStatus(report: TurnReport): ReportStatus {
   return { executionId: report.requestId, state, body: report.body, candidate: report.delivered, fee,
     completeness: report.delivered ? "complete" : stopped ? "stopped" : null };
 }
+
+/** The saved report has been read, or the read failed: either way the old status read may be asked (a failed read says nothing about
+ * a report of the old path, and must not stop one from showing; a wait is only for a read that has not answered yet). */
+export const turnReadSettled = (report: TurnReport | null | undefined, failed: boolean) => report !== undefined || failed;
 
 export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
   const [report, setReport] = useState<TurnReport | null | undefined>(undefined), [failed, setFailed] = useState(false);
@@ -61,6 +66,7 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
   async function* events(body: unknown, onOpened: () => void): AsyncGenerator<AgentTurnEvent> {
     const controller = abort.current = new AbortController();
     turning.current = true;
+    turnId.current = null; // the id of an earlier report must not stand for this one
     try {
       for await (const event of mentorTurnEvents(body, (request, onEvent) => runTurn(request, onEvent, { fetch: fetcher, signal: controller.signal }))) {
         if (event.type === "admitted") { turnId.current = Number(event.executionId.slice(5)); onOpened(); }
@@ -69,10 +75,13 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
     } finally { turning.current = false; }
   }
   const stop = async (request: { stopAt?: number; confirmed?: boolean }): Promise<TurnStopAnswer> => {
-    const id = turnId.current ?? report?.turnId;
+    // A stop pressed while the stream is only just open waits for its turn id; a report read after a reload already names it.
+    const id = turnId.current ?? report?.turnId ?? (turning.current
+      ? await waitForTurnId(() => turnId.current, ms => new Promise(resolve => setTimeout(resolve, ms))) : null);
     if (!id) throw new Error("TURN_STOP_FAILED");
     return turnReportStop({ fetch: fetcher, dropStream: () => abort.current?.abort() })(
       { turnId: id, stopAt: request.stopAt ?? 0, ...(request.confirmed ? { confirmed: true } : {}) });
   };
-  return { on, server, status, refetch, events, stop };
+  /** `known`: the saved report has been read (a report or none) or the read failed; until then the old status read is not asked. */
+  return { on, known: turnReadSettled(report, failed), server, status, refetch, events, stop };
 }

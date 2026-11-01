@@ -16,10 +16,12 @@ const accountText = (item: { platform: string; account: string }) => `${platform
  * editing or adding. Head references are listed but cannot be ticked. Limits come from the host (a first card
  * asks for at least 3; a follow-up card for what is still missing). Confirmed once, then a read-only echo.
  */
-export function CandidateCardView({ card, confirmation: saved, disabled = false, onConfirm }: {
+export function CandidateCardView({ card, confirmation: saved, disabled = false, busy = false, onConfirm }: {
   card: CandidateCard;
   confirmation?: CardConfirmation | null;
   disabled?: boolean;
+  /** The conversation is still answering (the card can appear while the turn finishes): says why nothing can be ticked yet. */
+  busy?: boolean;
   onConfirm: (submission: CandidateSubmission) => Promise<CardConfirmation>;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
@@ -39,6 +41,7 @@ export function CandidateCardView({ card, confirmation: saved, disabled = false,
       <p className={styles.head}>{title}</p>
       <p className={styles.title}>{card.followUp ? "再选几个账号补上" : "选出你想对标的账号"}</p>
       <p className={styles.hint}>至少选 {card.minSelect} 个，最多 {card.maxSelect} 个。选好后会读取这些账号的资料和近期作品。</p>
+      {busy && !pending && <p className={styles.hint} role="status">AI 还在整理这一轮的回复，回复完成后就可以勾选。</p>}
       <div role="group" aria-label="候选账号" className={styles.list}>
         {selectable.map(option => {
           const checked = selected.includes(option.id);

@@ -8,6 +8,7 @@ import type { TurnView } from "@repo/api/src/services/turn/view";
 import { trpc } from "@/trpc/client";
 import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
 import type { MentorRequest } from "./mentor-turn";
+import { mentorOnTurnPath, mentorPathReady } from "./mentor-path-gate";
 import {
   isTurnExecution, releaseResumedRequests, turnExecutionId, mentorTurnBody, mentorTurnEvents, readTurnView, stepOpened, turnHistory,
   type TurnHistory,
@@ -21,8 +22,11 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
   const choices = trpc.runtime.choices.useQuery(sessionId ? { sessionId } : undefined, { enabled: Boolean(sessionId), staleTime: RUNTIME_CHOICES_STALE_MS });
   const on = Boolean(sessionId && choices.data?.corePathV2);
   const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
-  // The old path's mentor turns of this draft (opc.read) and the new path's: a draft that began on the old path stays on it.
-  const oldMentorTurns = useRef(0);
+  // The path is known once the switch and the turn path's read of this conversation have answered (see mentor-path-gate.ts).
+  const ready = mentorPathReady({ hasSession: Boolean(sessionId), choicesSettled: choices.isSuccess || choices.isError, viewLoaded: view !== null });
+  // The path decision the send reads when it fires (see mentor-path-gate.ts).
+  const gate = useRef({ ready, on });
+  gate.current = { ready, on };
   const reload = useCallback(async () => {
     // Read whatever the switch says: a rollback must not hide replies the turn path already saved and charged.
     if (!sessionId) return null;
@@ -51,7 +55,7 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
   history.current = projected;
   const merged = useRef<{ old?: unknown; projected?: unknown; data?: unknown }>({});
   const paused = view?.activeTurn?.pauseReason === "waiting_credits" ? view.activeTurn : null;
-  return { on, turns: projected.turns, owns: isTurnExecution, stepOpened,
+  return { on, ready, turns: projected.turns, owns: isTurnExecution, stepOpened,
     /** 继续 after a pause for credits: the server has what was asked, so any device can press it. */
     notices(stream: (open: () => Promise<AsyncIterable<AgentTurnEvent>>) => void): ChatNotice[] {
       if (!paused) return [];
@@ -61,15 +65,16 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
     },
     /** The draft as the old path read it, plus the turn path's bindings. */
     draft<T extends { turns?: unknown[] } | undefined>(draft: T): T {
-      oldMentorTurns.current = draft?.turns?.length ?? 0;
       return draft && { ...draft, turns: [...(draft.turns ?? []), ...projected.turns] };
     },
     /** The stream of one mentor request: POST /api/turn with the switch on, the old stream otherwise. */
     open<T>(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined, old: () => Promise<T>) {
-      // The new path reads session_messages only: a draft with mentor talk on the old path would show it and the model would not have it.
-      if (!on || oldMentorTurns.current > 0) return old;
-      return async () => readAfter(mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! },
-        history.current)));
+      // Decided when the turn is sent, after the gate is ready: a send before that waits, and never falls to the old path unasked.
+      return async () => {
+        if (!await mentorOnTurnPath(() => gate.current)) return old();
+        return readAfter(mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! },
+          history.current)));
+      };
     },
     /** The old view, with this conversation's turns after its executions; refetching reads both. */
     withOld<T extends { data?: unknown; refetch: () => Promise<unknown> }>(old: T): T {

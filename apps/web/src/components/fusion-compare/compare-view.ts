@@ -58,6 +58,7 @@ const REFUSALS: Record<string, string> = {
   TURN_INPUT_TOO_LARGE: '这次的内容太长，有模型放不下。请缩短问题，或取消勾选放不下的模型后再试。',
   TURN_CORE_DISABLED: '对话服务正在切换，请刷新页面后再试。',
   TURN_UNAUTHENTICATED: '登录已过期，请重新登录后再试。',
+  TURN_CREDIT_ACCOUNT_REVIEW: '你的积分账户状态需要我们核对，这次对比没有开始，也没有扣费。请提交工单，我们帮你处理。',
   TURN_REQUEST_REPLAYED: '这次对比已经开始过了，请在对话里查看。',
 };
 export function compareErrorText(error: unknown): string {

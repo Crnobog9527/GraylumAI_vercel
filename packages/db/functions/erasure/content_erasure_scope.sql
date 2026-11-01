@@ -118,5 +118,6 @@ BEGIN
   'affectedSources',dependents,'preservedSavedVersions',preserved,
   'dataEvents',coalesce((SELECT jsonb_agg(jsonb_build_array(request_id,item_key,created_at) ORDER BY request_id,item_key)
    FROM opc_data_events WHERE actor_id=a AND (execution_id=ANY(executions) OR project_id=ANY(projects)
+    OR turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions))
     OR target_project_id=ANY(projects) OR source_version_id=ANY(versions))),'[]'::jsonb));
 END $function$;
