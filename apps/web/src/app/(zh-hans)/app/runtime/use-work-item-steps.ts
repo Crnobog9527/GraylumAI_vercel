@@ -22,7 +22,9 @@ export function useWorkItemSteps({ chat, library, versions, workItem, isVideo, v
   async function finalize(reply: { turnId: number; requestId: string }, frozen?: ScriptOperation) {
     if (!workItem) return;
     const kind = isVideo ? 'script' : 'brief';
-    const op: ScriptOperation = frozen ?? {
+    // A request whose outcome is unknown stays the request: its version condition, until the result is definite.
+    const held = localStorage.getItem(scriptKey);
+    const op: ScriptOperation = frozen ?? (held ? JSON.parse(held) : null) ?? {
       kind,
       workItemId: workItem.workItemId,
       requestId: reply.requestId,

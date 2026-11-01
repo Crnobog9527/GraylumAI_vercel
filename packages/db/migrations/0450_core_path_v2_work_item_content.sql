@@ -696,6 +696,10 @@ BEGIN
    OR t.policy#>>'{workSource,contentId}'=ANY(refs::text[])
    OR t.session_id IN (SELECT rs.id FROM runtime_sessions rs WHERE rs.actor_id=a AND content_erasure_references(rs.scope,refs)))
   ORDER BY t.id);
+ -- A resumed turn's raw responses before the pause are on the turns it continues.
+ WITH RECURSIVE chain(id,resume_of) AS (SELECT t.id,t.resume_of FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids)
+   UNION SELECT p.id,p.resume_of FROM chain c JOIN turns p ON p.actor_id=a AND p.id=c.resume_of)
+ SELECT coalesce(array_agg(id ORDER BY id),'{}') INTO turn_ids FROM chain;
  turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND EXISTS(SELECT 1 FROM turns src
    WHERE src.actor_id=a AND src.id=ANY(turn_ids) AND src.session_id=t.session_id AND src.id<=t.id) ORDER BY t.id);
  SELECT count(*) INTO preserved FROM opc_content_versions c0 WHERE c0.actor_id=a AND c0.erased_at IS NULL

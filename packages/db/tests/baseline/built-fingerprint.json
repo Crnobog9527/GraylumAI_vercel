@@ -3570,7 +3570,7 @@
   "fn:content_erasure_references_walk(jsonb,uuid[])": "159fa029348d",
   "fn:content_erasure_runtime_check(uuid,uuid)": "844fdce868e9",
   "fn:content_erasure_saved_readable(uuid,uuid)": "5985c39f4cfc",
-  "fn:content_erasure_scope(uuid,text,uuid)": "6375f8738519",
+  "fn:content_erasure_scope(uuid,text,uuid)": "2b5697ff32f2",
   "fn:content_erasure_sweep_sessions(integer,timestamp with time zone,uuid)": "d46426cc59e0",
   "fn:content_erasure_turn_check(uuid,bigint)": "6483632fe9a2",
   "fn:content_erasure_uuid(text)": "4203807989ba",

@@ -185,6 +185,9 @@ export async function workContentCases(t){
   await close(w.a,next.turnId,'completed',{messages:[{role:'user',content:'[OPC_VIDEO_PACKAGE_V1] x'},{role:'assistant',content:JSON.stringify({storyboard:'RESUMED'})}]});
   const saved=await results(w,request,next.turnId,script.id);
   assert.equal((await version(saved.storyboard.id)).turn_id,Number(next.turnId));
+  // The turn it continued holds raw responses of the same reply: deleting the version reaches back along the chain.
+  const scope=(await one("select content_erasure_scope($1,'content',$2) v",[w.actor,saved.storyboard.id])).turns.map(Number);
+  assert.ok(scope.includes(Number(first.turnId))&&scope.includes(Number(next.turnId)));
  }
  // A conversation delete keeps the saved versions readable, refuses a new save, and is not the local fast path.
  {
