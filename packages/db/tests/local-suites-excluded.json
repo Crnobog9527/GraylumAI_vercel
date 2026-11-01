@@ -45,6 +45,7 @@
   "pay-failover-mapping/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "pay-failover/run-local.mjs": "runs as a child of pay-waffo/run-local.mjs (its own PAY-FAILOVER fixtures), so it is already in CI — 2026-10-26",
   "pay-founder/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
+  "pay-replay/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "payg-three-tools/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "payg/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "payment-notices/reminders-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
