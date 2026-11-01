@@ -1192,7 +1192,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {liveOnly && <MentorTurnSteps live={liveOnly} reply={liveOnly} calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns} {...research.panel}
-                    disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
+                    disabled={sendLocked ? "busy" : snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
                     onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...turnPath.notices(open => void run(() => streamTurn(open))),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),

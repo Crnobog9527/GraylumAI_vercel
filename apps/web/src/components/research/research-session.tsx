@@ -78,7 +78,7 @@ export function ResearchSessionCards({ sessionId, disabled, onConfirmed }: {
    * The conversation cannot take an answer right now: a reply is running, the draft is read-only, or another step
    * than the latest mentor turn's is shown (the continuation is sent on the shown step).
    */
-  disabled: boolean;
+  disabled: boolean | "busy";
   onConfirmed?: (confirmation: CardConfirmation) => void;
 }) {
   const utils = trpc.useUtils();
@@ -97,9 +97,9 @@ export function ResearchSessionCards({ sessionId, disabled, onConfirmed }: {
   return (
     <div aria-label="研究选择卡" className="space-y-3">
       {rows.map(({ card, confirmation }) => card.kind === "keywords"
-        ? <KeywordCardView key={card.cardId} card={card} confirmation={confirmation} disabled={disabled}
+        ? <KeywordCardView key={card.cardId} card={card} confirmation={confirmation} disabled={Boolean(disabled)} busy={disabled === "busy"}
           onConfirm={submission => submit(card.cardId, submission)}/>
-        : <CandidateCardView key={card.cardId} card={card} confirmation={confirmation} disabled={disabled}
+        : <CandidateCardView key={card.cardId} card={card} confirmation={confirmation} disabled={Boolean(disabled)} busy={disabled === "busy"}
           onConfirm={submission => submit(card.cardId, submission)}/>)}
     </div>
   );
