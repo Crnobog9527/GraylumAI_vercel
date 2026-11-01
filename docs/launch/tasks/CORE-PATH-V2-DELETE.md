@@ -1,15 +1,15 @@
 # CORE-PATH-V2 V2-12 删除旧路径：准备方案
 
 状态：草稿，只读盘点和方案。**没有迁移、没有代码改动、没有碰 staging**；`content_erasure_ledger_owned` 的草稿只在本机临时库里验证过。
-基线：`origin/staging` `3f82f0a25`（#1559 之后）。#1558、#1561、V2-10b 的 C2 还没合并，它们改的文件本文只读不动。
+基线：`origin/staging` `6a10a0557`（#1583、迁移 0453 之后）。这是**第二次重算**：#1558（定位方案）、#1561（选题）、#1568（work_item C2）、V2-7b、日限补预占都已合并，初稿基线是 `3f82f0a25`。
 依据：`CORE-PATH-V2.md` 的 V2-12 行、5.3、5.4 节；Owner 确认的顺序是：**不可逆的删除等 100 人压测通过后才做**。
-逐项清单（表、外键、函数、Node 文件、调用方）在 `CORE-PATH-V2-DELETE-INVENTORY.md`，是脚本生成的，C2 和压测之后要重算（第 7 节）。
+逐项清单（表、外键、函数、Node 文件、调用方）在 `CORE-PATH-V2-DELETE-INVENTORY.md`，是脚本生成的；每个批次开工前、压测之后都要再重算（第 7 节）。
 
 ## 0. 一页结论
 
 1. **删除的范围比 5.3 节写的大，不能"整体删目录"。**
-   - 数据库：19 张待删表（5.3 的 18 张加 `runtime_session_names`），本机建库实测全是空表。
-     201 个待删函数。另有 **190 个不在删除名单里的函数引用了待删对象**（其中 120 个现在还有现役 Node 代码在调用），
+   - 数据库：19 张待删表（5.3 的 18 张加 `runtime_session_names`），本机建库实测全是空表；**其中 `runtime_scope_material` 新路径还在用，要保留（0.5）**。
+     201 个待删函数（其中 5 个素材相关的也要保留）。另有 **200 个不在删除名单里的函数引用了待删对象**（其中 126 个现在还有现役 Node 代码在调用；初稿是 190 和 120），
      25 条外键从保留的表指向待删表，3 个触发器挂在保留的表上却调用待删函数。不先处理这些，DROP 会直接失败或让调用报错。
    - Node：`services/runtime`、`services/bill2` 共 140 个非测试文件、230 个测试文件。其中 **95 个文件现在被新路径
      （`services/turn/`、`/api/turn/*`）、cron、`trpc.ts`、管理后台设置导入**，要先原样搬出去才能删目录。
@@ -19,28 +19,37 @@
    评审团的 tRPC 与后台推进、"学习我的文风"（声音）生成、复盘（`publishMonitor` 的定时读取与复盘回合）、
    研究工具子调用的回执写入、注销时的财务恢复、管理后台的 BILL2 报表/卡住调用/止损页、三个 cron 的旧段。
    这些不是定位方案、选题、work_item、对比旧入口，是第二批阻塞项（第 3 节）。
-3. **"C2 和压测一过就能一次删干净"目前做不到。** 能做到的是：把一次性的不可逆迁移缩到最小（第 4 节批次 F），
-   前面的批次都是可逆的"先接走、再搬迁、再改写"。批次 B 里和 #1558/#1561/C2 无关的几块可以现在开始排期。
-4. **函数数 ≤ 450 的目标已不现实。** 现在是 1006 个（5.3 写的是 939），只删名单里的 201+7 个剩约 798 个；
+3. **"C2 和压测一过就能一次删干净"仍做不到，但 #1558/#1561/C2 已合并，批次 A（搬迁）和 B1–B3 的前置条件已满足。** 能做到的是：把一次性的不可逆迁移缩到最小（第 4 节批次 F），
+   前面的批次都是可逆的"先接走、再搬迁、再改写"。批次 B4 以后（对比、评审团、报告、声音、复盘、研究、后台）不依赖这三个 PR，可以并行排期。
+4. **函数数 ≤ 450 的目标已不现实。** 现在是 1023 个（初稿 1006，5.3 写的是 939；增加的是 #1558/#1561/C2/0451 新函数），只删名单里的 201+7 个剩约 815 个；
    把能随旧消费者一起删的函数全算上也到不了 450（见第 6 节估算）。这个口径要总控请 Owner 重定，本文不改它。
+5. **0.5 新路径还依赖旧的素材快照（C2 之后新发现，初稿没有）。** 定位方案、选题、work_item 三条新路径把用户素材存成快照，
+   存在 `runtime_scope_material`，由 `runtime_material` 写入；`opc_library_edit`、`opc_handoff`、`opc_step_material`、`opc_topic_bind`、
+   `opc_video_material_prepare`、`opc_work_ui_change` 六个函数直接调它，`opc/service.ts` 现役调用这些函数。新路径的 `topic_turn_source`、
+   `opc_work_verify`、`opc_video_turn_check` 读这张表核对 `turns.policy` 里记的素材版本和哈希。所以这张表和 `runtime_material`、
+   `runtime_work_projection`、`runtime_material_allowed` 不能按"待删"处理：要**保留**，并把它们对 `bill2_actor`、`bill2_scope_allowed`、
+   `runtime_executions` 的引用改写掉（批次 C）。5.3 把它放在待删名单里，是 C2 之前的判断。
+   新路径里还留着一批"旧路径同一请求已受理则拒绝"的检查（`turn_open`、`turn_plan_context`、`topic_turn_source`、`opc_data_source_turn`，
+   源码里写着 "V2-12 drops this"），和 `opc_video_turn_check` 对旧执行历史的核对，它们读 `runtime_executions`，批次 C 里去掉。
 
-## 1. 需要总控定的事（最多 3 项）
+## 1. 需要总控定的事（4 项，新增第 4 项）
 
 | # | 要定什么 | 推荐 |
 |---|---|---|
 | 1 | 第二批阻塞项（声音文风生成、复盘、研究回执、评审团后台）怎么接：沿用 `turns`（新增 kind 或无工具回合），还是各自保留一套极简计费 | 沿用 `turns`，每块一个小 PR；不另建计费。声音、复盘各需要一个明确的 kind 和 `policy` 冻结字段，属于技术细节，不是新产品决定 |
 | 2 | "函数数 ≤ 450" 改成什么验收口径 | 改成"待删名单清零 + 闭包棘轮不放宽"，不再用总数 |
-| 3 | 搬迁批次（批次 A，95 个文件的纯改路径）排在什么时候 | C2 合并后、其他窗口静默的一个时段，一次做完；中途不并行改这些文件 |
+| 3 | 搬迁批次（批次 A，95 个文件的纯改路径）排在什么时候 | **C2 已合并，前置条件满足。** 找一个其他窗口静默的时段一次做完；中途不并行改这些文件 |
+| 4 | 素材快照（0.5）：保留 `runtime_scope_material` 表和 `runtime_material` 并改写，还是把快照搬到新表 | 保留表、整段改写 `runtime_material`/`runtime_work_projection`/`runtime_material_allowed`，只去掉对 BILL2 和 `runtime_executions` 的引用；不搬数据、不改表名。改名可以放到删除之后另做 |
 
 ## 2. 现状：删除对象一览
 
 | 类别 | 数量 | 清单位置 |
 |---|---|---|
-| 待删表 | 19 | INVENTORY A |
+| 待删表 | 19（`runtime_scope_material` 要保留，实际删 18） | INVENTORY A |
 | 指向待删表的外键（保留的表上） | 25 | INVENTORY B |
 | 保留的表上调用待删函数的触发器 | 3：`credit_transactions` 上 `runtime_stop_loss_settled`、`runtime_stop_loss_settlement_lock`，`system_settings` 上 `runtime_stop_loss_settings_guard` | INVENTORY B |
-| 待删函数 | 201（其中 80 个现在能从现役调用方走到） | INVENTORY C |
-| 引用待删对象的保留函数 | 190：已无入口 7、只用 `bill2_actor` 等通用小函数 43、要改写 68、随 BILL2 消费者改写或删 72（含 `atomic_settle`/`atomic_refund`） | INVENTORY D |
+| 待删函数 | 201（其中 80 个现在能从现役调用方走到；5 个素材相关的要保留，见 0.5） | INVENTORY C |
+| 引用待删对象的保留函数 | 200（初稿 190）：已无入口 7、只用 `bill2_actor` 等通用小函数 47、要改写 74、随 BILL2 消费者改写或删 72（含 `atomic_settle`/`atomic_refund`）。新增的 10 个是 #1558/#1561/C2 的新函数和 `turn_open`，见 0.5 | INVENTORY D |
 | Node：必须先搬出 | 95 个文件（`bill2` 21、`runtime` 74） | INVENTORY E.1 |
 | Node：随旧消费者一起删 | 44 个文件 | INVENTORY E.2 |
 | Node：已无导入 | 1 个（`bill2/receiptRetention.ts`） | INVENTORY E.3 |
@@ -51,7 +60,7 @@
 
 - **`bill2_actor` 只查 `profiles`（账号是否活跃），被清单里 93 个保留函数调用。** 删它等于重写这 93 个函数。
   建议保留并改名（例如 `account_active_check`）或原样保留；`bill2_scope_allowed` 同理要先看它依赖的
-  `runtime_check_memo_*` 是否也要保留。这一条能把需要改写的函数从 190 个降到约 150 个。
+  `runtime_check_memo_*` 是否也要保留。这一条能把需要改写的函数从 200 个降到约 150 个。
 - **5.3 节说"`atomic_*` 账本函数保留"，但 `atomic_settle`、`atomic_refund` 内部调用 `bill2_legacy_settle`/`bill2_legacy_refund`，
   并引用 `bill2_runs`/`bill2_calls`。** 它们不能删：`publish_monitor_publish_close`、`research_user_charge`、`artifact_reject_generation`
   和两个 `agent_slice_*` 函数还在调它们（社媒发布收尾、研究收费、报告生成被拒的退款）。所以它们要**整段改写成不依赖 BILL2**，
@@ -66,13 +75,13 @@
 
 ## 3. 还在使用旧路径的消费者
 
-"等什么"一列：**#1558** 定位方案、**#1561** 选题页、**C2** work_item 页面（C1 已在 #1559 合并）、**自有**＝本文新发现、没有对应 PR。
+"等什么"一列：三项新路径 PR（#1558 定位方案、#1561 选题页、C2 work_item 页面）**都已合并**，对应行改成"已合并，轮到我们"；**自有**＝本文新发现、没有对应 PR。
 
 | 消费者 | 现状证据 | 阻塞删除的对象 | 等什么 |
 |---|---|---|---|
-| 定位方案生成 | 定位页调 `opc.prepareStep`、`runtime.executeStream`、`opc.planResult`、`opc.planRequestState` | `bill2_prepare`、`runtime_execution`、`runtime_admission_replay`、`opc_plan_*` | #1558 |
-| 选题页 | `opc.topicTurn`、`runtime.execute`、`opc.adoptTopics`、`opc.saveTopicDraft`、`opc.topicWorkspace` | `runtime_executions`、`runtime_scope_material`、`opc_topic_*`、`opc_adopt_topics_with_source` | #1561 |
-| work_item 会话与作品 | `/app/runtime` 页：`runtime.start/prepare/resume/resumeStream`、`opc.saveWorkResult`、`saveContentResult`、`prepareVideoMaterial`、`checkVideoExecution`、`saveVideoResults`、`workResults` | `runtime_work_*`、`runtime_session_result_*`、`opc_work_*`、`opc_video_*`、`runtime_scope_material` | C2 |
+| 定位方案生成 | #1558 已合并（`turns` 的 `plan` kind，`plan_turn_read`、`turn_plan_apply`、`turn_plan_context`）。定位页代码里 `opc.prepareStep`、`runtime.executeStream`、`opc.planResult`、`opc.planRequestState` 的旧分支和 hook 还在（`use-mentor-turn-path`、`use-report-gen` 按 `corePathV2` 分支） | 旧分支：`bill2_prepare`、`runtime_execution`、`runtime_admission_replay`、`opc_plan_*`。新路径自己还读：`turn_plan_context` 查 `runtime_executions`（"V2-12 drops this"）、`plan_turn_read` 用 `bill2_scope_allowed` | **已合并，轮到我们**：B1 删前端旧分支和 tRPC 过程；批次 C 去掉 `turn_plan_context` 对旧表的查询 |
+| 选题页 | #1561、#1579 已合并（`turn_*topic*`，`topic_turn_source`）。选题页 `topics/page.tsx` 仍实例化 `opc.topicTurn`、`runtime.execute`，`opc.adoptTopics`、`opc.saveTopicDraft`、`opc.topicWorkspace` 各有调用 | 旧分支：`runtime_executions`、`opc_topic_*`、`opc_adopt_topics_with_source`。新路径自己还读：`topic_turn_source` 查 `runtime_executions` 和 **`runtime_scope_material`**（0.5） | **已合并，轮到我们**：B2 删旧分支；`runtime_scope_material` 保留 |
+| work_item 会话与作品 | C1（#1559）、C2（#1568）已合并（`opc_work_verify`、`opc_content_from_turn`、`opc_video_results_from_turn`、`opc_work_source`）。`/app/runtime` 页仍有 `runtime.start/prepare/resume`、`opc.saveWorkResult`、`saveContentResult`、`prepareVideoMaterial`、`checkVideoExecution`、`saveVideoResults`、`workResults` 的调用 | 旧分支：`runtime_work_*`、`runtime_session_result_*`、`opc_work_*` 旧版、`opc_video_*execution*`。新路径自己还读：`opc_work_verify`、`opc_video_turn_check` 读 **`runtime_scope_material`**，后者还查 `runtime_executions` 和 `runtime_history_available`（旧内容版本的来历核对） | **已合并，轮到我们**：B3 删旧分支；`opc_video_turn_check` 对旧执行历史的核对要改成只认 `turns`，旧内容版本的 `execution_id` 视为没有来历 |
 | 对比旧入口 | `ComparePicker` 调 `fusionCompare.options/estimate/start`；`CompareCard` 调 `read/stop/stream/adopt`（新入口 `turnList/turnRead/turnAdopt` 已在用） | `fusion_compare_*`（23 个，16 个引用待删对象）、`fusion_group_*`、`bill2_runs`、`fusion_billing_groups` | 自有：先确认 `/api/turn/compare` 是否已替换这 7 个调用；若没有，是前端改动 |
 | 评审团（tRPC 与后台） | `fusionReview` 路由导入 `bill2/service`、`runtime/budget`、`realHost`、`stagingPolicy`；`services/fusion/{admission,background,recovery,reviewRecord,executor}` 导入 `bill2/service`；`fusion-recovery` cron | `fusion_review_*`（34 个，5 个待删、19 个引用待删对象）、`fusion_review_fees`、`bill2_*`、`fusion_review_fee_*` | 自有：V2-7b 已把回合改到 `turns`，但旧入口和推进函数仍在（`reviewRecord` 的类型里仍保留"回合字段为空即走 BILL2 路径"的分支） |
 | 报告 | `runtime.reportStart` 等 10 个过程经 `services/report/{service,fees}` 走 `report_fees`、`runtime_executions`；V2-7a 的新入口是 `services/turn/report.ts` | `report_fees`、`report_fee_*`、`report_document*`、`runtime_executions` | 自有：前端按 `corePathV2` 分支，旧分支要删；`reportDocument`/`reportLatest` 这类读取要改读 `artifact_versions` |
@@ -92,9 +101,9 @@
 
 | 批次 | 做什么 | 前置 | 可逆 | 能在压测前做 |
 |---|---|---|---|---|
-| A 搬迁 | 95 个仍在用的模块从 `services/runtime`、`services/bill2` 原样搬到 `services/turn/`（按用途分 `provider/`、`admission/`、`agent/`、`skills/`、`research/`、`settings/`）；只改路径和导入，不改行为；对应测试跟着搬 | C2、#1558、#1561 合并，其他窗口静默 | 是 | 是 |
-| B 接走 | 逐块把第 3 节的消费者接到新路径或删掉旧分支：B1 定位方案（#1558）、B2 选题（#1561）、B3 work_item（C2）、B4 对比旧入口、B5 评审团旧入口、B6 报告旧分支、B7 声音、B8 复盘与社媒、B9 研究回执、B10 管理后台与 cron | 各自的等待项 | 是（旧对象都在） | B4–B10 里不依赖 #1558/#1561/C2 的可以现在排期 |
-| C 保留函数脱离旧表 | 把 INVENTORY D 里码 W、B 的函数整段 `CREATE OR REPLACE` 改写，去掉对待删表和待删函数的引用；小函数 `bill2_actor` 等先改名或确认保留；`runtime_start`、`opc_start*` 同批 | 对应的 B 批次 | 是 | 随 B 批次 |
+| A 搬迁 | 95 个仍在用的模块从 `services/runtime`、`services/bill2` 原样搬到 `services/turn/`（按用途分 `provider/`、`admission/`、`agent/`、`skills/`、`research/`、`settings/`）；只改路径和导入，不改行为；对应测试跟着搬 | **C2、#1558、#1561 已合并**；其他窗口静默 | 是 | 是 |
+| B 接走 | 逐块把第 3 节的消费者接到新路径或删掉旧分支：B1 定位方案、B2 选题、B3 work_item（这三项的前置 PR 已合并）、B4 对比旧入口、B5 评审团旧入口、B6 报告旧分支、B7 声音、B8 复盘与社媒、B9 研究回执、B10 管理后台与 cron | B1–B3 已解锁；B4–B10 各自的等待项见第 3 节 | 是（旧对象都在） | 是，B1–B10 都可以在压测前做，只有 F 要等 |
+| C 保留函数脱离旧表 | 把 INVENTORY D 里码 W、B 的函数整段 `CREATE OR REPLACE` 改写，去掉对待删表和待删函数的引用；小函数 `bill2_actor` 等先改名或确认保留；`runtime_start`、`opc_start*` 同批；**素材函数 `runtime_material`、`runtime_work_projection`、`runtime_material_allowed` 整段改写后保留（0.5）**；去掉新路径里"V2-12 drops this"的 `runtime_executions` 查询 | 对应的 B 批次 | 是 | 随 B 批次 |
 | D 去外键和触发器 | 新迁移：去掉 INVENTORY B 的 25 条外键、3 个保留表上的触发器、引用旧列的检查约束与索引；保留表里没读者的 `bill2_*` 列删掉 | A、B、C 完成 | 外键可重建，删列不可逆（空表，影响为零） | 否 |
 | E 回归 | 重算清单（第 7 节），确认待删对象的现役引用为零；跑全部本机套件 | D | — | 否 |
 | F 一次性删除（不可逆） | 一个迁移：先 `content_erasure_ledger_owned` 整段改按 `turns`（第 6 节）→ DROP 待删函数 → DROP 待删表 → 删 `core_path_v2.enabled`、`runtime_rw_v2`、测试窗口设置；同一个 PR 删 `services/runtime`、`services/bill2` 剩余文件、旧 tRPC 过程、旧测试套件，改 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json`、指纹、闭包基线 | E，**100 人压测通过**，总控上库 | 否 | 否 |
@@ -194,14 +203,20 @@ EXPLAIN 计划（本机空库下看不出索引选择）；时间点（见 6.4�
 
 | 步骤 | 函数数 |
 |---|---|
-| 现在（含重载） | 1006 |
-| 删 201 个待删 + 7 个已无入口 | 约 798 |
-| 再删 B 批次里随旧消费者一起删的（INVENTORY D 里码 B 的函数中不再有现役调用方者，上限约 72） | 约 726 以上 |
+| 现在（含重载） | 1023（初稿 1006） |
+| 删 201 个待删（其中 5 个素材函数要保留）+ 7 个已无入口 | 约 815 |
+| 再删 B 批次里随旧消费者一起删的（INVENTORY D 里码 B 的函数中不再有现役调用方者，上限约 72） | 约 743 以上 |
 | 5.3 的目标 | ≤ 450 |
 
 差距来自 5.3 写的 939 没算到 `turn_*`、`fusion_review_*`、`opc_*` 等 V2-2 之后新增和长期保留的函数。结论见第 0 节第 4 条。
 
-## 7. 重算方法（C2 和压测之后）
+## 7. 重算方法与记录
+
+**重算记录：**
+- 2026-11-01 初稿，基线 `3f82f0a25`：1006 个函数，190 个保留函数引用待删对象。
+- 2026-11-02 第二次，基线 `6a10a0557`：1023 个函数；引用待删对象的保留函数 200 个，新增的 10 个是 `opc_content_from_turn`、`opc_data_source_turn`、`opc_data_turn`、`opc_video_results_from_turn`、`opc_video_turn_check`、`opc_work_verify`、`plan_turn_read`、`topic_turn_source`、`turn_open`、`turn_plan_context`。待删表 19、待删函数 201、外键 25、触发器 3、Node 的 95/44/1 个文件和 230 个测试，**都没变**（新路径 PR 没改 `services/runtime`、`services/bill2` 的导入关系）。变的是：新路径开始依赖素材快照（0.5）。
+
+做法：
 
 盘点用的三段脚本不在仓库里，留在共享笔记目录 `side-session-notes/local_d8bc3b2c-63f9-44d5-a8ca-c002bb397c23/v2-12-inventory/`，原因：它们只服务这一次删除，不值得进 CI。要点：
 
@@ -211,7 +226,7 @@ EXPLAIN 计划（本机空库下看不出索引选择）；时间点（见 6.4�
 
 局限（本文没验证的）：
 - 函数文本匹配是名字匹配，注释或字符串里的同名会多算；动态拼名的 `rpc(name)` 调用会漏。所以数字作为上限用。
-- "现役 Node"包含了所有旧消费者自己；本文把它们当作现役，所以 190 里 120 个"有现役调用"不代表现在真的有人在用，要靠第 3 节的实测请求统计。
+- "现役 Node"包含了所有旧消费者自己；本文把它们当作现役，所以 200 里 126 个"有现役调用"不代表现在真的有人在用，要靠第 3 节的实测请求统计。
 - 前端调用统计只数了 `trpc.<路由>.<过程>` 形式，用 `utils.` 或变量间接调用的可能漏数。
 - 没读 staging 数据库，也没读任何日志：19 张表为空是本机从文件建库的结果，不是 staging 的行数。F 批次开始前要由总控核对 staging 的行数。
 

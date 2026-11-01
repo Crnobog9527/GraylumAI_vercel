@@ -1,11 +1,11 @@
 # CORE-PATH-V2 V2-12 删除清单（盘点数据）
 
 状态：草稿，只读盘点，不含迁移、不含代码改动。配套方案见 `CORE-PATH-V2-DELETE.md`。
-基线：`origin/staging` `3f82f0a25`（#1559 之后）。**本文是脚本生成的初算**：C2、#1558、#1561 合并后必须重算一遍再动手（方法见方案第 7 节）。
+基线：`origin/staging` `6a10a0557`（#1583、迁移 0453 之后）。第二次重算：#1558、#1561、C2、V2-7b、日限补预占都已合并。**本文是脚本生成的**，动手前和每个批次前必须再重算（方法见方案第 7 节）。
 
-## A. 待删的表（19 张）
+## A. 待删的表（19 张，其中 1 张带 ⚠ 要保留）
 
-第 5.3 节的 18 张加 `runtime_session_names`（并入 `sessions.title`）。本机从文件建库实测：全部为空表，行数 0。
+第 5.3 节的 18 张加 `runtime_session_names`（并入 `sessions.title`）。本机从文件建库实测：全部为空表，行数 0。其中 `runtime_scope_material` 带 ⚠：新路径还在用，不能按“删除”处理（方案 0.5）。
 
 | 表 | 指向它的外键（来自保留的表） | 其上的触发器 |
 |---|---|---|
@@ -15,7 +15,7 @@
 | `runtime_tool_calls` | — | a_erased_row_guard、content_erasure_parent_guard、runtime_workspace_tool_guard、runtime_mentor_history_guard、a_runtime_library_tool_guard、runtime_workspace_benchmark_guard、runtime_workspace_posts_guard |
 | `runtime_session_batches` | — | a_erased_row_guard、content_erasure_parent_guard |
 | `runtime_session_results` | — | runtime_session_results_owner_guard |
-| `runtime_scope_material` | `opc_turns_session_id_material_revision_fkey`、`opc_video_material_bindings_session_id_material_revision_fkey` | a_erased_row_guard、content_erasure_parent_guard |
+| `runtime_scope_material` ⚠ **新路径仍读写：定位/选题/work_item 的素材快照。不在 F 批次删，见方案 0.5** | `opc_turns_session_id_material_revision_fkey`、`opc_video_material_bindings_session_id_material_revision_fkey` | a_erased_row_guard、content_erasure_parent_guard |
 | `runtime_library_references` | — | — |
 | `runtime_voice_references` | — | — |
 | `runtime_test_windows` | — | — |
@@ -54,7 +54,7 @@
 | `research_selection_cards` | `research_selection_cards_execution_id_fkey` → `runtime_executions` | 去掉外键；`execution_id` 列改为可空的无约束历史列或删列（研究产物表要保留） |
 | `token_stats` | `token_stats_bill2_call_id_fkey` → `bill2_calls`<br>`token_stats_bill2_run_id_fkey` → `bill2_runs` | 去掉外键；`bill2_run_id`/`bill2_call_id` 列无新路径读者时一并删列（要先核对 token_stats 两条约束与两个 `credit_transactions_bill2_*` 索引） |
 
-其他带旧字样的列（没有外键，但读者要先改）：`token_stats.bill2_run_id`、`ai_usage_logs.bill2_run_id`、`credit_transactions.bill2_run_id`、`credit_transactions.bill2_call_id`、`token_stats.bill2_call_id`、`ai_usage_logs.bill2_call_id`、`library_recognition_units.bill2_request_id`、`social_review_runs.runtime_request_id`、`social_review_runs.runtime_execution_id`、`social_review_runs.bill2_run_id`、`social_publish_jobs.bill2_run_id`、`research_operations.bill2_call_id`、`social_review_runs.runtime_session_id`。
+其他带旧字样的列（没有外键，但读者要先改）：`ai_usage_logs.bill2_run_id`、`ai_usage_logs.bill2_call_id`、`credit_transactions.bill2_run_id`、`credit_transactions.bill2_call_id`、`research_operations.bill2_call_id`、`token_stats.bill2_run_id`、`token_stats.bill2_call_id`、`library_recognition_units.bill2_request_id`、`social_review_runs.runtime_request_id`、`social_review_runs.runtime_execution_id`、`social_review_runs.bill2_run_id`、`social_review_runs.runtime_session_id`、`social_publish_jobs.bill2_run_id`。
 
 保留的表上引用 `bill2_*` 的检查约束：`token_stats.token_stats_execution_scope`、`token_stats.token_stats_legacy_usage_required`。
 
@@ -71,7 +71,9 @@
 
 **report_***（8）：`report_admission_check`、`report_fee_hold`、`report_fee_settle`※、`report_fee_settle_due`※、`report_fee_settle_internal`、`report_fee_terminal_settlement`、`report_fee_view`、`report_stop`※
 
-**runtime_***（113）：`runtime_admission_replay`※、`runtime_admit`、`runtime_admit_commit`、`runtime_admit_precheck`、`runtime_admit_source_check`、`runtime_billing_allowed`、`runtime_binding_guard`、`runtime_cancel`※、`runtime_cancel_with_code`、`runtime_capacity_marker_arm`、`runtime_capacity_marker_since`、`runtime_check_memo_close`、`runtime_check_memo_get`、`runtime_check_memo_open`、`runtime_check_memo_put`、`runtime_context_allowed`、`runtime_context_allowed_before_workspace`、`runtime_direct_billing_allowed`、`runtime_direct_billing_allowed_before_opc`、`runtime_direct_billing_allowed_before_topic`、`runtime_execution`※、`runtime_execution_visibility`※、`runtime_financial_recovery`※、`runtime_history_availability`、`runtime_history_availability_before_memo`、`runtime_history_available`、`runtime_history_available_before_memo`、`runtime_interrupt_capacity`、`runtime_interrupted_recovery`、`runtime_library_propagate`※、`runtime_library_read`、`runtime_library_references_freeze`、`runtime_library_sources_gone`、`runtime_library_tool_guard`、`runtime_library_visible`、`runtime_load_skill_allowed`、`runtime_load_skill_entry`、`runtime_load_skill_result_valid`、`runtime_matching_call_guard`、`runtime_material`、`runtime_material_allowed`、`runtime_material_allowed_before_b1`、`runtime_mentor_history`、`runtime_mentor_history_draft`、`runtime_mentor_history_guard`、`runtime_mentor_messages`、`runtime_pending_financial_batch`※、`runtime_positioning_gate`、`runtime_production_access`、`runtime_production_allowed`、`runtime_production_database`、`runtime_production_enabled`、`runtime_production_recovery_policy`、`runtime_rate_limits_patch`、`runtime_read_verified`、`runtime_receipt_saved`、`runtime_response`、`runtime_rw_flag`、`runtime_session_context`※、`runtime_session_items`、`runtime_session_names_owner_guard`、`runtime_session_result_delete`※、`runtime_session_result_edit`※、`runtime_session_result_save`※、`runtime_session_result_save_turn`※、`runtime_session_result_title`、`runtime_session_result_turn_view`、`runtime_session_result_versions`※、`runtime_session_result_view`、`runtime_session_results_list`、`runtime_session_results_list_turns`※、`runtime_session_results_owner_guard`、`runtime_session_results_session`、`runtime_set_stop_new_calls`※、`runtime_source`、`runtime_source_checkpoint`、`runtime_stale_charged_rounds`、`runtime_stale_round_compensate`、`runtime_stop_loss_alert`、`runtime_stop_loss_assert`、`runtime_stop_loss_call_guard`、`runtime_stop_loss_config`、`runtime_stop_loss_observe`、`runtime_stop_loss_settings_guard`、`runtime_stop_loss_settled`、`runtime_stop_loss_usage`、`runtime_test_actor_access`、`runtime_test_budget_guard`、`runtime_test_dispatch_guard`、`runtime_test_policy`、`runtime_test_recovery_policy`、`runtime_test_window_allowed`、`runtime_tool`、`runtime_update_rate_limits`※、`runtime_update_stop_loss`※、`runtime_view`※、`runtime_view_with_work_items`、`runtime_voice_references_freeze`、`runtime_voice_source_gone`、`runtime_voice_sources_gone`、`runtime_work_items`、`runtime_work_projection`、`runtime_work_projection_before_opc`、`runtime_workspace_benchmark_guard`、`runtime_workspace_post_window`、`runtime_workspace_posts_guard`、`runtime_workspace_posts_history_erased`、`runtime_workspace_posts_history_visible`、`runtime_workspace_posts_receipt_ready`、`runtime_workspace_posts_visible`、`runtime_workspace_session`、`runtime_workspace_source`※、`runtime_workspace_tool_guard`
+**runtime_***（113）：`runtime_admission_replay`※、`runtime_admit`、`runtime_admit_commit`、`runtime_admit_precheck`、`runtime_admit_source_check`、`runtime_billing_allowed`、`runtime_binding_guard`、`runtime_cancel`※、`runtime_cancel_with_code`、`runtime_capacity_marker_arm`、`runtime_capacity_marker_since`、`runtime_check_memo_close`、`runtime_check_memo_get`、`runtime_check_memo_open`、`runtime_check_memo_put`、`runtime_context_allowed`、`runtime_context_allowed_before_workspace`、`runtime_direct_billing_allowed`、`runtime_direct_billing_allowed_before_opc`、`runtime_direct_billing_allowed_before_topic`、`runtime_execution`※、`runtime_execution_visibility`※、`runtime_financial_recovery`※、`runtime_history_availability`、`runtime_history_availability_before_memo`、`runtime_history_available`、`runtime_history_available_before_memo`、`runtime_interrupt_capacity`、`runtime_interrupted_recovery`、`runtime_library_propagate`※、`runtime_library_read`、`runtime_library_references_freeze`、`runtime_library_sources_gone`、`runtime_library_tool_guard`、`runtime_library_visible`、`runtime_load_skill_allowed`、`runtime_load_skill_entry`、`runtime_load_skill_result_valid`、`runtime_matching_call_guard`、`runtime_material`⚠、`runtime_material_allowed`⚠、`runtime_material_allowed_before_b1`⚠、`runtime_mentor_history`、`runtime_mentor_history_draft`、`runtime_mentor_history_guard`、`runtime_mentor_messages`、`runtime_pending_financial_batch`※、`runtime_positioning_gate`、`runtime_production_access`、`runtime_production_allowed`、`runtime_production_database`、`runtime_production_enabled`、`runtime_production_recovery_policy`、`runtime_rate_limits_patch`、`runtime_read_verified`、`runtime_receipt_saved`、`runtime_response`、`runtime_rw_flag`、`runtime_session_context`※、`runtime_session_items`、`runtime_session_names_owner_guard`、`runtime_session_result_delete`※、`runtime_session_result_edit`※、`runtime_session_result_save`※、`runtime_session_result_save_turn`※、`runtime_session_result_title`、`runtime_session_result_turn_view`、`runtime_session_result_versions`※、`runtime_session_result_view`、`runtime_session_results_list`、`runtime_session_results_list_turns`※、`runtime_session_results_owner_guard`、`runtime_session_results_session`、`runtime_set_stop_new_calls`※、`runtime_source`、`runtime_source_checkpoint`、`runtime_stale_charged_rounds`、`runtime_stale_round_compensate`、`runtime_stop_loss_alert`、`runtime_stop_loss_assert`、`runtime_stop_loss_call_guard`、`runtime_stop_loss_config`、`runtime_stop_loss_observe`、`runtime_stop_loss_settings_guard`、`runtime_stop_loss_settled`、`runtime_stop_loss_usage`、`runtime_test_actor_access`、`runtime_test_budget_guard`、`runtime_test_dispatch_guard`、`runtime_test_policy`、`runtime_test_recovery_policy`、`runtime_test_window_allowed`、`runtime_tool`、`runtime_update_rate_limits`※、`runtime_update_stop_loss`※、`runtime_view`※、`runtime_view_with_work_items`、`runtime_voice_references_freeze`、`runtime_voice_source_gone`、`runtime_voice_sources_gone`、`runtime_work_items`、`runtime_work_projection`⚠、`runtime_work_projection_before_opc`⚠、`runtime_workspace_benchmark_guard`、`runtime_workspace_post_window`、`runtime_workspace_posts_guard`、`runtime_workspace_posts_history_erased`、`runtime_workspace_posts_history_visible`、`runtime_workspace_posts_receipt_ready`、`runtime_workspace_posts_visible`、`runtime_workspace_session`、`runtime_workspace_source`※、`runtime_workspace_tool_guard`
+
+带 ⚠ 的是**新路径仍在用、按命名规则圈进来但不能删**的函数：`runtime_material`（素材快照的写入口，opc_library_edit、opc_handoff、opc_step_material、opc_topic_bind、opc_video_material_prepare、opc_work_ui_change 直接调用）；`runtime_work_projection`（runtime_material 调用，turn_mentor_context 注释引用）；`runtime_work_projection_before_opc`（同上的旧版本）；`runtime_material_allowed`（素材读取判定）；`runtime_material_allowed_before_b1`（同上的旧版本）。它们要改写掉对 `bill2_actor`、`bill2_scope_allowed`、`runtime_executions` 的引用后保留（方案 0.5）。
 
 ### C.1 现役 Node 仍在调用的待删函数
 
@@ -112,14 +114,14 @@
 
 另有运行手册 `docs/runbooks/BILL2_V1_PENDING_READONLY.sql` 引用 10 个待删函数，删除时随手册一起改。
 
-## D. 没列入删除、但引用了待删对象的函数（190 个）
+## D. 没列入删除、但引用了待删对象的函数（200 个）
 
 这些函数要么改写、要么随调用方一起删，否则 DROP 后调用即报错。其中 7 个现在已无入口（不被现役 Node、触发器或其他保留函数调用）。
 处理码：**D** 现已无入口，随迁移直接删；**H** 只用 `bill2_actor`/`bill2_scope_allowed`/`bill2_decimal` 这几个通用小函数（`bill2_actor` 只查 `profiles`），保留或改名这三个小函数即可，调用方不用动；**W** 引用的是 `runtime_*` 旧表或旧函数，要改写（整段 `CREATE OR REPLACE`）；**B** 引用 BILL2 计费表/函数，随计费消费者一起改写或删除。
 
-合计：D 7、H 43、W 68、B 72。
+合计：D 7、H 47、W 74、B 72。
 
-### D.定位、选题、work_item（opc）（65）
+### D.定位、选题、work_item（opc）（71）
 
 | 函数 | 码 | 引用的待删表 | 引用的待删函数 | 现役 Node 调用 |
 |---|---|---|---|---|
@@ -140,11 +142,14 @@
 | `opc_capture_resolve` | W | `runtime_executions` | `bill2_actor`、`bill2_scope_allowed`、`runtime_history_available` | `service.ts` |
 | `opc_content_allowed` | W |  | `runtime_history_available` | — |
 | `opc_content_from_execution` | W | `runtime_executions` | `bill2_actor`、`runtime_history_available` | `service.ts` |
-| `opc_content_manual_save` | H |  | `bill2_actor` | `service.ts` |
+| `opc_content_from_turn` | H |  | `bill2_actor` | `turnContent.ts` |
+| `opc_content_manual_save` | H |  | `bill2_actor` | `turnContent.ts` |
 | `opc_content_reaction` | W | `runtime_executions` |  | `dataFoundation.ts` |
 | `opc_content_source_current` | D |  | `bill2_actor`、`bill2_scope_allowed` | — |
 | `opc_conversation_rename` | W | `runtime_session_names` | `bill2_actor` | `conversationName.ts` |
 | `opc_data_execution` | W | `runtime_executions` | `bill2_actor`、`runtime_history_available`、`bill2_scope_allowed` | — |
+| `opc_data_source_turn` | W | `runtime_executions` |  | — |
+| `opc_data_turn` | H |  | `bill2_actor`、`bill2_scope_allowed` | — |
 | `opc_free_conversations` | W | `runtime_executions`、`runtime_session_names` | `runtime_check_memo_open`、`bill2_actor`、`bill2_scope_allowed`+2 | `opc.ts` |
 | `opc_handoff` | W |  | `bill2_actor`、`runtime_material` | `handoff-envelope.ts` |
 | `opc_handoff_b1` | H |  | `bill2_actor` | `service.ts` |
@@ -182,12 +187,15 @@
 | `opc_video_material_prepare` | W | `runtime_scope_material`、`runtime_executions` | `bill2_actor`、`runtime_material` | `service.ts` |
 | `opc_video_package_from_execution` | W | `runtime_executions` | `bill2_actor`、`runtime_history_available` | `service.ts` |
 | `opc_video_results_from_execution` | W | `runtime_executions` | `bill2_actor`、`runtime_history_available` | `service.ts` |
+| `opc_video_results_from_turn` | H |  | `bill2_actor` | `turnContent.ts` |
 | `opc_video_runtime_binding_guard` ‹触发器 1› | W | `runtime_scope_material`、`runtime_executions` |  | — |
+| `opc_video_turn_check` | W | `runtime_scope_material`、`runtime_executions` | `bill2_actor`、`runtime_history_available` | — |
 | `opc_work_check` | W | `runtime_scope_material` |  | `db.ts` |
 | `opc_work_result` | W | `runtime_executions` | `bill2_actor`、`runtime_history_available` | `service.ts` |
 | `opc_work_result_turn` | H |  | `bill2_actor` | `service.ts` |
 | `opc_work_results` | W | `runtime_executions` | `bill2_actor`、`bill2_scope_allowed` | `service.ts` |
 | `opc_work_ui_change` | W | `runtime_scope_material` | `bill2_actor`、`runtime_material` | `service.ts` |
+| `opc_work_verify` | W | `runtime_scope_material` |  | `db.ts` |
 
 ### D.评审团与对比（44）
 
@@ -293,6 +301,23 @@
 | `research_user_tool_charges` | B | `bill2_calls`、`bill2_runs`、`runtime_executions` | `bill2_actor`、`bill2_unit_multiplier` | `userApi.ts` |
 | `research_user_unfinished_round` | W | `runtime_executions` |  | `userApi.ts` |
 
+### D.其他（12）
+
+| 函数 | 码 | 引用的待删表 | 引用的待删函数 | 现役 Node 调用 |
+|---|---|---|---|---|
+| `artifact_evidence_allowed` | W |  | `runtime_check_memo_get`、`runtime_check_memo_put` | — |
+| `artifact_save_candidate` | W | `runtime_executions` |  | `workbench.ts` |
+| `mentor_source_check` | H |  | `bill2_scope_allowed` | `mentor.ts`、`plan.ts` |
+| `plan_turn_read` | H |  | `bill2_scope_allowed` | `planHttp.ts` |
+| `runtime_start` | B |  | `bill2_actor`、`bill2_scope_allowed`、`bill2_create_draft` | — |
+| `session_view_allowed` | H |  | `bill2_scope_allowed` | `view.ts` |
+| `topic_turn_source` | W | `runtime_scope_material`、`runtime_executions` |  | `topic.ts` |
+| `turn_mentor_context` | W | `runtime_executions` |  | — |
+| `turn_open` | W | `runtime_executions` |  | `db.ts` |
+| `turn_plan_context` | W | `runtime_executions` |  | — |
+| `turn_stop` | B | `report_fees` |  | `db.ts` |
+| `workspace_turn_read` | W | `runtime_executions` |  | `workspace.ts` |
+
 ### D.报告（11）
 
 | 函数 | 码 | 引用的待删表 | 引用的待删函数 | 现役 Node 调用 |
@@ -308,19 +333,6 @@
 | `report_source` | H |  | `bill2_actor`、`bill2_scope_allowed` | `preflight.ts`、`service.ts` 等3 |
 | `report_source_for_read` | H |  | `bill2_actor`、`bill2_scope_allowed` | — |
 | `turn_report_admit` | B | `report_fees`、`runtime_executions` |  | — |
-
-### D.其他（8）
-
-| 函数 | 码 | 引用的待删表 | 引用的待删函数 | 现役 Node 调用 |
-|---|---|---|---|---|
-| `artifact_evidence_allowed` | W |  | `runtime_check_memo_get`、`runtime_check_memo_put` | — |
-| `artifact_save_candidate` | W | `runtime_executions` |  | `workbench.ts` |
-| `mentor_source_check` | H |  | `bill2_scope_allowed` | `mentor.ts` |
-| `runtime_start` | B |  | `bill2_actor`、`bill2_scope_allowed`、`bill2_create_draft` | — |
-| `session_view_allowed` | H |  | `bill2_scope_allowed` | `view.ts` |
-| `turn_mentor_context` | W | `runtime_executions` |  | — |
-| `turn_stop` | B | `report_fees` |  | `db.ts` |
-| `workspace_turn_read` | W | `runtime_executions` |  | `workspace.ts` |
 
 ### D.复盘与社媒监测（8）
 
@@ -394,7 +406,7 @@
 | `runtime/budget.ts` | `trpc.ts` |
 | `runtime/catalogCache.ts` | `services/billingUnit.ts`、`services/membershipEntitlements.ts`、`services/turn` |
 | `runtime/checklistMaterial.ts` | （仅其他保留模块间互相导入） |
-| `runtime/contentSource.ts` | （仅其他保留模块间互相导入） |
+| `runtime/contentSource.ts` | `services/turn` |
 | `runtime/context.ts` | `scripts/ac0Probe/mentorPreparation.mjs`、`services/turn` |
 | `runtime/freeChatResearch.ts` | `services/turn` |
 | `runtime/groundedCard.ts` | `services/turn` |
