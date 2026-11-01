@@ -25,7 +25,7 @@ import topicStyles from './topic-candidates.module.css';
 import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
 import { opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
-import { consentedTopicIds } from './adoption-consent';
+import { consentedForCandidate } from './adoption-consent';
 import { lastReplyAdoptionNotice, parseAdoption, parseCandidate } from './topic-candidate';
 import { refuseTopic, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
@@ -393,7 +393,7 @@ function TopicWorkspaceContent() {
       try { if (JSON.stringify((JSON.parse(stored) as CandidateSnapshot).body)!==JSON.stringify(frozen.body)) return; }
       catch { return; }
     }
-    const consented = consentedTopicIds(action.input, frozen.body.map(item => item.id), frozen.body.map(item => item.title));
+    const consented = consentedForCandidate(action.input, frozen.body);
     if (!consented || consented.length !== ids.length || consented.some(id => !ids.includes(id))) return;
     const request = adoptionRequest(frozen, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
     if (!request) return;

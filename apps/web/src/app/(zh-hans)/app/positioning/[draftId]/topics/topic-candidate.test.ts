@@ -26,6 +26,11 @@ describe('topic candidates and adoption in a reply', () => {
   it('a reply that adopts without the user saying so is refused, out loud', () => {
     expect(topicAdoptionNotice({ input: '好，继续', body: adopt }, [{ id, title: 'One hour' }], new Set(), true)).toContain('没有采用');
   });
+  it('says to change the form first when the message names one the topic does not have', () => {
+    const shown = [{ id, title: 'One hour', contentType: 'article' }];
+    expect(topicAdoptionNotice({ input: '三条都做短视频，请采用第一条', body: adopt }, shown, new Set(), true)).toContain('形式');
+    expect(topicAdoptionNotice({ input: '三条都做文章，请采用第一条', body: adopt }, shown, new Set(), true)).toBeNull();
+  });
   it('opened in another browser the page cannot act, so it says so even when the user did consent', () => {
     expect(topicAdoptionNotice({ input: '采用第一条', body: adopt }, [{ id, title: 'One hour' }], new Set(), false)).toContain('没有采用');
   });

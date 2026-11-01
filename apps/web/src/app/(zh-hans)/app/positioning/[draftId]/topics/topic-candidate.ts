@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { planItem } from '@repo/api/src/shared/opcRequests';
 import type { z } from 'zod';
-import { consentedTopicIds } from './adoption-consent';
+import { consentedTopicIds, statedForm } from './adoption-consent';
 
 export type PlanItem = z.infer<typeof planItem>;
 
@@ -77,11 +77,15 @@ export function adoptionContextHeld(sessionId: string, executionId: string, cand
  * canCarryOut: this browser holds the candidate the user saw when they sent it; the page acts only then.
  */
 export function topicAdoptionNotice(reply: { input: string | null; body: string | null } | undefined,
-  candidate: readonly { id: string; title: string }[] | null, adopted: ReadonlySet<string>, canCarryOut: boolean): string | null {
+  candidate: readonly { id: string; title: string; contentType?: string }[] | null, adopted: ReadonlySet<string>, canCarryOut: boolean): string | null {
   const ids = parseAdoption(reply?.body);
   if (!reply || !ids || ids.every(id => adopted.has(id))) return null;
   if (!candidate) return '这次没有采用：上一条选题的格式不完整，没能保存成候选。请让教练重新给出选题。';
-  const consented = consentedTopicIds(reply.input, candidate.map(item => item.id), candidate.map(item => item.title));
+  const titles = candidate.map(item => item.title), all = candidate.map(item => item.id);
+  const consented = consentedTopicIds(reply.input, all, titles, candidate.map(item => item.contentType));
+  const wanted = consentedTopicIds(reply.input, all, titles);
+  if (!consented && wanted?.length === ids.length && wanted.every(id => ids.includes(id)) && statedForm(reply.input))
+    return '这次没有采用：你说的内容形式和这条选题现在的形式不一致。请先把选题的形式改成一致的，再确认采用。';
   if (canCarryOut && consented?.length === ids.length && consented.every(id => ids.includes(id))) return null;
   return '这次没有采用：系统没能确认你要采用哪一条。请在选题卡片上点采用，或直接发送“采用第一条”。';
 }

@@ -20,6 +20,15 @@ describe('natural-language topic adoption consent', () => {
     expect(consentedTopicIds('采用第一条，再采用第二条', ids)).toBeNull();
     expect(consentedTopicIds('先别采用，采用第一条', ids)).toBeNull();
   });
+  it('does not adopt when the form the message names is not the topic\'s', () => {
+    const video = ['video', 'video', 'video'], mixed = ['article', 'video', undefined];
+    expect(consentedTopicIds('三条都做短视频，请采用第一条', ids, [], video)).toEqual(['one']);
+    expect(consentedTopicIds('三条都做短视频，请采用第一条', ids, [], mixed)).toBeNull();
+    expect(consentedTopicIds('三条都做短视频，请采用第三条', ids, [], mixed)).toBeNull();
+    expect(consentedTopicIds('三条都做短视频，请采用全部选题', ids, [], mixed)).toBeNull();
+    expect(consentedTopicIds('请采用第二条', ids, [], mixed)).toEqual(['two']);
+    expect(consentedTopicIds('三条都做文章，请采用第一条', ids, [], mixed)).toEqual(['one']);
+  });
   it('refuses an instruction that is quoted, an example or reported, and anything else around it that is not on the short list', () => {
     for (const message of ['比如，采用第一条', '示例指令：\n采用第一条', '例如采用第一条', '假设我说，采用第一条', '他说，采用第一条',
       '采用第一条，顺便举个例子', '采用第一条，三条都做视频', '三条都行，采用第一条', '"采用第一条"，这样写对吗'])
