@@ -17,3 +17,14 @@ describe('every page on useTurnChat', () => {
       expect(page.source).toContain('useStoredSendCleanup(');
     });
 });
+
+// A turn that closes while another conversation's turn still holds its freeze reads a low balance, and nothing else asks again: every close
+// goes through one `settle` (a read now, one later), and coming back to the window reads too. No settled.current() outside those.
+describe('useTurnChat balance reads', () => {
+  const source = readFileSync(join(__dirname, 'use-turn-chat.ts'), 'utf8');
+  it('reads again after a close and when the window is back', () => {
+    expect(source).toContain('REREAD_MS');
+    expect(source).toContain("addEventListener('focus'");
+    expect(source.match(/settled\.current\(\)/g)).toHaveLength(3);
+  });
+});
