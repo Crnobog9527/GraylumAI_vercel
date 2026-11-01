@@ -44,6 +44,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const choices = trpc.runtime.choices.useQuery({ sessionId }, { staleTime: RUNTIME_CHOICES_STALE_MS });
   const chat = useTurnChat(sessionId, () => { void utils.credits.getBalance.invalidate(); void utils.opc.conversations.invalidate(); });
   const [input, setInput] = useState(''), [outgoing, setOutgoing] = useState<string | null>(null);
+  const inputRef = useRef(input);
+  inputRef.current = input;
   const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
   const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
   const [skillId, setSkillId] = useState(''), [references, setReferences] = useState<LibraryReference[]>([]);
@@ -65,9 +67,10 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     if (!chat.view || chat.sending) return;
     const pending = readPending(localStorage, sessionId);
     if (!pending?.restored || pendingSeen(pending, chat.view) !== 'stored') return;
-    setInput(current => { const next = withoutSentText(current, pending.text); localStorage.setItem('opc-runtime-input:' + sessionId, next); return next; });
-    const sent = new Set((pending.references ?? []).map(reference => reference.documentId));
-    if (sent.size) updateReferences(references.filter(reference => !sent.has(reference.documentId)));
+    const next = withoutSentText(inputRef.current, pending.text);
+    setInput(next); localStorage.setItem('opc-runtime-input:' + sessionId, next);
+    // The references the kept draft still names stay (the same document may be named again after the put-back text); the rest go with it.
+    if (pending.references?.length) updateReferences(COMPOSER_REFERENCES_ENABLED ? referencesNamedIn(next, references) : []);
     forgetPending(localStorage, sessionId);
     // The request id left in the address belongs to this send: a later send must not reuse it (the server would replay, not send).
     const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);

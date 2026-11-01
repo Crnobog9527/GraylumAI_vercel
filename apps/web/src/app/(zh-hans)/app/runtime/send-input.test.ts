@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
+import { referencesNamedIn } from '@/components/opc/composer-references';
 import {
   clearForSend, forgetPending, markPendingRestored, openingDraft, pendingSeen, readPending, rememberPending, requestIdFor,
   restoredDraft, withoutSentText,
@@ -123,4 +124,12 @@ it('takes the whole put-back text out of the box, keeping a newer draft after it
   // The user edited the put-back text before the answer came: it is theirs.
   expect(withoutSentText('第二条再加一句', '第二条')).toBe('第二条再加一句');
   expect(withoutSentText('另一段', '第二条')).toBe('另一段');
+});
+
+it('after a confirmed send the draft that stays still carries the references it names', () => {
+  const docs = [{ documentId: 'd1', version: 1, label: '资料' }];
+  const kept = withoutSentText('总结 @资料\n\n继续分析 @资料', '总结 @资料');
+  expect(kept).toBe('继续分析 @资料');
+  expect(referencesNamedIn(kept, docs)).toEqual(docs);
+  expect(referencesNamedIn(withoutSentText('总结 @资料', '总结 @资料'), docs)).toEqual([]);
 });
