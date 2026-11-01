@@ -79,9 +79,10 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
   if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
 
   // 3. Open: one call, no tools, no positioning check (a workspace exists only for a confirmed positioning).
-  const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, startThresholdCredits: startCredits,
+  // topic: turn_open refuses a request the old path holds, under this conversation's lock.
+  const policy = { ...turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd, startThresholdCredits: startCredits,
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }, stopLoss: config.stopLoss, historyItems: HISTORY_ITEMS,
-    inputBytes: quote.inputLimit, pricing: quote.pricing, frozen: { modelId: quote.modelId, model: quote.model } });
+    inputBytes: quote.inputLimit, pricing: quote.pricing, frozen: { modelId: quote.modelId, model: quote.model } }), topic: true };
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId, requestId: input.requestId, kind: 'chat', policy }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }

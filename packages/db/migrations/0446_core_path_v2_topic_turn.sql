@@ -13,6 +13,9 @@
 --                          accept either source; old rows and old requests behave exactly as before
 --   content_erasure_scope, _mark_session, _confirm
 --                          a conversation's turn events and topic drafts are erased like its execution's
+--   turn_open, runtime_admit, runtime_admit_commit
+--                          one request id on one path only while both exist: each refuses, under the conversation's lock, a request the
+--                          other holds (turn_open for a topic turn, the old admission for any turn), so no retry pays twice
 --   topic_turn_source      what a topic turn reads before it opens, on the read client (the old prepareTopicTurn checks: writable,
 --                          bound workspace, allowed source, the Skill resources, the frozen material)
 -- Compatibility: old code reads execution_id only and ignores turn rows, and nothing writes one until the page switches.
@@ -853,6 +856,392 @@ BEGIN
   'alreadyDeleted',deleted,'preservedSavedVersions',scope->'preservedSavedVersions','financialReviewCount',remaining);
 EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.turn_open(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_kind text, p_policy jsonb, p_resume_of bigint DEFAULT NULL::bigint)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  s runtime_sessions; t turns; prof profiles; existing turns;
+  v_day date := (now() AT TIME ZONE 'UTC')::date; v_bucket smallint; total numeric; band numeric;
+  u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
+  carried integer := 0;
+BEGIN
+  IF p_kind NOT IN ('chat','mentor','report','compare','jury','jury_adopt','review') THEN
+    RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
+  END IF;
+  IF jsonb_typeof(p_policy) <> 'object'
+    OR jsonb_typeof(p_policy->'q') <> 'number' OR (p_policy->>'q')::numeric <= 0
+    OR jsonb_typeof(p_policy->'uTurnUsd') <> 'number' OR (p_policy->>'uTurnUsd')::numeric < 0
+    OR jsonb_typeof(p_policy->'gCredits') <> 'number' OR (p_policy->>'gCredits')::numeric <> floor((p_policy->>'gCredits')::numeric)
+    OR (p_policy->>'gCredits')::numeric < 0
+    OR jsonb_typeof(p_policy->'minCredits') <> 'number' OR (p_policy->>'minCredits')::numeric < 0
+    OR jsonb_typeof(p_policy->'historyItems') <> 'number' OR (p_policy->>'historyItems')::numeric NOT BETWEEN 0 AND 200
+    OR jsonb_typeof(p_policy->'limits') <> 'object'
+    OR coalesce((p_policy->'limits'->>'model')::numeric, 0) < 1
+    OR coalesce((p_policy->'limits'->>'paidTools')::numeric, -1) < 0
+    OR coalesce((p_policy->'limits'->>'freeTools')::numeric, -1) < 0
+    OR coalesce((p_policy->'limits'->>'decisions')::numeric, 0) < 0
+    OR jsonb_typeof(p_policy->'stopLoss') <> 'object'
+    OR coalesce((p_policy->'stopLoss'->>'limitUsd')::numeric, 0) <= 0
+    OR coalesce((p_policy->'stopLoss'->>'p')::numeric, 0) < 1
+    OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
+    OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
+    OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits'] THEN
+    RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
+  END IF;
+
+  -- 1. The account row first, then the session: one turn at a time per conversation (3a). The account comes first as in the
+  -- erasure functions (they hold it before the session), so an open and a deletion of the same conversation never deadlock.
+  SELECT * INTO prof FROM profiles WHERE id = p_actor_id FOR UPDATE;
+  SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
+  IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  -- 2. The same request again: the turn it opened, unchanged.
+  SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
+  IF existing.id IS NOT NULL THEN
+    IF existing.session_id IS DISTINCT FROM p_session_id OR existing.kind <> p_kind
+      OR existing.resume_of IS DISTINCT FROM p_resume_of THEN
+      RAISE EXCEPTION 'TURN_REQUEST_CONFLICT' USING ERRCODE='22023';
+    END IF;
+    -- A replay reads the history too: a deleted conversation or an erasing account is refused here as for a new request,
+    -- so the same old request can never read back deleted content (as runtime_session_context).
+    IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
+    IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false'
+      OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
+      RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
+    END IF;
+    t := existing;
+  ELSE
+    IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_ERASED' USING ERRCODE='42501'; END IF;
+    IF EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
+      RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
+    END IF;
+    IF p_resume_of IS NULL THEN
+      -- A jury (or its adoption) runs on the report's draft conversation without occupying it (V2-7b): the conversation stays
+      -- usable while a review advances or waits, as before; one review per user is the review record's own rule.
+      IF s.active_turn_id IS NOT NULL AND p_kind NOT IN ('jury','jury_adopt') THEN RAISE EXCEPTION 'TURN_SESSION_BUSY' USING ERRCODE='55P03'; END IF;
+      -- V2-5c: the mentor's read before this turn is bound to it: a turn that closed since then makes that read stale (it could pay
+      -- again for what that turn fetched, or use a grant it spent). Under this session's lock, so no close can slip in after it.
+      IF p_kind = 'mentor' AND p_policy->'mentor'->>'preparedAt' IS NOT NULL AND EXISTS (SELECT 1 FROM turns x
+          WHERE x.actor_id = p_actor_id AND x.session_id = p_session_id AND x.closed_at > (p_policy->'mentor'->>'preparedAt')::timestamptz) THEN
+        RAISE EXCEPTION 'TURN_PREPARE_STALE' USING ERRCODE='55P03';
+      END IF;
+      -- V2-10b: a topic turn's request id admitted on the old path, under this session's lock (runtime_admit refuses the other way).
+      -- V2-12 drops this with the old table.
+      IF p_kind = 'chat' AND p_policy ? 'topic' AND EXISTS (SELECT 1 FROM runtime_executions e
+          WHERE e.actor_id = p_actor_id AND e.request_id = p_request_id) THEN
+        RAISE EXCEPTION 'TURN_TOPIC_REQUEST_CONFLICT' USING ERRCODE='22023';
+      END IF;
+    ELSE
+      -- Resume (V2-8): the paused turn is checked, locked and priced by turn_resume_carry.
+      carried := public.turn_resume_carry(p_actor_id, p_session_id, s.active_turn_id, p_resume_of, p_kind, p_policy);
+    END IF;
+    -- The same account check as bill2_actor: active and not deleted.
+    IF prof.id IS NULL OR prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false' THEN
+      RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
+    END IF;
+
+    -- 3. Stop-loss (2.5.1): reserve U_turn on the own bucket row first, then read the day's sum, then check with the band B.
+    -- On a resume the paused turn's reservation is still counted here (it is released by its close below): refusing earlier,
+    -- never later.
+    IF (p_policy->'stopLoss'->>'p')::int < (p_policy->'stopLoss'->>'poolSize')::int THEN
+      RAISE EXCEPTION 'TURN_STOP_LOSS_CONFIG' USING ERRCODE='22023';
+    END IF;
+    u_turn := (p_policy->>'uTurnUsd')::numeric;
+    v_bucket := CASE WHEN p_kind IN ('report','compare','jury','jury_adopt') THEN -1 ELSE abs(hashtext(p_actor_id::text)) % 16 END;
+    INSERT INTO daily_spend AS d (day, bucket, reserved_usd) VALUES (v_day, v_bucket, u_turn)
+      ON CONFLICT (day, bucket) DO UPDATE SET reserved_usd = d.reserved_usd + excluded.reserved_usd;
+    SELECT sum(reserved_usd + spent_usd) INTO total FROM daily_spend WHERE daily_spend.day = v_day;
+    band := ((p_policy->'stopLoss'->>'p')::numeric - 1) * (p_policy->'stopLoss'->>'uFastUsd')::numeric
+      + (p_policy->'stopLoss'->>'uBigUsd')::numeric;
+    IF total + band > (p_policy->'stopLoss'->>'limitUsd')::numeric THEN
+      RAISE EXCEPTION 'STOP_LOSS_REACHED' USING ERRCODE='P0001';
+    END IF;
+
+    -- The paused turn closes before the new freeze is sized: its whole freeze comes back (refund_all; what it would have charged
+    -- is carried above) and counts in the balance read below. Its receipts stay its own for the stop-loss. Not delivered, no
+    -- messages: the turn that continues it saves the conversation.
+    IF p_resume_of IS NOT NULL THEN
+      PERFORM public.turn_resume_close(p_actor_id, p_resume_of, carried);
+    END IF;
+
+    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The balance is read under the
+    -- account lock taken first: two sessions of one account in different stop-loss buckets never size H on the same balance.
+    -- The account is checked again here (same lock) before anything is frozen.
+    SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
+    IF prof.status IS DISTINCT FROM 'active' OR prof.is_deleted::text IS DISTINCT FROM 'false'
+      OR EXISTS (SELECT 1 FROM account_erasure_requests WHERE profile_id = p_actor_id) THEN
+      RAISE EXCEPTION 'TURN_ACCOUNT_ERASING' USING ERRCODE='42501';
+    END IF;
+    -- The freeze covers the carried credits too (the continuation settles them).
+    IF p_kind = 'report' THEN PERFORM public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
+    g := (p_policy->>'gCredits')::int + carried;
+    available := greatest(public.credit_available(p_actor_id), 0);
+    -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
+    -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).
+    -- On a resume the carried credits are owed already: the balance left after them must still cover one normal turn.
+    IF available - carried < (p_policy->>'minCredits')::int THEN RAISE EXCEPTION 'TURN_INSUFFICIENT_CREDITS' USING ERRCODE='P0001'; END IF;
+    h := least(g, available);
+    IF h > 0 THEN
+      SELECT pre_deduct_id INTO hold FROM public.atomic_pre_deduct(p_actor_id, h, 'AI turn freeze', p_request_id);
+    END IF;
+
+    frozen := p_policy || jsonb_build_object('day', v_day, 'bucket', v_bucket, 'holdId', hold, 'heldCredits', h)
+      || CASE WHEN carried > 0 THEN jsonb_build_object('carriedCredits', carried) ELSE '{}'::jsonb END;
+    INSERT INTO turns (actor_id, session_id, request_id, kind, state, resume_of, policy, reserved_credits, reserved_usd, input_bytes)
+      -- reserved_credits is the freeze this turn's calls may use (turn_call_begin pauses on it); the carried part is added back
+      -- at the close (turn_close), and the hold itself is the whole H (policy.heldCredits).
+      VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h - carried, u_turn,
+        (p_policy->>'inputBytes')::int)
+      RETURNING * INTO t;
+    IF p_kind NOT IN ('jury','jury_adopt') THEN UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id; END IF;
+  END IF;
+
+  -- 5. The visible history, newest N in order.
+  SELECT coalesce(jsonb_agg(jsonb_build_object('seq', m.seq, 'role', m.role, 'content', m.content, 'contentHash', m.content_hash)
+    ORDER BY m.seq), '[]'::jsonb) INTO history
+  FROM (SELECT seq, role, content, content_hash FROM session_messages
+        WHERE session_id = p_session_id AND visible AND deleted_at IS NULL
+        ORDER BY seq DESC LIMIT (t.policy->>'historyItems')::int) m;
+  -- 6. What the turn's prompt needs from the account, read here instead of in more round trips: the reply language and, for a
+  -- free chat, the positioning gate (confirmed positioning; refusals in 24 hours, counted on the turns refused for it).
+  RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'replay', existing.id IS NOT NULL,
+    'reservedCredits', t.reserved_credits, 'reservedUsd', t.reserved_usd, 'history', history, 'resumeOf', t.resume_of,
+    'replyLanguage', prof.reply_language,
+    'positioning', CASE WHEN p_kind = 'chat' THEN jsonb_build_object(
+      'positioned', public.turn_positioned(p_actor_id),
+      'refusals24h', (SELECT count(*) FROM turns r WHERE r.actor_id = p_actor_id AND r.failure_code = 'positioning_required'
+        AND r.closed_at > now() - interval '24 hours')) END,
+    -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
+    -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
+    'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor') END);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.runtime_admit_commit(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb, p_pre jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions;e runtime_executions;b jsonb;candidates bigint[];now_versions jsonb;
+BEGIN
+ -- The same entry guards as runtime_admit.
+ IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('sessionId',p_session_id)); END IF;
+ IF EXISTS(SELECT 1 FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id AND (erased_at IS NOT NULL OR content_deleted_at IS NOT NULL)) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
+ PERFORM bill2_actor(p_actor_id);
+ IF p_request_id IS NULL THEN RAISE EXCEPTION 'RUNTIME_REQUEST_REQUIRED';END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,107));
+ SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id FOR UPDATE;
+ IF s.id IS NULL THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED';END IF;
+ SELECT * INTO e FROM runtime_executions WHERE actor_id=p_actor_id AND request_id=p_request_id;
+ IF e.id IS NOT NULL THEN
+  IF e.session_id<>s.id OR e.payload IS DISTINCT FROM p_payload
+   OR (SELECT payload FROM bill2_runs WHERE id=e.billing_run_id) IS DISTINCT FROM p_billing THEN RAISE EXCEPTION 'RUNTIME_REQUEST_CONFLICT';END IF;
+  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
+ END IF;
+ -- CORE-PATH-V2 V2-10b: under this session's lock, as turn_open: a request id the turn path holds is never admitted here too.
+ IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.request_id=p_request_id) THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+ -- The proof belongs to exactly this request, payload and billing, and to the session as it is now.
+ IF p_pre IS NULL OR p_pre->>'version' IS DISTINCT FROM '1' OR p_pre->>'requestId' IS DISTINCT FROM p_request_id::text
+  OR p_pre->>'binding' IS DISTINCT FROM md5(p_payload::text||'|'||p_billing::text) THEN
+  RAISE EXCEPTION 'RUNTIME_ADMIT_PRECHECK_INVALID' USING ERRCODE='P0001';
+ END IF;
+ IF (p_pre->>'sessionRevision')::bigint IS DISTINCT FROM s.revision THEN RAISE EXCEPTION 'RUNTIME_ADMIT_STALE' USING ERRCODE='P0001';END IF;
+ IF jsonb_typeof(p_pre->'catalogVersions')='object' AND to_regprocedure('public.catalog_versions_snapshot()') IS NOT NULL THEN
+  EXECUTE 'SELECT public.catalog_versions_snapshot()' INTO now_versions;
+  IF now_versions->'skills' IS DISTINCT FROM p_pre->'catalogVersions'->'skills'
+   OR now_versions->'models' IS DISTINCT FROM p_pre->'catalogVersions'->'models' THEN
+   RAISE EXCEPTION 'RUNTIME_ADMIT_STALE' USING ERRCODE='P0001';
+  END IF;
+ END IF;
+ -- Cheap checks that depend on the session lock or the primary key are repeated here, in the same order as runtime_admit.
+ IF EXISTS(SELECT 1 FROM runtime_executions pending JOIN bill2_runs pr ON pr.id=pending.billing_run_id
+  WHERE pending.session_id=s.id AND pr.contract_version='bill2.v2' AND pending.primary_result IS NOT NULL
+   AND pending.payload ? 'attachedOrganizer' AND pending.result IS NULL
+   AND pending.state IN ('waiting_credits','waiting_resume','running','interrupted','cost_pending')
+   AND NOT pr.cancel_requested AND pending.failure_code IS DISTINCT FROM 'RUNTIME_INTERRUPTED_RELEASED') THEN RAISE EXCEPTION 'RUNTIME_ORGANIZER_PENDING';END IF;
+ IF s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution JOIN bill2_runs old_run
+   ON old_run.id=old_execution.billing_run_id
+   WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id
+    AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id
+    AND old_run.session_ref=s.id AND old_execution.state='cost_pending'
+    AND old_run.closed AND old_run.cancel_requested) THEN
+  RAISE EXCEPTION 'RUNTIME_SESSION_BUSY';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,105));
+ IF EXISTS(SELECT 1 FROM bill2_runs WHERE actor_id=p_actor_id AND request_id=p_request_id) THEN RAISE EXCEPTION 'RUNTIME_LEGACY_RUN_DENIED';END IF;
+ IF p_billing->>'revisionId' IS NOT NULL THEN
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid;
+  ELSE
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid FOR SHARE;
+  END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
+ END IF;
+ SELECT coalesce(array_agg(x::bigint ORDER BY n),ARRAY[]::bigint[]) INTO candidates FROM jsonb_array_elements_text(p_pre->'candidates') WITH ORDINALITY t(x,n);
+ PERFORM set_config('graylum.admit_proved','on',true);
+ b:=bill2_prepare(p_actor_id,p_request_id,p_billing);
+ PERFORM set_config('graylum.admit_proved','',true);
+ INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,billing_run_id,history_revision,candidate_history)
+ VALUES(p_actor_id,s.id,p_request_id,p_payload,(b->>'id')::uuid,s.revision,candidates) RETURNING * INTO e;
+ UPDATE bill2_runs SET session_ref=s.id WHERE id=e.billing_run_id;
+ UPDATE runtime_sessions SET active_execution=e.id WHERE id=s.id;
+ IF p_payload ? 'reportGeneration' THEN PERFORM report_fee_hold(e,p_billing); END IF;
+ RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.runtime_admit(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions;e runtime_executions;b jsonb;history_candidates bigint[];source runtime_executions;prior_turn opc_turns;current_turn opc_turns;card jsonb;answer jsonb;idx integer;
+BEGIN
+ -- 0324 archived business guard
+ IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('sessionId',p_session_id)); END IF;
+
+ -- D7 read boundary
+ IF EXISTS(SELECT 1 FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id AND (erased_at IS NOT NULL OR content_deleted_at IS NOT NULL)) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
+ PERFORM bill2_actor(p_actor_id);
+ IF p_request_id IS NULL THEN RAISE EXCEPTION 'RUNTIME_REQUEST_REQUIRED';END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,107));
+ SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id FOR UPDATE;
+ IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED';END IF;
+ SELECT * INTO e FROM runtime_executions WHERE actor_id=p_actor_id AND request_id=p_request_id;
+ IF e.id IS NOT NULL THEN
+  IF e.session_id<>s.id OR e.payload IS DISTINCT FROM p_payload
+   OR (SELECT payload FROM bill2_runs WHERE id=e.billing_run_id) IS DISTINCT FROM p_billing THEN RAISE EXCEPTION 'RUNTIME_REQUEST_CONFLICT';END IF;
+  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
+ END IF;
+ -- CORE-PATH-V2 V2-10b: under this session's lock, as turn_open: a request id the turn path holds is never admitted here too.
+ IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.request_id=p_request_id) THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+ PERFORM report_admission_check(p_actor_id,p_session_id,p_payload,p_billing);
+ IF EXISTS(SELECT 1 FROM runtime_executions pending JOIN bill2_runs pr ON pr.id=pending.billing_run_id
+  WHERE pending.session_id=s.id AND pr.contract_version='bill2.v2' AND pending.primary_result IS NOT NULL
+   AND pending.payload ? 'attachedOrganizer' AND pending.result IS NULL
+   AND pending.state IN ('waiting_credits','waiting_resume','running','interrupted','cost_pending')
+   AND NOT pr.cancel_requested AND pending.failure_code IS DISTINCT FROM 'RUNTIME_INTERRUPTED_RELEASED') THEN RAISE EXCEPTION 'RUNTIME_ORGANIZER_PENDING';END IF;
+ -- Only NEW admissions validate source freshness. Existing requests above and
+ -- execution recovery retain their frozen inputs even after another turn exists.
+ answer:=p_payload#>'{request,answerSource}';
+ IF answer IS NOT NULL THEN
+  BEGIN
+   SELECT * INTO source FROM runtime_executions WHERE id=(answer->>'executionId')::uuid
+    AND actor_id=p_actor_id AND session_id=s.id;
+   EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';
+  END;
+  SELECT * INTO prior_turn FROM opc_turns WHERE session_id=s.id AND request_id=source.request_id
+   AND token::text=source.payload->>'opcTurnToken' AND purpose='mentor';
+  SELECT * INTO current_turn FROM opc_turns WHERE session_id=s.id AND request_id=p_request_id
+   AND token::text=p_payload->>'opcTurnToken' AND purpose='mentor';
+  IF source.id IS NULL OR source.state IS DISTINCT FROM 'completed' OR NOT runtime_history_available(source.id)
+   OR source.id IS DISTINCT FROM (SELECT id FROM runtime_executions WHERE session_id=s.id ORDER BY created_at DESC,id DESC LIMIT 1)
+   OR prior_turn.token IS NULL OR current_turn.token IS NULL
+   OR prior_turn.draft_id IS DISTINCT FROM current_turn.draft_id
+   OR prior_turn.round_id IS DISTINCT FROM current_turn.round_id
+   OR prior_turn.step_id IS DISTINCT FROM current_turn.step_id
+   OR NOT EXISTS(SELECT 1 FROM opc_drafts WHERE draft_id=current_turn.draft_id AND actor_id=p_actor_id
+     AND session_id=s.id AND round_id=current_turn.round_id)
+   OR coalesce(p_payload#>>'{request,selection,task}','') !~ '^opc-question:[a-z][a-z0-9_-]{0,63}$'
+   OR source.payload#>>'{request,selection,task}' IS DISTINCT FROM p_payload#>>'{request,selection,task}'
+   THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';END IF;
+  BEGIN card:=(source.result->>'body')::jsonb;
+   EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';END;
+  IF jsonb_typeof(card->'card')='object' AND NOT (card->'card' ? 'recommended') THEN
+   card:=jsonb_set(card,'{card,recommended}','null'::jsonb);
+  END IF;
+  IF card->>'format' IS DISTINCT FROM 'agent-turn.v1' OR jsonb_typeof(card->'card') IS DISTINCT FROM 'object'
+   OR card->'card' IS DISTINCT FROM p_payload#>'{answeredCard,card}'
+   OR answer IS DISTINCT FROM (p_payload->'answeredCard')-'card'
+   OR jsonb_typeof(card#>'{card,options}') IS DISTINCT FROM 'array'
+   THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';END IF;
+  IF answer ? 'optionIndex' THEN
+   IF jsonb_typeof(answer->'optionIndex') IS DISTINCT FROM 'number' OR (answer->>'optionIndex') !~ '^[0-4]$'
+    THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';END IF;
+   idx:=(answer->>'optionIndex')::integer;
+   IF idx>=jsonb_array_length(card#>'{card,options}')
+    OR p_payload->>'input' IS DISTINCT FROM card#>>ARRAY['card','options',idx::text]
+    OR p_payload#>>'{request,input}' IS DISTINCT FROM card#>>ARRAY['card','options',idx::text]
+    THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';END IF;
+  ELSIF p_payload->>'input' IS DISTINCT FROM p_payload#>>'{request,input}' THEN
+   RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';
+  END IF;
+ ELSIF p_payload ? 'answeredCard' THEN RAISE EXCEPTION 'OPC_ANSWER_SOURCE_DENIED';
+ END IF;
+ IF s.scope->>'kind'='work_item' AND (p_payload->>'input' LIKE '[OPC_SCRIPT_V1]%' OR p_payload->>'input' LIKE '[OPC_VIDEO_PACKAGE_V1]%') AND opc_item_content_type((s.scope->>'workItemId')::uuid)<>'video' THEN RAISE EXCEPTION 'OPC_VIDEO_TYPE_REQUIRED';END IF;
+ -- A stopped invocation may retain an unknown financial obligation. Its closed,
+ -- cancelled BILL2 run cannot dispatch or append history. Under the existing
+ -- session row lock, only replace the pointer; never settle or edit old evidence.
+ IF s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution JOIN bill2_runs old_run
+   ON old_run.id=old_execution.billing_run_id
+   WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id
+    AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id
+    AND old_run.session_ref=s.id AND old_execution.state='cost_pending'
+    AND old_run.closed AND old_run.cancel_requested) THEN
+  RAISE EXCEPTION 'RUNTIME_SESSION_BUSY';
+ END IF;
+ IF p_payload IS DISTINCT FROM p_billing->'input' THEN RAISE EXCEPTION 'RUNTIME_INPUT_BINDING_DENIED';END IF;
+ IF p_payload->'scopeMaterial' IS NOT NULL AND p_payload->'scopeMaterial'->>'sessionId' IS DISTINCT FROM s.id::text THEN RAISE EXCEPTION 'RUNTIME_MATERIAL_SCOPE';END IF;
+ PERFORM runtime_context_allowed(p_actor_id,p_payload);
+ -- A2 source freeze
+ PERFORM runtime_admit_source_check(p_actor_id,s,p_payload);
+ IF p_billing->'scope' IS DISTINCT FROM s.scope OR p_billing->>'sessionRef' IS NOT NULL THEN RAISE EXCEPTION 'RUNTIME_BINDING_DENIED';END IF;
+ -- Share the original admission lock before checking for an existing BILL2 run.
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,105));
+ -- Never adopt an old isolated run, even with a matching public request ID.
+ IF EXISTS(SELECT 1 FROM bill2_runs WHERE actor_id=p_actor_id AND request_id=p_request_id) THEN RAISE EXCEPTION 'RUNTIME_LEGACY_RUN_DENIED';END IF;
+ -- Freeze history membership and permission locks before bill2_prepare takes
+ -- the profile balance lock. Dispatch takes revision permissions before profile.
+ history_candidates:=ARRAY(
+  WITH bounded AS MATERIALIZED (
+   SELECT h.revision,h.execution_id FROM runtime_session_history h
+   WHERE h.session_id=s.id AND h.revision<=s.revision AND NOT h.internal_control
+   ORDER BY h.revision DESC
+   LIMIT CASE WHEN coalesce((p_payload->>'historyItems')::int,0)>0
+    THEN least(1000,(p_payload->>'historyItems')::int)+128 ELSE 0 END
+  ), availability AS MATERIALIZED (
+   SELECT * FROM runtime_history_availability(ARRAY(SELECT DISTINCT execution_id FROM bounded))
+  ), visible AS MATERIALIZED (
+   -- 0409: the own-post visibility test depends on the execution only, so it runs once per execution, not once per history row.
+   SELECT a.execution_id FROM availability a WHERE a.available AND runtime_workspace_posts_history_visible(a.execution_id)
+  )
+  SELECT revision FROM bounded JOIN visible USING(execution_id) ORDER BY revision);
+ -- Runtime requires the administrator model binding; legacy unbound BILL2
+ -- callers keep their existing package authorization contract.
+ IF p_billing->>'revisionId' IS NOT NULL THEN
+  IF runtime_rw_flag('sharedRowLocks') THEN
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid;
+  ELSE
+   PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+    AND skill_id=(p_billing->>'skillId')::uuid AND active
+    AND (CASE WHEN p_payload ? 'reportGeneration' THEN coalesce(report_model_id,model_id)
+      ELSE model_id END)=(p_billing->>'modelId')::uuid FOR SHARE;
+  END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
+ END IF;
+ b:=bill2_prepare(p_actor_id,p_request_id,p_billing);
+ INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,billing_run_id,history_revision)
+ VALUES(p_actor_id,s.id,p_request_id,p_payload,(b->>'id')::uuid,s.revision) RETURNING * INTO e;
+ UPDATE runtime_executions SET candidate_history=history_candidates WHERE id=e.id;
+ UPDATE bill2_runs SET session_ref=s.id WHERE id=e.billing_run_id;
+ UPDATE runtime_sessions SET active_execution=e.id WHERE id=s.id;
+ -- 0295 report price
+ IF p_payload ? 'reportGeneration' THEN PERFORM report_fee_hold(e,p_billing); END IF;
+ RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
 END $function$;
 
 DO $$

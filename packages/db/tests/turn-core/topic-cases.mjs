@@ -111,6 +111,23 @@ export async function topicCases(t){
   await c.query('update opc_businesses set archived_at=null where id=$1',[src.business]);
   report.checks.push('topic: a failed turn, a reply with no topics, another conversation, another account or an archived business is no source');
  }
+ // 3c. One request id on one path, whichever came first, under the conversation's lock (never two charges while both paths exist).
+ {
+  const a=await account(1000),src=await source(a),old=randomUUID();
+  await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+   values($1,$2,$3,$4,'{}',0,'completed')`,[randomUUID(),a.actor,src.topicSession,old]);
+  assert.match(await refusal(open(a,{kind:'chat',session:src.topicSession,request:old,pol:{...pol(),topic:true}})),/TURN_TOPIC_REQUEST_CONFLICT/);
+  assert.equal(await balance(a),1000,'nothing frozen');
+  const {request}=await topicTurn(a,src,'words');
+  for(const name of ['runtime_admit_commit','runtime_admit']){
+   const args=name==='runtime_admit'?'$1,$2,$3,$4,$5':'$1,$2,$3,$4,$5,null';
+   assert.match(await refusal(one(`select ${name}(${args}) v`,[a.actor,src.topicSession,request,'{}','{}'])),/OPC_REQUEST_CONFLICT/,name);
+  }
+  // A chat that is no topic turn is unchanged.
+  const free=await account(1000),o=await open(free,{pol:pol()});
+  assert.equal(o.state,'running');
+  report.checks.push('topic: a request id held by one path is refused by the other, both ways, before any charge');
+ }
  // 3b. An old execution in the same workspace stays what it was: its event names the execution, no turn.
  {
   const a=await account(1000),src=await source(a),proposal=item(src),eid=randomUUID();

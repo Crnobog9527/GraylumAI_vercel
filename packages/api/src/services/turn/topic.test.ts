@@ -66,7 +66,7 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     expect(t.names()).toEqual(['topic_turn_source', 'turn_open', 'turn_close']);
     expect(t.args('topic_turn_source')).toEqual({ p_actor_id: 'actor', p_draft_id: input.draftId, p_request_id: input.requestId });
     expect(t.args('turn_open')).toMatchObject({ p_kind: 'chat', p_session_id: workspace.sessionId, p_request_id: input.requestId,
-      p_policy: { minCredits: 12, gCredits: 180, limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 } } });
+      p_policy: { topic: true, minCredits: 12, gCredits: 180, limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 } } });
     expect(t.args('turn_open').p_policy).not.toHaveProperty('fixedCredits');
     expect(h.chatQuote.mock.calls[0]![1]).toMatchObject({ modelId: uuid(20) });
     expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'completed', p_delivered: true,
