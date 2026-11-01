@@ -11,6 +11,7 @@ import { liveCompare, readCompare, stopCompare, type CompareCtx } from '../servi
 import type { ColumnEvent } from '../services/fusion/compareColumn';
 import { readAdmissionConfiguration } from '../services/runtime/admissionConfiguration';
 import { readCoreConfig } from '../services/turn/chat';
+import { swallow } from '../lib/swallow';
 import { adoptTurnCompare, listTurnCompares, readTurnCompare } from '../services/turn/compareCards';
 
 const uuid = z.string().uuid();
@@ -75,7 +76,9 @@ export const fusionCompareRouter = router({
    * routes above serve compares of the old path; a conversation can hold both while the switch is moved. */
   turnList: reader.input(z.object({ sessionId: uuid }).strict()).query(async ({ ctx, input }) => {
     const cards = await listTurnCompares(ctx.admin, ctx.user.id, input.sessionId);
-    const names = await compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])).catch(() => ({}));
+    // As the old list: a failed name lookup never hides the cards.
+    const names = await swallow('fusion_compare_names_failed', compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])), {},
+      { category: 'api' });
     return { cards, names };
   }),
   turnRead: reader.input(compare).query(({ ctx, input }) => readTurnCompare(ctx.admin, ctx.user.id, input.compareId)),
