@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { draftReadResponse } from "./readonlyDraft";
+import { draftReadWithModule } from "./readonlyDraft";
 import {assertCompleteStepResult,STEP_ENVELOPE_INSTRUCTION,opcSaveResult} from './stepOutput';
 export {opcSaveResult} from './stepOutput';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from "../runtime/waitingOrganizer";
@@ -387,7 +387,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         searchEnabled: false,
       }).prepare(runtimeRequest);
     },
-    read: async (draftId: string) => ({...await draftReadResponse(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc),
+    read: async (draftId: string) => ({...await draftReadWithModule(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc, user, admin),
       runtimeMode:real?(real.mode==="production"?"production":"staging_test"):"isolated"}),
     start: (value: unknown) => startWithPositioningProfileLimit(value,user,admin,rpc),
     topicDraftRead: (draftId: string) => rpc("opc_topic_draft_read", { p_draft_id: uuid.parse(draftId) }),

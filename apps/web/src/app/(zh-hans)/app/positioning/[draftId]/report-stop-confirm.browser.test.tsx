@@ -33,6 +33,7 @@ beforeAll(async () => {
       runtime:{reportLatest:{setData:noop}},credits:{getBalance:{invalidate:noop}}};
     const mutation={isPending:false,mutateAsync:noop};
     export const trpc={useUtils:()=>utils,runtime:{
+      choices: { useQuery: () => ({ data: { corePathV2: false } }) },
       reportLatest:{useQuery:()=>({isSuccess:true,data:{executionId:id}})},
       reportAvailable:{useQuery:()=>({data:{enabled:true,priceCredits:500}})},
       reportPreflight:{useQuery:()=>({data:{canGenerate:true},isFetching:false,isError:false})},
