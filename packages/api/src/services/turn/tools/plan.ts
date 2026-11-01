@@ -41,6 +41,8 @@ export type PlanInput = {
   offered: readonly TurnToolName[];
   /** Whether a free tool has anything to serve this turn (a Skill catalog, a readable library); absent: yes. */
   freeReady?: Partial<Record<'read_source' | 'load_skill', boolean>>;
+  /** Workspace results bigger than the free reserve: kept only when they fit, and own posts raise the read limit (the old path's 5). */
+  source?: { strategyBytes?: number; posts?: { bytes: number; calls: number } };
   /** Bytes the turn needs without any tool result (instructions, current message, tool definitions), and its input ceiling. */
   requiredBytes: number; inputBytes: number;
   /** The ceiling a turn with usable research may use (absent: inputBytes). */
@@ -87,14 +89,19 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
 
   // Free tools first: they cost the user nothing and serve the user's own material.
   let freeTools = 0;
+  const postsFit = Boolean(input.source?.posts && offered.includes('read_source') && input.freeReady?.read_source !== false
+    && fits(FREE_RESULT_RESERVE_BYTES + input.source.posts.bytes));
+  const readCalls = postsFit ? input.source!.posts!.calls : READ_SOURCE_CALLS;
   for (const name of ['read_source', 'load_skill'] as const) {
     if (!offered.includes(name)) continue;
     if (input.freeReady?.[name] === false) { trim(name, 'disabled'); continue; }
     if (!fits(FREE_RESULT_RESERVE_BYTES)) { trim(name, 'capacity'); continue; }
     available.push(name);
-    freeTools += name === 'load_skill' ? LOAD_SKILL_CALLS : READ_SOURCE_CALLS;
+    freeTools += name === 'load_skill' ? LOAD_SKILL_CALLS : readCalls;
   }
   if (available.some(name => name === 'read_source' || name === 'load_skill')) used += FREE_RESULT_RESERVE_BYTES;
+  const sourceRoom = { strategy: false, posts: false };
+  if (postsFit && available.includes('read_source')) { used += input.source!.posts!.bytes; sourceRoom.posts = true; }
   // read_skill_file reads the turn's frozen Skill package from the process cache: no row, no model call of its own (2.5.3).
   if (offered.includes('read_skill_file')) available.push('read_skill_file');
 
@@ -135,13 +142,20 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
       }
     } else for (const name of research) trim(name, rejected);
   }
+  // Sized last, against the ceiling this turn really has: a turn with usable research holds a strategy read next to everything else.
+  const strategyBytes = input.source?.strategyBytes ?? 0;
+  if (strategyBytes && available.includes('read_source')
+    && used + strategyBytes <= (setup ? input.researchInputBytes ?? input.inputBytes : input.inputBytes)) {
+    used += strategyBytes; sourceRoom.strategy = true;
+  }
   const order = (names: TurnToolName[]) => offered.filter(name => names.includes(name));
   const note = trimmed.length ? `\nTools unavailable for this reply: ${trimmed.map(t => `${t.name} (${t.reason})`).join(', ')}. `
     + 'Do not call them; if the answer needs them, tell the user plainly.' : null;
   return {
     plan: { offered, available: order(available), trimmed, note,
       paidToolUpperUsd: setup ? paidToolBounds(setup.policies, paidTools, subcalls, input.modelMultiplier) : [],
-      limits: { paidTools: setup ? paidTools : 0, freeTools }, subcalls, reserveBytes: used - input.requiredBytes },
+      limits: { paidTools: setup ? paidTools : 0, freeTools }, subcalls, reserveBytes: used - input.requiredBytes,
+      ...(input.source ? { readCalls, sourceRoom } : {}) },
     research: setup,
   };
 }

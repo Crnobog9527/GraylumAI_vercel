@@ -15,6 +15,14 @@ describe('chatToolDeps', () => {
     expect(accounts[0]).toMatchObject({ platform: 'tiktok' });
   });
 
+  it('the workspace check runs before turn_open; without the post switches no tier is read', async () => {
+    const admin = client({ data: ['v1'], error: null }), config = Promise.resolve({ data: [], error: null });
+    expect(await chatToolDeps(admin, () => admin).workspace!(actorId, config)).toEqual({ sources: ['v1'], strategy: true, posts: null });
+    expect(admin.rpc).toHaveBeenCalledWith('opc_workspace_sources', { p_actor_id: actorId });
+    const failed = client({ data: null, error: { message: 'denied' } });
+    await expect(chatToolDeps(failed, () => failed).workspace!(actorId, config)).rejects.toThrow('TURN_WORKSPACE_UNAVAILABLE');
+  });
+
   it('a refused read throws, so prepareChatTools goes on without accounts', async () => {
     const admin = client({ data: null, error: { message: 'denied' } });
     await expect(chatToolDeps(admin, () => admin).benchmarkAccounts!(actorId, sessionId)).rejects.toThrow('TURN_BENCHMARK_ACCOUNTS_UNAVAILABLE');

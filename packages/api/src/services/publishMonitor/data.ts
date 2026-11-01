@@ -56,7 +56,7 @@ export function entitlementWindow(client: SupabaseClient): WindowLookup {
 
 const snapshotSchema = z.object({ capturedOn: day, metrics, missingFields: z.array(z.string()),
   breakdowns: z.record(z.string(), z.unknown()) }).strict();
-const dataSchema = z.object({
+export const dataSchema = z.object({
   windowDays: z.number().int().min(1),
   connections: z.array(z.object({ id: uuid, platform: z.string(), status: z.string(), lastSuccessAt: timestamp,
     refreshDay: day.nullable(), refreshState: z.string().nullable(), refreshError: z.string().nullable(),
