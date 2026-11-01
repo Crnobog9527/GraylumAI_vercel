@@ -92,7 +92,7 @@ export async function workContentCases(t){
   assert.deepEqual([story.body,story.source_content_id,story.turn_id,story.status],['分镜正文',script.id,Number(pkg.id),'final']);
   assert.match(await refusal(prepare(w,randomUUID(),script.id)),/OPC_CONTENT_ALREADY_GENERATED/);
  }
- // A claim that never opened, left behind: it blocks a second claim while young; after ten minutes it does not, and its own request still resumes.
+ // A claim that never opened, left behind: it blocks a second claim while young; after ten minutes it is abandoned (material revoked) so it cannot pay later.
  {
   const w=await workspace(),script=await save(w,{expected:await latest(w,'script'),id:(await turn(w,{text:'STALE'})).id}),old=randomUUID();
   await prepare(w,old,script.id);
@@ -102,7 +102,10 @@ export async function workContentCases(t){
   await c.query('alter table opc_video_material_bindings enable trigger artifact_immutable');
   const fresh=randomUUID();
   assert.ok((await prepare(w,fresh,script.id)).revision,'an old unopened claim is skipped');
-  assert.equal((await prepare(w,old,script.id)).revision,(await work(w,old)).work.materialRevision,'and its own request still resumes');
+  // The old request must not pay a second time after the new one: its material is revoked with the new claim.
+  assert.match(await refusal(work(w,old)),/OPC_CONTENT_BINDING/,'the old request cannot open any more');
+  assert.match(await refusal(prepare(w,old,script.id)),/OPC_CONTENT_BINDING/,'nor claim again');
+  assert.equal((await work(w,fresh)).work.materialRevision,(await prepare(w,fresh,script.id)).revision,'the new one reads its own revision');
  }
  // Refused packages: another turn, no frozen material, a reply that is not the package, an open claim blocks a second, a failed one retries.
  {

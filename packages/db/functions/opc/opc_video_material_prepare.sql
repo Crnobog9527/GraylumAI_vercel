@@ -121,8 +121,12 @@ BEGIN
  LOOP
   IF coalesce(conflict.material_revoked,false) THEN CONTINUE;END IF;
   -- A claim whose request never opened (no execution, no turn) and is older than the window is abandoned: the page that made it opens
-  -- the request at once, and nobody else can release it (another browser, cleared storage). The request itself still resumes by its id.
-  IF conflict.execution_id IS NULL AND conflict.created_at < now() - interval '10 minutes' THEN CONTINUE;END IF;
+  -- the request at once, and nobody else can release it (another browser, cleared storage). Its material is revoked here, in this
+  -- transaction under the session lock: the old request can no longer open (opc_work_check, and opc_work_verify after an open that
+  -- raced this), so it cannot pay for what the new claim is about to make.
+  IF conflict.execution_id IS NULL AND conflict.created_at < now() - interval '10 minutes' THEN
+   PERFORM runtime_material(p_actor_id,conflict.session_id,'revoke',NULL,conflict.material_revision,NULL);CONTINUE;
+  END IF;
   package:=NULL;
   IF conflict.execution_state='completed' THEN BEGIN package:=conflict.raw::jsonb;EXCEPTION WHEN others THEN package:=NULL;END;END IF;
   -- 0118 rows predate explicit choice columns. Infer only a structurally valid

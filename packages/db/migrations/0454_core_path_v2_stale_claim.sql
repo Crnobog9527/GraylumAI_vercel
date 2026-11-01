@@ -4,9 +4,10 @@
 -- opc_video_material_prepare refuses a new storyboard or editing request (OPC_CONTENT_ALREADY_GENERATED) while another claim of the same kind
 -- has neither an execution nor a turn: the old path's rule, released only by the page that made it (abandon) or by resuming that request.
 -- Staging, 2026-11-02: a claim whose turn never opened stayed 1h54m, and the next "storyboard" of the hand-edited script was refused by
--- it from a page that no longer held the request. A claim older than 10 minutes with no execution and no turn is skipped here, like a revoked one.
--- Compatible: only the refusal for an old unopened claim goes; a young one still blocks, and an old claim's own request still resumes
--- (the claim is not revoked). Repeatable: CREATE OR REPLACE. Recovery: re-apply 0450's opc_video_material_prepare. No data is written.
+-- it from a page that no longer held the request. A claim older than 10 minutes with no execution and no turn is abandoned here: its material
+-- is revoked in the same transaction (what the page's own abandon does), so its request cannot open later and pay a second time.
+-- Compatible: only the refusal for an old unopened claim goes; a young one still blocks. Repeatable: CREATE OR REPLACE.
+-- Recovery: re-apply 0450's opc_video_material_prepare. Data: the stale claim's material is marked revoked, as an abandon does.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -97,8 +98,12 @@ BEGIN
  LOOP
   IF coalesce(conflict.material_revoked,false) THEN CONTINUE;END IF;
   -- A claim whose request never opened (no execution, no turn) and is older than the window is abandoned: the page that made it opens
-  -- the request at once, and nobody else can release it (another browser, cleared storage). The request itself still resumes by its id.
-  IF conflict.execution_id IS NULL AND conflict.created_at < now() - interval '10 minutes' THEN CONTINUE;END IF;
+  -- the request at once, and nobody else can release it (another browser, cleared storage). Its material is revoked here, in this
+  -- transaction under the session lock: the old request can no longer open (opc_work_check, and opc_work_verify after an open that
+  -- raced this), so it cannot pay for what the new claim is about to make.
+  IF conflict.execution_id IS NULL AND conflict.created_at < now() - interval '10 minutes' THEN
+   PERFORM runtime_material(p_actor_id,conflict.session_id,'revoke',NULL,conflict.material_revision,NULL);CONTINUE;
+  END IF;
   package:=NULL;
   IF conflict.execution_state='completed' THEN BEGIN package:=conflict.raw::jsonb;EXCEPTION WHEN others THEN package:=NULL;END;END IF;
   -- 0118 rows predate explicit choice columns. Infer only a structurally valid
