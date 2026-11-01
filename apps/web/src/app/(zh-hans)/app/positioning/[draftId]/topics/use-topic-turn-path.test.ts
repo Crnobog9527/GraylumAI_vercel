@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { TurnView } from '@repo/api/src/services/turn/view';
-import { topicExecutions, topicPathDecided, topicSendOutcome, turnRunningNotice } from './use-topic-turn-path';
+import { topicExecutions, topicPathDecided, topicRequestSeen, topicSendOutcome, turnRunningNotice } from './use-topic-turn-path';
 
 const R = '00000000-0000-4000-8000-000000000001';
 const view = (over: Partial<TurnView> = {}): TurnView => ({ activeTurn: null, lastTurn: null, calls: [], messages: [
@@ -24,6 +24,12 @@ describe('the topic workspace on the turn path (CORE-PATH-V2 V2-10b)', () => {
     expect(topicPathDecided({ choices: true, old: true, turns: true })).toBe(true);
     for (const missing of ['choices', 'old', 'turns'])
       expect(topicPathDecided({ choices: true, old: true, turns: true, [missing]: false })).toBe(false);
+  });
+
+  it('counts a dropped send as sent only when the read back shows it', () => {
+    expect(topicRequestSeen(view(), R)).toBe(true);
+    expect(topicRequestSeen(view(), '00000000-0000-4000-8000-000000000002')).toBe(false);
+    expect(topicRequestSeen(null, R)).toBe(false);
   });
 
   it('a reply without a request id is not offered as a source', () => {

@@ -28,7 +28,17 @@ export function usePlanTurn(sessionId: string | undefined, requestId: string | u
   const [turn, setTurn] = useState<PlanTurn | null>(null);
   useEffect(() => {
     setTurn(null);
-    if (sessionId && requestId) void readPlanTurn(sessionId, requestId).then(setTurn, () => undefined);
+    if (!sessionId || !requestId) return;
+    // Read until the turn closes: a recovery on this page finishes it, and a failed read is read again.
+    let timer: ReturnType<typeof setTimeout>, left = READS, gone = false;
+    const read = async () => {
+      const next = await readPlanTurn(sessionId, requestId).catch(() => undefined);
+      if (gone) return;
+      if (next !== undefined) setTurn(next);
+      if (next?.state !== "closed" && --left > 0) timer = setTimeout(() => void read(), READ_MS);
+    };
+    void read();
+    return () => { gone = true; clearTimeout(timer); };
   }, [sessionId, requestId]);
   return turn;
 }

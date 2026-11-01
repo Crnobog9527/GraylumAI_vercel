@@ -52,6 +52,10 @@ export function refuseTopicRequest(storage: Pick<Storage, 'setItem' | 'removeIte
   storage.removeItem(key);
 }
 
+/** A dropped stream proves nothing: the request counts as sent only if the read back shows it. */
+export const topicRequestSeen = (view: TurnView | null, requestId: string) =>
+  Boolean(view?.activeTurn || view?.messages.some(m => m.requestId === requestId));
+
 /** A topic turn cannot be stopped: while it runs the page only says so. */
 export function turnRunningNotice(e: { executionId: string; state: string }): ChatNotice | null {
   return e.state === 'running' ? { id: e.executionId, tone: 'status', busy: true, text: '正在回复…' } : null;
@@ -90,8 +94,8 @@ export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unkn
   const send = async (request: { draftId: string; requestId: string; input: string }, candidate?: unknown) => {
     if (candidate) localStorage.setItem(`opc-topic-adoption-context:${sessionId}:${request.requestId}`, JSON.stringify(candidate));
     const outcome = await runTurn(request, () => undefined, { fetch: fetcher, url: TOPIC_TURN_URL });
-    await refetch();
-    return topicSendOutcome(outcome);
+    const next = await refetch();
+    return { ...topicSendOutcome(outcome), unknown: outcome.state === 'lost' && !topicRequestSeen(next, request.requestId) };
   };
   const decided = topicPathDecided({ choices: choices.isSuccess || choices.isError, old: oldSettled, turns: Boolean(view) });
   return { on, decided, data, refetch, send };
