@@ -41,7 +41,9 @@ describe('compare stop billing in a real browser (synthetic, no paid calls)', ()
         stop: { useMutation: options => { const m = useMutation({ ...options, mutationFn: async () => {
           s.stopped = true; s.view = s.pending;
         } }); return { ...m, isPending: m.isPending }; } },
-        adopt: { useMutation: () => ({ isPending: false }) }
+        adopt: { useMutation: () => ({ isPending: false }) },
+        turnRead: { useQuery: () => ({ data: undefined, refetch() {} }) },
+        turnAdopt: { useMutation: () => ({ isPending: false }) }
       }, credits: {
         getCreditsSummary: { useQuery: () => query({ totalSpent: 20 }) },
         getCreditTransactions: { useQuery: (_input, options) => useQuery({ ...options, retry: false,

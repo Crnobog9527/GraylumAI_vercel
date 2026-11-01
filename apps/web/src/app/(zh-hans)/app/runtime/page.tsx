@@ -480,7 +480,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    </section>
   </div>
   {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
-   {freeChat&&<CompareButton sessionId={sessionId} question={input}
+   {freeChat&&<CompareButton sessionId={sessionId} question={input} path="old"
     disabled={busy||Boolean(view.data?.activeExecution)||!compareSkill.ready}
     blockedReason={COMPOSER_REFERENCES_ENABLED&&referencesNamedIn(input,references).length?'带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。':undefined}
     skill={compareSkill.skill}

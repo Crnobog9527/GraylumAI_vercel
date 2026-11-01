@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Square } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { useTurnCompareLive } from './turn-compare-live';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { allSettled, billingSettled, chargedCredits, totalChargedCredits, columnPhase, compareErrorText, heldCredits,
   stoppedLabel, type ColumnPhase, type ReadColumn } from './compare-view';
@@ -23,8 +24,11 @@ const newId = () => crypto.randomUUID();
  * or, when the conversation moved on, hands the answer back as a quote for the composer. After the end each column shows
  * what it actually cost and the total.
  */
-export function CompareCard({ compareId, names, onAdopted, onQuote }: {
+export function CompareCard({ compareId, names, turn = false, onAdopted, onQuote }: {
   compareId: string;
+  /** A compare of the turn path: all its columns stream in the request that started it, there is no stop button, and it is read
+   * and adopted on the turn routes. */
+  turn?: boolean;
   /** The real configured model names, by model id (Owner 2026-10-17 Q1). */
   names: Record<string, string>;
   onAdopted: () => void;
@@ -40,15 +44,21 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
   const refreshedBilling = useRef('');
   const adoptRequest = useRef<{ column: number; id: string } | null>(null);
   const streaming = Object.values(live).some(column => column.streaming);
-  const view = trpc.fusionCompare.read.useQuery({ compareId }, {
-    retry: false, refetchInterval: query => {
+  const liveTurn = useTurnCompareLive(compareId, turn);
+  const refetchEvery = (query: { state: { data: unknown } }) => {
       const data = query.state.data as View | undefined;
-      if (!data || data.state === 'running' || streaming) return 2000;
+      if (!data || data.state === 'running' || streaming || liveTurn.open) return 2000;
       // Stopped but a dispatched column's cost is not confirmed yet: keep looking, slowly, until its billing closes.
       return allSettled(data.columns) ? false : 10_000;
-    } });
+  };
+  const oldView = trpc.fusionCompare.read.useQuery({ compareId }, { enabled: !turn, retry: false, refetchInterval: refetchEvery });
+  const turnView = trpc.fusionCompare.turnRead.useQuery({ compareId }, { enabled: turn, retry: false, refetchInterval: refetchEvery });
+  const view = turn ? turnView : oldView;
   const stop = trpc.fusionCompare.stop.useMutation({ onSettled: () => void view.refetch() });
-  const adopt = trpc.fusionCompare.adopt.useMutation();
+  const oldAdopt = trpc.fusionCompare.adopt.useMutation();
+  const turnAdopt = trpc.fusionCompare.turnAdopt.useMutation();
+  const adopt = { isPending: oldAdopt.isPending || turnAdopt.isPending, mutateAsync: (input: { compareId: string; column: number; requestId: string }) =>
+    turn ? turnAdopt.mutateAsync({ compareId: input.compareId, column: input.column }) : oldAdopt.mutateAsync(input) };
   const data = view.data as View | undefined;
 
   // Settlement may finish after the stop mutation. Refresh the wallet and ledger for each new financial snapshot.
@@ -67,7 +77,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
   // Each column that has not been dispatched is asked for once by this tab; a reload asks again and the server answers
   // "already" for a column another request dispatched (it is then read, not streamed).
   useEffect(() => {
-    if (!data || data.state !== 'running') return;
+    if (turn || !data || data.state !== 'running') return;
     for (const column of data.columns) {
       if (started.current.has(column.column) || columnPhase(column, data.state) !== 'queued') continue;
       started.current.add(column.column);
@@ -101,11 +111,11 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
         }
       })();
     }
-  }, [data, compareId, utils, view, retryTick]);
+  }, [data, compareId, utils, view, retryTick, turn]);
 
   if (!data) return <section className={styles.card} aria-busy="true"><p className={styles.muted}>正在读取对比…</p></section>;
   const adoptedColumn = data.adoption?.column ?? null;
-  const ended = data.state !== 'running' && !streaming && allSettled(data.columns);
+  const ended = data.state !== 'running' && !streaming && !liveTurn.open && allSettled(data.columns);
 
   async function adoptAnswer(column: number) {
     if (adopt.isPending) return;
@@ -124,7 +134,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
       <header className={styles.head}>
         <strong>多模型对比</strong>
         {data.question && <p className={styles.question}>{data.question}</p>}
-        {!ended && <button type="button" className={styles.ghost} disabled={stop.isPending}
+        {!ended && !turn && <button type="button" className={styles.ghost} disabled={stop.isPending}
           onClick={() => stop.mutate({ compareId })}><Square size={14} /> 全部停止</button>}
       </header>
       <div className={styles.tabs} role="tablist" aria-label="切换模型">
@@ -133,8 +143,10 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
       </div>
       <div className={styles.columns}>
         {data.columns.map(column => {
-          const own = live[column.column];
-          const phase: ColumnPhase = own?.streaming ? 'streaming' : columnPhase(column, data.state);
+          const own = turn ? { text: liveTurn.text[column.column] ?? '', streaming: liveTurn.open && !liveTurn.answered.includes(column.column) } : live[column.column];
+          const shown = columnPhase(column, data.state);
+          // A turn-path column nobody has answered yet is being written (this tab's stream, or another's): never "queued".
+          const phase: ColumnPhase = own?.streaming ? 'streaming' : turn && shown === 'queued' && data.state === 'running' ? 'streaming' : shown;
           const text = column.body ?? own?.text ?? '';
           return (
             <article key={column.column} className={styles.column} data-active={tab === column.column} aria-label={names[column.modelId] ?? '模型'}>
@@ -150,7 +162,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
                 phase === 'queued' || phase === 'streaming' ? '正在生成…' : '没有回答'}</p>}</div>
               <footer className={styles.columnFoot}>
                 {ended && <span>实际扣费 {chargedCredits(column)} 积分</span>}
-                {(phase === 'streaming' || phase === 'pending') && <button type="button" className={styles.ghost} disabled={stop.isPending}
+                {!turn && (phase === 'streaming' || phase === 'pending') && <button type="button" className={styles.ghost} disabled={stop.isPending}
                   onClick={() => stop.mutate({ compareId, column: column.column })}>停止这一列</button>}
                 {adoptedColumn === column.column && <span className={styles.adopted}><Check size={14} /> 已用这个回答继续</span>}
                 {adoptedColumn === null && phase === 'done' && <button type="button" className={styles.primary} disabled={adopt.isPending}

@@ -36,8 +36,8 @@ import workStyles from './runtime-work.module.css';
 export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const utils = trpc.useUtils();
   const results = trpc.opc.sessionResults.useQuery({ sessionId }, { retry: false });
-  // The conversation's compares stay as they are: their cards run, stop and adopt on the compare router, whichever path the
-  // conversation's turns take. Cards follow the history (a saved message has no clock to place one by).
+  // The conversation's compares: those of the turn path are read and adopted from turns (fusionCompare.turn*), those of the old
+  // path as they were; both are listed. Cards follow the history (a saved message has no clock to place one by).
   const compare = useCompareThread(sessionId);
   const choices = trpc.runtime.choices.useQuery({ sessionId }, { staleTime: RUNTIME_CHOICES_STALE_MS });
   const chat = useTurnChat(sessionId, () => { void utils.credits.getBalance.invalidate(); void utils.opc.conversations.invalidate(); });
@@ -139,11 +139,10 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
         </section>
       </div>
       <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
-        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill}
-          blockedReason={messages.length ? '这个对话已经用上新的对话通道，多模型对比暂时读不到它的上文，接入完成前先不能发起。已有的对比结果照常查看。'
-            : COMPOSER_REFERENCES_ENABLED && referencesNamedIn(input, references).length
-              ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。' : undefined}
-          onStarted={compareId => { update(''); compare.add(compareId); void compare.refresh(); }} onMaybeStarted={() => void compare.refresh()}/>
+        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill} path="turn"
+          blockedReason={COMPOSER_REFERENCES_ENABLED && referencesNamedIn(input, references).length
+            ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。' : undefined}
+          onStarted={(compareId, _names, _session, turn) => { update(''); compare.add(compareId, turn); void compare.refresh(); }} onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
           skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}/>
       </div></footer>

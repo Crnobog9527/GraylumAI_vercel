@@ -9,6 +9,9 @@ import { adoptCompare } from '../services/fusion/compareAdopt';
 import { compareSkillInput } from '../services/fusion/compareLoad';
 import { liveCompare, readCompare, stopCompare, type CompareCtx } from '../services/fusion/compareLive';
 import type { ColumnEvent } from '../services/fusion/compareColumn';
+import { readAdmissionConfiguration } from '../services/runtime/admissionConfiguration';
+import { readCoreConfig } from '../services/turn/chat';
+import { adoptTurnCompare, listTurnCompares, readTurnCompare } from '../services/turn/compareCards';
 
 const uuid = z.string().uuid();
 const forbidden = new Set(['FUSION_COMPARE_DISABLED', 'FUSION_COMPARE_FORBIDDEN', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',
@@ -56,7 +59,9 @@ const compare = z.object({ compareId: uuid }).strict();
  * The compare switch is off by default; with it off every work route refuses (FUSION_COMPARE_DISABLED). */
 export const fusionCompareRouter = router({
   /** The picker's contents. A failed settings read reads as "off" to the page rather than leaking a database error. */
-  options: reader.query(({ ctx }) => compareOptions(ctx.admin, ctx.user.id)),
+  // corePathV2: which path a start goes on (CORE-PATH-V2 V2-10); an unreadable setting keeps the old one.
+  options: reader.query(async ({ ctx }) => ({ ...await compareOptions(ctx.admin, ctx.user.id),
+    corePathV2: await readAdmissionConfiguration(ctx.admin).then(c => Boolean(readCoreConfig(c)), () => false) })),
   /** This conversation's compare cards, oldest first, with the server-written adoption (the adopted answer's execution). */
   list: reader.input(z.object({ sessionId: uuid }).strict()).query(async ({ ctx, input }) => {
     const cards = await compareRpc<Array<{ config?: { models?: string[] } }>>(ctx.admin, 'fusion_compare_list',
@@ -66,6 +71,16 @@ export const fusionCompareRouter = router({
     const names = await compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])).catch(() => ({}));
     return { cards, names };
   }),
+  /** The compares of the turn path (POST /api/turn/compare), listed, read and adopted from turns (CORE-PATH-V2 V2-10). The old
+   * routes above serve compares of the old path; a conversation can hold both while the switch is moved. */
+  turnList: reader.input(z.object({ sessionId: uuid }).strict()).query(async ({ ctx, input }) => {
+    const cards = await listTurnCompares(ctx.admin, ctx.user.id, input.sessionId);
+    const names = await compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])).catch(() => ({}));
+    return { cards, names };
+  }),
+  turnRead: reader.input(compare).query(({ ctx, input }) => readTurnCompare(ctx.admin, ctx.user.id, input.compareId)),
+  turnAdopt: reader.input(compare.extend({ column: z.number().int().min(0).max(7) }).strict())
+    .mutation(({ ctx, input }) => adoptTurnCompare(ctx.admin, ctx.user.id, input)),
   /** "At most X credits": priced per chosen model, nothing recorded, no paid judgement; repeatable. */
   estimate: worker.input(request).mutation(({ ctx, input }) => ctx.compare.estimate(input)),
   /** Records, judges positioning once, admits and claims the whole group (or answers waiting_credits, holding nothing). */
