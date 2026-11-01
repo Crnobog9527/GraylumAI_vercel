@@ -21,8 +21,12 @@ describe('research rows of a free chat turn', () => {
 describe('a send that opened no turn', () => {
   it('stored and charged nothing, whatever the code: the words and any claim for them go back', () => {
     expect(neverOpened({ state: 'refused' })).toBe(true);
-    expect(neverOpened({ state: 'finished', last: { type: 'error' } })).toBe(true);
-    expect(neverOpened({ state: 'finished', last: { type: 'error', turnId: 12 } })).toBe(false);
+    expect(neverOpened({ state: 'finished', last: { type: 'error', code: 'STOP_LOSS_REACHED' } })).toBe(true);
+    expect(neverOpened({ state: 'finished', last: { type: 'error', code: 'SOMETHING_NEW' } })).toBe(true);
+    // turn_open may have committed with its answer lost: the turn and its freeze exist, the error has no turn.
+    for (const code of ['TURN_DATABASE_UNAVAILABLE', 'TURN_OPEN_FAILED', 'TURN_FAILED'])
+      expect(neverOpened({ state: 'finished', last: { type: 'error', code } })).toBe(false);
+    expect(neverOpened({ state: 'finished', last: { type: 'error', code: 'STOP_LOSS_REACHED', turnId: 12 } })).toBe(false);
     expect(neverOpened({ state: 'finished', last: { type: 'result', turnId: 12 } })).toBe(false);
   });
 });
