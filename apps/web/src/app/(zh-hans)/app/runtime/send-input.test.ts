@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
+import { referencesNamedIn } from '@/components/opc/composer-references';
 import {
-  clearForSend, forgetPending, markPendingRestored, openingDraft, readPending, rememberPending, requestIdFor, restoredDraft,
+  clearForSend, forgetPending, markPendingRestored, openingDraft, pendingSeen, readPending, rememberPending, requestIdFor,
+  restoredDraft, withoutSentText,
 } from './send-input';
 
 function box(initial: string) {
@@ -103,4 +105,31 @@ it('gives an edited resend a new id instead of the address id of the unanswered 
   expect(requestIdFor('other', pending, '第一条消息，改过', () => 'fresh')).toBe('other'); // e.g. the new-task hand-off
   expect(requestIdFor('from-url', null, '任何内容', () => 'fresh')).toBe('from-url');
   expect(requestIdFor(null, null, '任何内容', () => 'fresh')).toBe('fresh');
+});
+
+const view = (...asked: Array<[string, string | null]>) => ({ messages: asked.flatMap(([content, requestId]) => [
+  { role: 'user', content, requestId }, { role: 'assistant', content: 'a', requestId }]) });
+it('a send is stored only when the saved conversation carries its request id, never by its words or its time', () => {
+  const pending = { requestId: 'r2' };
+  expect(pendingSeen(pending, view(['第一条', 'r1'], ['第二条', 'r2']))).toBe('stored');
+  // The same words asked a minute ago under another request id: this send may never have arrived.
+  expect(pendingSeen(pending, view(['第二条', 'r1']))).toBe('unknown');
+  expect(pendingSeen(pending, view(['第二条', null]))).toBe('unknown');
+  expect(pendingSeen(pending, { messages: [] })).toBe('unknown');
+});
+
+it('takes the whole put-back text out of the box, keeping a newer draft after it, and leaves an edited box alone', () => {
+  expect(withoutSentText('第二条', '第二条')).toBe('');
+  expect(withoutSentText('第二条\n\n新的草稿', '第二条')).toBe('新的草稿');
+  // The user edited the put-back text before the answer came: it is theirs.
+  expect(withoutSentText('第二条再加一句', '第二条')).toBe('第二条再加一句');
+  expect(withoutSentText('另一段', '第二条')).toBe('另一段');
+});
+
+it('after a confirmed send the draft that stays still carries the references it names', () => {
+  const docs = [{ documentId: 'd1', version: 1, label: '资料' }];
+  const kept = withoutSentText('总结 @资料\n\n继续分析 @资料', '总结 @资料');
+  expect(kept).toBe('继续分析 @资料');
+  expect(referencesNamedIn(kept, docs)).toEqual(docs);
+  expect(referencesNamedIn(withoutSentText('总结 @资料', '总结 @资料'), docs)).toEqual([]);
 });

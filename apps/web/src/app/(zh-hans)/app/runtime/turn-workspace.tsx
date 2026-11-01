@@ -12,11 +12,13 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
+import { turnBusyForCredits } from '@/components/opc/credits-label';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import {
-  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor, saveDraftReferences,
+  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, pendingSeen, readPending, rememberPending,
+  requestIdFor, saveDraftReferences, withoutSentText,
 } from './send-input';
 import {
   COMPOSER_REFERENCES_ENABLED, referenceRequest, referencesNamedIn, type LibraryReference,
@@ -42,6 +44,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const choices = trpc.runtime.choices.useQuery({ sessionId }, { staleTime: RUNTIME_CHOICES_STALE_MS });
   const chat = useTurnChat(sessionId, () => { void utils.credits.getBalance.invalidate(); void utils.opc.conversations.invalidate(); });
   const [input, setInput] = useState(''), [outgoing, setOutgoing] = useState<string | null>(null);
+  const inputRef = useRef(input);
+  inputRef.current = input;
   const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
   const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
   const [skillId, setSkillId] = useState(''), [references, setReferences] = useState<LibraryReference[]>([]);
@@ -56,6 +60,22 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     if (id) localStorage.setItem('opc-runtime-skill:' + sessionId, id); else localStorage.removeItem('opc-runtime-skill:' + sessionId);
   };
   const update = (value: string) => { setInput(value); localStorage.setItem('opc-runtime-input:' + sessionId, value); };
+
+  // After a reload the server says what it holds: a send it stored (its request id is in the saved conversation) is not lost, so its text goes
+  // out of the box again (the page put it back in case the send was lost) and the user is not tempted to send it twice.
+  useEffect(() => {
+    if (!chat.view || chat.sending) return;
+    const pending = readPending(localStorage, sessionId);
+    if (!pending?.restored || pendingSeen(pending, chat.view) !== 'stored') return;
+    const next = withoutSentText(inputRef.current, pending.text);
+    setInput(next); localStorage.setItem('opc-runtime-input:' + sessionId, next);
+    // The references the kept draft still names stay (the same document may be named again after the put-back text); the rest go with it.
+    if (pending.references?.length) updateReferences(COMPOSER_REFERENCES_ENABLED ? referencesNamedIn(next, references) : []);
+    forgetPending(localStorage, sessionId);
+    // The request id left in the address belongs to this send: a later send must not reuse it (the server would replay, not send).
+    const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat.view, chat.sending, sessionId]);
 
   async function send(text = input) {
     if (!text.trim() || chat.busy) return;
@@ -110,7 +130,9 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
       actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];
   const pendingText = outgoing ?? (chat.view?.activeTurn && !paused ? '' : null);
-  return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen} onToggleRight={() => setPanelOpen(open => !open)}
+  return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen}
+    turnBusy={turnBusyForCredits({ viewRead: Boolean(chat.view), viewFailed: chat.viewFailed, busy: chat.busy, paused: chat.paused })}
+    onToggleRight={() => setPanelOpen(open => !open)}
     right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
     <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
       <RuntimeHeader title="工作对话"/>
