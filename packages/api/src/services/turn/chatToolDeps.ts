@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { canonicalAccount, type CanonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
-import { discoverSkillCatalog, pinnedCatalogEntry } from '../runtime/skillCatalog';
+import { discoverSkillCatalog, moduleUsesVoice, pinnedCatalogEntry } from '../runtime/skillCatalog';
 import { admitCatalogVoice } from '../runtime/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
@@ -29,7 +29,7 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
       const listed = await discoverSkillCatalog(client, admin, { maxResultBytes: FREE_RESULT_RESERVE_BYTES, excludeSocial: false, actorId });
       // A work item's method is the revision it is bound to, in place of what the catalog lists for its module.
       const catalog = pin ? withPinnedSkill(listed, pin, await pinnedCatalogEntry(sourceOf(pin), pin, FREE_RESULT_RESERVE_BYTES,
-        listed.find(entry => entry.moduleId === pin.moduleId)?.usesVoice)) : listed;
+        await moduleUsesVoice(admin, pin.moduleId))) : listed;
       const prepared = await prepareSkills(catalog, sourceOf, FREE_RESULT_RESERVE_BYTES);
       return { catalog, prepared };
     },

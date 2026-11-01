@@ -114,6 +114,13 @@ export async function discoverSkillCatalog(user: SupabaseClient, admin: Supabase
   return entries;
 }
 
+/** From the module, not the catalog: a pinned module may not be listed. Unreadable throws: no turn loses the voice silently. */
+export async function moduleUsesVoice(admin: SupabaseClient, moduleId: string): Promise<boolean> {
+  const row = await admin.from('modules').select('uses_user_voice').eq('id', moduleId).single();
+  if (row.error) throw new Error('RUNTIME_CATALOG_UNAVAILABLE');
+  return row.data.uses_user_voice === true;
+}
+
 /**
  * One exact revision of a Skill as a catalog entry, whatever the catalog itself would list: a work item keeps the method it came
  * from (CORE-PATH-V2 V2-10b), which may be an older revision or the positioning package the catalog leaves out. Null when that
