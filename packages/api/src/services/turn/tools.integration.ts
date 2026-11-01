@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
@@ -16,7 +17,9 @@ import { turnClients } from './db';
 import type { CounterStore } from './limiter';
 import { RUNTIME_PAYG_SETTING } from './quote';
 import type { TurnEvent } from './sse';
+import type { ChatToolDeps } from './tools/chatTools';
 import { researchSettings } from './tools/__tests__/fixtures';
+import { workspaceTurnReader, type WorkspaceAccess } from './tools/workspace';
 import { tikhubRouteId } from '../research/vendors/tikhub';
 
 /*
@@ -135,10 +138,11 @@ const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.0000
 const admit = async () => ({ ok: true as const });
 type NewWork = Parameters<typeof runChatTurn>[0]['newWork'];
 async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false,
-  newWork: NewWork = { message: admit, calls: admit }, text = 'How should a coffee shop position itself?', resumeOf?: number) {
+  newWork: NewWork = { message: admit, calls: admit }, text = 'How should a coffee shop position itself?', resumeOf?: number,
+  workspace?: ChatToolDeps['workspace']) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   const deps = { admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate }, newWork,
-    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library } };
+    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library, ...(workspace ? { workspace } : {}) } };
   const ids = { actorId: f.actor, sessionId: f.session, requestId: randomUUID() };
   await withCatalogRequest(() => resumeOf ? runResumedTurn(deps, { ...ids, resumeOf }, e => events.push(e))
     : runChatTurn(deps, { ...ids, text }, e => events.push(e)));
@@ -303,6 +307,67 @@ it('RUNTIME: CORE-PATH-V2 V2-6: read_source reads the user\'s own library once, 
   await db.query('update runtime_sessions set content_deleted_at=now() where id=$1', [f.session]);
   const read = await db.query("select library_turn_read($1,$2,'search:coffee','[]') r", [f.actor, f.session]);
   expect(read.rows[0].r).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-6 B: read_source reads the workspace and own posts through the free reads, for this owner only', async () => {
+  await db.query(readFileSync(new URL('../../../../db/tests/workspace-positioning/fixture.sql', import.meta.url), 'utf8'));
+  const f = await setup(), other = await setup(), bodies: string[] = [];
+  const main = (await db.query("select ws_test.positioning($1,'Tea studio','WORKSPACE_CANARY') v", [f.actor])).rows[0].v;
+  const { admin } = countingAdmin(), read = turnClients(admin).read;
+  const sources = async (actor: string) => (await admin.rpc('opc_workspace_sources', { p_actor_id: actor })).data as string[];
+  expect(await sources(f.actor)).toEqual([main.version]);
+  expect(await sources(other.actor)).toEqual([]);
+  const free = (actor: string, session: string, query: string, allowed: string[]) =>
+    db.query('select workspace_turn_read($1,$2,$3,$4::uuid[]) r', [actor, session, query, allowed]).then(r => r.rows[0].r);
+  // Allowed: the turn's model reads the index, then the entry, with no row of its own.
+  const access: WorkspaceAccess = { sources: await sources(f.actor), strategy: true, posts: null };
+  const reader = workspaceTurnReader(read, f.actor, f.session, access);
+  expect(JSON.parse((await reader('')).text).entries.map((e: { id: string }) => e.id)).toEqual([main.business]);
+  const out = await turn(f, searchingModel(bodies, { name: 'read_source', args: { query: main.business } }), suppliers(vi.fn()), false, undefined, undefined, undefined,
+    async () => access);
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+  expect(bodies[1]).toContain('WORKSPACE_CANARY');
+  expect(bodies[1]).not.toContain('DRAFT_WORKSPACE_CANARY');
+  // This account has a confirmed positioning, so there is no decision check either.
+  expect((await rows(f.actor)).map(r => r.call_kind)).toEqual(['model', 'model']);
+  expect(out.calls).toContain('rpc/workspace_turn_read');
+  // Refused: another account, with the owner's version list, its own conversation or the owner's.
+  expect(await free(other.actor, other.session, '', [main.version])).toEqual({ kind: 'workspace_index', entries: [] });
+  expect(await free(other.actor, other.session, main.business, [main.version])).toEqual({ kind: 'unavailable' });
+  expect(await free(other.actor, f.session, main.business, [main.version])).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
+  // A version the check before turn_open left out is not read, even by its owner.
+  expect(await free(f.actor, f.session, main.business, [])).toEqual({ kind: 'unavailable' });
+  // Revoked after the list was made: the free read itself refuses it (the list is not a lasting permission).
+  await db.query('update bill2_drafts set revoked=true where id=$1', [main.draft]);
+  expect(await free(f.actor, f.session, main.business, [main.version])).toEqual({ kind: 'unavailable' });
+  expect(await free(f.actor, f.session, '', [main.version])).toEqual({ kind: 'workspace_index', entries: [] });
+  expect(await sources(f.actor)).toEqual([]);
+
+  // Own posts: another account's rows never come back, however it asks.
+  const connection = randomUUID(), post = randomUUID(), today = new Date().toISOString().slice(0, 10);
+  // An own connection is bound to a business and an account (checks and foreign keys); the rows under test are the posts, so the
+  // bindings are skipped for these inserts only.
+  await db.query('set session_replication_role = replica');
+  await db.query(`insert into social_connections(id,actor_id,business_id,account_project_id,role,source,platform,status)
+    values($1,$2,$3,$4,'own','manual','tiktok','connected')`, [connection, f.actor, randomUUID(), randomUUID()]);
+  await db.query(`insert into social_posts(id,actor_id,connection_id,source,platform_post_id,posted_at,title_excerpt)
+    values($1,$2,$3,'manual','p1',now()-interval '1 day','POST_CANARY')`, [post, f.actor, connection]);
+  await db.query(`insert into social_metric_snapshots(actor_id,connection_id,post_id,captured_on,source,metrics)
+    values($1,$2,$3,$4,'manual','{"views":10}')`, [f.actor, connection, post, today]);
+  await db.query('set session_replication_role = origin');
+  const posts = (actor: string, session: string, review = false) => db.query('select posts_turn_read($1,$2,14,$3,false) r', [actor, session, review]).then(r => r.rows[0].r);
+  expect((await posts(f.actor, other.session)).kind).toBe('unavailable');
+  const own = workspaceTurnReader(read, f.actor, f.session, { ...access, posts: { windowDays: 30, benchmarks: false, review: true } });
+  const shown = JSON.parse((await own('my_posts')).text);
+  expect(shown).toMatchObject({ kind: 'my_posts', status: 'available', posts: [{ title_excerpt: 'POST_CANARY', metrics: { views: 10 } }] });
+  expect(shown.review.benchmarks.rows).toEqual([]);
+  expect(await posts(other.actor, other.session, true)).toMatchObject({ data: { connections: [], posts: [] },
+    review: { histories: [], followers: [], posts: [] } });
+  expect(await posts(other.actor, f.session)).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
+  // The account being erased reads nothing at all.
+  await db.query('insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now())', [f.actor, randomUUID()]);
+  expect(await posts(f.actor, f.session)).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
+  expect(await free(f.actor, f.session, '', [])).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-6: the call limits refuse a research call before anything is written or sent', async () => {

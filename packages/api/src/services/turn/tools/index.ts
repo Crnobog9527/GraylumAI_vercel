@@ -44,7 +44,7 @@ export type TurnToolsInput = {
   /** Checked before each paid tool call with its subcall count (newWorkGate); throws TurnStop to refuse. */
   callGate?: (subcalls: number) => Promise<void>;
   accounts?: { benchmark: readonly CanonicalAccount[]; currentMessage: string };
-  skills?: PreparedSkills; skillFiles?: PreparedSkillFiles; readSource?: SourceReader;
+  skills?: PreparedSkills; skillFiles?: PreparedSkillFiles; readSource?: SourceReader; sourceDescription?: string;
   onCall?: ResearchToolsInput['onCall'];
 };
 
@@ -94,10 +94,11 @@ export function turnTools(input: TurnToolsInput): TurnTools {
     }
     // read_source
     const reader = input.readSource;
+    const readLimit = plan.readCalls ?? READ_SOURCE_CALLS;
     let reads = 0;
-    tools.push({ name, description: READ_SOURCE_DESCRIPTION, enabled: () => reads < READ_SOURCE_CALLS,
+    tools.push({ name, description: input.sourceDescription ?? READ_SOURCE_DESCRIPTION, enabled: () => reads < readLimit,
     async execute(arguments_) {
-      if (!usable(name) || !reader || reads >= READ_SOURCE_CALLS) return TOOL_UNAVAILABLE;
+      if (!usable(name) || !reader || reads >= readLimit) return TOOL_UNAVAILABLE;
       const query = typeof arguments_.query === 'string' ? arguments_.query : '';
       // Counted before the read: a failed read still used its model continuation.
       reads++; freeCalls++;

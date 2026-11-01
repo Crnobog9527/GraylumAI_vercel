@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from '../../runtime/libraryAdmission';
 import { SKILL_LOAD_REFUSED } from '../../runtime/loadSkillTool';
-import { LIBRARY_RETRIEVAL_INSTRUCTIONS } from '../../runtime/primaryInstructions';
+import { LIBRARY_RETRIEVAL_INSTRUCTIONS, WORKSPACE_CONTEXT_INSTRUCTIONS, WORKSPACE_STRATEGY_INSTRUCTIONS } from '../../runtime/primaryInstructions';
+import { OWN_POSTS_INSTRUCTIONS } from '../../runtime/workspacePosts';
 import { prepareChatTools, type ChatToolDeps } from './chatTools';
 import { freeSlots, researchSettings } from './__tests__/fixtures';
 
@@ -47,6 +48,40 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
     const off = await prepare({ library: true }, { [LIBRARY_AGENT_READ_KEY]: true, [LIBRARY_RETRIEVAL_KEY]: false });
     expect(off.plan.offered).not.toContain('read_source');
     expect(off.sharedInstructions(false)).not.toContain(LIBRARY_RETRIEVAL_INSTRUCTIONS);
+  });
+
+  it('the workspace keeps read_source offered with the library off, its rules per user, and own posts raise the reads', async () => {
+    const posts = { windowDays: 30, benchmarks: false, review: false };
+    const setup = await prepare({ library: true, workspace: async () => ({ sources: ['v1'], strategy: true, posts }) });
+    expect(setup.plan.available).toContain('read_source');
+    expect(setup.context).toMatchObject({ workspaceContext: true });
+    expect(setup.context.libraryRetrieval).toBeUndefined();
+    expect(setup.sharedInstructions(false)).not.toContain(WORKSPACE_CONTEXT_INSTRUCTIONS);
+    for (const text of [WORKSPACE_CONTEXT_INSTRUCTIONS, OWN_POSTS_INSTRUCTIONS]) expect(setup.userInstructions).toContain(text);
+    expect(setup.plan.readCalls).toBe(5);
+    expect(setup.plan.limits.freeTools).toBe(5);
+  });
+
+  it('a free member keeps two reads; a failed workspace check reads nothing and still offers the same tool', async () => {
+    const free = await prepare({ workspace: async () => ({ sources: [], strategy: true, posts: { windowDays: 0, benchmarks: false, review: false } }) });
+    expect(free.plan.readCalls).toBe(2);
+    expect(free.userInstructions).toContain(WORKSPACE_STRATEGY_INSTRUCTIONS);
+    const failed = await prepare({ workspace: async () => { throw new Error('db'); } });
+    expect(failed.plan.available).toContain('read_source');
+    expect(failed.userInstructions).not.toContain(OWN_POSTS_INSTRUCTIONS);
+  });
+
+  it('no room for a strategy result: the strategy rule is left out and its read refused', async () => {
+    const rows = Object.entries(researchSettings(false)).map(([key, value]) => ({ key, value }));
+    const rpc = vi.fn();
+    const setup = await prepareChatTools({ admin: {} as SupabaseClient, read: { rpc } as never, configuration: Promise.resolve({ data: rows, error: null }),
+      tools: { workspace: async () => ({ sources: ['v1'], strategy: true, posts: null }) }, actorId, sessionId, requiredBytes: 1000,
+      interactiveBytes: 50_000, quotedBytes: 150_000, modelMultiplier: '6', defaultMultiplier: '6', maxTools: 9 });
+    expect(setup.plan.sourceRoom).toEqual({ strategy: false, posts: false });
+    expect(setup.userInstructions).not.toContain(WORKSPACE_STRATEGY_INSTRUCTIONS);
+    const tool = (await build(setup as never, false)).tools.find(t => t.name === 'read_source')!;
+    expect(JSON.parse(await tool.execute({ query: `strategy_report:${actorId}` }, 'c1'))).toEqual({ kind: 'unavailable' });
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('the catalog voice goes to the per-user segment with its version, never the shared one', async () => {

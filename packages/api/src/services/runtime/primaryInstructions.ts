@@ -23,7 +23,7 @@ export const FREE_CHAT_POSITIONING_REDIRECT=
   'that only use it, are answered normally.';
 export const freeChatInstructions=(redirect:boolean)=>FREE_CHAT_BASE_INSTRUCTIONS+(redirect?FREE_CHAT_POSITIONING_REDIRECT:'');
 /** Execution-time additions to the primary instructions; admission sizes the same text. */
-const WORKSPACE_CONTEXT_INSTRUCTIONS=
+export const WORKSPACE_CONTEXT_INSTRUCTIONS=
   '\nYou may answer ordinary questions directly, without a work direction or business context. Only when the user request '+
   'actually needs their own confirmed positioning, account strategy or topic, call read_source with no query for an owned '+
   'metadata index, then with query set to the exact relevant returned id to read its content. When the request concerns '+
@@ -49,7 +49,7 @@ export const WORKSPACE_STRATEGY_RESULT_BYTES=52000;
 export const workspaceStrategyReserve=(maxCalls:number)=>Math.max(1,Math.min(2,maxCalls-1))*WORKSPACE_STRATEGY_RESULT_BYTES;
 export const workspaceFrozen=(on:boolean,strategy=on)=>(on?{workspaceContext:true as const,
  ...(strategy?{workspaceGuide:WORKSPACE_STRATEGY_GUIDE}:{})}:{});
-const WORKSPACE_STRATEGY_INSTRUCTIONS=
+export const WORKSPACE_STRATEGY_INSTRUCTIONS=
   '\nWhen a listed positioning has a strategyReport id and the request concerns next steps, this week, the plan and its '+
   'metrics, monetization, audience, benchmarks, assumptions or content direction, make your one read that id instead of the '+
   'positioning entry: it returns the confirmed fields and the strategy together. Say which positioning version the answer is based on.';
