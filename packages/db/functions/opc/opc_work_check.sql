@@ -33,16 +33,10 @@ BEGIN
    RAISE EXCEPTION 'OPC_CONTENT_BINDING' USING ERRCODE='42501';
   END IF;
  ELSE
-  -- The brief and material the old path froze for the next turn: the newest of this conversation not revoked.
+  -- The brief and material the old path froze for the next turn: the newest of this conversation not revoked. A claimed revision that
+  -- has not opened its turn does not hold other requests back: a turn reads the material and does not use it up.
   SELECT * INTO m FROM runtime_scope_material
    WHERE session_id=s.id AND NOT revoked AND erased_at IS NULL ORDER BY revision DESC LIMIT 1;
-  -- opc_video_runtime_binding_guard's first rule: until the claimed request opens, no other request may take its material.
-  IF EXISTS(SELECT 1 FROM opc_video_material_bindings claimed WHERE claimed.actor_id=p_actor_id AND claimed.session_id=s.id
-    AND claimed.material_revision=m.revision
-    AND NOT EXISTS(SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id AND e.request_id=claimed.request_id)
-    AND NOT EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.request_id=claimed.request_id)) THEN
-   RAISE EXCEPTION 'OPC_CONTENT_BINDING' USING ERRCODE='42501';
-  END IF;
  END IF;
  RETURN jsonb_build_object('work',work||jsonb_build_object('brief',m.content->'brief','material',m.content->'material',
   'videoPackage',binding.request_id IS NOT NULL,'materialRevision',m.revision,'materialHash',m.content_hash));

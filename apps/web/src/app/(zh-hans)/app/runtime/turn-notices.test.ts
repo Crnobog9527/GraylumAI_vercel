@@ -10,6 +10,10 @@ describe('turn notices', () => {
     expect(turnCodeNotice('TURN_CREDIT_ACCOUNT_REVIEW')).toMatchObject({ kept: true, text: expect.stringContaining('没有扣费') });
     expect(turnCodeNotice('TURN_PROVIDER_402').kept).toBe(false);
     expect(turnCodeNotice('SOMETHING_NEW')).toMatchObject({ kept: false, text: expect.stringContaining('不要重复发送') });
+    // The platform's daily stop-loss refuses before a turn opens: said plainly, nothing charged, the words kept.
+    expect(turnCodeNotice('STOP_LOSS_REACHED')).toMatchObject({ kept: true, text: expect.stringContaining('没有扣费') });
+    // The code is shown, so the next report of a failure says which one it was.
+    expect(turnCodeNotice('SOMETHING_NEW').text).toContain('代码 SOMETHING_NEW');
   });
   it('names every trimmed tool, grouped by why (never a silent drop)', () => {
     expect(trimmedToolNotices({ available: ['read_source'], trimmed: [{ name: 'web_search', reason: 'capacity' },

@@ -3869,7 +3869,7 @@
   "fn:opc_video_results_from_turn(uuid,uuid,uuid,bigint,uuid,bigint,bigint,boolean,boolean)": "65d14b8fbc74",
   "fn:opc_video_runtime_binding_guard()": "bd5d938535ef",
   "fn:opc_video_turn_check(uuid,uuid,bigint,uuid)": "976f70c09c71",
-  "fn:opc_work_check(uuid,uuid,boolean,uuid)": "c541c2ce7b7d",
+  "fn:opc_work_check(uuid,uuid,boolean,uuid)": "54f6f823979a",
   "fn:opc_work_material_payload(uuid)": "3e45f05a8e6f",
   "fn:opc_work_result(uuid,uuid)": "2eddfcbe6f46",
   "fn:opc_work_result_turn(uuid,bigint)": "7e5cbbb9ca9c",

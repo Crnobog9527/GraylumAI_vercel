@@ -10,6 +10,7 @@ import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 export const TURN_CONTINUE = '继续';
 export const TURN_PAUSED_NOTICE = '积分不足，这一轮已暂停，已完成的部分不会重复扣费。充值后点继续。超过 24 小时未继续会自动退回。';
 const REFUSED: Record<string, string> = {
+  STOP_LOSS_REACHED: '服务今天的用量已到上限，这条消息没有发送，也没有扣费。请稍后再试。',
   TURN_INSUFFICIENT_CREDITS: '积分不足，这条消息没有发送，也没有扣费。充值后可以再次发送。',
   TURN_RATE_LIMITED: '发送太频繁，这条消息没有发送。请稍后再试。',
   TURN_NEW_CALLS_PAUSED: '服务暂时暂停了新请求，这条消息没有发送，也没有扣费。',
@@ -47,7 +48,8 @@ const GENERIC = '这条消息没有完成。请刷新后查看结果，不要重
 
 export function turnCodeNotice(code: string): { text: string; kept: boolean } {
   if (REFUSED[code]) return { text: REFUSED[code], kept: true };
-  return { text: FAILED[code] ?? GENERIC, kept: false };
+  // An unknown code is shown, small, so the next failure says what it was.
+  return { text: FAILED[code] ?? `${GENERIC}（代码 ${code}）`, kept: false };
 }
 
 const TOOL_LABEL: Record<string, string> = { social_search: '社媒搜索', social_account: '账号数据', web_search: '网页搜索', web_fetch: '网页读取',
