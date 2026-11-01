@@ -333,8 +333,8 @@ async function workItem(actor: string) {
     published_by=$3 where id=$1`, [skillId, entry, actor]);
   await db.query('commit');
   await db.query(`insert into artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version) values
-    ($1,$4,$5,$6,'source-'||$1,'source',1),($2,$4,$5,$6,'account-'||$2,'account',0),($3,$4,$5,$6,'item-'||$3,'item',0)`,
-  [source, account, item, actor, moduleId, skillId]);
+    ($1,$4,$5,$6,$7,'source',1),($2,$4,$5,$6,$8,'account',0),($3,$4,$5,$6,$9,'item',0)`,
+  [source, account, item, actor, moduleId, skillId, 'source-' + source, 'account-' + account, 'item-' + item]);
   await db.query('update artifact_projects set source_project_id=$2 where id=$1', [item, account]);
   await db.query(`insert into artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,state,steps)
     values($1,$2,$3,$4,'{}',repeat('c',64),repeat('d',64),'published','{}')`, [round, source, revisionId, hash]);
