@@ -165,10 +165,12 @@ describe('method membership read projection', () => {
   });
   it('never shows a one-time purchase as renewing and fails closed on a missing subscription row', async () => {
     const once = { id: 'o1', subscription_id: 's1', auto_renew: false, entitlement_end: '2026-11-01T00:00:00.000Z' };
-    const ok = await readMethodMembership(fixture(undefined, null, [once], [{ id: 's1', cancel_at_period_end: 'false' }]).db, 'actor');
+    // The clock is pinned: the term ends 2026-11-01, and a test reading the real clock fails once that day has passed.
+    const now = Date.parse('2026-10-30T12:00:00Z');
+    const ok = await readMethodMembership(fixture(undefined, null, [once], [{ id: 's1', cancel_at_period_end: 'false' }]).db, 'actor', now);
     expect(ok.memberships[0]?.auto_renew).toBe(false);
-    await expect(readMethodMembership(fixture(undefined, null, [once], []).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
-    await expect(readMethodMembership(fixture(undefined, null, [once], null).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+    await expect(readMethodMembership(fixture(undefined, null, [once], []).db, 'actor', now)).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+    await expect(readMethodMembership(fixture(undefined, null, [once], null).db, 'actor', now)).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
   });
   it.each(['card', 'card_cn'])('does not resurrect an older %s term after the later renewal is refunded', async method => {
     const now = Date.parse('2026-11-21T15:10:48Z');
