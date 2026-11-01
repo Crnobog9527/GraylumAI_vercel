@@ -113,6 +113,31 @@ class CIWorkflowsTest < Minitest::Test
       refute jobs.fetch(id).key?('needs'), id
     end
   end
+  # Owner 2026-11-01: the suites the pull request CI excludes run every night, outside the required checks.
+  def test_nightly_excluded_suites_run_on_a_schedule_only_and_are_never_a_required_check
+    nightly = YAML.safe_load(File.read("#{ROOT}/workflows/nightly-db-suites.yml"))
+    events = nightly['on'] || nightly[true]
+    assert_equal ['schedule'], events.keys
+    assert_equal 1, events.fetch('schedule').length
+    assert_equal({'contents'=>'read'}, nightly.fetch('permissions'))
+    job = nightly.fetch('jobs').fetch('excluded-suites')
+    required = GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']
+    refute_includes required, job.fetch('name').sub(/ \(.*\)\z/, '')
+    assert_equal({'contents'=>'read'}, job.fetch('permissions'))
+    assert_equal false, job.fetch('strategy').fetch('fail-fast')
+    shards = job.fetch('strategy').fetch('matrix').fetch('shard')
+    assert_equal (1..shards.length).to_a, shards
+    assert_operator job.fetch('timeout-minutes'), :<=, 60
+    runs = job.fetch('steps').map { |step| step['run'] }.compact
+    assert_equal 1, runs.count("env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded --shard ${{ matrix.shard }}/#{shards.length}")
+    job.fetch('steps').each do |step|
+      refute step.key?('continue-on-error'), step['name']
+      refute step.key?('env'), step['name']
+    end
+    refute nightly.key?('secrets')
+    ci_runs = @ci.fetch('jobs').values.flat_map { |j| j['steps'].map { |step| step['run'] }.compact }
+    refute ci_runs.any? { |run| run.include?('--excluded') }, 'pull request CI must not run the excluded list'
+  end
   def test_a_newer_push_to_the_same_pull_request_cancels_the_older_run_but_a_push_to_a_branch_never_does
     concurrency = @ci.fetch('concurrency')
     assert_equal "${{ github.event_name == 'pull_request' }}", concurrency.fetch('cancel-in-progress')
