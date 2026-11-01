@@ -15,7 +15,7 @@ const reference = z.object({ kind: z.literal('library_document'), documentId: z.
 const saved = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('chat'), text: z.string(),
     chosen: z.object({ moduleId: z.string().optional(), references: z.array(reference).optional() }).optional(),
-    workItem: z.boolean().optional() }),
+    workItem: z.boolean().optional(), workRequest: z.string().uuid().optional() }),
   z.object({ kind: z.literal('mentor'), moduleId: z.string(), stepId: z.string(), text: z.string(), organizeAfter: z.boolean(),
     answer: mentorAnswer.optional(), researchRefreshId: z.string().optional() }),
 ]);
@@ -33,8 +33,9 @@ export async function runResumedTurn(deps: ChatDeps, input: { actorId: string; s
   }
   const resume = { of: resumeOf, read }, ids = { actorId, sessionId, requestId, resume };
   if (asked.data.kind === 'chat') {
-    const { text, chosen, workItem } = asked.data;
-    return runChatTurn(deps, { ...ids, text, ...(workItem ? { workItem } : {}), ...(chosen ? { chosen: { ...chosen } as never } : {}) }, emit);
+    const { text, chosen, workItem, workRequest } = asked.data;
+    return runChatTurn(deps, { ...ids, text, ...(workItem ? { workItem } : {}), ...(workRequest ? { workRequest } : {}),
+      ...(chosen ? { chosen: { ...chosen } as never } : {}) }, emit);
   }
   const { moduleId, stepId, text, organizeAfter, answer, researchRefreshId } = asked.data;
   return runMentorTurn(deps as never, { ...ids, moduleId, stepId, text, organizeAfter, ...(answer ? { answer } : {}),
