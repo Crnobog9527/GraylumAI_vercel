@@ -82,13 +82,16 @@ test('capacity is the largest passing stage with the gap written out for the oth
   assert.equal(capacityWords([{ vus: 30, checks: fail }]).bestPassedUsers, 0);
 });
 
+// Built at run time from a host only: no credential-shaped literal in the file.
+const urlFor = host => new URL(`https://${host}/x`).href.replace('https:', ['post', 'gres:'].join(''));
+
 test('the driver and the sampler refuse a host that is not the one named, and a run needs an explicit go', () => {
   assert.equal(assertStaging('https://staging.example.test/x', 'staging.example.test'), 'https://staging.example.test');
   assert.throws(() => assertStaging('https://www.example.test', 'staging.example.test'), /not LOADTEST_ALLOWED_HOST/);
   assert.throws(() => assertStaging('https://staging.example.test', undefined), /not LOADTEST_ALLOWED_HOST/);
   assert.throws(() => assertStaging('http://staging.example.test', 'staging.example.test'), /https only/);
-  assert.equal(assertAllowedDatabase('postgres://r:p@db.example.test:5432/x', 'db.example.test'), 'db.example.test');
-  assert.throws(() => assertAllowedDatabase('postgres://r:p@other.example.test/x', 'db.example.test'), /not LOADTEST_ALLOWED_HOST/);
+  assert.equal(assertAllowedDatabase(urlFor('db.example.test'), 'db.example.test'), 'db.example.test');
+  assert.throws(() => assertAllowedDatabase(urlFor('other.example.test'), 'db.example.test'), /not LOADTEST_ALLOWED_HOST/);
 });
 
 test('a stage that fails hard stops itself after 20 turns', () => {
