@@ -46,7 +46,8 @@ const GENERIC = '这条消息没有完成。请刷新后查看结果，不要重
 
 export function turnCodeNotice(code: string): { text: string; kept: boolean } {
   if (REFUSED[code]) return { text: REFUSED[code], kept: true };
-  return { text: FAILED[code] ?? GENERIC, kept: false };
+  // An unknown code is shown, small, so the next failure says what it was.
+  return { text: FAILED[code] ?? `${GENERIC}（代码 ${code}）`, kept: false };
 }
 
 const TOOL_LABEL: Record<string, string> = { social_search: '社媒搜索', social_account: '账号数据', web_search: '网页搜索', web_fetch: '网页读取',

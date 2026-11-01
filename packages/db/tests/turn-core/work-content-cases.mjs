@@ -77,7 +77,8 @@ export async function workContentCases(t){
   const claim=await work(w,request);
   assert.equal(claim.work.videoPackage,true);assert.equal(claim.work.brief,'已定稿口播稿：定稿口播稿');
   assert.equal(claim.work.materialRevision,material.revision);
-  assert.match(await refusal(work(w,randomUUID())),/OPC_CONTENT_BINDING/,'no other request takes the claimed material');
+  // Nothing is used up by a turn: another request reads the newest material and is not held back by a claim that has not opened.
+  assert.equal((await work(w,randomUUID())).work.materialRevision,material.revision);
   assert.deepEqual(await prepare(w,request,script.id).then(m=>m.revision),material.revision,'a repeated claim replays');
   // Admission refused definitely: the claim can be abandoned; once a turn holds it, it cannot.
   const other=randomUUID();
@@ -217,6 +218,6 @@ export async function workContentCases(t){
   assert.equal((await version(kept.id)).body,'OTHER_BODY');
  }
  report.checks.push('V2-10b C2: content saved by turn, repeated, refused like its execution twin, FK and one source',
-  'V2-10b C2: a claimed revision is the request\'s alone; package saved once; open claim blocks, failed claim retries',
+  'V2-10b C2: a claimed revision is read by its own request and holds no other back; package saved once; open claim blocks a second claim, failed claim retries',
   'V2-10b C2: content delete takes the producing turns, session delete keeps saved versions, account erasure clears them');
 }

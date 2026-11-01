@@ -30,6 +30,10 @@ export const closedTurnSeen = (seen: number | null | undefined, view: Pick<TurnV
 };
 export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }>;
   /** A work item's conversation (V2-10b): the server reads its checks, method and brief. */ workItem?: boolean };
+/** A refusal before the stream, or an error event without a turn: no turn was opened, so nothing was stored or charged. */
+export function neverOpened(outcome: { state: 'refused' } | { state: 'finished'; last: { type: string; turnId?: number } }): boolean {
+  return outcome.state === 'refused' || (outcome.last.type === 'error' && outcome.last.turnId === undefined);
+}
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
 /** One function for the page's life: `read` depends on it, and a new one per render would read without end. */
@@ -102,7 +106,9 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     if (!code || code === 'TURN_REQUEST_REPLAYED') return 'done';
     const { text: said, kept } = turnCodeNotice(code);
     setNotice({ code, text: said });
-    return kept ? 'kept' : 'unknown';
+    // An error event carries its turn only once one is open: without it (or refused before the stream) nothing was stored or charged,
+    // whatever the code says, so the words and any claim made for them are given back instead of waiting to be verified.
+    return kept || neverOpened(outcome) ? 'kept' : 'unknown';
   }, [sessionId, fetcher, read]);
   const send = useCallback((text: string, requestId: string, chosen: TurnChoice = {}) =>
     run({ kind: 'chat', requestId, text, ...chosen }), [run]);
