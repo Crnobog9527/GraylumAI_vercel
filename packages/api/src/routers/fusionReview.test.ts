@@ -60,11 +60,12 @@ it('available tells a signed-in user whether the review is switched on, and fail
   const settings = await import('../services/fusion/settings');
   const read = vi.spyOn(settings, 'readFusionSettings');
   read.mockResolvedValueOnce({ review: { enabled: true } } as never);
-  expect(await mineFixture().caller.available()).toEqual({ enabled: true });
+  // corePathV2 is which path a start goes on; a setting that cannot be read keeps the old one (false).
+  expect(await mineFixture().caller.available()).toEqual({ enabled: true, corePathV2: false });
   read.mockResolvedValueOnce({ review: { enabled: false } } as never);
-  expect(await mineFixture().caller.available()).toEqual({ enabled: false });
+  expect(await mineFixture().caller.available()).toEqual({ enabled: false, corePathV2: false });
   read.mockRejectedValueOnce(new Error('down'));
-  expect(await mineFixture().caller.available()).toEqual({ enabled: false });
+  expect(await mineFixture().caller.available()).toEqual({ enabled: false, corePathV2: false });
   await expect(mineFixture(false).caller.available()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   read.mockRestore();
 });

@@ -274,6 +274,87 @@ try{
   assert.equal(await one('select content v from session_messages where session_id=$1 and seq=3',[a.session]),'later','other messages stay');
   report.checks.push('compare: >= 2 models and <= 500 credits or nothing is recorded; N columns each rounded on its own (4, not 3); a refused column is free; adoption appends question and answer once, replays, refuses another column; a moved-on conversation gets a quote');
  }
+ // 7b. The compare cards of the turn path (0443): list and read, the owner's only, a column per model in order, each rounded on its own.
+ {
+  const a=await account(),b=await account(),models=[randomUUID(),randomUUID(),randomUUID()];
+  const cp={question:'which?',questionHash:hash('which?'),requestHash:hash('r7b'),snapshotHash:hash('s'),config:{models}};
+  const o=await open(a,{kind:'compare',pol:comparePolicy({limits:{model:3,paidTools:0,freeTools:0,decisions:0},gCredits:180,minCredits:180}),product:cp});
+  const read=(actor,id=o.compareId)=>one('select fusion_compare_turn_read($1,$2) v',[actor,id]);
+  const list=(actor,session)=>one('select fusion_compare_turn_list($1,$2) v',[actor,session]);
+  const running=await read(a.actor);
+  assert.deepEqual(running.columns.map(x=>[x.column,x.modelId,x.body,x.call,x.billing.closed]),models.map((id,i)=>[i,id,null,null,false]),'queued columns, nothing final');
+  assert.equal(running.state,'running');assert.equal(running.chargedCredits,0);
+  for(const [i,id] of models.entries())await one('select turn_fusion_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,o.turnId,i+1,'model',id,null,null,hash('r7b'+i),0.1,m]);
+  assert.equal((await read(a.actor)).columns[0].call.inFlight,true,'a dispatched column is in flight');
+  await record(a,o.turnId,1,{n:0.0021,output:{phase:'fusion_compare',body:'one',verdict:'usable'}});
+  await record(a,o.turnId,2,{n:0.0021,output:{phase:'fusion_compare',body:'two',verdict:'usable'}});
+  await record(a,o.turnId,3,{status:'unusable',actual:0.01});
+  await close(a,o.turnId,'completed',{delivered:true});
+  const done=await read(a.actor);
+  assert.deepEqual(done.columns.map(x=>[x.body,x.call.verdict,x.billing.closed,x.billing.chargedCredits]),
+   [['one','usable',true,2],['two','usable',true,2],[null,'unusable',true,0]],'each column rounded on its own; a refused column is free and shows nothing');
+  assert.equal(done.chargedCredits,4);assert.equal(done.state,'finished');assert.equal(done.turnId,o.turnId);
+  const cards=await list(a.actor,a.session);
+  assert.deepEqual(cards.map(x=>[x.compareId,x.turnId,x.question]),[[o.compareId,o.turnId,'which?']]);
+  // A compare closed with a full refund (failed after answers were saved) charges nothing, and neither does any column.
+  const f=await open(a,{kind:'compare',pol:comparePolicy({limits:{model:2,paidTools:0,freeTools:0,decisions:0}}),product:{...cp,requestHash:hash('r7c'),config:{models:models.slice(0,2)}}});
+  for(const [i,id] of models.slice(0,2).entries())await one('select turn_fusion_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,f.turnId,i+1,'model',id,null,null,hash('r7c'+i),0.1,m]);
+  for(const s of [1,2])await record(a,f.turnId,s,{n:0.0021,output:{phase:'fusion_compare',body:'x'+s,verdict:'usable'}});
+  await close(a,f.turnId,'failed',{refundAll:true,failure:'turn_failed'});
+  const refunded=await read(a.actor,f.compareId);
+  assert.equal(refunded.chargedCredits,0);
+  assert.deepEqual(refunded.columns.map(x=>[x.billing.closed,x.billing.chargedCredits,x.billing.netChargedCredits]),[[true,0,0],[true,0,0]],'a refunded turn shows no column cost');
+  // A receipt above the frozen amount is capped by the turn's charge: the columns together never show more than was charged.
+  const g=await open(a,{kind:'compare',pol:comparePolicy({gCredits:120,minCredits:120}),product:{...cp,requestHash:hash('r7d'),config:{models:models.slice(0,2)}}});
+  for(const [i,id] of models.slice(0,2).entries())await one('select turn_fusion_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,g.turnId,i+1,'model',id,null,null,hash('r7d'+i),0.1,m]);
+  for(const s of [1,2])await record(a,g.turnId,s,{n:0.15,output:{phase:'fusion_compare',body:'y'+s,verdict:'usable'}});
+  const capped=await close(a,g.turnId,'completed',{delivered:true}),over=await read(a.actor,g.compareId);
+  assert.equal(over.chargedCredits,capped.chargedCredits);
+  assert.equal(over.columns.reduce((n,x)=>n+x.billing.chargedCredits,0),capped.chargedCredits,'the columns add up to the actual charge');
+  assert.ok(over.columns[0].billing.chargedCredits>=over.columns[1].billing.chargedCredits&&over.columns[1].billing.chargedCredits<90,'the later column takes the shortfall');
+  // Refused: another account reads nothing and lists nothing; an unknown compare reads nothing; a client role cannot call.
+  assert.equal(await read(b.actor),null);
+  assert.deepEqual(await list(b.actor,a.session),[]);
+  assert.equal(await read(a.actor,randomUUID()),null);
+  assert.match(await refusal(read(randomUUID())),/TURN_ACCOUNT_DENIED/);
+  for(const f of ['fusion_compare_turn_read','fusion_compare_turn_list']){
+   for(const role of ['anon','authenticated'])
+    assert.equal(await one(`select bool_or(has_function_privilege($1,p.oid,'execute')) v from pg_proc p where proname=$2`,[role,f]),false,f+' '+role);
+   assert.equal(await one(`select bool_or(has_function_privilege('service_role',p.oid,'execute')) v from pg_proc p where proname=$1`,[f]),true,f);
+  }
+  // A compare is stopped by nobody: turn_stop answers only reports.
+  assert.match(await refusal(one('select turn_stop($1,$2,false,null) v',[a.actor,o.turnId])),/TURN_STOP_NOT_ALLOWED/);
+  report.checks.push('compare cards: list and read return only the owner\'s compare, one column per model in order, each column rounded on its own, a refused column free and not shown; another account reads nothing; no client role; a compare cannot be stopped');
+ }
+ // 7c. The sidebar list (0444): a conversation of the turn path is listed from session_messages, once, by its first visible user
+ // message; hidden, deleted and foreign conversations are not.
+ {
+  const a=await account(),b=await account(),list=actor=>one('select opc_free_conversations($1) v',[actor]);
+  // A free conversation as the app starts it (its scope names the draft runtime_start makes); the fixture's session has none.
+  const start=async actor=>(await one('select runtime_start($1,$2,$3) v',[actor,randomUUID(),JSON.stringify({scope:{kind:'positioning_draft'}})])).sessionId;
+  a.session=await start(a.actor);
+  const put=(session,seq,role,content,over='')=>c.query(`insert into session_messages(session_id,seq,role,turn_id,content,content_hash,visible,created_at)
+   values($1,$2,$3,$4,$5,$6,${over||'true'},now())`,[session,seq,role,90000+seq,content,hash(content)]);
+  assert.deepEqual(await list(a.actor),[],'no message, no compare: not listed');
+  await put(a.session,1,'user','   ',"false");
+  assert.deepEqual(await list(a.actor),[],'a hidden message does not list a conversation');
+  await put(a.session,2,'user','  How should a coffee shop position itself?  ');
+  await put(a.session,3,'assistant','Start with the buyer.');
+  const first=await list(a.actor);
+  assert.deepEqual(first.map(x=>[x.sessionId,x.title]),[[a.session,'How should a coffee shop position itself?']],'listed once, titled by the first visible user message');
+  assert.ok(first[0].lastActivityAt);
+  // Another account sees nothing of it; the old-path conversations keep listing beside it.
+  assert.deepEqual(await list(b.actor),[]);
+  const second=await start(a.actor);
+  await put(second,1,'user','A second question');
+  const both=await list(a.actor);
+  assert.deepEqual(both.map(x=>x.title).sort(),['A second question','How should a coffee shop position itself?']);
+  assert.equal(new Set(both.map(x=>x.sessionId)).size,2,'each conversation once');
+  // Content deleted: the conversation leaves the list.
+  await c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[second]);
+  assert.deepEqual((await list(a.actor)).map(x=>x.sessionId),[a.session]);
+  report.checks.push('sidebar list: a conversation of the turn path is listed once from session_messages by its first visible user message; hidden-only, deleted and foreign conversations are not');
+ }
  // 8. The 3-unfinished version rule (10-20) and jury adoption (once per adopted review, no fee).
  {
   const a=await account();
