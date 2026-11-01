@@ -29,6 +29,10 @@ export function turnReportStatus(report: TurnReport): ReportStatus {
     completeness: report.delivered ? "complete" : stopped ? "stopped" : null };
 }
 
+/** The saved report has been read, or the read failed: either way the old status read may be asked (a failed read says nothing about
+ * a report of the old path, and must not stop one from showing; a wait is only for a read that has not answered yet). */
+export const turnReadSettled = (report: TurnReport | null | undefined, failed: boolean) => report !== undefined || failed;
+
 export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
   const [report, setReport] = useState<TurnReport | null | undefined>(undefined), [failed, setFailed] = useState(false);
   // A report already written stays readable whatever the switch says now (a rollback must not hide a paid report); `on` only
@@ -78,6 +82,6 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
     return turnReportStop({ fetch: fetcher, dropStream: () => abort.current?.abort() })(
       { turnId: id, stopAt: request.stopAt ?? 0, ...(request.confirmed ? { confirmed: true } : {}) });
   };
-  /** `known`: the saved report has been read (a report or none); until then the old status read must not be asked about it. */
-  return { on, known: report !== undefined, server, status, refetch, events, stop };
+  /** `known`: the saved report has been read (a report or none) or the read failed; until then the old status read is not asked. */
+  return { on, known: turnReadSettled(report, failed), server, status, refetch, events, stop };
 }
