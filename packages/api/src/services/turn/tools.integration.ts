@@ -338,11 +338,16 @@ it('RUNTIME: CORE-PATH-V2 V2-6 B: read_source reads the workspace and own posts 
 
   // Own posts: another account's rows never come back, however it asks.
   const connection = randomUUID(), post = randomUUID(), today = new Date().toISOString().slice(0, 10);
-  await db.query(`insert into social_connections(id,actor_id,role,source,platform,status) values($1,$2,'own','manual','tiktok','connected')`, [connection, f.actor]);
+  // An own connection is bound to a business and an account (checks and foreign keys); the rows under test are the posts, so the
+  // bindings are skipped for these inserts only.
+  await db.query('set session_replication_role = replica');
+  await db.query(`insert into social_connections(id,actor_id,business_id,account_project_id,role,source,platform,status)
+    values($1,$2,$3,$4,'own','manual','tiktok','connected')`, [connection, f.actor, randomUUID(), randomUUID()]);
   await db.query(`insert into social_posts(id,actor_id,connection_id,source,platform_post_id,posted_at,title_excerpt)
     values($1,$2,$3,'manual','p1',now()-interval '1 day','POST_CANARY')`, [post, f.actor, connection]);
   await db.query(`insert into social_metric_snapshots(actor_id,connection_id,post_id,captured_on,source,metrics)
     values($1,$2,$3,$4,'manual','{"views":10}')`, [f.actor, connection, post, today]);
+  await db.query('set session_replication_role = origin');
   const posts = (actor: string, session: string, review = false) => db.query('select posts_turn_read($1,$2,14,$3,false) r', [actor, session, review]).then(r => r.rows[0].r);
   expect((await posts(f.actor, other.session)).kind).toBe('unavailable');
   const own = workspaceTurnReader(read, f.actor, f.session, { ...access, posts: { windowDays: 30, benchmarks: false, review: true } });
