@@ -150,6 +150,25 @@ export async function workContentCases(t){
   const held=await one("select count(*)::int v from session_messages where session_id=$1 and content like '%ERASE_FIRST%'",[w.session]);
   assert.equal(held,0,'no copy stays in the conversation');
  }
+ // Read, then deleted, then opened: the check after the open finds it, before anything is sent.
+ {
+  const w=await workspace(),script=await save(w,{expected:await latest(w,'script'),id:(await turn(w,{text:'GONE'})).id}),request=randomUUID();
+  await prepare(w,request,script.id);const claim=await work(w,request);
+  const opened=await open(w.a,{session:w.session,request,pol:policy({...hold(claim),workSource:{contentId:script.id,kind:'script'}})});
+  const verify=id=>call('opc_work_verify($1,$2)',[w.actor,id]);
+  assert.equal(await verify(opened.turnId),true);
+  await close(w.a,opened.turnId,'failed',{messages:[],delivered:false});
+  const held=randomUUID(),late=await open(w.a,{session:w.session,request:held,pol:policy({workSource:{contentId:script.id,kind:'script'},...hold(claim)})});
+  await close(w.a,late.turnId,'failed',{messages:[],delivered:false});
+  const hash=(await one("select content_erasure_preview($1,'content',$2) v",[w.actor,script.id])).previewHash;
+  await one("select content_erasure_confirm($1,'content',$2,$3) v",[w.actor,script.id,hash]);
+  const after=await open(w.a,{session:w.session,pol:policy({workSource:{contentId:script.id,kind:'script'}})});
+  assert.equal(await verify(after.turnId),false,'the deleted source');
+  await close(w.a,after.turnId,'failed',{messages:[],delivered:false});
+  const material=await open(w.a,{session:w.session,pol:policy(hold(claim))});
+  assert.equal(await verify(material.turnId),false,'the erased material');
+  await close(w.a,material.turnId,'failed',{messages:[],delivered:false});
+ }
  // A resumed package: it has its own request id, is saved under the request that claimed the material, and blocks a second one.
  {
   const w=await workspace(),script=await save(w,{expected:await latest(w,'script'),id:(await turn(w,{text:'R'})).id}),request=randomUUID();

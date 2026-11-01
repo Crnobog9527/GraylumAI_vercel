@@ -227,6 +227,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // The model SDK wraps what the exchange throws; the stop that ended the call is kept here and wins over the wrapper.
   let stopped: TurnStop | undefined;
   try {
+    // What was read before the open still stands: a delete before it shows here, one after it finds this turn and waits.
+    if (work && !(await db.workVerify({ actorId: input.actorId, turnId: opened.turnId }))) throw new TurnStop('TURN_WORK_SOURCE_ERASED');
     // 3. Positioning gate (2.7): only when the account has no confirmed positioning. A call row the user is never charged for
     // (charge_user=false); the platform's cost is its real one, or the upper bound when the response reported none.
     let fallback = false;

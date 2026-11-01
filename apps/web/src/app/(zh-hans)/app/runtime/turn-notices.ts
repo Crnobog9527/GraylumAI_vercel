@@ -35,6 +35,7 @@ const REFUSED: Record<string, string> = {
   ...CONTENT_SOURCE_MESSAGES,
 };
 const FAILED: Record<string, string> = {
+  TURN_WORK_SOURCE_ERASED: '这条选题的来源稿件刚被删除或更换，这条消息没有发出，积分已退回。请刷新后再试。',
   TURN_TOMBSTONED: '这个对话已删除，本轮回复没有保存。',
   TURN_PROVIDER_402: '模型服务暂时不可用，本轮已全额退回积分。',
   TURN_PROVIDER_BUSY: '模型服务繁忙，本轮已全额退回积分。请稍后再试。',

@@ -145,6 +145,8 @@ export function turnDatabase(clients: TurnClients) {
     workCheck: (a: { actorId: string; sessionId: string; videoRequired: boolean; requestId: string }) =>
       call(clients.read, 'opc_work_check', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_video_required: a.videoRequired,
         p_request_id: a.requestId }, workCheck),
+    workVerify: (a: { actorId: string; turnId: number }) =>
+      call(clients.read, 'opc_work_verify', { p_actor_id: a.actorId, p_turn_id: a.turnId }, z.boolean()),
     workSource: (a: { actorId: string; sessionId: string; kind: 'script' | 'storyboard' }) =>
       call(clients.read, 'opc_work_source', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_kind: a.kind }, workSource),
     // The report membership check of the old admission (payment facts, refunds, the subscription's period end; never only the

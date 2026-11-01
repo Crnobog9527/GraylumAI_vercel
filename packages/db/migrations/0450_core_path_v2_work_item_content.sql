@@ -12,6 +12,8 @@
 --                          may not take a claimed revision before the claimant opened (opc_video_runtime_binding_guard's rule).
 --   opc_turn_root_request, opc_turn_latest   a turn resumed after a credit pause has its own request id: the first says which request it continues,
 --                          the second which turn a claimed request has now.
+--   opc_work_verify        after the open, before anything is sent: what Node read and froze still stands. A delete before the open is
+--                          seen here; one after it finds the open turn and waits (content_erasure_confirm).
 --   opc_work_source        read of the saved content a derived Skill reads (opc_content_source_current's choice).
 --   opc_video_material_prepare   the conflict loop and abandon also see a claimed request that became a turn.
 --   content_erasure_scope/_confirm/_mark_session/_saved_readable   a deleted version takes its turn's reply and raw body with it, like its
@@ -105,6 +107,24 @@ AS $function$
   UNION ALL SELECT t.id FROM down JOIN turns t ON t.actor_id=p_actor_id AND t.resume_of=down.id)
  SELECT t.* FROM turns t WHERE t.actor_id=p_actor_id AND t.id=(SELECT max(id) FROM down)
 $function$;
+
+CREATE OR REPLACE FUNCTION public.opc_work_verify(p_actor_id uuid, p_turn_id bigint)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE t turns;m runtime_scope_material;
+BEGIN
+ SELECT * INTO t FROM turns WHERE actor_id=p_actor_id AND id=p_turn_id;
+ IF t.id IS NULL THEN RETURN false; END IF;
+ IF t.policy ? 'workSource' AND NOT opc_content_allowed(p_actor_id,(t.policy#>>'{workSource,contentId}')::uuid) THEN RETURN false; END IF;
+ IF t.policy ? 'workMaterial' THEN
+  SELECT * INTO m FROM runtime_scope_material WHERE session_id=t.session_id AND revision=(t.policy#>>'{workMaterial,revision}')::bigint;
+  IF m.session_id IS NULL OR m.revoked OR m.erased_at IS NOT NULL OR m.content_hash IS DISTINCT FROM t.policy#>>'{workMaterial,hash}' THEN RETURN false; END IF;
+ END IF;
+ RETURN true;
+END $function$;
 
 CREATE OR REPLACE FUNCTION public.opc_work_source(p_actor_id uuid, p_session_id uuid, p_kind text)
  RETURNS jsonb
@@ -1239,7 +1259,7 @@ END $function$;
 DO $grants$
 DECLARE f text;
 BEGIN
- FOREACH f IN ARRAY ARRAY['opc_work_check(uuid,uuid,boolean,uuid)','opc_work_source(uuid,uuid,text)',
+ FOREACH f IN ARRAY ARRAY['opc_work_check(uuid,uuid,boolean,uuid)','opc_work_verify(uuid,bigint)','opc_work_source(uuid,uuid,text)',
    'opc_turn_root_request(uuid,bigint)','opc_turn_latest(uuid,uuid)','opc_content_from_turn(uuid,uuid,uuid,bigint,text,text,bigint,uuid)','opc_video_turn_check(uuid,uuid,bigint,uuid)',
    'opc_video_results_from_turn(uuid,uuid,uuid,bigint,uuid,bigint,bigint,boolean,boolean)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
