@@ -17,41 +17,54 @@ const researchJournal = (operations, bytes) => ({ operations: Array.from({ lengt
   return { id, identityHash: 'a'.repeat(64), quoteUnits: 1000, state: 'succeeded', discoveryId: null,
     result: { outcome: 'ok', items: Array.from({ length: Math.ceil(bytes / JSON.stringify(item).length) }, () => item), cost: { actual: 0.001 } } }; }) });
 
+// The pieces are exported for the single-machine load run (scripts/loadtest/single-machine.mjs): fixtures once, an actor per user, a turn per call.
+export async function mentorFixtures(client) {
+  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
+  await client.query(read('packages/db/tests/turn-core/report-fixture.sql'));
+}
+
+export async function mentorActor(client, { accountBound }) {
+  const actor = randomUUID();
+  await client.query('insert into profiles(id,credits) values($1,1000)', [actor]);
+  await client.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+    values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`, [actor, 'opening_grant:' + actor]);
+  const source = (await client.query('select turn_test.report_source($1) v', [actor])).rows[0].v;
+  await client.query(`update artifact_rounds set steps = jsonb_set(steps, '{s,fieldMeta}', '{}') where id = $1`, [source.round]);
+  if (accountBound) {
+    const g = (await client.query('select d7_test.artifacts($1) v', [actor])).rows[0].v;
+    const account = (await client.query('select account_project_id id from opc_items where work_item_id=$1', [g.workItem])).rows[0].id;
+    await client.query(`insert into opc_account_strategy_drafts(account_project_id,draft_id,actor_id,root_source_version_id,base_source_version_id,
+      base_account_revision,current) values($1,$2,$3,$4,$4,0,true)`, [account, source.draft, actor, g.version]);
+  }
+  return { actor, source };
+}
+
+// `between(seq)` runs where the model call is (the load run waits there); the scenario passes nothing.
+export async function mentorTurn(call, { actor, source }, { accountBound, research = null, between = async () => {} }) {
+  await call('mentor_turn_prepare', [actor, source.session, true, null]);
+  const policy = { q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30, historyItems: 100, inputBytes: 1000,
+    limits: { model: 3, paidTools: 0, freeTools: 1 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
+    mentor: { moduleId: source.module, stepId: 's', sourceChecked: accountBound } };
+  const { turnId } = await call('turn_open', [actor, source.session, randomUUID(), 'mentor', JSON.stringify(policy)]);
+  for (const seq of [1, 2, 3]) {
+    await call('turn_call_begin', [actor, turnId, seq, 'model', randomUUID(), null, null, hash('r' + turnId + seq), 0.02, 6]);
+    await between(seq);
+    await call('turn_call_identity', [actor, turnId, seq, 'gen-' + seq]);
+    await call('turn_call_record', [actor, turnId, seq, 'ok', 0.001, 0.001, '{}', null, hash('p' + turnId + seq), 'body']);
+  }
+  if (accountBound) await call('mentor_source_check', [actor, source.session]);
+  await call('turn_close', [actor, turnId, 'completed', JSON.stringify([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }]),
+    true, false, null, JSON.stringify({ roundId: source.round, revisionId: source.revision, versions: { s: 1 },
+      organizerInput: { captureFormat: 'v2', userInput: 'hi' }, output: { inputKind: 'answer', patches: [], notes: [] },
+      ...(research ? { research: researchJournal(research.operations, research.bytes) } : {}) })]);
+}
+
 export const mentorScenario = ({ name, accountBound, research = null }) => ({
   name, path: 'new',
   tables: ['turns', 'turn_calls', 'session_messages', 'runtime_sessions', 'profiles', 'credit_transactions', 'opc_drafts', 'artifact_rounds'],
   async setup({ client }) {
-    await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
-    await client.query(read('packages/db/tests/turn-core/report-fixture.sql'));
-    const actor = randomUUID();
-    await client.query('insert into profiles(id,credits) values($1,1000)', [actor]);
-    await client.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
-      values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`, [actor, 'opening_grant:' + actor]);
-    const source = (await client.query('select turn_test.report_source($1) v', [actor])).rows[0].v;
-    await client.query(`update artifact_rounds set steps = jsonb_set(steps, '{s,fieldMeta}', '{}') where id = $1`, [source.round]);
-    if (accountBound) {
-      const g = (await client.query('select d7_test.artifacts($1) v', [actor])).rows[0].v;
-      const account = (await client.query('select account_project_id id from opc_items where work_item_id=$1', [g.workItem])).rows[0].id;
-      await client.query(`insert into opc_account_strategy_drafts(account_project_id,draft_id,actor_id,root_source_version_id,base_source_version_id,
-        base_account_revision,current) values($1,$2,$3,$4,$4,0,true)`, [account, source.draft, actor, g.version]);
-    }
-    return { actor, source };
+    await mentorFixtures(client);
+    return mentorActor(client, { accountBound });
   },
-  async run({ call, state: { actor, source } }) {
-    await call('mentor_turn_prepare', [actor, source.session, true, null]);
-    const policy = { q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30, historyItems: 100, inputBytes: 1000,
-      limits: { model: 3, paidTools: 0, freeTools: 1 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
-      mentor: { moduleId: source.module, stepId: 's', sourceChecked: accountBound } };
-    const { turnId } = await call('turn_open', [actor, source.session, randomUUID(), 'mentor', JSON.stringify(policy)]);
-    for (const seq of [1, 2, 3]) {
-      await call('turn_call_begin', [actor, turnId, seq, 'model', randomUUID(), null, null, hash('r' + turnId + seq), 0.02, 6]);
-      await call('turn_call_identity', [actor, turnId, seq, 'gen-' + seq]);
-      await call('turn_call_record', [actor, turnId, seq, 'ok', 0.001, 0.001, '{}', null, hash('p' + turnId + seq), 'body']);
-    }
-    if (accountBound) await call('mentor_source_check', [actor, source.session]);
-    await call('turn_close', [actor, turnId, 'completed', JSON.stringify([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }]),
-      true, false, null, JSON.stringify({ roundId: source.round, revisionId: source.revision, versions: { s: 1 },
-        organizerInput: { captureFormat: 'v2', userInput: 'hi' }, output: { inputKind: 'answer', patches: [], notes: [] },
-        ...(research ? { research: researchJournal(research.operations, research.bytes) } : {}) })]);
-  },
+  async run({ call, state }) { await mentorTurn(call, state, { accountBound, research }); },
 });

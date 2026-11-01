@@ -22,6 +22,7 @@ const REFUSED: Record<string, string> = {
   TURN_ACCOUNT_ERASING: '账号正在注销，无法发送消息。',
   TURN_SKILL_UNAVAILABLE: '所选技能现在用不了，这条消息没有发送，也没有扣费。可以换一个技能，或不选技能再发送。',
   TURN_REFERENCES_UNAVAILABLE: '引用的资料现在读不了，这条消息没有发送，也没有扣费。可以去掉引用再发送。',
+  TURN_CREDIT_ACCOUNT_REVIEW: '你的积分账户状态需要我们核对，这条消息没有发送，也没有扣费。请提交工单，我们帮你处理。',
   TURN_RESUME_COST_PENDING: '上一步的费用还在核对，请稍后再点继续。',
   TURN_RESUME_DENIED: '这一轮已经结束，请刷新后查看结果。',
   TURN_RESUME_INPUT_LOST: '这一轮无法继续，已全额退回积分。请重新发送。',

@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { canonicalAccount, type CanonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
-import { discoverSkillCatalog } from '../runtime/skillCatalog';
+import { discoverSkillCatalog, moduleUsesVoice, pinnedCatalogEntry } from '../runtime/skillCatalog';
 import { admitCatalogVoice } from '../runtime/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
@@ -12,7 +12,7 @@ import { admitOwnPosts } from '../runtime/workspacePosts';
 import { databaseSkillSource } from '../skills/databaseSource';
 import type { ChatToolDeps } from './tools/chatTools';
 import { FREE_RESULT_RESERVE_BYTES } from './tools/plan';
-import { prepareSkills } from './tools/skills';
+import { prepareSkills, withPinnedSkill } from './tools/skills';
 
 /*
  * CORE-PATH-V2 V2-6: what POST /api/turn gives a free chat for its tools. All of it runs before turn_open: the Skill catalog with
@@ -22,11 +22,15 @@ import { prepareSkills } from './tools/skills';
 export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient): ChatToolDeps {
   return {
     library: true,
-    async skills(actorId) {
+    async skills(actorId, pin) {
       const client = user();
-      const catalog = await discoverSkillCatalog(client, admin, { maxResultBytes: FREE_RESULT_RESERVE_BYTES, excludeSocial: false, actorId });
-      const prepared = await prepareSkills(catalog, entry => databaseSkillSource({ userClient: client, privateClient: admin,
-        moduleId: entry.moduleId, skillId: entry.skillId, revisionId: entry.revisionId }), FREE_RESULT_RESERVE_BYTES);
+      const sourceOf = (entry: { moduleId: string; skillId: string; revisionId: string }) => databaseSkillSource({ userClient: client,
+        privateClient: admin, moduleId: entry.moduleId, skillId: entry.skillId, revisionId: entry.revisionId });
+      const listed = await discoverSkillCatalog(client, admin, { maxResultBytes: FREE_RESULT_RESERVE_BYTES, excludeSocial: false, actorId });
+      // A work item's method is the revision it is bound to, in place of what the catalog lists for its module.
+      const catalog = pin ? withPinnedSkill(listed, pin, await pinnedCatalogEntry(sourceOf(pin), pin, FREE_RESULT_RESERVE_BYTES,
+        await moduleUsesVoice(admin, pin.moduleId))) : listed;
+      const prepared = await prepareSkills(catalog, sourceOf, FREE_RESULT_RESERVE_BYTES);
       return { catalog, prepared };
     },
     async voice(actorId, catalog) {

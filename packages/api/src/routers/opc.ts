@@ -181,8 +181,8 @@ export const opcRouter = router({
       ctx.opc.revise(input.draftId, input.requestId, input.expectedRoundId),
     ),
   saveWorkResult: procedure
-    .input(z.object({ executionId: z.string().uuid() }).strict())
-    .mutation(({ ctx, input }) => ctx.opc.saveWorkResult(input.executionId)),
+    .input(z.union([z.object({ executionId: z.string().uuid() }).strict(), z.object({ turnId: z.number().int().positive() }).strict()]))
+    .mutation(({ ctx, input }) => 'turnId' in input ? ctx.opc.saveWorkResult(input) : ctx.opc.saveWorkResult(input.executionId)),
   workResults: readProcedure
     .input(z.object({ sessionId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),

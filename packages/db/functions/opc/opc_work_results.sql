@@ -13,5 +13,9 @@ BEGIN
  PERFORM bill2_actor(p_actor_id);
  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
  IF s.id IS NULL OR (s.content_deleted_at IS NULL AND NOT bill2_scope_allowed(p_actor_id,s.scope)) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
- RETURN (SELECT coalesce(jsonb_agg(jsonb_build_object('artifactId',v.id,'version',v.version,'sourceAvailable',artifact_evidence_allowed(v.project_id,v.evidence_ids),'body',CASE WHEN content_erasure_artifact_readable(p_actor_id,v.id) THEN v.report->'sections'->0->>'body' ELSE NULL END) ORDER BY v.created_at),'[]') FROM artifact_versions v JOIN runtime_executions e ON e.id=v.id WHERE e.session_id=s.id);
+ RETURN (SELECT coalesce(jsonb_agg(jsonb_build_object('artifactId',v.id,'version',v.version,'sourceAvailable',artifact_evidence_allowed(v.project_id,v.evidence_ids),'body',CASE WHEN content_erasure_artifact_readable(p_actor_id,v.id) THEN v.report->'sections'->0->>'body' ELSE NULL END,'turnId',v.report->'turnId') ORDER BY v.created_at),'[]') FROM artifact_versions v
+  -- CORE-PATH-V2 V2-10b: an old result's version is its execution; a turn's is named by its link (opc_work_result_turn).
+  WHERE v.id IN (SELECT e.id FROM runtime_executions e WHERE e.session_id=s.id
+   UNION ALL SELECT l.round_id FROM turns t JOIN opc_result_links l ON l.turn_actor_id=t.actor_id AND l.turn_id=t.id
+    WHERE t.actor_id=p_actor_id AND t.session_id=s.id AND l.step_id='result'));
 END $function$;
