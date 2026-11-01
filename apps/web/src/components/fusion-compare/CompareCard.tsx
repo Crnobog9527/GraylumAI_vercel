@@ -143,7 +143,8 @@ export function CompareCard({ compareId, names, turn = false, onAdopted, onQuote
       </div>
       <div className={styles.columns}>
         {data.columns.map(column => {
-          const own = turn ? { text: liveTurn.text[column.column] ?? '', streaming: liveTurn.open && !liveTurn.answered.includes(column.column) } : live[column.column];
+          const own = turn ? { text: liveTurn.text[column.column] ?? '',
+            streaming: liveTurn.open && !liveTurn.answered.includes(column.column) } : live[column.column];
           const shown = columnPhase(column, data.state);
           // A turn-path column nobody has answered yet is being written (this tab's stream, or another's): never "queued".
           const phase: ColumnPhase = own?.streaming ? 'streaming' : turn && shown === 'queued' && data.state === 'running' ? 'streaming' : shown;
@@ -172,7 +173,8 @@ export function CompareCard({ compareId, names, turn = false, onAdopted, onQuote
           );
         })}
       </div>
-      {ended && <p className={styles.total}>本次对比共扣 {totalChargedCredits(data.columns)} 积分（各列分别结算：未产生用量的列不收费，手动停止的按已产生用量计费）</p>}
+      {ended && <p className={styles.total}>本次对比共扣 {totalChargedCredits(data.columns)} 积分
+        （各列分别结算：未产生用量的列不收费{!turn && '，手动停止的按已产生用量计费'}）</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
     </section>
   );

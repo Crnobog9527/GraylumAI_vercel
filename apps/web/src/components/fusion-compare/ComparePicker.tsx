@@ -73,7 +73,8 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
       title={blockedReason ?? (question.trim() ? undefined : '先写好问题再对比')}
       onClick={() => void openPicker()}><Columns3 size={16} /> 多模型对比</button>
     {sessionError && <span role="status" className={styles.error}>{sessionError}</span>}
-    {open && activeSession && <ComparePicker options={data} turnPath={path === 'turn' || (path === 'auto' && 'corePathV2' in data && data.corePathV2 === true)} sessionId={activeSession} question={question} skill={skill}
+    {open && activeSession && <ComparePicker options={data} sessionId={activeSession}
+      turnPath={path === 'turn' || (path === 'auto' && 'corePathV2' in data && data.corePathV2 === true)} question={question} skill={skill}
       onClose={() => setOpen(false)} onMaybeStarted={onMaybeStarted} startId={startId}
       onUpgrade={() => { setOpen(false); setPaywall(true); }}
       onStarted={(compareId, names, turn) => { setOpen(false); onStarted(compareId, names, activeSession, turn); }} />}
@@ -138,7 +139,10 @@ function ComparePicker({ options, turnPath, sessionId, question, skill, onClose,
         shown: { credits: estimate.credits, columns: estimate.columns } });
       // The group exists but holds nothing yet: keep the request id (it outlives this dialog) so a top-up and another click
       // continue the same start instead of meeting FUSION_COMPARE_ACTIVE.
-      if (result.state === 'waiting_credits') { setError({ text: `余额不够这次对比的上限（最多 ${estimate.credits} 积分）。充值后再点一次开始，会接着这次对比继续。`, upgrade: false }); return; }
+      if (result.state === 'waiting_credits') {
+        setError({ text: `余额不够这次对比的上限（最多 ${estimate.credits} 积分）。充值后再点一次开始，会接着这次对比继续。`, upgrade: false });
+        return;
+      }
       if (result.state === 'processing') { setError({ text: '正在准备，请稍候再点一次开始。', upgrade: false }); return; }
       startId.current = null;
       onStarted(result.compareId, names, false);
@@ -156,7 +160,9 @@ function ComparePicker({ options, turnPath, sessionId, question, skill, onClose,
       <DialogContent className={styles.picker}>
         <DialogHeader>
           <DialogTitle>多模型对比</DialogTitle>
-          <DialogDescription>同一个问题交给几个模型同时回答，看完选一个继续。已按推荐勾好，也可以自己换。</DialogDescription>
+          <DialogDescription>
+            同一个问题交给几个模型同时回答，看完选一个继续。已按推荐勾好，也可以自己换。
+          </DialogDescription>
         </DialogHeader>
         <fieldset className={styles.models}>
           <legend className={styles.muted}>选择 {options.minModels}–{options.maxModels} 个模型</legend>
@@ -177,7 +183,8 @@ function ComparePicker({ options, turnPath, sessionId, question, skill, onClose,
         {status.ready && <p className={styles.estimate} role="status">{price.isPending || !estimate
           ? <><Loader2 size={14} className={styles.spin} /> 正在计算预计消耗…</>
           : estimate.overBudget ? '这次对比超过单次上限，请少选几个模型。'
-            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费，开始生成后手动停止的按已用量计费。</>}</p>}
+            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费
+              {!turnPath && '，开始生成后手动停止的按已用量计费'}。</>}</p>}
         {error && <p role="alert" className={styles.error}>{error.text}{error.upgrade && <>
           {' '}<button type="button" className="underline" onClick={onUpgrade}>去升级</button></>}</p>}
         <DialogFooter>

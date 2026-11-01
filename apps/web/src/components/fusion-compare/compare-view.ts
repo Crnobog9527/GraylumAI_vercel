@@ -72,7 +72,8 @@ const RECOVERABLE = new Set(['FUSION_COMPARE_ACTIVE', 'FUSION_COMPARE_DENIED', '
   'FUSION_GROUP_CONFLICT', 'BILL2_REQUEST_CONFLICT', 'FUSION_ADMISSION_UNAVAILABLE']);
 export const isDefiniteRefusal = (error: unknown) => {
   const code = error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '';
-  return !RECOVERABLE.has(code) && /^(FUSION|REPORT)_(?![A-Z_]*UNAVAILABLE)[A-Z_]+$|^POSITIONING_REQUIRED$|^TURN_(?!LOST$|REQUEST_REPLAYED$|[A-Z_]*UNAVAILABLE$)[A-Z_]+$/.test(code);
+  return !RECOVERABLE.has(code) && (/^(FUSION|REPORT)_(?![A-Z_]*UNAVAILABLE)[A-Z_]+$|^POSITIONING_REQUIRED$/.test(code)
+    || /^TURN_(?!LOST$|REQUEST_REPLAYED$|[A-Z_]*UNAVAILABLE$)[A-Z_]+$/.test(code));
 };
 export const isUpgradeRefusal = (error: unknown) => /FUSION_COMPARE_FORBIDDEN|FUSION_MEMBERSHIP_REQUIRED/
   .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');
