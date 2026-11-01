@@ -5,8 +5,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 
-export async function topicCases(t){
- const {c,one,open,begin,identity,record,close,balance,account,policy,refusal,report}=t;
+function helpers({c,one,open,begin,identity,record,close,policy}){
  const source=a=>one('select turn_test.topic_source($1) v',[a.actor]);
  const read=(a,src,request=randomUUID())=>one('select topic_turn_source($1,$2,$3) v',[a.actor,src.draft,request]);
  const pol=()=>policy({gCredits:30,minCredits:10,limits:{model:1,paidTools:0,freeTools:0}});
@@ -28,6 +27,12 @@ export async function topicCases(t){
  const accounts=async(a,src)=>[{platform:src.platform,account:src.account,expectedRevision:(await c.query(
   'select revision from opc_accounts where actor_id=$1 and account_key=$2',[a.actor,src.account])).rows[0].revision}];
 
+ return {source,read,pol,item,topicTurn,save,adopt,events,accounts};
+}
+
+export async function topicCases(t){
+ const {c,one,refusal,report,balance,account,open,close}=t;
+ const {source,read,pol,item,topicTurn,save,adopt,events,accounts}=helpers(t);
  // 1. topic_turn_source: what the old prepareTopicTurn checked, refused before anything is frozen.
  {
   const a=await account(1000),src=await source(a),got=await read(a,src);
@@ -123,12 +128,55 @@ export async function topicCases(t){
   assert.equal((await one('select opc_topic_read($1,$2) v',[a.actor,src.draft])).opening.executionId,request);
   await save(a,src,request,[proposal]);
   assert.equal((await events(a)).length,1);
+  // Another account's event of the same shape, untouched by everything below.
+  const b=await account(1000),other=await source(b),theirs=item(other),their=await topicTurn(b,other,JSON.stringify([theirs]));
+  await save(b,other,their.request,[theirs]);
   const scope=await one('select content_erasure_scope($1,$2,$3) v',[a.actor,'session',src.topicSession]);
   assert.equal(scope.dataEvents.length,1,'the preview names the event');
   await one('select content_erasure_mark_session($1,$2) v',[a.actor,src.topicSession]);
   assert.equal((await events(a)).length,0,'the event went with the conversation');
   assert.equal((await c.query('select body from opc_topic_draft_versions where request_id=$1',[request])).rows[0].body,null,'the draft text too');
   assert.match(await refusal(save(a,src,request,[proposal],{request:randomUUID(),version:1})),/OPC_DATA_SOURCE_DENIED/);
-  report.checks.push('topic: the opening reads its turn; deleting the conversation erases its events and drafts');
+  assert.equal((await events(b)).length,1,'another account keeps its event');
+  assert.equal((await c.query('select body from opc_topic_draft_versions where request_id=$1',[their.request])).rows[0].body!==null,true);
+  report.checks.push('topic: the opening reads its turn; deleting the conversation erases its events and drafts, and only its own');
+ }
+}
+
+// Runs after the relation lock count: an account scrub invalidates cached plans, which the count would read as locks of turn_open.
+export async function topicAccountCases(t){
+ const {c,one,account,report}=t,{source,item,topicTurn,save,adopt,events,accounts}=helpers(t);
+ // 5. Account erasure: the proofs count an event that names a turn, the scrub removes it, another account keeps its own.
+ {
+  const a=await account(1000),src=await source(a),proposal=item(src),{request}=await topicTurn(a,src,JSON.stringify([proposal]));
+  await save(a,src,request,[proposal]);
+  const list=await accounts(a,src),first=await events(a);
+  assert.equal(first.length,1);
+  assert.ok(first[0].turn_id);
+  await adopt(a,src,[proposal],list,{sources:[{itemId:proposal.id,executionId:request}]});
+  assert.equal((await events(a)).filter(e=>e.turn_id).length,2,'both events name the turn');
+  const b=await account(1000),other=await source(b),theirs=item(other),their=await topicTurn(b,other,JSON.stringify([theirs]));
+  await save(b,other,their.request,[theirs]);
+  // What each proof counts for these rows alone: the same proof with the rows gone, inside a transaction that is undone.
+  const proofs=async()=>[Number(await one('select account_erasure_body_remaining($1) v',[a.actor])),
+   Number(await one('select account_erasure_business_remaining($1) v',[a.actor]))];
+  const held=await proofs();
+  await c.query('begin');
+  await c.query('delete from opc_data_events where actor_id=$1',[a.actor]);
+  const without=await proofs();
+  await c.query('rollback');
+  assert.deepEqual(held.map((n,i)=>n-without[i]),[2,2],'each proof counts both rows');
+  assert.equal((await events(a)).length,2);
+  // As account_erasure_confirm leaves it (an earlier transaction): the profile closed, the request recorded.
+  await c.query("update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1",[a.actor]);
+  await c.query("insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now()-interval '1 minute')",[a.actor,randomUUID()]);
+  const scrub=await one('select account_erasure_scrub_content($1) v',[a.actor]);
+  assert.notEqual(scrub.retry,true);
+  assert.equal(scrub.opc_data_events,2);
+  assert.equal((await events(a)).length,0,'the scrub removed them');
+  assert.ok(held[0]-(await proofs())[0]>=2,'the body proof fell with them');
+  assert.equal((await events(b)).length,1,'another account keeps its event');
+  assert.equal(await one('select count(*)::int v from turns where actor_id=$1',[a.actor]),1,'the billing record of the turn stays');
+  report.checks.push('topic: account erasure proofs count events naming a turn, the scrub removes them, another account is untouched');
  }
 }

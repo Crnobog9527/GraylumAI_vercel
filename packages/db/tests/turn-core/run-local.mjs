@@ -10,7 +10,7 @@ import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {localDb,read,root} from '../runtime-view-perf/local-db.mjs';
 import {reportCases} from './report-cases.mjs';
-import {topicCases} from './topic-cases.mjs';
+import {topicAccountCases,topicCases} from './topic-cases.mjs';
 import {reportFinalCases} from './report-final-cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 // V2-7a: a report opens only for a Gold account's confirmed round (turn_report_admit); the fixture builds one per call.
@@ -789,5 +789,6 @@ try{
   report.checks.push(`a report's turn_open: ${core} relation locks on core-path tables (<= 40), ${report.reportOpenRelationLocks.source} on its source reads, ${report.reportOpenRelationLocks.ledger} in the ledger leaves`);
  }
  await reportFinalCases({c,one,open,begin,record,account,reportSource,reportPolicy,refusal,report});
+ await topicAccountCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}
