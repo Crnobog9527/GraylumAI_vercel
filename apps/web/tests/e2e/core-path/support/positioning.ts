@@ -82,8 +82,18 @@ export async function completeBenchmarkStep(page: Page, meter: SpendMeter) {
   const confirmChoice = candidates.getByRole('button', { name: '确认选择' });
   // Reference-only accounts ("头部账号", "只作参考") have a disabled box; the others are ticked one by one, counted by "已选 N 个".
   const boxes = candidates.getByRole('checkbox');
-  for (let i = 0; i < await boxes.count() && !(await confirmChoice.isEnabled()); i += 1) {
-    if (await boxes.nth(i).isEnabled() && !(await boxes.nth(i).isChecked())) await boxes.nth(i).check(); // scrolls the box into view first
+  // The card can be re-rendered while the turn that produced it is still closing, which drops ticks made in that window
+  // ("已选 0 个" after ticking). So tick, wait until the count has held steady, and only then press the button; tick again
+  // from the card's own state if a re-render wiped the choice.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let i = 0; i < await boxes.count() && !(await confirmChoice.isEnabled()); i += 1) {
+      if (await boxes.nth(i).isEnabled() && !(await boxes.nth(i).isChecked())) await boxes.nth(i).check(); // scrolls the box into view first
+    }
+    const picked = candidates.getByText(/已选 \d+ 个/);
+    await page.waitForTimeout(2_000);
+    const held = await picked.innerText().catch(() => '');
+    if (await confirmChoice.isEnabled() && !/已选 0 个/.test(held)) break;
+    test.info().annotations.push({ type: 'benchmark-selection-reset', description: `attempt ${attempt}: "${held}", button ${await confirmChoice.isEnabled() ? 'on' : 'off'}` });
   }
   await expect(confirmChoice).toBeEnabled();
   await confirmChoice.click();
