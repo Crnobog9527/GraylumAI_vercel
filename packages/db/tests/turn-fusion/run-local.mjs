@@ -326,6 +326,35 @@ try{
   assert.match(await refusal(one('select turn_stop($1,$2,false,null) v',[a.actor,o.turnId])),/TURN_STOP_NOT_ALLOWED/);
   report.checks.push('compare cards: list and read return only the owner\'s compare, one column per model in order, each column rounded on its own, a refused column free and not shown; another account reads nothing; no client role; a compare cannot be stopped');
  }
+ // 7c. The sidebar list (0444): a conversation of the turn path is listed from session_messages, once, by its first visible user
+ // message; hidden, deleted and foreign conversations are not.
+ {
+  const a=await account(),b=await account(),list=actor=>one('select opc_free_conversations($1) v',[actor]);
+  // A free conversation as the app starts it (its scope names the draft runtime_start makes); the fixture's session has none.
+  const start=async actor=>(await one('select runtime_start($1,$2,$3) v',[actor,randomUUID(),JSON.stringify({scope:{kind:'positioning_draft'}})])).sessionId;
+  a.session=await start(a.actor);
+  const put=(session,seq,role,content,over='')=>c.query(`insert into session_messages(session_id,seq,role,turn_id,content,content_hash,visible,created_at)
+   values($1,$2,$3,$4,$5,$6,${over||'true'},now())`,[session,seq,role,90000+seq,content,hash(content)]);
+  assert.deepEqual(await list(a.actor),[],'no message, no compare: not listed');
+  await put(a.session,1,'user','   ',"false");
+  assert.deepEqual(await list(a.actor),[],'a hidden message does not list a conversation');
+  await put(a.session,2,'user','  How should a coffee shop position itself?  ');
+  await put(a.session,3,'assistant','Start with the buyer.');
+  const first=await list(a.actor);
+  assert.deepEqual(first.map(x=>[x.sessionId,x.title]),[[a.session,'How should a coffee shop position itself?']],'listed once, titled by the first visible user message');
+  assert.ok(first[0].lastActivityAt);
+  // Another account sees nothing of it; the old-path conversations keep listing beside it.
+  assert.deepEqual(await list(b.actor),[]);
+  const second=await start(a.actor);
+  await put(second,1,'user','A second question');
+  const both=await list(a.actor);
+  assert.deepEqual(both.map(x=>x.title).sort(),['A second question','How should a coffee shop position itself?']);
+  assert.equal(new Set(both.map(x=>x.sessionId)).size,2,'each conversation once');
+  // Content deleted: the conversation leaves the list.
+  await c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[second]);
+  assert.deepEqual((await list(a.actor)).map(x=>x.sessionId),[a.session]);
+  report.checks.push('sidebar list: a conversation of the turn path is listed once from session_messages by its first visible user message; hidden-only, deleted and foreign conversations are not');
+ }
  // 8. The 3-unfinished version rule (10-20) and jury adoption (once per adopted review, no fee).
  {
   const a=await account();
