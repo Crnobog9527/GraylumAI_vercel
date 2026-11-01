@@ -11,11 +11,12 @@ vi.mock('@/components/opc/query-notice',()=>({QueryNotice:()=>null}));
 vi.mock('@/trpc/client',()=>{
  const view={scope:{kind:'positioning_draft'},executions:[turn('e1','completed','第一条'),turn('e2','running','最后一条')]};
  const namespace=(group:string)=>new Proxy({}, {get:(_,name)=>({
-  useQuery:()=>({data:group==='runtime'&&name==='view'?view:undefined,error:null,refetch:async()=>undefined}),
+  useQuery:()=>({isSuccess:group==='runtime'&&name==='choices',data:group==='runtime'&&name==='view'?view:undefined,error:null,refetch:async()=>undefined}),
   useMutation:()=>({isPending:false,mutateAsync:vi.fn()}),
  })});
  return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),fusionCompare:namespace('fusionCompare'),useUtils:()=>({})}};
 });
+vi.mock('./use-has-turn-messages',()=>({useHasTurnMessages:()=>({loaded:true,has:false})}));
 import RuntimePage from './page';
 
 it('puts the open turn notice and its actions under the last message, above the composer',()=>{

@@ -407,7 +407,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [openingSteps, setOpeningSteps] = useState<string[]>([]);
   const [notice, setNotice] = useState(""), openingFailed = useOpeningFailureNotice(d, history.data?.executions, notice, setNotice);
   useEffect(() => {
-    if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted) return; // read-only: no turn
+    if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted || !turnPath.ready) return; // read-only; path undecided
     // A manual draft (我已有定位, R15) opens too: the mentor asks for the existing positioning first.
     if (d.snapshot.state !== "draft") return;
     const flowSteps: Step[] = d.snapshot.workflow.steps;
@@ -462,7 +462,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         setOpeningSteps([...openingInFlight.current]);
       }
     })();
-  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed]);
+  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed, turnPath.ready]);
   const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, historyFailed: history.isError, draftId, recover: recoverPendingStep,
     steps: (d?.snapshot.workflow.steps ?? []) as Step[],
     ready: !planView && hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
