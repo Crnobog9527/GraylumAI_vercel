@@ -129,6 +129,44 @@ export async function workContentCases(t){
   assert.match(await refusal(save(w,{expected:e+1,id:r.id})),/OPC_CONTENT_DENIED|OPC_CONTENT_INVALID/);
   await one("select content_erasure_confirm($1,'content',$2,$3) v",[w.actor,script.id,await previewHash()]);
  }
+ // A turn that opened later had the reply in its history, a turn that read the claimed revision held the script: both go. A running one
+ // would write after the cleanup, so the delete waits for it.
+ {
+  const w=await workspace(),e=await latest(w,'script'),r=await turn(w,{text:'ERASE_FIRST'});
+  const script=await save(w,{expected:e,id:r.id}),request=randomUUID();
+  await prepare(w,request,script.id);const claim=await work(w,request);
+  const pkg=await turn(w,{request,text:JSON.stringify({storyboard:'S'}),extra:hold(claim)});
+  const reading=await work(w,randomUUID());
+  assert.equal(reading.work.materialRevision,claim.work.materialRevision);
+  const later=await turn(w,{text:'重复：ERASE_FIRST',extra:hold(reading)});
+  const scope=(await one("select content_erasure_scope($1,'content',$2) v",[w.actor,script.id])).turns.map(Number);
+  assert.ok([r.id,pkg.id,later.id].every(id=>scope.includes(Number(id))));
+  const running=await open(w.a,{session:w.session});
+  const hash=async()=>(await one("select content_erasure_preview($1,'content',$2) v",[w.actor,script.id])).previewHash;
+  assert.match(await refusal(one("select content_erasure_confirm($1,'content',$2,$3) v",[w.actor,script.id,await hash()])),/CONTENT_ERASURE_BUSY/);
+  assert.equal((await version(script.id)).body,'ERASE_FIRST','a refused delete changed nothing');
+  await close(w.a,running.turnId,'failed',{messages:[],delivered:false});
+  await one("select content_erasure_confirm($1,'content',$2,$3) v",[w.actor,script.id,await hash()]);
+  const held=await one("select count(*)::int v from session_messages where session_id=$1 and content like '%ERASE_FIRST%'",[w.session]);
+  assert.equal(held,0,'no copy stays in the conversation');
+ }
+ // A resumed package: it has its own request id, is saved under the request that claimed the material, and blocks a second one.
+ {
+  const w=await workspace(),script=await save(w,{expected:await latest(w,'script'),id:(await turn(w,{text:'R'})).id}),request=randomUUID();
+  await prepare(w,request,script.id);const claim=await work(w,request);
+  const first=await open(w.a,{session:w.session,request,pol:policy(hold(claim))});
+  await c.query("update turns set state='paused',pause_reason='waiting_credits' where actor_id=$1 and id=$2",[w.actor,first.turnId]);
+  await c.query('set role service_role');
+  const next=await one('select turn_open($1,$2,$3,$4,$5,$6) v',[w.actor,w.session,randomUUID(),'chat',JSON.stringify(policy(hold(claim))),first.turnId]);
+  await c.query('reset role');
+  assert.equal(await one('select opc_turn_root_request($1,$2) v',[w.actor,next.turnId]),request);
+  assert.equal(Number((await one('select to_jsonb(t) v from opc_turn_latest($1,$2) t',[w.actor,request])).id),Number(next.turnId));
+  assert.match(await refusal(prepare(w,randomUUID(),script.id)),/OPC_CONTENT_ALREADY_GENERATED/,'the resumed turn still holds the claim');
+  await begin(w.a,next.turnId,1);await record(w.a,next.turnId,1);
+  await close(w.a,next.turnId,'completed',{messages:[{role:'user',content:'[OPC_VIDEO_PACKAGE_V1] x'},{role:'assistant',content:JSON.stringify({storyboard:'RESUMED'})}]});
+  const saved=await results(w,request,next.turnId,script.id);
+  assert.equal((await version(saved.storyboard.id)).turn_id,Number(next.turnId));
+ }
  // A conversation delete keeps the saved versions readable, refuses a new save, and is not the local fast path.
  {
   const w=await workspace(),r=await turn(w,{text:'SESSION_SAVED'}),left=await turn(w),e=await latest(w,'script');

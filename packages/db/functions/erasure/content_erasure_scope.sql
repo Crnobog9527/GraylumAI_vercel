@@ -87,14 +87,19 @@ BEGIN
   executions:=ARRAY(SELECT DISTINCT x FROM unnest(executions||more) x ORDER BY x);
   EXIT WHEN cardinality(executions)=n;
  END LOOP;
- -- CORE-PATH-V2 V2-10b C2: the turns of the same dependency, by what a turn can hold: the producing turn of a selected version, the
- -- turn given a script as material or as source, and every turn of a conversation in scope.
+ -- CORE-PATH-V2 V2-10b C2: the turns of the same dependency, by what a turn can hold: the producing turn of a selected version, a turn
+ -- given a script as material (any turn that read a claimed revision) or as source, every turn of a conversation in scope; then, as
+ -- runtime_history_dependencies for an execution, every later turn of those conversations, whose history held the reply.
  turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND (t.session_id=ANY(sessions)
    OR t.id IN (SELECT c.turn_id FROM opc_content_versions c WHERE c.actor_id=a AND c.id=ANY(content_ids) AND c.turn_id IS NOT NULL)
    OR t.request_id IN (SELECT b.request_id FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.source_script_id=ANY(refs))
+   OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.session_id=t.session_id AND b.source_script_id=ANY(refs)
+    AND b.material_revision::text=t.policy#>>'{workMaterial,revision}')
    OR t.policy#>>'{workSource,contentId}'=ANY(refs::text[])
    OR t.session_id IN (SELECT rs.id FROM runtime_sessions rs WHERE rs.actor_id=a AND content_erasure_references(rs.scope,refs)))
   ORDER BY t.id);
+ turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND EXISTS(SELECT 1 FROM turns src
+   WHERE src.actor_id=a AND src.id=ANY(turn_ids) AND src.session_id=t.session_id AND src.id<=t.id) ORDER BY t.id);
  SELECT count(*) INTO preserved FROM opc_content_versions c0 WHERE c0.actor_id=a AND c0.erased_at IS NULL
   AND NOT c0.id=ANY(content_ids) AND (c0.execution_id=ANY(executions) OR c0.turn_id=ANY(turn_ids) OR c0.source_content_id=ANY(content_ids));
  preserved:=preserved+(SELECT count(*) FROM artifact_versions v WHERE NOT v.project_id=ANY(projects)

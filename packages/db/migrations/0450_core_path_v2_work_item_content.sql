@@ -10,6 +10,8 @@
 --   opc_content_turn_available   opc_result_link_available for a turn id; opc_content_allowed follows it, as runtime_history_available.
 --   opc_work_check         takes the request id: a claimed request reads its claimed revision (and returns it to freeze); another request
 --                          may not take a claimed revision before the claimant opened (opc_video_runtime_binding_guard's rule).
+--   opc_turn_root_request, opc_turn_latest   a turn resumed after a credit pause has its own request id: the first says which request it continues,
+--                          the second which turn a claimed request has now.
 --   opc_work_source        read of the saved content a derived Skill reads (opc_content_source_current's choice).
 --   opc_video_material_prepare   the conflict loop and abandon also see a claimed request that became a turn.
 --   content_erasure_scope/_confirm/_mark_session/_saved_readable   a deleted version takes its turn's reply and raw body with it, like its
@@ -79,6 +81,30 @@ BEGIN
  RETURN jsonb_build_object('work',work||jsonb_build_object('brief',m.content->'brief','material',m.content->'material',
   'videoPackage',binding.request_id IS NOT NULL,'materialRevision',m.revision,'materialHash',m.content_hash));
 END $function$;
+
+CREATE OR REPLACE FUNCTION public.opc_turn_root_request(p_actor_id uuid, p_turn_id bigint)
+ RETURNS uuid
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+ WITH RECURSIVE up AS (
+  SELECT id,request_id,resume_of FROM turns WHERE actor_id=p_actor_id AND id=p_turn_id
+  UNION ALL SELECT t.id,t.request_id,t.resume_of FROM up JOIN turns t ON t.actor_id=p_actor_id AND t.id=up.resume_of)
+ SELECT request_id FROM up WHERE resume_of IS NULL
+$function$;
+
+CREATE OR REPLACE FUNCTION public.opc_turn_latest(p_actor_id uuid, p_request_id uuid)
+ RETURNS SETOF turns
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+ WITH RECURSIVE down AS (
+  SELECT id FROM turns WHERE actor_id=p_actor_id AND request_id=p_request_id
+  UNION ALL SELECT t.id FROM down JOIN turns t ON t.actor_id=p_actor_id AND t.resume_of=down.id)
+ SELECT t.* FROM turns t WHERE t.actor_id=p_actor_id AND t.id=(SELECT max(id) FROM down)
+$function$;
 
 CREATE OR REPLACE FUNCTION public.opc_work_source(p_actor_id uuid, p_session_id uuid, p_kind text)
  RETURNS jsonb
@@ -377,8 +403,8 @@ BEGIN
 
  PERFORM bill2_actor(p_actor_id);
  IF NOT coalesce(p_storyboard,false) AND NOT coalesce(p_editing,false) THEN RAISE EXCEPTION 'OPC_CONTENT_CHOICE_INVALID';END IF;
- SELECT b.* INTO binding FROM opc_video_material_bindings b JOIN turns x ON x.actor_id=b.actor_id AND x.request_id=b.request_id
-  WHERE b.actor_id=p_actor_id AND b.request_id=p_request_id AND x.id=p_turn_id;
+ SELECT b.* INTO binding FROM opc_video_material_bindings b
+  WHERE b.actor_id=p_actor_id AND b.request_id=p_request_id AND b.request_id=opc_turn_root_request(p_actor_id,p_turn_id);
  IF binding.request_id IS NULL OR binding.work_item_id<>p_work_item_id OR binding.source_script_id<>p_source_script_id
   OR (binding.storyboard IS NOT NULL AND binding.storyboard IS DISTINCT FROM p_storyboard)
   OR (binding.editing IS NOT NULL AND binding.editing IS DISTINCT FROM p_editing)
@@ -508,7 +534,7 @@ BEGIN
    material_row.revoked material_revoked
   FROM opc_video_material_bindings b
   LEFT JOIN runtime_executions e ON e.actor_id=b.actor_id AND e.request_id=b.request_id
-  LEFT JOIN turns t ON t.actor_id=b.actor_id AND t.request_id=b.request_id
+  LEFT JOIN LATERAL opc_turn_latest(b.actor_id,b.request_id) t ON true
   LEFT JOIN runtime_scope_material material_row ON material_row.session_id=b.session_id AND material_row.revision=b.material_revision
   WHERE b.actor_id=p_actor_id AND b.work_item_id=p_work_item_id AND b.request_id<>p_request_id
    AND ((p_storyboard AND coalesce(b.storyboard,true)) OR (p_editing AND coalesce(b.editing,true)))
@@ -639,14 +665,19 @@ BEGIN
   executions:=ARRAY(SELECT DISTINCT x FROM unnest(executions||more) x ORDER BY x);
   EXIT WHEN cardinality(executions)=n;
  END LOOP;
- -- CORE-PATH-V2 V2-10b C2: the turns of the same dependency, by what a turn can hold: the producing turn of a selected version, the
- -- turn given a script as material or as source, and every turn of a conversation in scope.
+ -- CORE-PATH-V2 V2-10b C2: the turns of the same dependency, by what a turn can hold: the producing turn of a selected version, a turn
+ -- given a script as material (any turn that read a claimed revision) or as source, every turn of a conversation in scope; then, as
+ -- runtime_history_dependencies for an execution, every later turn of those conversations, whose history held the reply.
  turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND (t.session_id=ANY(sessions)
    OR t.id IN (SELECT c.turn_id FROM opc_content_versions c WHERE c.actor_id=a AND c.id=ANY(content_ids) AND c.turn_id IS NOT NULL)
    OR t.request_id IN (SELECT b.request_id FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.source_script_id=ANY(refs))
+   OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.session_id=t.session_id AND b.source_script_id=ANY(refs)
+    AND b.material_revision::text=t.policy#>>'{workMaterial,revision}')
    OR t.policy#>>'{workSource,contentId}'=ANY(refs::text[])
    OR t.session_id IN (SELECT rs.id FROM runtime_sessions rs WHERE rs.actor_id=a AND content_erasure_references(rs.scope,refs)))
   ORDER BY t.id);
+ turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND EXISTS(SELECT 1 FROM turns src
+   WHERE src.actor_id=a AND src.id=ANY(turn_ids) AND src.session_id=t.session_id AND src.id<=t.id) ORDER BY t.id);
  SELECT count(*) INTO preserved FROM opc_content_versions c0 WHERE c0.actor_id=a AND c0.erased_at IS NULL
   AND NOT c0.id=ANY(content_ids) AND (c0.execution_id=ANY(executions) OR c0.turn_id=ANY(turn_ids) OR c0.source_content_id=ANY(content_ids));
  preserved:=preserved+(SELECT count(*) FROM artifact_versions v WHERE NOT v.project_id=ANY(projects)
@@ -996,7 +1027,11 @@ BEGIN
  DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions) AND r.turn_id=t.id;
  UPDATE session_messages SET content='',content_hash=encode(sha256(''::bytea),'hex'),visible=false,deleted_at=coalesce(deleted_at,stamp)
   WHERE session_id=ANY(sessions) AND (content<>'' OR visible);
- -- The turns behind deleted content (content_erasure_scope), in conversations that stay.
+ -- The turns behind deleted content (content_erasure_scope), in conversations that stay. One still running would write its receipt and
+ -- reply after this cleanup, and the conversation has no tombstone to stop it: the delete waits for it (retryable).
+ IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND t.state<>'closed' AND NOT t.session_id=ANY(sessions)) THEN
+  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
+ END IF;
  DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND r.turn_id=t.id;
  UPDATE session_messages m SET content='',content_hash=encode(sha256(''::bytea),'hex'),visible=false,deleted_at=coalesce(m.deleted_at,stamp)
   FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND m.session_id=t.session_id AND m.turn_id=t.id AND (m.content<>'' OR m.visible);
@@ -1171,7 +1206,9 @@ BEGIN
           -- The page's handle of a topic reply (V2-10b): its turn's request id, what the topic draft and the adoption name.
           'requestId', (SELECT r.request_id FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id),
           -- A Skill reply of a work item (V2-10b C2): what the page offers to adopt.
-          'workSkill', (SELECT r.policy ? 'workSkill' FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id))
+          'workSkill', (SELECT r.policy ? 'workSkill' FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id),
+          -- The request a resumed turn continues: what a video package is named by.
+          'rootRequestId', opc_turn_root_request(p_actor_id, m.turn_id))
         ORDER BY m.seq), '[]'::jsonb)
       FROM (SELECT seq, role, turn_id, content FROM session_messages
             WHERE session_id = p_session_id AND visible AND deleted_at IS NULL AND seq > greatest(coalesce(p_after_seq, 0), 0)
@@ -1203,7 +1240,7 @@ DO $grants$
 DECLARE f text;
 BEGIN
  FOREACH f IN ARRAY ARRAY['opc_work_check(uuid,uuid,boolean,uuid)','opc_work_source(uuid,uuid,text)',
-   'opc_content_from_turn(uuid,uuid,uuid,bigint,text,text,bigint,uuid)','opc_video_turn_check(uuid,uuid,bigint,uuid)',
+   'opc_turn_root_request(uuid,bigint)','opc_turn_latest(uuid,uuid)','opc_content_from_turn(uuid,uuid,uuid,bigint,text,text,bigint,uuid)','opc_video_turn_check(uuid,uuid,bigint,uuid)',
    'opc_video_results_from_turn(uuid,uuid,uuid,bigint,uuid,bigint,bigint,boolean,boolean)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);

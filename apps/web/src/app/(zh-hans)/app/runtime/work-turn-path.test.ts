@@ -29,8 +29,9 @@ describe('a work item on the turn path', () => {
     expect(videoRequest('editing')).toContain('只含 editing 一个字符串字段');
   });
   it('reads a package reply by its request id', () => {
-    const messages = [{ role: 'user', requestId: 'r', turnId: 1 }, { role: 'assistant', requestId: 'r', turnId: 1 }];
-    expect(replyOfRequest(messages, 'r')).toBe(1);
+    // A turn resumed after a pause has its own request id; it is found by the request it continues.
+    const messages = [{ role: 'user', rootRequestId: 'r', turnId: 2 }, { role: 'assistant', rootRequestId: 'r', turnId: 2 }];
+    expect(replyOfRequest(messages, 'r')).toBe(2);
     expect(replyOfRequest(messages, 'other')).toBeNull();
   });
 });

@@ -114,7 +114,7 @@ BEGIN
    material_row.revoked material_revoked
   FROM opc_video_material_bindings b
   LEFT JOIN runtime_executions e ON e.actor_id=b.actor_id AND e.request_id=b.request_id
-  LEFT JOIN turns t ON t.actor_id=b.actor_id AND t.request_id=b.request_id
+  LEFT JOIN LATERAL opc_turn_latest(b.actor_id,b.request_id) t ON true
   LEFT JOIN runtime_scope_material material_row ON material_row.session_id=b.session_id AND material_row.revision=b.material_revision
   WHERE b.actor_id=p_actor_id AND b.work_item_id=p_work_item_id AND b.request_id<>p_request_id
    AND ((p_storyboard AND coalesce(b.storyboard,true)) OR (p_editing AND coalesce(b.editing,true)))

@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
+import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { AgentWorkStatus } from '@/components/chat-display/agent-work-status';
 import {
   RuntimeEmptyState,
@@ -22,7 +22,7 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { trpc } from '@/trpc/client';
-import { clearForSend, forgetPending, markPendingRestored, readPending, rememberPending, requestIdFor } from './send-input';
+import { clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor } from './send-input';
 import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from './turn-notices';
 import { workRowsOf } from './turn-work-rows';
 import { useTurnChat } from './use-turn-chat';
@@ -79,7 +79,8 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
     scriptKey = 'opc-final-turn:' + sessionId,
     inputKey = 'opc-runtime-input:' + sessionId;
   useEffect(() => {
-    setInput(localStorage.getItem(inputKey) ?? '');
+    // A send not confirmed yet comes back into the box; its record keeps the request id, so sending it again replays.
+    setInput(openingDraftWithReferences(localStorage, sessionId).text);
     setSkillId(localStorage.getItem('opc-runtime-skill:' + sessionId) ?? '');
   }, [sessionId, inputKey]);
   const update = (value: string) => {
@@ -112,7 +113,7 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
   const videoEnded = Boolean(currentScript && typeof window !== 'undefined' && localStorage.getItem('opc-video-ended:' + currentScript.id));
   const busy = chat.busy || videoBusy || guiding;
 
-  const { finalize, runVideo, setType, editItem } = useWorkItemSteps({
+  const { finalize, runVideo, setType, editPending } = useWorkItemSteps({
     chat,
     library,
     versions,
@@ -345,9 +346,17 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
         <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
           {!messages.length && !outgoing && <RuntimeEmptyState text="已带入选题简报和原工作方法，正在根据当前进度准备引导。" />}
           <section className={workStyles.transcript}>
-            {workItem && typePending && <ChatInlineNotice tone="warning">内容类型保存结果待核实。</ChatInlineNotice>}
+            {workItem && typePending && (
+              <ChatInlineNotice
+                tone="warning"
+                label="类型保存待核实"
+                actions={[{ label: CHAT_ACTION.retry, disabled: editPending, onClick: () => void setType('unknown') }]}
+              >
+                内容类型保存结果待核实。
+              </ChatInlineNotice>
+            )}
             {workItem && contentType === 'unknown' && (
-              <WorkTypeChoice disabled={busy || editItem.isPending || typePending} onChoose={value => void setType(value)} />
+              <WorkTypeChoice disabled={busy || editPending || typePending} onChoose={value => void setType(value)} />
             )}
             {replies.map(reply => {
               const question = asked(reply.turnId),

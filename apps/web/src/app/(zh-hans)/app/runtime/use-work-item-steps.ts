@@ -14,7 +14,8 @@ export function useWorkItemSteps({ chat, library, versions, workItem, isVideo, v
   chat: ReturnType<typeof useTurnChat>; library: { refetch: () => Promise<unknown> }; versions: readonly ContentVersion[]; workItem: WorkItem | null;
   isVideo: boolean; videoKey: string; scriptKey: string; setError: (text: string) => void; setVideoBusy: (busy: boolean) => void;
   setTypePending: (pending: boolean) => void;
-}) {
+}): { finalize: (reply: { turnId: number; requestId: string }, frozen?: ScriptOperation) => Promise<void>; runVideo: (op: VideoOperation) => Promise<void>;
+  setType: (value: string) => Promise<void>; editPending: boolean } {
   const editItem = trpc.opc.editLibrary.useMutation(), saveContent = trpc.opc.saveContentFromTurn.useMutation();
   const prepareVideo = trpc.opc.prepareVideoMaterial.useMutation(), saveVideo = trpc.opc.saveVideoResultsFromTurn.useMutation();
 
@@ -139,5 +140,5 @@ export function useWorkItemSteps({ chat, library, versions, workItem, isVideo, v
     }
   }
   // After a reload: a frozen step resumes itself once, when no turn is running; one held for the user's choice waits for it.
-  return { finalize, runVideo, setType, editItem };
+  return { finalize, runVideo, setType, editPending: editItem.isPending };
 }

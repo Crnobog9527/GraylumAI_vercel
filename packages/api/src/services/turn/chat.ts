@@ -77,6 +77,7 @@ function workMaterial(work: WorkItemTurn | null): string {
 }
 export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string; chosen?: ChatSelection;
   /** The page's work_item conversation (V2-10b): reads its checks, method and brief before the open. */ workItem?: boolean;
+  /** A resumed work turn: the request that claimed its material (the resume has its own id). */ workRequest?: string;
   /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead } };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -116,9 +117,10 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // V2-10b: a work item's refusals and what its turn needs, before anything is quoted or frozen (B1: not under turn_open's locks).
   // Only when the request says so: a free chat's round trips stay as budgeted (plan 2.3).
   let work: WorkItemTurn | null = null;
+  const workRequest = input.workRequest ?? input.requestId;
   if (input.workItem) try {
     work = (await db.workCheck({ actorId: input.actorId, sessionId: input.sessionId, videoRequired: VIDEO_REQUEST.test(input.text),
-      requestId: input.requestId })).work;
+      requestId: workRequest })).work;
   }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_DATABASE_UNAVAILABLE' }); }
   if (work && VIDEO_PACKAGE.test(input.text) && !work.videoPackage) return emit({ type: 'error', code: 'OPC_CONTENT_BINDING' });
@@ -202,7 +204,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat',
     policy: { ...policy, ...(workSkill ? { workSkill } : {}), ...(workSource ? { workSource } : {}),
-      ...(work?.videoPackage ? { workMaterial: { revision: work.materialRevision, hash: work.materialHash } } : {}) },
+      // Every turn that read a revision: deleting the script it held reaches this turn (content_erasure_scope).
+      ...(work && work.materialRevision !== null ? { workMaterial: { revision: work.materialRevision, hash: work.materialHash } } : {}) },
     ...(input.resume ? { resumeOf: input.resume.of } : {}) }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
@@ -211,7 +214,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
   // Archived between the read and the open: the turn runs on, as one opened just before; the miss is only logged (B1).
   if (work) void swallow('turn_work_business_archived_after_read', db.workCheck({ actorId: input.actorId, sessionId: input.sessionId,
-    videoRequired: false, requestId: input.requestId }), undefined, { category: 'api' });
+    videoRequired: false, requestId: workRequest }), undefined, { category: 'api' });
 
   let seq = 0;
   const callDeps = { db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
@@ -334,7 +337,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // The resume needs nothing from the browser. A save that fails leaves it to expire: runResumedTurn refunds it.
     if (code === 'TURN_PAUSED_FOR_CREDITS') await swallow('turn_pause_save_failed', db.pauseSave({ actorId: input.actorId,
       turnId: opened.turnId, input: { kind: 'chat', text: input.text, ...(input.chosen ? { chosen: input.chosen } : {}),
-        ...(input.workItem ? { workItem: true } : {}) } }), false, { category: 'ai' });
+        ...(input.workItem ? { workItem: true, workRequest } : {}) } }), false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).

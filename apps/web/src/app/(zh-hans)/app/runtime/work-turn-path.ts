@@ -89,5 +89,5 @@ export const guideRequest = (stage: string, label: string) =>
   `不要直接生成正文或口播稿，不要生成分镜、剪辑、图片、视频或发布；已定稿后只询问下一步意愿。`;
 
 /** The saved reply of a request, on the view read after its turn: none while it runs, or if it delivered nothing. */
-export const replyOfRequest = (messages: ReadonlyArray<{ role: string; requestId?: string | null; turnId: number | null }>, requestId: string) =>
-  messages.find(m => m.role === 'assistant' && m.requestId === requestId)?.turnId ?? null;
+export const replyOfRequest = (messages: ReadonlyArray<{ role: string; rootRequestId?: string | null; turnId: number | null }>, requestId: string) =>
+  messages.find(m => m.role === 'assistant' && m.rootRequestId === requestId)?.turnId ?? null;

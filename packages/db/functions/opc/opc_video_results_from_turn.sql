@@ -15,8 +15,8 @@ BEGIN
 
  PERFORM bill2_actor(p_actor_id);
  IF NOT coalesce(p_storyboard,false) AND NOT coalesce(p_editing,false) THEN RAISE EXCEPTION 'OPC_CONTENT_CHOICE_INVALID';END IF;
- SELECT b.* INTO binding FROM opc_video_material_bindings b JOIN turns x ON x.actor_id=b.actor_id AND x.request_id=b.request_id
-  WHERE b.actor_id=p_actor_id AND b.request_id=p_request_id AND x.id=p_turn_id;
+ SELECT b.* INTO binding FROM opc_video_material_bindings b
+  WHERE b.actor_id=p_actor_id AND b.request_id=p_request_id AND b.request_id=opc_turn_root_request(p_actor_id,p_turn_id);
  IF binding.request_id IS NULL OR binding.work_item_id<>p_work_item_id OR binding.source_script_id<>p_source_script_id
   OR (binding.storyboard IS NOT NULL AND binding.storyboard IS DISTINCT FROM p_storyboard)
   OR (binding.editing IS NOT NULL AND binding.editing IS DISTINCT FROM p_editing)
