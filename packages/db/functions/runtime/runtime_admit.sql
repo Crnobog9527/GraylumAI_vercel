@@ -26,6 +26,8 @@ BEGIN
    OR (SELECT payload FROM bill2_runs WHERE id=e.billing_run_id) IS DISTINCT FROM p_billing THEN RAISE EXCEPTION 'RUNTIME_REQUEST_CONFLICT';END IF;
   RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
  END IF;
+ -- CORE-PATH-V2 V2-10b: under this session's lock, as turn_open: a request id the turn path holds is never admitted here too.
+ IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.request_id=p_request_id) THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
  PERFORM report_admission_check(p_actor_id,p_session_id,p_payload,p_billing);
  IF EXISTS(SELECT 1 FROM runtime_executions pending JOIN bill2_runs pr ON pr.id=pending.billing_run_id
   WHERE pending.session_id=s.id AND pr.contract_version='bill2.v2' AND pending.primary_result IS NOT NULL
