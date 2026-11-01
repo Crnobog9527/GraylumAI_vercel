@@ -12,6 +12,7 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
+import { turnBusyForCredits } from '@/components/opc/credits-label';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
@@ -126,7 +127,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
       actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];
   const pendingText = outgoing ?? (chat.view?.activeTurn && !paused ? '' : null);
-  return <WorkspaceFrame area="chat" revealRight={reveal} turnBusy={chat.busy && !chat.paused} rightOpen={panelOpen}
+  return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen}
+    turnBusy={turnBusyForCredits({ viewRead: Boolean(chat.view), viewFailed: chat.viewFailed, busy: chat.busy, paused: chat.paused })}
     onToggleRight={() => setPanelOpen(open => !open)}
     right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
     <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>

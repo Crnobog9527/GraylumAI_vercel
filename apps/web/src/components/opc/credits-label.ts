@@ -14,3 +14,13 @@ export function sidebarCreditsLabel(input: { status: CreditsStatus; credits: num
   if (input.busy) return { label: input.lastIdle ?? '查看', idle: input.lastIdle };
   return { label: input.credits, idle: input.credits };
 }
+
+/**
+ * Whether the sidebar should treat the conversation as running. Before the conversation's first read answers nothing is known: a page
+ * reloaded mid-turn may get the balance (held down by the turn's freeze) before the turn's state, and that balance must not be taken
+ * for an idle one. A read that failed says nothing either way and does not keep the label away for good.
+ */
+export function turnBusyForCredits(input: { viewRead: boolean; viewFailed: boolean; busy: boolean; paused: boolean }): boolean {
+  if (!input.viewRead) return !input.viewFailed;
+  return input.busy && !input.paused;
+}
