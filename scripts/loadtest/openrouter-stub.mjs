@@ -103,7 +103,8 @@ export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 90, s
     res.write(': OPENROUTER PROCESSING\n\n');
     if (callTool) res.write(frame([{ index: 0, delta: { role: 'assistant', content: null, tool_calls: [toolCall] }, finish_reason: null }]));
     else for (let i = 0; i < count && !res.destroyed; i++) {
-      res.write(frame([{ index: 0, delta: i === 0 ? { role: 'assistant', content: pieces?.[i] ?? '测试' } : { content: pieces?.[i] ?? '测试' }, finish_reason: null }]));
+      const content = pieces?.[i] ?? '测试';
+      res.write(frame([{ index: 0, delta: i === 0 ? { role: 'assistant', content } : { content }, finish_reason: null }]));
       await sleep(Math.max(0, start + firstByteMs + (i + 1) * intervalMs - Date.now()));
     }
     if (res.destroyed) return;
