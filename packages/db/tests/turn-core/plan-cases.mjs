@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // CORE-PATH-V2 V2-10b A (kind=plan): allowed and refused opens, the metered charge (no fixed price, no membership gate, a body that
-// is no usable plan still pays by usage), duplicate and concurrent requests, failures, the hidden plan text and turn_plan_read.
+// is no usable plan still pays by usage), duplicate and concurrent requests, failures, the hidden plan text and plan_turn_read.
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 
@@ -10,6 +10,9 @@ export async function planCases(t){
  const published=async a=>{
   const src=await reportSource(a);
   await c.query("update artifact_rounds set state='published' where id=$1",[src.round]);
+  await c.query("update artifact_projects set current_version=1 where id=$1",[src.project]);
+  await c.query(`insert into artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)
+   values($1,$2,$3,1,'{"body":"CONFIRMED"}',$4,'[]')`,[randomUUID(),src.project,src.round,'e'.repeat(64)]);
   return src;
  };
  const hash=text=>createHash('sha256').update(text).digest('hex');
@@ -21,7 +24,7 @@ export async function planCases(t){
  const closePlan=(a,turn,kind,{body=null,round,delivered=kind==='completed',refundAll=false}={})=>
   one("select turn_close($1,$2,$3,'[]',$4,$5,null,$6) v",[a.actor,turn,kind,delivered,refundAll,
    body===null?null:JSON.stringify({body,roundId:round})]);
- const read=(a,src,req)=>one('select turn_plan_read($1,$2,$3) v',[a.actor,src.session,req]);
+ const read=(a,src,req)=>one('select plan_turn_read($1,$2,$3) v',[a.actor,src.session,req]);
  const call=async(a,turn,seq=1)=>{await begin(a,turn,seq,{upper:0.05});await identity(a,turn,seq);await record(a,turn,seq,{n:0.01,actual:0.01});};
  const items='[{"id":"00000000-0000-4000-8000-000000000001","platform":"tiktok","account":"me","title":"T","brief":"B","day":"2026-11-02"}]';
  // 1. Refused: nothing is frozen, whatever the reason.
@@ -166,5 +169,15 @@ export async function planCases(t){
   await c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[src.session]);
   assert.equal((await read(a,src,req)).body,null,'a deleted conversation shows no text');
   report.checks.push('plan: cannot be stopped; read only by its owner; deletion hides the text');
+ }
+ // 8. A revoked draft reads nothing, its text included (the old path's source boundary).
+ {
+  const a=await account(1000),src=await published(a),req=request(),o=await openPlan(a,src,req);
+  await call(a,o.turnId);
+  await closePlan(a,o.turnId,'completed',{body:items,round:src.round});
+  assert.equal((await read(a,src,req)).body,items);
+  await c.query('update bill2_drafts set revoked=true where id=$1',[src.draft]);
+  assert.match(await refusal(read(a,src,req)),/TURN_PLAN_DENIED/);
+  report.checks.push('plan: a revoked source reads nothing');
  }
 }

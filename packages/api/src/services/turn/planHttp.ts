@@ -32,10 +32,12 @@ export async function handlePlanRead(request: Request, deps: ReportHttpDeps): Pr
     return json(503, { error: 'TURN_DATABASE_MISMATCH' });
   const actorId = await swallow('turn_plan_auth_failed', deps.authenticate(request), null, { category: 'api' });
   if (!actorId) return json(401, { error: 'TURN_UNAUTHENTICATED' });
-  const { data, error } = await deps.clients.read.rpc('turn_plan_read', { p_actor_id: actorId, p_session_id: input.sessionId,
+  const { data, error } = await deps.clients.read.rpc('plan_turn_read', { p_actor_id: actorId, p_session_id: input.sessionId,
     p_request_id: input.requestId });
-  if (error) return /TURN_SESSION_DENIED/.test(error.message ?? '') ? json(404, { error: 'TURN_SESSION_DENIED' })
-    : json(503, { error: 'TURN_DATABASE_UNAVAILABLE' });
+  if (error) {
+    const denied = /TURN_SESSION_DENIED|TURN_PLAN_DENIED/.exec(error.message ?? '')?.[0];
+    return denied ? json(404, { error: denied }) : json(503, { error: 'TURN_DATABASE_UNAVAILABLE' });
+  }
   if (data === null) return json(200, { plan: null });
   const turn = read.parse(data), items = parsePlan(turn.body);
   return json(200, { plan: { turnId: turn.turnId, state: turn.state, closeKind: turn.closeKind, chargedCredits: turn.chargedCredits,

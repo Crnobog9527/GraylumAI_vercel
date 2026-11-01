@@ -172,6 +172,7 @@ describe('GET /api/turn/plan', () => {
     expect((await handlePlanRead(new Request(url), deps({}, { authenticate: async () => null }))).status).toBe(401);
     expect((await handlePlanRead(new Request(url), deps({}, { databaseHost: { declared: 'a', actual: 'b' } }))).status).toBe(503);
     expect(await answer(await handlePlanRead(new Request(url), deps({ error: { message: 'TURN_SESSION_DENIED at line 3' } })))).toEqual([404, { error: 'TURN_SESSION_DENIED' }]);
+    expect(await answer(await handlePlanRead(new Request(url), deps({ error: { message: 'TURN_PLAN_DENIED' } })))).toEqual([404, { error: 'TURN_PLAN_DENIED' }]);
     expect(await answer(await handlePlanRead(new Request(url), deps({ error: { message: 'connection reset' } })))).toEqual([503, { error: 'TURN_DATABASE_UNAVAILABLE' }]);
   });
 });

@@ -10,7 +10,7 @@
 --                      round published and holding the step, the quoted module, an archived business refused (0324), the same
 --                      request never on the old path and never with other input; returns what the prompt needs
 --   turn_plan_apply    turn_close's kind result: the plan text, hidden from history, with the round it was made from
---   turn_plan_read     a request's plan turn with its saved text (replaces opc_plan_request_state and opc_plan_result on this path)
+--   plan_turn_read     a request's plan turn with its saved text (replaces opc_plan_request_state and opc_plan_result on this path)
 -- Compatibility: nothing calls kind=plan until the page switches (after #1543); other kinds and the old plan path are unchanged, and
 -- old code reads the wider CHECK as before, so this can be applied before or after the code deploys.
 -- Repeatable: DROP CONSTRAINT IF EXISTS then ADD, CREATE OR REPLACE throughout.
@@ -117,17 +117,20 @@ BEGIN
   UPDATE turns SET policy = policy || jsonb_build_object('planRoundId', round_id) WHERE actor_id = t.actor_id AND id = t.id;
 END $function$;
 
-CREATE OR REPLACE FUNCTION public.turn_plan_read(p_actor_id uuid, p_session_id uuid, p_request_id uuid)
+CREATE OR REPLACE FUNCTION public.plan_turn_read(p_actor_id uuid, p_session_id uuid, p_request_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; tomb jsonb; body text; source_version uuid;
+DECLARE t turns; tomb jsonb; body text; source_version uuid; draft uuid;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM runtime_sessions s JOIN opc_drafts d ON d.session_id = s.id AND d.actor_id = p_actor_id
-      WHERE s.id = p_session_id AND s.actor_id = p_actor_id) THEN
-    RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501';
+  SELECT d.draft_id INTO draft FROM runtime_sessions s JOIN opc_drafts d ON d.session_id = s.id AND d.actor_id = p_actor_id
+    WHERE s.id = p_session_id AND s.actor_id = p_actor_id;
+  IF draft IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  -- A revoked draft reads nothing, as opc_plan_request_state and opc_plan_result on the old path.
+  IF NOT coalesce(bill2_scope_allowed(p_actor_id, jsonb_build_object('kind', 'positioning_draft', 'draftId', draft)), false) THEN
+    RAISE EXCEPTION 'TURN_PLAN_DENIED' USING ERRCODE='42501';
   END IF;
   SELECT * INTO t FROM turns r WHERE r.actor_id = p_actor_id AND r.request_id = p_request_id AND r.session_id = p_session_id AND r.kind = 'plan';
   IF t.id IS NULL THEN RETURN NULL; END IF;
@@ -138,6 +141,10 @@ BEGIN
      ORDER BY m.seq DESC LIMIT 1;
   END IF;
   SELECT v.id INTO source_version FROM artifact_versions v WHERE v.round_id = (t.policy->>'planRoundId')::uuid;
+  -- The positioning it was made from must still be a usable source (opc_plan_result's rule): no version, or a revoked one, reads nothing.
+  IF t.policy ? 'planRoundId' AND (source_version IS NULL OR NOT opc_source_allowed(p_actor_id, source_version)) THEN
+    RAISE EXCEPTION 'TURN_PLAN_DENIED' USING ERRCODE='42501';
+  END IF;
   RETURN jsonb_build_object('turnId', t.id, 'state', t.state, 'closeKind', t.close_kind, 'delivered', t.delivered,
     'chargedCredits', t.charged_credits, 'settlement', t.settlement, 'body', body,
     'sourceRoundId', t.policy->>'planRoundId', 'sourceVersionId', source_version);
@@ -462,10 +469,10 @@ END $function$;
 DO $$
 DECLARE f text;
 BEGIN
-  FOREACH f IN ARRAY ARRAY['turn_plan_context(uuid,uuid,jsonb)','turn_plan_apply(turns,text,jsonb)','turn_plan_read(uuid,uuid,uuid)'] LOOP
+  FOREACH f IN ARRAY ARRAY['turn_plan_context(uuid,uuid,jsonb)','turn_plan_apply(turns,text,jsonb)','plan_turn_read(uuid,uuid,uuid)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
   END LOOP;
-  EXECUTE 'GRANT EXECUTE ON FUNCTION public.turn_plan_read(uuid,uuid,uuid) TO service_role';
+  EXECUTE 'GRANT EXECUTE ON FUNCTION public.plan_turn_read(uuid,uuid,uuid) TO service_role';
 END $$;
 
 COMMIT;
