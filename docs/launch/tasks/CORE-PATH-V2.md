@@ -208,6 +208,10 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 #### 2.5.1 每日止损：开轮预占、收轮回补（回应 #1508 审查 P1）
 
+> 2026-11-01 更新（Owner"同意两项"，MASTER_PLAN 2.1，迁移 0453）：`chat`、`mentor` 开轮只预占 `holdUsd`（一次模型 + 最大一个付费工具 + 定位检查的上界），不再预占 U_turn；`turn_call_begin` 在本次上界 U_i 没被覆盖时补预占，步骤和判定与下面的开轮三步相同（先锁自己的桶、再读开轮那天的总和、再查 s + B ≤ L），超限 `STOP_LOSS_REACHED`，回合按失败全退收轮。`turns.reserved_usd` 是已预占累计，收轮和恢复链按它回补。固定价 kind 不变。下面的证明仍成立，把"开轮事务"读成"开轮或补预占事务"，`U_fast` 读成**一个事务最多新增的预占**（不小于 `holdUsd` 和普通桶 kind 的 U_turn；0453 之前按 2.83 美元一次调用已超过配置的 1.5，证明实际不成立）；每次调用发出前都已预占，所以 `spent ≤ reserved` 不变。
+>
+> 日限 L、预留带 B、并发轮数的关系：一轮在途占 `holdUsd`（staging 约 3 美元），同时能跑的轮数 ≈ (L − B − 当天已花) / holdUsd。staging P=8、U_fast=3、U_big=5 时 B=26，L=100 约 24 轮；L≥10×B 要求 L≥260。压测在途 N 轮需要 L ≥ 3N + 26 + 当天已花。
+
 旧设计只在收轮累加，开轮看不到在途回合，并发时超额没有上界。改法：
 
 表 `daily_spend(day, bucket smallint, reserved_usd, spent_usd)`：`bucket 0–15` 按 `actor_id` 哈希分摊给普通回合（chat、mentor、review）；
@@ -307,7 +311,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | 怎么做 | `atomic_pre_deduct(actor, H, …)`：**真的从 `profiles.credits` 里扣掉**（`credits = balance_before − p_amount`），`billing_history` 留预扣记录 | `daily_spend.reserved_usd += U_turn`：只是一个计数，不碰任何余额 |
 | `turns` 里记什么 | `reserved_credits = H`：**只是"已经预扣了多少"的记录**，收轮时用来算退多少（退 H−D）；**可用余额永远不再减它** | `policy.upper_usd = U_turn`：收轮回补用 |
 | 可用余额 A 怎么算 | 现有 `credit_available`：`profiles.credits` − 隔离的赠送余量 − 退款包 hold − 拒付 pending hold（现有算法一条不改）。因为预扣已经在 `credits` 里扣掉了，**不减 `turns.reserved_credits`**；否则余额 1000、冻结 400 会被算成 200 而不是 600，同一账号的其他会话会被错误拒绝 | 不参与 A |
-| 回合中途"够不够" | 只看 `turns` 自己的行：`H − Σ已记名义积分 ≥ min(下一次调用上界, L)` 否则 `paused(waiting_credits)`；**不读 `profiles`** | `turn_call_begin` 不再碰 `daily_spend`（预占在开轮一次做完） |
+| 回合中途"够不够" | 只看 `turns` 自己的行：`H − Σ已记名义积分 ≥ min(下一次调用上界, L)` 否则 `paused(waiting_credits)`；**不读 `profiles`** | 已覆盖本次上界的调用不碰 `daily_spend`；没覆盖才在 `turn_call_begin` 补预占（Owner 2026-11-01，见 2.5.1 更新），超限止损拒绝 |
 | 收轮 | `turn_settle_credits`：结算 D、退还 H−D 到 `profiles.credits`，守恒 `restored + D = H` | `spent += n_total, reserved −= U_turn` |
 | 崩溃/未知成本 | 该笔份额留在预扣里（2.5.2），`turns.reserved_credits` 不变，直到恢复任务结算 | 同 2.5.2 |
 

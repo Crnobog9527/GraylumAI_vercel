@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { decimal, DECIMAL_SCALE } from '../../bill2/decimal';
-import { TurnStop } from '../call';
+import { stopLossStop, TurnStop } from '../call';
 import { tombstoned, TurnDatabaseError } from '../db';
 import type { SubcallReceipt, ToolCallDeps, ToolCallOutcome } from './types';
 
@@ -88,7 +88,7 @@ export async function openToolRow(deps: ToolCallDeps, call: PaidToolCall): Promi
       requestHash: call.requestHash, upperUsd: call.upperUsd, multiplier: call.multiplier });
   } catch (error) {
     if (error instanceof TurnDatabaseError && error.code === 'TURN_CALL_LIMIT') throw new ToolLimitReached();
-    throw error;
+    throw stopLossStop(error);
   }
   const notSent = () => deps.db.record({ ...base, status: 'not_sent', nominalUsd: null, actualUsd: null, usage: {},
     providerId: null, payloadHash: call.requestHash, raw: null });

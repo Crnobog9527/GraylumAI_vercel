@@ -39,6 +39,9 @@ BEGIN
     OR (p_policy ? 'holdCredits' AND (p_kind NOT IN ('chat','mentor') OR jsonb_typeof(p_policy->'holdCredits') <> 'number'
       OR (p_policy->>'holdCredits')::numeric <> floor((p_policy->>'holdCredits')::numeric)
       OR (p_policy->>'holdCredits')::numeric < 1 OR (p_policy->>'holdCredits')::numeric > (p_policy->>'gCredits')::numeric))
+    -- holdUsd: the same for the stop-loss; only with holdCredits, never above U_turn.
+    OR (p_policy ? 'holdUsd' AND (NOT p_policy ? 'holdCredits' OR jsonb_typeof(p_policy->'holdUsd') <> 'number'
+      OR (p_policy->>'holdUsd')::numeric < 0 OR (p_policy->>'holdUsd')::numeric > (p_policy->>'uTurnUsd')::numeric))
     OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits','topUps'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
@@ -93,13 +96,16 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
     END IF;
 
-    -- 3. Stop-loss (2.5.1): reserve U_turn on the own bucket row first, then read the day's sum, then check with the band B.
+    -- 3. Stop-loss (2.5.1): reserve the first reservation (U_turn, or one call's holdUsd where the turn tops up, Owner 11-01) on the
+    -- own bucket row first, then read the day's sum, then check with the band B.
     -- On a resume the paused turn's reservation is still counted here (it is released by its close below): refusing earlier,
     -- never later.
-    IF (p_policy->'stopLoss'->>'p')::int < (p_policy->'stopLoss'->>'poolSize')::int THEN
+    -- The band's proof needs U_fast to bound what one transaction adds, so a holdUsd above it is a configuration fault.
+    IF (p_policy->'stopLoss'->>'p')::int < (p_policy->'stopLoss'->>'poolSize')::int
+      OR coalesce((p_policy->>'holdUsd')::numeric, 0) > (p_policy->'stopLoss'->>'uFastUsd')::numeric THEN
       RAISE EXCEPTION 'TURN_STOP_LOSS_CONFIG' USING ERRCODE='22023';
     END IF;
-    u_turn := (p_policy->>'uTurnUsd')::numeric;
+    u_turn := coalesce((p_policy->>'holdUsd')::numeric, (p_policy->>'uTurnUsd')::numeric);
     v_bucket := CASE WHEN p_kind IN ('report','compare','jury','jury_adopt') THEN -1 ELSE abs(hashtext(p_actor_id::text)) % 16 END;
     INSERT INTO daily_spend AS d (day, bucket, reserved_usd) VALUES (v_day, v_bucket, u_turn)
       ON CONFLICT (day, bucket) DO UPDATE SET reserved_usd = d.reserved_usd + excluded.reserved_usd;

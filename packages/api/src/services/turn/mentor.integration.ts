@@ -406,6 +406,26 @@ it('RUNTIME: CORE-PATH-V2 V2-5: an organizer the remaining freeze cannot start p
   expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
 });
 
+it('RUNTIME: CORE-PATH-V2 2.5.1: the stop-loss refusing the organizer closes the turn failed with everything refunded', async () => {
+  const f = await setup();
+  const before = (await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits;
+  // The day's limit reached while the reply streams: the organizer's bound is no longer covered and its top-up is refused.
+  const t = transport(async (body, n) => {
+    if (body.model === ORGANIZER) return organized('gen-org-' + n, patch('Sell coffee to students'));
+    await db.query("update turns set reserved_usd=0 where actor_id=$1 and state='running'", [f.actor]);
+    await db.query('update daily_spend set spent_usd=spent_usd+2000');
+    return prose('gen-reply-' + n, 'Good. Who buys it?');
+  });
+  const out = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
+  await db.query('update daily_spend set spent_usd=greatest(spent_usd-2000,0)');
+  expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'error', code: 'STOP_LOSS_REACHED' });
+  expect(t.bodies.map(b => b.model)).toEqual([MENTOR]);
+  expect((await db.query('select state,close_kind,charged_credits from turns where actor_id=$1', [f.actor])).rows)
+    .toEqual([{ state: 'closed', close_kind: 'failed', charged_credits: 0 }]);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(before);
+  expect((await f.steps())['step-0'].information?.goal?.value ?? '').toBe('');
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-10: a resume at the organizer keeps the reply: it is not written again, and the checklist is organized', async () => {
   const f = await setup();
   const t = transport(async (body, n) => {

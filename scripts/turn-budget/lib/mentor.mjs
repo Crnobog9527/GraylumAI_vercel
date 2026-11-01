@@ -42,7 +42,7 @@ export async function mentorActor(client, { accountBound }) {
 // `between(seq)` runs where the model call is (the load run waits there); the scenario passes nothing.
 export async function mentorTurn(call, { actor, source }, { accountBound, research = null, holdCredits = null, between = async () => {} }) {
   await call('mentor_turn_prepare', [actor, source.session, true, null]);
-  const policy = { ...(holdCredits ? { holdCredits } : {}), q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30,
+  const policy = { ...(holdCredits ? { holdCredits, holdUsd: 0.000001 } : {}), q: 100, uTurnUsd: 0.1, gCredits: 60, minCredits: 10, uModelCredits: 30,
     historyItems: 100, inputBytes: 1000,
     limits: { model: 3, paidTools: 0, freeTools: 1 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
     mentor: { moduleId: source.module, stepId: 's', sourceChecked: accountBound } };
