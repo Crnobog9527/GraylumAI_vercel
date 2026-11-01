@@ -101,6 +101,11 @@ export async function resolvePostSource(db:SessionRpc,actor:string,source:unknow
  if(!request.review||result.kind!=='my_posts')return result;
  const {readReviewData}=await import('../publishMonitor/reviewData');
  const {review}=await readReviewData(db as Pick<SupabaseClient,'rpc'>,actor,request.windowDays!,now,data);
+ return fitReview(data,result,review,now);
+}
+/** my_posts with its review, under 11000 bytes: posts, then benchmark rows, then own rows go, and the projection follows the posts kept. */
+type Review=Awaited<ReturnType<typeof import('../publishMonitor/reviewData').readReviewData>>['review'];
+export function fitReview(data:PublishMonitorData,result:Record<string,unknown>,review:Review,now:number):unknown{
  const sourceConnections=[...new Set([...data.connections.map(c=>c.id),...review.benchmarks.rows.map(r=>r.connectionId),
   ...review.followers.map(f=>f.connectionId)])];
  const enriched:Record<string,unknown>={...result,review,source_connections:sourceConnections,

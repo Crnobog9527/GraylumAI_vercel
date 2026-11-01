@@ -50,6 +50,10 @@ export type ToolPlan = ToolAvailability & {
   note: string | null;
   /** Input bytes kept free for one tool result and the reply after it (counted in the input budget). */
   reserveBytes: number;
+  /** read_source calls this turn (absent: READ_SOURCE_CALLS). */
+  readCalls?: number;
+  /** Room was kept for a strategy read and for own post data (absent: no). */
+  sourceRoom?: { strategy: boolean; posts: boolean };
 };
 
 /** Where the turn writes its money evidence: the same begin/record as model calls (2.5.2). */

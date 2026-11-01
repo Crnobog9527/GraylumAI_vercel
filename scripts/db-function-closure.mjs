@@ -41,7 +41,7 @@ export const EXCEPTIONS = { research_turn_apply: 'Owner 2026-10-30: a mentor tur
 // The one kind of database call a turn's tools may make between model calls (ENGINEERING 5, Owner 2026-10-28): a free read of the user's
 // own material, by the owner's key, through the read client, with no lock, no write and no turn_calls row. Adding a name needs that rule
 // to cover it; freeReadViolations holds each name to it.
-export const FREE_READS = ['library_turn_read'];
+export const FREE_READS = ['library_turn_read', 'workspace_turn_read', 'posts_turn_read'];
 // The only tables a free read may reach without an owner column (Owner 2026-11-01, ENGINEERING 5). Listed by name on purpose: any other
 // table with no owner column fails. Linked tables hold rows of a row already proved the owner's, and each select must name the row by
 // one of the listed keys. Catalog tables are the site-wide, admin-written, read-only ones.
