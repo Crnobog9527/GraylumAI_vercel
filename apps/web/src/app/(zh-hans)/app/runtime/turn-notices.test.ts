@@ -5,6 +5,8 @@ import { trimmedToolNotices, turnCodeNotice } from './turn-notices';
 describe('turn notices', () => {
   it('gives the text back only for a code that proves nothing was stored', () => {
     expect(turnCodeNotice('TURN_INSUFFICIENT_CREDITS').kept).toBe(true);
+    // A refused credit freeze (an account whose credit sources cannot be told apart) says so and keeps the text: nothing was charged.
+    expect(turnCodeNotice('TURN_CREDIT_ACCOUNT_REVIEW')).toMatchObject({ kept: true, text: expect.stringContaining('没有扣费') });
     expect(turnCodeNotice('TURN_PROVIDER_402').kept).toBe(false);
     expect(turnCodeNotice('SOMETHING_NEW')).toMatchObject({ kept: false, text: expect.stringContaining('不要重复发送') });
   });

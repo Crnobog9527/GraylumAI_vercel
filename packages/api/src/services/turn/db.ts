@@ -78,9 +78,15 @@ export class TurnDatabaseError extends Error {
 }
 // A kind's own refusals (a report's REPORT_*, an archived business, V2-7a) keep their codes too.
 const KNOWN = /\b(TURN_[A-Z_]+|REPORT_[A-Z_]+|STOP_LOSS_REACHED|OPC_BUSINESS_ARCHIVED|OPC_VIDEO_TYPE_REQUIRED)\b/;
+/** The freeze (atomic_pre_deduct) refuses an account whose credit sources it cannot tell apart (PRE_DEDUCT_*): nothing was frozen or
+ * charged, and the page says so instead of "database unavailable". The database's own text never reaches the page. */
+export const CREDIT_ACCOUNT_REVIEW = 'TURN_CREDIT_ACCOUNT_REVIEW';
+export function turnDatabaseCode(message: string | undefined, known: RegExp = KNOWN): string {
+  return known.exec(message ?? '')?.[1] ?? (/\bPRE_DEDUCT_[A-Z_]+\b/.test(message ?? '') ? CREDIT_ACCOUNT_REVIEW : 'TURN_DATABASE_UNAVAILABLE');
+}
 async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
   const { data, error } = await client.rpc(name, args);
-  if (error) throw new TurnDatabaseError(KNOWN.exec(error.message ?? '')?.[1] ?? 'TURN_DATABASE_UNAVAILABLE');
+  if (error) throw new TurnDatabaseError(turnDatabaseCode(error.message));
   return schema.parse(data);
 }
 
