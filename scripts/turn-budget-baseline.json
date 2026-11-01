@@ -50,5 +50,18 @@
   },
   "hotSeqScans": 0,
   "enforce": true
+ },
+ "new:mentor-top-up": {
+  "path": "new",
+  "roundTrips": 12,
+  "dbTimeMs": 29.9,
+  "relationLocks": 124,
+  "lockClasses": {
+   "main": 41,
+   "mentor": 55,
+   "ledger": 40
+  },
+  "hotSeqScans": 0,
+  "enforce": false
  }
 }

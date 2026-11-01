@@ -102,11 +102,17 @@ export function turnDatabase(clients: TurnClients) {
     open: (a: { actorId: string; sessionId: string; requestId: string; kind: string; policy: Record<string, unknown>; resumeOf?: number }) =>
       call(w, 'turn_open', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_request_id: a.requestId, p_kind: a.kind,
         p_policy: a.policy, p_resume_of: a.resumeOf ?? null }, opened),
-    begin: (a: { actorId: string; turnId: number; seq: number; callKind: CallKind; modelId: string | null; toolName: string | null;
-      paid: boolean | null; requestHash: string; upperUsd: string; multiplier: string }) =>
-      call(w, 'turn_call_begin', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_call_kind: a.callKind,
+    begin: async (a: { actorId: string; turnId: number; seq: number; callKind: CallKind; modelId: string | null; toolName: string | null;
+      paid: boolean | null; requestHash: string; upperUsd: string; multiplier: string }) => {
+      const once = () => call(w, 'turn_call_begin', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_call_kind: a.callKind,
         p_model_id: a.modelId, p_tool_name: a.toolName, p_paid: a.paid, p_request_hash: a.requestHash, p_upper_usd: a.upperUsd,
-        p_multiplier: a.multiplier }, begun),
+        p_multiplier: a.multiplier }, begun);
+      // A call raced this one after its look at the freeze: nothing was written; the next attempt takes the account first.
+      for (let attempt = 1; ; attempt++) {
+        try { return await once(); }
+        catch (error) { if (attempt >= 3 || !(error instanceof TurnDatabaseError) || error.code !== 'TURN_HOLD_RETRY') throw error; }
+      }
+    },
     identity: (a: { actorId: string; turnId: number; seq: number; providerId: string }) =>
       call(w, 'turn_call_identity', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_provider_id: a.providerId },
         z.object({ status: z.string() })),
