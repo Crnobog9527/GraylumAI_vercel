@@ -139,6 +139,34 @@ jobs:
       - name: Test required-check contracts
         run: ruby .github/scripts/test-ci-workflows.rb
 
+  # Owner 2026-11-01: a pull request into staging whose every changed file is on the allow-list in scripts/ci-test-scope.mjs
+  # (documentation, and page / component / style files with their tests) skips the two slow database jobs below. Everything else
+  # runs the full suite: pushes, scheduled runs, pull requests into main, and any run whose changed-file list cannot be read.
+  scope:
+    name: Decide test scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Decide whether the database jobs run
+        id: scope
+        run: node scripts/ci-test-scope.mjs
+
   migration-ledger:
     name: Check migration ledger
     runs-on: ubuntu-latest
@@ -355,6 +383,8 @@ jobs:
 
   integration:
     name: Run billing and recovery integration tests
+    needs: [scope]
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -482,6 +512,8 @@ jobs:
   # the integration job comes near its 30-minute limit. Every suite still runs; none is skipped.
   db-suites:
     name: Run database behaviour suites (${{ matrix.shard }}/2)
+    needs: [scope]
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -562,13 +594,15 @@ jobs:
 
   unit-check:
     name: Unit Tests
-    needs: [test, integration, db-suites, ci-contracts, migration-ledger]
+    needs: [test, integration, db-suites, ci-contracts, migration-ledger, scope]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
+      # The two database jobs may be skipped only when the scope job succeeded and said the run is not full. A failed or
+      # cancelled job, or a skip for any other reason, still fails this check.
       - name: Require successful worker validation
         env:
           WORK_RESULT: ${{ needs.test.result }}
@@ -576,11 +610,20 @@ jobs:
           DB_SUITES_RESULT: ${{ needs.db-suites.result }}
           CONTRACTS_RESULT: ${{ needs.ci-contracts.result }}
           LEDGER_RESULT: ${{ needs.migration-ledger.result }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_FULL: ${{ needs.scope.outputs.full }}
         run: |
           set -euo pipefail
-          if [ "$WORK_RESULT" != success ] || [ "$INTEGRATION_RESULT" != success ] ||
-            [ "$DB_SUITES_RESULT" != success ] ||
-            [ "$CONTRACTS_RESULT" != success ] || [ "$LEDGER_RESULT" != success ]; then
+          allowed_skip=false
+          if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_FULL" = false ]; then
+            allowed_skip=true
+          fi
+          database_job_ok() {
+            [ "$1" = success ] || { [ "$1" = skipped ] && [ "$allowed_skip" = true ]; }
+          }
+          if [ "$WORK_RESULT" != success ] || [ "$CONTRACTS_RESULT" != success ] ||
+            [ "$LEDGER_RESULT" != success ] || [ "$SCOPE_RESULT" != success ] ||
+            ! database_job_ok "$INTEGRATION_RESULT" || ! database_job_ok "$DB_SUITES_RESULT"; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
           fi
