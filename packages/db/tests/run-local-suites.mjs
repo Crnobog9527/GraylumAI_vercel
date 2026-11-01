@@ -70,7 +70,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const removeSnapshot = () => { snapshot?.remove(); snapshot = null; };
     process.on('SIGINT', () => { removeSnapshot(); process.exit(130); });
     process.on('SIGTERM', () => { removeSnapshot(); process.exit(143); });
-    const queue = [...suites];
+    // The suites that build their own database take 4-8 minutes against 2-35 s for the ones starting from the snapshot: start them first,
+    // or they begin last and the job waits for them alone (stable sort, so the order inside each group stays alphabetical).
+    const queue = [...suites].sort((x, y) => Number(usesLocalDb(x)) - Number(usesLocalDb(y)));
     const worker = async () => {
       for (let suite = queue.shift(); suite; suite = queue.shift()) {
         const started = Date.now();
