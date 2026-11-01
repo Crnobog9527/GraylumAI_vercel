@@ -24,10 +24,9 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
   const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
   // The path is known once the switch and the turn path's read of this conversation have answered (see mentor-path-gate.ts).
   const ready = mentorPathReady({ hasSession: Boolean(sessionId), choicesSettled: choices.isSuccess || choices.isError, viewLoaded: view !== null });
-  // The old path's mentor turns of this draft (opc.read) and the new path's: a draft that began on the old path stays on it.
-  const oldMentorTurns = useRef(0);
-  const gate = useRef({ ready, on, oldMentorTurns: 0 });
-  gate.current = { ready, on, oldMentorTurns: oldMentorTurns.current };
+  // The path decision the send reads when it fires (see mentor-path-gate.ts).
+  const gate = useRef({ ready, on });
+  gate.current = { ready, on };
   const reload = useCallback(async () => {
     // Read whatever the switch says: a rollback must not hide replies the turn path already saved and charged.
     if (!sessionId) return null;
@@ -66,14 +65,13 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
     },
     /** The draft as the old path read it, plus the turn path's bindings. */
     draft<T extends { turns?: unknown[] } | undefined>(draft: T): T {
-      oldMentorTurns.current = draft?.turns?.length ?? 0;
       return draft && { ...draft, turns: [...(draft.turns ?? []), ...projected.turns] };
     },
     /** The stream of one mentor request: POST /api/turn with the switch on, the old stream otherwise. */
     open<T>(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined, old: () => Promise<T>) {
       // Decided when the turn is sent, after the gate is ready: a send before that waits, and never falls to the old path unasked.
       return async () => {
-        if (!await mentorOnTurnPath(() => ({ ...gate.current, oldMentorTurns: oldMentorTurns.current }))) return old();
+        if (!await mentorOnTurnPath(() => gate.current)) return old();
         return readAfter(mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! },
           history.current)));
       };
