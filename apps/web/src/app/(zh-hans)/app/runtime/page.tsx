@@ -46,12 +46,13 @@ import { usePaygResume } from '@/lib/use-payg-resume';
 import { useRuntimeViewBusy, useRuntimeViewPolling, useRuntimeViewSettled, useRuntimeViewStreaming } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
 import { TurnWorkspace } from './turn-workspace';
+import { WorkItemWorkspace } from './work-item-workspace';
 import { useHasTurnMessages } from './use-has-turn-messages';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, placeCompareCards, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
+import { displayReply, requestedVideoChoice, shownRuntimeInput, type VideoChoice } from './work-input';
 
-type VideoChoice='both'|'storyboard'|'editing';
 type VideoOperation={workItemId:string;choice?:VideoChoice;script:{requestId:string;executionId:string;expectedVersion:number};followup:{requestId:string;input:string;selection:{kind:'skill';moduleId:string;revisionId:string};executionId?:string};package:{requestId:string;expectedStoryboardVersion:number;expectedEditingVersion:number};sourceScriptId?:string;held?:boolean};
 type ScriptOperation={kind?:'brief'|'script';workItemId:string;requestId:string;executionId:string;expectedVersion:number};
 type ContentVersion={id:string;kind:string;version:number;status:string;body:string|null;sourceContentId:string|null;executionId:string|null;requestId:string};
@@ -59,21 +60,6 @@ const videoDefiniteRejections=new Set(['OPC_CONTENT_OUTPUT_TRUNCATED','OPC_VERSI
 const scriptDefiniteRejections=new Set(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_CONTENT_DENIED','OPC_CONTENT_INVALID','OPC_CONTENT_SOURCE','OPC_VIDEO_TYPE_REQUIRED']);
 
 
-// Presentation only: preserve the immutable Runtime request/result for replay.
-function displayReply(input:string|null,body:string|null){
- if(!body)return '正在核实结果，请保留原任务。';
- const fenced=body.match(/```json\s*([\s\S]*?)\s*```/);
- const json=(fenced?.[1]??body).trim();
- if(json.startsWith('[')){try{const topics=JSON.parse(json);if(Array.isArray(topics)&&topics.length>0&&topics.every(topic=>topic&&typeof topic.title==='string'&&typeof topic.brief==='string'&&typeof topic.platform==='string'&&typeof topic.account==='string'))return [fenced?body.slice(0,fenced.index).trim():'',...topics.map((topic,index)=>`${index+1}. ${topic.title}\n${topic.platform} · ${topic.account}\n${topic.brief}`)].filter(Boolean).join('\n\n');}catch{/* A non-topic reply stays verbatim. */}}
- if(!input?.startsWith('[OPC_VIDEO_PACKAGE_V1]'))return body;
- try{const value=JSON.parse(body);if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).every(key=>['storyboard','editing'].includes(key))){const parts=[];if(typeof value.storyboard==='string')parts.push('分镜脚本\n'+value.storyboard);if(typeof value.editing==='string')parts.push('剪辑建议\n'+value.editing);if(parts.length)return parts.join('\n\n');}}catch{/* Incomplete output stays recoverable; protocol text is not conversation. */}
- return '生成结果尚未整理完成，请保留原任务并恢复核对。';
-}
-/** What the transcript shows for a stored input: protocol markers become the user's plain request. */
-function shownRuntimeInput(input:string){
- if(!input.startsWith('[OPC_VIDEO_PACKAGE_V1]'))return input.replace(/^\[OPC_SCRIPT_V1\]\s*/, '');
- return input.includes('只生成分镜脚本')?'请基于已定稿口播稿生成分镜脚本。':input.includes('只生成剪辑建议')?'请基于已保存的分镜生成剪辑建议。':'请先完成分镜脚本，再基于分镜生成剪辑建议。';
-}
 /** Session storage when available; private modes and the server render have none. */
 function browserSession(){try{return typeof window==='undefined'?null:window.sessionStorage;}catch{return null;}}
 function transcriptDay(value:string){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));}
@@ -86,7 +72,7 @@ function RuntimeRoute(){
  const routeModule=params.get('module')??'';
  return <RuntimePath key={routeSession||'new:'+routeModule} routeSession={routeSession} routeModule={routeModule}/>;
 }
-/** CORE-PATH-V2 V2-10: with core_path_v2.enabled a free conversation runs on the turn path; work items stay on the old one until V2-10b. */
+/** CORE-PATH-V2 V2-10: with core_path_v2.enabled a free conversation runs on the turn path; so does a work item without old-path history (V2-10b C2). */
 function RuntimePath({routeSession,routeModule}:{routeSession:string;routeModule:string}){
  const choices=trpc.runtime.choices.useQuery(routeSession?{sessionId:routeSession}:undefined,{staleTime:RUNTIME_CHOICES_STALE_MS});
  // A conversation the turn path already holds replies of moves to it after a rollback: reading them needs no switch, and the old
@@ -99,6 +85,7 @@ function RuntimePath({routeSession,routeModule}:{routeSession:string;routeModule
  // show the earlier talk without the model having it. V2-12 moves that history before the old path goes.
  const oldHistory=Boolean((view.data?.executions as unknown[]|undefined)?.length);
  if(onTurns&&view.data?.scope?.kind==='positioning_draft'&&!oldHistory)return <TurnWorkspace sessionId={routeSession}/>;
+ if(onTurns&&view.data?.scope?.kind==='work_item'&&!oldHistory)return <WorkItemWorkspace sessionId={routeSession} workItemId={view.data.scope.workItemId}/>;
  return <RuntimeWorkspace routeSession={routeSession} routeModule={routeModule}/>;
 }
 function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeModule:string}){
@@ -213,7 +200,6 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   if(requestedModule){localStorage.setItem('opc-runtime-skill:'+result.sessionId,requestedModule);setStoredModule(requestedModule);}
   url.search='';url.searchParams.set('session',result.sessionId);history.replaceState(null,'',url);setSession(result.sessionId);
  }catch{setError('建立草稿失败。再次点击会恢复同一次开始请求。');}}
- function requestedVideoChoice(value:string):VideoChoice|'end'|null{const text=value.trim().replace(/[。.!！?？]/g,'');if(/^(暂时结束|先结束|先到这里|暂时不生成)$/.test(text))return'end';if(/^(先做分镜[，,、\s]*再生成剪辑建议|分镜\s*[+＋和与、]\s*剪辑建议都生成|都生成|生成分镜和剪辑建议)$/.test(text))return'both';if(/^(只生成分镜|仅生成分镜|生成分镜)$/.test(text))return'storyboard';if(/^(只生成剪辑建议|仅生成剪辑建议|生成剪辑建议)$/.test(text))return'editing';return null;}
  async function send(scriptRequest=false){if(!workContextReady||!choices.data){setError('正在核对原工作与可用能力，请稍候；输入已保留。');return;}if(scriptRequest&&!isVideo)return;const videoChoice=isVideo&&currentScript?requestedVideoChoice(input):null;if(videoChoice){await chooseVideo(videoChoice);return;}setError('');
   // UI-A fix: the box empties on send; a send that is not stored puts the text back (unless the user typed again).
   let restoreInput=()=>{},stored=false;

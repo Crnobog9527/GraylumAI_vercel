@@ -22,7 +22,8 @@ export function withResearchRow(rows: readonly WorkItem[], call: ResearchCall): 
   const row = workItemFromResearchCall(call);
   return rows.some(old => old.id === row.id) ? rows.map(old => old.id === row.id ? row : old) : [...rows, row];
 }
-export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }> };
+export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }>;
+  /** A work item's conversation (V2-10b): the server reads its checks, method and brief. */ workItem?: boolean };
 export type SendAnswer = 'done' | 'kept' | 'unknown';
 
 /** One function for the page's life: `read` depends on it, and a new one per render would read without end. */

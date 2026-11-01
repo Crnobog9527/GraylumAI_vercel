@@ -25,8 +25,8 @@ import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenIn
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
 import {positioningMentorInstructions} from './existingPositioning';
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
-export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcContentFromTurn, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoResultsFromTurn, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentFromTurn, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoResultsFromTurn, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
@@ -441,6 +441,11 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_source_content_id: v.sourceContentId,
       });
     },
+    contentFromTurn: (value: unknown) => {
+      const v = opcContentFromTurn.parse(value);
+      return rpc("opc_content_from_turn", { p_work_item_id: v.workItemId, p_request_id: v.requestId, p_expected_version: v.expectedVersion,
+        p_kind: v.kind, p_status: v.status, p_turn_id: v.turnId, p_source_content_id: v.sourceContentId });
+    },
     contentManualSave: (value: unknown) => {
       const v = opcContentManualSave.parse(value);
       return rpc("opc_content_manual_save", {
@@ -477,6 +482,11 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_storyboard: v.choice === "both" || v.choice === "storyboard",
         p_editing: v.choice === "both" || v.choice === "editing",
       });
+    },
+    videoResultsFromTurn: (value: unknown) => { const v = opcVideoResultsFromTurn.parse(value);
+      return rpc("opc_video_results_from_turn", { p_work_item_id: v.workItemId, p_request_id: v.requestId, p_turn_id: v.turnId,
+        p_source_script_id: v.sourceScriptId, p_expected_storyboard_version: v.expectedStoryboardVersion,
+        p_expected_editing_version: v.expectedEditingVersion, p_storyboard: v.choice !== "editing", p_editing: v.choice !== "storyboard" });
     },
     videoExecutionCheck: (value: unknown) => {
       const v = opcVideoExecutionCheck.parse(value);

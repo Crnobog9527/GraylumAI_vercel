@@ -15,7 +15,8 @@ const turnView = z.object({
   lastTurn: z.object({ turnId: z.number().int().positive(), kind: z.string(), closeKind: z.string(), failureCode: z.string().nullable(),
     settlement: z.enum(['pending', 'done']).nullable(), chargedCredits: z.number().int().nullable(), closedAt: z.string() }).nullable(),
   messages: z.array(z.object({ seq: z.number().int().positive(), role: z.enum(['user', 'assistant']), turnId: z.number().int().nullable(),
-    content: z.string(), /** The turn's request id, a topic reply's handle (V2-10b). */ requestId: z.string().uuid().nullable().optional() })),
+    content: z.string(), /** The turn's request id, a topic reply's handle (V2-10b). */ requestId: z.string().uuid().nullable().optional(),
+    /** A Skill reply of a work item (V2-10b C2). */ workSkill: z.boolean().nullable().optional() })),
   // The paid tool calls behind these replies, for the work rows after a reload. Absent until migration 0441.
   calls: z.array(z.object({ turnId: z.number().int(), seq: z.number().int(), toolName: z.string().nullable(), status: z.string(),
     usage: z.unknown(), q: z.unknown(), multiplier: z.unknown(), arguments: z.string().nullable() })).default([]),

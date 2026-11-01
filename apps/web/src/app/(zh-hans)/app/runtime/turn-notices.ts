@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { ToolAvailability } from '@repo/api/src/services/turn/tools/types';
+import { CONTENT_SOURCE_MESSAGES } from '@repo/api/src/shared/contentSourceMessages';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 
 /*
@@ -28,6 +29,10 @@ const REFUSED: Record<string, string> = {
   TURN_RESUME_INPUT_LOST: '这一轮无法继续，已全额退回积分。请重新发送。',
   TURN_UNAUTHENTICATED: '登录已过期，请重新登录后再发送。',
   POSITIONING_REQUIRED: POSITIONING_REQUIRED_NOTICE,
+  OPC_BUSINESS_ARCHIVED: '这个业务已归档，这条消息没有发送，也没有扣费。',
+  OPC_VIDEO_TYPE_REQUIRED: '这条选题不是视频类型，不能生成口播稿或分镜，这条消息没有发送，也没有扣费。',
+  OPC_CONTENT_BINDING: '分镜或剪辑的准备内容已变化，这条消息没有发送，也没有扣费。请刷新后再试。',
+  ...CONTENT_SOURCE_MESSAGES,
 };
 const FAILED: Record<string, string> = {
   TURN_TOMBSTONED: '这个对话已删除，本轮回复没有保存。',

@@ -13,6 +13,7 @@ import { CORE_PATH_SETTING } from './settingKeys';
 import { readAdmissionSettings, type NewWorkGateResult, type RuntimeCallGate, type SettingsRead } from '../runtime/newWorkGate';
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from '../runtime/positioningGate';
 import { freeChatInstructions } from '../runtime/primaryInstructions';
+import { withInjectedSource } from '../runtime/contentSource';
 import { assertRuntimeRequestCapacity } from '../runtime/context';
 import { isPositioningRefusal, POSITIONING_FALLBACK_INSTRUCTIONS, POSITIONING_MARKER } from '../runtime/positioningFallback';
 import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, type RequestContext } from '../runtime/providerRequest';
@@ -67,6 +68,8 @@ export type ChatDeps = {
 };
 /** The requests only a video item may make (runtime_admit's check, on the old path). */
 const VIDEO_REQUEST = /^\[OPC_(SCRIPT|VIDEO_PACKAGE)_V1\]/;
+/** A package needs the material its request claimed (opc_video_material_prepare); opc_video_turn_check would refuse the paid reply. */
+const VIDEO_PACKAGE = /^\[OPC_VIDEO_PACKAGE_V1\]/;
 /** The item's frozen brief and material ahead of the message, as data; rebuilt each turn, never saved with the message. */
 function workMaterial(work: WorkItemTurn | null): string {
   if (!work || (work.brief === null && work.material === null)) return '';
@@ -114,10 +117,12 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // Only when the request says so: a free chat's round trips stay as budgeted (plan 2.3).
   let work: WorkItemTurn | null = null;
   if (input.workItem) try {
-    work = (await db.workCheck({ actorId: input.actorId, sessionId: input.sessionId, videoRequired: VIDEO_REQUEST.test(input.text) })).work;
+    work = (await db.workCheck({ actorId: input.actorId, sessionId: input.sessionId, videoRequired: VIDEO_REQUEST.test(input.text),
+      requestId: input.requestId })).work;
   }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_DATABASE_UNAVAILABLE' }); }
-  const material = workMaterial(work);
+  if (work && VIDEO_PACKAGE.test(input.text) && !work.videoPackage) return emit({ type: 'error', code: 'OPC_CONTENT_BINDING' });
+  let material = workMaterial(work);
   const budgets = await readPurposeBudgets(admin, configuration);
   const interactiveBytes = budgets?.interactive.inputBytes ?? 90000;
   let quote;
@@ -154,6 +159,21 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const chosen = input.chosen ? tools?.selection(input.chosen) ?? { refused: 'TURN_SKILL_UNAVAILABLE' } : { note: '' };
   if ('refused' in chosen) return emit({ type: 'error', code: chosen.refused });
   const inputLimit = tools ? tools.inputLimit : quote.inputLimit;
+  // A2: a derived work method reads one saved version, chosen by the database, frozen below; like the material, sent and never saved.
+  let workSource: { contentId: string; kind: 'script' | 'storyboard' } | undefined;
+  if (work && 'contentSource' in chosen && chosen.contentSource) {
+    try {
+      const source = await db.workSource({ actorId: input.actorId, sessionId: input.sessionId, kind: chosen.contentSource });
+      if (source.status === 'refused') return emit({ type: 'error', code: source.code });
+      if (source.status === 'ready') {
+        workSource = { contentId: source.contentId, kind: source.kind };
+        const injected = withInjectedSource('', source.kind, source.version, source.body) + '\n\n';
+        if (requiredBytes + Buffer.byteLength(injected) + (tools?.definitionBytes ?? 0) > inputLimit)
+          return emit({ type: 'error', code: 'RUNTIME_CONTENT_SOURCE_TOO_LARGE' });
+        material += injected;
+      }
+    } catch { return emit({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' }); }
+  }
   // The ceiling this turn really has (research usable: the research one; otherwise the interactive one), before anything opens.
   if (tools && requiredBytes + tools.definitionBytes > inputLimit) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
   const toolLimits = tools ? tools.plan.limits : { paidTools: 0, freeTools: 0 };
@@ -181,7 +201,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   const workSkill = work && 'skill' in chosen ? chosen.skill : undefined;
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat',
-    policy: workSkill ? { ...policy, workSkill } : policy,
+    policy: { ...policy, ...(workSkill ? { workSkill } : {}), ...(workSource ? { workSource } : {}),
+      ...(work?.videoPackage ? { workMaterial: { revision: work.materialRevision, hash: work.materialHash } } : {}) },
     ...(input.resume ? { resumeOf: input.resume.of } : {}) }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
@@ -190,7 +211,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
   // Archived between the read and the open: the turn runs on, as one opened just before; the miss is only logged (B1).
   if (work) void swallow('turn_work_business_archived_after_read', db.workCheck({ actorId: input.actorId, sessionId: input.sessionId,
-    videoRequired: false }), undefined, { category: 'api' });
+    videoRequired: false, requestId: input.requestId }), undefined, { category: 'api' });
 
   let seq = 0;
   const callDeps = { db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
