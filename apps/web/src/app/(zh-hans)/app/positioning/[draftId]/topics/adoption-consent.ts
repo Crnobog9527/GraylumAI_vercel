@@ -6,9 +6,12 @@
 export function consentedTopicIds(input: string | null, candidateIds: string[], titles: readonly string[] = []): string[] | null {
   const message = input?.trim() ?? '';
   if (/[?？吗]|不要|不用|别|先不|暂不|是否/.test(message)) return null;
-  const clauses = message.split(/[，,。！!；;\n]+/).filter(clause => /采用|采纳/.test(clause));
-  if (clauses.length !== 1) return null;
-  const match = clauses[0].trim().match(/^(?:请|帮我|我要|我想|现在|只|就|把|将|\s)*(?:采用|采纳)\s*(.*?)\s*(?:作为选题|吧|就好|即可)?$/);
+  // A comma also separates a list: an ordinal-only clause after the instruction stays with it.
+  const clauses = message.split(/[，,。！!；;\n]+/), first = clauses.findIndex(clause => /采用|采纳/.test(clause));
+  if (first < 0 || clauses.filter(clause => /采用|采纳/.test(clause)).length !== 1) return null;
+  let last = first;
+  while (last + 1 < clauses.length && /^\s*第\s*[一二三四五六七八九十两\d]+\s*条(?:选题|内容)?\s*$/.test(clauses[last + 1])) last += 1;
+  const match = clauses.slice(first, last + 1).join('，').trim().match(/^(?:请|帮我|我要|我想|现在|只|就|把|将|\s)*(?:采用|采纳)\s*(.*?)\s*(?:作为选题|吧|就好|即可)?$/);
   if (!match || candidateIds.length === 0) return null;
   const selection = titles.reduce((text, title) => title ? text.split(title).join('') : text, match[1]).trim();
   if (/^(?:全部|所有)(?:选题|内容)?$/.test(selection)) return [...candidateIds];

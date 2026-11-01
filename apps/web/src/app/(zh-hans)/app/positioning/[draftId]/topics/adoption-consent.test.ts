@@ -14,6 +14,8 @@ describe('natural-language topic adoption consent', () => {
     const titles = ['One hour of prep for a week of baby meals', 'Second', 'Third'];
     expect(consentedTopicIds('三条都做短视频，请采用第一条 One hour of prep for a week of baby meals 作为选题。', ids, titles)).toEqual(['one']);
     expect(consentedTopicIds('好的，采用第二条吧', ids)).toEqual(['two']);
+    expect(consentedTopicIds('采用第一条，第三条', ids)).toEqual(['one', 'three']);
+    expect(consentedTopicIds('三条都行，采用第一条,第三条。', ids)).toEqual(['one', 'three']);
     expect(consentedTopicIds('采用第一条 some other words', ids, titles)).toBeNull();
     expect(consentedTopicIds('采用第一条，再采用第二条', ids)).toBeNull();
     expect(consentedTopicIds('先别采用，采用第一条', ids)).toBeNull();

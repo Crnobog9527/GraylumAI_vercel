@@ -56,7 +56,8 @@ export function parseAdoption(text: string | null | undefined): string[] | null 
   for (const match of [...text.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g)].reverse()) {
     try {
       const value = JSON.parse(match[1]) as { action?: unknown; itemIds?: unknown };
-      if (value.action === 'adopt' && Array.isArray(value.itemIds) && value.itemIds.length > 0 && value.itemIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id))) return [...new Set(value.itemIds as string[])];
+      if (value.action === 'adopt' && Array.isArray(value.itemIds) && value.itemIds.length > 0
+        && value.itemIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id))) return [...new Set(value.itemIds as string[])];
     } catch { /* not an adoption block */ }
   }
   return null;
