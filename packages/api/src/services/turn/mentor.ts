@@ -26,6 +26,7 @@ import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } fro
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
+import { TurnReplay, type ResumeRead } from './resume';
 import { mentorHost, mentorOrganizerInput, mentorState, resourcesOf } from './mentorContext';
 import { answeredText, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
@@ -53,7 +54,8 @@ export type MentorDeps = {
 };
 export type MentorInput = { actorId: string; sessionId: string; requestId: string; moduleId: string; stepId: string; text: string;
   organizeAfter: boolean; /** V2-5b: an answer to the card of the latest mentor reply of this step. */ answer?: MentorAnswer;
-  /** V2-5c: the user pressed Refresh on one benchmark account. */ researchRefreshId?: string };
+  /** V2-5c: the user pressed Refresh on one benchmark account. */ researchRefreshId?: string;
+  /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead } };
 
 const MARKER_RESERVE_BYTES = 256;
 /** Supplier time of a turn: its 300 s minus the reply and the organizer after the last lookup. */
@@ -98,10 +100,15 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     if (error) throw new Error('TURN_OPEN_FAILED');
     return sourceChecked.parse(data);
   };
+  // A resume keeps to what the paused turn has left and replays its receipts: the reply survives a pause at the organizer.
+  const resume = input.resume?.read;
+  const replay = resume ? new TurnReplay(resume.calls) : undefined;
   let checked: z.infer<typeof sourceChecked> | undefined;
   // 2. Open: freeze, read the draft and its checklist in the same transaction.
   const openTurn = () => db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'mentor',
-    policy: mentorPolicy(catalog, { opening, stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
+    ...(input.resume ? { resumeOf: input.resume.of } : {}),
+    policy: mentorPolicy(catalog, { ...(resume ? { left: resume.limits, replayedModels: replay?.replayedModels ?? 0 } : {}), opening,
+      stepId: input.stepId, moduleId: input.moduleId, sourceChecked: checked !== undefined,
       sourceDrafts: checked?.sourceDrafts ?? [], ...(typeof flowRaw?.preparedAt === 'string' ? { preparedAt: flowRaw.preparedAt } : {}) }) });
   let opened, flow: PreparedResearch | undefined, flowRaw: Record<string, unknown> | undefined;
   // A turn the benchmark flow may run in: one read gets the check and the flow's state together (plan 3.1).
@@ -233,8 +240,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         const request = openRouterRequestBody(body, { context, policy: callPolicy(mentor) as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, mentor.inputLimit); }
         catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
-        await callGate().catch(keep);
-        return modelCall(callDeps(mentor), mentor, request, onChunk).then(response => {
+        const stored = replay?.model();
+        if (!stored) await callGate().catch(keep);
+        return (stored ? Promise.resolve(stored) : modelCall(callDeps(mentor), mentor, request, onChunk)).then(response => {
           const message = JSON.parse(response)?.choices?.[0]?.message, call = message?.tool_calls?.[0];
           toolCalled = Boolean(message?.tool_calls?.length);
           if (call?.function?.name === ASK_QUESTION_TOOL) cardMessage = groundedCardFallback(call.function.arguments);
@@ -269,7 +277,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const scopeDenied = rechecked !== null && !rechecked.allowed;
     const researchMade = benchmark?.journal();
     const closed = await close('completed', { delivered: true,
-      messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId) }],
+      messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId, ctx.roundId) }],
       ...(organizer || researchMade ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
         versions: state.versions, organizerInput: captureInput, output: organized, ...(scopeDenied ? { scopeDenied } : {}) } : {}),
         ...(researchMade ? { research: researchMade } : {}) } } : {}) });
@@ -279,6 +287,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   } catch (error) {
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code
       : error instanceof Error && /^TURN_[A-Z_]+$/.test(error.message) ? error.message : 'TURN_FAILED';
+    if (code === 'TURN_PAUSED_FOR_CREDITS') await swallow('turn_pause_save_failed', db.pauseSave({ actorId: input.actorId,
+      turnId: opened.turnId, input: { kind: 'mentor', moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
+        ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) } }),
+    false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.

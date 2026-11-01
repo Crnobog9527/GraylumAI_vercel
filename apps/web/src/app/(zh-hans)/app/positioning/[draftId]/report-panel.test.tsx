@@ -18,6 +18,7 @@ vi.mock("@/trpc/client", () => {
         return { data: options.enabled ? state.available : undefined };
       } },
       reportPreflight: { useQuery: () => ({ data: state.preflight, isError: state.preflightError, isFetching: state.preflightFetching }) },
+      choices: { useQuery: () => ({ data: { corePathV2: false } }) },
       reportLatest: { useQuery: () => ({ ...state.latest, refetch: vi.fn() }) },
       reportStatus: { useQuery: (input: { executionId: string }, options: { enabled: boolean }) => {
         state.statusInput.push(options.enabled ? input.executionId : null);

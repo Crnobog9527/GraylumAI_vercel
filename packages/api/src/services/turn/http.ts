@@ -8,6 +8,7 @@ import { runCompareTurn } from './compare';
 import { codeOf, juryTurn } from './jury';
 import { reportTurnRequest, runReportTurn } from './report';
 import { runMentorTurn } from './mentor';
+import { runResumedTurn } from './resumeTurn';
 import { mentorAnswer } from './mentorInput';
 import { eventStream, type StreamEvent } from './sse';
 import { swallow } from '../../lib/swallow';
@@ -19,12 +20,17 @@ import { swallow } from '../../lib/swallow';
  */
 const common = { sessionId: z.string().uuid(), requestId: z.string().uuid() };
 export const turnRequest = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('chat'), ...common, text: z.string().trim().min(1).max(200_000) }).strict(),
+  // V2-10: what the composer chose for this message: a Skill the model loads first, library documents it reads first.
+  z.object({ kind: z.literal('chat'), ...common, text: z.string().trim().min(1).max(200_000), moduleId: z.string().uuid().optional(),
+    references: z.array(z.object({ kind: z.literal('library_document'), documentId: z.string().uuid(),
+      version: z.number().int().positive() }).strict()).min(1).max(8).optional() }).strict(),
   // V2-5: the positioning mentor. moduleId is the draft's module (the turn is quoted for its model; turn_open refuses any other);
   // text is the user's words, or the host's opening marker. 8000 characters, as the old mentor request.
   z.object({ kind: z.literal('mentor'), ...common, moduleId: z.string().uuid(), stepId: z.string().min(1).max(128),
     text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean(), answer: mentorAnswer.optional(),
     researchRefreshId: z.string().uuid().optional() }).strict(),
+  // V2-10: continue a turn paused for credits. What the user asked was saved at the pause, so any device can send this.
+  z.object({ kind: z.literal('resume'), ...common, resumeOf: z.number().int().positive() }).strict(),
   reportTurnRequest,
   // V2-7b: as the old compare request. Everything else is read and checked on the server (compare.ts).
   z.object({ kind: z.literal('compare'), ...common, question: z.string().trim().min(1).max(20_000),
@@ -75,6 +81,8 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
   if (!actorId) return json(401, 'TURN_UNAUTHENTICATED');
   // A limiter that cannot answer refuses (fails closed).
   if (await swallow('turn_rate_limit_unavailable', deps.rateLimited(actorId), true, { category: 'api' })) return json(429, 'TURN_RATE_LIMITED');
+  if (input.kind === 'resume') return eventStream(emit => runResumedTurn(deps.chat, { actorId, sessionId: input.sessionId,
+    requestId: input.requestId, resumeOf: input.resumeOf }, emit));
   if (input.kind === 'report') {
     // A report hears when its page drops the stream (the user's stop, V2-7a); a chat runs to its end regardless.
     const gone = new AbortController();
@@ -91,5 +99,7 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
   if (input.kind === 'mentor') return eventStream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
     requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
     ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) }, emit));
-  return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text }, emit));
+  const chosen = { ...(input.moduleId ? { moduleId: input.moduleId } : {}), ...(input.references ? { references: input.references } : {}) };
+  return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text,
+    ...(Object.keys(chosen).length ? { chosen } : {}) }, emit));
 }
