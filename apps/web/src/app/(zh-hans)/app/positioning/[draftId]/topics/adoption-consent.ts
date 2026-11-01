@@ -2,10 +2,13 @@
 
 // A model reply can identify candidate IDs, but it cannot authorize a write.
 // Only an unambiguous instruction in the persisted user turn may do that. The instruction may sit in one clause of a longer message
-// and name the topic's title too; a message with a question or a negation anywhere consents to nothing.
+// and name the topic's title too; a message with a question, a negation or a condition anywhere consents to nothing.
 export function consentedTopicIds(input: string | null, candidateIds: string[], titles: readonly string[] = []): string[] | null {
-  const message = input?.trim() ?? '';
+  // The title is the user's quote, not their words: what it says neither asks nor refuses.
+  const message = titles.reduce((text, title) => title ? text.split(title).join('') : text, input?.trim() ?? '');
   if (/[?？吗]|不要|不用|别|先不|暂不|是否/.test(message)) return null;
+  // Not yet in force: a condition or a later time anywhere keeps it from being consent now.
+  if (/等|后|待|稍|回头|如果|假如|要是|若|再|考虑|看看/.test(message)) return null;
   // A comma also separates a list: an ordinal-only clause after the instruction stays with it.
   const clauses = message.split(/[，,。！!；;\n]+/), first = clauses.findIndex(clause => /采用|采纳/.test(clause));
   if (first < 0 || clauses.filter(clause => /采用|采纳/.test(clause)).length !== 1) return null;
@@ -13,7 +16,7 @@ export function consentedTopicIds(input: string | null, candidateIds: string[], 
   while (last + 1 < clauses.length && /^\s*第\s*[一二三四五六七八九十两\d]+\s*条(?:选题|内容)?\s*$/.test(clauses[last + 1])) last += 1;
   const match = clauses.slice(first, last + 1).join('，').trim().match(/^(?:请|帮我|我要|我想|现在|只|就|把|将|\s)*(?:采用|采纳)\s*(.*?)\s*(?:作为选题|吧|就好|即可)?$/);
   if (!match || candidateIds.length === 0) return null;
-  const selection = titles.reduce((text, title) => title ? text.split(title).join('') : text, match[1]).trim();
+  const selection = match[1].trim();
   if (/^(?:全部|所有)(?:选题|内容)?$/.test(selection)) return [...candidateIds];
   const numerals: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
   function ordinal(value: string): number {

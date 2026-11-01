@@ -20,6 +20,12 @@ describe('natural-language topic adoption consent', () => {
     expect(consentedTopicIds('采用第一条，再采用第二条', ids)).toBeNull();
     expect(consentedTopicIds('先别采用，采用第一条', ids)).toBeNull();
   });
+  it('refuses an instruction that is not in force yet', () => {
+    for (const message of ['等我确认后，采用第一条', '采用第一条，等我确认后再保存', '如果可以，采用第一条', '明天再采用第一条', '采用第一条，之后再说'])
+      expect(consentedTopicIds(message, ids)).toBeNull();
+    // A title is a quote: its words do not count.
+    expect(consentedTopicIds('请采用第一条 如果等你有空 作为选题', ids, ['如果等你有空', 'b', 'c'])).toEqual(['one']);
+  });
   it('refuses questions, vague agreement, negation and out-of-range selection', () => {
     for (const message of ['不要采用第一条', '采用第一条吗？', '好，继续', '先看看第二条', '采用第四条', '别人说采用第一条',
       '采用第一条和', '采用和第一条', '采用第一条和选题']) {
