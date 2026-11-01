@@ -1047,8 +1047,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       return envelope ? { step, ...envelope } : null;
     })
     .filter((entry): entry is { step: Step; raw: string; parsed: StepEnvelope | null } => Boolean(entry));
-  const hasPendingStepRequest = pendingStepRequests.length > 0;
-  const awaitingReply = hasPendingStepRequest && !recoveryNeedsUser.length;
+  const hasPendingStepRequest = pendingStepRequests.length > 0, awaitingReply = hasPendingStepRequest && !recoveryNeedsUser.length;
   // The server execution slot owns concurrency. A stopped historical call may
   // still have pending cost without owning that slot; never infer busy from cost.
   const pendingMentor = mentorExecutions.find(
@@ -1134,7 +1133,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           if (step.id !== selectedStep.id) return null;
           const s = snap.steps[step.id];
           const sendLocked = busy || Boolean(history.data?.activeExecution) || openingSteps.includes(step.id) || Boolean(pendingMentor) ||
-            hasPendingConfirmation || hasPendingStepRequest || free.busy;
+            hasPendingConfirmation || hasPendingStepRequest || free.busy, replying = sendLocked && !recoveryNeedsUser.length;
           const nudged = s.valid || infoEdits[step.id] ? [] : savedFields(sessionStorage, draftId, step.id, d.information[step.id].schema);
           chatShown = true; // Its message list carries the page's notices.
           return (
@@ -1192,7 +1191,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {liveOnly && <MentorTurnSteps live={liveOnly} reply={liveOnly} calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns} {...research.panel}
-                    disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
+                    disabled={replying ? "busy" : sendLocked || snap.state !== "draft" ||
+                      mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
                     onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...turnPath.notices(open => void run(() => streamTurn(open))),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),

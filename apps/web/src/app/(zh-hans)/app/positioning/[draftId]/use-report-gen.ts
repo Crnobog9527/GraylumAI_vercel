@@ -76,7 +76,9 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const [streaming, setStreaming] = useState(false);
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const status = trpc.runtime.reportStatus.useQuery({ executionId: executionId ?? "" }, {
-    enabled: Boolean(executionId) && !turn.status,
+    // A turn-path report is read on the turn routes only: the old status read would answer a request id it does not know
+    // (REPORT_UNAVAILABLE), and it waits for the turn read to say there is no turn report before it is asked about one.
+    enabled: Boolean(executionId) && !turn.status && turn.known && streamPath.current !== "turn",
     refetchInterval: query => !streaming && reportProgressing(query.state.data) ? POLL_MS : false,
   });
   const shown = turn.status ?? (status.data && status.data.executionId === executionId ? status.data : null);

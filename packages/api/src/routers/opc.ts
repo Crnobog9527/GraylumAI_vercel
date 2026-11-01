@@ -28,9 +28,11 @@ import {
   opcTopicDraft,
   opcLibraryEdit,
   opcContentFromExecution,
+  opcContentFromTurn,
   opcContentManualSave,
   opcVideoPackage,
   opcVideoResults,
+  opcVideoResultsFromTurn,
   opcVideoExecutionCheck,
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
@@ -284,6 +286,9 @@ export const opcRouter = router({
   saveContentResult: procedure
     .input(opcContentFromExecution)
     .mutation(({ ctx, input }) => ctx.opc.contentFromExecution(input)),
+  saveContentFromTurn: procedure
+    .input(opcContentFromTurn)
+    .mutation(({ ctx, input }) => ctx.opc.contentFromTurn(input)),
   saveContentManual: procedure
     .input(opcContentManualSave)
     .mutation(({ ctx, input }) => ctx.opc.contentManualSave(input)),
@@ -293,6 +298,9 @@ export const opcRouter = router({
   saveVideoResults: procedure
     .input(opcVideoResults)
     .mutation(({ ctx, input }) => ctx.opc.videoResults(input)),
+  saveVideoResultsFromTurn: procedure
+    .input(opcVideoResultsFromTurn)
+    .mutation(({ ctx, input }) => ctx.opc.videoResultsFromTurn(input)),
   checkVideoExecution: procedure
     .input(opcVideoExecutionCheck)
     .mutation(({ ctx, input }) => ctx.opc.videoExecutionCheck(input)),

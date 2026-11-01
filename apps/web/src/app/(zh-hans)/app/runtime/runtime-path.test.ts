@@ -18,8 +18,8 @@ describe('which workspace a conversation opens in', () => {
     expect(choose({ viewSettled: false })).toBe('loading');
     expect(choose({})).toBe('turn');
   });
-  it('opens every free conversation on the turn path with the switch on, old-path history or not; a work item or a failed view stays old', () => {
-    expect(choose({ scopeKind: 'work_item' })).toBe('old');
+  it('opens every free conversation and work item on the turn path with the switch on; a failed view stays old', () => {
+    expect(choose({ scopeKind: 'work_item' })).toBe('work');
     expect(choose({ scopeKind: undefined })).toBe('old');
   });
   it('follows the switch only: off and nothing of the turn path held is the old workspace, held replies stay on the turn path', () => {
