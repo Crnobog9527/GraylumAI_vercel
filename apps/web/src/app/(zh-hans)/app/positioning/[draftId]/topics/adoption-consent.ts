@@ -1,8 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 // A model reply can identify candidate IDs, but it cannot authorize a write.
-// Only an unambiguous instruction in the persisted user turn may do that. The instruction may sit in one clause of a longer message
-// and name the topic's title too; a message with a question, a negation or a condition anywhere consents to nothing.
+// Only an unambiguous instruction in the persisted user turn may do that. The instruction may name the topic's title and may follow a
+// clause that only says what form the topics take, or a spoken filler. Anything else around it (an example, a quote, a condition, a
+// question, a later time) is not on that short list, so it consents to nothing: the list is what is allowed, never what is refused.
+const FORM = /^[一二三四五六七八九十两\d]+条都?(?:做|定为|是|用)?(?:成)?(?:短?视频|文章|图文)$/;
+const FILLER = /^(?:好的?|行|可以|嗯|那就|那)$/;
 const numerals: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 function ordinal(value: string): number {
   if (/^\d+$/.test(value)) return Number(value);
@@ -23,10 +26,13 @@ export function consentedTopicIds(input: string | null, candidateIds: string[], 
   // Not yet in force: a condition or a later time anywhere keeps it from being consent now.
   if (/等|后|待|稍|回头|如果|假如|要是|若|再|考虑|看看/.test(message)) return null;
   // A comma also separates a list: an ordinal-only clause after the instruction stays with it.
-  const clauses = message.split(/[，,。！!；;\n]+/), first = clauses.findIndex(clause => /采用|采纳/.test(clause));
+  const clauses = message.split(/[，,。！!；;\n]+/).map(clause => clause.trim()).filter(Boolean);
+  const first = clauses.findIndex(clause => /采用|采纳/.test(clause));
   if (first < 0 || clauses.filter(clause => /采用|采纳/.test(clause)).length !== 1) return null;
+  if (!clauses.slice(0, first).every(clause => FORM.test(clause) || FILLER.test(clause))) return null;
   let last = first;
-  while (last + 1 < clauses.length && /^\s*第\s*[一二三四五六七八九十两\d]+\s*条(?:选题|内容)?\s*$/.test(clauses[last + 1])) last += 1;
+  while (last + 1 < clauses.length && /^第\s*[一二三四五六七八九十两\d]+\s*条(?:选题|内容)?$/.test(clauses[last + 1])) last += 1;
+  if (last + 1 < clauses.length) return null; // nothing may follow the instruction but more ordinals
   const match = clauses.slice(first, last + 1).join('，').trim().match(/^(?:请|帮我|我要|我想|现在|只|就|把|将|\s)*(?:采用|采纳)\s*(.*?)\s*(?:作为选题|吧|就好|即可)?$/);
   if (!match || candidateIds.length === 0) return null;
   const selection = match[1].trim();
