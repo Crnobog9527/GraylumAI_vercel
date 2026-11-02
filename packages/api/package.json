@@ -91,8 +91,6 @@
     "./src/services/research/priceRefresh": "./src/services/research/priceRefresh.ts",
     "./src/services/research/runtime/secrets": "./src/services/research/runtime/secrets.ts",
     "./src/services/turn/settings/stagingEnvironment": "./src/services/turn/settings/stagingEnvironment.ts",
-    "./src/services/turn/settings/stuckCalls": "./src/services/turn/settings/stuckCalls.ts",
-    "./src/services/bill2/receiptRetention": "./src/services/bill2/receiptRetention.ts",
     "./src/services/report/fees": "./src/services/report/fees.ts",
     "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts",
     "./src/services/accountErasure/content": "./src/services/accountErasure/content.ts",

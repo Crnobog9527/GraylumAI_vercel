@@ -23,15 +23,7 @@ BEGIN
     'basis',coalesce(st#>>ARRAY['fieldMeta',field_id,'basis'],'unknown'),
     'executionId',st#>ARRAY['fieldMeta',field_id,'executionId'],
     'origin',st#>ARRAY['fieldMeta',field_id,'origin'],'createdAt',st#>ARRAY['fieldMeta',field_id,'createdAt'],
-    'hasPendingSuggestion',EXISTS(SELECT 1 FROM runtime_executions e JOIN opc_turns t
-      ON t.session_id=e.session_id AND t.request_id=e.request_id
-      WHERE e.id::text=st#>>ARRAY['fieldMeta',field_id,'suggestion','executionId']
-       AND t.round_id=r.id AND t.draft_id=d.draft_id AND t.purpose='mentor'
-       AND t.token::text=e.payload->>'opcTurnToken' AND e.state='completed'
-       AND e.payload->>'revisionId'=r.revision_id::text
-       AND e.payload->>'moduleId'=(SELECT module_id::text FROM artifact_projects WHERE id=r.project_id)
-       AND e.payload#>>'{scopeMaterial,content,work,roundId}'=r.id::text
-       AND e.session_id=p_session_id AND e.actor_id=p_actor_id AND runtime_history_available(e.id)),'protected',NOT coalesce(NOT coalesce((st->>'valid')::boolean,false)
+    'hasPendingSuggestion',false,'protected',NOT coalesce(NOT coalesce((st->>'valid')::boolean,false)
  AND coalesce(st->'information'->(field_id)->>'status','unknown') NOT IN ('confirmed','deferred') AND (
   (st->'fieldMeta'->(field_id)->>'source'='capture' AND st->'fieldMeta'->(field_id)->>'fp'=artifact_hash(st->'information'->(field_id))
    AND EXISTS(SELECT 1 FROM artifact_requests cap WHERE cap.project_id=d.project_id AND cap.round_id=r.id
