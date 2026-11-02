@@ -20,6 +20,13 @@ const laterMigrations=number=>readdirSync(resolve(root,'packages/db/migrations')
 // 0385 also patches claim_daily_checkin, which 0396 retired; a replay on the finished database skips that one patch.
 const replayable=file=>{
   const text=read('packages/db/migrations/'+file);
+  // 0334 patches the organizer-pending gate of runtime_admit and opc_step_material; V2-12 R1b removed that gate from opc_step_material
+  // (the organizer belongs to the old path), so a replay on the finished database patches runtime_admit only.
+  if(file.startsWith('0334_')) {
+    const gone=",\n  'public.opc_step_material(uuid,uuid,uuid,text,text,text)']";
+    assert.ok(text.includes(gone),'0334 still lists opc_step_material in its patch');
+    return text.replace(gone,']');
+  }
   if(!file.startsWith('0385_'))return text;
   const checkinPatch=/SELECT pg_temp\.e3_patch\('public\.claim_daily_checkin\(uuid\)',[\s\S]*?\$r\$\);\n/;
   assert.ok(checkinPatch.test(text),'0385 still carries the check-in patch this replay removes');
