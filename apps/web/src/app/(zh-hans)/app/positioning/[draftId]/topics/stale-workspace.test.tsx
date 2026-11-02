@@ -27,11 +27,14 @@ describe('topics page of a workspace bound to an older positioning version', () 
     const html = renderToStaticMarkup(<Page/>);
     expect(html).toContain('你已更新过正式定位');
     expect(html).toContain('/app/positioning/draft');
+    expect(html).toContain('用最新定位开始选题');
     expect(html).not.toContain('OPC_');
   }, 60_000);
   it('shows no notice while the workspace is on the current version', async () => {
     current = 'v9';
     const { default: Page } = await import('./page');
-    expect(renderToStaticMarkup(<Page/>)).not.toContain('你已更新过正式定位');
+    const html = renderToStaticMarkup(<Page/>);
+    expect(html).not.toContain('你已更新过正式定位');
+    expect(html).not.toContain('用最新定位开始选题');
   }, 60_000);
 });

@@ -8,7 +8,8 @@ CREATE OR REPLACE FUNCTION public.opc_topic_consent(p_actor_id uuid, p_draft_id 
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE w opc_topic_workspaces; result jsonb;
+DECLARE w opc_topic_workspaces; result jsonb; d opc_drafts; ap artifact_projects; v artifact_versions; r artifact_rounds; old_version bigint;
+ mat jsonb; n bigint; floor_seq bigint;
 BEGIN
  -- 0324 archived business guard
  IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id)); END IF;
@@ -18,7 +19,36 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(p_draft_id::text,113));
  SELECT * INTO w FROM opc_topic_workspaces WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
- IF w.draft_id IS NOT NULL AND w.source_version_id IS DISTINCT FROM p_source_version_id THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_CHANGED';END IF;
+ IF w.draft_id IS NOT NULL AND w.source_version_id IS DISTINCT FROM p_source_version_id THEN
+  -- Owner 2026-11-02 (option A): after the positioning is updated the user can start the topic work again on the latest
+  -- positioning. Only the newest formal version of this draft's project qualifies, and only the same pinned method revision.
+  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+  SELECT * INTO ap FROM artifact_projects WHERE id=d.project_id AND actor_id=p_actor_id;
+  SELECT * INTO v FROM artifact_versions WHERE id=p_source_version_id AND project_id=d.project_id;
+  SELECT version INTO old_version FROM artifact_versions WHERE id=w.source_version_id;
+  IF ap.id IS NULL OR v.id IS NULL OR v.version IS DISTINCT FROM ap.current_version OR v.version<=coalesce(old_version,0)
+   THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_CHANGED';END IF;
+  IF NOT opc_source_allowed(p_actor_id,v.id) THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_DENIED';END IF;
+  SELECT * INTO r FROM artifact_rounds WHERE id=v.round_id AND project_id=d.project_id;
+  IF r.id IS NULL OR r.state<>'published' OR jsonb_typeof(r.workflow->'planResources') IS DISTINCT FROM 'array'
+   OR jsonb_array_length(r.workflow->'planResources')=0 THEN RAISE EXCEPTION 'OPC_TOPIC_SKILL_MISSING';END IF;
+  IF r.revision_id IS DISTINCT FROM w.revision_id OR ap.module_id IS DISTINCT FROM w.module_id OR ap.skill_id IS DISTINCT FROM w.skill_id
+   THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_CHANGED';END IF;
+  -- An old turn still running (another tab) would write its messages after the floor: wait for the session lock, then refuse.
+  PERFORM 1 FROM runtime_sessions WHERE id=w.session_id AND actor_id=p_actor_id FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM runtime_sessions WHERE id=w.session_id AND active_turn_id IS NOT NULL) THEN RAISE EXCEPTION 'OPC_TOPIC_TURN_ACTIVE';END IF;
+  -- The same conversation, a new material revision; what the model is sent from the old conversation starts after floor_seq.
+  SELECT coalesce(max(revision),0) INTO n FROM runtime_scope_material WHERE session_id=w.session_id;
+  mat:=runtime_material(p_actor_id,w.session_id,'save',gen_random_uuid(),n,
+   jsonb_build_object('brief','topic:first-week','material',opc_source_material(v.id,'topic:first-week'),'roundId',NULL));
+  SELECT coalesce(max(seq),0) INTO floor_seq FROM session_messages WHERE session_id=w.session_id;
+  -- The only update the binding's guard lets through: the marker names this draft and this transaction.
+  PERFORM set_config('graylum.topic_rebind',p_draft_id::text||':'||txid_current()::text,true);
+  UPDATE opc_topic_workspaces SET source_version_id=v.id,source_hash=coalesce(v.report_hash,''),
+   material_revision=(mat->>'revision')::bigint,history_floor_seq=floor_seq WHERE draft_id=p_draft_id;
+  PERFORM set_config('graylum.topic_rebind','',true);
+  RETURN opc_topic_read(p_actor_id,p_draft_id);
+ END IF;
  IF NOT opc_source_allowed(p_actor_id,p_source_version_id) THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_DENIED';END IF;
  result:=opc_topic_bind(p_actor_id,p_draft_id,coalesce(w.request_id,gen_random_uuid()),p_source_version_id);
  -- Upgraded workspaces with any prior topic turn already started their work.

@@ -215,6 +215,7 @@ try {
   sql(read('packages/db/migrations/0453_core_path_v2_stop_loss_top_up.sql')); // the stop-loss top-up rewrites turn_open, which 0449 replays
   sql(read('packages/db/migrations/0454_core_path_v2_stale_claim.sql')); // 0450 rewrites opc_video_material_prepare, which 0454 changed
   sql(read('packages/db/migrations/0459_core_path_v2_voice.sql')); // V2-12 B7 rewrites turn_open, which 0449 replays (and turn_close, turn_tombstones, turn_user_charge, turn_call_record)
+  sql(read('packages/db/migrations/0476_core_path_v2_topic_rebind.sql')); // the topic re-bind rewrites topic_turn_source, opc_topic_consent and opc_topic_original, which 0449 replays (and artifact_immutable)
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
