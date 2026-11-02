@@ -148,7 +148,6 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });
   const charge = !report.live && !working ? reportFeeText(status?.fee) : null;
   if (charge) notices.push({ id: "report-fee", tone: "status", text: charge });
-  if (status && view?.kind === "waiting") notices.push(...report.payg.turnNotices(status, busy || working));
   // An existing report still being written already says so; the "opened" line would only repeat it.
   const repeats = report.refusal?.opened && (view?.kind === "progress" || Boolean(report.live));
   if (report.refusal && !repeats) notices.push({ id: "report-refusal", tone: "warning", text: report.refusal.text,
