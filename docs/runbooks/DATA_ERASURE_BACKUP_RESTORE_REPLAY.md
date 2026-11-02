@@ -5,6 +5,14 @@
 > 依据：[DATA-ERASURE.md](../launch/tasks/DATA-ERASURE.md) §8、E7、附录 C [S8]；
 > [保留期核对清单](DATA_ERASURE_RETENTION_CHECKLISTS.md) 缺口第 5 条。
 
+> **本机机械演练（2026-11-02 起，每次 CI 都跑）**：`packages/db/tests/restore-drill/run-local.mjs` 用仓库文件建库、写入核心路径数据
+> （回合、回执、回复正文、消息、积分流水、余额），`pg_dump` 后 `pg_restore --exit-on-error` 进新库，比对每张表的行数和逐行校验和、
+> 函数/索引/约束/触发器/策略/授权/序列，以及每个账号的回合、回执、流水和余额；恢复后的库还要能继续开新回合、删除对话。
+> 这只证明导出导入这一步没有丢数据；它**不替代**下面在真实备份上的演练（还缺：平台备份或 PITR、Storage 文件、Auth 用户、
+> 隔离项目和 Owner 对演练费用的当次确认，见 REL-1 第 7 节 E2）。
+> 同一轮还加了 `packages/db/tests/erasure-volume/run-local.mjs`：24 轮对话（含付费/免费工具回执和回复正文）删除、
+> 以及整号注销（70 轮、30 个附件）在现有时限内完成且不留内容行。
+
 ## 为什么需要
 
 旧备份只包含备份那一刻的数据。备份之后才确认的账号注销、单条删除（回答、对话、成果、内容、资料库文档）
