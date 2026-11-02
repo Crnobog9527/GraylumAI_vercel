@@ -197,17 +197,20 @@ async function openEntry(answers: { enabled: boolean; mine?: unknown[]; refuse?:
     if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
     const name = path.split('/').pop() ?? '';
     calls[name] = (calls[name] ?? 0) + 1;
-    if (name === 'fusionReview.start') {
+    // The turn routes (CORE-PATH-V2): POST /api/turn/estimate prices, POST /api/turn (kind=jury) starts.
+    if (path === '/api/turn/estimate') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ estimateCredits: 1500, holdCredits: 320,
+        requiredCredits: 1820, maxRounds: 2, reviewers: 3 }) });
+    }
+    if (path === '/api/turn') {
       starts.push(JSON.parse(route.request().postData() ?? '{}'));
       await new Promise(done => setTimeout(done, 300));
-    }
-    if (name === 'fusionReview.start' && answers.refuse) {
-      return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { message: answers.refuse,
-        code: -32603, data: { code: 'FORBIDDEN', httpStatus: 403, path: 'fusionReview.start' } } }) });
+      if (answers.refuse) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: answers.refuse }) });
+      return route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'review', turnId: 1, reviewId: REVIEW,
+        state: 'running', reservedCredits: 1820 })}\n\n` });
     }
     const result = name === 'fusionReview.available' ? { enabled: answers.enabled } : name === 'fusionReview.mine' ? answers.mine ?? []
-      : name === 'fusionReview.panel' ? PANEL : name === 'fusionReview.start' ? { reviewId: REVIEW, state: 'running' }
-        : name === 'fusionReview.estimate' ? { estimateCredits: 1500, holdCredits: 320, requiredCredits: 1820, maxRounds: 2, reviewers: 3 } : {};
+      : name === 'fusionReview.panel' ? PANEL : {};
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
   });
   await page.goto('http://localhost/#entry');
@@ -232,7 +235,7 @@ it('shows no entry and no error when the jury is switched off', async () => {
 it('starts one review with the panel\'s names and opens its page; a running one is linked instead', async () => {
   const { page, errors, calls, starts } = await openEntry({ enabled: true });
   try {
-    expect(calls['fusionReview.estimate'] ?? 0).toBe(0); // nothing is estimated until the user opens the card
+    expect(calls.estimate ?? 0).toBe(0); // nothing is estimated until the user opens the card
     await page.getByRole('button', { name: '请评审团审阅报告' }).click();
     await ui(page.getByText(/3 位评审（目标用户、操盘手、挑刺审核人）/)).toBeVisible();
     // The maximum is shown before the user agrees, and start carries exactly that maximum.
@@ -241,8 +244,8 @@ it('starts one review with the panel\'s names and opens its page; a running one 
     await page.getByRole('button', { name: '开始评审' }).dblclick();
     await page.waitForFunction(() => Boolean((window as unknown as { __pushed?: string }).__pushed));
     expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/app/positioning/${DRAFT}/review/${REVIEW}`);
-    expect(calls['fusionReview.start']).toBe(1);
-    expect(starts).toEqual([expect.objectContaining({ draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1500 })]);
+    expect(calls.turn).toBe(1);
+    expect(starts).toEqual([expect.objectContaining({ kind: 'jury', draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1500 })]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
   const running = await openEntry({ enabled: true, mine: [mineItem('running')] });

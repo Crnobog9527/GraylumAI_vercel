@@ -6,14 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 import { readTurnRouteEnv } from '../../lib/envValidator';
 import { swallow } from '../../lib/swallow';
-import { authoritativeBilling, type BillingRpc } from '../turn/provider/service';
-import { createRuntimeBudget, type RuntimeBudget } from '../turn/settings/budget';
 import { newWorkGate, type RuntimeCallGate } from '../turn/admission/newWorkGate';
-import { runtimeGateEnvironment } from '../runtime/realHost';
-import { loadStagingPolicy } from '../turn/settings/stagingPolicy';
-import { stagingTransport } from '../runtime/stagingTransport';
-import { fusionExecutor } from './executor';
-import { reviewFlow } from './review';
 import { ENDED_STATES, reviewRecord } from './reviewRecord';
 import { turnClients } from '../turn/db';
 import { juryTurn } from '../turn/jury';
@@ -34,22 +27,6 @@ export const MAX_ADVANCES = 30;
 export const MAX_HOPS = 10;
 
 export type AdvanceResult = { next: boolean; reason: string; dispatched?: number };
-
-/** The service-side flow: billed as the review's own user, exactly as the daily recovery settles (no user token on
- * the server). Admission still checks the switch, membership, allowlist and frozen caps on every claim. */
-export function serviceReviewFlow(admin: SupabaseClient, actorId: string, budget: RuntimeBudget,
-  env: Record<string, string | undefined> = process.env) {
-  const executor = {
-    async run(...args: Parameters<ReturnType<typeof fusionExecutor>['run']>) {
-      const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env);
-      const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => actorId,
-        adapter: stagingTransport(admin, window, budget), budget });
-      return fusionExecutor({ billing, admin, actorId, callGate: newWorkGate(admin, runtimeGateEnvironment(window)).calls, budget })
-        .run(...args);
-    },
-  };
-  return reviewFlow({ admin, actorId, env, executor: executor as ReturnType<typeof fusionExecutor> });
-}
 
 const leaseResult = z.object({ acquired: z.boolean(), reason: z.string(), actorId: z.string().uuid().optional(),
   count: z.number().optional() }).passthrough();
@@ -80,53 +57,28 @@ export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: strin
 }
 
 /** One step of one review. Never throws for an expected stop; the caller relays only when next is true. */
-export async function advanceReview(input: { admin: SupabaseClient; reviewId: string; env?: Record<string, string | undefined>;
-  budget?: RuntimeBudget; flow?: (actorId: string, budget: RuntimeBudget) => ReturnType<typeof reviewFlow>;
-  /** CORE-PATH-V2 V2-7b: the jury turn's dependencies for a review on the turn path (tests inject them). */
+export async function advanceReview(input: { admin: SupabaseClient; reviewId: string;
+  /** The jury turn's dependencies (tests inject them). */
   jury?: { slots?: CounterStore; transport?: typeof fetch; calls?: RuntimeCallGate } }): Promise<AdvanceResult> {
   return withPlatformSecretRequest(async () => {
     const { admin, reviewId } = input;
     const outcome = await withAdvanceLease(admin, reviewId, async lease => {
-      // A review on the turn path advances through its jury turn (one group per invocation), never through BILL2.
+      // A review advances through its jury turn (one group per invocation). One without a turn belongs to the retired
+      // BILL2 path (CORE-PATH-V2 V2-12 B5): nothing starts there any more, so there is nothing to advance.
       const view = await swallow('fusion_review_read_failed', reviewRecord(admin, lease.actorId!).read(reviewId), null,
         { category: 'billing', reviewId });
-      if (view?.turnId) {
-        try {
-          // The call gate of the turn path: the same namespace as POST /api/turn (no test window on the turn path).
-          return await juryTurn({ admin, clients: turnClients(admin), slots: input.jury?.slots ?? redisCounterStore(),
-            transport: input.jury?.transport, calls: input.jury?.calls ?? newWorkGate(admin, readTurnRouteEnv().environment).calls },
-          lease.actorId!).advance(reviewId);
-        } catch (error) {
-          const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
-          logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
-          return { next: false, reason: 'failed' };
-        }
-      }
-      const budget = input.budget ?? createRuntimeBudget();
-      const flow = input.flow ? input.flow(lease.actorId!, budget) : serviceReviewFlow(admin, lease.actorId!, budget, input.env);
+      if (!view?.turnId) return { next: false, reason: view ? 'no_turn' : 'failed' };
       try {
-        const step = await flow.continue(reviewId);
-        if (ENDED_STATES.has(step.review.state)) return { next: false, reason: 'ended' };
-        if (step.waiting === 'credits') return { next: false, reason: 'waiting_credits' };
-        // Calls already dispatched elsewhere (an invocation that was cut off) settle through the recovery, never twice.
-        const calls = step.calls.filter(call => !call.dispatched);
-        if (!calls.length) return { next: false, reason: step.waiting === 'calls' ? 'in_flight' : 'idle' };
-        const results = await Promise.allSettled(calls.map(call => flow.dispatch(reviewId, call.callId)));
-        const failed = results.filter(result => result.status === 'rejected').length;
-        if (failed) logger.warn('billing', 'fusion_review_dispatch_failed', { reviewId, failed });
-        const dispatched = results.filter(result => result.status === 'fulfilled'
-          && (result.value.state === 'judged'
-            || !['not_started', 'not_dispatched'].includes(result.value.reason))).length;
-        // No accepted dispatch: stop this chain and refund the attempt so a later retry can recover from an outage.
-        if (!dispatched) return { next: false, reason: 'failed', dispatched: 0 };
-        // Partial progress may continue; dispatchOnce still prevents resending accepted calls.
-        return { next: true, reason: 'advanced', dispatched };
+        // The call gate of the turn path: the same namespace as POST /api/turn (no test window on the turn path).
+        return await juryTurn({ admin, clients: turnClients(admin), slots: input.jury?.slots ?? redisCounterStore(),
+          transport: input.jury?.transport, calls: input.jury?.calls ?? newWorkGate(admin, readTurnRouteEnv().environment).calls },
+        lease.actorId!).advance(reviewId);
       } catch (error) {
         const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
         logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
         return { next: false, reason: 'failed' };
       }
-    }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed', 'gated'].includes(value.reason));
+    }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed', 'gated', 'no_turn'].includes(value.reason));
     return outcome.ran ? outcome.value : { next: false, reason: outcome.reason };
   });
 }

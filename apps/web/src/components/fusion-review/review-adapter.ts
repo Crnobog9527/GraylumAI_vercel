@@ -130,7 +130,7 @@ export function feeText(fee: ReviewFee): string | null {
   return `评审中途结束，按已经发出的部分实际扣了 ${n(charged)} 积分（本次评审价格 ${n(fee.credits)} 积分）。`;
 }
 
-/** fusionReview.start refusals in plain words. */
+/** Refusals of starting a review (POST /api/turn, kind=jury) in plain words. */
 const START_ERROR: Record<string, string> = {
   FUSION_REVIEW_DISABLED: '评审团暂时没有开放。',
   FUSION_REVIEW_INCOMPLETE: '评审团暂时没有开放。',
