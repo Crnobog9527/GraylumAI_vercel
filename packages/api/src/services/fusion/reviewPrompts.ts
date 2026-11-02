@@ -168,7 +168,10 @@ export const thinReason = (reason: string) => [...reason.trim()].length < MIN_BU
   || /^(没有|缺乏|缺少|无)(任何)?(依据|来源|证据|数据)[。.]?$/.test(reason.trim());
 
 /** The first `max` characters (whole code points) of a text, marked when cut. */
-const short = (text: string, max: number) => { const chars = [...text]; return chars.length <= max ? text : max === 0 ? '' : `${chars.slice(0, max).join('')}…`; };
+const short = (text: string, max: number) => {
+  const chars = [...text];
+  return chars.length <= max ? text : max === 0 ? '' : `${chars.slice(0, max).join('')}…`;
+};
 
 /** What the summary sees of a review started with the evidence check: the issues merged by code (each with the seats that
  * raised it and its verified evidence), the key decisions with every seat's view, and a plain note of what was held back. */
