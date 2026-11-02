@@ -193,23 +193,24 @@ export async function runReportFee({db,Client,connectionString,report}) {
     assert.deepEqual(await terminal,{ok:true},'releasing deletion profile lets the terminal trigger finish');
     assert.equal((await fee(db,inverseReport.id)).state,'refunded');
     assert.equal(await wallet(db,inverse.actor),inverseHeld+PRICE);
-    // The ordinary retry now runs the entire profile-first deletion/financial-recovery path successfully.
-    // A second still-running report proves this real path also moves an execution to cancelled.
+    // The ordinary retry now runs the entire profile-first deletion path successfully. It no longer settles the still-running report
+    // (V2-12 R2b): its execution state and held fee stay as they were, the content goes and the result is review_required.
     assert.equal((await fee(db,inverseSibling.id)).state,'held');
-    assert.equal((await erase(lockClients[0],inverse,'artifact',inverse.project)).status,'deleted');
-    assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',
-      [inverseSibling.id])).rows[0].state,'cancelled');
-    assert.equal((await fee(db,inverseSibling.id)).state,'refunded');
+    const siblingBefore = (await db.query('SELECT state FROM runtime_executions WHERE id=$1',[inverseSibling.id])).rows[0].state;
+    assert.equal((await erase(lockClients[0],inverse,'artifact',inverse.project)).status,'review_required');
+    assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',[inverseSibling.id])).rows[0].state,siblingBefore,
+      'the delete does not cancel the running report');
+    assert.equal((await fee(db,inverseSibling.id)).state,'held','the held fee is not refunded from the delete');
   } finally {
     await lockClients[0].query('ROLLBACK');
     await terminal;
     await Promise.all(lockClients.map(c=>c.end()));
   }
-  assert.equal(await wallet(db,inverse.actor),5000,'profile-first deletion retry cannot refund twice');
+  assert.equal(await wallet(db,inverse.actor),5000-PRICE,'profile-first deletion retry cannot refund twice (the sibling stays held)');
   assert.equal(Number((await db.query(`SELECT count(*) n FROM credit_transactions WHERE idempotency_key=$1`,
     ['report:'+inverseReport.id+':release'])).rows[0].n),1);
   await balanced(db,inverse.actor,'profile-first deletion versus terminal trigger');
-  report.checks.push('profile-first content deletion versus terminal trigger: actual lock inversion yields retryable 55P03, no deadlock, retry succeeds and refunds once');
+  report.checks.push('profile-first content deletion versus terminal trigger: actual lock inversion yields retryable 55P03, no deadlock, retry succeeds, refunds the terminal one once and leaves the running one held');
 
   // A conservation failure rolls back both the execution transition and the money movement.
   const corrupt = await execution(db,f);
@@ -357,10 +358,11 @@ export async function runReportFee({db,Client,connectionString,report}) {
   const done = await execution(db,del,undefined,false);
   await finish(db,done.id,'completed',{body:completeBody,completeness:'complete'});
   const running = await execution(db,del,undefined,false);
-  assert.equal((await erase(db,del,'artifact',del.project)).status,'deleted');
+  // The delete no longer settles a running report's held price (V2-12 R2b): it is counted, the result is review_required.
+  assert.equal((await erase(db,del,'artifact',del.project)).status,'review_required');
   assert.equal((await fee(db,done.id)).state,'charged','a complete report deleted later is still charged');
-  assert.equal((await fee(db,running.id)).state,'refunded','a running report deleted is refunded');
-  assert.equal(await wallet(db,del.actor),5000-PRICE);
+  assert.equal((await fee(db,running.id)).state,'held','a running report deleted keeps its held price');
+  assert.equal(await wallet(db,del.actor),5000-2*PRICE);
   await balanced(db,del.actor,'content erasure');
   const acc = await seed(db);
   await setBalance(db,acc.actor,5000);
@@ -389,7 +391,7 @@ export async function runReportFee({db,Client,connectionString,report}) {
     if (/CONTENT_ERASURE_BUSY/.test(raced[0])) await erase(racers[0],rc,'artifact',rc.project);
   } finally { await Promise.all(racers.map(x=>x.end())); }
   assert.equal((await fee(db,ended.id)).state,'refunded');assert.equal(await wallet(db,rc.actor),5000,'refunded once');
-  report.checks.push('report price: draft deletion charges a complete report and refunds a running one; account erasure refunds; held price pending; deletion racing the daily settlement does not deadlock');
+  report.checks.push('report price: draft deletion charges a complete report and leaves a running one held (review_required); account erasure refunds; held price pending; deletion racing the daily settlement does not deadlock');
 
   // Daily job: ended executions settle; one stuck for 3 days with its run closed and settled is refunded.
   const job = await seed(db);

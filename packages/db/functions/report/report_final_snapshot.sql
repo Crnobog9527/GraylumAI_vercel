@@ -21,11 +21,8 @@ BEGIN
  IF source->'revision' IS DISTINCT FROM payload->'reportRevision'
   OR source->>'bodyHash' IS DISTINCT FROM payload->>'reportBodyHash' THEN RAISE EXCEPTION 'REPORT_VERSION_CONFLICT'; END IF;
  eid:=(source->>'executionId')::uuid;
- -- CORE-PATH-V2 V2-7a2: a report generated on the turn path has no old execution; its link names the turn (report_document_source
- -- prefers an old execution, so the same order here).
- IF NOT EXISTS(SELECT 1 FROM runtime_executions WHERE id=eid AND actor_id=a) THEN
-  SELECT id INTO tid FROM turns WHERE actor_id=a AND request_id=eid AND kind='report' AND state='closed';
- END IF;
+ -- CORE-PATH-V2 V2-12: a report is generated on the turn path; its link names the turn.
+ SELECT id INTO tid FROM turns WHERE actor_id=a AND request_id=eid AND kind='report' AND state='closed';
  IF tid IS NULL THEN l.execution_id:=eid; ELSE l.turn_actor_id:=a; l.turn_id:=tid; END IF;
  IF NOT opc_result_link_available(l) THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
  SELECT evidence_id INTO ev FROM opc_result_links WHERE round_id=rid AND step_id='report-final'

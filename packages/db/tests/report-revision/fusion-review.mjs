@@ -324,7 +324,8 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   const before = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v);
   assert.ok(before>=1);
   assert.ok(Number((await db.query('SELECT account_erasure_body_remaining($1) v',[f.actor])).rows[0].v)>=before);
-  assert.equal((await erase(db,f,'artifact',f.project)).status,'deleted');
+  // The review's group runs that are still open are no longer cancelled by the delete: the content goes, the result is review_required.
+  assert.equal((await erase(db,f,'artifact',f.project)).status,'review_required');
   assert.equal(Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v),0);
   const g = await seed(db);
   await db.query("UPDATE profiles SET membership_level='gold',credits=credits+2000 WHERE id=$1",[g.actor]);

@@ -86,12 +86,6 @@ BEGIN
           WHERE x.actor_id = p_actor_id AND x.session_id = p_session_id AND x.closed_at > (p_policy->'mentor'->>'preparedAt')::timestamptz) THEN
         RAISE EXCEPTION 'TURN_PREPARE_STALE' USING ERRCODE='55P03';
       END IF;
-      -- V2-10b: a topic turn's request id admitted on the old path, under this session's lock (runtime_admit refuses the other way).
-      -- V2-12 drops this with the old table.
-      IF p_kind = 'chat' AND p_policy ? 'topic' AND EXISTS (SELECT 1 FROM runtime_executions e
-          WHERE e.actor_id = p_actor_id AND e.request_id = p_request_id) THEN
-        RAISE EXCEPTION 'TURN_TOPIC_REQUEST_CONFLICT' USING ERRCODE='22023';
-      END IF;
     ELSE
       -- Resume (V2-8): the paused turn is checked, locked and priced by turn_resume_carry.
       carried := public.turn_resume_carry(p_actor_id, p_session_id, s.active_turn_id, p_resume_of, p_kind, p_policy);

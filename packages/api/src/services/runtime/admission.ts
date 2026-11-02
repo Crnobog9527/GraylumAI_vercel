@@ -13,7 +13,7 @@ import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from 
 import {currentInputBytes} from './historySelection';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import {admissionActor,capReviewAdmission,type WeeklyReview} from '../publishMonitor/reviewAdmission';
+import {isEmailVerified} from '../../lib/auth';
 import { databaseSkillSource } from '../skills/databaseSource';
 import { activateSkill, identityOf } from '../skills/loader';
 import { BRAND_IDENTITY_INSTRUCTIONS, withBrandIdentity } from '../modelIdentity/brandIdentity';
@@ -79,7 +79,7 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
  * Real admission requires the separately loaded, enabled Staging window. */
 export type LocalRuntimePolicy={
  /** Real hosts opt into the server-side staging setting; client input cannot select v2. */
- paygHost?: boolean;weeklyReview?:WeeklyReview;
+ paygHost?: boolean;
  reportGeneration?:FrozenReport;
  payg?: {callPolicies: FrozenPaygRun['callPolicy']; billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']>};
  resumeWaitingOrganizer?:ResumeWaitingOrganizer;
@@ -115,12 +115,16 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  }
  function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity,configuredOutput?:number){
   return admittedOutputLimit(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
-   row.max_tokens,policy.weeklyReview?Math.min(organizerLimit,policy.maxOutputTokens):organizerLimit);
+   row.max_tokens,organizerLimit);
  }
  function inputCapacity(row:Record<string,unknown>,output:number,bytes=policy.inputBytes){
   return policy.real?Math.min(bytes,realModel(row).inputLimit):fixtureInputCapacity(Number(row.input_limit),output,bytes);
  }
- const actor=()=>admissionActor(user,admin,policy.weeklyReview);
+ const actor=async()=>{
+  const r=await user.auth.getUser();
+  if(r.error||!r.data.user||!isEmailVerified(r.data.user))throw new Error('RUNTIME_AUTH_REQUIRED');
+  return r.data.user.id;
+ };
  async function query(name:string,args:Record<string,unknown>){
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
   if(r.error?.code==='P0001'&&r.error.message==='OPC_BUSINESS_ARCHIVED')throw new StagingAccessError('OPC_BUSINESS_ARCHIVED');
@@ -188,12 +192,12 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const budgets=policy.purposeBudgets?await readPurposeBudgets(admin,configuration):null;
    const purpose=policy.reportGeneration?'report':input.selection.kind==='organizer'?'organize':'interactive';
    const selectedBudget=budgets?.[purpose];
-   const inputBytes=policy.weeklyReview?Math.min(policy.inputBytes,selectedBudget?.inputBytes??Infinity):selectedBudget?.inputBytes??policy.inputBytes;
-   const historyItems=policy.reportGeneration||policy.weeklyReview?0:selectedBudget?.historyItems??policy.historyItems;
+   const inputBytes=selectedBudget?.inputBytes??policy.inputBytes;
+   const historyItems=policy.reportGeneration?0:selectedBudget?.historyItems??policy.historyItems;
    const configuredOutput=policy.reportGeneration||budgets&&purpose==='interactive'?PURPOSE_OUTPUT_CAP:undefined;
    const stepStream=Boolean(policy.opcTurnToken&&policy.stepStream);
    const libraryRetrieval=await admitLibraryRetrieval(admin,Boolean(policy.real),input.selection.kind,
-    [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken,policy.weeklyReview],configuration);
+    [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken],configuration);
    let ownPosts=await admitOwnPosts(admin,Boolean(policy.real),input.selection.kind,
     [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken,input.sources.length],configuration);
    if(stepStream&&(mentorStream||input.selection.kind!=='skill'||input.network!=='deny'||input.sources.length))
@@ -202,14 +206,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    for(const source of input.sources)await query('runtime_source',{p_source:source});
    let organizerOutput:number|undefined;
    let organizerInstructions=policy.organizerInstructions ?? GENERIC_ORGANIZER_TEMPLATE;
-   const chatTurn=!policy.weeklyReview&&freeChatCatalogTurn({selection:input.selection,mentorStream,stepStream,hostTurnContext,report:policy.reportGeneration,
+   const chatTurn=freeChatCatalogTurn({selection:input.selection,mentorStream,stepStream,hostTurnContext,report:policy.reportGeneration,
     opcTurnToken:policy.opcTurnToken,scope:session.scope});let modelId:string,instructions=freeChatInstructions(chatTurn&&!gated);
    let skillChars=0;
    let skillFile:SkillFileBinding|undefined,skillFileReserve=0;
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined,chosenSource:ContentSourceKind|undefined;
    let voiceFlagged=false;
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')
-    modelId=policy.real&&!policy.weeklyReview?serverChatModel(await settings):input.selection.modelId;
+    modelId=policy.real?serverChatModel(await settings):input.selection.modelId;
    else if(input.selection.kind==='skill'){
     const module=await readAdmissionModule(admin,input.selection.moduleId);
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
@@ -379,13 +383,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
    let reasoning:ReasoningPolicy|undefined;
    const organize=input.selection.kind==='organizer';
-   if((mentorStream||stepStream||policy.reportGeneration)&&!policy.real||policy.weeklyReview)reasoning={parameter:'none'};
+   if((mentorStream||stepStream||policy.reportGeneration)&&!policy.real)reasoning={parameter:'none'};
    // Reviews use the approved provider-default format within 1000 tokens; other real chats freeze configured reasoning.
    const freeChat=Boolean(policy.real&&input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
    // A chosen Skill uses the PAYG-evidenced v6 format with the same administrator reasoning as free chat:
    // a model whose reasoning is mandatory (Gemini) has no evidenced 'none' variant, so 'none' was refused (#1026).
    const chosenSkill=Boolean(policy.real&&input.selection.kind==='skill'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
-   if(policy.real&&!policy.weeklyReview&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat||chosenSkill))
+   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat||chosenSkill))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
@@ -404,7 +408,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:replySetting,...(sourceContent?{sourceContent}:{}),
     ...(voice?{voiceProfile:voice.frozen}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
-     ...(budgets||policy.reportGeneration||policy.weeklyReview?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
+     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     ...(skillFile?{skillFile,skillFileReserve}:{}),...(libraryReferences.length?{libraryReferences}:{}),
     ...sourceReadFlags(libraryRetrieval,sourceTools),
     ...(historyRead?{historyRead:{version:MENTOR_HISTORY_VERSION,reserve:MENTOR_HISTORY_RESERVE_BYTES}}:{}),
@@ -464,12 +468,12 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
       currentInput,inputBudgetBytes:limitOf(bytes),existingToolsBytes:admissionToolBytes(Boolean(skillFile),historyRead),
       researchToolsBytes,researchHostDeltaBytes,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES}),
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))})
-    ||freeChat&&!policy.weeklyReview&&await attachFreeChatResearch({admin,real:policy.real!,context,billing,configuration,
+    ||freeChat&&await attachFreeChatResearch({admin,real:policy.real!,context,billing,configuration,
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,false,currentInput,false,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
-   capReviewAdmission(context,billing,policy.weeklyReview);assertFrozenPayloads(context,billing);
+   assertFrozenPayloads(context,billing);
    const admit=admission(readRwV2(await configuration).admitSplit,query,input.sessionId,input.requestId,context,billing);
    try{
     try{return await admitWithRepair(admin,actorId,admit);}// D2: a session held by an earlier round is repaired once
