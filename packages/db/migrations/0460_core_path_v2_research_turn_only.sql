@@ -8,10 +8,13 @@
 --   research_user_cards, research_user_evidence, research_user_unfinished_round, research_runtime_read.
 -- research_session_owned keeps its signature; its third argument (an execution id) is no longer checked. research_user_evidence names a
 -- session by its name, else by its first visible user message (as the conversation list does since 0444), not by an execution's input.
+-- research_user_tool_charges (the credit record's "搜索明细") reads the turn's own spend row and turn_calls instead of bill2_calls: one line per
+-- supplier subcall of the turn's tool rows (usage.results, which now also keeps each subcall's multiplier and what it asked for), with the
+-- same unrounded credits (cost x m x q, 0 without data, none while unknown). Only the turn's first spend row ('turn:<id>:spend') lists them.
 -- Not touched here: research_user_message (only the old runtime store calls it), research_runtime_link / call_charge / close_unsent /
--- plan_create, research_user_tool_charges, research_operation_settled (BILL2 and erasure users; they go with their callers).
+-- plan_create, research_operation_settled (BILL2 and erasure users; they go with their callers).
 -- Compatible: the turn path reads and writes the same rows by turn_id; results and signatures are unchanged.
--- Repeatable: whole-function CREATE OR REPLACE. Recovery: re-apply the previous text of the twelve functions from git history
+-- Repeatable: whole-function CREATE OR REPLACE. Recovery: re-apply the previous text of the thirteen functions from git history
 -- (0435 and earlier); no data is written or removed, so nothing needs restoring.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -269,6 +272,51 @@ BEGIN
   ELSE RAISE EXCEPTION 'RESEARCH_READ_INVALID';
   END CASE;
   RETURN v;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.research_user_tool_charges(a uuid, p_transaction uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE tx credit_transactions; t turns; q numeric; output jsonb;
+BEGIN
+ PERFORM bill2_actor(a);
+ SELECT * INTO tx FROM credit_transactions WHERE id=p_transaction AND user_id=a;
+ IF tx.id IS NULL THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
+ IF tx.source_type IS DISTINCT FROM 'ai_task' OR coalesce(tx.metadata->>'turnId','') !~ '^[0-9]+$' THEN RETURN '[]'::jsonb;END IF;
+ SELECT * INTO t FROM turns WHERE actor_id=a AND id=(tx.metadata->>'turnId')::bigint;
+ -- A turn that paid in parts lists its searches under its first spend row only.
+ IF t.id IS NULL OR tx.idempotency_key IS DISTINCT FROM 'turn:'||t.id||':spend' THEN RETURN '[]'::jsonb;END IF;
+ IF NOT EXISTS(SELECT 1 FROM runtime_sessions s WHERE s.id=t.session_id AND s.actor_id=a
+   AND s.content_deleted_at IS NULL AND s.erased_at IS NULL) THEN RETURN '[]'::jsonb;END IF;
+ q:=(t.policy->>'q')::numeric;
+ SELECT coalesce(jsonb_agg(x.line ORDER BY x.seq,x.n),'[]'::jsonb) INTO output FROM (
+  SELECT c.seq,l.n,jsonb_build_object(
+   'callId',md5(t.id::text||':'||c.seq||':'||l.n)::uuid,'toolName',c.tool_name,'args',NULL::jsonb,
+   'query',l.v->'call'->>'query','platform',l.v->'call'->>'platform','dataKind',l.v->'call'->>'dataKind',
+   'source',CASE
+     WHEN l.v IS NULL OR l.v->>'outcome'='unknown' OR jsonb_typeof(l.v->'costUsd')<>'string' THEN 'tool_unknown'
+     WHEN l.v->>'outcome' IN ('ok','partial') AND coalesce((l.v->>'items')::integer,0)>0 THEN 'tool_usage'
+     WHEN (l.v->>'costUsd')::numeric>0 THEN 'tool_failed_charged'
+     ELSE 'tool_failed' END,
+   -- Before the turn's cumulative ceil, as the stream showed it: cost x the subcall's m x q.
+   'credits',CASE
+     WHEN l.v IS NULL OR l.v->>'outcome'='unknown' OR jsonb_typeof(l.v->'costUsd')<>'string' THEN NULL
+     WHEN l.v->>'outcome' IN ('ok','partial') AND coalesce((l.v->>'items')::integer,0)>0
+       THEN ((l.v->>'costUsd')::numeric*coalesce((l.v->>'multiplier')::numeric,c.multiplier)*q)::text
+     ELSE '0' END) line
+  FROM turn_calls c
+  CROSS JOIN LATERAL (
+   SELECT r.v,r.n FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.usage->'results')='array' THEN c.usage->'results' ELSE '[]'::jsonb END)
+     WITH ORDINALITY r(v,n)
+   UNION ALL
+   SELECT NULL::jsonb,0::bigint WHERE NOT (jsonb_typeof(c.usage->'results')='array' AND jsonb_array_length(c.usage->'results')>0)
+  ) l
+  WHERE c.turn_id=t.id AND c.actor_id=a AND c.call_kind='tool' AND c.status IN ('ok','unusable','unknown')
+ ) x;
+ RETURN output;
 END $function$;
 
 COMMIT;

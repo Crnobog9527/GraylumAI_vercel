@@ -159,6 +159,14 @@ const rows = (actor: string) => db.query(`select c.seq,c.call_kind,c.tool_name,c
   c.upper_usd::float8 u,c.cost_pending from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1
   order by c.seq`, [actor]).then(r => r.rows);
 
+
+/** The credit record's search list (research_user_tool_charges) for the turn's spend row of this actor; null without one. */
+async function toolCharges(asActor: string, owner = asActor) {
+  const tx = (await db.query(`select id from credit_transactions where user_id=$1 and idempotency_key like 'turn:%:spend'`, [owner])).rows[0];
+  if (!tx) return null;
+  return (await db.query('select research_user_tool_charges($1,$2) v', [asActor, tx.id])).rows[0].v as Array<Record<string, unknown>>;
+}
+
 it('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes, all inside the freeze', async () => {
   const f = await setup(), bodies: string[] = [];
   const parallel = vi.fn(async () => searchResult());
@@ -192,6 +200,16 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the con
     'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record',
     'rpc/turn_call_begin', 'rpc/turn_call_record',
     'rpc/turn_call_begin', 'rpc/turn_call_identity', 'rpc/turn_call_record', 'rpc/turn_close']);
+  // V2-12 B9: the credit record's search list reads the turn: one line, what it asked for, the unrounded credits (0.01 x m 6 x q 100).
+  const lines = (await toolCharges(f.actor))!;
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toMatchObject({ toolName: 'web_search', source: 'tool_usage', platform: 'web', dataKind: 'web_search', args: null });
+  expect(typeof lines[0]!.query).toBe('string');
+  expect(Number(lines[0]!.credits)).toBe(6);
+  // Another account's spend row is refused, and an account with no search lists nothing of this one.
+  const other = await setup();
+  const tx = (await db.query(`select id from credit_transactions where user_id=$1 and idempotency_key like 'turn:%:spend'`, [f.actor])).rows[0];
+  await expect(db.query('select research_user_tool_charges($1,$2)', [other.actor, tx.id])).rejects.toThrow('RESEARCH_SCOPE_DENIED');
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5c: the daily summary counts old charges and turn tool receipts once each, and settled credits add up', async () => {
@@ -245,6 +263,7 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a search that returns nothing is said plainly an
   expect(bodies[1]).toContain('NO_DATA_RETURNED');
   const tool = (await rows(f.actor)).find(r => r.call_kind === 'tool');
   expect(tool).toMatchObject({ status: 'unusable', n: 0, c: 0.01 });
+  expect(await toolCharges(f.actor)).toEqual([expect.objectContaining({ toolName: 'web_search', source: 'tool_failed_charged', credits: '0' })]);
   // Only the two model calls.
   expect((await db.query('select charged_credits from turns where actor_id=$1', [f.actor])).rows[0].charged_credits)
     .toBe(await modelCredits(f.actor));
@@ -258,6 +277,7 @@ it('RUNTIME: CORE-PATH-V2 V2-6: an unknown supplier result costs the user nothin
   expect(parallel).toHaveBeenCalledTimes(1);
   expect(bodies[1]).toContain('PROVIDER_RESULT_UNKNOWN');
   expect((await rows(f.actor)).find(r => r.call_kind === 'tool')).toMatchObject({ status: 'unknown', cost_pending: true, u: 0.01 });
+  expect(await toolCharges(f.actor)).toEqual([expect.objectContaining({ toolName: 'web_search', source: 'tool_unknown', credits: null })]);
   const t = (await db.query('select charged_credits,settlement from turns where actor_id=$1', [f.actor])).rows[0];
   // The user is settled now for the two model calls only; the turn stays pending for the supplier cost (recovery).
   expect(t).toEqual({ charged_credits: await modelCredits(f.actor), settlement: 'pending' });

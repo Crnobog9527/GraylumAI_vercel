@@ -8,26 +8,41 @@ CREATE OR REPLACE FUNCTION public.research_user_tool_charges(a uuid, p_transacti
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE tx credit_transactions; output jsonb;
+DECLARE tx credit_transactions; t turns; q numeric; output jsonb;
 BEGIN
  PERFORM bill2_actor(a);
  SELECT * INTO tx FROM credit_transactions WHERE id=p_transaction AND user_id=a;
  IF tx.id IS NULL THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
- SELECT coalesce(jsonb_agg(jsonb_build_object('callId',c.id,'toolName',o.result->>'toolName','args',o.result->'args',
-  'query',o.result->'call'->>'query','platform',o.result->'call'->>'platform','dataKind',o.result->'call'->>'dataKind',
-  'source',CASE WHEN c.nominal_source IN ('tool_usage','tool_no_usage','tool_failed','tool_failed_charged','tool_unknown')
-    THEN c.nominal_source END,
-  -- Same frozen call multiplier and run conversion as settlement, before its cumulative ceil.
-  'credits',CASE WHEN c.settled_at IS NOT NULL AND c.nominal_source LIKE 'tool_%'
-    THEN (c.nominal_cost_usd*bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier')*r.credits_per_usd)::text END
- ) ORDER BY c.sequence,c.id),'[]'::jsonb) INTO output
- FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id
- JOIN runtime_executions x ON x.billing_run_id=r.id AND x.actor_id=a
- JOIN runtime_sessions s ON s.id=x.session_id AND s.actor_id=a
- LEFT JOIN LATERAL (SELECT evidence.result FROM research_operations evidence
-  JOIN research_plans p ON p.id=evidence.plan_id AND p.execution_id=x.id AND p.actor_id=a AND p.erased_at IS NULL
-  WHERE evidence.bill2_call_id=c.id AND evidence.erased_at IS NULL) o ON true
- WHERE r.id=tx.bill2_run_id AND r.actor_id=a AND c.call_kind='tool'
- AND x.content_deleted_at IS NULL AND x.erased_at IS NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL;
+ IF tx.source_type IS DISTINCT FROM 'ai_task' OR coalesce(tx.metadata->>'turnId','') !~ '^[0-9]+$' THEN RETURN '[]'::jsonb;END IF;
+ SELECT * INTO t FROM turns WHERE actor_id=a AND id=(tx.metadata->>'turnId')::bigint;
+ -- A turn that paid in parts lists its searches under its first spend row only.
+ IF t.id IS NULL OR tx.idempotency_key IS DISTINCT FROM 'turn:'||t.id||':spend' THEN RETURN '[]'::jsonb;END IF;
+ IF NOT EXISTS(SELECT 1 FROM runtime_sessions s WHERE s.id=t.session_id AND s.actor_id=a
+   AND s.content_deleted_at IS NULL AND s.erased_at IS NULL) THEN RETURN '[]'::jsonb;END IF;
+ q:=(t.policy->>'q')::numeric;
+ SELECT coalesce(jsonb_agg(x.line ORDER BY x.seq,x.n),'[]'::jsonb) INTO output FROM (
+  SELECT c.seq,l.n,jsonb_build_object(
+   'callId',md5(t.id::text||':'||c.seq||':'||l.n)::uuid,'toolName',c.tool_name,'args',NULL::jsonb,
+   'query',l.v->'call'->>'query','platform',l.v->'call'->>'platform','dataKind',l.v->'call'->>'dataKind',
+   'source',CASE
+     WHEN l.v IS NULL OR l.v->>'outcome'='unknown' OR jsonb_typeof(l.v->'costUsd')<>'string' THEN 'tool_unknown'
+     WHEN l.v->>'outcome' IN ('ok','partial') AND coalesce((l.v->>'items')::integer,0)>0 THEN 'tool_usage'
+     WHEN (l.v->>'costUsd')::numeric>0 THEN 'tool_failed_charged'
+     ELSE 'tool_failed' END,
+   -- Before the turn's cumulative ceil, as the stream showed it: cost x the subcall's m x q.
+   'credits',CASE
+     WHEN l.v IS NULL OR l.v->>'outcome'='unknown' OR jsonb_typeof(l.v->'costUsd')<>'string' THEN NULL
+     WHEN l.v->>'outcome' IN ('ok','partial') AND coalesce((l.v->>'items')::integer,0)>0
+       THEN ((l.v->>'costUsd')::numeric*coalesce((l.v->>'multiplier')::numeric,c.multiplier)*q)::text
+     ELSE '0' END) line
+  FROM turn_calls c
+  CROSS JOIN LATERAL (
+   SELECT r.v,r.n FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.usage->'results')='array' THEN c.usage->'results' ELSE '[]'::jsonb END)
+     WITH ORDINALITY r(v,n)
+   UNION ALL
+   SELECT NULL::jsonb,0::bigint WHERE NOT (jsonb_typeof(c.usage->'results')='array' AND jsonb_array_length(c.usage->'results')>0)
+  ) l
+  WHERE c.turn_id=t.id AND c.actor_id=a AND c.call_kind='tool' AND c.status IN ('ok','unusable','unknown')
+ ) x;
  RETURN output;
 END $function$;

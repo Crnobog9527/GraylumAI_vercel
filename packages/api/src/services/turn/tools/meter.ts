@@ -100,7 +100,9 @@ export async function openToolRow(deps: ToolCallDeps, call: PaidToolCall): Promi
     // The receipt keeps what each subcall was and returned (counts, outcome, cost); the items themselves go to the raw body.
     const usage = { subcalls: receipts.length, outcome: settled.outcome, vendors: [...new Set(receipts.map(r => r.result.vendor))],
       results: receipts.map(r => ({ route: r.result.route, outcome: r.result.outcome, reason: r.result.reason, items: r.result.items.length,
-        units: r.result.usage.units, costUsd: r.costUsd })) };
+        units: r.result.usage.units, costUsd: r.costUsd, multiplier: r.multiplier,
+        // What it asked for, for the credit record's search list (research_user_tool_charges); short, the row's usage is capped.
+        call: r.display ? { ...r.display, query: r.display.query.slice(0, 200) } : null })) };
     const raw = body !== undefined ? JSON.stringify(body) : receipts.length ? JSON.stringify(receipts.map(r => r.result)) : null;
     const payloadHash = sha256(raw ?? call.requestHash);
     if (settled.outcome === 'not_sent') await notSent();

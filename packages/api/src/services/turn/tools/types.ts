@@ -71,6 +71,8 @@ export type SubcallReceipt = {
   costUsd: string | null;
   /** The route's frozen multiplier m. */
   multiplier: string;
+  /** What the subcall asked for, as the user's search-charge list shows it (kept in the row's usage). */
+  display?: { query: string; platform: string; dataKind: string };
 };
 
 /**

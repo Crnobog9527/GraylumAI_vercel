@@ -48,6 +48,17 @@ describe('one paid tool call is one row: begin, subcalls, record (2.5.2)', () =>
     expect(h.writes[1]![1].usage).toMatchObject({ subcalls: 2, outcome: 'delivered' });
   });
 
+  it('the row keeps each subcall\'s multiplier and display, the query cut short, for the credit record\'s search list', async () => {
+    const h = ledger();
+    await paidToolCall(h.deps, call, async l => {
+      l.add({ ...r({}), display: { query: 'q'.repeat(500), platform: 'douyin', dataKind: 'search' } }); l.add(r({}));
+    });
+    const results = (h.writes[1]![1].usage as { results: Array<{ multiplier: string; call: { query: string; platform: string } | null }> }).results;
+    expect(results[0]).toMatchObject({ multiplier: '6', call: { platform: 'douyin' } });
+    expect(results[0]!.call!.query).toHaveLength(200);
+    expect(results[1]!.call).toBeNull();
+  });
+
   it('no data: an unusable receipt (user base 0, platform cost kept)', async () => {
     const h = ledger();
     const out = await paidToolCall(h.deps, call, async l => { l.add(r({ items: [] })); });
