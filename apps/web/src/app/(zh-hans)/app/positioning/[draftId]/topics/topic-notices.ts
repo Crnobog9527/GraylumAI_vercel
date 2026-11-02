@@ -44,22 +44,27 @@ export const REBIND_OPENING_INPUT = '定位已更新。请只根据最新的已�
 /** The server refused to start again on the latest positioning (e.g. the topic method was updated since): say so, never a vague error. */
 export const REBIND_REFUSED_NOTICE = '暂时不能用最新定位重新开始选题（选题方法已有更新）。原对话和计划仍可查看，没有任何改动；请联系我们处理。';
 
+/** Another tab still has a topic turn running in the old conversation. */
+export const REBIND_BUSY_NOTICE = '这个选题对话在别处还有一轮没结束，请等它结束后再点“用最新定位开始选题”。';
+
 /** What the page shows when starting again on the latest positioning failed. */
 export function rebindFailureMessage(cause: unknown) {
   const message = cause instanceof Error ? cause.message : String(cause);
+  if (message.includes('OPC_TOPIC_TURN_ACTIVE')) return REBIND_BUSY_NOTICE;
   return /OPC_TOPIC_SOURCE_CHANGED|OPC_TOPIC_SKILL_MISSING|OPC_TOPIC_SOURCE_DENIED/.test(message) ? REBIND_REFUSED_NOTICE : topicFailureMessage(cause);
 }
 
-/** One request id per draft and new positioning version, kept in this browser, so a double click or a refresh never opens twice. */
-export function rebindOpeningRequestId(storage: Pick<Storage, 'getItem' | 'setItem'>, draftId: string, versionId: string, fresh: () => string) {
-  const key = 'opc-topic-rebind-opening:' + draftId + ':' + versionId;
-  try {
-    const kept = storage.getItem(key);
-    if (kept) return kept;
-    const id = fresh();
-    storage.setItem(key, id);
-    return id;
-  } catch { return fresh(); }
+/**
+ * The opening's request id is a pure function of the draft and the new positioning version, so every browser and tab that restarts the
+ * same workspace sends the same id: the second one is a replay of the first turn, never a second charge.
+ */
+export async function rebindOpeningRequestId(draftId: string, versionId: string) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('topic-rebind-opening:' + draftId + ':' + versionId)));
+  const bytes = digest.slice(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40; // a version 4 shaped id, as every request id the server accepts
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** The user-facing text of a reply without the machine-readable plan or adoption block. */

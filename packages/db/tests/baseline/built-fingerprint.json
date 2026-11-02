@@ -3986,7 +3986,7 @@
   "fn:opc_strategy_use()": "46a775fe67c3",
   "fn:opc_target_business(uuid,jsonb)": "0bad3f4827ad",
   "fn:opc_topic_bind(uuid,uuid,uuid,uuid)": "5611b3be6048",
-  "fn:opc_topic_consent(uuid,uuid,uuid)": "3a17285437ca",
+  "fn:opc_topic_consent(uuid,uuid,uuid)": "cdca40db027a",
   "fn:opc_topic_draft_from_execution(uuid,uuid,uuid,bigint,uuid,uuid,jsonb)": "77bb85b61dba",
   "fn:opc_topic_draft_read(uuid,uuid)": "f12319d3460a",
   "fn:opc_topic_draft_save(uuid,uuid,uuid,bigint,uuid,jsonb)": "77c5c2ced9ae",

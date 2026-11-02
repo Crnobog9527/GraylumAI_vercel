@@ -210,6 +210,11 @@ export async function topicRebindCases(t){
  assert.match(await refusal(read(a,src)),/OPC_TOPIC_SOURCE_CHANGED/);
  // 3. The re-bind: the same conversation, a new material revision, the floor at the last message.
  const messages=Number(await one('select max(seq)::int v from session_messages where session_id=$1',[src.topicSession]));
+ // A turn of the old conversation still running (another tab) blocks the re-bind: its messages would land after the floor.
+ await c.query('update runtime_sessions set active_turn_id=(select id from turns where actor_id=$1 limit 1) where id=$2',[a.actor,src.topicSession]);
+ assert.match(await refusal(consent()),/OPC_TOPIC_TURN_ACTIVE/);
+ assert.equal((await workspace()).source_version_id,src.version,'refused: untouched');
+ await c.query('update runtime_sessions set active_turn_id=null where id=$1',[src.topicSession]);
  const bound=await consent();
  assert.equal(bound.sourceVersionId,version2);assert.equal(bound.sessionId,src.topicSession);
  const after=await workspace();

@@ -34,6 +34,9 @@ BEGIN
    OR jsonb_array_length(r.workflow->'planResources')=0 THEN RAISE EXCEPTION 'OPC_TOPIC_SKILL_MISSING';END IF;
   IF r.revision_id IS DISTINCT FROM w.revision_id OR ap.module_id IS DISTINCT FROM w.module_id OR ap.skill_id IS DISTINCT FROM w.skill_id
    THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_CHANGED';END IF;
+  -- An old turn still running (another tab) would write its messages after the floor: wait for the session lock, then refuse.
+  PERFORM 1 FROM runtime_sessions WHERE id=w.session_id AND actor_id=p_actor_id FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM runtime_sessions WHERE id=w.session_id AND active_turn_id IS NOT NULL) THEN RAISE EXCEPTION 'OPC_TOPIC_TURN_ACTIVE';END IF;
   -- The same conversation, a new material revision; what the model is sent from the old conversation starts after floor_seq.
   SELECT coalesce(max(revision),0) INTO n FROM runtime_scope_material WHERE session_id=w.session_id;
   mat:=runtime_material(p_actor_id,w.session_id,'save',gen_random_uuid(),n,
