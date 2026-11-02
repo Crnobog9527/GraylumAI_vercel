@@ -9,7 +9,9 @@
 --   turns_kind_check      adds 'voice'
 --   turn_voice_context    turn_open's per-kind context: the frozen policy shape, and whether the version is still generating
 --   turn_voice_apply      turn_close's kind result: the parsed profile, written to the version in the close's transaction
---   turn_tombstones       a voice turn's source is its version: deleted or no longer generating reads as voiceSourceRevoked
+--   turn_voice_revoked    whether a voice turn's version is deleted or no longer generating (a separate plpgsql function so no other kind
+--                         pays a relation lock for it)
+--   turn_tombstones       a voice turn's source is its version: that reads as voiceSourceRevoked
 --   turn_user_charge      a voice turn that saved no profile pays nothing
 --   voice_delete_versions also deletes the call receipts a generation of the deleted versions saved, and locks its open turn
 -- Compatibility: nothing calls kind=voice until the code deploys (apply this first); the old voice path and every other kind are
@@ -49,6 +51,19 @@ BEGIN
   -- version deleted meanwhile (nothing starts; a tombstone ends one that did).
   RETURN jsonb_build_object('generating', EXISTS (SELECT 1 FROM voice_profile_versions v WHERE v.actor_id = p_actor_id
     AND v.id = (voice->>'versionId')::uuid AND v.status = 'generating'));
+END $function$;
+
+-- plpgsql on purpose: a SQL function body (or a subquery inside turn_tombstones itself) is planned, and its tables locked, by every
+-- turn of every kind; here the table is touched only by a voice turn (the turn budget counts relation locks per call).
+CREATE OR REPLACE FUNCTION public.turn_voice_revoked(p_actor_id uuid, p_policy jsonb)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  RETURN NOT EXISTS (SELECT 1 FROM voice_profile_versions v WHERE v.actor_id = p_actor_id
+    AND v.id::text = p_policy->'voice'->>'versionId' AND v.status = 'generating');
 END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_voice_apply(t turns, p_kind text, p_result jsonb)
@@ -420,8 +435,7 @@ AS $function$
     WHERE s.id = p_session_id AND s.actor_id = p_actor_id AND s.content_deleted_at IS NULL AND s.erased_at IS NULL) END,
   'accountErasing', EXISTS (SELECT 1 FROM account_erasure_requests r WHERE r.profile_id = p_actor_id),
   -- For a voice generation the source is the version being written: deleted (or no longer generating) means the work is void.
-  'voiceSourceRevoked', CASE WHEN p_policy ? 'voice' THEN NOT EXISTS (SELECT 1 FROM voice_profile_versions v
-      WHERE v.actor_id = p_actor_id AND v.id::text = p_policy->'voice'->>'versionId' AND v.status = 'generating')
+  'voiceSourceRevoked', CASE WHEN p_policy ? 'voice' THEN public.turn_voice_revoked(p_actor_id, p_policy)
     ELSE p_policy ? 'voiceVersionId' AND NOT EXISTS (SELECT 1 FROM voice_profiles v WHERE v.actor_id = p_actor_id
       AND v.enabled AND v.confirmed_version_id::text = p_policy->>'voiceVersionId') END)
 $function$;
@@ -520,7 +534,7 @@ END $function$;
 DO $$
 DECLARE f text;
 BEGIN
-  FOREACH f IN ARRAY ARRAY['turn_voice_context(uuid,jsonb)','turn_voice_apply(turns,text,jsonb)'] LOOP
+  FOREACH f IN ARRAY ARRAY['turn_voice_context(uuid,jsonb)','turn_voice_apply(turns,text,jsonb)','turn_voice_revoked(uuid,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
   END LOOP;
 END $$;
