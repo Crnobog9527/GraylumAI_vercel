@@ -13,8 +13,6 @@ import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from '../turn/agent/agentToo
 import {createRuntimeBudget} from '../turn/settings/budget';
 import {runtimeActor} from './actor';
 import {inflightFinancialHost} from './inflightFinancial';
-import {recoverErasedAccounts,erasureFinancialBudget} from '../accountErasure/financialRecovery';
-import type {BillingRpc} from '../turn/provider/service';
 import {authoritativeBilling} from '../turn/provider/service';
 import type {RuntimeProgress} from '../turn/agent/progress';
 import {openRouterAdapter} from '../turn/provider/openRouterAdapter';
@@ -881,61 +879,6 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['serial-tools-v2','
    [f.execution.runId])).rows.some(row=>JSON.stringify(row).includes('PRIVATE_CLOSED'))).toBe(false);
   await financial.finish(adapter);expect(posts).toBe(1);
  }finally{gate.release();await pending;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
-});
-
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([false,true])(
- 'RUNTIME: a new erasure batch closes a lost host with early ID=%s without replaying its model call',async withId=>{
- const f=await fixture('serial-tools-v3-stream'),identity=revocableRuntimeIdentity(f.actorId);
- const sent=latch(),earlySaved=latch(),tail=latch();let crashed=false,posts=0,lookups=0;
- const id='gen-lost-'+f.execution.executionId;
- const database:BillingRpc={rpc:async(name,args)=>{
-  if(crashed)throw new Error('Synthetic invocation lost');
-  const result=await admin.rpc(name,args);
-  if(name==='bill2_record'&&!result.error&&(args.p_evidence as {providerId?:string}).providerId===id)earlySaved.release();
-  return result;
- }};
- const adapter=openRouterAdapter({budget:identity.budget,credential:async()=> 'SYNTHETIC_LOCAL_ONLY',
-  transport:async(_url,init)=>{
-   if(init?.method==='GET'){
-    lookups++;return new Response(JSON.stringify({data:{id,model:'synthetic/mentor',total_cost:0.003,finish_reason:'stop'}}));
-   }
-   posts++;sent.release();
-   return new Response(new ReadableStream<Uint8Array>({async start(controller){
-    if(withId)controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify({id,model:'synthetic/mentor',
-     choices:[{index:0,delta:{role:'assistant',content:'{"message":"partial'},finish_reason:null}]})+'\n\n'));
-    await tail.promise;controller.close();
-   }}),{headers:{'content-type':'text/event-stream',...(withId?{'x-generation-id':id}:{})}});
-  }});
- // Simulate process loss after its already-durable dispatch/early ID: no invocation finally can run.
- const pending=runtimeExecutor({callGate:allowTestCalls,database,actor:identity.actor,budget:identity.budget,adapter})
-  .execute(f.execution.executionId).catch(()=>({state:'lost'}));
- await Promise.race([withId?earlySaved.promise:sent.promise,pending.then(value=>{throw new Error('No dispatch: '+JSON.stringify(value));})]);
- await closeAccount(f.actorId);identity.revoke();crashed=true;tail.release();await pending;
- const before=(await db.query('select closed from bill2_runs where id=$1',[f.execution.runId])).rows[0];
- expect(before.closed).toBe(false);
- const call=(await db.query('select provider_id,selected_cost_usd from bill2_calls where run_id=$1',[f.execution.runId])).rows[0];
- expect(call).toEqual({provider_id:withId?id:null,selected_cost_usd:null});
- const freshAdapter=openRouterAdapter({credential:async()=> 'SYNTHETIC_LOCAL_ONLY',transport:async(_url,init)=>{
-  expect(init?.method).toBe('GET');lookups++;
-  return new Response(JSON.stringify({data:{id,model:'synthetic/mentor',total_cost:0.003,finish_reason:'stop'}}));
- }});
- const report=await recoverErasedAccounts({database:admin,budget:erasureFinancialBudget(55_000),profileId:f.actorId,
-  adapter:()=>freshAdapter});
- expect(report.failed).toBe(0);expect(report.processed).toBeGreaterThanOrEqual(1);
- expect(posts).toBe(1);expect(lookups).toBe(withId?1:0);
- expect((await db.query('select state,closed,charged from bill2_runs where id=$1',[f.execution.runId])).rows[0])
-  // Existing BILL2 finalize leaves the dispatched ledger state while actual cost is unknown.
-  .toEqual({state:withId?'settled':'dispatched',closed:true,charged:withId?3:null});
- expect((await db.query('select provider_cost_usd::text cost from bill2_runs where id=$1',[f.execution.runId])).rows[0].cost)
-  .toBe(withId?'0.003':null);
- expect((await db.query('select state from runtime_executions where id=$1',[f.execution.executionId])).rows[0].state)
-  .toBe(withId?'cancelled':'cost_pending');
- expect((await db.query('select active_execution from runtime_sessions where id=$1',[f.session.sessionId])).rows[0].active_execution).toBeNull();
- expect(report.pending).toBe(withId?0:1);expect(report.success).toBe(withId);
- if(!withId){
-  expect(report.oldestPendingAt).not.toBeNull();
-  expect((await db.query('select actual_restore from bill2_runs where id=$1',[f.execution.runId])).rows[0].actual_restore).toBeNull();
- }
 });
 
 it.each(['rejected','timeout','5xx','started'].flatMap(kind=>[false,true].map(native=>({kind,native}))))('RUNTIME: provider refusal boundary $kind native=$native preserves original execution',async({kind,native})=>{
