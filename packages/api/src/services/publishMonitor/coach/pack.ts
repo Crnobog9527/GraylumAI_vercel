@@ -66,7 +66,7 @@ export function buildPack(input: PackInput) {
     cold_start: settled8.length === 0,
     limits: { experiments_max: longRun ? 3 : COACH_PENDING.basicsFailExperiments, experiment_kinds: longRun
       ? ['tactic', 'basics'].concat(cadence === 'chat' || cadence === 'weekly' ? [] : ['pillar_mix']) : ['basics'],
-    strategy_proposal: cadence === 'quarterly', pillar_mix_proposal: longRun && (cadence === 'monthly' || cadence === 'quarterly') },
+    strategy_proposal: longRun && cadence === 'quarterly', pillar_mix_proposal: longRun && (cadence === 'monthly' || cadence === 'quarterly') },
     strategy: { version_id: rows.profile?.strategyVersionId ?? null, missing: !rows.strategy,
       pillars: rows.profile?.pillars ?? [], pillars_source: rows.profile?.pillarsSource ?? null,
       pillar_mix_target: rows.profile?.pillarMixTarget ?? null, fields: rows.strategy ? clip(rows.strategy, 200) : null },

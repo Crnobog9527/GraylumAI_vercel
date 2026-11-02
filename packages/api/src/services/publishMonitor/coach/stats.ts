@@ -46,5 +46,6 @@ export function day7Metric(fact: Fact, metric: string): number | null {
   if (!fact.day7) return null;
   if (metric === 'engagement_rate') return engagementRate(fact.day7);
   const value = fact.day7[metric];
-  return value === undefined || fact.missing.includes(metric) ? null : value;
+  // The day-7 snapshot's own numbers decide: fact.missing merges the day-7 and day-30 snapshots' missing fields, so it cannot hide a real day-7 value.
+  return value === undefined ? null : value;
 }

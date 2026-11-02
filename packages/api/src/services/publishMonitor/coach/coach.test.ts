@@ -7,7 +7,7 @@ import { buildPack, packBytes, type Cadence } from './pack';
 import { packRowsSchema } from './rows';
 import { historyScoreboard, platformShift, scoreboard } from './scoreboard';
 import { generateDataset } from './simulatedDataset';
-import { REVIEW_PACK_RESERVE, utcDay } from './stats';
+import { REVIEW_PACK_RESERVE, day7Metric, utcDay } from './stats';
 import { packRowsFor, simId } from './testRows';
 
 const AS_OF = '2026-10-27';
@@ -135,6 +135,21 @@ describe('experiment ledger (RC-2): verdicts by code match the designed outcomes
     // Numbers uploaded after the period for posts inside it still count.
     const late = fresh.map(d => ({ ...d, capturedOn: '2099-01-01' }));
     expect(conclude(e, inside, late).samples).toBe(3);
+  });
+
+  it('published posts without a captured rate are thin data (extended), not "not run"', () => {
+    const { e, fresh, facts } = basics();
+    const result = conclude(e, facts, []);
+    expect(fresh.length).toBeGreaterThan(0);
+    expect(result).toMatchObject({ samples: 0, verdict: 'inconclusive', reason: 'samples_lt_3', next_status: 'extended' });
+    expect(conclude({ ...e, extended_once: true }, facts, [])).toMatchObject({ verdict: 'inconclusive', next_status: 'concluded' });
+  });
+
+  it('a real day-7 value is not hidden by a missing field of another observation', () => {
+    const { facts } = basics();
+    const fact = { ...facts[0]!, day7: { views: 1000 }, missing: ['views'] };
+    expect(day7Metric(fact, 'views')).toBe(1000);
+    expect(day7Metric({ ...fact, day7: {} }, 'views')).toBeNull();
   });
 
   it('a derived rate (watch percentage from seconds and video length) settles like a confirmed one', () => {
@@ -276,6 +291,19 @@ describe('funnel diagnoses (RC-2 picks)', () => {
     const ds = [mk(1, 'p-bad', '2026-10-26'), mk(2, 'p-bad', '2026-10-25'), mk(3, 'p-bad', '2026-10-24'), mk(4, 'p-ok1', '2026-10-23'), mk(5, 'p-ok2', '2026-10-22')];
     const pack = loose(buildPack({ rows: { ...r, diagnostics: ds }, cadence: 'weekly', businessId: simId('A'), now: NOW, handbooks }));
     expect(pack.diagnostics.posts.map((p: { post_id: string }) => p.post_id)).toEqual([simId('p-bad'), simId('p-ok1'), simId('p-ok2')]);
+  });
+});
+
+describe('strategy proposals (RC-2)', () => {
+  it('a quarterly pack that only covers the basics does not open the strategy proposal', () => {
+    const r = rows('A');
+    const full = loose(buildPack({ rows: { ...r, diagnostics: [] }, cadence: 'quarterly', businessId: simId('A'), now: NOW, handbooks }));
+    expect(full.limits.strategy_proposal).toBe(true);
+    const failing = r.diagnostics.slice(0, 3).map(d => ({ ...d, platform: 'douyin', rates: { bounce_2s: 0.95, retain_3s: 0.1 }, reviewRunId: null,
+      capturedOn: AS_OF }));
+    const basicsOnly = loose(buildPack({ rows: { ...r, diagnostics: failing }, cadence: 'quarterly', businessId: simId('A'), now: NOW, handbooks }));
+    expect(basicsOnly.mode).toBe('basics_only');
+    expect(basicsOnly.limits.strategy_proposal).toBe(false);
   });
 });
 
