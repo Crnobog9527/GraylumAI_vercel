@@ -8,8 +8,7 @@
 --     turn path's own bindings (the page adds them); 'informationVersion' stays a JSON null as before for turn-path rows.
 --   opc_topic_read / opc_topic_original / opc_data_source_turn / opc_adopt_topics_with_source: a topic reply is a turn's reply only.
 --   opc_content_allowed / opc_result_link_available: a link or version sourced from an old execution is no longer available (as 0462's rule).
---   opc_business_archive: the old provider-call busy check becomes a turn check (a running turn of the business makes archive BUSY);
---   opc_review_archive_guard / opc_target_business: the old provider-call (run / execution) branches go.
+--   opc_business_archive: also BUSY while a turn of the business is running (the old provider-call check stays until the old path is dropped).
 -- Repeatable: whole-function CREATE OR REPLACE. Recovery: re-apply the previous text from git history; nothing is written or removed.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -367,48 +366,18 @@ BEGIN
   IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.state IN ('opening','running','stopping')
    AND opc_target_business(p_actor_id,jsonb_build_object('sessionId',t.session_id))=b.id) THEN
    RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
+  -- A provider call already dispatched must settle first. Never erase/cancel its
+  -- money or result while archiving. New claim/dispatch also holds the business lock.
+  IF EXISTS(SELECT 1 FROM bill2_runs r JOIN bill2_calls c ON c.run_id=r.id
+   WHERE r.actor_id=p_actor_id AND c.dispatched_at IS NOT NULL
+    AND ((r.contract_version='bill2.v2' AND c.settled_at IS NULL)
+     OR (r.contract_version<>'bill2.v2' AND (NOT r.closed OR c.state NOT IN ('responded','cancelled'))))
+    AND opc_target_business(p_actor_id,jsonb_build_object('runId',r.id))=b.id) THEN
+   RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
   UPDATE opc_businesses SET archived_at=clock_timestamp(),revision=revision+1
    WHERE id=b.id RETURNING * INTO b;
  END IF;
  RETURN jsonb_build_object('businessId',b.id,'name',b.name,'archivedAt',b.archived_at,'isArchived',true);
-END $function$;
-
-CREATE OR REPLACE FUNCTION public.opc_target_business(a uuid, t jsonb)
- RETURNS uuid
- LANGUAGE plpgsql
- STABLE
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE scope jsonb;bid uuid;pid uuid;did uuid;
-BEGIN
- IF t->>'sessionId' IS NOT NULL THEN
-  SELECT s.scope INTO scope FROM runtime_sessions s WHERE s.id=(t->>'sessionId')::uuid AND s.actor_id=a;
- ELSE scope:=t; END IF;
- did:=coalesce(scope->>'draftId',t->>'draftId')::uuid;
- pid:=coalesce(scope->>'workItemId',scope->>'projectId')::uuid;
- SELECT b.id INTO bid FROM opc_businesses b WHERE b.actor_id=a AND (
-  b.id=(t->>'businessId')::uuid OR EXISTS(
-   SELECT 1 FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id
-    WHERE db.business_id=b.id AND d.actor_id=a AND (d.draft_id=did OR d.project_id=pid)) OR EXISTS(
-   SELECT 1 FROM opc_accounts ac WHERE ac.business_id=b.id AND ac.actor_id=a
-    AND (ac.project_id=pid OR EXISTS(SELECT 1 FROM opc_items i
-     WHERE i.account_project_id=ac.project_id AND i.work_item_id=pid))));
- RETURN bid;
-END $function$;
-
-CREATE OR REPLACE FUNCTION public.opc_review_archive_guard()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-BEGIN
- IF OLD.archived_at IS NULL AND NEW.archived_at IS NOT NULL AND (
-  EXISTS(SELECT 1 FROM fusion_reviews rv WHERE rv.actor_id=NEW.actor_id
-   AND rv.state IN ('running','paused')
-   AND opc_target_business(NEW.actor_id,jsonb_build_object('draftId',rv.draft_id))=NEW.id)
- ) THEN RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
- RETURN NEW;
 END $function$;
 
 COMMIT;
