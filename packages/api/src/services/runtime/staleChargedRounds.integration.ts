@@ -5,7 +5,7 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { runtimeExecutor } from './execute';
-import { autoCompensateStaleRounds, compensateStaleRound, findStaleChargedRounds, STALE_ROUND_AGE_MS } from './staleChargedRounds';
+import { autoCompensateStaleRounds, compensateStaleRound, findStaleChargedRounds, STALE_ROUND_AGE_MS } from '../turn/settings/staleChargedRounds';
 import { runAutomaticFinancialRecovery } from './automaticRecovery';
 import { overlap } from '../__tests__/fixtures/planBConcurrency';
 

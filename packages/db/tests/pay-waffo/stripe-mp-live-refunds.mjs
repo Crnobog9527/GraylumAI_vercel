@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -30,7 +31,7 @@ export async function stripeMpLiveRefundCases({admin,service}) {
     const o=(await one(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','gold_first30',
       'fixture','live',$3,'terms-v1',$4) o`,[user,plan,version,digests(digest)]));
     assert.equal(o.payment_mode,'live');
-    const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+    const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=addUtcMonths(start,1);
     await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,new Date(start.getTime()-60000)]);
     const paidAt=new Date(start.getTime()+6000);
     await pay(user,o,{subscription:`sub_${o.id}`,start,end,paidAt});

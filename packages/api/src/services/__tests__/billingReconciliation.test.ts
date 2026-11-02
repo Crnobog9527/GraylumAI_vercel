@@ -14,7 +14,7 @@ function createMockSupabase(data: {
   creditTransactions?: Array<Record<string, unknown>>;
   paymentOrders?: Array<Record<string, unknown>>;
   launchBaselineAt?: unknown;
-  researchTotals?: {count:number;credits:number};
+  researchTotals?: {count:number;credits:number;turnOtherCredits?:number};
   calls?: { settledCalls: number; mismatched: number; sample: string[] };
   sources?: { mismatched: number; sample: Array<{ kind: string; id: string }> };
 }) {
@@ -207,6 +207,17 @@ describe('runDailyBillingReconciliation', () => {
     expect(result.success).toBe(true);
     expect(result.summary).toMatchObject({ tokenStatsCredits: 1000, researchSettledCredits: 359,
       reportFixedPriceCredits: 1000, fusionReviewFixedPriceCredits: 7500, settledCredits: 9859 });
+  });
+
+  it('adds up turn settlements through the research summary', async () => {
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      researchTotals: { count: 1, credits: 6, turnOtherCredits: 24 },
+      billingHistory: [{ operation_type: 'settle', amount: -30 }],
+      creditTransactions: [{ type: 'consumption', ledger_type: 'spend', reason_code: 'turn_spend', counts_as_spend: true,
+        source_type: 'ai_task', idempotency_key: 'turn:1:spend', amount: -30 }],
+    }), new Date('2026-03-10T00:00:00Z'));
+    expect(result.mismatches).toEqual([]);
+    expect(result.summary).toMatchObject({ researchSettledCredits: 6, turnOtherCredits: 24, settledCredits: 30 });
   });
 
   it('fails closed when a fixed-price spend key has inconsistent ledger facts', async () => {

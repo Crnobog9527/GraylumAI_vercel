@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { PositioningClassifier } from '../runtime/positioningGate';
+import type { PositioningClassifier } from '../turn/admission/positioningGate';
 import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, compareRpc, overCompareBudget, replayCompareGroup,
   type CompareAdmitted } from './compareAdmission';
 import { judgeCompareGate, readCompareGate, staticCompareGate } from './compareGate';

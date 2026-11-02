@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Columns3, Loader2 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { estimateFusion, startCompare } from '@/lib/turn-fusion';
+import { turnCompareLive } from './turn-compare-live';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -84,8 +86,13 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
   const [picked, setPicked] = useState(() => initialPick(options));
   const [error, setError] = useState<{ text: string; upgrade: boolean } | null>(null);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
-  const price = trpc.fusionCompare.estimate.useMutation();
-  const start = trpc.fusionCompare.start.useMutation();
+  // Priced by POST /api/turn/estimate, started by POST /api/turn/compare (CORE-PATH-V2 V2-10).
+  const [pricing, setPricing] = useState(false), [starting, setStarting] = useState(false);
+  const price = { isPending: pricing, mutateAsync: (body: typeof input) => {
+    setPricing(true);
+    return estimateFusion<Estimate>({ kind: 'compare', ...body }).finally(() => setPricing(false));
+  } };
+  const start = { isPending: starting };
   const status = pickStatus(picked, options);
   const names = Object.fromEntries(options.models.map(model => [model.id, model.name]));
   const input = { sessionId, question: question.trim(), modelIds: picked, ...(skill ? { skill } : {}) };
@@ -109,14 +116,15 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
     if (startId.current?.key !== key) startId.current = { key, id: crypto.randomUUID() };
     const requestId = startId.current.id;
     try {
-      const result = await start.mutateAsync({ ...input, requestId,
-        shown: { credits: estimate.credits, columns: estimate.columns } });
-      // The group exists but holds nothing yet: keep the request id (it outlives this dialog) so a top-up and another click
-      // continue the same start instead of meeting FUSION_COMPARE_ACTIVE.
-      if (result.state === 'waiting_credits') { setError({ text: `余额不够这次对比的上限（最多 ${estimate.credits} 积分）。充值后再点一次开始，会接着这次对比继续。`, upgrade: false }); return; }
-      if (result.state === 'processing') { setError({ text: '正在准备，请稍候再点一次开始。', upgrade: false }); return; }
+      // All the columns stream in this one request; the card follows them through the live store and the saved state.
+      setStarting(true);
+      const shown = { credits: estimate.credits, columns: estimate.columns };
+      const turn = startCompare({ ...input, requestId, shown }, { onOpened: turnCompareLive.begin, onColumn: turnCompareLive.column,
+        onAnswer: (id, index) => turnCompareLive.answered(id, index) });
+      const { compareId } = await turn.started.finally(() => setStarting(false));
+      void turn.finished.finally(() => turnCompareLive.end(compareId));
       startId.current = null;
-      onStarted(result.compareId, names);
+      onStarted(compareId, names);
     } catch (cause) {
       // A definite refusal (a compare error code from the server) ends this request id. Anything else (network, a lost
       // response) may have claimed the group: keep the id so the next click replays the same start instead of meeting
@@ -131,7 +139,9 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
       <DialogContent className={styles.picker}>
         <DialogHeader>
           <DialogTitle>多模型对比</DialogTitle>
-          <DialogDescription>同一个问题交给几个模型同时回答，看完选一个继续。已按推荐勾好，也可以自己换。</DialogDescription>
+          <DialogDescription>
+            同一个问题交给几个模型同时回答，看完选一个继续。已按推荐勾好，也可以自己换。
+          </DialogDescription>
         </DialogHeader>
         <fieldset className={styles.models}>
           <legend className={styles.muted}>选择 {options.minModels}–{options.maxModels} 个模型</legend>
@@ -152,7 +162,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
         {status.ready && <p className={styles.estimate} role="status">{price.isPending || !estimate
           ? <><Loader2 size={14} className={styles.spin} /> 正在计算预计消耗…</>
           : estimate.overBudget ? '这次对比超过单次上限，请少选几个模型。'
-            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费，开始生成后手动停止的按已用量计费。</>}</p>}
+            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费。</>}</p>}
         {error && <p role="alert" className={styles.error}>{error.text}{error.upgrade && <>
           {' '}<button type="button" className="underline" onClick={onUpgrade}>去升级</button></>}</p>}
         <DialogFooter>

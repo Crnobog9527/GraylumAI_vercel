@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { TRPCError } from '@trpc/server';
-import { stagingRpcFailure } from '../runtime/stagingErrors';
+import { stagingRpcFailure } from '../turn/settings/stagingErrors';
 
 export const archiveBusinessInput = z.object({ businessId: z.string().uuid() }).strict();
 const businessState = z.object({

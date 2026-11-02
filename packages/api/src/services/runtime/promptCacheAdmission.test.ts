@@ -4,16 +4,16 @@ import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './execute';
-import {openRouterBound} from '../bill2/openRouterPolicy';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
-import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {PROMPT_CACHE_OVERHEAD_BYTES} from '../turn/provider/promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
 import {testIdentityGuard,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
-import {replySettingInstructions} from './replyLanguage';
+import {replySettingInstructions} from '../turn/agent/replyLanguage';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
-vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 // New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
 const DEFAULT_REPLY_RULE=replySettingInstructions('zh-Hans');
@@ -22,8 +22,8 @@ const skill='Pinned skill 正文';
 const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
-vi.mock('./billingUnitAdmission',async original=>({
- ...(await original<typeof import('./billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
+vi.mock('../turn/admission/billingUnitAdmission',async original=>({
+ ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
 }));
 const actor='10000000-0000-4000-8000-000000000001',modelId='10000000-0000-4000-8000-000000000002';
 testPrimaryModel.id=modelId;
@@ -89,12 +89,23 @@ it.each([
   expect((await runtimeAdmissionService(f.user,f.admin,policy).prepare(f.input)).context).not.toHaveProperty('promptCache');
  }else expect((await f.service.prepare(f.input)).context).not.toHaveProperty('promptCache');
 });
-it('ordinary role is never marked even on Anthropic with a write price',async()=>{
+it('ordinary role stays unmarked here: free chat caching lives in the CORE-PATH-V2 turn path (V2-4)',async()=>{
  const f=fixture();
  const reasoning=configuredReasoning(f.row.model_id).reasoning;
  f.row.config.reasoning={...reasoning,catalog:reasoning.catalog!,route:reasoning.route!};
  const result=await f.service.prepare({...f.input,selection:{kind:'ordinary',modelId}});
  expect(result.context).not.toHaveProperty('promptCache');
+});
+it('a report context never carries promptCache: report_admission_check.sql refuses it (reports cache on CORE-PATH-V2, V2-7a)',async()=>{
+ const f=fixture();
+ const reasoning=configuredReasoning(f.row.model_id).reasoning;
+ f.row.config.reasoning={...reasoning,catalog:reasoning.catalog!,route:reasoning.route!};
+ const reportGeneration={version:1 as const,projectId:actor,roundId:actor,evidenceIds:[],snapshotHash:'a'.repeat(64),packageHash:'b'.repeat(64),
+  workflowHash:'c'.repeat(64),templateHash:'d'.repeat(64),sections:['One'],maxCharacters:12000};
+ const result=await runtimeAdmissionService(f.user,f.admin,{...f.policy,reportGeneration,skillResources:['report.md'],
+  additionalInstructions:'Confirmed facts: {"x":1}',stableAdditionalInstructions:undefined,searchEnabled:false,workspaceContext:false}).prepare(f.input);
+ expect(result.context).not.toHaveProperty('promptCache');
+ expect(()=>runtimeContext.parse({...result.context,promptCache:{version:'prompt-cache-v3',systemPrefixChars:1,systemPrefixSha256:'a'.repeat(64),historyMarker:false}})).toThrow();
 });
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
  const instructions=brand+skill+'\n'+host();
@@ -155,7 +166,7 @@ it('switch on: the identity leads the cached prefix and carries the Owner-approv
  expect(result.context.instructions).toContain('我是 Graylum 的 AI 自媒体陪跑教练');
 });
 
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

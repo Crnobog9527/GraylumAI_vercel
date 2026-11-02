@@ -5,16 +5,16 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { executeOriginalExecution, streamOriginalExecution } from './executionStream';
 import { executionVisibility } from './libraryVisibility';
-import { createRuntimeBudget } from './budget';
-import { denyNewCalls } from './newWorkGate';
+import { createRuntimeBudget } from '../turn/settings/budget';
+import { denyNewCalls } from '../turn/admission/newWorkGate';
 const mock = vi.hoisted(() => ({ factory: vi.fn(), policy: vi.fn(), gate: vi.fn(), recover: vi.fn(), capture: vi.fn() }));
 vi.mock('../opc/capture', () => ({ captureCompleted: mock.capture }));
 vi.mock('./execute', () => ({ runtimeExecutor: mock.factory }));
-vi.mock('./stagingPolicy', () => ({ loadStagingPolicy: mock.policy, loadStagingRecoveryPolicy: async () => ({}),
+vi.mock('../turn/settings/stagingPolicy', () => ({ loadStagingPolicy: mock.policy, loadStagingRecoveryPolicy: async () => ({}),
   realPolicyCheck: (...args: unknown[]) => Promise.resolve(mock.policy(...args)).then(() => ({ ok: true }), (failure: unknown) => ({ ok: false, failure })) }));
 vi.mock('./stagingTransport', () => ({ stagingTransport: () => ({ lookup: vi.fn() }) }));
-vi.mock('./newWorkGate', async importOriginal => ({
-  ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+  ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
   newWorkGate: (_db: unknown, environment: string) => ({ calls: mock.gate(environment) }),
 }));
 beforeEach(() => {

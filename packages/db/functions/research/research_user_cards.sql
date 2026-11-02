@@ -14,7 +14,7 @@ BEGIN
  SELECT coalesce(jsonb_agg(jsonb_build_object('cardId',c.id,'kind',c.kind,'options',c.options,
   'minSelect',c.min_select,'maxSelect',c.max_select,'confirmationId',c.confirmation_id,'items',c.confirmed_items)
   ORDER BY c.created_at,c.id),'[]'::jsonb) INTO output FROM research_selection_cards c
- JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
- WHERE c.actor_id=a AND c.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+ LEFT JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
+ WHERE c.actor_id=a AND c.session_id=s AND (c.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL));
  RETURN output;
 END $function$;

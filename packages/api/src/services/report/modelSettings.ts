@@ -1,18 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { paygStartThresholdsSchema } from '../adminSettings';
-import { aggregateCredits } from '../bill2/decimal';
-import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
-import { parseStagingPolicy, type StagingPolicy } from '../runtime/stagingPolicy';
+import { aggregateCredits } from '../turn/provider/decimal';
+import { stagingRuntimeWindow } from '../turn/settings/stagingEnvironment';
+import { parseStagingPolicy, type StagingPolicy } from '../turn/settings/stagingPolicy';
 import { readPaygPolicies } from '../runtime/realHost';
-import { realRuntimeEnvironment } from '../runtime/productionEnvironment';
-import { loadProductionPolicy } from '../runtime/productionPolicy';
+import { realRuntimeEnvironment } from '../turn/settings/productionEnvironment';
+import { loadProductionPolicy } from '../turn/settings/productionPolicy';
 import { freezeStagingPaygPricing } from '../runtime/paygPricing';
-import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
-import { admitReasoning } from '../runtime/reasoningAdmission';
-import { PURPOSE_OUTPUT_CAP, readPurposeBudgets } from '../runtime/purposeBudgets';
+import { freezeWindowBillingUnit } from '../turn/admission/billingUnitAdmission';
+import { admitReasoning } from '../turn/admission/reasoningAdmission';
+import { PURPOSE_OUTPUT_CAP, readPurposeBudgets } from '../turn/settings/purposeBudgets';
 import { readPricingSnapshot } from '../../shared/modelPricing';
-import { PRICE_SNAPSHOT_MAX_AGE_MS } from '../runtime/pricingAdmission';
+import { PRICE_SNAPSHOT_MAX_AGE_MS } from '../turn/admission/pricingAdmission';
 import { reportModelErrorCode } from './modelErrors';
 
 type Model = { id: string; name: string; model_id: string; provider: string; is_active: string;

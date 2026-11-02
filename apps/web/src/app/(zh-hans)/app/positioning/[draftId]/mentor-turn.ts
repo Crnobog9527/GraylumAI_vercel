@@ -33,7 +33,8 @@ export type MentorStepEnvelope<Information> = {
   executionId?: string;
 };
 
-const EXECUTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// An execution of the old path (a uuid) or a turn of the CORE-PATH-V2 path (`turn:<id>`, mentor-turn-path.ts).
+const EXECUTION_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|turn:[1-9][0-9]{0,17})$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -221,6 +222,7 @@ export type MentorExecution = PaygViewFields & {
     request?: MentorRequest | null;
     unavailableReason?: string | null;
     historyOmitted?: boolean;
+    createdAt?: string | null;
     executionId: string;
     input: string | null;
     body: string | null;
@@ -280,6 +282,8 @@ const releasedRefusals = new WeakSet<object>();
 /** Refused before admission (an HTTP 4xx before the `admitted` event): no execution exists, so nothing is kept.
  * A pending earlier organizer is a wait, not a refusal: its request stays for the payg-wait resume. */
 export function isRefusedBeforeAdmission(error: unknown, admitted: boolean): boolean {
+  // The turn path's refusals (mentor-turn-path.ts TurnRefused): `kept` is the server's word that nothing was stored or charged.
+  if (!admitted && error instanceof Error && error.name === "TurnRefused" && (error as { kept?: boolean }).kept === true) return true;
   return !admitted && ["opc.mentorTurnStream", "opc.prepareStep"].includes(definiteRefusal(error)?.path ?? "")
     && !isOrganizerPendingError(error);
 }

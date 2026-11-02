@@ -1,23 +1,23 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // The tools one execution offers its primary model, from its frozen context only, and the request bytes they take.
 import type {z} from 'zod';
-import {executionSkillFileTool} from './skillFileExecution';
-import {executionLoadSkillTool,LOAD_SKILL_TOOL} from './loadSkillTool';
-import {skillCatalogReserveBytes} from './skillCatalog';
-import {skillFileToolBytes} from './skillFile';
-import {executionMentorHistoryTool,mentorHistoryToolBytes} from './mentorHistory';
-import {sourceRuntimeTool} from './sourceRuntimeTool';
+import {executionSkillFileTool} from '../turn/skills/skillFileExecution';
+import {executionLoadSkillTool,LOAD_SKILL_TOOL} from '../turn/skills/loadSkillTool';
+import {skillCatalogReserveBytes} from '../turn/skills/skillCatalog';
+import {skillFileToolBytes} from '../turn/skills/skillFile';
+import {executionMentorHistoryTool,mentorHistoryToolBytes} from '../turn/agent/mentorHistory';
+import {sourceRuntimeTool} from '../turn/research/sourceRuntimeTool';
 import {withSourceWorkProgress} from './sourceWorkProgress';
 import type {AgentToolEvent} from '../../shared/agentWork';
-import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
-import {groundedCardTool,groundedCardToolBytes,type cardSources} from './groundedCard';
-import {askQuestionTool,askQuestionToolBytes,READ_HISTORY_TOOL} from './agentTools';
+import {promptCacheReserveBytes} from '../turn/provider/promptCache';
+import {groundedCardTool,groundedCardToolBytes,type cardSources} from '../turn/agent/groundedCard';
+import {askQuestionTool,askQuestionToolBytes,READ_HISTORY_TOOL} from '../turn/agent/agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
-import type {runtimeContext} from './runtimeContext';
-import type {RuntimeTool} from './runner';
+import type {runtimeContext} from '../turn/agent/runtimeContext';
+import type {RuntimeTool} from '../turn/agent/runner';
 import type {ResearchExecution} from './researchExecution';
-import type {RequestTiming} from './timing';
-import type {ToolRpc} from './skillFileExecution';
+import type {RequestTiming} from '../turn/provider/timing';
+import type {ToolRpc} from '../turn/skills/skillFileExecution';
 
 export function executionTools(input:{
  context:z.infer<typeof runtimeContext>;executionId:string;args:{p_execution_id:string};
@@ -42,7 +42,7 @@ export function executionTools(input:{
  const toolBytes=(input.agentTurn?(input.grounded?groundedCardToolBytes():askQuestionToolBytes(input.fiveFields)):
   Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
   (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+(research?.definitionBytes??0)+
-  (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+  (context.historySelection?.markerReserveBytes??promptCacheReserveBytes(context.promptCache));
  // The loads this reply may make: reserved once, in the first history selection only, never in later per-call totals.
  return {tools,toolBytes,catalogReserve:context.skillCatalog?skillCatalogReserveBytes(context.skillCatalog):0};
 }

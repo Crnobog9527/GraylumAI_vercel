@@ -4,15 +4,15 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
 const mocks=vi.hoisted(()=>({host:vi.fn(),prod:vi.fn(),freeze:vi.fn(),gate:vi.fn()}));
-vi.mock('./paygHostPolicy',async original=>({...(await original<typeof import('./paygHostPolicy')>()),readPaygHostPolicies:mocks.host}));
-vi.mock('./productionPolicy',()=>({readPaygProductionPolicies:mocks.prod}));
+vi.mock('../turn/admission/paygHostPolicy',async original=>({...(await original<typeof import('../turn/admission/paygHostPolicy')>()),readPaygHostPolicies:mocks.host}));
+vi.mock('../turn/settings/productionPolicy',()=>({readPaygProductionPolicies:mocks.prod}));
 vi.mock('./paygPricing',()=>({freezeStagingPaygPricing:mocks.freeze}));
-vi.mock('./newWorkGate',()=>({readNewWorkSettings:()=>({}),readAdmissionSettings:async()=>({ok:true,primaryModelId:'10000000-0000-4000-8000-000000000003'}),
+vi.mock('../turn/admission/newWorkGate',()=>({readNewWorkSettings:()=>({}),readAdmissionSettings:async()=>({ok:true,primaryModelId:'10000000-0000-4000-8000-000000000003'}),
   newWorkGate:(_a:unknown,environment:string)=>{mocks.gate(environment);return {message:async()=>({ok:true})};},requireNewWork:()=>{}}));
-vi.mock('./billingUnitAdmission',async original=>({
-  ...(await original<typeof import('./billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission',async original=>({
+  ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit:async()=>({version:'bill-unit-v2',creditsPerUsd:'100',defaultMultiplier:'3',
     models:{},providers:{},hash:'f'.repeat(64)}),
 }));

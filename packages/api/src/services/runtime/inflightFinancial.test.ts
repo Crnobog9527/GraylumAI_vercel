@@ -3,7 +3,7 @@ import { AuthSessionMissingError } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
 import { inflightFinancialHost } from './inflightFinancial';
 import { runtimeActor } from './actor';
-import { createRuntimeBudget } from './budget';
+import { createRuntimeBudget } from '../turn/settings/budget';
 const actorId = '10000000-0000-4000-8000-000000000001';
 const runId = '10000000-0000-4000-8000-000000000002';
 const executionId = '10000000-0000-4000-8000-000000000003';

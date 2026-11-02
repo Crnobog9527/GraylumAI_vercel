@@ -167,6 +167,22 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
    `packages/db/functions/` 和 `built-fingerprint.json` 一起提交。任何带迁移的 PR 都要这样做；合并冲突时
    先解决迁移冲突，再重新生成，不手工合并这些文件。
 
+### 主路径约束（CORE-PATH-V2，Owner 2026-10-28 批准）
+
+适用范围：主路径 v2 的代码，即 `packages/api/src/services/turn/`、`packages/db/functions/turn/` 以及它们调用的账本函数；计划见 `docs/launch/tasks/CORE-PATH-V2.md`。旧路径（`services/runtime/`、`services/bill2/`）在 V2-12 删除前只做必要修复，不加新功能。
+
+- 主路径的表主键带所有者列，查询必须带所有者键；不得对全站共用行加锁或更新（按天累计类数据用分桶行）；数据库函数只用事务级状态（不用 `pg_advisory_lock`、非 LOCAL 的 `SET`、临时表），以兼容连接池事务模式；后台定时任务按批认领（`SKIP LOCKED`）、幂等、可多实例并行；对外部供应商的调用按模型/供应商设并发上限并做退避。
+- 一轮对话只允许三类数据库写入：开轮（`turn_open`）、回执（`turn_call_begin`/`turn_call_identity`/`turn_call_record`，每次付费调用发出前必须先写 `turn_call_begin`）、收轮（`turn_close`）。模型调用与工具调用之间不得有其他数据库读写；需要的数据在开轮时取回，或来自进程内目录缓存。例外（Owner 2026-10-28 批准）：免费的读取工具（读用户自己的资料库、作品）可以在回合中途按本人键只读查询一次，不加锁、不写入，不写回执；次数按本轮免费工具上限计，冻结进 `turns.policy`。
+- 免费只读函数（`FREE_READS`，Owner 2026-10-28）的扫描（Owner 2026-11-01 放宽）：第一个参数是 `p_actor_id`，走到的每个函数都是 STABLE/IMMUTABLE，不写、不加锁，自身按所有者验证。每条查询带所有者键，只有两类表例外，且都写在 `scripts/db-function-closure.mjs` 的明确名单里：① `FREE_READ_LINKED`：本身没有所有者列、必须从已验证属于本人的行按 id 关联下来的表（如 `artifact_versions`、`artifact_rounds`），每条查询要用名单里的键点名这一行；② `FREE_READ_CATALOG`：全站只读目录表。名单外没有所有者列的表一律不通过；往名单加表要 Owner 批准。
+- 付费调用在 SDK 和 HTTP 客户端里不重试（`maxRetries` 为 0）；只有确定没发出或确定不计费的失败可以重试，每次尝试各自一行回执；结果不明的调用交恢复任务，不退冻结、不释放预占。
+- 冻结（Owner 2026-11-01，取代 2026-10-28 的"开轮冻结一次"）：`chat`、`mentor` 回合开轮只冻一次模型加最大一个付费工具的上界（`policy.holdCredits`），`turn_call_begin` 发现本次上界没被覆盖时在回执这一类写入内补冻（`atomic_pre_deduct`，按回合和序号命名），有余额不暂停，余额真不够才暂停。`turn_call_begin` 必须先无锁判断，需要补冻才按 profile → session → turn 的锁序复核；不需要补冻的调用不碰 `profiles`。一轮可以有多笔冻结，收轮由 `turn_settle_holds` 按序拆分，每笔各自幂等。固定价的 `report`、`compare`、`jury`、`jury_adopt` 和只调用一次的 `plan` 不带 `holdCredits`，仍是开轮冻足。
+- 日限预占（Owner 2026-11-01，取代"开轮预占整轮上界"）：带 `holdCredits` 的回合开轮只预占 `policy.holdUsd`（一次模型、最大一个付费工具、定位检查的上界之和），`turn_call_begin` 发现本次上界没被覆盖时，在写回执前先锁自己的 `daily_spend` 桶行、再读当天总和、再按 `turn_open` 的同一式子检查，超限抛 `STOP_LOSS_REACHED` 并回滚，不写回执、不动积分，回合按失败全退收轮。锁序 turn → 桶。只能改预占时机，不能放宽判定。`U_fast` 是一个事务最多新增的预占，配置值必须不小于 `holdUsd` 和普通桶 kind 的 `U_turn`；`holdUsd` 大于它时 `turn_open` 拒绝（`TURN_STOP_LOSS_CONFIG`）。
+- 主路径的数据库函数只能读写 `turns`、`turn_calls`、`session_messages`、`runtime_sessions`、`profiles`、`credit_transactions`、`credit_source_entries`、`daily_spend`、`catalog_versions`，以及按 `kind` 需要的草稿/报告/评审表各一行；只允许对本人 `profiles` 和本会话 `runtime_sessions` 加行锁；不得对任何全站共用行加锁。例外（Owner 2026-10-29 批准）：扣积分和结算用到的账本函数（`atomic_pre_deduct`、`turn_settle_credits`、`credit_available`、`credit_source_apply`，含其中按订阅期、积分包记账的来源记录，如 `subscription_credit_grants`）不受这条表白名单限制，按账本叶子计数；结算积分时，这些账本函数还可以锁住用户本人的订阅期和积分包来源记录（Owner 2026-10-29 另行批准），只限本人的行，其他行锁限制照旧。它们只能读写本人的账本行。例外（Owner 2026-10-30 批准）：`kind=mentor` 的回合可以在收轮事务内写本回合对标工具产生的 `research_*` 派生行，只限本人、本回合的行，不加这条之外的行锁；回合中途仍不得写 `research_*`。
+- 全站只读、管理员写的目录（系统设置、模型目录、Skill 包、权益规则）必须通过 `catalogCache` 读取；余额、冻结、墓碑、会话状态、用户写入的数据永不缓存。
+- staging 与正式环境不得有代码分支；环境差异只能是配置（密钥、地址、价格快照、账号积分）。
+- `scripts/check-turn-budget.mjs` 的基线只许变小（调高需 Owner 批准；Owner 2026-10-30 批准导师非开场回合 ≤ 11 → ≤ 12，2026-10-31 批准账号策略草稿 ≤ 13，见计划 3.1）；碰主路径的 PR 描述写明往返/锁/数据库时间的前后值。
+- 新的业务规则要进主路径时，先问"它属于开轮、回执还是收轮"，只在那一个函数里加分支；需要新表才能表达的，先在 PR 里写一句为什么现有列不够。
+
 ## 6. AI 与 Agent 功能
 
 以下原则来自 [Master Plan v12](launch/MASTER_PLAN.md) 第 3、4 节（延续已锁定的
@@ -203,7 +219,7 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
 | 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
 | 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files`；`node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files`。CI 的 "Unit Tests" 必需检查依赖这两条及空库文件建库检查；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
-| 数据库行为套件统一入口（CI 同款，需要本地 Docker） | `node packages/db/tests/run-local-suites.mjs --local-only`（CI 用 `--ci`；`--list` 只列出，`--only <目录>` 只跑一个目录）。自动发现 `packages/db/tests/<目录>/` 下文件名带 `-local` 的套件，默认全部进 CI；暂时不能跑的写进 `packages/db/tests/local-suites-excluded.json`（要有原因和日期，只许变少，`scripts/tests/local-suites.test.mjs` 检查）。新套件的入口要接受 `--ci`（在 CI）和 `--local-only`（本机）。空库建库回放还会检查：标 STABLE/IMMUTABLE 的函数体里不许写数据或加行锁（PostgREST 对它们开只读事务），误报才可写进 `packages/db/tests/baseline/volatility-allow.json`，同样只许变少 |
+| 数据库行为套件统一入口（CI 同款，需要本地 Docker） | `node packages/db/tests/run-local-suites.mjs --local-only`（CI 用 `--ci`；`--list` 只列出，`--only <目录>` 只跑一个目录）。自动发现 `packages/db/tests/<目录>/` 下文件名带 `-local` 的套件，默认全部进 CI；暂时不能跑的写进 `packages/db/tests/local-suites-excluded.json`（要有原因和日期，只许变少，`scripts/tests/local-suites.test.mjs` 检查）。新套件的入口要接受 `--ci`（在 CI）和 `--local-only`（本机）。被排除的套件在每次推送到 `staging` 后由 `.github/workflows/nightly-db-suites.yml` 跑一遍（GitHub 的定时触发只认默认分支 main，所以不用定时；新推送会取消还没跑完的旧运行，staging 安静下来后才会跑完一次）（`env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded`，在一次性检出里，不是必需检查，红了只是报告、不挡合并）；排除清单里原因以 `not a suite:` 开头的是辅助文件、模板和包装脚本，夜间跳过它们。通过 `localDb()` 建库的套件由入口先建一次库、保存成镜像，每个套件再从镜像启动自己的容器（`db-snapshot/isolation-local.mjs` 检查快照和全新建库一致、一个容器的写入不会影响别的容器）；需要在建库中途写数据的套件（传 `beforeApply`）和自己建库的套件仍各自重放迁移。空库建库回放还会检查：标 STABLE/IMMUTABLE 的函数体里不许写数据或加行锁（PostgREST 对它们开只读事务），误报才可写进 `packages/db/tests/baseline/volatility-allow.json`，同样只许变少 |
 
 - ESLint 用 typescript-eslint 推荐规则检查 TS/TSX，网站另加 React Hooks 的
   `rules-of-hooks` 和 `exhaustive-deps`。已有问题记在各包的 `eslint-suppressions.json`
@@ -226,6 +242,19 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
   第 4 节。
 - 往 CI 加测试或测试套件时，PR 描述写明加入后该 job 的实测总时长，离 30 分钟上限至少留 8 分钟；
   不够就拆成并行 job。不许调大超时时间：调大超时算放宽 CI，要 Owner 批准（2026-10-26 #1404 教训）。
+- CI 默认跑全套。只有一种情况跳过数据库和计费测试（"Run database behaviour suites" 两组和 "Run billing and recovery
+  integration tests"，Owner 2026-11-01 批准）：目标分支是 `staging` 的 PR，并且改动的**每个文件**都在白名单里。
+  白名单只有：`docs/**`、`*.md`，以及 `apps/web/src/components/**` 和 `apps/web/src/app/**` 下的页面、组件、样式
+  （`.tsx`、`.css`）和它们的测试（`.test.ts`、`.test.tsx`）。`apps/web/src/app/api/**`、`route`/`middleware`/`proxy` 文件、
+  `apps/web/src` 下的其他目录、`packages/**`、`supabase/**`、`scripts/**`、`.github/**`、依赖和锁文件都不在白名单里，
+  混进一个就跑全套。push 到 `staging`/`main`、定时任务、目标是 `main` 的可审查 PR，以及拿不到改动列表、列表为空时，一律全套。
+  另一种跳过（Owner 2026-11-01 批准）：草稿 PR 只跑快速检查（lint、类型、单元、构建与安全 E2E、全部安全检查），
+  同样跳过这两项数据库和计费测试；草稿转为可审查时 CI 会重新触发（`pull_request` 带 `ready_for_review`），
+  这一次按上面的规则判定，改了白名单外文件的 PR 一定跑全套。只有 `draft` 明确为 `true` 才算草稿，读不到按可审查处理。
+  判定写在 `scripts/ci-test-scope.mjs`（测试在 `scripts/tests/ci-test-scope.test.mjs`）；改白名单等于改规则，要 Owner 批准。
+  lint、类型检查、单元测试、构建与安全 E2E、全部安全检查在任何情况下都照跑。必需检查名字不变："Unit Tests" 只接受
+  判定任务成功且判定为"不用全套"时的跳过，失败、取消和其他原因的跳过仍然是红的
+  （`.github/scripts/test-ci-workflows.rb` 逐一检查）。同一个 PR 推新版本会取消旧运行，push 到 `staging` 不取消。
 - 作为门槛的检查（代码大小、类型检查、测试等）不能接管道或用别的方式吞掉失败（例如接 `| tail`
   后再提交推送）：要单独运行看退出码，或者用 `set -o pipefail`。检查没过不能提交推送
   （2026-10-13 #900 教训）。

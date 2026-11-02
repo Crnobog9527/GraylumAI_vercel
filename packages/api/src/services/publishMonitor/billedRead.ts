@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { readProviderPrices, resolveProviderPrice, resolveProviderMultipliers } from '../billingProviderPrices';
-import { decimal } from '../bill2/decimal';
-import type { BillingRpc } from '../bill2/service';
-import { frozenToolPolicy, toolCallPolicy, toolModelId, toolResultEvidence, type ToolCallPolicy } from '../bill2/toolBilling';
+import { decimal } from '../turn/provider/decimal';
+import type { BillingRpc } from '../turn/provider/service';
+import { frozenToolPolicy, toolCallPolicy, toolModelId, toolResultEvidence, type ToolCallPolicy } from '../turn/provider/toolBilling';
 import { toolSubcallBilling } from '../bill2/toolSubcall';
 import {
   requestIdentity, ResearchPause, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest,
@@ -16,7 +16,7 @@ import { readResearchToolsConfig } from '../research/vendors/config';
 import { tikhubRouteId, type TikhubCall } from '../research/vendors/tikhub';
 import type { ResearchCallResult, SocialKind, SocialPlatform } from '../research/vendors/types';
 import { readMultiplierSnapshot } from '../billingUnit';
-import { loadStagingPolicy } from '../runtime/stagingPolicy';
+import { loadStagingPolicy } from '../turn/settings/stagingPolicy';
 import { derivedUuid } from '../fusion/admission';
 
 /**

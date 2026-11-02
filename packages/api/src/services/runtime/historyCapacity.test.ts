@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
 import {selectBlockHistory,currentInputBytes} from './historySelection';
-import {selectRuntimeHistory,runtimeScopeInput} from './context';
-import {freezeHistorySelection,type HostTurnContext} from './hostTurn';
-import {askQuestionToolBytes} from './agentTools';
+import {selectRuntimeHistory,runtimeScopeInput} from '../turn/agent/context';
+import {freezeHistorySelection,type HostTurnContext} from '../turn/agent/hostTurn';
+import {askQuestionToolBytes} from '../turn/agent/agentTools';
 const host:HostTurnContext={stepId:'s1',opening:false,checklist:Array.from({length:3},(_,step)=>({
  id:'s'+step,title:'Synthetic step',fields:Array.from({length:8},(_,field)=>({id:'f'+field,title:'Synthetic field',
   required:true,role:'user_fact',status:'draft',protected:false})),

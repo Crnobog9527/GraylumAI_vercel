@@ -5,7 +5,7 @@ import {randomUUID, createHash} from 'node:crypto';
 import pg from 'pg';
 import {createClient} from '@supabase/supabase-js';
 import {runtimeExecutor} from './execute';
-import {openRouterAdapter} from '../bill2/openRouterAdapter';
+import {openRouterAdapter} from '../turn/provider/openRouterAdapter';
 import {agentTurnBody} from '../../shared/agentTurn';
 
 const connectionString = process.env.V3_LOCAL_DB!;

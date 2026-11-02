@@ -63,54 +63,20 @@ export function computeVersionMarks(versions: VersionRow[], reviews: ReviewRow[]
   return marks;
 }
 
-const BATCH = 40;
-const chunks = <T,>(list: T[]): T[][] => Array.from({ length: Math.ceil(list.length / BATCH) }, (_, at) => list.slice(at * BATCH, (at + 1) * BATCH));
-
 export class VersionMarksDenied extends Error { constructor() { super('FUSION_VERSION_MARKS_DENIED'); } }
 
 /**
  * Marks of every version of the given analyses' projects, plus the extra version ids the page shows (an account's history also
  * lists versions of its inherited root and earlier draft projects). Another user's analysis (or an unknown one) is refused, never
  * empty. Reviews are only the caller's own, so an extra id of someone else's version can never come back marked.
+ * The rows come from one database function (fusion_version_marks_read, 0455): the server's role has no SELECT on the tables.
  */
 export async function loadVersionMarks(admin: SupabaseClient, actorId: string, draftIds: string[], versionIds: string[] = []):
   Promise<Record<string, VersionMark>> {
-  const ids = [...new Set(draftIds)];
-  type Draft = { draft_id: string; project_id: string; actor_id: string };
-  const found = new Map<string, Draft>();
-  for (const batch of chunks(ids)) {
-    const drafts = await admin.from('opc_drafts').select('draft_id,project_id,actor_id').in('draft_id', batch);
-    if (drafts.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-    for (const draft of (drafts.data ?? []) as Draft[]) found.set(draft.draft_id, draft);
-  }
-  const owned = [...found.values()];
-  if (owned.length !== ids.length || owned.some(draft => draft.actor_id !== actorId)) throw new VersionMarksDenied();
-  const projects = [...new Set(owned.map(draft => draft.project_id))];
-  const columns = 'id,source:report->generatedReport->>source,from:report->generatedReport->>sourceVersionId' as const;
-  const reviewColumns = 'id,draft_id,source_version_id,state,ended_at,adoption,created_at' as const;
-  const versionRows = new Map<string, unknown>();
-  const reviewRows = new Map<string, ReviewRow & { created_at: string }>();
-  // Every read is bounded by a short id list (a long one makes the request URL too big) and by a row cap per batch.
-  const jobs: Array<PromiseLike<void>> = [];
-  const keep = (rows: unknown, error: unknown, into: (row: never) => void) => {
-    if (error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-    for (const row of (rows ?? []) as never[]) into(row);
-  };
-  for (const batch of chunks(projects)) {
-    jobs.push(admin.from('artifact_versions').select(columns).in('project_id', batch).is('erased_at', null).limit(1000)
-      .then(({ data, error }) => keep(data, error, row => versionRows.set((row as { id: string }).id, row))));
-    jobs.push(admin.from('fusion_reviews').select(reviewColumns).eq('actor_id', actorId).in('project_id', batch)
-      .order('created_at', { ascending: false }).limit(1000)
-      .then(({ data, error }) => keep(data, error, row => reviewRows.set((row as { id: string }).id, row))));
-  }
-  for (const batch of chunks([...new Set(versionIds)])) {
-    jobs.push(admin.from('artifact_versions').select(columns).in('id', batch).is('erased_at', null).limit(1000)
-      .then(({ data, error }) => keep(data, error, row => versionRows.set((row as { id: string }).id, row))));
-    jobs.push(admin.from('fusion_reviews').select(reviewColumns).eq('actor_id', actorId).in('source_version_id', batch)
-      .order('created_at', { ascending: false }).limit(1000)
-      .then(({ data, error }) => keep(data, error, row => reviewRows.set((row as { id: string }).id, row))));
-  }
-  await Promise.all(jobs);
-  const reviews = [...reviewRows.values()].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-  return computeVersionMarks([...versionRows.values()] as unknown as VersionRow[], reviews);
+  const { data, error } = await admin.rpc('fusion_version_marks_read', { p_actor_id: actorId, p_draft_ids: [...new Set(draftIds)],
+    p_version_ids: [...new Set(versionIds)] });
+  if (error) throw String(error.message ?? '').includes('FUSION_VERSION_MARKS_DENIED') ? new VersionMarksDenied() : new Error('FUSION_REVIEW_UNAVAILABLE');
+  const rows = (data ?? {}) as { versions?: VersionRow[]; reviews?: Array<ReviewRow & { created_at: string }> };
+  const reviews = [...(rows.reviews ?? [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  return computeVersionMarks(rows.versions ?? [], reviews);
 }

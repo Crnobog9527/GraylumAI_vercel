@@ -22,7 +22,8 @@ describe('fusionCompare router', () => {
   it('exposes the compare procedures', () => {
     const procedures = Object.keys(appRouter._def.procedures).filter(name => name.startsWith('fusionCompare.'));
     expect(procedures.sort()).toEqual(['fusionCompare.adopt', 'fusionCompare.estimate', 'fusionCompare.list', 'fusionCompare.options',
-      'fusionCompare.read', 'fusionCompare.start', 'fusionCompare.stop', 'fusionCompare.stream']);
+      'fusionCompare.read', 'fusionCompare.start', 'fusionCompare.stop', 'fusionCompare.stream', 'fusionCompare.turnAdopt',
+      'fusionCompare.turnList', 'fusionCompare.turnRead']);
   });
   it('keeps exact compare refusals for the page, with a status that says what kind they are', async () => {
     for (const [message, code] of [['FUSION_COMPARE_DISABLED', 'FORBIDDEN'], ['FUSION_COMPARE_ACTIVE', 'CONFLICT'],

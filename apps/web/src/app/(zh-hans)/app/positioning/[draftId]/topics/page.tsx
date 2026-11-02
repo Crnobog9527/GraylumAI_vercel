@@ -24,8 +24,10 @@ import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
 import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
-import { consentedTopicIds } from './adoption-consent';
+import { opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
+import { consentedForCandidate } from './adoption-consent';
+import { lastReplyAdoptionNotice, parseAdoption, parseCandidate } from './topic-candidate';
+import { refuseTopic, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
   topicTurnShows } from './topic-notices';
@@ -57,62 +59,6 @@ type Operation = { kind: 'chat'; request: ChatRequest; candidateAtSend?: Candida
 // and identity conflicts retain the whole original envelope, never just its ID.
 const definiteRejections = new Set(['OPC_BUSINESS_CONFLICT', 'OPC_BUSINESS_DENIED', 'OPC_VERSION_CONFLICT', 'OPC_ACCOUNT_CONFLICT', 'OPC_ACCOUNTS_INVALID', 'OPC_PLAN_INVALID', 'OPC_DUPLICATE_ITEM', 'OPC_TOPIC_ALREADY_ADOPTED', 'OPC_SOURCE_DENIED', 'OPC_DENIED', 'OPC_TOPIC_SOURCE_REVOKED', 'OPC_TOPIC_UNBOUND', 'OPC_TOPIC_SKILL_MISSING']);
 
-/** The last JSON array the Agent offered as the first-week plan, if any. */
-function parseCandidate(text: string | null | undefined): PlanItem[] | null {
-  if (!text) return null;
-  const blocks = [...text.matchAll(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/g)].map(
-    (m) => m[1],
-  );
-  const trimmed = text.trim();
-  const bodies = trimmed.startsWith('[') && trimmed.endsWith(']')
-    ? [...blocks, trimmed]
-    : blocks;
-  for (let i = bodies.length - 1; i >= 0; i -= 1) {
-    try {
-      const parsed = JSON.parse(bodies[i]);
-      if (!Array.isArray(parsed) || !parsed.length || parsed.length > 28) continue;
-      const items = parsed.map((raw) => {
-        const item = raw as Record<string, unknown>;
-        const value = (key: string) =>
-          typeof item?.[key] === 'string' ? (item[key] as string).trim() : '';
-        const candidate = {
-          id: value('id'),
-          platform: value('platform'),
-          account: value('account'),
-          title: value('title'),
-          brief: value('brief'),
-          day: value('day'),
-          ...(value('contentType')?{contentType:planItem.shape.contentType.parse(value('contentType'))} : {}),
-        };
-        if (
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate.id) ||
-          !/^[a-z0-9_-]{1,32}$/.test(candidate.platform) ||
-          !/^[a-z0-9][a-z0-9._:-]{0,127}$/.test(candidate.account) ||
-          !candidate.title || candidate.title.length > 160 ||
-          !candidate.brief || candidate.brief.length > 2000 ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(candidate.day)
-        )
-          throw new Error('invalid item');
-        return candidate;
-      });
-      return items;
-    } catch {
-      /* not this block */
-    }
-  }
-  return null;
-}
-
-function parseAdoption(text: string | null | undefined): string[] | null {
-  if (!text) return null;
-  for (const match of [...text.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g)].reverse()) {
-    try {
-      const value = JSON.parse(match[1]) as { action?: unknown; itemIds?: unknown };
-      if (value.action === 'adopt' && Array.isArray(value.itemIds) && value.itemIds.length > 0 && value.itemIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id))) return [...new Set(value.itemIds as string[])];
-    } catch { /* not an adoption block */ }
-  }
-  return null;
-}
 function TopicWorkspaceContent() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
@@ -146,17 +92,14 @@ function TopicWorkspaceContent() {
     { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), refetchInterval: 30000 });
   const sessionId = read.data && !read.data.conversationDeleted && workspace.data?.bound ? workspace.data.sessionId : '';
   const viewPolling = useRuntimeViewPolling();
-  const view = trpc.runtime.view.useQuery({ sessionId }, { enabled: Boolean(sessionId), ...viewPolling.options });
+  const oldView = trpc.runtime.view.useQuery({ sessionId }, { enabled: Boolean(sessionId), ...viewPolling.options });
+  const turnPath = useTopicTurnPath(sessionId, oldView.data?.executions as unknown[] | undefined, oldView.isSuccess || oldView.isError);
+  const view = (turnPath.on ? { data: turnPath.data, refetch: turnPath.refetch } : oldView) as unknown as typeof oldView;
   const bind = trpc.opc.consentTopicWorkspace.useMutation();
-  const turn = trpc.opc.topicTurn.useMutation();
-  const execute = trpc.runtime.execute.useMutation();
+  const turn = trpc.opc.topicTurn.useMutation(), execute = trpc.runtime.execute.useMutation();
   const payg = usePaygResume(() => view.refetch());
-  const cancel = trpc.runtime.cancel.useMutation();
-  const savePlan = trpc.opc.savePlan.useMutation();
-  const handoff = trpc.opc.handoff.useMutation();
-  const saveDraft = trpc.opc.saveTopicDraft.useMutation();
-  const adoptTopics = trpc.opc.adoptTopics.useMutation();
-  const queryUtils = trpc.useUtils();
+  const cancel = trpc.runtime.cancel.useMutation(), savePlan = trpc.opc.savePlan.useMutation(), handoff = trpc.opc.handoff.useMutation();
+  const saveDraft = trpc.opc.saveTopicDraft.useMutation(), adoptTopics = trpc.opc.adoptTopics.useMutation(), queryUtils = trpc.useUtils();
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending || payg.busy;
@@ -233,18 +176,10 @@ function TopicWorkspaceContent() {
    * account. The list carries the authoritative current revision.
    */
   const accountList = trpc.opc.list.useQuery();
-  const accounts = (accountList.data?.accounts ?? []) as Array<{
-    platform: string; account: string; revision: number;
-  }>;
+  const accounts = (accountList.data?.accounts ?? []) as Array<{ platform: string; account: string; revision: number }>;
 
-  const executions = view.data?.executions as
-    | Array<{
-        executionId: string;
-        state: string;
-        input: string | null; body: string | null; primaryBody: string | null;
-        contentAvailable: boolean; unavailableReason?: string | null;
-      } & PaygViewFields & StopSignals>
-    | undefined;
+  const executions = view.data?.executions as Array<{ executionId: string; state: string; input: string | null; body: string | null;
+    primaryBody: string | null; contentAvailable: boolean; unavailableReason?: string | null } & PaygViewFields & StopSignals> | undefined;
 
   const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
   useEffect(()=>{
@@ -302,6 +237,12 @@ function TopicWorkspaceContent() {
         try {
           if (op.kind === 'chat') {
             setOutgoing({ text: op.request.input });
+            if (turnPath.on) { const id = op.request.requestId; reached = true; setOutgoing(old => old && { ...old, executionId: id });
+              const told = await turnPath.send(op.request, op.candidateAtSend); if (told.notice) setError(told.notice);
+              if (told.unknown) { setOutgoing(null); throw new Error('TURN_STREAM_LOST'); } // Kept: a repeat sends the same request.
+              if (told.keepInput) { setOutgoing(null); back(); refuseTopic(localStorage, storageKey, op); setPending(null); return; }
+              stored(id, op.request.input);
+            } else {
             const admitted = await turn.mutateAsync(op.request);
             // Q1: the previous organizer answered instead; nothing was stored and the input stays in the box.
             if (!payg.admitted(admitted)) { setOutgoing(null); back(); localStorage.removeItem(storageKey); setPending(null); return; }
@@ -310,6 +251,7 @@ function TopicWorkspaceContent() {
             const outcome = topicTurnOutcome(await execute.mutateAsync({ executionId: admitted.executionId }));
             if (outcome.notice) { setError(outcome.notice); setExplained({ id: admitted.executionId, text: outcome.notice }); }
             if (outcome.keepInput) back(); else stored(op.request.requestId, op.request.input);
+            }
           } else if (op.kind === 'save') {
             const result = await savePlan.mutateAsync(op.request);
             editCandidate(null);
@@ -351,7 +293,7 @@ function TopicWorkspaceContent() {
   }
 
   async function send() {
-    if (!sessionId || !input.trim() || pending) return;
+    if (!sessionId || !input.trim() || pending || !turnPath.decided) return;
     const visible = candidate ?? (topicDraft.data?.body?.length
       ? { body: topicDraft.data.body as PlanItem[], requestId: topicDraft.data.draftVersionId ?? '' } : null);
     await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() }, candidateAtSend:visible?structuredClone(visible):null }, true);
@@ -359,7 +301,8 @@ function TopicWorkspaceContent() {
 
   const opening = workspace.data?.opening as (ChatRequest & { executionId?: string | null }) | null | undefined;
   const refusedOpening = useTopicOpening({ opening, storageKey, executions: view.data?.executions,
-    ready: Boolean(sessionId && view.data && !busy && !pending && workspace.data?.sourceAllowed), send: request => void perform({ kind: 'chat', request }) });
+    ready: Boolean(sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
+    send: request => void perform({ kind: 'chat', request }) });
 
   async function stop(executionId: string) {
     setError(''); // 已停止 from the click on, and after a reload; a failed stop keeps it until a re-read proves otherwise
@@ -450,7 +393,7 @@ function TopicWorkspaceContent() {
       try { if (JSON.stringify((JSON.parse(stored) as CandidateSnapshot).body)!==JSON.stringify(frozen.body)) return; }
       catch { return; }
     }
-    const consented = consentedTopicIds(action.input, frozen.body.map(item => item.id));
+    const consented = consentedForCandidate(action.input, frozen.body);
     if (!consented || consented.length !== ids.length || consented.some(id => !ids.includes(id))) return;
     const request = adoptionRequest(frozen, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
     if (!request) return;
@@ -476,15 +419,19 @@ function TopicWorkspaceContent() {
   const lastOpen = Boolean(executions?.length && !['completed', 'cancelled'].includes(executions.at(-1)!.state));
   const pendingOutgoing = outgoing && !executions?.some(e => e.executionId === outgoing.executionId) ? outgoing : null;
   // Everything about the latest turn sits directly under it, in the conversation.
+  const lastReply = executions?.filter(e => e.state === 'completed').at(-1);
+  const stuckAdoption = lastReplyAdoptionNotice(sessionId, lastReply, candidate?.body ?? null, adoptedItemIds);
   const tailNotices: ChatNotice[] = [
     ...(pending ? [{ id: 'pending', tone: 'warning' as const, label: '待确认的操作', actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void perform(pending) }],
       text: '上一项操作的结果尚未确认（完整原请求已冻结）。重试会核对原消息、保存或采纳，不新建身份。' }] : []),
     ...(busy && !lastOpen ? [{ id: 'busy', tone: 'status' as const, busy: true, text: '正在处理，请稍候…' }] : []),
     ...(notice ? [{ id: 'notice', tone: 'success' as const, text: notice }] : []),
     ...(error && !topicTurnShows(executions?.at(-1), error) ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
+    ...(stuckAdoption && !busy && !pending ? [{ id: 'adoption', tone: 'warning' as const, text: stuckAdoption }] : []),
     ...payg.blockedNotices(executions, busy), ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
-  const openTurnNotice = (e: NonNullable<typeof executions>[number]) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
+  const openTurnNotice = (e: NonNullable<typeof executions>[number]) => turnPath.on ? turnRunningNotice(e)
+    : topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
     userStopped: userStopIds(tabSession(), sessionId, [e]).length > 0, stopping: cancel.isPending, explained: topicExplained(explained, e.executionId, error),
     onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
   const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];
@@ -591,7 +538,7 @@ function TopicWorkspaceContent() {
           <footer className={composerStyles.zone}>
             <div className={composerStyles.wrap}>
               <WorkComposer references={false} maxLength={8000} value={input} onChange={updateInput}
-                sendDisabled={busy||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
+                sendDisabled={busy||!turnPath.decided||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
                 onSend={skill=>{if(skill)void free.send(input,skill);else void send();}}/>
               <p className={composerStyles.note}>
                 候选会自动保存；只有你明确采用的具体选题才会进入资料库。

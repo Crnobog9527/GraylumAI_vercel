@@ -24,8 +24,8 @@ const dirtyOrder={...orderSafe,body:CANARY,
  termination:{...orderSafe.stripeRefund.termination,body:CANARY}},upgradeAttempt:{...orderSafe.upgradeAttempt,
  body:CANARY,quote:{...orderSafe.upgradeAttempt.quote,body:CANARY},stripeMetadata:{...orderSafe.upgradeAttempt.stripeMetadata,body:CANARY}}};
 export async function subscription(db,f,metadata={},id=randomUUID()){
- const plan=(await db.query(`INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
- VALUES('Erasure synthetic',$1,false,false,0) RETURNING id`,['test_'+randomUUID()])).rows[0].id;
+ const plan=(await db.query(`INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,positioning_profile_limit)
+ VALUES('Erasure synthetic',$1,false,false,0,1) RETURNING id`,['test_'+randomUUID()])).rows[0].id;
  await db.query(`INSERT INTO user_subscriptions(id,user_id,membership_plan_id,stripe_subscription_id,billing_cycle,status,
  cancel_at_period_end,current_period_start,current_period_end,metadata)
  VALUES($1,$2,$3,$4,'monthly','active','true',now(),now()+interval '1 month',$5)`,[id,f.user,plan,'sub_'+id,metadata]);

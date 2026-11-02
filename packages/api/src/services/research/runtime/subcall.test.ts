@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { BillingClaimRejection } from '../../bill2/claimFailure';
-import type { ToolCallPolicy } from '../../bill2/toolBilling';
+import { BillingClaimRejection } from '../../turn/provider/claimFailure';
+import type { ToolCallPolicy } from '../../turn/provider/toolBilling';
 import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
 import type { ResearchCallResult } from '../vendors/types';
 import { requestIdentity, ResearchPause, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest, type VendorCalls } from './subcall';

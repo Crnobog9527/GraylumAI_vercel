@@ -32,17 +32,19 @@ export function socialRequest(ctx: ResearchToolContext, platform: SocialPlatform
 }
 
 export interface ToolAllowance { left: number; used: number }
+/** What one subcall asked for, as the `research_call` event shows it. */
+export const callDisplay = (request: SupplierRequest) => request.vendor === 'tikhub'
+  ? { query: request.call.keyword ?? request.call.account ?? request.call.postId ?? '',
+    platform: request.call.platform, dataKind: request.call.kind }
+  : request.vendor === 'parallel' ? { query: request.query, platform: 'web' as const, dataKind: 'web_search' as const }
+    : { query: request.url, platform: 'web' as const, dataKind: 'web_fetch' as const };
 /** Reserve this round's allowance before any await; tools and subcalls execute serially. */
 export async function executeResearchCall(ctx: ResearchToolContext, budget: ToolAllowance, request: SupplierRequest,
   operationId: string, toolName: string, args: Record<string, unknown>, discoveryId?: string): Promise<SubcallOutcome> {
   if (budget.left <= 0) return { sent: false, budget: true, stop: 'VENDOR_RATE_LIMITED' };
   budget.left -= 1;
   budget.used += 1;
-  const display = request.vendor === 'tikhub'
-    ? { query: request.call.keyword ?? request.call.account ?? request.call.postId ?? '',
-      platform: request.call.platform, dataKind: request.call.kind }
-    : request.vendor === 'parallel' ? { query: request.query, platform: 'web' as const, dataKind: 'web_search' as const }
-      : { query: request.url, platform: 'web' as const, dataKind: 'web_fetch' as const };
+  const display = callDisplay(request);
   ctx.emit({ type: 'research_call', callId: operationId, toolName, args, ...display, state: 'running' });
   // Each subcall saves what it actually asked for, so charges and evidence rows describe it exactly.
   const outcome = await runSubcall({ ...ctx.subcall, newId: () => operationId,

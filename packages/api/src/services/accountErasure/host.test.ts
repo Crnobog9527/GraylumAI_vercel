@@ -25,6 +25,7 @@ function fixture() {
     };
     if (name === 'account_erasure_scrub_content') data = { artifact_generations: 0 };
     if (name === 'account_erasure_scrub_runtime') data = { runtime_sessions: 0 };
+    if (name === 'account_erasure_scrub_turns') data = { turn_call_raw: 0, session_messages: 0 };
     if (name === 'account_erasure_storage_ready') data = { ready: true };
     if (name === 'account_erasure_local_cleanup') data = { remaining: 0, manualReview: 0, errors: [] };
     if (name === 'account_erasure_auth_begin') {

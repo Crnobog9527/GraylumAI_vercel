@@ -4,10 +4,10 @@ import {randomUUID,createHash} from 'node:crypto';
 import pg from 'pg';
 import {createClient} from '@supabase/supabase-js';
 import {runtimeExecutor} from './execute';
-import {freezeHostPromptCache} from './promptCache';
-import {freezeHistorySelection} from './hostTurn';
-import {openRouterAdapter} from '../bill2/openRouterAdapter';
-import {openRouterBound} from '../bill2/openRouterPolicy';
+import {freezeHostPromptCache} from '../turn/provider/promptCache';
+import {freezeHistorySelection} from '../turn/agent/hostTurn';
+import {openRouterAdapter} from '../turn/provider/openRouterAdapter';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable'))

@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.research_benchmark_shortfall_latest(a uuid, s 
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   SELECT b.* FROM research_benchmark_shortfalls b
-  JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
-  WHERE b.actor_id=a AND b.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+  LEFT JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
+  WHERE b.actor_id=a AND b.session_id=s AND (b.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
   ORDER BY b.created_at DESC,b.id DESC LIMIT 1
 $function$;

@@ -84,7 +84,7 @@ for (const [name, load] of loaders) {
     if (name === 'API') {
       it('rechecks runtime limits without reserving another slot for a waiting credit claim', async () => {
         const { checkRuntimeRateLimit } = await load();
-        const { DEFAULT_RUNTIME_RATE_LIMITS } = await import('../runtime/rateLimitSettings');
+        const { DEFAULT_RUNTIME_RATE_LIMITS } = await import('../turn/settings/rateLimitSettings');
         mocks.getRemaining.mockResolvedValue({ remaining: 0, reset: Date.now() + 60000 });
         expect(await checkRuntimeRateLimit('user', 'calls', DEFAULT_RUNTIME_RATE_LIMITS, 'staging', 1, 'bill2.v2', false))
           .toEqual({ success: true });

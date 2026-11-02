@@ -13,7 +13,8 @@ BEGIN
   PERFORM bill2_actor(p_actor_id);
   IF p_state NOT IN ('stopped','interrupted') THEN RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
   SELECT * INTO rv FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id FOR UPDATE;
-  IF rv.id IS NULL THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
+  -- A jury on the turn path has no stop or end button (Owner 10-28); its turn ends it (turn_fusion_close, 24-hour recovery).
+  IF rv.id IS NULL OR rv.config->>'path' = 'turn' THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
   IF rv.state NOT IN ('running','paused') THEN
     -- 0294 fee settle
     IF rv.state=p_state THEN PERFORM fusion_review_fee_settle_internal(rv.id); RETURN fusion_review_view(rv); END IF;

@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type {TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
-import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/bill2/openRouterEvidence';
-import {openRouterStream} from '../../packages/api/src/services/bill2/openRouterStream';
-import {AGENT_STREAM_TOOLS} from '../../packages/api/src/services/runtime/agentTools';
+import type {TransportObservation} from '../../packages/api/src/services/turn/provider/fixtureAdapter';
+import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/turn/provider/openRouterEvidence';
+import {openRouterStream} from '../../packages/api/src/services/turn/provider/openRouterStream';
+import {AGENT_STREAM_TOOLS} from '../../packages/api/src/services/turn/agent/agentTools';
 
 /** Use the production bounded SSE parser; never JSON.parse the complete SSE wire.
  * Provider names must agree across all validated frames. The financial adapter

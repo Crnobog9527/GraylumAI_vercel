@@ -8,7 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { readResearchToolsConfig } from '../research/vendors/config';
 import { canonicalAccount } from '../research/tools/accountLinks';
 import { SOCIAL_PLATFORMS } from '../research/vendors/types';
-import { RESEARCH_REFRESH_NOTE, type HostTurnContext } from '../runtime/hostTurn';
+import { RESEARCH_REFRESH_NOTE, type HostTurnContext } from '../turn/agent/hostTurn';
 
 const grant = z.object({ platform: z.enum(SOCIAL_PLATFORMS), account: z.string().min(1).max(200), used: z.boolean() }).nullable();
 

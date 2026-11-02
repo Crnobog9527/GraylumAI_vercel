@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { stagingRpcFailure } from '../runtime/stagingErrors';
+import { stagingRpcFailure } from '../turn/settings/stagingErrors';
 
 /** UI-FINISH (Owner 2026-10-13): ordinary conversations can be renamed; an empty name restores the default. */
 export const conversationRename = z.object({

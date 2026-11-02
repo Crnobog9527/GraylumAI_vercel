@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import { rowFor, type ConfigurationRows } from './runtime/settingsRows';
+import { rowFor, type ConfigurationRows } from './turn/settings/settingsRows';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {

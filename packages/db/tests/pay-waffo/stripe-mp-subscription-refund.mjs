@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { refundedRepurchaseCases } from './refunded-repurchase.mjs';
@@ -33,7 +34,7 @@ export async function stripeMpSubscriptionRefundCases({admin,service,connect}) {
     }
     const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,'gold_first30',
       'fixture','test',$4,'terms-v1',$5) o`,[user,plan,method,version,JSON.stringify([{kind:'email',key_version:'test-v1',digest}])])).rows[0];
-    const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+    const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=addUtcMonths(start,1);
     await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,new Date(start.getTime()-60000)]);
     await checkout(user,o,method);
     const paidAt=new Date(start.getTime()+6000);

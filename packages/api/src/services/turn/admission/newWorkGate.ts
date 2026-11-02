@@ -1,0 +1,98 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import type {ConfigurationRows} from '../settings/settingsRows';
+import { StagingAccessError } from '../settings/stagingErrors';
+import { logger } from '../../../lib/logger';
+import { RateLimitError } from '../../../lib/rateLimitError';
+import { checkRuntimeRateLimit } from '../../redisRateLimiter';
+import { DEFAULT_RUNTIME_RATE_LIMITS, RUNTIME_RATE_LIMIT_KEY, readRuntimeRateLimits, storedRateLimits, type RuntimeRateLimits }
+  from '../settings/rateLimitSettings';
+import { identityGuardFromStored, MODEL_IDENTITY_GUARD_KEY } from '../../modelIdentity/guardSetting';
+import { RESEARCH_TOOLS_KEY, storedResearchToolsSchema } from '../../research/vendors/config';
+
+export type GateRejection = 'call_limited' | 'paused' | 'limit_unavailable' | 'usage_configuration_required';
+export type NewWorkGateResult = { ok: true } | {
+  ok: false; reason: GateRejection; retryAfter: number; window?: 'minute' | 'day';
+};
+export type RuntimeCallGate = (actorId: string, maxCalls: number, contractVersion?: 'bill2.v1' | 'bill2.v2',
+  reserve?: boolean, checkPause?: boolean) => Promise<NewWorkGateResult>;
+/** identityGuard: MODEL-IDENTITY-GUARD switch, read in the same query (absent = on).
+ * primaryModelId: the administrator's free-chat model (UI-MODEL), absent when unset or malformed. */
+/** researchEnabled: the research tools master switch (RT-6), true only for a valid stored config that is on. */
+export type SettingsRead = { ok: true; config: RuntimeRateLimits; identityGuard?: boolean; primaryModelId?: string; researchEnabled?: boolean }
+  | { ok: false };
+const researchEnabled = (value: unknown) => {
+  try { return storedResearchToolsSchema.safeParse(typeof value === 'string' ? JSON.parse(value) : value).data?.enabled === true; }
+  catch { return false; }
+};
+const PRIMARY_MODEL_KEY = 'primary_model_id';
+const primaryModel = (value: unknown) => z.string().uuid().safeParse(value).success ? { primaryModelId: value as string } : {};
+const unavailable = (): NewWorkGateResult => ({ ok: false, reason: 'limit_unavailable', retryAfter: 60 });
+export const denyNewCalls: RuntimeCallGate = async () => unavailable();
+
+/** Catch immediately so a replay can ignore this speculative read, including its failure. */
+export async function readNewWorkSettings(admin: SupabaseClient): Promise<SettingsRead> {
+  try { return { ok: true, config: (await readRuntimeRateLimits(admin)).config }; }
+  catch { return { ok: false }; }
+}
+
+/** Admission's read: the same rate limits plus the MODEL-IDENTITY-GUARD switch, primary model and research switch, in one round trip. */
+export async function readAdmissionSettings(admin: SupabaseClient,
+  configuration?: Promise<ConfigurationRows>): Promise<SettingsRead> {
+  try {
+    const rows = await (configuration ?? admin.from('system_settings').select('key,value').in('key', [
+      RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY, PRIMARY_MODEL_KEY,
+      RESEARCH_TOOLS_KEY]));
+    if (rows.error || !Array.isArray(rows.data)) return { ok: false };
+    const value = (key: string) => (rows.data as Array<{ key: string; value: unknown }>).find(row => row.key === key)?.value;
+    const limits = value(RUNTIME_RATE_LIMIT_KEY);
+    return { ok: true, config: limits === undefined ? { ...DEFAULT_RUNTIME_RATE_LIMITS } : storedRateLimits(limits),
+      identityGuard: identityGuardFromStored(value(MODEL_IDENTITY_GUARD_KEY)), ...primaryModel(value(PRIMARY_MODEL_KEY)),
+      researchEnabled: researchEnabled(value(RESEARCH_TOOLS_KEY)) };
+  } catch { return { ok: false }; }
+}
+
+function pauseResult(settings: SettingsRead, bucket: 'admission' | 'calls' | 'legacy'): NewWorkGateResult {
+  if (!settings.ok) return unavailable();
+  if (settings.config.stopNewCalls) {
+    logger.info('security', 'runtime_new_calls_paused', { bucket });
+    return { ok: false, reason: 'paused', retryAfter: 60 };
+  }
+  return { ok: true };
+}
+
+/** Identity must come from the authenticated host, never from the request payload. */
+export function newWorkGate(admin: SupabaseClient, environment: 'local' | 'staging' | 'production') {
+  async function check(actorId: string, bucket: 'admission' | 'calls', rate: number,
+    read?: Promise<SettingsRead>, contractVersion: 'bill2.v1' | 'bill2.v2' = 'bill2.v1', reserve = true, checkPause = true) {
+    const settings = await (read ?? readNewWorkSettings(admin));
+    if (!settings.ok) return unavailable();
+    if (checkPause) {
+      const pause = pauseResult(settings, bucket);
+      if (!pause.ok) return pause;
+    }
+    const result = await checkRuntimeRateLimit(actorId, bucket, settings.config, environment, rate, contractVersion, reserve);
+    if (result.success) return { ok: true } as const;
+    return { ok: false, reason: result.reason === 'unavailable' ? 'limit_unavailable'
+      : result.reason === 'usage_configuration_required' ? result.reason : 'call_limited',
+      retryAfter: result.retryAfter, window: result.window } as const;
+  }
+  return {
+    message: (actorId: string, read?: Promise<SettingsRead>) => check(actorId, 'admission', 1, read),
+    calls: ((actorId, maxCalls, contractVersion = 'bill2.v1', reserve = true, checkPause = true) =>
+      check(actorId, 'calls', maxCalls, undefined, contractVersion, reserve, checkPause)) satisfies RuntimeCallGate,
+  };
+}
+
+export function requireNewWork(result: NewWorkGateResult): void {
+  if (result.ok) return;
+  if (result.reason === 'usage_configuration_required') throw new StagingAccessError('RUNTIME_USAGE_CONFIGURATION_REQUIRED');
+  throw new RateLimitError(result.reason === 'call_limited' ? 'rate_limited' : 'unavailable',
+    result.retryAfter, result.reason === 'call_limited' ? result.window ?? 'minute' : result.reason);
+}
+
+/** Existing legacy limiters remain unchanged; only the shared pause is added. */
+export async function requireLegacyCallsEnabled(admin: SupabaseClient): Promise<void> {
+  requireNewWork(pauseResult(await readNewWorkSettings(admin), 'legacy'));
+}

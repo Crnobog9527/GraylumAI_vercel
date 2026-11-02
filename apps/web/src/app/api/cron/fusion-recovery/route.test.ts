@@ -2,15 +2,17 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), turns: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth, createCronServiceClient: mocks.create }));
 vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancials: mocks.recover }));
+vi.mock('@repo/api/src/services/turn/fusionRecovery', () => ({ recoverFusionTurns: mocks.turns }));
 import { GET } from './route';
 
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.create.mockReturnValue({ synthetic: true });
   mocks.recover.mockResolvedValue({ success: true, scanned: 1, cancelled: 0, recovered: 1, scrubbed: 0, failed: 0, rejudged: 0, deferred: 0 });
+  mocks.turns.mockResolvedValue({ success: true, expired: 0, orphaned: 0, synced: 0, failed: 0 });
 });
 const request = () => new Request('https://synthetic.test/api/cron/fusion-recovery');
 
@@ -24,6 +26,12 @@ it('runs the Fusion recovery with a grace period for calls that may still be str
   const response = await GET(request());
   expect(response.status).toBe(200);
   expect(mocks.recover).toHaveBeenCalledWith({ synthetic: true }, { dispatchedGraceMs: 600_000 });
+  // CORE-PATH-V2 V2-7b: the turn-path step runs in the same cron.
+  expect(mocks.turns).toHaveBeenCalledWith({ synthetic: true });
+});
+it('fails the run when the turn-path step fails', async () => {
+  mocks.turns.mockResolvedValueOnce({ success: false, expired: 0, orphaned: 0, synced: 0, failed: 1 });
+  expect((await GET(request())).status).toBe(500);
 });
 it('fails the run when a call stays pending, and keeps errors private', async () => {
   mocks.recover.mockResolvedValueOnce({ success: false, failed: 1 });

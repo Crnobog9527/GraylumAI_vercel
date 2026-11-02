@@ -28,14 +28,13 @@ BEGIN
    'use','Real public data of benchmark accounts fetched during positioning research; numbers come only from this table.')
   FROM opc_businesses b CROSS JOIN LATERAL (
    SELECT d.session_id,count(*)::int accounts,(count(*) FILTER (WHERE rb.qualified))::int qualified,max(rb.fetched_at) fetched_at,
-    jsonb_agg(DISTINCT jsonb_build_object('executionId',rb.execution_id)) produced_by
+    jsonb_agg(DISTINCT jsonb_strip_nulls(jsonb_build_object('executionId',rb.execution_id,'turnId',rb.turn_id))) produced_by
    FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id AND d.actor_id=p_actor_id
     AND d.project_id=(SELECT cv.project_id FROM artifact_versions cv WHERE cv.id=b.current_source_version_id)
    JOIN runtime_sessions rs ON rs.id=d.session_id AND rs.actor_id=p_actor_id AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL
    JOIN research_benchmarks rb ON rb.session_id=d.session_id AND rb.actor_id=p_actor_id
-   JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=d.session_id
-    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
-   WHERE db.business_id=b.id GROUP BY d.session_id ORDER BY max(rb.fetched_at) DESC,d.session_id LIMIT 1) s
+   LEFT JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=d.session_id
+   WHERE db.business_id=b.id AND (rb.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)) GROUP BY d.session_id ORDER BY max(rb.fetched_at) DESC,d.session_id LIMIT 1) s
   WHERE b.actor_id=p_actor_id AND b.erased_at IS NULL AND b.current_source_version_id IS NOT NULL
    AND opc_source_allowed(p_actor_id,b.current_source_version_id)
   UNION ALL
@@ -104,10 +103,11 @@ BEGIN
     'lastPublishedAt',b.last_published_at,'postsAnalyzed',b.posts_analyzed,'category',b.category,'qualified',b.qualified,
     'excluded',b.excluded,'missing',to_jsonb(b.missing),'fetchedAt',b.fetched_at)
     ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account),'[]'::jsonb)::text,
-   coalesce(jsonb_agg(DISTINCT jsonb_build_object('executionId',b.execution_id)),'[]'::jsonb) INTO body,produced
+   coalesce(jsonb_agg(DISTINCT jsonb_strip_nulls(jsonb_build_object('executionId',b.execution_id,'turnId',b.turn_id))),'[]'::jsonb) INTO body,produced
   FROM (SELECT rb.* FROM research_benchmarks rb
-    JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=rb.session_id
-    WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    LEFT JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=rb.session_id
+    WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid
+      AND (rb.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
     ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account LIMIT 30) b;
   cap:=8000;
   RETURN jsonb_build_object('kind','workspace_source','identity',entry-'producedBy'-'accounts'-'qualified'-'fetchedAt','body',left(body,cap),'truncated',length(body)>cap,

@@ -2,9 +2,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const billing = vi.hoisted(() => ({ recoverReceipts: vi.fn(), readRun: vi.fn(), requestCancel: vi.fn(), closeRun: vi.fn(), finalizeRun: vi.fn() }));
-vi.mock('../bill2/service', async importOriginal => ({ ...await importOriginal<object>(), authoritativeBilling: () => billing }));
+vi.mock('../turn/provider/service', async importOriginal => ({ ...await importOriginal<object>(), authoritativeBilling: () => billing }));
 const parsed = vi.hoisted(() => vi.fn((value: unknown) => value));
-vi.mock('../runtime/stagingPolicy', () => ({ parseStagingPolicy: parsed, loadStagingPolicy: () => { throw new Error('live admission'); } }));
+vi.mock('../turn/settings/stagingPolicy', () => ({ parseStagingPolicy: parsed, loadStagingPolicy: () => { throw new Error('live admission'); } }));
 vi.mock('../runtime/stagingTransport', () => ({ stagingTransport: () => ({}) }));
 import { recoverVoiceGenerations } from './recovery';
 

@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { TransportObservation } from '../bill2/fixtureAdapter';
-import type { RuntimeBudget } from '../runtime/budget';
+import type { TransportObservation } from '../turn/provider/fixtureAdapter';
+import type { RuntimeBudget } from '../turn/settings/budget';
 import { fusionExecutor, fusionResponseText } from './executor';
 import type { AdmittedFusionRun } from './admission';
 

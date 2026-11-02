@@ -28,7 +28,7 @@ vi.mock('./settings', () => ({ readFusionSettings: async () => ({ version: 1, co
   reviewerModelIds: ids.reviewers, summaryModelId: ids.summary, skillId: '00000000-0000-4000-8000-0000000000c1', maxRounds: 2, reviewerRoles: {},
   opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: '5', fixedPriceCredits: 1500, dispatchMinutes: 10,
   breaker: { platformUsd: '2', noDeliveryCalls: 10 } } }) }));
-vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ creditsPerUsd: '100', callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
+vi.mock('../turn/settings/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ creditsPerUsd: '100', callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
   multiplier: '3', outputLimit: 8192, providerLimits: { providerSlug: 'x', contextTokens: 400000, promptUsdPerMillion: '0.1', completionUsdPerMillion: '0.1', requestUsd: '0' } })) }) }));
 vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import('./reviewPrompts')>()),
   resolveReviewSkill: async () => ({ skillId: '00000000-0000-4000-8000-0000000000c1', revisionId: '00000000-0000-4000-8000-0000000000c2', packageHash: 'a'.repeat(64) }),

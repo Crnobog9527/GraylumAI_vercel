@@ -16,8 +16,8 @@ BEGIN
     'excluded',b.excluded,'missing',to_jsonb(b.missing),'fetchedAt',b.fetched_at)
     ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account),'[]'::jsonb) INTO output
   FROM (SELECT b.* FROM research_benchmarks b
-    JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
-    WHERE b.actor_id=a AND b.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    LEFT JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE b.actor_id=a AND b.session_id=s AND (b.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
     ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account LIMIT 30) b;
   RETURN jsonb_build_object('rows',output,'hash',encode(sha256(convert_to(output::text,'utf8')),'hex'));
 END $function$;

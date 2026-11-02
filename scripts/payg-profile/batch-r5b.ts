@@ -2,8 +2,8 @@
 import {createHash} from 'node:crypto';
 import {createSamplePlan,priceSchema,requestFor} from './sampling';
 import measured from './r4-evidence.json';
-import {decimal} from '../../packages/api/src/services/bill2/decimal';
-import {openRouterCallBound} from '../../packages/api/src/services/bill2/openRouterPolicy';
+import {decimal} from '../../packages/api/src/services/turn/provider/decimal';
+import {openRouterCallBound} from '../../packages/api/src/services/turn/provider/openRouterPolicy';
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 const money=(n:bigint)=>`${n/1000000000000n}.${String(n%1000000000000n).padStart(12,'0')}`;
 export const R5B_ID='payg-profile-20261006-r5b';

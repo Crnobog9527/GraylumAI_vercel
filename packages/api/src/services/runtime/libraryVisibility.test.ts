@@ -3,7 +3,7 @@ import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {executionVisibility} from './libraryVisibility';
 import {streamOriginalExecution,type ExecutionStreamEvent} from './executionStream';
-import type {RuntimeProgress} from './progress';
+import type {RuntimeProgress} from '../turn/agent/progress';
 import {observeContext} from './executorRpc';
 
 const actor='10000000-0000-4000-8000-000000000001',execution='10000000-0000-4000-8000-000000000002';

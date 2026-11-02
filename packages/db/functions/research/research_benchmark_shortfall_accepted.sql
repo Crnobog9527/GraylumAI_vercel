@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION public.research_benchmark_shortfall_accepted(a uuid, 
 AS $function$
   SELECT research_benchmark_qualified(a,s)>=1 AND research_benchmark_rounds(a,s)>=2
     AND EXISTS(SELECT 1 FROM research_benchmark_shortfalls b
-      JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
+      LEFT JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
       WHERE b.actor_id=a AND b.session_id=s AND b.choice='generate' AND b.required>=req
-        AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)
+        AND (b.turn_id IS NOT NULL OR (x.id IS NOT NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)))
 $function$;

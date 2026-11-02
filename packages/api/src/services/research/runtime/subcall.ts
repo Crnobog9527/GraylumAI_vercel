@@ -6,8 +6,8 @@
 // without its BILL2 link, and an unsent one is cancelled so a stable discovery cursor can move to a successor.
 // Nothing is sent unless every earlier step passed. A sent request is never resent or switched to another supplier.
 import { createHash } from 'node:crypto';
-import { BillingClaimRejection } from '../../bill2/claimFailure';
-import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy } from '../../bill2/toolBilling';
+import { BillingClaimRejection } from '../../turn/provider/claimFailure';
+import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy } from '../../turn/provider/toolBilling';
 import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
 import { callFirecrawl } from '../vendors/firecrawl';
 import { callParallel, type ParallelMode } from '../vendors/parallel';
@@ -63,6 +63,8 @@ export interface SubcallContext {
   onSupplierDispatch?: () => void;
   /** The supplier request's timeout, read just before it is sent (ARCH-FIX C1: the round's time left); absent, 60s. */
   timeoutMs?: () => number;
+  /** CORE-PATH-V2: what came back and its priced receipt, once per subcall that got this far (the turn's own ledger). */
+  onResult?: (result: ResearchCallResult, evidence: ReturnType<typeof toolResultEvidence>) => void;
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
@@ -187,6 +189,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   }
 
   const evidence = toolResultEvidence(claim.callId, policy, result, sha256(JSON.stringify(result)));
+  context.onResult?.(result, evidence);
   let storageError: unknown;
   if (researchDispatched !== 'no') {
     try { await context.evidence.finish(operationId, opened.token, OPERATION_STATE[result.outcome], {

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { admitFusionModel, fusionRequestFormat, FUSION_COMPARE_REQUEST_FORMAT, FUSION_REQUEST_FORMAT, type FusionModelRow } from './models';
 import { resetPlatformSecretCacheForTests } from '../platformSecrets/reader';
-import type { StagingPolicy } from '../runtime/stagingPolicy';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
 
 const key = 'SYNTHETIC_LOCAL_ONLY';
 const row: FusionModelRow = { id: '00000000-0000-4000-8000-000000000001', name: 'Synthetic', model_id: 'anthropic/claude-sonnet-5.5',

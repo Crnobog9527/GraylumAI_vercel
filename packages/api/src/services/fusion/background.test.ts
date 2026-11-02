@@ -5,6 +5,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const alerts = vi.hoisted(() => [] as Array<[string, string, unknown]>);
 vi.mock('../../lib/logger', () => ({ logger: { error: (c: string, m: string, x: unknown) => alerts.push([c, m, x]),
   warn: (c: string, m: string, x: unknown) => alerts.push([c, m, x]) } }));
+const turn = vi.hoisted(() => ({ view: null as unknown, advance: (async () => ({ next: false, reason: 'idle' })) as (id: string) => Promise<unknown>,
+  advances: [] as string[] }));
+vi.mock('./reviewRecord', async importOriginal => ({ ...await importOriginal<typeof import('./reviewRecord')>(),
+  reviewRecord: () => ({ read: async () => turn.view }) }));
+vi.mock('../turn/jury', () => ({ juryTurn: () => ({ advance: (id: string) => { turn.advances.push(id); return turn.advance(id); } }) }));
+vi.mock('../turn/db', () => ({ turnClients: () => ({}) }));
 import { advanceAuthorized, advanceReview, kickAdvance, kickStalledReviews, MAX_ADVANCES, withAdvanceLease } from './background';
 
 const reviewId = '00000000-0000-4000-8000-000000000001';
@@ -35,16 +41,13 @@ function leaseDb(options: { count?: number; state?: string } = {}) {
   } };
   return { db: db as unknown as SupabaseClient, lease, calls, cleared };
 }
-type Call = { callId: string; dispatched: boolean };
-function fakeFlow(step: { state?: string; waiting?: 'credits' | 'calls'; calls?: Call[] }, dispatched: string[], gate?: Promise<void>) {
-  return () => ({
-    continue: async () => ({ review: { state: step.state ?? 'running' }, calls: step.calls ?? [], waiting: step.waiting }),
-    dispatch: async (_review: string, callId: string) => { await gate; dispatched.push(callId); return { state: 'judged', verdict: 'usable' }; },
-  }) as never;
-}
+/** The review the record read returns: on the turn path it carries its turn. */
+const onTurn = { turnId: 7, state: 'running' };
+const jury = { slots: {} as never, calls: (async () => ({ allowed: true })) as never };
+const advance = (admin: SupabaseClient) => advanceReview({ admin, reviewId, jury });
 
 describe('review background', () => {
-  beforeEach(() => { alerts.length = 0; });
+  beforeEach(() => { alerts.length = 0; turn.view = onTurn; turn.advances.length = 0; turn.advance = async () => ({ next: false, reason: 'idle' }); });
 
   it('runs work only under the lease and always releases it, also after a failure', async () => {
     const { db, lease } = leaseDb();
@@ -59,100 +62,62 @@ describe('review background', () => {
     expect(lease.token).toBe('someone-else'); // another holder's lease is never released
   });
 
-  it('two advancers at once: only one runs the step, each call is dispatched once', async () => {
+  it('two advancers at once: only one runs the step, the group is advanced once', async () => {
     const { db } = leaseDb();
-    const dispatched: string[] = [];
     let open!: () => void;
     const gate = new Promise<void>(resolve => { open = resolve; });
-    const flow = fakeFlow({ calls: [{ callId: 'a', dispatched: false }, { callId: 'b', dispatched: false }] }, dispatched, gate);
-    const first = advanceReview({ admin: db, reviewId, flow });
-    const second = await advanceReview({ admin: db, reviewId, flow });
+    turn.advance = async () => { await gate; return { next: true, reason: 'advanced', dispatched: 2 }; };
+    const first = advance(db);
+    const second = await advance(db);
     open();
     expect(second).toEqual({ next: false, reason: 'leased' });
     expect(await first).toEqual({ next: true, reason: 'advanced', dispatched: 2 });
-    expect(dispatched.sort()).toEqual(['a', 'b']);
+    expect(turn.advances).toEqual([reviewId]);
   });
 
-  it('never re-dispatches a call already dispatched elsewhere; stops for credits, an end state or nothing to do', async () => {
-    const dispatched: string[] = [];
-    const run = (step: Parameters<typeof fakeFlow>[0]) => advanceReview({ admin: leaseDb().db, reviewId, flow: fakeFlow(step, dispatched) });
-    expect(await run({ calls: [{ callId: 'x', dispatched: true }], waiting: 'calls' })).toEqual({ next: false, reason: 'in_flight' });
-    expect(await run({ waiting: 'credits' })).toEqual({ next: false, reason: 'waiting_credits' });
-    expect(await run({ state: 'completed' })).toEqual({ next: false, reason: 'ended' });
-    expect(await run({})).toEqual({ next: false, reason: 'idle' });
-    expect(dispatched).toEqual([]);
+  it('an expected stop is passed on as it is and refunds its attempt', async () => {
+    for (const reason of ['in_flight', 'waiting_credits', 'ended', 'idle', 'gated']) {
+      const { db, lease } = leaseDb();
+      turn.advance = async () => ({ next: false, reason });
+      expect(await advance(db)).toEqual({ next: false, reason });
+      expect(lease.count).toBe(0);
+    }
   });
 
   it('more than 30 credit waits still resume after top-up without exhausting the cap', async () => {
     const { db, lease } = leaseDb({ count: MAX_ADVANCES - 1 });
-    const dispatched: string[] = [];
-    for (let i = 0; i < 35; i++) {
-      expect(await advanceReview({ admin: db, reviewId, flow: fakeFlow({ waiting: 'credits' }, dispatched) }))
-        .toEqual({ next: false, reason: 'waiting_credits' });
-    }
+    turn.advance = async () => ({ next: false, reason: 'waiting_credits' });
+    for (let i = 0; i < 35; i++) expect(await advance(db)).toEqual({ next: false, reason: 'waiting_credits' });
     expect(lease.count).toBe(MAX_ADVANCES - 1);
-    expect(await advanceReview({ admin: db, reviewId,
-      flow: fakeFlow({ calls: [{ callId: 'resumed', dispatched: false }] }, dispatched) }))
-      .toMatchObject({ next: true, dispatched: 1 });
-    expect(dispatched).toEqual(['resumed']);
+    turn.advance = async () => ({ next: true, reason: 'advanced', dispatched: 1 });
+    expect(await advance(db)).toMatchObject({ next: true, dispatched: 1 });
     expect(lease.count).toBe(MAX_ADVANCES);
   });
 
-  it('repeated dispatch outages stop relaying and remain resumable after recovery', async () => {
+  it('a failing step stops the relay with its attempt refunded; the lease is released', async () => {
     const { db, lease } = leaseDb({ count: MAX_ADVANCES - 1 });
-    const dispatched: string[] = [];
-    const flow = () => ({
-      continue: async () => ({ review: { state: 'running' }, calls: [{ callId: 'a', dispatched: false }] }),
-      dispatch: async () => { throw new Error('RUNTIME_STAGING_SERVICE_UNAVAILABLE'); },
-    }) as never;
-    for (let i = 0; i < 35; i++) {
-      expect(await advanceReview({ admin: db, reviewId, flow })).toEqual({ next: false, reason: 'failed', dispatched: 0 });
-    }
+    turn.advance = async () => { throw new Error('TURN_CALL_UNAVAILABLE'); };
+    for (let i = 0; i < 35; i++) expect(await advance(db)).toEqual({ next: false, reason: 'failed' });
     expect(lease.count).toBe(MAX_ADVANCES - 1);
-    const readFailure = () => ({ continue: async () => { throw new Error('FUSION_REVIEW_UNAVAILABLE'); } }) as never;
-    for (let i = 0; i < 35; i++) {
-      expect(await advanceReview({ admin: db, reviewId, flow: readFailure })).toEqual({ next: false, reason: 'failed' });
-    }
-    expect(lease.count).toBe(MAX_ADVANCES - 1);
-    expect(await advanceReview({ admin: db, reviewId,
-      flow: fakeFlow({ calls: [{ callId: 'a', dispatched: false }] }, dispatched) }))
-      .toEqual({ next: true, reason: 'advanced', dispatched: 1 });
-    expect(dispatched).toEqual(['a']);
-  });
-
-  it.each(['not_started', 'not_dispatched'])('fulfilled %s outcomes stop and preserve retry capacity', async reason => {
-    const { db, lease } = leaseDb({ count: MAX_ADVANCES - 1 });
-    const flow = () => ({
-      continue: async () => ({ review: { state: 'running' }, calls: [{ callId: 'a', dispatched: false }] }),
-      dispatch: async () => ({ state: 'pending', reason }),
-    }) as never;
-    for (let i = 0; i < 35; i++) {
-      expect(await advanceReview({ admin: db, reviewId, flow })).toEqual({ next: false, reason: 'failed', dispatched: 0 });
-    }
-    expect(lease.count).toBe(MAX_ADVANCES - 1);
-    expect(await advanceReview({ admin: db, reviewId,
-      flow: fakeFlow({ calls: [{ callId: 'a', dispatched: false }] }, []) }))
-      .toEqual({ next: true, reason: 'advanced', dispatched: 1 });
-  });
-
-  it.each(['receipt_pending', 'response_unreadable', 'closed'])('counts dispatched %s alongside a refused call', async reason => {
-    const { db, lease } = leaseDb();
-    const flow = () => ({
-      continue: async () => ({ review: { state: 'running' },
-        calls: [{ callId: 'a', dispatched: false }, { callId: 'b', dispatched: false }] }),
-      dispatch: async (_review: string, callId: string) => ({ state: 'pending', reason: callId === 'a' ? reason : 'not_started' }),
-    }) as never;
-    expect(await advanceReview({ admin: db, reviewId, flow })).toEqual({ next: true, reason: 'advanced', dispatched: 1 });
-    expect(lease.count).toBe(1);
-  });
-
-  it('a failing step stops the relay with the lease released; past the advance limit nothing runs and an alert is logged', async () => {
-    const { db, lease } = leaseDb();
-    const failing = () => ({ continue: async () => { throw new Error('FUSION_REVIEW_UNAVAILABLE'); } }) as never;
-    expect(await advanceReview({ admin: db, reviewId, flow: failing })).toEqual({ next: false, reason: 'failed' });
     expect(lease.token).toBeNull();
+    expect(alerts).toContainEqual(['billing', 'fusion_review_advance_failed', { reviewId, code: 'TURN_CALL_UNAVAILABLE' }]);
+  });
+
+  // CORE-PATH-V2 V2-12 B5: nothing starts on the BILL2 path any more, so a review without a turn is never advanced.
+  it('a review without a turn (the retired BILL2 path) or one that cannot be read is not advanced', async () => {
+    const { db, lease } = leaseDb();
+    turn.view = { turnId: null, state: 'running' };
+    expect(await advance(db)).toEqual({ next: false, reason: 'no_turn' });
+    turn.view = null;
+    expect(await advance(db)).toEqual({ next: false, reason: 'failed' });
+    expect(turn.advances).toEqual([]);
+    expect(lease.count).toBe(0);
+  });
+
+  it('past the advance limit nothing runs and an alert is logged', async () => {
     const capped = leaseDb({ count: MAX_ADVANCES });
-    expect(await advanceReview({ admin: capped.db, reviewId, flow: failing })).toEqual({ next: false, reason: 'limit' });
+    expect(await advance(capped.db)).toEqual({ next: false, reason: 'limit' });
+    expect(turn.advances).toEqual([]);
     expect(alerts).toContainEqual(['billing', 'fusion_review_advance_limit', { reviewId, count: MAX_ADVANCES }]);
   });
 

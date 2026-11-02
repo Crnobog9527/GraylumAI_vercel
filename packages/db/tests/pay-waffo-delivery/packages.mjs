@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 export async function packageCases({admin,service}) {
@@ -21,7 +22,7 @@ export async function packageCases({admin,service}) {
   const checkout=`checkout_${membership.id}`;
   await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
    VALUES('stripe','fixture','test','checkout',$1,$2)`,[checkout,membership.id]);
-  const start=new Date(Math.floor(Date.now()/1000)*1000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+  const start=new Date(Math.floor(Date.now()/1000)*1000),end=addUtcMonths(start,1);
   await service.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,$4,'usd',$5,NULL,$5,$6)`,
    [membership.id,checkout,`payment_${membership.id}`,membership.amount_total,start,end]);
   const buy=async()=>(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'credit_package',$2,'one_time',

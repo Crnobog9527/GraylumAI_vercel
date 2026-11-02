@@ -2,9 +2,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { erasureFinancialBudget } from '../accountErasure/financialRecovery';
 import { recoverPendingFinancials } from './automaticRecovery';
-import type { BillingTransport } from '../bill2/service';
+import type { BillingTransport } from '../turn/provider/service';
 const mocks = vi.hoisted(() => ({ recover: vi.fn(), billing: vi.fn() }));
-vi.mock('../bill2/service', async original => ({ ...await original<typeof import('../bill2/service')>(), authoritativeBilling: mocks.billing }));
+vi.mock('../turn/provider/service', async original => ({ ...await original<typeof import('../turn/provider/service')>(), authoritativeBilling: mocks.billing }));
 const actor = '10000000-0000-4000-8000-000000000001';
 const execution = '10000000-0000-4000-8000-000000000002';
 const item = { actorId: actor, executionId: execution,

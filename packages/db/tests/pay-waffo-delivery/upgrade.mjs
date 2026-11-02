@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 export async function upgradeCases({admin,service}) {
@@ -15,7 +16,7 @@ export async function upgradeCases({admin,service}) {
   'standard','fixture','test',1,'terms-v1',$3) o`,[user,pro,digests])).rows[0];
  const pay=async(o,cycle)=>{
   const checkout=`checkout_${o.id}`,start=new Date(Math.floor(Date.now()/1000)*1000),end=new Date(start);
-  if(cycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1);else end.setUTCMonth(end.getUTCMonth()+1);
+  if(cycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1);else end.setTime(addUtcMonths(end,1));
   await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
    VALUES('waffo','fixture','test','checkout',$1,$2)`,[checkout,o.id]);
   return (await service.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,$4,'usd',$5,$6,$5,$7) v`,
@@ -43,7 +44,7 @@ export async function upgradeCases({admin,service}) {
  // Historical admitted fixture: time passed before an asynchronous payment settled.
  await admin.query('BEGIN');
  try {
-  const id=randomUUID(),paid=new Date(Math.floor(Date.now()/1000)*1000),end=new Date(paid);end.setUTCMonth(end.getUTCMonth()+1);
+  const id=randomUUID(),paid=new Date(Math.floor(Date.now()/1000)*1000),end=addUtcMonths(paid,1);
   await admin.query('INSERT INTO payment_orders SELECT (jsonb_populate_record(NULL::payment_orders,$1)).*',
    [{...fresh,id,purchase_request_id:randomUUID(),created_at:new Date(paid.getTime()-3*3600000),
     method_upgrade_charge_at:new Date(paid.getTime()+47*3600000)}]);

@@ -870,8 +870,8 @@ it('RUNTIME: completion capture has a bounded wait and later retry remains idemp
   } finally { await locker.query('rollback'); await locker.end(); }
 });
 
-vi.mock('../runtime/newWorkGate', async importOriginal => ({
-  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+  ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
   ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 

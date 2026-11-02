@@ -2,7 +2,7 @@
 import {describe, expect, it} from 'vitest';
 import {Agent, OpenAIChatCompletionsModel, Runner, tool} from '@openai/agents';
 import OpenAI from 'openai';
-import {askQuestionTool} from '../../services/runtime/agentTools';
+import {askQuestionTool} from '../../services/turn/agent/agentTools';
 import {AGENT_TURN_CONFIG, CARD_CATEGORIES, agentTurnMeasurement, agentTurnPrompt, agentTurnSummary, agentTurnStats,
   agentTurnMarkdown} from './agentTurn.ts';
 import {createBudget, HARD_MAX_CALLS, memoryLedger} from './budget.ts';

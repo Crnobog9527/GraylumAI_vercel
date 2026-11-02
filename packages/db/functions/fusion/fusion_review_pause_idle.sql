@@ -12,7 +12,8 @@ DECLARE n integer;
 BEGIN
   -- Never waits on a review row a claim, advance or close holds: those are skipped until the next run.
   UPDATE fusion_reviews rv SET state='paused',updated_at=clock_timestamp()
-  WHERE rv.id IN (SELECT id FROM fusion_reviews WHERE state='running' AND updated_at<=clock_timestamp()-p_idle
+  -- Turn-path reviews wait on their jury turn instead (paused between groups, 24-hour recovery; V2-7b).
+  WHERE rv.id IN (SELECT id FROM fusion_reviews WHERE state='running' AND turn_id IS NULL AND updated_at<=clock_timestamp()-p_idle
       ORDER BY updated_at LIMIT 500 FOR UPDATE SKIP LOCKED)
     AND rv.state='running' AND rv.updated_at<=clock_timestamp()-p_idle
     AND NOT EXISTS(SELECT 1 FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id WHERE br.actor_id=rv.actor_id

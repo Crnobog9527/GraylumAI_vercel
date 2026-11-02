@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { SessionRpc } from './session';
+import type { SessionRpc } from '../turn/agent/session';
 const ownerActions = new Set([
   'fail_before_dispatch', 'fail_platform', 'interrupt', 'checkpoint_match', 'checkpoint_source', 'checkpoint_primary', 'check_latest', 'complete',
 ]);
