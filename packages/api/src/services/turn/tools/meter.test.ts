@@ -48,15 +48,16 @@ describe('one paid tool call is one row: begin, subcalls, record (2.5.2)', () =>
     expect(h.writes[1]![1].usage).toMatchObject({ subcalls: 2, outcome: 'delivered' });
   });
 
-  it('the row keeps each subcall\'s multiplier and display, the query cut short, for the credit record\'s search list', async () => {
+  it('the row keeps each subcall\'s multiplier and kind; what it searched for goes to the raw body only', async () => {
     const h = ledger();
     await paidToolCall(h.deps, call, async l => {
-      l.add({ ...r({}), display: { query: 'q'.repeat(500), platform: 'douyin', dataKind: 'search' } }); l.add(r({}));
+      l.add({ ...r({}), display: { query: 'secret words', platform: 'douyin', dataKind: 'search' } }); l.add(r({}));
     });
-    const results = (h.writes[1]![1].usage as { results: Array<{ multiplier: string; call: { query: string; platform: string } | null }> }).results;
-    expect(results[0]).toMatchObject({ multiplier: '6', call: { platform: 'douyin' } });
-    expect(results[0]!.call!.query).toHaveLength(200);
-    expect(results[1]!.call).toBeNull();
+    const record = h.writes[1]![1] as { usage: { results: Array<{ multiplier: string; call: { platform: string } | null }> }; raw: string };
+    expect(record.usage.results[0]).toMatchObject({ multiplier: '6', call: { platform: 'douyin', dataKind: 'search' } });
+    expect(record.usage.results[1]!.call).toBeNull();
+    expect(JSON.stringify(record.usage)).not.toContain('secret words');
+    expect(JSON.parse(record.raw)[0].display).toEqual({ query: 'secret words', platform: 'douyin', dataKind: 'search' });
   });
 
   it('no data: an unusable receipt (user base 0, platform cost kept)', async () => {

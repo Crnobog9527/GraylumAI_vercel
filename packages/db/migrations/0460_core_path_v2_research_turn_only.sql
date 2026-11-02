@@ -9,7 +9,7 @@
 -- research_session_owned keeps its signature; its third argument (an execution id) is no longer checked. research_user_evidence names a
 -- session by its name, else by its first visible user message (as the conversation list does since 0444), not by an execution's input.
 -- research_user_tool_charges (the credit record's "搜索明细") reads the turn's own spend row and turn_calls instead of bill2_calls: one line per
--- supplier subcall of the turn's tool rows (usage.results, which now also keeps each subcall's multiplier and what it asked for), with the
+-- supplier subcall of the turn's tool rows (usage.results, which now also keeps each subcall's multiplier and kind; what it searched for is read from the call's raw body, which erasure and a deleted session already cover), with the
 -- same unrounded credits (cost x m x q, 0 without data, none while unknown). Only the turn's first spend row ('turn:<id>:spend') lists them.
 -- Not touched here: research_user_message (only the old runtime store calls it), research_runtime_link / call_charge / close_unsent /
 -- plan_create, research_operation_settled (BILL2 and erasure users; they go with their callers).
@@ -295,7 +295,9 @@ BEGIN
  SELECT coalesce(jsonb_agg(x.line ORDER BY x.seq,x.n),'[]'::jsonb) INTO output FROM (
   SELECT c.seq,l.n,jsonb_build_object(
    'callId',md5(t.id::text||':'||c.seq||':'||l.n)::uuid,'toolName',c.tool_name,'args',NULL::jsonb,
-   'query',l.v->'call'->>'query','platform',l.v->'call'->>'platform','dataKind',l.v->'call'->>'dataKind',
+   'query',CASE WHEN left(w.body,1)='[' AND jsonb_typeof((w.body::jsonb)->(l.n::integer-1)->'display'->'query')='string'
+     THEN (w.body::jsonb)->(l.n::integer-1)->'display'->>'query' END,
+   'platform',l.v->'call'->>'platform','dataKind',l.v->'call'->>'dataKind',
    'source',CASE
      WHEN l.v IS NULL OR l.v->>'outcome'='unknown' OR jsonb_typeof(l.v->'costUsd')<>'string' THEN 'tool_unknown'
      WHEN l.v->>'outcome' IN ('ok','partial') AND coalesce((l.v->>'items')::integer,0)>0 THEN 'tool_usage'
@@ -308,11 +310,12 @@ BEGIN
        THEN ((l.v->>'costUsd')::numeric*coalesce((l.v->>'multiplier')::numeric,c.multiplier)*q)::text
      ELSE '0' END) line
   FROM turn_calls c
+  LEFT JOIN turn_call_raw w ON w.turn_id=c.turn_id AND w.seq=c.seq
   CROSS JOIN LATERAL (
    SELECT r.v,r.n FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.usage->'results')='array' THEN c.usage->'results' ELSE '[]'::jsonb END)
      WITH ORDINALITY r(v,n)
    UNION ALL
-   SELECT NULL::jsonb,0::bigint WHERE NOT (jsonb_typeof(c.usage->'results')='array' AND jsonb_array_length(c.usage->'results')>0)
+   SELECT NULL::jsonb,0::bigint WHERE (jsonb_typeof(c.usage->'results')='array' AND jsonb_array_length(c.usage->'results')>0) IS NOT TRUE
   ) l
   WHERE c.turn_id=t.id AND c.actor_id=a AND c.call_kind='tool' AND c.status IN ('ok','unusable','unknown')
  ) x;
