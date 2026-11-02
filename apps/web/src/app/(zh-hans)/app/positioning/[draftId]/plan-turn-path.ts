@@ -61,7 +61,8 @@ async function closed(sessionId: string, requestId: string, deps: PlanTurnDeps):
   return null;
 }
 
-/** Sends the request unless it already has a turn, and answers with `valid`, a plan's items and its source round. A refusal before opening is thrown with its code. */
+/** Sends the request unless it already has a turn, and answers with `valid`, a plan's items and its source round.
+ * A refusal before opening is thrown with its code. */
 export async function runPlanTurn(request: PlanTurnRequest, ids: { sessionId: string; moduleId: string }, known: PlanTurn | null,
   deps: PlanTurnDeps = browser) {
   if (!known) {
