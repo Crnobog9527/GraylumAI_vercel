@@ -2,8 +2,10 @@
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2 V2-12 batch C (number 0458): runtime_work_projection no longer reads runtime_executions.
 -- The only old-table reference in the material functions was the hasPendingSuggestion check, which looked for a completed old-path
--- mentor execution. runtime_executions is empty (staging holds test data only) and the turn path never writes it, so the check is
--- false for every field today: it is now the literal false. The projection of everything else is unchanged.
+-- mentor execution. The turn path never writes runtime_executions or a suggestion that points at one, so for turn-path data the check
+-- was false already. Staging still holds old-path test rows in runtime_executions (4630 at 2026-11-02); the production database is
+-- built new without them. For those test rows the flag is now the literal false: an old-path suggestion is no longer reported as pending.
+-- The projection of everything else is unchanged.
 -- Compatible: same signature and result shape; old and new code read the same JSON. Repeatable: CREATE OR REPLACE.
 -- Recovery: re-apply the previous definition of runtime_work_projection (packages/db/functions/runtime/runtime_work_projection.sql at the parent commit); no data is written.
 BEGIN;
