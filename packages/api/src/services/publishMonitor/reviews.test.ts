@@ -1,13 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach,expect,it,vi} from 'vitest';
 import {logger} from '../../lib/logger';
-const m=vi.hoisted(()=>({run:vi.fn(),pack:vi.fn(),settings:vi.fn(),close:vi.fn()}));
+const m=vi.hoisted(()=>({run:vi.fn(),pack:vi.fn(),settings:vi.fn(),close:vi.fn(),rows:vi.fn(),build:vi.fn()}));
 vi.mock('../turn/review',()=>({runReviewTurn:m.run}));
 vi.mock('../turn/agent/workspacePosts',()=>({resolvePostSource:m.pack}));
 vi.mock('../turn/db',()=>({turnClients:(db:unknown)=>({write:db,read:db}),turnDatabase:()=>({close:m.close})}));
 vi.mock('../turn/admission/newWorkGate',()=>({newWorkGate:()=>({})}));
 vi.mock('../turn/limiter',()=>({redisCounterStore:()=>({})}));
 vi.mock('./reviewSettings',()=>({readReviewSettings:m.settings}));
+vi.mock('./coach/rows',()=>({readPackRows:m.rows}));
+vi.mock('./coach/pack',()=>({buildPack:m.build}));
 import {createRuntimeBudget} from '../turn/settings/budget';
 import {advanceReview,prepareReview,runWeeklyReviews,type ReviewClaim,type ReviewStep} from './reviews';
 const c:ReviewClaim={id:'11111111-1111-4111-8111-111111111111',actorId:'22222222-2222-4222-8222-222222222222',
@@ -92,6 +94,21 @@ it('the visibility of the pack\'s sources is asked right before the turn is save
   expect(await visible()).toBe(false);return {kind:'deferred',code:'x'};});
  await advanceReview(d.db,c,options());
  expect(d.calls.find(x=>x[0]==='publish_monitor_pack_visible')![1]).toEqual({p_actor_id:c.actorId,p_result:PACK});
+});
+it('a brand review reads the coach pack of its brand and cadence, saves it wrapped like the plain pack, and runs the turn as a coach review',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888',CONN='99999999-9999-4999-8999-999999999999';
+ m.rows.mockResolvedValue({followers:[{connectionId:CONN},{connectionId:CONN}]});
+ m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ const d=database({default:{businessId:BUSINESS,cadence:'monthly',attempt:2}});
+ await advanceReview(d.db,c,options());
+ expect(m.rows).toHaveBeenCalledWith(expect.anything(),c.actorId,BUSINESS,12);
+ expect(m.build).toHaveBeenCalledWith(expect.objectContaining({cadence:'monthly',businessId:BUSINESS,handbooks:expect.any(Map)}));
+ const wrapped={kind:'review_pack',status:'available',window_days:90,source_connections:[CONN],review:{kind:'review_pack',mode:'full'}};
+ expect(d.calls.find(x=>x[0]==='publish_monitor_review_save_pack')![1]).toEqual({p_id:c.id,p_token:c.token,p_pack:wrapped});
+ expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({coach:true,cadence:'monthly',attempt:2}),wrapped,expect.any(Function),expect.any(Function));
+ expect(m.pack).not.toHaveBeenCalled();
+ await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
+ expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,8);
 });
 it('the 90-day window is used only for an account whose window is that long',async()=>{
  await advanceReview(database({default:{}},{publish_monitor_post_window:90}).db,c,options());
