@@ -24,7 +24,6 @@ const claimSchema=z.object({id:z.string().uuid(),actorId:z.string().uuid(),token
 export type ReviewClaim=z.infer<typeof claimSchema>;
 export type ReviewStep={env:Record<string,string|undefined>;defer:(work:()=>Promise<void>)=>void;budget:RuntimeBudget;turn?:ReviewTurnDeps};
 const stepResult=z.object({allowed:z.boolean(),actorId:z.string().uuid(),turnId:z.number().int().positive().nullable().optional(),
- executionId:z.string().uuid().nullable().optional(),
  state:z.string().nullable().optional(),expired:z.boolean().nullish().transform(v=>v===true)}).passthrough();
 async function step(db:SupabaseClient,c:ReviewClaim,action:string,reason?:string){
  const r=await db.rpc('publish_monitor_review_step',{p_id:c.id,p_token:c.token,p_action:action,p_reason:reason??null});
@@ -40,15 +39,6 @@ const POST_STATUSES=['available','stale','no_recent_posts','not_connected'];
 /** Looks at the review's turn (found by the claim's request id, never invented): what is already settled ends here, what is expired is closed. */
 export async function prepareReview(db:SupabaseClient,c:ReviewClaim):Promise<boolean>{
  const observed=await step(db,c,'observe');
- // A review claimed before B8b may still hold an unfinished Runtime execution (waiting for credits or resume) past its deadline: it is
- // cancelled there (known usage settles, undispatched holds come back) and the period ends or the claim waits for its bill.
- if(observed.expired&&observed.executionId){
-  const cancelled=await db.rpc('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:observed.executionId});
-  if(cancelled.error)throw new Error('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
-  if((cancelled.data as {state?:string}|null)?.state==='completed')await step(db,c,'observe');
-  else await step(db,c,'skip','RUNTIME_INTERRUPTED');
-  return false;
- }
  // completed / skipped by the step itself, a retry already scheduled, or a cost the recovery job still owns.
  if(['completed','failed','cost_pending','retrying'].includes(observed.state??''))return false;
  if(observed.expired){await finishExpiredReview(db,c,observed.turnId);return false;}
@@ -66,7 +56,7 @@ export async function prepareReview(db:SupabaseClient,c:ReviewClaim):Promise<boo
 }
 /** The user's own posts of the last 90 days with the review tables, all computed in code (no model, no refresh, no provider). */
 export async function readReviewPack(db:SupabaseClient,actor:string){
- const window=await db.rpc('runtime_workspace_post_window',{p_actor_id:actor});
+ const window=await db.rpc('publish_monitor_post_window',{p_actor_id:actor});
  if(window.error||typeof window.data!=='number')throw new Error('PUBLISH_MONITOR_REVIEW_DATA_UNAVAILABLE');
  const pack=await resolvePostSource(db as unknown as SessionRpc,actor,{kind:'workspace_posts_request',windowDays:90,entitled:window.data>=90,review:true}) as
   {kind?:string;status?:string;review?:unknown}|null;
@@ -87,7 +77,7 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:Revi
   if(saved.error||saved.data!==true)return;
   const result=await runReviewTurn(turnDeps(db,options),{id:c.id,actorId:c.actorId,sessionId:c.sessionId,requestId:c.requestId,
    modelId:c.modelId!,maxCostUsd:c.maxCostUsd},pack,async()=>(await step(db,c,'authorize')).allowed,async()=>{
-    const visible=await db.rpc('runtime_workspace_posts_visible',{p_actor_id:c.actorId,p_result:pack});
+    const visible=await db.rpc('publish_monitor_pack_visible',{p_actor_id:c.actorId,p_result:pack});
     return !visible.error&&visible.data===true;
    });
   if(result.kind==='skipped'){await step(db,c,'skip',result.reason);return;}
