@@ -223,6 +223,20 @@ export async function holdCases(t){
    assert.deepEqual([bad.sample[0].actorId,String(bad.sample[0].turnId)],[a.actor,String(o.turnId)]);
   }finally{await c.query("update credit_transactions set amount=$2 where id=$1",[row.rows[0].id,row.rows[0].amount]);}
   assert.equal((await day()).mismatched,0,'balanced again');
+ // A turn closed on an earlier day and settled now (recovery) is checked where it was settled, not where it closed.
+ {
+  const win=(from,to)=>one("select billing_reconcile_day(now()-$1::interval,now()-$2::interval) v",[from,to]).then(r=>r.turns);
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);await close(a,o.turnId);
+  await c.query("update turns set closed_at=now()-interval '3 days' where actor_id=$1 and id=$2",[a.actor,o.turnId]);
+  const row=await c.query("select id,amount from credit_transactions where user_id=$1 and source_type='ai_task' and source_id=$2 and reason_code='turn_spend'",[a.actor,String(o.turnId)]);
+  await c.query("update credit_transactions set amount=amount+1 where id=$1",[row.rows[0].id]);
+  try{
+   const now=await win('1 day','-1 minute'),past=await win('10 days','5 days');
+   assert.ok(now.sample.some(s=>String(s.turnId)===String(o.turnId)),'found in the window of its settlement though it closed 3 days ago');
+   assert.ok(!past.sample.some(s=>String(s.turnId)===String(o.turnId)),'not in a window before its settlement');
+  }finally{await c.query("update credit_transactions set amount=$2 where id=$1",[row.rows[0].id,row.rows[0].amount]);}
+ }
  }
  report.checks.push('hold top-up: one call frozen at the open, topped up in begin, charge = usage, each freeze settled once with its own keys',
   'hold top-up: no account lock when covered, paused only when the balance cannot, G caps it, repeat begin freezes nothing',

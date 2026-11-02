@@ -1,7 +1,8 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2 V2-12 batch R7: the daily reconciliation also checks every settled turn against the credit ledger.
--- A turn settled in the window must have turn_spend ledger rows that add up to its charged_credits, and its turn_intercepted
+-- A turn is checked in the window where it was settled (its settle record or ledger rows are dated), not where it closed: a turn
+-- closed on one day and settled by recovery on a later one is still checked. It must have turn_spend ledger rows that add up to its charged_credits, and its turn_intercepted
 -- row (a freeze not returned because the subscription ended) must equal what the settle record in billing_history says.
 -- The old per-call check (bill2_calls) stays until the old path is dropped. Accounts under erasure are skipped.
 -- Compatible: the result gains a "turns" key; nothing else changes. Repeatable: whole-function CREATE OR REPLACE.
@@ -45,9 +46,13 @@ BEGIN
  INTO calls;
 
  -- Turn path: a settled turn's charged credits must equal what the ledger booked for it as turn_spend.
- WITH t AS (SELECT x.actor_id,x.id,coalesce(x.charged_credits,0) charged FROM turns x
-   WHERE x.settlement='done' AND x.closed_at>=p_start AND x.closed_at<p_end
-    AND NOT EXISTS (SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=x.actor_id)),
+ WITH w AS (SELECT b.user_id actor_id,(b.metadata->>'turnId')::bigint id FROM billing_history b
+   WHERE b.operation_type='settle' AND b.created_at>=p_start AND b.created_at<p_end AND b.metadata->>'turnId' ~ '^[0-9]{1,18}$'
+  UNION SELECT c.user_id,c.source_id::bigint FROM credit_transactions c
+   WHERE c.source_type='ai_task' AND c.reason_code IN ('turn_spend','turn_intercepted') AND c.created_at>=p_start AND c.created_at<p_end
+    AND c.source_id ~ '^[0-9]{1,18}$'),
+ t AS (SELECT x.actor_id,x.id,coalesce(x.charged_credits,0) charged FROM turns x JOIN w ON w.actor_id=x.actor_id AND w.id=x.id
+   WHERE x.settlement='done' AND NOT EXISTS (SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=x.actor_id)),
  l AS (SELECT t.*,
    coalesce((SELECT sum(-c.amount) FROM credit_transactions c WHERE c.user_id=t.actor_id
     AND c.source_type='ai_task' AND c.source_id=t.id::text AND c.reason_code='turn_spend'),0) booked,
