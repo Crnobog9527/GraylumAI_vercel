@@ -619,7 +619,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
   （`runtime_session_names` 并入 `sessions.title`。）
 - 函数：`runtime/` 111 个中除 `runtime_start`（改写为建会话）外全部；`billing/` 102 个中 `bill2_*` 全部（`atomic_*`、`credit_*` 账本函数保留）；
   `fusion/` 63 个中计费与推进相关的（产物读写保留）；`report/` 的 `report_fee_*`、`report_stop`、`report_admission_check`；`other/` 中 `catalog_versions_snapshot` 保留。
-  目标：`packages/db/functions` 从 939 降到约 450（主路径相关从约 330 降到约 20）。
+  验收（Owner 2026-11-02 "同意改口径"，取代原"函数数从 939 降到约 450"）：待删名单清零，保留函数不引用待删对象，闭包棘轮不放宽；不再按函数总数验收（现状 1023 个，只删名单剩约 815 个）。
 - Node：`services/runtime/` 315 个文件和 `services/bill2/` 56 个文件整体删除，新目录 `services/turn/`（目标 ≤ 60 个文件，每个 ≤ 500 行）；
   `routers/runtime.ts`、`fusionReview.ts`、`fusionCompare.ts` 的计费部分改调 `services/turn`。
 
