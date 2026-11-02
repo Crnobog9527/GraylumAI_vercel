@@ -13,8 +13,8 @@ if(!api?.startsWith('http://127.0.0.1:')||!legacy?.includes('graylum-bill2-legac
 it('RUNTIME UPGRADE: revision-bearing legacy work identity survives 0105 to 0106 without payload repair',async()=>{
  const sql=new pg.Client({connectionString:process.env.V3_LOCAL_DB});await sql.connect();
  const admin=createClient(api,process.env.V3_LOCAL_SERVICE_JWT!,{auth:{persistSession:false}});
- const {authoritativeBilling}=await import(/* @vite-ignore */ legacy+'/packages/api/src/services/turn/provider/service.ts');
- const {localFixtureAdapter}=await import(/* @vite-ignore */ legacy+'/packages/api/src/services/turn/provider/fixtureAdapter.ts');
+ const {authoritativeBilling}=await import(/* @vite-ignore */ legacy+'/packages/api/src/services/bill2/service.ts');
+ const {localFixtureAdapter}=await import(/* @vite-ignore */ legacy+'/packages/api/src/services/bill2/fixtureAdapter.ts');
  let posts=0,gets=0;
  const server=createServer(async(req,res)=>{for await(const _ of req){}if(req.url?.startsWith('/receipt/'))gets++;else posts++;
   res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'legacy-identity-'+(req.url?.startsWith('/receipt/')?req.url.split('/').at(-1)?.replace('legacy-identity-',''):posts),model:'identity-m',final:gets>0||posts>1,cost:gets>0||posts>1?'0.003':null,currency:'USD',coverage:'request_total'}));});
