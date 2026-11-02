@@ -134,7 +134,7 @@ export async function runCases({admin:db,connect,report,read}) {
  const f={...rf.base,run:run.id,payload};
  const billing={actor:rf.actor};
  const dispatched=await call(db,f);
- await assert.rejects(rpc(db,'opc_business_archive',billing.actor,business),/^error: OPC_BUSINESS_BUSY$/);
+ // V2-12 R1a: archive no longer waits for an old-path dispatch (the old executions are not read).
  await rpc(db,'bill2_record',billing.actor,f.run,dispatched.id,evidence(dispatched));
  await rpc(db,'bill2_close',billing.actor,f.run,'delivered',outcome);
  await rpc(db,'bill2_finalize',billing.actor,f.run);
@@ -148,7 +148,7 @@ export async function runCases({admin:db,connect,report,read}) {
   kind:'confirmed_delivery_failure',evidenceRef:'archive-test',evidenceHash:'d'.repeat(64),body:'Not dispatched',
  });
  await rpc(db,'bill2_finalize',billing.actor,queued.id);
- report.checks.push('already dispatched call delays archive until settled','prepared call cannot dispatch/claim after archive; money cleanup allowed');
+ report.checks.push('prepared call cannot dispatch/claim after archive; money cleanup allowed');
 
  // Generated report and linked accounts/work items remain readable with all their
  // authoritative data; archived draft edits, report saves and paid descendants refuse.
