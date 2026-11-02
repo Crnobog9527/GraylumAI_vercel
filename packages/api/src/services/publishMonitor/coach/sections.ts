@@ -16,10 +16,13 @@ export function periodOf(now: number, days: number): Period {
 }
 
 /** Every own post once: a post can be both a fact row (created when its day-7 turned up empty) and a too-new row, and must count once. */
-export function uniquePosts(rows: Pick<PackRows, 'facts' | 'recent'>): Array<{ postId: string; platform: string; postedAt: string; pillarKey: string | null }> {
-  const byId = new Map<string, { postId: string; platform: string; postedAt: string; pillarKey: string | null }>();
+type OwnPost = { postId: string; platform: string; postedAt: string; pillarKey: string | null };
+export function uniquePosts(rows: Pick<PackRows, 'facts' | 'recent'>): OwnPost[] {
+  const byId = new Map<string, OwnPost>();
   for (const p of rows.facts) byId.set(p.postId, { postId: p.postId, platform: p.platform, postedAt: p.postedAt, pillarKey: p.pillarKey });
-  for (const p of rows.recent) if (!byId.has(p.postId)) byId.set(p.postId, { postId: p.postId, platform: p.platform, postedAt: p.postedAt, pillarKey: p.pillarKey });
+  for (const p of rows.recent) {
+    if (!byId.has(p.postId)) byId.set(p.postId, { postId: p.postId, platform: p.platform, postedAt: p.postedAt, pillarKey: p.pillarKey });
+  }
   return [...byId.values()];
 }
 
