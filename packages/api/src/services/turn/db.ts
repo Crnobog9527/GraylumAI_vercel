@@ -99,7 +99,7 @@ export function turnDatabase(clients: TurnClients) {
   const w = clients.write;
   return {
     /** resumeOf: the session's turn paused for credits, continued by this one (V2-8); its limits are what that turn has left. */
-    open: (a: { actorId: string; sessionId: string; requestId: string; kind: string; policy: Record<string, unknown>; resumeOf?: number }) =>
+    open: (a: { actorId: string; sessionId: string | null; requestId: string; kind: string; policy: Record<string, unknown>; resumeOf?: number }) =>
       call(w, 'turn_open', { p_actor_id: a.actorId, p_session_id: a.sessionId, p_request_id: a.requestId, p_kind: a.kind,
         p_policy: a.policy, p_resume_of: a.resumeOf ?? null }, opened),
     begin: async (a: { actorId: string; turnId: number; seq: number; callKind: CallKind; modelId: string | null; toolName: string | null;
