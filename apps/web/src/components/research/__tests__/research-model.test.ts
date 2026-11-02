@@ -141,9 +141,16 @@ describe("server rows from research.toolCharges and research.evidence", () => {
       { callId: "b", toolName: "social_search", args: null, source: "tool_usage", credits: "1", query: "穿搭", platform: "douyin" },
       { callId: "c", toolName: "social_account", args: null, source: "tool_unknown", credits: null, query: "sample", platform: "douyin" },
       { callId: "d", toolName: "benchmark_fetch", args: null, source: "tool_usage", credits: "1", query: "aa_one", platform: "tiktok" },
-      { callId: "e", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "咖啡店", platform: "douyin" },
+      { callId: "e", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "咖啡店", platform: "douyin",
+        dataKind: "search" },
+      { callId: "f", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "acct_x", platform: "douyin",
+        dataKind: "account_profile" },
+      { callId: "g", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "咖啡 对标", platform: "web",
+        dataKind: "web_search" },
     ]);
-    expect(charges.map(charge => describeRequest(charge.tool, charge.args)?.query)).toEqual(["咖啡", "穿搭", "sample", "aa_one", "咖啡店"]);
+    expect(charges.map(charge => describeRequest(charge.tool, charge.args)?.query)).toEqual(["咖啡", "穿搭", "sample", "aa_one", "咖啡店", "acct_x", "咖啡 对标"]);
+    expect(charges.slice(4).map(charge => describeRequest(charge.tool, charge.args)?.line)).toEqual(
+      expect.arrayContaining([expect.stringContaining("关键词作品"), expect.stringContaining("账号资料"), "网页搜索"]));
   });
 
   it("maps evidence rows without inventing a route or a title", () => {

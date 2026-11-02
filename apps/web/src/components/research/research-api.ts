@@ -15,6 +15,16 @@ export interface ToolChargeRow {
   /** What the one subcall asked for (turn rows keep it per subcall instead of the whole call's arguments). */
   query?: string | null;
   platform?: string | null;
+  dataKind?: string | null;
+}
+
+const ACCOUNT_KINDS = ["account_profile", "account_posts", "account_relation", "post_detail"];
+/** One benchmark discovery subcall shown as what it was: a web search, a page read, an account lookup or a keyword search. */
+function byKind(dataKind: string | null | undefined, platform: string, query: string): Pick<SearchCharge, "tool" | "args"> {
+  if (dataKind === "web_search") return { tool: "web_search", args: { query } };
+  if (dataKind === "web_fetch") return { tool: "web_fetch", args: { url: query } };
+  if (dataKind && ACCOUNT_KINDS.includes(dataKind)) return { tool: "social_account", args: { platform, account: query } };
+  return { tool: "social_search", args: { platform, keywords: [query] } };
 }
 
 /**
@@ -31,8 +41,7 @@ function requestOf(row: ToolChargeRow & { toolName: ResearchToolName }): Pick<Se
     case "social_search": return { tool: row.toolName, args: { platform, keywords: query ? [query] : [] } };
     case "social_account": return { tool: row.toolName, args: { platform, account: query } };
     case "benchmark_fetch": return { tool: row.toolName, args: { accounts: query ? [{ platform, account: query }] : [] } };
-    case "benchmark_discover": return query ? { tool: "social_search", args: { platform, keywords: [query] } }
-      : { tool: row.toolName, args: {} };
+    case "benchmark_discover": return query ? byKind(row.dataKind, platform, query) : { tool: row.toolName, args: {} };
     default: return { tool: row.toolName, args: {} };
   }
 }
