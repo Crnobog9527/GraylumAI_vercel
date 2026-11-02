@@ -47,6 +47,7 @@ import {agentTurnBody} from '../../shared/agentTurn';
 import {OPENING_INPUT,openingRequestId} from '../../shared/opcQuestions';
 import {createTRPCContext} from '../../trpc';
 import {ensurePositioningProfilePlans} from '../__tests__/fixtures/positioningProfilePlans';
+const lastResult=async(stream:AsyncIterable<unknown>)=>{let last:unknown;for await(const event of stream)last=event;return (last as {result?:unknown}|undefined)?.result;};
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
 const db=new pg.Client({connectionString});
@@ -524,7 +525,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired
    };
    Object.assign(process.env,hostEnv);
    await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '61 seconds' where run_id=$1",[e.runId]);
-   expect(await caller.execute({executionId:e.executionId})).toMatchObject({state:'completed'});
+   expect(await lastResult(await caller.executeStream({executionId:e.executionId}))).toMatchObject({state:'completed'});
   }finally{
    globalThis.fetch=previousFetch;
    for(const [name,value] of Object.entries(previousEnv)){if(value===undefined)delete process.env[name];else process.env[name]=value;}
@@ -691,7 +692,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const previous=Object.fromEntries(Object.keys(env).map(k=>[k,process.env[k]]));
  try{
   Object.assign(process.env,{...env,V3_RUNTIME_STAGING_ENABLED:'false'});
-  expect(await caller.execute({executionId:e.executionId})).toEqual({state:'cancelled'});
+  expect(await lastResult(await caller.executeStream({executionId:e.executionId}))).toEqual({state:'cancelled'});
   expect((await caller.view({sessionId:s.sessionId})).executions[0]).toMatchObject({state:'cancelled'});
   await expect(caller.prepare({...request,requestId:randomUUID()})).rejects.toThrow();
   expect((await db.query('select enabled from runtime_test_windows where id=$1',[windowId])).rows[0].enabled).toBe(true);
@@ -1094,8 +1095,6 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // cache; this measurement is the first Skill prepare of a cold process, as before.
   clearSkillResourceCache();
   const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
-  const execute=await measured(c=>c.execute({executionId:skill.result.executionId}));
-  expect(execute.result).toMatchObject({state:'completed'});
   // Each further prepare uses its own new Session, since a prepared execution is never run here.
   const newSession=async()=>((await measured(c=>c.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}))).result as {sessionId:string}).sessionId;
   const prepareIn=(id:string,module=moduleId,revision=pack.revisionId)=>
@@ -1109,7 +1108,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // CHAT-LANGUAGE: every admission reads the profile's reply language once (profiles), concurrently with model loading.
   expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:9,rateLimit:0});
   expect(ordinaryWarm.summary.labels['rest/profiles']?.rt).toBe(2); // the caller's profile check, plus the reply language
-  const all={start,ordinary,stream,skill,execute,skillWarm};
+  const all={start,ordinary,stream,skill,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   // POSITIONING-GATE: free-chat admission adds one read (runtime_positioning_gate); this user has no positioning
   // and the fixture model has no OpenRouter key, so Decisions is not called (fallback rule frozen instead).
@@ -1120,16 +1119,15 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
    ordinary:{prelude:2,policy:0,host:0,admission:14,rateLimit:0},
    stream:{prelude:2,policy:0,host:0,execute:7,provider:8,rateLimit:0},
    skill:{prelude:2,policy:0,host:0,admission:12,rateLimit:0},
-   execute:{prelude:2,policy:0,host:0,execute:6,provider:7,rateLimit:0},
    skillWarm:{prelude:2,policy:0,host:0,admission:11,rateLimit:0},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // D7 checks before buffered output and on both sides of post-execution capture; a stream's after-capture check is its result yield (PR-2A).
-  expect(label('rpc/runtime_execution_visibility')).toEqual({start:0,ordinary:0,stream:4,skill:0,execute:2,skillWarm:0});
-  expect(label('rpc/runtime_positioning_gate')).toEqual({start:0,ordinary:1,stream:0,skill:1,execute:0,skillWarm:1});
-  expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
+  expect(label('rpc/runtime_execution_visibility')).toEqual({start:0,ordinary:0,stream:4,skill:0,skillWarm:0});
+  expect(label('rpc/runtime_positioning_gate')).toEqual({start:0,ordinary:1,stream:0,skill:1,skillWarm:1});
+  expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,skillWarm:1});
   // AC-0c: one service-role and one user-scoped (RLS) module read per request
   // (AC-0 baseline 7 for the Skill prepare). DB-PERF PR-4: the package is checked once per request (its first
   // listing) and uncached files arrive in one checked batch read: 2 in a cold process, 1 when cached (was 5/3).
@@ -1161,7 +1159,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   await db.query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]);
   await expect(skillPrepare()).rejects.toThrow();
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);
-  for(const m of [stream,execute])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
+  for(const m of [stream])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
   // Only the streamed procedure releases its own line; callers here skip the route.
   expect(logged.mock.calls.filter(c=>c[1]==='runtime_request_timing')).toHaveLength(1);
  }finally{
