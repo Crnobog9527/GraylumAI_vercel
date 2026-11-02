@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { openRouterCallBound } from '../bill2/openRouterPolicy';
+import { openRouterCallBound } from '../turn/provider/openRouterPolicy';
 import { DECISIONS, parseOpinion } from './hostChecks';
 import { fitted } from './reviewCore';
 import { estimateReview } from './reviewEstimate';
