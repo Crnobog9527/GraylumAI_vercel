@@ -54,7 +54,8 @@ export async function runCases(db,report) {
  const pending=await runtimeFixture(db,{dispatched:true});
  const pendingBefore=await money(db,pending);
  assert.equal((await erase(db,pending)).status,'deleted');
- assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',[pending.execution])).rows[0].state,'cost_pending');
+ assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',[pending.execution])).rows[0].state,'interrupted',
+  'an open old run is no longer cancelled or recovered by the delete: its state is left alone');
  assert.deepEqual(await money(db,pending),pendingBefore,'unknown cost does not refund or charge');
  await rpc(db,'bill2_record',pending.actor,pending.run,pending.call.id,evidence(pending.call));
  await rpc(db,'runtime_financial_recovery',pending.actor,pending.execution,true);
