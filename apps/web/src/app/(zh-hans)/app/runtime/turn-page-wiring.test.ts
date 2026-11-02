@@ -25,6 +25,8 @@ describe('useTurnChat balance reads', () => {
   it('reads again after a close and when the window is back', () => {
     expect(source).toContain('REREAD_MS');
     expect(source).toContain("addEventListener('focus'");
-    expect(source.match(/settled\.current\(\)/g)).toHaveLength(3);
+    expect(source).toContain('announceTurnClosed()');
+    expect(source).toContain('onTurnClosed(');
+    expect(source.match(/settled\.current\(\)/g)).toHaveLength(4);
   });
 });

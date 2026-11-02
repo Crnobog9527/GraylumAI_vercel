@@ -8,6 +8,7 @@ import type { ResearchCall } from '@/components/research/research-model';
 import { workItemFromResearchCall, type WorkItem } from '@/components/chat-display/agent-work-model';
 import { readTurnView } from '@/app/(zh-hans)/app/positioning/[draftId]/mentor-turn-path';
 import { turnBusyForCredits } from '@/components/opc/credits-label';
+import { announceTurnClosed, onTurnClosed } from './turn-closed-channel';
 import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
 
 /*
@@ -55,17 +56,19 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   const [notice, setNotice] = useState<{ code: string; text: string } | null>(null);
   const alive = useRef(true), settled = useRef(onSettled);
   useEffect(() => { settled.current = onSettled; }, [onSettled]);
-  // Not a poll: one more read a while after a close, and one whenever the user comes back to the window.
+  // Not a poll: one more read a while after a close, one when another tab says its turn closed, and one whenever the user comes back to the window.
   const reread = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settle = useCallback(() => {
     settled.current();
+    announceTurnClosed();
     if (reread.current) clearTimeout(reread.current);
     reread.current = setTimeout(() => settled.current(), REREAD_MS);
   }, []);
   useEffect(() => {
     const back = () => { if (document.visibilityState !== 'hidden') settled.current(); };
+    const stop = onTurnClosed(() => settled.current());
     window.addEventListener('focus', back); document.addEventListener('visibilitychange', back);
-    return () => { window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', back);
+    return () => { stop(); window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', back);
       if (reread.current) clearTimeout(reread.current); };
   }, []);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
