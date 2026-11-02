@@ -385,10 +385,15 @@ jobs:
       # Browser reports, storage state, traces, videos, and screenshots are intentionally not uploaded.
 
   integration:
-    name: Run billing and recovery integration tests
+    name: Run billing and recovery integration tests (${{ matrix.shard }}/2)
     needs: [scope]
     if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
+    # Shard 1: BILL2 + PAYG + empty-database build (about 7.5 minutes of tests); shard 2: runtime recovery (about 7.5 minutes).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -457,18 +462,22 @@ jobs:
       # (--schema-from-files: platform stand-in -> packages/db/baseline -> every migration). No secrets, no provider network, no Next app or
       # browser; the runner lists and verifies the excluded app-only cases.
       - name: Integration — BILL2 billing
+        if: matrix.shard == 1
         run: node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files
 
       - name: Integration — PAYG runtime waiting, resume and metering review
+        if: matrix.shard == 1
         run: node packages/db/tests/payg/run-runtime.mjs --ci
 
       - name: Integration — Runtime recovery and streaming
+        if: matrix.shard == 2
         run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
 
       # DB-BASELINE: build an empty database from repository files only (platform stand-in ->
       # packages/db/baseline -> every migration) in the pinned PostgreSQL image and require the
       # committed built fingerprint, the account-open audit and the credit-guard paths to hold.
       - name: Integration — Empty-database build from files
+        if: matrix.shard == 1
         run: node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql,packages/db/tests/runtime-view-perf/fixture.sql,packages/db/tests/content-erasure/fixture.sql,packages/db/tests/content-erasure-perf/fixture.sql,packages/db/tests/content-erasure-perf/assertions.sql
 
   lint-check:
@@ -514,14 +523,14 @@ jobs:
   # MAINT-P1b: the run-local database suites have their own worker, split in two, so neither this job nor
   # the integration job comes near its 30-minute limit. Every suite still runs; none is skipped.
   db-suites:
-    name: Run database behaviour suites (${{ matrix.shard }}/2)
+    name: Run database behaviour suites (${{ matrix.shard }}/4)
     needs: [scope]
     if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -586,9 +595,9 @@ jobs:
           done
 
       # Every database suite that starts its own container (packages/db/tests/<dir>/*-local.mjs) runs in one
-      # of the two shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
+      # of the four shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
       - name: Integration — Database behaviour suites (run-local)
-        run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/2
+        run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/4
 
       # CORE-PATH-V2 V2-1: turn budget, on the same database image in each shard (about half a minute); the old path's numbers
       # are reported against scripts/turn-budget-baseline.json, a scenario marked "enforce": true may not exceed its baseline.
