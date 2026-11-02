@@ -94,10 +94,12 @@ try{
  assert.equal((await r.content([live.session])).visible,0);
  report.checks.push('restored database works: a new round continues the identity sequence, charges the restored balance by the same amount as its ledger row, and a conversation deletion runs');
  // 5. The comparison can fail: one changed receipt in the restored copy is found (rolled back afterwards).
+ const untouched=await picture(restored);   // taken now: the new round above already changed the restored copy
  await restored.query('begin');
  await restored.query(`update turn_calls set nominal_usd=nominal_usd+0.000001 where turn_id=(select min(id) from turns)`);
  const tampered=await picture(restored);await restored.query('rollback');
- assert.notDeepEqual(tampered.rows.turn_calls,before.pic.rows.turn_calls,'a changed receipt changes the table checksum');
+ assert.equal(tampered.rows.turn_calls[0],untouched.rows.turn_calls[0],'same row count: only a value changed');
+ assert.notEqual(tampered.rows.turn_calls[1],untouched.rows.turn_calls[1],'a changed receipt changes the table checksum');
  report.checks.push('negative control: a one-micro-dollar change to one receipt makes the same comparison fail');
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{
