@@ -45,7 +45,7 @@ beforeAll(async () => {
   const styles = fileURLToPath(new URL('../../../globals.css', import.meta.url));
   const mock = `const query = (data) => ({ useQuery: () => ({ data, isLoading: false, error: null, refetch() {} }) });
     export const trpc = { admin: { getFinanceStats: query(window.financeData) },
-      billingReport: { bill2ByModel: query(undefined) } };`;
+      billingReport: { turnByModel: query(undefined), unsettledTurns: query(undefined) } };`;
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env.NODE_ENV': JSON.stringify('development') },
     oxc: { jsx: { runtime: 'automatic' } }, css: { postcss: { plugins: [tailwind({ base: src })] } },

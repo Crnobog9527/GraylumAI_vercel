@@ -79,6 +79,16 @@ describe('POST /api/turn/estimate', () => {
     expect(await status(compareBody)).toEqual([503, { error: 'TURN_CORE_DISABLED' }]);
   });
 
+  it('a non-Gold account is refused with 403 and nothing created, for a compare and for a jury (Gold-only entries)', async () => {
+    for (const code of ['TURN_MEMBERSHIP_REQUIRED', 'FUSION_MEMBERSHIP_REQUIRED']) {
+      m.allowed.mockRejectedValueOnce(new Error(code));
+      expect(await status(compareBody)).toEqual([403, { error: code }]);
+      m.estimate.mockRejectedValueOnce(new Error(code));
+      expect(await status({ kind: 'jury', draftId: SESSION, sourceVersionId: REQUEST })).toEqual([403, { error: code }]);
+    }
+    expect(m.compare).not.toHaveBeenCalled();
+  });
+
   it('a jury answers with the price and the hold of its start', async () => {
     m.estimate.mockResolvedValue({ estimateCredits: 1500, holdCredits: 40, requiredCredits: 1540, maxRounds: 2, reviewers: 3 });
     expect(await status({ kind: 'jury', draftId: SESSION, sourceVersionId: REQUEST })).toEqual([200,
