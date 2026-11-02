@@ -507,7 +507,7 @@ it.each([
 
 // The required BILL2 CI suite executes the same offline PAYG financial cases as the dedicated runner.
 it('BILL2: PAYG v2 money paths, erasure, nominal pricing and real concurrency remain isolated',async()=>{
-  const base=new URL('../../../../../db/tests/payg',import.meta.url);
+  const base=new URL('../../../../../db/tests/payg/',import.meta.url);
   const load=(name:string)=>import(/* @vite-ignore */ new URL(name+'.mjs',base).href);
   const report={checks:[] as string[]};
   const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
@@ -534,13 +534,13 @@ it('BILL2: PAYG v2 money paths, erasure, nominal pricing and real concurrency re
 },60000);
 
 it('BILL2: provider rejection v1/v2 preserves paid calls and refunds once under cancellation races',async()=>{
- const base=new URL('../../../../../db/tests/payg',import.meta.url);
+ const base=new URL('../../../../../db/tests/payg/',import.meta.url);
  const {providerRejectionCases}=await import(/* @vite-ignore */new URL('provider-rejection.mjs',base).href);
  await providerRejectionCases({db,Client:pg.Client,connectionString});
 },60000);
 
 it('BILL2: an open staging test window admits any signed-in actor and keeps every other window check',async()=>{
- const base=new URL('../../../../../db/tests/payg',import.meta.url);
+ const base=new URL('../../../../../db/tests/payg/',import.meta.url);
  const load=(name:string)=>import(/* @vite-ignore */ new URL(name+'.mjs',base).href);
  const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
  const report={checks:[] as string[]};
@@ -563,7 +563,7 @@ it('BILL2: persistent provider rejection view preserves history, permissions and
 },60000);
 
 it('BILL2: historical receipt erasure preserves v1/v2 accounting and immutable evidence boundaries',async()=>{
- const base=new URL('../../../../../db/tests/erasure-b2b',import.meta.url);
+ const base=new URL('../../../../../db/tests/erasure-b2b/',import.meta.url);
  const report={checks:[] as string[]};
  const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
  if(!(await db.query("select to_regnamespace('b2a_test') name")).rows[0].name){
@@ -585,7 +585,7 @@ it('BILL2: historical receipt erasure preserves v1/v2 accounting and immutable e
 
 
 it('BILL2: erased run content keeps original financial recovery and rejects late refill',async()=>{
- const base=new URL('../../../../../db/tests/erasure-run',import.meta.url);
+ const base=new URL('../../../../../db/tests/erasure-run/',import.meta.url);
  const report={checks:[] as string[]};
  const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
  if(!(await db.query("select to_regnamespace('b2a_test') name")).rows[0].name){
@@ -606,7 +606,7 @@ it('BILL2: erased run content keeps original financial recovery and rejects late
 },60000);
 
 it('BILL2: erased call content keeps original financial recovery and rejects late refill',async()=>{
- const base=new URL('../../../../../db/tests/erasure-call',import.meta.url);
+ const base=new URL('../../../../../db/tests/erasure-call/',import.meta.url);
  const report={checks:[] as string[]};
  const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
  if(!(await db.query("select to_regnamespace('b2a_test') name")).rows[0].name){
