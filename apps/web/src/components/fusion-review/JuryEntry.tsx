@@ -15,7 +15,7 @@ import styles from './jury-entry.module.css';
 const codeOf = (error: unknown) => (error instanceof Error ? error.message : '');
 type Estimate = { estimateCredits?: number; requiredCredits?: number };
 
-/** The price on the turn path (POST /api/turn/estimate), read when the card opens; the old tRPC estimate serves the old path. */
+/** The price (POST /api/turn/estimate), read when the card opens. */
 function useTurnEstimate(on: boolean, draftId: string, sourceVersionId: string) {
   const [state, setState] = useState<{ data?: Estimate; error?: unknown; fetching: boolean; tick: number }>({ fetching: false, tick: 0 });
   useEffect(() => {
@@ -57,18 +57,13 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   const goldOnly = entitlements.data?.allowFusionReview === false;
   const mine = trpc.fusionReview.mine.useQuery({ draftId, limit: 1 }, { enabled, retry: false, staleTime: 15_000 });
   const panel = trpc.fusionReview.panel.useQuery(undefined, { enabled, staleTime: Infinity, retry: false });
-  const turnPath = available.data?.corePathV2 === true;
-  const oldStart = trpc.fusionReview.start.useMutation();
   const [starting, setStarting] = useState(false);
-  const start = { isPending: oldStart.isPending || starting };
+  const start = { isPending: starting };
   const [open, setOpen] = useState(false);
   // The Gold paywall opens on this page (Owner 2026-10-25).
   const [paywall, setPaywall] = useState(false);
   // The fixed price of a review and the balance a start needs (0294), shown before the user agrees.
-  const oldEstimate = trpc.fusionReview.estimate.useQuery({ draftId, sourceVersionId }, { enabled: enabled && open && !turnPath, retry: false,
-    staleTime: 0, refetchOnWindowFocus: false });
-  const turnEstimate = useTurnEstimate(enabled && open && turnPath, draftId, sourceVersionId);
-  const estimate: { data?: Estimate; error?: unknown; isFetching: boolean; refetch: () => unknown } = turnPath ? turnEstimate : oldEstimate;
+  const estimate = useTurnEstimate(enabled && open, draftId, sourceVersionId);
   const cap = estimate.data?.estimateCredits;
   const required = estimate.data?.requiredCredits;
   const [error, setError] = useState('');
@@ -99,11 +94,8 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
     requestId.current ||= crypto.randomUUID();
     if (!cap) return;
     try {
-      let review: { reviewId: string };
-      if (turnPath) {
-        setStarting(true);
-        review = await startJury({ requestId: requestId.current, draftId, sourceVersionId, acceptedCredits: cap }).finally(() => setStarting(false));
-      } else review = await oldStart.mutateAsync({ requestId: requestId.current, draftId, sourceVersionId, acceptedCredits: cap });
+      setStarting(true);
+      const review = await startJury({ requestId: requestId.current, draftId, sourceVersionId, acceptedCredits: cap }).finally(() => setStarting(false));
       router.push(reviewHref(draftId, review.reviewId));
     } catch (cause) {
       const code = codeOf(cause);

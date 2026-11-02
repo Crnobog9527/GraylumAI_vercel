@@ -2,8 +2,7 @@
 
 /** What the picker gets from fusionCompare.options (FUSION-COMPARE §3.3, §4). */
 export type CompareOptions = { enabled: false; reason: 'disabled' | 'plan' } | { enabled: true;
-  models: Array<{ id: string; name: string }>; defaultModelIds: string[]; minModels: number; maxModels: number; usable: boolean;
-  /** Which path a new compare starts on (CORE-PATH-V2 V2-10). */ corePathV2?: boolean };
+  models: Array<{ id: string; name: string }>; defaultModelIds: string[]; minModels: number; maxModels: number; usable: boolean };
 type Picker = Extract<CompareOptions, { enabled: true }>;
 
 /** Opening the picker: the administrator's default group, limited to models still offered and to the maximum.
