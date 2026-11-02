@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { router, adminProcedure } from '../trpc';
-import { logger } from '../lib/logger';
 import {
   meteringReviewInput, reviewMetering, meteringReviewSnapshotInput, meteringReviewSnapshot,
 } from '../services/turn/settings/meteringReview';
