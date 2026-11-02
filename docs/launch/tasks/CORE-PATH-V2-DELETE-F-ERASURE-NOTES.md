@@ -109,3 +109,15 @@ select (select count(*) from turns where state <> 'closed' or settlement = 'pend
 -- 3. 未结清旧 run 的总数（现在是 23）：与上面表对不上就先停下来问
 select count(*) from bill2_runs where not closed or state not in ('settled','refunded') or conflict;
 ```
+
+## 6. 总控 11-03 的决定
+
+- 2 条 v1 老 run 冻结的 896 积分：不退（测试账号）；23 条未结清旧 run：F 时丢弃。
+- `fusion_call_outputs`：F 时清空；`fusion_turn_outputs` 要保留（新路径的评审团输出）。清空语句由 V2-8 的 F 清单落。
+
+## 7. 删资料时新路径的保护（去掉 `runtime_library_propagate` 后）
+
+`runtime_library_propagate` 清的是旧路径存下的副本（旧执行的工具结果、历史项）。新路径不存资料文本：`read_source` 没有 `turn_calls` 行，
+`library_turn_read` 每次读都查活的文档（`deleted_at`、`status`、版本），已删资料立刻 `source_deleted`，搜索无命中、列表里没有，断点续跑也是重新读。
+`library_delete` 本身直接删 `library_document_segments`。回合表（`turn_call_raw`、`session_messages`）里只有模型的回答，不含资料原文。
+测试：`turn-erasure` 第 14 块（真实函数）。
