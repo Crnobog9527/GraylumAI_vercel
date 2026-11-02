@@ -358,10 +358,11 @@ export async function runReportFee({db,Client,connectionString,report}) {
   const done = await execution(db,del,undefined,false);
   await finish(db,done.id,'completed',{body:completeBody,completeness:'complete'});
   const running = await execution(db,del,undefined,false);
-  assert.equal((await erase(db,del,'artifact',del.project)).status,'deleted');
+  // The delete no longer settles a running report's held price (V2-12 R2b): it is counted, the result is review_required.
+  assert.equal((await erase(db,del,'artifact',del.project)).status,'review_required');
   assert.equal((await fee(db,done.id)).state,'charged','a complete report deleted later is still charged');
-  assert.equal((await fee(db,running.id)).state,'refunded','a running report deleted is refunded');
-  assert.equal(await wallet(db,del.actor),5000-PRICE);
+  assert.equal((await fee(db,running.id)).state,'held','a running report deleted keeps its held price');
+  assert.equal(await wallet(db,del.actor),5000-2*PRICE);
   await balanced(db,del.actor,'content erasure');
   const acc = await seed(db);
   await setBalance(db,acc.actor,5000);
@@ -390,7 +391,7 @@ export async function runReportFee({db,Client,connectionString,report}) {
     if (/CONTENT_ERASURE_BUSY/.test(raced[0])) await erase(racers[0],rc,'artifact',rc.project);
   } finally { await Promise.all(racers.map(x=>x.end())); }
   assert.equal((await fee(db,ended.id)).state,'refunded');assert.equal(await wallet(db,rc.actor),5000,'refunded once');
-  report.checks.push('report price: draft deletion charges a complete report and refunds a running one; account erasure refunds; held price pending; deletion racing the daily settlement does not deadlock');
+  report.checks.push('report price: draft deletion charges a complete report and leaves a running one held (review_required); account erasure refunds; held price pending; deletion racing the daily settlement does not deadlock');
 
   // Daily job: ended executions settle; one stuck for 3 days with its run closed and settled is refunded.
   const job = await seed(db);
