@@ -16,6 +16,7 @@ function createMockSupabase(data: {
   launchBaselineAt?: unknown;
   researchTotals?: {count:number;credits:number;turnOtherCredits?:number};
   calls?: { settledCalls: number; mismatched: number; sample: string[] };
+  turns?: { settledTurns: number; mismatched: number; sample: Array<{ actorId: string; turnId: string }> };
   sources?: { mismatched: number; sample: Array<{ kind: string; id: string }> };
 }) {
   const tables: Record<string, Array<Record<string, unknown>>> = {

@@ -41,6 +41,8 @@ export interface BillingReconciliationSummary {
   fusionReviewFixedPriceCredits?: number;
   settledCalls?: number;
   callLedgerMismatches?: number;
+  settledTurns?: number;
+  turnLedgerMismatches?: number;
   creditSourceMismatches?: number;
   unattributedSourceEntries?: number;
   notAppliedSourceEntries?: number;
