@@ -52,8 +52,6 @@ async function runFusionKick(supabase: SupabaseClient, origin: string) {
   catch { return { success: false, kicked: 0 }; }
 }
 
-}
-
 /** Research prices expire (TikHub after 7 days): re-read TikHub's official prices daily, alert before any price expires. */
 async function runResearchPriceRefresh(supabase: SupabaseClient) {
   let windowId: string | null = null;
@@ -68,8 +66,6 @@ async function runResearchPriceRefresh(supabase: SupabaseClient) {
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
-}
-
 async function runWaffoReconciliation(supabase: SupabaseClient) {
   const mode = paymentDeploymentMode();
   if (mode === 'test' ? process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true' : !process.env.WAFFO_MERCHANT_NAMESPACE) {
