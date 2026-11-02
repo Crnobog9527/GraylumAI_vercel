@@ -57,4 +57,28 @@ describe('the summary request when the opinions are written to the 8192 cap', ()
     expect(severities).toContain('critical');
     expect(severities).toContain('major');
   });
+
+  it('stays bounded when the opinions hold many severe issues that cannot be merged (every issue has one view, kept at every level up to 3)', () => {
+    const skill = { reviewer: 'r', summary: 's', rubric: 'b' };
+    const context = { report, materials: [], sections, maxCharacters: 12000 };
+    const omission = (seat: number) => parseOpinion(JSON.stringify({
+      decisions: DECISIONS.map(decision => ({ decision, strongestCase: text('理由', 1500), strongestAlternative: text('替代', 1500), verdict: 'change', basis: text('依据', 1500) })),
+      issues: Array.from({ length: 8 }, (_, i) => ({ location: sections[i], perspective: `视角${seat}`, severity: 'major', kind: 'omission', quote: '',
+        anchor: sections[i], problem: text(`缺失${seat}-${i}`, 1900), suggestion: text(`补充${seat}-${i}`, 1900) })),
+    }), { sections, report })!;
+    const opinions = [0, 1, 2].map(seat => ({ reviewer: String.fromCharCode(65 + seat), opinion: omission(seat) }));
+    const merge = mergeOpinions(opinions, { report, sections });
+    expect(merge.issues).toHaveLength(24);
+    // A small frozen size (no declared fields, a short report): what the deepest of the former levels still left too large.
+    const limit = 94_543;
+    const build = (level: number) => summaryRequestMerged(skill, { ...context, report: sections.map(name => `## ${name}\n短`).join('\n') }, merge, opinions, [], {}, level);
+    expect(fusionRequestBytes(build(3))).toBeGreaterThan(limit);
+    const sent = fitted(build, limit);
+    expect(fusionRequestBytes(sent)).toBeLessThanOrEqual(limit);
+    const input = JSON.parse(sent.input);
+    // All 24 severe issues are still handed over, each with its chapter, severity and a shortened text.
+    expect(input.issues).toHaveLength(24);
+    expect(input.issues.every((issue: { severity: string; section: string }) => issue.severity === 'major' && sections.includes(issue.section))).toBe(true);
+    expect(input.note).toContain('已被缩短');
+  });
 });

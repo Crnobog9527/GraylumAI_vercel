@@ -15,13 +15,14 @@ import { mergeOpinions } from './reviewMerge';
 import { REVIEWER_ROLES } from './reviewEvidence';
 
 /** The least trimming that fits the byte cap: 0 = full opinions; 1 = without replies and reasoning text; 2 = also only
- * critical and major issues; 3 = also no issues (the key-decision verdicts stay). */
+ * critical and major issues (merged summary) / no minor ones; 3 = one view per issue (merged summary) / no issues (plain summary:
+ * the key-decision verdicts stay); 4–5 (merged summary only) = every issue kept with shortened texts. */
 export function fitted(build: (level: number) => FusionRequest, limit: number): FusionRequest {
-  for (let level = 0; level < 3; level++) {
+  for (let level = 0; level < 5; level++) {
     const request = build(level);
     if (fusionRequestBytes(request) <= limit) return request;
   }
-  return build(3);
+  return build(5);
 }
 
 /** What a review decides from its record and saved answers, without billing: the frozen config, the reviewed source, each
