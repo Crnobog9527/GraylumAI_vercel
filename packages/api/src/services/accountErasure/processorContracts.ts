@@ -12,6 +12,14 @@ export const batchSchema = z.object({
   reason: z.enum(['call_set_open', 'billing_pending', 'content_pending', 'binding_busy', 'no_runtime_binding']).optional(),
 }).strict();
 export const detachSchema = z.union([batchSchema, z.object({ detached: z.literal(true) }).strict()]);
+export const financialSchema = z.object({
+  id: z.string().uuid(), state: z.enum(['prepared', 'dispatched', 'unknown', 'cost_pending', 'settled', 'refunded']),
+  executionId: z.string().uuid().nullable().optional(),
+});
+export const recoverySchema = z.object({
+  executionId: z.string().uuid(), runId: z.string().uuid(),
+  state: z.enum(['prepared', 'running', 'interrupted', 'waiting_credits', 'cost_pending', 'completed', 'cancelled']),
+});
 export const localSchema = z.object({
   remaining: count, manualReview: count, errors: z.array(z.string().regex(/^[A-Z0-9_]{1,64}$/)).max(100),
 }).strict();

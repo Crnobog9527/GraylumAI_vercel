@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { erasureRpcDiagnostic } from './rpcDiagnostics';
 import type { BillingRpc } from '../turn/provider/service';
 import {
-  batchSchema, beginSchema, contentRemaining, detachSchema, localSchema, resultSchema, storageReadySchema, storageSchema, workSchema,
+  batchSchema, beginSchema, contentRemaining, detachSchema, financialSchema, localSchema,
+  recoverySchema, resultSchema, storageReadySchema, storageSchema, workSchema,
 } from './processorContracts';
 
 export interface ErasureStorageAdapter {
@@ -100,15 +101,31 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
   };
   try {
     let work = await inventory();
-    const runs: string[] = [];
+    const runs: Array<{ id: string; terminal: boolean }> = [];
     const seen = new Set<string>();
     for (let page = 0; page < pages; page++) {
       for (const id of work.runs) {
         if (seen.has(id)) throw new ProcessorFault('ERASURE_INVALID_RESULT');
         seen.add(id);
-        // CORE-PATH-V2 V2-12: no per-run BILL2 cancel/finalize/read/recovery any more. The run scrubs and the detach below guard
-        // themselves (an open or unsettled run is left as it is, and the work batch's financialPending keeps the erasure pending).
-        runs.push(id);
+        await attempt(async () => {
+          const binding = { p_actor_id: input.profileId, p_run_id: id };
+          const cancelled = financialSchema.parse(await rpc('bill2_cancel', binding));
+          if (cancelled.id !== id) throw new ProcessorFault('ERASURE_IDENTITY_CHANGED');
+          const settled = financialSchema.parse(await rpc('bill2_finalize', binding));
+          if (settled.id !== id) throw new ProcessorFault('ERASURE_IDENTITY_CHANGED');
+          const view = financialSchema.parse(await rpc('bill2_read', binding));
+          if (view.id !== id) throw new ProcessorFault('ERASURE_IDENTITY_CHANGED');
+          if (view.executionId) {
+            const recovered = recoverySchema.parse(await rpc('runtime_financial_recovery', {
+              p_actor_id: input.profileId, p_execution_id: view.executionId, p_finish: true,
+            }));
+            if (recovered.executionId !== view.executionId || recovered.runId !== id) throw new ProcessorFault('ERASURE_IDENTITY_CHANGED');
+            if (!['completed', 'cancelled'].includes(recovered.state)) report.remaining++;
+          }
+          const terminal = ['settled', 'refunded'].includes(settled.state) && ['settled', 'refunded'].includes(view.state);
+          if (!terminal) { report.remaining++; report.stage = 'billing_pending'; }
+          runs.push({ id, terminal });
+        });
       }
       if (!work.nextRunId) break;
       if (page === pages - 1) { report.remaining++; error('ERASURE_PAGE_LIMIT'); break; }
@@ -125,11 +142,11 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
     for (const run of runs) {
       for (const name of ['account_erasure_scrub_receipts', 'account_erasure_scrub_run', 'account_erasure_scrub_calls']) {
         await attempt(async () => {
-          batch(await rpc(name, { ...actor, p_run_id: run, ...(name.endsWith('receipts') ? { p_limit: 100 } : {}) }));
+          batch(await rpc(name, { ...actor, p_run_id: run.id, ...(name.endsWith('receipts') ? { p_limit: 100 } : {}) }));
         });
       }
-      await attempt(async () => {
-        const detached = detachSchema.parse(await rpc('account_erasure_detach_runtime', { ...actor, p_run_id: run }));
+      if (run.terminal) await attempt(async () => {
+        const detached = detachSchema.parse(await rpc('account_erasure_detach_runtime', { ...actor, p_run_id: run.id }));
         if (!('detached' in detached)) batch(detached);
       });
     }

@@ -4,7 +4,8 @@
 -- or settling (state<>'closed' or settlement='pending'), so an erasure with a turn in flight stays 'billing_pending' and is not
 -- completed. Changed: account_erasure_financial_proof, _financial_batch (totalPending/oldestPendingAt/reasons only; items are still the
 -- old runs), _note_error (BILLING_CLEAR refused while a turn is open) and _preview (runsInFlight). Nothing is removed: the old BILL2
--- run handling (work_batch run list, scrub_run/_calls/_receipts, detach_runtime) stays until batch F, because bill2_runs.session_ref
+-- run handling (work_batch run list, the processor's bill2_cancel/finalize/read and runtime_financial_recovery calls, scrub_run/_calls/
+-- _receipts, detach_runtime) stays until batch F (the erasure-completion Fusion case fails without the processor's finalize), because bill2_runs.session_ref
 -- points at runtime_sessions and staging still holds thousands of old runs (Owner-side check 2026-11-02); the old rows are removed with
 -- their tables in F. Signatures and result keys are unchanged.
 -- Compatible: result shapes are the same. Repeatable: whole-function CREATE OR REPLACE.
