@@ -5,7 +5,7 @@ import { runTurn } from "@/lib/turn-stream";
 /*
  * CORE-PATH-V2 V2-10b: the first-week plan on POST /api/turn (kind=plan). A request is known by its id: GET /api/turn/plan reads it
  * after the stream, a dropped connection or a reload, so a request is sent once and its plan is never paid for twice. A plan that
- * cannot be read as one (the model's body, or a turn that failed) answers `valid: false`, as opc.planResult: the page releases
+ * cannot be read as one (the model's body, or a turn that failed) answers `valid: false`: the page releases
  * the request and the next click is a new one.
  */
 const READ_MS = 3000, READS = 120;
@@ -23,11 +23,11 @@ export async function readPlanTurn(sessionId: string, requestId: string, deps: P
   return (await response.json() as { plan: PlanTurn | null }).plan;
 }
 
-/** The retained request's turn, for the page's recovery; null while there is none or it cannot be read (the old record answers then). */
+/** The retained request's turn, for the page's recovery: undefined until it is read, null when the request has none. */
 export function usePlanTurn(sessionId: string | undefined, requestId: string | undefined) {
-  const [turn, setTurn] = useState<PlanTurn | null>(null);
+  const [turn, setTurn] = useState<PlanTurn | null | undefined>(undefined);
   useEffect(() => {
-    setTurn(null);
+    setTurn(undefined);
     if (!sessionId || !requestId) return;
     // Read until the turn closes: a recovery on this page finishes it, and a failed read is read again.
     let timer: ReturnType<typeof setTimeout>, left = READS, gone = false;
@@ -43,7 +43,10 @@ export function usePlanTurn(sessionId: string | undefined, requestId: string | u
   return turn;
 }
 
-/** What the page's recovery shows for a retained request that has a turn (the shape of opc.planRequestState's answer). */
+/** What the page's recovery shows for a retained request that never opened a turn: nothing was admitted, started or charged. */
+export const NO_PLAN_TURN = { admitted: false, materialRevoked: false, hasResult: false, state: null };
+
+/** What the page's recovery shows for a retained request that has a turn. */
 export function planTurnState(turn: PlanTurn) {
   return { admitted: true, materialRevoked: false, hasResult: turn.valid, state: turn.state === "closed" ? "completed" : "running" };
 }
@@ -58,7 +61,7 @@ async function closed(sessionId: string, requestId: string, deps: PlanTurnDeps):
   return null;
 }
 
-/** Sends the request unless it already has a turn, and answers as opc.planResult does. A refusal before opening is thrown with its code. */
+/** Sends the request unless it already has a turn, and answers with `valid`, a plan's items and its source round. A refusal before opening is thrown with its code. */
 export async function runPlanTurn(request: PlanTurnRequest, ids: { sessionId: string; moduleId: string }, known: PlanTurn | null,
   deps: PlanTurnDeps = browser) {
   if (!known) {

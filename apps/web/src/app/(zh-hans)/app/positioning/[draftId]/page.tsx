@@ -33,7 +33,7 @@ import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRet
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
-import { planTurnState, readPlanTurn, runPlanTurn, usePlanTurn } from "./plan-turn-path";
+import { NO_PLAN_TURN, planTurnState, readPlanTurn, runPlanTurn, usePlanTurn } from "./plan-turn-path";
 import { turnCodeNotice } from "@/app/(zh-hans)/app/runtime/turn-notices";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
@@ -65,7 +65,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
   const list = trpc.opc.list.useQuery(), turnPath = useMentorTurnPath(read.data?.sessionId, draftId);
-  const prepareStep = trpc.opc.prepareStep.useMutation();
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
   const mentorSendInFlight=useRef(false);
@@ -216,11 +215,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * distinguish "never admitted" from "admitted, outcome unknown" truthfully
    * instead of assuming a cancellation or a zero cost.
    */
-  const retainedState = trpc.opc.planRequestState.useQuery(
-    { draftId, requestId: retainedPlan?.requestId ?? "" },
-    { enabled: Boolean(retainedPlan?.requestId) },
-  );
   const retainedTurn = usePlanTurn(read.data?.sessionId, retainedPlan?.requestId);
+  const retainedState = { isLoading: Boolean(retainedPlan?.requestId) && retainedTurn === undefined, error: null as Error | null };
   /** The bound topic workspace of this draft (the consented entry target). */
   const bindTopic = trpc.opc.consentTopicWorkspace.useMutation();
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
@@ -856,21 +852,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * same request can be replayed instead of paying for a second call.
    */
   async function runPlanRequest(request: PlanRequest, sourceRoundId: string | null = d.roundId) {
-      // V2-10b: a request with a turn stays there; a new one takes the turn path when it is on; an old one stays where it is.
+      // V2-12: every plan request runs as a turn; a request that already has one is read, not sent again.
       const ids = { sessionId: read.data?.sessionId as string, moduleId: read.data?.moduleId as string };
       const turned = await readPlanTurn(ids.sessionId, request.requestId).catch(() => null);
-      const state = turned ? { executionId: null, state: null }
-        : await utils.opc.planRequestState.fetch({ draftId, requestId: request.requestId });
-      if (!turned && !state.executionId && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
+      if (!turned && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
         setNotice("原请求属于旧定位轮次，服务端尚无可恢复执行；已保留记录，没有按新定位生成。请核对后另行选择新请求。");
         throw new Error("OPC_OLD_REQUEST_NOT_ADMITTED");
       }
-      const onTurn = Boolean(turned) || (turnPath.on && !state.executionId);
-      const prepared = onTurn ? null : state.executionId ? { executionId: state.executionId }
-        : await prepareStep.mutateAsync(request);
-      if (prepared && state.state !== "completed") await execute.mutateAsync({ executionId: prepared.executionId });
-      const candidate = prepared ? await utils.opc.planResult.fetch({ draftId, executionId: prepared.executionId })
-        : await runPlanTurn(request, ids, turned).catch(cause => { setNotice(turnCodeNotice((cause as Error).message).text); throw cause; });
+      const candidate = await runPlanTurn(request, ids, turned).catch(cause => { setNotice(turnCodeNotice((cause as Error).message).text); throw cause; });
       if (!candidate.valid) {
         // This execution completed and returned a body that cannot be used as
         // a plan. It is safe to create a new request after the user edits the
@@ -953,7 +942,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
   /** The server's identity/lifecycle projection for the retained request. */
-  const retainedStateData = (retainedTurn ? planTurnState(retainedTurn) : retainedState.data) as
+  const retainedStateData = (retainedTurn ? planTurnState(retainedTurn) : retainedTurn === null ? NO_PLAN_TURN : undefined) as
     { admitted?: boolean; state?: string | null; hasResult?: boolean; materialRevoked?: boolean } | undefined;
   if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d) return <main className="p-6" role="alert">
