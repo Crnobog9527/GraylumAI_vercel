@@ -355,6 +355,10 @@ R2a #1649 已合并；R2b #1651 只去掉结算。旧内容清除/detach 按总�
 ## F 前一次性清理（staging，只读核对于 11-03）
 未结清旧 run 23 条（活账号的旧测试 run，已注销账号 0 条）、活跃旧 execution 19 条、待记成本 1 条。注销和删除内容现在都不会自动结掉它们，F 前要先结清或明确丢弃。
 
+### 7.6 #1652 改写时去掉的旧路径用例（2026-11-03，记录）
+
+这些用例靠旧执行器造数据或断言旧路径的行为，R1/R5/R6 改写后不再成立；对应的旧入口随 F 删，所以不补新路径版本：`capture.integration.ts` 的三个用例（resolve 的建议身份、complete 回调的投影、Q1 organizer 守卫）——`opc_capture_resolve` 现在只接受对话回合的建议，回合版由 turn-core 覆盖；`admissionGate.integration.ts` 的 `mentor` 入口（旧 `prepareStep`）；`turn-core` 里“同请求 id 在旧路径出现过”的拒绝断言。旧 BILL2 归档用例（`paywall-profile-archive`）没有删：归档的旧检查原样保留到 F，回合版新增 `OPC_BUSINESS_BUSY` 检查和用例。`report-revision` 重放 0334 时去掉对 `opc_step_material` 的补丁（该守卫已随 R1b 删除）。
+
 ## 8. 发现的问题（不在本任务范围，已记录）
 
 - `docs/runbooks/BILL2_V1_PENDING_READONLY.sql` 引用 10 个待删函数，删除时要一并处理。
