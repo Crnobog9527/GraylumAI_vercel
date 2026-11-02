@@ -188,11 +188,11 @@ function TopicWorkspaceContent() {
   }
 
   async function perform(proposed: Operation, fromBox = false) {
-    if (!storageKey || operationBusy.current || (stale && (proposed.kind === 'chat' || proposed.kind === 'adoptTopics'))) return; // A stale workspace opens no turn, retry included.
+    const opensTurn = proposed.kind === 'chat' || proposed.kind === 'adoptTopics'; // A stale workspace opens none, retry included.
+    if (!storageKey || operationBusy.current || (stale && opensTurn)) return;
     operationBusy.current = true;
     setWorking(true);
-    setError('');
-    setNotice('');
+    setError(''); setNotice('');
     try {
       // The browser lock prevents two tabs from replacing an unknown operation.
       await navigator.locks.request(storageKey, async () => {
