@@ -334,6 +334,26 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 - 现在清单还没清零：留下的函数里仍有 54 个从现役入口走得到、又碰要删的对象（注销 25、评审团/对比 21、复盘 4、账务 3、其余 1：`opc_capture_apply`、`opc_work_result` 随 ⑥ 和旧工作台用例一起去）。清零后重新生成，守卫通过才可以跑。
 - 本机演练：用建库脚本在带旧表数据的本机库上跑（演练记录补在这里）。
 
+### 7.5 注销与内容删除（R2，V2-9 窗口）留给 F 的清单
+
+来源：V2-9 窗口的 `R2-leftovers-for-F.md`（共享笔记目录，2026-11-03）。R2a（#1649）已合并，R2b（#1651）只去掉结算；旧内容清除和 detach 按总控决定保留到 F。**F 要把下面这些函数整段改写成不碰旧表的版本（或随 F 删），和批次 F 的迁移同时上库；F 迁移的自检守卫在它们没改完时会拒绝运行。**
+
+R2a #1649 已合并；R2b #1651 只去掉结算。旧内容清除/detach 按总控决定保留到 F。下面这些函数现在还读或写旧表（`runtime_executions`、`runtime_session_history`、`runtime_history_dependencies`、`runtime_tool_calls`、`runtime_session_batches`、`bill2_runs/calls/receipts`、`report_fees`、`fusion_billing_groups`），F 时整段改写成不碰旧表的版本，或随旧表一起删除。
+
+## content_erasure_*
+`content_erasure_scope`、`content_erasure_parent_guard`、`content_erasure_mark_session`、`content_erasure_financial_allowed`、`content_erasure_ledger_owned`、`content_erasure_visible`、`content_erasure_saved_readable`、`content_erasure_artifact_readable`、`content_erasure_runtime_check`、`content_erasure_preview`、`content_erasure_capture_steps`，以及 `content_erasure_confirm` 里剩下的旧 run/execution 内容清除段（0480 之后仍引用 `runtime_executions`、`runtime_*` 历史表、`bill2_runs`、`fusion_billing_groups`、`report_fees`）。
+
+## account_erasure_*
+- 读写旧表：`account_erasure_work_batch`、`account_erasure_scrub_content`（`report_fees`）、`account_erasure_body_remaining`、`account_erasure_prune_business`。
+- 随 F 删除：`account_erasure_scrub_runtime`、`account_erasure_detach_runtime`、`account_erasure_scrub_run`、`account_erasure_scrub_calls`、`account_erasure_scrub_receipts`。
+- `account_erasure_financial_batch` / `_financial_proof` / `_note_error` / `_preview` 里读旧 run 的那一段（旧 run 的 `financialPending`）在 F 去掉，只留回合一侧（0461 已加）。
+
+## Node（F 时一起改）
+`processor.ts` 里 `scrub_receipts/run/calls` 和 `detach_runtime` 的循环、`account_erasure_work_batch` 的 `runs` 列表，随上面的函数一起去掉；`financialRecovery.ts` 已是只读盘点，F 后只保留回合的计数。
+
+## F 前一次性清理（staging，只读核对于 11-03）
+未结清旧 run 23 条（活账号的旧测试 run，已注销账号 0 条）、活跃旧 execution 19 条、待记成本 1 条。注销和删除内容现在都不会自动结掉它们，F 前要先结清或明确丢弃。
+
 ## 8. 发现的问题（不在本任务范围，已记录）
 
 - `docs/runbooks/BILL2_V1_PENDING_READONLY.sql` 引用 10 个待删函数，删除时要一并处理。
