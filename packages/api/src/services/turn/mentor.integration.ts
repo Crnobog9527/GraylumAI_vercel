@@ -721,7 +721,9 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: pasted links settle in batches, make benchmarks
   expect(rows.every(r => r.turn_id !== null && r.execution_id === null)).toBe(true);
   expect((await db.query('select research_rounds,research_qualified from opc_drafts where draft_id=$1', [f.draftId])).rows[0].research_rounds).toBe(1);
   // V2-12 B9: the credit record's search list reads the benchmark batches too: one line per subcall, the account from the batch's raw body.
-  const spend = (await db.query(`select id from credit_transactions where user_id=$1 and idempotency_key like 'turn:%:spend'`, [f.actor])).rows[0];
+  // The spend row of the turn that searched (the draft may have had an opening turn before it).
+  const spend = (await db.query(`select ct.id from credit_transactions ct where ct.user_id=$1 and exists(select 1 from turn_calls c
+    where c.actor_id=ct.user_id and c.call_kind='tool' and 'turn:'||c.turn_id||':spend'=ct.idempotency_key)`, [f.actor])).rows[0];
   const charges = (await db.query('select research_user_tool_charges($1,$2) v', [f.actor, spend.id])).rows[0].v as Array<Record<string, unknown>>;
   expect(charges.length).toBeGreaterThanOrEqual(2);
   expect(charges.every(line => line.toolName === 'benchmark_fetch')).toBe(true);
