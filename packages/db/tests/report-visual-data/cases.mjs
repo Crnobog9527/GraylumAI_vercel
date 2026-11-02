@@ -12,10 +12,10 @@ const withData=(t=text(),b=block())=>`${t}\n\n${b}`;
 const stored=(body,extra={})=>({dataVersion:1,validatedAt:'2026-10-20T00:00:00.000Z',dropped:[],textEdited:[],
  data:{summary:'VISUAL_PRIVATE_DATA'},bodyHash:hash(body),...extra});
 
-/** A completed report execution whose generated body is `body`. */
+/** A completed report turn whose generated body is `body`. */
 async function seedBody(db,body) {
  const f=await seed(db);
- await db.query(`UPDATE runtime_executions SET result=jsonb_set(result,'{body}',to_jsonb($2::text)) WHERE id=$1`,[f.execution,body]);
+ await db.query(`UPDATE session_messages SET content=$2,content_hash=encode(sha256(convert_to($2,'utf8')),'hex') WHERE session_id=$1`,[f.session,body]);
  return f;
 }
 const doc=(db,f,action,{request=randomUUID(),revision=0,body=null,bodyHash=null,data=null}={})=>
@@ -106,9 +106,10 @@ export async function runCases({db,report,before0300}) {
  const closedFinal=await doc(db,closed,'finalize',{bodyHash:hash(withData()),data:stored(withData())});
  await closeAccount(db,closed.base);
  await rpc(db,'account_erasure_scrub_content',closed.actor);
+ await rpc(db,'account_erasure_scrub_turns',closed.actor);
  await rpc(db,'account_erasure_scrub_runtime',closed.actor);
  assert.equal(await versionReport(db,closedFinal.versionId),null);
- assert.doesNotMatch(JSON.stringify((await db.query('SELECT result FROM runtime_executions WHERE id=$1',[closed.execution])).rows),
+ assert.doesNotMatch(JSON.stringify((await db.query('SELECT content FROM session_messages WHERE session_id=$1',[closed.session])).rows),
   /VISUAL_PRIVATE/);
  report.checks.push('content deletion and account erasure clear the stored data, the block and the edit copies');
 }

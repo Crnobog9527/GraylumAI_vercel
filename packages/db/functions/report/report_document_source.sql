@@ -8,30 +8,22 @@ CREATE OR REPLACE FUNCTION public.report_document_source(a uuid, eid uuid)
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE e runtime_executions;p artifact_projects;r artifact_rounds;source jsonb;spec jsonb;
+DECLARE p artifact_projects;r artifact_rounds;source jsonb;spec jsonb;
  q artifact_requests;v artifact_versions;body text;revision bigint:=0;item jsonb;sid uuid;
  nt jsonb;gen_body text;gen_completeness text;gen_done boolean;
 BEGIN
  PERFORM bill2_actor(a);
  PERFORM id FROM profiles WHERE id=a FOR SHARE;
- SELECT session_id INTO sid FROM runtime_executions WHERE id=eid AND actor_id=a;
- -- CORE-PATH-V2 V2-7a: a report generated on the turn path is found by its turn's request id (the page's handle for it).
- IF sid IS NULL THEN nt:=report_turn_source(a,eid); sid:=(nt->>'sessionId')::uuid; END IF;
+ -- CORE-PATH-V2 V2-12 B6: a report is found by its turn's request id (the page's handle for it); there is no other source.
+ nt:=report_turn_source(a,eid);sid:=(nt->>'sessionId')::uuid;
  IF sid IS NULL THEN RAISE EXCEPTION 'REPORT_EXECUTION_REQUIRED'; END IF;
  PERFORM id FROM runtime_sessions WHERE id=sid AND actor_id=a FOR UPDATE;
- IF nt IS NULL THEN
-  SELECT * INTO e FROM runtime_executions WHERE id=eid AND actor_id=a FOR UPDATE;
-  PERFORM content_erasure_runtime_check(a,eid);
-  spec:=e.payload->'reportGeneration';
-  gen_body:=e.result->>'body';gen_completeness:=e.result->>'completeness';gen_done:=e.state='completed';
- ELSE
-  -- Read again under the session lock; a deleted conversation or an erasing account has no report to edit or publish.
-  nt:=report_turn_source(a,eid);
-  IF nt IS NULL OR (turn_tombstones(a,sid,'{}'::jsonb)->>'sessionTombstoned')::boolean
-   OR (turn_tombstones(a,sid,'{}'::jsonb)->>'accountErasing')::boolean THEN RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
-  spec:=nt->'spec';
-  gen_body:=nt->>'body';gen_completeness:=nt->>'completeness';gen_done:=(nt->>'completed')::boolean;
- END IF;
+ -- Read again under the session lock; a deleted conversation or an erasing account has no report to edit or publish.
+ nt:=report_turn_source(a,eid);
+ IF nt IS NULL OR (turn_tombstones(a,sid,'{}'::jsonb)->>'sessionTombstoned')::boolean
+  OR (turn_tombstones(a,sid,'{}'::jsonb)->>'accountErasing')::boolean THEN RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
+ spec:=nt->'spec';
+ gen_body:=nt->>'body';gen_completeness:=nt->>'completeness';gen_done:=(nt->>'completed')::boolean;
  IF spec IS NULL OR jsonb_typeof(spec)<>'object' THEN RAISE EXCEPTION 'REPORT_EXECUTION_REQUIRED'; END IF;
  SELECT * INTO p FROM artifact_projects WHERE id=(spec->>'projectId')::uuid AND actor_id=a FOR UPDATE;
  SELECT * INTO r FROM artifact_rounds WHERE id=(spec->>'roundId')::uuid AND project_id=p.id;
