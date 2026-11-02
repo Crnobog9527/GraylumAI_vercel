@@ -10,7 +10,7 @@ import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readAdmissionConfiguration } from './admission/admissionConfiguration';
 import { rowFor } from './settings/settingsRows';
 import { isPositioningRefusal } from './admission/positioningFallback';
-import { judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from './admission/positioningGate';
+import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from './admission/positioningGate';
 import type { PricingDeps } from './admission/pricingAdmission';
 import { ceil12, TurnStop } from './call';
 import { CORE_PATH_SETTING, GATE_CODES, type ChatDeps } from './chat';
@@ -147,7 +147,8 @@ export async function runCompareTurn(deps: CompareTurnDeps, input: CompareTurnIn
         onCost: usdCost => { spent.sent = true; spent.cost = usdCost === null ? null : ceil12(usdCost.toFixed(15)); } },
         gate.refusals24h >= POSITIONING_REFUSAL_CAP); }
       catch { refused = true; }
-      const usage = { chargeUser: false };
+      // The receipt names the Decisions model, so the finance report attributes this call to it and not to the first compare column.
+      const usage = { chargeUser: false, model: DECISIONS_MODEL };
       await calls.record(spent.sent
         ? { actorId: input.actorId, turnId: opened.turnId, seq, status: 'ok', nominalUsd: spent.cost ?? decisionUpper,
           actualUsd: spent.cost, usage, providerId: null, payloadHash: sha256(refused ? 'refused' : 'allowed'), raw: null }
