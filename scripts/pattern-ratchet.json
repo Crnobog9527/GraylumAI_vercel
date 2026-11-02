@@ -8,7 +8,7 @@
       ],
       "regex": "\\.catch\\(\\s*\\(\\)\\s*=>",
       "count": "matches",
-      "max": 46
+      "max": 37
     },
     {
       "id": "system-settings-direct-read",
@@ -19,7 +19,7 @@
       ],
       "regex": "\\.from\\('system_settings'\\)",
       "count": "files",
-      "max": 47
+      "max": 46
     },
     {
       "id": "process-env-direct-read",
@@ -33,7 +33,7 @@
       ],
       "regex": "process\\.env\\.",
       "count": "files",
-      "max": 59
+      "max": 58
     },
     {
       "id": "web-error-code-includes",

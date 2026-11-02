@@ -104,7 +104,7 @@ it('reads the 0233 gate state and fails operationally instead of guessing', asyn
 });
 
 it('maps the refusal to a stable code the front end can recognize', () => {
-  const error = stagingProcedureError(new StagingAccessError('POSITIONING_REQUIRED'), 'runtime.prepare');
+  const error = stagingProcedureError(new StagingAccessError('POSITIONING_REQUIRED'), 'runtime.start');
   expect(error.code).toBe('PRECONDITION_FAILED');
   expect(error.message.startsWith(POSITIONING_REQUIRED + '：')).toBe(true);
   expect(error.message).toContain('没有扣积分');

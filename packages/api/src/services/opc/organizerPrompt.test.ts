@@ -1,21 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {describe,expect,it,vi,beforeEach} from 'vitest';
-import type {SupabaseClient} from '@supabase/supabase-js';
-import type {LocalRuntimePolicy} from '../runtime/admission';
-import {opcService} from './service';
+import {describe,expect,it} from 'vitest';
 import {ORGANIZER_INSTRUCTIONS,organizerStepMaterial} from './organizerPrompt';
-const captured=vi.hoisted(()=>({policy:undefined as LocalRuntimePolicy|undefined}));
-vi.mock('../runtime/admission',()=>({runtimeAdmissionService:(_u:unknown,_a:unknown,p:LocalRuntimePolicy)=>{
-  captured.policy=p;return {prepare:async()=>({executionId:'synthetic'})};
-}}));
+import {mentorHost,mentorOrganizerInput,mentorState} from '../turn/mentorContext';
+import {mentorSystem,organizerInstructions} from '../turn/mentorPrompt';
 const schema=[{id:'goal',title:'目标与变现方式',required:true},
   {id:'audience',title:'服务受众',required:true},{id:'platform',title:'起步平台',required:true}];
 const id='10000000-0000-4000-8000-000000000001';
 const values={goal:{status:'provisional',nature:'decision',value:'增加工作日下午的到店客流，暂不扩店'},
   audience:{status:'unknown',nature:'unknown',value:''},platform:{status:'deferred',nature:'unknown',value:''}};
-vi.mock('../artifacts/workbench',()=>({workbenchService:()=>({read:async()=>({state:'draft',revisionId:id,
-  workflow:{steps:[{id:'current',title:'了解你',information:schema}]},steps:{current:{valid:false}}})})}));
-beforeEach(()=>{captured.policy=undefined;});
+
 describe('organizer complete-value context',()=>{
   it('projects only pinned current-step fields with values and statuses, including missing fields',()=>{
     expect(organizerStepMaterial('current',schema,{...values,foreign:{value:'not in schema'}})).toEqual({id:'current',fields:[
@@ -29,26 +22,21 @@ describe('organizer complete-value context',()=>{
   it.each([
     ['audience answer', '先服务附近独自阅读的自由职业者，给他们安静的空间'],
     ['platform choice', '小红书'],
-  ])('freezes existing goal and off-topic %s separately with the complete declared checklist',async(_name,input)=>{
-    const admin={rpc:vi.fn((name:string)=>{
-      const data:Record<string,unknown>={opc_query:{projectId:id,roundId:id,sessionId:id,information:{current:{schema,values}}},
-        artifact_query:{moduleId:id,workflow:{steps:[{id:"current",resources:[]}] }},runtime_admission_replay:null,runtime_session_context:{waitingOrganizer:null,scopeMaterial:{revision:1,content:{work:{roundId:id,steps:{current:{information:values}}}}}},opc_capture_apply:{processed:[],remaining:0,hasMore:false},opc_step_material:{revision:1,turnToken:id}};
-      if(!(name in data))throw new Error(name);
-      const response=Promise.resolve({data:data[name],error:null});
-      return Object.assign(response,{abortSignal:()=>response});
-    })} as unknown as SupabaseClient;
-    const user={auth:{getUser:async()=>({data:{user:{id,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
-    await opcService(user,admin).prepareStep({draftId:id,requestId:id,stepId:'current',questionId:'goal',
-      purpose:'mentor',organizeAfter:true,input});
-    const frozen=JSON.parse(captured.policy!.organizerInput!);
+  ])('freezes existing goal and off-topic %s separately with the complete declared checklist',(_name,input)=>{
+    const state=mentorState({draftId:id,projectId:id,roundId:id,mode:'new',moduleId:id,skillId:id,revisionId:id,packageHash:'a'.repeat(64),
+      steps:[{id:'current',title:'了解你',information:schema,resources:['SKILL.md']}],suggestions:{},fallbackEligible:false,
+      work:{roundId:id,steps:{current:{version:1,valid:false,information:values}}}},'current');
+    const host=mentorHost(state,'current',{opening:false,summary:false});
+    const frozen=mentorOrganizerInput(state,host,input).value as {userInput:string;captureFormat:string;
+      checklist:Array<{fields:Array<{id:string;value:string}>}>};
     expect(frozen.userInput).toBe(input);
     expect(frozen.captureFormat).toBe('v2');
     expect(frozen).not.toHaveProperty('currentQuestion');
-    expect(frozen.checklist[0].fields.map((f:{id:string})=>f.id)).toEqual(['goal','audience','platform']);
-    expect(frozen.checklist[0].fields[0].value).toBe(values.goal.value);
-    expect(captured.policy!.organizerInstructions).toContain('return empty patches');
-    expect(captured.policy!.additionalInstructions).toContain('Never pull the user back to a numbered question');
-
+    expect(frozen.checklist[0]!.fields.map(f=>f.id)).toEqual(['goal','audience','platform']);
+    expect(frozen.checklist[0]!.fields[0]!.value).toBe(values.goal.value);
+    expect(organizerInstructions(undefined,false)).toContain('return empty patches');
+    expect(mentorSystem({skillText:'',skillEntryChars:0,brandIdentity:false,mode:'new',host,skillFile:false,replyRule:''}).instructions)
+      .toContain('Never pull the user back to a numbered question');
   });
   it('requires complete updates, unchanged-content empty patches, and provisional status',()=>{
     expect(ORGANIZER_INSTRUCTIONS).toContain('updated COMPLETE value, preserving valid information');
@@ -73,11 +61,6 @@ describe('organizer complete-value context',()=>{
   });
 
 });
-
-vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
- ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
-}));
 
 it('preserves organizer descriptions without adding them to mentor field specs',async()=>{
  const {elicitFieldSpecs}=await import('../../shared/opcMethodPolicy');

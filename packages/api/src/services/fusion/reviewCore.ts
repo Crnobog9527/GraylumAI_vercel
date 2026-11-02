@@ -1,8 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { FusionMember } from './admission';
-import type { FusionBodyVerdict } from './executor';
+import type { FusionPhase } from './models';
 import { checkRevision, DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
 import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
 import { PAYG_PROFILE_MAX_BYTES } from '../turn/admission/paygHostPolicy';
@@ -13,6 +12,9 @@ import { reportBodyText } from '../../shared/reportData';
 import { evidenceRules, roleOf } from './reviewEvidenceFlow';
 import { mergeOpinions } from './reviewMerge';
 import { REVIEWER_ROLES } from './reviewEvidence';
+
+/** One model's request in a review step. */
+export type FusionMember = { modelId: string; phase: Exclude<FusionPhase, 'fusion_compare'>; request: FusionRequest };
 
 /** The least trimming that fits the byte cap: 0 = full opinions; 1 = without replies and reasoning text; 2 = also only
  * critical and major issues (merged summary) / no minor ones; 3 = one view per issue (merged summary) / no issues (plain summary:
@@ -113,27 +115,6 @@ export function reviewCore(admin: SupabaseClient, actorId: string) {
     const indexes = [...new Set([...first.keys(), ...second.keys()])].sort((a, b) => a - b);
     return indexes.map(index => ({ reviewer: reviewerLabel(index), opinion: (second.get(index) ?? first.get(index))! }));
   }
-  /** The frozen host check for one saved body (also used by recovery, §3.3). */
-  async function judgeText(view: ReviewView, src: Source, call: ReviewView['calls'][number], round: number, text: string): Promise<FusionBodyVerdict> {
-    if (call.phase === 'fusion_review') return parseOpinion(text, await opinionRules(view, src, round, call.modelId ?? null)) ? 'usable' : 'format_invalid';
-    return checkRevision(text, revisionInput(view, src)).ok ? 'usable' : 'revision_invalid';
-  }
-  /** Saved but never judged (a crash between save and verdict): judge again with the frozen check. */
-  /** Judges every saved, unjudged call of the review; returns every call of it that now has a verdict, so the daily
-   * recovery can settle all of them, not only those on its listing page (#962 review). */
-  async function rejudge(view: ReviewView, src: Source): Promise<string[]> {
-    const judged = view.calls.filter(c => c.verdict !== null).map(c => c.callId);
-    for (const call of view.calls.filter(c => c.verdict === null && c.dispatched)) {
-      const text = await outputOf(call.callId);
-      if (!text) continue;
-      const step = view.steps.find(s => s.groupId === call.groupId)!;
-      const verdict = await judgeText(view, src, call, step.round, text);
-      const result = await admin.rpc('fusion_call_verdict', { p_actor_id: actorId, p_call_id: call.callId, p_verdict: verdict });
-      if (result.error && !/FUSION_VERDICT_IMMUTABLE/.test(String(result.error.message))) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-      judged.push(call.callId);
-    }
-    return judged;
-  }
   const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
     sections: src.sections, maxCharacters: src.maxCharacters, evidence: Boolean(config.parse(view.config).evidence), ...reviewLocale(view.config) });
   /** Round 1 as sent, and the summary at its deepest trimming (verdicts only, which claimStep can always fall back to). */
@@ -213,5 +194,5 @@ export function reviewCore(admin: SupabaseClient, actorId: string) {
       awaitingChoice: true } } : { state: passed ? 'completed' : 'revision_failed', outcome: { kind: passed ? 'no_change' : 'revision_failed' } };
   }
   return { readSource, frozenValues, outputOf, callsAt, passedRevision, revisionInput, opinionRules, opinionsOf, finalOpinions,
-    judgeText, rejudge, contextOf, fitsWhenSent, phaseLimit, phaseOf, buildMembers, decide };
+    contextOf, fitsWhenSent, phaseLimit, phaseOf, buildMembers, decide };
 }

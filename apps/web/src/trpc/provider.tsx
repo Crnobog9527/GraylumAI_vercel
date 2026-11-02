@@ -1,7 +1,7 @@
 'use client';
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink, httpBatchStreamLink, httpLink, splitLink } from '@trpc/client';
+import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import React, { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
@@ -122,13 +122,9 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       onToken: token => { accessTokenRef.current = token; sessionPromiseRef.current = Promise.resolve(token); },
     });
     return trpc.createClient({ links: [sessionRefreshLink(session), splitLink({
-      condition: op => trpcLinkKind(op.path) === 'stream',
-      true: httpBatchStreamLink(options),
-      false: splitLink({
-        condition: op => trpcLinkKind(op.path) === 'single',
-        true: httpLink(options),
-        false: httpBatchLink(options),
-      }),
+      condition: op => trpcLinkKind(op.path) === 'single',
+      true: httpLink(options),
+      false: httpBatchLink(options),
     })] });
   });
 
