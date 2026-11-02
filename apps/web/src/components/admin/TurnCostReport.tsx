@@ -56,7 +56,6 @@ export function TurnModelReportCard() {
             <th className="text-right">名义费用（美元）</th>
           </tr></thead><tbody>{data.byDate.map((line) => <tr key={line.date}>
             <td>{line.date}</td><td className="text-right">{line.calls}</td><td className="text-right">{line.unknownCostCalls}</td>
-            <td className="text-right">{line.unknownActualCalls}</td>
             <td className="text-right">{costText(line.unknownCostCalls, line.nominalUsd)}</td>
           </tr>)}</tbody></table></>
         }
