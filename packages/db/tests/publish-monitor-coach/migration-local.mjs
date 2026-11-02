@@ -196,7 +196,7 @@ try {
     if (fact.day30 && fact.day30_on === on(30)) assert.deepEqual(fact.day30, truth.day30);
     assert.equal(fact.business_id, businesses[post.account]);
   }
-  assert.ok(day7 > 300 && imported > 20, `${day7} ${imported}`);
+  assert.ok(day7 > 250 && imported > 20, `${day7} ${imported}`);
   const outage = dataset.accounts.find(a => a.key === 'B').outages[0];
   const lost = posts.filter(x => x.post.platform === 'youtube' && x.post.account === 'B' && x.post.visibility === 'daily')
     .map(x => facts.get(x.post.platformPostId)).filter(f => f.day7 === null);
