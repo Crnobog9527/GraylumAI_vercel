@@ -23,8 +23,6 @@ function setup(overrides: Record<string, Override> = {}) {
       else if (name === 'account_erasure_work_batch') data = {
         requestId: request, stage: 'closed', runs: [run], nextRunId: null, financialPending: 0, manualReview: 0,
       };
-      else if (['bill2_cancel', 'bill2_finalize', 'bill2_read'].includes(name)) data = { id: run, state: 'settled', executionId: execution };
-      else if (name === 'runtime_financial_recovery') data = { runId: run, executionId: execution, state: 'completed' };
       else if (name === 'account_erasure_scrub_content') data = { artifact_generations: 1, artifact_generations_skipped: 0 };
       else if (name === 'account_erasure_scrub_runtime') data = { runtime_sessions: 1, runtime_sessions_skipped: 0 };
       else if (name === 'account_erasure_scrub_turns') data = { turn_call_raw: 1, turn_call_raw_skipped: 0, session_messages: 2, session_messages_skipped: 0 };
@@ -56,7 +54,8 @@ describe('unwired account erasure processor', () => {
     expect(await processAccountErasure(f.input)).toEqual({ stage: 'completed', retry: false, remaining: 0, manualReview: 0, errorCodes: [] });
     expect(f.maxActive()).toBe(1);
     expect(f.events.indexOf('account_erasure_auth_begin')).toBeLessThan(f.events.indexOf('AUTH_REMOVE'));
-    expect(f.events.indexOf('runtime_financial_recovery')).toBeLessThan(f.events.indexOf('account_erasure_scrub_runtime'));
+    // V2-12: the per-run BILL2 cancel/finalize/read and runtime_financial_recovery calls are gone from the pass.
+    expect(f.events.some(n => /^bill2_|runtime_financial_recovery/.test(n))).toBe(false);
     expect(f.rpc).toHaveBeenCalledWith('account_erasure_auth_result', { p_profile_id: actor, p_request_id: request, p_absent: true });
     expect(f.authAdapter.remove).toHaveBeenCalledExactlyOnceWith(actor);
     expect(f.events.some(n => /prepare|dispatch|claim/.test(n))).toBe(false);
@@ -84,10 +83,9 @@ describe('unwired account erasure processor', () => {
     const f = setup({
       account_erasure_work_batch: () => ({ requestId: request, stage: 'billing_pending', runs: [run],
         nextRunId: null, financialPending: 1, manualReview: 0 }),
-      bill2_finalize: () => ({ id: run, state: 'cost_pending' }),
     });
     const result = await processAccountErasure(f.input);
-    expect(result.stage).toBe('billing_pending'); expect(f.events).not.toContain('account_erasure_detach_runtime');
+    expect(result.stage).toBe('billing_pending');
     expect(f.authAdapter.remove).not.toHaveBeenCalled(); expect(f.storageAdapter.cleanSubject).toHaveBeenCalledOnce();
   });
   it('does not treat a locked row or cursor tail as completion', async () => {
@@ -173,7 +171,9 @@ describe('unwired account erasure processor', () => {
     expect(f.authAdapter.getState).not.toHaveBeenCalled(); expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
   it('rejects request and financial identity changes without exposing raw exceptions', async () => {
-    const f = setup({ bill2_finalize: () => ({ id: other, state: 'settled' }) });
+    let reads = 0;
+    const f = setup({ account_erasure_work_batch: () => ({ requestId: ++reads === 1 ? request : other, stage: 'closed', runs: [],
+      nextRunId: null, financialPending: 0, manualReview: 0 }) });
     expect((await processAccountErasure(f.input)).errorCodes).toContain('ERASURE_IDENTITY_CHANGED');
     expect(f.authAdapter.remove).not.toHaveBeenCalled();
     const g = setup({ account_erasure_local_cleanup: () => { throw new Error('private@example.test private payload'); } });
@@ -212,17 +212,17 @@ describe('unwired account erasure processor', () => {
     expect(f.authAdapter.remove).toHaveBeenCalledOnce();
   });
   it('never starts another RPC after a transaction timeout with uncertain completion', async () => {
-    const f = setup({ bill2_cancel: () => new Promise(() => {}) });
+    const f = setup({ account_erasure_scrub_content: () => new Promise(() => {}) });
     const result = await processAccountErasure({ ...f.input, budget: { operationTimeoutMs: 2 } });
     expect(result.errorCodes).toContain('ERASURE_OPERATION_TIMEOUT');
-    expect(f.events).toEqual(['account_erasure_work_batch', 'bill2_cancel']);
+    expect(f.events).toEqual(['account_erasure_work_batch', 'account_erasure_scrub_content']);
     expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
   it('a rejected transport may have committed and stops all subsequent RPCs and Auth', async () => {
-    const f = setup({ bill2_finalize: () => { throw new Error('socket dropped after commit: PRIVATE'); } });
+    const f = setup({ account_erasure_scrub_content: () => { throw new Error('socket dropped after commit: PRIVATE'); } });
     const result = await processAccountErasure(f.input);
     expect(result.errorCodes).toContain('ERASURE_RPC_UNCERTAIN');
-    expect(f.events).toEqual(['account_erasure_work_batch', 'bill2_cancel', 'bill2_finalize']);
+    expect(f.events).toEqual(['account_erasure_work_batch', 'account_erasure_scrub_content']);
     expect(f.authAdapter.remove).not.toHaveBeenCalled(); expect(JSON.stringify(result)).not.toContain('PRIVATE');
   });
   it('an explicit RPC error cannot be hidden by an otherwise clean inventory', async () => {
@@ -268,7 +268,9 @@ describe('unwired account erasure processor', () => {
     expect(f.storageAdapter.cleanSubject).toHaveBeenCalledOnce(); expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
   it('unfinished financial evidence cannot be overridden by an empty final inventory', async () => {
-    const f = setup({ bill2_finalize: () => ({ id: run, state: 'unknown' }) });
+    let reads = 0;
+    const f = setup({ account_erasure_work_batch: () => ({ requestId: request, stage: 'closed', runs: [run], nextRunId: null,
+      financialPending: ++reads === 1 ? 0 : 1, manualReview: 0 }) });
     const result = await processAccountErasure(f.input);
     expect(result.stage).toBe('billing_pending'); expect(result.remaining).toBeGreaterThan(0);
     expect(f.authAdapter.remove).not.toHaveBeenCalled();

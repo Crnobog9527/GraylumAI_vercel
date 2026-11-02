@@ -50,6 +50,13 @@ BEGIN
    AND (p_profile_id IS NULL OR p.id=p_profile_id)
    AND (r.state NOT IN ('settled','refunded') OR NOT r.closed
     OR e.state NOT IN ('completed','cancelled') OR s.active_execution=e.id)
+ ), open_turns AS (
+  -- CORE-PATH-V2 V2-12: a deleted account's core-path turns still open or settling are pending too; turn recovery settles them
+  -- (it does not look at the account's status), so they are reported here and never listed as work.
+  SELECT count(*) n,min(a.confirmed_at) oldest FROM account_erasure_requests a JOIN profiles p ON p.id=a.profile_id
+  JOIN turns t ON t.actor_id=p.id
+  WHERE p.status='deleted' AND p.is_deleted='true' AND (p_profile_id IS NULL OR p.id=p_profile_id)
+   AND (t.state<>'closed' OR t.settlement='pending')
  ), chosen AS (
   SELECT actor_id FROM candidates WHERE needs_work
   ORDER BY stage_updated_at,actor_id,id LIMIT 1
@@ -74,9 +81,10 @@ BEGIN
      FROM jsonb_array_elements(payload->'callPolicy') v))) ORDER BY id) FROM page),'[]'::jsonb),
   'nextRunId',CASE WHEN (SELECT count(*) FROM page)=p_limit
    THEN (SELECT id FROM page ORDER BY id DESC LIMIT 1) END,
-  'totalPending',(SELECT count(*) FROM candidates),
-  'oldestPendingAt',(SELECT min(confirmed_at) FROM candidates),
+  'totalPending',(SELECT count(*) FROM candidates)+(SELECT n FROM open_turns),
+  'oldestPendingAt',(SELECT min(m) FROM (SELECT min(confirmed_at) m FROM candidates UNION ALL SELECT oldest FROM open_turns) u),
   'reasons',coalesce((SELECT jsonb_object_agg(reason,n) FROM
-    (SELECT reason,count(*) n FROM candidates GROUP BY reason) counts),'{}'::jsonb)) INTO result;
+    (SELECT reason,sum(n)::bigint n FROM (SELECT reason,count(*) n FROM candidates GROUP BY reason
+      UNION ALL SELECT 'BILLING_PENDING',n FROM open_turns WHERE n>0) r GROUP BY reason) counts),'{}'::jsonb)) INTO result;
  RETURN result;
 END $function$;
