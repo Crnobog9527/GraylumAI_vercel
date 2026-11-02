@@ -12,6 +12,9 @@ DECLARE pending bigint:=0; manual bigint:=0; n bigint; entry record;
 BEGIN
  SELECT count(*) INTO pending FROM bill2_runs WHERE actor_id=p_profile_id
   AND (NOT closed OR state NOT IN ('settled','refunded') OR conflict);
+ -- CORE-PATH-V2 V2-12: plus the account's core-path turns still open or settling (a frozen hold, an unsettled close).
+ SELECT count(*) INTO n FROM turns WHERE actor_id=p_profile_id AND (state<>'closed' OR settlement='pending');
+ pending:=pending+n;
  SELECT count(*) INTO n FROM payment_orders WHERE user_id=p_profile_id
   AND (NOT erasure_payment_terminal(to_jsonb(payment_orders))
     OR (refund_approval IS NOT NULL AND coalesce(refund_approval->>'status','') NOT IN ('rejected','succeeded','failed')));
