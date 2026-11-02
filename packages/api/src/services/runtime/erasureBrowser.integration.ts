@@ -9,12 +9,12 @@ import {createRequire} from 'node:module';
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {runtimeExecutor} from './execute';
 import {runtimeActor} from './actor';
-import {createRuntimeBudget} from './budget';
+import {createRuntimeBudget} from '../turn/settings/budget';
 import {inflightFinancialHost} from './inflightFinancial';
 import {streamOriginalExecution} from './executionStream';
-import {QUESTION_CONTRACT} from './agentTools';
-import {openRouterAdapter} from '../bill2/openRouterAdapter';
-import type {RuntimeProgress} from './progress';
+import {QUESTION_CONTRACT} from '../turn/agent/agentTools';
+import {openRouterAdapter} from '../turn/provider/openRouterAdapter';
+import type {RuntimeProgress} from '../turn/agent/progress';
 
 // The browser dependency belongs to web; resolve its runtime there without adding an API dependency.
 type LocalPage={goto:(url:string)=>Promise<unknown>;waitForFunction:(fn:()=>boolean)=>Promise<unknown>;

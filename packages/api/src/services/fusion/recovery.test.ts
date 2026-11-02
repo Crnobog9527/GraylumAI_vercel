@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createRuntimeBudget } from '../runtime/budget';
+import { createRuntimeBudget } from '../turn/settings/budget';
 import { recoverFusionFinancials } from './recovery';
 
 const rejudged = vi.hoisted(() => [] as string[]);

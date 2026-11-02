@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
-import { DEFAULT_STOP_LOSS } from '../services/runtime/stopLossSettings';
+import { DEFAULT_STOP_LOSS } from '../services/turn/settings/stopLossSettings';
 import {
   DEFAULT_RUNTIME_RATE_LIMITS as config, RUNTIME_RATE_LIMIT_KEY as key, readRuntimeRateLimits, saveRuntimeRateLimits,
-} from '../services/runtime/rateLimitSettings';
+} from '../services/turn/settings/rateLimitSettings';
 import { runtimeSettingsHarness as harness } from './runtimeSettingsTestHarness';
 
 it.each([false, true])('legacy pause preserves quotas when already stopped=%s', async stopped => {

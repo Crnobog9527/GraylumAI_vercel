@@ -9,11 +9,11 @@ import { opcService } from '../opc/service';
 import { workbenchService } from '../artifacts/workbench';
 import { reportService } from './service';
 import { runtimeExecutor } from '../runtime/execute';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import { openRouterAdapter } from '../turn/provider/openRouterAdapter';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
-import type { FrozenPaygRun } from '../bill2/service';
+import type { FrozenPaygRun } from '../turn/provider/service';
 
 type Fixture = { actor: string; user: SupabaseClient; admin: SupabaseClient; registration: string;
   mentorModel: string; flow: ReturnType<typeof makeWorkflow> };

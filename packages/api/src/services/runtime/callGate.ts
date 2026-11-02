@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { GateRejection, RuntimeCallGate } from './newWorkGate';
+import type { GateRejection, RuntimeCallGate } from '../turn/admission/newWorkGate';
 
 export function runtimeCallGate(input: { call: RuntimeCallGate; actor: () => Promise<string>; version: 'bill2.v1' | 'bill2.v2';
   onRejected: (reason: GateRejection) => void; enter?: () => (() => void) | undefined }) {

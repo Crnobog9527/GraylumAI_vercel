@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BRAND_IDENTITY_INSTRUCTIONS } from '../modelIdentity/brandIdentity';
 import { clearSkillResourceCache, packageHash, sha256 } from '../skills/loader';
-import { GROUNDED_CARD_CONTRACT } from '../runtime/groundedCard';
-import { HOST_TURN_DATA_NOTICE_V1, type HostTurnContext } from '../runtime/hostTurn';
-import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
-import { freezeSharedPromptCache } from '../runtime/promptCache';
-import { replySettingInstructions } from '../runtime/replyLanguage';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import { GROUNDED_CARD_CONTRACT } from './agent/groundedCard';
+import { HOST_TURN_DATA_NOTICE_V1, type HostTurnContext } from './agent/hostTurn';
+import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from './provider/providerRequest';
+import { freezeSharedPromptCache } from './provider/promptCache';
+import { replySettingInstructions } from './agent/replyLanguage';
+import { openRouterBound } from './provider/openRouterPolicy';
 import { mentorSystem, mentorUserMessage, projectMentorHistory, SKILL_FILE_INSTRUCTIONS } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillEntryChars, skillFileReserveBytes } from './mentorSkill';
 

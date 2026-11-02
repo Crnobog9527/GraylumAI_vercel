@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash} from 'node:crypto';
 import {createR8Plan} from './batch-r8';
-import {decimal} from '../../packages/api/src/services/bill2/decimal';
+import {decimal} from '../../packages/api/src/services/turn/provider/decimal';
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 const money=(n:bigint)=>`${n/1000000000000n}.${String(n%1000000000000n).padStart(12,'0')}`;
 export const R9_ID='payg-profile-20261006-r9';

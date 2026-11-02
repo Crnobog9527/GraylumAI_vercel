@@ -2,16 +2,16 @@
 import type { TurnReplay } from '../resume';
 import type { CanonicalAccount } from '../../research/tools/accountLinks';
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
-import { FREE_CHAT_RESEARCH_INSTRUCTIONS } from '../../runtime/freeChatResearch';
-import { loadSkillTool, SKILL_LOAD_REFUSED } from '../../runtime/loadSkillTool';
-import type { RuntimeTool } from '../../runtime/runner';
+import { FREE_CHAT_RESEARCH_INSTRUCTIONS } from '../research/freeChatResearch';
+import { loadSkillTool, SKILL_LOAD_REFUSED } from '../skills/loadSkillTool';
+import type { RuntimeTool } from '../agent/runner';
 import type { VendorCalls } from '../../research/runtime/subcall';
 import type { CounterStore } from '../limiter';
 import { LOAD_SKILL_CALLS, READ_SOURCE_CALLS, type ResearchSetup } from './plan';
 import { researchTools, type ResearchToolsInput } from './research';
 import { researchRounds } from './rounds';
 import { READ_SOURCE_GUIDE } from './source';
-import { skillFileTool } from '../../runtime/skillFile';
+import { skillFileTool } from '../skills/skillFile';
 import { turnLoadSkillTool, turnSkillFileTool, type PreparedSkillFiles, type PreparedSkills } from './skills';
 import type { GeneralResearchToolName, ToolCallDeps, ToolCallOutcome, ToolPlan, ToolSummary, TurnTools } from './types';
 

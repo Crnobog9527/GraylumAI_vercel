@@ -3,8 +3,8 @@ import {expect, it} from 'vitest';
 import {captureHostContext, captureOrganizerInput} from './captureContext';
 import {existingPositioningInstructions, positioningMentorInstructions} from './existingPositioning';
 import {agentTurnInstructions} from './agentTurnPrompt';
-import {freezeHostPromptCache} from '../runtime/promptCache';
-import type {HostTurnContext} from '../runtime/hostTurn';
+import {freezeHostPromptCache} from '../turn/provider/promptCache';
+import type {HostTurnContext} from '../turn/agent/hostTurn';
 
 const steps = [{id: 'first', title: 'First'}, {id: 'later', title: 'Later'}];
 const information = {

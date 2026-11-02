@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
 import {selectBlockHistory,validateBlockCall,type HistoryOptions} from './historySelection';
-import {selectRuntimeHistory} from './context';
-import {freezeHistorySelection} from './hostTurn';
-import {PostgresSession} from './session';
+import {selectRuntimeHistory} from '../turn/agent/context';
+import {freezeHistorySelection} from '../turn/agent/hostTurn';
+import {PostgresSession} from '../turn/agent/session';
 const history = (count: number, width = 100) => Array.from({length: count}, (_, i) =>
   ({role: i % 2 ? 'assistant' : 'user', content: String(i + 1).padStart(width, 'x')}));
 const incoming = [{role: 'user', content: 'hello'}];

@@ -12,7 +12,7 @@ import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { opcService } from '../opc/service';
-import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
+import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
 import { publishSkillPackage } from '../skills/publication';
 import { CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
@@ -31,8 +31,8 @@ import { runTurnRecovery } from './recovery';
 import type { TurnEvent } from './sse';
 
 // The draft is started through the old service (it is not part of a turn); its rate limiter is not under test here.
-vi.mock('../runtime/newWorkGate', async importOriginal => ({
-  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+vi.mock('./admission/newWorkGate', async importOriginal => ({
+  ...await importOriginal<typeof import('./admission/newWorkGate')>(),
   ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 

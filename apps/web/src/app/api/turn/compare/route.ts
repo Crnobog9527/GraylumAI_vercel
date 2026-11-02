@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { readTurnRouteEnv } from '@repo/api/src/lib/envValidator';
-import { withCatalogRequest } from '@repo/api/src/services/runtime/catalogCache';
-import { newWorkGate } from '@repo/api/src/services/runtime/newWorkGate';
+import { withCatalogRequest } from '@repo/api/src/services/turn/settings/catalogCache';
+import { newWorkGate } from '@repo/api/src/services/turn/admission/newWorkGate';
 import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
 import { checkRateLimit } from '@repo/api/src/services/redisRateLimiter';
 import { handleCompareStart } from '@repo/api/src/services/turn/fusionHttp';

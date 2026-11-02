@@ -4,10 +4,10 @@ import { writeFileSync } from 'node:fs';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { testIdentityGuard } from '../__tests__/fixtures/runtimeGates';
-import { postgresJsonbBytes } from './payloadSize';
-import { PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP, type PurposeBudgets } from './purposeBudgets';
+import { postgresJsonbBytes } from '../turn/provider/payloadSize';
+import { PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP, type PurposeBudgets } from '../turn/settings/purposeBudgets';
 import { packageHash, sha256, type SkillSource } from '../skills/loader';
-import { replySettingInstructions } from './replyLanguage';
+import { replySettingInstructions } from '../turn/agent/replyLanguage';
 // New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
 const DEFAULT_REPLY_RULE = replySettingInstructions('zh-Hans');
 
@@ -169,7 +169,7 @@ it('standalone organization fits at its exact input cap and rejects one more byt
   `${process.env.MENTOR_PAYLOAD_PREFLIGHT_DIR}/organize-worst.json`,JSON.stringify(f.captured()));
 });
 
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

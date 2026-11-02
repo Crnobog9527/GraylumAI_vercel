@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {it,expect} from 'vitest';
 import type {Session} from '@openai/agents';
-import {runRuntime} from './runner';
-import {groundedCardTool,cardSources,rejectSeparateCardProse} from './groundedCard';
-import {agentTurnResult} from './agentTurnResult';
+import {runRuntime} from '../turn/agent/runner';
+import {groundedCardTool,cardSources,rejectSeparateCardProse} from '../turn/agent/groundedCard';
+import {agentTurnResult} from '../turn/agent/agentTurnResult';
 import {NativeSession} from './nativeSession';
-import {NativeProgressProjection} from './nativeProgress';
+import {NativeProgressProjection} from '../turn/agent/nativeProgress';
 it.each(['','单独生成的另一套安排。'])('SDK, public projection and saved history agree with guarded cards (%j)',async prose=>{
  const stored:unknown[]=[];
  const session:Session={getSessionId:async()=> 'synthetic',getItems:async()=>[],addItems:async items=>{stored.push(...items);},

@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import type {SkillCatalogEntry} from './skillCatalog';
+import type {SkillCatalogEntry} from '../turn/skills/skillCatalog';
 
 const mocks = vi.hoisted(() => ({catalog: [] as unknown[], voice: undefined as unknown}));
-vi.mock('./skillCatalog', async importOriginal => ({...await importOriginal<object>(), discoverSkillCatalog: async () => mocks.catalog}));
-vi.mock('./voiceCatalog', () => ({admitCatalogVoice: async () => mocks.voice}));
+vi.mock('../turn/skills/skillCatalog', async importOriginal => ({...await importOriginal<object>(), discoverSkillCatalog: async () => mocks.catalog}));
+vi.mock('../turn/admission/voiceCatalog', () => ({admitCatalogVoice: async () => mocks.voice}));
 import {admitSkillCatalog} from './skillCatalogAdmission';
-import {serializedResultBytes, skillCatalogReserveBytes} from './skillCatalog';
-import {loadSkillToolBytes} from './loadSkillTool';
+import {serializedResultBytes, skillCatalogReserveBytes} from '../turn/skills/skillCatalog';
+import {loadSkillToolBytes} from '../turn/skills/loadSkillTool';
 
 const id = (n: number) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 const entry: SkillCatalogEntry = {name: 'script-writer', description: '写口播稿。', moduleId: id(1), skillId: id(11), packageId: id(21),

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isPositioningRefusal } from '../runtime/positioningFallback';
+import { isPositioningRefusal } from '../turn/admission/positioningFallback';
 import { compareRpc, replayCompareGroup } from './compareAdmission';
 import { columnStreamer } from './compareStream';
 import type { FusionCallOutcome, FusionClaimedCall, ExecutableRun, FusionBodyVerdict } from './executor';

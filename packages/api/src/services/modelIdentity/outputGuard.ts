@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
 import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
-import { META_RESERVE, RESULT_BYTE_LIMIT } from '../runtime/resultCapacity';
+import { META_RESERVE, RESULT_BYTE_LIMIT } from '../turn/provider/resultCapacity';
 
 /**
  * MODEL-IDENTITY-GUARD layer 3: replace a model's first-person self-identification

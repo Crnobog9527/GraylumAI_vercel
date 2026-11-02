@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
 import {ADMIT_STALE, admitInTwoSteps, admitStale} from './admitSplit';
-import {readRwV2, RW_V2_KEY} from './rwV2';
+import {readRwV2, RW_V2_KEY} from '../turn/agent/rwV2';
 
 const args = {p_session_id: 's', p_request_id: 'r', p_payload: {a: 1}, p_billing: {b: 2}};
 const stale = () => new Error('RUNTIME_ADMISSION_DENIED', {cause: new Error(ADMIT_STALE)});

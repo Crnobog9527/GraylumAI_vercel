@@ -99,7 +99,7 @@ it('rejects an invalid declared template before any reservation or admission', a
   await expect(f.run()).rejects.toThrow('CAPACITY_EXCEEDED');
   expect(f.writes).toEqual([]);
 });
-vi.mock('./newWorkGate', async importOriginal => ({
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
  ...await importOriginal(), ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 

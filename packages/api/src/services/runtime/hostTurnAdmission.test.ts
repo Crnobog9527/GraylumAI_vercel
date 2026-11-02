@@ -4,26 +4,26 @@ import {expect,it,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './execute';
-import {openRouterBound} from '../bill2/openRouterPolicy';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX} from '../opc/agentTurnPrompt';
-import {freezeHistorySelection,HOST_TURN_DATA_NOTICE_V1,type HostTurnContext} from './hostTurn';
-import {runtimeScopeInput} from './context';
+import {freezeHistorySelection,HOST_TURN_DATA_NOTICE_V1,type HostTurnContext} from '../turn/agent/hostTurn';
+import {runtimeScopeInput} from '../turn/agent/context';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
-import {withPrimaryAddenda} from './primaryInstructions';
-import {replySettingInstructions} from './replyLanguage';
+import {withPrimaryAddenda} from '../turn/agent/primaryInstructions';
+import {replySettingInstructions} from '../turn/agent/replyLanguage';
 // New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
 const DEFAULT_REPLY_RULE=replySettingInstructions('zh-Hans');
-import {applyPromptCache} from './promptCache';
+import {applyPromptCache} from '../turn/provider/promptCache';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
-vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 const skill='Pinned skill 正文';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
-vi.mock('./billingUnitAdmission',async original=>({
- ...(await original<typeof import('./billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
+vi.mock('../turn/admission/billingUnitAdmission',async original=>({
+ ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
 }));
 const actor='10000000-0000-4000-8000-000000000001',modelId='10000000-0000-4000-8000-000000000002';
 const revisionId='10000000-0000-4000-8000-000000000003',moduleId='10000000-0000-4000-8000-000000000004';
@@ -124,13 +124,13 @@ it('rejects invalid or oversized host state before admit and reserves 150 even w
   .prepare(f.input)).rejects.toThrow('RUNTIME_CONTEXT_INVALID');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });
-vi.mock('./newWorkGate', async importOriginal => ({
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
  ...await importOriginal(), ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 it('uses identical marker reservation at the admission byte boundary with and without cache',async()=>{
  const f=hostFixture();
  const context=(await runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input)).context;
- const {askQuestionToolBytes}=await import('./agentTools');
+ const {askQuestionToolBytes}=await import('../turn/agent/agentTools');
  const current=runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext);
  // The executor appends the reply-language rule (SKILL-I18N-HOOK); admission sizes it as well.
  const edge=Buffer.byteLength(JSON.stringify({instructions:context.instructions+DEFAULT_REPLY_RULE,
@@ -155,7 +155,7 @@ it('keeps checklist values and update events outside the cached prefix and count
  expect(first.instructions).not.toContain('手填事实');
  expect(first.hostTurnContext).toEqual(host);
  expect(runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)).toContain('手填事实');
- const {askQuestionToolBytes}=await import('./agentTools');
+ const {askQuestionToolBytes}=await import('../turn/agent/agentTools');
  const edge=Buffer.byteLength(JSON.stringify({instructions:first.instructions+DEFAULT_REPLY_RULE,messages:[{role:'user',
   content:runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)}]}))+askQuestionToolBytes(true)+150+1024;
  for(const delta of [0,-1]) {

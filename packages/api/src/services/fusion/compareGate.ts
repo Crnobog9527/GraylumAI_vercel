@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { decisionsClassifier, POSITIONING_REFUSAL_CAP, readPositioningGate, type GateVerdict, type PositioningClassifier,
-  type PositioningGateState } from '../runtime/positioningGate';
+  type PositioningGateState } from '../turn/admission/positioningGate';
 
 /** POSITIONING-GATE for a compare (FUSION-COMPARE §3.2), the ordinary rules applied before any group exists:
  * a user who already has a confirmed positioning is never gated ('allow', no paid judgement); a Skill marked social-media

@@ -3,7 +3,7 @@ import { after } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { readTurnRouteEnv } from '@repo/api/src/lib/envValidator';
-import { withCatalogRequest } from '@repo/api/src/services/runtime/catalogCache';
+import { withCatalogRequest } from '@repo/api/src/services/turn/settings/catalogCache';
 import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
 import { checkRateLimit } from '@repo/api/src/services/redisRateLimiter';
 import { handReviewToServer } from '@repo/api/src/services/fusion/background';
@@ -12,7 +12,7 @@ import { handleTurnRequest } from '@repo/api/src/services/turn/http';
 import { handleTurnView } from '@repo/api/src/services/turn/view';
 import { redisCounterStore } from '@repo/api/src/services/turn/limiter';
 import { turnClients } from '@repo/api/src/services/turn/db';
-import { newWorkGate } from '@repo/api/src/services/runtime/newWorkGate';
+import { newWorkGate } from '@repo/api/src/services/turn/admission/newWorkGate';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 export const runtime = 'nodejs';

@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
-import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE_INSTRUCTIONS } from '../runtime/primaryInstructions';
-import { replySettingInstructions } from '../runtime/replyLanguage';
+import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../turn/admission/positioningFallback';
+import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE_INSTRUCTIONS } from '../turn/agent/primaryInstructions';
+import { replySettingInstructions } from '../turn/agent/replyLanguage';
 const REPLY_RULE = replySettingInstructions('zh-Hans');
-import { runtimeScopeInput } from '../runtime/context';
+import { runtimeScopeInput } from '../turn/agent/context';
 import { assertCompareFits, compareInput, compareInstructions, compareRequest, compareRequestBytes, snapshotHash, workspaceDependencies,
   type CompareParts } from './compareSnapshot';
 import { fusionRequestBytes } from './request';

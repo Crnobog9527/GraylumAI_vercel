@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import { toolResultEvidence, type ToolCallPolicy } from '../../bill2/toolBilling';
+import { toolResultEvidence, type ToolCallPolicy } from '../provider/toolBilling';
 import { callFirecrawl } from '../../research/vendors/firecrawl';
 import { callParallel } from '../../research/vendors/parallel';
 import { callTikhub } from '../../research/vendors/tikhub';

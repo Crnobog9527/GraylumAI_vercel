@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { rowFor, type ConfigurationRows } from './settingsRows';
-import { PAYG_HOST_SETTING, readPaygHostPolicies } from './paygHostPolicy';
-import { admitReasoning } from './reasoningAdmission';
-import { FREE_CHAT_REQUEST_FORMAT } from './providerRequest';
-import { StagingAccessError } from './stagingErrors';
-import type { StagingPolicy } from './stagingPolicy';
-import { admissionDeadline, admittedOutputLimit } from './admissionLimits';
+import { rowFor, type ConfigurationRows } from '../turn/settings/settingsRows';
+import { PAYG_HOST_SETTING, readPaygHostPolicies } from '../turn/admission/paygHostPolicy';
+import { admitReasoning } from '../turn/admission/reasoningAdmission';
+import { FREE_CHAT_REQUEST_FORMAT } from '../turn/provider/providerRequest';
+import { StagingAccessError } from '../turn/settings/stagingErrors';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
+import { admissionDeadline, admittedOutputLimit } from '../turn/admission/admissionLimits';
 
 /**
  * Free chat uses the first offered model by default, so the administrator's default

@@ -6,8 +6,8 @@
 // without its BILL2 link, and an unsent one is cancelled so a stable discovery cursor can move to a successor.
 // Nothing is sent unless every earlier step passed. A sent request is never resent or switched to another supplier.
 import { createHash } from 'node:crypto';
-import { BillingClaimRejection } from '../../bill2/claimFailure';
-import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy } from '../../bill2/toolBilling';
+import { BillingClaimRejection } from '../../turn/provider/claimFailure';
+import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy } from '../../turn/provider/toolBilling';
 import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
 import { callFirecrawl } from '../vendors/firecrawl';
 import { callParallel, type ParallelMode } from '../vendors/parallel';

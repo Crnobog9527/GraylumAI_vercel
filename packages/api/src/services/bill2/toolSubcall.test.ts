@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { BillingClaimRejection } from './claimFailure';
-import type { BillingRpc } from './service';
-import type { ToolClaimPayload, toolResultEvidence } from './toolBilling';
+import { BillingClaimRejection } from '../turn/provider/claimFailure';
+import type { BillingRpc } from '../turn/provider/service';
+import type { ToolClaimPayload, toolResultEvidence } from '../turn/provider/toolBilling';
 import { toolSubcallBilling } from './toolSubcall';
 
 const actorId = '11111111-1111-4111-8111-111111111111';

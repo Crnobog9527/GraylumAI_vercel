@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import type { ToolCallPolicy } from '../../bill2/toolBilling';
+import type { ToolCallPolicy } from '../../turn/provider/toolBilling';
 import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../vendors/config';
 import { tikhubRouteId } from '../vendors/tikhub';
 import type { ResearchCallResult } from '../vendors/types';
 import { benchmarkFetch } from './benchmarkFetch';
-import { researchRuntimeTools } from '../../runtime/researchRuntimeTool';
+import { researchRuntimeTools } from '../../turn/research/researchRuntimeTool';
 import type { FetchClaim, FetchState, RuntimeResearchStore } from './store';
 import type { EvidencePort, VendorCalls } from './subcall';
 import { stableResearchId, type ResearchToolContext } from './toolContext';

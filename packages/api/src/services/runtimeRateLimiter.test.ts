@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './runtime/rateLimitSettings';
+import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './turn/settings/rateLimitSettings';
 const mock = vi.hoisted(() => ({ limit: vi.fn(), remaining: vi.fn(), construct: vi.fn(), redis: vi.fn(), log: vi.fn() }));
 vi.mock('@upstash/redis', () => ({ Redis: class { constructor(options: unknown) { mock.redis(options); } } }));
 vi.mock('@upstash/ratelimit', () => ({ Ratelimit: class {

@@ -2,14 +2,14 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
-import { StagingAccessError, stagingProcedureError } from '../services/runtime/stagingErrors';
+import { StagingAccessError, stagingProcedureError } from '../services/turn/settings/stagingErrors';
 import { compareModelNames, compareOptions } from '../services/fusion/compareOptions';
 import { compareRpc } from '../services/fusion/compareAdmission';
 import { adoptCompare } from '../services/fusion/compareAdopt';
 import { compareSkillInput } from '../services/fusion/compareLoad';
 import { liveCompare, readCompare, stopCompare, type CompareCtx } from '../services/fusion/compareLive';
 import type { ColumnEvent } from '../services/fusion/compareColumn';
-import { readAdmissionConfiguration } from '../services/runtime/admissionConfiguration';
+import { readAdmissionConfiguration } from '../services/turn/admission/admissionConfiguration';
 import { readCoreConfig } from '../services/turn/chat';
 import { swallow } from '../lib/swallow';
 import { adoptTurnCompare, listTurnCompares, readTurnCompare } from '../services/turn/compareCards';

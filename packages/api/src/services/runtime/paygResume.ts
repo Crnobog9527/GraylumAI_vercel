@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {StagingAccessError} from './stagingErrors';
-import type { FrozenRun, FrozenPaygRun } from '../bill2/service';
-import { modelCallPolicies } from '../bill2/runPolicies';
-import type { RuntimeCallGate } from './newWorkGate';
+import {StagingAccessError} from '../turn/settings/stagingErrors';
+import type { FrozenRun, FrozenPaygRun } from '../turn/provider/service';
+import { modelCallPolicies } from '../turn/admission/runPolicies';
+import type { RuntimeCallGate } from '../turn/admission/newWorkGate';
 import type { PaygWait, ResumeInput } from './paygRuntime';
 
 export type RuntimeExecution = {

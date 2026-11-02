@@ -2,10 +2,10 @@
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { benchmarkReportFacts, benchmarkShortfallNote, confirmedReportFacts, completeReportCandidate, frozenReport, reportManifest, REPORT_FACT_BYTES } from './contract';
-import { frozenPurposeBudget, PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP } from '../runtime/purposeBudgets';
-import { runRuntime } from '../runtime/runner';
+import { frozenPurposeBudget, PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP } from '../turn/settings/purposeBudgets';
+import { runRuntime } from '../turn/agent/runner';
 import type { ArtifactSnapshot } from '../artifacts/public';
-import { runtimeContext } from '../runtime/runtimeContext';
+import { runtimeContext } from '../turn/agent/runtimeContext';
 function snapshot(n: number): ArtifactSnapshot {
   return { workflow: { steps: Array.from({ length: n }, (_, i) => ({ id: `s${i}`, title: `Part ${i}` })) },
     state: 'draft', steps: Object.fromEntries(Array.from({ length: n }, (_, i) => [`s${i}`, {

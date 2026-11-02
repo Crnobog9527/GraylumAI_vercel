@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { paygOwnerDatabase } from './paygOwner';
-import { PostgresSession } from './session';
+import { PostgresSession } from '../turn/agent/session';
 const id = '10000000-0000-4000-8000-000000000001';
 function fixture() {
   const database = { rpc: vi.fn(async () => ({ data: [], error: null })) };

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {HOST_TURN_DATA_NOTICE_V1} from '../runtime/hostTurn';
-import type {HostTurnContext} from '../runtime/hostTurn';
+import {HOST_TURN_DATA_NOTICE_V1} from '../turn/agent/hostTurn';
+import type {HostTurnContext} from '../turn/agent/hostTurn';
 
 const hostRules = (normalOpening = true) => [
   "Act as the single continuous mentor for the supplied workflow. Follow its pinned Skill and keep continuity across s",

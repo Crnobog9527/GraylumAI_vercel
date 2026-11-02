@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {PURPOSE_OUTPUT_CAP} from '../../runtime/purposeBudgets';
+import {PURPOSE_OUTPUT_CAP} from '../../turn/settings/purposeBudgets';
 // Capacity units, not a claim that a particular tokenizer emits one token here.
 // U+0001 serializes as six ASCII bytes; é contributes two UTF-8 bytes.
 export const outputUnit='\u0001é';

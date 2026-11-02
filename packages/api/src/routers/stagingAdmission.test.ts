@@ -13,12 +13,12 @@ import { router } from '../trpc';
 import { testPrimaryModel } from '../services/__tests__/fixtures/runtimeGates';
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 // I1: a real host admits only through a per-call (v2) profile; mock the profile reader and price freeze.
-vi.mock('../services/runtime/paygHostPolicy', async original => ({...(await original<typeof import('../services/runtime/paygHostPolicy')>()),
+vi.mock('../services/turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../services/turn/admission/paygHostPolicy')>()),
   readPaygHostPolicies: (await import('../services/__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('../services/runtime/paygPricing', async original => ({...(await original<typeof import('../services/runtime/paygPricing')>()),
   freezeStagingPaygPricing: (await import('../services/__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
-vi.mock('../services/runtime/billingUnitAdmission', async (original) => ({
-  ...(await original<typeof import('../services/runtime/billingUnitAdmission')>()),
+vi.mock('../services/turn/admission/billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('../services/turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
 }));
 const app = router({ opc: opcRouter, runtime: runtimeRouter });
@@ -309,7 +309,7 @@ it('capture resolve requires the same open test window as information and read e
   mocks.captureResolve.mockResolvedValueOnce({ version: 1, result: 'accept' });
   await expect(app.createCaller(context()).opc.captureResolve(input)).resolves.toEqual({ version: 1, result: 'accept' });
 });
-vi.mock('../services/runtime/newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('../services/runtime/newWorkGate')>(),
+vi.mock('../services/turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../services/turn/admission/newWorkGate')>(),
  ...(await import('../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import { decimal, DECIMAL_SCALE } from '../../bill2/decimal';
+import { decimal, DECIMAL_SCALE } from '../provider/decimal';
 import { stopLossStop, TurnStop } from '../call';
 import { tombstoned, TurnDatabaseError } from '../db';
 import type { SubcallReceipt, ToolCallDeps, ToolCallOutcome } from './types';

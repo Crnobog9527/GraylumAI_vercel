@@ -5,7 +5,7 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { expect, it } from 'vitest';
 import { runtimeExecutor } from './execute';
-import { POSITIONING_FALLBACK, POSITIONING_MARKER } from './positioningFallback';
+import { POSITIONING_FALLBACK, POSITIONING_MARKER } from '../turn/admission/positioningFallback';
 
 // POSITIONING-GATE (Owner 2026-10-12): Decisions was unavailable, so the turn carries the fallback rule. When the primary
 // model refuses with the structured marker, the round ends through fail_platform (0215 + 0233): the charged call is

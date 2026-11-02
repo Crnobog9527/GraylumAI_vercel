@@ -1,0 +1,316 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {it,expect,vi} from 'vitest';
+import {openRouterBound} from './openRouterPolicy';
+import {openRouterAdapter} from './openRouterAdapter';
+const identity={provider:'openrouter',account:'test',model:'test/model',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},outputLimit:100,upperUsd:'0.02'} as const;
+const body=JSON.stringify({model:identity.model,stream:false,store:false,messages:[],max_tokens:100,provider:openRouterBound(identity.providerLimits,identity.outputLimit).routing});
+it('dispatches once and preserves non-success bounded evidence',async()=>{
+ const transport=vi.fn(async()=>new Response('{"id":"gen-test"}',{status:500}));
+ const adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ const observation=await adapter.dispatch({input:body},identity);
+ expect(transport).toHaveBeenCalledTimes(1);
+ expect(transport.mock.calls[0]?.length).toBe(2);
+ expect(adapter.evidence(observation,identity,'response')).toMatchObject({providerId:'gen-test',cost:null,final:false});
+});
+it('denies implicit routing and tools before any transport',async()=>{
+ const transport=vi.fn(); const adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ await expect(adapter.dispatch({input:JSON.stringify({model:identity.model,messages:[]})},identity)).rejects.toThrow('DENIED');
+ await expect(adapter.dispatch({input:JSON.stringify({...JSON.parse(body),tools:[{}]})},identity)).rejects.toThrow('DENIED');
+ expect(transport).not.toHaveBeenCalled();
+});
+it('does not retry a transport failure',async()=>{
+ const transport=vi.fn(async()=>{throw new Error('connection lost');});
+ await expect(openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport}).dispatch({input:body},identity)).rejects.toThrow();
+ expect(transport).toHaveBeenCalledTimes(1);
+});
+it.each(['test/model:online','openrouter/auto','openrouter/fusion'])('denies implicit research or model routing through %s',async model=>{
+ const transport=vi.fn(),adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ await expect(adapter.dispatch({input:JSON.stringify({...JSON.parse(body),model})},{...identity,model})).rejects.toThrow('MODEL_DENIED');
+ expect(transport).not.toHaveBeenCalled();
+});
+it.each([
+ {plugins:{id:'web'}},{plugins:[]},{tools:{}},{web_search_options:{}},{models:[]},
+ {provider:{allow_fallbacks:false,require_parameters:true,only:['unexpected']}},
+ {messages:[{role:'user',content:[{type:'image_url',image_url:{url:'https://private.invalid/image'}}]}]},
+ {messages:[{role:'assistant',content:'',tool_calls:[{}]}]},
+ {messages:[null]},
+])('rejects unsupported routing, tools and remote content %# before credential access',async(patch)=>{
+ const transport=vi.fn(),credential=vi.fn();
+ const adapter=openRouterAdapter({credential,transport});
+ await expect(adapter.dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('DENIED');
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+it('accepts only the exact web-off plugin on a tool-free request (Fusion review); ordinary requests are unchanged',async()=>{
+ const transport=vi.fn<typeof fetch>(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ const webOff={...JSON.parse(body),plugins:[{id:'web',enabled:false}]};
+ await adapter.dispatch({input:JSON.stringify(webOff)},identity);
+ expect(JSON.parse(String(transport.mock.calls[0]?.[1]?.body)).plugins).toEqual([{id:'web',enabled:false}]);
+ await adapter.dispatch({input:body},identity);
+ expect(JSON.parse(String(transport.mock.calls[1]?.[1]?.body))).not.toHaveProperty('plugins');
+ const workspace=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ for(const [target,patch] of [
+  [adapter,{plugins:[{id:'web'}]}],[adapter,{plugins:[{id:'web',enabled:true}]}],[adapter,{plugins:[{enabled:false,id:'web'}]}],
+  [adapter,{plugins:[{id:'web',enabled:false},{id:'file-parser'}]}],[adapter,{plugins:[{id:'web',enabled:false,max_results:1}]}],
+  [adapter,{plugins:[{id:'web',enabled:false}],tool_choice:'none'}],[adapter,{tool_choice:'none'}],
+  [adapter,{plugins:[{id:'web',enabled:false}],tools:[]}],[workspace,{plugins:[{id:'web',enabled:false}],tools:[]}],
+ ] as const){
+  await expect(target.dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('DENIED');
+ }
+ expect(transport).toHaveBeenCalledTimes(2);
+});
+it('preserves bounded bytes on an oversized error response',async()=>{
+ const transport=vi.fn(async()=>new Response('x'.repeat(65537),{status:500}));
+ const adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ const observation=await adapter.dispatch({input:body},identity);
+ expect(observation.rawBody).toHaveLength(65536);expect(observation).not.toHaveProperty('rawBodyBase64');
+ expect(observation).toMatchObject({complete:false,transportIssue:'body_limit'});
+ expect(adapter.evidence(observation,identity,'response')).toMatchObject({cost:null,final:false});
+ expect(transport).toHaveBeenCalledTimes(1);
+});
+
+it('preflights once and binds the captured credential before any HTTP',async()=>{
+ let current='SYNTHETIC_ORIGINAL';const credential=vi.fn(async()=>current),transport=vi.fn<typeof fetch>(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({credential,transport});
+ const send=await adapter.prepareDispatch({input:body},identity);
+ expect(transport).not.toHaveBeenCalled();current='SYNTHETIC_CHANGED';
+ await send();expect(credential).toHaveBeenCalledTimes(1);
+ expect(transport.mock.calls[0]?.[1]).toMatchObject({headers:{Authorization:'Bearer SYNTHETIC_ORIGINAL'}});
+ expect(()=>send()).toThrow('CAPABILITY_CONSUMED');expect(transport).toHaveBeenCalledTimes(1);
+});
+
+it('allows only the opt-in first-party read_source tool and its message roundtrip',async()=>{
+ const transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ const source={type:'function',function:{name:'read_source',description:'Read own workspace',parameters:{type:'object',properties:{query:{type:'string'}}}}};
+ const request={...JSON.parse(body),tools:[source],messages:[{role:'assistant',content:null,tool_calls:[{id:'call-source',type:'function',function:{name:'read_source',arguments:'{}'}}]},{role:'tool',tool_call_id:'call-source',content:'{"entries":[]}'}]};
+ await adapter.dispatch({input:JSON.stringify(request)},identity);
+ expect(transport).toHaveBeenCalledTimes(1);
+ for(const patch of [{tools:[{...source,function:{...source.function,name:'search'}}]},{plugins:[{id:'web'}]},{messages:[{role:'assistant',content:null,tool_calls:[{id:'bad',type:'function',function:{name:'search',arguments:'{}'}}]}]}]){
+  await expect(adapter.dispatch({input:JSON.stringify({...request,...patch})},identity)).rejects.toThrow('DENIED');
+ }
+ expect(transport).toHaveBeenCalledTimes(1);
+});
+
+it.each(['complete','timeout'])('bounds the full response, not each keepalive (%s)',async(mode)=>{
+ vi.useFakeTimers();
+ const timeout=vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>{const c=new AbortController();setTimeout(()=>c.abort(new DOMException('Timed out','TimeoutError')),ms);return c.signal;});
+ let signal:AbortSignal|undefined,ended=false;
+ const transport=vi.fn<typeof fetch>(async(_url,init)=>{
+  signal=init!.signal as AbortSignal;
+  return new Response(new ReadableStream({start(controller){
+   controller.enqueue(new TextEncoder().encode(' '.repeat(165)));
+   signal!.addEventListener('abort',()=>controller.error(signal!.reason),{once:true});
+   // A late nonstream response may send keepalives before any JSON.
+   if(mode==='complete')setTimeout(()=>{controller.enqueue(new TextEncoder().encode('{"id":"gen-late"}'));controller.close();},60_000);
+   else setTimeout(()=>controller.enqueue(new TextEncoder().encode(' ')),119_000);
+  }}),{headers:{'X-Generation-Id':'gen-late'}});
+ });
+ try{
+  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport});
+  const pending=adapter.dispatch({input:body},identity).then(v=>{ended=true;return v;});
+  await vi.advanceTimersByTimeAsync(45_001);expect(ended).toBe(false);expect(signal?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(mode==='complete'?14_999:194_999);
+  const observed=await pending;expect(observed).toMatchObject({generationId:'gen-late',complete:mode==='complete',transportIssue:mode==='complete'?null:'body_timeout'});
+  expect(timeout).toHaveBeenCalledWith(240_000);expect(transport).toHaveBeenCalledTimes(1);
+  expect(adapter.evidence(observed,identity,'response')).toMatchObject({providerId:'gen-late',cost:null,final:false});
+ }finally{timeout.mockRestore();vi.useRealTimers();}
+});
+it.each([1_500,45_000])('keeps lookup timeout bounded to %i ms and does not retry it',async(timeoutMs)=>{
+ vi.useFakeTimers();const timeout=vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>{const c=new AbortController();setTimeout(()=>c.abort(),ms);return c.signal;});
+ const transport=vi.fn<typeof fetch>(async(_url,init)=>new Response(new ReadableStream({start(controller){init!.signal!.addEventListener('abort',()=>controller.error(new Error('stopped')),{once:true});}})));
+ try{
+  const pending=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport}).lookup('gen-local',identity,{timeoutMs});
+  await vi.advanceTimersByTimeAsync(timeoutMs);expect(await pending).toMatchObject({complete:false,transportIssue:'body_timeout'});
+  expect(timeout).toHaveBeenCalledWith(timeoutMs);expect(transport).toHaveBeenCalledTimes(1);
+ }finally{timeout.mockRestore();vi.useRealTimers();}
+});
+it('retains only the bounded generation header when the network interrupts a body',async()=>{
+ let reads=0;const transport=vi.fn<typeof fetch>(async()=>new Response(new ReadableStream({pull(controller){if(reads++===0)controller.enqueue(new TextEncoder().encode('   '));else controller.error(new Error('disconnect'));}}),{headers:{'X-Generation-Id':'gen-local','Authorization':'DO_NOT_RETAIN'}}));
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport});const observed=await adapter.dispatch({input:body},identity);
+ expect(observed).toMatchObject({generationId:'gen-local',rawBody:'   ',complete:false,transportIssue:'body_interrupted'});
+ expect(JSON.stringify(observed)).not.toContain('DO_NOT_RETAIN');expect(adapter.evidence(observed,identity,'response')).toMatchObject({providerId:'gen-local',cost:null,final:false});
+});
+it.each(['','a'.repeat(257),'gen-first, gen-second','gen unsafe'])('does not retain malformed generation header %#',async id=>{
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport:async()=>new Response('broken',{headers:{'X-Generation-Id':id}})});
+ expect(await adapter.dispatch({input:body},identity)).not.toHaveProperty('generationId');
+});
+it('preserves the lookup identity even when an error response exceeds its unchanged byte cap',async()=>{
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport:async()=>new Response('x'.repeat(65537),{status:500,headers:{'X-Generation-Id':'gen-limit'}})});
+ const observation=await adapter.dispatch({input:body},identity);
+ expect(observation.rawBody).toHaveLength(65536);expect(observation).not.toHaveProperty('rawBodyBase64');
+ expect(adapter.evidence(observation,identity,'response')).toMatchObject({providerId:'gen-limit',cost:null,final:false,evidenceKind:'transport_observation'});
+});
+
+it('forwards only an approved reasoning_effort byte-for-byte',async()=>{
+ const transport=vi.fn(async()=>new Response('{"id":"gen-reasoning"}',{status:200})),credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY');
+ const input=JSON.stringify({...JSON.parse(body),reasoning_effort:'none'});
+ await openRouterAdapter({credential,transport}).dispatch({input},identity);
+ expect(transport).toHaveBeenCalledTimes(1);expect((transport.mock.calls[0] as unknown as [string,RequestInit])[1].body).toBe(input);
+});
+it('forwards reasoning_effort none for the DeepSeek mentor model byte-for-byte',async()=>{
+ const deepseek={...identity,model:'deepseek/deepseek-v4.1-flash'};
+ const transport=vi.fn(async()=>new Response('{"id":"gen-deepseek"}',{status:200})),credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY');
+ const input=JSON.stringify({...JSON.parse(body),model:deepseek.model,reasoning_effort:'none'});
+ await openRouterAdapter({credential,transport}).dispatch({input},deepseek);
+ expect(transport).toHaveBeenCalledTimes(1);expect((transport.mock.calls[0] as unknown as [string,RequestInit])[1].body).toBe(input);
+});
+it.each([
+ {reasoning_effort:''},{reasoning_effort:null},{reasoning_effort:0},{reasoning_effort:{effort:'none'}},
+ {reasoning:{effort:'unknown'}},{reasoning:{enabled:true}},{reasoning_effort:'none',reasoning:{exclude:true}},{include_reasoning:false},{verbosity:'low'},
+])('rejects unapproved reasoning parameters %# before credential access',async(patch)=>{
+ const transport=vi.fn(),credential=vi.fn();
+ await expect(openRouterAdapter({credential,transport}).dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+
+it.each([
+ ...['none','minimal','low','medium','high','xhigh','max'].flatMap(effort=>[{reasoning_effort:effort},{reasoning:{effort}}]),
+ {reasoning:{enabled:false}},{reasoning:{max_tokens:1}},{reasoning:{max_tokens:128000}},
+])('forwards documented reasoning structure byte-for-byte %#',async(patch)=>{
+ const transport=vi.fn<typeof fetch>(async()=>new Response('{}')),credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY');
+ const input=JSON.stringify({...JSON.parse(body),...patch});
+ await openRouterAdapter({credential,transport}).dispatch({input},identity);
+ expect(transport).toHaveBeenCalledTimes(1);expect(transport.mock.calls[0]![1]!.body).toBe(input);
+});
+it.each([
+ {reasoning:{enabled:false,effort:'none'}},{reasoning:{effort:'high',max_tokens:1}},
+ {reasoning:{max_tokens:0}},{reasoning:{max_tokens:-1}},{reasoning:{max_tokens:1.5}},
+ {reasoning:{max_tokens:128001}},{reasoning:{max_tokens:'100'}},
+ {reasoning:{}},{reasoning:[]},{reasoning:null},{reasoning:{exclude:false}},
+ {reasoning_effort:'none',reasoning:{enabled:false}},
+])('rejects ambiguous or unbounded reasoning before credentials %#',async(patch)=>{
+ const transport=vi.fn(),credential=vi.fn();
+ await expect(openRouterAdapter({credential,transport}).dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('BILL2_PROVIDER_REQUEST_DENIED');
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+
+it.each(['header','frame','conflict','invalid-header'])(
+ 'emits one reliable early identity without waiting for the response tail: %s',async(mode)=>{
+ let finish!:()=>void;
+ const tail=new Promise<void>(resolve=>{finish=resolve;});
+ const encode=(id:string,content:string)=>new TextEncoder().encode('data: '+JSON.stringify({
+  id,model:identity.model,choices:[{index:0,delta:{content},finish_reason:null}],
+ })+'\n\n');
+ const stream=new ReadableStream<Uint8Array>({async start(controller){
+  controller.enqueue(encode('gen-first','first'));await tail;
+  if(mode==='conflict')controller.enqueue(encode('gen-second','second'));
+  controller.close();
+ }});
+ const headers=mode==='header'||mode==='conflict'?{'x-generation-id':'gen-first'}:
+  mode==='invalid-header'?{'x-generation-id':'invalid id'}:undefined;
+ const transport=vi.fn(async()=>new Response(stream,{headers}));
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport});
+ const early=vi.fn(),chunk=vi.fn();
+ const send=await adapter.prepareDispatch({input:JSON.stringify({...JSON.parse(body),stream:true,stream_options:{include_usage:true}})},
+  identity,chunk,early);
+ let complete=false;const result=send().then(value=>{complete=true;return value;});
+ for(let i=0;i<20;i++)await Promise.resolve();
+ expect(early).toHaveBeenCalledExactlyOnceWith('gen-first');expect(chunk).toHaveBeenCalled();expect(complete).toBe(false);
+ finish();const observed=await result;
+ expect(early).toHaveBeenCalledTimes(1);
+ if(mode==='conflict')expect(adapter.evidence(observed,identity,'response')).toMatchObject({
+  providerId:null,cost:null,final:false,rejectedReason:'identity_or_response_mismatch',
+ });
+});
+it('an early identity observer failure does not interrupt provider reading',async()=>{
+ const transport=vi.fn(async()=>new Response('{}',{headers:{'x-generation-id':'gen-test'}}));
+ const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport});
+ const send=await adapter.prepareDispatch({input:body},identity,undefined,()=>{throw new Error('storage down');});
+ expect(await send()).toMatchObject({complete:true,generationId:'gen-test'});
+});
+
+it('v2 independently verifies final UTF-8 request, counts and per-call U before credentials',async()=>{
+ const {openRouterCallBound}=await import('./openRouterPolicy');
+ const request={...JSON.parse(body),messages:[{role:'user',content:'中文🙂'}]};
+ const wire=JSON.stringify(request),bytes=Buffer.byteLength(wire);
+ const nominalPricing={version:'nominal-v1' as const,pricingHash:'a'.repeat(64),endpointTag:'synthetic',
+  tiers:[{minPromptTokens:0,prompt:'2',completion:'0',request:'0'}],timeOfDay:[]};
+ const payg={policyId:'policy',policyVersion:'v1',profileVersion:'v1',evidenceVersion:'fixture-v1',
+  bytes,templateTokens:100,marginTokens:100,promptTokensUpper:bytes+200,messages:1,tools:0,schemaBytes:0,
+  pricingHash:nominalPricing.pricingHash,endpointTag:'synthetic',nominalPricing};
+ const bound=openRouterCallBound(identity.providerLimits,identity.outputLimit,payg.promptTokensUpper);
+ const v2={...identity,payg,upperUsd:bound.upperUsd};
+ const credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY'),transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({credential,transport});
+ await adapter.dispatch({input:wire},v2);
+ expect(transport).toHaveBeenCalledTimes(1);
+ credential.mockClear();transport.mockClear();
+ for(const mutation of [{bytes:wire.length,promptTokensUpper:wire.length+200},{messages:2},{tools:1},{schemaBytes:1}]){
+  await expect(adapter.prepareDispatch({input:wire},{...v2,payg:{...payg,...mutation}})).rejects.toThrow('QUOTE_CONFLICT');
+ }
+ await expect(adapter.prepareDispatch({input:wire},{...v2,upperUsd:identity.upperUsd})).rejects.toThrow('QUOTE_CONFLICT');
+ await expect(adapter.prepareDispatch({input:wire},{...v2,payg:{...payg,nominalPricing:{...nominalPricing,
+  tiers:[{...nominalPricing.tiers[0]!,prompt:'3'}]}}})).rejects.toThrow('BOUND_CONFLICT');
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});
+it('v2 binds actual tool parameter and response format schema bytes',async()=>{
+ const {openRouterCallBound}=await import('./openRouterPolicy');
+ const tool={type:'function',function:{name:'read_source',parameters:{type:'object',properties:{query:{type:'string'}}}}};
+ const response_format={type:'json_object'};
+ const request={...JSON.parse(body),messages:[{role:'user',content:'read'}],tools:[tool],response_format};
+ const wire=JSON.stringify(request),bytes=Buffer.byteLength(wire);
+ const nominalPricing={version:'nominal-v1' as const,pricingHash:'a'.repeat(64),endpointTag:'synthetic',
+  tiers:[{minPromptTokens:0,prompt:'2',completion:'0',request:'0'}],timeOfDay:[]};
+ const payg={policyId:'policy',policyVersion:'v1',profileVersion:'v1',evidenceVersion:'fixture-v1',bytes,
+  templateTokens:0,marginTokens:0,promptTokensUpper:bytes,messages:1,tools:1,
+  schemaBytes:Buffer.byteLength(JSON.stringify(tool.function.parameters))+Buffer.byteLength(JSON.stringify(response_format)),
+  pricingHash:nominalPricing.pricingHash,endpointTag:'synthetic',nominalPricing};
+ const v2={...identity,payg,upperUsd:openRouterCallBound(identity.providerLimits,identity.outputLimit,bytes).upperUsd};
+ const credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY'),transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({allowWorkspaceRead:true,credential,transport});
+ await adapter.prepareDispatch({input:wire},v2);
+ expect(credential).toHaveBeenCalledTimes(1);expect(transport).not.toHaveBeenCalled();
+ await expect(adapter.prepareDispatch({input:wire},{...v2,payg:{...payg,schemaBytes:0}})).rejects.toThrow('QUOTE_CONFLICT');
+});
+
+it('bounds short lookup credential reads before any GET is sent',async()=>{
+ vi.useFakeTimers();
+ const timeout=vi.spyOn(AbortSignal,'timeout').mockImplementation(ms=>{
+  const controller=new AbortController();setTimeout(()=>controller.abort(new Error('synthetic timeout')),ms);return controller.signal;
+ });
+ const transport=vi.fn<typeof fetch>();
+ try{
+  const adapter=openRouterAdapter({credential:async()=>new Promise<string>(()=>{}),transport});
+  const result=adapter.lookup('gen-synthetic',identity,{timeoutMs:1_500}).catch(error=>error);
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(await result).toBeInstanceOf(Error);expect(transport).not.toHaveBeenCalled();
+ }finally{timeout.mockRestore();vi.useRealTimers();}
+});
+it('LIB-2d: sends one measured inline JPEG only for the image purpose and its exact quote',async()=>{
+ const {openRouterCallBound}=await import('./openRouterPolicy');
+ const {syntheticJpeg}=await import('../../__tests__/fixtures/syntheticJpeg');
+ const url='data:image/jpeg;base64,'+syntheticJpeg(1600,1131).toString('base64');
+ const limits={...identity.providerLimits,contextTokens:100000,imageUsd:'0'};
+ const routing=openRouterCallBound(limits,identity.outputLimit,1,0).routing;
+ const part={type:'image_url',image_url:{url}};
+ const wireFor=(content:unknown[],role='user')=>JSON.stringify({...JSON.parse(body),provider:routing,messages:[{role,content}]});
+ const wire=wireFor([{type:'text',text:'识别'},part]);
+ const image={dataUrlBytes:Buffer.byteLength(url),width:1600,height:1131,tokensUpper:2*115*81+2048};
+ const bytes=Buffer.byteLength(wire),t=bytes-image.dataUrlBytes+image.tokensUpper+200;
+ const nominalPricing={version:'nominal-v1' as const,pricingHash:'a'.repeat(64),endpointTag:'synthetic',
+  tiers:[{minPromptTokens:0,prompt:'2',completion:'0',request:'0'}],timeOfDay:[]};
+ const payg={policyId:'policy',policyVersion:'v1',profileVersion:'v1',evidenceVersion:'fixture-v1',bytes,templateTokens:100,
+  marginTokens:100,promptTokensUpper:t,messages:1,tools:0,schemaBytes:0,pricingHash:nominalPricing.pricingHash,endpointTag:'synthetic',
+  nominalPricing,image};
+ const v2={...identity,providerLimits:limits,payg,phase:'library_ocr',
+  upperUsd:openRouterCallBound(limits,identity.outputLimit,t,image.tokensUpper).upperUsd};
+ const credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY'),transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({credential,transport});
+ await adapter.prepareDispatch({input:wire},v2);
+ expect(credential).toHaveBeenCalledTimes(1);credential.mockClear();
+ const textQuote:Record<string,unknown>={...payg};delete textQuote.image;
+ const denied:Array<[string,unknown]>=[
+  ['another purpose',{...v2,phase:'ordinary'}],
+  ['a quote without the image',{...v2,payg:{...textQuote,promptTokensUpper:bytes+200},
+   upperUsd:openRouterCallBound(limits,identity.outputLimit,bytes+200).upperUsd}],
+  ['a different measured size',{...v2,payg:{...payg,image:{...image,width:1599,tokensUpper:2*115*81+2048}}}],
+ ];
+ for(const [,frozen] of denied)await expect(adapter.prepareDispatch({input:wire},frozen as typeof v2)).rejects.toThrow(/DENIED|CONFLICT/);
+ for(const other of [wireFor([part,part]),wireFor([{type:'image_url',image_url:{url:'https://example.invalid/a.jpg'}}]),
+  wireFor([{type:'text',text:'x'},part],'assistant')]){
+  await expect(adapter.prepareDispatch({input:other},{...v2,payg:{...payg,bytes:Buffer.byteLength(other),
+   promptTokensUpper:Buffer.byteLength(other)-image.dataUrlBytes+image.tokensUpper+200}})).rejects.toThrow(/DENIED|CONFLICT/);
+ }
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { MethodInformationField } from '../../shared/opcMethodPolicy';
 import type { AnsweredCard } from '../opc/answerCard';
 import { captureHostContext, captureOrganizerInput, type CaptureState } from '../opc/captureContext';
-import type { HostTurnContext } from '../runtime/hostTurn';
+import type { HostTurnContext } from './agent/hostTurn';
 
 /*
  * CORE-PATH-V2 kind=mentor: the draft state turn_open read for this turn (turn_mentor_context, 0422). The checklist the mentor

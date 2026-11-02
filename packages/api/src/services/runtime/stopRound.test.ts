@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {stoppedCompletion,type StopExecution} from './stoppedCompletion';
-import {NativeProgressProjection,NativeTextTransport} from './nativeProgress';
+import {NativeProgressProjection,NativeTextTransport} from '../turn/agent/nativeProgress';
 import {nativeFrameProjection} from './nativeOutput';
 import {runtimeRouter} from '../../routers/runtime';
-import {createRuntimeBudget} from './budget';
-import type {authoritativeBilling} from '../bill2/service';
+import {createRuntimeBudget} from '../turn/settings/budget';
+import type {authoritativeBilling} from '../turn/provider/service';
 
 // CHAT-NATIVE-OUTPUT follow-up (0260): a stop names the round whose text was on screen.
 const id='10000000-0000-4000-8000-000000000001';

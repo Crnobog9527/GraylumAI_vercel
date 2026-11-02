@@ -2,7 +2,7 @@
 // #1029 P1: an erasure BILL2 confirms while a subcall is recorded closes the turn; nothing more reaches the client.
 import { expect, it, vi } from 'vitest';
 import { researchExecution } from './researchExecution';
-import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
+import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from '../turn/research/researchTurn';
 import { runSubcall } from '../research/runtime/subcall';
 import type { ResearchTurnEvent } from '../../shared/researchTurn';
 

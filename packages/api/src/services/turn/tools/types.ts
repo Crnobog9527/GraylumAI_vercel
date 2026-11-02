@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { ResearchCallResult } from '../../research/vendors/types';
-import type { RuntimeTool } from '../../runtime/runner';
+import type { RuntimeTool } from '../agent/runner';
 import type { TurnDatabase } from '../db';
 
 /*

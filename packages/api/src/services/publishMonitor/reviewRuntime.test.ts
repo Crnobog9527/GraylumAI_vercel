@@ -3,27 +3,27 @@ import {expect,it,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import type {Session} from '@openai/agents';
 import {runtimeAdmissionService} from '../runtime/admission';
-import {runtimeContext} from '../runtime/runtimeContext';
-import {runRuntime} from '../runtime/runner';
-import {openRouterRequestBody} from '../runtime/providerRequest';
+import {runtimeContext} from '../turn/agent/runtimeContext';
+import {runRuntime} from '../turn/agent/runner';
+import {openRouterRequestBody} from '../turn/provider/providerRequest';
 import {runtimePaygCall} from '../runtime/paygRuntime';
-import {openRouterBound,openRouterCallBound} from '../bill2/openRouterPolicy';
-import {decimal} from '../bill2/decimal';
-import type {FrozenPaygRun} from '../bill2/service';
+import {openRouterBound,openRouterCallBound} from '../turn/provider/openRouterPolicy';
+import {decimal} from '../turn/provider/decimal';
+import type {FrozenPaygRun} from '../turn/provider/service';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {REVIEW_PROMPT} from './reviews';
 const extensions=vi.hoisted(()=>({catalog:vi.fn(),research:vi.fn()}));
-vi.mock('../runtime/skillCatalog',async original=>({...(await original<typeof import('../runtime/skillCatalog')>()),
+vi.mock('../turn/skills/skillCatalog',async original=>({...(await original<typeof import('../turn/skills/skillCatalog')>()),
  discoverSkillCatalog:extensions.catalog}));
-vi.mock('../runtime/freeChatResearch',async original=>({...(await original<typeof import('../runtime/freeChatResearch')>()),
+vi.mock('../turn/research/freeChatResearch',async original=>({...(await original<typeof import('../turn/research/freeChatResearch')>()),
  attachFreeChatResearch:extensions.research}));
-vi.mock('../runtime/newWorkGate',()=>({readAdmissionSettings:async()=>({ok:true}),
+vi.mock('../turn/admission/newWorkGate',()=>({readAdmissionSettings:async()=>({ok:true}),
  newWorkGate:()=>({message:async()=>({ok:true})}),requireNewWork:()=>{}}));
 vi.mock('../models/openRouterKey',()=>({readOpenRouterKeyOrUnset:async()=>undefined}));
-vi.mock('../runtime/paygHostPolicy',async original=>({...(await original<typeof import('../runtime/paygHostPolicy')>()),
+vi.mock('../turn/admission/paygHostPolicy',async original=>({...(await original<typeof import('../turn/admission/paygHostPolicy')>()),
  readPaygHostPolicies:async(_db:unknown,_real:unknown,quotes:unknown[])=>quotes}));
 vi.mock('../runtime/paygPricing',()=>({freezeStagingPaygPricing:async(_db:unknown,quotes:unknown[])=>quotes}));
-vi.mock('../runtime/billingUnitAdmission',async original=>({...(await original<typeof import('../runtime/billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission',async original=>({...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
  freezeWindowBillingUnit:async()=>({version:'bill-unit-v2',creditsPerUsd:'100',defaultMultiplier:'3',
   providers:{},models:{'10000000-0000-4000-8000-000000000003':{multiplier:'3',source:'global'}},hash:'a'.repeat(64)})}));
 const id=(n:number)=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { RuntimeProgress } from '../runtime/progress';
+import type { RuntimeProgress } from '../turn/agent/progress';
 import { redactIdentityBody, redactIdentityCard, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 type TextEvent = Extract<RuntimeProgress, { type: 'text' }>;

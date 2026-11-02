@@ -1,17 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { RuntimeBudget } from '../services/runtime/budget';
+import type { RuntimeBudget } from '../services/turn/settings/budget';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
-import { authoritativeBilling, type BillingRpc } from '../services/bill2/service';
-import { createRuntimeBudget } from '../services/runtime/budget';
-import { newWorkGate } from '../services/runtime/newWorkGate';
+import { authoritativeBilling, type BillingRpc } from '../services/turn/provider/service';
+import { createRuntimeBudget } from '../services/turn/settings/budget';
+import { newWorkGate } from '../services/turn/admission/newWorkGate';
 import { runtimeGateEnvironment } from '../services/runtime/realHost';
 import { runtimeActor } from '../services/runtime/actor';
-import { loadStagingPolicy } from '../services/runtime/stagingPolicy';
+import { loadStagingPolicy } from '../services/turn/settings/stagingPolicy';
 import { stagingTransport } from '../services/runtime/stagingTransport';
-import { StagingAccessError, stagingProcedureError } from '../services/runtime/stagingErrors';
+import { StagingAccessError, stagingProcedureError } from '../services/turn/settings/stagingErrors';
 import { reportRevisionService } from '../services/report/revisionSync';
 import { fusionExecutor } from '../services/fusion/executor';
 import { reviewFlow } from '../services/fusion/review';
@@ -19,7 +19,7 @@ import { handReviewToServer, withAdvanceLease } from '../services/fusion/backgro
 import { ENDED_STATES, reviewState } from '../services/fusion/reviewRecord';
 import { adoptionChoices } from '../services/fusion/reviewAdoption';
 import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
-import { readAdmissionConfiguration } from '../services/runtime/admissionConfiguration';
+import { readAdmissionConfiguration } from '../services/turn/admission/admissionConfiguration';
 import { readCoreConfig } from '../services/turn/chat';
 import { loadVersionMarks } from '../services/fusion/versionMarks';
 
