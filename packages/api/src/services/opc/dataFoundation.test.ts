@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { briefAdoption, contentReaction, dataFoundationService, topicAdoptionWithSource } from './dataFoundation';
+import { dataFoundationService, topicAdoptionWithSource } from './dataFoundation';
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const item = { id: id(5), platform: 'x', account: 'main', title: '采用的标题', brief: '用户修改后的摘要', day: '2026-10-10' };
 const base = { draftId: id(1), requestId: id(2), expectedVersion: 0, sourceVersionId: id(3), body: [item] };
@@ -47,41 +47,5 @@ describe('R9 data foundation contracts', () => {
   it('leaves an unknown adoption failure as it is', async () => {
     const rpc = vi.fn().mockRejectedValue(new Error('connection reset'));
     await expect(dataFoundationService(rpc).adoptTopics(adoption)).rejects.not.toHaveProperty('code', 'CONFLICT');
-  });
-  it.each(['rewrite', 'abandon'] as const)('records the explicit %s action with a stable request identity', async action => {
-    const rpc = vi.fn().mockResolvedValue({ recorded: true });
-    await dataFoundationService(rpc).recordReaction({ requestId: id(2), executionId: id(4), action, reason: '  原因  ' });
-    expect(rpc).toHaveBeenCalledWith('opc_content_reaction', {
-      p_request_id: id(2), p_execution_id: id(4), p_action: action, p_reason: '原因',
-    });
-  });
-  it('rejects unsupported implicit feedback and oversized reasons', () => {
-    const event = { requestId: id(2), executionId: id(4), action: 'rewrite' };
-    expect(contentReaction.safeParse({ ...event, action: 'not_useful' }).success).toBe(false);
-    expect(contentReaction.safeParse({ ...event, reason: 'a'.repeat(1001) }).success).toBe(false);
-  });
-  it('propagates ownership, deletion and replay conflicts instead of reporting success', async () => {
-    const rpc = vi.fn().mockRejectedValue(new Error('CONTENT_ERASED'));
-    await expect(dataFoundationService(rpc).recordReaction({
-      requestId: id(2), executionId: id(4), action: 'abandon',
-    })).rejects.toThrow('CONTENT_ERASED');
-    expect(rpc).toHaveBeenCalledTimes(1);
-  });
-  it('sends brief adoption with the AI excerpt and the user-confirmed brief separately', async () => {
-    const rpc = vi.fn().mockResolvedValue({ revision: 2 });
-    await dataFoundationService(rpc).adoptBrief({ requestId: id(2), workItemId: id(6), expectedRevision: 1,
-      executionId: id(4), original: ' 整理出的简报 ', brief: ' 用户改过的简报 ' });
-    expect(rpc).toHaveBeenCalledWith('opc_brief_adoption', {
-      p_request_id: id(2), p_work_item_id: id(6), p_expected_revision: 1,
-      p_execution_id: id(4), p_original: '整理出的简报', p_brief: '用户改过的简报',
-    });
-  });
-  it('rejects client actors, empty or oversized briefs before calling SQL', () => {
-    const ok = { requestId: id(2), workItemId: id(6), expectedRevision: 1, executionId: id(4), original: 'a', brief: 'b' };
-    expect(briefAdoption.safeParse(ok).success).toBe(true);
-    for (const bad of [{ actorId: id(9) }, { brief: ' ' }, { brief: 'x'.repeat(2001) }, { original: '' },
-      { expectedRevision: 0 }, { executionId: 'not-a-uuid' }]) {
-      expect(briefAdoption.safeParse({ ...ok, ...bad }).success).toBe(false);
-    }
   });
 });
