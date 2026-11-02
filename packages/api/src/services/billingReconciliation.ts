@@ -1780,6 +1780,8 @@ export async function runDailyBillingReconciliation(
     fusionReviewFixedPriceCredits,
     settledCalls: totals.calls.settledCalls,
     callLedgerMismatches: totals.calls.mismatched,
+    settledTurns: totals.turns.settledTurns,
+    turnLedgerMismatches: totals.turns.mismatched,
     creditSourceMismatches: totals.sources.mismatched,
     unattributedSourceEntries: totals.entries.unattributed,
     notAppliedSourceEntries: totals.entries.notApplied,
@@ -1800,10 +1802,15 @@ export async function runDailyBillingReconciliation(
   }
   // ARCH-FIX E2: each settled call's ledger rows sum to its charge less compensation; packs and subscription grants
   // agree with the credit-source ledger.
-  const { calls, sources } = totals;
+  const { calls, turns, sources } = totals;
   if (calls.mismatched > 0) {
     mismatches.push(`Call ledger rows do not match the charge for ${calls.mismatched} of ${calls.settledCalls} settled calls`
       + ` (${calls.sample.join(', ')})`);
+  }
+  // Turn path: a settled turn's spend rows (and its not-returned freeze row) must equal what the turn charged.
+  if (turns.mismatched > 0) {
+    mismatches.push(`Turn ledger rows do not match the charge for ${turns.mismatched} of ${turns.settledTurns} settled turns`
+      + ` (${turns.sample.map((row) => `${row.actorId}:${row.turnId}`).join(', ')})`);
   }
   if (sources.mismatched > 0) {
     const sample = sources.sample.map((row) => `${row.kind}:${row.id}`).join(', ');

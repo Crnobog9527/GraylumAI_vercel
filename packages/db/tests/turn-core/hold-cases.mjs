@@ -206,6 +206,24 @@ export async function holdCases(t){
   const r=await one("select billing_reconcile_day(now()-interval '1 day',now()+interval '1 minute') v");
   assert.deepEqual([r.sources.mismatched,r.entries.notApplied],[0,0],JSON.stringify(r.sources));
  }
+ // The turn ledger (V2-12 R7): every settled turn's spend rows equal what it charged; a changed row is named.
+ {
+  const day=()=>one("select billing_reconcile_day(now()-interval '1 day',now()+interval '1 minute') v").then(r=>r.turns);
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);
+  assert.equal((await close(a,o.turnId)).chargedCredits>0,true);
+  const ok=await day();
+  assert.ok(ok.settledTurns>=1);assert.equal(ok.mismatched,0,'balanced: '+JSON.stringify(ok.sample));
+  const row=await c.query("select id,amount from credit_transactions where user_id=$1 and source_type='ai_task' and source_id=$2 and reason_code='turn_spend'",[a.actor,String(o.turnId)]);
+  assert.equal(row.rowCount,1);
+  await c.query("update credit_transactions set amount=amount+1 where id=$1",[row.rows[0].id]);
+  try{
+   const bad=await day();
+   assert.equal(bad.mismatched,1,'unbalanced');
+   assert.deepEqual([bad.sample[0].actorId,String(bad.sample[0].turnId)],[a.actor,String(o.turnId)]);
+  }finally{await c.query("update credit_transactions set amount=$2 where id=$1",[row.rows[0].id,row.rows[0].amount]);}
+  assert.equal((await day()).mismatched,0,'balanced again');
+ }
  report.checks.push('hold top-up: one call frozen at the open, topped up in begin, charge = usage, each freeze settled once with its own keys',
   'hold top-up: no account lock when covered, paused only when the balance cannot, G caps it, repeat begin freezes nothing',
   'hold top-up: failed, expired, unknown cost and resume return or carry every freeze; two conversations share a balance; fixed kinds unchanged; ledger reconciles');

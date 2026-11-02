@@ -3687,7 +3687,7 @@
   "fn:bill2_unit_multiplier(jsonb)": "81cd301f190a",
   "fn:bill2_usage_total(uuid,text)": "8adc72892fab",
   "fn:billing_provider_prices_swap(text,text)": "eae751e56fdb",
-  "fn:billing_reconcile_day(timestamp with time zone,timestamp with time zone)": "ba779e3df404",
+  "fn:billing_reconcile_day(timestamp with time zone,timestamp with time zone)": "efa6d4eba8ca",
   "fn:catalog_versions_bump()": "5ab5b8adc4e0",
   "fn:catalog_versions_snapshot()": "9e84498a8d99",
   "fn:content_erasure_artifact_readable(uuid,uuid)": "da710b3fa067",

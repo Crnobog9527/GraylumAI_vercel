@@ -12,6 +12,7 @@ export type DailyBillingTotals = {
   completedPaymentOrders: number;
   completedPaymentAmount: number;
   calls: { settledCalls: number; mismatched: number; sample: string[] };
+  turns: { settledTurns: number; mismatched: number; sample: Array<{ actorId: string; turnId: string }> };
   sources: { mismatched: number; sample: Array<{ kind: string; id: string }> };
   entries: { unattributed: number; notApplied: number };
 };
@@ -35,6 +36,8 @@ export async function readDailyBillingTotals(supabase: SupabaseClient, start: st
   const result = await supabase.rpc('billing_reconcile_day', { p_start: start, p_end: end });
   if (result.error) throw result.error;
   const data = record(result.data);
+  // The turns block arrives with migration 0487; before it is applied the function has none, so it reads as zero turns.
+  const turns = data.turns === undefined ? { settledTurns: 0, mismatched: 0, sample: [] } : record(data.turns);
   const calls = record(data.calls), sources = record(data.sources), entries = record(data.entries);
   return {
     tokenStatsCount: integer(data.tokenStatsCount),
@@ -49,6 +52,14 @@ export async function readDailyBillingTotals(supabase: SupabaseClient, start: st
       settledCalls: integer(calls.settledCalls),
       mismatched: integer(calls.mismatched),
       sample: list(calls.sample).map(String),
+    },
+    turns: {
+      settledTurns: integer(turns.settledTurns),
+      mismatched: integer(turns.mismatched),
+      sample: list(turns.sample).map((item) => {
+        const row = record(item);
+        return { actorId: String(row.actorId), turnId: String(row.turnId) };
+      }),
     },
     sources: {
       mismatched: integer(sources.mismatched),
