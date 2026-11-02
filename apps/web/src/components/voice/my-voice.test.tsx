@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { canClearRequestId, fromForm, toForm, voiceErrorMessage, type VoiceState, type VoiceVersion } from '@/lib/voice/format';
+import { canClearRequestId, fromForm, generationJustEnded, toForm, voiceErrorMessage, type VoiceState, type VoiceVersion } from '@/lib/voice/format';
 import { MyVoiceView, type MyVoiceViewProps } from './my-voice-view';
 
 const profile = { tone: '像跟朋友唠嗑', sentenceLength: '短句多', openings: '先吐槽', stance: '', phrases: ['咋整'], avoid: ['家人们'],
@@ -76,5 +76,15 @@ describe('kept request id (review P1)', () => {
     expect(canClearRequestId(true, { ...base, latest: version('generating') }, false)).toBe(false);
     expect(canClearRequestId(true, base, true)).toBe(false);
     expect(canClearRequestId(true, base, false)).toBe(true);
+  });
+});
+
+describe('balance refresh after learning', () => {
+  it('refreshes the balance only when a run leaves "generating"', () => {
+    expect(generationJustEnded('generating', 'draft')).toBe(true);
+    expect(generationJustEnded('generating', 'failed')).toBe(true);
+    expect(generationJustEnded('generating', 'generating')).toBe(false);
+    expect(generationJustEnded(undefined, 'draft')).toBe(false);
+    expect(generationJustEnded('draft', 'confirmed')).toBe(false);
   });
 });
