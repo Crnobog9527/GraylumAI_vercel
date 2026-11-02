@@ -57,7 +57,7 @@ export function dataFoundationService<T>(rpc: ActorRpc<T>) {
       if (error instanceof Error && ['OPC_DATA_SOURCE_DENIED', 'OPC_TOPIC_SOURCE_INVALID',
         'OPC_TOPIC_SOURCE_REQUIRED'].includes(error.message)) throw new TRPCError({ code: 'FORBIDDEN', message: 'OPC_SOURCE_DENIED' });
       const code = error instanceof Error ? topicRefusals[error.message] : undefined;
-      if (code) throw new TRPCError({ code, message: error.message });
+      if (code && error instanceof Error) throw new TRPCError({ code, message: error.message });
       throw error;
     }
   }

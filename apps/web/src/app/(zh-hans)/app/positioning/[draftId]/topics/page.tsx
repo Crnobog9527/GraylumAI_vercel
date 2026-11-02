@@ -275,7 +275,7 @@ function TopicWorkspaceContent() {
 
   const opening = workspace.data?.opening as (ChatRequest & { executionId?: string | null }) | null | undefined;
   const refusedOpening = useTopicOpening({ opening, storageKey, executions: view.data?.executions,
-    ready: Boolean(sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
+    ready: Boolean(!stale && sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
     send: request => void perform({ kind: 'chat', request }) });
 
   function adoptionRequest(snapshot: CandidateSnapshot, itemIds: string[], requestId = crypto.randomUUID()): AdoptTopicsRequest | null {
