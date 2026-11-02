@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type {BillingTransport} from './service';
+import type {BillingTransport} from './frozenRun';
 /** AC-0c: one HTTP invocation reuses Auth's own network verdict for the exact
  * same credential. Verification still happens through `GET /auth/v1/user`
  * (never local JWT verification); only a repeated identical lookup inside the
