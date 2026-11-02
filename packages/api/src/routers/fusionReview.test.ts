@@ -60,12 +60,11 @@ it('available tells a signed-in user whether the review is switched on, and fail
   const settings = await import('../services/fusion/settings');
   const read = vi.spyOn(settings, 'readFusionSettings');
   read.mockResolvedValueOnce({ review: { enabled: true } } as never);
-  // corePathV2 is which path a start goes on; a setting that cannot be read keeps the old one (false).
-  expect(await mineFixture().caller.available()).toEqual({ enabled: true, corePathV2: false });
+  expect(await mineFixture().caller.available()).toEqual({ enabled: true });
   read.mockResolvedValueOnce({ review: { enabled: false } } as never);
-  expect(await mineFixture().caller.available()).toEqual({ enabled: false, corePathV2: false });
+  expect(await mineFixture().caller.available()).toEqual({ enabled: false });
   read.mockRejectedValueOnce(new Error('down'));
-  expect(await mineFixture().caller.available()).toEqual({ enabled: false, corePathV2: false });
+  expect(await mineFixture().caller.available()).toEqual({ enabled: false });
   await expect(mineFixture(false).caller.available()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   read.mockRestore();
 });
@@ -96,4 +95,11 @@ it('versionMarks answers for the caller\'s own analyses and refuses another user
   await expect(marksCaller(id(1), false).caller.versionMarks({ draftIds: [id(3)] })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   await expect(own.caller.versionMarks({ draftIds: [] })).rejects.toThrow();
   await expect(own.caller.versionMarks({ draftIds: Array.from({ length: 51 }, (_, i) => id(100 + i)) })).rejects.toThrow();
+});
+
+// CORE-PATH-V2 V2-12 B5: a review starts on POST /api/turn (kind=jury); the old BILL2 entries are gone from the router.
+it('has no procedure that starts, prices or dispatches a review on the old path', () => {
+  const procedures = Object.keys(fusionReviewRouter._def.procedures);
+  for (const name of ['start', 'estimate', 'dispatch']) expect(procedures).not.toContain(name);
+  expect(procedures).toEqual(expect.arrayContaining(['continue', 'mine', 'events', 'detail', 'adopt', 'confirmAdoption', 'versionMarks']));
 });

@@ -23,7 +23,7 @@ type Estimate = { credits: number; columns: Array<{ modelId: string; credits: nu
  * the user may untick or pick others within [minModels, maxModels]; "最多消耗 X 积分" is priced by the server for exactly this
  * request and the start carries it, so the group never holds more than the user agreed to.
  */
-export function CompareButton({ sessionId, resolveSession, question, skill, disabled, blockedReason, path = 'auto', onStarted, onMaybeStarted }: {
+export function CompareButton({ sessionId, resolveSession, question, skill, disabled, blockedReason, onStarted, onMaybeStarted }: {
   /** The conversation to compare in; absent on the blank new-conversation page, where `resolveSession` creates it on demand. */
   sessionId?: string;
   /** Creates (idempotently, free of charge) or finds the empty conversation a first-message compare hangs on. */
@@ -31,10 +31,7 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
   question: string; skill?: CompareSkill; disabled?: boolean;
   /** Why a compare cannot start with this message (shown as the button's hint), for example an @ library reference. */
   blockedReason?: string;
-  /** Which path the compare starts on: the conversation's own ('turn' for one on the turn path, 'old' for one with old-path history)
-   * or, for a new conversation, whatever the switch says. */
-  path?: 'auto' | 'turn' | 'old';
-  onStarted: (compareId: string, names: Record<string, string>, sessionId: string, turn: boolean) => void;
+  onStarted: (compareId: string, names: Record<string, string>, sessionId: string) => void;
   /** A start whose outcome is unknown (the response was lost): the page re-reads the conversation's compares. */
   onMaybeStarted?: () => void;
 }) {
@@ -73,33 +70,29 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
       title={blockedReason ?? (question.trim() ? undefined : '先写好问题再对比')}
       onClick={() => void openPicker()}><Columns3 size={16} /> 多模型对比</button>
     {sessionError && <span role="status" className={styles.error}>{sessionError}</span>}
-    {open && activeSession && <ComparePicker options={data} sessionId={activeSession}
-      turnPath={path === 'turn' || (path === 'auto' && 'corePathV2' in data && data.corePathV2 === true)} question={question} skill={skill}
+    {open && activeSession && <ComparePicker options={data} sessionId={activeSession} question={question} skill={skill}
       onClose={() => setOpen(false)} onMaybeStarted={onMaybeStarted} startId={startId}
       onUpgrade={() => { setOpen(false); setPaywall(true); }}
-      onStarted={(compareId, names, turn) => { setOpen(false); onStarted(compareId, names, activeSession, turn); }} />}
+      onStarted={(compareId, names) => { setOpen(false); onStarted(compareId, names, activeSession); }} />}
     {paywall && <ReportPaywallDialog scene="compare" onClose={() => setPaywall(false)} />}
   </>;
 }
 
-function ComparePicker({ options, turnPath, sessionId, question, skill, onClose, onUpgrade, onStarted, onMaybeStarted, startId }: {
-  options: Extract<CompareOptions, { enabled: true }>; turnPath: boolean; sessionId: string; question: string; skill?: CompareSkill;
+function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade, onStarted, onMaybeStarted, startId }: {
+  options: Extract<CompareOptions, { enabled: true }>; sessionId: string; question: string; skill?: CompareSkill;
   onClose: () => void; onUpgrade: () => void; onMaybeStarted?: () => void; startId: { current: { key: string; id: string } | null };
-  onStarted: (compareId: string, names: Record<string, string>, turn: boolean) => void;
+  onStarted: (compareId: string, names: Record<string, string>) => void;
 }) {
   const [picked, setPicked] = useState(() => initialPick(options));
   const [error, setError] = useState<{ text: string; upgrade: boolean } | null>(null);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
-  // The turn path (CORE-PATH-V2 V2-10): priced by POST /api/turn/estimate, started by POST /api/turn/compare.
-  const oldPrice = trpc.fusionCompare.estimate.useMutation();
-  const oldStart = trpc.fusionCompare.start.useMutation();
-  const [turnPricing, setTurnPricing] = useState(false), [turnStarting, setTurnStarting] = useState(false);
-  const price = { isPending: oldPrice.isPending || turnPricing, mutateAsync: (body: typeof input) => {
-    if (!turnPath) return oldPrice.mutateAsync(body);
-    setTurnPricing(true);
-    return estimateFusion<Estimate>({ kind: 'compare', ...body }).finally(() => setTurnPricing(false));
+  // Priced by POST /api/turn/estimate, started by POST /api/turn/compare (CORE-PATH-V2 V2-10).
+  const [pricing, setPricing] = useState(false), [starting, setStarting] = useState(false);
+  const price = { isPending: pricing, mutateAsync: (body: typeof input) => {
+    setPricing(true);
+    return estimateFusion<Estimate>({ kind: 'compare', ...body }).finally(() => setPricing(false));
   } };
-  const start = { isPending: oldStart.isPending || turnStarting };
+  const start = { isPending: starting };
   const status = pickStatus(picked, options);
   const names = Object.fromEntries(options.models.map(model => [model.id, model.name]));
   const input = { sessionId, question: question.trim(), modelIds: picked, ...(skill ? { skill } : {}) };
@@ -123,29 +116,15 @@ function ComparePicker({ options, turnPath, sessionId, question, skill, onClose,
     if (startId.current?.key !== key) startId.current = { key, id: crypto.randomUUID() };
     const requestId = startId.current.id;
     try {
-      if (turnPath) {
-        // All the columns stream in this one request; the card follows them through the live store and the saved state.
-        setTurnStarting(true);
-        const shown = { credits: estimate.credits, columns: estimate.columns };
-        const turn = startCompare({ ...input, requestId, shown }, { onOpened: turnCompareLive.begin, onColumn: turnCompareLive.column,
-          onAnswer: (id, index) => turnCompareLive.answered(id, index) });
-        const { compareId } = await turn.started.finally(() => setTurnStarting(false));
-        void turn.finished.finally(() => turnCompareLive.end(compareId));
-        startId.current = null;
-        onStarted(compareId, names, true);
-        return;
-      }
-      const result = await oldStart.mutateAsync({ ...input, requestId,
-        shown: { credits: estimate.credits, columns: estimate.columns } });
-      // The group exists but holds nothing yet: keep the request id (it outlives this dialog) so a top-up and another click
-      // continue the same start instead of meeting FUSION_COMPARE_ACTIVE.
-      if (result.state === 'waiting_credits') {
-        setError({ text: `余额不够这次对比的上限（最多 ${estimate.credits} 积分）。充值后再点一次开始，会接着这次对比继续。`, upgrade: false });
-        return;
-      }
-      if (result.state === 'processing') { setError({ text: '正在准备，请稍候再点一次开始。', upgrade: false }); return; }
+      // All the columns stream in this one request; the card follows them through the live store and the saved state.
+      setStarting(true);
+      const shown = { credits: estimate.credits, columns: estimate.columns };
+      const turn = startCompare({ ...input, requestId, shown }, { onOpened: turnCompareLive.begin, onColumn: turnCompareLive.column,
+        onAnswer: (id, index) => turnCompareLive.answered(id, index) });
+      const { compareId } = await turn.started.finally(() => setStarting(false));
+      void turn.finished.finally(() => turnCompareLive.end(compareId));
       startId.current = null;
-      onStarted(result.compareId, names, false);
+      onStarted(compareId, names);
     } catch (cause) {
       // A definite refusal (a compare error code from the server) ends this request id. Anything else (network, a lost
       // response) may have claimed the group: keep the id so the next click replays the same start instead of meeting
@@ -183,8 +162,7 @@ function ComparePicker({ options, turnPath, sessionId, question, skill, onClose,
         {status.ready && <p className={styles.estimate} role="status">{price.isPending || !estimate
           ? <><Loader2 size={14} className={styles.spin} /> 正在计算预计消耗…</>
           : estimate.overBudget ? '这次对比超过单次上限，请少选几个模型。'
-            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费
-              {!turnPath && '，开始生成后手动停止的按已用量计费'}。</>}</p>}
+            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费。</>}</p>}
         {error && <p role="alert" className={styles.error}>{error.text}{error.upgrade && <>
           {' '}<button type="button" className="underline" onClick={onUpgrade}>去升级</button></>}</p>}
         <DialogFooter>

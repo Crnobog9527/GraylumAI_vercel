@@ -2,7 +2,8 @@
 // R14 with a fixed revision sample: no review feature, no model call.
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
-import {fixture,rpc,closeAccount,call,evidence,outcome} from '../erasure-b2a/cases.mjs';
+import {fixture,rpc,closeAccount} from '../erasure-b2a/cases.mjs';
+import {insertReportTurn} from '../report-finalization/turn-seed.mjs';
 import {erase} from '../content-erasure/cases.mjs';
 const hash=body=>createHash('sha256').update(body).digest('hex');
 const original='## One\nOriginal report.\n## Two\nKnown limitations.';
@@ -45,18 +46,7 @@ export async function seed(db,maxLength=20000,minLength=1) {
  const spec={version:1,projectId:project,roundId:round,snapshotHash:source.snapshotHash,
   packageHash:'b'.repeat(64),workflowHash:'c'.repeat(64),templateHash:'d'.repeat(64),
   evidenceIds:[],sections:['One','Two'],maxCharacters:12000};
- const context={reportGeneration:spec,request:{sessionId:session},sources:[],network:'deny',role:'skill',
-  moduleId:f.module,skillId:f.skill,revisionId:f.revision,packageHash:'b'.repeat(64)};
- const billing={...base.payload,scope:{kind:'positioning_draft',draftId:draft},input:context,
-  moduleId:f.module,skillId:f.skill,revisionId:f.revision};
- const run=await rpc(db,'bill2_prepare',f.actor,randomUUID(),billing);
- await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result,billing_run_id)
-  VALUES($1,$2,$3,$4,$5,0,'completed',$6,$7)`,[execution,f.actor,session,randomUUID(),context,{body:original,completeness:'complete'},run.id]);
- await db.query('UPDATE bill2_runs SET session_ref=$1 WHERE id=$2',[session,run.id]);
- const claimed=await call(db,{...base,run:run.id});
- await rpc(db,'bill2_record',f.actor,run.id,claimed.id,evidence(claimed));
- await rpc(db,'bill2_close',f.actor,run.id,'delivered',{...outcome,body:original});
- await rpc(db,'bill2_finalize',f.actor,run.id);
+ await insertReportTurn(db,{actor:f.actor,session,request:execution,spec,body:original});
  const formal=await rpc(db,'report_document',f.actor,execution,'finalize',randomUUID(),0,null,hash(original));
  assert.equal(formal.version,1);
  return {...f,project,round,session,draft,execution,base,versionId:formal.versionId};

@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
-import {fixture,rpc,closeAccount,call,evidence,outcome} from '../erasure-b2a/cases.mjs';
+import {fixture,rpc,closeAccount} from '../erasure-b2a/cases.mjs';
+import {insertReportTurn} from './turn-seed.mjs';
 import {erase} from '../content-erasure/cases.mjs';
 const hash=body=>createHash('sha256').update(body).digest('hex');
 const original='## One\nOriginal confirmed facts.\n## Two\nKnown limitations.';
@@ -9,7 +10,7 @@ const edited='## One\nR5_MANUAL_PRIVATE_BODY\n## Two\nManually retained limitati
 export async function seed(db,completeness='complete',evidenceCount=0,reportExtra={}) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
- const project=randomUUID(),round=randomUUID(),confirmation=randomUUID(),execution=randomUUID();
+ const project=randomUUID(),round=randomUUID(),confirmation=randomUUID(),execution=randomUUID();  // execution: the report turn's request id
  const draft=await rpc(db,'bill2_create_draft',f.actor);
  const session=randomUUID();
  const workflow={id:'r5-fixture',version:1,kind:'document',steps:[{id:'s',title:'Facts',dependsOn:[],
@@ -39,20 +40,7 @@ export async function seed(db,completeness='complete',evidenceCount=0,reportExtr
  const spec={version:1,projectId:project,roundId:round,snapshotHash:source.snapshotHash,
   packageHash:'b'.repeat(64),workflowHash:'c'.repeat(64),templateHash:'d'.repeat(64),
   evidenceIds:[],sections:['One','Two'],maxCharacters:12000};
- const context={reportGeneration:spec,request:{sessionId:session},sources:[],network:'deny',role:'skill',
-  moduleId:f.module,skillId:f.skill,revisionId:f.revision,packageHash:'b'.repeat(64)};
- const billing={...base.payload,scope:{kind:'positioning_draft',draftId:draft},input:context,
-  moduleId:f.module,skillId:f.skill,revisionId:f.revision};
- const run=await rpc(db,'bill2_prepare',f.actor,randomUUID(),billing);
- await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result,billing_run_id)
-  VALUES($1,$2,$3,$4,$5,0,'completed',$6,$7)`,[execution,f.actor,session,randomUUID(),context,
-  {body:original,completeness},run.id]);
- await db.query('UPDATE bill2_runs SET session_ref=$1 WHERE id=$2',[session,run.id]);
- const reportRun={...base,run:run.id};
- const claimed=await call(db,reportRun);
- await rpc(db,'bill2_record',f.actor,run.id,claimed.id,evidence(claimed));
- await rpc(db,'bill2_close',f.actor,run.id,'delivered',{...outcome,body:original});
- await rpc(db,'bill2_finalize',f.actor,run.id);
+ await insertReportTurn(db,{actor:f.actor,session,request:execution,spec,body:original,completeness});
 
  return {...f,project,round,session,draft,execution,base};
 }
@@ -76,6 +64,12 @@ export async function runCases({db,Client,connectionString,report}) {
  const foreign=await fixture(db);
  await assert.rejects(read(db,{...f,actor:foreign.actor}),/REPORT_EXECUTION_REQUIRED/);
  await assert.rejects(read(db,{...f,actor:randomUUID()}),/ACTOR_DENIED|REPORT_EXECUTION_REQUIRED/);
+ // V2-12 B6: an old execution is no longer a report handle, whatever it carries; only a report turn's request id is.
+ const oldExecution=randomUUID();
+ await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result)
+  VALUES($1,$2,$3,$4,$5,0,'completed',$6)`,[oldExecution,f.actor,f.session,randomUUID(),{reportGeneration:{version:1,projectId:f.project,roundId:f.round}},{body:original,completeness:'complete'}]);
+ for(const action of ['read','save','finalize'])
+  await assert.rejects(rpc(db,'report_document',f.actor,oldExecution,action,randomUUID(),0,edited,hash(original),null),/REPORT_EXECUTION_REQUIRED/);
  const request=randomUUID();
  const saved=await save(db,f,edited,0,request);
  assert.equal(saved.revision,1);assert.equal(saved.manuallyEdited,true);assert.equal(saved.bodyHash,hash(edited));
@@ -131,7 +125,7 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal((await db.query('SELECT report FROM artifact_versions WHERE id=$1',[result.versionId])).rows[0].report,null);
  report.checks.push('D7 artifact deletion scrubs hand edits, formal report and replay rows without changing erasure functions');
  const independent=await seed(db);await save(db,independent);const published=await finalize(db,independent,edited,1);
- await erase(db,independent,'answer',independent.execution);
+ await erase(db,independent,'session',independent.session);
  const retained=await rpc(db,'artifact_transition',independent.actor,independent.module,independent.skill,'report',
   independent.project,independent.round,null,{});
  assert.equal(retained.available,true);assert.equal(retained.sourceAvailable,false);
@@ -139,7 +133,7 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal(await rpc(db,'opc_source_allowed',independent.actor,published.versionId),false);
  assert.doesNotMatch(JSON.stringify((await db.query('SELECT payload FROM artifact_requests WHERE project_id=$1',
   [independent.project])).rows),/R5_MANUAL_PRIVATE_BODY/);
- report.checks.push('deleting the report execution preserves the independent formal body but revokes its source and clears edit copies');
+ report.checks.push('deleting the report conversation preserves the independent formal body but revokes its source and clears edit copies');
  const atLimit=await seed(db,'complete',128);
  assert.equal((await read(db,atLimit)).candidate,true);
  await assert.rejects(finalize(db,atLimit),/REPORT_EVIDENCE_CAPACITY/);
