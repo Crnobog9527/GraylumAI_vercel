@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.billing_reconcile_day(p_start timestamp with t
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE totals jsonb;calls jsonb;sources jsonb;entries jsonb;
+DECLARE totals jsonb;calls jsonb;turn_check jsonb;sources jsonb;entries jsonb;
 BEGIN
  IF p_start IS NULL OR p_end IS NULL OR NOT isfinite(p_start) OR NOT isfinite(p_end) OR p_end<p_start
   OR p_end-p_start>interval '31 days' THEN RAISE EXCEPTION 'invalid reconciliation window'; END IF;
@@ -36,6 +36,29 @@ BEGIN
  SELECT jsonb_build_object('settledCalls',(SELECT count(*) FROM c),'mismatched',(SELECT count(*) FROM bad),
   'sample',coalesce((SELECT jsonb_agg(id) FROM (SELECT id FROM bad ORDER BY id LIMIT 20) s),'[]'))
  INTO calls;
+
+ -- Turn path: a settled turn's charged credits must equal what the ledger booked for it as turn_spend.
+ WITH w AS (SELECT b.user_id actor_id,(b.metadata->>'turnId')::bigint id FROM billing_history b
+   WHERE b.operation_type='settle' AND b.created_at>=p_start AND b.created_at<p_end AND b.metadata->>'turnId' ~ '^[0-9]{1,18}$'
+  UNION SELECT c.user_id,c.source_id::bigint FROM credit_transactions c
+   WHERE c.source_type='ai_task' AND c.reason_code IN ('turn_spend','turn_intercepted') AND c.created_at>=p_start AND c.created_at<p_end
+    AND c.source_id ~ '^[0-9]{1,18}$'),
+ t AS (SELECT x.actor_id,x.id,coalesce(x.charged_credits,0) charged FROM turns x JOIN w ON w.actor_id=x.actor_id AND w.id=x.id
+   WHERE x.state='closed' AND x.charged_credits IS NOT NULL AND NOT EXISTS (SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=x.actor_id)),
+ l AS (SELECT t.*,
+   coalesce((SELECT sum(-c.amount) FROM credit_transactions c WHERE c.user_id=t.actor_id
+    AND c.source_type='ai_task' AND c.source_id=t.id::text AND c.reason_code='turn_spend'),0) booked,
+   coalesce((SELECT sum(-c.amount) FROM credit_transactions c WHERE c.user_id=t.actor_id
+    AND c.source_type='ai_task' AND c.source_id=t.id::text AND c.reason_code='turn_intercepted'),0) kept,
+   coalesce((SELECT sum((b.metadata->>'refundInterceptedRestoration')::int) FROM billing_history b WHERE b.user_id=t.actor_id
+    AND b.operation_type='settle' AND b.metadata->>'turnId'=t.id::text
+    AND b.metadata->>'refundInterceptedRestoration' ~ '^[0-9]{1,9}$'),0) expected_kept FROM t),
+ bad AS (SELECT * FROM l WHERE booked<>charged OR kept<>expected_kept)
+ SELECT jsonb_build_object('settledTurns',(SELECT count(*) FROM t),'mismatched',(SELECT count(*) FROM bad),
+  'sample',coalesce((SELECT jsonb_agg(jsonb_build_object('actorId',actor_id,'turnId',id,'charged',charged,'booked',booked,
+      'intercepted',kept,'expectedIntercepted',expected_kept) ORDER BY id)
+    FROM (SELECT * FROM bad ORDER BY id LIMIT 20) b),'[]'))
+ INTO turn_check;
 
  WITH u AS (SELECT user_id FROM billing_history WHERE created_at>=p_start AND created_at<p_end
    UNION SELECT user_id FROM credit_source_entries WHERE created_at>=p_start AND created_at<p_end),
@@ -73,5 +96,5 @@ BEGIN
  SELECT jsonb_build_object('unattributed',count(*) FILTER (WHERE source_kind='unattributed'),'notApplied',count(*) FILTER (WHERE NOT applied))
  INTO entries FROM credit_source_entries WHERE created_at>=p_start AND created_at<p_end;
 
- RETURN totals||jsonb_build_object('calls',calls,'sources',sources,'entries',entries);
+ RETURN totals||jsonb_build_object('calls',calls,'turns',turn_check,'sources',sources,'entries',entries);
 END $function$;
