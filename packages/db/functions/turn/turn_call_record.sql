@@ -41,7 +41,10 @@ BEGIN
     -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
     -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs
     -- only after account_erasure_barrier, so any receipt still writing then started after the request and sees it here.
-    IF p_raw IS NOT NULL AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean THEN
+    -- A voice generation's answer quotes the user's own documents: once its version is deleted (voiceSourceRevoked) a receipt that
+    -- arrives later is not stored either (V2-12 B7; voice_delete_versions removes what was stored before).
+    IF p_raw IS NOT NULL AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean
+      AND NOT (t.policy ? 'voice' AND (tomb->>'voiceSourceRevoked')::boolean) THEN
       INSERT INTO turn_call_raw (turn_id, seq, body) VALUES (p_turn_id, p_seq, p_raw);
     END IF;
   ELSIF c.status <> p_status OR c.payload_hash IS DISTINCT FROM p_payload_hash THEN
