@@ -120,9 +120,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planAccount, setPlanAccount] = useState("");
   const [planStart, setPlanStart] = useState(() => new Date().toISOString().slice(0, 10));
   const [planDays, setPlanDays] = useState(7);
-  const history = turnPath.withOld(trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
-    { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
-      refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) }));
+  const history = turnPath.history;
   const research = useResearchCalls(read.data?.sessionId);
   const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal, stale = live.reopenGraceOver;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
@@ -145,10 +143,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       // that legal representation; all other identity fields/extra keys stay exact.
       if (request.organizeAfter === false) delete request.organizeAfter;
       const stopped = history.data.executions?.some((execution: {
-        executionId: string; state: string; request?: MentorRequest;
-        billing?: {closed?: boolean; cancelRequested?: boolean};
+        executionId: string; state: string; request?: MentorRequest | null;
+        billing?: {closed?: boolean; cancelRequested?: boolean} | null;
       }) => execution.state === "cost_pending" && execution.billing?.closed === true &&
-        execution.billing.cancelRequested === true && execution.executionId !== history.data.activeExecution &&
+        execution.billing.cancelRequested === true && execution.executionId !== history.data?.activeExecution &&
         execution.request && sameRequest(request, execution.request));
       // Only an exact server-persisted, stopped request retires this local lock.
       if (stopped && sessionStorage.getItem(key) === raw) {
