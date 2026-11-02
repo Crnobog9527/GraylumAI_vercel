@@ -3,7 +3,7 @@
 -- CORE-PATH-V2 V2-12 batch R1b: work-item, video, capture and conversation-list functions drop their old-path branches
 -- (runtime_executions, bill2_runs, runtime_history_available). Each removed branch reads a row only the old path writes, so for
 -- turn-path data it is empty or false and the result is unchanged; an old execution used as a source is refused instead
--- (opc_data_event_guard, opc_video_turn_check), as 0462's rule makes old histories unavailable. See 0481's header for the data note.
+-- (opc_data_event_guard, opc_video_turn_check), as old histories go with the old path (staging holds test data of it only).
 --   opc_capture_resolve: only a mentor turn's suggestion (turn_mentor_source_available) can be accepted, ignored or dismissed.
 --   opc_free_conversations: a conversation is named by its first visible message (the turn path's rule); no execution row feeds the list.
 --   opc_work_results, artifact_save_candidate, opc_step_material, opc_video_material_prepare: the old executions are not looked at.

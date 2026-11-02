@@ -7,7 +7,7 @@
 --   opc_query_before_mentor_basis / opc_query_before_entry_projection / opc_query: the turns projection and capture-availability read the
 --     turn path's own bindings (the page adds them); 'informationVersion' stays a JSON null as before for turn-path rows.
 --   opc_topic_read / opc_topic_original / opc_data_source_turn / opc_adopt_topics_with_source: a topic reply is a turn's reply only.
---   opc_content_allowed / opc_result_link_available: a link or version sourced from an old execution is no longer available (as 0462's rule).
+--   opc_content_allowed / opc_result_link_available: a link or version sourced from an old execution is no longer available (old histories go with the old path; staging holds test data of it only).
 --   opc_business_archive: also BUSY while a turn of the business is running (the old provider-call check stays until the old path is dropped).
 -- Repeatable: whole-function CREATE OR REPLACE. Recovery: re-apply the previous text from git history; nothing is written or removed.
 BEGIN;
