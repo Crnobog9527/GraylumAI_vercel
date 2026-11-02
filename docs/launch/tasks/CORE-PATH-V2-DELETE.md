@@ -106,7 +106,9 @@
 | C 保留函数脱离旧表 | 把 INVENTORY D 里码 W、B 的函数整段 `CREATE OR REPLACE` 改写，去掉对待删表和待删函数的引用；小函数 `bill2_actor` 等先改名或确认保留；`runtime_start`、`opc_start*` 同批；**素材函数 `runtime_material`、`runtime_work_projection`、`runtime_material_allowed` 整段改写后保留（0.5）**；去掉新路径里"V2-12 drops this"的 `runtime_executions` 查询 | 对应的 B 批次 | 是 | 随 B 批次 |
 | D 去外键和触发器 | 新迁移：去掉 INVENTORY B 的 25 条外键、3 个保留表上的触发器、引用旧列的检查约束与索引；保留表里没读者的 `bill2_*` 列删掉 | A、B、C 完成 | 外键可重建，删列不可逆（空表，影响为零） | 否 |
 | E 回归 | 重算清单（第 7 节），确认待删对象的现役引用为零；跑全部本机套件 | D | — | 否 |
-| F 一次性删除（不可逆） | 一个迁移：先 `content_erasure_ledger_owned` 整段改按 `turns`（第 6 节）→ DROP 待删函数 → DROP 待删表 → 删 `core_path_v2.enabled`、`runtime_rw_v2`、测试窗口设置；同一个 PR 删 `services/runtime`、`services/bill2` 剩余文件、旧 tRPC 过程、旧测试套件，改 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json`、指纹、闭包基线 | E，**100 人压测通过**，总控上库 | 否 | 否 |
+| F 一次性删除（不可逆） | 一个迁移：先 `content_erasure_ledger_owned` 整段改按 `turns`（第 6 节）→ DROP 待删函数 → DROP 待删表 → 删 `core_path_v2.enabled`、`runtime_rw_v2`、测试窗口设置；同一个 PR 删 `services/runtime`、`services/bill2` 剩余文件、旧 tRPC 过程、旧测试套件，把 `runtime_history_available`/`runtime_history_availability`（旧执行历史一律视为没有来历，草稿迁移 0462 在 #1617）和 `bill2_scope_allowed` 五层链（C3）的改写并进同一个迁移；改 ENGINEERING/ARCHITECTURE 文档、`local-suites-excluded.json`、指纹、闭包基线 | E，**100 人压测通过**，总控上库 | 否 | 否 |
+
+批次 C 实测（2026-11-02，总控确认选 A）：C2（历史可用性只认 `turns`）、C3 在 F 之前做会让仍在 CI 里跑的旧路径套件（`billing.integration`、`runtime-history-perf`、`content-source`、`cron-idle-cost` 等）整体失败，所以不单独先做，并进 F，和旧套件、旧路径一起处理。已做的 C 项只有 0458（`runtime_work_projection` 不再读 `runtime_executions`）。依据：正式库新建不带旧数据，staging 只有测试数据，所以"旧历史没有来历"不是新的产品决定。
 
 批次 F 的迁移开头按 5.4 写明：不可逆、staging 仅测试数据、正式库尚不存在。回退只能靠"V2-12 前关 `core_path_v2.enabled`"，F 之后没有。
 
