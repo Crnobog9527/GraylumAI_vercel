@@ -54,6 +54,20 @@ it('an expired review that never opened a turn is skipped without closing anythi
  expect(m.close).not.toHaveBeenCalled();
  expect(stepActions(d.calls)).toEqual([['observe',null],['skip','RUNTIME_INTERRUPTED']]);
 });
+it('an unfinished pre-migration execution past its deadline is cancelled there and then skipped; a completed one is observed',async()=>{
+ const legacy={observe:{state:'cost_pending',expired:true,executionId:'99999999-9999-4999-8999-999999999999'},default:{}};
+ const d=database(legacy,{runtime_cancel:{state:'cancelled'}});
+ expect(await prepareReview(d.db,c)).toBe(false);
+ expect(d.calls.find(x=>x[0]==='runtime_cancel')![1]).toEqual({p_actor_id:c.actorId,p_execution_id:'99999999-9999-4999-8999-999999999999'});
+ expect(stepActions(d.calls)).toEqual([['observe',null],['skip','RUNTIME_INTERRUPTED']]);
+ expect(m.close).not.toHaveBeenCalled();
+ const done=database(legacy,{runtime_cancel:{state:'completed'}});
+ expect(await prepareReview(done.db,c)).toBe(false);
+ expect(stepActions(done.calls)).toEqual([['observe',null],['observe',null]]);
+ const broken={rpc:vi.fn(async(name:string)=>name==='runtime_cancel'?{data:null,error:{code:'08006'}}
+  :{data:{allowed:true,actorId:c.actorId,state:'cost_pending',expired:true,executionId:'99999999-9999-4999-8999-999999999999'},error:null})};
+ await expect(prepareReview(broken as never,c)).rejects.toThrow('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
+});
 it('turning the feature off closes a running turn and skips; nothing new is paid for',async()=>{
  const d=database({observe:{allowed:false,state:'running',turnId:7},default:{}});
  expect(await prepareReview(d.db,c)).toBe(false);

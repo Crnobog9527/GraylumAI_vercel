@@ -97,6 +97,14 @@ try{
  assert.match(notice,/生成中断，已用积分按实际结算/);
  report.checks.push('an interruption is retried up to three attempts with new request ids, the known cost of each taken off one cap');
 
+ // An interruption the turn recovery job already closed is retried when the scheduler only observes it.
+ const observedRetry=await fixture();
+ await turn(observedRetry,{close:'interrupted',delivered:false,cost:'0.01'});
+ const observedResult=await step(observedRetry.review,'observe');
+ assert.equal(observedResult.state,'retrying');
+ assert.equal((await reload(observedRetry.review)).attempt,2);
+ report.checks.push('an interrupted turn closed before the scheduler looked is retried on observe, not lost');
+
  // 3. A turn whose cost is unknown (a call without a receipt) keeps the claim and is never retried while its settlement is pending.
  const unknown=await fixture();
  const u=await turn(unknown,{close:'interrupted',delivered:false,cost:null});
@@ -119,20 +127,23 @@ try{
  assert.equal((await step(running.review,'skip','RUNTIME_INTERRUPTED')).state,'retrying');
  report.checks.push('a running turn keeps its claim, expires after 15 minutes, and the interruption is then retried');
 
- // 5. A turn that delivered nothing (failed, or completed but undelivered) ends the period when observed; other reasons end it at once.
- for(const [close,delivered] of [['failed',false],['completed',false]]){
+ // 5. A turn that failed or was interrupted is retried when observed; one that completed without delivering (an erasure) ends the period.
+ {
   const f=await fixture();
-  await turn(f,{close,delivered,cost:"0.01"});
-  const result=await step(f.review,'observe');
-  assert.equal(result.state,'failed');
-  assert.deepEqual([(await reload(f.review)).status],['skipped']);
+  await turn(f,{close:'failed',delivered:false,cost:'0.01'});
+  assert.equal((await step(f.review,'observe')).state,'retrying');
+  assert.equal((await reload(f.review)).attempt,2);
+  const g=await fixture();
+  await turn(g,{close:'completed',delivered:false,cost:'0.01'});
+  assert.equal((await step(g.review,'observe')).state,'failed');
+  assert.equal((await reload(g.review)).status,'skipped');
  }
  const balance=await fixture();
  await step(balance.review,'skip','BALANCE_LOW');
  const low=await reload(balance.review);
  assert.deepEqual([low.status,low.skip_reason],['skipped','BALANCE_LOW']);
  assert.equal((await rpc(c,'publish_monitor_reviews',balance.actor)).find(r=>r.id===balance.review.id).notice,'余额不足，未复盘');
- report.checks.push('a turn that delivered nothing ends the period; a balance skip ends it at once and says so');
+ report.checks.push('a failed turn is retried and an undelivered completed one ends the period; a balance skip ends it at once and says so');
 
  // 6. A cap that leaves nothing after the known cost is not retried.
  const capped=await fixture('0.01');
@@ -159,6 +170,17 @@ try{
  assert.equal((await step(legacyOpen.review,'skip','RUNTIME_INTERRUPTED')).state,'cost_pending');
  const stillOpen=await reload(legacyOpen.review);
  assert.deepEqual([stillOpen.status,stillOpen.attempt],['claimed',1]);
+ // Unfinished past the deadline (waiting for credits): expired with its execution id, so the caller can cancel it there.
+ const legacyPaused=await fixture();
+ const pausedRow=await reload(legacyPaused.review);
+ const pausedExecution=await one(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state)
+  VALUES($1,$2,$3,'{}',0,'running') RETURNING id v`,[legacyPaused.actor,pausedRow.runtime_session_id,pausedRow.runtime_request_id]);
+ await c.query("UPDATE social_review_runs SET created_at=now()-interval '20 minutes' WHERE id=$1",[legacyPaused.review.id]);
+ const pausedObserved=await step(legacyPaused.review,'observe');
+ assert.deepEqual([pausedObserved.state,pausedObserved.expired,pausedObserved.executionId],['cost_pending',true,pausedExecution]);
+ await c.query("UPDATE runtime_executions SET state='cancelled' WHERE id=$1",[pausedExecution]);
+ await step(legacyPaused.review,'skip','RUNTIME_INTERRUPTED');
+ assert.equal((await reload(legacyPaused.review)).status,'skipped');
  // Nothing opened yet and well past the deadline: the answer says so with a plain boolean, never NULL.
  const idle=await fixture();
  await c.query("UPDATE social_review_runs SET created_at=now()-interval '30 minutes' WHERE id=$1",[idle.review.id]);

@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_step(p_id uuid, p_token
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE r social_review_runs;x turns;lx runtime_executions;allowed boolean;spent numeric;st text;
+DECLARE r social_review_runs;x turns;lx runtime_executions;allowed boolean;spent numeric;st text;why text;
 BEGIN
  SELECT * INTO r FROM social_review_runs WHERE id=p_id FOR UPDATE;
  IF r.id IS NULL OR r.lease_token IS DISTINCT FROM p_token OR r.status<>'claimed'
@@ -32,7 +32,10 @@ BEGIN
      finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
     RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',NULL,'state','failed','expired',false);
    END IF;
-   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',NULL,'state','cost_pending','expired',false);
+   -- Still unfinished: past the 15-minute deadline with no result the caller cancels it (runtime_cancel, which settles known usage
+   -- and refunds what was not dispatched) and then skips; a running owner keeps its claim until then.
+   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',NULL,'executionId',lx.id,'state','cost_pending',
+    'expired',coalesce(lx.result IS NULL AND r.created_at<=clock_timestamp()-interval '15 minutes',false));
   END IF;
  END IF;
  IF x.id IS NOT NULL AND r.turn_id IS DISTINCT FROM x.id THEN
@@ -52,12 +55,14 @@ BEGIN
   -- The caller closes an expired or disabled turn before it skips; a turn still running here keeps the claim.
   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',x.id,'state','running','expired',false);
  ELSIF p_action='skip' OR p_action='observe' AND st='failed' THEN
+  -- An interruption the turn recovery job closed before this scheduler looked (observe) is retried like one reported by skip.
+  why:=coalesce(p_reason,CASE WHEN p_action='observe' AND x.close_kind IN ('interrupted','failed','expired') THEN 'RUNTIME_INTERRUPTED' END);
   -- An unknown financial outcome keeps the claim: the turn recovery owns the held credits until the turn is settled.
   IF x.id IS NOT NULL AND x.settlement IS DISTINCT FROM 'done' THEN
    RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',x.id,'state','cost_pending');END IF;
   spent:=CASE WHEN x.id IS NULL THEN 0 ELSE (SELECT coalesce(sum(turn_call_spent_usd(call_kind,nominal_usd,actual_usd)) FILTER (WHERE status='ok'),0)
     +coalesce(sum(actual_usd) FILTER (WHERE status='unusable'),0) FROM turn_calls WHERE turn_id=x.id) END;
-  IF p_action='skip' AND p_reason='RUNTIME_INTERRUPTED' AND r.attempt<3 AND allowed AND r.max_cost_usd-spent>0 THEN
+  IF why='RUNTIME_INTERRUPTED' AND r.attempt<3 AND allowed AND r.max_cost_usd-spent>0 THEN
    -- A deploy or a killed invocation is not the user's week lost: the settled attempt keeps its own request and receipts; the next
    -- attempt gets a new request in the same session, claimable by the next batch at once. Every attempt shares one cap: the known
    -- cost comes off it; a turn whose cost is still unknown (settlement pending) never retries (returned above).
@@ -65,7 +70,7 @@ BEGIN
     created_at=clock_timestamp(),lease_expires_at=clock_timestamp() WHERE id=r.id;
    RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',x.id,'state','retrying','expired',false);
   END IF;
-  UPDATE social_review_runs SET status='skipped',skip_reason=coalesce(p_reason,'RUNTIME_ENDED'),
+  UPDATE social_review_runs SET status='skipped',skip_reason=coalesce(why,'RUNTIME_ENDED'),
    finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
  END IF;
  RETURN jsonb_build_object('allowed',allowed,'actorId',r.actor_id,'turnId',x.id,'state',st,

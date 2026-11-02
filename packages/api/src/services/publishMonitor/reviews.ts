@@ -24,6 +24,7 @@ const claimSchema=z.object({id:z.string().uuid(),actorId:z.string().uuid(),token
 export type ReviewClaim=z.infer<typeof claimSchema>;
 export type ReviewStep={env:Record<string,string|undefined>;defer:(work:()=>Promise<void>)=>void;budget:RuntimeBudget;turn?:ReviewTurnDeps};
 const stepResult=z.object({allowed:z.boolean(),actorId:z.string().uuid(),turnId:z.number().int().positive().nullable().optional(),
+ executionId:z.string().uuid().nullable().optional(),
  state:z.string().nullable().optional(),expired:z.boolean().nullish().transform(v=>v===true)}).passthrough();
 async function step(db:SupabaseClient,c:ReviewClaim,action:string,reason?:string){
  const r=await db.rpc('publish_monitor_review_step',{p_id:c.id,p_token:c.token,p_action:action,p_reason:reason??null});
@@ -39,6 +40,15 @@ const POST_STATUSES=['available','stale','no_recent_posts','not_connected'];
 /** Looks at the review's turn (found by the claim's request id, never invented): what is already settled ends here, what is expired is closed. */
 export async function prepareReview(db:SupabaseClient,c:ReviewClaim):Promise<boolean>{
  const observed=await step(db,c,'observe');
+ // A review claimed before B8b may still hold an unfinished Runtime execution (waiting for credits or resume) past its deadline: it is
+ // cancelled there (known usage settles, undispatched holds come back) and the period ends or the claim waits for its bill.
+ if(observed.expired&&observed.executionId){
+  const cancelled=await db.rpc('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:observed.executionId});
+  if(cancelled.error)throw new Error('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
+  if((cancelled.data as {state?:string}|null)?.state==='completed')await step(db,c,'observe');
+  else await step(db,c,'skip','RUNTIME_INTERRUPTED');
+  return false;
+ }
  // completed / skipped by the step itself, a retry already scheduled, or a cost the recovery job still owns.
  if(['completed','failed','cost_pending','retrying'].includes(observed.state??''))return false;
  if(observed.expired){await finishExpiredReview(db,c,observed.turnId);return false;}
