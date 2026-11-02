@@ -30,7 +30,7 @@ import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage
   MentorWelcome } from "@/components/chat-display/mentor-messages";
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry, useOpeningFailureNotice } from "./mentor-notices";
-import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
+import { useAutoStepRecovery } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
 import { NO_PLAN_TURN, planTurnState, readPlanTurn, runPlanTurn, usePlanTurn } from "./plan-turn-path";
@@ -42,10 +42,9 @@ import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
   summaryShown } from "./step-summary";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
-  retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
-import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
+  retainExecution, settleEnvelope, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
@@ -72,8 +71,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const streamTurn=(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>
     live.stream(open,{executionId,onAdmitted,onFinished:()=>void utils.credits.getBalance.invalidate(),
       onResult:result=>{const notice=turnResultNotice(result);if(notice)setError(notice);}});
-  const execute={mutateAsync:(input:{executionId:string})=>turnPath.owns(input.executionId)?turnPath.settled(input.executionId)
-    :streamTurn(()=>utils.client.runtime.executeStream.mutate({...input,textProtocol:TEXT_PROTOCOL}),input.executionId)};
+  const execute={mutateAsync:(input:{executionId:string})=>turnPath.settled(input.executionId)};
   /** A mentor turn in one request: admission, then the same execution stream (AC-1). */
   const mentorTurn=(request:MentorRequest,onAdmitted?:(id:string)=>void)=>
     streamTurn(turnPath.open(request,read.data),undefined,onAdmitted);
@@ -123,7 +121,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const history = turnPath.history;
   const research = useResearchCalls(read.data?.sessionId);
   const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal, stale = live.reopenGraceOver;
-  const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   // State, not a ref: on a client-side return cached history exists before the log mounts.
   const [mentorInput, setMentorInput] = useState("");
@@ -259,7 +256,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     revise.isPending ||
     change.isPending ||
     savePlan.isPending ||
-    handoff.isPending || payg.busy;
+    handoff.isPending;
   useEffect(() => {
     // Hydrate before persisting: initial/StrictMode effects must not overwrite
     // a saved buffer with the render's empty initial state.
@@ -610,7 +607,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     // A running execution keeps envelope and bubble until a resume sees a terminal result; a Q1 refusal refills the box.
     if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
     setPendingBubble(old=>old?.requestId===request.requestId?null:old);
-    if(!payg.admitted(result))refusedTurn(sessionStorage,draftId,step.id,request.input,()=>setMentorInput(old=>old.trim()?old:request.input));
     live.clear();
   }
   async function resumeInterruptedOpening() {
@@ -1054,7 +1050,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
   }
   /** A step can be confirmed once the steps it depends on are confirmed. */
-  function confirmableStep(step: Step) { if (pendingMentor || awaitingReply || liveOnly || mentorExecutions.some(openOrganizer)) return false;
+  function confirmableStep(step: Step) { if (pendingMentor || awaitingReply || liveOnly) return false;
     if (steps.some(other => other.id !== step.id && confirmation.envelopeState(other.id).kind === "valid")) return false;
     return Boolean(d.accountRevision) || (step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending);
   }
@@ -1066,7 +1062,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (values) void autosave.enqueue(stepId).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
   }
   function checklistProps(): Parameters<typeof CaptureChecklist>[0] {
-    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor) || mentorExecutions.some(openOrganizer);
+    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor);
     return {
       steps, information: d.information, edits: infoEdits, selectedStepId: selectedStep.id, editable: snap.state === "draft",
       valid: Object.fromEntries(steps.map(step => [step.id, Boolean(snap.steps[step.id].valid)])),
@@ -1093,7 +1089,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return <StepReviewDialog title={step.title} schema={info.schema} reviewed={reviewed}
       updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} onDefer={confirmation.setDeferred}
       onEdit={(fieldId, value) => { confirmation.noteEdit(fieldId, editedValue(reviewed.values[fieldId]!, value)); editField(review.stepId, fieldId, value); }}
-      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly) || mentorExecutions.some(openOrganizer)}
+      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly)}
       loading={review.loading} loadError={review.loadError} onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
@@ -1166,7 +1162,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !status.answered && foldedCard === execution.executionId
                             && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
                           {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
-                          <ChatNoticeList notices={[...payg.turnNotices(execution, busy), mentorTurnNotice(execution.executionId, reply.notice,
+                          <ChatNoticeList notices={[mentorTurnNotice(execution.executionId, reply.notice,
                             !busy && execution.executionId === history.data?.activeExecution && turnNeedsRetry(execution, stale)
                             ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
                         </MentorTurnGroup>
@@ -1181,7 +1177,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     disabled={replying ? "busy" : sendLocked || snap.state !== "draft" ||
                       mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
                     onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
-                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...turnPath.notices(open => void run(() => streamTurn(open))),
+                  <ChatNoticeList notices={[...turnPath.notices(open => void run(() => streamTurn(open))),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
