@@ -40,8 +40,7 @@ BEGIN
      CASE WHEN cap~'^(0|[1-9][0-9]{0,3})(\.[0-9]{1,6})?$' THEN cap::numeric ELSE 0 END)
     ON CONFLICT(actor_id,business_id,period_start,cadence) DO NOTHING RETURNING * INTO r;
     IF NOT FOUND THEN CONTINUE;END IF;
-    session:=runtime_start(a,r.runtime_request_id,'{"scope":{"kind":"positioning_draft"}}');
-    UPDATE social_review_runs SET runtime_session_id=(session->>'sessionId')::uuid WHERE id=r.id RETURNING * INTO r;
+    UPDATE social_review_runs SET runtime_session_id=publish_monitor_review_session(a,r.id) WHERE id=r.id RETURNING * INTO r;
    END IF;
    out:=out||jsonb_build_array(jsonb_build_object('id',r.id,'actorId',a,'token',r.lease_token,
     'requestId',r.runtime_request_id,'sessionId',r.runtime_session_id,'modelId',r.model_id,'maxCostUsd',r.max_cost_usd::text));
@@ -93,8 +92,7 @@ BEGIN
     CASE WHEN cap~'^(0|[1-9][0-9]{0,3})(\.[0-9]{1,6})?$' THEN cap::numeric ELSE 0 END)
    ON CONFLICT(actor_id,business_id,period_start,cadence) DO NOTHING RETURNING * INTO r;
    IF NOT FOUND THEN CONTINUE;END IF;
-   session:=runtime_start(a,r.runtime_request_id,'{"scope":{"kind":"positioning_draft"}}');
-   UPDATE social_review_runs SET runtime_session_id=(session->>'sessionId')::uuid WHERE id=r.id RETURNING * INTO r;
+   UPDATE social_review_runs SET runtime_session_id=publish_monitor_review_session(a,r.id) WHERE id=r.id RETURNING * INTO r;
    out:=out||jsonb_build_array(publish_monitor_review_claim_item(r));
    -- One new review per user per batch; the next brand waits for this one to finish.
    EXIT;

@@ -3,7 +3,7 @@
 // Run: node packages/db/tests/publish-monitor-coach/migration-local.mjs --local-only
 import assert from 'node:assert/strict';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
-import { fixtureSql } from '../publish-monitor/fixtures.mjs';
+import { fixtureSql, laterRedefinitions } from '../publish-monitor/fixtures.mjs';
 import { generateDataset } from '../../../api/src/services/publishMonitor/coach/simulatedDataset.ts';
 import { seedSql } from './seed-sql.mjs';
 
@@ -147,8 +147,11 @@ try {
   const [again] = await claim();
   assert.equal(again.cadence, 'quarterly'); assert.equal(again.businessId, weekly.businessId);
   // Completed: the stages seen are recorded and the next due review is no longer a strategy check.
-  await c.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state)
-   VALUES($1,$2,$3,'{}',0,'completed')`, [gold, again.sessionId, again.requestId]);
+  const reviewPolicy = { q: 100, uTurnUsd: 0.04, gCredits: 24, minCredits: 6, uModelCredits: 24, historyItems: 0, inputBytes: 1000,
+    limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
+    review: { mode: 'weekly' } };
+  const reviewTurn = await svc('SELECT turn_open($1,$2,$3,$4,$5) v', [gold, again.sessionId, again.requestId, 'review', JSON.stringify(reviewPolicy)]);
+  await svc("SELECT turn_close($1,$2,'completed','[]'::jsonb,true,false,NULL) v", [gold, reviewTurn.turnId]);
   assert.equal((await step(again, 'observe')).state, 'completed');
   assert.equal((await run(again.id)).status, 'completed');
   assert.ok(Object.values(await stagesOf()).includes('growing'));
@@ -249,7 +252,8 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalog = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const built = await v(catalog);
-  await c.query(read(MIGRATION));
+  // 0457, then the publish-monitor migrations after it (0463, 0477 redefine its claim and step): the pair replays to the same catalog.
+  for (const path of [MIGRATION, ...laterRedefinitions('0457')]) await c.query(read(path));
   assert.deepEqual(await v(catalog), built);
   await c.query('BEGIN');
   await c.query(read('packages/db/tests/publish-monitor-coach/rollback-0457.sql').replace(/^(BEGIN|COMMIT);$/gm, ''));
