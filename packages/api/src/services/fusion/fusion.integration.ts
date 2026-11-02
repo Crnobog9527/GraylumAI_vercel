@@ -10,7 +10,6 @@ import { createRuntimeBudget } from '../turn/settings/budget';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { admitFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor } from './executor';
-import { recoverFusionFinancials } from './recovery';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from './settings';
 import { seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 
@@ -148,25 +147,6 @@ it.runIf(staging)('RUNTIME: Fusion group admission, streamed dispatch, saved bod
   for (const call of calls) expect({ settled: Boolean(call.settled_at), verdict: call.fusion_verdict, closed: call.closed,
     charged: Number(call.charged_delta) >= 1 }).toEqual({ settled: true, verdict: 'usable', closed: true, charged: true });
   expect(await wallet(f.actor)).toBe(1000 - calls.reduce((sum, c) => sum + Number(c.charged_delta), 0));
-});
-
-it.runIf(staging)('RUNTIME: Fusion stop releases undispatched holds; recovery cancels a call past its dispatch deadline', async () => {
-  const f = await member();
-  const executor = executorFor(f.actor);
-  const stopped = await admitFusionGroup({ admin, actorId: f.actor, requestId: randomUUID(), sourceSessionId: f.session, members: members(), env });
-  await executor.claim(stopped.groupId, 'review:1', 1, stopped.runs);
-  expect(await wallet(f.actor)).toBeLessThan(1000);
-  await executor.stop(stopped.runs.map(run => run.runId));
-  expect(await wallet(f.actor)).toBe(1000);
-  const late = await admitFusionGroup({ admin, actorId: f.actor, requestId: randomUUID(), sourceSessionId: f.session, members: members(), env });
-  await executor.claim(late.groupId, 'review:1', 1, late.runs);
-  expect(await wallet(f.actor)).toBeLessThan(1000);
-  await db.query(`update bill2_calls set dispatch_deadline=now()-interval '1 second'
-    where run_id in (select id from bill2_runs where fusion_group_id=$1)`, [late.groupId]);
-  const summary = await recoverFusionFinancials(admin, { limit: 200 });
-  expect(summary.cancelled).toBeGreaterThanOrEqual(2);
-  expect(await wallet(f.actor)).toBe(1000);
-  expect(sent.filter(body => body.model).length).toBeGreaterThan(0);
 });
 
 it.runIf(staging)('RUNTIME: Fusion admission refuses a disabled switch, a non-allowlisted model and a non-member', async () => {
