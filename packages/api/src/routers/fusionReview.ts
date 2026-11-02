@@ -1,26 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { RuntimeBudget } from '../services/turn/settings/budget';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
-import { authoritativeBilling, type BillingRpc } from '../services/turn/provider/service';
-import { createRuntimeBudget } from '../services/turn/settings/budget';
-import { newWorkGate } from '../services/turn/admission/newWorkGate';
-import { runtimeGateEnvironment } from '../services/runtime/realHost';
-import { runtimeActor } from '../services/runtime/actor';
-import { loadStagingPolicy } from '../services/turn/settings/stagingPolicy';
-import { stagingTransport } from '../services/runtime/stagingTransport';
 import { StagingAccessError, stagingProcedureError } from '../services/turn/settings/stagingErrors';
 import { reportRevisionService } from '../services/report/revisionSync';
-import { fusionExecutor } from '../services/fusion/executor';
 import { reviewFlow } from '../services/fusion/review';
-import { handReviewToServer, withAdvanceLease } from '../services/fusion/background';
+import { handReviewToServer } from '../services/fusion/background';
 import { ENDED_STATES, reviewState } from '../services/fusion/reviewRecord';
 import { adoptionChoices } from '../services/fusion/reviewAdoption';
 import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
-import { readAdmissionConfiguration } from '../services/turn/admission/admissionConfiguration';
-import { readCoreConfig } from '../services/turn/chat';
 import { loadVersionMarks } from '../services/fusion/versionMarks';
 
 const uuid = z.string().uuid();
@@ -51,34 +39,8 @@ export function revisionHooks(revisions: Pick<ReturnType<typeof reportRevisionSe
   };
 }
 
-/** What the live flow needs from the protected context. */
-type ProtectedCtx = { hasSupabaseAdminPrivileges?: boolean; supabaseAdmin?: SupabaseClient | null; user: { id: string };
-  userScopedSupabase: SupabaseClient; runtimeBudget?: RuntimeBudget; headers?: Headers | null };
-/** The live review flow: staging test window, billing, executor and call gate (one request per model call). */
-async function liveFlow(ctx: ProtectedCtx) {
-  if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
-  const admin = ctx.supabaseAdmin;
-  const window = await loadStagingPolicy(admin as unknown as BillingRpc, ctx.user.id, process.env);
-  const budget = ctx.runtimeBudget ?? createRuntimeBudget();
-  const actor = runtimeActor(ctx.userScopedSupabase.auth, ctx.user.id, budget, ctx.headers?.get('Authorization'));
-  const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor, adapter: stagingTransport(admin, window, budget), budget });
-  const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, runtimeGateEnvironment(window)).calls,
-    budget });
-  return reviewFlow({ admin, actorId: ctx.user.id, executor, ...revisionHooks(reportRevisionService(ctx.userScopedSupabase, admin)) });
-}
-const unwrap = (cause: unknown, path: string) => reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path);
-
-/** FUSION-REVIEW review API (staging test window only, like Runtime real calls). One request per model call. */
-const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
-  try {
-    const result = await next({ ctx: { ...ctx, flow: await liveFlow(ctx) } });
-    if (!result.ok) throw result.error;
-    return result;
-  } catch (cause) { throw unwrap(cause, path); }
-});
-const review = z.object({ reviewId: uuid }).strict();
-
-/** Reads only (events, panel names): no staging window, executor or billing is needed to look. */
+/** Reads and the chapter choice. A review starts on POST /api/turn (kind=jury), never here (CORE-PATH-V2 V2-12 B5); reading needs
+ * no staging window, executor or billing. */
 const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
   try {
     if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
@@ -90,48 +52,20 @@ const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
   } catch (cause) { throw reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path); }
 });
 
+const review = z.object({ reviewId: uuid }).strict();
 const mineCursor = z.object({ createdAt: z.string().datetime({ offset: true }), reviewId: uuid }).strict();
 const mineInput = z.object({ limit: z.number().int().min(1).max(50).default(10), draftId: uuid.optional(),
   cursor: mineCursor.optional() }).strict();
 const mineOutput = z.array(z.object({ reviewId: uuid, draftId: uuid, sourceVersionId: uuid, state: reviewState,
   round: z.number().int().min(1), phase: z.enum(['review', 'summary']), outcomeKind: z.string().nullable(),
   awaitingChoice: z.boolean(), createdAt: z.string(), endedAt: z.string().nullable(), seenAt: z.string().nullable() }));
-/** acceptedCredits: the "最多消耗 X 积分" the user agreed to; a start whose maximum is now higher is refused. */
-const startInput = z.object({ requestId: uuid, draftId: uuid, sourceVersionId: uuid,
-  acceptedCredits: z.number().int().positive().optional() }).strict();
-/** A retried start finds its review before the live-call window is required (#962 review); a new start needs it. */
-const startProcedure = protectedProcedure.input(startInput).use(async ({ ctx, input, next, path }) => {
-  if (ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin) {
-    try {
-      const existing = await reviewFlow({ admin: ctx.supabaseAdmin, actorId: ctx.user.id }).replayStart(input);
-      if (existing) return next({ ctx: { ...ctx, replayed: existing } });
-    } catch (cause) { throw unwrap(cause, path); }
-  }
-  return next({ ctx: { ...ctx, replayed: null } });
-});
-
 export const fusionReviewRouter = router({
-  /** The maximum a start would hold, before the user agrees; creates nothing and calls no model. */
-  estimate: procedure.input(z.object({ draftId: uuid, sourceVersionId: uuid }).strict())
-    .query(({ ctx, input }) => ctx.flow.estimate(input)),
-  start: startProcedure.mutation(async ({ ctx, input, path }) => {
-    const started = ctx.replayed ?? await (async () => {
-      try { return await (await liveFlow(ctx)).start(input); } catch (cause) { throw unwrap(cause, path); }
-    })();
-    if (!ENDED_STATES.has(started.state)) handReviewToServer(ctx, started.reviewId);
-    return started;
-  }),
   /** The page only reads now (FUSION-BACKGROUND): returns the review as it stands and hands it to the server again
    * (a no-op while the server holds it). No call is claimed or returned for the page to dispatch. */
   continue: reader.input(review).mutation(async ({ ctx, input }) => {
     const view = await ctx.flow.read(input.reviewId);
     if (!ENDED_STATES.has(view.state)) handReviewToServer(ctx, input.reviewId);
     return { review: view, calls: [] as typeof view.calls, background: true as const };
-  }),
-  /** Kept for old pages: runs only under the advance lease, so it never races the server; refused calmly otherwise. */
-  dispatch: procedure.input(review.extend({ callId: uuid })).mutation(async ({ ctx, input }) => {
-    const leased = await withAdvanceLease(ctx.supabaseAdmin, input.reviewId, () => ctx.flow.dispatch(input.reviewId, input.callId));
-    return leased.ran ? leased.value : { skipped: true as const, reason: leased.reason };
   }),
   /** The completion notice (FUSION-BACKGROUND): the user's latest reviews, "待选择" / "已暂停" and whether seen. */
   mine: reader.input(mineInput).output(mineOutput).query(async ({ ctx, input }) => {
@@ -164,9 +98,7 @@ export const fusionReviewRouter = router({
   detail: reader.input(review).query(({ ctx, input }) => ctx.flow.detail(input.reviewId)),
   /** Whether the review is switched on, so the positioning page shows no entry (and no error) when it is off.
    * Membership and balance are still checked by start; a failed settings read reads as off. */
-  // corePathV2: which path a start goes on (CORE-PATH-V2 V2-10); an unreadable setting keeps the old one.
-  available: reader.query(async ({ ctx }) => ({ enabled: await readFusionSettings(ctx.admin).then(s => s.review.enabled === true, () => false),
-    corePathV2: await readAdmissionConfiguration(ctx.admin).then(c => Boolean(readCoreConfig(c)), () => false) })),
+  available: reader.query(async ({ ctx }) => ({ enabled: await readFusionSettings(ctx.admin).then(s => s.review.enabled === true, () => false) })),
   /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */
   panel: reader.query(async ({ ctx }) => {
     const names = (await readFusionSettings(ctx.admin)).review.displayNames;
