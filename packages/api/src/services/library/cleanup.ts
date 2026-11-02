@@ -51,13 +51,8 @@ export async function cleanupLibrary(client: SupabaseClient, options: {
       })) released++;
     } catch { failed++; }
   }
-  // LIB-4 (0262): remove deleted documents' copies from finished executions that read them. Amounts stay.
-  let references = { processed: 0, waiting: 0 };
-  try {
-    references = await libraryRpc<typeof references>(client, 'runtime_library_propagate', {
-      p_actor_id: options.actorId ?? null, p_limit: 20,
-    });
-  } catch { failed++; }
+  // CORE-PATH-V2 V2-12 F: no finished execution holds a copy of a deleted document any more (runtime_library_propagate is dropped).
+  const references = { processed: 0, waiting: 0 };
   const backlog = await libraryRpc<{ pending: number; overdue: number; oldestDeletedAt: string | null }>(
     client, 'library_cleanup_backlog', { a: options.actorId ?? null },
   );
