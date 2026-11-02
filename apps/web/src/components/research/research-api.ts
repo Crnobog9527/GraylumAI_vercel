@@ -24,6 +24,7 @@ function byKind(dataKind: string | null | undefined, platform: string, query: st
   if (dataKind === "web_search") return { tool: "web_search", args: { query } };
   if (dataKind === "web_fetch") return { tool: "web_fetch", args: { url: query } };
   if (dataKind && ACCOUNT_KINDS.includes(dataKind)) return { tool: "social_account", args: { platform, account: query } };
+  if (dataKind === "account_search") return { tool: "social_search", args: { platform, keywords: [query], dataKind } };
   return { tool: "social_search", args: { platform, keywords: [query] } };
 }
 

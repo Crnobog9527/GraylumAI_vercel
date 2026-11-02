@@ -4415,7 +4415,7 @@
   "fn:runtime_stop_loss_observe(uuid)": "8bdd7ed7a33c",
   "fn:runtime_stop_loss_settings_guard()": "20b5f75eb1a6",
   "fn:runtime_stop_loss_settled()": "b1f481408ad0",
-  "fn:runtime_stop_loss_usage(uuid)": "a2f188bb1109",
+  "fn:runtime_stop_loss_usage(uuid)": "3cee1666dbfb",
   "fn:runtime_test_actor_access(uuid)": "7ae60b26a537",
   "fn:runtime_test_budget_guard()": "81b5f4fcfef2",
   "fn:runtime_test_dispatch_guard()": "bd6b8bd2e5da",

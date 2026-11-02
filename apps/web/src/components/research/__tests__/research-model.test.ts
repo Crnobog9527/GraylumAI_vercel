@@ -95,6 +95,8 @@ describe("benchmark table", () => {
     expect(cellText({ ...youtube, platform: "tiktok" }, "followers", NOW)).toBe("1.9 万");
     expect(formatCount(0)).toBe("0");
     expect(formatLastUpdate("2026-10-13T10:00:00Z", NOW)).toBe("2026-10-13（1 天前）");
+    // 20:30 UTC on 31 Oct is already 1 Nov east of UTC: the date is the UTC one whatever the viewer's zone.
+    expect(formatLastUpdate("2026-10-31T20:30:00Z", NOW)).toContain("2026-10-31");
     expect(cellText(ROWS[1]!, "medianViews", NOW)).toBe(MISSING_TEXT);
   });
 
@@ -151,6 +153,12 @@ describe("server rows from research.toolCharges and research.evidence", () => {
     expect(charges.map(charge => describeRequest(charge.tool, charge.args)?.query)).toEqual(["咖啡", "穿搭", "sample", "aa_one", "咖啡店", "acct_x", "咖啡 对标"]);
     expect(charges.slice(4).map(charge => describeRequest(charge.tool, charge.args)?.line)).toEqual(
       expect.arrayContaining([expect.stringContaining("关键词作品"), expect.stringContaining("账号资料"), "网页搜索"]));
+  });
+
+  it("a discovery subcall that searched accounts is not worded as keyword posts", () => {
+    const [charge] = toSearchCharges([{ callId: "h", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1",
+      query: "baby meal prep", platform: "tiktok", dataKind: "account_search" }]);
+    expect(describeRequest(charge!.tool, charge!.args)).toEqual({ query: "baby meal prep", line: "TikTok · 搜索账号" });
   });
 
   it("maps evidence rows without inventing a route or a title", () => {

@@ -189,7 +189,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       host = withResearchRefresh(host, { refreshId: input.researchRefreshId, platform: flow.refresh.platform as SocialPlatform, account,
         note: RESEARCH_REFRESH_NOTE });
     }
-    if (flow && flowRaw && (benchmarkStep || linkTurn || input.researchRefreshId)) {
+    // A card the coach proposed on any step is confirmed on the page: its confirmation id must reach the next turn whatever the
+    // step is, or the coach says it never got the confirmation and proposes the card again (round 10, a finished positioning).
+    const hasCards = Array.isArray(flowRaw?.cards) && flowRaw.cards.length > 0;
+    if (flow && flowRaw && (benchmarkStep || linkTurn || input.researchRefreshId || hasCards)) {
       const known = flow.cardDiscoveries;
       host = withResearchContext(researchInputHost(host, true)!, await researchContextFrom({ cards: flowRaw.cards, benchmarks: flowRaw.benchmarks,
         shortfall: flowRaw.shortfall ?? null, discoveryOf: async card => known[card] ?? null }));
