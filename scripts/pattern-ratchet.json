@@ -43,7 +43,7 @@
       ],
       "regex": "\\.includes\\('(RUNTIME|OPC|BILL2|PAY|FUSION|PUBLISH)_",
       "count": "matches",
-      "max": 9
+      "max": 8
     },
     {
       "id": "payments-double-cast",
