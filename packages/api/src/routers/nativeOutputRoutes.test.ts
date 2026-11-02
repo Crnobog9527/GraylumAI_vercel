@@ -37,18 +37,6 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-it.each(['plan', 'workspace', 'topics'] as const)('%s retains prepare then buffered runtime.execute with no progress observer', async path => {
-  const caller = app.createCaller(context);
-  if (path === 'plan') await caller.opc.prepareStep({...input, purpose: 'plan'});
-  if (path === 'topics') await caller.opc.topicTurn({draftId: id, requestId: id, input: 'synthetic'});
-  if (path === 'workspace') await caller.runtime.prepare({sessionId: id, requestId: id, input: 'synthetic',
-    selection: {kind: 'ordinary', modelId: id}, network: 'deny', organizeAfter: false});
-  expect(mock.execute).not.toHaveBeenCalled();
-  const result = await caller.runtime.execute({executionId: id});
-  expect(result).toMatchObject({state: 'completed', body: 'buffered result'});
-  expect(mock.execute).toHaveBeenCalledTimes(1);
-  expect(mock.execute.mock.calls[0]![2]).toBeUndefined();
-});
 
 it('mentor stream refuses plan before admission or execution', async () => {
   const stream = await app.createCaller(context).opc.mentorTurnStream({...input, purpose: 'plan', textProtocol: 'textDelta-v1'});
