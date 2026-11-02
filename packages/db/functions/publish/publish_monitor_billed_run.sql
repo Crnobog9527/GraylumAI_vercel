@@ -15,11 +15,14 @@ BEGIN
  SELECT * INTO b FROM social_billed_runs WHERE connection_id=c.id AND refresh_id=p_refresh_id AND closed_at IS NULL FOR UPDATE;
  IF b.run_id IS NULL AND p_run_id IS NOT NULL THEN
   IF jsonb_typeof(p_policies) IS DISTINCT FROM 'array'
-   OR NOT EXISTS(SELECT 1 FROM bill2_runs WHERE id=p_run_id AND actor_id=c.actor_id) THEN
+   -- Old code still running while this migration is applied binds the BILL2 run it prepared; both kinds are accepted until batch F.
+   OR (NOT EXISTS(SELECT 1 FROM turns WHERE request_id=p_run_id AND actor_id=c.actor_id AND kind='review')
+    AND NOT EXISTS(SELECT 1 FROM bill2_runs WHERE id=p_run_id AND actor_id=c.actor_id)) THEN
    RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
   INSERT INTO social_billed_runs(run_id,connection_id,refresh_id,actor_id,policies)
   VALUES(p_run_id,c.id,p_refresh_id,c.actor_id,p_policies) RETURNING * INTO b;
  END IF;
  RETURN CASE WHEN b.run_id IS NULL THEN jsonb_build_object('runId',NULL)
-  ELSE jsonb_build_object('runId',b.run_id,'policies',b.policies) END;
+  ELSE jsonb_build_object('runId',b.run_id,'policies',b.policies,
+   'legacy',NOT EXISTS(SELECT 1 FROM turns WHERE request_id=b.run_id AND actor_id=b.actor_id)) END;
 END $function$;
