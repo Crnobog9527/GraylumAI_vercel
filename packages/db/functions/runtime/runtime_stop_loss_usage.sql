@@ -5,17 +5,17 @@
 CREATE OR REPLACE FUNCTION public.runtime_stop_loss_usage(a uuid)
  RETURNS jsonb
  LANGUAGE sql
+ STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
  WITH day AS MATERIALIZED (
   SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date AS utc_date
  )
  SELECT jsonb_build_object('utcDate',day.utc_date,
-  'userUsd',coalesce(sum((t.metadata->>'providerCostUsd')::numeric) FILTER(WHERE t.user_id=a),0)::text,
-  'siteUsd',coalesce(sum((t.metadata->>'providerCostUsd')::numeric),0)::text)
- FROM day LEFT JOIN credit_transactions t ON
-  t.reason_code='bill2_release' AND t.metadata->>'providerCostUsd' IS NOT NULL
-  AND t.created_at >= (day.utc_date::timestamp AT TIME ZONE 'UTC')
-  AND t.created_at < ((day.utc_date+1)::timestamp AT TIME ZONE 'UTC')
- GROUP BY day.utc_date;
+  'userUsd',coalesce((SELECT sum(coalesce(k.nominal_usd,0)) FROM turns t
+    JOIN turn_calls k ON k.actor_id=t.actor_id AND k.turn_id=t.id
+    WHERE a IS NOT NULL AND t.actor_id=a AND t.state='closed' AND (t.policy->>'day')::date=day.utc_date),0)::text,
+  'siteUsd',coalesce((SELECT sum(s.spent_usd) FROM daily_spend s WHERE s.day=day.utc_date),0)::text,
+  'reservedUsd',coalesce((SELECT sum(s.reserved_usd) FROM daily_spend s WHERE s.day=day.utc_date),0)::text)
+ FROM day;
 $function$;
