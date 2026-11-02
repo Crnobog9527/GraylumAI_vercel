@@ -96,7 +96,7 @@
   "packages/api/src/services/turn/provider/openRouterEvidence.ts": {"longLines":2},
   "packages/api/src/services/turn/provider/openRouterHistory.ts": {"longLines":2},
   "packages/api/src/services/turn/provider/openRouterStream.ts": {"longLines":2},
-  "packages/api/src/services/turn/provider/service.ts": {"longLines":6},
+  "packages/api/src/services/turn/provider/service.ts": {"longLines":3},
   "packages/api/src/services/turn/settings/stagingErrors.ts": {"longLines":1},
   "packages/api/src/services/turn/settings/stagingPolicy.ts": {"longLines":4},
   "packages/db/schema.ts": {"lines":593},

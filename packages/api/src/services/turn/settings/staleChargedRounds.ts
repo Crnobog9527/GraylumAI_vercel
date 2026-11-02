@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import type { BillingRpc } from '../provider/service';
+import type { BillingRpc } from '../provider/frozenRun';
 import { logger } from '../../../lib/logger';
 
 /**

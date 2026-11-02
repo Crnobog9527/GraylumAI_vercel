@@ -4,7 +4,7 @@ import { rowFor, type ConfigurationRows } from '../settings/settingsRows';
 import { isDeepStrictEqual } from 'node:util';
 import { reasoningPolicy, frozenReasoningFields, type ReasoningPolicy } from './reasoningPolicy';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { FrozenRun } from '../provider/service';
+import type { FrozenRun } from '../provider/frozenRun';
 import { PAYG_MAX_TOOLS } from './paygPolicy';
 import { stagingRuntimeWindow } from '../settings/stagingEnvironment';
 import type { StagingPolicy } from '../settings/stagingPolicy';

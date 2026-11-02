@@ -11,7 +11,7 @@ import {openRouterBound,openRouterCallBound} from '../turn/provider/openRouterPo
 import {decimal} from '../turn/provider/decimal';
 import type {FrozenPaygRun} from '../turn/provider/service';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
-import {REVIEW_PROMPT} from './reviews';
+import {REVIEW_PROMPT} from './reviewAdmission';
 const extensions=vi.hoisted(()=>({catalog:vi.fn(),research:vi.fn()}));
 vi.mock('../turn/skills/skillCatalog',async original=>({...(await original<typeof import('../turn/skills/skillCatalog')>()),
  discoverSkillCatalog:extensions.catalog}));
