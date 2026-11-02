@@ -325,6 +325,15 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 - `opc.saveWorkResult` 路由已收窄为只收 `turnId`；`services/opc/service.ts` 里 `saveWorkResult(executionId)` 的旧分支和 `opc_work_result`，随上面那个集成用例一起在 F 删。
 - 静态无调用方的入口已分两批删：`opc` 路由 11 个（#1647）、`runtime` 路由 9 个（#1648）。
 
+### 7.4 批次 F 迁移草稿（脚本生成，2026-11-03，不上库）
+
+`CORE-PATH-V2-DELETE-F-DRAFT.sql` 是按重算清单脚本生成的批次 F 迁移草稿（文件放在 docs 里，**不在 `packages/db/migrations`，没有迁移号**）：15 张表、153 个函数、23 条外键、2 个触发器。要点：
+- **开头是自检守卫**：迁移运行时先扫一遍 `pg_proc`，只要还有一个“留下的”函数的源文本（去掉注释后）提到要删的表或调用要删的函数，就抛 `V2_12_F_REFERENCES_REMAIN_*` 并整体回滚——plpgsql 引用已删的表只会在调用时才报错，所以靠守卫拦。清单没清零时，这个迁移跑不过。
+- 全部不带 CASCADE；表用一条 `DROP TABLE a, b, c` 一起删（内部外键互相指向）；先去外键，保留表里的列保留原值（不再有约束）。
+- 保留（不删）：`runtime_scope_material`（素材快照）、`runtime_session_names`、`runtime_session_results`（现役功能）、`runtime_test_windows`（等总控定，草稿按“留”生成）。
+- 现在清单还没清零：留下的函数里仍有 54 个从现役入口走得到、又碰要删的对象（注销 25、评审团/对比 21、复盘 4、账务 3、其余 1：`opc_capture_apply`、`opc_work_result` 随 ⑥ 和旧工作台用例一起去）。清零后重新生成，守卫通过才可以跑。
+- 本机演练：用建库脚本在带旧表数据的本机库上跑（演练记录补在这里）。
+
 ## 8. 发现的问题（不在本任务范围，已记录）
 
 - `docs/runbooks/BILL2_V1_PENDING_READONLY.sql` 引用 10 个待删函数，删除时要一并处理。
