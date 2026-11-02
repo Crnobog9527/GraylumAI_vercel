@@ -300,6 +300,30 @@ staging 上旧表的行数（只读查询，2026-11-03）：`runtime_executions`
 R1–R6 之间文件不重叠（函数不同），R2 给 V2-9、R4 给复盘窗口，本窗口做 R1、R5、R6。每批：本机跑相关套件和 `check-turn-budget`，闭包棘轮不放宽。
 F（DROP）仍排最后，验收和复测通过、总控放行才做。
 
+### 7.3 批次 F 删 Node 代码前的清单（2026-11-03，导入图重算）
+
+方法：以 `apps/web/src/app`、`routers`、`trpc`、`services/turn` 为入口，沿导入走一遍，不穿过要删的 `services/runtime`、`services/bill2`。
+结果：现役代码里还有 **34 处导入**指向这两个目录，删目录之前必须先清零：
+
+| 现役文件 | 还在导入的要删文件 |
+|---|---|
+| `routers/opc.ts` | `runtime/libraryVisibility.ts`, `runtime/executionStream.ts` |
+| `routers/runtime.ts` | `runtime/libraryVisibility.ts`, `runtime/nativeView.ts`, `runtime/workItems.ts`, `runtime/paygRuntime.ts`, `runtime/admission.ts`, `runtime/stagingTransport.ts`, `runtime/execute.ts`, `runtime/realHost.ts`, `runtime/actor.ts`, `runtime/defaultModel.ts`, `runtime/executionStream.ts` |
+| `services/accountErasure/financialRecovery.ts` | `runtime/inflightFinancial.ts`, `runtime/stagingTransport.ts` |
+| `services/fusion/admission.ts` | `runtime/paygRuntime.ts`, `runtime/paygPricing.ts`, `runtime/realHost.ts` |
+| `services/fusion/compareAdmission.ts` | `runtime/realHost.ts`, `runtime/paygRuntime.ts`, `runtime/paygPricing.ts` |
+| `services/fusion/models.ts` | `runtime/realHost.ts` |
+| `services/opc/service.ts` | `runtime/waitingOrganizer.ts`, `runtime/admission.ts` |
+| `services/publishMonitor/billedReadLegacy.ts` | `bill2/toolSubcall.ts` |
+| `services/publishMonitor/reviews.ts` | `runtime/executorRpc.ts`, `runtime/admission.ts`, `runtime/execute.ts`, `runtime/stagingTransport.ts`, `runtime/realHost.ts` |
+| `services/report/modelSettings.ts` | `runtime/realHost.ts`, `runtime/paygPricing.ts` |
+| `services/report/service.ts` | `runtime/admission.ts`, `runtime/nativeView.ts` |
+
+另外：
+- `packages/api/src/services/opc/opc.integration.ts` 是 v3 工作台（`run-workbench.mjs` 的 opcMode）手动运行的集成套件，CI 不跑；它的 116 个用例里有 **73 个走旧路径**（旧执行、旧计划结果、旧视频流程，浏览器用例居多），其中调用 `planResult`、`saveResult`、`planRequestState`、`positionHistory`、`contentFromExecution`、`videoExecutionCheck` 等已删方法的，随旧路径在 F 一起删，并按第 5 节写“旧场景 → 新测试”对照表。
+- `opc.saveWorkResult` 路由已收窄为只收 `turnId`；`services/opc/service.ts` 里 `saveWorkResult(executionId)` 的旧分支和 `opc_work_result`，随上面那个集成用例一起在 F 删。
+- 静态无调用方的入口已分两批删：`opc` 路由 11 个（#1647）、`runtime` 路由 9 个（#1648）。
+
 ## 8. 发现的问题（不在本任务范围，已记录）
 
 - `docs/runbooks/BILL2_V1_PENDING_READONLY.sql` 引用 10 个待删函数，删除时要一并处理。
