@@ -5,9 +5,7 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { CompareCard } from './CompareCard';
 
-export type CompareCardRow = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null;
-  /** A compare of the turn path (CORE-PATH-V2 V2-10): read, adopted and followed on its own routes, never stopped by a button. */
-  turn?: boolean };
+export type CompareCardRow = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null };
 type Card = CompareCardRow;
 
 /** The listed cards plus the compares this tab started that the list does not (yet) have: a failed list read must not hide a
@@ -32,39 +30,31 @@ export function placeCompareCards(cards: readonly Card[], turns: ReadonlyArray<{
 
 /**
  * The compares of one conversation, for the free-conversation page (FUSION-COMPARE §3.4): `cards` to place by time next to the
- * history, `adoptedExecutions` to show those answers as ordinary replies (the server writes the execution id at adoption, so
- * the page cannot mark anything itself), and the real model names for the column titles.
+ * history and the real model names for the column titles. Every compare is a turn-path compare (CORE-PATH-V2 V2-12 B4).
  */
 export function useCompareThread(sessionId: string | null) {
   // The conversation's existing compares are listed whatever the switch, the plan or the allowlist say now: only the new-compare
-  // button depends on eligibility. A compare still running must keep its controls (dispatch, stop) and a finished one its answers.
-  // A failed list read is retried and then polled until it works: a card is what dispatches and stops its columns, so it must
-  // not stay hidden after a transient failure.
-  const list = trpc.fusionCompare.list.useQuery({ sessionId: sessionId ?? '' }, { enabled: Boolean(sessionId), retry: 2,
+  // button depends on eligibility. A compare still running must keep its controls and a finished one its answers.
+  // A failed list read is retried and then polled until it works, so a transient failure does not leave a card hidden.
+  const list = trpc.fusionCompare.turnList.useQuery({ sessionId: sessionId ?? '' }, { enabled: Boolean(sessionId), retry: 2,
     retryDelay: 1000, refetchInterval: query => (query.state.status === 'error' ? 5000 : false) });
-  const turnList = trpc.fusionCompare.turnList.useQuery({ sessionId: sessionId ?? '' }, { enabled: Boolean(sessionId), retry: 2,
-    retryDelay: 1000, refetchInterval: query => (query.state.status === 'error' ? 5000 : false) });
-  const old = list.data as { cards: Card[]; names: Record<string, string> } | undefined;
-  const turned = turnList.data as { cards: Card[]; names: Record<string, string> } | undefined;
-  const data = old || turned ? { cards: [...(old?.cards ?? []), ...(turned?.cards ?? []).map(card => ({ ...card, turn: true }))]
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)), names: { ...old?.names, ...turned?.names } } : undefined;
+  const data = list.data as { cards: Card[]; names: Record<string, string> } | undefined;
   // Compares this tab started: shown from the start response itself, so a failed list read cannot hide a group that holds credits.
   const [started, setStarted] = useState<Card[]>([]);
-  const cards = withStarted(data?.cards ?? [], started);
+  const cards = withStarted((data?.cards ?? []).slice().sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)), started);
   // Real model names of exactly the models these cards used (server-resolved), not today's allowlist.
   const names = data?.names ?? {};
-  const adoptedExecutions = new Set(cards.map(card => card.adoption?.executionId).filter((id): id is string => Boolean(id)));
-  const add = (compareId: string, turn = false) => setStarted(old => old.some(card => card.compareId === compareId) ? old
-    : [...old, { compareId, state: 'running', createdAt: new Date().toISOString(), ...(turn ? { turn } : {}) }]);
+  const add = (compareId: string) => setStarted(old => old.some(card => card.compareId === compareId) ? old
+    : [...old, { compareId, state: 'running', createdAt: new Date().toISOString() }]);
   // `loaded`: the list has been answered (or failed for good): until then it is not yet known which cancelled turns are adopted answers.
-  const loaded = !sessionId || (list.isFetched && turnList.isFetched);
-  return { cards, names, adoptedExecutions, add, loaded, refresh: async (): Promise<void> => { await Promise.all([list.refetch(), turnList.refetch()]); } };
+  const loaded = !sessionId || list.isFetched;
+  return { cards, names, add, loaded, refresh: async (): Promise<void> => { await list.refetch(); } };
 }
 
 /** One card per compare, oldest first; `onAdopted` lets the page re-read its history, `onQuote` prefills the composer. */
 export function CompareThread({ cards, names, onAdopted, onQuote }: {
   cards: Card[]; names: Record<string, string>; onAdopted: () => void; onQuote: (text: string) => void;
 }) {
-  return <>{cards.map(card => <CompareCard key={card.compareId} compareId={card.compareId} names={names} turn={card.turn === true}
+  return <>{cards.map(card => <CompareCard key={card.compareId} compareId={card.compareId} names={names}
     onAdopted={onAdopted} onQuote={onQuote} />)}</>;
 }

@@ -1,30 +1,27 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-const state = vi.hoisted(() => ({ view: undefined as unknown, oldReads: 0 }));
+const state = vi.hoisted(() => ({ view: undefined as unknown }));
 vi.mock('@/components/chat/MessageMarkdown', () => ({ MessageMarkdown: ({ text }: { text: string }) => <span>{text}</span> }));
 vi.mock('@/trpc/client', () => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false });
   return { trpc: { useUtils: () => ({ credits: {}, client: {} }), fusionCompare: {
-    read: { useQuery: (_input: unknown, options?: { enabled?: boolean }) => { if (options?.enabled !== false) state.oldReads++; return { data: undefined, refetch: vi.fn() }; } },
     turnRead: { useQuery: () => ({ data: state.view, refetch: vi.fn() }) },
-    stop: { useMutation: mutation }, adopt: { useMutation: mutation }, turnAdopt: { useMutation: mutation } } } };
+    turnAdopt: { useMutation: mutation } } } };
 });
 import { CompareCard } from './CompareCard';
 
 const column = (n: number, over: Record<string, unknown> = {}) => ({ column: n, runId: String(n), modelId: `m${n}`, body: null,
   billing: { closed: false, state: 'held', reservedCredits: 5, chargedCredits: 0, netChargedCredits: 0 }, call: null, ...over });
 const names = { m0: 'Sonnet', m1: 'GPT' };
-const render = (view: unknown) => { state.view = view; return renderToStaticMarkup(<CompareCard compareId="c" names={names} turn onAdopted={() => {}} onQuote={() => {}} />); };
-beforeEach(() => { state.oldReads = 0; });
+const render = (view: unknown) => { state.view = view; return renderToStaticMarkup(<CompareCard compareId="c" names={names} onAdopted={() => {}} onQuote={() => {}} />); };
 
-it('a running compare of the turn path says its columns are being written, offers no stop, and never reads the old routes', () => {
+it('a running compare of the turn path says its columns are being written, offers no stop, and has no old route to read', () => {
   const html = render({ compareId: 'c', state: 'running', question: 'q', columns: [column(0), column(1)], adoption: null });
   expect(html).toContain('生成中');
   expect(html).not.toContain('停止');
   expect(html).not.toContain('排队中');
-  expect(state.oldReads).toBe(0);
 });
 
 it('a finished compare shows each column\'s own charge, the total, the adopt button and still no stop', () => {
