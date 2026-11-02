@@ -93,7 +93,7 @@ export async function runCases({db,report,before0300}) {
  const bench=await seedBody(db,withData());
  const benchTurn=(await db.query('SELECT id FROM turns WHERE actor_id=$1 AND request_id=$2',[bench.actor,bench.execution])).rows[0].id;
  const fetched=(await db.query(`INSERT INTO research_account_fetches(actor_id,session_id,platform,account,account_key,state)
-  VALUES($1,$2,'tiktok','benchmark_a',encode(sha256(convert_to($2::text||':benchmark_a','utf8')),'hex'),'succeeded') RETURNING id`,
+  VALUES($1,$2::uuid,'tiktok','benchmark_a',encode(sha256(convert_to($2::uuid::text||':benchmark_a','utf8')),'hex'),'succeeded') RETURNING id`,
   [bench.actor,bench.session])).rows[0].id;
  await db.query(`INSERT INTO research_benchmarks(fetch_id,actor_id,session_id,turn_actor_id,turn_id,platform,account,followers,
   posts_analyzed,last_published_at,category,qualified,refs,operation_ids,missing,fetched_at)
