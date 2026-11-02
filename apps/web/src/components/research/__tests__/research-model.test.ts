@@ -153,6 +153,12 @@ describe("server rows from research.toolCharges and research.evidence", () => {
       expect.arrayContaining([expect.stringContaining("关键词作品"), expect.stringContaining("账号资料"), "网页搜索"]));
   });
 
+  it("a discovery subcall that searched accounts is not worded as keyword posts", () => {
+    const [charge] = toSearchCharges([{ callId: "h", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1",
+      query: "baby meal prep", platform: "tiktok", dataKind: "account_search" }]);
+    expect(describeRequest(charge!.tool, charge!.args)).toEqual({ query: "baby meal prep", line: "TikTok · 搜索账号" });
+  });
+
   it("maps evidence rows without inventing a route or a title", () => {
     const [entry, ...rest] = toEvidenceEntries([
       { operationId: "o1", toolName: "social_account", args: { platform: "douyin", account: "a" }, state: "succeeded",
