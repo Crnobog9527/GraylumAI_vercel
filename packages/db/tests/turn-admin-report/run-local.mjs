@@ -77,6 +77,13 @@ try{
  assert.equal(rows.reduce((n,row)=>n+Number(row.total_cost_usd),0).toFixed(2),
   Number(await one('select coalesce(sum(turn_call_spent_usd(call_kind,nominal_usd,actual_usd)),0) v from turn_calls where status=\'ok\'')).toFixed(2),'the cost is the cost the turn closed with');
  assert.equal((await c.query('select * from turn_admin_cost_rows($1,$2)',[new Date(Date.now()-5*864e5).toISOString(),new Date(Date.now()-4*864e5).toISOString()])).rows.length,0,'a window without calls is empty');
+ // A turn whose calls straddle the window edge: the credits stay on its first call whatever window is asked for.
+ await c.query("update turn_calls set dispatched_at=dispatched_at-interval '2 days' where turn_id=$1 and seq=1",[two.turnId]);
+ const cut=new Date(Date.now()-864e5).toISOString();
+ const late=(await c.query('select * from turn_admin_cost_rows($1,$2) where call_key=$3',[cut,to,two.turnId+':2'])).rows;
+ assert.deepEqual(late.map(row=>row.total_credits),[0],'the later call of a straddling turn never picks up the credits when its first call is outside the window');
+ const wide=(await c.query('select * from turn_admin_cost_rows($1,$2) where call_key=any($3)',[new Date(Date.now()-5*864e5).toISOString(),to,[two.turnId+':1',two.turnId+':2']])).rows;
+ assert.equal(wide.reduce((n,row)=>n+row.total_credits,0),twoRows.reduce((n,row)=>n+row.total_credits,0),'a wider window counts the turn credits once');
  report.checks.push('cost rows: one per spent call in token_stats shape, credits once per turn, decision calls under their own model, empty window is empty');
  for(const [f,t] of [[to,from],[from,from],[new Date(Date.now()-93*864e5).toISOString(),to],[null,to]])
   for(const fn of ['turn_admin_model_report','turn_admin_cost_rows'])assert.match(await refusal(c.query('select * from '+fn+'($1,$2)',[f,t])),/TURN_REPORT_WINDOW_INVALID/);

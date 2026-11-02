@@ -4449,7 +4449,7 @@
   "fn:ticket_upload_finish(uuid,uuid,boolean)": "453c7d2531d5",
   "fn:token_stats_model_alias()": "2d856e4cf9bb",
   "fn:topic_turn_source(uuid,uuid,uuid)": "cc764a607c4b",
-  "fn:turn_admin_cost_rows(timestamp with time zone,timestamp with time zone)": "9ed4aca7ad0e",
+  "fn:turn_admin_cost_rows(timestamp with time zone,timestamp with time zone)": "dbb6feef448c",
   "fn:turn_admin_model_report(timestamp with time zone,timestamp with time zone)": "4555fbd70bef",
   "fn:turn_admin_unsettled_turns(integer)": "d14ff66a5dd2",
   "fn:turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "89de7745166a",
