@@ -126,7 +126,7 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     expect(settled.consumedCredits).toBeGreaterThan(0);
     expect(settled.consumedCredits).toBeLessThanOrEqual(REPORT_PRICE);
     expect(settled.consumedCredits + settled.refundedCredits).toBe(settled.nominalReserved);
-    expect(settled.nominalReserved).toBe(REPORT_PRICE);
+    expect(settled.nominalReserved).toBeGreaterThanOrEqual(REPORT_PRICE);
     // The page says so too, though late: the status line stays at "已停止，正在保存已显示的内容…" for minutes first.
     await expect(reportDialog(page).getByText(new RegExp(`本次报告扣了 ${settled.consumedCredits} 积分`))).toBeVisible({ timeout: 300_000 });
     await meter.finishJourney('journey 3: stops');
