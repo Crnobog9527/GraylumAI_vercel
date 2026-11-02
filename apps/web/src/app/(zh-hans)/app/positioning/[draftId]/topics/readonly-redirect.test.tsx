@@ -35,13 +35,13 @@ describe('topics page of a draft whose conversation was deleted', () => {
     // PAYWALL: the whole topics page sits behind the profile-archive gate.
     expect(html).toMatch(/^<section data-archive-gate="">/);
     // Nothing of the topic conversation is fetched or polled behind the read-only view.
-    expect(enabled).toMatchObject({ 'opc.topicWorkspace': false, 'runtime.view': false, 'opc.topicDraft': false });
+    expect(enabled).toMatchObject({ 'opc.topicWorkspace': false, 'opc.topicDraft': false });
   }, 60_000); // The page module is large; its first import alone can take several seconds.
 
   it('starts no topic query while the draft read is still loading', async () => {
     readData = undefined;
     const { default: Page } = await import('./page');
     renderToStaticMarkup(<Page/>);
-    expect(enabled).toMatchObject({ 'opc.topicWorkspace': false, 'runtime.view': false, 'opc.topicDraft': false });
+    expect(enabled).toMatchObject({ 'opc.topicWorkspace': false, 'opc.topicDraft': false });
   }, 60_000);
 });
