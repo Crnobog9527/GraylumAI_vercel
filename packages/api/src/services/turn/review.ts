@@ -16,6 +16,7 @@ import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
 import { readCoreConfig, GATE_CODES, type ChatDeps } from './chat';
 import { startThresholdCredits, turnPolicy } from './policy';
 import { turnSession } from './history';
+import { MIN_MODEL_DISPATCH_MS, type RuntimeBudget } from './settings/budget';
 import { chatQuote, QuoteError } from './quote';
 import { swallow } from '../../lib/swallow';
 
@@ -38,7 +39,8 @@ export const REVIEW_OUTPUT_TOKENS = 2000;
 
 export type ReviewClaimInput = { id: string; actorId: string; sessionId: string; requestId: string; modelId: string; maxCostUsd: string;
   cadence?: string; attempt?: number };
-export type ReviewTurnDeps = Pick<ChatDeps, 'admin' | 'clients' | 'slots' | 'newWork' | 'transport' | 'pricing'>;
+/** `budget`: the cron invocation's shared time budget; a review never starts, and no model call is sent, without the time left to write and settle it. */
+export type ReviewTurnDeps = Pick<ChatDeps, 'admin' | 'clients' | 'slots' | 'newWork' | 'transport' | 'pricing'> & { budget?: RuntimeBudget };
 /** `skipped`: nothing was charged and the review ends with this reason; `deferred`: nothing opened and the claim is tried again later;
  *  `done`: the turn closed (completed or failed) and the review's step decides what that means. */
 export type ReviewTurnResult = { kind: 'skipped'; reason: 'CONFIGURATION_REQUIRED' | 'BALANCE_LOW' } | { kind: 'deferred'; code: string }
@@ -79,6 +81,11 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
   const policy = turnPolicy({ q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
     limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }, stopLoss: config.stopLoss, historyItems: 0, inputBytes: quote.inputLimit,
     pricing: quote.pricing, startThresholdCredits: startCredits, frozen: { modelId: quote.modelId, model: quote.model } });
+  // Too little of this invocation is left for a model call and its settlement: nothing opens, the next batch takes the claim again.
+  if (deps.budget) {
+    try { deps.budget.modelCallTimeout(MIN_MODEL_DISPATCH_MS); }
+    catch { return { kind: 'deferred', code: 'RUNTIME_TIME_BUDGET_EXHAUSTED' }; }
+  }
   if (!(await authorize())) return { kind: 'deferred', code: 'REVIEW_NOT_AUTHORIZED' };
   let opened;
   try {
@@ -94,7 +101,8 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
   if (opened.replay) return { kind: 'deferred', code: 'TURN_REQUEST_REPLAYED' };
   let seq = 0, stopped: TurnStop | undefined;
   const callDeps = { db, slots: deps.slots, actorId: claim.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
-    adapter: openRouterAdapter({ allowWorkspaceRead: true, credential: quote.credential, transport: deps.transport }) };
+    adapter: openRouterAdapter({ allowWorkspaceRead: true, credential: quote.credential, transport: deps.transport,
+      ...(deps.budget ? { budget: deps.budget } : {}) }) };
   const close = (kind: CloseKind, extra: { delivered?: boolean; refundAll?: boolean; failureCode?: string;
     messages?: Array<{ role: 'user' | 'assistant'; content: string }> } = {}) =>
     db.close({ actorId: claim.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,

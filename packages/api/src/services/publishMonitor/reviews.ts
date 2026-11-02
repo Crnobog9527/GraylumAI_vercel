@@ -73,7 +73,8 @@ export async function readReviewPack(db:SupabaseClient,actor:string){
  return pack&&pack.kind==='my_posts'&&POST_STATUSES.includes(pack.status??'')&&typeof pack.review==='object'&&pack.review!==null?pack:null;
 }
 function turnDeps(db:SupabaseClient,options:ReviewStep):ReviewTurnDeps{
- return options.turn??{admin:db,clients:turnClients(db),slots:redisCounterStore(),newWork:newWorkGate(db,readTurnRouteEnv().environment)};
+ return options.turn??{admin:db,clients:turnClients(db),slots:redisCounterStore(),newWork:newWorkGate(db,readTurnRouteEnv().environment),
+  budget:options.budget};
 }
 /** Runs outside the cron response, under the turn core's own freeze, receipts and recovery. */
 export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:ReviewStep){

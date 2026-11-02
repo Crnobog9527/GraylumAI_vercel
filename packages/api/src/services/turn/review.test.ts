@@ -7,6 +7,7 @@ vi.mock('./quote',async original=>({...(await original<object>()),chatQuote:m.qu
 vi.mock('./agent/runner',()=>({runRuntime:m.run}));
 vi.mock('./provider/openRouterAdapter',()=>({openRouterAdapter:()=>({})}));
 import {TurnStop} from './call';
+import {createRuntimeBudget} from './settings/budget';
 import {runReviewTurn,type ReviewClaimInput} from './review';
 const claim:ReviewClaimInput={id:'11111111-1111-4111-8111-111111111111',actorId:'22222222-2222-4222-8222-222222222222',
  sessionId:'55555555-5555-4555-8555-555555555555',requestId:'44444444-4444-4444-8444-444444444444',
@@ -118,4 +119,15 @@ it('a source account disconnected while the text was written: nothing is saved, 
   const result = await runReviewTurn(d.deps, claim, { kind: 'my_posts' }, async () => true, async () => false);
   expect(result).toEqual({ kind: 'done', turnId: 9, closeKind: 'erased', delivered: false });
   expect(of(d.calls, 'turn_close')[0]).toMatchObject({ p_close_kind: 'erased', p_delivered: false, p_messages: [], p_refund_all: true });
+});
+it('a cron invocation with too little time left opens nothing: the claim is taken again by the next batch', async () => {
+  const d = deps();
+  // 250 s of the 285 s persistence window are already used: under a minute of work time is left.
+  let now = 0;
+  const budget = createRuntimeBudget(() => now);
+  now = 250_000;
+  expect(await runReviewTurn({ ...d.deps, budget }, claim, {}, async () => true)).toEqual({ kind: 'deferred', code: 'RUNTIME_TIME_BUDGET_EXHAUSTED' });
+  expect(of(d.calls, 'turn_open')).toHaveLength(0);
+  now = 0;
+  expect((await runReviewTurn({ ...d.deps, budget }, claim, {}, async () => true)).kind).toBe('done');
 });
