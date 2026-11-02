@@ -18,7 +18,6 @@ import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailu
 import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/stripeCardReconciliation';
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
-import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
 import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
 import { settleDueReportFees } from '@repo/api/src/services/report/fees';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
@@ -34,10 +33,6 @@ export const maxDuration = 60;
 const CRON_FAILURE_MESSAGE = 'Billing reconciliation failed';
 const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 
-/** FUSION-REVIEW: cancel undispatched calls past their dispatch deadline, recover and settle the rest. */
-async function runFusionRecovery(supabase: SupabaseClient) {
-  try { return await recoverFusionFinancials(supabase); }
-  catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
 }
 
 /** VOICE: settle generations whose page closed before they finished; scrub runs whose source document was deleted. */
@@ -59,6 +54,8 @@ async function runFusionKick(supabase: SupabaseClient, origin: string) {
   catch { return { success: false, kicked: 0 }; }
 }
 
+}
+
 /** Research prices expire (TikHub after 7 days): re-read TikHub's official prices daily, alert before any price expires. */
 async function runResearchPriceRefresh(supabase: SupabaseClient) {
   let windowId: string | null = null;
@@ -73,6 +70,8 @@ async function runResearchPriceRefresh(supabase: SupabaseClient) {
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
+}
+
 async function runWaffoReconciliation(supabase: SupabaseClient) {
   const mode = paymentDeploymentMode();
   if (mode === 'test' ? process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true' : !process.env.WAFFO_MERCHANT_NAMESPACE) {
@@ -158,25 +157,21 @@ export async function GET(request: Request) {
     // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);
     // CORE-PATH-V2 V2-12 B10: the stale charged rounds scan, the stuck PAYG calls scan and the receipt retention are gone (old BILL2
-    // tools; the old rows go with their tables in batch F). What an unsettled turn needs is read by the admin finance page.
-    const [result, readinessAudit, erasureFinancial, waffo, stripeCard, { fusion, fusionKick }, reportFees,
+    // tools; the old rows go with their tables in batch F).
+    const [result, readinessAudit, erasureFinancial, waffo, stripeCard, fusionKick, reportFees,
       voice, researchPrices] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
       runStripeCardReconciliation(supabase),
-      (async () => {
-        // Kick before recovery resets idle timestamps; do not delay the independent financial audits.
-        const fusionKick = await runFusionKick(supabase, new URL(request.url).origin);
-        return { fusionKick, fusion: await runFusionRecovery(supabase) };
-      })(),
+      runFusionKick(supabase, new URL(request.url).origin),
       runReportFeeSettlement(supabase),
       runVoiceRecovery(supabase),
       runResearchPriceRefresh(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && stripeCard.success && fusion.success && fusionKick.success
+      && stripeCard.success && fusionKick.success
       && reportFees.success && voice.success && researchPrices.success;
 
     if (!success) {
@@ -189,7 +184,6 @@ export async function GET(request: Request) {
           ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
           ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`]),
 
-          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
           ...(fusionKick.success ? [] : ['Fusion review kick failed']),
           ...(reportFees.success ? [] : ['Report price settlement failed']),
           ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`]),
@@ -199,7 +193,6 @@ export async function GET(request: Request) {
           erasureFinancial,
           waffo,
           stripeCard,
-          fusion,
           fusionKick,
           reportFees,
           voice,
@@ -241,7 +234,6 @@ export async function GET(request: Request) {
       erasureFinancial,
       waffo,
       stripeCard,
-      fusion,
       fusionKick,
       reportFees,
       voice,

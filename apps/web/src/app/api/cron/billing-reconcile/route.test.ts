@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   stripeCard: vi.fn(),
   stripeClient: vi.fn(),
   reportStripeCard: vi.fn(),
-  fusion: vi.fn(),
   fusionKick: vi.fn(),
   voice: vi.fn(),
   reportFees: vi.fn(),
@@ -30,7 +29,6 @@ vi.mock('@repo/api/src/services/payments/stripeCardReconciliation', () => ({ rec
 vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeClient }));
 vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mocks.reportStripeCard,
   reportPaymentEvidenceConflict: vi.fn() }));
-vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancials: mocks.fusion }));
 vi.mock('@repo/api/src/services/voice/recovery', () => ({ recoverVoiceGenerations: mocks.voice }));
 vi.mock('@repo/api/src/services/research/priceRefresh', () => ({ refreshResearchPrices: mocks.researchPrices }));
 vi.mock('@repo/api/src/services/research/runtime/secrets', () => ({ platformSecretReader: () => async () => 'key' }));
@@ -107,7 +105,6 @@ describe('/api/cron/billing-reconcile', () => {
     vi.stubEnv('STRIPE_CARD_RECONCILIATION_MODE', 'test');
     mocks.stripeClient.mockReturnValue({ client: 'stripe' });
     mocks.stripeCard.mockResolvedValue({ success: true, skipped: true, findings: [] });
-    mocks.fusion.mockResolvedValue({ success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0 });
     mocks.fusionKick.mockResolvedValue({ success: true, kicked: 0, listed: 0 });
     mocks.reportFees.mockResolvedValue({ success: true, settled: 0 });
     mocks.voice.mockResolvedValue({ success: true, settled: 0, scrubbed: 0, waiting: 0, failed: 0 });
@@ -132,8 +129,7 @@ describe('/api/cron/billing-reconcile', () => {
   it('no longer runs the stale charged rounds, stuck PAYG calls or receipt retention segments', async () => {
     const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
     expect(response.status).toBe(200);
-    expect(Object.keys(await response.json())).not.toEqual(expect.arrayContaining(['staleRounds']));
-    const body = await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json();
+    const body = await response.json();
     for (const key of ['staleRounds', 'stuckCalls', 'receiptRetention']) expect(body).not.toHaveProperty(key);
   });
 
@@ -148,20 +144,8 @@ describe('/api/cron/billing-reconcile', () => {
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
   });
 
-  it('runs the Fusion recovery step and fails the job while a Fusion call stays pending', async () => {
+  it('kicks stalled reviews from this deployment, and fails the job when the kick fails', async () => {
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
-    expect(mocks.fusion).toHaveBeenCalledWith({ client: 'service-role' });
-    mocks.fusion.mockResolvedValue({ success: false, scanned: 1, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 });
-    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
-    expect(response.status).toBe(500);
-    expect(await response.json()).toMatchObject({ fusion: { failed: 1 } });
-    mocks.fusion.mockRejectedValue(new Error('unexpected'));
-    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
-  });
-
-  it('kicks stalled reviews before the Fusion recovery, from this deployment, and fails the job when the kick fails', async () => {
-    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
-    expect(mocks.fusionKick.mock.invocationCallOrder[0]).toBeLessThan(mocks.fusion.mock.invocationCallOrder[0]!);
     expect(mocks.fusionKick).toHaveBeenCalledWith({ client: 'service-role' }, 'https://graylum.test', { timeLimitMs: 10_000 });
     mocks.fusionKick.mockResolvedValue({ success: false, kicked: 0 });
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
