@@ -3,7 +3,7 @@
  * REVIEW-COACH RC-2: the experiment ledger's verdicts, decided by code (tech plan v1 section 5, v2 for rate metrics).
  * The model may explain a verdict, never change it. Baselines are frozen when an experiment is proposed.
  */
-import { isRateMetric, lowerIsBetter } from './funnel';
+import { isRateMetric, lowerIsBetter, withDerived } from './funnel';
 import type { Diagnostic, Experiment, Fact } from './rows';
 import { platformShift } from './scoreboard';
 import { DAY_MS, DEFAULT_TARGET_MULT, FAILED_AT_OR_BELOW, LOW_VOLUME_PER_WEEK, MIN_SAMPLES, day7Metric, median, round,
@@ -84,10 +84,12 @@ export function conclude(e: Experiment, facts: Fact[], diagnostics: Diagnostic[]
     // yet, or another platform, pillar or format) is never a sample.
     // The sample is the posts published in the experiment's period (not the day their numbers were captured: a late upload of an old
     // post does not count, and numbers captured after the period for a post inside it do).
-    const candidates = diagnostics.filter(d => e.metric in d.rates
+    // The same derived rates as the diagnosis (watch percentage from seconds and video length) that the pack showed the model.
+    const derivedRates = diagnostics.map(d => ({ ...d, rates: withDerived(d).rates }));
+    const candidates = derivedRates.filter(d => e.metric in d.rates
       && (() => { const f = byPost.get(d.postId); return f !== undefined && matches(e.match, f) && inPeriod(f.postedAt, e); })());
     // One diagnostic per post (the latest capture, then the smaller id): several captures of one post are not several samples.
-    const latest = new Map<string, Diagnostic>();
+    const latest = new Map<string, (typeof derivedRates)[number]>();
     for (const d of candidates) {
       const kept = latest.get(d.postId);
       if (!kept || d.capturedOn > kept.capturedOn || (d.capturedOn === kept.capturedOn && d.id < kept.id)) latest.set(d.postId, d);

@@ -103,8 +103,9 @@ export function checkOutput(text: string, pack: PackView): CheckedOutput {
     // One long-run experiment per pillar per period (tech plan v1); basics experiments are about the opening, not the pillar.
     if (x.kind !== 'basics' && usedPillars.has(x.match.pillar_key)) return reject(path, 'pillar_repeated');
     if (!cited(x.evidence)) return reject(path, 'no_evidence');
+    // A long-run experiment has no funnel layer: a layer would send it to the rate settlement path, which has no such metric.
     if (x.kind === 'basics' ? !rate || !x.layer || (x.target.max === undefined && x.target.min === undefined)
-      : rate || !DAY7_METRICS.includes(x.metric) || x.target.mult === undefined || x.target.mult < 1.1 || x.target.mult > 5)
+      : rate || x.layer || !DAY7_METRICS.includes(x.metric) || x.target.mult === undefined || x.target.mult < 1.1 || x.target.mult > 5)
       return reject(path, 'metric_or_target');
     usedPillars.add(x.match.pillar_key);
     out.experiments.push(x);

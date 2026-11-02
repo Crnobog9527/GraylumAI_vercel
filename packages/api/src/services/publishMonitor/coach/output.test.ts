@@ -63,6 +63,12 @@ describe('coach_json checks (RC-2)', () => {
       'pillar_mix_proposal:not_this_cadence', 'strategy_proposal:not_this_cadence', 'stage_suggestion:not_this_cadence']);
   });
 
+  it('a long-run experiment with a funnel layer is rejected: it would be settled as a rate experiment', () => {
+    const r = out({ experiments: [{ ...good, layer: 'hook' }] });
+    expect(r.experiments).toEqual([]);
+    expect(r.rejected.map(x => `${x.path}:${x.reason}`)).toEqual(['experiments.0:metric_or_target']);
+  });
+
   it('only tags untagged posts with known pillars and only annotates reviewed experiments', () => {
     const untagged = full.untagged_posts[0].post_id;
     const r = out({ tags: [{ post_id: untagged, pillar_key: 'p2' }, { post_id: untagged, pillar_key: 'p9' }, { post_id: post, pillar_key: 'p1' }],

@@ -137,6 +137,13 @@ describe('experiment ledger (RC-2): verdicts by code match the designed outcomes
     expect(conclude(e, inside, late).samples).toBe(3);
   });
 
+  it('a derived rate (watch percentage from seconds and video length) settles like a confirmed one', () => {
+    const { e, fresh, facts } = basics();
+    const derived = fresh.map(d => ({ ...d, videoSeconds: 40, rates: { avg_watch_seconds: 20 } }));
+    const result = conclude({ ...e, metric: 'avg_watch_pct', layer: 'retention', target_line: { min: 0.4 } }, facts, derived);
+    expect(result).toMatchObject({ samples: 3, verdict: 'worked' });
+  });
+
   it('several captures of one post are one sample, not several', () => {
     const { e, fresh, facts } = basics();
     const first = fresh[0]!;
