@@ -8,7 +8,8 @@
 --     turn path's own bindings (the page adds them); 'informationVersion' stays a JSON null as before for turn-path rows.
 --   opc_topic_read / opc_topic_original / opc_data_source_turn / opc_adopt_topics_with_source: a topic reply is a turn's reply only.
 --   opc_content_allowed / opc_result_link_available: a link or version sourced from an old execution is no longer available (as 0462's rule).
---   opc_business_archive / opc_review_archive_guard / opc_target_business: the old provider-call busy checks go (a turn closes its own money).
+--   opc_business_archive: the old provider-call busy check becomes a turn check (a running turn of the business makes archive BUSY);
+--   opc_review_archive_guard / opc_target_business: the old provider-call (run / execution) branches go.
 -- Repeatable: whole-function CREATE OR REPLACE. Recovery: re-apply the previous text from git history; nothing is written or removed.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -362,6 +363,10 @@ BEGIN
  EXCEPTION WHEN lock_not_available THEN RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END;
  IF b.id IS NULL THEN RAISE EXCEPTION 'OPC_BUSINESS_DENIED'; END IF;
  IF b.archived_at IS NULL THEN
+  -- A turn still running for this business must close first (its model call may be in flight and its freeze is open); the owner retries.
+  IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.state IN ('opening','running','stopping')
+   AND opc_target_business(p_actor_id,jsonb_build_object('sessionId',t.session_id))=b.id) THEN
+   RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
   UPDATE opc_businesses SET archived_at=clock_timestamp(),revision=revision+1
    WHERE id=b.id RETURNING * INTO b;
  END IF;

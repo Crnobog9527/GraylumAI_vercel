@@ -153,6 +153,21 @@ export async function topicCases(t){
   assert.equal((await c.query('select body from opc_topic_draft_versions where request_id=$1',[their.request])).rows[0].body!==null,true);
   report.checks.push('topic: the opening reads its turn; deleting the conversation erases its events and drafts, and only its own');
  }
+ // Archive (V2-12 R1a, replaces the old "a dispatched BILL2 call blocks archive" case): a running turn of the business makes archive
+ // BUSY, the owner retries after it closes, and an archived business refuses the next turn's source.
+ {
+  const {begin,identity,record}=t;
+  const a=await account(1000),src=await source(a);
+  const o=await open(a,{kind:'chat',session:src.topicSession,pol:pol()});
+  await begin(a,o.turnId,1,{upper:0.05});
+  assert.match(await refusal(one('select opc_business_archive($1,$2) v',[a.actor,src.business])),/OPC_BUSINESS_BUSY/);
+  assert.equal((await c.query('select archived_at from opc_businesses where id=$1',[src.business])).rows[0].archived_at,null);
+  await identity(a,o.turnId,1);await record(a,o.turnId,1,{n:0.01,actual:0.01});
+  await close(a,o.turnId,'completed',{messages:[{role:'user',content:'topics please'},{role:'assistant',content:'words'}]});
+  assert.equal((await one('select opc_business_archive($1,$2) v',[a.actor,src.business])).isArchived,true);
+  assert.match(await refusal(read(a,src)),/OPC_BUSINESS_ARCHIVED/);
+  report.checks.push('archive: a running turn of the business makes archive BUSY; after it closes archive succeeds and the next topic turn is refused as archived');
+ }
 }
 
 // Owner 2026-11-02 (option A): after the positioning is updated the user starts the topic work again on the latest version. The binding row
