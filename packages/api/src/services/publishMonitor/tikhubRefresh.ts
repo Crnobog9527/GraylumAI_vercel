@@ -43,11 +43,15 @@ export async function closeOrphanRuns(db: Db): Promise<number> {
   const listed = await db.rpc('publish_monitor_billed_orphans', { p_limit: 50 });
   if (listed.error) throw new Error('PUBLISH_MONITOR_TIKHUB_UNAVAILABLE');
   const rows = z.array(z.object({ connectionId: z.string().uuid(), actorId: z.string().uuid(), runId: z.string().uuid(),
-    policies: z.array(z.unknown()), legacy: z.boolean() }).strict()).parse(listed.data);
+    policies: z.array(z.unknown()) }).strict()).parse(listed.data);
   // One run that cannot be settled must not hold back the others' credits: settle them all, then report the failures.
   let failed = 0;
   for (const row of rows) {
-    try { await settleLeftOpenRun(db, row.actorId, row.runId, row.policies, row.legacy); } catch { failed += 1; }
+    try {
+      const legacy = await db.rpc('publish_monitor_billed_legacy', { p_run_id: row.runId });
+      if (legacy.error) throw new Error('PUBLISH_MONITOR_TIKHUB_UNAVAILABLE');
+      await settleLeftOpenRun(db, row.actorId, row.runId, row.policies, legacy.data === true);
+    } catch { failed += 1; }
   }
   if (failed > 0) throw new Error('PUBLISH_MONITOR_BILLED_RUNS_UNSETTLED');
   return rows.length;

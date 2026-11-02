@@ -9,8 +9,11 @@
 --   * publish_monitor_billed_run: binds a turn (by request id) instead of a BILL2 run.
 --   * publish_monitor_billed_recovery: unchanged for a run opened on BILL2 before this migration (its receipts are still replayed and
 --     its hold released); a turn run needs only its live ledger attempts freed, its turn is settled by the turn recovery job.
---   * publish_monitor_billed_run / billed_orphans: also say whether a run is such a legacy BILL2 run ('legacy'); a turn run is listed as
---     an orphan once its turn is closed, a legacy run as before.
+--   * publish_monitor_billed_run accepts a turn's request id and, for old code that is still running while this is applied, a BILL2 run
+--     id (both until batch F), and also says whether the run is such a legacy BILL2 run ('legacy'). publish_monitor_billed_orphans keeps
+--     its old output shape (old code validates it strictly); a turn run is listed once its turn is closed, a legacy run as before.
+--     publish_monitor_billed_legacy(run) tells the two apart. The order of deployment is therefore free: old code keeps working on
+--     the new functions, new code works on the old ones only after the migration.
 -- publish_monitor_tool_only_run stays until batch F (bill2_prepare still calls it). Repeatable: CREATE OR REPLACE only.
 -- Recovery: re-apply 0289's versions of billed_run and billed_orphans (packages/db/functions history) and
 -- DROP FUNCTION public.publish_monitor_session(uuid,uuid); ledger rows written meanwhile keep the turn's request id and are
@@ -46,7 +49,9 @@ BEGIN
  SELECT * INTO b FROM social_billed_runs WHERE connection_id=c.id AND refresh_id=p_refresh_id AND closed_at IS NULL FOR UPDATE;
  IF b.run_id IS NULL AND p_run_id IS NOT NULL THEN
   IF jsonb_typeof(p_policies) IS DISTINCT FROM 'array'
-   OR NOT EXISTS(SELECT 1 FROM turns WHERE request_id=p_run_id AND actor_id=c.actor_id AND kind='review') THEN
+   -- Old code still running while this migration is applied binds the BILL2 run it prepared; both kinds are accepted until batch F.
+   OR (NOT EXISTS(SELECT 1 FROM turns WHERE request_id=p_run_id AND actor_id=c.actor_id AND kind='review')
+    AND NOT EXISTS(SELECT 1 FROM bill2_runs WHERE id=p_run_id AND actor_id=c.actor_id)) THEN
    RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
   INSERT INTO social_billed_runs(run_id,connection_id,refresh_id,actor_id,policies)
   VALUES(p_run_id,c.id,p_refresh_id,c.actor_id,p_policies) RETURNING * INTO b;
@@ -76,7 +81,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_orphans(p_limit integer) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',b.connection_id,'actorId',b.actor_id,'runId',b.run_id,
-  'policies',b.policies,'legacy',NOT EXISTS(SELECT 1 FROM turns t WHERE t.request_id=b.run_id AND t.actor_id=b.actor_id))),'[]'::jsonb)
+  'policies',b.policies)),'[]'::jsonb)
  FROM (SELECT b.* FROM social_billed_runs b LEFT JOIN social_connections c ON c.id=b.connection_id
   WHERE b.closed_at IS NULL AND (c.id IS NULL OR c.refresh_id IS DISTINCT FROM b.refresh_id
    OR c.lease_expires_at IS NULL OR c.lease_expires_at<clock_timestamp()-interval '1 hour')
@@ -84,10 +89,16 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   ORDER BY b.created_at LIMIT LEAST(GREATEST(p_limit,1),200)) b
 $$;
 
+-- Whether a run is a BILL2 run opened before reads moved to turns (it has no turn).
+CREATE OR REPLACE FUNCTION public.publish_monitor_billed_legacy(p_run_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT NOT EXISTS(SELECT 1 FROM turns WHERE request_id=p_run_id AND kind='review')
+$$;
+
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_session','publish_monitor_billed_run',
-   'publish_monitor_billed_recovery','publish_monitor_billed_orphans') LOOP
+   'publish_monitor_billed_recovery','publish_monitor_billed_orphans','publish_monitor_billed_legacy') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f);
  END LOOP;

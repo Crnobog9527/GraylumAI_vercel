@@ -207,7 +207,16 @@ try {
   [lop0, 'c'.repeat(64), ROUTE, lcall.id, randomUUID(), lrun0.id]);
   const legacyRows = await svc('SELECT publish_monitor_billed_recovery($1) v', [lrun0.id]);
   assert.deepEqual(legacyRows.map(x => [x.callId, x.callPending, x.live]), [[lcall.id, true, true]]);
-  assert.equal((await svc('SELECT publish_monitor_billed_orphans(50) v')).find(o => o.runId === lrun0.id)?.legacy, true);
+  const orphan = (await svc('SELECT publish_monitor_billed_orphans(50) v')).find(o => o.runId === lrun0.id);
+  assert.deepEqual(Object.keys(orphan).sort(), ['actorId', 'connectionId', 'policies', 'runId'], 'the old output shape: old code validates it strictly');
+  assert.equal(await svc('SELECT publish_monitor_billed_legacy($1) v', [lrun0.id]), true);
+  assert.equal(await svc('SELECT publish_monitor_billed_legacy($1) v', [turn2.request]), false);
+  // Old code still running while 0463 is applied binds the BILL2 run it prepared: accepted until batch F.
+  const ob = await member();
+  const oclaim = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === ob.conn);
+  const orun = await rpc(c, 'bill2_prepare', ob.a, randomUUID(), await payload(ob.a));
+  const obound = await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [ob.conn, oclaim.lease, oclaim.refreshId, orun.id, JSON.stringify([toolPolicy])]);
+  assert.deepEqual([obound.runId, obound.legacy], [orun.id, true]);
   report.checks.push('a run opened on BILL2 before 0463 keeps its recovery rows and is listed as a legacy orphan');
 
   // Insufficient credits: settled for today without any hold.
