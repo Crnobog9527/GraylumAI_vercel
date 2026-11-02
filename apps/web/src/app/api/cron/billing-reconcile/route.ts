@@ -33,8 +33,6 @@ export const maxDuration = 60;
 const CRON_FAILURE_MESSAGE = 'Billing reconciliation failed';
 const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 
-}
-
 /** VOICE: settle generations whose page closed before they finished; scrub runs whose source document was deleted. */
 async function runVoiceRecovery(supabase: SupabaseClient) {
   try { return await recoverVoiceGenerations(supabase); }
