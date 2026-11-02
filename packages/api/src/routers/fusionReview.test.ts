@@ -72,15 +72,16 @@ it('available tells a signed-in user whether the review is switched on, and fail
 
 function marksCaller(draftOwner: string, signedIn = true) {
   const draft = id(3);
-  const table = (rows: unknown): never => { const q: Record<string, unknown> = {}; for (const key of ['select', 'in', 'is', 'eq', 'order']) q[key] = () => q;
-    q.limit = async () => ({ data: rows, error: null }); q.then = (resolve: (value: unknown) => void) => resolve({ data: rows, error: null }); return q as never; };
   const profile = { id: id(1), role: 'user', status: 'active', credits: 0, nickname: 'fixture' };
-  const from = (name: string) => name === 'opc_drafts' ? table([{ draft_id: draft, project_id: id(5), actor_id: draftOwner }])
-    : name === 'artifact_versions' ? table([{ id: id(4), source: null, from: null }])
-    : name === 'fusion_reviews' ? table([{ id: id(2), draft_id: id(3), source_version_id: id(4), state: 'completed', ended_at: '2026-10-19T10:00:00Z', adoption: null }])
-    : (() => { const q: Record<string, unknown> = {}; q.select = () => q; q.eq = () => q; q.maybeSingle = async () => ({ data: profile, error: null });
-      q.single = q.maybeSingle; return q as never; })();
-  const db = { rpc: vi.fn(), from };
+  const from = () => { const q: Record<string, unknown> = {}; q.select = () => q; q.eq = () => q; q.maybeSingle = async () => ({ data: profile, error: null });
+    q.single = q.maybeSingle; return q as never; };
+  // The marks come from one database function (the server's role cannot read the tables): the caller's own drafts answer, another's are refused.
+  const rpc = vi.fn(async (name: string, args?: { p_draft_ids?: string[] }) => name === 'fusion_version_marks_read' && draftOwner === id(1)
+    && args?.p_draft_ids?.length === 1 && args.p_draft_ids[0] === draft
+    ? { data: { versions: [{ id: id(4), source: null, from: null }], reviews: [{ id: id(2), draft_id: id(3), source_version_id: id(4), state: 'completed',
+      ended_at: '2026-10-19T10:00:00Z', adoption: null, created_at: '2026-10-19T09:00:00Z' }] }, error: null }
+    : { data: null, error: { message: 'FUSION_VERSION_MARKS_DENIED' } });
+  const db = { rpc, from };
   const caller = fusionReviewRouter.createCaller({ headers: new Headers(),
     user: signedIn ? { id: id(1), app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } } : null,
     isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {},
