@@ -20,8 +20,11 @@ BEGIN
  -- open turns bound to it are locked first, so a turn that closes waits for this commit, re-reads its tombstones, closes
  -- erased and saves nothing. The callers hold the account row (library_actor), which turn_close takes before its turn row,
  -- so a turn row held here is only ever held by a call write (turn row only): waiting on it cannot deadlock.
- PERFORM 1 FROM turns WHERE actor_id=a AND policy->>'voiceVersionId'=ANY(ids::text[]) AND policy ? 'voiceVersionId'
-  AND state<>'closed' ORDER BY id FOR UPDATE;
+ PERFORM 1 FROM turns WHERE actor_id=a AND state<>'closed' AND ((policy ? 'voiceVersionId' AND policy->>'voiceVersionId'=ANY(ids::text[]))
+   OR (kind='voice' AND policy->'voice'->>'versionId'=ANY(ids::text[]))) ORDER BY id FOR UPDATE;
+ -- V2-12 B7: what a generation of these versions saved on its receipts (the model's answer, derived from the user's own documents).
+ DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.kind='voice' AND t.policy->'voice'->>'versionId'=ANY(ids::text[])
+  AND r.turn_id=t.id;
  UPDATE session_messages m SET visible=false FROM turns t
   WHERE t.actor_id=a AND t.policy ? 'voiceVersionId' AND t.policy->>'voiceVersionId'=ANY(ids::text[])
    AND m.session_id=t.session_id AND m.turn_id=t.id AND m.visible;

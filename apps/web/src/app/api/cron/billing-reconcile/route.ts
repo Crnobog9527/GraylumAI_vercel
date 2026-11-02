@@ -15,15 +15,11 @@ import { reconcileWaffoPayments } from '@repo/api/src/services/payments/waffoRec
 import { getWaffoTestOperationsClient, getWaffoOperationsClient } from '@repo/api/src/services/payments/waffoTestOperationsClient';
 import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waffoCardCheckout';
 import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
-import { findStaleChargedRounds } from '@repo/api/src/services/turn/settings/staleChargedRounds';
 import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/stripeCardReconciliation';
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
-import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
 import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
 import { settleDueReportFees } from '@repo/api/src/services/report/fees';
-import { findStuckPaygCalls } from '@repo/api/src/services/turn/settings/stuckCalls';
-import { scrubExpiredReceiptOutput } from '@repo/api/src/services/bill2/receiptRetention';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
 import { pruneGaCheckoutIds } from '@repo/api/src/services/analytics/gaPurchase';
@@ -36,18 +32,6 @@ export const maxDuration = 60;
 
 const CRON_FAILURE_MESSAGE = 'Billing reconciliation failed';
 const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
-
-/** Stale charged rounds: report-only; an operator verifies and refunds each one (Owner 2026-10-12). */
-async function runStaleRoundReconciliation(supabase: SupabaseClient) {
-  try { return await findStaleChargedRounds(supabase); }
-  catch { return { success: false, findings: [], total: 0, truncated: false, scanFailed: true }; }
-}
-
-/** FUSION-REVIEW: cancel undispatched calls past their dispatch deadline, recover and settle the rest. */
-async function runFusionRecovery(supabase: SupabaseClient) {
-  try { return await recoverFusionFinancials(supabase); }
-  catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
-}
 
 /** VOICE: settle generations whose page closed before they finished; scrub runs whose source document was deleted. */
 async function runVoiceRecovery(supabase: SupabaseClient) {
@@ -68,12 +52,6 @@ async function runFusionKick(supabase: SupabaseClient, origin: string) {
   catch { return { success: false, kicked: 0 }; }
 }
 
-/** ARCH-FIX G2: receipts older than 30 days on finished runs lose their raw provider output (Owner 2026-10-25). */
-async function runReceiptRetention(supabase: SupabaseClient) {
-  try { return await scrubExpiredReceiptOutput(supabase); }
-  catch { return { success: false, scrubbed: 0, batches: 0, complete: false }; }
-}
-
 /** Research prices expire (TikHub after 7 days): re-read TikHub's official prices daily, alert before any price expires. */
 async function runResearchPriceRefresh(supabase: SupabaseClient) {
   let windowId: string | null = null;
@@ -88,12 +66,6 @@ async function runResearchPriceRefresh(supabase: SupabaseClient) {
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
-// 0261: stuck calls keep this daily job failing (alerting) until an administrator settles them.
-async function runStuckCallScan(supabase: SupabaseClient) {
-  try { return await findStuckPaygCalls(supabase); }
-  catch { return { success: false, calls: [], total: 0, truncated: false, scanFailed: true }; }
-}
-
 async function runWaffoReconciliation(supabase: SupabaseClient) {
   const mode = paymentDeploymentMode();
   if (mode === 'test' ? process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true' : !process.env.WAFFO_MERCHANT_NAMESPACE) {
@@ -178,28 +150,23 @@ export async function GET(request: Request) {
     logger.system.cronJob('billing-reconcile', 'started');
     // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees,
-      voice, researchPrices, receiptRetention] = await Promise.all([
+    // CORE-PATH-V2 V2-12 B10: the stale charged rounds scan, the stuck PAYG calls scan and the receipt retention are gone (old BILL2
+    // tools; the old rows go with their tables in batch F).
+    const [result, readinessAudit, erasureFinancial, waffo, stripeCard, fusionKick, reportFees,
+      voice, researchPrices] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
-      runStaleRoundReconciliation(supabase),
       runStripeCardReconciliation(supabase),
-      (async () => {
-        // Kick before recovery resets idle timestamps; do not delay the independent financial audits.
-        const fusionKick = await runFusionKick(supabase, new URL(request.url).origin);
-        return { fusionKick, fusion: await runFusionRecovery(supabase) };
-      })(),
-      runStuckCallScan(supabase),
+      runFusionKick(supabase, new URL(request.url).origin),
       runReportFeeSettlement(supabase),
       runVoiceRecovery(supabase),
       runResearchPriceRefresh(supabase),
-      runReceiptRetention(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success
-      && reportFees.success && voice.success && researchPrices.success && receiptRetention.success;
+      && stripeCard.success && fusionKick.success
+      && reportFees.success && voice.success && researchPrices.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -209,29 +176,21 @@ export async function GET(request: Request) {
         [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message),
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
           ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
-          ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`]),
           ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`]),
 
-          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
-          ...(stuckCalls.success ? [] : [`PAYG calls with unknown cost need manual settlement: ${stuckCalls.total}`]),
           ...(fusionKick.success ? [] : ['Fusion review kick failed']),
           ...(reportFees.success ? [] : ['Report price settlement failed']),
           ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`]),
           ...(researchPrices.success ? [] : [`Research prices: ${researchPrices.failed.length} refresh failures, `
-            + `${researchPrices.expiring.length} expiring within a day, window ${researchPrices.window}`]),
-          ...(receiptRetention.success ? [] : ['Receipt raw output retention failed'])].join(' | '),
+            + `${researchPrices.expiring.length} expiring within a day, window ${researchPrices.window}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
-          staleRounds,
           stripeCard,
-          fusion,
-          stuckCalls,
           fusionKick,
           reportFees,
           voice,
           researchPrices,
-          receiptRetention,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -268,15 +227,11 @@ export async function GET(request: Request) {
       readinessAudit,
       erasureFinancial,
       waffo,
-      staleRounds,
       stripeCard,
-      fusion,
-      stuckCalls,
       fusionKick,
       reportFees,
       voice,
       researchPrices,
-      receiptRetention,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

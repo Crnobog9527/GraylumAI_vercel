@@ -8,7 +8,7 @@
       ],
       "regex": "\\.catch\\(\\s*\\(\\)\\s*=>",
       "count": "matches",
-      "max": 47
+      "max": 46
     },
     {
       "id": "system-settings-direct-read",
@@ -19,7 +19,7 @@
       ],
       "regex": "\\.from\\('system_settings'\\)",
       "count": "files",
-      "max": 49
+      "max": 48
     },
     {
       "id": "process-env-direct-read",
@@ -43,7 +43,7 @@
       ],
       "regex": "\\.includes\\('(RUNTIME|OPC|BILL2|PAY|FUSION|PUBLISH)_",
       "count": "matches",
-      "max": 9
+      "max": 8
     },
     {
       "id": "payments-double-cast",

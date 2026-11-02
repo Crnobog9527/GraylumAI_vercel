@@ -14,7 +14,7 @@ DECLARE
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
   carried integer := 0;
 BEGIN
-  IF p_kind NOT IN ('chat','mentor','report','plan','compare','jury','jury_adopt','review') THEN
+  IF p_kind NOT IN ('chat','mentor','report','plan','compare','jury','jury_adopt','review','voice') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
   END IF;
   IF jsonb_typeof(p_policy) <> 'object'
@@ -49,8 +49,13 @@ BEGIN
   -- 1. The account row first, then the session: one turn at a time per conversation (3a). The account comes first as in the
   -- erasure functions (they hold it before the session), so an open and a deletion of the same conversation never deadlock.
   SELECT * INTO prof FROM profiles WHERE id = p_actor_id FOR UPDATE;
-  SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
-  IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  -- A voice generation (V2-12 B7) belongs to the account, not to a conversation: it has no session, and one is refused.
+  IF p_kind = 'voice' THEN
+    IF p_session_id IS NOT NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  ELSE
+    SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
+    IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  END IF;
   -- 2. The same request again: the turn it opened, unchanged.
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
   IF existing.id IS NOT NULL THEN
@@ -153,7 +158,7 @@ BEGIN
       VALUES (p_actor_id, p_session_id, p_request_id, p_kind, 'running', p_resume_of, frozen, h - carried, u_turn,
         (p_policy->>'inputBytes')::int)
       RETURNING * INTO t;
-    IF p_kind NOT IN ('jury','jury_adopt') THEN UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id; END IF;
+    IF p_kind NOT IN ('jury','jury_adopt','voice') THEN UPDATE runtime_sessions SET active_turn_id = t.id WHERE id = s.id; END IF;
   END IF;
 
   -- 5. The visible history, newest N in order.
@@ -174,5 +179,6 @@ BEGIN
     -- Per-kind context for the prompt (2.7). Each kind reads its input from p_policy->'<kind>' and adds its own branch here
     -- (CASE p_kind WHEN '<kind>' THEN public.turn_<kind>_context(...) END); no kind has one yet.
     'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor')
-      WHEN 'plan' THEN public.turn_plan_context(p_actor_id, p_session_id, p_policy) END);
+      WHEN 'plan' THEN public.turn_plan_context(p_actor_id, p_session_id, p_policy)
+      WHEN 'voice' THEN public.turn_voice_context(p_actor_id, p_policy) END);
 END $function$;

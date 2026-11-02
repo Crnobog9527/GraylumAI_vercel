@@ -4,7 +4,7 @@
 // A branch is dropped only when its IF condition is a plain test on the turn's kind (`t.kind` / `p_kind` against string literals, no OR)
 // that the kind being counted fails, or when an earlier branch of the same IF is a pure kind test that the kind passes. Anything
 // else (other conditions, OR, CASE expressions) stays in, so pruning can only under-drop, never hide a call that could run.
-export const KINDS = ['chat', 'mentor', 'report', 'plan', 'compare', 'jury', 'jury_adopt', 'review'];
+export const KINDS = ['chat', 'mentor', 'report', 'plan', 'compare', 'jury', 'jury_adopt', 'review', 'voice'];
 
 // The kinds a root can be called with. The fusion functions refuse every other kind in their first statement (turn_fusion_recovery
 // only selects jury turns), so counting them for chat / mentor / report would count a path that raises or is never taken.

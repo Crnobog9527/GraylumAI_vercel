@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TurnView } from '@repo/api/src/services/turn/view';
 import { runTurn } from '@/lib/turn-stream';
-import { trpc } from '@/trpc/client';
-import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { turnCodeNotice } from '@/app/(zh-hans)/app/runtime/turn-notices';
 import type { ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { readTurnView } from '../mentor-turn-path';
@@ -13,8 +11,8 @@ import { topicFailureMessage } from './topic-notices';
 /*
  * CORE-PATH-V2 V2-10b: the topic workspace on POST /api/turn/topic (kind=chat in the workspace's conversation). The page works on
  * executions, so each saved exchange is one finished execution here. Its id is the turn's request id, the handle the topic draft and the
- * adoption name on the server; the running turn has no reply yet, so `turn:<id>` is enough. A conversation that holds old-path turns
- * stays on the old path, as a free conversation (V2-10). Only a report can be stopped: a running topic turn offers no stop.
+ * adoption name on the server; the running turn has no reply yet, so `turn:<id>` is enough. Only a report can be stopped: a running
+ * topic turn offers no stop.
  */
 const READ_MS = 3000;
 /** A turn from another tab starts without this page: an idle workspace still looks now and then. */
@@ -61,11 +59,7 @@ export function turnRunningNotice(e: { executionId: string; state: string }): Ch
   return e.state === 'running' ? { id: e.executionId, tone: 'status', busy: true, text: '正在回复…' } : null;
 }
 
-/** Nothing is sent before the path is known: an old-path opening would keep this conversation on the old path for good. */
-export const topicPathDecided = (read: { choices: boolean; old: boolean; turns: boolean }) => read.choices && read.old && read.turns;
-
-export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unknown[] | undefined, oldSettled: boolean) {
-  const choices = trpc.runtime.choices.useQuery(sessionId ? { sessionId } : undefined, { enabled: Boolean(sessionId), staleTime: RUNTIME_CHOICES_STALE_MS });
+export function useTopicTurnPath(sessionId: string) {
   const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
   const refetch = useCallback(async () => {
     if (!sessionId) return null;
@@ -87,9 +81,6 @@ export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unkn
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [refetch]);
-  // Replies the turn path already saved and charged stay readable whatever the switch says now.
-  const held = Boolean(view?.messages.length || view?.activeTurn);
-  const on = held || Boolean(choices.data?.corePathV2 && oldExecutions && !oldExecutions.length);
   const data = useMemo(() => view ? topicExecutions(view) : { executions: [], activeExecution: null }, [view]);
   const send = async (request: { draftId: string; requestId: string; input: string }, candidate?: unknown) => {
     if (candidate) localStorage.setItem(`opc-topic-adoption-context:${sessionId}:${request.requestId}`, JSON.stringify(candidate));
@@ -100,6 +91,6 @@ export function useTopicTurnPath(sessionId: string, oldExecutions: readonly unkn
     const failed = outcome.state === 'finished' && outcome.last.type === 'error' && outcome.last.code !== 'TURN_REQUEST_REPLAYED' && !seen;
     return { ...told, keepInput: told.keepInput || failed, unknown: outcome.state === 'lost' && !seen };
   };
-  const decided = topicPathDecided({ choices: choices.isSuccess || choices.isError, old: oldSettled, turns: Boolean(view) });
-  return { on, decided, data, refetch, send };
+  // Nothing is sent before the first read: it shows whether a turn is already running.
+  return { decided: Boolean(view), data, refetch, send };
 }
