@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { basicsPass, diagnosePost, handbookSchema, type Handbook } from './funnel';
-import { conclude } from './ledger';
+import { conclude, ledgerView } from './ledger';
 import { buildPack, packBytes, type Cadence } from './pack';
 import { packRowsSchema } from './rows';
 import { historyScoreboard, platformShift, scoreboard } from './scoreboard';
@@ -83,16 +83,58 @@ describe('experiment ledger (RC-2): verdicts by code match the designed outcomes
     expect(conclude({ ...r.experiments[1]!, extended_once: true, baseline: null }, r.facts, r.diagnostics).next_status).toBe('concluded');
   });
 
-  it('a basics experiment is settled on confirmed rates against its handbook line', () => {
+  // A diagnostic counts only through a known fact of the same brand: these are the facts of the posts the diagnostics describe.
+  const factFor = (d: { postId: string; platform: string; capturedOn: string }, over: object = {}) => ({ postId: d.postId, platform: d.platform,
+    postedAt: d.capturedOn + 'T00:00:00Z', title: null, url: null, pillarKey: 'p1', pillarSource: 'user' as const, formatTags: [],
+    basis: 'day7' as const, day7: { views: 100 }, day7On: d.capturedOn, day30: null, day30On: null, importCumulative: null,
+    importOn: null, missing: [], ...over });
+  const basics = () => {
     const r = rows('A');
     const fresh = r.diagnostics.filter(d => d.capturedOn === r.diagnostics[0]!.capturedOn);
     const e = { ...r.experiments[0]!, kind: 'basics' as const, metric: 'bounce_2s', layer: 'hook', target_line: { max: 0.5 },
       target_mult: null, match: { pillar_key: 'p1' }, period_start: fresh[0]!.capturedOn, period_end: fresh[0]!.capturedOn };
-    const facts = r.facts.map(f => fresh.some(d => d.postId === f.postId) ? { ...f, pillarKey: 'p1' } : f);
+    return { r, fresh, e, facts: fresh.map(d => factFor(d)) };
+  };
+
+  it('a basics experiment is settled on confirmed rates against its handbook line', () => {
+    const { e, fresh, facts } = basics();
     const result = conclude(e, facts, fresh);
     expect(result.samples).toBe(3);
     expect(result.verdict).toBe('failed');
     expect(conclude({ ...e, target_line: { max: 0.65 } }, facts, fresh).verdict).toBe('worked');
+  });
+
+  it('a diagnostic whose post is not a matching fact is never a sample (another platform, another pillar, not settled)', () => {
+    const { e, fresh, facts } = basics();
+    expect(conclude(e, [], fresh)).toMatchObject({ samples: 0, verdict: 'not_run' });
+    const other = { ...e, match: { pillar_key: 'p1', platform: fresh[0]!.platform } };
+    expect(conclude(other, facts.map(f => ({ ...f, platform: 'tiktok' })), fresh).samples).toBe(0);
+    expect(conclude(e, facts.map(f => ({ ...f, pillarKey: 'p2' })), fresh).samples).toBe(0);
+  });
+
+  it('a rate without a handbook line gives a lean in the metric direction, never a verdict by ratio', () => {
+    const { e, fresh, facts } = basics();
+    const noLine = { ...e, target_line: null, baseline: { metric: 'bounce_2s', median: 0.5, samples: 5, window_weeks: 8, basis: 'diag' } };
+    const low = fresh.map(d => ({ ...d, rates: { ...d.rates, bounce_2s: 0.1 } }));
+    // The bounce rate fell from 0.5 to 0.1: that is an improvement, not a failure.
+    expect(conclude(noLine, facts, low)).toMatchObject({ verdict: 'inconclusive', reason: 'within_noise', lean: 'positive' });
+    const high = fresh.map(d => ({ ...d, rates: { ...d.rates, bounce_2s: 0.95 } }));
+    expect(conclude(noLine, facts, high)).toMatchObject({ verdict: 'inconclusive', lean: 'negative' });
+    const retain = { ...noLine, metric: 'retain_3s', baseline: { metric: 'retain_3s', median: 0.5, samples: 5, window_weeks: 8, basis: 'diag' } };
+    const drop = fresh.map(d => ({ ...d, rates: { ...d.rates, retain_3s: 0.1 } }));
+    expect(conclude(retain, facts, drop)).toMatchObject({ verdict: 'inconclusive', lean: 'negative' });
+  });
+
+  it('an experiment is reviewed only after its last post could have settled; until then it is listed as settling', () => {
+    const { r, e } = basics();
+    const end = '2026-10-24';
+    const waiting = { ...e, status: 'running' as const, user_decision: null, period_end: end, period_start: '2026-10-17' };
+    const early = ledgerView([waiting], [], [], Date.parse('2026-10-27T00:00:00Z'));
+    expect(early.to_review).toHaveLength(0);
+    expect(early.running[0]).toMatchObject({ id: waiting.id, settling: true });
+    const later = ledgerView([waiting], [], [], Date.parse('2026-11-01T00:00:00Z'));
+    expect(later.to_review.map(x => x.id)).toEqual([waiting.id]);
+    expect(r.experiments.length).toBeGreaterThan(0);
   });
 });
 
@@ -146,6 +188,12 @@ describe('review pack (RC-2)', () => {
   it('without diagnostics the pack is full, offers candidates and names the gaps instead of inventing numbers', () => {
     const r = { ...rows('B'), diagnostics: [] };
     const pack = loose(buildPack({ rows: r, cadence: 'monthly', businessId: simId('B'), now: NOW, handbooks }));
+    // The count and the pillar mix cover every post of the 28 days (settled and too new), not only the too-new ones.
+    const posted = r.facts.filter(f => utcDay(f.postedAt) > utcDay(AS_OF + 'T00:00:00Z') - 28).length
+      + r.recent.filter(p => utcDay(p.postedAt) > utcDay(AS_OF + 'T00:00:00Z') - 28).length;
+    expect(pack.this_period.published).toBe(posted);
+    expect(Object.values(pack.this_period.by_pillar as Record<string, number>).reduce((a, b) => a + b, 0)).toBe(posted);
+    expect(pack.this_period.published).toBeGreaterThan(pack.this_period.too_new.length);
     expect(pack.mode).toBe('full');
     expect(pack.diagnostics).toMatchObject({ requested: false, basics_pass: null });
     expect(pack.diagnostics.candidates.length).toBeGreaterThan(0);

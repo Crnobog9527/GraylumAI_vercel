@@ -3,7 +3,7 @@
  * REVIEW-COACH RC-2: the experiment ledger's verdicts, decided by code (tech plan v1 section 5, v2 for rate metrics).
  * The model may explain a verdict, never change it. Baselines are frozen when an experiment is proposed.
  */
-import { isRateMetric } from './funnel';
+import { isRateMetric, lowerIsBetter } from './funnel';
 import type { Diagnostic, Experiment, Fact } from './rows';
 import { platformShift } from './scoreboard';
 import { DAY_MS, DEFAULT_TARGET_MULT, FAILED_AT_OR_BELOW, LOW_VOLUME_PER_WEEK, MIN_SAMPLES, day7Metric, median, round,
@@ -42,16 +42,20 @@ function weeklyRate(e: Experiment, facts: Fact[]) {
 }
 
 function decide(e: Experiment, matched: string[], values: number[], extra: { shift: boolean; lowVolume: boolean;
-  meets: (value: number) => boolean | null; ratio: number | null }): Conclusion {
+  meets: (value: number) => boolean | null; ratio: number | null;
+  /** A rate without a handbook line: the ratio is shown and gives a direction-aware lean, but never a verdict. */
+  trend?: { ratio: number | null; lean: Conclusion['lean'] } }): Conclusion {
   const mid = median(values);
+  const shown = extra.trend ? extra.trend.ratio : extra.ratio;
   const base = { matched_posts: matched, samples: values.length, median: mid === null ? null : round(mid, 4),
-    vs_baseline: extra.ratio === null ? null : round(extra.ratio, 2), lean: null as Conclusion['lean'] };
+    vs_baseline: shown === null ? null : round(shown, 2), lean: null as Conclusion['lean'] };
   const finish = (verdict: Verdict, reason: string | null, lean: Conclusion['lean'] = null): Conclusion => ({ ...base, verdict,
     reason, lean, next_status: verdict === 'inconclusive' && !e.extended_once && matched.length > 0 ? 'extended' : 'concluded' });
   if (extra.shift) return finish('inconclusive', 'platform_shift');
   if (!matched.length) return finish('not_run', null);
   const meets = mid === null ? null : extra.meets(mid);
-  const lean = meets === true ? 'positive' : extra.ratio !== null && extra.ratio <= FAILED_AT_OR_BELOW ? 'negative' : null;
+  const lean = meets === true ? 'positive' : extra.trend ? extra.trend.lean
+    : extra.ratio !== null && extra.ratio <= FAILED_AT_OR_BELOW ? 'negative' : null;
   if (values.length < MIN_SAMPLES) {
     if (extra.lowVolume && values.length >= 2) return finish('inconclusive', 'low_volume', lean);
     return finish('inconclusive', 'samples_lt_3');
@@ -59,7 +63,8 @@ function decide(e: Experiment, matched: string[], values: number[], extra: { shi
   if (meets) return finish('worked', null);
   if (extra.ratio !== null && extra.ratio <= FAILED_AT_OR_BELOW) return finish('failed', null);
   if (meets === false && e.target_line) return finish('failed', null);
-  return finish('inconclusive', 'within_noise');
+  // A rate without a line says which way it points, so the model can describe the direction without a verdict.
+  return finish('inconclusive', 'within_noise', extra.trend ? lean : null);
 }
 
 /** Day-7 experiments (views, engagement_rate, ...) are settled on facts; rate experiments on confirmed diagnostics. */
@@ -75,15 +80,19 @@ export function conclude(e: Experiment, facts: Fact[], diagnostics: Diagnostic[]
   const isRate = e.layer !== null || isRateMetric(e.metric);
   if (isRate) {
     const byPost = new Map(facts.map(f => [f.postId, f]));
+    // A diagnostic counts only when its post is a known fact that matches the experiment: one that cannot be matched (not settled
+    // yet, or another platform, pillar or format) is never a sample.
     const rows = diagnostics.filter(d => inPeriod(d.capturedOn + 'T00:00:00Z', e) && e.metric in d.rates
-      && (() => { const f = byPost.get(d.postId); return !f || matches(e.match, f); })());
+      && (() => { const f = byPost.get(d.postId); return f !== undefined && matches(e.match, f); })());
     const baseline = e.baseline?.median ?? null;
     const values = rows.map(d => d.rates[e.metric]!);
     const mid = median(values);
     const ratio = mid !== null && baseline ? mid / baseline : null;
-    // Rates are judged against their handbook line; no line means only a lean, never a verdict by ratio.
-    return decide(e, rows.map(d => d.postId), values, { shift: false, lowVolume, meets: v => meetsLine(v) ?? false,
-      ratio: line ? null : ratio });
+    // Rates are judged against their handbook line; no line means only a lean (by the metric's direction), never a verdict by ratio.
+    const up = ratio === null ? null : lowerIsBetter(e.metric) ? 1 / ratio : ratio;
+    const lean = up === null ? null : up >= 1 / FAILED_AT_OR_BELOW ? 'positive' : up <= FAILED_AT_OR_BELOW ? 'negative' : null;
+    return decide(e, rows.map(d => d.postId), values, { shift: false, lowVolume, meets: v => meetsLine(v) ?? false, ratio: null,
+      ...(line ? {} : { trend: { ratio, lean } }) });
   }
   const values = matchedFacts.map(f => day7Metric(f, e.metric)).filter((v): v is number => v !== null);
   const mid = median(values);
@@ -94,7 +103,10 @@ export function conclude(e: Experiment, facts: Fact[], diagnostics: Diagnostic[]
     meets: () => (line ? meetsLine(mid!) : ratio === null ? null : ratio >= target), ratio });
 }
 
-/** Ledger rows for the pack: what to review now, what still runs, and the latest concluded. */
+/** A post's day-7 numbers exist a week after it was posted: an experiment is settled only after the last post it could count is settled. */
+export const SETTLE_DAYS = 7;
+
+/** Ledger rows for the pack: what to review now, what still runs (or still waits for its last posts to settle), and the latest concluded. */
 export function ledgerView(experiments: Experiment[], facts: Fact[], diagnostics: Diagnostic[], now: number) {
   const today = Math.floor(now / DAY_MS);
   const open = experiments.filter(e => ['proposed', 'running', 'extended'].includes(e.status) && e.user_decision !== 'declined');
@@ -102,8 +114,8 @@ export function ledgerView(experiments: Experiment[], facts: Fact[], diagnostics
     layer: e.layer, target_mult: e.target_mult, target_line: e.target_line, match: e.match, baseline: e.baseline,
     period: { start: e.period_start, end: e.period_end } });
   return {
-    to_review: open.filter(e => utcDay(e.period_end) < today).map(e => ({ ...brief(e), result: conclude(e, facts, diagnostics) })),
-    running: open.filter(e => utcDay(e.period_end) >= today).map(brief),
+    to_review: open.filter(e => utcDay(e.period_end) + SETTLE_DAYS < today).map(e => ({ ...brief(e), result: conclude(e, facts, diagnostics) })),
+    running: open.filter(e => utcDay(e.period_end) + SETTLE_DAYS >= today).map(e => ({ ...brief(e), settling: utcDay(e.period_end) < today })),
     recent_concluded: experiments.filter(e => e.status === 'concluded').slice(0, 6)
       .map(e => ({ id: e.id, verdict: e.verdict, hypothesis: e.hypothesis, concluded_on: e.updated_at.slice(0, 10) })),
   };

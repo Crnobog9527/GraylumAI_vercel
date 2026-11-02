@@ -44,9 +44,11 @@ export function thisPeriod(rows: PackRows, period: Period) {
     vsPrev[platform] = { current: median(now), previous: median(before), samples: [now.length, before.length] };
   }
   const byPillar: Record<string, number> = {};
-  for (const p of recent) byPillar[p.pillarKey ?? 'untagged'] = (byPillar[p.pillarKey ?? 'untagged'] ?? 0) + 1;
+  // Everything posted in the period: the settled ones (facts) and the ones still too new (recent); too_new lists only the latter.
+  const inPeriod = facts.filter(f => between(f.postedAt, period.start, period.end));
+  for (const p of [...recent, ...inPeriod]) byPillar[p.pillarKey ?? 'untagged'] = (byPillar[p.pillarKey ?? 'untagged'] ?? 0) + 1;
   return {
-    published: recent.length,
+    published: recent.length + inPeriod.length,
     published_previous: rows.recent.filter(p => between(p.postedAt, period.prevStart, period.prevEnd)).length
       + facts.filter(f => between(f.postedAt, period.prevStart, period.prevEnd)).length,
     too_new: recent.map(p => ({ post_id: p.postId, platform: p.platform, posted_at: p.postedAt.slice(0, 10),
