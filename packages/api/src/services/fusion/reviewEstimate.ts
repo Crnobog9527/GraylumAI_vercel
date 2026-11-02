@@ -12,6 +12,8 @@ const PROFILE_OVERHEAD = 4096 + 4096;
 /** JSON framing of the input, the response format and the request fields around the snapshot (as fusionRequestBytes
  * counts them, including its fields allowance). */
 const FRAMING_BYTES = 16384;
+/** Opinion size, in tokens, the summary/debate request bound is priced for (the output cap before it was raised to 8192). */
+const PRICED_OPINION_TOKENS = 4096;
 /** One declared field in the summary input: up to 400 characters, escaped twice (input string inside the body). */
 const FIELD_BYTES = 400 * 3 * 2 + 256;
 
@@ -57,7 +59,9 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
     parts.reduce((sum, part) => ({ usd: sum.usd + part.usd, credits: sum.credits + part.credits }), { usd: 0, credits: 0 });
   const steps = input.fieldCount * FIELD_BYTES;
   if (input.snapshotBytes > FUSION_INPUT_CAP) throw new Error('FUSION_INPUT_TOO_LARGE');
-  const opinionBytes = input.opinionTokens * 4;
+  // What the summary and debate requests price per opinion. The output cap may be raised (8192) without enlarging this: both requests
+  // are trimmed to the priced size (fitted, reviewCore), so a longer opinion costs the summary detail, never more than the priced bytes.
+  const opinionBytes = Math.min(input.opinionTokens, PRICED_OPINION_TOKENS) * 4;
   const reviewerBytes = input.instructionBytes.reviewer + input.snapshotBytes + FRAMING_BYTES;
   // Debate round: the reviewer also reads its own and every other reviewer's round-1 opinion.
   const debateBytes = reviewerBytes + input.reviewers.length * opinionBytes;
