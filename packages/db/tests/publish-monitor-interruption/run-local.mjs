@@ -3,7 +3,7 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
-// V2-12 B8b (0473): the weekly review on kind='review' turns. Real local turn core and review functions; no provider calls or remote database.
+// V2-12 B8b (0477): the weekly review on kind='review' turns. Real local turn core and review functions; no provider calls or remote database.
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
@@ -19,7 +19,7 @@ async function service(client,work){
 const rpc=(client,...args)=>service(client,()=>nativeRpc(client,...args));
 const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
 const svc=(sql,args=[])=>service(c,()=>one(sql,args));
-const MIGRATION_PATH='packages/db/migrations/0473_publish_monitor_review_turns.sql';
+const MIGRATION_PATH='packages/db/migrations/0477_publish_monitor_review_turns.sql';
 const step=(r,action,reason=null)=>rpc(c,'publish_monitor_review_step',r.id,r.token,action,reason);
 const hash=text=>createHash('sha256').update(text).digest('hex');
 const POLICY={q:100,uTurnUsd:0.04,gCredits:24,minCredits:6,uModelCredits:24,historyItems:0,inputBytes:32000,
@@ -208,9 +208,9 @@ try{
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
  const before2=await one(catalog);
- for(const _ of [1,2])for(const path of [MIGRATION_PATH,...laterRedefinitions('0472')])await c.query(read(path));
+ for(const _ of [1,2])for(const path of [MIGRATION_PATH,...laterRedefinitions('0476')])await c.query(read(path));
  assert.deepEqual(await one(catalog),before2);
- report.checks.push('0473 reapplies twice without a catalog change');
+ report.checks.push('0477 reapplies twice without a catalog change');
  const permissions=(await c.query(`SELECT role,has_function_privilege(role,'publish_monitor_review_step(uuid,uuid,text,text)','EXECUTE') allowed
   FROM unnest(ARRAY['anon','authenticated','service_role']) role ORDER BY role`)).rows;
  assert.deepEqual(permissions,[{role:'anon',allowed:false},{role:'authenticated',allowed:false},{role:'service_role',allowed:true}]);

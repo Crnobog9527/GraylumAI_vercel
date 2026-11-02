@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- CORE-PATH-V2 V2-12 B8b (number 0473 assigned by the controller; Owner 2026-11-02 "复盘必须开"): the weekly review runs as a
+-- CORE-PATH-V2 V2-12 B8b (number 0477 assigned by the controller; Owner 2026-11-02 "复盘必须开"): the weekly review runs as a
 -- kind='review' turn (policy.review.mode = 'weekly') instead of a Runtime execution on a BILL2 run.
 --   * social_review_runs.turn_id: the review's turn (turns.id). runtime_execution_id / bill2_run_id / prior_bill2_run_ids stay for rows
 --     written before this migration and are dropped with the old tables (batch F).
