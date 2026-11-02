@@ -21,7 +21,8 @@ const fetcher: typeof fetch = (...args) => globalThis.fetch(...args);
 /** CORE-PATH-V2 V2-10: the turn path's side of the positioning page. Off, it adds nothing and the page runs on the old path. */
 export function useMentorTurnPath(sessionId: string | undefined, draftId: string) {
   const choices = trpc.runtime.choices.useQuery(sessionId ? { sessionId } : undefined, { enabled: Boolean(sessionId), staleTime: RUNTIME_CHOICES_STALE_MS });
-  const on = Boolean(sessionId && choices.data?.corePathV2);
+  // V2-12: the turn path is the only path; the server answers TURN_CORE_DISABLED itself when its switch is off.
+  const on = Boolean(sessionId);
   const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
   // The path is known once the switch and the turn path's read of this conversation have answered (see mentor-path-gate.ts).
   const ready = mentorPathReady({ hasSession: Boolean(sessionId), choicesSettled: choices.isSuccess || choices.isError, viewLoaded: view !== null });
@@ -72,10 +73,11 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
       return draft && { ...draft, turns: [...(draft.turns ?? []), ...projected.turns] };
     },
     /** The stream of one mentor request: POST /api/turn with the switch on, the old stream otherwise. */
-    open<T>(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined, old: () => Promise<T>) {
+    open(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined) {
       // Decided when the turn is sent, after the gate is ready: a send before that waits, and never falls to the old path unasked.
       return async () => {
-        if (!await mentorOnTurnPath(() => gate.current)) return old();
+        // V2-12: the old stream is gone; a conversation whose switch is off cannot send (the real database is built on the turn path).
+        if (!await mentorOnTurnPath(() => gate.current)) throw new Error("TURN_PATH_REQUIRED");
         return readAfter(mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! },
           history.current)));
       };
