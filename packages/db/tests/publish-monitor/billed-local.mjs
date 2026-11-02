@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Local-only PUBLISH-MONITOR PR-4b (0289) verification: the Owner-approved tool-only BILL2 run (and that every other run
-// shape is still refused), one billed TikHub call end to end, the billed-read ledger, and orphaned-run discovery.
+// shape is still refused; the run stays until V2-12 batch F), then the billed-read ledger on kind='review' turns (0463, B8a):
+// the hidden read session, binding a turn, live-attempt recovery, orphaned-run discovery, disconnect and pruning.
 // Run: node packages/db/tests/publish-monitor/billed-local.mjs --local-only
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,6 +10,7 @@ import { rpc } from '../erasure-b2a/cases.mjs';
 import { fixtureSql } from './fixtures.mjs';
 
 const MIGRATION = 'packages/db/migrations/0289_publish_monitor_billed_reads.sql';
+const MIGRATION2 = 'packages/db/migrations/0463_publish_monitor_read_turns.sql';
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0289', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
@@ -54,9 +56,11 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
+  // 0289 first, then 0463 (which redefines three of its functions): the pair replays to the same catalog (patches are marker-guarded).
   await c.query(read(MIGRATION));
+  await c.query(read(MIGRATION2));
   assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('reapplication preserves the complete catalog (patches are marker-guarded)');
+  report.checks.push('reapplication of 0289 and 0463 preserves the complete catalog (patches are marker-guarded)');
 
   // The exception is narrow: every other shape is still refused exactly as before.
   const m = await member();
@@ -93,61 +97,98 @@ try {
   assert.equal(await v('SELECT credits::int v FROM profiles WHERE id=$1', [m.a]), 94);
   report.checks.push('the approved tool-only run bills one TikHub call at the frozen price (6 credits) and finalizes');
 
+  // B8a (0463): the refresh runs as a kind='review' turn in the connection's hidden conversation; the ledger's run id is the
+  // turn's request id. Nothing below touches BILL2.
+  const beforeReapply = await v(catalogSql);
+  await c.query(read(MIGRATION2));
+  assert.deepEqual(await v(catalogSql), beforeReapply);
+  report.checks.push('0463 re-applies without changing the catalog');
+  for (const role of ['anon', 'authenticated']) {
+    for (const f of ['publish_monitor_session(uuid,uuid)', 'publish_monitor_billed_run(uuid,uuid,uuid,uuid,jsonb)',
+      'publish_monitor_billed_recovery(uuid)', 'publish_monitor_billed_orphans(integer)']) {
+      assert.equal(await v("SELECT has_function_privilege($1,'public." + f + "','execute') v", [role]), false, role + ' ' + f);
+    }
+  }
+  const POLICY = { q: 100, uTurnUsd: 0.02, gCredits: 12, minCredits: 6, uModelCredits: 0, historyItems: 0, inputBytes: 0,
+    limits: { model: 2, paidTools: 1, freeTools: 0, decisions: 0 }, stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
+    review: { mode: 'read' } };
+  const openTurn = async (member) => {
+    const session = await svc('SELECT publish_monitor_session($1,$2) v', [member.a, member.conn]);
+    const request = randomUUID();
+    const turn = await svc('SELECT turn_open($1,$2,$3,$4,$5) v', [member.a, session, request, 'review', JSON.stringify(POLICY)]);
+    return { session, request, turnId: turn.turnId };
+  };
+  const closeTurn = (member, turn) => svc("SELECT turn_close($1,$2,'completed','[]'::jsonb,false) v", [member.a, turn.turnId]);
+
+  // A read turn settles under the ordinary turn rules: one paid tool row, the user pays only for what returned data.
+  const payer = await member(), paid = await openTurn(payer);
+  const begun = await svc("SELECT turn_call_begin($1,$2,1,'tool',NULL,'publish_monitor_read',true,$3,'0.02','6') v", [payer.a, paid.turnId, 'a'.repeat(64)]);
+  assert.equal(begun.state, 'running');
+  await svc("SELECT turn_call_record($1,$2,1,'ok','0.01','0.01','{}'::jsonb,NULL,$3,NULL) v", [payer.a, paid.turnId, 'b'.repeat(64)]);
+  const settled = await svc("SELECT turn_close($1,$2,'completed','[]'::jsonb,true) v", [payer.a, paid.turnId]);
+  assert.equal(settled.chargedCredits, 6, '0.01 USD x 100 x 6, the held 12 credits released down to what was used');
+  assert.equal(await v('SELECT credits::int v FROM profiles WHERE id=$1', [payer.a]), 94);
+  report.checks.push('a read turn charges the tool row it used (6 credits) and releases the rest of its freeze');
+
+  // The hidden conversation: one per connection, only for the connection's own account.
+  const s1 = await svc('SELECT publish_monitor_session($1,$2) v', [m.a, m.conn]);
+  assert.equal(await svc('SELECT publish_monitor_session($1,$2) v', [m.a, m.conn]), s1, 'the same session every time');
+  assert.deepEqual((await c.query('SELECT scope FROM runtime_sessions WHERE id=$1', [s1])).rows[0].scope,
+    { kind: 'publish_monitor_read', connectionId: m.conn });
+  const stranger = await member();
+  await assert.rejects(svc('SELECT publish_monitor_session($1,$2) v', [stranger.a, m.conn]), /PUBLISH_MONITOR_INPUT_INVALID/);
+  await assert.rejects(svc('SELECT publish_monitor_session($1,$2) v', [m.a, randomUUID()]), /PUBLISH_MONITOR_INPUT_INVALID/);
+  report.checks.push('the read session is one hidden conversation per connection and refuses another account or a missing connection');
+
   // Ledger: one live attempt per request key and refresh; an answered attempt is found again by a re-run.
   const claim = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === m.conn);
   const keys = [m.conn, claim.lease, claim.refreshId];
-  const run2 = await rpc(c, 'bill2_prepare', m.a, randomUUID(), await payload(m.a));
+  const turn2 = await openTurn(m);
   const bind = id => svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...keys, id, JSON.stringify([toolPolicy])]);
-  assert.equal((await bind(run2.id)).runId, run2.id);
-  assert.equal((await bind(randomUUID())).runId, run2.id, 'the open run wins');
+  await assert.rejects(bind(randomUUID()), /PUBLISH_MONITOR_INPUT_INVALID/, 'a run id must be a review turn of this account');
+  const otherTurn = await openTurn(stranger);
+  await assert.rejects(bind(otherTurn.request), /PUBLISH_MONITOR_INPUT_INVALID/, 'another account\'s turn cannot be bound');
+  assert.equal((await bind(turn2.request)).runId, turn2.request);
+  assert.equal((await bind(randomUUID())).runId, turn2.request, 'the open run wins');
   const op = randomUUID(), token = randomUUID(), key = 'f'.repeat(64);
   const step = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys,
-    extra.op ?? op, name, key, ROUTE, extra.token ?? token, extra.call ?? null, extra.state ?? null,
+    extra.op ?? op, name, extra.key ?? key, ROUTE, extra.token ?? token, extra.call ?? null, extra.state ?? null,
     extra.result ? JSON.stringify(extra.result) : null]);
   assert.deepEqual(await step('open'), { ok: true });
   assert.deepEqual(await step('open', { op: randomUUID() }), { ok: false }, 'one live attempt per key');
-  assert.deepEqual(await step('dispatch'), { ok: false }, 'never dispatched before its BILL2 call is linked');
+  assert.deepEqual(await step('dispatch'), { ok: false }, 'never dispatched before it is linked');
   assert.deepEqual(await step('link', { call: randomUUID() }), { ok: true });
   assert.deepEqual(await step('dispatch', { token: randomUUID() }), { ok: false }, 'the token must match');
   assert.deepEqual(await step('dispatch'), { ok: true });
-  // A second key, really claimed and sent on the run but never answered (a killed process).
-  const op2 = randomUUID(), key2 = 'e'.repeat(64);
-  const real = await rpc(c, 'bill2_claim', m.a, run2.id, 1, { provider: 'tikhub', account: 'tikhub-main', model: ROUTE,
-    protocol: 'research-tool-v1', phase: 'publish_monitor', requestHash: 'e'.repeat(64), automaticRetry: false, hiddenTools: false,
-    lookupSupported: false, upperUsd: '0.01', billingUnit: { modelId: toolPolicy.modelId, multiplier: '6' }, toolPricing: pricing });
-  assert.equal((await rpc(c, 'bill2_dispatch', m.a, run2.id, real.id, real.dispatchToken)).dispatch, true);
-  const step2 = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys,
-    op2, name, key2, ROUTE, token, extra.call ?? null, null, null]);
-  await step2('open'); await step2('link', { call: real.id }); await step2('dispatch');
-  // An opened attempt that was never linked to a call (killed between open and link).
-  const op3 = randomUUID();
-  await svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys, op3, 'open', 'd'.repeat(64),
-    ROUTE, token, null, null, null]);
-  const recovery = await svc('SELECT publish_monitor_billed_recovery($1) v', [run2.id]);
-  const byOp = Object.fromEntries(recovery.map(x => [x.operationId, x]));
-  assert.deepEqual([byOp[op2].callPending, byOp[op2].live, byOp[op2].receipt], [true, true, null], 'sent, no receipt');
-  assert.deepEqual([byOp[op3].callId, byOp[op3].callPending, byOp[op3].live], [null, false, true], 'opened, never linked');
-  assert.equal(byOp[op].callPending, false, 'a fake call id is not a pending BILL2 call');
+  // A second key sent but never answered (a killed process), and an attempt opened but never linked.
+  const op2 = randomUUID(), op3 = randomUUID();
+  await step('open', { op: op2, key: 'e'.repeat(64) }); await step('link', { op: op2, call: randomUUID() }); await step('dispatch', { op: op2 });
+  await step('open', { op: op3, key: 'd'.repeat(64) });
+  const recovery = await svc('SELECT publish_monitor_billed_recovery($1) v', [turn2.request]);
+  assert.deepEqual(recovery.map(x => x.operationId).sort(), [op, op2, op3].sort(), 'every live attempt, nothing else');
+  assert.deepEqual(recovery.map(x => Object.keys(x)), recovery.map(() => ['operationId']), 'no receipt is replayed: the turn recovery settles the turn');
   // Abandoning is bound to the run, needs no live claim, and frees the key.
   assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [randomUUID(), op3]), false, 'another run cannot touch it');
-  assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [run2.id, op3]), true);
-  assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [run2.id, op3]), false, 'idempotent');
+  assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [turn2.request, op3]), true);
+  assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [turn2.request, op3]), false, 'idempotent');
   assert.equal((await svc('SELECT publish_monitor_billed_lookup($1,$2,$3,$4) v', [...keys, 'd'.repeat(64)])).found, false);
-  report.checks.push('recovery lists sent-without-receipt calls and opened-but-unlinked attempts; abandon is run-bound and frees the key');
+  report.checks.push('recovery lists the live attempts only (no BILL2 call or receipt); abandon is run-bound and frees the key');
   assert.deepEqual(await step('finish', { state: 'succeeded', result: { items: [{ id: 'n1' }] } }), { ok: true });
   const found = await svc('SELECT publish_monitor_billed_lookup($1,$2,$3,$4) v', [...keys, key]);
   assert.deepEqual([found.found, found.state, found.result], [true, 'answered', { items: [{ id: 'n1' }] }]);
-  // The stored answer carries its receipt; recovery offers it for replay when the BILL2 call is still pending.
+  assert.deepEqual((await svc('SELECT publish_monitor_billed_recovery($1) v', [turn2.request])).map(x => x.operationId), [op2],
+    'an answered attempt needs no recovery');
   report.checks.push('ledger: one live attempt per key, link before dispatch, token-bound, answers kept for re-runs');
 
-  // A stale claim cannot open new attempts; a run left open is found for closing once the refresh moved on.
+  // A stale claim cannot open new attempts; a dead refresh's run is listed for closing once its turn is closed.
   await svc('SELECT publish_monitor_refresh_finish($1,$2,$3,$4,$5) v', [...keys, 'done', null]);
   assert.deepEqual(await step('open', { op: randomUUID() }), { ok: false });
-  const orphans = await svc('SELECT publish_monitor_billed_orphans(50) v');
-  assert.ok(orphans.some(o => o.runId === run2.id));
-  await svc('SELECT publish_monitor_billed_closed($1) v', [run2.id]);
-  assert.ok(!(await svc('SELECT publish_monitor_billed_orphans(50) v')).some(o => o.runId === run2.id));
-  report.checks.push('a settled refresh opens nothing new; its still-open run is listed for closing until marked closed');
+  assert.ok(!(await svc('SELECT publish_monitor_billed_orphans(50) v')).some(o => o.runId === turn2.request), 'turn still running: not listed');
+  await closeTurn(m, turn2);
+  assert.ok((await svc('SELECT publish_monitor_billed_orphans(50) v')).some(o => o.runId === turn2.request), 'turn closed: listed');
+  await svc('SELECT publish_monitor_billed_closed($1) v', [turn2.request]);
+  assert.ok(!(await svc('SELECT publish_monitor_billed_orphans(50) v')).some(o => o.runId === turn2.request));
+  report.checks.push('a settled refresh opens nothing new; its still-open run is listed for closing once the turn is closed, until marked closed');
 
   // Insufficient credits: settled for today without any hold.
   const claim2 = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v'));
@@ -160,36 +201,30 @@ try {
   }
   report.checks.push('insufficient credits settles the connection for today as "余额不足，未更新"');
 
-  // Disconnecting while a billed call is unsettled must keep the recovery rows (ids and states) and wipe the saved answer.
+  // Disconnecting while a billed call is unsettled must keep the ledger rows (ids and states) and wipe the saved answer.
   const dm = await member();
   const dkeys = await (async () => {
     const claimed = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === dm.conn);
     return [dm.conn, claimed.lease, claimed.refreshId];
   })();
-  const drun = await rpc(c, 'bill2_prepare', dm.a, randomUUID(), await payload(dm.a));
-  await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...dkeys, drun.id, JSON.stringify([toolPolicy])]);
+  const dturn = await openTurn(dm);
+  await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...dkeys, dturn.request, JSON.stringify([toolPolicy])]);
   const dop = randomUUID(), dstep = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v',
     [...dkeys, extra.op ?? dop, name, 'a'.repeat(64), ROUTE, token, extra.call ?? null, extra.state ?? null,
       extra.result ? JSON.stringify(extra.result) : null]);
-  const dcall = await rpc(c, 'bill2_claim', dm.a, drun.id, 1, { provider: 'tikhub', account: 'tikhub-main', model: ROUTE,
-    protocol: 'research-tool-v1', phase: 'publish_monitor', requestHash: 'a'.repeat(64), automaticRetry: false, hiddenTools: false,
-    lookupSupported: false, upperUsd: '0.01', billingUnit: { modelId: toolPolicy.modelId, multiplier: '6' }, toolPricing: pricing });
-  assert.equal((await rpc(c, 'bill2_dispatch', dm.a, drun.id, dcall.id, dcall.dispatchToken)).dispatch, true);
-  await dstep('open'); await dstep('link', { call: dcall.id }); await dstep('dispatch');
+  const dcall = randomUUID();
+  await dstep('open'); await dstep('link', { call: dcall }); await dstep('dispatch');
   await dstep('finish', { state: 'succeeded', result: { items: [{ id: 'secret-post' }], billing: { receipt: { toolOutcome: 'delivered' } } } });
   await svc('SELECT publish_monitor_disconnect($1,$2) v', [dm.a, dm.conn]);
-  const kept = (await c.query('SELECT state,result,call_id FROM social_billed_reads WHERE run_id=$1', [drun.id])).rows;
-  assert.deepEqual([kept.length, kept[0].result, kept[0].call_id], [1, { billing: { receipt: { toolOutcome: 'delivered' } } }, dcall.id],
-    'recovery row survives; the answer is wiped and only the receipt stays');
-  const rec = await svc('SELECT publish_monitor_billed_recovery($1) v', [drun.id]);
-  assert.deepEqual([rec[0].callPending, rec[0].receipt], [true, { toolOutcome: 'delivered' }],
-    'the unsettled call is still found after the disconnect, with its saved receipt');
+  const kept = (await c.query('SELECT state,result,call_id FROM social_billed_reads WHERE run_id=$1', [dturn.request])).rows;
+  assert.deepEqual([kept.length, kept[0].result, kept[0].call_id], [1, { billing: { receipt: { toolOutcome: 'delivered' } } }, dcall],
+    'the ledger row survives; the answer is wiped and only the receipt stays');
   // A request still in flight when the connection is deleted: its late finish stores the receipt only, never the answer.
   const lm = await member();
   const lclaim = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === lm.conn);
   const lkeys = [lm.conn, lclaim.lease, lclaim.refreshId];
-  const lrun = await rpc(c, 'bill2_prepare', lm.a, randomUUID(), await payload(lm.a));
-  await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...lkeys, lrun.id, JSON.stringify([toolPolicy])]);
+  const lturn = await openTurn(lm);
+  await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...lkeys, lturn.request, JSON.stringify([toolPolicy])]);
   const lop = randomUUID(), lstep = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v',
     [...lkeys, lop, name, 'b'.repeat(64), ROUTE, token, extra.call ?? null, extra.state ?? null, extra.result ? JSON.stringify(extra.result) : null]);
   await lstep('open'); await lstep('link', { call: randomUUID() }); await lstep('dispatch');
@@ -197,15 +232,15 @@ try {
   assert.deepEqual(await lstep('finish', { state: 'succeeded', result: { items: [{ id: 'late-secret' }], billing: { receipt: { toolOutcome: 'delivered' } } } }), { ok: true });
   const late = (await c.query('SELECT state,result FROM social_billed_reads WHERE id=$1', [lop])).rows[0];
   assert.deepEqual([late.state, late.result], ['answered', { billing: { receipt: { toolOutcome: 'delivered' } } }]);
-  report.checks.push('disconnecting keeps the recovery row of an unsettled call (answer wiped) so its hold can still be released');
+  report.checks.push('disconnecting keeps the ledger row of an unsettled call (answer wiped) so its turn can still be settled');
 
   // Pruning leaves evidence of open runs alone, whatever its age.
-  await c.query("UPDATE social_billed_reads SET created_at=now()-interval '9 days' WHERE run_id=$1", [drun.id]);
+  await c.query("UPDATE social_billed_reads SET created_at=now()-interval '9 days' WHERE run_id=$1", [dturn.request]);
   assert.equal(await svc('SELECT publish_monitor_billed_prune(1000) v'), 0, 'open run: nothing pruned');
-  await svc('SELECT publish_monitor_billed_closed($1) v', [drun.id]);
-  await c.query("UPDATE social_billed_runs SET closed_at=now()-interval '9 days' WHERE run_id=$1", [drun.id]);
+  await svc('SELECT publish_monitor_billed_closed($1) v', [dturn.request]);
+  await c.query("UPDATE social_billed_runs SET closed_at=now()-interval '9 days' WHERE run_id=$1", [dturn.request]);
   assert.ok(await svc('SELECT publish_monitor_billed_prune(1000) v') >= 1);
-  assert.equal(await v('SELECT count(*)::int v FROM social_billed_runs WHERE run_id=$1', [drun.id]), 0);
+  assert.equal(await v('SELECT count(*)::int v FROM social_billed_runs WHERE run_id=$1', [dturn.request]), 0);
   report.checks.push('pruning waits for the billed run to be closed and a week to pass');
 
   assert.equal(db.sql(read('packages/db/tests/account-open-policy-audit.sql')), '');

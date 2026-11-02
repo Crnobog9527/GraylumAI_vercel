@@ -8,12 +8,6 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_billed_recovery(p_run_id uuid)
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
- SELECT COALESCE(jsonb_agg(jsonb_build_object('operationId',x.id,'callId',x.call_id,'model',x.model,
-   'callPending',x.pending,'live',x.state IN ('opened','dispatched'),'receipt',x.receipt) ORDER BY x.created_at),'[]'::jsonb)
- FROM (SELECT r.id,r.call_id,r.model,r.state,r.created_at,
-   CASE WHEN r.state='answered' THEN r.result->'billing'->'receipt' END AS receipt,
-   EXISTS(SELECT 1 FROM bill2_calls bc WHERE bc.id=r.call_id AND bc.run_id=r.run_id AND bc.state='dispatched'
-    AND bc.settled_at IS NULL) AS pending
-  FROM social_billed_reads r WHERE r.run_id=p_run_id) x
- WHERE x.pending OR x.state IN ('opened','dispatched')
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('operationId',r.id) ORDER BY r.created_at),'[]'::jsonb)
+ FROM social_billed_reads r WHERE r.run_id=p_run_id AND r.state IN ('opened','dispatched')
 $function$;
