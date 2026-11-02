@@ -137,6 +137,17 @@ describe('experiment ledger (RC-2): verdicts by code match the designed outcomes
     expect(conclude(e, inside, late).samples).toBe(3);
   });
 
+  it('several captures of one post are one sample, not several', () => {
+    const { e, fresh, facts } = basics();
+    const first = fresh[0]!;
+    const repeated = [0, 1, 2].map(i => ({ ...first, id: first.id.slice(0, -1) + String(i), capturedOn: `2026-10-0${i + 1}`,
+      rates: { ...first.rates, bounce_2s: 0.1 } }));
+    const result = conclude(e, [facts[0]!], repeated);
+    expect(result.samples).toBe(1);
+    expect(result.matched_posts).toEqual([first.postId]);
+    expect(result.verdict).not.toBe('worked');
+  });
+
   it('an experiment is reviewed only after its last post could have settled; until then it is listed as settling', () => {
     const { r, e } = basics();
     const end = '2026-10-24';
@@ -231,6 +242,21 @@ describe('review pack (RC-2)', () => {
     expect(pack.strategy.missing).toBe(true);
     expect(pack.gaps[0]).toMatchObject({ missing: ['strategy'] });
     expect(pack.limits.strategy_proposal).toBe(true);
+  });
+});
+
+describe('post counts (RC-2)', () => {
+  it('a post that is both a settled fact and a too-new row counts once in every count', () => {
+    const r = rows('A');
+    const f = r.facts.find(x => utcDay(x.postedAt) > utcDay(AS_OF + 'T00:00:00Z') - 20)!;
+    expect(f).toBeDefined();
+    const twin = { postId: f.postId, platform: f.platform, postedAt: f.postedAt, title: null, pillarKey: f.pillarKey };
+    const once = loose(buildPack({ rows: { ...r, diagnostics: [] }, cadence: 'monthly', businessId: simId('A'), now: NOW, handbooks }));
+    const twice = loose(buildPack({ rows: { ...r, recent: [...r.recent, twin], diagnostics: [] }, cadence: 'monthly', businessId: simId('A'), now: NOW, handbooks }));
+    expect(twice.this_period.published).toBe(once.this_period.published);
+    expect(twice.this_period.published_previous).toBe(once.this_period.published_previous);
+    expect(twice.stage.posts_8w).toBe(once.stage.posts_8w);
+    expect(twice.monthly.pillar_mix_actual_4w).toEqual(once.monthly.pillar_mix_actual_4w);
   });
 });
 

@@ -15,6 +15,14 @@ export function periodOf(now: number, days: number): Period {
   return { start: end - days + 1, end, prevStart: end - 2 * days + 1, prevEnd: end - days };
 }
 
+/** Every own post once: a post can be both a fact row (created when its day-7 turned up empty) and a too-new row, and must count once. */
+export function uniquePosts(rows: Pick<PackRows, 'facts' | 'recent'>): Array<{ postId: string; platform: string; postedAt: string; pillarKey: string | null }> {
+  const byId = new Map<string, { postId: string; platform: string; postedAt: string; pillarKey: string | null }>();
+  for (const p of rows.facts) byId.set(p.postId, { postId: p.postId, platform: p.platform, postedAt: p.postedAt, pillarKey: p.pillarKey });
+  for (const p of rows.recent) if (!byId.has(p.postId)) byId.set(p.postId, { postId: p.postId, platform: p.platform, postedAt: p.postedAt, pillarKey: p.pillarKey });
+  return [...byId.values()];
+}
+
 /**
  * Posts whose day 7 fell inside the period (they were published 7 days earlier), each compared with its own pillar's
  * and platform's 8-week median before it. Posts published inside the period are too new to judge and only counted.
@@ -44,13 +52,13 @@ export function thisPeriod(rows: PackRows, period: Period) {
     vsPrev[platform] = { current: median(now), previous: median(before), samples: [now.length, before.length] };
   }
   const byPillar: Record<string, number> = {};
-  // Everything posted in the period: the settled ones (facts) and the ones still too new (recent); too_new lists only the latter.
-  const inPeriod = facts.filter(f => between(f.postedAt, period.start, period.end));
-  for (const p of [...recent, ...inPeriod]) byPillar[p.pillarKey ?? 'untagged'] = (byPillar[p.pillarKey ?? 'untagged'] ?? 0) + 1;
+  // Everything posted in the period, each post once: the settled ones (facts) and the ones still too new (recent); too_new lists the latter.
+  const all = uniquePosts(rows);
+  const inPeriod = all.filter(p => between(p.postedAt, period.start, period.end));
+  for (const p of inPeriod) byPillar[p.pillarKey ?? 'untagged'] = (byPillar[p.pillarKey ?? 'untagged'] ?? 0) + 1;
   return {
-    published: recent.length + inPeriod.length,
-    published_previous: rows.recent.filter(p => between(p.postedAt, period.prevStart, period.prevEnd)).length
-      + facts.filter(f => between(f.postedAt, period.prevStart, period.prevEnd)).length,
+    published: inPeriod.length,
+    published_previous: all.filter(p => between(p.postedAt, period.prevStart, period.prevEnd)).length,
     too_new: recent.map(p => ({ post_id: p.postId, platform: p.platform, posted_at: p.postedAt.slice(0, 10),
       title: text(p.title, 80), note: '太新，下周再看' })),
     by_pillar: byPillar, settled_posts: posts,
@@ -67,7 +75,6 @@ export function stageSection(rows: PackRows, now: number) {
   const today = Math.floor(now / DAY_MS);
   const at = (points: Array<{ date: string; value: number }>, daysAgo: number) =>
     points.filter(p => utcDay(p.date) <= today - daysAgo).at(-1) ?? null;
-  const last8 = rows.facts.filter(f => utcDay(f.postedAt) >= today - 56);
   // Per platform only: a change in which platform the user mostly posts on is not a change in how the account performs.
   const trend: Record<string, { recent_4w_median: number; previous_4w_median: number; change: number; samples: [number, number] }> = {};
   for (const platform of new Set(rows.facts.map(f => f.platform))) {
@@ -82,7 +89,7 @@ export function stageSection(rows: PackRows, now: number) {
     accounts: rows.accounts.map(x => ({ platform: x.platform, stage: x.stage })),
     followers: rows.followers.map(f => ({ platform: f.platform, now: at(f.points, 0), weeks4_ago: at(f.points, 28),
       weeks8_ago: at(f.points, 56) })),
-    posts_8w: last8.length + rows.recent.filter(p => utcDay(p.postedAt) >= today - 56).length,
+    posts_8w: uniquePosts(rows).filter(p => utcDay(p.postedAt) >= today - 56).length,
     day7_views_trend: Object.keys(trend).length ? trend : null,
   };
 }
@@ -106,8 +113,7 @@ export function gaps(rows: PackRows) {
 
 export function mixActual(rows: PackRows, now: number, days: number) {
   const since = Math.floor(now / DAY_MS) - days;
-  const keys = [...rows.facts.filter(f => utcDay(f.postedAt) >= since).map(f => f.pillarKey),
-    ...rows.recent.filter(p => utcDay(p.postedAt) >= since).map(p => p.pillarKey)].map(k => k ?? 'untagged');
+  const keys = uniquePosts(rows).filter(p => utcDay(p.postedAt) >= since).map(p => p.pillarKey ?? 'untagged');
   const out: Record<string, number> = {};
   for (const k of keys) out[k] = (out[k] ?? 0) + 1;
   return Object.fromEntries(Object.entries(out).map(([k, n]) => [k, round(n / keys.length, 2)]));

@@ -84,8 +84,15 @@ export function conclude(e: Experiment, facts: Fact[], diagnostics: Diagnostic[]
     // yet, or another platform, pillar or format) is never a sample.
     // The sample is the posts published in the experiment's period (not the day their numbers were captured: a late upload of an old
     // post does not count, and numbers captured after the period for a post inside it do).
-    const rows = diagnostics.filter(d => e.metric in d.rates
+    const candidates = diagnostics.filter(d => e.metric in d.rates
       && (() => { const f = byPost.get(d.postId); return f !== undefined && matches(e.match, f) && inPeriod(f.postedAt, e); })());
+    // One diagnostic per post (the latest capture, then the smaller id): several captures of one post are not several samples.
+    const latest = new Map<string, Diagnostic>();
+    for (const d of candidates) {
+      const kept = latest.get(d.postId);
+      if (!kept || d.capturedOn > kept.capturedOn || (d.capturedOn === kept.capturedOn && d.id < kept.id)) latest.set(d.postId, d);
+    }
+    const rows = [...latest.values()].sort((x, y) => x.postId.localeCompare(y.postId));
     const baseline = e.baseline?.median ?? null;
     const values = rows.map(d => d.rates[e.metric]!);
     const mid = median(values);
