@@ -23,6 +23,9 @@ BEGIN
  END IF;
  WITH calls AS MATERIALIZED (
   SELECT k.turn_id, k.status, k.nominal_usd, k.actual_usd, k.multiplier, k.dispatched_at,
+   -- The nominal cost can be an upper-bound fallback while the supplier's actual cost is still unknown: they are counted apart. A call
+   -- that certainly cost nothing (not sent, rejected, refused 402, unusable) is not unknown.
+   (k.actual_usd IS NULL AND k.status NOT IN ('no_charge_402','not_sent','rejected','unusable')) actual_unknown,
    -- A decision call (the positioning check) is a real model call paid by the platform: it is attributed to the model its receipt
    -- names (usage.model), not to the turn's main model.
    CASE WHEN k.call_kind='decision' THEN coalesce(nullif(k.usage->>'model',''), t.policy->'models'->>(k.model_id::text), 'unknown')
@@ -33,9 +36,9 @@ BEGIN
   SELECT charged_credits, absorbed_credits, state, settlement FROM turns WHERE opened_at>=p_from AND opened_at<p_to
  )
  SELECT jsonb_build_object(
-  'models',coalesce((SELECT jsonb_agg(jsonb_build_object('model',model,'calls',calls,'unknownCostCalls',unknown,
+  'models',coalesce((SELECT jsonb_agg(jsonb_build_object('model',model,'calls',calls,'unknownCostCalls',unknown,'unknownActualCalls',unknown_actual,
     'nominalUsd',nominal::text,'actualUsd',actual::text,'minMultiplier',min_m::text,'maxMultiplier',max_m::text) ORDER BY calls DESC,model)
-   FROM (SELECT model,count(*) calls,count(*) FILTER (WHERE nominal_usd IS NULL) unknown,
+   FROM (SELECT model,count(*) calls,count(*) FILTER (WHERE nominal_usd IS NULL) unknown,count(*) FILTER (WHERE actual_unknown) unknown_actual,
      coalesce(sum(nominal_usd),0) nominal,coalesce(sum(actual_usd),0) actual,min(multiplier) min_m,max(multiplier) max_m
     FROM calls GROUP BY model) m),'[]'::jsonb),
   'byDate',coalesce((SELECT jsonb_agg(jsonb_build_object('date',day,'calls',calls,'unknownCostCalls',unknown,'nominalUsd',nominal::text) ORDER BY day)
@@ -45,6 +48,7 @@ BEGIN
   'totals',jsonb_build_object(
    'calls',(SELECT count(*) FROM calls),
    'unknownCostCalls',(SELECT count(*) FROM calls WHERE nominal_usd IS NULL),
+   'unknownActualCalls',(SELECT count(*) FROM calls WHERE actual_unknown),
    'nominalUsd',(SELECT coalesce(sum(nominal_usd),0)::text FROM calls),
    'actualUsd',(SELECT coalesce(sum(actual_usd),0)::text FROM calls),
    'turns',(SELECT count(*) FROM turns_in),

@@ -11,16 +11,17 @@ vi.mock('@/trpc/client', () => ({ trpc: { billingReport: {
 
 function report(unknown: number) {
   return { available: true,
-    models: [{ model: 'test/model', calls: 3, unknownCostCalls: unknown, nominalUsd: '0.5', actualUsd: '0.4', minMultiplier: '2', maxMultiplier: '3' }],
+    models: [{ model: 'test/model', calls: 3, unknownCostCalls: unknown, unknownActualCalls: unknown ? 2 : 0, nominalUsd: '0.5', actualUsd: '0.4', minMultiplier: '2', maxMultiplier: '3' }],
     byDate: [{ date: '2026-10-03', calls: 3, unknownCostCalls: unknown, nominalUsd: '0.5' }],
-    totals: { calls: 3, unknownCostCalls: unknown, nominalUsd: '0.5', actualUsd: '0.4', turns: 2, chargedCredits: 9, absorbedCredits: 1, unsettledTurns: 1 } };
+    totals: { calls: 3, unknownCostCalls: unknown, unknownActualCalls: unknown ? 2 : 0, nominalUsd: '0.5', actualUsd: '0.4', turns: 2, chargedCredits: 9, absorbedCredits: 1, unsettledTurns: 1 } };
 }
 
 describe('turn cost report cards', () => {
   it('shows a cost with unknown calls as unknown with its known part, in every line', () => {
     fixture.report = report(1);
     const html = renderToStaticMarkup(<TurnModelReportCard />);
-    expect(html.match(/未知（已知部分 \$0\.5）/g)).toHaveLength(4);
+    expect(html.match(/未知（已知部分 \$0\.5）/g)).toHaveLength(3); // nominal: model, total, date line
+    expect(html.match(/未知（已知部分 \$0\.4）/g)).toHaveLength(2); // actual (counted apart): model line and total
     expect(html).toContain('2× ~ 3×');
     expect(html).toContain('实扣 9 积分，平台承担 1 积分');
     expect(html).toContain('未结清回合 1 个');

@@ -36,17 +36,19 @@ export function TurnModelReportCard() {
         : !data.available ? <p role="alert">报表暂不可用（数据库读取函数尚未应用或读取失败）；这里不显示 0 冒充没有数据。</p>
         : <>
           <table className="w-full text-sm"><thead><tr>
-            <th className="text-left">模型</th><th className="text-right">调用</th><th className="text-right">费用未知</th>
+            <th className="text-left">模型</th><th className="text-right">调用</th>
+            <th className="text-right">名义费用未知</th><th className="text-right">实际费用未知</th>
             <th className="text-right">名义费用（美元）</th><th className="text-right">实际费用（美元）</th><th className="text-left">冻结倍数</th>
           </tr></thead><tbody>{data.models.map((line) => <tr key={line.model}>
             <td>{line.model}</td><td className="text-right">{line.calls}</td><td className="text-right">{line.unknownCostCalls}</td>
+            <td className="text-right">{line.unknownActualCalls}</td>
             <td className="text-right">{costText(line.unknownCostCalls, line.nominalUsd)}</td>
-            <td className="text-right">{costText(line.unknownCostCalls, line.actualUsd)}</td>
+            <td className="text-right">{costText(line.unknownActualCalls, line.actualUsd)}</td>
             <td>{line.minMultiplier === line.maxMultiplier ? `${line.minMultiplier}×` : `${line.minMultiplier}× ~ ${line.maxMultiplier}×`}</td>
           </tr>)}</tbody></table>
           <p className="text-xs">合计：{data.totals.calls} 次调用 / {data.totals.turns} 个回合；
             名义费用 {costText(data.totals.unknownCostCalls, data.totals.nominalUsd)}；
-            实际费用 {costText(data.totals.unknownCostCalls, data.totals.actualUsd)}；
+            实际费用 {costText(data.totals.unknownActualCalls, data.totals.actualUsd)}；
             实扣 {data.totals.chargedCredits} 积分，平台承担 {data.totals.absorbedCredits} 积分；
             未结清回合 {data.totals.unsettledTurns} 个（关闭不等于结清）。</p>
           <table className="w-full text-sm"><thead><tr>
@@ -54,6 +56,7 @@ export function TurnModelReportCard() {
             <th className="text-right">名义费用（美元）</th>
           </tr></thead><tbody>{data.byDate.map((line) => <tr key={line.date}>
             <td>{line.date}</td><td className="text-right">{line.calls}</td><td className="text-right">{line.unknownCostCalls}</td>
+            <td className="text-right">{line.unknownActualCalls}</td>
             <td className="text-right">{costText(line.unknownCostCalls, line.nominalUsd)}</td>
           </tr>)}</tbody></table></>
         }

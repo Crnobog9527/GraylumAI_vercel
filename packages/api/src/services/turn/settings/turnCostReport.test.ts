@@ -5,9 +5,9 @@ import { turnModelReport, unsettledTurns } from './turnCostReport';
 const from = new Date('2026-10-01T00:00:00Z');
 const to = new Date('2026-10-31T00:00:00Z');
 const report = {
-  models: [{ model: 'example/m', calls: 3, unknownCostCalls: 1, nominalUsd: '0.0123', actualUsd: '0.01', minMultiplier: '1.5', maxMultiplier: '2' }],
+  models: [{ model: 'example/m', calls: 3, unknownCostCalls: 1, unknownActualCalls: 2, nominalUsd: '0.0123', actualUsd: '0.01', minMultiplier: '1.5', maxMultiplier: '2' }],
   byDate: [{ date: '2026-10-02', calls: 3, unknownCostCalls: 1, nominalUsd: '0.0123' }],
-  totals: { calls: 3, unknownCostCalls: 1, nominalUsd: '0.0123', actualUsd: '0.01', turns: 2, chargedCredits: 7, absorbedCredits: 1, unsettledTurns: 1 },
+  totals: { calls: 3, unknownCostCalls: 1, unknownActualCalls: 2, nominalUsd: '0.0123', actualUsd: '0.01', turns: 2, chargedCredits: 7, absorbedCredits: 1, unsettledTurns: 1 },
 };
 const db = (data: unknown, error: unknown = null) => ({ rpc: vi.fn(async () => ({ data, error })) }) as never;
 

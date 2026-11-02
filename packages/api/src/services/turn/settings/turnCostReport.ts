@@ -8,10 +8,10 @@ import { logger } from '../../../lib/logger';
 const usd = z.string().regex(/^[0-9]+(\.[0-9]+)?$/);
 const count = z.number().int().nonnegative();
 const modelReport = z.object({
-  models: z.array(z.object({ model: z.string(), calls: count, unknownCostCalls: count, nominalUsd: usd, actualUsd: usd,
+  models: z.array(z.object({ model: z.string(), calls: count, unknownCostCalls: count, unknownActualCalls: count, nominalUsd: usd, actualUsd: usd,
     minMultiplier: z.string().nullable(), maxMultiplier: z.string().nullable() }).strict()),
   byDate: z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), calls: count, unknownCostCalls: count, nominalUsd: usd }).strict()),
-  totals: z.object({ calls: count, unknownCostCalls: count, nominalUsd: usd, actualUsd: usd, turns: count,
+  totals: z.object({ calls: count, unknownCostCalls: count, unknownActualCalls: count, nominalUsd: usd, actualUsd: usd, turns: count,
     chargedCredits: count, absorbedCredits: count, unsettledTurns: count }).strict(),
 }).strict();
 const unsettled = z.object({

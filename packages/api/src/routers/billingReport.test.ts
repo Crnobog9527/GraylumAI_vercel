@@ -22,9 +22,9 @@ function harness(role: 'admin' | 'user' | 'anonymous', rpcResult: { data: unknow
 }
 
 const reportData = {
-  models: [{ model: 'v/a', calls: 2, unknownCostCalls: 0, nominalUsd: '0.004', actualUsd: '0.003', minMultiplier: '2', maxMultiplier: '3' }],
+  models: [{ model: 'v/a', calls: 2, unknownCostCalls: 0, unknownActualCalls: 0, nominalUsd: '0.004', actualUsd: '0.003', minMultiplier: '2', maxMultiplier: '3' }],
   byDate: [{ date: '2026-10-01', calls: 2, unknownCostCalls: 0, nominalUsd: '0.004' }],
-  totals: { calls: 2, unknownCostCalls: 0, nominalUsd: '0.004', actualUsd: '0.003', turns: 1, chargedCredits: 1, absorbedCredits: 0, unsettledTurns: 0 },
+  totals: { calls: 2, unknownCostCalls: 0, unknownActualCalls: 0, nominalUsd: '0.004', actualUsd: '0.003', turns: 1, chargedCredits: 1, absorbedCredits: 0, unsettledTurns: 0 },
 };
 const unsettledData = { total: 0, turns: [] };
 
