@@ -7,7 +7,7 @@
 
 | # | 要做的 | 为什么 | 谁批 |
 |---|---|---|---|
-| 1 | 给**一个能被 Vercel 够到的地址**放桩（`openrouter-stub.mjs`，要 `LOAD_STUB_HOST/PORT/PREFIX`）。推荐 A：Owner 机器上跑桩 + 免费隧道（不用新账号，有隧道 1 跳的偏差，见第 3 节）；B：单独一个 Vercel 项目放桩（同区域更干净，但要新建项目）| 应用够不到本机；`openrouter.ai` 地址写死在代码里 | 总控定 A/B，B 要 Owner 批 |
+| 1 | 给**一个能被 Vercel 够到的地址**放桩（`openrouter-stub.mjs`，要 `LOAD_STUB_HOST/PORT/PREFIX`）。推荐 A：Owner 机器上跑桩 + 免费隧道（Owner 照做步骤见 `owner-tunnel-steps.md`；不用新账号，有隧道 1 跳的偏差，见第 3 节）；B：单独一个 Vercel 项目放桩（同区域更干净，但要新建项目）| 应用够不到本机；`openrouter.ai` 地址写死在代码里 | 总控定 A/B，B 要 Owner 批 |
 | 2 | 在 graylumai-staging 项目设两个环境变量：`LOADTEST_MODEL_STUB_URL`（https 桩地址含密路径）和 `LOADTEST_STUB_DB_HOST`（staging Supabase 主机），**跑完立即删掉并重新部署** | 钩子（本 PR）只有这两个都在、且应用连的库就是该主机时才改道；两个变量都不在时代码什么都不做 | 总控（Vercel staging 设置） |
 | 3 | 采样器要一个**读 pg_stat_activity 的 staging 只读角色连接串**（需 `pg_read_all_stats`），可选再给管理令牌 + 项目标识读池设置 | 只读；放本机环境变量，不进仓库 | Owner/总控提供 |
 | 4 | 日限临时调到 300（上批同做法），跑完调回；100 个测试账号（沿用 loadtest211–310 或重置）| 桩的"花费"记在账上约 31.6 美元，不是真钱 | 总控 |
