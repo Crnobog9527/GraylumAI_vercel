@@ -140,8 +140,10 @@ describe("server rows from research.toolCharges and research.evidence", () => {
       { callId: "a", toolName: "web_search", args: null, source: "tool_usage", credits: "6", query: "咖啡", platform: "web" },
       { callId: "b", toolName: "social_search", args: null, source: "tool_usage", credits: "1", query: "穿搭", platform: "douyin" },
       { callId: "c", toolName: "social_account", args: null, source: "tool_unknown", credits: null, query: "sample", platform: "douyin" },
+      { callId: "d", toolName: "benchmark_fetch", args: null, source: "tool_usage", credits: "1", query: "aa_one", platform: "tiktok" },
+      { callId: "e", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "咖啡店", platform: "douyin" },
     ]);
-    expect(charges.map(charge => describeRequest(charge.tool, charge.args)?.query)).toEqual(["咖啡", "穿搭", "sample"]);
+    expect(charges.map(charge => describeRequest(charge.tool, charge.args)?.query)).toEqual(["咖啡", "穿搭", "sample", "aa_one", "咖啡店"]);
   });
 
   it("maps evidence rows without inventing a route or a title", () => {

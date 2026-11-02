@@ -17,22 +17,29 @@ export interface ToolChargeRow {
   platform?: string | null;
 }
 
-/** A turn's row has no call arguments, only the subcall's own query and platform: rebuild the shape describeRequest reads. */
-function argsOf(row: ToolChargeRow): unknown {
-  if (row.args) return row.args;
+/**
+ * A turn's row has no call arguments, only the subcall's own query and platform: rebuild what describeRequest reads. A benchmark
+ * discovery subcall is one keyword search, so it is shown as that, with its own keyword.
+ */
+function requestOf(row: ToolChargeRow & { toolName: ResearchToolName }): Pick<SearchCharge, "tool" | "args"> {
+  if (row.args) return { tool: row.toolName, args: row.args };
   const query = row.query ?? "";
+  const platform = row.platform ?? "";
   switch (row.toolName) {
-    case "web_search": return { query };
-    case "web_fetch": return { url: query };
-    case "social_search": return { platform: row.platform ?? "", keywords: query ? [query] : [] };
-    case "social_account": return { platform: row.platform ?? "", account: query };
-    default: return {};
+    case "web_search": return { tool: row.toolName, args: { query } };
+    case "web_fetch": return { tool: row.toolName, args: { url: query } };
+    case "social_search": return { tool: row.toolName, args: { platform, keywords: query ? [query] : [] } };
+    case "social_account": return { tool: row.toolName, args: { platform, account: query } };
+    case "benchmark_fetch": return { tool: row.toolName, args: { accounts: query ? [{ platform, account: query }] : [] } };
+    case "benchmark_discover": return query ? { tool: "social_search", args: { platform, keywords: [query] } }
+      : { tool: row.toolName, args: {} };
+    default: return { tool: row.toolName, args: {} };
   }
 }
 
 export function toSearchCharges(rows: ToolChargeRow[]): SearchCharge[] {
   return rows.flatMap(row => row.toolName
-    ? [{ callId: row.callId, tool: row.toolName, args: argsOf(row), settlement: row.source, userCredits: row.credits }]
+    ? [{ callId: row.callId, ...requestOf({ ...row, toolName: row.toolName }), settlement: row.source, userCredits: row.credits }]
     : []);
 }
 
