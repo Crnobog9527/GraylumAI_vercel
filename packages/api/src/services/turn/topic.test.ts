@@ -63,7 +63,7 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
   it('reads the workspace first, opens a metered chat turn in its conversation and saves both messages', async () => {
     const t = harness(); runs('Topics');
     await runTopicTurn(t.deps, input, t.emit);
-    expect(t.names()).toEqual(['topic_turn_source', 'turn_open', 'turn_close']);
+    expect(t.names()).toEqual(['topic_turn_source', 'turn_open', 'topic_turn_source', 'turn_close']);
     expect(t.args('topic_turn_source')).toEqual({ p_actor_id: 'actor', p_draft_id: input.draftId, p_request_id: input.requestId });
     expect(t.args('turn_open')).toMatchObject({ p_kind: 'chat', p_session_id: workspace.sessionId, p_request_id: input.requestId,
       p_policy: { topic: true, minCredits: 12, gCredits: 180, limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 } } });
@@ -84,6 +84,19 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     const sent = JSON.stringify(await (h.runtime.mock.calls[0]![0] as { session: { getItems: () => Promise<unknown[]> } }).session.getItems());
     expect(sent).toContain('NEW_ASK'); expect(sent).toContain('NEW_REPLY');
     expect(sent).not.toContain('OLD_ASK'); expect(sent).not.toContain('OLD_CANDIDATES');
+  });
+
+  it('gives the turn up, sending nothing, when the positioning was re-bound between the first read and the open', async () => {
+    const t = harness({ source: { data: workspace } });
+    let reads = 0;
+    const respond = (t.deps.clients.write as unknown as { rpc: (n: string, a: Record<string, unknown>) => Promise<unknown> }).rpc;
+    (t.deps.clients.write as unknown as { rpc: unknown }).rpc = async (name: string, args: Record<string, unknown>) =>
+      name === 'topic_turn_source' && ++reads === 2 ? { data: { ...workspace, sourceVersionId: uuid(8) }, error: null } : respond(name, args);
+    runs('Topics');
+    await runTopicTurn(t.deps, input, t.emit);
+    expect(h.runtime).not.toHaveBeenCalled();
+    expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'failed', p_delivered: false, p_refund_all: true });
+    expect(t.events.at(-1)).toMatchObject({ type: 'error', code: 'OPC_TOPIC_SOURCE_CHANGED' });
   });
 
   it('without a floor (a workspace never re-bound) sends the whole visible history as before', async () => {

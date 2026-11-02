@@ -98,6 +98,15 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
 
   let text = '', stopped: TurnStop | undefined, seq = 0;
   try {
+    // 3b. The open set the conversation's active turn, which a re-bind to a newer positioning refuses to pass: read the workspace once more,
+    // on the write client, and give the turn up if the positioning was re-bound between the first read and the open (nothing was sent).
+    const again = await deps.clients.write.rpc('topic_turn_source', { p_actor_id: input.actorId, p_draft_id: input.draftId, p_request_id: input.requestId });
+    const now = source.safeParse(again.data);
+    if (again.error || !now.success || now.data.sourceVersionId !== workspace.data.sourceVersionId
+      || JSON.stringify(now.data.material) !== JSON.stringify(material)) {
+      await swallow('turn_close_failed', close('failed', { refundAll: true, failureCode: 'opc_topic_source_changed' }), undefined, { category: 'ai' });
+      return emit({ type: 'error', code: 'OPC_TOPIC_SOURCE_CHANGED', turnId });
+    }
     // 4. The prompt: the Skill text with the plan's resources (shared, cached), then the workspace's rules and the reply language;
     // the frozen material and the user's words in the current message, as data.
     const guard = settings.ok ? settings.identityGuard ?? true : true;
