@@ -19,7 +19,7 @@
   "apps/web/src/app/(zh-hans)/app/marketplace/page.tsx": {"lines":526,"longLines":7},
   "apps/web/src/app/(zh-hans)/app/page.tsx": {"longLines":4},
   "apps/web/src/app/(zh-hans)/app/positioning/[draftId]/page.tsx": {"lines":1685,"longLines":15},
-  "apps/web/src/app/(zh-hans)/app/positioning/[draftId]/topics/page.tsx": {"lines":555,"longLines":15},
+  "apps/web/src/app/(zh-hans)/app/positioning/[draftId]/topics/page.tsx": {"lines":510,"longLines":14},
   "apps/web/src/app/(zh-hans)/app/positioning/page.tsx": {"longLines":21},
   "apps/web/src/app/(zh-hans)/app/profile/page.tsx": {"longLines":1},
   "apps/web/src/app/(zh-hans)/app/runtime/page.tsx": {"longLines":45},
