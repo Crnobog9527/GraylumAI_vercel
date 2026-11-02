@@ -28,6 +28,7 @@
 -- rollback-0457.sql and leave the new tables and columns in place (nothing old reads them); review rows, BILL2 runs
 -- and journals are never rewritten, so any pending financial recovery is unaffected.
 BEGIN;
+SET LOCAL lock_timeout='5s';
 
 CREATE TABLE IF NOT EXISTS public.social_coach_profiles(
  actor_id uuid NOT NULL,
