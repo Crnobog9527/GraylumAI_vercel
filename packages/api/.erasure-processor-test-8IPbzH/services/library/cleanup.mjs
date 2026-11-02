@@ -1,0 +1,119 @@
+import { libraryRpc } from './rpc.mjs';
+import { canonicalPath } from './content.mjs';
+import { libraryStorage } from './storage.mjs';
+import { startScheduledJobRun, finishScheduledJobRun } from '../scheduledJobRuns.mjs';
+import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest.mjs';
+import { logger } from '../../lib/logger.mjs';
+export async function cleanupLibrary(client, options = {}) {
+    const storage = options.storage ?? libraryStorage(client);
+    const started = Date.now();
+    const rows = await libraryRpc(client, 'library_cleanup_candidates', {
+        a: options.actorId ?? null, n: options.limit ?? 50, did: options.documentId ?? null,
+    });
+    let checked = 0;
+    let released = 0;
+    let failed = 0;
+    for (const row of rows) {
+        if (Date.now() - started > (options.budgetMs ?? 35_000))
+            break;
+        checked++;
+        try {
+            await libraryRpc(client, 'library_cleanup_touch', { a: row.actor_id, did: row.document_id });
+            const expired = Date.now() > Math.max(Date.parse(row.original_guard_until), row.text_guard_until ? Date.parse(row.text_guard_until) : 0);
+            if (row.closed || row.status === 'uploading' && expired) {
+                const deletion = await libraryRpc(client, 'library_delete', {
+                    a: row.actor_id, did: row.document_id, closed: true, unfinished_only: !row.closed, expiry_only: !row.closed,
+                });
+                // A stale uploading candidate may already have published. The locked RPC decides;
+                // never touch Storage unless that transaction actually marked it for deletion.
+                row.cleanup = deletion.status === 'deleting';
+                // Open-account expiry deletions are recorded for the off-database manifest (0227).
+                if (row.cleanup && !row.closed)
+                    scheduleErasureManifestSync(client);
+            }
+            let absent = false;
+            if (row.cleanup) {
+                absent = true;
+                for (const path of [row.original_path, row.text_path].filter((p) => p !== null)) {
+                    // Read before retrying a durable deletion; after an uncertain outcome the next sweep does the same.
+                    if (!await storage.absent(path))
+                        await storage.remove(path);
+                    absent = await storage.absent(path) && absent;
+                }
+            }
+            if (await libraryRpc(client, 'library_cleanup_observe', {
+                a: row.actor_id, did: row.document_id, absent,
+            }))
+                released++;
+        }
+        catch {
+            failed++;
+        }
+    }
+    // LIB-4 (0262): remove deleted documents' copies from finished executions that read them. Amounts stay.
+    let references = { processed: 0, waiting: 0 };
+    try {
+        references = await libraryRpc(client, 'runtime_library_propagate', {
+            p_actor_id: options.actorId ?? null, p_limit: 20,
+        });
+    }
+    catch {
+        failed++;
+    }
+    const backlog = await libraryRpc(client, 'library_cleanup_backlog', { a: options.actorId ?? null });
+    return { checked, released, failed, references, ...backlog, budgetExhausted: checked < rows.length };
+}
+/** Batch ownership lookup means retained/claimed objects never consume one network round trip each.
+ * On a partial page, every processed orphan is removed, so rescanning makes forward progress. */
+export async function cleanupOrphanPage(client, storage, page, started) {
+    const paths = page.paths.filter(canonicalPath);
+    const claimed = new Set(await libraryRpc(client, 'library_paths_claimed', { paths }));
+    let orphans = 0;
+    let complete = true;
+    for (const path of paths) {
+        if (claimed.has(path))
+            continue;
+        if (Date.now() - started > 45_000) {
+            complete = false;
+            break;
+        }
+        if (!await storage.absent(path))
+            await storage.remove(path);
+        if (!await storage.absent(path))
+            throw new Error('LIBRARY_STORAGE_UNAVAILABLE');
+        orphans++;
+    }
+    return { orphans, unknownPaths: page.paths.length - paths.length, complete };
+}
+// REL-1 core 7 (6) drill (#1420): the batch, not the 35 s budget, bounds throughput. Staging took about 9 s per 50 rows,
+// so 100 (the most library_cleanup_candidates allows) keeps the budget's margin and doubles what clears within 24 hours.
+export const LIBRARY_CRON_BATCH = 100;
+export async function runLibraryCleanup(client) {
+    const started = Date.now();
+    const runId = await startScheduledJobRun({ supabase: client, jobKey: 'library_cleanup', triggerSource: 'cron' });
+    try {
+        const result = await cleanupLibrary(client, { limit: LIBRARY_CRON_BATCH });
+        // Persist only the storage continuation, never signed URLs, names or content.
+        const previous = await client.from('scheduled_job_runs').select('summary').eq('job_key', 'library_cleanup')
+            .neq('id', runId).not('finished_at', 'is', null).order('started_at', { ascending: false }).limit(1).maybeSingle();
+        if (previous.error)
+            throw new Error('LIBRARY_UNAVAILABLE');
+        const cursor = previous.data?.summary?.scanCursor;
+        const storage = libraryStorage(client);
+        const page = await storage.scan('', typeof cursor === 'string' ? cursor : undefined);
+        const orphanResult = await cleanupOrphanPage(client, storage, page, started);
+        const { orphans, unknownPaths, complete } = orphanResult;
+        // The upload write guard (0376) lives on Supabase's storage.objects; report it if a platform change removed it.
+        const storageGuard = await libraryRpc(client, 'library_storage_guard_present', {});
+        if (storageGuard !== true)
+            logger.error('system', 'library_storage_guard_missing');
+        const summary = { ...result, orphans, unknownPaths, storageGuard, scanCursor: complete ? page.cursor : (cursor ?? null) };
+        const bad = result.failed || unknownPaths || storageGuard !== true;
+        await finishScheduledJobRun({ supabase: client, runId, status: bad ? 'error' : 'success', summary });
+        return summary;
+    }
+    catch {
+        await finishScheduledJobRun({ supabase: client, runId, status: 'error', error: 'LIBRARY_CLEANUP_FAILED' });
+        throw new Error('LIBRARY_CLEANUP_FAILED');
+    }
+}

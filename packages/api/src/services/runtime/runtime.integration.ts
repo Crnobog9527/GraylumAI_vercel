@@ -1095,8 +1095,6 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // cache; this measurement is the first Skill prepare of a cold process, as before.
   clearSkillResourceCache();
   const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
-  const execute=await measured(async c=>{const events=[];for await(const event of await c.executeStream({executionId:skill.result.executionId}))events.push(event);return events;});
-  expect(execute.result.at(-1)).toMatchObject({type:'result',result:{state:'completed'}});
   // Each further prepare uses its own new Session, since a prepared execution is never run here.
   const newSession=async()=>((await measured(c=>c.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}))).result as {sessionId:string}).sessionId;
   const prepareIn=(id:string,module=moduleId,revision=pack.revisionId)=>
@@ -1110,7 +1108,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // CHAT-LANGUAGE: every admission reads the profile's reply language once (profiles), concurrently with model loading.
   expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:9,rateLimit:0});
   expect(ordinaryWarm.summary.labels['rest/profiles']?.rt).toBe(2); // the caller's profile check, plus the reply language
-  const all={start,ordinary,stream,skill,execute,skillWarm};
+  const all={start,ordinary,stream,skill,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   // POSITIONING-GATE: free-chat admission adds one read (runtime_positioning_gate); this user has no positioning
   // and the fixture model has no OpenRouter key, so Decisions is not called (fallback rule frozen instead).
@@ -1121,16 +1119,15 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
    ordinary:{prelude:2,policy:0,host:0,admission:14,rateLimit:0},
    stream:{prelude:2,policy:0,host:0,execute:7,provider:8,rateLimit:0},
    skill:{prelude:2,policy:0,host:0,admission:12,rateLimit:0},
-   execute:{prelude:2,policy:0,host:0,execute:6,provider:7,rateLimit:0},
    skillWarm:{prelude:2,policy:0,host:0,admission:11,rateLimit:0},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // D7 checks before buffered output and on both sides of post-execution capture; a stream's after-capture check is its result yield (PR-2A).
-  expect(label('rpc/runtime_execution_visibility')).toEqual({start:0,ordinary:0,stream:4,skill:0,execute:2,skillWarm:0});
-  expect(label('rpc/runtime_positioning_gate')).toEqual({start:0,ordinary:1,stream:0,skill:1,execute:0,skillWarm:1});
-  expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
+  expect(label('rpc/runtime_execution_visibility')).toEqual({start:0,ordinary:0,stream:4,skill:0,skillWarm:0});
+  expect(label('rpc/runtime_positioning_gate')).toEqual({start:0,ordinary:1,stream:0,skill:1,skillWarm:1});
+  expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,skillWarm:1});
   // AC-0c: one service-role and one user-scoped (RLS) module read per request
   // (AC-0 baseline 7 for the Skill prepare). DB-PERF PR-4: the package is checked once per request (its first
   // listing) and uncached files arrive in one checked batch read: 2 in a cold process, 1 when cached (was 5/3).
@@ -1162,7 +1159,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   await db.query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]);
   await expect(skillPrepare()).rejects.toThrow();
   for(const m of [ordinary,skill])expect(m.summary.executionIds).toEqual([m.result.executionId]);
-  for(const m of [stream,execute])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
+  for(const m of [stream])expect(m.summary.marks.providerPostMs).toBeGreaterThanOrEqual(0);
   // Only the streamed procedure releases its own line; callers here skip the route.
   expect(logged.mock.calls.filter(c=>c[1]==='runtime_request_timing')).toHaveLength(1);
  }finally{

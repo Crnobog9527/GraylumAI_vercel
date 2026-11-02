@@ -216,6 +216,10 @@ try {
   sql(read('packages/db/migrations/0454_core_path_v2_stale_claim.sql')); // 0450 rewrites opc_video_material_prepare, which 0454 changed
   sql(read('packages/db/migrations/0459_core_path_v2_voice.sql')); // V2-12 B7 rewrites turn_open, which 0449 replays (and turn_close, turn_tombstones, turn_user_charge, turn_call_record)
   sql(read('packages/db/migrations/0476_core_path_v2_topic_rebind.sql')); // the topic re-bind rewrites topic_turn_source, opc_topic_consent and opc_topic_original, which 0449 replays (and artifact_immutable)
+  sql(read('packages/db/migrations/0483_core_path_v2_turn_functions_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0484_core_path_v2_report_research_topic_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0485_core_path_v2_opc_functions_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0486_core_path_v2_opc_work_capture_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
