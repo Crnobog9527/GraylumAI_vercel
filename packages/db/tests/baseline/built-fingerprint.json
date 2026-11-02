@@ -4174,7 +4174,7 @@
   "fn:publish_monitor_connections(uuid)": "e3ef4d0438b2",
   "fn:publish_monitor_data(uuid,integer,uuid)": "18c211d15894",
   "fn:publish_monitor_disconnect(uuid,uuid)": "2af1b820a383",
-  "fn:publish_monitor_erasure_remaining(uuid)": "1dce350656b4",
+  "fn:publish_monitor_erasure_remaining(uuid)": "c34423c8c8b7",
   "fn:publish_monitor_erasure_retained(text,jsonb)": "151480a34bde",
   "fn:publish_monitor_erasure_scrub(uuid)": "b8fc2cb59ab2",
   "fn:publish_monitor_link_post(uuid,uuid,uuid)": "108519a9e382",

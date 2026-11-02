@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- Rollback for 0407: the previous complete claim, step and erasure_remaining, and the old per-user period key.
+-- Rollback for 0457: the previous complete claim, step and erasure_remaining, and the old per-user period key.
 -- Valid only while publish_monitor_coach_enabled has never been true (no per-brand or non-weekly rows). New tables
 -- and columns stay: nothing old reads them. Review rows, BILL2 runs and journals are not touched.
 BEGIN;

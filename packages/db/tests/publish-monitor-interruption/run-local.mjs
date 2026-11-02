@@ -62,7 +62,7 @@ const ledger=(f)=>one(`SELECT jsonb_build_object('balance',p.credits,'sum',
  'holds',(SELECT count(*) FROM bill2_calls WHERE run_id=r.id AND settled_at IS NULL),
  'spends',(SELECT count(*) FROM credit_transactions WHERE bill2_run_id=r.id AND reason_code='bill2_spend')) v
  FROM profiles p JOIN bill2_runs r ON r.actor_id=p.id WHERE r.id=$1`,[f.run]);
-// 0407 retries an interruption up to three attempts; these scenarios are about the last one, which ends the period.
+// 0457 retries an interruption up to three attempts; these scenarios are about the last one, which ends the period.
 async function expire(f,attempt=3){
  await c.query('UPDATE social_review_runs SET attempt=$2 WHERE id=$1',[f.review.id,attempt]);
  assert.equal((await step(f.review,'observe')).expired,true);
@@ -92,7 +92,7 @@ try{
  assert.equal(await one('SELECT status v FROM social_review_runs WHERE id=$1',[f.review.id]),'claimed');
  await c.query('ROLLBACK');
  report.checks.push('RED: old observe leaves the released charged review claimed without a deadline or recoverable user');
- // 0407: an earlier attempt is retried with a new request; its settled actual cost comes off the same review's cap.
+ // 0457: an earlier attempt is retried with a new request; its settled actual cost comes off the same review's cap.
  await c.query('BEGIN');
  const cap=await one('SELECT max_cost_usd::text v FROM social_review_runs WHERE id=$1',[f.review.id]);
  assert.equal((await expire(f,1)).state,'retrying');
@@ -104,7 +104,7 @@ try{
   await one('SELECT max_cost_usd::text v FROM social_review_runs WHERE id=$1',[f.review.id]));
  assert.deepEqual(await ledger(f),{balance:995,sum:995,charged:5,theoretical:5,absorbed:0,closed:true,state:'settled',holds:0,spends:1});
  await c.query('ROLLBACK');
- report.checks.push('0407: an interrupted attempt is retried once more with a new request, its settled 5 credits kept and its cost off the cap');
+ report.checks.push('0457: an interrupted attempt is retried once more with a new request, its settled 5 credits kept and its cost off the cap');
  await expire(f);
  const final=await ledger(f);
  assert.deepEqual(final,{balance:995,sum:995,charged:5,theoretical:5,absorbed:0,closed:true,state:'settled',holds:0,spends:1});
@@ -218,7 +218,7 @@ try{
  report.checks.push('a concurrent result writer makes skip retry without waiting; retry terminates only the empty result');
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
- // Later redefinitions (0407 step) replay after it, as in the publish-monitor suites (MAINT-P1).
+ // Later redefinitions (0457 step) replay after it, as in the publish-monitor suites (MAINT-P1).
  const before=await one(catalog);
  for(const _ of [1,2])for(const path of [MIGRATION_PATH,...laterRedefinitions('0401')])await c.query(read(path));
  assert.deepEqual(await one(catalog),before);

@@ -25,7 +25,7 @@
 -- off; step returns the same fields; new columns have defaults; old rows read as weekly, attempt 1, no brand.
 -- Repeatability: IF NOT EXISTS / CREATE OR REPLACE / guarded constraint changes; applying twice changes nothing.
 -- Recovery: restore the previous claim, step and erasure_remaining from packages/db/tests/publish-monitor-coach/
--- rollback-0407.sql and leave the new tables and columns in place (nothing old reads them); review rows, BILL2 runs
+-- rollback-0457.sql and leave the new tables and columns in place (nothing old reads them); review rows, BILL2 runs
 -- and journals are never rewritten, so any pending financial recovery is unaffected.
 BEGIN;
 
@@ -507,7 +507,7 @@ AS $function$
    AND (business_id IS NOT NULL OR target_account_project_id IS NOT NULL
     OR NOT (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL
      OR created_at>clock_timestamp()-interval '30 days')))
- -- 0407: removed with their posts, review runs and brands (ON DELETE CASCADE); counted so erasure waits for them.
+ -- 0457: removed with their posts, review runs and brands (ON DELETE CASCADE); counted so erasure waits for them.
  +(SELECT count(*) FROM social_post_facts WHERE actor_id=a)
  +(SELECT count(*) FROM social_post_diagnostics WHERE actor_id=a)
  +(SELECT count(*) FROM social_review_experiments WHERE actor_id=a)

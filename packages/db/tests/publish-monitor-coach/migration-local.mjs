@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// REVIEW-COACH RC-1 (migration 0407): local PostgreSQL built from repository files only. No provider, model or staging.
+// REVIEW-COACH RC-1 (migration 0457): local PostgreSQL built from repository files only. No provider, model or staging.
 // Run: node packages/db/tests/publish-monitor-coach/migration-local.mjs --local-only
 import assert from 'node:assert/strict';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
@@ -7,7 +7,7 @@ import { fixtureSql } from '../publish-monitor/fixtures.mjs';
 import { generateDataset } from '../../../api/src/services/publishMonitor/coach/simulatedDataset.ts';
 import { seedSql } from './seed-sql.mjs';
 
-const MIGRATION = 'packages/db/migrations/0407_publish_monitor_review_coach_foundation.sql';
+const MIGRATION = 'packages/db/migrations/0457_publish_monitor_review_coach_foundation.sql';
 const OLD_KEYS = ['actorId', 'id', 'maxCostUsd', 'modelId', 'requestId', 'sessionId', 'token'];
 const db = await localDb(), c = db.client, report = { build: db.build, checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
@@ -252,7 +252,7 @@ try {
   await c.query(read(MIGRATION));
   assert.deepEqual(await v(catalog), built);
   await c.query('BEGIN');
-  await c.query(read('packages/db/tests/publish-monitor-coach/rollback-0407.sql').replace(/^(BEGIN|COMMIT);$/gm, ''));
+  await c.query(read('packages/db/tests/publish-monitor-coach/rollback-0457.sql').replace(/^(BEGIN|COMMIT);$/gm, ''));
   assert.match(await v("SELECT pg_get_functiondef('publish_monitor_review_claim(integer)'::regprocedure) v"),
     /ON CONFLICT\(actor_id,period_start\)/);
   await c.query('ROLLBACK');
