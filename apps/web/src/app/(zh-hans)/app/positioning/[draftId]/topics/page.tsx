@@ -188,7 +188,7 @@ function TopicWorkspaceContent() {
   }
 
   async function perform(proposed: Operation, fromBox = false) {
-    if (!storageKey || operationBusy.current) return;
+    if (!storageKey || operationBusy.current || (stale && (proposed.kind === 'chat' || proposed.kind === 'adoptTopics'))) return; // A stale workspace opens no turn, retry included.
     operationBusy.current = true;
     setWorking(true);
     setError('');
