@@ -100,6 +100,7 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     // The settlement already in the ledger before this report starts: the one for this report must be a different one.
     const settledBefore = (await latestReportSettlement(page, gold.id))?.executionId ?? null;
     // The next stop asks first. "继续生成" keeps the report going; "确认停止" charges the part already written.
+    const balanceBeforePaid = await readCredits(page);
     await startReport(page);
     await stopButton(page).click();
     const ask = page.getByRole('alertdialog', { name: '确认停止报告？' });
@@ -127,6 +128,8 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     expect(settled.consumedCredits).toBeLessThanOrEqual(REPORT_PRICE);
     expect(settled.consumedCredits + settled.refundedCredits).toBe(settled.nominalReserved);
     expect(settled.nominalReserved).toBeGreaterThanOrEqual(REPORT_PRICE);
+    // Independent of the turn row: the balance after the refund is the balance before minus what was consumed.
+    await expectBalanceBack(page, balanceBeforePaid - settled.consumedCredits, 120_000);
     // The page says so too, though late: the status line stays at "已停止，正在保存已显示的内容…" for minutes first.
     await expect(reportDialog(page).getByText(new RegExp(`本次报告扣了 ${settled.consumedCredits} 积分`))).toBeVisible({ timeout: 300_000 });
     await meter.finishJourney('journey 3: stops');
