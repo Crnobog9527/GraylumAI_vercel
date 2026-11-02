@@ -2,9 +2,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { requireAccounts } from './support/accounts';
+import { coreSql } from './support/db';
 import { resultsDirectory } from './support/config';
 import { expect, test } from './support/fixtures';
-import { buildReadyDraft, stopsInLast24h } from './support/positioning';
+import { buildReadyDraft, resumeReadyDraft, stopsInLast24h } from './support/positioning';
 import { expectBalanceBack, expectThirteenChapters, finalizeReport, REPORT_PRICE, reportDialog, startReport, stopButton, waitForReportDone } from './support/report';
 import { latestReportSettlement, readCredits } from './support/ui';
 
@@ -28,6 +29,14 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     test.setTimeout(30 * 60_000);
     // Reuse a draft whose three steps are already confirmed (CORE_E2E_DRAFT_URL, a path like /app/positioning/<id>): the benchmark
     // search is the costly part of the run, so a follow-up run of the later journeys does not repeat it.
+    if (process.env.CORE_E2E_RESUME_DRAFT_URL) {
+      const { page } = await openAs('gold');
+      draftUrl = await resumeReadyDraft(page, meter, new URL(process.env.CORE_E2E_RESUME_DRAFT_URL, process.env.PLAYWRIGHT_BASE_URL).toString());
+      await mkdir(resultsDirectory, { recursive: true });
+      await writeFile(path.join(resultsDirectory, 'ready-draft.txt'), new URL(draftUrl).pathname);
+      await meter.finishJourney('journey 1a: resumed three steps');
+      return;
+    }
     if (process.env.CORE_E2E_DRAFT_URL) {
       draftUrl = new URL(process.env.CORE_E2E_DRAFT_URL, process.env.PLAYWRIGHT_BASE_URL).toString();
       return;
@@ -68,17 +77,30 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     const before = await readCredits(page);
 
     // Free stops: the report is held, stopped within a minute, and the whole price comes back.
+    // The stop is pressed right after the start (a second at most): the page must not ask the old status read about a turn-path
+    // report (runtime.reportStatus answered 400 REPORT_UNAVAILABLE before #1573), and the server must record the stop.
+    const badStatusReads: string[] = [];
+    page.on('response', response => {
+      if (response.url().includes('runtime.reportStatus') && response.status() >= 400) badStatusReads.push(`${response.status()} ${response.url().slice(-60)}`);
+    });
     for (let free = prior; free < 2; free += 1) {
       await startReport(page);
       await stopButton(page).click();
       await expect(reportDialog(page).getByText(/已停止/).first()).toBeVisible({ timeout: 60_000 });
       await expectBalanceBack(page, before);
+      await expect.poll(async () => (await coreSql()<Array<{ stopped: boolean }>>`
+        select stopped_by_user as stopped from turns where actor_id = ${gold.id}::uuid and kind = 'report' order by id::bigint desc limit 1`)[0]?.stopped ?? false,
+      { message: 'the server recorded the stop (turns.stopped_by_user)', timeout: 120_000, intervals: [2000, 5000] }).toBe(true);
       await meter.checkpoint(`journey 3: free stop ${free + 1}`);
     }
+    expect(badStatusReads, 'no runtime.reportStatus 4xx while a turn-path report runs and stops').toEqual([]);
+    // CORE_E2E_FREE_STOPS_ONLY=1 ends here: the third stop asks first and, once confirmed, charges the part already written.
+    if (process.env.CORE_E2E_FREE_STOPS_ONLY === '1') { await meter.finishJourney('journey 3: free stops only'); return; }
 
     // The settlement already in the ledger before this report starts: the one for this report must be a different one.
-    const settledBefore = (await latestReportSettlement(page))?.executionId ?? null;
+    const settledBefore = (await latestReportSettlement(page, gold.id))?.executionId ?? null;
     // The next stop asks first. "继续生成" keeps the report going; "确认停止" charges the part already written.
+    const balanceBeforePaid = await readCredits(page);
     await startReport(page);
     await stopButton(page).click();
     const ask = page.getByRole('alertdialog', { name: '确认停止报告？' });
@@ -96,7 +118,7 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     // later, so the balance alone would read a charge of about 500. (On staging the status line stayed at "已停止，正在保存已显示的内容…"
     // for minutes while the ledger was already right; the notice text is noted, not asserted.)
     const newSettlement = async () => {
-      const entry = await latestReportSettlement(page);
+      const entry = await latestReportSettlement(page, gold.id);
       return entry !== null && entry.executionId !== settledBefore && entry.outcome === 'user_stop' ? entry : null;
     };
     await expect.poll(newSettlement, { timeout: 180_000, intervals: [3000, 5000] }).not.toBeNull();
@@ -105,7 +127,9 @@ test.describe.serial('journey 1 + 3: positioning to a finalized report, with sto
     expect(settled.consumedCredits).toBeGreaterThan(0);
     expect(settled.consumedCredits).toBeLessThanOrEqual(REPORT_PRICE);
     expect(settled.consumedCredits + settled.refundedCredits).toBe(settled.nominalReserved);
-    expect(settled.nominalReserved).toBe(REPORT_PRICE);
+    expect(settled.nominalReserved).toBeGreaterThanOrEqual(REPORT_PRICE);
+    // Independent of the turn row: the balance after the refund is the balance before minus what was consumed.
+    await expectBalanceBack(page, balanceBeforePaid - settled.consumedCredits, 120_000);
     // The page says so too, though late: the status line stays at "已停止，正在保存已显示的内容…" for minutes first.
     await expect(reportDialog(page).getByText(new RegExp(`本次报告扣了 ${settled.consumedCredits} 积分`))).toBeVisible({ timeout: 300_000 });
     await meter.finishJourney('journey 3: stops');

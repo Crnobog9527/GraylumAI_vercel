@@ -82,6 +82,8 @@ BEGIN
       PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
     ELSIF t.kind = 'plan' THEN
       PERFORM public.turn_plan_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'voice' THEN
+      PERFORM public.turn_voice_apply(t, v_kind, p_kind_result);
     ELSE
       RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
     END IF;

@@ -45,11 +45,15 @@ export type SpendReader = () => Promise<number>;
 export function dbSpendReader(sql: Sql, actorIds: readonly string[], sinceIso: string): SpendReader {
   if (actorIds.length === 0) throw new Error('No billing account is known; a spend of zero would be a guess.');
   return async () => {
+    // The old path (bill2_runs) and the turn path (turn_calls, CORE-PATH-V2) are both read until V2-12 removes the old one.
     const rows = await sql<Array<{ usd: string | null }>>`
-      select coalesce(sum(coalesce(r.provider_cost_usd::numeric,
-        (select sum(c.selected_cost_usd::numeric) from bill2_calls c where c.run_id = r.id), 0)), 0)::text as usd
-      from bill2_runs r
-      where r.actor_id = any(${actorIds as string[]}::uuid[]) and r.created_at >= ${sinceIso}::timestamptz`;
+      select ((select coalesce(sum(coalesce(r.provider_cost_usd::numeric,
+        (select sum(c.selected_cost_usd::numeric) from bill2_calls c where c.run_id = r.id), 0)), 0)
+        from bill2_runs r
+        where r.actor_id = any(${actorIds as string[]}::uuid[]) and r.created_at >= ${sinceIso}::timestamptz)
+      + (select coalesce(sum(coalesce(t.actual_usd, t.nominal_usd, 0)), 0)
+        from turn_calls t
+        where t.actor_id = any(${actorIds as string[]}::uuid[]) and t.dispatched_at >= ${sinceIso}::timestamptz))::text as usd`;
     return Number(rows[0]?.usd ?? 0);
   };
 }

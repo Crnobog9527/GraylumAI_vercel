@@ -19,7 +19,9 @@ AS $function$
     'pendingPayments', (SELECT count(*) FROM public.payment_orders o
       WHERE o.user_id = p_profile_id AND o.status = 'pending'),
     'runsInFlight', (SELECT count(*) FROM public.bill2_runs r
-      WHERE r.actor_id = p_profile_id AND r.state IN ('prepared', 'dispatched', 'unknown', 'cost_pending')),
+      WHERE r.actor_id = p_profile_id AND r.state IN ('prepared', 'dispatched', 'unknown', 'cost_pending')) +
+      -- CORE-PATH-V2 V2-12: plus the core-path turns still open or settling.
+      (SELECT count(*) FROM public.turns t WHERE t.actor_id = p_profile_id AND (t.state <> 'closed' OR t.settlement = 'pending')),
     'closed', EXISTS (SELECT 1 FROM public.account_erasure_requests e WHERE e.profile_id = p_profile_id)
   );
 $function$;
