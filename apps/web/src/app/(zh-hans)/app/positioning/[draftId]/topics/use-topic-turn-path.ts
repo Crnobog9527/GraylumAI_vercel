@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TurnView } from '@repo/api/src/services/turn/view';
 import { runTurn } from '@/lib/turn-stream';
+import { trpc } from '@/trpc/client';
 import { turnCodeNotice } from '@/app/(zh-hans)/app/runtime/turn-notices';
 import type { ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { readTurnView } from '../mentor-turn-path';
@@ -61,6 +62,7 @@ export function turnRunningNotice(e: { executionId: string; state: string }): Ch
 
 export function useTopicTurnPath(sessionId: string) {
   const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
+  const utils = trpc.useUtils();
   const refetch = useCallback(async () => {
     if (!sessionId) return null;
     const next = await readTurnView(sessionId, fetcher);
@@ -86,6 +88,7 @@ export function useTopicTurnPath(sessionId: string) {
     if (candidate) localStorage.setItem(`opc-topic-adoption-context:${sessionId}:${request.requestId}`, JSON.stringify(candidate));
     const outcome = await runTurn(request, () => undefined, { fetch: fetcher, url: TOPIC_TURN_URL });
     const next = await refetch();
+    void utils.credits.getBalance.invalidate(); // the turn is settled: the sidebar balance moved (opening, chat, adoption turns alike)
     const told = topicSendOutcome(outcome), seen = topicRequestSeen(next, request.requestId);
     // A turn that failed saved nothing: its words go back in the box, or they would be nowhere.
     const failed = outcome.state === 'finished' && outcome.last.type === 'error' && outcome.last.code !== 'TURN_REQUEST_REPLAYED' && !seen;
