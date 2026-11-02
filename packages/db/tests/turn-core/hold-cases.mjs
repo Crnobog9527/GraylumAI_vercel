@@ -223,6 +223,21 @@ export async function holdCases(t){
    assert.deepEqual([bad.sample[0].actorId,String(bad.sample[0].turnId)],[a.actor,String(o.turnId)]);
   }finally{await c.query("update credit_transactions set amount=$2 where id=$1",[row.rows[0].id,row.rows[0].amount]);}
   assert.equal((await day()).mismatched,0,'balanced again');
+ // A turn whose paid tool cost is still unknown is settled for the user (charged) while its settlement stays pending: it is checked too.
+ {
+  const win=()=>one("select billing_reconcile_day(now()-interval '1 day',now()+interval '1 minute') v").then(r=>r.turns);
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);
+  await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.01});
+  await close(a,o.turnId);
+  const row=(await c.query("select settlement,charged_credits from turns where actor_id=$1 and id=$2",[a.actor,o.turnId])).rows[0];
+  assert.equal(row.settlement,'pending');assert.notEqual(row.charged_credits,null);
+  const spend=await c.query("select id,amount from credit_transactions where user_id=$1 and source_type='ai_task' and source_id=$2 and reason_code='turn_spend'",[a.actor,String(o.turnId)]);
+  assert.equal(spend.rowCount,1);
+  await c.query("update credit_transactions set amount=amount+1 where id=$1",[spend.rows[0].id]);
+  try{assert.ok((await win()).sample.some(s=>String(s.turnId)===String(o.turnId)),'a charged turn with a pending provider cost is checked');}
+  finally{await c.query("update credit_transactions set amount=$2 where id=$1",[spend.rows[0].id,spend.rows[0].amount]);}
+ }
  // A turn closed on an earlier day and settled now (recovery) is checked where it was settled, not where it closed.
  {
   const win=(from,to)=>one("select billing_reconcile_day(now()-$1::interval,now()-$2::interval) v",[from,to]).then(r=>r.turns);

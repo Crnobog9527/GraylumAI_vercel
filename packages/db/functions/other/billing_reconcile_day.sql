@@ -44,7 +44,7 @@ BEGIN
    WHERE c.source_type='ai_task' AND c.reason_code IN ('turn_spend','turn_intercepted') AND c.created_at>=p_start AND c.created_at<p_end
     AND c.source_id ~ '^[0-9]{1,18}$'),
  t AS (SELECT x.actor_id,x.id,coalesce(x.charged_credits,0) charged FROM turns x JOIN w ON w.actor_id=x.actor_id AND w.id=x.id
-   WHERE x.settlement='done' AND NOT EXISTS (SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=x.actor_id)),
+   WHERE x.state='closed' AND x.charged_credits IS NOT NULL AND NOT EXISTS (SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=x.actor_id)),
  l AS (SELECT t.*,
    coalesce((SELECT sum(-c.amount) FROM credit_transactions c WHERE c.user_id=t.actor_id
     AND c.source_type='ai_task' AND c.source_id=t.id::text AND c.reason_code='turn_spend'),0) booked,
