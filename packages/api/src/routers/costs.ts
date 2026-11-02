@@ -50,11 +50,16 @@ export const costsRouter = router({
       const queryStartIso = window.rangeStartIso < window.monthStartIso
         ? window.rangeStartIso : window.monthStartIso;
       // MODEL-IDENTITY-GUARD: token_stats stores aliases; reports group by the real model.
-      const rows = await withRealModelUsed(ctx.supabase, await requireReportRows<DashboardRow>((from, to) => ctx.supabase
+      const oldRows = await withRealModelUsed(ctx.supabase, await requireReportRows<DashboardRow>((from, to) => ctx.supabase
         .from('token_stats')
         .select('user_id, model_used, total_credits, total_cost_usd, cached_tokens, input_tokens, created_at')
         .gte('created_at', queryStartIso)
         .order('created_at').order('id').range(from, to)));
+      // A core-path turn writes no token_stats: its calls are read from turn_calls (the same row shape), so today's cost is not missing them.
+      const turnRows = await requireReportRows<DashboardRow>((from, to) => ctx.supabase
+        .rpc('turn_admin_cost_rows', { p_from: queryStartIso, p_to: new Date(now.getTime() + 60_000).toISOString() })
+        .order('created_at').order('call_key').range(from, to));
+      const rows = [...oldRows, ...turnRows];
       const topUserIds = buildTopUsersFromRows(
         rows.filter((row) => row.created_at >= window.rangeStartIso),
         [],
