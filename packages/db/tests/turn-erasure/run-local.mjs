@@ -387,5 +387,34 @@ try{
   assert.equal(await one('select stage v from account_erasure_requests where profile_id=$1',[a.actor]),'closed');
   report.checks.push('account erasure money: the work batch lists no runs and counts the open turn as pending; the financial batch reports it (items empty); the preview counts it in flight; BILLING_CLEAR is refused until it closes, then restores the stage; a live account is no subject');
  }
+ // 14. V2-12 F: the old runtime_library_propagate (copies of a deleted document in finished executions) is dropped. The turn path keeps no
+ // copy: read_source reads the live document on every read (library_turn_read), so a deleted document is refused at once, also on a
+ // paused turn's continuation, and the turn tables never hold its text.
+ {
+  const a=await account(1000),doc=randomUUID(),text='LIBRARY_CANARY_'+randomUUID();
+  await c.query(`insert into library_documents(id,actor_id,request_id,kind,format,purpose,filename,status,original_bytes,text_bytes)
+   values($1,$2,$3,'document','md','reference','canary.md','ready',10,10)`,[doc,a.actor,randomUUID()]);
+  await c.query("insert into library_document_segments(document_id,actor_id,ordinal,title,body,source) values($1,$2,0,'Intro',$3,'extracted')",[doc,a.actor,text]);
+  const refs=JSON.stringify([{ref:'doc-1',documentId:doc,version:1}]);
+  const read=q=>one('select library_turn_read($1,$2,$3,$4::jsonb) v',[a.actor,a.session,q,refs]);
+  assert.match(JSON.stringify(await read('search:LIBRARY_CANARY')),/LIBRARY_CANARY_/,'a live document is found');
+  assert.equal((await read('doc-1/segment-1')).kind,'library_segment');
+  const t=await turn(a);
+  const held=await one(`select (select count(*) from turn_call_raw r join turns t on t.id=r.turn_id where t.actor_id=$1 and r.body::text like '%LIBRARY_CANARY%')
+   +(select count(*) from session_messages m where m.session_id=$2 and m.content like '%LIBRARY_CANARY%') v`,[a.actor,a.session]);
+  assert.equal(Number(held),0,'no turn table holds the document text');
+  await c.query('begin');await c.query('set local role service_role');
+  assert.equal((await one('select library_delete($1,$2,false) v',[a.actor,doc])).status,'deleting');
+  await c.query('commit');
+  assert.equal(await one('select count(*)::int v from library_document_segments where document_id=$1',[doc]),0,'the segments are gone');
+  for(const q of ['doc-1','doc-1/segment-1'])assert.deepEqual(await read(q),{kind:'unavailable',reason:'source_deleted',ref:'doc-1'},'a deleted document is refused: '+q);
+  assert.deepEqual((await read('search:LIBRARY_CANARY')).hits,[],'a deleted document is not found');
+  assert.deepEqual((await read('library')).documents,[],'a deleted document is not listed');
+  const other=await account(1000);
+  assert.deepEqual(await one('select library_turn_read($1,$2,$3,$4::jsonb) v',[other.actor,other.session,'doc-1/segment-1',refs]),
+   {kind:'unavailable',reason:'source_deleted',ref:'doc-1'},'another account never reads it');
+  assert.ok(t);
+  report.checks.push('library deletion on the turn path: no turn table holds document text; after library_delete the document is refused (doc, segment), not found by search, not listed; another account never reads it');
+ }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}
