@@ -13,7 +13,7 @@ import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_REOPENED_NOTICE, REPORT_TITLE, REPORT_WRITING_NOTICE,
+  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE,
   reportActionLabel, reportAutoOpen, reportFeeText, reportUnfinished, reportView,
 } from "./report-gen";
 import { ReportExport } from "./report-export-button";
@@ -131,7 +131,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   const marks = useVersionMarks([markOf?.draftId]);
   const status = report.status;
   const view = status ? reportView(status) : null;
-  const working = report.starting || report.streaming;
+  const working = report.streaming;
   const body = report.live?.text || (view && (view.kind === "report" || view.kind === "progress") ? view.body : null) || savedBody;
   const notices: ChatNotice[] = [];
   if (report.stopConfirmation) notices.push({ id: "report-stop-confirming", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
@@ -139,11 +139,10 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
     actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
   else if (report.live?.stopped) notices.push({ id: "report-stopping", tone: "status", busy: true, text: STOP_SAVING_NOTICE });
   else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true,
-    text: report.reopened && !report.live.text ? REPORT_REOPENED_NOTICE : REPORT_WRITING_NOTICE,
+    text: REPORT_WRITING_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] });
-  else if (report.starting) notices.push({ id: "report-starting", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
   else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true,
-    text: report.reopened && !view.body && status?.state !== "cost_pending" ? REPORT_REOPENED_NOTICE : view.notice,
+    text: view.notice,
     ...(report.canStopWithoutStream ? { actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] } : {}) });
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });

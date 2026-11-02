@@ -24,29 +24,31 @@ beforeAll(async () => {
     const id=${JSON.stringify(id)}, queue=[]; let wake, release, offset=4;
     window.fixture={requests:[],defer:false,release(){release?.();release=null;},append(text){queue.push({type:'textDelta',text,offset,rev:1,source:'final'});
       offset+=Array.from(text).length;wake?.();wake=null;}};
-    async function* events(){yield {type:'textDelta',text:'起始正文',offset:0,rev:1,source:'final'};
-      while(true){if(!queue.length)await new Promise(resolve=>wake=resolve);yield queue.shift();}}
-    const data={executionId:id,state:'running',body:null,completeness:null,candidate:false};
-    const refetch=async()=>({data});
+    const mutation={isPending:false,mutateAsync:async()=>{}};
     const noop=async()=>{};
-    const utils={client:{runtime:{executeStream:{mutate:async()=>events()},reportLatest:{query:async()=>({executionId:id})}}},
-      runtime:{reportLatest:{setData:noop}},credits:{getBalance:{invalidate:noop}}};
-    const mutation={isPending:false,mutateAsync:noop};
+    const utils={credits:{getBalance:{invalidate:noop}}};
     export const trpc={useUtils:()=>utils,runtime:{
-      choices: { useQuery: () => ({ data: { corePathV2: false } }) },
-      reportLatest:{useQuery:()=>({isSuccess:true,data:{executionId:id}})},
+      choices: { useQuery: () => ({ data: { corePathV2: true } }) },
       reportAvailable:{useQuery:()=>({data:{enabled:true,priceCredits:500}})},
       reportPreflight:{useQuery:()=>({data:{canGenerate:true},isFetching:false,isError:false})},
-      reportStatus:{useQuery:()=>({data,refetch})},reportStart:{useMutation:()=>mutation},resume:{useMutation:()=>mutation},
-      cancel:{useMutation:()=>({mutateAsync:async request=>{window.fixture.requests.push(request);
+      resume:{useMutation:()=>mutation}},
+      research:{chooseShortfall:{useMutation:()=>mutation}},user:{getEntitlements:{useQuery:()=>({})}}};
+    async function* events(){yield {type:'textDelta',text:'起始正文',offset:0,rev:1,source:'final'};
+      while(true){if(!queue.length)await new Promise(resolve=>wake=resolve);yield queue.shift();}}
+    const none={data:null};
+    // The turn hook is synthetic too: the report's open stream and its stop request are what this test drives (use-turn-report.ts).
+    export function useTurnReport(){return {on:true,known:true,server:{kind:'known',executionId:null},status:null,
+      refetch:async()=>none,
+      events:(body,onOpened)=>{onOpened();return events();},
+      stop:async request=>{window.fixture.requests.push(request);
         if(window.fixture.defer)await new Promise(resolve=>release=resolve);
-        return {state:request.confirmed?'stopping':'confirmation_required'};}})}},
-      research:{chooseShortfall:{useMutation:()=>mutation}},user:{getEntitlements:{useQuery:()=>({})}}};`;
+        return {state:request.confirmed?'stopping':'confirmation_required'};}};}`;
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env': JSON.stringify({ NODE_ENV: 'development' }) },
     oxc: { jsx: { runtime: 'automatic' } },
     resolve: { alias: {
       '@/trpc/client': '\0report-stop-transport',
+      './use-turn-report': '\0report-stop-turn',
       '@/components/fusion-review/JuryEntry': '\0report-stop-jury',
       '@/components/fusion-review/VersionMark': '\0report-stop-marks',
       '@': fileURLToPath(new URL('../../../../../', import.meta.url)),
@@ -57,6 +59,7 @@ beforeAll(async () => {
       },
       load(path: string) {
         if (path === '\0report-stop-transport') return transport;
+        if (path === '\0report-stop-turn') return "export {useTurnReport} from '\0report-stop-transport';";
         if (path === '\0report-stop-marks') return 'export const useVersionMarks=()=>({});export const VersionMark=()=>null;';
         if (path === '\0report-stop-jury') return 'export const JuryEntry=()=>null;';
         if (path !== entry) return;
@@ -82,8 +85,16 @@ async function open() {
   await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
   await page.goto('http://report-stop.test/');
   await page.addScriptTag({ content: 'window.process={env:{NODE_ENV:"development"},browser:true};' });
+  await page.addScriptTag({ content: `Object.defineProperty(crypto,'randomUUID',{value:()=>${JSON.stringify(id)}});` });
   await page.addScriptTag({ content: code });
-  try { await ui(page.getByText('起始正文', { exact: true })).toBeVisible(); }
+  try {
+    // The report starts from the entry: open it, ask for the report, confirm the fixed price.
+    await page.getByRole('button', { name: '生成完整报告（500 积分）', exact: true }).click();
+    const report = page.getByRole('dialog', { name: '完整运营策略报告', exact: true });
+    await report.getByRole('button', { name: '生成完整报告（500 积分）', exact: true }).click();
+    await report.getByRole('button', { name: '确认并扣 500 积分', exact: true }).click();
+    await ui(page.getByText('起始正文', { exact: true })).toBeVisible();
+  }
   catch (error) {
     const body = await page.locator('body').innerText();
     await page.close();
