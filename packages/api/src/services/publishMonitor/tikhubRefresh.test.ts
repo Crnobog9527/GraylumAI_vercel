@@ -70,10 +70,8 @@ describe('closing left-open billed runs', () => {
     mocks.settleOpen.mockReset();
     mocks.settleOpen.mockRejectedValueOnce(new Error('x')).mockResolvedValue(undefined);
     const rows = [1, 2, 3].map(n => ({ connectionId: id(n), actorId: id(900), runId: id(500 + n), policies: [] }));
-    const database = { rpc: async (name: string, args: { p_run_id?: string }) =>
-      ({ data: name === 'publish_monitor_billed_legacy' ? args.p_run_id === id(503) : rows, error: null }) } as never;
+    const database = { rpc: async () => ({ data: rows, error: null }) } as never;
     await expect(closeOrphanRuns(database)).rejects.toThrow('PUBLISH_MONITOR_BILLED_RUNS_UNSETTLED');
     expect(mocks.settleOpen).toHaveBeenCalledTimes(3);
-    expect(mocks.settleOpen.mock.calls.map(call => call[4])).toEqual([false, false, true]);
   });
 });

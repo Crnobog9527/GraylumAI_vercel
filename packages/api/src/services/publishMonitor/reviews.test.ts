@@ -19,7 +19,7 @@ type Calls=Array<[string,Record<string,unknown>]>;
 /** A database whose step answers come from `steps` (by action) and whose other RPCs return `other`. */
 function database(steps:Record<string,Record<string,unknown>>,extra:Record<string,unknown>={}){
  const calls:Calls=[];
- const other:Record<string,unknown>={runtime_workspace_post_window:14,...extra};
+ const other:Record<string,unknown>={publish_monitor_post_window:14,...extra};
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   calls.push([name,args]);
   if(name==='publish_monitor_review_step'){
@@ -54,20 +54,6 @@ it('an expired review that never opened a turn is skipped without closing anythi
  expect(m.close).not.toHaveBeenCalled();
  expect(stepActions(d.calls)).toEqual([['observe',null],['skip','RUNTIME_INTERRUPTED']]);
 });
-it('an unfinished pre-migration execution past its deadline is cancelled there and then skipped; a completed one is observed',async()=>{
- const legacy={observe:{state:'cost_pending',expired:true,executionId:'99999999-9999-4999-8999-999999999999'},default:{}};
- const d=database(legacy,{runtime_cancel:{state:'cancelled'}});
- expect(await prepareReview(d.db,c)).toBe(false);
- expect(d.calls.find(x=>x[0]==='runtime_cancel')![1]).toEqual({p_actor_id:c.actorId,p_execution_id:'99999999-9999-4999-8999-999999999999'});
- expect(stepActions(d.calls)).toEqual([['observe',null],['skip','RUNTIME_INTERRUPTED']]);
- expect(m.close).not.toHaveBeenCalled();
- const done=database(legacy,{runtime_cancel:{state:'completed'}});
- expect(await prepareReview(done.db,c)).toBe(false);
- expect(stepActions(done.calls)).toEqual([['observe',null],['observe',null]]);
- const broken={rpc:vi.fn(async(name:string)=>name==='runtime_cancel'?{data:null,error:{code:'08006'}}
-  :{data:{allowed:true,actorId:c.actorId,state:'cost_pending',expired:true,executionId:'99999999-9999-4999-8999-999999999999'},error:null})};
- await expect(prepareReview(broken as never,c)).rejects.toThrow('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
-});
 it('turning the feature off closes a running turn and skips; nothing new is paid for',async()=>{
  const d=database({observe:{allowed:false,state:'running',turnId:7},default:{}});
  expect(await prepareReview(d.db,c)).toBe(false);
@@ -101,14 +87,14 @@ it('advance saves the code-computed pack, runs one turn with the frozen claim, a
  expect(stepActions(d.calls).at(-1)).toEqual(['observe',null]);
 });
 it('the visibility of the pack\'s sources is asked right before the turn is saved, through the database check',async()=>{
- const d=database({default:{}},{runtime_workspace_posts_visible:false});
+ const d=database({default:{}},{publish_monitor_pack_visible:false});
  m.run.mockImplementationOnce(async(_deps,_claim,_pack,_authorize,visible:()=>Promise<boolean>)=>{
   expect(await visible()).toBe(false);return {kind:'deferred',code:'x'};});
  await advanceReview(d.db,c,options());
- expect(d.calls.find(x=>x[0]==='runtime_workspace_posts_visible')![1]).toEqual({p_actor_id:c.actorId,p_result:PACK});
+ expect(d.calls.find(x=>x[0]==='publish_monitor_pack_visible')![1]).toEqual({p_actor_id:c.actorId,p_result:PACK});
 });
 it('the 90-day window is used only for an account whose window is that long',async()=>{
- await advanceReview(database({default:{}},{runtime_workspace_post_window:90}).db,c,options());
+ await advanceReview(database({default:{}},{publish_monitor_post_window:90}).db,c,options());
  expect(m.pack).toHaveBeenCalledWith(expect.anything(),c.actorId,expect.objectContaining({entitled:true}));
 });
 it('a pack the code cannot build ends the week as a configuration skip before any model call',async()=>{

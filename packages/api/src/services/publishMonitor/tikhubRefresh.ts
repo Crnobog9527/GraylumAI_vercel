@@ -48,9 +48,7 @@ export async function closeOrphanRuns(db: Db): Promise<number> {
   let failed = 0;
   for (const row of rows) {
     try {
-      const legacy = await db.rpc('publish_monitor_billed_legacy', { p_run_id: row.runId });
-      if (legacy.error) throw new Error('PUBLISH_MONITOR_TIKHUB_UNAVAILABLE');
-      await settleLeftOpenRun(db, row.actorId, row.runId, row.policies, legacy.data === true);
+      await settleLeftOpenRun(db, row.runId);
     } catch { failed += 1; }
   }
   if (failed > 0) throw new Error('PUBLISH_MONITOR_BILLED_RUNS_UNSETTLED');

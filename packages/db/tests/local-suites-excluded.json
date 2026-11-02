@@ -56,7 +56,6 @@
   "platform-secrets/run-or2-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "positioning-gate/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "provider-prices-swap/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "publish-monitor-review/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "receipt-retention/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "reply-language/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "report-finalization/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
