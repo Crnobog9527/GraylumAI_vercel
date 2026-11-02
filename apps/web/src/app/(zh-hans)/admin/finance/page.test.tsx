@@ -18,8 +18,8 @@ const query = vi.hoisted(() => ({ data: {} as Record<string, unknown> }));
 vi.mock('@/trpc/client', () => ({ trpc: { admin: { getFinanceStats: { useQuery: () => ({
   isLoading: false, error: null, refetch: vi.fn(), data: query.data,
 }) } } } }));
-vi.mock('@/components/admin/Bill2ModelReportCard', async (importOriginal) => ({
-  ...await importOriginal<object>(), Bill2ModelReportCard: () => null,
+vi.mock('@/components/admin/TurnCostReport', async (importOriginal) => ({
+  ...await importOriginal<object>(), TurnModelReportCard: () => null, UnsettledTurnsCard: () => null,
 }));
 // Render every tab so the model table is part of the static markup.
 vi.mock('@/components/ui/tabs', () => {
