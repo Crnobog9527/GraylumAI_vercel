@@ -232,6 +232,37 @@ EXPLAIN 计划（本机空库下看不出索引选择）；时间点（见 6.4�
 - 前端调用统计只数了 `trpc.<路由>.<过程>` 形式，用 `utils.` 或变量间接调用的可能漏数。
 - 没读 staging 数据库，也没读任何日志：19 张表为空是本机从文件建库的结果，不是 staging 的行数。F 批次开始前要由总控核对 staging 的行数。
 
+### 7.1 第三次重算（批次 F 之前，基线 `17607a9cf`，2026-11-03）
+
+结论先说：**现役引用还没有清零，所以 F 现在写不出"最终"迁移。** 下面是脚本重算的数字（上次 80 个，现在 79 个，变化很小；B 批次大多还没合并）。
+
+| 项 | 数量 |
+|---|---|
+| 待删函数 | 201；其中现在能从现役代码走到的 **79** |
+| 其中有现役 Node 调用的 | **16**（下表） |
+| 其中只被保留的 SQL 函数引用的 | 63（`bill2_actor`、`bill2_erasure_*`、`bill2_decimal` 等） |
+| 引用待删对象的保留函数 | 188；能从现役走到的 **163**；已无入口 25（可直接删） |
+| 指向待删表的外键 | 25（`runtime_executions` 14、`bill2_runs` 5、`bill2_calls` 5、`fusion_billing_groups` 2 和 `runtime_scope_material` 2 条） |
+| 保留的表上调用待删函数的触发器 | 3（止损） |
+
+有现役 Node 调用的 16 个待删函数，按要接走的消费者分：
+
+| 消费者 | 待删函数 | 现役调用方 |
+|---|---|---|
+| 提供方服务（B10 的一部分，`turn/provider/service.ts`） | `bill2_cancel`、`bill2_claim`、`bill2_close`、`bill2_create_draft`、`bill2_finalize`、`bill2_prepare` | `services/turn/provider/service.ts`（新路径的提供方文件里还留着 BILL2 调用，要先查是不是死代码） |
+| 注销（财务恢复） | `bill2_cancel`、`bill2_finalize`、`runtime_financial_recovery` | `services/accountErasure/processor.ts` |
+| 复盘与社媒（B8） | `bill2_close`、`bill2_finalize` | `publishMonitor/billedReadLegacy.ts`（#1624 B8b 在途） |
+| 对比与评审团（B4、B5） | `bill2_create_draft`、`fusion_review_fee_settle`、`runtime_workspace_source` | `fusion/admission.ts`、`fusion/compareAdmission.ts`、`fusion/reviewRecord.ts`、`fusion/compareLoad.ts` |
+| 研究读取与工作区帖子（B9、新路径内） | `runtime_source`、`runtime_workspace_source`、`runtime_workspace_posts_visible`、`runtime_workspace_post_window`、`runtime_workspace_session` | `turn/research/sourceRuntimeTool.ts`、`turn/agent/workspacePosts.ts`（新路径自己在用，要改写不是删除） |
+| 定位服务 | `runtime_session_context` | `opc/service.ts` |
+| 账本 | `bill2_legacy_refund`、`bill2_legacy_settle` | 被 `atomic_refund`、`atomic_settle` 调用（批次 C 里整段改写） |
+
+周复盘 #1624（B8b，迁移 0467，未合并）用到的旧对象，F 要等它合并后收口：`runtime_cancel`、`runtime_executions`、`runtime_workspace_posts_visible`、`runtime_workspace_post_window`、`bill2_runs`（在 `publish_monitor_review_step` 里）；它自己也在把 `publish_monitor_review_*` 改到 `turns`，合并后这几处要重算。
+
+对批次顺序的影响：
+- F 必须等 B4、B5、B8b、B9 的 `turn` 侧改写，和批次 C 对 163 个保留函数的改写（其中 63 个只靠通用小函数连着）都做完。现在这两块的量是 F 之前的主要工作。
+- 本 PR 只更新盘点数据（`CORE-PATH-V2-DELETE-INVENTORY.md`）和本节，**没有迁移、没有代码删除**；F 的迁移与代码删除按"清单清零"那一刻的盘点再写。
+
 ## 8. 发现的问题（不在本任务范围，已记录）
 
 - `docs/runbooks/BILL2_V1_PENDING_READONLY.sql` 引用 10 个待删函数，删除时要一并处理。
