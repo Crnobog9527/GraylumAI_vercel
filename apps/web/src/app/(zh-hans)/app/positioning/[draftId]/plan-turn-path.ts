@@ -5,7 +5,7 @@ import { runTurn } from "@/lib/turn-stream";
 /*
  * CORE-PATH-V2 V2-10b: the first-week plan on POST /api/turn (kind=plan). A request is known by its id: GET /api/turn/plan reads it
  * after the stream, a dropped connection or a reload, so a request is sent once and its plan is never paid for twice. A plan that
- * cannot be read as one (the model's body, or a turn that failed) answers `valid: false`, as opc.planResult: the page releases
+ * cannot be read as one (the model's body, or a turn that failed) answers `valid: false`: the page releases
  * the request and the next click is a new one.
  */
 const READ_MS = 3000, READS = 120;
@@ -23,27 +23,44 @@ export async function readPlanTurn(sessionId: string, requestId: string, deps: P
   return (await response.json() as { plan: PlanTurn | null }).plan;
 }
 
-/** The retained request's turn, for the page's recovery; null while there is none or it cannot be read (the old record answers then). */
-export function usePlanTurn(sessionId: string | undefined, requestId: string | undefined) {
-  const [turn, setTurn] = useState<PlanTurn | null>(null);
-  useEffect(() => {
-    setTurn(null);
-    if (!sessionId || !requestId) return;
-    // Read until the turn closes: a recovery on this page finishes it, and a failed read is read again.
-    let timer: ReturnType<typeof setTimeout>, left = READS, gone = false;
-    const read = async () => {
-      const next = await readPlanTurn(sessionId, requestId).catch(() => undefined);
-      if (gone) return;
-      if (next !== undefined) setTurn(next);
-      if (next?.state !== "closed" && --left > 0) timer = setTimeout(() => void read(), READ_MS);
-    };
-    void read();
-    return () => { gone = true; clearTimeout(timer); };
-  }, [sessionId, requestId]);
-  return turn;
+/**
+ * Reads the request's turn until it closes: a recovery on this page finishes it, and a failed read is read again (READS times, then it
+ * stops until the next watch). `failed` tells whether the last read failed. Returns the stop function.
+ */
+export function watchPlanTurn(sessionId: string, requestId: string, on: { turn: (turn: PlanTurn | null) => void; failed: (failed: boolean) => void },
+  deps: { read?: typeof readPlanTurn; schedule?: (run: () => void, ms: number) => unknown; cancel?: (timer: unknown) => void } = {}) {
+  const readTurn = deps.read ?? readPlanTurn, schedule = deps.schedule ?? setTimeout, cancel = deps.cancel ?? (timer => clearTimeout(timer as never));
+  let timer: unknown, left = READS, gone = false;
+  const read = async () => {
+    const next = await readTurn(sessionId, requestId).catch(() => undefined);
+    if (gone) return;
+    if (next !== undefined) on.turn(next);
+    on.failed(next === undefined);
+    if (next?.state !== "closed" && --left > 0) timer = schedule(() => void read(), READ_MS);
+  };
+  void read();
+  return () => { gone = true; cancel(timer); };
 }
 
-/** What the page's recovery shows for a retained request that has a turn (the shape of opc.planRequestState's answer). */
+/**
+ * The retained request's turn, for the page's recovery: `turn` is undefined until it is read and null when the request has none.
+ * `state.error` is set while the last read failed and nothing is known yet; `recheck` reads again, also after the reads ran out.
+ */
+export function usePlanTurn(sessionId: string | undefined, requestId: string | undefined) {
+  const [turn, setTurn] = useState<PlanTurn | null | undefined>(undefined), [failed, setFailed] = useState(false), [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setTurn(undefined); setFailed(false);
+    if (!sessionId || !requestId) return;
+    return watchPlanTurn(sessionId, requestId, { turn: setTurn, failed: setFailed });
+  }, [sessionId, requestId, attempt]);
+  const error = failed && turn === undefined ? new Error("TURN_PLAN_READ_FAILED") : null;
+  return { turn, state: { isLoading: Boolean(requestId) && turn === undefined && !error, error }, recheck: () => setAttempt(count => count + 1) };
+}
+
+/** What the page's recovery shows for a retained request that never opened a turn: nothing was admitted, started or charged. */
+export const NO_PLAN_TURN = { admitted: false, materialRevoked: false, hasResult: false, state: null };
+
+/** What the page's recovery shows for a retained request that has a turn. */
 export function planTurnState(turn: PlanTurn) {
   return { admitted: true, materialRevoked: false, hasResult: turn.valid, state: turn.state === "closed" ? "completed" : "running" };
 }
@@ -58,7 +75,8 @@ async function closed(sessionId: string, requestId: string, deps: PlanTurnDeps):
   return null;
 }
 
-/** Sends the request unless it already has a turn, and answers as opc.planResult does. A refusal before opening is thrown with its code. */
+/** Sends the request unless it already has a turn, and answers with `valid`, a plan's items and its source round.
+ * A refusal before opening is thrown with its code. */
 export async function runPlanTurn(request: PlanTurnRequest, ids: { sessionId: string; moduleId: string }, known: PlanTurn | null,
   deps: PlanTurnDeps = browser) {
   if (!known) {

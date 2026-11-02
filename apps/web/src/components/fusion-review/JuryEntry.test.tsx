@@ -9,8 +9,7 @@ vi.mock('@/trpc/client', () => {
   const query = (data: unknown) => ({ data, isFetching: false, error: null, refetch: vi.fn() });
   return { trpc: { fusionReview: {
     available: { useQuery: () => query({ enabled: true }) },
-    mine: { useQuery: () => query(state.mine) }, panel: { useQuery: () => query(undefined) }, estimate: { useQuery: () => query(undefined) },
-    start: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
+    mine: { useQuery: () => query(state.mine) }, panel: { useQuery: () => query(undefined) } },
     user: { getEntitlements: { useQuery: () => ({ data: state.entitlements }) } } } };
 });
 import { JuryEntry } from './JuryEntry';

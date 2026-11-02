@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it,vi} from 'vitest';
-import {freezeHistorySelection} from './hostTurn';
+import {freezeHistorySelection} from '../turn/agent/hostTurn';
 import {runtimeExecutor} from './execute';
 import {packageHash,sha256,clearSkillResourceCache} from '../skills/loader';
-import {createRuntimeBudget} from './budget';
+import {createRuntimeBudget} from '../turn/settings/budget';
 const billing=vi.hoisted(()=>({claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}));
-vi.mock('../bill2/service',async original=>({...await original<typeof import('../bill2/service')>(),authoritativeBilling:()=>billing}));
+vi.mock('../turn/provider/service',async original=>({...await original<typeof import('../turn/provider/service')>(),authoritativeBilling:()=>billing}));
 const id='10000000-0000-4000-8000-000000000001';
 it.each(['answer','summary','repeat','oversized','denied','large','revoked','malformed','nul','surrogate','badId','transient'] as const)('settles file continuation %s and replays without another dispatch',async outcome=>{
  vi.clearAllMocks();

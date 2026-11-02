@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { rowsFor, type ConfigurationRows } from './settingsRows';
+import { rowsFor, type ConfigurationRows } from '../turn/settings/settingsRows';
 import { summaryPolicy } from '../artifacts/summaryPolicy';
-import { stagingRpcFailure } from './stagingErrors';
+import { stagingRpcFailure } from '../turn/settings/stagingErrors';
 
 /** A separate organizer turn runs on the administrator's summary model (moved out of admission.ts unchanged). */
 export async function organizerSelection(admin: SupabaseClient, dialogueModelId: string | null | undefined, real: boolean,

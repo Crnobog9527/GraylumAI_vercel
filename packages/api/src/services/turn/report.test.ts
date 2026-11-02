@@ -16,19 +16,19 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock('./chat', async original => ({ ...await original<object>(), readCoreConfig: () => ({ enabled: true, decisionUpperUsd: '0.01',
   stopLoss: { limitUsd: 100, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 } }) }));
-vi.mock('../runtime/admissionConfiguration', async original => ({ ...await original<object>(), readAdmissionConfiguration: async () => ({ data: [{ key: 'report_fixed_price_credits', value: 500 }], error: null }),
+vi.mock('./admission/admissionConfiguration', async original => ({ ...await original<object>(), readAdmissionConfiguration: async () => ({ data: [{ key: 'report_fixed_price_credits', value: 500 }], error: null }),
   readAdmissionModule: async (_admin: unknown, id: string) => ({ error: null,
     data: { id, active: true, model_id: '20000000-0000-4000-8000-000000000001', report_model_id: '20000000-0000-4000-8000-000000000002' } }) }));
-vi.mock('../runtime/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
-vi.mock('../runtime/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
+vi.mock('./settings/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
+vi.mock('./admission/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
 vi.mock('./reportSkill', async original => ({ ...await original<object>(), reportSkillText: async () => 'SKILL TEXT' }));
-vi.mock('../runtime/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
-vi.mock('../runtime/providerRequest', async original => ({ ...await original<object>(),
+vi.mock('./agent/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
+vi.mock('./provider/providerRequest', async original => ({ ...await original<object>(),
   openRouterRequestBody: (_body: string, options: { context: Record<string, unknown>; phase: string }) => {
     h.request.push(options); return 'REQUEST'; } }));
-vi.mock('../bill2/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: (o: { transport: typeof fetch }) => { h.transports.push(o.transport); return {}; } }));
+vi.mock('./provider/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: (o: { transport: typeof fetch }) => { h.transports.push(o.transport); return {}; } }));
 vi.mock('./call', async original => ({ ...await original<object>(), modelCall: h.call }));
-vi.mock('../runtime/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
+vi.mock('./agent/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
 const pricing = { version: 'nominal-v1', pricingHash: 'a'.repeat(64), endpointTag: 'anthropic/exact',
   tiers: [{ minPromptTokens: 0, prompt: '3', completion: '15', request: '0' }], timeOfDay: [] };
 const quote = { pricing, modelId: '20000000-0000-4000-8000-000000000002', model: 'anthropic/claude-sonnet-5.5', q: '100', multiplier: '6',

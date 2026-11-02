@@ -28,13 +28,13 @@ const mock = `
   const view = { model: 'example/model', maxTokens: 4096, issues: [], capacity, priceView, pricing,
     config: { route: 'example/fp8', purposes: {}, catalog: { fetchedAt: '2026-10-01T00:00:00.000Z', model: 'example/model' } } };
   const state = window.__fix = { reportInputs: [], reads: 0, readError: null, refetches: 0, summaryError: true, view };
-  const report = { available: true, truncated: false, models: [], byPurpose: [], byDate: [],
-    totals: { calls: 0, runs: 0, officialCostUsd: '0', weightedUsd: '0', chargedCredits: 0, unallocatedChargedCredits: 0,
-      refundedRuns: 0, unparsableCalls: 0 } };
+  const report = { available: true, models: [], byDate: [],
+    totals: { calls: 0, unknownCostCalls: 0, nominalUsd: '0', actualUsd: '0', turns: 0, chargedCredits: 0, absorbedCredits: 0,
+      unsettledTurns: 0 } };
   export const trpc = {
     useUtils: () => ({ modelReasoning: { get: { setData: (_, value) => { state.view = value; window.rerender(); } } },
       modelPricing: { getMultipliers: { invalidate() {} } }, model: { getAdminModelsDashboard: { invalidate() {} } } }),
-    billingReport: { bill2ByModel: { useQuery: (input) => { state.reportInputs.push(input.days); return { data: report }; } } },
+    billingReport: { turnByModel: { useQuery: (input) => { state.reportInputs.push(input.days); return { data: report }; } } },
     modelPricing: { getMultipliers: { useQuery: () => ({ data: { site: { creditsPerUsd: '100' }, models: [{ id: 'model-1', effective: '2' }] } }) } },
     modelReasoning: {
       get: { useQuery: () => ({ data: state.view, error: null }) },
@@ -59,7 +59,7 @@ beforeAll(async () => {
   const vite = createRequire(require.resolve('vitest/package.json')).resolve('vite');
   const { build } = await import(pathToFileURL(vite).href);
   const styles = fileURLToPath(new URL('../../app/globals.css', import.meta.url));
-  const card = fileURLToPath(new URL('./Bill2ModelReportCard.tsx', import.meta.url));
+  const card = fileURLToPath(new URL('./TurnCostReport.tsx', import.meta.url));
   const section = fileURLToPath(new URL('./ModelEditPriceSection.tsx', import.meta.url));
   const profile = fileURLToPath(new URL('../profile/PersonalInfoCard.tsx', import.meta.url));
   const bundle = await build({
@@ -75,14 +75,14 @@ beforeAll(async () => {
       if (id === '\0small-fixes-supabase') return 'export const createClient = () => ({});';
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';
         import ${JSON.stringify(styles)};
-        import { Bill2ModelReportCard } from ${JSON.stringify(card)};
+        import { TurnModelReportCard } from ${JSON.stringify(card)};
         import { ModelEditPriceSection } from ${JSON.stringify(section)};
         import { CreditsAndSubscriptionCards } from ${JSON.stringify(profile)};
         const root = createRoot(document.getElementById('root'));
         const user = { id: 'u1', email: '', nickname: 'u', full_name: 'u', avatar_url: '', credits: 500, subscription_tier: 'free',
           auth_provider: 'email', email_verified: true, created_date: '2026-01-01' };
         const views = {
-          report: () => React.createElement(Bill2ModelReportCard),
+          report: () => React.createElement(TurnModelReportCard),
           edit: () => React.createElement(ModelEditPriceSection, { modelId: 'model-1', open: true, onShowMultipliers() {} }),
           profile: () => React.createElement(CreditsAndSubscriptionCards, { user: { ...user } }),
         };

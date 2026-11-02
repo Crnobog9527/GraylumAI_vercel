@@ -4,7 +4,7 @@
 // another, unless it is listed in local-suites-excluded.json (reason + date; the list may only shrink,
 // see scripts/tests/local-suites.test.mjs). A new suite is therefore in CI the day it is added.
 // Usage: node packages/db/tests/run-local-suites.mjs --ci | --local-only [--excluded] [--list] [--only <dir[,dir]>] [--jobs N] [--shard K/N]
-// --excluded (nightly, .github/workflows/nightly-db-suites.yml): run the suites the list excludes instead of the others. Entries whose reason
+// --excluded (after each push to staging, .github/workflows/nightly-db-suites.yml): run the suites the list excludes instead of the others. Entries whose reason
 // starts with "not a suite:" (helper modules, templates, wrappers) are skipped. Many of these suites refuse to start when CI is set, so the
 // nightly workflow runs `env -u CI ... --local-only --excluded`; run it only on a throwaway checkout, some suites rewrite tracked result files.
 // Each suite is started with the same flag (--ci / --local-only) and must accept it. --shard K/N keeps every
@@ -109,7 +109,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`total ${results.reduce((sum, item) => sum + item.seconds, 0)}s over ${results.length} suites`);
     if (process.env.GITHUB_STEP_SUMMARY) {
       const rows = results.sort((x, y) => x.suite.localeCompare(y.suite)).map(({ suite, seconds, passed }) => `| ${suite} | ${passed ? 'pass' : '**FAIL**'} | ${seconds} |`);
-      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Database suites${nightly ? ' (nightly, excluded list)' : ''} ${shard}/${shards}\n\n| suite | result | seconds |\n| --- | --- | --- |\n${rows.join('\n')}\n`);
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Database suites${nightly ? ' (excluded list)' : ''} ${shard}/${shards}\n\n| suite | result | seconds |\n| --- | --- | --- |\n${rows.join('\n')}\n`);
     }
     if (results.some(item => !item.passed)) process.exitCode = 1;
   }

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { NO_ENTITLEMENT } from '../../runtime/workspacePosts';
+import { NO_ENTITLEMENT } from '../agent/workspacePosts';
 import { NO_ACCESS, workspaceTurnReader, type PostsAccess, type WorkspaceAccess } from './workspace';
 
 const id = '00000000-0000-4000-8000-000000000001';

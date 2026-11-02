@@ -4,12 +4,12 @@ import {isDeepStrictEqual} from 'node:util';
 import {priceSchema,recordSamples,outputPressurePassed} from './sampling';
 import {createR9Plan,R9_ID} from './batch-r9';
 import {streamMetadata} from './stream-metadata';
-import {openRouterAdapter} from '../../packages/api/src/services/bill2/openRouterAdapter';
-import {decimal} from '../../packages/api/src/services/bill2/decimal';
-import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
-import type {OpenRouterIdentity} from '../../packages/api/src/services/bill2/openRouterEvidence';
-import type {OpenRouterLimits} from '../../packages/api/src/services/bill2/openRouterPolicy';
-import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/bill2/openRouterEvidence';
+import {openRouterAdapter} from '../../packages/api/src/services/turn/provider/openRouterAdapter';
+import {decimal} from '../../packages/api/src/services/turn/provider/decimal';
+import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/turn/provider/fixtureAdapter';
+import type {OpenRouterIdentity} from '../../packages/api/src/services/turn/provider/openRouterEvidence';
+import type {OpenRouterLimits} from '../../packages/api/src/services/turn/provider/openRouterPolicy';
+import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/turn/provider/openRouterEvidence';
 
 export type Plan=ReturnType<typeof createR9Plan>;
 export type Sample=Plan['manifest']['samples'][number];

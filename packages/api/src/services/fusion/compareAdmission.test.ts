@@ -13,14 +13,14 @@ vi.mock('./settings', async original => ({ ...(await original<typeof import('./s
   readFusionSettings: async () => ({ version: 1, review: {}, compare: state.compare }) }));
 vi.mock('../membershipEntitlements', async original => ({ ...(await original<typeof import('../membershipEntitlements')>()),
   readMembershipEntitlements: async () => state.entitlements, assertFusionEntitlement: () => undefined }));
-vi.mock('../runtime/stagingPolicy', async original => ({ ...(await original<typeof import('../runtime/stagingPolicy')>()),
+vi.mock('../turn/settings/stagingPolicy', async original => ({ ...(await original<typeof import('../turn/settings/stagingPolicy')>()),
   loadStagingPolicy: async () => ({ ...(state.production ? { mode: 'production' } : {}), id: id(900), creditsPerUsd: '100', multiplier: '3',
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(), callPolicies: [] }) }));
-vi.mock('../runtime/admissionLimits', async original => ({ ...(await original<typeof import('../runtime/admissionLimits')>()),
+vi.mock('../turn/admission/admissionLimits', async original => ({ ...(await original<typeof import('../turn/admission/admissionLimits')>()),
   admissionDeadline: (at: string) => at }));
 vi.mock('../runtime/paygPricing', async original => ({ ...(await original<typeof import('../runtime/paygPricing')>()),
   freezeStagingPaygPricing: async (_a: unknown, policies: unknown[]) => policies }));
-vi.mock('../runtime/billingUnitAdmission', async original => ({ ...(await original<typeof import('../runtime/billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission', async original => ({ ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2' }) }));
 vi.mock('./models', async original => ({ ...(await original<typeof import('./models')>()),
   admitFusionModel: async (_db: unknown, _w: unknown, row: { id: string }, phase: string, tokens: number) => {
@@ -38,7 +38,7 @@ vi.mock('../runtime/paygRuntime', async original => ({ ...(await original<typeof
     if (state.noRoom.has(policy.modelId)) throw new Error('RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY');
     return { call: { phase, upperUsd: '0.01', model: `m/${policy.modelId}`, runtimeEpoch: 1 }, upperCredits: state.credits.get(policy.modelId) ?? 10 };
   } }));
-vi.mock('../bill2/service', async original => ({ ...(await original<typeof import('../bill2/service')>()),
+vi.mock('../turn/provider/service', async original => ({ ...(await original<typeof import('../turn/provider/service')>()),
   frozenCallSchema: z.any(), frozenPaygRunSchema: { parse: (value: unknown) => value } }));
 import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, replayCompareGroup } from './compareAdmission';
 import { FUSION_INPUT_CAP } from './request';

@@ -1,15 +1,17 @@
-# Nightly run of the database suites that pull request CI does not run (packages/db/tests/local-suites-excluded.json).
+# Full run of the database suites that pull request CI does not run (packages/db/tests/local-suites-excluded.json).
+# GitHub only fires schedule / workflow_dispatch from the default branch (main), so this runs on every push to staging instead;
+# a newer push cancels the older run, so a run finishes once staging has been quiet for its duration.
 # Owner 2026-11-01: not a required check and never blocks a merge; a red run is a report, and the list only shrinks as suites are fixed.
 # Secretless and read-only like the rest of CI. The checkout is thrown away: some suites rewrite tracked result files and nothing is committed.
 name: Nightly database suites
 
 on:
-  schedule:
-    - cron: '30 10 * * *'
+  push:
+    branches: [staging]
 
 concurrency:
-  group: nightly-db-suites-${{ github.sha }}
-  cancel-in-progress: false
+  group: excluded-db-suites
+  cancel-in-progress: true
 
 permissions:
   contents: read

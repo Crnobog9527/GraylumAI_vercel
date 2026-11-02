@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 /** Long-running turns: their events stream back as they happen. */
-const STREAMED = new Set(['runtime.executeStream', 'runtime.resumeStream', 'opc.mentorTurnStream', 'fusionCompare.stream']);
+const STREAMED = new Set(['runtime.executeStream', 'runtime.resumeStream', 'opc.mentorTurnStream']);
 
 /**
  * Reads sent on their own instead of in the shared batch. A batched response

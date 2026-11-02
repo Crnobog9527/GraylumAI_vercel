@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, expect, it, vi } from 'vitest';
 import { runtimeRouter } from './runtime';
-import { createRuntimeBudget } from '../services/runtime/budget';
+import { createRuntimeBudget } from '../services/turn/settings/budget';
 const id = '00000000-0000-4000-8000-000000000001';
 afterEach(() => vi.unstubAllEnvs());
 function fixture() {

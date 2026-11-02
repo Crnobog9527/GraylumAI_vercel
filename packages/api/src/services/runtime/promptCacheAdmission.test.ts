@@ -4,16 +4,16 @@ import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './execute';
-import {openRouterBound} from '../bill2/openRouterPolicy';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
-import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {PROMPT_CACHE_OVERHEAD_BYTES} from '../turn/provider/promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
 import {testIdentityGuard,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
-import {replySettingInstructions} from './replyLanguage';
+import {replySettingInstructions} from '../turn/agent/replyLanguage';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
-vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 // New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
 const DEFAULT_REPLY_RULE=replySettingInstructions('zh-Hans');
@@ -22,8 +22,8 @@ const skill='Pinned skill 正文';
 const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
-vi.mock('./billingUnitAdmission',async original=>({
- ...(await original<typeof import('./billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
+vi.mock('../turn/admission/billingUnitAdmission',async original=>({
+ ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
 }));
 const actor='10000000-0000-4000-8000-000000000001',modelId='10000000-0000-4000-8000-000000000002';
 testPrimaryModel.id=modelId;
@@ -166,7 +166,7 @@ it('switch on: the identity leads the cached prefix and carries the Owner-approv
  expect(result.context.instructions).toContain('我是 Graylum 的 AI 自媒体陪跑教练');
 });
 
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

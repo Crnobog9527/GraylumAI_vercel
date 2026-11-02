@@ -3,8 +3,8 @@ import { expect, it } from 'vitest';
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH } from './brandIdentity';
 import { guardedProgress, runtimeIdentityGuard } from './runtimeGuard';
 import { leaksModelIdentity } from './outputGuard';
-import { NativeProgressProjection, NativeTextTransport, type NativeTextUpdate } from '../runtime/nativeProgress';
-import type { RuntimeProgress } from '../runtime/progress';
+import { NativeProgressProjection, NativeTextTransport, type NativeTextUpdate } from '../turn/agent/nativeProgress';
+import type { RuntimeProgress } from '../turn/agent/progress';
 
 /** Rebuild what the browser shows from textDelta events (offset/rev protocol). */
 function client() {

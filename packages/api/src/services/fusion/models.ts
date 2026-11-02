@@ -3,14 +3,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption, type RuntimeModelRow } from '../models/runtimeEligibility';
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import type { z } from 'zod';
-import type { frozenCallPolicy } from '../bill2/service';
-import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
+import type { frozenCallPolicy } from '../turn/provider/service';
+import { PURPOSE_OUTPUT_CAP } from '../turn/provider/responseCapacity';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
-import { readPaygHostPolicies } from '../runtime/paygHostPolicy';
+import { readPaygHostPolicies } from '../turn/admission/paygHostPolicy';
 import { readPaygPolicies } from '../runtime/realHost';
-import { admitReasoning } from '../runtime/reasoningAdmission';
-import type { ReasoningPolicy } from '../runtime/reasoningPolicy';
-import type { StagingPolicy } from '../runtime/stagingPolicy';
+import { admitReasoning } from '../turn/admission/reasoningAdmission';
+import type { ReasoningPolicy } from '../turn/admission/reasoningPolicy';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
 
 /** Fusion review calls: streamed, JSON-schema output, no tools, web plugin explicitly off. */
 export const FUSION_REQUEST_FORMAT = 'fusion-json-v1-stream';

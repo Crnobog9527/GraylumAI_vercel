@@ -27,7 +27,9 @@ export const DEFAULTS = {
   // UPDATE may only name these tables, and the statement must carry the table's owner key.
   // The per-kind draft / report / review tables a turn may write one row of (ENGINEERING 5), with their owner keys. A kind's own PR adds
   // the table it writes, with its owner key, and cites ENGINEERING 5 (aligning with the rule, not relaxing it).
-  kindTables: { artifact_rounds: ['id', 'project_id'], fusion_reviews: ['actor_id', 'id'], fusion_compares: ['actor_id', 'id'] },
+  // voice_profile_versions: the one version row a voice generation (V2-12 B7) saves its profile to, by (actor_id, id).
+  kindTables: { artifact_rounds: ['id', 'project_id'], fusion_reviews: ['actor_id', 'id'], fusion_compares: ['actor_id', 'id'],
+    voice_profile_versions: ['actor_id', 'id'] },
   updateKeys: {
     turns: ['actor_id', 'id'], profiles: ['id'], runtime_sessions: ['id', 'actor_id'], session_messages: ['session_id'],
     turn_calls: ['turn_id'], daily_spend: ['bucket'], credit_transactions: ['user_id'], credit_source_entries: ['user_id'],

@@ -20,6 +20,10 @@ BEGIN
  SELECT * INTO w FROM opc_topic_workspaces WHERE draft_id=did AND actor_id=a;
  IF d.draft_id IS NULL OR w.session_id IS DISTINCT FROM source_session OR w.source_version_id IS DISTINCT FROM vid
   OR NOT opc_source_allowed(a,vid) THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_INVALID';END IF;
+ -- A reply from before the workspace was re-bound to a newer positioning is no source: it cannot be saved or adopted on the new version.
+ IF w.history_floor_seq>0 AND (e.id IS NOT NULL OR EXISTS(SELECT 1 FROM turns t JOIN session_messages m ON m.turn_id=t.id
+   WHERE t.actor_id=a AND t.request_id=eid AND m.session_id=source_session AND m.seq<=w.history_floor_seq)) THEN
+  RAISE EXCEPTION 'OPC_TOPIC_SOURCE_INVALID';END IF;
  IF raw IS NULL THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_INVALID';END IF;
  FOR part IN SELECT regexp_matches(raw,'```(?:json)?\s*(\[[\s\S]*?\])\s*```','g') LOOP
   BEGIN

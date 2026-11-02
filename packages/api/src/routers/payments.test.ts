@@ -3608,6 +3608,11 @@ describe('PAY-1 Customer Portal', () => {
     await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: !noSubscription });
     expect(h.create).not.toHaveBeenCalled();
   });
+  it('a failing availability read answers "not available" instead of a 500', async () => {
+    const h = portalHarness({ readError: true });
+    await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: false });
+    expect(h.create).not.toHaveBeenCalled();
+  });
   it('opens the Portal for a card (Managed Payments) subscription on its own customer, proven by its order metadata', async () => {
     const h = portalHarness({ card: {} });
     await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: true });

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { BillingClaimRejection } from '../bill2/claimFailure';
+import { BillingClaimRejection } from '../turn/provider/claimFailure';
 
 const configuration = '计费配置待处理，暂时无法继续，请稍后重试或联系管理员。';
 const conflict = '当前任务状态已变化，暂时无法继续，请刷新后查看原任务。';

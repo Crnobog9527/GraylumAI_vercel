@@ -10,8 +10,9 @@ import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {localDb,read,root} from '../runtime-view-perf/local-db.mjs';
 import {planCases} from './plan-cases.mjs';
+import {voiceCases} from './voice-cases.mjs';
 import {reportCases} from './report-cases.mjs';
-import {topicAccountCases,topicCases} from './topic-cases.mjs';
+import {topicAccountCases,topicCases,topicRebindCases} from './topic-cases.mjs';
 import {reportFinalCases} from './report-final-cases.mjs';
 import {workContentCases} from './work-content-cases.mjs';
 import {holdCases} from './hold-cases.mjs';
@@ -734,8 +735,10 @@ try{
  }
  // V2-7a: kind=report (report-cases.mjs).
  await reportCases({c,one,open,begin,identity,record,close,balance,account,reportSource,reportPolicy,openReport,refusal,peer,report});
- await topicCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
+ await topicCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await planCases({c,one,open,begin,identity,record,close,balance,account,reportSource,policy,refusal,peer,report});
+ // V2-12 B7: kind=voice (voice-cases.mjs).
+ await voiceCases({c,one,open,begin,identity,record,balance,account,policy,refusal,report});
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
@@ -796,6 +799,7 @@ try{
  }
  await reportFinalCases({c,one,open,begin,record,account,reportSource,reportPolicy,refusal,report});
  await topicAccountCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
+ await topicRebindCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await workResultCases({c,db,one,open,begin,record,close,account,policy,refusal,report});
  await holdCases({c,one,open,begin,record,close,balance,account,policy,refusal,peer,report});
  await stopLossCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});

@@ -8,8 +8,8 @@ vi.mock('@repo/api/src/services/turn/http', () => ({ handleTurnRequest: mocks.ha
 vi.mock('@repo/api/src/services/turn/limiter', () => ({ redisCounterStore: () => ({}) }));
 vi.mock('@repo/api/src/services/redisRateLimiter', () => ({ checkRateLimit: vi.fn() }));
 vi.mock('@repo/api/src/services/platformSecrets/request', () => ({ withPlatformSecretRequest: (run: () => unknown) => run() }));
-vi.mock('@repo/api/src/services/runtime/catalogCache', () => ({ withCatalogRequest: (run: () => unknown) => run() }));
-vi.mock('@repo/api/src/services/runtime/newWorkGate', () => ({ newWorkGate: () => ({}) }));
+vi.mock('@repo/api/src/services/turn/settings/catalogCache', () => ({ withCatalogRequest: (run: () => unknown) => run() }));
+vi.mock('@repo/api/src/services/turn/admission/newWorkGate', () => ({ newWorkGate: () => ({}) }));
 vi.mock('@repo/api/src/services/turn/db', () => ({ turnClients: () => ({}) }));
 vi.mock('@repo/api/src/services/fusion/background', () => ({ handReviewToServer: vi.fn() }));
 vi.mock('@repo/api/src/lib/envValidator', () => ({ readTurnRouteEnv: () => ({ url: 'https://db.test', anonKey: 'anon', serviceKey: 'service',

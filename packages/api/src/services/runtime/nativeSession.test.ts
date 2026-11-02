@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import type { AgentInputItem, Session } from '@openai/agents';
 import { recoverOpenRouterHistory } from './historyRecovery';
 import { NativeSession } from './nativeSession';
-import { jsonbBytes, RESULT_BYTE_LIMIT } from './resultCapacity';
+import { jsonbBytes, RESULT_BYTE_LIMIT } from '../turn/provider/resultCapacity';
 function fixture() {
   const saved: AgentInputItem[][] = [];
   const inner: Session = { getSessionId: async () => 'synthetic', getItems: async () => [],

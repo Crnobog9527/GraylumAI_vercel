@@ -619,7 +619,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
   （`runtime_session_names` 并入 `sessions.title`。）
 - 函数：`runtime/` 111 个中除 `runtime_start`（改写为建会话）外全部；`billing/` 102 个中 `bill2_*` 全部（`atomic_*`、`credit_*` 账本函数保留）；
   `fusion/` 63 个中计费与推进相关的（产物读写保留）；`report/` 的 `report_fee_*`、`report_stop`、`report_admission_check`；`other/` 中 `catalog_versions_snapshot` 保留。
-  目标：`packages/db/functions` 从 939 降到约 450（主路径相关从约 330 降到约 20）。
+  验收（Owner 2026-11-02 "同意改口径"，取代原"函数数从 939 降到约 450"）：待删名单清零，保留函数不引用待删对象，闭包棘轮不放宽；不再按函数总数验收（现状 1023 个，只删名单剩约 815 个）。
 - Node：`services/runtime/` 315 个文件和 `services/bill2/` 56 个文件整体删除，新目录 `services/turn/`（目标 ≤ 60 个文件，每个 ≤ 500 行）；
   `routers/runtime.ts`、`fusionReview.ts`、`fusionCompare.ts` 的计费部分改调 `services/turn`。
 
@@ -731,7 +731,7 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 | 提示缓存 #1502（导师历史标记 + SKILL.md 断点） | **按新路径改写**（V2-5）：三个断点规则不变，hostTurnContext/材料位置、历史投影占位算法按 2.9 节第 3、5 条重写；`hostTurnAdmission.test.ts` 的断言作为 V2-5 验收原样迁入。原 PR 关闭 |
 | #1503 复核脚本 | 改读 `turn_calls` 缓存 token 列后合并（V2-13 之前） |
 | #1504 `tool_choice:"none"` 放行 | 已合并；V2-5 开场轮对齐依赖它 |
-| 运营教练复盘 #1481（迁移 0407）、#1483 | 主路径完成后以 `kind=review` 接核：#1481 的数据地基（结算事实、实验账本）与主路径无关，可在 V2-2 之后由总控择机上库合并；#1483 要改成不走 `REVIEW_PROMPT`+旧 Runtime，而是 V2-6 的"固定 Skill"入口，等 V2-12 后改写 |
+| 运营教练复盘 #1481（迁移 0457）、#1483 | 主路径完成后以 `kind=review` 接核：#1481 的数据地基（结算事实、实验账本）与主路径无关，可在 V2-2 之后由总控择机上库合并；#1483 要改成不走 `REVIEW_PROMPT`+旧 Runtime，而是 V2-6 的"固定 Skill"入口，等 V2-12 后改写 |
 | 图片生成规划 | 上线后；按新 `kind=image` 接入，冻结额按张数 |
 | ARCH-FIX 未完成的线 | 与主路径重叠的（线 C 工具参数、线 D 卡住回合收尾、线 A 入口限流）在 V2-6/V2-8/V2-4 内完成并在 PR 标题带 ARCH-FIX；不重叠的（线 B 上传存储、线 E 订阅积分隔离与对账、线 G 收据保留期改读 `turn_calls`）照原计划 |
 | REL-1 核心 12 项未通过的（10-27 清单） | 1⑤ 报告停止退款与确认、1② 兜底 B、7② 长对话删除、9③ >500 拒绝、10⑤ 周复盘：前四项由 V2-7a/V2-5/V2-9/V2-7b 直接解决并在 V2-11 e2e 覆盖；周复盘随复盘任务上线后 |

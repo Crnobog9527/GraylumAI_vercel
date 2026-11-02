@@ -25,6 +25,8 @@ BEGIN
     OR EXISTS(SELECT 1 FROM runtime_executions e JOIN runtime_sessions s ON s.id=e.session_id
      WHERE e.billing_run_id=r.id AND e.actor_id=p_profile_id
      AND (e.state NOT IN ('completed','cancelled') OR s.active_execution=e.id)))) INTO pending;
+  -- CORE-PATH-V2 V2-12: an open or unsettled core-path turn is money in flight too.
+  pending:=pending OR EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_profile_id AND (t.state<>'closed' OR t.settlement='pending'));
   IF p_code='BILLING_CLEAR' AND pending THEN
    RAISE EXCEPTION 'ERASURE_BILLING_STILL_PENDING';
   END IF;

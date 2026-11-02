@@ -15,19 +15,19 @@ const h = vi.hoisted(() => ({ request: [] as Array<{ context: Record<string, unk
   chatQuote: vi.fn(), module: vi.fn() }));
 vi.mock('./chat', async original => ({ ...await original<object>(), readCoreConfig: () => ({ enabled: true, decisionUpperUsd: '0.01',
   stopLoss: { limitUsd: 100, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 } }) }));
-vi.mock('../runtime/admissionConfiguration', async original => ({ ...await original<object>(),
+vi.mock('./admission/admissionConfiguration', async original => ({ ...await original<object>(),
   readAdmissionConfiguration: async () => ({ data: [{ key: 'billing_payg_start_thresholds', value: { version: 'v1',
     thresholds: [{ model: 'anthropic/claude-sonnet-5.5', purpose: 'ordinary', credits: 12 }, { model: 'anthropic/claude-sonnet-5.5', purpose: 'skill', credits: 99 }] } }],
     error: null }), readAdmissionModule: h.module }));
-vi.mock('../runtime/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
-vi.mock('../runtime/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
+vi.mock('./settings/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
+vi.mock('./admission/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
 vi.mock('./reportSkill', async original => ({ ...await original<object>(), reportSkillText: async () => 'SKILL TEXT' }));
-vi.mock('../runtime/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
-vi.mock('../runtime/providerRequest', async original => ({ ...await original<object>(),
+vi.mock('./agent/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
+vi.mock('./provider/providerRequest', async original => ({ ...await original<object>(),
   openRouterRequestBody: (_body: string, options: { context: Record<string, unknown>; phase: string }) => { h.request.push(options); return 'REQUEST'; } }));
-vi.mock('../bill2/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: () => ({}) }));
+vi.mock('./provider/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: () => ({}) }));
 vi.mock('./call', async original => ({ ...await original<object>(), modelCall: h.call }));
-vi.mock('../runtime/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
+vi.mock('./agent/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
 vi.mock('./quote', async original => ({ ...await original<object>(), chatQuote: h.chatQuote }));
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

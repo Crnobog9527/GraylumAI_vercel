@@ -25,6 +25,7 @@ import { trpc } from '@/trpc/client';
 import { clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor } from './send-input';
 import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from './turn-notices';
 import { workRowsOf } from './turn-work-rows';
+import { useStoredSendCleanup } from './use-stored-send-cleanup';
 import { useTurnChat } from './use-turn-chat';
 import { displayReply, requestedVideoChoice, shownRuntimeInput, type VideoChoice } from './work-input';
 import {
@@ -87,6 +88,10 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
     setInput(value);
     localStorage.setItem(inputKey, value);
   };
+  useStoredSendCleanup(sessionId, chat, input, next => {
+    setInput(next);
+    localStorage.setItem(inputKey, next);
+  });
   const chooseSkill = (id: string) => {
     setSkillId(id);
     if (id) localStorage.setItem('opc-runtime-skill:' + sessionId, id);
@@ -307,6 +312,7 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
     <WorkspaceFrame
       area="chat"
       activeWorkItemId={workItemId}
+      turnBusy={chat.creditsBusy}
       rightOpen={panelOpen}
       onToggleRight={() => setPanelOpen(open => !open)}
       right={

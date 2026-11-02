@@ -12,6 +12,9 @@ DECLARE stops integer; t turns;
 BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF p_refund_all THEN RETURN 0; END IF;
+  -- A voice generation is paid for only when a usable profile was saved and kept (the old rule: no profile, no charge, whatever the
+  -- call cost; an erased one, its version deleted meanwhile, saved nothing).
+  IF t.kind = 'voice' AND (NOT p_delivered OR p_kind <> 'completed') THEN RETURN 0; END IF;
   -- An erased review or compare (its report, source or conversation deleted) pays nothing, also for an answer that arrived after:
   -- its body was never kept, so nothing was delivered.
   IF t.kind IN ('jury','compare') AND p_kind = 'erased' THEN RETURN 0; END IF;

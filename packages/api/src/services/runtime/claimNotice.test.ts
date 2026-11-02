@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
-import { claimFailure, BillingClaimRejection } from '../bill2/claimFailure';
+import { claimFailure, BillingClaimRejection } from '../turn/provider/claimFailure';
 import { billingClaimNotice, withClaimNotice } from './claimNotice';
 
 it.each([

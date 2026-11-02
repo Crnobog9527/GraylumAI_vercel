@@ -19,6 +19,10 @@ BEGIN
  SELECT * INTO w FROM opc_topic_workspaces WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  IF w.draft_id IS NULL THEN RAISE EXCEPTION 'OPC_TOPIC_UNBOUND';END IF;
  IF NOT opc_source_allowed(p_actor_id,w.source_version_id) THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_REVOKED';END IF;
+ -- A turn opens only on the latest formal positioning: a workspace behind it is read-only until the user starts again on the new version.
+ IF (SELECT v.version FROM artifact_versions v WHERE v.id=w.source_version_id)
+  IS DISTINCT FROM (SELECT ap.current_version FROM artifact_projects ap WHERE ap.id=d.project_id) THEN
+  RAISE EXCEPTION 'OPC_TOPIC_SOURCE_CHANGED';END IF;
  -- The same request admitted on the old path (a page switched mid-request): never a second charge. V2-12 drops this.
  IF EXISTS(SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id AND e.request_id=p_request_id) THEN
   RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
@@ -30,5 +34,6 @@ BEGIN
   RAISE EXCEPTION 'OPC_TOPIC_SKILL_MISSING';END IF;
  RETURN jsonb_build_object('sessionId',w.session_id,'moduleId',w.module_id,'skillId',w.skill_id,'revisionId',w.revision_id,
   'packageHash',r.package_hash,'resources',r.workflow->'planResources','sourceVersionId',w.source_version_id,
+  'historyFloor',w.history_floor_seq,
   'material',jsonb_build_object('sessionId',m.session_id,'revision',m.revision,'hash',m.content_hash,'content',m.content));
 END $function$;

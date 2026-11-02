@@ -11,11 +11,9 @@ AS $function$
 DECLARE source jsonb;request jsonb;prior artifact_requests;result jsonb;pid uuid;rid uuid;spec jsonb;generated text;parts jsonb;
 BEGIN
  -- 0324 archived business guard
- -- CORE-PATH-V2 V2-7a: a report turn has no old execution; its conversation names the business the same way.
+ -- CORE-PATH-V2 V2-12 B6: p_execution_id is the report turn's request id; its conversation names the business.
  IF p_action IS DISTINCT FROM 'read' THEN PERFORM opc_assert_business_writable(p_actor_id,
-  CASE WHEN EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=p_execution_id AND x.actor_id=p_actor_id)
-   THEN jsonb_build_object('executionId',p_execution_id)
-   ELSE jsonb_build_object('sessionId',report_turn_source(p_actor_id,p_execution_id)->>'sessionId') END); END IF;
+  jsonb_build_object('sessionId',report_turn_source(p_actor_id,p_execution_id)->>'sessionId')); END IF;
 
  IF p_action IS NULL OR p_action NOT IN ('read','save','finalize') THEN RAISE EXCEPTION 'REPORT_BODY_INVALID'; END IF;
  source:=report_document_source(p_actor_id,p_execution_id);
@@ -35,11 +33,8 @@ BEGIN
   END IF;
   IF source->>'finalized'='true' OR source->>'state'<>'draft' THEN RAISE EXCEPTION 'REPORT_ALREADY_FINALIZED'; END IF;
   IF (source->>'revision')::bigint<>p_expected_revision THEN RAISE EXCEPTION 'REPORT_VERSION_CONFLICT'; END IF;
-  SELECT x.payload->'reportGeneration',x.result->>'body' INTO spec,generated FROM runtime_executions x WHERE x.id=p_execution_id;
-  -- CORE-PATH-V2 V2-7a: or the report turn of that request id (report_document_source has already proved it is the actor's).
-  IF spec IS NULL THEN
-   SELECT n->'spec',n->>'body' INTO spec,generated FROM report_turn_source(p_actor_id,p_execution_id) n;
-  END IF;
+  -- The report turn of that request id (report_document_source has already proved it is the actor's).
+  SELECT n->'spec',n->>'body' INTO spec,generated FROM report_turn_source(p_actor_id,p_execution_id) n;
   parts:=report_body_parts(p_body);
   IF p_body IS NULL OR btrim(parts->>'text')='' OR char_length(parts->>'text')>(spec->>'maxCharacters')::integer
    OR parts->>'block' IS DISTINCT FROM report_body_parts(generated)->>'block' THEN

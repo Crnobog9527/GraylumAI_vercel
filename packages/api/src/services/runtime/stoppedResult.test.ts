@@ -2,8 +2,8 @@
 import { expect, it } from 'vitest';
 import { agentTurnBody } from '../../shared/agentTurn';
 import { stoppedResult, type StopProjectionInput } from './stoppedResult';
-import { jsonbBytes, RESULT_BYTE_LIMIT } from './resultCapacity';
-import { NativeTextTransport } from './nativeProgress';
+import { jsonbBytes, RESULT_BYTE_LIMIT } from '../turn/provider/resultCapacity';
+import { NativeTextTransport } from '../turn/agent/nativeProgress';
 const base: StopProjectionInput = {
   executionId: '10000000-0000-4000-8000-000000000001', format: 'plain', body: '中😀\n文', stopAt: 3,
   source: 'assistant', expectedSource: 'assistant', primaryComplete: true, attachedOrganizer: false,

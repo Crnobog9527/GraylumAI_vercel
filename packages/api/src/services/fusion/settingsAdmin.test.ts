@@ -25,8 +25,8 @@ vi.mock('./models', async original => ({ ...(await original<typeof import('./mod
     if (code) throw new Error(code);
     return { outputLimit: skill.limits.get(`${row.id}:${phase}`) ?? _t };
   } }));
-vi.mock('../runtime/stagingPolicy', () => ({ parseStagingPolicy: () => ({ expiresAt: '2030-01-01T00:00:00Z' }) }));
-vi.mock('../runtime/stagingEnvironment', () => ({ stagingRuntimeWindow: () => id(9) }));
+vi.mock('../turn/settings/stagingPolicy', () => ({ parseStagingPolicy: () => ({ expiresAt: '2030-01-01T00:00:00Z' }) }));
+vi.mock('../turn/settings/stagingEnvironment', () => ({ stagingRuntimeWindow: () => id(9) }));
 vi.mock('./settings', async original => ({ ...(await original<typeof import('./settings')>()),
   writeFusionSettings: async (_db: unknown, value: unknown) => { skill.writes++; return value; } }));
 import { fusionModelOptions, saveFusionSettings } from './settingsAdmin';

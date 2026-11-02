@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { scheduleErasureManifestSync } from './offdbManifest';
 import { logger } from '../../lib/logger';
-import { currentRequestTiming } from '../runtime/timing';
+import { currentRequestTiming } from '../turn/provider/timing';
 
 export const contentTarget = z.object({
   kind: z.enum(['answer', 'session', 'artifact', 'content']),

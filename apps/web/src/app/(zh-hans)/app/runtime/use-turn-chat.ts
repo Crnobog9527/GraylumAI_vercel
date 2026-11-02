@@ -7,6 +7,8 @@ import { runTurn } from '@/lib/turn-stream';
 import type { ResearchCall } from '@/components/research/research-model';
 import { workItemFromResearchCall, type WorkItem } from '@/components/chat-display/agent-work-model';
 import { readTurnView } from '@/app/(zh-hans)/app/positioning/[draftId]/mentor-turn-path';
+import { turnBusyForCredits } from '@/components/opc/credits-label';
+import { announceTurnClosed, onTurnClosed } from './turn-closed-channel';
 import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
 
 /*
@@ -15,6 +17,8 @@ import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
  * back, every READ_MS, for as long as the server says a turn is active, and never sends again.
  */
 const READ_MS = 3000;
+/** Another conversation's turn may still hold its freeze when this one closes: the balance is read once more after this, and on return to the window. */
+const REREAD_MS = 8000;
 export type LiveTurn = { text: string; trimmed: string[]; rows: WorkItem[] };
 
 /** A research call's row, replacing the row of the same call (running, then its end state). */
@@ -52,6 +56,21 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   const [notice, setNotice] = useState<{ code: string; text: string } | null>(null);
   const alive = useRef(true), settled = useRef(onSettled);
   useEffect(() => { settled.current = onSettled; }, [onSettled]);
+  // Not a poll: one more read a while after a close, one when another tab says its turn closed, and one whenever the user comes back to the window.
+  const reread = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settle = useCallback(() => {
+    settled.current();
+    announceTurnClosed();
+    if (reread.current) clearTimeout(reread.current);
+    reread.current = setTimeout(() => settled.current(), REREAD_MS);
+  }, []);
+  useEffect(() => {
+    const back = () => { if (document.visibilityState !== 'hidden') settled.current(); };
+    const stop = onTurnClosed(() => settled.current());
+    window.addEventListener('focus', back); document.addEventListener('visibilitychange', back);
+    return () => { stop(); window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', back);
+      if (reread.current) clearTimeout(reread.current); };
+  }, []);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const read = useCallback(async () => {
@@ -79,18 +98,18 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     const now = closedTurnSeen(lastClosed.current, view);
     if (!now.changed) return;
     lastClosed.current = now.id;
-    settled.current();
-  }, [view, closedNow.id]);
+    settle();
+  }, [view, closedNow.id, settle]);
   // A pause waits for the user; nothing moves it, so it is not read again.
   const active = Boolean(view?.activeTurn) && view?.activeTurn?.pauseReason !== 'waiting_credits' && !sending;
   useEffect(() => {
     if (!active) return;
     let wasActive = true;
     const timer = setInterval(() => { void read().then(next => {
-      if (next && !next.activeTurn && wasActive) { wasActive = false; settled.current(); }
+      if (next && !next.activeTurn && wasActive) { wasActive = false; settle(); }
     }); }, READ_MS);
     return () => clearInterval(timer);
-  }, [active, read]);
+  }, [active, read, settle]);
 
   const run = useCallback(async (body: Record<string, unknown>): Promise<SendAnswer> => {
     setSending(true); setNotice(null); setLive({ text: '', trimmed: [], rows: [] });
@@ -107,7 +126,7 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     }, { fetch: fetcher });
     await read();
     if (!alive.current) return 'unknown';
-    setSending(false); setLive(null); settled.current();
+    setSending(false); setLive(null); settle();
     if (outcome.state === 'lost') return 'unknown';
     const code = outcome.state === 'refused' ? outcome.code : outcome.last.type === 'error' ? outcome.last.code : null;
     if (!code || code === 'TURN_REQUEST_REPLAYED') return 'done';
@@ -116,13 +135,16 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     // An error event carries its turn only once one is open: without it (or refused before the stream) nothing was stored or charged,
     // whatever the code says, so the words and any claim made for them are given back instead of waiting to be verified.
     return kept || neverOpened(outcome) ? 'kept' : 'unknown';
-  }, [sessionId, fetcher, read]);
+  }, [sessionId, fetcher, read, settle]);
   const send = useCallback((text: string, requestId: string, chosen: TurnChoice = {}) =>
     run({ kind: 'chat', requestId, text, ...chosen }), [run]);
   /** 继续 after a pause for credits: the server has what was asked, so any device can press it. */
   const resume = useCallback(() => view?.activeTurn ? run({ kind: 'resume', requestId: crypto.randomUUID(), resumeOf: view.activeTurn.turnId })
     : Promise.resolve<SendAnswer>('done'), [run, view?.activeTurn]);
 
-  return { view, viewFailed, live, sending, notice, send, resume, paused: view?.activeTurn?.pauseReason === 'waiting_credits', reload: read,
-    busy: sending || Boolean(view?.activeTurn), clearNotice: () => setNotice(null) };
+  const busy = sending || Boolean(view?.activeTurn), paused = view?.activeTurn?.pauseReason === 'waiting_credits';
+  // What the sidebar balance is told: the conversation's own state, so every page on this hook keeps the turn's freeze out of the balance.
+  const creditsBusy = turnBusyForCredits({ viewRead: view !== null, viewFailed, busy, paused });
+  return { view, viewFailed, live, sending, notice, send, resume, paused, reload: read,
+    busy, creditsBusy, clearNotice: () => setNotice(null) };
 }

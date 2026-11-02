@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import { openRouterAdapter } from '../turn/provider/openRouterAdapter';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
 import { FUSION_INPUT_CAP, assertSnapshotSize, fusionRequestBody } from './request';
 
 const providerLimits = { providerSlug: 'anthropic', contextTokens: 200000, promptUsdPerMillion: '3', completionUsdPerMillion: '15', requestUsd: '0' };

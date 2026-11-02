@@ -361,5 +361,31 @@ try{
   }finally{await c.query('rollback');}
   report.checks.push('index use: message hide, body delete, voice lookup and the erasure proof count use indexes');
  }
+ // 13. V2-12 B10: the erasure job's money check reads the account's core-path turns (BILL2 runs are not read any more).
+ {
+  const a=await account();await turn(a);
+  const other=await account();const otherOpen=await open(other);await begin(other,otherOpen.turnId);await record(other,otherOpen.turnId);
+  const running=await open(a);await begin(a,running.turnId);await record(a,running.turnId);
+  await c.query("update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1",[a.actor]);
+  await c.query("insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now()-interval '1 minute')",[a.actor,randomUUID()]);
+  const work=await one('select account_erasure_work_batch($1) v',[a.actor]);
+  assert.deepEqual([work.runs,work.nextRunId],[[],null],'no run list any more');
+  assert.equal(work.financialPending,1,'the open turn is money in flight');
+  const batch=await one('select account_erasure_financial_batch(20,$1) v',[a.actor]);
+  assert.deepEqual([batch.items,batch.nextRunId,batch.selectedActorId,batch.totalPending,batch.reasons],[[],null,null,1,{BILLING_PENDING:1}]);
+  assert.equal((await one('select account_erasure_preview($1) v',[a.actor])).runsInFlight,1);
+  // The other (live) account's open turn is not counted for this erasure, and a scheduled pass sees only deleted accounts.
+  assert.equal((await one('select account_erasure_financial_batch(20,null) v')).totalPending>=1,true);
+  assert.match(await refusal(c.query("select account_erasure_note_error($1,'BILLING_CLEAR')",[a.actor])),/ERASURE_BILLING_STILL_PENDING/,'cannot be cleared while a turn is open');
+  await c.query("select account_erasure_note_error($1,'BILLING_PENDING')",[a.actor]);
+  assert.equal(await one('select stage v from account_erasure_requests where profile_id=$1',[a.actor]),'billing_pending');
+  assert.match(await refusal(c.query('select account_erasure_financial_batch(20,$1)',[other.actor])),/ERASURE_BATCH_ACTOR_DENIED/,'a live account is not a subject');
+  assert.equal((await close(a,running.turnId)).closeKind,'erased');
+  assert.equal((await one('select account_erasure_work_batch($1) v',[a.actor])).financialPending,0,'settled once the turn closed');
+  assert.equal((await one('select account_erasure_financial_batch(20,$1) v',[a.actor])).totalPending,0);
+  await c.query("select account_erasure_note_error($1,'BILLING_CLEAR')",[a.actor]);
+  assert.equal(await one('select stage v from account_erasure_requests where profile_id=$1',[a.actor]),'closed');
+  report.checks.push('account erasure money: the work batch lists no runs and counts the open turn as pending; the financial batch reports it (items empty); the preview counts it in flight; BILLING_CLEAR is refused until it closes, then restores the stage; a live account is no subject');
+ }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

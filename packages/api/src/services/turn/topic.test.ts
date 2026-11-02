@@ -13,17 +13,17 @@ import { handleTopicTurn, type TopicHttpDeps } from './topicHttp';
 const h = vi.hoisted(() => ({ call: vi.fn(), runtime: vi.fn(), chatQuote: vi.fn(), module: vi.fn() }));
 vi.mock('./chat', async original => ({ ...await original<object>(), readCoreConfig: () => ({ enabled: true, decisionUpperUsd: '0.01',
   stopLoss: { limitUsd: 100, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 } }) }));
-vi.mock('../runtime/admissionConfiguration', async original => ({ ...await original<object>(),
+vi.mock('./admission/admissionConfiguration', async original => ({ ...await original<object>(),
   readAdmissionConfiguration: async () => ({ data: [{ key: 'billing_payg_start_thresholds', value: { version: 'v1',
     thresholds: [{ model: 'anthropic/claude-sonnet-5.5', purpose: 'ordinary', credits: 12 }] } }], error: null }), readAdmissionModule: h.module }));
-vi.mock('../runtime/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
-vi.mock('../runtime/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
+vi.mock('./settings/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
+vi.mock('./admission/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
 vi.mock('./reportSkill', async original => ({ ...await original<object>(), reportSkillText: async () => 'SKILL TEXT' }));
-vi.mock('../runtime/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
-vi.mock('../runtime/providerRequest', async original => ({ ...await original<object>(), openRouterRequestBody: () => 'REQUEST' }));
-vi.mock('../bill2/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: () => ({}) }));
+vi.mock('./agent/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
+vi.mock('./provider/providerRequest', async original => ({ ...await original<object>(), openRouterRequestBody: () => 'REQUEST' }));
+vi.mock('./provider/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: () => ({}) }));
 vi.mock('./call', async original => ({ ...await original<object>(), modelCall: h.call }));
-vi.mock('../runtime/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
+vi.mock('./agent/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
 vi.mock('./quote', async original => ({ ...await original<object>(), chatQuote: h.chatQuote }));
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -63,7 +63,7 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
   it('reads the workspace first, opens a metered chat turn in its conversation and saves both messages', async () => {
     const t = harness(); runs('Topics');
     await runTopicTurn(t.deps, input, t.emit);
-    expect(t.names()).toEqual(['topic_turn_source', 'turn_open', 'turn_close']);
+    expect(t.names()).toEqual(['topic_turn_source', 'turn_open', 'topic_turn_source', 'turn_close']);
     expect(t.args('topic_turn_source')).toEqual({ p_actor_id: 'actor', p_draft_id: input.draftId, p_request_id: input.requestId });
     expect(t.args('turn_open')).toMatchObject({ p_kind: 'chat', p_session_id: workspace.sessionId, p_request_id: input.requestId,
       p_policy: { topic: true, minCredits: 12, gCredits: 180, limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 } } });
@@ -72,6 +72,39 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'completed', p_delivered: true,
       p_messages: [{ role: 'user', content: input.text }, { role: 'assistant', content: 'Topics' }] });
     expect(t.events.at(-1)).toMatchObject({ type: 'result', turnId: 9, body: 'Topics', chargedCredits: 7 });
+  });
+
+  it('sends the model only the messages after the re-bind floor, keeping the old ones out of its context', async () => {
+    const item = (seq: number, role: 'user' | 'assistant', content: string) => ({ seq, role, content, contentHash: 'a'.repeat(64) });
+    const t = harness({ source: { data: { ...workspace, historyFloor: 2 } },
+      open: () => ({ turnId: 9, state: 'running', replay: false, reservedCredits: 30, reservedUsd: 0.3, positioning: { positioned: true, refusals24h: 0 },
+        history: [item(1, 'user', 'OLD_ASK'), item(2, 'assistant', 'OLD_CANDIDATES'), item(3, 'user', 'NEW_ASK'), item(4, 'assistant', 'NEW_REPLY')] }) });
+    runs('Topics');
+    await runTopicTurn(t.deps, input, t.emit);
+    const sent = JSON.stringify(await (h.runtime.mock.calls[0]![0] as { session: { getItems: () => Promise<unknown[]> } }).session.getItems());
+    expect(sent).toContain('NEW_ASK'); expect(sent).toContain('NEW_REPLY');
+    expect(sent).not.toContain('OLD_ASK'); expect(sent).not.toContain('OLD_CANDIDATES');
+  });
+
+  it('gives the turn up, sending nothing, when the positioning was re-bound between the first read and the open', async () => {
+    const t = harness({ source: { data: workspace } });
+    let reads = 0;
+    const respond = (t.deps.clients.write as unknown as { rpc: (n: string, a: Record<string, unknown>) => Promise<unknown> }).rpc;
+    (t.deps.clients.write as unknown as { rpc: unknown }).rpc = async (name: string, args: Record<string, unknown>) =>
+      name === 'topic_turn_source' && ++reads === 2 ? { data: { ...workspace, sourceVersionId: uuid(8) }, error: null } : respond(name, args);
+    runs('Topics');
+    await runTopicTurn(t.deps, input, t.emit);
+    expect(h.runtime).not.toHaveBeenCalled();
+    expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'failed', p_delivered: false, p_refund_all: true });
+    expect(t.events.at(-1)).toMatchObject({ type: 'error', code: 'OPC_TOPIC_SOURCE_CHANGED' });
+  });
+
+  it('without a floor (a workspace never re-bound) sends the whole visible history as before', async () => {
+    const t = harness({ open: () => ({ turnId: 9, state: 'running', replay: false, reservedCredits: 30, reservedUsd: 0.3,
+      positioning: { positioned: true, refusals24h: 0 }, history: [{ seq: 1, role: 'user', content: 'FIRST_ASK', contentHash: 'a'.repeat(64) }] }) });
+    runs('Topics');
+    await runTopicTurn(t.deps, input, t.emit);
+    expect(JSON.stringify(await (h.runtime.mock.calls[0]![0] as { session: { getItems: () => Promise<unknown[]> } }).session.getItems())).toContain('FIRST_ASK');
   });
 
   it('builds the prompt from the Skill, the workspace rules and the frozen material, without tools or a positioning check', async () => {

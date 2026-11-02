@@ -31,6 +31,14 @@ export default function PositioningHome() {
   const compareChoice=composerChoices.data?.skills.find(x=>skillId?x.moduleId===skillId:x.moduleId===composerChoices.data?.defaultSkill?.moduleId);
   const compareSkill={ready:Boolean(composerChoices.data&&(!(skillId||composerChoices.data.defaultSkill)||compareChoice)),
     skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};
+  // The marketplace opens the start page with ?module=<id>: that Skill is chosen once the choices confirm it can run
+  // (never swapped for another).
+  const wantedModule=useRef<string|null>(null);
+  useEffect(()=>{
+    if(wantedModule.current===null)wantedModule.current=new URL(location.href).searchParams.get('module')??'';
+    const wanted=wantedModule.current;
+    if(wanted&&composerChoices.data?.skills.some(x=>x.moduleId===wanted)){setSkillId(wanted);wantedModule.current='';}
+  },[composerChoices.data]);
   const catalog = trpc.opc.catalog.useQuery(undefined,{retry:false}),
     list = trpc.opc.list.useQuery(undefined,{retry:false}),
     library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),

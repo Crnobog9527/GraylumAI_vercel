@@ -10,8 +10,8 @@ import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {runtimeExecutor} from './execute';
 import {streamOriginalExecution,type ExecutionStreamEvent} from './executionStream';
 import {executionVisibility} from './libraryVisibility';
-import {openRouterAdapter} from '../bill2/openRouterAdapter';
-import {createRuntimeBudget} from './budget';
+import {openRouterAdapter} from '../turn/provider/openRouterAdapter';
+import {createRuntimeBudget} from '../turn/settings/budget';
 
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable'))throw new Error('isolated runner required');

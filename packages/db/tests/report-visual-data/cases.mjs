@@ -12,10 +12,10 @@ const withData=(t=text(),b=block())=>`${t}\n\n${b}`;
 const stored=(body,extra={})=>({dataVersion:1,validatedAt:'2026-10-20T00:00:00.000Z',dropped:[],textEdited:[],
  data:{summary:'VISUAL_PRIVATE_DATA'},bodyHash:hash(body),...extra});
 
-/** A completed report execution whose generated body is `body`. */
+/** A completed report turn whose generated body is `body`. */
 async function seedBody(db,body) {
  const f=await seed(db);
- await db.query(`UPDATE runtime_executions SET result=jsonb_set(result,'{body}',to_jsonb($2::text)) WHERE id=$1`,[f.execution,body]);
+ await db.query(`UPDATE session_messages SET content=$2,content_hash=encode(sha256(convert_to($2,'utf8')),'hex') WHERE session_id=$1`,[f.session,body]);
  return f;
 }
 const doc=(db,f,action,{request=randomUUID(),revision=0,body=null,bodyHash=null,data=null}={})=>
@@ -88,6 +88,24 @@ export async function runCases({db,report,before0300}) {
  await assert.rejects(rpc(db,'report_document_data_source',foreign.actor,f.execution),/REPORT_EXECUTION_REQUIRED/);
  report.checks.push('data bound to the finalized body hash and the current benchmark table; stale ones refused atomically; replay stable; owner-only');
 
+ // 3b. A report written with benchmark numbers: the table hash is recomputed from the report turn's conversation (the turn path
+ // has no old execution row; an empty-table hash used to be compared against the frozen one and refused every such 定稿).
+ const bench=await seedBody(db,withData());
+ const benchTurn=(await db.query('SELECT id FROM turns WHERE actor_id=$1 AND request_id=$2',[bench.actor,bench.execution])).rows[0].id;
+ const fetched=(await db.query(`INSERT INTO research_account_fetches(actor_id,session_id,platform,account,account_key,state)
+  VALUES($1,$2::uuid,'tiktok','benchmark_a',encode(sha256(convert_to($2::uuid::text||':benchmark_a','utf8')),'hex'),'succeeded') RETURNING id`,
+  [bench.actor,bench.session])).rows[0].id;
+ await db.query(`INSERT INTO research_benchmarks(fetch_id,actor_id,session_id,turn_actor_id,turn_id,platform,account,followers,
+  posts_analyzed,last_published_at,category,qualified,refs,operation_ids,missing,fetched_at)
+  VALUES($1,$2,$3,$2,$4,'tiktok','benchmark_a',50000,20,now(),'imitable',true,'{}','{}','{}',now())`,[fetched,bench.actor,bench.session,benchTurn]);
+ const benchTable=(await db.query('SELECT research_benchmark_table($1,$2)->>\'hash\' v',[bench.actor,bench.session])).rows[0].v;
+ assert.notEqual(benchTable,emptyTable,'the fixture table is not empty');
+ await assert.rejects(doc(db,bench,'finalize',{revision:0,bodyHash:hash(withData()),data:stored(withData(),{benchmarkHash:emptyTable})}),
+  /REPORT_DATA_INVALID/,'the hash of an empty table is not the current table');
+ const benchDone=await doc(db,bench,'finalize',{revision:0,bodyHash:hash(withData()),data:stored(withData(),{benchmarkHash:benchTable})});
+ assert.equal(benchDone.finalized,true);
+ report.checks.push('a turn-path report finalizes with numbers from its conversation\'s benchmark table; a stale hash is refused');
+
  const plain=await seed(db);
  const old=await doc(db,plain,'finalize',{bodyHash:hash('## One\nOriginal confirmed facts.\n## Two\nKnown limitations.')});
  assert.equal(Object.hasOwn((await versionReport(db,old.versionId)).generatedReport,'data'),false);
@@ -106,9 +124,10 @@ export async function runCases({db,report,before0300}) {
  const closedFinal=await doc(db,closed,'finalize',{bodyHash:hash(withData()),data:stored(withData())});
  await closeAccount(db,closed.base);
  await rpc(db,'account_erasure_scrub_content',closed.actor);
+ await rpc(db,'account_erasure_scrub_turns',closed.actor);
  await rpc(db,'account_erasure_scrub_runtime',closed.actor);
  assert.equal(await versionReport(db,closedFinal.versionId),null);
- assert.doesNotMatch(JSON.stringify((await db.query('SELECT result FROM runtime_executions WHERE id=$1',[closed.execution])).rows),
+ assert.doesNotMatch(JSON.stringify((await db.query('SELECT content FROM session_messages WHERE session_id=$1',[closed.session])).rows),
   /VISUAL_PRIVATE/);
  report.checks.push('content deletion and account erasure clear the stored data, the block and the edit copies');
 }

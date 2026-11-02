@@ -14,7 +14,7 @@ const temp=await mkdtemp(join(tmpdir(),'graylum-r9-private-regression-'));
 try{
  const entry=join(temp,'regression.cjs');
  await build({stdin:{contents:`export {observationEvent,identityFor} from './scripts/payg-profile/executor';
- export {openRouterAdapter} from './packages/api/src/services/bill2/openRouterAdapter';
+ export {openRouterAdapter} from './packages/api/src/services/turn/provider/openRouterAdapter';
  export {recordSamples} from './scripts/payg-profile/sampling';`,resolveDir:process.cwd()},
  outfile:entry,bundle:true,platform:'node',format:'cjs'});
  const {observationEvent,identityFor,openRouterAdapter,recordSamples}=req(entry);

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash, randomUUID } from 'node:crypto';
-import { decimal } from '../../bill2/decimal';
-import type { ToolCallPolicy } from '../../bill2/toolBilling';
+import { decimal } from '../provider/decimal';
+import type { ToolCallPolicy } from '../provider/toolBilling';
 import { canonicalAccount, profileLinksIn, type CanonicalAccount } from '../../research/tools/accountLinks';
 import { toolEnvelope, type ToolEnvelope } from '../../research/tools/envelope';
 import { admitSubcalls, researchToolArgs, subcallNeed, withoutNulls, type ResearchToolArgs } from '../../research/tools/schemas';
@@ -11,8 +11,8 @@ import type { ResearchItem, SocialKind, SocialPlatform } from '../../research/ve
 import type { SupplierRequest } from '../../research/runtime/subcall';
 import { callDisplay } from '../../research/runtime/toolContext';
 import type { ResearchTurnEvent } from '../../../shared/researchTurn';
-import { INVALID_RESEARCH_ARGUMENTS, fastSearchOnly, researchToolDescription, researchToolParameters } from '../../runtime/researchRuntimeTool';
-import type { RuntimeTool } from '../../runtime/runner';
+import { INVALID_RESEARCH_ARGUMENTS, fastSearchOnly, researchToolDescription, researchToolParameters } from '../research/researchRuntimeTool';
+import type { RuntimeTool } from '../agent/runner';
 import type { TurnReplay } from '../resume';
 import { paidToolCall, subcallCredits, ToolLimitReached, type SubcallLedger } from './meter';
 import { routePolicy, supplierSubcall, type SupplierDeps } from './suppliers';
@@ -136,7 +136,7 @@ async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planne
     input.onCall?.emit({ type: 'research_call', ...line, state: 'running' });
     const result0 = stored?.[i];
     const receipt = result0 ? { result: result0, costUsd: null, multiplier: '1' } as SupplierReceipt : await supplierSubcall(input.suppliers, step.request);
-    ledger.add(receipt);
+    ledger.add(result0 ? receipt : { ...receipt, display: callDisplay(step.request) });
     const result = receipt.result;
     const answered = ['ok', 'partial'].includes(result.outcome) ? 'succeeded' as const : 'failed' as const;
     input.onCall?.emit({ type: 'research_call', ...line, ...result.outcome === 'not_sent' ? { state: 'failed' as const } : {

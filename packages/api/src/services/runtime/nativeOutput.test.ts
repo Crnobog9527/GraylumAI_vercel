@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest';
 import { questionToolCardSchema } from '../../shared/agentTurn';
 import { finalizeNativeSummary, prepareNativePrimary, stepEnvelope, nativeVisible } from './nativeOutput';
-import { jsonbBytes, RESULT_BYTE_LIMIT, SUMMARY_RESERVE, META_RESERVE } from './resultCapacity';
+import { jsonbBytes, RESULT_BYTE_LIMIT, SUMMARY_RESERVE, META_RESERVE } from '../turn/provider/resultCapacity';
 const executionId = '10000000-0000-4000-8000-000000000001';
 const options = { envelopeOrder: 'message-first-v1', length: false, attachedOrganizer: false, executionId };
 const saved = (body: string, metadata: Record<string, unknown>) => ({
@@ -109,7 +109,7 @@ it('projects preserved plain text and empty messages without exposing malformed 
 });
 
 it.each(['\n',' ','\u3000'])('step normal completion trims %j without a final replacement',async whitespace=>{
- const {NativeProgressProjection}=await import('./nativeProgress');
+ const {NativeProgressProjection}=await import('../turn/agent/nativeProgress');
  for(const content of [whitespace+'Hello world','Hello world'+whitespace]){
   const raw=JSON.stringify({message:content,inputKind:'answer'});
   const p=new NativeProgressProjection({mode:'message-first'});

@@ -10,7 +10,7 @@ const {build} = require(viteRequire.resolve('esbuild'));
 const directory = await mkdtemp(join(tmpdir(), 'graylum-profile-validation-'));
 try {
   const modulePath = join(directory, 'schema.cjs');
-  await build({entryPoints: [resolve('packages/api/src/services/runtime/paygHostPolicy.ts')],
+  await build({entryPoints: [resolve('packages/api/src/services/turn/admission/paygHostPolicy.ts')],
     outfile: modulePath, bundle: true, platform: 'node', format: 'cjs'});
   const {paygHostSettings} = require(modulePath);
   const file = process.argv[2] ?? 'docs/launch/evidence/payg-profile-final.json';

@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
-import {hostTurnContextSchema,hostTurnInput,HOST_TURN_DATA_NOTICE_V1,projectHostTurnItem} from './hostTurn';
-import {projectSupersededScopeItem,runtimeScopeInput} from './context';
-import {applyPromptCache,freezeHostPromptCache,HISTORY_MARKER_RESERVE_BYTES,HISTORY_CACHE_OVERHEAD_BYTES} from './promptCache';
-import {openRouterRequestBody,type RequestContext} from './providerRequest';
-import {frozenCallPolicy} from '../bill2/service';
-import {openRouterBound} from '../bill2/openRouterPolicy';
+import {hostTurnContextSchema,hostTurnInput,HOST_TURN_DATA_NOTICE_V1,projectHostTurnItem} from '../turn/agent/hostTurn';
+import {projectSupersededScopeItem,runtimeScopeInput} from '../turn/agent/context';
+import {applyPromptCache,freezeHostPromptCache,HISTORY_MARKER_RESERVE_BYTES,HISTORY_CACHE_OVERHEAD_BYTES} from '../turn/provider/promptCache';
+import {openRouterRequestBody,type RequestContext} from '../turn/provider/providerRequest';
+import {frozenCallPolicy} from '../turn/provider/service';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import golden from './promptCacheGolden.json';
 const host={stepId:'s1',opening:false,checklist:[]};
 const material=(revision=1)=>({sessionId:'session',revision,hash:'hash'+revision,content:{facts:'private material'}});

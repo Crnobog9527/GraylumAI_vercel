@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { TransportObservation } from '../bill2/fixtureAdapter';
+import type { TransportObservation } from './provider/fixtureAdapter';
 import type { RecoveryItem } from './db';
 import { RECOVERY_BATCH, recoverTurns, type TurnRecoveryDeps } from './recovery';
 

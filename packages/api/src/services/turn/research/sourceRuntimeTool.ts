@@ -1,0 +1,74 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {z} from 'zod';
+import type {RuntimeTool} from '../agent/runner';
+import type {ToolRpc} from '../skills/skillFileExecution';
+import type {runtimeContext} from '../agent/runtimeContext';
+import {LIBRARY_READ_GUIDE,LIBRARY_SEARCH_GUIDE,libraryQuery,readLibrary} from './libraryReadTool';
+import {filterPostEntries} from '../agent/workspacePosts';
+import {WORKSPACE_STRATEGY_GUIDE} from '../agent/primaryInstructions';
+/** Fixed tool descriptions; admission sizes them with the executor's own formula. */
+function sourceToolDescription(name: string, workspaceContext?: boolean, library?: boolean, retrieval?: boolean): string {
+ const base=name==='search'?'Search current sources through the explicitly enabled local search adapter.':
+  workspaceContext?'Read owned business context only when relevant. Omit query to list positioning/account/topic metadata; '+
+   'pass an exact returned id to read that source. Read-only; no internet access.':'Read the selected source only.';
+ // LIB-4: admission sizes the same text, so pass `library` there when the execution freezes references (4b).
+ return name==='read_source'&&(library||retrieval)?base+LIBRARY_READ_GUIDE+(retrieval?LIBRARY_SEARCH_GUIDE:''):base;
+}
+export function sourceToolBytes(names: string[], workspaceContext?: boolean, library?: boolean, retrieval?: boolean): number {
+ return Buffer.byteLength(JSON.stringify(names.map(name=>({name,description:sourceToolDescription(name,workspaceContext,library,retrieval)}))));
+}
+export function sourceRuntimeTool(options: {
+ name: string; context: z.infer<typeof runtimeContext>; args: {p_execution_id: string};
+ ownerRpc: ToolRpc; budget: {assertCanStart: () => void}; execution: {live?: boolean; sessionId: string};
+ exchange: (request: string, phase: string) => Promise<{usage?: {toolResult?: unknown}}>;
+}): RuntimeTool {
+ const {name,context,args,ownerRpc,budget,execution,exchange}=options;
+ return {name,description:sourceToolDescription(name,context.workspaceContext,Boolean(context.libraryReferences?.length),context.libraryRetrieval===true),
+    execute:async(arguments_,callId)=>{
+     budget.assertCanStart();
+     const toolArgs={...args,p_call_id:callId,p_name:name,p_arguments:arguments_};
+     const saved=await ownerRpc<{execute:boolean;result:unknown}>('runtime_tool',{...toolArgs,p_action:'claim'});
+     if(name==='read_source'){
+      const query=libraryQuery(arguments_,context);
+      if(query!==null)return readLibrary({ownerRpc,executionId:args.p_execution_id,query,saved,toolArgs});
+      if(context.workspaceContext){
+       if(saved.result!==null){
+        if((saved.result as {kind?:string}).kind==='my_posts'&&!await ownerRpc<boolean>(
+         'runtime_workspace_posts_visible',{p_result:saved.result}))return JSON.stringify({kind:'unavailable',reason:'source_deleted'});
+        return JSON.stringify(saved.result);
+       }
+       const query=typeof arguments_.query==='string'?arguments_.query:'';
+       // No strategy guide frozen = no room was reserved for a strategy result: it is not read, nothing is appended.
+       const source=query.startsWith('my_posts')&&!context.ownPosts
+        ?{kind:'unavailable',dependencies:[]}
+        :query.startsWith('strategy_report:')&&context.workspaceGuide!==WORKSPACE_STRATEGY_GUIDE
+        ?{kind:'unavailable',dependencies:[]}
+        :await ownerRpc<unknown>('runtime_workspace_source',{p_session_id:execution.sessionId,p_query:query});
+       const committed=await ownerRpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',
+        p_result:filterPostEntries(source,Boolean(context.ownPosts))});
+       return JSON.stringify(committed.result);
+      }
+      if(!context.sources?.length||Object.keys(arguments_).length)throw new Error('RUNTIME_SOURCE_ARGUMENT_DENIED');
+      const source=await ownerRpc<unknown>('runtime_source',{p_source:context.sources[0]});
+      if(saved.result!==null){
+       if(JSON.stringify(saved.result)!==JSON.stringify(source))throw new Error('RUNTIME_SOURCE_CHANGED');
+       return JSON.stringify(source);
+      }
+      await ownerRpc('runtime_tool',{...toolArgs,p_action:'complete',p_result:filterPostEntries(source,Boolean(context.ownPosts))});
+      return JSON.stringify(source);
+     }
+     // Increment/replay the original billed tool phase even when the result was saved.
+     // This keeps following model call identities deterministic after SDK replay.
+     const envelope=await exchange(JSON.stringify({tool:name,arguments:arguments_}), 'tool:'+name);
+     if(saved.result!==null)return JSON.stringify(saved.result);
+     if(!execution.live&&!saved.execute&& !envelope.usage?.toolResult)throw new Error('RUNTIME_TOOL_PENDING');
+     const result=z.object({body:z.string().max(20000),sources:z.array(z.object({
+      id:z.string(),version:z.string(),status:z.literal('available'),
+     }).strict()).max(32)}).strict().parse(envelope.usage?.toolResult);
+     const committed=await ownerRpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',p_result:result});
+     // Use the persisted JSON representation on first execution as on replay.
+     // JSONB reorders object keys; serializing the pre-write object would alter
+     // the next SDK request bytes after recovery despite identical tool data.
+     return JSON.stringify(committed.result);
+    }};
+}

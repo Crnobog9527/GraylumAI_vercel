@@ -67,18 +67,18 @@
   "devDependencies": {
     "dotenv": "^18.0.9",
     "drizzle-kit": "^0.31.11",
-    "pg": "^8.20.0",
-    "turbo": "^2.9.14"
+    "pg": "^8.23.1",
+    "turbo": "^2.11.10"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
-    "@tanstack/react-query": "^5.104.5",
-    "@trpc/client": "^11.19.0",
-    "@trpc/next": "^11.19.0",
-    "@trpc/react-query": "^11.19.0",
-    "@trpc/server": "^11.19.0",
-    "@upstash/ratelimit": "^2.0.8",
-    "@upstash/redis": "^1.39.0",
+    "@tanstack/react-query": "^5.105.2",
+    "@trpc/client": "^11.22.1",
+    "@trpc/next": "^11.22.1",
+    "@trpc/react-query": "^11.22.1",
+    "@trpc/server": "^11.22.1",
+    "@upstash/ratelimit": "^2.2.0",
+    "@upstash/redis": "^1.41.0",
     "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.9",
     "zod": "^4.6.6"

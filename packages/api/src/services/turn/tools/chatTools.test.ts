@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from '../../runtime/libraryAdmission';
-import { SKILL_LOAD_REFUSED } from '../../runtime/loadSkillTool';
-import { LIBRARY_RETRIEVAL_INSTRUCTIONS, WORKSPACE_CONTEXT_INSTRUCTIONS, WORKSPACE_STRATEGY_INSTRUCTIONS } from '../../runtime/primaryInstructions';
-import { OWN_POSTS_INSTRUCTIONS } from '../../runtime/workspacePosts';
+import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from '../admission/libraryAdmission';
+import { SKILL_LOAD_REFUSED } from '../skills/loadSkillTool';
+import { LIBRARY_RETRIEVAL_INSTRUCTIONS, WORKSPACE_CONTEXT_INSTRUCTIONS, WORKSPACE_STRATEGY_INSTRUCTIONS } from '../agent/primaryInstructions';
+import { OWN_POSTS_INSTRUCTIONS } from '../agent/workspacePosts';
 import { prepareChatTools, type ChatToolDeps } from './chatTools';
 import { freeSlots, researchSettings } from './__tests__/fixtures';
 

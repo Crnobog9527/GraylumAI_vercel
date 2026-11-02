@@ -23,7 +23,7 @@ const mock = `
     const s = window.server;
     if (name==='get') return {config:s.limits,source:'configured',enforcement:{admission:true,calls:true,pause:true}};
     if (name==='stopLossConfig') return {config:s.stopLoss,revision:s.revision,source:s.source};
-    if (name==='stopLossStatus') return {config:s.stopLoss,revision:s.revision,source:s.source,usage:s.usage,basis:'settled_provider_usd',
+    if (name==='stopLossStatus') return {config:s.stopLoss,revision:s.revision,source:s.source,usage:s.usage,basis:'closed_turn_known_usd',
       timezone:'UTC',externalNotifications:'email'};
     if (name==='stopLossAlerts') return {alerts:s.alerts,limit:100};
   };
@@ -175,10 +175,13 @@ it('shows friendly errors for a failed toggle and a forbidden read', async () =>
 }, 20000);
 
 it('shows empty limits as not blocking, saves the full config and reads it back', async () => {
-  const { page, errors } = await open({ usage: { utcDate: '2026-10-11', userUsd: '0', siteUsd: '3.456789' } });
+  const { page, errors } = await open({ usage: { utcDate: '2026-10-11', userUsd: '0', siteUsd: '3.456789', reservedUsd: '0.5' } });
   try {
     const usage = page.getByTestId('stop-loss-usage');
     await browserExpect(usage).toContainText('今天（UTC 2026-10-11）全站实际成本：$3.4567');
+    // A reservation is shown apart and never counted as spent.
+    await browserExpect(usage).toContainText('另有预占（还没花出去，按调用上限暂扣）：$0.5');
+    await browserExpect(usage).toContainText('不计入上面的实际成本');
     await browserExpect(usage).toContainText('全站每日上限：未设置，不拦截。');
     await browserExpect(page.getByText('设置来源：默认（全部未设置）')).toBeVisible();
     const save = page.getByRole('button', { name: '保存止损设置' });

@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { TransportObservation } from '../bill2/fixtureAdapter';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { openRouterEvidence, type OpenRouterIdentity } from '../bill2/openRouterEvidence';
+import type { TransportObservation } from './provider/fixtureAdapter';
+import { openRouterAdapter } from './provider/openRouterAdapter';
+import { openRouterEvidence, type OpenRouterIdentity } from './provider/openRouterEvidence';
 import { nominalActualFallback, nominalCost, nominalPricing } from '../../shared/nominalPricing';
 import { logSwallowed, swallow } from '../../lib/swallow';
 import { ceil12 } from './call';

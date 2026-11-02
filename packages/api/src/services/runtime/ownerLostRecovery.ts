@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import type { BillingRpc } from '../bill2/service';
+import type { BillingRpc } from '../turn/provider/service';
 import { logger } from '../../lib/logger';
-import type { RuntimeBudget } from './budget';
+import type { RuntimeBudget } from '../turn/settings/budget';
 import type { AutomaticRecoverySummary } from './automaticRecovery';
 
 export const OWNER_LOST_WINDOW_MS = 24 * 3600 * 1000;

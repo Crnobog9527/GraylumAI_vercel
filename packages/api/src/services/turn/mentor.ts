@@ -3,23 +3,23 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { ASK_QUESTION_TOOL, INVALID_REPLY_NOTICE } from '../../shared/agentTurn';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { agentTurnResult } from '../runtime/agentTurnResult';
-import { assertRuntimeRequestCapacity } from '../runtime/context';
+import { openRouterAdapter } from './provider/openRouterAdapter';
+import { agentTurnResult } from './agent/agentTurnResult';
+import { assertRuntimeRequestCapacity } from './agent/context';
 import { cardSources, groundedCardFallback, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse,
-  type CardSources } from '../runtime/groundedCard';
-import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
-import { freezeSharedPromptCache } from '../runtime/promptCache';
-import { replySettingInstructions } from '../runtime/replyLanguage';
-import { runRuntime } from '../runtime/runner';
-import { RESEARCH_REFRESH_NOTE } from '../runtime/hostTurn';
+  type CardSources } from './agent/groundedCard';
+import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from './provider/providerRequest';
+import { freezeSharedPromptCache } from './provider/promptCache';
+import { replySettingInstructions } from './agent/replyLanguage';
+import { runRuntime } from './agent/runner';
+import { RESEARCH_REFRESH_NOTE } from './agent/hostTurn';
 import { withResearchRefresh } from '../opc/researchRefresh';
 import { canonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
-import { carriesAccountLink, requiresBenchmarkResearch, researchInputHost } from '../runtime/researchAdmissionGuard';
-import { researchContextFrom, withResearchContext } from '../runtime/researchHostContext';
-import { skillFileToolBytes } from '../runtime/skillFile';
-import type { PricingDeps } from '../runtime/pricingAdmission';
+import { carriesAccountLink, requiresBenchmarkResearch, researchInputHost } from './research/researchAdmissionGuard';
+import { researchContextFrom, withResearchContext } from './research/researchHostContext';
+import { skillFileToolBytes } from './skills/skillFile';
+import type { PricingDeps } from './admission/pricingAdmission';
 import { modelCall, TurnStop } from './call';
 import { CLOSES, GATE_CODES, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
@@ -189,7 +189,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       host = withResearchRefresh(host, { refreshId: input.researchRefreshId, platform: flow.refresh.platform as SocialPlatform, account,
         note: RESEARCH_REFRESH_NOTE });
     }
-    if (flow && flowRaw && (benchmarkStep || linkTurn || input.researchRefreshId)) {
+    // A card the coach proposed on any step is confirmed on the page: its confirmation id must reach the next turn whatever the
+    // step is, or the coach says it never got the confirmation and proposes the card again (round 10, a finished positioning).
+    const hasCards = Array.isArray(flowRaw?.cards) && flowRaw.cards.length > 0;
+    if (flow && flowRaw && (benchmarkStep || linkTurn || input.researchRefreshId || hasCards)) {
       const known = flow.cardDiscoveries;
       host = withResearchContext(researchInputHost(host, true)!, await researchContextFrom({ cards: flowRaw.cards, benchmarks: flowRaw.benchmarks,
         shortfall: flowRaw.shortfall ?? null, discoveryOf: async card => known[card] ?? null }));

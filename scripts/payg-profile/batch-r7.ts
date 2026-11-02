@@ -4,7 +4,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {createR6Plan} from './batch-r6';
 import {createSamplePlan,priceSchema} from './sampling';
 import historicalPrices from './plan-prices-vertex-2026-10-05.json';
-import {decimal} from '../../packages/api/src/services/bill2/decimal';
+import {decimal} from '../../packages/api/src/services/turn/provider/decimal';
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 const money=(n:bigint)=>`${n/1000000000000n}.${String(n%1000000000000n).padStart(12,'0')}`;
 export const R7_ID='payg-profile-20261006-r7';

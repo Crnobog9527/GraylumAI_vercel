@@ -17,7 +17,7 @@ vi.mock('./fusionCalls', async original => ({ ...await original<object>(), fusio
 vi.mock('./compareQuote', () => ({ priceCompareColumns: m.price }));
 vi.mock('./fusionQuote', () => ({ fusionQuote: m.quote }));
 vi.mock('../models/openRouterKey', () => ({ readOpenRouterKeyOrUnset: m.key }));
-vi.mock('../runtime/admissionConfiguration', () => ({ readAdmissionConfiguration: m.configuration }));
+vi.mock('./admission/admissionConfiguration', () => ({ readAdmissionConfiguration: m.configuration }));
 import { handleCompareStart, handleTurnEstimate, type FusionHttpDeps } from './fusionHttp';
 import { CORE_PATH_SETTING } from './chat';
 
@@ -77,6 +77,16 @@ describe('POST /api/turn/estimate', () => {
     expect(await status(compareBody)).toEqual([403, { error: 'POSITIONING_REQUIRED' }]);
     m.configuration.mockResolvedValueOnce({ data: [{ key: CORE_PATH_SETTING, value: { enabled: false, stopLoss: {} } }], error: null });
     expect(await status(compareBody)).toEqual([503, { error: 'TURN_CORE_DISABLED' }]);
+  });
+
+  it('a non-Gold account is refused with 403 and nothing created, for a compare and for a jury (Gold-only entries)', async () => {
+    for (const code of ['TURN_MEMBERSHIP_REQUIRED', 'FUSION_MEMBERSHIP_REQUIRED']) {
+      m.allowed.mockRejectedValueOnce(new Error(code));
+      expect(await status(compareBody)).toEqual([403, { error: code }]);
+      m.estimate.mockRejectedValueOnce(new Error(code));
+      expect(await status({ kind: 'jury', draftId: SESSION, sourceVersionId: REQUEST })).toEqual([403, { error: code }]);
+    }
+    expect(m.compare).not.toHaveBeenCalled();
   });
 
   it('a jury answers with the price and the hold of its start', async () => {

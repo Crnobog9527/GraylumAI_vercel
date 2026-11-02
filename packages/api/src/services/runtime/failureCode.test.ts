@@ -2,9 +2,9 @@
 import {expect,it,vi} from 'vitest';
 import {runtimeExecutor} from './execute';
 import {cancelWithCode} from './executorRpc';
-import {createRuntimeBudget} from './budget';
+import {createRuntimeBudget} from '../turn/settings/budget';
 const billing=vi.hoisted(()=>({claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}));
-vi.mock('../bill2/service',async original=>({...await original<typeof import('../bill2/service')>(),authoritativeBilling:()=>billing}));
+vi.mock('../turn/provider/service',async original=>({...await original<typeof import('../turn/provider/service')>(),authoritativeBilling:()=>billing}));
 const id='10000000-0000-4000-8000-000000000001';
 
 // 0248: a v1 transport that never started is cancelled with its code in the same transaction.

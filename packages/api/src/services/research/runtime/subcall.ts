@@ -6,9 +6,8 @@
 // without its BILL2 link, and an unsent one is cancelled so a stable discovery cursor can move to a successor.
 // Nothing is sent unless every earlier step passed. A sent request is never resent or switched to another supplier.
 import { createHash } from 'node:crypto';
-import { BillingClaimRejection } from '../../bill2/claimFailure';
-import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy } from '../../bill2/toolBilling';
-import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
+import { BillingClaimRejection } from '../../turn/provider/claimFailure';
+import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy, type ToolClaimPayload } from '../../turn/provider/toolBilling';
 import { callFirecrawl } from '../vendors/firecrawl';
 import { callParallel, type ParallelMode } from '../vendors/parallel';
 import { callTikhub, type TikhubCall } from '../vendors/tikhub';
@@ -30,6 +29,21 @@ export interface VendorCalls {
   firecrawl: typeof callFirecrawl;
 }
 const REAL_VENDORS: VendorCalls = { tikhub: callTikhub, parallel: callParallel, firecrawl: callFirecrawl };
+
+/** The billing steps of one subcall: the turn core's own ledger (turn/tools/benchmark) or the BILL2 steps (bill2/toolSubcall, publish monitor). */
+export type ToolClaim =
+  | { state: 'claimed'; callId: string; token: string }
+  | { state: 'waiting_credits' }
+  /** The same sequence was claimed before (a replay): it must not be sent again from here. */
+  | { state: 'replayed'; callId: string };
+
+export interface ToolSubcallBilling {
+  readonly runId: string;
+  claim(sequence: number, payload: ToolClaimPayload): Promise<ToolClaim>;
+  /** true only when this process may send the request now. */
+  dispatch(callId: string, token: string): Promise<boolean>;
+  record(callId: string, evidence: ReturnType<typeof toolResultEvidence>): Promise<{ accountClosed: boolean; contentDeleted: boolean }>;
+}
 
 /** Host-owned evidence for one subcall: a research operation bound to the answer at creation (0263). */
 export interface EvidencePort {
@@ -64,7 +78,7 @@ export interface SubcallContext {
   /** The supplier request's timeout, read just before it is sent (ARCH-FIX C1: the round's time left); absent, 60s. */
   timeoutMs?: () => number;
   /** CORE-PATH-V2: what came back and its priced receipt, once per subcall that got this far (the turn's own ledger). */
-  onResult?: (result: ResearchCallResult, evidence: ReturnType<typeof toolResultEvidence>) => void;
+  onResult?: (result: ResearchCallResult, evidence: ReturnType<typeof toolResultEvidence>, display?: ResearchCallDisplay) => void;
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
@@ -189,7 +203,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   }
 
   const evidence = toolResultEvidence(claim.callId, policy, result, sha256(JSON.stringify(result)));
-  context.onResult?.(result, evidence);
+  context.onResult?.(result, evidence, context.metadata?.call);
   let storageError: unknown;
   if (researchDispatched !== 'no') {
     try { await context.evidence.finish(operationId, opened.token, OPERATION_STATE[result.outcome], {

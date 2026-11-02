@@ -12,7 +12,7 @@ import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { opcService } from '../opc/service';
-import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
+import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
 import { publishSkillPackage } from '../skills/publication';
 import { CORE_PATH_SETTING } from './chat';
 import { turnClients } from './db';
@@ -31,8 +31,8 @@ import { runTurnRecovery } from './recovery';
 import type { TurnEvent } from './sse';
 
 // The draft is started through the old service (it is not part of a turn); its rate limiter is not under test here.
-vi.mock('../runtime/newWorkGate', async importOriginal => ({
-  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+vi.mock('./admission/newWorkGate', async importOriginal => ({
+  ...await importOriginal<typeof import('./admission/newWorkGate')>(),
   ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 
@@ -665,6 +665,22 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a keyword card is free, reaches the page at clo
   expect((prepared.data as { cards: Array<{ items: string[] }> }).cards[0]!.items).toEqual(['coffee', 'latte art', 'cafe']);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-5c: a confirmed keyword card reaches the next turn on a step that is not the benchmark step', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'propose_keywords', { keywords: ['coffee', 'latte art', 'cafe', 'beans', 'roasting', 'barista'] })
+      : prose('gen-reply-' + n, 'Please pick on the card.'));
+  const out = await turn(f, { text: 'Find benchmarks', transport: first.fn, research: tiktokVendors() });
+  const card = (out.events.find(e => e.type === 'research_card') as { card: { cardId: string } }).card.cardId;
+  const confirmed = await rest().rpc('research_card_confirm', { a: f.actor, p_card: card, p: { selected: ['k0', 'k1', 'k2'] } });
+  const confirmationId = (confirmed.data as { confirmationId: string }).confirmationId;
+  const second = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet) : prose('gen-reply-' + n, 'Searching.'));
+  await turn(f, { text: 'I confirmed the keywords', transport: second.fn, research: tiktokVendors() });
+  expect(JSON.stringify(second.bodies.filter(b => b.model !== ORGANIZER))).toContain(confirmationId);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5c: an unknown supplier result is not the user\'s, and a failed reply keeps what the lookup saved', async () => {
   const f = await setup();
   await researchOn();
@@ -720,6 +736,14 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: pasted links settle in batches, make benchmarks
   expect(rows.map(r => r.account)).toEqual(links);
   expect(rows.every(r => r.turn_id !== null && r.execution_id === null)).toBe(true);
   expect((await db.query('select research_rounds,research_qualified from opc_drafts where draft_id=$1', [f.draftId])).rows[0].research_rounds).toBe(1);
+  // V2-12 B9: the credit record's search list reads the benchmark batches too: one line per subcall, the account from the batch's raw body.
+  // The spend row of the turn that searched (the draft may have had an opening turn before it).
+  const spend = (await db.query(`select ct.id from credit_transactions ct where ct.user_id=$1 and exists(select 1 from turn_calls c
+    where c.actor_id=ct.user_id and c.call_kind='tool' and 'turn:'||c.turn_id||':spend'=ct.idempotency_key)`, [f.actor])).rows[0];
+  const charges = (await db.query('select research_user_tool_charges($1,$2) v', [f.actor, spend.id])).rows[0].v as Array<Record<string, unknown>>;
+  expect(charges.length).toBeGreaterThanOrEqual(2);
+  expect(charges.every(line => line.toolName === 'benchmark_fetch')).toBe(true);
+  expect(charges.map(line => line.query)).toContain('aa_one');
   const again = await rest().rpc('research_benchmark_rows', { a: f.actor, s: f.session });
   expect(JSON.stringify(again.data)).toContain('bb_two');
   // A later turn does not pay again for an account already fetched.
