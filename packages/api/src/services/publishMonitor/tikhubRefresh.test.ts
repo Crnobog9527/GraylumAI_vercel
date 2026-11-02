@@ -69,9 +69,10 @@ describe('closing left-open billed runs', () => {
   it('one run that cannot be settled does not hold back the others, and the failure is still reported', async () => {
     mocks.settleOpen.mockReset();
     mocks.settleOpen.mockRejectedValueOnce(new Error('x')).mockResolvedValue(undefined);
-    const rows = [1, 2, 3].map(n => ({ connectionId: id(n), actorId: id(900), runId: id(500 + n), policies: [] }));
+    const rows = [1, 2, 3].map(n => ({ connectionId: id(n), actorId: id(900), runId: id(500 + n), policies: [], legacy: n === 3 }));
     const database = { rpc: async () => ({ data: rows, error: null }) } as never;
     await expect(closeOrphanRuns(database)).rejects.toThrow('PUBLISH_MONITOR_BILLED_RUNS_UNSETTLED');
     expect(mocks.settleOpen).toHaveBeenCalledTimes(3);
+    expect(mocks.settleOpen.mock.calls.map(call => call[4])).toEqual([false, false, true]);
   });
 });

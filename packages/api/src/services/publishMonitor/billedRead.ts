@@ -24,6 +24,7 @@ import { RESEARCH_THRESHOLDS_KEY } from '../turn/research/researchAdmission';
 import { rowFor } from '../turn/settings/settingsRows';
 import { paidToolCall, ToolLimitReached } from '../turn/tools/meter';
 import { paidToolBounds } from '../turn/tools/plan';
+import { settleLegacyRun } from './billedReadLegacy';
 import type { ToolCallOutcome } from '../turn/tools/types';
 
 /**
@@ -41,7 +42,7 @@ type Env = Record<string, string | undefined>;
 export const PUBLISH_MONITOR_PHASE = 'publish_monitor';
 const RUN_MINUTES = 30;
 const uuid = z.string().uuid();
-const runView = z.object({ runId: uuid.nullable(), policies: z.array(z.unknown()).optional() }).passthrough();
+const runView = z.object({ runId: uuid.nullable(), policies: z.array(z.unknown()).optional(), legacy: z.boolean().optional() }).passthrough();
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
 export class BilledReadError extends Error {
@@ -112,12 +113,16 @@ export async function admitReadTurn(admin: Admin, routes: string[], now = new Da
 }
 
 /**
- * A run left open by a killed process: its live ledger attempts are freed (so their keys can be sent again) and it is marked
- * closed. Its turn is settled by the turn recovery job; nothing is settled from here. Idempotent.
+ * A run left open by a killed process. Its live ledger attempts are freed (so their keys can be sent again) and it is marked
+ * closed. A turn run is settled by the turn recovery job, nothing is settled from here; a legacy run (opened on BILL2 before
+ * reads moved to turns) still gets its saved receipts replayed and its hold released (billedReadLegacy.ts). Idempotent.
  */
-export async function settleLeftOpenRun(admin: Admin, runId: string) {
-  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId }, z.array(z.object({ operationId: uuid }).strict()));
-  for (const row of rows) await rpc(admin, 'publish_monitor_billed_abandon', { p_run_id: runId, p_operation_id: row.operationId }, z.boolean());
+export async function settleLeftOpenRun(admin: Admin, actorId: string, runId: string, policies: unknown[], legacy = false) {
+  if (legacy) { await settleLegacyRun(admin, actorId, runId, policies); return; }
+  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId }, z.array(z.object({ operationId: uuid, live: z.boolean() }).passthrough()));
+  for (const row of rows.filter(item => item.live)) {
+    await rpc(admin, 'publish_monitor_billed_abandon', { p_run_id: runId, p_operation_id: row.operationId }, z.boolean());
+  }
   await rpc(admin, 'publish_monitor_billed_closed', { p_run_id: runId }, z.unknown());
 }
 
@@ -171,7 +176,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
   // A run left open by an earlier attempt of this refresh is freed first (its unanswered requests are sent again).
   const open = await rpc(admin, 'publish_monitor_billed_run', { ...keyArgs(keys), p_run_id: null, p_policies: null }, runView.nullable());
   if (open === null) return { kind: 'stale' };
-  if (open.runId) await settleLeftOpenRun(admin, open.runId);
+  if (open.runId) await settleLeftOpenRun(admin, keys.actorId, open.runId, open.policies ?? [], open.legacy === true);
   const results: Partial<Record<SocialKind, ResearchCallResult>> = {};
   const missing: typeof requests = [];
   for (const item of requests) {
@@ -215,6 +220,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
     return bound === null ? { kind: 'stale' } : { kind: 'unavailable', reason: 'TIKHUB_NOT_ADMITTED' };
   }
   let sequence = 0, seq = 0;
+  let last: ResearchCallResult | undefined;
   const calls = { db, actorId: keys.actorId, turnId: opened.turnId, nextSeq: () => ++seq };
   let outcome: ToolCallOutcome = 'not_sent';
   let stopped: ReadOutcome | null = null;
@@ -224,14 +230,23 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
       for (const item of missing) {
         const context: SubcallContext = { policies: admitted!.policies, phase: PUBLISH_MONITOR_PHASE,
           // The tool row above is the charge; a subcall only reports what came back (turn/tools/benchmark.ts does the same).
+          // The receipt that decides the charge is the FINAL one, recorded after the evidence was stored: when storing the answer
+          // failed the subcall downgrades it (failed_charged / unknown), and then the user is not charged for data that was not kept.
           billing: { runId: TURN_BILLING_RUN, async claim() { return { state: 'claimed', callId: randomUUID(), token: randomUUID() }; },
-            dispatch: async () => true, record: async () => ({ accountClosed: false, contentDeleted: false }) },
+            dispatch: async () => true,
+            async record(_callId, receipt) {
+              const result = last;
+              last = undefined;
+              if (result) ledger.add({ result: receipt.toolOutcome === 'failed_charged' ? { ...result, outcome: 'failed', items: [] } : result,
+                costUsd: receipt.toolOutcome === 'unknown' ? null : receipt.cost,
+                multiplier: admitted!.policies.find(policy => policy.model === `tikhub:${result.route}`)?.multiplier ?? admitted!.multiplier });
+              return { accountClosed: false, contentDeleted: false };
+            } },
           evidence: ledgerPort(admin, keys, requestIdentity(item.request), `tikhub:${item.request.route}`),
           nextSequence: () => ++sequence,
           secrets: deps.secrets ?? platformSecretReader(admin as unknown as BillingRpc),
           rateCounter: deps.rateCounter ?? checkVendorRateLimit, newId: () => randomUUID(),
-          onResult: (result, evidence) => ledger.add({ result, costUsd: evidence.toolOutcome === 'unknown' ? null : evidence.cost,
-            multiplier: admitted!.policies.find(policy => policy.model === `tikhub:${result.route}`)?.multiplier ?? admitted!.multiplier }),
+          onResult: result => { last = result; },
           ...(deps.vendors ? { vendors: deps.vendors } : {}), ...(deps.now ? { now: deps.now } : {}) };
         const sent = await runSubcall(context, item.request);
         if (!sent.sent) return { kind: 'unavailable', reason: sent.stop.slice(0, 64) } as ReadOutcome;

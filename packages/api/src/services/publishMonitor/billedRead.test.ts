@@ -35,7 +35,7 @@ const answer = (route: string): ResearchCallResult => ({ vendor: 'tikhub', route
   truncated: false, fetchedAt: '2026-10-17T00:00:00.000Z' });
 
 function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { runId: string; policies: unknown[] };
-  recovery?: Array<Record<string, unknown>>; openError?: string; begin?: Record<string, unknown> } = {}) {
+  recovery?: Array<Record<string, unknown>>; openError?: string; begin?: Record<string, unknown>; finishFails?: boolean; closed?: boolean } = {}) {
   const calls: Array<[string, Record<string, unknown>]> = [];
   const tomb = { sessionTombstoned: false, accountErasing: false, voiceSourceRevoked: false };
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
@@ -52,9 +52,14 @@ function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { run
       }
       case 'publish_monitor_billed_recovery': return ok(opts.recovery ?? []);
       case 'publish_monitor_billed_abandon': return ok(true);
-      case 'publish_monitor_billed_step': return ok({ ok: true });
+      case 'publish_monitor_billed_step':
+        return opts.finishFails && args.p_step === 'finish' ? { data: null, error: { message: 'storage down' } } : ok({ ok: true });
       case 'publish_monitor_billed_closed': return ok(null);
       case 'publish_monitor_session': return ok(SESSION);
+      case 'bill2_record': return ok({});
+      case 'bill2_read': return ok({ closed: opts.closed === true });
+      case 'bill2_close': return ok({});
+      case 'bill2_finalize': return ok({ state: 'settled' });
       case 'turn_open':
         if (opts.openError) return { data: null, error: { message: opts.openError } };
         return ok({ turnId: 7, state: 'running', replay: false, reservedCredits: 14, reservedUsd: 0.02, history: [] });
@@ -105,13 +110,34 @@ describe('publish-monitor billed TikHub read (a kind=review turn)', () => {
 
   it('frees a run left open by a killed process before reading again: its live attempts are abandoned, nothing is replayed', async () => {
     const a = admin({ open: { runId: RUN, policies: [policy(POSTS)] }, recovery: [
-      { operationId: '00000000-0000-4000-8000-000000000301' }, { operationId: '00000000-0000-4000-8000-000000000305' }] });
+      { operationId: '00000000-0000-4000-8000-000000000301', live: true }, { operationId: '00000000-0000-4000-8000-000000000305', live: true }] });
     await billedTikhubRead(deps(a.db), keys, 'xiaohongshu', XHS);
     expect(of(a, 'publish_monitor_billed_abandon').map(args => args.p_operation_id))
       .toEqual(['00000000-0000-4000-8000-000000000301', '00000000-0000-4000-8000-000000000305']);
     expect(of(a, 'publish_monitor_billed_closed')[0]).toEqual({ p_run_id: RUN });
     const order = names(a.calls);
     expect(order.indexOf('publish_monitor_billed_closed')).toBeLessThan(order.indexOf('turn_open'));
+  });
+
+  it('a run left open on BILL2 before reads moved to turns is still settled there: saved receipts replayed, the rest at zero', async () => {
+    const saved = { toolOutcome: 'delivered', cost: '0.01' };
+    const a = admin({ open: { runId: RUN, policies: [policy(POSTS)], legacy: true } as never, recovery: [
+      { operationId: '00000000-0000-4000-8000-000000000301', callId: '00000000-0000-4000-8000-000000000302',
+        model: `tikhub:${POSTS}`, callPending: true, live: true, receipt: null },
+      { operationId: '00000000-0000-4000-8000-000000000303', callId: '00000000-0000-4000-8000-000000000304',
+        model: `tikhub:${POSTS}`, callPending: true, live: false, receipt: saved }] });
+    await billedTikhubRead(deps(a.db), keys, 'xiaohongshu', XHS);
+    expect(of(a, 'bill2_record').map(args => (args.p_evidence as { toolOutcome: string }).toolOutcome)).toEqual(['unknown', 'delivered']);
+    expect(of(a, 'bill2_close')[0]).toMatchObject({ p_outcome: 'delivered' });
+    expect(of(a, 'bill2_finalize')).toHaveLength(1);
+    expect(of(a, 'publish_monitor_billed_abandon').map(args => args.p_operation_id)).toEqual(['00000000-0000-4000-8000-000000000301']);
+  });
+
+  it('when the answer could not be stored the user is not charged for it: the receipt is the downgraded one, the turn fails', async () => {
+    const a = admin({ finishFails: true }), seen: string[] = [];
+    await expect(billedTikhubRead(deps(a.db, seen), keys, 'xiaohongshu', XHS)).rejects.toThrow();
+    expect(of(a, 'turn_call_record')[0]).toMatchObject({ p_status: 'unusable', p_nominal_usd: null });
+    expect(of(a, 'turn_close')[0]).toMatchObject({ p_close_kind: 'failed', p_delivered: false });
   });
 
   it('a balance that cannot start the read opens nothing and charges nothing', async () => {

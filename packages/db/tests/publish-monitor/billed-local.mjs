@@ -148,7 +148,8 @@ try {
   await assert.rejects(bind(randomUUID()), /PUBLISH_MONITOR_INPUT_INVALID/, 'a run id must be a review turn of this account');
   const otherTurn = await openTurn(stranger);
   await assert.rejects(bind(otherTurn.request), /PUBLISH_MONITOR_INPUT_INVALID/, 'another account\'s turn cannot be bound');
-  assert.equal((await bind(turn2.request)).runId, turn2.request);
+  const bound = await bind(turn2.request);
+  assert.deepEqual([bound.runId, bound.legacy], [turn2.request, false]);
   assert.equal((await bind(randomUUID())).runId, turn2.request, 'the open run wins');
   const op = randomUUID(), token = randomUUID(), key = 'f'.repeat(64);
   const step = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys,
@@ -166,7 +167,7 @@ try {
   await step('open', { op: op3, key: 'd'.repeat(64) });
   const recovery = await svc('SELECT publish_monitor_billed_recovery($1) v', [turn2.request]);
   assert.deepEqual(recovery.map(x => x.operationId).sort(), [op, op2, op3].sort(), 'every live attempt, nothing else');
-  assert.deepEqual(recovery.map(x => Object.keys(x)), recovery.map(() => ['operationId']), 'no receipt is replayed: the turn recovery settles the turn');
+  assert.ok(recovery.every(x => x.callPending === false && x.receipt === null && x.live === true), 'a turn run replays no receipt: the turn recovery settles the turn');
   // Abandoning is bound to the run, needs no live claim, and frees the key.
   assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [randomUUID(), op3]), false, 'another run cannot touch it');
   assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [turn2.request, op3]), true);
@@ -189,6 +190,25 @@ try {
   await svc('SELECT publish_monitor_billed_closed($1) v', [turn2.request]);
   assert.ok(!(await svc('SELECT publish_monitor_billed_orphans(50) v')).some(o => o.runId === turn2.request));
   report.checks.push('a settled refresh opens nothing new; its still-open run is listed for closing once the turn is closed, until marked closed');
+
+  // A run opened on BILL2 before 0463 (its run id is a bill2_runs id, no turn) keeps its old recovery: the sent call without a receipt is
+  // listed as pending and the run is found as a legacy orphan, so its hold can still be released.
+  const lg = await member();
+  const lrun0 = await rpc(c, 'bill2_prepare', lg.a, randomUUID(), await payload(lg.a));
+  const lcall = await rpc(c, 'bill2_claim', lg.a, lrun0.id, 1, { provider: 'tikhub', account: 'tikhub-main', model: ROUTE,
+    protocol: 'research-tool-v1', phase: 'publish_monitor', requestHash: 'c'.repeat(64), automaticRetry: false, hiddenTools: false,
+    lookupSupported: false, upperUsd: '0.01', billingUnit: { modelId: toolPolicy.modelId, multiplier: '6' }, toolPricing: pricing });
+  assert.equal((await rpc(c, 'bill2_dispatch', lg.a, lrun0.id, lcall.id, lcall.dispatchToken)).dispatch, true);
+  const lop0 = randomUUID();
+  await c.query('INSERT INTO social_billed_runs(run_id,connection_id,refresh_id,actor_id,policies) VALUES($1,$2,$3,$4,$5)',
+    [lrun0.id, lg.conn, randomUUID(), lg.a, JSON.stringify([toolPolicy])]);
+  await c.query(`INSERT INTO social_billed_reads(id,actor_id,connection_id,refresh_id,request_key,model,run_id,call_id,state,token)
+    SELECT $1,actor_id,connection_id,refresh_id,$2,$3,run_id,$4,'dispatched',$5 FROM social_billed_runs WHERE run_id=$6`,
+  [lop0, 'c'.repeat(64), ROUTE, lcall.id, randomUUID(), lrun0.id]);
+  const legacyRows = await svc('SELECT publish_monitor_billed_recovery($1) v', [lrun0.id]);
+  assert.deepEqual(legacyRows.map(x => [x.callId, x.callPending, x.live]), [[lcall.id, true, true]]);
+  assert.equal((await svc('SELECT publish_monitor_billed_orphans(50) v')).find(o => o.runId === lrun0.id)?.legacy, true);
+  report.checks.push('a run opened on BILL2 before 0463 keeps its recovery rows and is listed as a legacy orphan');
 
   // Insufficient credits: settled for today without any hold.
   const claim2 = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v'));

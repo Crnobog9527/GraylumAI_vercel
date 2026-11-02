@@ -21,5 +21,6 @@ BEGIN
   VALUES(p_run_id,c.id,p_refresh_id,c.actor_id,p_policies) RETURNING * INTO b;
  END IF;
  RETURN CASE WHEN b.run_id IS NULL THEN jsonb_build_object('runId',NULL)
-  ELSE jsonb_build_object('runId',b.run_id,'policies',b.policies) END;
+  ELSE jsonb_build_object('runId',b.run_id,'policies',b.policies,
+   'legacy',NOT EXISTS(SELECT 1 FROM turns WHERE request_id=b.run_id AND actor_id=b.actor_id)) END;
 END $function$;
