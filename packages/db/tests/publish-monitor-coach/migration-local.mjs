@@ -252,7 +252,7 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalog = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const built = await v(catalog);
-  // 0457, then the publish-monitor migrations after it (0463, 0467 redefine its claim and step): the pair replays to the same catalog.
+  // 0457, then the publish-monitor migrations after it (0463, 0473 redefine its claim and step): the pair replays to the same catalog.
   for (const path of [MIGRATION, ...laterRedefinitions('0457')]) await c.query(read(path));
   assert.deepEqual(await v(catalog), built);
   await c.query('BEGIN');
