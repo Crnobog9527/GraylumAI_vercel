@@ -47,11 +47,6 @@ BEGIN
   IF r.state <> 'published' OR spec IS NULL OR NOT (r.steps ? v_step) THEN
     RAISE EXCEPTION 'TURN_PLAN_STEP_DENIED' USING ERRCODE='42501';
   END IF;
-  -- The same request paid for on the old path while both paths exist (a page switched mid-request): never a second charge.
-  -- V2-12 drops this with the old table.
-  IF EXISTS (SELECT 1 FROM runtime_executions e WHERE e.actor_id = p_actor_id AND e.request_id = (plan->>'requestId')::uuid) THEN
-    RAISE EXCEPTION 'TURN_PLAN_REQUEST_CONFLICT' USING ERRCODE='22023';
-  END IF;
   -- turn_open checks a repeated request's session and kind; what it asks for is checked here (as the old input hash).
   IF EXISTS (SELECT 1 FROM turns x WHERE x.actor_id = p_actor_id AND x.request_id = (plan->>'requestId')::uuid
       AND (x.kind <> 'plan' OR x.policy#>>'{plan,inputHash}' IS DISTINCT FROM plan->>'inputHash'

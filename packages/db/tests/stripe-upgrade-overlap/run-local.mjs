@@ -20,6 +20,13 @@ const laterMigrations=number=>readdirSync(resolve(root,'packages/db/migrations')
 // 0385 also patches claim_daily_checkin, which 0396 retired; a replay on the finished database skips that one patch.
 const replayable=file=>{
   const text=read('packages/db/migrations/'+file);
+  // 0334 patches the organizer-pending gate of runtime_admit and opc_step_material; V2-12 R1b removed that gate from opc_step_material
+  // (the organizer belongs to the old path), so a replay on the finished database patches runtime_admit only.
+  if(file.startsWith('0334_')) {
+    const gone=",\n  'public.opc_step_material(uuid,uuid,uuid,text,text,text)']";
+    assert.ok(text.includes(gone),'0334 still lists opc_step_material in its patch');
+    return text.replace(gone,']');
+  }
   if(!file.startsWith('0385_'))return text;
   const checkinPatch=/SELECT pg_temp\.e3_patch\('public\.claim_daily_checkin\(uuid\)',[\s\S]*?\$r\$\);\n/;
   assert.ok(checkinPatch.test(text),'0385 still carries the check-in patch this replay removes');
@@ -217,6 +224,10 @@ try {
   sql(read('packages/db/migrations/0459_core_path_v2_voice.sql')); // V2-12 B7 rewrites turn_open, which 0449 replays (and turn_close, turn_tombstones, turn_user_charge, turn_call_record)
   sql(read('packages/db/migrations/0476_core_path_v2_topic_rebind.sql')); // the topic re-bind rewrites topic_turn_source, opc_topic_consent and opc_topic_original, which 0449 replays (and artifact_immutable)
   sql(read('packages/db/migrations/0480_core_path_v2_content_erasure_no_old_settle.sql')); // V2-12 R2b rewrites content_erasure_confirm, which 0450 replays
+  sql(read('packages/db/migrations/0483_core_path_v2_turn_functions_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0484_core_path_v2_report_research_topic_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0485_core_path_v2_opc_functions_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0486_core_path_v2_opc_work_capture_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

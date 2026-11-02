@@ -11,12 +11,11 @@ AS $function$
  SELECT jsonb_build_object(
   -- hasProfile: a profile was really saved, so the run was delivered; otherwise the user must not be charged.
   'generations',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'versionId',id,'runId',billing_run_id,
-    'status',status,'hasProfile',profile IS NOT NULL,'recovery',voice_run_recovery(billing_run_id))),'[]')
+    'status',status,'hasProfile',profile IS NOT NULL)),'[]')
     FROM (SELECT * FROM voice_profile_versions
     WHERE (status='generating' OR (billing_run_id IS NOT NULL AND NOT billing_settled))
      AND updated_at<clock_timestamp()-interval '30 minutes' ORDER BY updated_at LIMIT p_limit) g),
-  'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id,'outcome',outcome,
-    'recovery',voice_run_recovery(run_id))),'[]')
+  'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id,'outcome',outcome)),'[]')
    FROM (SELECT * FROM voice_billing_scrubs WHERE checked_at<clock_timestamp()-interval '30 minutes'
     ORDER BY checked_at LIMIT p_limit) s));
 $function$;

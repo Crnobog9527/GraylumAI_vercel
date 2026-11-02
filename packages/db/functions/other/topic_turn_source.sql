@@ -23,9 +23,6 @@ BEGIN
  IF (SELECT v.version FROM artifact_versions v WHERE v.id=w.source_version_id)
   IS DISTINCT FROM (SELECT ap.current_version FROM artifact_projects ap WHERE ap.id=d.project_id) THEN
   RAISE EXCEPTION 'OPC_TOPIC_SOURCE_CHANGED';END IF;
- -- The same request admitted on the old path (a page switched mid-request): never a second charge. V2-12 drops this.
- IF EXISTS(SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id AND e.request_id=p_request_id) THEN
-  RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
  SELECT * INTO m FROM runtime_scope_material WHERE session_id=w.session_id AND revision=w.material_revision;
  IF m.session_id IS NULL OR m.revoked THEN RAISE EXCEPTION 'OPC_TOPIC_MATERIAL_MISSING';END IF;
  SELECT * INTO r FROM artifact_rounds WHERE id=(SELECT round_id FROM artifact_versions WHERE id=w.source_version_id);

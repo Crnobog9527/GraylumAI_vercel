@@ -9,5 +9,4 @@ CREATE OR REPLACE FUNCTION public.opc_data_source_turn(a uuid, eid uuid)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
  SELECT t.id FROM turns t WHERE t.actor_id=a AND t.request_id=eid AND t.kind='chat'
-  AND NOT EXISTS(SELECT 1 FROM runtime_executions e WHERE e.id=eid AND e.actor_id=a)
 $function$;
