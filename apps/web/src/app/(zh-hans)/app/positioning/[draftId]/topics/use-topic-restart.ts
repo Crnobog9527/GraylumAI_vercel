@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useRef } from 'react';
-import { REBIND_OPENING_INPUT, rebindOpeningRequestId, topicFailureMessage } from './topic-notices';
+import { REBIND_OPENING_INPUT, rebindFailureMessage, rebindOpeningRequestId, topicFailureMessage } from './topic-notices';
 
 type Request = { draftId: string; requestId: string; input: string };
 type Bound = { sourceVersionId?: string; sourceAllowed?: boolean } | undefined;
@@ -30,6 +30,6 @@ export function useTopicRestart(o: { draftId: string; stale: boolean; sessionId:
       if (accepted.sourceVersionId !== o.current) throw new Error('OPC_TOPIC_SOURCE_CHANGED');
       if (stale) wanted.current = true; // the workspace was behind: after it re-binds, the first message goes out once
       await o.refetch();
-    } catch (cause) { o.setError(topicFailureMessage(cause)); }
+    } catch (cause) { o.setError(stale ? rebindFailureMessage(cause) : topicFailureMessage(cause)); }
   };
 }

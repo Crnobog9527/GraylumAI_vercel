@@ -41,6 +41,15 @@ export const STALE_WORKSPACE_NOTICE =
 /** The first message after the user starts the topic work again on the updated positioning (the old conversation is not sent to the model). */
 export const REBIND_OPENING_INPUT = '定位已更新。请只根据最新的已确认定位和选题方法，提出第一周选题候选；区分已确认事实与建议，缺少必要信息时先问我。';
 
+/** The server refused to start again on the latest positioning (e.g. the topic method was updated since): say so, never a vague error. */
+export const REBIND_REFUSED_NOTICE = '暂时不能用最新定位重新开始选题（选题方法已有更新）。原对话和计划仍可查看，没有任何改动；请联系我们处理。';
+
+/** What the page shows when starting again on the latest positioning failed. */
+export function rebindFailureMessage(cause: unknown) {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return /OPC_TOPIC_SOURCE_CHANGED|OPC_TOPIC_SKILL_MISSING|OPC_TOPIC_SOURCE_DENIED/.test(message) ? REBIND_REFUSED_NOTICE : topicFailureMessage(cause);
+}
+
 /** One request id per draft and new positioning version, kept in this browser, so a double click or a refresh never opens twice. */
 export function rebindOpeningRequestId(storage: Pick<Storage, 'getItem' | 'setItem'>, draftId: string, versionId: string, fresh: () => string) {
   const key = 'opc-topic-rebind-opening:' + draftId + ':' + versionId;

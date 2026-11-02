@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { rebindOpeningRequestId, topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
+import { REBIND_REFUSED_NOTICE, rebindFailureMessage, rebindOpeningRequestId, topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
 import { DEFINITE_REFUSAL_NOTICE } from '@/app/(zh-hans)/app/runtime/gate-notices';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
@@ -68,4 +68,10 @@ it('keeps one opening request id per draft and new positioning version, so a dou
   expect(rebindOpeningRequestId(storage, 'd', 'v2', fresh)).toBe('id-1');
   expect(rebindOpeningRequestId(storage, 'd', 'v2', fresh)).toBe('id-1');
   expect(rebindOpeningRequestId(storage, 'd', 'v3', fresh)).toBe('id-2');
+});
+
+it('says plainly when starting again on the latest positioning is refused, never the old "silent switch" text', () => {
+  for (const code of ['OPC_TOPIC_SOURCE_CHANGED', 'OPC_TOPIC_SKILL_MISSING', 'OPC_TOPIC_SOURCE_DENIED'])
+    expect(rebindFailureMessage(new Error(code))).toBe(REBIND_REFUSED_NOTICE);
+  expect(rebindFailureMessage(new Error('OPC_BUSINESS_ARCHIVED'))).toBe(topicFailureMessage(new Error('OPC_BUSINESS_ARCHIVED')));
 });

@@ -198,6 +198,13 @@ export async function topicRebindCases(t){
  assert.match(await refusal(c.query("update opc_topic_workspaces set request_id=gen_random_uuid(),source_hash='x' where draft_id=$1",[src.draft])),/immutable/,'marker, one allowed and one other column');
  await c.query('rollback');
  assert.match(await refuseUpdate('delete from opc_topic_workspaces where draft_id=$1'),/immutable/,'delete');
+ // The marker opens nothing else: the same marker on rows of other immutable tables changes nothing there.
+ for(const [table,id,set] of [['artifact_versions',version2,"report_hash=repeat('0',64)"],['artifact_rounds',round2,"state='draft'"]]){
+  await c.query('begin');
+  await c.query("select set_config('graylum.topic_rebind',$1||':'||txid_current(),true)",[src.draft]);
+  assert.match(await refusal(c.query(`update ${table} set ${set} where id=$1`,[id])),/immutable/,table+' stays immutable under the marker');
+  await c.query('rollback');
+ }
  assert.equal((await workspace()).source_version_id,src.version,'untouched');
  // 2. A turn opens only on the latest version: the workspace behind it is read-only.
  assert.match(await refusal(read(a,src)),/OPC_TOPIC_SOURCE_CHANGED/);
