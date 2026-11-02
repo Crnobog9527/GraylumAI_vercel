@@ -69,6 +69,8 @@ for (const state of ['draft', 'published'] as const) for (const reportGeneration
       await page.route('**/*', async route => {
         const path = new URL(route.request().url()).pathname;
         if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
+      if (path === '/api/turn/report') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ report: null }) });
+        if (path === '/api/turn/report') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ report: null }) });
         const result = path.endsWith('/opc.read') ? read(state, reportGeneration) : path.endsWith('/runtime.view') ? { executions: [] }
           : path.endsWith('/opc.businesses') ? [] : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
             : path.endsWith('/opc.capturePending') ? { processed: [] } : path.endsWith('/runtime.reportAvailable') ? { enabled: true, priceCredits: 500 } : {};
@@ -85,7 +87,7 @@ for (const state of ['draft', 'published'] as const) for (const reportGeneration
   }, 20000);
 }
 
-// #1079/#1003: a jury adoption published a new round; the report execution stays in the first round (reportLatest: none).
+// #1079/#1003: a jury adoption published a new round; the report execution stays in the first round (the turn read finds none).
 it('opens the saved formal report of an adopted version with its chapter list, never 「生成完整报告」', async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors: string[] = [];
@@ -97,7 +99,7 @@ it('opens the saved formal report of an adopted version with its chapter list, n
       const path = new URL(route.request().url()).pathname;
       if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
       const result = path.endsWith('/opc.read') ? adopted : path.endsWith('/runtime.view') ? { executions: [] }
-        : path.endsWith('/runtime.reportLatest') ? { executionId: null } : path.endsWith('/runtime.reportAvailable') ? { enabled: true, priceCredits: 500 }
+        : path.endsWith('/runtime.reportAvailable') ? { enabled: true, priceCredits: 500 }
           : path.endsWith('/opc.businesses') ? [] : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
             : path.endsWith('/opc.capturePending') ? { processed: [] } : {};
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
