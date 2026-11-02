@@ -12,10 +12,7 @@ DECLARE projection jsonb;turns jsonb;
 BEGIN
  projection:=opc_query_before_mentor_basis(p_actor_id,p_draft_id);
  IF p_draft_id IS NULL THEN RETURN projection;END IF;
- SELECT coalesce(jsonb_agg(t.value||jsonb_build_object('informationVersion',
-   e.payload->'scopeMaterial'->'content'->'work'->'steps'->(t.value->>'stepId')->'version') ORDER BY t.ord),'[]')
- INTO turns FROM jsonb_array_elements(projection->'turns') WITH ORDINALITY t(value,ord)
- LEFT JOIN runtime_executions e ON e.id=(t.value->>'executionId')::uuid
-   AND e.actor_id=p_actor_id AND e.session_id=(projection->>'sessionId')::uuid;
+ SELECT coalesce(jsonb_agg(t.value||jsonb_build_object('informationVersion',NULL::jsonb) ORDER BY t.ord),'[]')
+ INTO turns FROM jsonb_array_elements(projection->'turns') WITH ORDINALITY t(value,ord);
  RETURN jsonb_set(projection,'{turns}',turns);
 END $function$;
