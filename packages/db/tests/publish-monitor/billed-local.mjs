@@ -211,13 +211,11 @@ try {
   for (const path of laterRedefinitions('0462')) await c.query(read(path));
   assert.equal(await v('SELECT state v FROM social_billed_reads WHERE id=$1', [lop0]), 'abandoned');
   assert.notEqual(await v('SELECT closed_at v FROM social_billed_runs WHERE run_id=$1', [lrun0.id]), null);
-  for (const f of ['publish_monitor_billed_legacy(uuid)', 'publish_monitor_review_admit_guard()', 'publish_monitor_review_call_guard()',
-    'publish_monitor_review_result_guard()']) {
-    assert.equal(await v('SELECT to_regprocedure($1) IS NULL v', ['public.' + f]), true, f + ' is gone');
-  }
+  assert.equal(await v("SELECT count(*)::int v FROM pg_trigger WHERE tgname IN ('publish_monitor_review_admit_guard','publish_monitor_review_result_guard','publish_monitor_review_call_guard')"), 0,
+    'the three guard triggers are gone');
   assert.equal(await v("SELECT count(*)::int v FROM pg_proc p WHERE p.proname LIKE 'publish_monitor\\_%' AND (pg_get_functiondef(p.oid) ~ 'runtime_executions|bill2_runs|bill2_calls|runtime_tool_calls|runtime_cancel|runtime_workspace_' AND p.proname<>'publish_monitor_tool_only_run')"), 0,
     'no publish-monitor function reads the old Runtime or BILL2 objects');
-  report.checks.push('0481: a BILL2 run no longer binds, recovery lists live attempts only, leftovers are closed, the guards are gone and no monitor function names an old object');
+  report.checks.push('0481: a BILL2 run no longer binds, recovery lists live attempts only, leftovers are closed, the guard triggers are gone and no monitor function names an old object');
 
   // Insufficient credits: settled for today without any hold.
   const claim2 = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v'));

@@ -7,8 +7,9 @@
 --   * publish_monitor_reviews: only turn-written reviews; the page no longer reads runtime_executions or runtime_tool_calls.
 --   * publish_monitor_review_supplement: the window comes from publish_monitor_post_window.
 --   * publish_monitor_billed_run / billed_recovery: only turns and ledger rows (no bill2_runs, no bill2_calls); publish_monitor_billed_legacy
---     is dropped.
---   * The admit / call / result guard triggers and functions on runtime_executions and bill2_calls are dropped.
+--     keeps its answer without naming an old object.
+--   * The three guard triggers on runtime_executions and bill2_calls are dropped; their functions and publish_monitor_billed_legacy are
+--     rewritten as shells / without old objects (CREATE OR REPLACE), nothing else is dropped.
 --   * Leftovers written by the old path are closed here: reviews that were claimed with a Runtime execution end as skipped (their period
 --     stays used), billed reads left open on a BILL2 run are closed with their live attempts abandoned. Completed reviews written by
 --     the old path stay as rows (the schedule needs their dates) but are no longer listed (their text lived in runtime_executions).
@@ -204,19 +205,28 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  FROM social_billed_reads r WHERE r.run_id=p_run_id AND r.state IN ('opened','dispatched')
 $$;
 
-DROP FUNCTION IF EXISTS public.publish_monitor_billed_legacy(uuid);
+-- Nothing is dropped except the three triggers (they can be rebuilt from 0307); the functions stay as empty shells so no function body
+-- names an old object any more.
 DROP TRIGGER IF EXISTS publish_monitor_review_admit_guard ON public.runtime_executions;
 DROP TRIGGER IF EXISTS publish_monitor_review_result_guard ON public.runtime_executions;
 DROP TRIGGER IF EXISTS publish_monitor_review_call_guard ON public.bill2_calls;
-DROP FUNCTION IF EXISTS public.publish_monitor_review_admit_guard();
-DROP FUNCTION IF EXISTS public.publish_monitor_review_result_guard();
-DROP FUNCTION IF EXISTS public.publish_monitor_review_call_guard();
+CREATE OR REPLACE FUNCTION public.publish_monitor_review_admit_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$ BEGIN RETURN NEW; END $$;
+CREATE OR REPLACE FUNCTION public.publish_monitor_review_result_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$ BEGIN RETURN NEW; END $$;
+CREATE OR REPLACE FUNCTION public.publish_monitor_review_call_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$ BEGIN RETURN NEW; END $$;
+-- Reviews are told from runs by the turn now; this answers "is it a pre-turn run" as before but names no old object.
+CREATE OR REPLACE FUNCTION public.publish_monitor_billed_legacy(p_run_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT NOT EXISTS(SELECT 1 FROM turns WHERE request_id=p_run_id AND kind='review')
+$$;
 
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_post_window','publish_monitor_pack_visible',
    'publish_monitor_review_step','publish_monitor_reviews','publish_monitor_review_supplement','publish_monitor_billed_run',
-   'publish_monitor_billed_recovery') LOOP
+   'publish_monitor_billed_recovery','publish_monitor_review_admit_guard','publish_monitor_review_result_guard','publish_monitor_review_call_guard','publish_monitor_billed_legacy') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f);
  END LOOP;
