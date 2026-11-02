@@ -66,3 +66,8 @@ export function voiceErrorMessage(error: unknown): string {
 export function canClearRequestId(freshRead: boolean, state: VoiceState | undefined, requestPending: boolean): boolean {
   return freshRead && Boolean(state) && state?.latest?.status !== 'generating' && !requestPending;
 }
+
+/** A learning run that has just ended (it was generating, now it is not): the balance moved when it settled, so refresh it. */
+export function generationJustEnded(before: string | undefined, after: string | undefined): boolean {
+  return before === 'generating' && after !== undefined && after !== 'generating';
+}
