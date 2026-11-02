@@ -74,7 +74,7 @@ Owner 定下的方向（第 45 项原话，摘录）：
   - 四选一卡片（分镜和剪辑 / 只要分镜 / 只要剪辑 / 结束，:317），用户打字时用正则对这几个选项（:132）；
   - `runVideo`（:163-224）：`saveContentResult` → `prepareVideoMaterial` → `runtime.prepare`（输入 `[OPC_VIDEO_PACKAGE_V1]…`，
     要求严格 JSON `{storyboard, editing}`，:226）→ `checkVideoExecution` → `runtime.execute` → `saveVideoResults`；
-  - URL 带 `&continue=1` 时自动发 `[OPC_WORK_CONTINUE_V1]`（:262-288）。
+  - URL 带 `&continue=1` 时页面只显示“继续中断的工作”按钮，用户点了才发一次 `[OPC_WORK_CONTINUE_V1]`，打开和刷新都不自动发（Owner 2026-11-02，取代原“自动发”；MASTER_PLAN 第 2.1 节）。
 - 默认 Skill：`runtime.choices`（`routers/runtime.ts:57-86`）把这个选题自己的 module/revision 作为 `defaultSkill`，
   也就是 `opc_handoff` 复制过来的定位方法 Skill。窗口当前选的 Skill 只记在浏览器 localStorage
   （`opc-runtime-skill:<sessionId>`，:64）。

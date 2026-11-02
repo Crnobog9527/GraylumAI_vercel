@@ -70,12 +70,12 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
   const [skillId, setSkillId] = useState(''),
     [, repaint] = useState(0),
     [typePending, setTypePending] = useState(false),
-    [heldGuide, setHeldGuide] = useState(false);
+    [heldGuide, setHeldGuide] = useState(false),
+    [continueOffered, setContinueOffered] = useState(false);
   const scrollArea = useRef<HTMLDivElement>(null),
     scrollState = useRef({ key: '', follow: true, signature: '' });
   const videoAttempt = useRef(false),
     scriptAttempt = useRef(new Set<string>()),
-    guideAttempt = useRef(false);
   const videoKey = 'opc-video-turn:' + sessionId,
     scriptKey = 'opc-final-turn:' + sessionId,
     inputKey = 'opc-runtime-input:' + sessionId;
@@ -240,28 +240,25 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
     void finalize({ turnId: op.turnId, requestId: op.requestId }, op);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workItem?.workItemId, chat.view, videoBusy]);
-  // ?continue is one start of the guide; consumed before sending, so a refused or reloaded guide never sends itself again.
+  // ?continue only offers the guide (Owner 2026-11-02): opening the page never sends. The button is the one start of it, consumed before
+  // sending, so a refused or reloaded guide never sends itself again.
   useEffect(() => {
-    if (
-      guideAttempt.current ||
-      !workItem ||
-      !chat.view ||
-      !moduleId ||
-      contentType === 'unknown' ||
-      chat.busy ||
-      videoBusy ||
-      localStorage.getItem(videoKey) ||
-      localStorage.getItem(scriptKey) ||
-      !new URL(location.href).searchParams.has('continue')
-    )
-      return;
-    guideAttempt.current = true;
+    setContinueOffered(new URL(location.href).searchParams.has('continue'));
+  }, [sessionId]);
+  const canContinue =
+    continueOffered &&
+    Boolean(workItem && chat.view && moduleId) &&
+    contentType !== 'unknown' &&
+    !busy &&
+    !localStorage.getItem(videoKey) &&
+    !localStorage.getItem(scriptKey);
+  function continueWork() {
+    setContinueOffered(false);
     const url = new URL(location.href);
     url.searchParams.delete('continue');
     history.replaceState(null, '', url);
     void guide();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workItem?.workItemId, chat.view, moduleId, contentType, chat.busy, videoBusy]);
+  }
 
   const messages = chat.view?.messages ?? [];
   const replies = messages.filter(m => m.role === 'assistant');
@@ -439,6 +436,11 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
                   <RuntimeReply text={chat.live?.text && !chat.live.text.trimStart().startsWith('{') ? chat.live.text : '正在回复…'} streaming />
                 </RuntimeTurnView>
               </>
+            )}
+            {canContinue && (
+              <Button variant="outline" onClick={continueWork}>
+                继续中断的工作
+              </Button>
             )}
             <ChatNoticeList notices={notices} />
             {chat.viewFailed && <ChatInlineNotice tone="warning">暂时读取不到对话记录，页面会继续重试。</ChatInlineNotice>}
