@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicFailureMessage, topicReplyText } from './topic-notices';
+import { topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
 import { DEFINITE_REFUSAL_NOTICE } from '@/app/(zh-hans)/app/runtime/gate-notices';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
@@ -52,4 +52,10 @@ it('never shows the verifying placeholder for a finished turn without a reply (e
   expect(topicReplyText({ ...stoppedEarly, state: 'completed', body: '说明\n```json\n[{"id":"x"}]\n```' })).toBe('说明');
   expect(topicReplyText({ ...stoppedEarly, state: 'completed', body: '回复', contentAvailable: false })).toBe('来源已不可用，暂不展示此内容。');
   expect(topicReplyText({ ...stoppedEarly, state: 'completed' })).toBe('');
+});
+
+it('calls a topic workspace stale only when it is bound to a version other than the current formal one', () => {
+  expect(topicWorkspaceStale('v9', 'v10')).toBe(true);
+  expect(topicWorkspaceStale('v10', 'v10')).toBe(false);
+  for (const [bound, current] of [[undefined, 'v10'], ['v9', undefined], ['', 'v10'], ['v9', null]]) expect(topicWorkspaceStale(bound, current)).toBe(false);
 });

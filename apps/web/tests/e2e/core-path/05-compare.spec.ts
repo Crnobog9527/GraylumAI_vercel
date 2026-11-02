@@ -47,13 +47,19 @@ test('journey 5: two models answer and the total equals the sum of the columns @
   await boxes.nth(labels.indexOf(other!.name)).check();
   await expect(picker.getByRole('checkbox', { checked: true })).toHaveCount(2);
   await expect(picker.getByText(/最多消耗/)).toBeVisible({ timeout: 60_000 });
+  // The turn path's compare cannot be stopped: the price line does not offer it either.
+  await expect(picker).not.toContainText('手动停止');
   await picker.getByRole('button', { name: '开始对比' }).click();
 
   const card = page.getByRole('region', { name: '多模型对比' });
   await expect(card.getByRole('article')).toHaveCount(2, { timeout: 60_000 });
+  // No stop button on the card or on a column while the answers are being written (Plan CORE-PATH-V2 §2.2, Owner 2026-10-28).
+  await expect(card.getByRole('button', { name: /停止/ })).toHaveCount(0);
   const totalText = card.getByText(/本次对比共扣 \d+ 积分/);
   await expect(totalText).toBeVisible({ timeout: 300_000 });
   await meter.checkpoint('journey 5: compare answered');
+  await expect(card).not.toContainText('手动停止');
+  await expect(card.getByRole('button', { name: /停止/ })).toHaveCount(0);
 
   const columns = card.getByRole('article');
   await expect(columns.nth(0)).toHaveAccessibleName(base!.name);

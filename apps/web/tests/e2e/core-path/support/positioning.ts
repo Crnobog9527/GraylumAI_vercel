@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { coreSql } from './db';
 import { gotoWithBypass } from '../../support/deploymentProtection';
@@ -78,12 +78,30 @@ export async function completeBenchmarkStep(page: Page, meter: SpendMeter) {
   }
   await expect(candidates).toBeVisible({ timeout: 60_000 });
   await meter.checkpoint('benchmark search');
+  await chooseBenchmarks(page, meter, candidates);
+}
+
+/** The candidate card onward: tick accounts, confirm, wait for the benchmark table (and the shortfall card if it comes). */
+export async function chooseBenchmarks(page: Page, meter: SpendMeter, candidates: Locator) {
   // Nothing is ticked at first and the button stays off until the card's minimum is reached: tick accounts until it turns on.
   const confirmChoice = candidates.getByRole('button', { name: '确认选择' });
   // Reference-only accounts ("头部账号", "只作参考") have a disabled box; the others are ticked one by one, counted by "已选 N 个".
   const boxes = candidates.getByRole('checkbox');
-  for (let i = 0; i < await boxes.count() && !(await confirmChoice.isEnabled()); i += 1) {
-    if (await boxes.nth(i).isEnabled() && !(await boxes.nth(i).isChecked())) await boxes.nth(i).check(); // scrolls the box into view first
+  // The card first appears with every box and the button disabled (trace 2026-11-01: all 12 boxes read disabled for ~15 s after it
+  // showed up, then turned on by themselves), so wait until a box can be ticked instead of reading the state once.
+  await expect(candidates.locator('input[type="checkbox"]:enabled').first()).toBeVisible({ timeout: 60_000 });
+  // The card can be re-rendered while the turn that produced it is still closing, which drops ticks made in that window
+  // ("已选 0 个" after ticking). So tick, wait until the count has held steady, and only then press the button; tick again
+  // from the card's own state if a re-render wiped the choice.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let i = 0; i < await boxes.count() && !(await confirmChoice.isEnabled()); i += 1) {
+      if (await boxes.nth(i).isEnabled() && !(await boxes.nth(i).isChecked())) await boxes.nth(i).check(); // scrolls the box into view first
+    }
+    const picked = candidates.getByText(/已选 \d+ 个/);
+    await page.waitForTimeout(2_000);
+    const held = await picked.innerText().catch(() => '');
+    if (await confirmChoice.isEnabled() && !/已选 0 个/.test(held)) break;
+    test.info().annotations.push({ type: 'benchmark-selection-reset', description: `attempt ${attempt}: "${held}", button ${await confirmChoice.isEnabled() ? 'on' : 'off'}` });
   }
   await expect(confirmChoice).toBeEnabled();
   await confirmChoice.click();
@@ -112,10 +130,24 @@ export async function buildReadyDraft(page: Page, meter: SpendMeter): Promise<st
   return url;
 }
 
+/** Continues a draft that stopped inside step 2 at its candidate card (CORE_E2E_RESUME_DRAFT_URL): no new draft, no new search. */
+export async function resumeReadyDraft(page: Page, meter: SpendMeter, url: string): Promise<string> {
+  await gotoWithBypass(page, new URL(url).pathname);
+  const candidates = page.locator('section[aria-label="对标候选账号"], section[aria-label="补选对标账号"]').first();
+  await expect(candidates).toBeVisible({ timeout: 60_000 });
+  await chooseBenchmarks(page, meter, candidates);
+  await completeStep(page, meter, 'step 2', '请根据对标结果给出可行性和平台选择，我同意你的建议。');
+  await completeStep(page, meter, 'step 3', '请给出定位、资料包、第一个月计划和变现方案，我同意你的建议。');
+  await expect(stepNav(page).getByRole('button').filter({ hasText: '✓' })).toHaveCount(3);
+  return url;
+}
+
 /** How many reports this account has stopped in the last 24 hours (the third stop asks for confirmation). */
 export async function stopsInLast24h(actorId: string): Promise<number> {
   const rows = await coreSql()<Array<{ n: string }>>`
-    select count(*)::text as n from report_fees f
-    where f.actor_id = ${actorId}::uuid and f.user_stopped_at > now() - interval '24 hours'`;
+    select ((select count(*) from report_fees f
+        where f.actor_id = ${actorId}::uuid and f.user_stopped_at > now() - interval '24 hours')
+      + (select count(*) from turns t
+        where t.actor_id = ${actorId}::uuid and t.kind = 'report' and t.stopped_by_user and t.closed_at > now() - interval '24 hours'))::text as n`;
   return Number(rows[0]?.n ?? 0);
 }

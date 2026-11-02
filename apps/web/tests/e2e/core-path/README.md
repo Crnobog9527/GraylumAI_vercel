@@ -47,6 +47,11 @@ grant select (actor_id, user_stopped_at)                              on public.
 grant select (id, session_id)                                         on public.runtime_executions to core_e2e_reader;
 grant select (execution_id, name)                                     on public.runtime_tool_calls to core_e2e_reader;
 grant select (id, model_id, name, is_active, config)                  on public.ai_models          to core_e2e_reader;
+-- 主路径 V2（turn 路径）：旧路径删除（V2-12）前，上面的旧表和下面两张新表都读
+grant select (id, actor_id, session_id, kind, state, close_kind, charged_credits, reserved_credits, settlement, stopped_by_user, closed_at)
+                                                                      on public.turns              to core_e2e_reader;
+grant select (turn_id, actor_id, call_kind, model_id, tool_name, provider_id, nominal_usd, actual_usd, dispatched_at)
+                                                                      on public.turn_calls         to core_e2e_reader;
 
 create policy core_e2e_read on public.bill2_runs         for select to core_e2e_reader using (true);
 create policy core_e2e_read on public.bill2_calls        for select to core_e2e_reader using (true);
@@ -54,11 +59,13 @@ create policy core_e2e_read on public.report_fees        for select to core_e2e_
 create policy core_e2e_read on public.runtime_executions for select to core_e2e_reader using (true);
 create policy core_e2e_read on public.runtime_tool_calls for select to core_e2e_reader using (true);
 create policy core_e2e_read on public.ai_models          for select to core_e2e_reader using (true);
+create policy core_e2e_read on public.turns              for select to core_e2e_reader using (true);
+create policy core_e2e_read on public.turn_calls         for select to core_e2e_reader using (true);
 ```
 
 - 角色没有任何写权限、不能读其他列和其他表；`system_settings` 不开放（对比名单从页面上读，价格从 `ai_models.config` 读，里面没有密钥）。
 - 连接串用 Supabase 的连接池地址（用户名带项目标识），`ssl=require`。
-- 撤销：`drop owned by core_e2e_reader; drop role core_e2e_reader;`，同时删掉 6 条 `core_e2e_read` 策略。
+- 撤销：`drop owned by core_e2e_reader; drop role core_e2e_reader;`，同时删掉 8 条 `core_e2e_read` 策略。
 
 ## 需要的环境
 
@@ -71,7 +78,6 @@ create policy core_e2e_read on public.ai_models          for select to core_e2e_
 | `VERCEL_BYPASS_COOKIE` | 如果 staging 有部署保护 |
 | `CORE_E2E_MODEL_ID` | 测试用模型，默认 `google/gemini-3.8-flash` |
 | `CORE_E2E_SIDE_MODEL_IDS` | 额外放行的模型（逗号分隔），默认整理 `openai/gpt-6-luna`、评审汇总 `anthropic/claude-opus-5.5`、评审席位 `openai/gpt-6.1-sol` 和 `google/gemini-4-argon` |
-| `CORE_E2E_PATH=v2` | V2-10 之后设置：额外断言普通对话没有“停止”按钮（旧路径的回复里有，所以此前只记一条说明） |
 
 登录只读：`auth.setup.ts` 不写站点，不动维护模式等全站开关。
 
@@ -99,6 +105,7 @@ create policy core_e2e_read on public.ai_models          for select to core_e2e_
 
 ## 当前路径与未验证的部分
 
+- 旅程 ② 的“自动加载了 Skill”在新路径（turn 路径）上**未验证**：load_skill 是免费工具，只计数、不写 `turn_calls`，页面也不显示，测试只在旧路径能查到并记标注（2026-11-01 staging 实跑确认）。待产品侧补一个可查的记录后再改回断言。
 - 本机没有可跑的后端（没有本地库、模型和供应商），测试只做了类型检查、`--list`、花费计量/模型选择/种子脚本的单元测试。**旅程的选择器来自源码阅读，从未在真实页面上执行**；staging 压测结束后实跑，必然要根据实际页面修一轮。
 - 已知风险：模型对话是否按预期给出“信息齐了”（`completeStep` 最多追 4 轮）；对标搜索和候选卡是否出现；确认按钮 2 秒稳定期；评审团约 3–4 分钟。
 - 20 轮长对话不是种子数据而是用产品本身一轮一个字地建（约 20 次极短调用，不到 1 美分）：运行表带冻结载荷和计费关联，直接 INSERT 不安全。

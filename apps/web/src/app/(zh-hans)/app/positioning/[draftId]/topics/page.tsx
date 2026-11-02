@@ -29,7 +29,8 @@ import { consentedForCandidate } from './adoption-consent';
 import { lastReplyAdoptionNotice, parseAdoption, parseCandidate } from './topic-candidate';
 import { refuseTopic, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
-import { topicFailureMessage, topicReplyText } from './topic-notices';
+import { STALE_WORKSPACE_NOTICE, topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
+import { StaleWorkspaceNotice } from './stale-workspace-notice';
 import { useTopicInput } from './topic-input';
 type PlanItem = {
   id: string;
@@ -56,13 +57,11 @@ function TopicWorkspaceContent() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
   const profile=trpc.user.getUserProfile.useQuery();
-  const [panelOpen,setPanelOpen]=useState(true);
-  const [infoOpen,setInfoOpen]=useState(false);
+  const [panelOpen,setPanelOpen]=useState(true), [infoOpen,setInfoOpen]=useState(false);
   const free=useFreeConversation();
   const inputKey=draftId?'opc-topic-input:'+draftId:'';
   const { input, updateInput, clearForSend, putBack, stored } = useTopicInput(inputKey);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [error, setError] = useState(''), [notice, setNotice] = useState('');
   // The user's message, shown at once until the server records its turn.
   const [outgoing, setOutgoing] = useState<{ text: string; executionId?: string } | null>(null);
   const [pending, setPending] = useState<Operation | null>(null);
@@ -79,12 +78,12 @@ function TopicWorkspaceContent() {
   const persistedExecution = useRef('');
   const adoptedExecution = useRef('');
 
-  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId), retry: retryUnlessMissing });
+  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId), retry: retryUnlessMissing, refetchOnWindowFocus: 'always' });
   // Read-only draft (conversation deleted): no topic workspace, conversation, polling or write starts.
   const workspace = trpc.opc.topicWorkspace.useQuery({ draftId },
     { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), refetchInterval: 30000 });
   const sessionId = read.data && !read.data.conversationDeleted && workspace.data?.bound ? workspace.data.sessionId : '';
-  const turnPath = useTopicTurnPath(sessionId);
+  const stale = topicWorkspaceStale(workspace.data?.sourceVersionId, read.data?.report?.id), turnPath = useTopicTurnPath(sessionId);
   const view = { data: turnPath.data, refetch: turnPath.refetch };
   const bind = trpc.opc.consentTopicWorkspace.useMutation();
   const savePlan = trpc.opc.savePlan.useMutation(), handoff = trpc.opc.handoff.useMutation();
@@ -189,11 +188,11 @@ function TopicWorkspaceContent() {
   }
 
   async function perform(proposed: Operation, fromBox = false) {
-    if (!storageKey || operationBusy.current) return;
+    const opensTurn = proposed.kind === 'chat' || proposed.kind === 'adoptTopics'; // A stale workspace opens none, retry included.
+    if (!storageKey || operationBusy.current || (stale && opensTurn)) return;
     operationBusy.current = true;
     setWorking(true);
-    setError('');
-    setNotice('');
+    setError(''); setNotice('');
     try {
       // The browser lock prevents two tabs from replacing an unknown operation.
       await navigator.locks.request(storageKey, async () => {
@@ -258,7 +257,7 @@ function TopicWorkspaceContent() {
             localStorage.setItem(storageKey + ':rejected:' + op.request.requestId, JSON.stringify(op));
             localStorage.removeItem(storageKey);
             setPending(null);
-            setError(message === 'OPC_BUSINESS_CONFLICT' ? '这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。' : '本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
+            setError(message === 'OPC_VERSION_CONFLICT' && stale ? STALE_WORKSPACE_NOTICE : message === 'OPC_BUSINESS_CONFLICT' ? '这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。' : '本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
           } else setError(topicFailureMessage(cause));
         }
         await Promise.all([read.refetch(), view.refetch(), accountList.refetch(), topicDraft.refetch()]);
@@ -268,7 +267,7 @@ function TopicWorkspaceContent() {
   }
 
   async function send() {
-    if (!sessionId || !input.trim() || pending || !turnPath.decided) return;
+    if (!sessionId || !input.trim() || pending || !turnPath.decided || stale) return;
     const visible = candidate ?? (topicDraft.data?.body?.length
       ? { body: topicDraft.data.body as PlanItem[], requestId: topicDraft.data.draftVersionId ?? '' } : null);
     await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() }, candidateAtSend:visible?structuredClone(visible):null }, true);
@@ -276,11 +275,11 @@ function TopicWorkspaceContent() {
 
   const opening = workspace.data?.opening as (ChatRequest & { executionId?: string | null }) | null | undefined;
   const refusedOpening = useTopicOpening({ opening, storageKey, executions: view.data?.executions,
-    ready: Boolean(sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
+    ready: Boolean(!stale && sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
     send: request => void perform({ kind: 'chat', request }) });
 
   function adoptionRequest(snapshot: CandidateSnapshot, itemIds: string[], requestId = crypto.randomUUID()): AdoptTopicsRequest | null {
-    if (accountList.isFetching || accountList.error || !accountList.data) return null;
+    if (stale || accountList.isFetching || accountList.error || !accountList.data) return null;
     const chosen = snapshot.body.filter(item => itemIds.includes(item.id));
     const unique = new Map(chosen.map(item => [item.platform + '::' + item.account, item]));
     if (!chosen.length || !unique.size) return null;
@@ -429,6 +428,7 @@ function TopicWorkspaceContent() {
 
       {bound && sourceAvailable && (
         <>
+          {stale && <StaleWorkspaceNotice draftId={draftId} />}
           <div ref={scrollArea} onScroll={rememberScroll} className="min-h-0 flex-1 overflow-y-auto" aria-label="选题对话记录">
             {!executions?.length && (
               <div className="mx-auto flex min-h-48 max-w-xl flex-col items-center justify-center px-6 py-10 text-center">
@@ -466,7 +466,7 @@ function TopicWorkspaceContent() {
                                 <p className={topicStyles.meta}>{item.platform} · {item.account} · {item.day}</p>
                                 <h3>{index+1}. {item.title}</h3>
                                 <p className={topicStyles.brief}>{item.brief}</p>
-                                {current&&(adopted&&topicLink(item)?<Link className={topicStyles.action} href={topicLink(item)!}>继续这条内容工作</Link>:<button className={topicStyles.action} disabled={busy||Boolean(pending)||adopted} onClick={()=>void adoptCurrent([item.id])}>{adopted?'已采用':'采用这个选题'}</button>)}
+                                {current&&(adopted&&topicLink(item)?<Link className={topicStyles.action} href={topicLink(item)!}>继续这条内容工作</Link>:<button className={topicStyles.action} disabled={busy||Boolean(pending)||adopted||stale} onClick={()=>void adoptCurrent([item.id])}>{adopted?'已采用':'采用这个选题'}</button>)}
                                 {!current&&<p className={topicStyles.old}>过往建议 · 仅供查看</p>}
                               </section>;
                             })}
@@ -493,7 +493,7 @@ function TopicWorkspaceContent() {
           <footer className={composerStyles.zone}>
             <div className={composerStyles.wrap}>
               <WorkComposer references={false} maxLength={8000} value={input} onChange={updateInput}
-                sendDisabled={busy||!turnPath.decided||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
+                sendDisabled={stale||busy||!turnPath.decided||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
                 onSend={skill=>{if(skill)void free.send(input,skill);else void send();}}/>
               <p className={composerStyles.note}>
                 候选会自动保存；只有你明确采用的具体选题才会进入资料库。
