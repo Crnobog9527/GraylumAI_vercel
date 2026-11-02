@@ -50,7 +50,7 @@ async function latestReportTurn(actorId: string): Promise<ReportSettlement | nul
   const rows = await coreSql()<Array<{ id: string; close_kind: string | null; charged: number | null; reserved: number; closed_at: string }>>`
     select id::text, close_kind, charged_credits as charged, reserved_credits as reserved, closed_at::text
     from turns where actor_id = ${actorId}::uuid and kind = 'report' and state = 'closed' and settlement = 'done'
-    order by id desc limit 1`;
+    order by id::bigint desc limit 1`;
   const row = rows[0];
   if (!row) return null;
   const consumed = row.charged ?? 0;
