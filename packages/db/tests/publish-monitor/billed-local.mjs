@@ -166,7 +166,7 @@ try {
   await step('open', { op: op3, key: 'd'.repeat(64) });
   const recovery = await svc('SELECT publish_monitor_billed_recovery($1) v', [turn2.request]);
   assert.deepEqual(recovery.map(x => x.operationId).sort(), [op, op2, op3].sort(), 'every live attempt, nothing else');
-  assert.ok(recovery.every(x => Object.keys(x).join() === 'operationId'), 'no receipt is replayed: the turn recovery settles the turn');
+  assert.ok(recovery.every(x => Object.keys(x).sort().join() === 'live,operationId' && x.live === true), 'no receipt is replayed: the turn recovery settles the turn');
   // Abandoning is bound to the run, needs no live claim, and frees the key.
   assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [randomUUID(), op3]), false, 'another run cannot touch it');
   assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [turn2.request, op3]), true);
@@ -204,7 +204,7 @@ try {
     SELECT $1,actor_id,connection_id,refresh_id,$2,$3,run_id,$4,'dispatched',$5 FROM social_billed_runs WHERE run_id=$6`,
   [lop0, 'c'.repeat(64), ROUTE, randomUUID(), randomUUID(), lrun0.id]);
   const rows = await svc('SELECT publish_monitor_billed_recovery($1) v', [lrun0.id]);
-  assert.deepEqual(rows, [{ operationId: lop0 }], 'only live ledger attempts, no BILL2 call or receipt');
+  assert.deepEqual(rows, [{ operationId: lop0, live: true }], 'only live ledger attempts, no BILL2 call or receipt');
   const orphan = (await svc('SELECT publish_monitor_billed_orphans(50) v')).find(o => o.runId === lrun0.id);
   assert.deepEqual(Object.keys(orphan).sort(), ['actorId', 'connectionId', 'policies', 'runId']);
   // The migration closes such a leftover: its live attempt is abandoned and the run is closed.

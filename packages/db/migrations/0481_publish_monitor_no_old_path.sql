@@ -198,10 +198,11 @@ BEGIN
   ELSE jsonb_build_object('runId',b.run_id,'policies',b.policies) END;
 END $$;
 
--- The live ledger attempts of a left-open run (opened or dispatched): the daily job abandons them so their keys are free again.
+-- The live ledger attempts of a left-open run (opened or dispatched): the daily job abandons them so their keys are free again. The row keeps
+-- 'live' (always true) so the code deployed before and after this migration both read it (rolling deployment).
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_recovery(p_run_id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
- SELECT COALESCE(jsonb_agg(jsonb_build_object('operationId',r.id) ORDER BY r.created_at),'[]'::jsonb)
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('operationId',r.id,'live',true) ORDER BY r.created_at),'[]'::jsonb)
  FROM social_billed_reads r WHERE r.run_id=p_run_id AND r.state IN ('opened','dispatched')
 $$;
 

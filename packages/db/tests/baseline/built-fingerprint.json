@@ -4160,7 +4160,7 @@
   "fn:publish_monitor_billed_lookup(uuid,uuid,uuid,text)": "52e485e928b0",
   "fn:publish_monitor_billed_orphans(integer)": "939be2a09924",
   "fn:publish_monitor_billed_prune(integer)": "edbc576de1f8",
-  "fn:publish_monitor_billed_recovery(uuid)": "114dcb98929c",
+  "fn:publish_monitor_billed_recovery(uuid)": "726df91f6a8f",
   "fn:publish_monitor_billed_run(uuid,uuid,uuid,uuid,jsonb)": "a4f997e2c90e",
   "fn:publish_monitor_billed_step(uuid,uuid,uuid,uuid,text,text,text,uuid,uuid,text,jsonb)": "d6932613de5d",
   "fn:publish_monitor_billed_strip(jsonb)": "d8e77732ff41",

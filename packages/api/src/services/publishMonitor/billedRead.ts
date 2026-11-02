@@ -117,7 +117,7 @@ export async function admitReadTurn(admin: Admin, routes: string[], now = new Da
  * The run's turn is settled by the turn recovery job; nothing is settled from here. Idempotent.
  */
 export async function settleLeftOpenRun(admin: Admin, runId: string) {
-  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId }, z.array(z.object({ operationId: uuid }).strict()));
+  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId }, z.array(z.object({ operationId: uuid }).passthrough()));
   for (const row of rows) await rpc(admin, 'publish_monitor_billed_abandon', { p_run_id: runId, p_operation_id: row.operationId }, z.boolean());
   await rpc(admin, 'publish_monitor_billed_closed', { p_run_id: runId }, z.unknown());
 }
