@@ -3,6 +3,7 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -177,7 +178,7 @@ export async function walletMembershipCases({ admin, service, connect }) {
   // Backdate only local fixture created_at. Calendar months are not fixed 30-day intervals.
   const priorPeriod = end => {
     let paid = new Date(end);
-    paid.setUTCMonth(paid.getUTCMonth() - 1);
+    paid.setTime(addUtcMonths(paid,-1));
     // A month cannot end on October 31 if it started in September. An annual source can;
     // February 29 always has a January 29 monthly source, so the annual fallback never loses leap day.
     const cycle = paid.getUTCDate() === end.getUTCDate() ? 'monthly' : 'yearly';

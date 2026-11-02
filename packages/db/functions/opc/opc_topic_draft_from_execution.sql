@@ -8,26 +8,28 @@ CREATE OR REPLACE FUNCTION public.opc_topic_draft_from_execution(p_actor_id uuid
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE original jsonb;result jsonb;prior opc_data_events;project uuid;
+DECLARE original jsonb;result jsonb;prior opc_data_events;project uuid;source_turn bigint;
 BEGIN
  -- 0324 archived business guard
  IF true THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id)); END IF;
 
  IF opc_draft_readonly(p_actor_id,p_draft_id) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF; -- 0249 read-only
  original:=opc_topic_original(p_actor_id,p_draft_id,p_source_version_id,p_execution_id);
+ source_turn:=opc_data_source_turn(p_actor_id,p_execution_id);
  SELECT project_id INTO project FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  PERFORM 1 FROM artifact_projects WHERE id=project FOR UPDATE;
  IF jsonb_typeof(p_body) IS DISTINCT FROM 'array' OR EXISTS(SELECT 1 FROM jsonb_array_elements(p_body) x
   WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(original) o WHERE o->>'id'=x->>'id'))
  THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_INVALID';END IF;
  SELECT * INTO prior FROM opc_data_events WHERE actor_id=p_actor_id AND request_id=p_request_id AND item_key='';
- IF FOUND AND (prior.action<>'topic_draft' OR prior.execution_id<>p_execution_id OR prior.project_id<>project
+ IF FOUND AND (prior.action<>'topic_draft' OR opc_data_event_source(prior)<>p_execution_id OR prior.project_id<>project
   OR prior.source_version_id<>p_source_version_id OR prior.adopted IS DISTINCT FROM p_body)
  THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
  result:=opc_topic_draft_save(p_actor_id,p_draft_id,p_request_id,p_expected_version,p_source_version_id,p_body);
  IF prior.request_id IS NULL THEN
-  INSERT INTO opc_data_events(actor_id,request_id,item_key,action,execution_id,project_id,source_version_id,original,adopted)
-  VALUES(p_actor_id,p_request_id,'','topic_draft',p_execution_id,project,p_source_version_id,original,p_body);
+  INSERT INTO opc_data_events(actor_id,request_id,item_key,action,execution_id,turn_actor_id,turn_id,project_id,source_version_id,original,adopted)
+  VALUES(p_actor_id,p_request_id,'','topic_draft',CASE WHEN source_turn IS NULL THEN p_execution_id END,
+   CASE WHEN source_turn IS NOT NULL THEN p_actor_id END,source_turn,project,p_source_version_id,original,p_body);
  END IF;
  RETURN result;
 END $function$;

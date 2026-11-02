@@ -10,7 +10,7 @@ AS $function$
  -- D7 source tombstones
  SELECT NOT EXISTS(SELECT 1 FROM artifact_projects WHERE id=project AND erased_at IS NOT NULL)
  AND NOT EXISTS(SELECT 1 FROM artifact_evidence WHERE ids ? id::text AND erased_at IS NOT NULL)
- AND artifact_evidence_allowed_before_opc(project,ids) AND NOT EXISTS(SELECT 1 FROM opc_result_links l WHERE ids ? l.evidence_id::text AND NOT runtime_history_available(l.execution_id))
+ AND artifact_evidence_allowed_before_opc(project,ids) AND NOT EXISTS(SELECT 1 FROM opc_result_links l WHERE ids ? l.evidence_id::text AND NOT opc_result_link_available(l))
  AND NOT EXISTS(SELECT 1 FROM opc_account_strategy_drafts binding JOIN opc_drafts d ON d.draft_id=binding.draft_id
   WHERE d.project_id=project AND NOT opc_source_allowed(d.actor_id,binding.root_source_version_id))
  AND NOT EXISTS(SELECT 1 FROM artifact_requests h JOIN artifact_projects p ON p.id=h.project_id

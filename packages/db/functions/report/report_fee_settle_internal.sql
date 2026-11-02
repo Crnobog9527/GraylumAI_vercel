@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.report_fee_settle_internal(p_execution_id uuid
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE f report_fees; e runtime_executions; charge integer; reason text; before_balance integer; restored integer; q record;
-  meta jsonb; complete boolean;
+  meta jsonb; complete boolean; b bill2_runs;
 BEGIN
   PERFORM 1 FROM profiles WHERE id=(SELECT actor_id FROM report_fees WHERE execution_id=p_execution_id) FOR UPDATE;
   SELECT * INTO f FROM report_fees WHERE execution_id=p_execution_id FOR UPDATE;
@@ -17,7 +17,20 @@ BEGIN
   SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id;
   complete:=coalesce(e.state IN ('completed','cost_pending') AND e.result->>'completeness'='complete'
     AND report_body_complete(e.result->>'body',e.payload->'reportGeneration'),false);
-  IF complete THEN charge:=f.credits; reason:='complete';
+  IF f.user_stopped_at IS NOT NULL AND f.stop_chargeable THEN
+    SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id;
+    IF e.id IS NULL OR e.state NOT IN ('completed','cancelled') OR b.id IS NULL
+      OR b.state NOT IN ('settled','refunded') OR b.provider_cost_usd IS NULL OR EXISTS(
+        SELECT 1 FROM bill2_calls WHERE run_id=b.id AND dispatched_at IS NOT NULL
+          AND (selected_cost_usd IS NULL OR settled_at IS NULL)) THEN
+      RETURN report_fee_view(f.execution_id);
+    END IF;
+    SELECT least(500,f.credits,ceil(coalesce(sum(c.selected_cost_usd *
+      bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier')),0)*b.credits_per_usd))::integer
+      INTO charge FROM bill2_calls c WHERE c.run_id=b.id AND c.dispatched_at IS NOT NULL;
+    reason:='user_stop';
+  ELSIF f.user_stopped_at IS NOT NULL AND e.state IN ('completed','cancelled') THEN charge:=0; reason:='user_stop';
+  ELSIF complete AND f.user_stopped_at IS NULL THEN charge:=f.credits; reason:='complete';
   ELSIF p_refund OR e.id IS NULL OR e.content_deleted_at IS NOT NULL OR e.erased_at IS NOT NULL THEN charge:=0; reason:='deleted';
   ELSIF e.state IN ('completed','cancelled') THEN charge:=0; reason:=coalesce(e.result->>'completeness',e.state);
   ELSE RETURN report_fee_view(f.execution_id); END IF;

@@ -61,14 +61,18 @@ export async function readDailyBillingCreditSources(supabase: SupabaseClient, st
 
   if (researchResult.error) throw researchResult.error;
 
-  const research = researchResult.data as { count: number; credits: number } | null;
+  const research = researchResult.data as { count: number; credits: number; turnOtherCredits?: number } | null;
+  // turnOtherCredits: absent until migration 0437 is applied.
+  const turnOtherCredits = research?.turnOtherCredits ?? 0;
   if (!research || !Number.isSafeInteger(research.count) || research.count < 0
-    || !Number.isSafeInteger(research.credits) || research.credits < 0) {
+    || !Number.isSafeInteger(research.credits) || research.credits < 0
+    || !Number.isSafeInteger(turnOtherCredits) || turnOtherCredits < 0) {
     throw new Error('Invalid research reconciliation totals');
   }
   return {
     creditTransactions,
     research,
+    turnOtherCredits,
     reportFixedPriceCredits: sumFixedPriceSpend(creditTransactions, 'report:'),
     fusionReviewFixedPriceCredits: sumFixedPriceSpend(creditTransactions, 'fusion-review:'),
   };

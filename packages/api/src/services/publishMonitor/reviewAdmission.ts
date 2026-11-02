@@ -2,9 +2,9 @@
 import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {isEmailVerified} from '../../lib/auth';
-import {aggregateCredits,decimal} from '../bill2/decimal';
-import {openRouterCallBound} from '../bill2/openRouterPolicy';
-import type {FrozenRun,FrozenPaygRun} from '../bill2/service';
+import {aggregateCredits,decimal} from '../turn/provider/decimal';
+import {openRouterCallBound} from '../turn/provider/openRouterPolicy';
+import type {FrozenRun,FrozenPaygRun} from '../turn/provider/service';
 
 export type WeeklyReview={id:string;token:string;maxCostUsd:string};
 export async function admissionActor(user:SupabaseClient,admin:SupabaseClient,review?:WeeklyReview):Promise<string>{

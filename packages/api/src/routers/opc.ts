@@ -6,14 +6,15 @@ import { capturePendingInput, captureResolveInput } from "../services/opc/captur
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
-import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
+import {loadStagingPolicy,assertStagingReadAccess} from '../services/turn/settings/stagingPolicy';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
-import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
+import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/turn/settings/stagingErrors';
 import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
-import { realHostMode } from "../services/runtime/productionEnvironment";
+import { realHostMode } from "../services/turn/settings/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
-import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultsList, sessionResultsService } from "../services/opc/sessionResults";
+import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultSaveTurn, sessionResultsList,
+  sessionResultsService } from "../services/opc/sessionResults";
 import {
   opcService,
   opcStart,
@@ -27,9 +28,11 @@ import {
   opcTopicDraft,
   opcLibraryEdit,
   opcContentFromExecution,
+  opcContentFromTurn,
   opcContentManualSave,
   opcVideoPackage,
   opcVideoResults,
+  opcVideoResultsFromTurn,
   opcVideoExecutionCheck,
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
@@ -180,8 +183,8 @@ export const opcRouter = router({
       ctx.opc.revise(input.draftId, input.requestId, input.expectedRoundId),
     ),
   saveWorkResult: procedure
-    .input(z.object({ executionId: z.string().uuid() }).strict())
-    .mutation(({ ctx, input }) => ctx.opc.saveWorkResult(input.executionId)),
+    .input(z.union([z.object({ executionId: z.string().uuid() }).strict(), z.object({ turnId: z.number().int().positive() }).strict()]))
+    .mutation(({ ctx, input }) => 'turnId' in input ? ctx.opc.saveWorkResult(input) : ctx.opc.saveWorkResult(input.executionId)),
   workResults: readProcedure
     .input(z.object({ sessionId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),
@@ -205,6 +208,8 @@ export const opcRouter = router({
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).versions(input)),
   sessionResultSave: procedure.input(sessionResultSave)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).save(input)),
+  sessionResultSaveTurn: procedure.input(sessionResultSaveTurn)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).saveTurn(input)),
   sessionResultEdit: procedure.input(sessionResultEdit)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).edit(input)),
   sessionResultDelete: procedure.input(sessionResultFamily)
@@ -281,6 +286,9 @@ export const opcRouter = router({
   saveContentResult: procedure
     .input(opcContentFromExecution)
     .mutation(({ ctx, input }) => ctx.opc.contentFromExecution(input)),
+  saveContentFromTurn: procedure
+    .input(opcContentFromTurn)
+    .mutation(({ ctx, input }) => ctx.opc.contentFromTurn(input)),
   saveContentManual: procedure
     .input(opcContentManualSave)
     .mutation(({ ctx, input }) => ctx.opc.contentManualSave(input)),
@@ -290,6 +298,9 @@ export const opcRouter = router({
   saveVideoResults: procedure
     .input(opcVideoResults)
     .mutation(({ ctx, input }) => ctx.opc.videoResults(input)),
+  saveVideoResultsFromTurn: procedure
+    .input(opcVideoResultsFromTurn)
+    .mutation(({ ctx, input }) => ctx.opc.videoResultsFromTurn(input)),
   checkVideoExecution: procedure
     .input(opcVideoExecutionCheck)
     .mutation(({ ctx, input }) => ctx.opc.videoExecutionCheck(input)),

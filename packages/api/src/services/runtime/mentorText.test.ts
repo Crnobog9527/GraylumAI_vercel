@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
-import {mentorText} from './mentorText';
-import {NativeProgressProjection} from './nativeProgress';
-import {agentTurnResult} from './agentTurnResult';
+import {mentorText} from '../turn/agent/mentorText';
+import {NativeProgressProjection} from '../turn/agent/nativeProgress';
+import {agentTurnResult} from '../turn/agent/agentTurnResult';
 import {stoppedResult} from './stoppedResult';
 import {NativeSession} from './nativeSession';
 import {recoverOpenRouterHistory} from './historyRecovery';

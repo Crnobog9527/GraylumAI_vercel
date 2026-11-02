@@ -4,12 +4,11 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource } from '../skills/databaseSource';
 import { activateFreeChatSkill } from '../skills/stepGuide';
-import { readWorkspaceCapability } from '../runtime/workspacePosts';
+import { readWorkspaceCapability } from '../turn/agent/workspacePosts';
 import { compareRpc } from './compareAdmission';
 import { compareRequest, compareRequestBytes, type CompareParts } from './compareSnapshot';
-import type { CompareChoice } from './compareStart';
 import { FUSION_INPUT_CAP } from './request';
-import { readReplyLocale } from '../runtime/replyLanguage';
+import { readReplyLocale } from '../turn/agent/replyLanguage';
 import { REPLY_LOCALES } from '../../shared/replyLanguage';
 
 /** What the browser sends to estimate or start a compare: the same Skill selection field as an ordinary turn. */
@@ -87,6 +86,20 @@ async function loadWorkspace(admin: SupabaseClient, actorId: string, sessionId: 
   }
   return sources;
 }
+
+/** What a compare on the turn path reads before its open: the columns' Skill, sources and language. The history is turn_open's
+ * (session_messages), and an ordinary turn on this path sends no work material, so a column gets none either. */
+export async function loadCompareTurnParts(deps: { admin: SupabaseClient; user: SupabaseClient; actorId: string },
+  input: Pick<CompareRequestInput, 'sessionId' | 'question' | 'skill'>) {
+  const [skill, workspace, replyLocale] = await Promise.all([input.skill ? loadSkill(deps.admin, deps.user, input.skill) : null,
+    loadWorkspace(deps.admin, deps.actorId, input.sessionId), readReplyLocale(deps.admin, deps.actorId)]);
+  return { skill, workspace, references: [], question: input.question, replyLocale };
+}
+
+export type CompareChoice = { sessionId: string; historyRevision: number; modelIds: string[]; parts: CompareParts;
+  /** The session's work-material token read with the context (fusion_compare_context.materialRevision), never defaulted:
+   * begin, admission and adoption compare against it. */
+  materialRevision: string };
 
 /** Reads everything a compare freezes (FUSION-COMPARE §3.2): the conversation history and work material from one
  * transaction (fusion_compare_context), the selected Skill through the ordinary user-scoped checks, and the confirmed

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { buildPaygReport, isPaygContract, type PaygReportFields } from './bill2PaygReport';
 import { usdToPico } from './reportUsd';
-import { formatWeightedUsd, weightedDeltaCredits } from './bill2/weighted';
+import { formatWeightedUsd, weightedDeltaCredits } from './turn/admission/weighted';
 import { parseMultiplier } from './billingUnit';
 
 /**

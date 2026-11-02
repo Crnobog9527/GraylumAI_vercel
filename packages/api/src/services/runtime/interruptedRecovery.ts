@@ -4,9 +4,9 @@
  * This code is proprietary and confidential.
  */
 import { z } from 'zod';
-import type { BillingRpc } from '../bill2/service';
+import type { BillingRpc } from '../turn/provider/service';
 import { logger } from '../../lib/logger';
-import type { RuntimeBudget } from './budget';
+import type { RuntimeBudget } from '../turn/settings/budget';
 import type { AutomaticRecoverySummary } from './automaticRecovery';
 
 const itemsSchema = z.array(z.object({

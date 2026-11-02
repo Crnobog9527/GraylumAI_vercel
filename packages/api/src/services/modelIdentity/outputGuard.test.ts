@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
-import { META_RESERVE, RESULT_BYTE_LIMIT } from '../runtime/resultCapacity';
+import { META_RESERVE, RESULT_BYTE_LIMIT } from '../turn/provider/resultCapacity';
 import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 // Leaks: what a model may say about itself after a direct question or a jailbreak.

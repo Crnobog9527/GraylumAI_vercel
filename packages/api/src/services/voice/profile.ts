@@ -20,6 +20,8 @@ export type VoiceProfile = z.infer<typeof voiceProfile>;
 
 /** What the profile says when the samples cannot show any difference between platforms (never left empty). */
 export const NO_PLATFORM_DIFFERENCE = '样文不足以判断各平台差异';
+/** Room for the profile (~3k tokens of JSON) plus the model's reasoning. */
+export const VOICE_OUTPUT_TOKENS = 8192;
 export type VoiceMaterial = { documentId: string; filename: string | null; text: string };
 
 export const VOICE_INSTRUCTIONS = [

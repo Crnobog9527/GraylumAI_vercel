@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {isAuthSessionMissingError, type SupabaseClient} from '@supabase/supabase-js';
-import type {RuntimeBudget} from './budget';
-import {StagingAccessError} from './stagingErrors';
+import type {RuntimeBudget} from '../turn/settings/budget';
+import {StagingAccessError} from '../turn/settings/stagingErrors';
 // Only an explicit Auth rejection permits financial finalization to cancel work.
 // Unknown/transport/service errors deny this operation without revoking the execution.
 function authFailure(error: { status?: number }) {

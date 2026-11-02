@@ -2,8 +2,8 @@
 import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { defaultModelFirst, freeChatModels } from './defaultModel';
-import type { PaygHostProfile } from './paygHostPolicy';
-import type { StagingPolicy } from './stagingPolicy';
+import type { PaygHostProfile } from '../turn/admission/paygHostPolicy';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 
 const sol = { id: 'sol', name: 'gpt-6.1-sol' }, luna = { id: 'luna', name: 'gpt-6-luna' };

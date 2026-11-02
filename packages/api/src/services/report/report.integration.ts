@@ -9,11 +9,11 @@ import { opcService } from '../opc/service';
 import { workbenchService } from '../artifacts/workbench';
 import { reportService } from './service';
 import { runtimeExecutor } from '../runtime/execute';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import { openRouterAdapter } from '../turn/provider/openRouterAdapter';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
-import type { FrozenPaygRun } from '../bill2/service';
+import type { FrozenPaygRun } from '../turn/provider/service';
 
 type Fixture = { actor: string; user: SupabaseClient; admin: SupabaseClient; registration: string;
   mentorModel: string; flow: ReturnType<typeof makeWorkflow> };
@@ -29,9 +29,10 @@ async function seedQualifiedBenchmarks(db: pg.Client, actor: string, sessionId: 
     const fetch = (await db.query(`insert into research_account_fetches(actor_id,session_id,execution_id,platform,account,account_key,state)
       values($1,$2::uuid,$3,'tiktok',$4::text,encode(sha256(convert_to($2::uuid::text||':'||$4::text,'utf8')),'hex'),'succeeded') returning id`,
     [actor, sessionId, execution, account])).rows[0].id;
-    await db.query(`insert into research_benchmarks(fetch_id,actor_id,session_id,execution_id,platform,account,followers,
+    // A benchmark is visible through its turn (V2-12 B9): a stand-in turn id keeps the old report path's fixture readable.
+    await db.query(`insert into research_benchmarks(fetch_id,actor_id,session_id,execution_id,turn_actor_id,turn_id,platform,account,followers,
       posts_analyzed,last_published_at,category,qualified,refs,operation_ids,missing,fetched_at)
-      values($1,$2,$3,$4,'tiktok',$5,50000,20,now(),'imitable',true,'{}','{}','{}',now())`, [fetch, actor, sessionId, execution, account]);
+      values($1,$2,$3,$4,$2,1,'tiktok',$5,50000,20,now(),'imitable',true,'{}','{}','{}',now())`, [fetch, actor, sessionId, execution, account]);
   }
 }
 export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixture>) {

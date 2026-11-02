@@ -5,3 +5,6 @@ export const RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE = '当前模型用途尚未�
 /** These refusals happen before an execution or reservation exists. No paid fallback is allowed. */
 export const RESEARCH_TOOLS_UNAVAILABLE_MESSAGE = '搜索暂时不可用，请稍后重试。本轮未发起模型调用，也未扣积分。';
 export const RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE = '本轮内容加上搜索工具后超出处理容量，请精简本轮输入后重试。本轮未发起模型调用，也未扣积分。';
+/** A turn that carries an account link needs the fetch tool to check it; say why it is refused (not the generic search notice). */
+export const RESEARCH_TOOLS_LINK_UNAVAILABLE_MESSAGE = '这一轮要核对你贴的账号链接，需要对标取数工具，但它暂时不可用（不是你的操作问题），请稍后重试。本轮未发起模型调用，也未扣积分。';
+export const RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY_MESSAGE = '这一轮要核对你贴的账号链接，需要对标取数工具，但本轮内容加上工具后超出处理容量。请只发账号链接、去掉其他文字后重试。本轮未发起模型调用，也未扣积分。';

@@ -25,6 +25,11 @@ BEGIN
     JOIN artifact_evidence ev ON ev.id=l.evidence_id
    WHERE l.evidence_id::text=eid AND ev.project_id=p.id AND e.actor_id=a AND e.content_deleted_at IS NOT NULL
    UNION ALL
+   -- CORE-PATH-V2 V2-7a2: a report finalized from a turn stays readable when its conversation is deleted, as above.
+   SELECT 1 FROM opc_result_links l JOIN turns t ON t.actor_id=l.turn_actor_id AND t.id=l.turn_id JOIN runtime_sessions s ON s.id=t.session_id
+    JOIN artifact_evidence ev ON ev.id=l.evidence_id
+   WHERE l.evidence_id::text=eid AND ev.project_id=p.id AND t.actor_id=a AND s.content_deleted_at IS NOT NULL
+   UNION ALL
    SELECT 1 FROM artifact_work_references ref JOIN artifact_versions src ON src.id=ref.source_version_id
     JOIN artifact_projects owner ON owner.id=src.project_id
    WHERE ref.evidence_id::text=eid AND ref.project_id=p.id AND owner.actor_id=a AND owner.content_deleted_at IS NOT NULL

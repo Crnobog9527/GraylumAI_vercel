@@ -54,56 +54,28 @@ describe('version marks', () => {
 });
 
 describe('loading version marks', () => {
-  const rows = (data: unknown) => ({ select: () => chain(data), in: () => chain(data), is: () => chain(data), eq: () => chain(data),
-    order: () => chain(data), limit: () => Promise.resolve({ data, error: null }) });
-  const chain = (data: unknown): never => ({ ...rows(data), then: (resolve: (value: unknown) => void) => resolve({ data, error: null }) }) as never;
-  const admin = (drafts: unknown) => ({ from: (table: string) => table === 'opc_drafts' ? chain(drafts)
-    : table === 'artifact_versions' ? chain([{ id: 'a', source: null, from: null }]) : chain([done('r', 'a')]) }) as never;
-  const mine = 'u1', draft = '10000000-0000-4000-8000-000000000001';
+  const draft = '10000000-0000-4000-8000-000000000001', mine = 'u1';
+  const rpc = (result: { data?: unknown; error?: { message: string } | null }, calls: unknown[] = []) =>
+    ({ rpc: (name: string, args: unknown) => { calls.push({ name, args }); return Promise.resolve({ data: null, error: null, ...result }); } }) as never;
+  const rows = { versions: [v('a')], reviews: [done('r', 'a')] };
 
-  it('answers for the caller\'s own analyses', async () => {
-    const marks = await loadVersionMarks(admin([{ draft_id: draft, project_id: 'p', actor_id: mine }]), mine, [draft]);
+  it('answers for the caller\'s own analyses, reading through the database function and never a table', async () => {
+    const calls: Array<{ name: string; args: unknown }> = [];
+    const marks = await loadVersionMarks(rpc({ data: rows }, calls), mine, [draft, draft], ['a', 'a']);
     expect(marks.a).toMatchObject({ mark: 'reviewed' });
+    expect(calls).toEqual([{ name: 'fusion_version_marks_read', args: { p_actor_id: mine, p_draft_ids: [draft], p_version_ids: ['a'] } }]);
+    const noTable = { from: () => { throw new Error('a table was read directly'); }, rpc: (rpc({ data: rows }) as unknown as { rpc: unknown }).rpc } as never;
+    expect((await loadVersionMarks(noTable, mine, [draft])).a).toMatchObject({ mark: 'reviewed' });
   });
 
   it('refuses another user\'s analysis, and an unknown one, instead of answering empty', async () => {
-    await expect(loadVersionMarks(admin([{ draft_id: draft, project_id: 'p', actor_id: 'someone-else' }]), mine, [draft]))
-      .rejects.toBeInstanceOf(VersionMarksDenied);
-    await expect(loadVersionMarks(admin([]), mine, [draft])).rejects.toBeInstanceOf(VersionMarksDenied);
-    await expect(loadVersionMarks(admin([{ draft_id: draft, project_id: 'p', actor_id: mine }]), mine,
-      [draft, '10000000-0000-4000-8000-000000000002'])).rejects.toBeInstanceOf(VersionMarksDenied);
+    await expect(loadVersionMarks(rpc({ error: { message: 'FUSION_VERSION_MARKS_DENIED' } }), mine, [draft])).rejects.toBeInstanceOf(VersionMarksDenied);
   });
 
-  it('marks a displayed version of another project of the account (inherited root, earlier draft) by its id', async () => {
-    const seen: Array<{ column: string; values: unknown }> = [];
-    const spy = (data: unknown): never => { const node: Record<string, unknown> = {};
-      for (const name of ['select', 'is', 'eq', 'order']) node[name] = () => node;
-      node.in = (column: string, values: unknown) => { seen.push({ column, values }); return node; };
-      node.limit = () => Promise.resolve({ data, error: null });
-      node.then = (resolve: (value: unknown) => void) => resolve({ data, error: null });
-      return node as never; };
-    const db = { from: (table: string) => table === 'opc_drafts' ? spy([{ draft_id: draft, project_id: 'p', actor_id: mine }])
-      : table === 'artifact_versions' ? spy([{ id: 'root', source: null, from: null }]) : spy([done('r', 'root')]) } as never;
-    const marks = await loadVersionMarks(db, mine, [draft], ['root']);
-    expect(marks.root).toMatchObject({ mark: 'reviewed' });
-    expect(seen.some(call => call.column === 'id' && JSON.stringify(call.values) === '["root"]')).toBe(true);
+  it('any other database failure reads as unavailable, and a review row of a newer date wins', async () => {
+    await expect(loadVersionMarks(rpc({ error: { message: 'permission denied for table opc_drafts' } }), mine, [draft])).rejects.toThrow('FUSION_REVIEW_UNAVAILABLE');
+    const newer = { versions: [v('a')], reviews: [done('old', 'a', { created_at: '2026-10-01T00:00:00Z' } as never), done('new', 'a', { created_at: '2026-10-02T00:00:00Z' } as never)] };
+    expect((await loadVersionMarks(rpc({ data: newer }), mine, [draft])).a).toMatchObject({ reviewId: 'new' });
+    expect(await loadVersionMarks(rpc({ data: null }), mine, [draft])).toEqual({});
   });
-  it('splits a large library into short id lists so no request URL grows too long', async () => {
-    const many = Array.from({ length: 80 }, (_, i) => `10000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
-    const sizes: number[] = [];
-    const node = (data: unknown): never => { const n: Record<string, unknown> = {};
-      for (const name of ['select', 'is', 'eq', 'order']) n[name] = () => n;
-      n.in = (_column: string, values: unknown[]) => { sizes.push(values.length); return n; };
-      n.limit = () => Promise.resolve({ data, error: null });
-      n.then = (resolve: (value: unknown) => void) => resolve({ data, error: null });
-      return n as never; };
-    const db = { from: (table: string) => table === 'opc_drafts'
-      ? { select: () => ({ in: (_c: string, values: string[]) => { sizes.push(values.length);
-        return Promise.resolve({ data: values.map(id => ({ draft_id: id, project_id: `p${id}`, actor_id: mine })), error: null }); } }) }
-      : table === 'artifact_versions' ? node([{ id: 'a', source: null, from: null }]) : node([done('r', 'a')]) } as never;
-    expect((await loadVersionMarks(db, mine, many)).a).toMatchObject({ mark: 'reviewed' });
-    expect(Math.max(...sizes)).toBeLessThanOrEqual(40);
-    expect(sizes.length).toBeGreaterThan(4);
-  });
-
 });

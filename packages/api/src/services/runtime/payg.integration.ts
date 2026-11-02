@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
 import { finishWaitingOrganizer } from './waitingOrganizer';
 import { runtimeExecutor } from './execute';
-import { createRuntimeBudget } from './budget';
+import { createRuntimeBudget } from '../turn/settings/budget';
 
 it.each([
   {exhausted:false,native:false,stop:false}, {exhausted:true,native:false,stop:false},

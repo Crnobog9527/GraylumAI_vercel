@@ -4,16 +4,16 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { INVALID_TOOL_ARGUMENTS, runRuntime, type RuntimeTool } from './runner';
-import { researchToolBytes } from './researchAdmission';
-import { researchRuntimeTools, researchToolDescription, researchToolParameters } from './researchRuntimeTool';
-import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TOOL_LIMITS, RESEARCH_TURN_VERSION } from './researchTurn';
+import { INVALID_TOOL_ARGUMENTS, runRuntime, type RuntimeTool } from '../turn/agent/runner';
+import { researchToolBytes } from '../turn/research/researchAdmission';
+import { researchRuntimeTools, researchToolDescription, researchToolParameters } from '../turn/research/researchRuntimeTool';
+import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TOOL_LIMITS, RESEARCH_TURN_VERSION } from '../turn/research/researchTurn';
 import { MIN_SUPPLIER_MS, supplierTimeout } from './researchExecution';
-import { createRuntimeBudget, MIN_MODEL_DISPATCH_MS } from './budget';
-import { mentorHistoryTool } from './mentorHistory';
+import { createRuntimeBudget, MIN_MODEL_DISPATCH_MS } from '../turn/settings/budget';
+import { mentorHistoryTool } from '../turn/agent/mentorHistory';
 import { terminalReplyGuard } from './executorRpc';
-import { loadSkillTool } from './loadSkillTool';
-import { skillFileTool } from './skillFile';
+import { loadSkillTool } from '../turn/skills/loadSkillTool';
+import { skillFileTool } from '../turn/skills/skillFile';
 import { RESEARCH_TOOL_NAMES, type ResearchToolName } from '../research/tools/schemas';
 import type { ResearchToolContext } from '../research/runtime/toolContext';
 

@@ -113,7 +113,7 @@ it('caches a frozen descriptor only by its exact identity',async()=>{
 });
 
 it('measures the Skill file continuation with one batch read instead of a check and a read per file',async()=>{
- const {skillFileContinuationBytes}=await import('../runtime/skillFile');
+ const {skillFileContinuationBytes}=await import('../turn/skills/skillFile');
  const c=clients(),source=c.source(revision(1));
  const [descriptor]=await source.list();
  const cold=await skillFileContinuationBytes(source,descriptor);

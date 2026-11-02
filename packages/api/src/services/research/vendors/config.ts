@@ -3,7 +3,7 @@
 // reads and validates it; the concurrency-checked write path and admin page are RT-2b. Missing or
 // invalid configuration means every research call stays off.
 import { z } from 'zod';
-import { rowFor, type ConfigurationRows } from '../../runtime/settingsRows';
+import { rowFor, type ConfigurationRows } from '../../turn/settings/settingsRows';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parallelRoute } from './parallel';
 import { FIRECRAWL_ROUTE } from './firecrawl';

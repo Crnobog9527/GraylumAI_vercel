@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { discoverSkillCatalog, MAX_SKILL_LOADS_PER_TURN, serializedResultBytes, skillCatalogInstructions, skillCatalogReserveBytes,
-  type SkillCatalogEntry } from './skillCatalog';
-import { LOAD_SKILL_TOOL, loadSkillToolBytes } from './loadSkillTool';
-import { admitCatalogVoice } from './voiceCatalog';
-import type { FrozenVoiceProfile } from './voiceAdmission';
+  type SkillCatalogEntry } from '../turn/skills/skillCatalog';
+import { LOAD_SKILL_TOOL, loadSkillToolBytes } from '../turn/skills/loadSkillTool';
+import { admitCatalogVoice } from '../turn/admission/voiceCatalog';
+import type { FrozenVoiceProfile } from '../turn/admission/voiceAdmission';
 
 export { MAX_SKILL_LOADS_PER_TURN };
 

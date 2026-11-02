@@ -4,12 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CHAT_ACTION, ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_REOPENED_NOTICE, REPORT_TITLE, REPORT_WRITING_NOTICE,
+  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE,
   reportActionLabel, reportAutoOpen, reportFeeText, reportUnfinished, reportView,
 } from "./report-gen";
 import { ReportExport } from "./report-export-button";
@@ -17,6 +21,7 @@ import { ReportChargeAction } from "./report-charge-confirm";
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
+import { reportStopChargeNotice } from "./turn-report-stop";
 export { PublishFootnote, PublishNext, reportPublishes } from "./report-publish";
 import { ReportDocumentPanel } from "./report-document-panel";
 import { REPORT_DOC_TEXT } from "./report-document";
@@ -31,7 +36,7 @@ import { savedFormalEditable, savedFormalReport, savedFormalStrategy, type Forma
 import { ReportBenchmarkGate } from "./report-benchmark-gate";
 
 type Props = {
-  draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
+  draftId: string; sessionId: string; projectId: string; roundId: string; moduleId?: string | null; confirmed: boolean; busy: boolean;
   /** The formal version's report (opc.read): the jury entry next to this one, and its saved text (savedFormalReport). */
   report?: FormalReport;
   /** This round is published (a formal version), not a revision in progress. */
@@ -63,6 +68,8 @@ function RoundReportEntry(props: Props) {
   const utils = trpc.useUtils();
   const report = useReportGen({ ...props, canGenerate: canGenerate, price: available.data?.priceCredits });
   const [open, setOpen] = useState(false);
+  // The user may close the report while the stop RPC is pending; its charge decision must stay visible.
+  useEffect(() => { if (report.stopConfirmation) setOpen(true); }, [report.stopConfirmation]);
   // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving
   // and coming back in this tab. A saved report of this round keeps its own dialog.
   const paywall = useReportPaywallMemory({ draftId: props.draftId, roundId: props.roundId,
@@ -124,18 +131,19 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   const marks = useVersionMarks([markOf?.draftId]);
   const status = report.status;
   const view = status ? reportView(status) : null;
-  const working = report.starting || report.streaming;
+  const working = report.streaming;
   const body = report.live?.text || (view && (view.kind === "report" || view.kind === "progress") ? view.body : null) || savedBody;
   const notices: ChatNotice[] = [];
-  if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
+  if (report.stopConfirmation) notices.push({ id: "report-stop-confirming", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
+  else if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
   else if (report.live?.stopped) notices.push({ id: "report-stopping", tone: "status", busy: true, text: STOP_SAVING_NOTICE });
   else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true,
-    text: report.reopened && !report.live.text ? REPORT_REOPENED_NOTICE : REPORT_WRITING_NOTICE,
+    text: REPORT_WRITING_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] });
-  else if (report.starting) notices.push({ id: "report-starting", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
   else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true,
-    text: report.reopened && !view.body && status?.state !== "cost_pending" ? REPORT_REOPENED_NOTICE : view.notice });
+    text: view.notice,
+    ...(report.canStopWithoutStream ? { actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] } : {}) });
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });
   const charge = !report.live && !working ? reportFeeText(status?.fee) : null;
@@ -149,7 +157,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   const first = !report.executionId && !savedBody;
   return (
     <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
-      onKeyDown={event => { if (event.key === "Escape") close(); }}
+      onKeyDown={event => { if (event.key === "Escape" && !report.stopConfirmation) close(); }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div ref={card} className={`${resultStyles.consentCard} ${outline.chapters.length >= REPORT_OUTLINE_MIN_CHAPTERS ? "!max-w-5xl" : "!max-w-3xl"}`}>
         <header>
@@ -184,6 +192,18 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
           )}
         </ReportWithOutline>
       </div>
+      <AlertDialog open={report.stopConfirmation} onOpenChange={open => { if (!open) report.cancelStop(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认停止报告？</AlertDialogTitle>
+            <AlertDialogDescription>{reportStopChargeNotice(price)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={report.cancelStop}>继续生成</AlertDialogCancel>
+            <AlertDialogAction onClick={report.confirmStop}>确认停止</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

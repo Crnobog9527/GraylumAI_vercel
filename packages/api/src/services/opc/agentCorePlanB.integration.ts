@@ -11,8 +11,8 @@ import { overlap } from '../__tests__/fixtures/planBConcurrency';
 import { runtimeAdmissionService } from '../runtime/admission';
 
 // Match the existing capture suite: this DB/confirmation test does not exercise the external rate limiter.
-vi.mock('../runtime/newWorkGate', async importOriginal => ({
-  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+  ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
   ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { checkRuntimeRateLimit } from './redisRateLimiter';
-import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './runtime/rateLimitSettings';
+import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './turn/settings/rateLimitSettings';
 
 // Explicit local-only entry. Normal unit/CI runs never connect to Redis.
 const enabled = process.env.RUNTIME_RATE_LIMIT_LOCAL === 'true';

@@ -3,14 +3,13 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import pg from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-import { authoritativeBilling, type BillingRpc } from '../bill2/service';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { openRouterBound } from '../bill2/openRouterPolicy';
-import { createRuntimeBudget } from '../runtime/budget';
+import { authoritativeBilling, type BillingRpc } from '../turn/provider/service';
+import { openRouterAdapter } from '../turn/provider/openRouterAdapter';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
+import { createRuntimeBudget } from '../turn/settings/budget';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { admitFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor } from './executor';
-import { recoverFusionFinancials } from './recovery';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from './settings';
 import { seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 
@@ -67,7 +66,9 @@ beforeAll(async () => {
   if (!staging) return;
   const expiresAt = new Date(Date.now() + 7200000).toISOString();
   const policies = pairs.map(([model, providerSlug], i) => {
-    const providerLimits = { providerSlug, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' };
+    // PROMPT-CACHE-ALL: the Anthropic route carries a frozen cache write price, so its frozen body holds cache breakpoints.
+    const providerLimits = { providerSlug, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0',
+      ...(providerSlug === 'anthropic' ? { cacheWriteUsdPerMillion: '1.25' } : {}) };
     return { modelId: models[i], model, provider: 'openrouter', account, protocol: 'openrouter-chat-v1', providerLimits,
       upperUsd: openRouterBound(providerLimits, 8192).upperUsd, inputLimit: 196608, outputLimit: 8192, multiplier: '3',
       automaticRetry: false, hiddenTools: false, lookupSupported: true };
@@ -133,31 +134,19 @@ it.runIf(staging)('RUNTIME: Fusion group admission, streamed dispatch, saved bod
     expect(body).not.toHaveProperty('tools');
     expect(body).not.toHaveProperty('tool_choice');
   }
+  // PROMPT-CACHE-ALL: through real admission (bill2_payg_validate_quote), claim and dispatch, the Anthropic reviewer's frozen
+  // body marks its system message; the OpenAI summary route (no frozen write price) sends the plain string.
+  const markedReview = sent.slice(-2).find(body => body.model === pairs[0][0])!;
+  const plainSummary = sent.slice(-2).find(body => body.model === pairs[2][0])!;
+  expect((markedReview.messages as Array<{ role: string; content: unknown }>)[0])
+    .toEqual({ role: 'system', content: [{ type: 'text', text: 'Review the report.', cache_control: { type: 'ephemeral' } }] });
+  expect((plainSummary.messages as Array<{ role: string; content: unknown }>)[0]).toEqual({ role: 'system', content: 'Summarize the opinions.' });
   const calls = (await db.query('select c.settled_at,c.fusion_verdict,c.charged_delta,r.closed from bill2_calls c join bill2_runs r on r.id=c.run_id where r.fusion_group_id=$1',
     [group.groupId])).rows;
   expect(calls).toHaveLength(2);
   for (const call of calls) expect({ settled: Boolean(call.settled_at), verdict: call.fusion_verdict, closed: call.closed,
     charged: Number(call.charged_delta) >= 1 }).toEqual({ settled: true, verdict: 'usable', closed: true, charged: true });
   expect(await wallet(f.actor)).toBe(1000 - calls.reduce((sum, c) => sum + Number(c.charged_delta), 0));
-});
-
-it.runIf(staging)('RUNTIME: Fusion stop releases undispatched holds; recovery cancels a call past its dispatch deadline', async () => {
-  const f = await member();
-  const executor = executorFor(f.actor);
-  const stopped = await admitFusionGroup({ admin, actorId: f.actor, requestId: randomUUID(), sourceSessionId: f.session, members: members(), env });
-  await executor.claim(stopped.groupId, 'review:1', 1, stopped.runs);
-  expect(await wallet(f.actor)).toBeLessThan(1000);
-  await executor.stop(stopped.runs.map(run => run.runId));
-  expect(await wallet(f.actor)).toBe(1000);
-  const late = await admitFusionGroup({ admin, actorId: f.actor, requestId: randomUUID(), sourceSessionId: f.session, members: members(), env });
-  await executor.claim(late.groupId, 'review:1', 1, late.runs);
-  expect(await wallet(f.actor)).toBeLessThan(1000);
-  await db.query(`update bill2_calls set dispatch_deadline=now()-interval '1 second'
-    where run_id in (select id from bill2_runs where fusion_group_id=$1)`, [late.groupId]);
-  const summary = await recoverFusionFinancials(admin, { limit: 200 });
-  expect(summary.cancelled).toBeGreaterThanOrEqual(2);
-  expect(await wallet(f.actor)).toBe(1000);
-  expect(sent.filter(body => body.model).length).toBeGreaterThan(0);
 });
 
 it.runIf(staging)('RUNTIME: Fusion admission refuses a disabled switch, a non-allowlisted model and a non-member', async () => {

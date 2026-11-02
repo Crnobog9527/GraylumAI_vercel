@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {overlapCases} from '../stripe-upgrade-overlap/cases.mjs';
@@ -33,7 +34,7 @@ export async function stripeMpUpgradeCases({admin,service,connect,proCycle='mont
   const proOrder=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,$5,'card','standard',
     'fixture','test',$3,'terms-v1',$4) o`,[user,pro,version,terms('b1'.repeat(32)),proCycle])).rows[0];
   const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=new Date(start);
-  if(proCycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1); else end.setUTCMonth(end.getUTCMonth()+1);
+  if(proCycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1); else end.setTime(addUtcMonths(end,1));
   await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[proOrder.id,new Date(start.getTime()-60000)]);
   const proPaid=await pay(user,proOrder,'card',start,end);
   assert.equal(proPaid.state,'fulfilled',JSON.stringify(proPaid));
@@ -48,7 +49,7 @@ export async function stripeMpUpgradeCases({admin,service,connect,proCycle='mont
   const goldOrder=(await upgrade()).rows[0];
   assert.deepEqual([goldOrder.method_transition,goldOrder.method_prior_subscription,goldOrder.source_order_id],['upgrade',proSub,proOrder.id]);
   // Delivering the Gold marks the Pro for stopping; the server then stops it at Stripe (cardUpgrade.ts).
-  const goldStart=new Date(Math.floor(Date.now()/1000)*1000-60000),goldEnd=new Date(goldStart);goldEnd.setUTCMonth(goldEnd.getUTCMonth()+1);
+  const goldStart=new Date(Math.floor(Date.now()/1000)*1000-60000),goldEnd=addUtcMonths(goldStart,1);
   const goldPaid=await pay(user,goldOrder,'card',goldStart,goldEnd);
   assert.equal(goldPaid.state,'fulfilled',JSON.stringify(goldPaid));
   assert.ok((await admin.query('SELECT method_cancel_requested_at FROM user_subscriptions WHERE id=$1',[proSub])).rows[0].method_cancel_requested_at);

@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {openRouterBound} from '../../services/bill2/openRouterPolicy';
-import {openRouterRequestBody} from '../../services/runtime/providerRequest';
-import {frozenReasoningFields} from '../../services/runtime/reasoningPolicy';
+import {openRouterBound} from '../../services/turn/provider/openRouterPolicy';
+import {openRouterRequestBody} from '../../services/turn/provider/providerRequest';
+import {frozenReasoningFields} from '../../services/turn/admission/reasoningPolicy';
 import {AGENT_TURN_CANDIDATES, AGENT_TURN_CANDIDATE_TOKENS, AGENT_TURN_CONFIG, CARD_CATEGORIES,
   type AgentTurnCandidate} from './agentTurn.ts';
 import {CANDIDATE_DEFAULT_MAX_USD, createBudget, HARD_MAX_CALLS, HARD_MAX_USD, memoryLedger} from './budget.ts';

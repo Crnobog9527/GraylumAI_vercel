@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {runtimeContext} from './runtimeContext';
-import {openRouterRequestBody, type RequestContext} from './providerRequest';
-import {historyToolNames, FREE_CHAT_REQUEST_FORMAT} from './providerRequest';
+import {runtimeContext} from '../turn/agent/runtimeContext';
+import {openRouterRequestBody, type RequestContext} from '../turn/provider/providerRequest';
+import {historyToolNames, FREE_CHAT_REQUEST_FORMAT} from '../turn/provider/providerRequest';
 import {executionTools} from './executionTools';
-import {skillCatalogReserveBytes} from './skillCatalog';
-import {selectRuntimeCallInput} from './context';
+import {skillCatalogReserveBytes} from '../turn/skills/skillCatalog';
+import {selectRuntimeCallInput} from '../turn/agent/context';
 
 const id = (n: number) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 const baseEntry = {name: 'script-writer', description: '写口播稿时使用。', moduleId: id(1), skillId: id(2), packageId: id(2),

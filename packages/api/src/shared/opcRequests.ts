@@ -63,6 +63,8 @@ export const opcContentFromExecution = z.object({
   executionId: uuid,
   sourceContentId: uuid.nullable().default(null),
 }).strict();
+/** V2-10b C2: the same save, of a reply on the turn path; a derived kind's source is the one its turn froze (policy.workSource). */
+export const opcContentFromTurn = opcContentFromExecution.omit({ executionId: true }).extend({ turnId: z.number().int().positive() }).strict();
 export const opcContentManualSave = z.object({
   workItemId: uuid,
   requestId: uuid,
@@ -84,6 +86,7 @@ export const opcVideoPackage = z.object({
 export const opcVideoResults = opcVideoPackage.extend({
   choice: z.enum(["both", "storyboard", "editing"]),
 }).strict();
+export const opcVideoResultsFromTurn = opcVideoResults.omit({ executionId: true }).extend({ turnId: z.number().int().positive() }).strict();
 export const opcVideoExecutionCheck = z.object({
   workItemId: uuid,
   executionId: uuid,

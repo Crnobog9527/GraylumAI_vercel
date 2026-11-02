@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentInputItem, Session } from '@openai/agents';
-import { fitNativeSessionItem } from './resultCapacity';
-import { projectOpenRouterItemsForSizing } from './openRouterHistory';
+import { fitNativeSessionItem } from '../turn/provider/resultCapacity';
+import { projectOpenRouterItemsForSizing } from '../turn/provider/openRouterHistory';
 
 type Item = Record<string, unknown>;
 function shortText(text: string): string {

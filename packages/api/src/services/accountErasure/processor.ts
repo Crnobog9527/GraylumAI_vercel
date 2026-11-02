@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { erasureRpcDiagnostic } from './rpcDiagnostics';
-import type { BillingRpc } from '../bill2/service';
+import type { BillingRpc } from '../turn/provider/service';
 import {
   batchSchema, beginSchema, contentRemaining, detachSchema, financialSchema, localSchema,
   recoverySchema, resultSchema, storageReadySchema, storageSchema, workSchema,
@@ -131,7 +131,8 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
       if (page === pages - 1) { report.remaining++; error('ERASURE_PAGE_LIMIT'); break; }
       work = await inventory(work.nextRunId);
     }
-    for (const name of ['account_erasure_scrub_content', 'account_erasure_scrub_runtime']) {
+    // CORE-PATH-V2 (0420): account_erasure_scrub_turns empties the new core-path content; the turn billing records stay.
+    for (const name of ['account_erasure_scrub_content', 'account_erasure_scrub_runtime', 'account_erasure_scrub_turns']) {
       await attempt(async () => {
         const content = contentRemaining(await rpc(name, actor));
         report.remaining += content.remaining;

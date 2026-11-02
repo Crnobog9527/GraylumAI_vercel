@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { stagingProcedureError } from '../runtime/stagingErrors';
+import { stagingProcedureError } from '../turn/settings/stagingErrors';
 import { reportFinalizationService, reportEditInput } from './finalization';
 const actor = randomUUID();
 const executionId = randomUUID();

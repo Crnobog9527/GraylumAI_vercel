@@ -7,18 +7,18 @@ const mocks = vi.hoisted(() => ({ policy: undefined as unknown, staging: vi.fn()
 const ids = { reviewer: '00000000-0000-4000-8000-0000000000a1', summary: '00000000-0000-4000-8000-0000000000b1',
   draft: '00000000-0000-4000-8000-0000000000d1', group: '00000000-0000-4000-8000-0000000000e1',
   run: '00000000-0000-4000-8000-0000000000f1', session: '00000000-0000-4000-8000-0000000000c1' };
-vi.mock('../runtime/stagingPolicy', async original => ({ ...(await original<typeof import('../runtime/stagingPolicy')>()),
+vi.mock('../turn/settings/stagingPolicy', async original => ({ ...(await original<typeof import('../turn/settings/stagingPolicy')>()),
   loadStagingPolicy: async () => mocks.policy }));
-vi.mock('../runtime/paygHostPolicy', async original => ({ ...(await original<typeof import('../runtime/paygHostPolicy')>()),
+vi.mock('../turn/admission/paygHostPolicy', async original => ({ ...(await original<typeof import('../turn/admission/paygHostPolicy')>()),
   readPaygHostPolicies: mocks.staging }));
-vi.mock('../runtime/productionPolicy', async original => ({ ...(await original<typeof import('../runtime/productionPolicy')>()),
+vi.mock('../turn/settings/productionPolicy', async original => ({ ...(await original<typeof import('../turn/settings/productionPolicy')>()),
   readPaygProductionPolicies: mocks.production }));
 vi.mock('./settings', async original => ({ ...(await original<typeof import('./settings')>()), readFusionSettings: async () => ({ review: { enabled: true, reviewerModelIds: [ids.reviewer],
   summaryModelId: ids.summary, opinionOutputTokens: 1000, summaryOutputTokens: 2000, dispatchMinutes: 10 } }) }));
 vi.mock('../membershipEntitlements', async original => ({ ...(await original<typeof import('../membershipEntitlements')>()), readMembershipEntitlements: async () => ({}), assertFusionEntitlement: () => {} }));
 vi.mock('../runtime/paygPricing', async original => ({ ...(await original<typeof import('../runtime/paygPricing')>()),
   freezeStagingPaygPricing: async (_db: unknown, policies: unknown[]) => policies }));
-vi.mock('../runtime/billingUnitAdmission', async original => ({ ...(await original<typeof import('../runtime/billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission', async original => ({ ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2',
   creditsPerUsd: '100', defaultMultiplier: '6', models: {}, providers: {}, hash: 'f'.repeat(64) }) }));
 vi.mock('../runtime/paygRuntime', async original => ({ ...(await original<typeof import('../runtime/paygRuntime')>()),
@@ -28,7 +28,7 @@ vi.mock('./request', async original => ({ ...(await original<typeof import('./re
 vi.mock('./models', async original => ({ ...(await original<typeof import('./models')>()),
   admitFusionModel: async (_db: unknown, _w: unknown, row: { id: string }) => ({ quote: { modelId: row.id },
     policy: { modelId: row.id }, outputLimit: 1000, reasoning: { parameter: 'none' } }) }));
-vi.mock('../bill2/service', async original => ({ ...(await original<typeof import('../bill2/service')>()),
+vi.mock('../turn/provider/service', async original => ({ ...(await original<typeof import('../turn/provider/service')>()),
   frozenPaygRunSchema: { parse: (value: unknown) => value } }));
 
 const { admitFusionGroup } = await import('./admission');

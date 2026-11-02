@@ -9,11 +9,11 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
-import { createRuntimeBudget } from './budget';
-import { authoritativeBilling } from '../bill2/service';
+import { createRuntimeBudget } from '../turn/settings/budget';
+import { authoritativeBilling } from '../turn/provider/service';
 import { recoverInterruptedExecutions } from './interruptedRecovery';
 import { erasureFinancialBudget } from '../accountErasure/financialRecovery';
-import { compensateStaleRound } from './staleChargedRounds';
+import { compensateStaleRound } from '../turn/settings/staleChargedRounds';
 
 async function fixture(invalid?: 'primary' | 'organizer' | 'terminal') {
   const connectionString = process.env.V3_LOCAL_DB;

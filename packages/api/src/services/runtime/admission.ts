@@ -1,15 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {admitOwnPosts,readWorkspaceCapability,ownPostsBudget} from './workspacePosts';
-import {freezeSkillFileBinding,skillFileToolBytes,skillFileContinuationBytes,type SkillFileBinding} from './skillFile';
+import {admitOwnPosts,readWorkspaceCapability,ownPostsBudget} from '../turn/agent/workspacePosts';
+import {freezeSkillFileBinding,skillFileToolBytes,skillFileContinuationBytes,type SkillFileBinding} from '../turn/skills/skillFile';
 import { GENERIC_ORGANIZER_TEMPLATE, loadOrganizerTemplate } from '../skills/organizerTemplate';
 import {activateFreeChatSkill} from '../skills/stepGuide';
 import {type FrozenReport} from '../report/contract';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
-import {freezePromptCache,freezeHostPromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {freezePromptCache,freezeHostPromptCache,promptCacheReserveBytes} from '../turn/provider/promptCache';
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
-import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
+import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from '../turn/agent/hostTurn';
 import {currentInputBytes} from './historySelection';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -18,51 +18,52 @@ import { databaseSkillSource } from '../skills/databaseSource';
 import { activateSkill, identityOf } from '../skills/loader';
 import { BRAND_IDENTITY_INSTRUCTIONS, withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { summaryPolicy, assertSeparateSummaryModel } from '../artifacts/summaryPolicy';
-import { aggregateCredits, decimal } from '../bill2/decimal';
-import type {StagingPolicy} from './stagingPolicy';
+import { aggregateCredits, decimal } from '../turn/provider/decimal';
+import type {StagingPolicy} from '../turn/settings/stagingPolicy';
 import { throwIfContentBindingRefused } from '../opc/contentBindingError';
-import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
+import {StagingAccessError,stagingRpcFailure} from '../turn/settings/stagingErrors';
 import {readOpenRouterKeyOrUnset} from '../models/openRouterKey';
-import {type FrozenPaygRun, type FrozenRun} from '../bill2/service';
-import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput, requestsHistoricalComparison } from './context';
-import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
-import { freeChatInstructions, readReplySetting, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
-import { admitVoice } from './voiceAdmission';
-import { type ReasoningPolicy } from './reasoningPolicy';
-import { admitReasoning } from './reasoningAdmission';
+import {type FrozenPaygRun, type FrozenRun} from '../turn/provider/service';
+import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput, requestsHistoricalComparison } from '../turn/agent/context';
+import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from '../turn/agent/matching';
+import { freeChatInstructions, readReplySetting, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from '../turn/agent/primaryInstructions';
+import { admitVoice } from '../turn/admission/voiceAdmission';
+import { type ReasoningPolicy } from '../turn/admission/reasoningPolicy';
+import { admitReasoning } from '../turn/admission/reasoningAdmission';
 import type {AnsweredCard} from '../opc/answerCard';
 import {ASK_QUESTION_TOOL,questionAnswerSourceSchema} from '../../shared/agentTurn';
 import {isOpeningInput} from '../../shared/opcQuestions';
-import {groundedCardToolBytes} from './groundedCard';
-import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS,READ_HISTORY_TOOL} from './agentTools';
-import {MENTOR_HISTORY_RESERVE_BYTES,MENTOR_HISTORY_VERSION,mentorHistoryToolBytes} from './mentorHistory';
-import {currentRequestTiming} from './timing';
-import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from './purposeBudgets';
-import {assertFrozenPayloads} from './payloadSize';
-import {freezeWindowBillingUnit} from './billingUnitAdmission';
-import {newWorkGate,readAdmissionSettings,requireNewWork} from './newWorkGate';
-import {serverChatModel} from './serverChatModel';
+import {groundedCardToolBytes} from '../turn/agent/groundedCard';
+import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS,READ_HISTORY_TOOL} from '../turn/agent/agentTools';
+import {MENTOR_HISTORY_RESERVE_BYTES,MENTOR_HISTORY_VERSION,mentorHistoryToolBytes} from '../turn/agent/mentorHistory';
+import {currentRequestTiming} from '../turn/provider/timing';
+import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from '../turn/settings/purposeBudgets';
+import {assertFrozenPayloads} from '../turn/provider/payloadSize';
+import {freezeWindowBillingUnit} from '../turn/admission/billingUnitAdmission';
+import {newWorkGate,readAdmissionSettings,requireNewWork} from '../turn/admission/newWorkGate';
+import {serverChatModel} from '../turn/agent/serverChatModel';
 import {requireAllowedInput} from './moderation';
-import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from './providerRequest';
-import {admissionDeadline,admittedOutputLimit,timedAdmission} from './admissionLimits';
+import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from '../turn/provider/providerRequest';
+import {admissionDeadline,admittedOutputLimit,timedAdmission} from '../turn/admission/admissionLimits';
 import {freezeAdmissionPayg} from './admissionPayg';
 import {readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
-import {admitWithRepair,keptCause} from './admissionRepair';
+import {admitWithRepair,isAdmitFunction,keptCause} from './admissionRepair';
+import {admission} from './admitSplit';import {readRwV2} from '../turn/agent/rwV2';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
- type PositioningGatePolicy} from './positioningGate';
-import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
+ type PositioningGatePolicy} from '../turn/admission/positioningGate';
+import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from '../turn/admission/positioningFallback';
 import {LIBRARY_RETRIEVAL_CALLS,admitLibraryReferences,admitLibraryRetrieval,candidateToolBytes,libraryReferenceInput,
- libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from './libraryAdmission';
-import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
-import {fitsCapacity} from './researchAdmission';
+ libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from '../turn/admission/libraryAdmission';
+import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from '../turn/agent/contentSource';
+import {fitsCapacity} from '../turn/research/researchAdmission';
 import {admitSkillCatalog,freeChatCatalogTurn,skillCatalogSlots} from './skillCatalogAdmission';
-import {researchCapacity} from './researchCapacity';
-import {RESEARCH_RESULT_RESERVE_BYTES} from './researchTurn';
-import {guardResearchAdmission,researchInputHost} from './researchAdmissionGuard';
-import {attachFreeChatResearch} from './freeChatResearch';
+import {researchCapacity} from '../turn/research/researchCapacity';
+import {RESEARCH_RESULT_RESERVE_BYTES} from '../turn/research/researchTurn';
+import {guardResearchAdmission,researchInputHost} from '../turn/research/researchAdmissionGuard';
+import {attachFreeChatResearch} from '../turn/research/freeChatResearch';
 import {organizerSelection} from './organizerSelection';
-import {readAdmissionConfiguration,MODEL_ROW_COLUMNS} from './admissionConfiguration';
+import {readAdmissionConfiguration,readAdmissionModel,readAdmissionModule} from '../turn/admission/admissionConfiguration';
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
  brief:z.string().max(8000),material:z.string().max(16000),roundId:uuid.nullable().default(null)}).strict();
@@ -124,8 +125,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
   if(r.error?.code==='P0001'&&r.error.message==='OPC_BUSINESS_ARCHIVED')throw new StagingAccessError('OPC_BUSINESS_ARCHIVED');
   if(r.error)throwIfContentBindingRefused(r.error);
-  if(name==='runtime_admit')throwLibraryRefusal(r.error);
-  if(name==='runtime_admit'&&r.error&&['P0001','PT400'].includes(r.error.code)&&
+  if(isAdmitFunction(name))throwLibraryRefusal(r.error);
+  if(isAdmitFunction(name)&&r.error&&['P0001','PT400'].includes(r.error.code)&&
    (['400: insufficient credits','insufficient credits'].includes(r.error.message)||
     /^积分不足: 需要 [0-9]+, 当前 [0-9]+$/.test(r.error.message)))
    throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
@@ -133,7 +134,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   if(r.error){
    if(policy.reportGeneration&&(r.error.message.startsWith('REPORT_')||
     ['OPC_CAPTURE_PENDING','RUNTIME_SKILL_MODEL_DENIED'].includes(r.error.message)))throw new Error(r.error.message);
-   if(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
+   if(isAdmitFunction(name)&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
    // Preserve SQL business/permission refusals; classify only operational failures.
    if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:keptCause(name,r.error,policy.reportGeneration)});
    stagingRpcFailure(r.error);
@@ -210,8 +211,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')
     modelId=policy.real&&!policy.weeklyReview?serverChatModel(await settings):input.selection.modelId;
    else if(input.selection.kind==='skill'){
-    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related,uses_user_voice')
-     .eq('id',input.selection.moduleId).single();
+    const module=await readAdmissionModule(admin,input.selection.moduleId);
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
     if(gated&&module.data.social_media_related===true)refusePositioning();
     moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);voiceFlagged=module.data.uses_user_voice===true;
@@ -237,8 +237,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
       '\nHost extraction and write-safety contract (takes precedence):\n' + organizerInstructions;
     }
    }else({modelId,organizerOutput,instructions}=await organizerSelection(admin,session.dialogueModelId,Boolean(policy.real),modelConfiguration,configuration));
-   // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the single system message and is
-   // frozen with this admission; a Skill's cached prefix grows by the same fixed text.
+   // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the frozen system message; a Skill's cached prefix grows by the same text.
    const settingsRead=await settings;
    const brandIdentity=settingsRead.ok?settingsRead.identityGuard??true:true;
    if(brandIdentity){
@@ -246,7 +245,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
    // DB-PERF PR-3: pricing and the billing unit reuse this row (MODEL_ROW_COLUMNS) instead of reading the model again.
-   const row=await admin.from('ai_models').select(MODEL_ROW_COLUMNS).eq('id',modelId).single();
+   const row=await readAdmissionModel(admin,modelId);
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
@@ -257,9 +256,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
    const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
-   // The executor appends these rules (withPrimaryAddenda); admission sizes them too, so a fitting turn never fails later.
-   // VOICE: a chosen writing Skill carries the user's confirmed voice; the executor appends it, so it is sized here too.
-   // Not for host-built turns (mentor, report), whose prompt cache covers the whole system message.
+   // The executor appends these rules and a chosen writing Skill's voice (withPrimaryAddenda); admission sizes them too, so a
+   // fitting turn never fails later. Not for host-built turns (mentor, report), whose prompt cache covers the whole system message.
    const voiceTurn=!hostTurnContext&&!policy.reportGeneration&&!mentorStream&&!stepStream;
    let voice=voiceTurn&&voiceFlagged?await admitVoice(admin,actorId,[moduleId!],true):undefined;
    const {setting:replySetting,rule:replyRule}=await replyRead,positioningRule=replyRule+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
@@ -274,7 +272,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     const settings=await configuration;
     if(settings.error)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries((settings.data??[]).map(r=>[r.key,r.value])),modelId));
-    const model=await admin.from('ai_models').select(MODEL_ROW_COLUMNS).eq('id',summary.modelId).single();
+    const model=await readAdmissionModel(admin,summary.modelId);
     if(policy.real&&model.error){if(model.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(model.error);}
     if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw unavailableModel();
     modelConfiguration(()=>assertSeparateSummaryModel(row.data.model_id,model.data.model_id));modelRows.push(model.data);
@@ -294,10 +292,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
      ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
-   let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({
-    real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
-    cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions});
+   // PROMPT-CACHE-ALL: reports (V2-7a) and free chat (V2-4) get prompt-cache-v3 on the CORE-PATH-V2 turn path, not here:
+   // report_admission_check.sql refuses a report context with promptCache.
+   const writePrice=policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined;
+   let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({real:Boolean(policy.real),role:input.selection.kind,
+    model:row.data.model_id,instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,cacheWriteUsdPerMillion:writePrice});
    if(mentorStream&&!stepSummary&&!hostTurnContext?.cardContract)instructions+='\n'+QUESTION_CONTRACT_INSTRUCTIONS;
    const currentInput=runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext);
    const maxOutputTokens=outputCapacity(row.data,organizerOutput,
@@ -309,7 +308,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let libraryBytes=0,cb=0; // cb: bytes reserved for the Skill catalog's tool and loads
    const admissionToolBytes=(file:boolean,history=false,extra=0)=>libraryBytes+cb+extra+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+(history?mentorHistoryToolBytes()+Math.max(skillFileReserve,MENTOR_HISTORY_RESERVE_BYTES):skillFileReserve):0)+
-    (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+    (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache));
    const requireCapacity=(text:string,file:boolean,content=currentInput,history=false,extra=0,bytes?:number)=>selectRuntimeHistory([],[{role:'user',content}],
     {instructions:text,inputBytes:limitOf(bytes),historyItems:0,toolBytes:admissionToolBytes(file,history,extra)});
    const skillFileInstructions='\nYou may read at most one declared Skill file in this turn with read_skill_file, '+
@@ -331,9 +330,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     catch(error){if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;}
    }
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
-    model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    instructions:instructions+replyRule,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
-    additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
+    model:row.data.model_id,cacheWriteUsdPerMillion:writePrice,instructions:instructions+replyRule,skillChars,
+    stableAdditionalPrefix:policy.stableAdditionalInstructions,additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
     historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
      currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
@@ -355,7 +353,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(voiceTurn&&candidates.length)voice=await admitVoice(admin,actorId,candidates.map(candidate=>candidate.moduleId));
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
-     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
+     (historySelection?.markerReserveBytes??promptCacheReserveBytes(promptCache)),
      instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext,strategyGuide),ownPosts,network:input.network,
       replyLanguage:replySetting,libraryReferences,libraryRetrieval,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),...(voice?{voice:{guide:voice.frozen.guide,profile:voice.profile}}:{})})});
@@ -423,7 +421,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const realCalls=policy.real?.callPolicies.filter(c=>selectedIds.has(c.modelId));
    const costPerCall=realCalls?.reduce((upper,c)=>decimal(c.upperUsd)>decimal(upper)?c.upperUsd:upper,'0')??policy.costPerCall;
    const costUsd=Array.from({length:maxCalls},()=>costPerCall);
-   // Decimal aggregation returns credits; no floating-point money is persisted.
    const credits=aggregateCredits(costUsd,policy.creditsPerUsd,policy.multiplier);
    const total=decimal(costPerCall)*BigInt(maxCalls);
    const cost=(total/1_000_000_000_000n).toString()+'.'+(total%1_000_000_000_000n).toString().padStart(12,'0');
@@ -463,7 +460,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit,modelRows});
    if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&
     await guardResearchAdmission({admin,real:policy.real,context,billing,settings,configuration,actorId,sessionId:input.sessionId,requestId:input.requestId,
-     capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,
+     userText:input.input,capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,
       currentInput,inputBudgetBytes:limitOf(bytes),existingToolsBytes:admissionToolBytes(Boolean(skillFile),historyRead),
       researchToolsBytes,researchHostDeltaBytes,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES}),
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))})
@@ -473,8 +470,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
    capReviewAdmission(context,billing,policy.weeklyReview);assertFrozenPayloads(context,billing);
-   const admit=()=>query('runtime_admit',{
-    p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});
+   const admit=admission(readRwV2(await configuration).admitSplit,query,input.sessionId,input.requestId,context,billing);
    try{
     try{return await admitWithRepair(admin,actorId,admit);}// D2: a session held by an earlier round is repaired once
     catch(error){

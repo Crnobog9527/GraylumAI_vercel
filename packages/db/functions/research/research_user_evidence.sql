@@ -23,15 +23,14 @@ BEGIN
    'sources',coalesce((SELECT jsonb_agg(item->>'url') FROM jsonb_array_elements(
      CASE WHEN jsonb_typeof(o.result->'items')='array' THEN o.result->'items' ELSE '[]'::jsonb END) item
      WHERE jsonb_typeof(item->'url')='string'),'[]'::jsonb),
-   'sessionId',s.id,'sessionTitle',coalesce(n.name,(SELECT left(nullif(btrim(t.payload->>'input'),''),80)
-     FROM runtime_executions t WHERE t.session_id=s.id AND t.actor_id=a
-     AND t.content_deleted_at IS NULL AND t.erased_at IS NULL ORDER BY t.created_at,t.id LIMIT 1)),
+   'sessionId',s.id,'sessionTitle',coalesce(n.name,(SELECT left(nullif(btrim(m.content),''),80)
+     FROM session_messages m WHERE m.session_id=s.id AND m.role='user' AND m.visible AND m.deleted_at IS NULL
+     ORDER BY m.seq LIMIT 1)),
    'createdAt',o.created_at) row
   FROM research_operations o JOIN research_plans p ON p.id=o.plan_id AND p.actor_id=a
   JOIN runtime_sessions s ON s.id=p.session_id AND s.actor_id=a
-  JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s.id
   LEFT JOIN runtime_session_names n ON n.session_id=s.id AND n.actor_id=a
-  WHERE o.erased_at IS NULL AND p.erased_at IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+  WHERE o.erased_at IS NULL AND p.erased_at IS NULL AND p.turn_id IS NOT NULL
    AND s.content_deleted_at IS NULL AND s.erased_at IS NULL AND o.state IN ('succeeded','failed','unknown')
    AND (p_cursor_time IS NULL OR (o.created_at,o.id)<(p_cursor_time,p_cursor_id))
   ORDER BY o.created_at DESC,o.id DESC LIMIT p_limit

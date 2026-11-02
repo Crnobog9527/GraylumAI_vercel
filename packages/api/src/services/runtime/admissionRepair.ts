@@ -11,8 +11,10 @@ export function sessionBusy(error: unknown): boolean {
   return error instanceof Error && error.message === 'RUNTIME_ADMISSION_DENIED'
     && (error.cause as { message?: unknown } | undefined)?.message === SESSION_BUSY;
 }
-/** runtime_admit's refusals whose SQL error admission keeps as the cause. */
-export const keepsCause = (name: string, message: unknown) => name === 'runtime_admit' && message === SESSION_BUSY;
+/** The three admission functions: runtime_admit and, behind the DB-RW-C switch, its precheck and commit steps. */
+export const isAdmitFunction = (name: string) => name === 'runtime_admit' || name === 'runtime_admit_precheck' || name === 'runtime_admit_commit';
+/** The admission refusals whose SQL error admission keeps as the cause. */
+export const keepsCause = (name: string, message: unknown) => isAdmitFunction(name) && (message === SESSION_BUSY || message === 'RUNTIME_ADMIT_STALE');
 /** The cause admission attaches to RUNTIME_ADMISSION_DENIED: the SQL error for a report (as before) or a session-busy refusal. */
 export const keptCause = (name: string, error: { message?: unknown }, report: unknown) =>
   report || keepsCause(name, error.message) ? error : undefined;

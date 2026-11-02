@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {fitNativeResult,attachNativeSummary} from './resultCapacity';
-import type {NativeProgressProjection,NativeTextUpdate} from './nativeProgress';
+import {fitNativeResult,attachNativeSummary} from '../turn/provider/resultCapacity';
+import type {NativeProgressProjection,NativeTextUpdate} from '../turn/agent/nativeProgress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import {z} from 'zod';
 import {INVALID_REPLY_NOTICE,questionToolCardSchema} from '../../shared/agentTurn';

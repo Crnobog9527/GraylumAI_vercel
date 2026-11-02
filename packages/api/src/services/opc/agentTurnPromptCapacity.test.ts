@@ -73,7 +73,7 @@ it.each([false,true].flatMap(opening=>['missing','provisional','confirmed','defe
    builderCharacters:direct.length,additionalCharacters:complete.length,utf8Bytes:Buffer.byteLength(complete)}));
  });
 
-vi.mock('../runtime/newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

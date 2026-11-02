@@ -224,7 +224,8 @@ it('RUNTIME: capture complete callback persists and new projection strips privat
   await f.apply(await f.seed(output([patch('suggestion')])));
   const projection = (await db.query('select runtime_work_projection($1,$2,$3) v', [f.actor, f.d.sessionId, f.d.roundId])).rows[0].v;
   expect(projection.steps['step-0'].fieldMeta.goal).toEqual({
-    protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:true,
+    // V2-12 C (0458): the projection no longer reads runtime_executions, so an old-path suggestion is never reported as pending.
+    protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:false,
     executionId:null,origin:{basis:'user_statement',executionId:id},createdAt:expect.any(String),
   });
   expect(Number.isFinite(Date.parse(projection.steps['step-0'].fieldMeta.goal.createdAt))).toBe(true);
@@ -469,6 +470,7 @@ it.each(['ascii', 'utf8'])('RUNTIME: full fields and protected markers fit 32768
   for (const step of Object.values(frozen.payload.scopeMaterial.content.work.steps) as Array<{ fieldMeta: Record<string, unknown>; information: Record<string, { value: string }> }>) {
     expect(Object.keys(step.fieldMeta).sort()).toEqual(Object.keys(step.information).sort());
     for (const [field, meta] of Object.entries(step.fieldMeta)) {
+      // This case installs the 0182 projection itself (above), so the pending-suggestion flag is that definition's, not 0458's.
       expect(meta).toMatchObject({protected:true,source:'user',hasPendingSuggestion:true});
       expect(step.information[field].value).toHaveLength(400); fields++;
     }
@@ -870,8 +872,8 @@ it('RUNTIME: completion capture has a bounded wait and later retry remains idemp
   } finally { await locker.query('rollback'); await locker.end(); }
 });
 
-vi.mock('../runtime/newWorkGate', async importOriginal => ({
-  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+  ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
   ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 

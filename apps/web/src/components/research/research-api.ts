@@ -12,11 +12,43 @@ export interface ToolChargeRow {
   args: unknown;
   source: ToolSettlement | null;
   credits: string | null;
+  /** What the one subcall asked for (turn rows keep it per subcall instead of the whole call's arguments). */
+  query?: string | null;
+  platform?: string | null;
+  dataKind?: string | null;
+}
+
+const ACCOUNT_KINDS = ["account_profile", "account_posts", "account_relation", "post_detail"];
+/** One benchmark discovery subcall shown as what it was: a web search, a page read, an account lookup or a keyword search. */
+function byKind(dataKind: string | null | undefined, platform: string, query: string): Pick<SearchCharge, "tool" | "args"> {
+  if (dataKind === "web_search") return { tool: "web_search", args: { query } };
+  if (dataKind === "web_fetch") return { tool: "web_fetch", args: { url: query } };
+  if (dataKind && ACCOUNT_KINDS.includes(dataKind)) return { tool: "social_account", args: { platform, account: query } };
+  return { tool: "social_search", args: { platform, keywords: [query] } };
+}
+
+/**
+ * A turn's row has no call arguments, only the subcall's own query and platform: rebuild what describeRequest reads. A benchmark
+ * discovery subcall is one keyword search, so it is shown as that, with its own keyword.
+ */
+function requestOf(row: ToolChargeRow & { toolName: ResearchToolName }): Pick<SearchCharge, "tool" | "args"> {
+  if (row.args) return { tool: row.toolName, args: row.args };
+  const query = row.query ?? "";
+  const platform = row.platform ?? "";
+  switch (row.toolName) {
+    case "web_search": return { tool: row.toolName, args: { query } };
+    case "web_fetch": return { tool: row.toolName, args: { url: query } };
+    case "social_search": return { tool: row.toolName, args: { platform, keywords: query ? [query] : [] } };
+    case "social_account": return { tool: row.toolName, args: { platform, account: query } };
+    case "benchmark_fetch": return { tool: row.toolName, args: { accounts: query ? [{ platform, account: query }] : [] } };
+    case "benchmark_discover": return query ? byKind(row.dataKind, platform, query) : { tool: row.toolName, args: {} };
+    default: return { tool: row.toolName, args: {} };
+  }
 }
 
 export function toSearchCharges(rows: ToolChargeRow[]): SearchCharge[] {
   return rows.flatMap(row => row.toolName
-    ? [{ callId: row.callId, tool: row.toolName, args: row.args ?? {}, settlement: row.source, userCredits: row.credits }]
+    ? [{ callId: row.callId, ...requestOf({ ...row, toolName: row.toolName }), settlement: row.source, userCredits: row.credits }]
     : []);
 }
 

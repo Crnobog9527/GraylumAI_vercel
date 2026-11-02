@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths,latestMonthEnd} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -62,7 +63,7 @@ export async function stripeMpLiveCases({admin,service}) {
 
   // Card monthly, live: first payment, tax, renewal, failure, stop, observation and entitlement.
   // The first month ended two hours ago, so its renewal is due now.
-  const end=new Date(Math.floor(Date.now()/1000)*1000-2*3600000),start=new Date(end);start.setUTCMonth(start.getUTCMonth()-1);
+  const end=latestMonthEnd(new Date(Math.floor(Date.now()/1000)*1000-2*3600000)),start=addUtcMonths(end,-1);
   const card=await order({digest:'d2'.repeat(32)});
   const fulfilled=(await service.query('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[card.o.id,'fixture',
     card.checkout,`in_live_${card.o.id}`,card.o.amount_total,'usd',new Date(start.getTime()+6000),`sub_live_${card.o.id}`,start,end])).rows[0].v;
@@ -78,7 +79,7 @@ export async function stripeMpLiveCases({admin,service}) {
   assert.equal((await facts(card.user)).mapping_state,'internal_paid','a paid live order entitles');
   assert.equal((await service.query(`SELECT pay_stripe_mp_observe_subscription($1,'fixture') v`,[fulfilled.subscriptionId])).rows.length,1);
   await service.query(`SELECT pay_stripe_mp_record_renewal_failure($1,'fixture','in_live_fail',$2)`,[fulfilled.subscriptionId,new Date()]);
-  const next=new Date(end);next.setUTCMonth(next.getUTCMonth()+1);
+  const next=addUtcMonths(end,1);
   const renewed=(await service.query(`SELECT pay_stripe_mp_renew_subscription($1,'fixture','in_live_renew',$2,'usd',$3,$4,$5) v`,
     [fulfilled.subscriptionId,card.o.amount_total,new Date(end.getTime()+60000),end,next])).rows[0].v;
   assert.equal(renewed.duplicate,false,JSON.stringify(renewed));
@@ -92,7 +93,7 @@ export async function stripeMpLiveCases({admin,service}) {
   // Pro -> Gold upgrade of a live subscription is admitted in live mode only: the prior paid order must share the mode.
   const pro=(await admin.query("SELECT id FROM membership_plans WHERE level='pro'")).rows[0].id;
   const upgrader=await user(),proOrder=await order({item:pro,digest:'d6'.repeat(32)},upgrader);
-  const proStart=new Date(Math.floor(Date.now()/1000)*1000-86400000),proEnd=new Date(proStart);proEnd.setUTCMonth(proEnd.getUTCMonth()+1);
+  const proStart=new Date(Math.floor(Date.now()/1000)*1000-86400000),proEnd=addUtcMonths(proStart,1);
   await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[proOrder.o.id,new Date(proStart.getTime()-60000)]);
   const proPaid=(await service.query('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[proOrder.o.id,'fixture',
     proOrder.checkout,`in_live_${proOrder.o.id}`,proOrder.o.amount_total,'usd',new Date(),`sub_live_${proOrder.o.id}`,proStart,proEnd]))

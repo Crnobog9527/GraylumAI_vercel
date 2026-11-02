@@ -1,14 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {stoppedCompletion} from './stoppedCompletion';
-import {denyNewCalls} from './newWorkGate';
+import {denyNewCalls} from '../turn/admission/newWorkGate';
 import { z } from 'zod';
-import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../bill2/service';
+import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../turn/provider/service';
 import { boundedFinancialDatabase, erasureFinancialBudget } from '../accountErasure/financialRecovery';
-import { createRuntimeBudget, type RuntimeBudget } from './budget';
+import { createRuntimeBudget, type RuntimeBudget } from '../turn/settings/budget';
 import { stagingTransport } from './stagingTransport';
-import type { StagingPolicy } from './stagingPolicy';
-import { autoCompensateStaleRounds, type StaleRoundAutoClose } from './staleChargedRounds';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
+import { autoCompensateStaleRounds, type StaleRoundAutoClose } from '../turn/settings/staleChargedRounds';
 import { recoverInterruptedExecutions } from './interruptedRecovery';
 import { recoverOwnerLostReplies } from './ownerLostRecovery';
 import { logger } from '../../lib/logger';

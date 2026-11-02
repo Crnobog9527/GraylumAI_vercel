@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type {HistorySelection} from './hostTurn';
+import type {HistorySelection} from '../turn/agent/hostTurn';
 
 export type HistoryOptions = {
   instructions: string; inputBytes: number; historyItems: number; toolBytes: number;

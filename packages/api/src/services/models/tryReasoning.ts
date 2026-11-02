@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { openRouterStream, OPENROUTER_STREAM_BYTE_LIMIT } from '../bill2/openRouterStream';
+import { openRouterStream, OPENROUTER_STREAM_BYTE_LIMIT } from '../turn/provider/openRouterStream';
 import {
   MIN_ANSWER_TOKENS_AFTER_BUDGET, MIN_MAX_TOKENS_WITH_THINKING, PURPOSE_LABELS,
   checkReasoningConfig, readReasoningConfig, reasoningRequestFields, type PurposeSetting, type ReasoningPurpose,

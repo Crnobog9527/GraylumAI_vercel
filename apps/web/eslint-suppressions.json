@@ -93,11 +93,6 @@
       "count": 3
     }
   },
-  "src/app/(zh-hans)/app/runtime/page.tsx": {
-    "react-hooks/exhaustive-deps": {
-      "count": 2
-    }
-  },
   "src/components/admin/AdminGuard.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1

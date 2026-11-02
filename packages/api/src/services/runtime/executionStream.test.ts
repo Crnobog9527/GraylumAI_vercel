@@ -4,8 +4,8 @@ import {TRPCError,type inferProcedureOutput} from '@trpc/server';
 import type {opcRouter} from '../../routers/opc';
 import type {runtimeRouter} from '../../routers/runtime';
 import type {AgentTurnEvent} from '../../shared/agentTurn';
-import type {RuntimeProgress} from './progress';
-import {createRequestTiming} from './timing';
+import type {RuntimeProgress} from '../turn/agent/progress';
+import {createRequestTiming} from '../turn/provider/timing';
 import {runtimeLocalEndpoint,streamOriginalExecution,TEXT_EVENT_INTERVAL_MS,type OriginalExecutionOutcome} from './executionStream';
 
 // Compile-time contract: both streamed procedures emit only AC-1 events
@@ -136,7 +136,7 @@ it('holds even the terminal native snapshot until the 100ms window ends',async()
 
 it('streams the fixed claim notice without losing the original state or preceding progress', async () => {
  const {billingClaimNotice,withClaimNotice}=await import('./claimNotice');
- const {BillingClaimRejection}=await import('../bill2/claimFailure');
+ const {BillingClaimRejection}=await import('../turn/provider/claimFailure');
  const notice=billingClaimNotice(new BillingClaimRejection('BILL2_START_THRESHOLD_UNCONFIGURED'));
  for(const result of [{state:'cancelled' as const,notice},{state:'pending' as const,notice},
   withClaimNotice({state:'waiting_credits' as const,code:'RUNTIME_WAITING_CREDITS' as const})]){

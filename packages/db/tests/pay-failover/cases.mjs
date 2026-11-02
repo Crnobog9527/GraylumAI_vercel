@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {advancedCases} from './advanced.mjs';
@@ -59,7 +60,7 @@ export async function runCases({admin,service,connect}) {
   return checkout;
  };
  const pay=async(o,{db=service,method='card',paid=new Date(Math.floor(Date.now()/1000)*1000),start=paid,checkout=`checkout_${o.id}`,review}={})=>{
-  const end=new Date(start);if(o.billing_cycle==='yearly')end.setUTCFullYear(end.getUTCFullYear()+1);else end.setUTCMonth(end.getUTCMonth()+1);
+  const end=new Date(start);if(o.billing_cycle==='yearly')end.setUTCFullYear(end.getUTCFullYear()+1);else end.setTime(addUtcMonths(end,1));
   const args=[o.id,'fixture',checkout,`PAY_${o.id}`,method,o.amount_total,'usd',paid,start,end];
   if(review!==undefined)args.push(review);
   return(await db.query('SELECT pay_failover_fulfill('+args.map((_,i)=>'$'+(i+1)).join(',')+') v',args)).rows[0].v;

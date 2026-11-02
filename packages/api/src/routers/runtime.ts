@@ -12,21 +12,23 @@ import {readNativeRuntimeViewWithWorkItems} from '../services/runtime/nativeView
 import {withWorkItems} from '../services/runtime/workItems';
 import {resumeInput} from '../services/runtime/paygRuntime';
 import type {inferProcedureBuilderResolverOptions} from '@trpc/server';
-import type {RuntimeProgress} from '../services/runtime/progress';
+import type {RuntimeProgress} from '../services/turn/agent/progress';
 import { z } from 'zod';
 import { protectedProcedure,router } from '../trpc';
 import { runtimeAdmissionService,runtimeAdmission,runtimeMaterialInput } from '../services/runtime/admission';
-import {loadStagingPolicy,assertStagingReadAccess,executionRouteAccess,type RealPolicyCheck} from '../services/runtime/stagingPolicy';
-import {StagingAccessError,stagingProcedureError} from '../services/runtime/stagingErrors';
+import {loadStagingPolicy,assertStagingReadAccess,executionRouteAccess,type RealPolicyCheck} from '../services/turn/settings/stagingPolicy';
+import {StagingAccessError,stagingProcedureError} from '../services/turn/settings/stagingErrors';
 import {stagingTransport} from '../services/runtime/stagingTransport';
 import { runtimeExecutor } from '../services/runtime/execute';
-import {newWorkGate} from '../services/runtime/newWorkGate';
+import {newWorkGate} from '../services/turn/admission/newWorkGate';
+import {readAdmissionConfiguration} from '../services/turn/admission/admissionConfiguration';
+import {readCoreConfig} from '../services/turn/chat';
 import {realContract,runtimeGateEnvironment} from '../services/runtime/realHost';
-import {realHostMode} from '../services/runtime/productionEnvironment';
+import {realHostMode} from '../services/turn/settings/productionEnvironment';
 import {runtimeActor} from '../services/runtime/actor';
 import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
-import { activateRuntimeCandidate } from '../services/runtime/matching';
+import { activateRuntimeCandidate } from '../services/turn/agent/matching';
 import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/runtime/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
@@ -164,7 +166,9 @@ export const runtimeRouter=router({
   // MODEL-IDENTITY-GUARD: opaque id plus display label only; never model_id or provider.
   const ordered=await defaultModelFirst(ctx.supabaseAdmin!,offered,choiceSettings);
   const choices=publicModelChoices(ordered,{surface:'user'});
-  return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:realContract(ctx.real).host.mode};
+  // CORE-PATH-V2 V2-10: which path this page sends on; an unreadable setting keeps the old one.
+  const corePathV2=Boolean(readCoreConfig(await readAdmissionConfiguration(ctx.supabaseAdmin!)));
+  return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:realContract(ctx.real).host.mode,corePathV2};
  }),
  start:procedure.input(z.object({requestId:z.string().uuid(),scope:z.unknown()}).strict()).mutation(({ctx,input})=>ctx.admission.start(input.requestId,input.scope)),
  saveMaterial:procedure.input(runtimeMaterialInput).mutation(({ctx,input})=>ctx.admission.saveMaterial(input)),
@@ -172,10 +176,11 @@ export const runtimeRouter=router({
  prepare:procedure.input(runtimeAdmission).mutation(({ctx,input})=>ctx.admission.prepare(input)),
  cancel:maintenanceProcedure.input(z.object({executionId:z.string().uuid(),
   stopAt:z.number().int().min(0).max(2147483647).optional(),source:z.enum(['assistant','message','final']).optional(),
-  call:z.number().int().min(1).max(999999999).optional()}).strict()).mutation(async({ctx,input})=>{
-  const r=await ctx.supabaseAdmin!.rpc(input.stopAt===undefined?'runtime_cancel':'runtime_execution',
-   {p_actor_id:ctx.user.id,p_execution_id:input.executionId,...(input.stopAt===undefined?{}:{p_action:'stop',
-    p_result:{stopAt:input.stopAt,...(input.source?{source:input.source}:{}),...(input.call?{call:input.call}:{})}})});
+  call:z.number().int().min(1).max(999999999).optional(),confirmed:z.boolean().optional()}).strict()).mutation(async({ctx,input})=>{
+  const r=await ctx.supabaseAdmin!.rpc('report_stop',
+   {p_actor_id:ctx.user.id,p_execution_id:input.executionId,p_confirmed:input.confirmed===true,
+    p_stop:input.stopAt===undefined?null:{stopAt:input.stopAt,...(input.source?{source:input.source}:{}),
+     ...(input.call?{call:input.call}:{})}});
   if(!r.error&&r.data?.state==='stopped_pending_result')return executeOriginalExecution({
    admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
    authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,

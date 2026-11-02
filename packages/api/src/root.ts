@@ -37,7 +37,6 @@ import { analyticsRouter } from './routers/analytics';
 import { founderRouter } from './routers/founder';
 import { expertConsultRouter } from './routers/expertConsult';
 import { publishMonitorRouter } from './routers/publishMonitor';
-import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
 import { fusionReviewRouter } from './routers/fusionReview';
 import { fusionCompareRouter } from './routers/fusionCompare';
@@ -73,7 +72,6 @@ export const appRouter = router({
   researchTools: researchToolsRouter,
   research: researchRouter,
   admin: adminRouter,
-  adminStaleRounds: adminStaleRoundsRouter,
   modules: modulesRouter,
   diagnostics: diagnosticsRouter,
   costs: costsRouter,

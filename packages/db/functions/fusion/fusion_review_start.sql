@@ -49,6 +49,7 @@ BEGIN
     OR ver.version IS DISTINCT FROM p.current_version OR NOT coalesce(ver.report ? 'generatedReport',false)
     OR NOT content_erasure_artifact_readable(p_actor_id,ver.id) THEN RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
   IF fusion_compare_active(p_actor_id) OR EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused'))
+    OR EXISTS(SELECT 1 FROM turns WHERE actor_id=p_actor_id AND kind='compare' AND state IN ('running','paused','stopping'))
     OR EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id WHERE br.actor_id=p_actor_id
       AND br.fusion_group_id IS NOT NULL AND fusion_call_in_flight(c)) THEN
     RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE'; END IF;
@@ -69,7 +70,7 @@ BEGIN
     materials,materials_hash,config,state,round,phase,attempt)
   VALUES(p_actor_id,p_request_id,d.draft_id,p.id,d.session_id,ver.id,ver.report_hash,m,h,p_config,'running',1,'review',1)
   RETURNING * INTO rv;
-  -- 0294 fixed price
-  PERFORM fusion_review_fee_hold(rv,v,p_config);
+  -- 0294 fixed price. On the turn path (CORE-PATH-V2 V2-7b) the price is the jury turn's freeze (turn_fusion_open), not a fee.
+  IF p_config->>'path' IS DISTINCT FROM 'turn' THEN PERFORM fusion_review_fee_hold(rv,v,p_config); END IF;
   RETURN fusion_review_view(rv);
 END $function$;

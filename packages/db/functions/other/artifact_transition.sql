@@ -12,6 +12,12 @@ DECLARE binding opc_account_strategy_drafts;a opc_accounts;b opc_businesses;resu
 BEGIN
  -- 0324 archived business guard
  IF p_action NOT IN ('read','report') THEN PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('projectId',p_project_id)); END IF;
+ -- V2-5: a positioning draft's session row before anything else (accounts, project): the serialization point every writer of its
+ -- checklist shares with a mentor turn's close, which holds it. Lock order: session, account, project.
+ IF p_action NOT IN ('read','report') THEN
+  PERFORM 1 FROM runtime_sessions s JOIN opc_drafts d ON d.session_id=s.id
+   WHERE d.project_id=p_project_id AND d.actor_id=p_actor_id AND s.actor_id=p_actor_id FOR UPDATE OF s;
+ END IF;
 
  -- D7 saved report read
  IF EXISTS(SELECT 1 FROM artifact_projects WHERE id=p_project_id AND actor_id=p_actor_id AND erased_at IS NOT NULL)

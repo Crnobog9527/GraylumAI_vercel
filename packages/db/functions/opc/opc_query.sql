@@ -61,6 +61,13 @@ BEGIN
     AND EXISTS(SELECT 1 FROM jsonb_each(capture_round.steps) s,jsonb_each(coalesce(s.value->'fieldMeta','{}')) m
      WHERE e.id::text IN (m.value#>>'{suggestion,executionId}',m.value#>>'{withdrawnSuggestion,executionId}'));
   SELECT coalesce(array_agg(execution_id),'{}') INTO available_ids FROM runtime_history_availability(ids) WHERE available;
+  -- V2-5b: suggestions a mentor turn of the new path wrote; their executionId is that turn's request id (turn_mentor_apply).
+  SELECT available_ids||coalesce(array_agg(x.id),'{}') INTO available_ids FROM (
+   SELECT DISTINCT (m.value#>>ARRAY[k,'executionId'])::uuid id FROM jsonb_each(capture_round.steps) s,
+    jsonb_each(coalesce(s.value->'fieldMeta','{}')) m, unnest(ARRAY['suggestion','withdrawnSuggestion']) k
+   WHERE m.value#>>ARRAY[k,'executionId'] ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    AND NOT coalesce((m.value#>>ARRAY[k,'executionId'])=ANY(available_ids::text[]),false)) x
+  WHERE turn_mentor_source_available(p_actor_id,(projection_result->>'sessionId')::uuid,x.id,capture_round.project_id,capture_round.id);
   FOR step_id,st IN SELECT key,value FROM jsonb_each(capture_round.steps) LOOP
    metas:='{}';
    FOR field_id IN SELECT f->>'id' FROM jsonb_array_elements(information->step_id->'schema') f LOOP

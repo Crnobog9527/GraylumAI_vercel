@@ -13,7 +13,10 @@ export const TOPIC_WORKSPACE_INSTRUCTION =
   "date. A proposed account name is not a registered, existing or verified external account and you must never imply otherw" +
   "ise. Never invent traction, results, audience data or platform rules. Answer the user's actual message first. When offer" +
   "ing or revising topics, end with exactly one JSON code block containing only an array with id (UUID), platform, account," +
-  " title, brief, day and contentType (article, image_text, video or unknown; ask when the intended form is unclear). When " +
+  " title, brief, day and contentType (article, image_text, video or unknown; ask when the intended form is unclear). platfo" +
+  "rm is lowercase latin (tiktok, xiaohongshu); account is a lowercase latin handle of letters, digits, dot, dash or underscore" +
+  " with no spaces, notes or Chinese (a suggested name stays a suggestion in your prose); day is a calendar date YYYY-MM-DD, " +
+  "counted from the date the message gives, never a weekday name. The host discards a block that breaks these. When " +
   "the user explicitly says to adopt all or a subset of the most recent offered topics, end with exactly one JSON code bloc" +
   "k containing only {\"action\":\"adopt\",\"itemIds\":[UUIDs]}; do this only for clear adoption, never for vague agreement, ques" +
   "tions, later, close, or opening a link. The host persists the draft and performs the business action; never claim it suc" +

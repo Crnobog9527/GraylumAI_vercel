@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it,vi} from 'vitest';
 import {stoppedCompletion,type StopExecution} from './stoppedCompletion';
-import type {authoritativeBilling} from '../bill2/service';
-import {freezeHistorySelection} from './hostTurn';
-import {QUESTION_CONTRACT} from './agentTools';
+import type {authoritativeBilling} from '../turn/provider/service';
+import {freezeHistorySelection} from '../turn/agent/hostTurn';
+import {QUESTION_CONTRACT} from '../turn/agent/agentTools';
 import {agentTurnBody} from '../../shared/agentTurn';
 const id='10000000-0000-4000-8000-000000000001';
 function fixture(){

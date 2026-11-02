@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { draftReadResponse } from "./readonlyDraft";
+import { draftReadWithModule } from "./readonlyDraft";
 import {assertCompleteStepResult,STEP_ENVELOPE_INSTRUCTION,opcSaveResult} from './stepOutput';
 export {opcSaveResult} from './stepOutput';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from "../runtime/waitingOrganizer";
-import {StagingAccessError} from "../runtime/stagingErrors";
+import {StagingAccessError} from "../turn/settings/stagingErrors";
+import {PLAN_INSTRUCTIONS} from "./planPrompt";
 import {TOPIC_WORKSPACE_INSTRUCTION} from "./topicInstructions";
 import { throwOpcRpcError } from "./contentBindingError";
 import { capturePending, capturePendingInput, captureResolveInput } from "./capture";
@@ -17,7 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
 import { runtimeAdmissionService } from "../runtime/admission";
 import { workbenchService } from "../artifacts/workbench";
-import type {StagingPolicy} from '../runtime/stagingPolicy';
+import type {StagingPolicy} from '../turn/settings/stagingPolicy';
 import { isOpeningInput, openingRequestId, questionTask } from "./questions";
 import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import { ORGANIZER_INSTRUCTIONS } from "./organizerPrompt";
@@ -25,8 +26,9 @@ import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenIn
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
 import {positioningMentorInstructions} from './existingPositioning';
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
-export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+import { turnContentService } from './turnContent';
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentFromTurn, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoResultsFromTurn, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
@@ -159,10 +161,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
           if (priorOpening) return priorOpening;
         }
       }
-      const instruction =
-        v.purpose === "plan"
-          ? "Create a first-week content plan candidate from the confirmed positioning version and the confirmed target platform/account/time constraints given below. Return only a JSON array (no code fence). Each item has id (UUID), platform (lowercase platform slug), account (lowercase account handle), title, brief, day (YYYY-MM-DD). The user is not required to author topic rows: you produce the topics, dates, titles and briefs. You may PROPOSE concrete account names, but a proposed account name is not a registered, existing or verified external account, and you must never state or imply that it exists, is available, is registered or has been checked. Use only the confirmed positioning and the supplied constraints; where a user-owned fact is genuinely missing, say so in the brief rather than inventing it. "
-          : "";
+      const instruction = v.purpose === "plan" ? PLAN_INSTRUCTIONS : "";
       const complete = state.schema
         .filter((f: { required: boolean }) => f.required)
         .every((f: { id: string }) =>
@@ -269,8 +268,8 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_request_id: uuid.parse(requestId),
         p_expected_round_id: uuid.parse(expectedRoundId),
       }),
-    saveWorkResult: (executionId: string) =>
-      rpc("opc_work_result", { p_execution_id: uuid.parse(executionId) }),
+    saveWorkResult: (id: string | { turnId: number }) => typeof id === "object" ? rpc("opc_work_result_turn", { p_turn_id: id.turnId })
+      : rpc("opc_work_result", { p_execution_id: uuid.parse(id) }),
     workResults: (sessionId: string) =>
       rpc("opc_work_results", { p_session_id: uuid.parse(sessionId) }),
     catalog: async () => {
@@ -387,7 +386,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         searchEnabled: false,
       }).prepare(runtimeRequest);
     },
-    read: async (draftId: string) => ({...await draftReadResponse(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc),
+    read: async (draftId: string) => ({...await draftReadWithModule(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc, user, admin),
       runtimeMode:real?(real.mode==="production"?"production":"staging_test"):"isolated"}),
     start: (value: unknown) => startWithPositioningProfileLimit(value,user,admin,rpc),
     topicDraftRead: (draftId: string) => rpc("opc_topic_draft_read", { p_draft_id: uuid.parse(draftId) }),
@@ -441,19 +440,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_source_content_id: v.sourceContentId,
       });
     },
-    contentManualSave: (value: unknown) => {
-      const v = opcContentManualSave.parse(value);
-      return rpc("opc_content_manual_save", {
-        p_work_item_id: v.workItemId,
-        p_request_id: v.requestId,
-        p_expected_version: v.expectedVersion,
-        p_source_content_id: v.sourceContentId,
-        p_kind: v.kind,
-        p_status: v.status,
-        p_title: v.title,
-        p_body: v.body,
-      });
-    },
+    ...turnContentService(rpc),
     videoPackage: (value: unknown) => {
       const v = opcVideoPackage.parse(value);
       return rpc("opc_video_package_from_execution", {

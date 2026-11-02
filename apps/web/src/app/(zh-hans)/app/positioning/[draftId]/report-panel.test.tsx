@@ -11,19 +11,15 @@ vi.mock("@/trpc/client", () => {
   const mutation = () => ({ mutateAsync: vi.fn(), isPending: false });
   return { trpc: {
     user: { getEntitlements: { useQuery: () => ({ data: undefined }) } },
-    useUtils: () => ({ client: { runtime: { executeStream: { mutate: vi.fn() } } }, credits: { getBalance: { invalidate: vi.fn() } } }),
+    useUtils: () => ({ credits: { getBalance: { invalidate: vi.fn() } } }),
     runtime: {
       reportAvailable: { useQuery: (_input: unknown, options: { enabled: boolean }) => {
         state.availableInput.push(options.enabled);
         return { data: options.enabled ? state.available : undefined };
       } },
       reportPreflight: { useQuery: () => ({ data: state.preflight, isError: state.preflightError, isFetching: state.preflightFetching }) },
-      reportLatest: { useQuery: () => ({ ...state.latest, refetch: vi.fn() }) },
-      reportStatus: { useQuery: (input: { executionId: string }, options: { enabled: boolean }) => {
-        state.statusInput.push(options.enabled ? input.executionId : null);
-        return { data: options.enabled ? state.status : undefined, refetch: vi.fn() };
-      } },
-      reportStart: { useMutation: mutation }, cancel: { useMutation: mutation }, resume: { useMutation: mutation },
+      choices: { useQuery: () => ({ data: { corePathV2: false } }) },
+      resume: { useMutation: mutation },
       reportDocument: { useQuery: () => ({ data: undefined, isError: false }) },
       reportSave: { useMutation: mutation }, reportFinalize: { useMutation: mutation },
     },
@@ -33,6 +29,16 @@ vi.mock("@/trpc/client", () => {
 });
 // The jury entry has its own tests; here it only needs to stay out of the way.
 vi.mock("@/components/fusion-review/JuryEntry", () => ({ JuryEntry: () => null }));
+// The saved-report read of the turn path (/api/turn/report), driven by the test state.
+vi.mock("./use-turn-report", async importOriginal => ({ ...await importOriginal<typeof import("./use-turn-report")>(),
+  useTurnReport: () => {
+    const server = state.latest.isSuccess ? { kind: "known", executionId: (state.latest.data as { executionId: string | null }).executionId }
+      : state.latest.isError ? { kind: "failed" } : { kind: "pending" };
+    const status = state.status && (state.latest.data as { executionId: string | null } | undefined)?.executionId ? state.status : null;
+    state.statusInput.push(status ? (status as { executionId: string }).executionId : null);
+    return { on: true, known: state.latest.isSuccess || state.latest.isError, server, status,
+      refetch: async () => ({ data: status }), events: async function* () {}, stop: async () => { throw new Error("TURN_STOP_FAILED"); } };
+  } }));
 import { ReportEntry } from "./report-panel";
 
 const props = { draftId: "d", sessionId: "s", projectId: "p", roundId: "r", busy: false, onTopics: () => {} };
@@ -188,7 +194,7 @@ it("still offers a new report in a revision round (draft) even though the old ve
 });
 it("the dialog shows the saved formal text and no generate button", async () => {
   const { ReportDialog } = await import("./report-panel");
-  const report = { executionId: null, status: null, live: null, streaming: false, refusal: null, offer: "start", starting: false,
+  const report = { executionId: null, status: null, live: null, streaming: false, refusal: null, offer: "start",
     payg: { turnNotices: () => [] }, start: () => {}, restart: () => {}, stop: () => {}, stopUnconfirmed: false, retryStop: () => {} };
   const html = renderToStaticMarkup(<ReportDialog report={report as never} savedBody={formal.report.generatedReport.body}
     busy={false} onClose={() => {}} onTopics={() => {}} />);
@@ -204,22 +210,17 @@ it("names a report that is still being written on the footer entry", () => {
   expect(html).toContain("完整运营策略报告（生成中）");
 });
 const dialogReport = (fields: Record<string, unknown>) => ({ executionId: saved, status: null, live: null, streaming: false, refusal: null,
-  offer: null, starting: false, reopened: false, payg: { turnNotices: () => [] }, start: () => {}, restart: () => {}, stop: () => {},
+  offer: null, payg: { turnNotices: () => [] }, start: () => {}, restart: () => {}, stop: () => {},
   stopUnconfirmed: false, retryStop: () => {}, ...fields });
-it("says a reattached report is written in the background, with no text yet, and offers no export while it runs", async () => {
+it("says the report is being written, and offers no export while it runs", async () => {
   const { ReportDialog } = await import("./report-panel");
-  const { REPORT_REOPENED_NOTICE, REPORT_WRITING_NOTICE } = await import("./report-gen");
+  const { REPORT_WRITING_NOTICE } = await import("./report-gen");
   const running = { executionId: saved, state: "running", body: null, completeness: null, candidate: false };
   const live = { executionId: saved, text: "", stopped: false };
   const render = (fields: Record<string, unknown>) => renderToStaticMarkup(<ReportDialog report={dialogReport(fields) as never}
     busy={false} onClose={() => {}} onTopics={() => {}} />);
-  expect(render({ status: running, reopened: true })).toContain(REPORT_REOPENED_NOTICE);
-  expect(render({ status: running, reopened: true, live, streaming: true })).toContain(REPORT_REOPENED_NOTICE);
-  // This page's own start streams the text, so it says it is writing.
-  const own = render({ status: running, live: { ...live, text: "## 一" }, streaming: true });
-  expect(own).toContain(REPORT_WRITING_NOTICE);
-  expect(own).not.toContain(REPORT_REOPENED_NOTICE);
-  expect(render({ status: running, reopened: true })).not.toContain("导出报告");
+  expect(render({ status: running, live, streaming: true })).toContain(REPORT_WRITING_NOTICE);
+  expect(render({ status: running })).not.toContain("导出报告");
 });
 it("offers 导出报告 for a finished report and for a saved formal version", async () => {
   const { ReportDialog } = await import("./report-panel");

@@ -4,11 +4,11 @@ import {logger} from '../../lib/logger';
 const m=vi.hoisted(()=>({prepare:vi.fn(),execute:vi.fn(),cancel:vi.fn(),policy:vi.fn(),settings:vi.fn(),executor:vi.fn()}));
 vi.mock('../runtime/admission',()=>({runtimeAdmissionService:()=>({prepare:m.prepare})}));
 vi.mock('../runtime/execute',()=>({runtimeExecutor:(options:unknown)=>{m.executor(options);return {execute:m.execute,cancel:m.cancel};}}));
-vi.mock('../runtime/stagingPolicy',()=>({loadStagingPolicy:m.policy,loadStagingRecoveryPolicy:m.policy}));
+vi.mock('../turn/settings/stagingPolicy',()=>({loadStagingPolicy:m.policy,loadStagingRecoveryPolicy:m.policy}));
 vi.mock('../runtime/stagingTransport',()=>({stagingTransport:()=>({})}));
-vi.mock('../runtime/newWorkGate',()=>({newWorkGate:()=>({calls:vi.fn()})}));
+vi.mock('../turn/admission/newWorkGate',()=>({newWorkGate:()=>({calls:vi.fn()})}));
 vi.mock('./reviewSettings',()=>({readReviewSettings:m.settings}));
-import {createRuntimeBudget} from '../runtime/budget';
+import {createRuntimeBudget} from '../turn/settings/budget';
 import {capReviewAdmission} from './reviewAdmission';
 import {advanceReview,prepareReview,runWeeklyReviews,type ReviewClaim} from './reviews';
 const c:ReviewClaim={id:'11111111-1111-4111-8111-111111111111',actorId:'22222222-2222-4222-8222-222222222222',

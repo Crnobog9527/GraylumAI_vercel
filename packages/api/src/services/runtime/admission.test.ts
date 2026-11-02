@@ -2,16 +2,16 @@
 import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {createHash} from 'node:crypto';
-import {stagingProcedureError} from './stagingErrors';
+import {stagingProcedureError} from '../turn/settings/stagingErrors';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
-vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
-vi.mock('./billingUnitAdmission', async (original) => ({
-  ...(await original<typeof import('./billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
 }));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002',modelId='10000000-0000-4000-8000-000000000003',requestId='10000000-0000-4000-8000-000000000004';
@@ -33,6 +33,44 @@ it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[fals
  const promise=admission.prepare({sessionId,requestId,input:'General travel tips',selection:{kind:'ordinary',modelId},network:'deny'});
  if(code&&!['PGRST202','42883'].includes(code)){await expect(promise).rejects.toThrow('RUNTIME_WORKSPACE_UNAVAILABLE');expect(frozen).toBeUndefined();}
  else{await promise;expect(frozen?.inputSelection).toBe('scope-projection-v1');expect(frozen?.providerRequestFormat).toBe(real?'serial-tools-v6-reasoning':undefined);expect(frozen?.reasoning).toEqual(real?{effort:'none'}:undefined);expect(frozen?.workspaceContext).toBe(code?undefined:true);expect(frozen?.scopeMaterial).toBeUndefined();expect(frozen?.sources).toEqual([]);}
+});
+
+// DB-RW-C: the two-step admission is behind runtime_rw_v2.admitSplit. Off or absent: exactly one runtime_admit call with the
+// frozen payload and billing, as before. On: the precheck, then the commit with the proof; a request already admitted is
+// returned from the precheck without a commit.
+it.each([
+ {setting:undefined,calls:['runtime_admit']},
+ {setting:{admitSplit:false},calls:['runtime_admit']},
+ {setting:{admitSplit:'true'},calls:['runtime_admit']},
+ {setting:{admitSplit:true},calls:['runtime_admit_precheck','runtime_admit_commit']},
+ {setting:{admitSplit:true},calls:['runtime_admit_precheck'],replay:true},
+])('admission chooses its database path from runtime_rw_v2 ($setting)',async({setting,calls,replay})=>{
+ const seen:Array<[string,Record<string,unknown>]>=[];
+ const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
+  if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId}},error:null};
+  if(name==='runtime_admission_replay')return {data:null,error:null};
+  if(name==='runtime_workspace_session')return {data:true,error:null};
+  if(name.startsWith('runtime_admit')){
+   seen.push([name,args]);
+   if(name==='runtime_admit_precheck')return {data:replay?{replay:{executionId:'old'}}:{version:1,binding:'b'},error:null};
+   return {data:{executionId:requestId},error:null};
+  }
+  throw new Error(name);
+ });
+ const models={in:async()=>({data:[{id:modelId,model_id:'test/model',config:configuredReasoning('test/model')}],error:null}),select:()=>models,eq:()=>models,single:async()=>({data:{id:modelId,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:32000,
+  config:configuredReasoning('test/model')},error:null})};
+ const settings={select:()=>settings,in:async()=>({data:[{id:modelId,model_id:'test/model',config:configuredReasoning('test/model')},...(setting===undefined?[]:[{key:'runtime_rw_v2',value:setting}])],error:null}),eq:()=>settings,
+  maybeSingle:async()=>({data:null,error:null})};
+ const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})}} as unknown as SupabaseClient;
+ const admin={rpc,from:(table:string)=>table==='system_settings'?settings:models} as unknown as SupabaseClient;
+ const admission=runtimeAdmissionService(user,admin,{workspaceContext:true,account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
+ const result=await admission.prepare({sessionId,requestId,input:'General travel tips',selection:{kind:'ordinary',modelId},network:'deny'});
+ expect(seen.map(([name])=>name)).toEqual(calls);
+ expect(result).toEqual(replay?{executionId:'old'}:{executionId:requestId});
+ const [, first]=seen[0]!;
+ expect(first).toMatchObject({p_session_id:sessionId,p_request_id:requestId,p_actor_id:actor});
+ expect(first.p_payload).toBeTruthy();expect(first.p_billing).toBeTruthy();
+ if(seen[1])expect(seen[1][1]).toMatchObject({...first,p_pre:{version:1,binding:'b'}});
 });
 
 it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorStream}))))('new admission preserves quote, protocol and replay (real=$real, mentor=$mentorStream)',async({real,mentorStream})=>{
@@ -140,7 +178,7 @@ it.each([true,false])('a session held by an earlier round is repaired once and t
  else{expect(result.message).toBe('RUNTIME_ADMISSION_DENIED');expect(admits).toEqual([requestId]);}
 });
 
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

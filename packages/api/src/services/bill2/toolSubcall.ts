@@ -4,26 +4,13 @@
 // tool_result). A subcall that is never dispatched is never sent. A dispatched subcall whose result cannot be recorded
 // stays without a receipt and settles as unknown at its recovery deadline (user 0, supplier cost pending).
 import { z } from 'zod';
-import { claimFailure } from './claimFailure';
-import type { BillingRpc } from './service';
-import type { ToolClaimPayload, toolResultEvidence } from './toolBilling';
+import { claimFailure } from '../turn/provider/claimFailure';
+import type { BillingRpc } from '../turn/provider/service';
+import type { ToolSubcallBilling } from '../research/runtime/subcall';
+import type { toolResultEvidence } from '../turn/provider/toolBilling';
 
 const uuid = z.string().uuid();
 const claimed = z.object({ id: uuid, state: z.string(), dispatchToken: z.string().uuid().nullable().optional() }).passthrough();
-
-export type ToolClaim =
-  | { state: 'claimed'; callId: string; token: string }
-  | { state: 'waiting_credits' }
-  /** The same sequence was claimed before (a replay): it must not be sent again from here. */
-  | { state: 'replayed'; callId: string };
-
-export interface ToolSubcallBilling {
-  readonly runId: string;
-  claim(sequence: number, payload: ToolClaimPayload): Promise<ToolClaim>;
-  /** true only when this process may send the request now. */
-  dispatch(callId: string, token: string): Promise<boolean>;
-  record(callId: string, evidence: ReturnType<typeof toolResultEvidence>): Promise<{ accountClosed: boolean; contentDeleted: boolean }>;
-}
 
 /** Actor-bound RPC steps for tool subcalls of one run. The actor comes from the trusted runtime, never from the model. */
 export function toolSubcallBilling(deps: { admin: BillingRpc; actorId: string; runId: string }): ToolSubcallBilling {
