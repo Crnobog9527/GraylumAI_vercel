@@ -8,7 +8,7 @@ import type { ResearchTurnEvent } from '../../shared/researchTurn';
 import { toolCallPolicies } from '../turn/admission/runPolicies';
 import { toolSubcallBilling } from '../bill2/toolSubcall';
 import { checkVendorRateLimit } from '../redisRateLimiter';
-import { databaseRuntimeResearchStore } from '../research/runtime/store';
+import { databaseRuntimeResearchStore } from './researchStore';
 import { platformSecretReader } from '../research/runtime/secrets';
 import { ResearchPause } from '../research/runtime/subcall';
 import type { ResearchToolContext } from '../research/runtime/toolContext';
