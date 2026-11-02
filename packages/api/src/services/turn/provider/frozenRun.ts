@@ -18,7 +18,11 @@ const scope = z.discriminatedUnion('kind', [
 ]);
 export const frozenCallPolicy = z.object({
   payg: paygStablePolicy.optional(), multiplier: z.string().regex(MULTIPLIER_PATTERN).optional(),
-   modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),providerLimits:openRouterLimits.optional(),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
+   modelId: uuid, provider:z.string().min(1),
+   account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),
+   providerLimits:openRouterLimits.optional(),upperUsd:z.string(),
+   inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),
+   automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
 export const frozen = z.object({
   contractVersion: z.literal('bill2.v1'), mode: z.enum(['isolated','staging_test','production']), testWindowId:uuid.optional(),
   sessionRef: z.null().optional(), scope,
@@ -42,14 +46,16 @@ export type FrozenPaygRun = z.infer<typeof frozenPayg>;
 export type FrozenRun = z.infer<typeof frozen>;
 export const call = z.object({ runtimeEpoch: z.number().int().positive().optional(), payg: paygCallQuote.optional(),
   provider: z.string().min(1).max(128), account: z.string().min(1).max(128), model: z.string().min(1).max(256),
-  protocol: z.enum(['fixture-cost-v1','openrouter-chat-v1']), providerLimits:openRouterLimits.optional(), requestHash: z.string().regex(/^[a-f0-9]{64}$/), upperUsd: z.string(),
+  protocol: z.enum(['fixture-cost-v1','openrouter-chat-v1']), providerLimits:openRouterLimits.optional(),
+  requestHash: z.string().regex(/^[a-f0-9]{64}$/), upperUsd: z.string(),
   inputLimit: z.number().int().positive().max(1_000_000), outputLimit: z.number().int().positive().max(1_000_000),
   automaticRetry: z.literal(false), hiddenTools: z.literal(false), lookupSupported: z.boolean(), phase: z.string().min(1).max(64),
   billingUnit: z.object({ modelId: uuid, multiplier: z.string().regex(MULTIPLIER_PATTERN), source: z.enum(['model', 'provider', 'global']) })
     .strict().optional() }).strict();
 export const frozenCallSchema = call;
 export type FrozenCall = z.infer<typeof call>;
-export type RunView = { executionId?: string|null; accountClosed?: boolean; contentDeleted?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
+export type RunView = { executionId?: string|null; accountClosed?: boolean; contentDeleted?: boolean; id: string;
+  state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
   contractVersion?: string; calls?: Array<{preDeductId?: string; chargedCredits?: number;}>;
   preDeductId: string; closed: boolean; conflict: boolean; reservedCredits: number; chargedCredits: number | null; outcome: string | null };
 type RpcResult={data:unknown;error:unknown};
