@@ -23,7 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { formatUsdFromCents } from '@/lib/currency';
 import { ReportUsdValue } from '@/components/admin/ReportUsdValue';
-import { Bill2ModelReportCard, UNIT_SOURCE_LABEL } from '@/components/admin/Bill2ModelReportCard';
+import { TurnModelReportCard, UnsettledTurnsCard, UNIT_SOURCE_LABEL } from '@/components/admin/TurnCostReport';
 import { ModelReportPriceCell } from '@/components/admin/ModelReportPriceCell';
 import { FinanceDailyChart } from '@/components/admin/FinanceDailyChart';
 import { FinanceStatusBadge } from '@/components/admin/FinanceStatusBadge';
@@ -681,7 +681,7 @@ export default function AdminFinancePage() {
                 </div>
               </CardContent>
             </Card>
-            <div className="mt-6"><Bill2ModelReportCard /></div>
+            <div className="mt-6 space-y-6"><TurnModelReportCard /><UnsettledTurnsCard /></div>
           </div>
         </TabsContent>
       </Tabs>

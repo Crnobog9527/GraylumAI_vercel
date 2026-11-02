@@ -4,14 +4,15 @@ import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {renewalReplayCases} from './renewal-replay.mjs';
+import {turnMoneyCases} from './turn-money.mjs';
 export async function membershipCases({c,v,profile,receive,withdraw,ops,report}) {
  const facts=async user=>{await c.query('SET ROLE service_role');try{return await v('SELECT pay_common_membership_facts($1) v',[user]);}finally{await c.query('RESET ROLE');}};
- const member=async(start,end,cycle='monthly')=>{
+ const member=async(start,end,cycle='monthly',level='pro')=>{
   const user=await profile(0),order=randomUUID(),sub=randomUUID(),plan=randomUUID();
   await c.query(`INSERT INTO membership_plans(id,name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,
-   allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES($1,'Fixture','pro',10,120,100,1200,true,true,500000000)
-   ON CONFLICT(level) DO NOTHING`,[plan]);
-  const pid=await v("SELECT id v FROM membership_plans WHERE level='pro'");
+   allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES($1,'Fixture',$2,10,120,100,1200,true,true,500000000)
+   ON CONFLICT(level) DO NOTHING`,[plan,level]);
+  const pid=await v('SELECT id v FROM membership_plans WHERE level=$1',[level]);
   const snap={version:1,item_type:'membership_plan',item_id:pid,item_updated_at:'2026-10-01T00:00:00Z',
    billing_cycle:cycle,currency:'usd',unit:'major',price:cycle==='yearly'?'120':'10',discount:'0',
    tax_behavior:'exclusive',credits:cycle==='yearly'?1200:100,bonus_credits:0};
@@ -28,9 +29,9 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
    entitlement_start,entitlement_end,qualified_paid_at,qualification_state,routing_version,terms_version,terms_accepted_at,offer_kind,
    price_ref_id,stripe_managed_payments,dispute_payment_key,dispute_subscription_key)
    VALUES($1,$2,'membership_plan',$3,$4,'subscription','completed','paid',$5,'usd','stripe','fixture','test','card_cn',
-    gen_random_uuid(),repeat('a',64),$6,now(),$7,'checkout','pro',true,$8,$9,$10,$9,'sold',1,'terms-v1',now(),'standard',$11,false,$12,$13)`,
+    gen_random_uuid(),repeat('a',64),$6,now(),$7,'checkout',$14,true,$8,$9,$10,$9,'sold',1,'terms-v1',now(),'standard',$11,false,$12,$13)`,
    [order,user,pid,cycle,cycle==='yearly'?12000:1000,snap,sub,cycle==='yearly'?'year':'month',start,end,price,
-    'fixture:test:pi_'+order.replaceAll('-',''),'fixture:test:sub_'+sub.replaceAll('-','')]);
+    'fixture:test:pi_'+order.replaceAll('-',''),'fixture:test:sub_'+sub.replaceAll('-',''),level]);
   await c.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
    VALUES('stripe','fixture','test','payment',$1,$2)`,['in_'+order.replaceAll('-',''),order]);
   await c.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,subscription_id)
@@ -221,5 +222,6 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
  assert.equal(await v('SELECT cancel_at_period_end v FROM user_subscriptions WHERE id=$1',[held.sub]),'true');
  report.checks.push('monthly refund failure during dispute: source and balance remain frozen; stop survives restore and withdrawal');
  await renewalReplayCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd});
+ await turnMoneyCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd});
 
 }

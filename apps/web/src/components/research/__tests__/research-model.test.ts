@@ -95,6 +95,8 @@ describe("benchmark table", () => {
     expect(cellText({ ...youtube, platform: "tiktok" }, "followers", NOW)).toBe("1.9 万");
     expect(formatCount(0)).toBe("0");
     expect(formatLastUpdate("2026-10-13T10:00:00Z", NOW)).toBe("2026-10-13（1 天前）");
+    // 20:30 UTC on 31 Oct is already 1 Nov east of UTC: the date is the UTC one whatever the viewer's zone.
+    expect(formatLastUpdate("2026-10-31T20:30:00Z", NOW)).toContain("2026-10-31");
     expect(cellText(ROWS[1]!, "medianViews", NOW)).toBe(MISSING_TEXT);
   });
 
