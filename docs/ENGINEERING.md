@@ -242,8 +242,8 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
   第 4 节。
 - 往 CI 加测试或测试套件时，PR 描述写明加入后该 job 的实测总时长，离 30 分钟上限至少留 8 分钟；
   不够就拆成并行 job。不许调大超时时间：调大超时算放宽 CI，要 Owner 批准（2026-10-26 #1404 教训）。
-- CI 默认跑全套。只有一种情况跳过数据库和计费测试（"Run database behaviour suites" 两组和 "Run billing and recovery
-  integration tests"，Owner 2026-11-01 批准）：目标分支是 `staging` 的 PR，并且改动的**每个文件**都在白名单里。
+- CI 默认跑全套。只有一种情况跳过数据库和计费测试（"Run database behaviour suites" 四片和 "Run billing and recovery
+  integration tests" 两片，Owner 2026-11-01 批准）：目标分支是 `staging` 的 PR，并且改动的**每个文件**都在白名单里。
   白名单只有：`docs/**`、`*.md`，以及 `apps/web/src/components/**` 和 `apps/web/src/app/**` 下的页面、组件、样式
   （`.tsx`、`.css`）和它们的测试（`.test.ts`、`.test.tsx`）。`apps/web/src/app/api/**`、`route`/`middleware`/`proxy` 文件、
   `apps/web/src` 下的其他目录、`packages/**`、`supabase/**`、`scripts/**`、`.github/**`、依赖和锁文件都不在白名单里，
