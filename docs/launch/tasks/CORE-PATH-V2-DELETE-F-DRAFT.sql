@@ -307,7 +307,51 @@ AS $function$
   FROM fusion_reviews rv WHERE rv.id=p_review_id;
 $function$;
 
--- ---- erasure segment (R2c) ----
+CREATE OR REPLACE FUNCTION public.fusion_call_output_read(p_actor_id uuid, p_call_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions; v fusion_turn_outputs;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  -- An answer saved on the turn path (V2-7b): readable while its turn's conversation exists, as below. A column refused under
+  -- the positioning rule (no_delivery) is kept only for billing and never shown.
+  SELECT * INTO v FROM fusion_turn_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id AND verdict<>'no_delivery';
+  IF v.turn_id IS NOT NULL THEN
+    SELECT s2.* INTO s FROM runtime_sessions s2 JOIN turns t ON t.session_id=s2.id
+      WHERE t.actor_id=p_actor_id AND t.id=v.turn_id FOR SHARE OF s2;
+    IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RETURN NULL; END IF;
+    RETURN jsonb_build_object('callId',v.call_id,'body',v.body,'bodyHash',v.body_hash,'savedAt',v.saved_at);
+  END IF;
+  RETURN NULL;
+END $function$;
+
+-- ---- new functions ----\n-- New in F: the narrowed runtime.view reads a session's scope only (no executions, history or work items).
+-- legacy: the session has no turn and was created before this database's first turn (an old-path conversation of staging test data).
+-- Production was built on the new path, so there it is always false. Refusals are runtime_view's: CONTENT_ERASED (42501) and RUNTIME_SCOPE_DENIED.
+CREATE OR REPLACE FUNCTION public.runtime_session_scope(p_actor_id uuid, p_session_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE s runtime_sessions;
+BEGIN
+ -- D7 read boundary
+ IF EXISTS(SELECT 1 FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id AND (erased_at IS NOT NULL OR content_deleted_at IS NOT NULL)) THEN
+  RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501';
+ END IF;
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
+ IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED'; END IF;
+ RETURN jsonb_build_object('sessionId',s.id,'scope',s.scope,
+  'legacy',NOT EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.session_id=s.id)
+    AND s.created_at < coalesce((SELECT min(opened_at) FROM turns),s.created_at) - interval '1 hour');
+END $function$;
+REVOKE ALL ON FUNCTION public.runtime_session_scope(uuid,uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_session_scope(uuid,uuid) TO service_role;\n\n-- ---- erasure segment (R2c) ----
 -- Format: whole-function CREATE OR REPLACE plus 6 DROP FUNCTION IF EXISTS; no BEGIN/COMMIT; safe to run twice. The generator splices it in after
 -- billing_reconcile_day and before DO $guard$. It touches only the 24 functions named below (no other function, table or trigger).
 -- CORE-PATH-V2 V2-12 batch F, pre-drop rewrite segment: account erasure and content deletion (R2c, 24 functions).
