@@ -17,6 +17,11 @@
 | 停止一条正在回复的执行（runtime.cancel） | 回合回复没有用户停止（`stop-reply-turn.test.ts`）；报告停止走 `/api/turn/stop`（`turn-report-stop.test.ts`） |
 | 旧视图轮询（useHistoryPolling） | 回合视图自己轮询（active turn / 读取失败时 3 秒） |
 
+## A4：A 目录不再引用 `lib/payg-wait.ts`
+- 新增 `turn-pause.ts`：`isPaused`（回合暂停在页面上的状态 `waiting_credits / waiting_resume`）、`hostNotice`（回合结果上的宿主固定提示）、`PausedFields` 类型；`agent-turn-display.ts`、`live-reply-controller.ts`、`mentor-turn.ts` 改引用它。
+- `mentor-turn-steps.tsx`：去掉"旧整理器仍开着"的进度（回合数据没有 `primaryBody / organizerComplete`）；`mentor-turn.ts`：去掉 Q1"上一轮整理还在等"的分支（`blockedAdmission`）和旧过程名的"准入前拒绝"判断；`admission-message.ts`：去掉整理器等待提示。
+- 删掉的测试用例（都只测旧路径）：`payg-wait-mentor.test.ts` 的 3 个 Q1 用例（旧整理器等待）、`mentor-turn-steps.test.tsx` 的 2 个整理器步骤用例、`mentor-turn.test.ts` 的"宿主提示在前（走 blockedAdmission）"和"旧过程准入前拒绝释放信封"两个用例、`admission-message.test.ts` 的 2 个（旧过程路径上的拒绝文案）。对应的新路径保护：回合拒绝由 `mentor-turn-path.ts`（`TurnRefused.kept`）和 `mentor-turn-path.test.ts` 覆盖；暂停由 `turnPath.notices`；整理器没有等待（回合内一次完成）。
+
 ## 没改（留给后续）
-- `payg-wait.ts` 的纯函数在 `admission-message.ts`、`agent-turn-display.ts`、`live-reply-controller.ts`、`mentor-turn-steps.tsx`、`mentor-turn.ts` 里仍被引用（只处理旧数据里才有的字段，回合数据上恒为"无"）；C 在 A、B 合并后删 `payg-wait.ts` 时一并清这些引用。`admission-message.ts` / `mentor-turn.ts` 里写着旧过程名的错误映射同理。
+- `admission-message.ts` / `mentor-turn.ts` 里剩下的旧过程路径名字符串（`opc.prepareStep` 等）只是不会再匹配的字符串，C 删过程时顺手清。
 - 浏览器验收交给 Codex（`*.browser.test.tsx` 本机无浏览器，未跑）。
