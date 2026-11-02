@@ -50,7 +50,7 @@ export const REBIND_BUSY_NOTICE = '这个选题对话在别处还有一轮没结
 /** What the page shows when starting again on the latest positioning failed. */
 export function rebindFailureMessage(cause: unknown) {
   const message = cause instanceof Error ? cause.message : String(cause);
-  if (message.includes('OPC_TOPIC_TURN_ACTIVE')) return REBIND_BUSY_NOTICE;
+  if (/\bOPC_TOPIC_TURN_ACTIVE\b/.test(message)) return REBIND_BUSY_NOTICE;
   return /OPC_TOPIC_SOURCE_CHANGED|OPC_TOPIC_SKILL_MISSING|OPC_TOPIC_SOURCE_DENIED/.test(message) ? REBIND_REFUSED_NOTICE : topicFailureMessage(cause);
 }
 
