@@ -196,40 +196,24 @@ try{
  const voidedClose=await svc("SELECT turn_close($1,$2,'erased','[]'::jsonb,false,true,NULL) v",[voided.actor,voidedTurn.turnId]);
  assert.equal(voidedClose.chargedCredits,0,'an erased review with a full refund charges nothing');
  report.checks.push('a voided (erased) review is refunded in full even after a priced call');
- // 7. A review claimed before this migration may already have a Runtime execution: it is never started again as a turn.
- const legacyDone=await fixture();
- const legacyRow=await reload(legacyDone.review);
- await c.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state,result)
-  VALUES($1,$2,$3,'{}',0,'completed',$4)`,[legacyDone.actor,legacyRow.runtime_session_id,legacyRow.runtime_request_id,JSON.stringify({body:'LEGACY_REVIEW'})]);
- const legacyObserved=await step(legacyDone.review,'observe');
- assert.deepEqual([legacyObserved.state,legacyObserved.turnId],['completed',null]);
- assert.equal((await reload(legacyDone.review)).status,'completed');
- const legacyHistory=(await rpc(c,'publish_monitor_reviews',legacyDone.actor)).find(r=>r.id===legacyDone.review.id);
- assert.equal(legacyHistory.body,'LEGACY_REVIEW','a review written before the migration keeps its body');
- const legacyOpen=await fixture();
- const openRow=await reload(legacyOpen.review);
+ // 7. What the old path left claimed is closed by 0481; an idle claim answers expired=false, never NULL.
+ const leftover=await fixture();
+ const leftoverRow=await reload(leftover.review);
  await c.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state)
-  VALUES($1,$2,$3,'{}',0,'running')`,[legacyOpen.actor,openRow.runtime_session_id,openRow.runtime_request_id]);
- assert.equal((await step(legacyOpen.review,'observe')).state,'cost_pending');
- assert.equal((await step(legacyOpen.review,'skip','RUNTIME_INTERRUPTED')).state,'cost_pending');
- const stillOpen=await reload(legacyOpen.review);
- assert.deepEqual([stillOpen.status,stillOpen.attempt],['claimed',1]);
- // Unfinished past the deadline (waiting for credits): expired with its execution id, so the caller can cancel it there.
- const legacyPaused=await fixture();
- const pausedRow=await reload(legacyPaused.review);
- const pausedExecution=await one(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state)
-  VALUES($1,$2,$3,'{}',0,'running') RETURNING id v`,[legacyPaused.actor,pausedRow.runtime_session_id,pausedRow.runtime_request_id]);
- await c.query("UPDATE social_review_runs SET created_at=now()-interval '20 minutes' WHERE id=$1",[legacyPaused.review.id]);
- const pausedObserved=await step(legacyPaused.review,'observe');
- assert.deepEqual([pausedObserved.state,pausedObserved.expired,pausedObserved.executionId],['cost_pending',true,pausedExecution]);
- await c.query("UPDATE runtime_executions SET state='cancelled' WHERE id=$1",[pausedExecution]);
- await step(legacyPaused.review,'skip','RUNTIME_INTERRUPTED');
- assert.equal((await reload(legacyPaused.review)).status,'skipped');
- // Nothing opened yet and well past the deadline: the answer says so with a plain boolean, never NULL.
+  VALUES($1,$2,$3,'{}',0,'running')`,[leftover.actor,leftoverRow.runtime_session_id,leftoverRow.runtime_request_id]);
+ for(const path of laterRedefinitions('0476'))await c.query(read(path));
+ const closedLeftover=await reload(leftover.review);
+ assert.deepEqual([closedLeftover.status,closedLeftover.skip_reason],['skipped','RUNTIME_ENDED'],'a review claimed with a Runtime execution ends');
  const idle=await fixture();
  await c.query("UPDATE social_review_runs SET created_at=now()-interval '30 minutes' WHERE id=$1",[idle.review.id]);
  assert.strictEqual((await step(idle.review,'observe')).expired,false);
- report.checks.push('a review with a pre-migration execution is observed, not restarted; an idle claim answers expired=false');
+ report.checks.push('a review left claimed by the old path is closed by 0481; an idle claim answers expired=false');
+ // The window and the source visibility are the monitor\'s own functions.
+ assert.equal(await svc('SELECT publish_monitor_post_window($1) v',[idle.actor])>=0,true);
+ assert.equal(await svc("SELECT publish_monitor_pack_visible($1,'{\"status\":\"no_entitlement\",\"source_connections\":[]}'::jsonb) v",[idle.actor]),true);
+ assert.equal(await svc("SELECT publish_monitor_pack_visible($1,jsonb_build_object('status','available','source_connections',jsonb_build_array(gen_random_uuid()))) v",[idle.actor]),false,'a source that is not the account\'s is not visible');
+ report.checks.push('the monitor has its own window and source-visibility functions');
+
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
  const before2=await one(catalog);

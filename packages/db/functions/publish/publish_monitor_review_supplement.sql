@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_supplement(a uuid, p_wi
 AS $function$
 DECLARE gold boolean;since timestamptz;out jsonb;days integer;
 BEGIN
- days:=runtime_workspace_post_window(a);
+ days:=publish_monitor_post_window(a);
  IF p_window_days NOT BETWEEN 1 AND 90 THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID';END IF;
  SELECT coalesce(bool_or(mp.allow_benchmark_monitor),false) AND p.membership_level='gold' INTO gold
   FROM profiles p JOIN membership_plans mp ON mp.level=p.membership_level WHERE p.id=a GROUP BY p.membership_level;

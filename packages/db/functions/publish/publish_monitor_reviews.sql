@@ -12,20 +12,17 @@ BEGIN
  PERFORM publish_monitor_actor(a);
  RETURN coalesce((SELECT jsonb_agg(v ORDER BY v->>'createdAt' DESC) FROM (
   SELECT jsonb_build_object('id',r.id,'periodStart',r.period_start,'status',r.status,'skipReason',r.skip_reason,
-   'createdAt',r.created_at,'sessionId',r.runtime_session_id,'executionId',coalesce(r.turn_id::text,r.runtime_execution_id::text),
-   -- The body is the turn's saved assistant message (or, for a row written before B8b, the execution's result); a deleted
-   -- conversation or an erasing account shows nothing.
+   'createdAt',r.created_at,'sessionId',r.runtime_session_id,'executionId',r.turn_id::text,
+   -- The body is the turn's saved assistant message; a deleted conversation or an erasing account shows nothing.
    'body',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL
-      AND r.pack IS NOT NULL AND runtime_workspace_posts_visible(a,r.pack) THEN
+      AND r.pack IS NOT NULL AND publish_monitor_pack_visible(a,r.pack) THEN
      (SELECT m.content FROM session_messages m WHERE m.session_id=s.id AND m.turn_id=r.turn_id AND m.role='assistant'
        AND m.deleted_at IS NULL ORDER BY m.seq DESC LIMIT 1)
-    WHEN r.status='completed' AND r.turn_id IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN x.result->>'body' END,
+    END,
    -- The numeric table comes only from the host's code-computed result saved with the review. Model text is never parsed into it.
    'tables',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND r.pack IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL
-      AND runtime_workspace_posts_visible(a,r.pack) THEN r.pack->'review'
-    WHEN r.status='completed' AND r.turn_id IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN
-    (SELECT t.result->'review' FROM runtime_tool_calls t WHERE t.execution_id=x.id AND t.result->>'kind'='my_posts'
-     AND t.result->>'window_days'='90' AND runtime_workspace_posts_visible(a,t.result) ORDER BY (t.result->>'window_days')::int DESC,t.call_id DESC LIMIT 1) END,
+      AND publish_monitor_pack_visible(a,r.pack) THEN r.pack->'review'
+ END,
    'notice',CASE WHEN r.status='completed' THEN '本周复盘已生成'
     WHEN r.status='claimed' AND t.close_kind='completed' AND t.delivered AND t.settlement='pending' THEN '本周复盘已生成，费用正在核对。'
     WHEN r.skip_reason='BALANCE_LOW' THEN '余额不足，未复盘'
@@ -35,6 +32,5 @@ BEGIN
     WHEN r.skip_reason='RUNTIME_ENDED' THEN '本周复盘生成未完成，这一周已结束，下周会正常安排。' END) v
   FROM social_review_runs r LEFT JOIN runtime_sessions s ON s.id=r.runtime_session_id AND s.actor_id=a
   LEFT JOIN turns t ON t.id=r.turn_id AND t.actor_id=a
-  LEFT JOIN runtime_executions x ON x.id=r.runtime_execution_id AND x.actor_id=a
-  WHERE r.actor_id=a ORDER BY r.created_at DESC LIMIT 52) q),'[]'::jsonb);
+  WHERE r.actor_id=a AND NOT (r.status='completed' AND r.turn_id IS NULL) ORDER BY r.created_at DESC LIMIT 52) q),'[]'::jsonb);
 END $function$;
