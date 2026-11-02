@@ -15,9 +15,12 @@ BEGIN
  END IF;
  WITH calls AS MATERIALIZED (
   SELECT k.turn_id, k.status, k.nominal_usd, k.actual_usd, k.multiplier, k.dispatched_at,
-   coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model', 'unknown') model
+   -- A decision call (the positioning check) is a real model call paid by the platform: it is attributed to the model its receipt
+   -- names (usage.model), not to the turn's main model.
+   CASE WHEN k.call_kind='decision' THEN coalesce(nullif(k.usage->>'model',''), t.policy->'models'->>(k.model_id::text), 'unknown')
+    ELSE coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model', 'unknown') END model
   FROM turn_calls k JOIN turns t ON t.actor_id=k.actor_id AND t.id=k.turn_id
-  WHERE k.call_kind='model' AND k.dispatched_at>=p_from AND k.dispatched_at<p_to
+  WHERE k.call_kind IN ('model','decision') AND k.dispatched_at>=p_from AND k.dispatched_at<p_to
  ), turns_in AS MATERIALIZED (
   SELECT charged_credits, absorbed_credits, state, settlement FROM turns WHERE opened_at>=p_from AND opened_at<p_to
  )

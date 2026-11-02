@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CORE-PATH-V2 V2-12 B10: two read-only admin functions on the core-path tables, replacing the BILL2 finance views that are deleted with
--- the old path. turn_admin_model_report(p_from, p_to): model calls grouped by model and by UTC day with the nominal and actual USD
+-- the old path. turn_admin_model_report(p_from, p_to): model and decision (positioning check) calls grouped by model and by UTC day with the nominal and actual USD
 -- the calls recorded, the calls whose cost is still unknown, the frozen multipliers, and the window's turns with the credits they
 -- charged and absorbed and how many are still open or settling. turn_admin_unsettled_turns(p_limit): the turns still open or
 -- settling (state<>'closed' or settlement='pending'), content-free (ids, kinds, states, counts, times), oldest first, so post-launch
@@ -23,9 +23,12 @@ BEGIN
  END IF;
  WITH calls AS MATERIALIZED (
   SELECT k.turn_id, k.status, k.nominal_usd, k.actual_usd, k.multiplier, k.dispatched_at,
-   coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model', 'unknown') model
+   -- A decision call (the positioning check) is a real model call paid by the platform: it is attributed to the model its receipt
+   -- names (usage.model), not to the turn's main model.
+   CASE WHEN k.call_kind='decision' THEN coalesce(nullif(k.usage->>'model',''), t.policy->'models'->>(k.model_id::text), 'unknown')
+    ELSE coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model', 'unknown') END model
   FROM turn_calls k JOIN turns t ON t.actor_id=k.actor_id AND t.id=k.turn_id
-  WHERE k.call_kind='model' AND k.dispatched_at>=p_from AND k.dispatched_at<p_to
+  WHERE k.call_kind IN ('model','decision') AND k.dispatched_at>=p_from AND k.dispatched_at<p_to
  ), turns_in AS MATERIALIZED (
   SELECT charged_credits, absorbed_credits, state, settlement FROM turns WHERE opened_at>=p_from AND opened_at<p_to
  )

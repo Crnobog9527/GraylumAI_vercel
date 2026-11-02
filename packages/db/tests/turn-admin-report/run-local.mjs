@@ -10,7 +10,7 @@ const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
 const hash=text=>createHash('sha256').update(text).digest('hex');
 const refusal=async(promise)=>{try{await promise;}catch(e){return e.message;}assert.fail('accepted');};
 const policy={q:100,uTurnUsd:0.1,gCredits:60,minCredits:10,uModelCredits:30,historyItems:200,inputBytes:1000,model:'example/model',
- limits:{model:3,paidTools:1,freeTools:1},stopLoss:{limitUsd:1000,p:8,poolSize:8,uFastUsd:1,uBigUsd:5}};
+ limits:{model:3,decisions:1,paidTools:1,freeTools:1},stopLoss:{limitUsd:1000,p:8,poolSize:8,uFastUsd:1,uBigUsd:5}};
 async function account(){
  const actor=randomUUID(),session=randomUUID();
  await c.query('insert into profiles(id,credits) values($1,1000)',[actor]);
@@ -21,22 +21,27 @@ async function account(){
  return {actor,session};
 }
 const open=(a)=>one('select turn_open($1,$2,$3,$4,$5) v',[a.actor,a.session,randomUUID(),'chat',JSON.stringify(policy)]);
-const begin=(a,turn,seq=1)=>one('select turn_call_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,turn,seq,'model',randomUUID(),null,null,hash('r'+turn+seq),0.02,6]);
-const record=(a,turn,seq=1)=>one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,turn,seq,'ok',0.01,0.01,'{}',null,hash('p'+turn+seq),'RAW']);
+const begin=(a,turn,seq=1,kind='model')=>one('select turn_call_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,turn,seq,kind,randomUUID(),null,null,hash('r'+turn+seq),0.02,6]);
+const record=(a,turn,seq=1,usage='{}')=>one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[a.actor,turn,seq,'ok',0.01,0.01,usage,null,hash('p'+turn+seq),'RAW']);
 const close=(a,turn)=>one("select turn_close($1,$2,'completed',$3,true,false,null) v",[a.actor,turn,JSON.stringify([{role:'user',content:'Q'},{role:'assistant',content:'A'}])]);
 const window=(days=1)=>[new Date(Date.now()-days*864e5).toISOString(),new Date(Date.now()+60e3).toISOString()];
 try{
  const a=await account();
  // One finished turn (known cost) and one still running whose call has no cost yet.
  const done=await open(a);await begin(a,done.turnId);await record(a,done.turnId);await close(a,done.turnId);
+ // A turn that only ran the positioning check (a decision call whose receipt names its own model) and then stopped.
+ const check=await open(a);await begin(a,check.turnId,1,'decision');await record(a,check.turnId,1,JSON.stringify({model:'example/decisions'}));await close(a,check.turnId);
  const running=await open(a);await begin(a,running.turnId);
  const [from,to]=window();
  const before=await one('select (select count(*) from turns)::int+(select count(*) from turn_calls)::int v');
  const r=await one('select turn_admin_model_report($1,$2) v',[from,to]);
- assert.equal(r.models.length,1);assert.equal(r.models[0].model,'example/model');
- assert.deepEqual([r.models[0].calls,r.models[0].unknownCostCalls],[2,1],'the call without a cost is counted unknown');
- assert.equal(Number(r.models[0].nominalUsd),0.01,'only the known cost is summed');
- assert.deepEqual([r.totals.calls,r.totals.unknownCostCalls,r.totals.turns,r.totals.unsettledTurns],[2,1,2,1]);
+ assert.deepEqual(r.models.map(m=>m.model).sort(),['example/decisions','example/model'],'the decision call is its own model line');
+ const main=r.models.find(m=>m.model==='example/model'),decision=r.models.find(m=>m.model==='example/decisions');
+ assert.deepEqual([main.calls,main.unknownCostCalls],[2,1],'the call without a cost is counted unknown');
+ assert.equal(Number(main.nominalUsd),0.01,'only the known cost is summed');
+ assert.deepEqual([decision.calls,decision.unknownCostCalls,Number(decision.nominalUsd)],[1,0,0.01],'the positioning check is counted and costed');
+ assert.deepEqual([r.totals.calls,r.totals.unknownCostCalls,r.totals.turns,r.totals.unsettledTurns],[3,1,3,1]);
+ assert.equal(Number(r.totals.nominalUsd),0.02);
  assert.equal(r.byDate.length,1);
  report.checks.push('model report: calls grouped by model, the call without a cost counted unknown and not summed, the open turn counted unsettled');
  const u=await one('select turn_admin_unsettled_turns(100) v');
