@@ -1,3 +1,5 @@
+-- Format: whole-function CREATE OR REPLACE plus 6 DROP FUNCTION IF EXISTS; no BEGIN/COMMIT; safe to run twice. The generator splices it in after
+-- billing_reconcile_day and before DO $guard$. It touches only the 24 functions named below (no other function, table or trigger).
 -- CORE-PATH-V2 V2-12 batch F, pre-drop rewrite segment: account erasure and content deletion (R2c, 24 functions).
 -- Goes into CORE-PATH-V2-DELETE-F-DRAFT.sql after the other pre-drop rewrites (billing_reconcile_day) and BEFORE the self-check guard, in the same
 -- transaction. After it no account/content erasure function names an old table (runtime_executions, runtime_session_history,
