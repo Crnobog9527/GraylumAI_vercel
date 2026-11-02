@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {randomUUID} from 'node:crypto';
-import type {FrozenPaygRun, FrozenRun} from '../provider/service';
+import type {FrozenPaygRun, FrozenRun} from '../provider/frozenRun';
 import {logger} from '../../../lib/logger';
 import {attachResearchTurn} from './researchAdmission';
 import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
