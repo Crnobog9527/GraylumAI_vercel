@@ -681,8 +681,7 @@ export default function AdminFinancePage() {
                 </div>
               </CardContent>
             </Card>
-            <div className="mt-6"><TurnModelReportCard /></div>
-            <div className="mt-6"><UnsettledTurnsCard /></div>
+            <div className="mt-6 space-y-6"><TurnModelReportCard /><UnsettledTurnsCard /></div>
           </div>
         </TabsContent>
       </Tabs>
