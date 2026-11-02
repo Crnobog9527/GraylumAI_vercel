@@ -13,6 +13,7 @@
 --                         pays a relation lock for it)
 --   turn_tombstones       a voice turn's source is its version: that reads as voiceSourceRevoked
 --   turn_user_charge      a voice turn that saved no profile pays nothing
+--   turn_call_record      a receipt arriving after a voice version was deleted does not store its answer
 --   voice_delete_versions also deletes the call receipts a generation of the deleted versions saved, and locks its open turn
 -- Compatibility: nothing calls kind=voice until the code deploys (apply this first); the old voice path and every other kind are
 -- unchanged, and old code reads the wider CHECK as before.
@@ -529,6 +530,69 @@ BEGIN
   WHERE t.actor_id=a AND t.policy ? 'voiceVersionId' AND t.policy->>'voiceVersionId'=ANY(ids::text[])
    AND m.session_id=t.session_id AND m.turn_id=t.id AND m.visible;
  RETURN n;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.turn_call_record(p_actor_id uuid, p_turn_id bigint, p_seq integer, p_status text, p_nominal_usd numeric, p_actual_usd numeric, p_usage jsonb, p_provider_id text, p_payload_hash text, p_raw text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE t turns; c turn_calls; q numeric; used integer; next_need integer; tomb jsonb; more integer := 0;
+BEGIN
+  IF p_status NOT IN ('ok','not_sent','rejected','no_charge_402','unusable') THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
+  -- Lock the turn row before reading the call: turn_close may be marking it unknown, or the same receipt may arrive twice.
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
+  SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
+  IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
+  tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
+  -- A final receipt that arrives after turn_close marked the call unknown is the cost evidence recovery would look up: kept. So is
+  -- a late proof that the request was never billed (not_sent, rejected), under the same no-provider-id check below; it frees the
+  -- freeze and the stop-loss share at the next settlement.
+  IF c.status = 'unknown' AND c.cost_pending AND p_status IN ('ok','no_charge_402','unusable','not_sent','rejected') THEN
+    c.status := 'identified';
+  END IF;
+  IF c.status IN ('dispatched','identified') THEN
+    IF p_status = 'ok' AND (p_nominal_usd IS NULL OR p_nominal_usd < 0) THEN RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023'; END IF;
+    -- not_sent and rejected are only for requests the provider certainly never billed: no provider id, no cost.
+    IF p_status IN ('not_sent','rejected') AND (c.provider_id IS NOT NULL OR p_provider_id IS NOT NULL) THEN
+      RAISE EXCEPTION 'TURN_CALL_INVALID' USING ERRCODE='22023';
+    END IF;
+    UPDATE turn_calls SET status = p_status,
+        nominal_usd = CASE WHEN p_status = 'ok' THEN p_nominal_usd ELSE 0 END,
+        -- unusable: the provider charged for a result that cannot be used; the user's base is 0, the platform's cost is kept.
+        actual_usd = CASE WHEN p_status IN ('ok','unusable') THEN p_actual_usd END,
+        usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
+        payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false,
+        -- Above the frozen bound: the estimate failed (price or metering); the model is blocked for new calls (turn_call_begin).
+        budget_conflict = c.call_kind = 'model' AND p_status = 'ok'
+          AND (coalesce(p_actual_usd, 0) > c.upper_usd OR coalesce(p_nominal_usd, 0) > c.upper_usd)
+      WHERE turn_id = p_turn_id AND seq = p_seq;
+    -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
+    -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs
+    -- only after account_erasure_barrier, so any receipt still writing then started after the request and sees it here.
+    -- A voice generation's answer quotes the user's own documents: once its version is deleted (voiceSourceRevoked) a receipt that
+    -- arrives later is not stored either (V2-12 B7; voice_delete_versions removes what was stored before).
+    IF p_raw IS NOT NULL AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean
+      AND NOT (t.policy ? 'voice' AND (tomb->>'voiceSourceRevoked')::boolean) THEN
+      INSERT INTO turn_call_raw (turn_id, seq, body) VALUES (p_turn_id, p_seq, p_raw);
+    END IF;
+  ELSIF c.status <> p_status OR c.payload_hash IS DISTINCT FROM p_payload_hash THEN
+    RAISE EXCEPTION 'TURN_CALL_CONFLICT' USING ERRCODE='22023';
+  END IF;
+  -- credits_low: the remaining freeze cannot cover one more model call of this turn.
+  q := (t.policy->>'q')::numeric;
+  SELECT coalesce(sum(CASE WHEN status = 'ok' THEN ceil(q * nominal_usd * multiplier)
+                           WHEN status IN ('dispatched','identified','unknown') THEN ceil(q * upper_usd * multiplier)
+                           ELSE 0 END), 0) INTO used
+  FROM turn_calls WHERE turn_id = p_turn_id AND call_kind <> 'decision';
+  -- credits_low: the same rule that pauses the next call (turn_call_begin): the remaining freeze below the start threshold L.
+  next_need := coalesce((t.policy->>'minCredits')::int, (t.policy->>'uModelCredits')::int, 0);
+  -- A turn that tops up can still freeze the balance: what is low is the two together. Never in the way of a receipt.
+  IF t.policy ? 'holdCredits' THEN
+    BEGIN more := greatest(public.credit_available(p_actor_id), 0); EXCEPTION WHEN raise_exception THEN more := 0; END;
+  END IF;
+  RETURN jsonb_build_object('status', p_status, 'creditsLow', t.reserved_credits + more - used < next_need) || tomb;
 END $function$;
 
 DO $$

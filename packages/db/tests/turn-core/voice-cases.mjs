@@ -120,6 +120,15 @@ export async function voiceCases(t){
   assert.equal(closed.chargedCredits,0);
   assert.equal(await balance(a),1000);
   assert.equal(await one('select count(*)::int v from voice_profile_versions where id=$1',[id]),0);
+  // A receipt that arrives after the deletion stores nothing (the answer quotes the user's documents).
+  const late=await account(1000),lateId=await version(late),lateTurn=await openVoice(late,lateId);
+  await begin(late,lateTurn.turnId,1,{upper:0.05});
+  await identity(late,lateTurn.turnId,1);
+  await c.query('select voice_delete_versions($1,$2)',[late.actor,[lateId]]);
+  const receipt=await record(late,lateTurn.turnId,1);
+  assert.equal(receipt.voiceSourceRevoked,true);
+  assert.equal(await raws(lateTurn.turnId),0,'a receipt after the deletion keeps no answer');
+  await closeVoice(late,lateTurn.turnId,'completed',{result:{versionId:lateId,profile}});
   report.checks.push('voice: a version deleted mid-generation voids the turn: erased, nothing saved or charged, receipts removed');
  }
  // 7. A kind result that does not name this turn's version is refused; the same request is the same turn and one freeze.
