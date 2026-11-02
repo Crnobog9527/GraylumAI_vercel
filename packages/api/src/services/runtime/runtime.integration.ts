@@ -47,6 +47,7 @@ import {agentTurnBody} from '../../shared/agentTurn';
 import {OPENING_INPUT,openingRequestId} from '../../shared/opcQuestions';
 import {createTRPCContext} from '../../trpc';
 import {ensurePositioningProfilePlans} from '../__tests__/fixtures/positioningProfilePlans';
+const lastResult=async(stream:AsyncIterable<unknown>)=>{let last:unknown;for await(const event of stream)last=event;return (last as {result?:unknown}|undefined)?.result;};
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
 const db=new pg.Client({connectionString});
@@ -524,7 +525,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired
    };
    Object.assign(process.env,hostEnv);
    await db.query("update bill2_calls set rejection_recovery_at=clock_timestamp()-interval '61 seconds' where run_id=$1",[e.runId]);
-   expect(await caller.execute({executionId:e.executionId})).toMatchObject({state:'completed'});
+   expect(await lastResult(await caller.executeStream({executionId:e.executionId}))).toMatchObject({state:'completed'});
   }finally{
    globalThis.fetch=previousFetch;
    for(const [name,value] of Object.entries(previousEnv)){if(value===undefined)delete process.env[name];else process.env[name]=value;}
@@ -691,7 +692,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const previous=Object.fromEntries(Object.keys(env).map(k=>[k,process.env[k]]));
  try{
   Object.assign(process.env,{...env,V3_RUNTIME_STAGING_ENABLED:'false'});
-  expect(await caller.execute({executionId:e.executionId})).toEqual({state:'cancelled'});
+  expect(await lastResult(await caller.executeStream({executionId:e.executionId}))).toEqual({state:'cancelled'});
   expect((await caller.view({sessionId:s.sessionId})).executions[0]).toMatchObject({state:'cancelled'});
   await expect(caller.prepare({...request,requestId:randomUUID()})).rejects.toThrow();
   expect((await db.query('select enabled from runtime_test_windows where id=$1',[windowId])).rows[0].enabled).toBe(true);
@@ -1094,8 +1095,8 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // cache; this measurement is the first Skill prepare of a cold process, as before.
   clearSkillResourceCache();
   const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
-  const execute=await measured(c=>c.execute({executionId:skill.result.executionId}));
-  expect(execute.result).toMatchObject({state:'completed'});
+  const execute=await measured(async c=>{const events=[];for await(const event of await c.executeStream({executionId:skill.result.executionId}))events.push(event);return events;});
+  expect(execute.result.at(-1)).toMatchObject({type:'result',result:{state:'completed'}});
   // Each further prepare uses its own new Session, since a prepared execution is never run here.
   const newSession=async()=>((await measured(c=>c.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}))).result as {sessionId:string}).sessionId;
   const prepareIn=(id:string,module=moduleId,revision=pack.revisionId)=>
