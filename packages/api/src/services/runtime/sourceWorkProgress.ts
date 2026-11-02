@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 import type {AgentToolEvent} from '../../shared/agentWork';
-import type {RuntimeTool} from './runner';
+import type {RuntimeTool} from '../turn/agent/runner';
 
 const record = (value: unknown): Record<string, unknown> =>
  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};

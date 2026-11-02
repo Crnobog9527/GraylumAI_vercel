@@ -2,10 +2,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { deriveFrozenPrices, deriveListPrices } from '../../shared/modelPriceBound';
 import { validateNominalBound } from '../../shared/nominalPricing';
-import { paygStablePolicy, type PaygStablePolicy } from '../bill2/paygPolicy';
+import { paygStablePolicy, type PaygStablePolicy } from '../turn/admission/paygPolicy';
 import { admitPricingSnapshots, pricingEndpoint, readPricingStates,
-  type PricingDeps, type PricingQuote } from './pricingAdmission';
-import { StagingAccessError } from './stagingErrors';
+  type PricingDeps, type PricingQuote } from '../turn/admission/pricingAdmission';
+import { StagingAccessError } from '../turn/settings/stagingErrors';
 
 type PaygTemplate = Omit<PaygStablePolicy, 'nominalPricing' | 'pricingHash' | 'endpointTag'>;
 type PaygPolicy = PricingQuote & { payg?: PaygTemplate };

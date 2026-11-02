@@ -3,12 +3,12 @@ import { z } from 'zod';
 import { adminProcedure, router } from '../trpc';
 import {
   readRuntimeRateLimits, runtimeRateLimitsSchema, saveRuntimeRateLimits, setStopNewCalls,
-} from '../services/runtime/rateLimitSettings';
+} from '../services/turn/settings/rateLimitSettings';
 
 import { readStopLoss, saveStopLoss, stopLossUpdateSchema, stopLossStatus, stopLossAlerts }
-  from '../services/runtime/stopLossSettings';
+  from '../services/turn/settings/stopLossSettings';
 
-import { providerBalanceInput, recordProviderBalance } from '../services/runtime/stopLossMonitor';
+import { providerBalanceInput, recordProviderBalance } from '../services/turn/settings/stopLossMonitor';
 
 const enforcement = { admission: true, calls: true, pause: true } as const;
 export const runtimeRateLimitsRouter = router({

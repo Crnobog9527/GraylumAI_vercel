@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {jsonbBytes,fitNativeResult,attachNativeSummary} from './resultCapacity';
+import {jsonbBytes,fitNativeResult,attachNativeSummary} from '../turn/provider/resultCapacity';
 import {streamOriginalExecution,type ExecutionStreamEvent} from './executionStream';
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import {beforeAll,afterAll,it,expect,vi} from 'vitest';
@@ -9,18 +9,18 @@ import {createServer,type ServerResponse} from 'node:http';
 import pg from 'pg';
 import {createClient} from '@supabase/supabase-js';
 import {runtimeExecutor} from './execute';
-import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from './agentTools';
-import {createRuntimeBudget} from './budget';
+import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from '../turn/agent/agentTools';
+import {createRuntimeBudget} from '../turn/settings/budget';
 import {runtimeActor} from './actor';
 import {inflightFinancialHost} from './inflightFinancial';
 import {recoverErasedAccounts,erasureFinancialBudget} from '../accountErasure/financialRecovery';
-import type {BillingRpc} from '../bill2/service';
-import {authoritativeBilling} from '../bill2/service';
-import type {RuntimeProgress} from './progress';
-import {openRouterAdapter} from '../bill2/openRouterAdapter';
-import type {ReasoningPolicy} from './reasoningPolicy';
+import type {BillingRpc} from '../turn/provider/service';
+import {authoritativeBilling} from '../turn/provider/service';
+import type {RuntimeProgress} from '../turn/agent/progress';
+import {openRouterAdapter} from '../turn/provider/openRouterAdapter';
+import type {ReasoningPolicy} from '../turn/admission/reasoningPolicy';
 import {agentTurnBody,AGENT_TURN_MESSAGE_LIMIT,INVALID_REPLY_NOTICE,ASK_QUESTION_ARGUMENT_LIMIT} from '../../shared/agentTurn';
-import {openRouterEvidence,decodeOpenRouterStreamObservation} from '../bill2/openRouterEvidence';
+import {openRouterEvidence,decodeOpenRouterStreamObservation} from '../turn/provider/openRouterEvidence';
 
 // Deliberately no remote fallback, application credentials or real model keys.
 const connectionString=process.env.V3_LOCAL_DB!;

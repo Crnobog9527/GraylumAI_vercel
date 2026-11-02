@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
-import * as posts from './workspacePosts';
+import * as posts from '../turn/agent/workspacePosts';
 import {runtimeAdmissionService} from './admission';
-vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate',async original=>({...await original<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002';
 const modelId='10000000-0000-4000-8000-000000000003',requestId='10000000-0000-4000-8000-000000000004';

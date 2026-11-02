@@ -74,8 +74,8 @@ describe('organizer complete-value context',()=>{
 
 });
 
-vi.mock('../runtime/newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 

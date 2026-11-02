@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
+import { PURPOSE_OUTPUT_CAP } from '../turn/provider/responseCapacity';
 
 /** Fusion settings (Master Plan §4.5): one existing system_settings row, no new table. The database
  * admission (0235 fusion_group_admit) reads the same row in its transaction. */

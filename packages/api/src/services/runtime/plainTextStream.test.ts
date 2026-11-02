@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe,expect,it,vi} from 'vitest';
-import {runtimeContext} from './runtimeContext';
-import {PLAIN_TEXT_STREAM,openRouterRequestBody,plainTextStreamAllowed,streamsPrimary} from './providerRequest';
+import {runtimeContext} from '../turn/agent/runtimeContext';
+import {PLAIN_TEXT_STREAM,openRouterRequestBody,plainTextStreamAllowed,streamsPrimary} from '../turn/provider/providerRequest';
 import {completedOutput,visibleText} from './nativeOutput';
 import {stoppedCompletion,type StopExecution} from './stoppedCompletion';
-import {openRouterBound} from '../bill2/openRouterPolicy';
-import {frozenReasoningFields} from './reasoningPolicy';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
+import {frozenReasoningFields} from '../turn/admission/reasoningPolicy';
 import {INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
-import type {authoritativeBilling} from '../bill2/service';
+import type {authoritativeBilling} from '../turn/provider/service';
 
 // CHAT-NATIVE-OUTPUT: free chat (v6) and Skill (v2) turns frozen with textStream stream their
 // primary reply. The marker never changes the format; unmarked turns keep their exact bytes.
@@ -124,7 +124,7 @@ describe('停止 on a marked plain-text turn',()=>{
 
 describe('tool rounds on a marked plain-text turn',()=>{
  it('the next round replaces the prelude shown before a read_source call instead of appending to it',async()=>{
-  const {NativeProgressProjection,NativeTextTransport}=await import('./nativeProgress');
+  const {NativeProgressProjection,NativeTextTransport}=await import('../turn/agent/nativeProgress');
   const {nativeFrameProjection}=await import('./nativeOutput');
   const transport=new NativeTextTransport(),events:unknown[]=[];
   // execute.ts builds a new projection (and frame projection) for every exchange of the primary turn.
@@ -173,8 +173,8 @@ describe('停止 on a marked turn: what was shown is what is kept',()=>{
 
 describe('POSITIONING-GATE fallback rounds stream with the refusal marker held back',()=>{
  const run=async(pieces:string[],context:Record<string,unknown>)=>{
-  const {roundEmitter,POSITIONING_FALLBACK}=await import('./positioningFallback');
-  const {NativeProgressProjection}=await import('./nativeProgress');
+  const {roundEmitter,POSITIONING_FALLBACK}=await import('../turn/admission/positioningFallback');
+  const {NativeProgressProjection}=await import('../turn/agent/nativeProgress');
   const shown:Array<{text:string;delta:string;replace:boolean;call?:number}>=[];
   const projection=new NativeProgressProjection({mode:'agent'});
   const emit=roundEmitter(update=>shown.push(update),()=>3,{textStream:PLAIN_TEXT_STREAM,...context,

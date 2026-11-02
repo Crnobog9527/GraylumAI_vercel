@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import type { CallIdentity, TransportObservation } from '../bill2/fixtureAdapter';
-import { consumeOpenRouterNotStarted } from '../bill2/openRouterAdapter';
-import { openRouterEvidence } from '../bill2/openRouterEvidence';
-import { openRouterRejection } from '../bill2/openRouterRejection';
+import type { CallIdentity, TransportObservation } from './provider/fixtureAdapter';
+import { consumeOpenRouterNotStarted } from './provider/openRouterAdapter';
+import { openRouterEvidence } from './provider/openRouterEvidence';
+import { openRouterRejection } from './provider/openRouterRejection';
 import { nominalCost, type NominalPricing } from '../../shared/nominalPricing';
 import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, TurnDatabaseError, type TurnDatabase } from './db';

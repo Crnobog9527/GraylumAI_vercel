@@ -2,9 +2,9 @@
 import {it,expect,vi} from 'vitest';
 import {resolveProviderPrice,type ProviderPriceEntry} from '../billingProviderPrices';
 import {multiplierForProviderCall,type MultiplierSnapshot} from '../billingUnit';
-import {toolCallPolicy} from '../bill2/toolBilling';
+import {toolCallPolicy} from '../turn/provider/toolBilling';
 const mock=vi.hoisted(()=>({window:vi.fn()}));
-vi.mock('../runtime/stagingPolicy',()=>({loadStagingPolicy:mock.window}));
+vi.mock('../turn/settings/stagingPolicy',()=>({loadStagingPolicy:mock.window}));
 vi.mock('../research/vendors/config',async original=>({...await original<object>(),readResearchToolsConfig:async()=>({
  config:{enabled:true,vendors:{tikhub:{enabled:true}}}})}));
 import {admitReadRun} from './billedRead';

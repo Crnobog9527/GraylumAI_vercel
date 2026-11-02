@@ -6,7 +6,7 @@
 export const WITHOUT_APP_SUITES = {
   cdc: {files: ['src/scripts/ac0Probe/cdcB2Eval.integration.ts'], prefix: 'CDC_EVAL: ', excluded: []},
   bill2: {
-    files: ['src/services/bill2/billing.integration.ts'],
+    files: ['src/services/turn/provider/billing.integration.ts'],
     prefix: 'BILL2: ',
     excluded: [],
   },

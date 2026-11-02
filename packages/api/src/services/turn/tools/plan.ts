@@ -1,16 +1,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { swallow } from '../../../lib/swallow';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { decimal, DECIMAL_SCALE } from '../../bill2/decimal';
-import type { ToolCallPolicy } from '../../bill2/toolBilling';
+import { decimal, DECIMAL_SCALE } from '../provider/decimal';
+import type { ToolCallPolicy } from '../provider/toolBilling';
 import type { SecretReader } from '../../research/runtime/secrets';
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
-import { frozenResearchConfig, FREE_CHAT_RESEARCH_CALLS, RESEARCH_RESULT_RESERVE_BYTES } from '../../runtime/researchTurn';
-import { admitResearchTurn } from '../../runtime/researchAdmission';
-import type { ResearchRejectionReason } from '../../runtime/researchAdmissionDiagnostics';
-import { chatResearchEnabled } from '../../runtime/freeChatResearch';
-import type { ConfigurationRows } from '../../runtime/settingsRows';
-import type { StagingPolicy } from '../../runtime/stagingPolicy';
+import { frozenResearchConfig, FREE_CHAT_RESEARCH_CALLS, RESEARCH_RESULT_RESERVE_BYTES } from '../research/researchTurn';
+import { admitResearchTurn } from '../research/researchAdmission';
+import type { ResearchRejectionReason } from '../research/researchAdmissionDiagnostics';
+import { chatResearchEnabled } from '../research/freeChatResearch';
+import type { ConfigurationRows } from '../settings/settingsRows';
+import type { StagingPolicy } from '../settings/stagingPolicy';
 import type { ResearchToolsConfig } from '../../research/vendors/config';
 import type { ResearchVendor } from '../../research/vendors/types';
 import type { GeneralResearchToolName, ToolPlan, TrimReason, TurnToolName } from './types';

@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {SupabaseClient} from '@supabase/supabase-js';
-import {openRouterAdapter} from '../bill2/openRouterAdapter';
+import {openRouterAdapter} from '../turn/provider/openRouterAdapter';
 import {openRouterAccount,readOpenRouterKeyOrUnset} from '../models/openRouterKey';
 import {isOpenRouterEndpoint,resolveOpenAICompatibleEndpoint} from '../providerUtils';
-import type {RuntimeBudget} from './budget';
-import type {StagingPolicy} from './stagingPolicy';
-import {catalogRead} from './catalogCache';
+import type {RuntimeBudget} from '../turn/settings/budget';
+import type {StagingPolicy} from '../turn/settings/stagingPolicy';
+import {catalogRead} from '../turn/settings/catalogCache';
 /** Uses the platform OpenRouter key (admin third-party keys page, Vault; OR-1), with no environment
  * key fallback. The namespace binds recovery to the exact original credential.
  */

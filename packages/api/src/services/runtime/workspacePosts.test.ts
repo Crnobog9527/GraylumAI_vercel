@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe,it,expect,vi} from 'vitest';
-import {admitOwnPosts,filterPostEntries,NO_ENTITLEMENT,OWN_POSTS_RESERVE,ownPostsResult,resolvePostSource} from './workspacePosts';
+import {admitOwnPosts,filterPostEntries,NO_ENTITLEMENT,OWN_POSTS_RESERVE,ownPostsResult,resolvePostSource} from '../turn/agent/workspacePosts';
 import type {PublishMonitorData} from '../publishMonitor/data';
 import {executorRpc} from './executorRpc';
-import {postgresJsonbBytes} from './payloadSize';
+import {postgresJsonbBytes} from '../turn/provider/payloadSize';
 const actor='11111111-1111-4111-8111-111111111111';
 const connection='22222222-2222-4222-8222-222222222222';
 const now=Date.parse('2026-10-18T00:00:00Z');

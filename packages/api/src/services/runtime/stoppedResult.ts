@@ -2,8 +2,8 @@
 import { createHash } from 'node:crypto';
 import { agentTurnBody, AGENT_TURN_FORMAT, questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
 import { stepEnvelope } from './nativeOutput';
-import type { NativeTextSource } from './nativeProgress';
-import { attachNativeSummary, fitNativeResult } from './resultCapacity';
+import type { NativeTextSource } from '../turn/agent/nativeProgress';
+import { attachNativeSummary, fitNativeResult } from '../turn/provider/resultCapacity';
 
 export type StoppedResult = {
   kind: 'usable_result'; evidenceRef: string; evidenceHash: string; body: string;

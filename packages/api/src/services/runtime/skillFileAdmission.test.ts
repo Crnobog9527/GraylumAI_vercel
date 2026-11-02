@@ -4,20 +4,20 @@ import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {packageHash,sha256} from '../skills/loader';
 import {runtimeAdmissionService} from './admission';
-import {runtimeContext} from './runtimeContext';
-import {StagingAccessError,stagingProcedureError} from './stagingErrors';
-import {sourceToolBytes} from './sourceRuntimeTool';
-import {withPrimaryAddenda} from './primaryInstructions';
-import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {runtimeContext} from '../turn/agent/runtimeContext';
+import {StagingAccessError,stagingProcedureError} from '../turn/settings/stagingErrors';
+import {sourceToolBytes} from '../turn/research/sourceRuntimeTool';
+import {withPrimaryAddenda} from '../turn/agent/primaryInstructions';
+import {PROMPT_CACHE_OVERHEAD_BYTES} from '../turn/provider/promptCache';
 import {withBrandIdentity} from '../modelIdentity/brandIdentity';
 import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../shared/runtimeInputMessages';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
-vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate',async original=>({...await original<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor],state:async()=> 'enabled'})}));
 const skill=vi.hoisted(()=>({instructions:'Synthetic Skill',file:'',activations:0,tooLarge:false}));
 const matching=vi.hoisted(()=>({candidates:[] as unknown[]}));
-vi.mock('./matching',async original=>({...await original<typeof import('./matching')>(),discoverRuntimeCandidates:async()=>matching.candidates}));
+vi.mock('../turn/agent/matching',async original=>({...await original<typeof import('../turn/agent/matching')>(),discoverRuntimeCandidates:async()=>matching.candidates}));
 vi.mock('../skills/loader',async original=>{const real=await original<typeof import('../skills/loader')>();return {...real,
  readSkillResource:async()=>skill.file,activateSkill:async()=>{skill.activations++;
   if(skill.tooLarge)throw new real.SkillLoadError('CAPACITY_EXCEEDED');return {forModel:()=>skill.instructions};}};});

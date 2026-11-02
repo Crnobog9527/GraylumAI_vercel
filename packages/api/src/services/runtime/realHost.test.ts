@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import { realContract, runtimeGateEnvironment } from './realHost';
-import type { StagingPolicy } from './stagingPolicy';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
 
 const window = { id: '10000000-0000-4000-8000-000000000001', callPolicies: [], creditsPerUsd: '100', multiplier: '6',
   expiresAt: '2099-01-01T00:00:00Z' } as unknown as StagingPolicy;

@@ -2,10 +2,10 @@
 import {beforeEach,expect,it,vi} from 'vitest';
 import {runtimeExecutor} from './execute';
 import {platformFailureReason} from './executorRpc';
-import type {RuntimeRunnerInput} from './runner';
+import type {RuntimeRunnerInput} from '../turn/agent/runner';
 const mock=vi.hoisted(()=>({run:vi.fn(),billing:{claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}}));
-vi.mock('./runner',()=>({runRuntime:mock.run}));
-vi.mock('../bill2/service',()=>({authoritativeBilling:()=>mock.billing}));
+vi.mock('../turn/agent/runner',()=>({runRuntime:mock.run}));
+vi.mock('../turn/provider/service',()=>({authoritativeBilling:()=>mock.billing}));
 const id='10000000-0000-4000-8000-000000000001';
 beforeEach(()=>vi.clearAllMocks());
 

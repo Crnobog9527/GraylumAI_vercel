@@ -3,14 +3,14 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { reportModelRouter } from './reportModel';
 import { pricingConfig } from '../services/__tests__/fixtures/runtimePricing';
 const mocks = vi.hoisted(() => ({ host: vi.fn(), pricing: vi.fn(), unit: vi.fn(), reasoning: vi.fn() }));
-vi.mock('../services/runtime/stagingEnvironment', () => ({ stagingRuntimeWindow: () => id(8) }));
-vi.mock('../services/runtime/stagingPolicy', () => ({ parseStagingPolicy: (value: unknown) => value }));
-vi.mock('../services/runtime/paygHostPolicy', async original => ({
-  ...await original<typeof import('../services/runtime/paygHostPolicy')>(), readPaygHostPolicies: mocks.host,
+vi.mock('../services/turn/settings/stagingEnvironment', () => ({ stagingRuntimeWindow: () => id(8) }));
+vi.mock('../services/turn/settings/stagingPolicy', () => ({ parseStagingPolicy: (value: unknown) => value }));
+vi.mock('../services/turn/admission/paygHostPolicy', async original => ({
+  ...await original<typeof import('../services/turn/admission/paygHostPolicy')>(), readPaygHostPolicies: mocks.host,
 }));
 vi.mock('../services/runtime/paygPricing', () => ({ freezeStagingPaygPricing: mocks.pricing }));
-vi.mock('../services/runtime/billingUnitAdmission', () => ({ freezeWindowBillingUnit: mocks.unit }));
-vi.mock('../services/runtime/reasoningAdmission', () => ({ admitReasoning: mocks.reasoning }));
+vi.mock('../services/turn/admission/billingUnitAdmission', () => ({ freezeWindowBillingUnit: mocks.unit }));
+vi.mock('../services/turn/admission/reasoningAdmission', () => ({ admitReasoning: mocks.reasoning }));
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 beforeEach(() => {
   vi.clearAllMocks();

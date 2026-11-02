@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash,randomUUID} from 'node:crypto';
 import {expect,it,vi} from 'vitest';
-import {authoritativeBilling,type BillingTransport,type FrozenCall} from './service';
+import {authoritativeBilling,type BillingTransport,type FrozenCall} from '../turn/provider/service';
 const body='synthetic';
 function setup(mode='normal') {
  const actorId=randomUUID(),runId=randomUUID(),callId=randomUUID(),executionId=randomUUID();
@@ -95,7 +95,7 @@ it.each(['slow','failure'])( 'early observation never delays chunk emission and 
 });
 it.each([401,500])('persists original financial evidence while getUser fails with status %s',async(status)=>{
  const {runtimeActor}=await import('../runtime/actor');
- const {createRuntimeBudget}=await import('../runtime/budget');
+ const {createRuntimeBudget}=await import('../turn/settings/budget');
  const f=setup();let revoked=false;
  const jwt='test.'+Buffer.from(JSON.stringify({exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.test';
  const auth={getSession:vi.fn(async()=>({data:{session:{access_token:jwt}},error:null})),
@@ -113,7 +113,7 @@ it.each([401,500])('persists original financial evidence while getUser fails wit
  ]);
 });
 it('cancels and joins a stalled early write within the remaining invocation budget',async()=>{
- const {createRuntimeBudget}=await import('../runtime/budget');
+ const {createRuntimeBudget}=await import('../turn/settings/budget');
  const f=setup();let elapsed=0;
  const budget=createRuntimeBudget(()=>elapsed);elapsed=284_980;
  let first=true,outstanding=0;

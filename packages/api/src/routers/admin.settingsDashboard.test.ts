@@ -1,14 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { REPORT_SETTING } from '../services/report/contract';
-import { PAYG_START_THRESHOLDS_KEY } from '../services/bill2/settingKeys';
+import { PAYG_START_THRESHOLDS_KEY } from '../services/turn/settings/settingKeys';
 import { logger } from '../lib/logger';
 import { adminRouter } from './admin';
 import { settingsRouter } from './settings';
 import { PAYMENT_CHANNEL_KEY } from '../services/payments/channelSettings';
-import { PAYG_HOST_SETTING } from '../services/runtime/paygHostPolicy';
-import { RUNTIME_RATE_LIMIT_KEY } from '../services/runtime/rateLimitSettings';
-import { PURPOSE_BUDGET_KEY } from '../services/runtime/purposeBudgets';
+import { PAYG_HOST_SETTING } from '../services/turn/admission/paygHostPolicy';
+import { RUNTIME_RATE_LIMIT_KEY } from '../services/turn/settings/rateLimitSettings';
+import { PURPOSE_BUDGET_KEY } from '../services/turn/settings/purposeBudgets';
 import { PROVIDER_PRICES_KEY } from '../services/billingProviderPrices';
 import { ABSORB_CONFIG_KEY, ABSORB_ACK_KEY } from '../services/bill2PlatformAlerts';
 

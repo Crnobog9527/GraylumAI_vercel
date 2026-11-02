@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { normalizeEndpointPricing, type PricingSnapshot } from '../../shared/modelPricing';
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
-import { PRICE_SNAPSHOT_MAX_AGE_MS, resetPriceRefreshCooldown } from './pricingAdmission';
+import { PRICE_SNAPSHOT_MAX_AGE_MS, resetPriceRefreshCooldown } from '../turn/admission/pricingAdmission';
 
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock('../models/openRouterCatalog', () => ({ readOpenRouterPricing: vi.fn(() => {

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { newPurchaseChannel, type PaymentMethod, type PaymentMethodRoutes } from './methodRouting';
-import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
+import { stagingRuntimeWindow } from '../turn/settings/stagingEnvironment';
 
 type Env = Record<string, string | undefined>;
 

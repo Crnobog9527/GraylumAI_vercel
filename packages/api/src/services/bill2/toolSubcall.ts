@@ -4,9 +4,9 @@
 // tool_result). A subcall that is never dispatched is never sent. A dispatched subcall whose result cannot be recorded
 // stays without a receipt and settles as unknown at its recovery deadline (user 0, supplier cost pending).
 import { z } from 'zod';
-import { claimFailure } from './claimFailure';
-import type { BillingRpc } from './service';
-import type { ToolClaimPayload, toolResultEvidence } from './toolBilling';
+import { claimFailure } from '../turn/provider/claimFailure';
+import type { BillingRpc } from '../turn/provider/service';
+import type { ToolClaimPayload, toolResultEvidence } from '../turn/provider/toolBilling';
 
 const uuid = z.string().uuid();
 const claimed = z.object({ id: uuid, state: z.string(), dispatchToken: z.string().uuid().nullable().optional() }).passthrough();

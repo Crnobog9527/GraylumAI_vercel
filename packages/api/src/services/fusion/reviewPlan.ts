@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BillingRpc } from '../bill2/service';
-import { loadStagingPolicy } from '../runtime/stagingPolicy';
+import type { BillingRpc } from '../turn/provider/service';
+import { loadStagingPolicy } from '../turn/settings/stagingPolicy';
 import { estimateReview } from './reviewEstimate';
 import { readReviewSkill, resolveReviewSkill, reviewLanguageRule } from './reviewPrompts';
-import { readReplyLocale } from '../runtime/replyLanguage';
+import { readReplyLocale } from '../turn/agent/replyLanguage';
 import { readFusionSettings } from './settings';
 
 /**

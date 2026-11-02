@@ -1,15 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { authoritativeBilling, type BillingRpc } from '../bill2/service';
+import { authoritativeBilling, type BillingRpc } from '../turn/provider/service';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
-import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
-import { newWorkGate, requireNewWork } from '../runtime/newWorkGate';
-import { refusePositioning, windowBoundKey } from '../runtime/positioningGate';
+import { createRuntimeBudget, type RuntimeBudget } from '../turn/settings/budget';
+import { newWorkGate, requireNewWork } from '../turn/admission/newWorkGate';
+import { refusePositioning, windowBoundKey } from '../turn/admission/positioningGate';
 import { runtimeGateEnvironment } from '../runtime/realHost';
 import { runtimeActor } from '../runtime/actor';
-import { loadStagingPolicy } from '../runtime/stagingPolicy';
+import { loadStagingPolicy } from '../turn/settings/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
-import { StagingAccessError } from '../runtime/stagingErrors';
+import { StagingAccessError } from '../turn/settings/stagingErrors';
 import { compareRpc } from './compareAdmission';
 import { streamCompareColumn } from './compareColumn';
 import { loadCompareChoice, type CompareRequestInput } from './compareLoad';

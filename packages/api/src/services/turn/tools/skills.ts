@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { identityOf, readSkillResources, sha256 as hashBytes, type PackageDescriptor, type SkillSource } from '../../skills/loader';
-import { loadSkillParameters, loadSkillTool, SKILL_LOAD_REFUSED } from '../../runtime/loadSkillTool';
-import { entryInstructions, loadSkillResult, type SkillCatalogEntry } from '../../runtime/skillCatalog';
-import { SKILL_FILE_MAX_BYTES, skillFileParameters, skillFileTool } from '../../runtime/skillFile';
-import type { RuntimeTool } from '../../runtime/runner';
+import { loadSkillParameters, loadSkillTool, SKILL_LOAD_REFUSED } from '../skills/loadSkillTool';
+import { entryInstructions, loadSkillResult, type SkillCatalogEntry } from '../skills/skillCatalog';
+import { SKILL_FILE_MAX_BYTES, skillFileParameters, skillFileTool } from '../skills/skillFile';
+import type { RuntimeTool } from '../agent/runner';
 
 /*
  * CORE-PATH-V2 V2-6, 2.4 / 2.7: the Skill tools read nothing from the database during the turn. Before turn_open the kind

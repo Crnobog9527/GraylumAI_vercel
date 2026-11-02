@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it,vi} from 'vitest';
-import {freezeHistorySelection} from './hostTurn';
+import {freezeHistorySelection} from '../turn/agent/hostTurn';
 import {runtimeExecutor} from './execute';
 import {packageHash,sha256} from '../skills/loader';
-import {createRuntimeBudget} from './budget';
-import {mentorHistoryToolBytes} from './mentorHistory';
+import {createRuntimeBudget} from '../turn/settings/budget';
+import {mentorHistoryToolBytes} from '../turn/agent/mentorHistory';
 const billing=vi.hoisted(()=>({claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}));
-vi.mock('../bill2/service',async original=>({...await original<typeof import('../bill2/service')>(),authoritativeBilling:()=>billing}));
+vi.mock('../turn/provider/service',async original=>({...await original<typeof import('../turn/provider/service')>(),authoritativeBilling:()=>billing}));
 const id='10000000-0000-4000-8000-000000000001';
 const base={packageId:id,revisionId:id,directoryName:'fixture',tasks:{},requiredCapabilities:[],files:[
  {path:'SKILL.md',bytes:0,sha256:sha256(''),mediaType:'text/markdown' as const,requires:[]}]};

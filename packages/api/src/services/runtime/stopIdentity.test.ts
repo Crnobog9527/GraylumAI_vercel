@@ -2,7 +2,7 @@
 import {describe,expect,it,vi} from 'vitest';
 import {stoppedCompletion,type StopExecution} from './stoppedCompletion';
 import {withBrandIdentity} from '../modelIdentity/brandIdentity';
-import type {authoritativeBilling} from '../bill2/service';
+import type {authoritativeBilling} from '../turn/provider/service';
 
 // CHAT-NATIVE-OUTPUT follow-up: a stop keeps the first stopAt code points the user saw. An identity rewrite
 // (MODEL-IDENTITY-GUARD) that only touches text after the stop point must not cancel the stop.

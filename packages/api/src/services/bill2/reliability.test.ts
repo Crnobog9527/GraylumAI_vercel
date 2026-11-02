@@ -5,9 +5,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { authoritativeBilling, type BillingRpc, type FrozenCall } from './service';
+import { authoritativeBilling, type BillingRpc, type FrozenCall } from '../turn/provider/service';
 import { executorRpc } from '../runtime/executorRpc';
-import { createRuntimeBudget } from '../runtime/budget';
+import { createRuntimeBudget } from '../turn/settings/budget';
 
 afterEach(() => { vi.restoreAllMocks(); });
 function fixture() {

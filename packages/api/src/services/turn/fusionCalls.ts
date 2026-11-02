@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { swallow } from '../../lib/swallow';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
+import { openRouterAdapter } from './provider/openRouterAdapter';
 import type { FusionPhase } from '../fusion/models';
-import type { RuntimeCallGate } from '../runtime/newWorkGate';
+import type { RuntimeCallGate } from './admission/newWorkGate';
 import { modelCall, TurnStop, type ModelCall } from './call';
 import { GATE_CODES } from './chat';
 import { turnDatabase, turnDatabaseCode, TurnDatabaseError, type CloseKind, type TurnClients } from './db';

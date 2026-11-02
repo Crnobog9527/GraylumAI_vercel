@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
-import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE_INSTRUCTIONS } from '../runtime/primaryInstructions';
-import { replySettingInstructions } from '../runtime/replyLanguage';
+import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../turn/admission/positioningFallback';
+import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE_INSTRUCTIONS } from '../turn/agent/primaryInstructions';
+import { replySettingInstructions } from '../turn/agent/replyLanguage';
 import type { ReplyLocale } from '../../shared/replyLanguage';
-import { runtimeScopeInput } from '../runtime/context';
+import { runtimeScopeInput } from '../turn/agent/context';
 import { FUSION_INPUT_CAP, type FusionRequest } from './request';
 
 /** The one frozen snapshot every column of a compare receives (FUSION-COMPARE §3.2). Pure: everything here has already

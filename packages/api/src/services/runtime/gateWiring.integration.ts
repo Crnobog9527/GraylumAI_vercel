@@ -4,9 +4,9 @@ import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { runtimeExecutor } from './execute';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
+import { openRouterAdapter } from '../turn/provider/openRouterAdapter';
 import { allowAllModeration } from './moderation';
-import type { RuntimeCallGate } from './newWorkGate';
+import type { RuntimeCallGate } from '../turn/admission/newWorkGate';
 const connectionString = process.env.V3_LOCAL_DB!;
 if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connectionString.endsWith('/v3_disposable')) {
   throw new Error('isolated runner required');

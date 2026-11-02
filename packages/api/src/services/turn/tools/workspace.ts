@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { dataSchema } from '../../publishMonitor/data';
 import { historiesSchema, reviewFrom, reviewPosts, supplementSchema, type History } from '../../publishMonitor/reviewData';
-import { fitReview, NO_ENTITLEMENT, ownPostsResult } from '../../runtime/workspacePosts';
+import { fitReview, NO_ENTITLEMENT, ownPostsResult } from '../agent/workspacePosts';
 import type { TurnClients } from '../db';
 import { READ_SOURCE_GUIDE, type SourceRead } from './source';
 

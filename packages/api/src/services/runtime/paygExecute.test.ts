@@ -1,14 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
-import { createRuntimeBudget } from './budget';
-import type { RuntimeCallGate } from './newWorkGate';
+import { createRuntimeBudget } from '../turn/settings/budget';
+import type { RuntimeCallGate } from '../turn/admission/newWorkGate';
 const mock = vi.hoisted(() => ({ run: vi.fn(), billing: {
   claimPaygCall: vi.fn(), dispatchOnce: vi.fn(), finalizeRun: vi.fn(), recoverRun: vi.fn(), recoverReceipts: vi.fn(),
 } }));
-vi.mock('../bill2/service', () => ({ authoritativeBilling: () => mock.billing }));
-vi.mock('./runner', () => ({ runRuntime: mock.run }));
-vi.mock('./session', () => ({ PostgresSession: class {} }));
+vi.mock('../turn/provider/service', () => ({ authoritativeBilling: () => mock.billing }));
+vi.mock('../turn/agent/runner', () => ({ runRuntime: mock.run }));
+vi.mock('../turn/agent/session', () => ({ PostgresSession: class {} }));
 // Only native turns fit their output to the context; the fixture measures no real tokens.
 vi.mock('./paygRuntime', async original => ({ ...await original<typeof import('./paygRuntime')>(),
   fitNativeRequestOutput: (request: string) => request }));
@@ -186,7 +186,7 @@ it('a suspended epoch-1 owner cannot fail or interrupt the resumed epoch-2 execu
 
 it.each(['first', 'organizer', 'uncertain'] as const)('keeps a safe claim reason through SDK wrapping: %s', async mode => {
   const f = fixture(); f.fund();
-  const { BillingClaimRejection } = await import('../bill2/claimFailure');
+  const { BillingClaimRejection } = await import('../turn/provider/claimFailure');
   const claim = mock.billing.claimPaygCall.getMockImplementation()!;
   mock.billing.claimPaygCall.mockImplementation(async (...args) => {
     if (mode !== 'organizer' || args[1] === 2) throw new BillingClaimRejection('BILL2_START_THRESHOLD_UNCONFIGURED');
@@ -219,7 +219,7 @@ it('unknown claim errors never become public notices', async () => {
 it.each(['RUNTIME_NEW_CALLS_STOPPED', 'RUNTIME_USER_DAILY_USD_LIMIT', 'RUNTIME_SITE_DAILY_USD_LIMIT'])(
   'returns stable stop-loss code through SDK wrapping: %s', async reason => {
     const f = fixture(); f.fund();
-    const { BillingClaimRejection } = await import('../bill2/claimFailure');
+    const { BillingClaimRejection } = await import('../turn/provider/claimFailure');
     mock.billing.claimPaygCall.mockRejectedValue(new BillingClaimRejection(reason));
     const result = await runtimeExecutor(f.options).execute(id);
     expect(result).toMatchObject({ code: reason });
@@ -230,7 +230,7 @@ it.each(['RUNTIME_NEW_CALLS_STOPPED', 'RUNTIME_USER_DAILY_USD_LIMIT', 'RUNTIME_S
 // 0248: the pre-dispatch cancellation carries a stable code; before the migration it retries without it.
 it.each(['applied','pending'] as const)('records the pre-dispatch failure code (0248 %s)', async migration => {
   const f = fixture(); f.fund();
-  const { BillingClaimRejection } = await import('../bill2/claimFailure');
+  const { BillingClaimRejection } = await import('../turn/provider/claimFailure');
   mock.billing.claimPaygCall.mockImplementation(async () => { throw new BillingClaimRejection('BILL2_START_THRESHOLD_UNCONFIGURED'); });
   const rpc = f.database.rpc.getMockImplementation()!;
   f.database.rpc.mockImplementation(async (name, args) => {

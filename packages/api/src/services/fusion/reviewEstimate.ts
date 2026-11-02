@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { z } from 'zod';
-import type { frozenCallPolicy } from '../bill2/service';
-import { aggregateCredits } from '../bill2/decimal';
-import { openRouterCallBound } from '../bill2/openRouterPolicy';
+import type { frozenCallPolicy } from '../turn/provider/service';
+import { aggregateCredits } from '../turn/provider/decimal';
+import { openRouterCallBound } from '../turn/provider/openRouterPolicy';
 import { FUSION_INPUT_CAP } from './request';
-import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
+import { PAYG_PROFILE_MAX_BYTES } from '../turn/admission/paygHostPolicy';
 
 type CallPolicy = z.infer<typeof frozenCallPolicy>;
 /** Per-call profile overheads frozen with every payg quote (template + margin tokens). */

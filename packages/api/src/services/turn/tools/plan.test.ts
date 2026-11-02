@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { decimal } from '../../bill2/decimal';
+import { decimal } from '../provider/decimal';
 import { turnPolicy } from '../policy';
 import { paidToolBounds, planTurnTools, type PlanInput } from './plan';
 import { fallbackEligible, researchRounds } from './rounds';

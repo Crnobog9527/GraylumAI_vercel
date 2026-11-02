@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
-import {READ_HISTORY_TOOL} from './agentTools';
+import {READ_HISTORY_TOOL} from '../turn/agent/agentTools';
 
 const object=(value:unknown):value is Record<string,unknown>=>
   Boolean(value&&typeof value==='object'&&!Array.isArray(value));

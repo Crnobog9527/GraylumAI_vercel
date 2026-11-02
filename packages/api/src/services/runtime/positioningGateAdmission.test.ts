@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { OPENING_INPUT } from '../../shared/opcQuestions';
-import type { GateVerdict } from './positioningGate';
-import { FREE_CHAT_POSITIONING_REDIRECT, REPLY_LANGUAGE_INSTRUCTIONS } from './primaryInstructions';
+import type { GateVerdict } from '../turn/admission/positioningGate';
+import { FREE_CHAT_POSITIONING_REDIRECT, REPLY_LANGUAGE_INSTRUCTIONS } from '../turn/agent/primaryInstructions';
 
 // POSITIONING-GATE PR2: admission-side checks. A refusal happens before runtime_admit, so nothing is reserved or charged.
 const mock = vi.hoisted(() => ({ redis: vi.fn(), recovery: vi.fn() }));

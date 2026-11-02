@@ -5,14 +5,14 @@ import {runtimeAdmissionService} from './admission';
 import {packageHash,sha256} from '../skills/loader';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
-import {openRouterBound} from '../bill2/openRouterPolicy';
-import type {PaygHostProfile} from './paygHostPolicy';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
+import type {PaygHostProfile} from '../turn/admission/paygHostPolicy';
 // The real readPaygHostPolicies decides admission here; only pricing/billing-unit freezing is stubbed.
 vi.mock('./paygPricing',()=>({freezeStagingPaygPricing:async(_admin:unknown,policies:{payg:unknown}[])=>policies.map(p=>({...p,
  payg:{...p.payg as object,pricingHash:'a'.repeat(64)}}))}));
-vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate',async original=>({...await original<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
-vi.mock('./billingUnitAdmission',async original=>({...(await original<typeof import('./billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission',async original=>({...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
  freezeWindowBillingUnit:async()=>({version:'bill-unit-v2',creditsPerUsd:'100',defaultMultiplier:'3',models:{},providers:{},hash:'f'.repeat(64)})}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor],state:async()=> 'enabled'})}));
 vi.mock('../skills/loader',async original=>({...await original<typeof import('../skills/loader')>(),

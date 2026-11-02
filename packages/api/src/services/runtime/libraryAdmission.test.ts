@@ -2,14 +2,14 @@
 import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService,runtimeAdmission} from './admission';
-import {stagingProcedureError} from './stagingErrors';
-import {LIBRARY_AGENT_READ_KEY,LIBRARY_RESULT_BYTES,LIBRARY_RETRIEVAL_KEY,admitLibraryRetrieval,candidateToolBytes,libraryReserveBytes,normalizeLibraryReferences,readSourceSlots} from './libraryAdmission';
-import {sourceToolBytes} from './sourceRuntimeTool';
-import {LIBRARY_INSTRUCTIONS,LIBRARY_RETRIEVAL_INSTRUCTIONS,libraryAddendum,withPrimaryAddenda} from './primaryInstructions';
+import {stagingProcedureError} from '../turn/settings/stagingErrors';
+import {LIBRARY_AGENT_READ_KEY,LIBRARY_RESULT_BYTES,LIBRARY_RETRIEVAL_KEY,admitLibraryRetrieval,candidateToolBytes,libraryReserveBytes,normalizeLibraryReferences,readSourceSlots} from '../turn/admission/libraryAdmission';
+import {sourceToolBytes} from '../turn/research/sourceRuntimeTool';
+import {LIBRARY_INSTRUCTIONS,LIBRARY_RETRIEVAL_INSTRUCTIONS,libraryAddendum,withPrimaryAddenda} from '../turn/agent/primaryInstructions';
 
 // LIB-4b admission: the separate `references` field, the server switch, refusals before any charge and the frozen shape.
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002';
