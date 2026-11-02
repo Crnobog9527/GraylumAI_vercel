@@ -40,14 +40,18 @@ export function judgeConnections(summary, line = CONNECTION_LINE) {
   const { maxConnections, reserved = 0, postgrestPool } = summary.limits ?? {};
   const usable = Number.isFinite(maxConnections) ? maxConnections - reserved : null;
   const measured = summary.samples > 0;
-  const check = (name, value, ok, limit) => ({ name, value, limit, ok: value === null || value === undefined ? false : ok, known: value !== null && value !== undefined });
+  const known = value => value !== null && value !== undefined;
+  const check = (name, value, ok, limit) => ({ name, value, limit, ok: known(value) ? ok : false, known: known(value) });
   const pool = Number.isFinite(postgrestPool) ? postgrestPool : line.postgrestAssumedPool;
   const postgrest = summary.peakByRole[POSTGREST_ROLE];
+  const cap = usable === null ? null : Math.floor((usable * line.totalOfUsablePercent) / 100);
   return [
     check(`peak client connections vs ${line.totalOfUsablePercent}% of usable`, measured && usable ? summary.peakTotal : null,
-      usable !== null && summary.peakTotal <= (usable * line.totalOfUsablePercent) / 100, usable === null ? null : Math.floor((usable * line.totalOfUsablePercent) / 100)),
-    check(`PostgREST (${POSTGREST_ROLE}) peak vs db_pool${Number.isFinite(postgrestPool) ? '' : ' (assumed)'}`, measured ? postgrest ?? 0 : null, (postgrest ?? 0) <= pool, pool),
-    check('idle in transaction seconds', measured ? summary.idleInTxMaxSeconds : null, summary.idleInTxMaxSeconds <= line.idleInTransactionSeconds, line.idleInTransactionSeconds),
+      cap !== null && summary.peakTotal <= cap, cap),
+    check(`PostgREST (${POSTGREST_ROLE}) peak vs db_pool${Number.isFinite(postgrestPool) ? '' : ' (assumed)'}`,
+      measured ? postgrest ?? 0 : null, (postgrest ?? 0) <= pool, pool),
+    check('idle in transaction seconds', measured ? summary.idleInTxMaxSeconds : null,
+      summary.idleInTxMaxSeconds <= line.idleInTransactionSeconds, line.idleInTransactionSeconds),
   ];
 }
 

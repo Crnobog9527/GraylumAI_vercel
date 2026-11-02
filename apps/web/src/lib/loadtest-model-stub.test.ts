@@ -23,15 +23,37 @@ describe('load-test model stub rewrite', () => {
   });
 
   it('wraps fetch only when active', async () => {
-    const original = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('ok'));
-    const off = { fetch: original as unknown as typeof fetch };
+    const original = vi.fn<typeof fetch>(async () => new Response('ok'));
+    const off = { fetch: original };
     expect(installModelStub({}, off)).toBe(false);
     expect(off.fetch).toBe(original);
-    const on = { fetch: original as unknown as typeof fetch };
+    const on = { fetch: original };
     expect(installModelStub(env, on)).toBe(true);
     await on.fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST' });
     await on.fetch('https://other.example.test/x');
     expect(String(original.mock.calls[0]![0])).toBe('https://stub.example.test/sekret/api/v1/chat/completions');
     expect(String(original.mock.calls[1]![0])).toBe('https://other.example.test/x');
+  });
+
+  it('never reroutes a deployment that lacks either variable or whose database host differs (production shape)', async () => {
+    const cases: Record<string, string | undefined>[] = [
+      { ...env, LOADTEST_MODEL_STUB_URL: undefined },
+      { ...env, LOADTEST_STUB_DB_HOST: undefined },
+      { ...env, LOADTEST_MODEL_STUB_URL: '' },
+      { ...env, LOADTEST_STUB_DB_HOST: '' },
+      { ...env, NEXT_PUBLIC_SUPABASE_URL: undefined },
+      { ...env, NEXT_PUBLIC_SUPABASE_URL: 'https://prod-ref.supabase.co' },
+      { ...env, NEXT_PUBLIC_SUPABASE_URL: 'https://db.stg.supabase.co.evil.test' },
+      { ...env, NEXT_PUBLIC_SUPABASE_URL: 'not a url' },
+      { ...env, VERCEL_ENV: 'production', NEXT_PUBLIC_SUPABASE_URL: 'https://prod-ref.supabase.co' },
+    ];
+    for (const e of cases) {
+      const original = vi.fn<typeof fetch>(async () => new Response('ok'));
+      const scope = { fetch: original };
+      expect(installModelStub(e, scope)).toBe(false);
+      expect(scope.fetch).toBe(original);
+      await scope.fetch('https://openrouter.ai/api/v1/chat/completions');
+      expect(String(original.mock.calls[0]![0])).toBe('https://openrouter.ai/api/v1/chat/completions');
+    }
   });
 });
