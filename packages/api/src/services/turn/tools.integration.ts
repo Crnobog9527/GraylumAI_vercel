@@ -203,6 +203,8 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the con
   // V2-12 B9: the credit record's search list reads the turn: one line, what it asked for, the unrounded credits (0.01 x m 6 x q 100).
   const lines = (await toolCharges(f.actor))!;
   expect(lines).toHaveLength(1);
+  // The API validates the id as a standard UUID (userApi.ts): version and variant bits set.
+  expect(lines[0]!.callId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(lines[0]).toMatchObject({ toolName: 'web_search', source: 'tool_usage', platform: 'web', dataKind: 'web_search', args: null });
   expect(typeof lines[0]!.query).toBe('string');
   expect(Number(lines[0]!.credits)).toBe(6);

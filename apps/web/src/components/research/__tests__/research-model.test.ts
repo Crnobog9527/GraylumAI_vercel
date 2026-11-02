@@ -135,6 +135,15 @@ describe("server rows from research.toolCharges and research.evidence", () => {
     expect(charges.map(chargeText)).toEqual(["0.25 积分", "结算中"]);
   });
 
+  it("rebuilds what a turn's subcall searched for from its own query and platform", () => {
+    const charges = toSearchCharges([
+      { callId: "a", toolName: "web_search", args: null, source: "tool_usage", credits: "6", query: "咖啡", platform: "web" },
+      { callId: "b", toolName: "social_search", args: null, source: "tool_usage", credits: "1", query: "穿搭", platform: "douyin" },
+      { callId: "c", toolName: "social_account", args: null, source: "tool_unknown", credits: null, query: "sample", platform: "douyin" },
+    ]);
+    expect(charges.map(charge => describeRequest(charge.tool, charge.args)?.query)).toEqual(["咖啡", "穿搭", "sample"]);
+  });
+
   it("maps evidence rows without inventing a route or a title", () => {
     const [entry, ...rest] = toEvidenceEntries([
       { operationId: "o1", toolName: "social_account", args: { platform: "douyin", account: "a" }, state: "succeeded",

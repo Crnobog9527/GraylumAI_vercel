@@ -12,11 +12,27 @@ export interface ToolChargeRow {
   args: unknown;
   source: ToolSettlement | null;
   credits: string | null;
+  /** What the one subcall asked for (turn rows keep it per subcall instead of the whole call's arguments). */
+  query?: string | null;
+  platform?: string | null;
+}
+
+/** A turn's row has no call arguments, only the subcall's own query and platform: rebuild the shape describeRequest reads. */
+function argsOf(row: ToolChargeRow): unknown {
+  if (row.args) return row.args;
+  const query = row.query ?? "";
+  switch (row.toolName) {
+    case "web_search": return { query };
+    case "web_fetch": return { url: query };
+    case "social_search": return { platform: row.platform ?? "", keywords: query ? [query] : [] };
+    case "social_account": return { platform: row.platform ?? "", account: query };
+    default: return {};
+  }
 }
 
 export function toSearchCharges(rows: ToolChargeRow[]): SearchCharge[] {
   return rows.flatMap(row => row.toolName
-    ? [{ callId: row.callId, tool: row.toolName, args: row.args ?? {}, settlement: row.source, userCredits: row.credits }]
+    ? [{ callId: row.callId, tool: row.toolName, args: argsOf(row), settlement: row.source, userCredits: row.credits }]
     : []);
 }
 
