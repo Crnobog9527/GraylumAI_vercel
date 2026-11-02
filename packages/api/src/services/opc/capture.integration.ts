@@ -470,7 +470,8 @@ it.each(['ascii', 'utf8'])('RUNTIME: full fields and protected markers fit 32768
   for (const step of Object.values(frozen.payload.scopeMaterial.content.work.steps) as Array<{ fieldMeta: Record<string, unknown>; information: Record<string, { value: string }> }>) {
     expect(Object.keys(step.fieldMeta).sort()).toEqual(Object.keys(step.information).sort());
     for (const [field, meta] of Object.entries(step.fieldMeta)) {
-      expect(meta).toMatchObject({protected:true,source:'user',hasPendingSuggestion:false});
+      // This case installs the 0182 projection itself (above), so the pending-suggestion flag is that definition's, not 0458's.
+      expect(meta).toMatchObject({protected:true,source:'user',hasPendingSuggestion:true});
       expect(step.information[field].value).toHaveLength(400); fields++;
     }
   }
