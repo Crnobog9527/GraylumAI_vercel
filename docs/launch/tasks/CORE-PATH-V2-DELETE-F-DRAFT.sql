@@ -179,6 +179,134 @@ BEGIN
  RETURN totals||jsonb_build_object('turns',turn_check,'sources',sources,'entries',entries);
 END $function$;
 
+CREATE OR REPLACE FUNCTION public.fusion_compare_active(a uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT EXISTS(SELECT 1 FROM fusion_compares fc WHERE fc.actor_id=a AND fc.state='admitting'
+      AND fc.created_at>clock_timestamp()-interval '5 minutes')
+    OR EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=a AND t.kind='compare' AND t.state IN ('opening','running','stopping'));
+$function$;
+
+CREATE OR REPLACE FUNCTION public.fusion_review_breaker_usage(a uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  -- Platform-borne outcomes of the last 7 days (§3.3 breaker): the compare and jury turns of CORE-PATH-V2 (V2-7b): calls that delivered nothing (a provider refusal, a 402, an answer refused under the fallback rule)
+  -- and the provider cost of calls whose result was unusable or whose turn refunded everything. answer_verdict: recovery records a
+  -- call whose cost came late as ok, but the platform bears one without a usable answer (a compare column broken off has none).
+  SELECT jsonb_build_object('noDeliveryCalls', t.n, 'platformUsd', t.usd)
+  FROM (SELECT count(*) FILTER (WHERE c.status IN ('rejected','no_charge_402')
+      OR (c.status='unusable' AND c.usage->>'verdict'='no_delivery') OR c.answer_verdict='no_delivery' OR (t.kind='compare' AND c.status='ok' AND c.answer_verdict IS NULL)) n,
+    coalesce(sum(coalesce(c.actual_usd,c.nominal_usd,0)) FILTER (WHERE c.status='unusable'
+      OR (c.status='ok' AND t.state='closed' AND t.charged_credits=0) OR c.answer_verdict<>'usable'
+      OR (t.kind='compare' AND c.status='ok' AND c.answer_verdict IS NULL)),0) usd
+    FROM turn_calls c JOIN turns t ON t.actor_id=c.actor_id AND t.id=c.turn_id
+    WHERE c.actor_id=a AND t.kind IN ('compare','jury') AND c.call_kind='model'
+      AND c.dispatched_at>=clock_timestamp()-interval '7 days') t;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.fusion_review_turn_source(p_actor_id uuid, p_request_id uuid, p_draft_id uuid, p_source_version_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE d opc_drafts; p artifact_projects; r artifact_rounds; ver artifact_versions; m jsonb;
+BEGIN
+  PERFORM opc_assert_business_writable(p_actor_id, jsonb_build_object('draftId', p_draft_id));
+  IF opc_draft_readonly(p_actor_id, p_draft_id) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
+  SELECT * INTO d FROM opc_drafts WHERE draft_id = p_draft_id AND actor_id = p_actor_id;
+  SELECT * INTO p FROM artifact_projects WHERE id = d.project_id AND actor_id = p_actor_id;
+  SELECT * INTO ver FROM artifact_versions WHERE id = p_source_version_id AND project_id = p.id AND erased_at IS NULL;
+  SELECT * INTO r FROM artifact_rounds WHERE id = ver.round_id AND project_id = p.id;
+  IF d.draft_id IS NULL OR p.id IS NULL OR ver.id IS NULL OR r.state IS DISTINCT FROM 'published' OR d.round_id IS DISTINCT FROM r.id
+    OR ver.version IS DISTINCT FROM p.current_version OR NOT coalesce(ver.report ? 'generatedReport', false)
+    OR NOT content_erasure_artifact_readable(p_actor_id, ver.id) THEN RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
+  IF fusion_compare_active(p_actor_id)
+    OR EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused') AND request_id <> p_request_id)
+    OR EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare' AND state IN ('running','paused','stopping')) THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE';
+  END IF;
+  SELECT coalesce(jsonb_object_agg(s.key, (SELECT coalesce(jsonb_object_agg(f.key, jsonb_build_object('value', f.value->'value',
+      'status', f.value->'status')), '{}') FROM jsonb_each(coalesce(s.value->'information', '{}')) f)), '{}')
+    INTO m FROM jsonb_each(r.steps) s;
+  RETURN jsonb_build_object('draftId', d.draft_id, 'projectId', p.id, 'sessionId', d.session_id, 'sourceVersionId', ver.id,
+    'versionHash', ver.report_hash, 'materials', m, 'breaker', fusion_review_breaker_usage(p_actor_id));
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.fusion_review_view(rv fusion_reviews)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT jsonb_build_object('reviewId',rv.id,'state',rv.state,'round',rv.round,'phase',rv.phase,'attempt',rv.attempt,
+    'draftId',rv.draft_id,'sourceVersionId',rv.source_version_id,'sourceSessionId',rv.source_session_id,
+    'versionHash',rv.version_hash,'materials',rv.materials,'materialsHash',rv.materials_hash,'config',rv.config,
+    'steps',rv.steps,'outcome',rv.outcome,'revisionId',rv.revision_id,'endedAt',rv.ended_at,'adoption',rv.adoption,
+    'turnId',rv.turn_id,
+    -- A review on the turn path (V2-7b): its fixed price is the turn's freeze and settlement.
+    'fee',(SELECT jsonb_build_object(
+      'credits',(t.policy->>'fixedCredits')::int,
+      'state',CASE WHEN t.charged_credits IS NULL THEN 'held' WHEN t.charged_credits>0 THEN 'charged' ELSE 'refunded' END,
+      'chargedCredits',t.charged_credits,'reason',t.close_kind,'settledAt',CASE WHEN t.charged_credits IS NOT NULL THEN t.closed_at END)
+      FROM turns t WHERE t.actor_id=rv.actor_id AND t.id=rv.turn_id),
+    -- Per call: its run, verdict and whether it settled, for continueReview. On the turn path a call is one turn_calls row of the
+    -- review's turn, in the step whose first sequence is the nearest at or below it; its id is the one fusion_turn_outputs keys.
+    'calls',coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',st.x->>'groupId','runId',md5(c.turn_id::text||':'||c.seq::text)::uuid,
+      'callId',md5(c.turn_id::text||':'||c.seq::text)::uuid,'seq',c.seq,'modelId',c.model_id,
+      'phase',CASE WHEN st.x->>'phase'='summary' THEN 'fusion_summary' ELSE 'fusion_review' END,
+      'dispatched',c.status<>'not_sent',
+      'verdict',coalesce(o.verdict,CASE WHEN c.status IN ('not_sent','rejected','no_charge_402') THEN 'no_delivery' END),
+      'settled',c.settled_at IS NOT NULL,'state',c.status,'dispatchedAt',c.dispatched_at,'settledAt',c.settled_at) ORDER BY c.seq)
+      FROM turn_calls c
+      CROSS JOIN LATERAL (SELECT x FROM jsonb_array_elements(rv.steps) x WHERE (x->>'fromSeq')::int<=c.seq
+        ORDER BY (x->>'fromSeq')::int DESC LIMIT 1) st
+      LEFT JOIN fusion_turn_outputs o ON o.turn_id=c.turn_id AND o.seq=c.seq
+      WHERE c.turn_id=rv.turn_id AND c.call_kind='model'),'[]'));
+$function$;
+
+CREATE OR REPLACE FUNCTION public.fusion_review_admin_list(p_limit integer, p_before_created timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id uuid DEFAULT NULL::uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT coalesce(jsonb_agg(x ORDER BY (x->>'createdAt')::timestamptz DESC, x->>'reviewId' DESC),'[]') FROM (
+    SELECT jsonb_build_object('reviewId',rv.id,'actorId',rv.actor_id,'draftId',rv.draft_id,'state',rv.state,'outcome',rv.outcome,
+      'round',rv.round,'createdAt',rv.created_at,'endedAt',rv.ended_at,'sourceVersionId',rv.source_version_id,
+      'breakerCleared',CASE WHEN rv.breaker_cleared_at IS NULL THEN NULL ELSE jsonb_build_object('at',rv.breaker_cleared_at,
+        'by',rv.breaker_cleared_by,'reason',rv.breaker_clear_reason,'batch',rv.breaker_clear_batch) END,'reviewers',rv.config->'reviewers','summary',rv.config->'summary',
+      'costUsd',coalesce((SELECT sum(coalesce(c.actual_usd,c.nominal_usd,0)) FROM turn_calls c
+        WHERE c.actor_id=rv.actor_id AND c.turn_id=rv.turn_id AND c.call_kind='model'),0),
+      'chargedCredits',coalesce((SELECT t.charged_credits FROM turns t WHERE t.actor_id=rv.actor_id AND t.id=rv.turn_id),0),
+      'fee',(SELECT jsonb_build_object('credits',(t.policy->>'fixedCredits')::int,
+        'state',CASE WHEN t.charged_credits IS NULL THEN 'held' WHEN t.charged_credits>0 THEN 'charged' ELSE 'refunded' END,
+        'chargedCredits',t.charged_credits,'reason',t.close_kind,'settledAt',CASE WHEN t.charged_credits IS NOT NULL THEN t.closed_at END)
+        FROM turns t WHERE t.actor_id=rv.actor_id AND t.id=rv.turn_id)) x
+    FROM fusion_reviews rv
+    WHERE p_before_created IS NULL OR (rv.created_at,rv.id)<(p_before_created,coalesce(p_before_id,'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid))
+    ORDER BY rv.created_at DESC, rv.id DESC LIMIT least(greatest(coalesce(p_limit,20),1),100)) q;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.fusion_review_admin_read(p_review_id uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT fusion_review_view(rv)||jsonb_build_object('actorId',rv.actor_id,'createdAt',rv.created_at,'outputs',
+    coalesce((SELECT jsonb_agg(jsonb_build_object('callId',md5(c.turn_id::text||':'||c.seq::text)::uuid,'costUsd',coalesce(c.actual_usd,c.nominal_usd),'body',o.body) ORDER BY c.seq)
+      FROM turn_calls c LEFT JOIN fusion_turn_outputs o ON o.turn_id=c.turn_id AND o.seq=c.seq
+      WHERE c.actor_id=rv.actor_id AND c.turn_id=rv.turn_id AND c.call_kind='model'),'[]'))
+  FROM fusion_reviews rv WHERE rv.id=p_review_id;
+$function$;
+
 -- ---- erasure segment (R2c) ----
 -- Format: whole-function CREATE OR REPLACE plus 6 DROP FUNCTION IF EXISTS; no BEGIN/COMMIT; safe to run twice. The generator splices it in after
 -- billing_reconcile_day and before DO $guard$. It touches only the 24 functions named below (no other function, table or trigger).

@@ -1,0 +1,21 @@
+diff --git a/packages/db/tests/turn-fusion/run-local.mjs b/packages/db/tests/turn-fusion/run-local.mjs
+index 14f1f9ecb..86cf249a8 100644
+--- a/packages/db/tests/turn-fusion/run-local.mjs
++++ b/packages/db/tests/turn-fusion/run-local.mjs
+@@ -479,6 +479,16 @@ try{
+   await begin(j,t,1);await record(j,t,1,{n:0.5,actual:0.5,output:seat()});
+   await close(j,t,'completed',{product:{state:'completed',outcome:{kind:'no_change'}}});
+   assert.ok(Number((await one('select fusion_review_breaker_usage($1) v',[j.actor])).platformUsd)>=0.5);
++  // The admin look-back reads the review's turn: cost, charged credits, fee and the saved answer (V2-12 R3).
++  {
++   const list=await one('select fusion_review_admin_list(50) v');
++   const row=list.find(x=>x.reviewId===rv);
++   assert.ok(row,'the review is listed');
++   assert.equal(Number(row.costUsd),0.5);assert.equal(row.chargedCredits,0);assert.equal(row.fee.state,'refunded');
++   const full=await one('select fusion_review_admin_read($1) v',[rv]);
++   assert.equal(full.outputs.length,1);assert.equal(typeof full.outputs[0].body,'string');assert.equal(Number(full.outputs[0].costUsd),0.5);
++   assert.equal(full.fee.state,'refunded');
++  }
+   report.checks.push('breaker: refunded compare and jury turns count as platform-borne, returned by the read before the open; a compare freezes its workspace sources; a revoked or malformed source is refused before the open, a malformed one by the open too');
+  }
+  // 13. #1522 review: a complete answer whose cost is not final yet is kept (turn_fusion_output) while the call stays open.
