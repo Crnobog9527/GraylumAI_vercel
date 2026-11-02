@@ -134,9 +134,10 @@ export function turnBenchmarkTools(input: BenchmarkToolsInput) {
       catch { return false; }
       return true;
     },
-    onResult: (result, evidence) => {
+    onResult: (result, evidence, display) => {
       const policy = policies.find(p => p.provider === result.vendor && p.model === `${result.vendor}:${result.route}`);
-      row?.add({ result, costUsd: evidence.toolOutcome === 'unknown' ? null : evidence.cost, multiplier: policy?.multiplier ?? '1' });
+      row?.add({ result, costUsd: evidence.toolOutcome === 'unknown' ? null : evidence.cost, multiplier: policy?.multiplier ?? '1',
+        ...(display ? { display } : {}) });
     },
   };
   const ctx: ResearchToolContext = { scope, executionId: input.requestId, config: frozenResearchConfig(research), store, subcall,

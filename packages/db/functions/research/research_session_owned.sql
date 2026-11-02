@@ -8,13 +8,10 @@ CREATE OR REPLACE FUNCTION public.research_session_owned(a uuid, s uuid, e uuid)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
-  -- Lock first, then check: an account closed while we waited for the lock is refused here.
+  -- Lock first, then check: an account closed while we waited for the lock is refused here. `e` (an old execution) is not checked.
   PERFORM id FROM profiles WHERE id=a FOR SHARE;
   PERFORM bill2_actor(a);
   PERFORM id FROM runtime_sessions WHERE id=s AND actor_id=a FOR SHARE;
-  IF e IS NOT NULL THEN PERFORM id FROM runtime_executions WHERE id=e AND actor_id=a FOR SHARE;END IF;
   IF NOT EXISTS(SELECT 1 FROM runtime_sessions x WHERE x.id=s AND x.actor_id=a AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)
-   OR (e IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=e AND x.session_id=s AND x.actor_id=a
-     AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
   THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
 END $function$;

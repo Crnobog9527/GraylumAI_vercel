@@ -48,6 +48,18 @@ describe('one paid tool call is one row: begin, subcalls, record (2.5.2)', () =>
     expect(h.writes[1]![1].usage).toMatchObject({ subcalls: 2, outcome: 'delivered' });
   });
 
+  it('the row keeps each subcall\'s multiplier and kind; what it searched for goes to the raw body only', async () => {
+    const h = ledger();
+    await paidToolCall(h.deps, call, async l => {
+      l.add({ ...r({}), display: { query: 'secret words', platform: 'douyin', dataKind: 'search' } }); l.add(r({}));
+    });
+    const record = h.writes[1]![1] as { usage: { results: Array<{ multiplier: string; call: { platform: string } | null }> }; raw: string };
+    expect(record.usage.results[0]).toMatchObject({ multiplier: '6', call: { platform: 'douyin', dataKind: 'search' } });
+    expect(record.usage.results[1]!.call).toBeNull();
+    expect(JSON.stringify(record.usage)).not.toContain('secret words');
+    expect(JSON.parse(record.raw)[0].display).toEqual({ query: 'secret words', platform: 'douyin', dataKind: 'search' });
+  });
+
   it('no data: an unusable receipt (user base 0, platform cost kept)', async () => {
     const h = ledger();
     const out = await paidToolCall(h.deps, call, async l => { l.add(r({ items: [] })); });
