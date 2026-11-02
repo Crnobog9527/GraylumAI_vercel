@@ -6,24 +6,11 @@
 import { z } from 'zod';
 import { claimFailure } from '../turn/provider/claimFailure';
 import type { BillingRpc } from '../turn/provider/service';
-import type { ToolClaimPayload, toolResultEvidence } from '../turn/provider/toolBilling';
+import type { ToolSubcallBilling } from '../research/runtime/subcall';
+import type { toolResultEvidence } from '../turn/provider/toolBilling';
 
 const uuid = z.string().uuid();
 const claimed = z.object({ id: uuid, state: z.string(), dispatchToken: z.string().uuid().nullable().optional() }).passthrough();
-
-export type ToolClaim =
-  | { state: 'claimed'; callId: string; token: string }
-  | { state: 'waiting_credits' }
-  /** The same sequence was claimed before (a replay): it must not be sent again from here. */
-  | { state: 'replayed'; callId: string };
-
-export interface ToolSubcallBilling {
-  readonly runId: string;
-  claim(sequence: number, payload: ToolClaimPayload): Promise<ToolClaim>;
-  /** true only when this process may send the request now. */
-  dispatch(callId: string, token: string): Promise<boolean>;
-  record(callId: string, evidence: ReturnType<typeof toolResultEvidence>): Promise<{ accountClosed: boolean; contentDeleted: boolean }>;
-}
 
 /** Actor-bound RPC steps for tool subcalls of one run. The actor comes from the trusted runtime, never from the model. */
 export function toolSubcallBilling(deps: { admin: BillingRpc; actorId: string; runId: string }): ToolSubcallBilling {
