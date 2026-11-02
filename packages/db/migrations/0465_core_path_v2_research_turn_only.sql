@@ -10,7 +10,8 @@
 -- session by its name, else by its first visible user message (as the conversation list does since 0444), not by an execution's input.
 -- research_user_tool_charges (the credit record's "搜索明细") reads the turn's own spend row and turn_calls instead of bill2_calls: one line per
 -- supplier subcall of the turn's tool rows (usage.results, which now also keeps each subcall's multiplier and kind; what it searched for is read from the call's raw body, which erasure and a deleted session already cover), with the
--- same unrounded credits (cost x m x q, 0 without data, none while unknown). Only the turn's first spend row ('turn:<id>:spend') lists them.
+-- same unrounded credits (cost x m x q, 0 without data, none while unknown). Only the turn's first spend row ('turn:<id>:spend') lists them,
+-- and a resumed turn's row also lists the searches it carried from the turns it resumed (up to turn_resume_break).
 -- Not touched here: research_user_message (only the old runtime store calls it), research_runtime_link / call_charge / close_unsent /
 -- plan_create, research_operation_settled (BILL2 and erasure users; they go with their callers).
 -- Compatible: the turn path reads and writes the same rows by turn_id; results and signatures are unchanged.
@@ -280,7 +281,7 @@ CREATE OR REPLACE FUNCTION public.research_user_tool_charges(a uuid, p_transacti
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE tx credit_transactions; t turns; q numeric; output jsonb;
+DECLARE tx credit_transactions; t turns; output jsonb;
 BEGIN
  PERFORM bill2_actor(a);
  SELECT * INTO tx FROM credit_transactions WHERE id=p_transaction AND user_id=a;
@@ -291,9 +292,14 @@ BEGIN
  IF t.id IS NULL OR tx.idempotency_key IS DISTINCT FROM 'turn:'||t.id||':spend' THEN RETURN '[]'::jsonb;END IF;
  IF NOT EXISTS(SELECT 1 FROM runtime_sessions s WHERE s.id=t.session_id AND s.actor_id=a
    AND s.content_deleted_at IS NULL AND s.erased_at IS NULL) THEN RETURN '[]'::jsonb;END IF;
- q:=(t.policy->>'q')::numeric;
- SELECT coalesce(jsonb_agg(x.line ORDER BY x.seq,x.n),'[]'::jsonb) INTO output FROM (
-  SELECT c.seq,l.n,jsonb_build_object(
+ -- A turn that resumed another carries that turn's paid searches (turn_resume_carry: the calls before turn_resume_break); the earlier turns
+ -- are settled at 0 and have no spend row, so their searches are listed here, each at its own turn's q.
+ WITH RECURSIVE chain AS (
+   SELECT p.id,p.resume_of,(p.policy->>'q')::numeric q FROM turns p WHERE p.actor_id=a AND p.id=t.id
+   UNION ALL
+   SELECT p.id,p.resume_of,(p.policy->>'q')::numeric FROM turns p JOIN chain ON p.id=chain.resume_of WHERE p.actor_id=a)
+ SELECT coalesce(jsonb_agg(x.line ORDER BY x.turn_id,x.seq,x.n),'[]'::jsonb) INTO output FROM (
+  SELECT c.turn_id,c.seq,l.n,jsonb_build_object(
    'callId',(substr(h.v,1,12)||'4'||substr(h.v,14,3)||'8'||substr(h.v,18,15))::uuid,'toolName',c.tool_name,'args',NULL::jsonb,
    -- A general lookup keeps `display` on each result of its raw body; a benchmark batch keeps its operations there (result.call.query),
    -- one per subcall of the row, so they are read by position only when the counts agree.
@@ -311,9 +317,9 @@ BEGIN
    'credits',CASE
      WHEN l.v IS NULL OR l.v->>'outcome'='unknown' OR jsonb_typeof(l.v->'costUsd')<>'string' THEN NULL
      WHEN l.v->>'outcome' IN ('ok','partial') AND coalesce((l.v->>'items')::integer,0)>0
-       THEN ((l.v->>'costUsd')::numeric*coalesce((l.v->>'multiplier')::numeric,c.multiplier)*q)::text
+       THEN ((l.v->>'costUsd')::numeric*coalesce((l.v->>'multiplier')::numeric,c.multiplier)*chain.q)::text
      ELSE '0' END) line
-  FROM turn_calls c
+  FROM chain JOIN turn_calls c ON c.turn_id=chain.id AND c.actor_id=a
   LEFT JOIN turn_call_raw w ON w.turn_id=c.turn_id AND w.seq=c.seq
   CROSS JOIN LATERAL (
    SELECT r.v,r.n FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.usage->'results')='array' THEN c.usage->'results' ELSE '[]'::jsonb END)
@@ -321,9 +327,10 @@ BEGIN
    UNION ALL
    SELECT NULL::jsonb,0::bigint WHERE (jsonb_typeof(c.usage->'results')='array' AND jsonb_array_length(c.usage->'results')>0) IS NOT TRUE
   ) l
-  CROSS JOIN LATERAL (SELECT md5(t.id::text||':'||c.seq||':'||l.n) v) h
+  CROSS JOIN LATERAL (SELECT md5(c.turn_id::text||':'||c.seq||':'||l.n) v) h
   CROSS JOIN LATERAL (SELECT CASE WHEN left(w.body,1)='[' THEN w.body::jsonb END b) j
-  WHERE c.turn_id=t.id AND c.actor_id=a AND c.call_kind='tool' AND c.status IN ('ok','unusable','unknown')
+  WHERE c.call_kind='tool' AND c.status IN ('ok','unusable','unknown')
+    AND (chain.id=t.id OR c.seq<turn_resume_break(a,chain.id))
  ) x;
  RETURN output;
 END $function$;

@@ -437,6 +437,11 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume continues from the receipts: no model 
   // One decision, one model call and one search on the paused turn; one model call on the resumed one (by seq, per turn).
   expect((await rows(f.actor)).map(r => [r.call_kind, r.status]))
     .toEqual([['decision', 'ok'], ['model', 'ok'], ['model', 'ok'], ['tool', 'ok']]);
+  // V2-12 B9: the paused turn was settled at 0 and has no spend row; the resumed turn's row lists the search it carried.
+  const carried = (await toolCharges(f.actor))!;
+  expect(carried).toHaveLength(1);
+  expect(carried[0]).toMatchObject({ toolName: 'web_search', source: 'tool_usage' });
+  expect(Number(carried[0]!.credits)).toBe(6);
   // Every receipt counted once: the user pays what the freeze held (D = min(N, H), 2.5.4), the platform bears the rest, as recorded.
   // Each turn rounds its own receipts up, so the two turns can come to one credit more than the sum rounded once; never a call's worth.
   const paid = (await db.query('select sum(coalesce(charged_credits,0))::int c, sum(coalesce(absorbed_credits,0))::int a from turns where actor_id=$1',
