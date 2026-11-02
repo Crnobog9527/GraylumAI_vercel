@@ -6,6 +6,8 @@ vi.mock('./admission/newWorkGate',()=>({readAdmissionSettings:async()=>({ok:true
 vi.mock('./quote',async original=>({...(await original<object>()),chatQuote:m.quote}));
 vi.mock('./agent/runner',()=>({runRuntime:m.run}));
 vi.mock('./provider/openRouterAdapter',()=>({openRouterAdapter:()=>({})}));
+vi.mock('./provider/providerRequest',async original=>({...(await original<object>()),openRouterRequestBody:()=>({})}));
+vi.mock('./agent/context',async original=>({...(await original<object>()),assertRuntimeRequestCapacity:()=>undefined}));
 import {TurnStop} from './call';
 import {createRuntimeBudget} from './settings/budget';
 import {runReviewTurn,type ReviewClaimInput} from './review';
@@ -130,4 +132,13 @@ it('a cron invocation with too little time left opens nothing: the claim is take
   expect(of(d.calls, 'turn_open')).toHaveLength(0);
   now = 0;
   expect((await runReviewTurn({ ...d.deps, budget }, claim, {}, async () => true)).kind).toBe('done');
+});
+it('a review switched off between the open and the paid request sends nothing: the turn closes failed with a full refund and the week is disabled', async () => {
+  let asked = 0;
+  m.run.mockImplementationOnce(async (options: { exchange: (n: number, body: unknown, onChunk: () => void) => Promise<unknown> }) => options.exchange(1, {}, () => undefined));
+  const d = deps();
+  const result = await runReviewTurn(d.deps, claim, {}, async () => (++asked) === 1);
+  expect(result).toEqual({ kind: 'skipped', reason: 'DISABLED' });
+  expect(of(d.calls, 'turn_close')[0]).toMatchObject({ p_close_kind: 'failed', p_refund_all: true, p_delivered: false });
+  expect(of(d.calls, 'turn_call_begin')).toHaveLength(0);
 });
