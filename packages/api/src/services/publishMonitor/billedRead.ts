@@ -22,7 +22,8 @@ import { readAdmissionConfiguration } from '../turn/admission/admissionConfigura
 import { PRODUCTION_RESEARCH_ACCOUNT } from '../turn/research/researchTurn';
 import { RESEARCH_THRESHOLDS_KEY } from '../turn/research/researchAdmission';
 import { rowFor } from '../turn/settings/settingsRows';
-import { paidToolCall, ToolLimitReached } from '../turn/tools/meter';
+import { openToolRow, ToolLimitReached, type SubcallLedger } from '../turn/tools/meter';
+import { swallow } from '../../lib/swallow';
 import { paidToolBounds } from '../turn/tools/plan';
 import { settleLegacyRun } from './billedReadLegacy';
 import type { ToolCallOutcome } from '../turn/tools/types';
@@ -167,6 +168,21 @@ export type BilledReadDeps = { admin: Admin; env?: Env; now?: () => Date; vendor
   secrets?: SubcallContext['secrets']; rateCounter?: SubcallContext['rateCounter'] };
 
 /**
+ * One paid tool call (meter.ts paidToolCall) whose receipt keeps NO supplier content: the answers live only in the billed-read
+ * ledger, which the connection's deletion wipes (publish_monitor_billed_wipe_results); a copy in the turn's receipt body would
+ * outlive it. `run` may throw: what it sent is settled first, then the error passes.
+ */
+async function readToolCall<T>(calls: Parameters<typeof openToolRow>[0], call: Parameters<typeof openToolRow>[1],
+  run: (ledger: SubcallLedger) => Promise<T>) {
+  const row = await openToolRow(calls, call);
+  let value: T | undefined, failure: unknown, failed = false;
+  try { value = await run(row); } catch (error) { failure = error; failed = true; }
+  const outcome = await row.settle({ subcalls: row.receipts.length });
+  if (failed) throw failure;
+  return { value: value as T, outcome };
+}
+
+/**
  * Reads one claimed TikHub connection: stored answers of this refresh are re-used; anything else is sent as one billed tool call
  * of this refresh's turn. The turn is always closed before returning, so no hold stays frozen.
  */
@@ -214,7 +230,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
   };
   let bound;
   try { bound = await rpc(admin, 'publish_monitor_billed_run', { ...keyArgs(keys), p_run_id: requestId, p_policies: admitted.policies }, runView.nullable()); }
-  catch (error) { await closeTurn('failed', false).catch(() => undefined); throw error; }
+  catch (error) { await swallow('publish_monitor_read_turn_close_failed', closeTurn('failed', false), undefined); throw error; }
   // The claim is no longer current, or another process bound a run first: this turn was never used, close it at once.
   if (!bound?.runId || bound.runId !== requestId) {
     await closeTurn('failed', false);
@@ -226,7 +242,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
   let outcome: ToolCallOutcome = 'not_sent';
   let stopped: ReadOutcome | null = null;
   try {
-    const call = await paidToolCall(calls, { toolName: 'publish_monitor_read', upperUsd: admitted.bound, multiplier: admitted.multiplier,
+    const call = await readToolCall(calls, { toolName: 'publish_monitor_read', upperUsd: admitted.bound, multiplier: admitted.multiplier,
       requestHash: sha256(missing.map(item => requestIdentity(item.request)).join(',')) }, async ledger => {
       for (const item of missing) {
         const context: SubcallContext = { policies: admitted!.policies, phase: PUBLISH_MONITOR_PHASE,
@@ -265,7 +281,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
       : error instanceof TurnStop || error instanceof ToolLimitReached || error instanceof TurnDatabaseError
         ? { kind: 'unavailable', reason: error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_CALL_LIMIT' }
         : null;
-    if (stopped === null) { await closeTurn('failed', false).catch(() => undefined); throw error; }
+    if (stopped === null) { await swallow('publish_monitor_read_turn_close_failed', closeTurn('failed', false), undefined); throw error; }
   }
   const delivered = outcome === 'delivered';
   await closeTurn('completed', delivered);

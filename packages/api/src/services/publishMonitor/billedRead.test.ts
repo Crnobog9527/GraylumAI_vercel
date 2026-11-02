@@ -94,6 +94,9 @@ describe('publish-monitor billed TikHub read (a kind=review turn)', () => {
     expect(of(a, 'turn_call_begin')[0]).toMatchObject({ p_call_kind: 'tool', p_tool_name: 'publish_monitor_read', p_paid: true });
     expect(of(a, 'turn_call_record')).toHaveLength(1);
     expect(of(a, 'turn_call_record')[0]).toMatchObject({ p_status: 'ok' });
+    // The receipt keeps no supplier content (the answers live only in the ledger, which a disconnect wipes).
+    expect(JSON.parse(String(of(a, 'turn_call_record')[0]!.p_raw))).toEqual({ subcalls: 2 });
+    expect(JSON.stringify(of(a, 'turn_call_record')[0])).not.toContain('n1');
     expect(names(a.calls).slice(-2)).toEqual(['turn_close', 'publish_monitor_billed_closed']);
     expect(of(a, 'turn_close')[0]).toMatchObject({ p_close_kind: 'completed', p_delivered: true });
     expect(names(a.calls).some(n => n.startsWith('bill2_'))).toBe(false);
