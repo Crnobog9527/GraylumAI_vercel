@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
 import { trpc } from "@/trpc/client";
 import { TurnRefused } from "./mentor-turn-path";

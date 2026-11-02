@@ -28,7 +28,7 @@ beforeAll(async () => {
     const noop=async()=>{};
     const utils={credits:{getBalance:{invalidate:noop}}};
     export const trpc={useUtils:()=>utils,runtime:{
-      choices: { useQuery: () => ({ data: { corePathV2: true } }) },
+      choices: { useQuery: () => ({ data: { corePathV2: true }, isSuccess: true, isError: false }) },
       reportAvailable:{useQuery:()=>({data:{enabled:true,priceCredits:500}})},
       reportPreflight:{useQuery:()=>({data:{canGenerate:true},isFetching:false,isError:false})},
       resume:{useMutation:()=>mutation}},
