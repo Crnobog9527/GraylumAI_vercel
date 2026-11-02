@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { protectedProcedure, adminProcedure, router } from '../trpc';
 import { logger } from '../lib/logger';
+import { subscriptionManagementAvailable } from '../services/payments/subscriptionManagement';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import {
   assertStripeCheckoutConfigured,
@@ -1015,22 +1016,12 @@ export const paymentsRouter = router({
     try { stripe = getStripeClient(); } catch { /* Original credentials unavailable; keep the order visible. */ }
     return listAdminPaymentOrders(ctx.supabase, input, createStripeBillingDocumentLoader(stripe, ctx.supabase));
   }),
-  getSubscriptionManagement: protectedProcedure.query(async ({ ctx }) => {
-    // Availability only decides whether the manage button shows: a read or Stripe failure (two renewing card subscriptions,
-    // an unreachable Stripe) must not fail the profile page with a 500 (round 10, user7). It is logged with its cause instead.
-    try {
-      // PAY-STRIPE-MP card subscriptions first (no stored Stripe ids), then legacy Stripe subscriptions.
-      if (await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(getStripeClient()))) {
-        return { available: true };
-      }
-      const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
-      return { available: Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id) };
-    } catch (error) {
-      logger.error('billing', 'payments_subscription_management_probe_failed', {
-        message: error instanceof Error ? error.message.slice(0, 200) : 'unknown' });
-      return { available: false };
-    }
-  }),
+  getSubscriptionManagement: protectedProcedure.query(({ ctx }) => subscriptionManagementAvailable(async () => {
+    // PAY-STRIPE-MP card subscriptions first (no stored Stripe ids), then legacy Stripe subscriptions.
+    if (await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(getStripeClient()))) return true;
+    const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
+    return Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id);
+  })),
   createCustomerPortalSession: protectedProcedure
     .input(z.object({ returnUrl: z.string().url().optional() }).strict().optional())
     .mutation(async ({ ctx, input }) => {
