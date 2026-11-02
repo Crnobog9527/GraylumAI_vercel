@@ -327,12 +327,13 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 
 ### 7.4 批次 F 迁移草稿（脚本生成，2026-11-03，不上库）
 
-`CORE-PATH-V2-DELETE-F-DRAFT.sql` 是按重算清单脚本生成的批次 F 迁移草稿（文件放在 docs 里，**不在 `packages/db/migrations`，没有迁移号**）：15 张表、153 个函数、23 条外键、2 个触发器。要点：
-- **开头是自检守卫**：迁移运行时先扫一遍 `pg_proc`，只要还有一个“留下的”函数的源文本（去掉注释后）提到要删的表或调用要删的函数，就抛 `V2_12_F_REFERENCES_REMAIN_*` 并整体回滚——plpgsql 引用已删的表只会在调用时才报错，所以靠守卫拦。清单没清零时，这个迁移跑不过。
-- 全部不带 CASCADE；表用一条 `DROP TABLE a, b, c` 一起删（内部外键互相指向）；先去外键，保留表里的列保留原值（不再有约束）。
-- 保留（不删）：`runtime_scope_material`（素材快照）、`runtime_session_names`、`runtime_session_results`（现役功能）、`runtime_test_windows`（等总控定，草稿按“留”生成）。
-- 现在清单还没清零：留下的函数里仍有 54 个从现役入口走得到、又碰要删的对象（注销 25、评审团/对比 21、复盘 4、账务 3、其余 1：`opc_capture_apply`、`opc_work_result` 随 ⑥ 和旧工作台用例一起去）。清零后重新生成，守卫通过才可以跑。
-- 本机演练：用建库脚本在带旧表数据的本机库上跑（演练记录补在这里）。
+`CORE-PATH-V2-DELETE-F-DRAFT.sql` 是按重算清单脚本生成的批次 F 迁移草稿（文件放在 docs 里，**不在 `packages/db/migrations`，没有迁移号**）：15 张表、164 个函数、24 条外键、39 个触发器，另有 6 个前置改写。要点：
+- **前置改写（同一事务、在守卫之前）**：`opc_business_archive`（去掉旧 BILL2 忙检查，保留回合版）、`opc_target_business`（去掉 runId / groupId / executionId 分支）、`opc_review_archive_guard`（去掉旧运行分支）、`atomic_settle` / `atomic_refund`（去掉“旧 BILL2 运行不许走老结算”的守卫，直接走通用结算）、`billing_reconcile_day`（去掉旧逐笔核对块和 `calls` 结果键，Node 读取要同批改成不要 `calls`）。这几个函数在 F 之前保持原样，因为它们对应的旧用例（评审团对比、BILL2 归档、账务对账）在 F 之前仍有效。
+- **开头是自检守卫**：迁移运行时先扫一遍 `pg_proc`，只要还有一个“留下的”函数的源文本（去掉注释后）提到要删的表或调用要删的函数，就抛 `V2_12_F_REFERENCES_REMAIN_*` 并整体回滚。
+- 全部不带 CASCADE；表用一条 `DROP TABLE a, b, c` 一起删；先去外键（含保留表指向要删表的外键，如 `runtime_session_results.source_execution_id`），保留表里的列保留原值。参数类型用到要删表行类型的函数（`bill2_public`、`bill2_payg_*`、`fusion_call_in_flight`、`report_fee_hold`、`runtime_load_skill_*`、`runtime_mentor_*` 等 22 个）也要删，否则 DROP TABLE 会因依赖失败。
+- 保留（不删）：`runtime_scope_material`、`runtime_session_names`、`runtime_session_results`、`runtime_test_windows`（总控 11-03 决定：留，不算旧路径）。
+- **清单还没清零**（2026-11-03，#1652 已上库后重算，基线 staging + #1655）：留下的函数里仍有 **53 个**从现役入口走得到、又碰要删的对象：注销 24（V2-9 窗口，见 7.5）、评审团/对比 21（随 F 删，F 前没有人改）、账务 3（`atomic_settle`、`atomic_refund`、`billing_reconcile_day`：F 的前置改写）、保留到 F 的归档函数 3（`opc_business_archive`、`opc_target_business`、`opc_review_archive_guard`：F 的前置改写）、其余 2（`opc_capture_apply`、`opc_work_result`：随旧执行器和旧工作台用例一起去）。注销之外，F 的前置改写和 F 的删表删函数一起把后面 29 个清零；注销 24 个要等 V2-9 窗口改写后，守卫才会通过。
+- **本机演练（2026-11-03，建库脚本 + 1500 个旧执行样本）**：不带守卫的机制部分一次跑通，94 ms：旧表 0 张留下，保留表数据不变（`credit_transactions` 1501 行不变），指向已删表的外键 0 条；带守卫跑时按预期拒绝，并列出还剩的注销函数。演练里发现并已补进生成器的两处依赖：参数类型用了要删表行类型的函数、保留表指向要删表的外键。
 
 ### 7.5 注销与内容删除（R2，V2-9 窗口）留给 F 的清单
 
