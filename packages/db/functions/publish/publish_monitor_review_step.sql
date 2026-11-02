@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_step(p_id uuid, p_token
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE r social_review_runs;x runtime_executions;allowed boolean;
+DECLARE r social_review_runs;x runtime_executions;allowed boolean;spent numeric;
 BEGIN
  SELECT * INTO r FROM social_review_runs WHERE id=p_id FOR UPDATE;
  IF r.id IS NULL OR r.lease_token IS DISTINCT FROM p_token OR r.status<>'claimed'
@@ -27,6 +27,12 @@ BEGIN
  END IF;
  IF p_action IN ('observe','skip') AND x.state='completed' THEN
   UPDATE social_review_runs SET status='completed',finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
+  -- Only a completed strategy check consumes a stage change; a skipped one is scheduled again (Owner 2026-10-27).
+  IF r.cadence='quarterly' AND r.business_id IS NOT NULL THEN
+   UPDATE social_coach_profiles SET strategy_check_stages=(SELECT coalesce(jsonb_object_agg(project_id::text,stage),'{}')
+     FROM opc_accounts WHERE actor_id=r.actor_id AND business_id=r.business_id AND erased_at IS NULL),
+    strategy_checked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE actor_id=r.actor_id AND business_id=r.business_id;
+  END IF;
  ELSIF p_action='skip' AND x.result IS NOT NULL THEN
   -- The owner completed after expiry was observed, but billing can still be cost_pending.
   -- Keep the original claim so native financial recovery and the next observe can publish it.
@@ -35,6 +41,17 @@ BEGIN
   -- An unknown financial outcome keeps the claim: existing Runtime recovery owns the held credits.
   IF x.id IS NOT NULL AND NOT coalesce((SELECT closed FROM bill2_runs WHERE id=x.billing_run_id),false) THEN
    RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'executionId',x.id,'state','cost_pending');END IF;
+  spent:=CASE WHEN x.id IS NULL THEN 0 ELSE (SELECT provider_cost_usd FROM bill2_runs WHERE id=x.billing_run_id) END;
+  IF p_action='skip' AND p_reason='RUNTIME_INTERRUPTED' AND r.attempt<3 AND allowed AND r.max_cost_usd-spent>0 THEN
+   -- A deploy or a killed invocation is not the user's week lost: the settled attempt keeps its own request, bill
+   -- and journal; the next attempt gets a new request in the same session, claimable by the next batch at once.
+   -- Every attempt shares one cap: the known actual cost comes off it; an unknown cost (NULL) never retries.
+   UPDATE social_review_runs SET attempt=attempt+1,runtime_request_id=gen_random_uuid(),runtime_execution_id=NULL,
+    bill2_run_id=NULL,max_cost_usd=r.max_cost_usd-spent,
+    prior_bill2_run_ids=prior_bill2_run_ids||CASE WHEN x.billing_run_id IS NULL THEN '{}'::uuid[] ELSE ARRAY[x.billing_run_id] END,
+    created_at=clock_timestamp(),lease_expires_at=clock_timestamp() WHERE id=r.id;
+   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'executionId',x.id,'state','retrying','expired',false);
+  END IF;
   UPDATE social_review_runs SET status='skipped',skip_reason=coalesce(p_reason,'RUNTIME_ENDED'),
    finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
  ELSIF p_action NOT IN ('authorize','observe') THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID';END IF;
