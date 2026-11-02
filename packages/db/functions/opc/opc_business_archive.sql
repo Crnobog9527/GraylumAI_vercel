@@ -23,6 +23,18 @@ BEGIN
  EXCEPTION WHEN lock_not_available THEN RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END;
  IF b.id IS NULL THEN RAISE EXCEPTION 'OPC_BUSINESS_DENIED'; END IF;
  IF b.archived_at IS NULL THEN
+  -- A turn still running for this business must close first (its model call may be in flight and its freeze is open); the owner retries.
+  IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.state IN ('opening','running','stopping')
+   AND opc_target_business(p_actor_id,jsonb_build_object('sessionId',t.session_id))=b.id) THEN
+   RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
+  -- A provider call already dispatched must settle first. Never erase/cancel its
+  -- money or result while archiving. New claim/dispatch also holds the business lock.
+  IF EXISTS(SELECT 1 FROM bill2_runs r JOIN bill2_calls c ON c.run_id=r.id
+   WHERE r.actor_id=p_actor_id AND c.dispatched_at IS NOT NULL
+    AND ((r.contract_version='bill2.v2' AND c.settled_at IS NULL)
+     OR (r.contract_version<>'bill2.v2' AND (NOT r.closed OR c.state NOT IN ('responded','cancelled'))))
+    AND opc_target_business(p_actor_id,jsonb_build_object('runId',r.id))=b.id) THEN
+   RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
   UPDATE opc_businesses SET archived_at=clock_timestamp(),revision=revision+1
    WHERE id=b.id RETURNING * INTO b;
  END IF;

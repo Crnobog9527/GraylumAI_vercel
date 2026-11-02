@@ -11,8 +11,13 @@ AS $function$
 BEGIN
  IF OLD.archived_at IS NULL AND NEW.archived_at IS NOT NULL AND (
   EXISTS(SELECT 1 FROM fusion_reviews rv WHERE rv.actor_id=NEW.actor_id
-   AND rv.state IN ('running','paused')
+   AND (rv.state IN ('running','paused') OR EXISTS(SELECT 1 FROM fusion_review_fees f
+    WHERE f.review_id=rv.id AND f.state='held'))
    AND opc_target_business(NEW.actor_id,jsonb_build_object('draftId',rv.draft_id))=NEW.id)
+  OR EXISTS(SELECT 1 FROM bill2_runs br JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
+   JOIN bill2_calls c ON c.run_id=br.id WHERE br.actor_id=NEW.actor_id AND g.actor_id=NEW.actor_id
+   AND g.kind='review' AND c.settled_at IS NULL
+   AND opc_target_business(NEW.actor_id,jsonb_build_object('runId',br.id))=NEW.id)
  ) THEN RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
  RETURN NEW;
 END $function$;
