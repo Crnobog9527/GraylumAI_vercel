@@ -119,7 +119,8 @@ export async function admitReadTurn(admin: Admin, routes: string[], now = new Da
  */
 export async function settleLeftOpenRun(admin: Admin, actorId: string, runId: string, policies: unknown[], legacy = false) {
   if (legacy) { await settleLegacyRun(admin, actorId, runId, policies); return; }
-  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId }, z.array(z.object({ operationId: uuid, live: z.boolean() }).passthrough()));
+  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId },
+    z.array(z.object({ operationId: uuid, live: z.boolean() }).passthrough()));
   for (const row of rows.filter(item => item.live)) {
     await rpc(admin, 'publish_monitor_billed_abandon', { p_run_id: runId, p_operation_id: row.operationId }, z.boolean());
   }
