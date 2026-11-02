@@ -9,9 +9,13 @@ CREATE OR REPLACE FUNCTION public.turn_tombstones(p_actor_id uuid, p_session_id 
  SET search_path TO 'public', 'pg_temp'
 AS $function$
  SELECT jsonb_build_object(
-  'sessionTombstoned', p_session_id IS NULL OR NOT EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = p_session_id
-    AND s.actor_id = p_actor_id AND s.content_deleted_at IS NULL AND s.erased_at IS NULL),
+  -- A voice generation has no conversation (V2-12 B7), so the missing session is not a tombstone.
+  'sessionTombstoned', CASE WHEN p_policy ? 'voice' THEN false ELSE p_session_id IS NULL OR NOT EXISTS (SELECT 1 FROM runtime_sessions s
+    WHERE s.id = p_session_id AND s.actor_id = p_actor_id AND s.content_deleted_at IS NULL AND s.erased_at IS NULL) END,
   'accountErasing', EXISTS (SELECT 1 FROM account_erasure_requests r WHERE r.profile_id = p_actor_id),
-  'voiceSourceRevoked', p_policy ? 'voiceVersionId' AND NOT EXISTS (SELECT 1 FROM voice_profiles v WHERE v.actor_id = p_actor_id
-    AND v.enabled AND v.confirmed_version_id::text = p_policy->>'voiceVersionId'))
+  -- For a voice generation the source is the version being written: deleted (or no longer generating) means the work is void.
+  'voiceSourceRevoked', CASE WHEN p_policy ? 'voice' THEN NOT EXISTS (SELECT 1 FROM voice_profile_versions v
+      WHERE v.actor_id = p_actor_id AND v.id::text = p_policy->'voice'->>'versionId' AND v.status = 'generating')
+    ELSE p_policy ? 'voiceVersionId' AND NOT EXISTS (SELECT 1 FROM voice_profiles v WHERE v.actor_id = p_actor_id
+      AND v.enabled AND v.confirmed_version_id::text = p_policy->>'voiceVersionId') END)
 $function$;
