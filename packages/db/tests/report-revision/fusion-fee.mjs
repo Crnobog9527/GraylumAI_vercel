@@ -217,7 +217,8 @@ export async function runFusionFee({db,Client,connectionString,report}) {
   const erv = await start(db,er);
   await usableCall(db,er,erv);
   assert.ok((await db.query('SELECT account_erasure_financial_proof($1) v',[er.actor])).rows[0].v.financialPending>=1,'a held fee is pending');
-  assert.equal((await erase(db,er,'artifact',er.project)).status,'deleted');
+  // The review's open group run is no longer cancelled by the delete (V2-12 R2b): the result is review_required; the held fee is still refunded.
+  assert.equal((await erase(db,er,'artifact',er.project)).status,'review_required');
   assert.equal((await fee(db,erv.reviewId)).state,'refunded','deleting the draft refunds the held fee');
   assert.equal(await wallet(db,er.actor),5000);
   await balanced(db,er.actor,'content erasure');
