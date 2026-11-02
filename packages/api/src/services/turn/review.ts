@@ -43,7 +43,7 @@ export type ReviewClaimInput = { id: string; actorId: string; sessionId: string;
 export type ReviewTurnDeps = Pick<ChatDeps, 'admin' | 'clients' | 'slots' | 'newWork' | 'transport' | 'pricing'> & { budget?: RuntimeBudget };
 /** `skipped`: nothing was charged and the review ends with this reason; `deferred`: nothing opened and the claim is tried again later;
  *  `done`: the turn closed (completed or failed) and the review's step decides what that means. */
-export type ReviewTurnResult = { kind: 'skipped'; reason: 'CONFIGURATION_REQUIRED' | 'BALANCE_LOW' } | { kind: 'deferred'; code: string }
+export type ReviewTurnResult = { kind: 'skipped'; reason: 'CONFIGURATION_REQUIRED' | 'BALANCE_LOW' | 'DISABLED' } | { kind: 'deferred'; code: string }
   | { kind: 'done'; turnId: number; closeKind: CloseKind; delivered: boolean };
 
 const REFUSED_AS_CONFIGURATION = new Set(['TURN_PAYG_DISABLED', 'TURN_MODEL_NOT_ADMITTED', 'TURN_PRICE_UNAVAILABLE',
@@ -127,6 +127,9 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
         // The pause and the call limits right before the paid call: nothing is written or sent when they refuse.
         const gate = await deps.newWork.calls(claim.actorId, 1, 'bill2.v2');
         if (!gate.ok) { stopped = new TurnStop(GATE_CODES[gate.reason]); throw stopped; }
+        // The user's switch or entitlement may have changed since the turn opened: asked again right before the paid request, and a
+        // "no" stops it with nothing sent (the freeze comes back with the failed close).
+        if (!(await authorize())) { stopped = new TurnStop('TURN_CALL_DENIED'); throw stopped; }
         return modelCall(callDeps, quote, request, onChunk).catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       } });
     if (!output.trim()) throw new Error('REVIEW_EMPTY');
@@ -142,11 +145,12 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
     // charged, whatever receipts the call left.
     // A pause for credits ends a scheduled review (no user is there to resume it): the turn closes at once as failed with nothing
     // delivered, the freeze comes back and the week ends as "余额不足，未复盘".
-    const paused = code === 'TURN_PAUSED_FOR_CREDITS';
+    const paused = code === 'TURN_PAUSED_FOR_CREDITS', denied = code === 'TURN_CALL_DENIED';
     const kind: CloseKind = code === 'TURN_CALL_UNKNOWN' ? 'interrupted' : code === 'TURN_TOMBSTONED' ? 'erased' : 'failed';
     const closed = await swallow('weekly_review_turn_close_failed', close(kind, { refundAll: kind === 'failed' || kind === 'erased',
       failureCode: code.toLowerCase() }), undefined, { category: 'ai' });
     if (paused && closed) return { kind: 'skipped', reason: 'BALANCE_LOW' };
+    if (denied && closed) return { kind: 'skipped', reason: 'DISABLED' };
     return { kind: 'done', turnId: opened.turnId, closeKind: kind, delivered: false };
   }
 }
