@@ -32,6 +32,16 @@ it('shows a failed read with a way to read again, never another workspace', () =
   expect(html).toContain('重新读取');
 });
 
+it('tells an old conversation it is no longer shown, with a way to a new one, and opens no workspace', () => {
+  for (const data of [{ scope: null }, { scope: { kind: 'something_else' } }, { legacy: true, scope: { kind: 'positioning_draft' } }, {}]) {
+    h.view.data = data;
+    const html = renderToStaticMarkup(<RuntimePage />);
+    expect(html).toContain('这个对话是旧版本产生的，已不再支持查看');
+    expect(html).toContain('开始新对话');
+    expect(html).not.toMatch(/turn:|work:/);
+  }
+});
+
 it('sends a link without a conversation to the start page', () => {
   h.session = '';
   expect(renderToStaticMarkup(<RuntimePage />)).toBe('<p>正在进入新任务…</p>');
