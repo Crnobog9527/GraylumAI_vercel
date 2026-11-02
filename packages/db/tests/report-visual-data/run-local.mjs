@@ -50,7 +50,7 @@ try {
  assert.deepEqual(snapshot(),finalCatalog,'repeat 0300 preserves complete catalog');
  report.checks.push('0300 applied twice after current staging; complete catalog unchanged');
  // The replay brought back 0300's report_document and report_body_complete (old executions): restore the final text (0432, 0456).
- for(const name of ['report_body_complete','report_final_snapshot','report_document_source','report_document_data_source','report_document'])
+ for(const name of ['report_body_complete','report_final_data','report_final_snapshot','report_document_source','report_document_data_source','report_document'])
   ok(sql(read(`packages/db/functions/report/${name}.sql`)));
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');

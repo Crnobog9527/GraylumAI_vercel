@@ -1,9 +1,9 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
-import { canClearRequestId, voiceErrorCode, voiceErrorMessage, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
+import { canClearRequestId, generationJustEnded, voiceErrorCode, voiceErrorMessage, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
 import { MyVoiceView } from './my-voice-view';
 import styles from './my-voice.module.css';
 
@@ -15,6 +15,7 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
   const [polling, setPolling] = useState(false);
   const query = trpc.voice.state.useQuery(undefined, { refetchOnMount: 'always', refetchInterval: polling ? POLL_MS : false });
   const state = query.data as VoiceState | undefined;
+  const utils = trpc.useUtils();
   const generate = trpc.voice.generate.useMutation();
   const confirm = trpc.voice.confirm.useMutation();
   const setEnabled = trpc.voice.setEnabled.useMutation();
@@ -22,6 +23,13 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
   const [preferred, setPreferred] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setPolling(state?.latest?.status === 'generating'); }, [state?.latest?.status]);
+  // Learning is billed when it settles, after the click returns: refresh the sidebar balance then, as a chat turn's end does.
+  const lastStatus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const status = state?.latest?.status;
+    if (generationJustEnded(lastStatus.current, status)) void utils.credits.getBalance.invalidate();
+    lastStatus.current = status;
+  }, [state?.latest?.status, utils]);
   // Once a state read made after this page opened shows nothing generating, a kept request id has a final outcome: the next
   // click must start a new generation, never replay the old one. Never from cached state (a remount still holds the state
   // from before the paid call), or a click before the fresh read would start and charge a second generation (#1262 review).
@@ -53,7 +61,7 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
         // A refusal before anything started is final for this request id; an unknown outcome keeps it for a retry.
         if (voiceErrorCode(error)) sessionStorage.removeItem(REQUEST_KEY);
         throw error;
-      } finally { await query.refetch(); }
+      } finally { await query.refetch(); void utils.credits.getBalance.invalidate(); }
     });
   }
 
