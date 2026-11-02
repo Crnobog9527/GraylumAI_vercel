@@ -257,6 +257,8 @@ EXPLAIN 计划（本机空库下看不出索引选择）；时间点（见 6.4�
 | 定位服务 | `runtime_session_context` | `opc/service.ts` |
 | 账本 | `bill2_legacy_refund`、`bill2_legacy_settle` | 被 `atomic_refund`、`atomic_settle` 调用（批次 C 里整段改写） |
 
+staging 上旧表的行数（只读查询，2026-11-03）：`runtime_executions` 4630、`runtime_session_history` 11907、`runtime_history_dependencies` 6825、`runtime_tool_calls` 1120、`runtime_session_batches` 4625、`bill2_runs` 4870、`bill2_calls` 7886、`bill2_receipts` 23936、`report_fees` 19、`fusion_billing_groups` 91；要保留的 `runtime_scope_material` 3019。**所以 F 必须带数据跑通**：25 条外键指向的行、`credit_transactions`/`ai_usage_logs`/`token_stats` 上的 `bill2_*` 列都有值，去外键和 DROP 之前要先决定这些列删还是置空（正式库未建，没有真实用户数据；staging 全是测试数据）。
+
 周复盘 #1624（B8b，迁移 0467，未合并）用到的旧对象，F 要等它合并后收口：`runtime_cancel`、`runtime_executions`、`runtime_workspace_posts_visible`、`runtime_workspace_post_window`、`bill2_runs`（在 `publish_monitor_review_step` 里）；它自己也在把 `publish_monitor_review_*` 改到 `turns`，合并后这几处要重算。
 
 对批次顺序的影响：
