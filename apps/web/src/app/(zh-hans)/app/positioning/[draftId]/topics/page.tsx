@@ -394,7 +394,7 @@ function TopicWorkspaceContent() {
   return (
     <WorkspaceFrame area="topics" rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={<div className={topicStyles.resultPanel}>
       <header><h2>已采用选题</h2><p>整体规划 · 已采用 {adoptedItemIds.size} 项 · 已创建 {handoffItems.length} 项工作</p></header>
-      <div className={topicStyles.resultBody}><p>候选留在对话中；只有明确采用的选题才进入资料库。</p>
+      <div className={topicStyles.resultBody}><p>候选留在对话中；只有明确采用的选题才进入资料库。点“继续内容工作”后，AI 会接着引导你继续这条内容。</p>
         {adoptedTopics.length ? adoptedTopics.map(item=><div key={item.id} className={topicStyles.adoptedRow}><strong>{item.title}</strong><small>{item.platform} · {item.account}</small>{topicLink(item)&&<Link href={topicLink(item)!}>继续内容工作 →</Link>}</div>) : <p>还没有采用选题。先在对话中看理由、作选择。</p>}
       </div>
     </div>}><main className={topicStyles.main}>

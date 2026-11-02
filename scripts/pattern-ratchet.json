@@ -8,7 +8,7 @@
       ],
       "regex": "\\.catch\\(\\s*\\(\\)\\s*=>",
       "count": "matches",
-      "max": 47
+      "max": 46
     },
     {
       "id": "system-settings-direct-read",
