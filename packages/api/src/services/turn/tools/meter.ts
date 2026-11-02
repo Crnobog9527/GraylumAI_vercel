@@ -100,8 +100,12 @@ export async function openToolRow(deps: ToolCallDeps, call: PaidToolCall): Promi
     // The receipt keeps what each subcall was and returned (counts, outcome, cost); the items themselves go to the raw body.
     const usage = { subcalls: receipts.length, outcome: settled.outcome, vendors: [...new Set(receipts.map(r => r.result.vendor))],
       results: receipts.map(r => ({ route: r.result.route, outcome: r.result.outcome, reason: r.result.reason, items: r.result.items.length,
-        units: r.result.usage.units, costUsd: r.costUsd })) };
-    const raw = body !== undefined ? JSON.stringify(body) : receipts.length ? JSON.stringify(receipts.map(r => r.result)) : null;
+        units: r.result.usage.units, costUsd: r.costUsd, multiplier: r.multiplier,
+        // The kind of search, for the credit record's search list (research_user_tool_charges). What it searched for is
+        // conversation content: it goes to the raw body below, which erasure and a deleted session already cover.
+        call: r.display ? { platform: r.display.platform, dataKind: r.display.dataKind } : null })) };
+    const results = receipts.map(r => r.display ? { ...r.result, display: r.display } : r.result);
+    const raw = body !== undefined ? JSON.stringify(body) : receipts.length ? JSON.stringify(results) : null;
     const payloadHash = sha256(raw ?? call.requestHash);
     if (settled.outcome === 'not_sent') await notSent();
     else if (settled.outcome !== 'unknown') {
