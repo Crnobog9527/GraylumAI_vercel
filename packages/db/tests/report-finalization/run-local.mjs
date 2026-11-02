@@ -52,6 +52,10 @@ try {
  // Replaying 0206 on top of the final chain brings back its seven-argument report_document, which 0300 dropped for the eight-argument one;
  // with both present the cases below cannot call it without types ("is not unique"). Drop the replayed leftover, as 0300 does.
  ok(sql('DROP FUNCTION IF EXISTS public.report_document(uuid,uuid,text,uuid,bigint,text,text)'));
+ // The replay also brought back 0206's report_body_complete, report_final_snapshot and report_document_source (the last reads old executions):
+ // restore the final text of the report functions from the built files (0300, 0432, 0456).
+ for(const name of ['report_body_complete','report_final_snapshot','report_document_source','report_document'])
+  ok(sql(read(`packages/db/functions/report/${name}.sql`)));
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

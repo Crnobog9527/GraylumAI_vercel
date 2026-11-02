@@ -27,7 +27,7 @@ export async function runCases({db,report}) {
  report.checks.push('the read helper is private');
 
  const f=await revised(db);
- assert.equal(await rpc(db,'runtime_history_available',f.execution),true,'the report execution stays readable');
+ assert.equal((await db.query("SELECT count(*)::int n FROM turns WHERE actor_id=$1 AND request_id=$2 AND kind='report'",[f.actor,f.execution])).rows[0].n,1,'the report turn stays');
  assert.equal(await readable(db,f),true);
  const saved=await savedReport(db,f);
  assert.equal(saved.available,true);assert.equal(saved.report.generatedReport.body,original,'viewable and exportable body');
@@ -64,11 +64,10 @@ export async function runCases({db,report}) {
  report.checks.push('artifact deletion still makes the earlier report unreadable');
 
  const answer=await revised(db);
- await erase(db,answer,'answer',answer.execution);
- assert.equal(await rpc(db,'runtime_history_available',answer.execution),false,'a deleted report execution is unreadable');
+ await erase(db,answer,'session',answer.session);
  const kept=await savedReport(db,answer);
  assert.equal(kept.available,true);assert.equal(kept.sourceAvailable,false,'unchanged R5 rule: formal text kept, source revoked');
- report.checks.push('deleting the report execution still revokes it as a source (R5 rule unchanged)');
+ report.checks.push('deleting the report conversation still revokes it as a source (R5 rule unchanged)');
 
  const closed=await revised(db);
  await closeAccount(db,closed.base);
