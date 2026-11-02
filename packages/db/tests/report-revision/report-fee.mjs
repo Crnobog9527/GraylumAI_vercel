@@ -193,23 +193,24 @@ export async function runReportFee({db,Client,connectionString,report}) {
     assert.deepEqual(await terminal,{ok:true},'releasing deletion profile lets the terminal trigger finish');
     assert.equal((await fee(db,inverseReport.id)).state,'refunded');
     assert.equal(await wallet(db,inverse.actor),inverseHeld+PRICE);
-    // The ordinary retry now runs the entire profile-first deletion/financial-recovery path successfully.
-    // A second still-running report proves this real path also moves an execution to cancelled.
+    // The ordinary retry now runs the entire profile-first deletion path successfully. It no longer settles the still-running report
+    // (V2-12 R2b): its execution state and held fee stay as they were, the content goes and the result is review_required.
     assert.equal((await fee(db,inverseSibling.id)).state,'held');
-    assert.equal((await erase(lockClients[0],inverse,'artifact',inverse.project)).status,'deleted');
-    assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',
-      [inverseSibling.id])).rows[0].state,'cancelled');
-    assert.equal((await fee(db,inverseSibling.id)).state,'refunded');
+    const siblingBefore = (await db.query('SELECT state FROM runtime_executions WHERE id=$1',[inverseSibling.id])).rows[0].state;
+    assert.equal((await erase(lockClients[0],inverse,'artifact',inverse.project)).status,'review_required');
+    assert.equal((await db.query('SELECT state FROM runtime_executions WHERE id=$1',[inverseSibling.id])).rows[0].state,siblingBefore,
+      'the delete does not cancel the running report');
+    assert.equal((await fee(db,inverseSibling.id)).state,'held','the held fee is not refunded from the delete');
   } finally {
     await lockClients[0].query('ROLLBACK');
     await terminal;
     await Promise.all(lockClients.map(c=>c.end()));
   }
-  assert.equal(await wallet(db,inverse.actor),5000,'profile-first deletion retry cannot refund twice');
+  assert.equal(await wallet(db,inverse.actor),5000-PRICE,'profile-first deletion retry cannot refund twice (the sibling stays held)');
   assert.equal(Number((await db.query(`SELECT count(*) n FROM credit_transactions WHERE idempotency_key=$1`,
     ['report:'+inverseReport.id+':release'])).rows[0].n),1);
   await balanced(db,inverse.actor,'profile-first deletion versus terminal trigger');
-  report.checks.push('profile-first content deletion versus terminal trigger: actual lock inversion yields retryable 55P03, no deadlock, retry succeeds and refunds once');
+  report.checks.push('profile-first content deletion versus terminal trigger: actual lock inversion yields retryable 55P03, no deadlock, retry succeeds, refunds the terminal one once and leaves the running one held');
 
   // A conservation failure rolls back both the execution transition and the money movement.
   const corrupt = await execution(db,f);
