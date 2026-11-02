@@ -39,6 +39,15 @@ describe('R9 data foundation contracts', () => {
     await dataFoundationService(rpc).adoptTopics(adoption);
     expect(rpc).toHaveBeenCalledWith('opc_adopt_topics_with_source', expect.objectContaining({ p_sources: null }));
   });
+  it.each([['OPC_VERSION_CONFLICT', 'CONFLICT'], ['OPC_TOPIC_ALREADY_ADOPTED', 'CONFLICT'], ['OPC_BUSINESS_DENIED', 'FORBIDDEN']])(
+    'answers a refused adoption (%s) as %s, not as a server fault, and keeps the code', async (refusal, code) => {
+      const rpc = vi.fn().mockRejectedValue(new Error(refusal));
+      await expect(dataFoundationService(rpc).adoptTopics(adoption)).rejects.toMatchObject({ code, message: refusal });
+    });
+  it('leaves an unknown adoption failure as it is', async () => {
+    const rpc = vi.fn().mockRejectedValue(new Error('connection reset'));
+    await expect(dataFoundationService(rpc).adoptTopics(adoption)).rejects.not.toHaveProperty('code', 'CONFLICT');
+  });
   it.each(['rewrite', 'abandon'] as const)('records the explicit %s action with a stable request identity', async action => {
     const rpc = vi.fn().mockResolvedValue({ recorded: true });
     await dataFoundationService(rpc).recordReaction({ requestId: id(2), executionId: id(4), action, reason: '  原因  ' });

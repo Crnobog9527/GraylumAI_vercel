@@ -25,6 +25,19 @@ export function topicFailureMessage(cause: unknown) {
   return '本次请求状态待核实。请点「重试」读取原任务，不要重复发送相同内容。';
 }
 
+/**
+ * The workspace is frozen to the positioning version it was bound to (Owner 2026-11-02: after the positioning is updated,
+ * the old topic workspace is read-only and the user is told). It is behind when the project's current formal version is
+ * another one; the server then refuses every adoption with OPC_VERSION_CONFLICT.
+ */
+export function topicWorkspaceStale(boundVersionId: unknown, currentVersionId: unknown) {
+  return typeof boundVersionId === 'string' && boundVersionId !== '' &&
+    typeof currentVersionId === 'string' && currentVersionId !== '' && boundVersionId !== currentVersionId;
+}
+
+export const STALE_WORKSPACE_NOTICE =
+  '你已更新过正式定位，这个选题工作区基于旧版本，不能再采用或继续对话；原对话和计划保留，只能查看。';
+
 /** The user-facing text of a reply without the machine-readable plan or adoption block. */
 export function replyProse(text: string | null | undefined) {
   if (!text) return '';
