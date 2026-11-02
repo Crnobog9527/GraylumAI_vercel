@@ -7,8 +7,6 @@ CREATE OR REPLACE FUNCTION public.runtime_history_availability(p_execution_ids u
  LANGUAGE plpgsql
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE opened boolean:=runtime_check_memo_open();
 BEGIN
- RETURN QUERY SELECT r.execution_id,r.available FROM runtime_history_availability_before_memo(p_execution_ids) r;
- PERFORM runtime_check_memo_close(opened);
+ RETURN QUERY SELECT requested.id,false FROM (SELECT DISTINCT unnest(p_execution_ids) id) requested;
 END $function$;

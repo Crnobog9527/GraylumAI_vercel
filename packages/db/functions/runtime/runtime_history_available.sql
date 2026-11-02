@@ -7,15 +7,6 @@ CREATE OR REPLACE FUNCTION public.runtime_history_available(p_execution_id uuid)
  LANGUAGE plpgsql
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE opened boolean:=runtime_check_memo_open();
- k text:=md5('runtime_history_available|'||coalesce(p_execution_id::text,''));hit text;result boolean;
 BEGIN
- hit:=runtime_check_memo_get(k);
- IF hit IS NOT NULL THEN result:=CASE hit WHEN 'n' THEN NULL ELSE hit::boolean END;
- ELSE
-  result:=runtime_history_available_before_memo(p_execution_id);
-  PERFORM runtime_check_memo_put(k,coalesce(result::text,'n'));
- END IF;
- PERFORM runtime_check_memo_close(opened);
- RETURN result;
+ RETURN false;
 END $function$;
