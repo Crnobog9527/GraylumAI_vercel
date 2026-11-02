@@ -86,25 +86,5 @@ export function dataFoundationService<T>(rpc: ActorRpc<T>) {
         p_source_draft_version_id: v.sourceDraftVersionId ?? null,
       });
     },
-    adoptBrief(value: unknown) {
-      const v = briefAdoption.parse(value);
-      return rpc('opc_brief_adoption', {
-        p_request_id: v.requestId,
-        p_work_item_id: v.workItemId,
-        p_expected_revision: v.expectedRevision,
-        p_execution_id: v.executionId,
-        p_original: v.original,
-        p_brief: v.brief,
-      });
-    },
-    recordReaction(value: unknown) {
-      const v = contentReaction.parse(value);
-      return rpc('opc_content_reaction', {
-        p_request_id: v.requestId,
-        p_execution_id: v.executionId,
-        p_action: v.action,
-        p_reason: v.reason || null,
-      });
-    },
   };
 }

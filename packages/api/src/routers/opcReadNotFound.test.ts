@@ -41,7 +41,7 @@ it('keeps a deleted conversation that the sidebar list still holds for its publi
   listed(f, {drafts:[{draftId:id(1)}]});
   await expect(f.caller.read({draftId:id(1)})).resolves.toMatchObject({conversationDeleted:true});
 });
-it.each(['read', 'topicWorkspace', 'topicDraft', 'positionHistory'] as const)(
+it.each(['read', 'topicWorkspace', 'topicDraft'] as const)(
   'answers another account\'s draft on %s with not found, not a server error', async (name) => {
     const f = fixture({error:{code:'P0001', message:'OPC_DENIED'}});
     const error = await f.caller[name]({draftId:id(1)}).catch((e: unknown) => e);

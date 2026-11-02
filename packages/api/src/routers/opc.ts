@@ -9,7 +9,7 @@ import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/turn/settings/stagingPolicy';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/turn/settings/stagingErrors';
-import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
+import {topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import { realHostMode } from "../services/turn/settings/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
@@ -21,19 +21,14 @@ import {
   opcPlan,
   opcHandoff,
   opcGenerate,
-  opcSaveResult,
   opcInformation,
   opcTopicBind,
   opcTopicTurn,
   opcTopicDraft,
   opcLibraryEdit,
-  opcContentFromExecution,
   opcContentFromTurn,
   opcContentManualSave,
-  opcVideoPackage,
-  opcVideoResults,
   opcVideoResultsFromTurn,
-  opcVideoExecutionCheck,
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
@@ -145,30 +140,6 @@ export const opcRouter = router({
         timing?.release();
       }
     }),
-  saveResult: procedure
-    .input(opcSaveResult)
-    .mutation(({ ctx, input }) => ctx.opc.saveResult(input)),
-  planResult: readProcedure
-    .input(
-      z
-        .object({ draftId: z.string().uuid(), executionId: z.string().uuid() })
-        .strict(),
-    )
-    .query(async ({ ctx, input }) => {
-      try {
-        return {
-          valid: true as const,
-          ...(await ctx.opc.planResult(input.draftId, input.executionId)),
-        };
-      } catch (cause) {
-        if (
-          cause instanceof Error &&
-          cause.message === "OPC_PLAN_RESPONSE_INVALID"
-        )
-          return { valid: false as const };
-        throw cause;
-      }
-    }),
   revise: procedure
     .input(
       z
@@ -214,15 +185,6 @@ export const opcRouter = router({
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).edit(input)),
   sessionResultDelete: procedure.input(sessionResultFamily)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).remove(input)),
-  planRequestState: readProcedure
-    .input(
-      z
-        .object({ draftId: z.string().uuid(), requestId: z.string().uuid() })
-        .strict(),
-    )
-    .query(({ ctx, input }) =>
-      ctx.opc.planRequestState(input.draftId, input.requestId),
-    ),
   // The bound topic workspace of the draft: binding read, the single explicit
   // bind, and one normal Agent turn inside it. All three keep their server-side
   // authorization; nothing here trusts a client-supplied session or Skill.
@@ -232,9 +194,6 @@ export const opcRouter = router({
   consentTopicWorkspace: procedure
     .input(opcTopicBind.omit({ requestId: true }))
     .mutation(({ ctx, input }) => ctx.opc.topicConsent(input)),
-  bindTopicWorkspace: procedure
-    .input(opcTopicBind)
-    .mutation(({ ctx, input }) => ctx.opc.topicBind(input)),
   topicTurn: procedure
     .input(opcTopicTurn)
     .mutation(({ ctx, input }) => ctx.opc.prepareTopicTurn(input)),
@@ -247,12 +206,6 @@ export const opcRouter = router({
   adoptTopics: procedure
     .input(topicAdoptionWithSource)
     .mutation(({ ctx, input }) => ctx.opc.adoptTopics(input)),
-  recordContentReaction: procedure
-    .input(contentReaction)
-    .mutation(({ctx,input}) => ctx.opc.recordReaction(input)),
-  adoptBrief: procedure
-    .input(briefAdoption)
-    .mutation(({ctx,input}) => ctx.opc.adoptBrief(input)),
   library: readProcedure
     .input(z.object({ search: z.string().max(160).default(''), from: z.string().date().nullable().default(null), to: z.string().date().nullable().default(null) }).strict())
     .query(({ ctx, input }) => ctx.opc.library(input)),
@@ -265,9 +218,6 @@ export const opcRouter = router({
   publicationUiChange: procedure
     .input(z.object({workItemId:z.string().uuid(),requestId:z.string().uuid(),expectedRevision:z.number().int().positive(),plannedDate:z.string().date().nullable(),status:z.enum(['unpublished','published']),publishedDate:z.string().date().nullable()}).strict())
     .mutation(({ctx,input})=>ctx.opc.publicationUiChange(input)),
-  positionHistory: readProcedure
-    .input(z.object({draftId:z.string().uuid()}).strict())
-    .query(({ctx,input})=>ctx.opc.positionHistory(input.draftId)),
   accountStrategyHistory: readProcedure
     .input(z.object({accountProjectId:z.string().uuid()}).strict())
     .query(({ctx,input})=>ctx.opc.accountStrategyHistory(input.accountProjectId)),
@@ -283,27 +233,15 @@ export const opcRouter = router({
   editLibrary: procedure
     .input(opcLibraryEdit)
     .mutation(({ ctx, input }) => ctx.opc.libraryEdit(input)),
-  saveContentResult: procedure
-    .input(opcContentFromExecution)
-    .mutation(({ ctx, input }) => ctx.opc.contentFromExecution(input)),
   saveContentFromTurn: procedure
     .input(opcContentFromTurn)
     .mutation(({ ctx, input }) => ctx.opc.contentFromTurn(input)),
   saveContentManual: procedure
     .input(opcContentManualSave)
     .mutation(({ ctx, input }) => ctx.opc.contentManualSave(input)),
-  saveVideoPackage: procedure
-    .input(opcVideoPackage)
-    .mutation(({ ctx, input }) => ctx.opc.videoPackage(input)),
-  saveVideoResults: procedure
-    .input(opcVideoResults)
-    .mutation(({ ctx, input }) => ctx.opc.videoResults(input)),
   saveVideoResultsFromTurn: procedure
     .input(opcVideoResultsFromTurn)
     .mutation(({ ctx, input }) => ctx.opc.videoResultsFromTurn(input)),
-  checkVideoExecution: procedure
-    .input(opcVideoExecutionCheck)
-    .mutation(({ ctx, input }) => ctx.opc.videoExecutionCheck(input)),
   prepareVideoMaterial: procedure
     .input(opcVideoMaterialPrepare)
     .mutation(({ ctx, input }) => ctx.opc.videoMaterialPrepare(input)),

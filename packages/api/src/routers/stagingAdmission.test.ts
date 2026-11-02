@@ -227,7 +227,7 @@ describe('downstream real-model admission after a valid remote window',()=>{
   expect(body.error.message).toBe('OPC_CONTENT_BINDING');
   expect(rpc.mock.calls.filter(([name]) => name === 'runtime_admit')).toHaveLength(1);
  });
- it.each(['prepareVideoMaterial', 'checkVideoExecution', 'saveVideoPackage', 'saveVideoResults'] as const)(
+ it.each(['prepareVideoMaterial'] as const)(
   'returns HTTP 412 with the binding code from actual OPC %s', async route => {
    mocks.realOpc = true;
    rpc.mockImplementation((name: string) => Object.assign(Promise.resolve(
@@ -236,10 +236,7 @@ describe('downstream real-model admission after a valid remote window',()=>{
    ), { abortSignal() { return this; } }));
    const base = { workItemId: actor, sourceScriptId: actor };
    const versions = { expectedStoryboardVersion: 0, expectedEditingVersion: 0 };
-   const input = route === 'checkVideoExecution' ? { ...base, executionId: actor }
-    : route === 'prepareVideoMaterial' ? { ...base, ...versions, requestId: actor, choice: 'both' }
-     : { ...base, ...versions, requestId: actor, executionId: actor,
-      ...(route === 'saveVideoResults' ? { choice: 'both' } : {}) };
+   const input = { ...base, ...versions, requestId: actor, choice: 'both' };
    const response = await post('opc.' + route, input);
    const body = await response.json();
    expect(response.status).toBe(412);
