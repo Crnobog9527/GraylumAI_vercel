@@ -7,6 +7,7 @@ CREATE OR REPLACE FUNCTION public.artifact_immutable()
  LANGUAGE plpgsql
  SET search_path TO 'public', 'pg_temp'
 AS $function$
+DECLARE keep text[]:=ARRAY['source_version_id','source_hash','material_revision','history_floor_seq'];
 BEGIN
   IF TG_OP='DELETE' AND public.erasure_business_delete_allowed(TG_TABLE_NAME,to_jsonb(OLD)) THEN
     RETURN OLD;
@@ -14,6 +15,13 @@ BEGIN
   IF TG_OP = 'UPDATE' AND TG_NARGS > 0
     AND public.erasure_update_allowed(to_jsonb(OLD), to_jsonb(NEW), TG_ARGV) THEN
     RETURN NEW;
+  END IF;
+  -- Owner 2026-11-02, option A: the topic workspace binding may be re-bound to the latest positioning, by opc_topic_consent only.
+  IF TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'opc_topic_workspaces' THEN
+    IF current_setting('graylum.topic_rebind',true) IS NOT DISTINCT FROM (to_jsonb(OLD)->>'draft_id')||':'||txid_current()::text
+      AND (to_jsonb(OLD)-keep)=(to_jsonb(NEW)-keep) THEN
+      RETURN NEW;
+    END IF;
   END IF;
   RAISE EXCEPTION 'artifact history immutable';
 END $function$;
