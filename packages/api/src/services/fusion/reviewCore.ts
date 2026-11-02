@@ -14,6 +14,17 @@ import { evidenceRules, roleOf } from './reviewEvidenceFlow';
 import { mergeOpinions } from './reviewMerge';
 import { REVIEWER_ROLES } from './reviewEvidence';
 
+/** The least trimming that fits the byte cap: 0 = full opinions; 1 = without replies and reasoning text; 2 = also only
+ * critical and major issues (merged summary) / no minor ones; 3 = one view per issue (merged summary) / no issues (plain summary:
+ * the key-decision verdicts stay); 4–5 (merged summary only) = every issue kept with shortened texts. */
+export function fitted(build: (level: number) => FusionRequest, limit: number): FusionRequest {
+  for (let level = 0; level < 5; level++) {
+    const request = build(level);
+    if (fusionRequestBytes(request) <= limit) return request;
+  }
+  return build(5);
+}
+
 /** What a review decides from its record and saved answers, without billing: the frozen config, the reviewed source, each
  * phase's requests, the host checks and the next position after a finished step. Shared by the BILL2 review flow (review.ts)
  * and the CORE-PATH-V2 jury turn (turn/jury.ts), so both run the same review. */
@@ -141,15 +152,6 @@ export function reviewCore(admin: SupabaseClient, actorId: string) {
     const priced = config.parse(view.config).requestBytes?.[phase];
     return Math.min(PAYG_PROFILE_MAX_BYTES, priced && priced > 0 ? priced : PAYG_PROFILE_MAX_BYTES);
   };
-  /** The least trimming that fits the byte cap: 0 = full opinions; 1 = without replies and reasoning text; 2 = also only
-   * critical and major issues; 3 = also no issues (the key-decision verdicts stay). */
-  function fitted(build: (level: number) => FusionRequest, limit: number): FusionRequest {
-    for (let level = 0; level < 3; level++) {
-      const request = build(level);
-      if (fusionRequestBytes(request) <= limit) return request;
-    }
-    return build(3);
-  }
   const trimmed = (opinion: Opinion | null, level: number): Opinion | null => !opinion || level === 0 ? opinion : {
     decisions: opinion.decisions.map(d => level >= 1 ? { ...d, strongestCase: '', strongestAlternative: '', basis: '' } : d),
     issues: level >= 3 ? [] : level >= 2 ? opinion.issues.filter(i => i.severity !== 'minor') : opinion.issues,
