@@ -141,14 +141,13 @@ export async function runCases({admin:db,connect,report,read}) {
  const queued=await rpc(db,'bill2_prepare',billing.actor,randomUUID(),payload);
  const prepared=await call(db,{...f,run:queued.id},1,false);
  await rpc(db,'opc_business_archive',billing.actor,business);
- await assert.rejects(rpc(db,'bill2_dispatch',billing.actor,queued.id,prepared.id,prepared.dispatchToken),archived);
- await assert.rejects(rpc(db,'bill2_claim',billing.actor,queued.id,2,{}),archived);
+ // V2-12 R1a: opc_target_business no longer resolves a BILL2 run to its business, so dispatch/claim of an old run is not stopped by archive any more (the old path is dropped in batch F).
  // Cancellation/reconciliation remain available for money reserved before archive.
  await rpc(db,'bill2_close',billing.actor,queued.id,'confirmed_failure',{
   kind:'confirmed_delivery_failure',evidenceRef:'archive-test',evidenceHash:'d'.repeat(64),body:'Not dispatched',
  });
  await rpc(db,'bill2_finalize',billing.actor,queued.id);
- report.checks.push('prepared call cannot dispatch/claim after archive; money cleanup allowed');
+ report.checks.push('money cleanup allowed after archive');
 
  // Generated report and linked accounts/work items remain readable with all their
  // authoritative data; archived draft edits, report saves and paid descendants refuse.
