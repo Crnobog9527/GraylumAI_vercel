@@ -48,10 +48,6 @@ export async function topicCases(t){
   await c.query('update runtime_scope_material set revoked=true where session_id=$1',[src.topicSession]);
   assert.match(await refusal(read(a,src)),/OPC_TOPIC_MATERIAL_MISSING/);
   await c.query('update runtime_scope_material set revoked=false where session_id=$1',[src.topicSession]);
-  const old=randomUUID();
-  await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
-   values($1,$2,$3,$4,'{}',0,'completed')`,[randomUUID(),a.actor,src.topicSession,old]);
-  assert.match(await refusal(read(a,src,old)),/OPC_REQUEST_CONFLICT/);
   await c.query('update bill2_drafts set revoked=true where id=$1',[src.draft]);
   assert.match(await refusal(read(a,src)),/OPC_TOPIC_SOURCE_REVOKED/);
   assert.equal(await balance(a),1000);
@@ -113,12 +109,9 @@ export async function topicCases(t){
   await c.query('update opc_businesses set archived_at=null where id=$1',[src.business]);
   report.checks.push('topic: a failed turn, a reply with no topics, another conversation, another account or an archived business is no source');
  }
- // 3c. One request id on one path, whichever came first, under the conversation's lock (never two charges while both paths exist).
+ // 3c. A request id a topic turn holds is refused by the old admission (that function goes with the old path in V2-12 F); the old-path refusals in turn_open are gone.
  {
-  const a=await account(1000),src=await source(a),old=randomUUID();
-  await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
-   values($1,$2,$3,$4,'{}',0,'completed')`,[randomUUID(),a.actor,src.topicSession,old]);
-  assert.match(await refusal(open(a,{kind:'chat',session:src.topicSession,request:old,pol:{...pol(),topic:true}})),/TURN_TOPIC_REQUEST_CONFLICT/);
+  const a=await account(1000),src=await source(a);
   assert.equal(await balance(a),1000,'nothing frozen');
   const {request}=await topicTurn(a,src,'words');
   for(const name of ['runtime_admit_commit','runtime_admit']){
@@ -159,6 +152,21 @@ export async function topicCases(t){
   assert.equal((await events(b)).length,1,'another account keeps its event');
   assert.equal((await c.query('select body from opc_topic_draft_versions where request_id=$1',[their.request])).rows[0].body!==null,true);
   report.checks.push('topic: the opening reads its turn; deleting the conversation erases its events and drafts, and only its own');
+ }
+ // Archive (V2-12 R1a, replaces the old "a dispatched BILL2 call blocks archive" case): a running turn of the business makes archive
+ // BUSY, the owner retries after it closes, and an archived business refuses the next turn's source.
+ {
+  const {begin,identity,record}=t;
+  const a=await account(1000),src=await source(a);
+  const o=await open(a,{kind:'chat',session:src.topicSession,pol:pol()});
+  await begin(a,o.turnId,1,{upper:0.05});
+  assert.match(await refusal(one('select opc_business_archive($1,$2) v',[a.actor,src.business])),/OPC_BUSINESS_BUSY/);
+  assert.equal((await c.query('select archived_at from opc_businesses where id=$1',[src.business])).rows[0].archived_at,null);
+  await identity(a,o.turnId,1);await record(a,o.turnId,1,{n:0.01,actual:0.01});
+  await close(a,o.turnId,'completed',{messages:[{role:'user',content:'topics please'},{role:'assistant',content:'words'}]});
+  assert.equal((await one('select opc_business_archive($1,$2) v',[a.actor,src.business])).isArchived,true);
+  assert.match(await refusal(read(a,src)),/OPC_BUSINESS_ARCHIVED/);
+  report.checks.push('archive: a running turn of the business makes archive BUSY; after it closes archive succeeds and the next topic turn is refused as archived');
  }
 }
 

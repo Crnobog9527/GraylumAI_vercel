@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.opc_result_link_available(l opc_result_links)
 AS $function$
 DECLARE tomb jsonb;
 BEGIN
- IF l.execution_id IS NOT NULL THEN RETURN runtime_history_available(l.execution_id); END IF;
+ IF l.execution_id IS NOT NULL THEN RETURN false; END IF;
  SELECT turn_tombstones(t.actor_id,t.session_id,'{}'::jsonb) INTO tomb FROM turns t
   WHERE t.actor_id=l.turn_actor_id AND t.id=l.turn_id AND t.state='closed' AND t.delivered;
  RETURN tomb IS NOT NULL AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean;

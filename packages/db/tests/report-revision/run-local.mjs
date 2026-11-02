@@ -65,7 +65,14 @@ try {
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
  for(const path of migrations){
-  const migration=read(path);
+  let migration=read(path);
+  // 0334 patches the organizer-pending gate of runtime_admit and opc_step_material; V2-12 R1b removed that gate from
+  // opc_step_material, so a replay on the finished database patches runtime_admit only.
+  if(path.endsWith('0334_runtime_interrupted_recovery.sql')){
+   const gone=",\n  'public.opc_step_material(uuid,uuid,uuid,text,text,text)']";
+   assert.ok(migration.includes(gone),'0334 still lists opc_step_material in its patch');
+   migration=migration.replace(gone,']');
+  }
   ok(sql(migration));
   const finalCatalog=snapshot();
   ok(sql(migration));

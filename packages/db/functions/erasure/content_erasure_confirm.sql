@@ -126,10 +126,9 @@ BEGIN
   AND ex.payload#>>'{scopeMaterial,revision}'=b.material_revision::text
  ON CONFLICT DO NOTHING;
  -- 0295 report price
- PERFORM report_fee_settle_internal(held_fee.execution_id,false) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
-  WHERE held_fee.actor_id=a AND held_fee.state='held' AND (fe.id=ANY(ids) OR fe.session_id=ANY(sessions));
- PERFORM report_fee_settle_internal(held_fee.execution_id,true) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
-  WHERE held_fee.actor_id=a AND held_fee.state='held' AND (fe.id=ANY(ids) OR fe.session_id=ANY(sessions));
+ -- V2-12 R2: an old report fee still held is no longer settled from here; it is counted and the delete reports review_required.
+ remaining:=remaining+(SELECT count(*) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
+  WHERE held_fee.actor_id=a AND held_fee.state='held' AND (fe.id=ANY(ids) OR fe.session_id=ANY(sessions)));
  UPDATE runtime_sessions SET content_deleted_at=stamp WHERE id=ANY(sessions) AND content_deleted_at IS NULL;
  UPDATE artifact_projects SET content_deleted_at=stamp WHERE id=ANY(projects) AND content_deleted_at IS NULL;
  UPDATE bill2_runs SET content_deleted_at=stamp WHERE actor_id=a AND content_deleted_at IS NULL
@@ -138,7 +137,6 @@ BEGIN
  -- No adapter, redispatch, new request ID or fabricated provider failure exists here.
  FOR row IN SELECT id,billing_run_id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id LOOP
   IF row.billing_run_id IS NOT NULL THEN
-   financial:=runtime_financial_recovery(a,row.id,true);
    PERFORM account_erasure_scrub_calls(a,row.billing_run_id);
    PERFORM account_erasure_scrub_run(a,row.billing_run_id);
    financial:=account_erasure_scrub_receipts(a,row.billing_run_id,100);
@@ -154,8 +152,6 @@ BEGIN
  FOR row IN SELECT r.id,r.closed FROM bill2_runs r JOIN fusion_compares fc ON fc.group_id=r.fusion_group_id
   WHERE fc.actor_id=a AND content_erasure_references(fc.workspace_dependencies,refs) ORDER BY r.id LOOP
   UPDATE bill2_runs SET content_deleted_at=stamp WHERE id=row.id AND content_deleted_at IS NULL;
-  IF NOT row.closed THEN PERFORM bill2_cancel(a,row.id); END IF;
-  PERFORM bill2_finalize(a,row.id);
   financial:=account_erasure_scrub_calls(a,row.id);
   remaining:=remaining+coalesce((financial->>'remaining')::bigint,0);
   financial:=account_erasure_scrub_run(a,row.id);
@@ -190,8 +186,6 @@ BEGIN
   WHERE g.actor_id=a AND (g.source_session_id=ANY(sessions)
    OR g.source_session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects))) ORDER BY r.id LOOP
   UPDATE bill2_runs SET content_deleted_at=stamp WHERE id=row.id AND content_deleted_at IS NULL;
-  IF NOT row.closed THEN PERFORM bill2_cancel(a,row.id); END IF;
-  PERFORM bill2_finalize(a,row.id);
   -- Anything a scrub could not clear yet is counted (review_required), and the recovery cron
   -- scrubs a content-deleted run again once it settles (PR-3b).
   financial:=account_erasure_scrub_calls(a,row.id);

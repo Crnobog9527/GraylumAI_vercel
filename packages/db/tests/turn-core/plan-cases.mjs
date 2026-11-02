@@ -60,11 +60,6 @@ export async function planCases(t){
   await c.query('update opc_businesses set archived_at=now() where id=$1',[business]);
   await refused({},/OPC_BUSINESS_ARCHIVED/);
   await c.query('update opc_businesses set archived_at=null where id=$1',[business]);
-  // The same request already admitted on the old path: never a second charge while both paths exist.
-  const old=request();
-  await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
-   values($1,$2,$3,$4,'{}',0,'completed')`,[randomUUID(),a.actor,src.session,old]);
-  assert.match(await refusal(openPlan(a,src,old)),/TURN_PLAN_REQUEST_CONFLICT/);
   assert.equal(await balance(a),1000);
   const opened=await openPlan(a,src);
   assert.equal(opened.state,'running');

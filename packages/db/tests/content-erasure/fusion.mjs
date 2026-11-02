@@ -23,19 +23,21 @@ export async function runFusion(db,report){
  const c=claimed.calls[0];
  assert.equal((await rpc(db,'bill2_dispatch',f.actor,run.run,c.id,c.dispatchToken)).dispatch,true);
  await rpc(db,'fusion_call_output_save',f.actor,c.id,'draft review body');
- assert.equal((await erase(db,f,'artifact',f.project)).status,'deleted');
+ // The group run is still dispatched (unsettled): the delete no longer cancels or finalizes it, so the money stays untouched and the
+ // result is review_required, while the content is gone.
+ assert.equal((await erase(db,f,'artifact',f.project)).status,'review_required');
  assert.equal((await db.query('SELECT count(*)::int n FROM fusion_call_outputs WHERE group_id=$1',[group])).rows[0].n,0,
   'deleting the draft deletes its Fusion outputs');
  assert.equal(await rpc(db,'fusion_call_output_read',f.actor,c.id),null);
  const r=(await db.query('SELECT content_deleted_at,closed FROM bill2_runs WHERE id=$1',[run.run])).rows[0];
- assert.ok(r.content_deleted_at&&r.closed,'the group run is marked and closed');
+ assert.ok(r.content_deleted_at&&!r.closed,'the group run is marked deleted and left open (not settled from here)');
  // A reviewer answer that arrives after the deletion must not bring the body back.
  for(const body of ['draft review body','late review body after deletion'])
   await assert.rejects(rpc(db,'fusion_call_output_save',f.actor,c.id,body),/FUSION_OUTPUT_DENIED/);
  assert.equal((await db.query('SELECT count(*)::int n FROM fusion_call_outputs WHERE group_id=$1 OR call_id=$2',[group,c.id])).rows[0].n,0,
   'a late Fusion save after deletion stores nothing');
  assert.equal(await rpc(db,'fusion_call_output_read',f.actor,c.id),null);
- report.checks.push('deleting a whole positioning draft deletes the Fusion outputs started from its conversation and closes the group runs; a late output save is refused and stores nothing');
+ report.checks.push('deleting a whole positioning draft deletes the Fusion outputs started from its conversation and marks the group runs deleted without settling them; a late output save is refused and stores nothing');
 }
 
 // FUSION-COMPARE PR-1 (0290): a compare record is removed with its source conversation's draft, and a compare
@@ -61,13 +63,14 @@ export async function runFusionCompare(db,report){
  await db.query('UPDATE fusion_compares SET group_id=$2 WHERE id=$1',[viaSource,group]);
  assert.equal((await db.query('SELECT content_erasure_references($1::jsonb,ARRAY[$2::uuid]) v',
   [JSON.stringify([{sourceVersionId:f.version}]),f.version])).rows[0].v,true,'the stored dependency format is recognised');
- assert.equal((await erase(db,f,'artifact',f.project)).status,'deleted');
+ // The compare's group run is not settled from here any more: the content goes, the run stays open, the result is review_required.
+ assert.equal((await erase(db,f,'artifact',f.project)).status,'review_required');
  const left=(await db.query('SELECT id FROM fusion_compares WHERE actor_id=$1',[f.actor])).rows.map(r=>r.id);
  assert.ok(!left.includes(inDraft),'deleting the draft deletes compares started from its conversation');
  assert.ok(!left.includes(viaSource),'deleting a source deletes compares that froze it');
  assert.ok(left.includes(unrelated),'other compares stay');
  const r=(await db.query('SELECT content_deleted_at,closed FROM bill2_runs WHERE id=$1',[run.run])).rows[0];
- assert.ok(r.content_deleted_at&&r.closed,'the compare group run that copied the source is marked and closed');
+ assert.ok(r.content_deleted_at&&!r.closed,'the compare group run that copied the source is marked deleted and left open');
  // A compare admission replay after the source deletion removed its record returns nothing.
  const groupRequest=(await db.query('SELECT request_id FROM fusion_billing_groups WHERE id=$1',[group])).rows[0].request_id;
  await db.query('SET ROLE service_role');
