@@ -82,8 +82,10 @@ export function conclude(e: Experiment, facts: Fact[], diagnostics: Diagnostic[]
     const byPost = new Map(facts.map(f => [f.postId, f]));
     // A diagnostic counts only when its post is a known fact that matches the experiment: one that cannot be matched (not settled
     // yet, or another platform, pillar or format) is never a sample.
-    const rows = diagnostics.filter(d => inPeriod(d.capturedOn + 'T00:00:00Z', e) && e.metric in d.rates
-      && (() => { const f = byPost.get(d.postId); return f !== undefined && matches(e.match, f); })());
+    // The sample is the posts published in the experiment's period (not the day their numbers were captured: a late upload of an old
+    // post does not count, and numbers captured after the period for a post inside it do).
+    const rows = diagnostics.filter(d => e.metric in d.rates
+      && (() => { const f = byPost.get(d.postId); return f !== undefined && matches(e.match, f) && inPeriod(f.postedAt, e); })());
     const baseline = e.baseline?.median ?? null;
     const values = rows.map(d => d.rates[e.metric]!);
     const mid = median(values);

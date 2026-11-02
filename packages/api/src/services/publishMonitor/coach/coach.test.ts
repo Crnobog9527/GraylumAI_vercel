@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { basicsPass, diagnosePost, handbookSchema, type Handbook } from './funnel';
 import { conclude, ledgerView } from './ledger';
+import { stageSection } from './sections';
 import { buildPack, packBytes, type Cadence } from './pack';
 import { packRowsSchema } from './rows';
 import { historyScoreboard, platformShift, scoreboard } from './scoreboard';
@@ -125,6 +126,17 @@ describe('experiment ledger (RC-2): verdicts by code match the designed outcomes
     expect(conclude(retain, facts, drop)).toMatchObject({ verdict: 'inconclusive', lean: 'negative' });
   });
 
+  it('a rate sample is a post published in the experiment period, whenever its numbers were captured', () => {
+    const { e, fresh } = basics();
+    const inside = fresh.map(d => factFor(d));
+    // The posts are older than the period: their numbers captured inside it do not make them participants.
+    const old = fresh.map(d => factFor(d, { postedAt: '2020-01-01T00:00:00Z' }));
+    expect(conclude(e, old, fresh)).toMatchObject({ samples: 0, verdict: 'not_run' });
+    // Numbers uploaded after the period for posts inside it still count.
+    const late = fresh.map(d => ({ ...d, capturedOn: '2099-01-01' }));
+    expect(conclude(e, inside, late).samples).toBe(3);
+  });
+
   it('an experiment is reviewed only after its last post could have settled; until then it is listed as settling', () => {
     const { r, e } = basics();
     const end = '2026-10-24';
@@ -219,5 +231,22 @@ describe('review pack (RC-2)', () => {
     expect(pack.strategy.missing).toBe(true);
     expect(pack.gaps[0]).toMatchObject({ missing: ['strategy'] });
     expect(pack.limits.strategy_proposal).toBe(true);
+  });
+});
+
+describe('stage trend (RC-2)', () => {
+  it('the day-7 views trend is per platform: a shift in which platform is used is not a performance change', () => {
+    const base = rows('A');
+    const make = (platform: string, daysAgo: number, views: number, n: number) => Array.from({ length: n }, (_, i) => ({
+      postId: simId(`${platform}-${daysAgo}-${i}`), platform, postedAt: new Date(NOW - daysAgo * 86400000).toISOString(), title: null, url: null,
+      pillarKey: null, pillarSource: null, formatTags: [], basis: 'day7' as const, day7: { views }, day7On: AS_OF, day30: null, day30On: null,
+      importCumulative: null, importOn: null, missing: [] }));
+    // Two platforms keep 100 and 10000 views; recently the user posts mostly on the big one.
+    const facts = [...make('douyin', 50, 100, 4), ...make('douyin', 10, 100, 1), ...make('xiaohongshu', 50, 10000, 1), ...make('xiaohongshu', 10, 10000, 4)];
+    const trend = loose(stageSection({ ...base, facts, recent: [] }, NOW)).day7_views_trend as Record<string, { change: number }>;
+    expect(Object.keys(trend).sort()).toEqual(['douyin', 'xiaohongshu']);
+    expect(trend.douyin!.change).toBe(0);
+    expect(trend.xiaohongshu!.change).toBe(0);
+    expect(loose(stageSection({ ...base, facts: [], recent: [] }, NOW)).day7_views_trend).toBeNull();
   });
 });

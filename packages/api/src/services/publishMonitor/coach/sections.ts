@@ -68,16 +68,22 @@ export function stageSection(rows: PackRows, now: number) {
   const at = (points: Array<{ date: string; value: number }>, daysAgo: number) =>
     points.filter(p => utcDay(p.date) <= today - daysAgo).at(-1) ?? null;
   const last8 = rows.facts.filter(f => utcDay(f.postedAt) >= today - 56);
-  const recentV = views(rows.facts.filter(f => utcDay(f.postedAt) >= today - 35)), olderV = views(rows.facts
-    .filter(f => utcDay(f.postedAt) >= today - 63 && utcDay(f.postedAt) < today - 35));
-  const a = median(recentV), b = median(olderV);
+  // Per platform only: a change in which platform the user mostly posts on is not a change in how the account performs.
+  const trend: Record<string, { recent_4w_median: number; previous_4w_median: number; change: number; samples: [number, number] }> = {};
+  for (const platform of new Set(rows.facts.map(f => f.platform))) {
+    const own = rows.facts.filter(f => f.platform === platform);
+    const recentV = views(own.filter(f => utcDay(f.postedAt) >= today - 35)), olderV = views(own
+      .filter(f => utcDay(f.postedAt) >= today - 63 && utcDay(f.postedAt) < today - 35));
+    const a = median(recentV), b = median(olderV);
+    if (a !== null && b) trend[platform] = { recent_4w_median: Math.round(a), previous_4w_median: Math.round(b),
+      change: round(a / b - 1, 2), samples: [recentV.length, olderV.length] };
+  }
   return {
     accounts: rows.accounts.map(x => ({ platform: x.platform, stage: x.stage })),
     followers: rows.followers.map(f => ({ platform: f.platform, now: at(f.points, 0), weeks4_ago: at(f.points, 28),
       weeks8_ago: at(f.points, 56) })),
     posts_8w: last8.length + rows.recent.filter(p => utcDay(p.postedAt) >= today - 56).length,
-    day7_views_trend: a !== null && b ? { recent_4w_median: Math.round(a), previous_4w_median: Math.round(b),
-      change: round(a / b - 1, 2), samples: [recentV.length, olderV.length] } : null,
+    day7_views_trend: Object.keys(trend).length ? trend : null,
   };
 }
 
