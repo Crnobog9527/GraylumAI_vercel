@@ -7,7 +7,7 @@ import { logger } from '../../lib/logger';
 import { readTurnRouteEnv } from '../../lib/envValidator';
 import { swallow } from '../../lib/swallow';
 import { newWorkGate, type RuntimeCallGate } from '../turn/admission/newWorkGate';
-import { ENDED_STATES, reviewRecord } from './reviewRecord';
+import { reviewRecord } from './reviewRecord';
 import { turnClients } from '../turn/db';
 import { juryTurn } from '../turn/jury';
 import { redisCounterStore, type CounterStore } from '../turn/limiter';
