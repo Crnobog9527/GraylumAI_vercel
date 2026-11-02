@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {fixture} from '../cdcB2Fixture';
 import {runtimeExecutor} from '../../services/runtime/execute';
-import {openRouterAdapter} from '../../services/bill2/openRouterAdapter';
+import {openRouterAdapter} from '../../services/turn/provider/openRouterAdapter';
 import {allowTestCalls} from '../../services/__tests__/fixtures/runtimeGates';
 import {historyItems} from './trial';
 import {hash,measure,profiles,type Role} from '../../../../../scripts/cdc-b2-eval/policy.ts';
@@ -13,8 +13,8 @@ import {seedCase} from '../../../../../scripts/cdc-writeback-v2/seed';
 import {replayReasoning} from '../../../../../scripts/cdc-b2-eval/reasoningReplay';
 
 // Disposable fixture has no remote Redis. External dispatch uses the separate $9 gate.
-vi.mock('../../services/runtime/newWorkGate',async original=>({
- ...await original<typeof import('../../services/runtime/newWorkGate')>(),
+vi.mock('../../services/turn/admission/newWorkGate',async original=>({
+ ...await original<typeof import('../../services/turn/admission/newWorkGate')>(),
  ...(await import('../../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 

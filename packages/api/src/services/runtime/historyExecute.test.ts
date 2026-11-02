@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach,expect,it,vi} from 'vitest';
 import {runtimeExecutor} from './execute';
-import {freezeHistorySelection} from './hostTurn';
-import type {RuntimeRunnerInput} from './runner';
+import {freezeHistorySelection} from '../turn/agent/hostTurn';
+import type {RuntimeRunnerInput} from '../turn/agent/runner';
 const mock=vi.hoisted(()=>({run:vi.fn(),billing:{claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}}));
-vi.mock('./runner',()=>({runRuntime:mock.run}));
-vi.mock('../bill2/service',()=>({authoritativeBilling:()=>mock.billing}));
+vi.mock('../turn/agent/runner',()=>({runRuntime:mock.run}));
+vi.mock('../turn/provider/service',()=>({authoritativeBilling:()=>mock.billing}));
 const id='10000000-0000-4000-8000-000000000001';
 beforeEach(()=>vi.clearAllMocks());
 it.each(['first-overflow','later-overflow','replay'] as const)('H1 %s fails before the affected claim and never shrinks frozen history',async mode=>{

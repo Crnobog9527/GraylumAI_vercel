@@ -1,15 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
-import { createRuntimeBudget } from './budget';
+import { createRuntimeBudget } from '../turn/settings/budget';
 import { BRAND_REPLY_ZH, withBrandIdentity } from '../modelIdentity/brandIdentity';
-import type { RuntimeProgress } from './progress';
+import type { RuntimeProgress } from '../turn/agent/progress';
 const mock = vi.hoisted(() => ({ run: vi.fn(), billing: {
   claimCall: vi.fn(), dispatchOnce: vi.fn(), recoverRun: vi.fn(), recoverReceipts: vi.fn(),
 } }));
-vi.mock('../bill2/service', () => ({ authoritativeBilling: () => mock.billing }));
-vi.mock('./runner', () => ({ runRuntime: mock.run }));
-vi.mock('./session', () => ({ PostgresSession: class {} }));
+vi.mock('../turn/provider/service', () => ({ authoritativeBilling: () => mock.billing }));
+vi.mock('../turn/agent/runner', () => ({ runRuntime: mock.run }));
+vi.mock('../turn/agent/session', () => ({ PostgresSession: class {} }));
 const id = '10000000-0000-4000-8000-000000000001';
 const LEAK = '我是由 Google 训练的大型语言模型。下面是三个选题建议。';
 

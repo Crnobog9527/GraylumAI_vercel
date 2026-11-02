@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { settingsRouter } from './settings';
 import { paygStartThresholdsSchema } from '../services/adminSettings';
-import { PAYG_START_THRESHOLDS_KEY } from '../services/bill2/settingKeys';
+import { PAYG_START_THRESHOLDS_KEY } from '../services/turn/settings/settingKeys';
 
 const threshold = { model: 'fixture/model', purpose: 'skill', typicalUsd: '0.04415' };
 const valid = { version: 'p50-v1', thresholds: [threshold] };

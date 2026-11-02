@@ -2,7 +2,7 @@
 import {afterEach,it,expect,vi} from 'vitest';
 import {createClient} from '@supabase/supabase-js';
 import {runtimeActor} from './actor';
-import {createRuntimeBudget,withRuntimeBudget} from './budget';
+import {createRuntimeBudget,withRuntimeBudget} from '../turn/settings/budget';
 const id='00000000-0000-4000-8000-000000000001';
 const token=(exp:number)=>'e30.'+Buffer.from(JSON.stringify({exp})).toString('base64url')+'.synthetic';
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});

@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { openRouterBound } from '../bill2/openRouterPolicy';
-import { createRuntimeBudget, RUNTIME_WORK_MS } from '../runtime/budget';
+import { openRouterAdapter } from './provider/openRouterAdapter';
+import { openRouterBound } from './provider/openRouterPolicy';
+import { createRuntimeBudget, RUNTIME_WORK_MS } from './settings/budget';
 import { modelCall, TurnStop, type ModelCall } from './call';
 import type { CounterStore } from './limiter';
 import { TurnDatabaseError, type TurnDatabase } from './db';

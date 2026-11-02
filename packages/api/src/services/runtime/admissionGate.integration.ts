@@ -5,7 +5,7 @@ import type pg from 'pg';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import type {createTRPCContext} from '../../trpc';
 import type {makeWorkflow} from '../__tests__/fixtures/artifacts';
-import * as gates from './newWorkGate';
+import * as gates from '../turn/admission/newWorkGate';
 import * as redis from '../redisRateLimiter';
 import {opcRouter} from '../../routers/opc';
 import {runtimeRouter} from '../../routers/runtime';
@@ -41,7 +41,7 @@ export function registerAdmissionGateTests(db:pg.Client,fixture:()=>Promise<Fixt
     await service.topicBind({draftId:d.draftId,requestId:randomUUID(),sourceVersionId:(await service.read(d.draftId)).report.id});
    }
    const session=entry==='runtime'?await runtime.start({requestId:randomUUID(),scope:{kind:'positioning_draft'}}):null;
-   const actual=await vi.importActual<typeof gates>('./newWorkGate');
+   const actual=await vi.importActual<typeof gates>('../turn/admission/newWorkGate');
    const factory=vi.spyOn(gates,'newWorkGate').mockImplementation(actual.newWorkGate);
    const settings=vi.spyOn(gates,'readNewWorkSettings').mockImplementation(actual.readNewWorkSettings);
    const limit=vi.spyOn(redis,'checkRuntimeRateLimit');

@@ -30,12 +30,12 @@ vi.mock('./compareAdmission', async original => ({ ...(await original<typeof imp
     return {};
   },
 }));
-vi.mock('../runtime/positioningGate', async original => ({ ...(await original<typeof import('../runtime/positioningGate')>()),
+vi.mock('../turn/admission/positioningGate', async original => ({ ...(await original<typeof import('../turn/admission/positioningGate')>()),
   readPositioningGate: async () => s.gate }));
 import { estimateCompare, startCompare, type CompareDeps } from './compareStart';
-import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
+import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../turn/admission/positioningFallback';
 import { snapshotHash, type CompareParts } from './compareSnapshot';
-import { decimal } from '../bill2/decimal';
+import { decimal } from '../turn/provider/decimal';
 
 const admin = {} as SupabaseClient;
 const classify = vi.fn();

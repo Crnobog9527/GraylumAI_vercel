@@ -4,12 +4,12 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource } from '../skills/databaseSource';
 import { activateFreeChatSkill } from '../skills/stepGuide';
-import { readWorkspaceCapability } from '../runtime/workspacePosts';
+import { readWorkspaceCapability } from '../turn/agent/workspacePosts';
 import { compareRpc } from './compareAdmission';
 import { compareRequest, compareRequestBytes, type CompareParts } from './compareSnapshot';
 import type { CompareChoice } from './compareStart';
 import { FUSION_INPUT_CAP } from './request';
-import { readReplyLocale } from '../runtime/replyLanguage';
+import { readReplyLocale } from '../turn/agent/replyLanguage';
 import { REPLY_LOCALES } from '../../shared/replyLanguage';
 
 /** What the browser sends to estimate or start a compare: the same Skill selection field as an ordinary turn. */

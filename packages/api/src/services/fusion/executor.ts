@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { authoritativeBilling } from '../bill2/service';
-import type { TransportObservation } from '../bill2/fixtureAdapter';
-import { OPENROUTER_RESPONSE_TIMEOUT_MS } from '../bill2/openRouterPolicy';
-import { openRouterStream } from '../bill2/openRouterStream';
-import { decodeOpenRouterStreamObservation } from '../bill2/openRouterEvidence';
-import type { RuntimeBudget } from '../runtime/budget';
-import { requireNewWork, type RuntimeCallGate } from '../runtime/newWorkGate';
+import type { authoritativeBilling } from '../turn/provider/service';
+import type { TransportObservation } from '../turn/provider/fixtureAdapter';
+import { OPENROUTER_RESPONSE_TIMEOUT_MS } from '../turn/provider/openRouterPolicy';
+import { openRouterStream } from '../turn/provider/openRouterStream';
+import { decodeOpenRouterStreamObservation } from '../turn/provider/openRouterEvidence';
+import type { RuntimeBudget } from '../turn/settings/budget';
+import { requireNewWork, type RuntimeCallGate } from '../turn/admission/newWorkGate';
 import type { AdmittedFusionRun } from './admission';
 
 type Billing = ReturnType<typeof authoritativeBilling>;

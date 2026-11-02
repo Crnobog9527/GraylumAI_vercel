@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {afterEach,it,expect,vi} from 'vitest';
-import {createRuntimeBudget} from '../services/runtime/budget';
+import {createRuntimeBudget} from '../services/turn/settings/budget';
 const mocks=vi.hoisted(()=>({execute:vi.fn()}));
 vi.mock('../services/runtime/execute',async original=>({...await original<typeof import('../services/runtime/execute')>(),runtimeExecutor:(options:{actor:()=>Promise<string>})=>({execute:()=>mocks.execute(options.actor)})}));
 import {runtimeRouter} from './runtime';
@@ -41,7 +41,7 @@ it('maps insufficient auth lifetime before any claim to an explicit recoverable 
  expect(claim).not.toHaveBeenCalled();expect(client.auth.getUser).not.toHaveBeenCalled();
 });
 
-vi.mock('../services/runtime/newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('../services/runtime/newWorkGate')>(),
+vi.mock('../services/turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../services/turn/admission/newWorkGate')>(),
  ...(await import('../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

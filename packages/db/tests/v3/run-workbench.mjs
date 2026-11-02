@@ -978,10 +978,10 @@ try {
         "run",
         "--config",
         rateLimitCases?.config ?? "vitest.integration.config.ts",
-        ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
+        ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/turn/provider/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(runtimeMode&&!withoutApp&&casePattern?.startsWith('^ERASURE_BROWSER:')
           ? ['src/services/runtime/erasureBrowser.integration.ts'] : []),
-        ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
+        ...(bill2Mode ? ['src/services/turn/provider/billing.integration.ts'] : []),
         ...(runtimeMode ? WITHOUT_APP_SUITES[cdcEval ? "cdc" : "runtime"].files : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',
           ...(c2StopOffline ? [c2StopOrganizer ? 'src/services/opc/mentor-stop-organizer.browser.integration.ts' : 'src/services/opc/mentor-stop.browser.integration.ts']

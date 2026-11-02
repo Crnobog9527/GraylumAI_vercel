@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, expect, it, vi } from 'vitest';
 const find = vi.hoisted(() => vi.fn());
-vi.mock('../services/runtime/staleChargedRounds', () => ({ findStaleChargedRounds: find, compensateStaleRound: vi.fn(),
+vi.mock('../services/turn/settings/staleChargedRounds', () => ({ findStaleChargedRounds: find, compensateStaleRound: vi.fn(),
   STALE_ROUND_REFUSALS: [] }));
 import { router } from '../trpc';
 import { adminStaleRoundsRouter } from './adminStaleRounds';

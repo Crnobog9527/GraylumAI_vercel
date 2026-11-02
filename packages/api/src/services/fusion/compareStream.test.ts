@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { POSITIONING_MARKER } from '../runtime/positioningFallback';
+import { POSITIONING_MARKER } from '../turn/admission/positioningFallback';
 import { columnStreamer, frameText } from './compareStream';
 
 const frame = (content: string, extra: Record<string, unknown> = {}) => JSON.stringify({ choices: [{ delta: { content, ...extra } }] });

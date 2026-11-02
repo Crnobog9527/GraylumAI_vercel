@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {createR5bPlan} from './batch-r5b';
 import {outputPressureCriterion,recordSamples} from './sampling';
 import measured from './r5b-evidence.json';
-import {decimal} from '../../packages/api/src/services/bill2/decimal';
+import {decimal} from '../../packages/api/src/services/turn/provider/decimal';
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 const money=(n:bigint)=>`${n/1000000000000n}.${String(n%1000000000000n).padStart(12,'0')}`;
 export const R6_ID='payg-profile-20261006-r6';

@@ -1,18 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
+import { openRouterAdapter } from './provider/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { completeReportCandidate, reportInstructions, REPORT_INPUT_BYTES, REPORT_REQUEST_INPUT } from '../report/contract';
 import { DEFAULT_REPORT_PRICE, REPORT_PRICE_KEY } from '../report/fees';
-import { readAdmissionConfiguration, readAdmissionModule, type ConfigurationRows } from '../runtime/admissionConfiguration';
-import { rowFor } from '../runtime/settingsRows';
+import { readAdmissionConfiguration, readAdmissionModule, type ConfigurationRows } from './admission/admissionConfiguration';
+import { rowFor } from './settings/settingsRows';
 import { swallow } from '../../lib/swallow';
-import { assertRuntimeRequestCapacity } from '../runtime/context';
-import { readAdmissionSettings } from '../runtime/newWorkGate';
-import { freezeSharedPromptCache } from '../runtime/promptCache';
-import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
-import { readPurposeBudgets } from '../runtime/purposeBudgets';
-import { runRuntime } from '../runtime/runner';
+import { assertRuntimeRequestCapacity } from './agent/context';
+import { readAdmissionSettings } from './admission/newWorkGate';
+import { freezeSharedPromptCache } from './provider/promptCache';
+import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from './provider/providerRequest';
+import { readPurposeBudgets } from './settings/purposeBudgets';
+import { runRuntime } from './agent/runner';
 import { modelCall, TurnStop } from './call';
 import { GATE_CODES, readCoreConfig, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';

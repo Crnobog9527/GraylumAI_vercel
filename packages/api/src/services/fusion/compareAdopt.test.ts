@@ -12,7 +12,7 @@ vi.mock('./compareAdmission', () => ({
     throw new Error('unexpected ' + name);
   },
 }));
-vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: (...args: unknown[]) => s.window(...args) }));
+vi.mock('../turn/settings/stagingPolicy', () => ({ loadStagingPolicy: (...args: unknown[]) => s.window(...args) }));
 import { adoptCompare } from './compareAdopt';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

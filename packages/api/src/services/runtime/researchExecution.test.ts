@@ -2,14 +2,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { lookupTimeLeft, researchExecution, responseAfterResearch } from './researchExecution';
-import { createRuntimeBudget } from './budget';
-import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
+import { createRuntimeBudget } from '../turn/settings/budget';
+import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from '../turn/research/researchTurn';
 import { terminalReplyGuard } from './executorRpc';
-import { INVALID_RESEARCH_ARGUMENTS, researchToolParameters } from './researchRuntimeTool';
-import { runRuntime } from './runner';
-import { toolCallPolicy } from '../bill2/toolBilling';
+import { INVALID_RESEARCH_ARGUMENTS, researchToolParameters } from '../turn/research/researchRuntimeTool';
+import { runRuntime } from '../turn/agent/runner';
+import { toolCallPolicy } from '../turn/provider/toolBilling';
 import { streamOriginalExecution } from './executionStream';
-import type { RuntimeProgress } from './progress';
+import type { RuntimeProgress } from '../turn/agent/progress';
 import type { ResearchTurnEvent } from '../../shared/researchTurn';
 import { resetPlatformSecretCacheForTests } from '../platformSecrets/reader';
 

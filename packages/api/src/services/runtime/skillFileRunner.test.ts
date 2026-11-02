@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect, it, vi} from 'vitest';
 import type {Session, AgentInputItem} from '@openai/agents';
-import {runRuntime} from './runner';
-import {skillFileTool} from './skillFile';
-import {askQuestionTool} from './agentTools';
+import {runRuntime} from '../turn/agent/runner';
+import {skillFileTool} from '../turn/skills/skillFile';
+import {askQuestionTool} from '../turn/agent/agentTools';
 import {terminalAgentReplyFailure} from './terminalAgentReply';
 const readCall = {id: 'read_1', type: 'function', function: {
   name: 'read_skill_file', arguments: '{"path":"references/guide.md"}',
@@ -44,7 +44,7 @@ it('accepts file calls only when the frozen host context offered that tool', () 
 });
 
 it('reserves escaped file bytes before freezing a nearly full history block',async()=>{
- const {skillFileContinuationBytes}=await import('./skillFile');
+ const {skillFileContinuationBytes}=await import('../turn/skills/skillFile');
  const {packageHash,sha256}=await import('../skills/loader');
  const {selectBlockHistory,validateBlockCall}=await import('./historySelection');
  const content='\u0001'.repeat(4000);

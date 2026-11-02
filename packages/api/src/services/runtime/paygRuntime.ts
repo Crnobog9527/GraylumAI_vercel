@@ -3,13 +3,13 @@ import {MIN_ANSWER_TOKENS_AFTER_BUDGET} from '../../shared/modelReasoning';
 import type {AgentTurnUnavailable} from '../../shared/agentTurn';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { frozenCallPolicy, type FrozenCall, type FrozenPaygRun } from '../bill2/service';
-import { measureCallInput, openRouterCallBound } from '../bill2/openRouterPolicy';
-import { paygStablePolicy } from '../bill2/paygPolicy';
+import { frozenCallPolicy, type FrozenCall, type FrozenPaygRun } from '../turn/provider/service';
+import { measureCallInput, openRouterCallBound } from '../turn/provider/openRouterPolicy';
+import { paygStablePolicy } from '../turn/admission/paygPolicy';
 import { validateNominalBound } from '../../shared/nominalPricing';
-import { aggregateCredits } from '../bill2/decimal';
-import { callBillingUnit } from './billingUnitAdmission';
-import { IMAGE_PURPOSES, measureImage, type ImageQuote } from '../bill2/imageInput';
+import { aggregateCredits } from '../turn/provider/decimal';
+import { callBillingUnit } from '../turn/admission/billingUnitAdmission';
+import { IMAGE_PURPOSES, measureImage, type ImageQuote } from '../turn/provider/imageInput';
 
 type StablePayg = z.infer<typeof paygStablePolicy>;
 /** T for one request: the text bytes plus the image token ceiling (LIB-2d), never the base64 length. */

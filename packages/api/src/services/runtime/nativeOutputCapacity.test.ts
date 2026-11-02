@@ -2,8 +2,8 @@
 import {expect, it} from 'vitest';
 import {createHash} from 'node:crypto';
 import {fitNativeRequestOutput, runtimePaygCall} from './paygRuntime';
-import {measureCallInput, openRouterBound, openRouterCallBound} from '../bill2/openRouterPolicy';
-import type {FrozenPaygRun} from '../bill2/service';
+import {measureCallInput, openRouterBound, openRouterCallBound} from '../turn/provider/openRouterPolicy';
+import type {FrozenPaygRun} from '../turn/provider/service';
 
 const modelId = '10000000-0000-4000-8000-000000000001';
 const pricingHash = 'a'.repeat(64);

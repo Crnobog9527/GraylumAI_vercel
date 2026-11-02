@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type {HostTurnContext} from '../runtime/hostTurn';
+import type {HostTurnContext} from '../turn/agent/hostTurn';
 import {agentTurnInstructions, researchOpeningInstructions} from './agentTurnPrompt';
 
 const REVIEW = [

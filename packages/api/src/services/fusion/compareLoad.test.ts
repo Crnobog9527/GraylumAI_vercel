@@ -12,7 +12,7 @@ vi.mock('./compareAdmission', () => ({
     throw new Error('unexpected ' + name);
   },
 }));
-vi.mock('../runtime/workspacePosts', () => ({ readWorkspaceCapability: async () => s.workspace }));
+vi.mock('../turn/agent/workspacePosts', () => ({ readWorkspaceCapability: async () => s.workspace }));
 import { fitHistory, historyTurn, loadCompareChoice } from './compareLoad';
 import { FUSION_INPUT_CAP } from './request';
 import { compareRequest, compareRequestBytes } from './compareSnapshot';

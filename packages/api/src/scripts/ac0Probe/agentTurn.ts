@@ -2,9 +2,9 @@
 // AC1-4 preparation only. Live execution still requires separate Owner approval.
 import {tool} from '@openai/agents';
 import {createRequire, registerHooks} from 'node:module';
-import type * as Tools from '../../services/runtime/agentTools.ts';
+import type * as Tools from '../../services/turn/agent/agentTools.ts';
 import type * as Prompt from './legacyAgentTurnPrompt.ts';
-import type * as History from '../../services/runtime/openRouterHistory.ts';
+import type * as History from '../../services/turn/provider/openRouterHistory.ts';
 
 let loaded: {tools: typeof Tools; prompt: typeof Prompt; history?: typeof History} | undefined;
 /** Node's standalone strip-types entry needs explicit filenames. Resolve only
@@ -15,11 +15,13 @@ function runtime(includeHistory = false) {
   const root = new URL('../../', import.meta.url);
   const known = new Map([
     'shared/agentTurn', 'shared/opcMethodPolicy', 'shared/modelReasoning', 'lib/logger',
-    'services/runtime/agentTools', 'services/research/tools/names', 'services/runtime/openRouterHistory', 'services/runtime/reasoningPolicy',
-    'services/runtime/budget', 'services/runtime/timing', 'services/runtime/authReuse',
-    'services/bill2/cacheMessages', 'services/bill2/openRouterAdapter', 'services/bill2/openRouterStream', 'services/bill2/openRouterPolicy',
-    'services/bill2/openRouterEvidence', 'services/bill2/decimal', 'services/bill2/responseCapacity',
-    'services/bill2/paygPolicy', 'services/bill2/imageInput', 'shared/nominalPricing',
+    'services/turn/agent/agentTools', 'services/research/tools/names',
+    'services/turn/provider/openRouterHistory', 'services/turn/admission/reasoningPolicy',
+    'services/turn/settings/budget', 'services/turn/provider/timing', 'services/turn/provider/authReuse',
+    'services/turn/provider/cacheMessages', 'services/turn/provider/openRouterAdapter',
+    'services/turn/provider/openRouterStream', 'services/turn/provider/openRouterPolicy',
+    'services/turn/provider/openRouterEvidence', 'services/turn/provider/decimal', 'services/turn/provider/responseCapacity',
+    'services/turn/admission/paygPolicy', 'services/turn/provider/imageInput', 'shared/nominalPricing',
   ].map(path =>
     [new URL(path, root).href, new URL(path + '.ts', root).href]));
   const hook = registerHooks({resolve(specifier, context, next) {
@@ -28,8 +30,8 @@ function runtime(includeHistory = false) {
   }});
   try {
     const require = createRequire(import.meta.url);
-    loaded ??= {tools: require('../../services/runtime/agentTools.ts'), prompt: require('./legacyAgentTurnPrompt.ts')};
-    if (includeHistory) loaded.history ??= require('../../services/runtime/openRouterHistory.ts');
+    loaded ??= {tools: require('../../services/turn/agent/agentTools.ts'), prompt: require('./legacyAgentTurnPrompt.ts')};
+    if (includeHistory) loaded.history ??= require('../../services/turn/provider/openRouterHistory.ts');
     return loaded;
   } finally { hook.deregister(); }
 }

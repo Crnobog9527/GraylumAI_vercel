@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {groundedCardToolBytes} from '../runtime/groundedCard';
+import {groundedCardToolBytes} from '../turn/agent/groundedCard';
 import {expect,it} from 'vitest';
 import {captureWorkflowSteps as steps} from '../__tests__/fixtures/captureWorkflow';
 import {captureHostContext,captureOrganizerInput} from './captureContext';
 import {agentTurnInstructions} from './agentTurnPrompt';
 import {selectBlockHistory,currentInputBytes} from '../runtime/historySelection';
-import {selectRuntimeHistory,runtimeScopeInput} from '../runtime/context';
-import {freezeHistorySelection} from '../runtime/hostTurn';
+import {selectRuntimeHistory,runtimeScopeInput} from '../turn/agent/context';
+import {freezeHistorySelection} from '../turn/agent/hostTurn';
 const history=Array.from({length:160},(_,i)=>({role:i%2?'assistant':'user',content:'h'.repeat(i%2?1600:600)}));
 const bytes=(v:unknown)=>Buffer.byteLength(JSON.stringify(v));
 const frozen=freezeHistorySelection();

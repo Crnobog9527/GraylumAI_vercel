@@ -5,22 +5,22 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
-import {runtimeContext} from './runtimeContext';
-import {openRouterRequestBody} from './providerRequest';
-import {frozenReasoningFields,type ReasoningPolicy} from './reasoningPolicy';
-import {openRouterBound} from '../bill2/openRouterPolicy';
+import {runtimeContext} from '../turn/agent/runtimeContext';
+import {openRouterRequestBody} from '../turn/provider/providerRequest';
+import {frozenReasoningFields,type ReasoningPolicy} from '../turn/admission/reasoningPolicy';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import type {ReasoningConfig} from '../../shared/modelReasoning';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
-vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
-vi.mock('./billingUnitAdmission', async (original) => ({
-  ...(await original<typeof import('./billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
 }));
 // Skill discovery is covered in matching.test.ts; only the admitted format matters here.
-vi.mock('./matching', async original => ({...(await original<typeof import('./matching')>()),discoverRuntimeCandidates:async()=>[]}));
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/agent/matching', async original => ({...(await original<typeof import('../turn/agent/matching')>()),discoverRuntimeCandidates:async()=>[]}));
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 // Staging free chat: ordinary turns freeze the administrator's interactive reasoning on the

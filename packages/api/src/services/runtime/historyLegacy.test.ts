@@ -2,8 +2,8 @@
 import {expect,it} from 'vitest';
 import {createHash} from 'node:crypto';
 import golden from './historyLegacyGolden.json';
-import {openRouterRequestBody,PROVIDER_REQUEST_FORMATS,type RequestContext} from './providerRequest';
-import {frozenCallPolicy} from '../bill2/service';
+import {openRouterRequestBody,PROVIDER_REQUEST_FORMATS,type RequestContext} from '../turn/provider/providerRequest';
+import {frozenCallPolicy} from '../turn/provider/service';
 // Captured from the implementation branch's unmodified staging source before H1,
 // using the existing #591 request corpus. Never regenerate from the candidate.
 it.each(golden)('unchanged pre-H1 cached bytes and hash: $context.providerRequestFormat / $phase',f=>{

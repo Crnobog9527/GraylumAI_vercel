@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/runtime/automaticRecovery', () => ({ runAutomaticFinancialRecovery: mocks.recover }));
-vi.mock('@repo/api/src/services/runtime/stopLossNotify', () => ({ deliverStopLossAlerts: mocks.notice }));
+vi.mock('@repo/api/src/services/turn/settings/stopLossNotify', () => ({ deliverStopLossAlerts: mocks.notice }));
 vi.mock('@repo/api/src/services/turn/recovery', () => ({ runTurnRecovery: mocks.turns }));
 vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start, finishScheduledJobRun: mocks.finish }));
 import { GET } from './route';

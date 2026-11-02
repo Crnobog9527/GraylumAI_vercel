@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BillingRpc } from '../../bill2/service';
+import type { BillingRpc } from '../../turn/provider/service';
 import { throwIfContentErased } from '../../accountErasure/content';
 import { canonicalAccount, type CanonicalAccount } from '../tools/accountLinks';
 import type { AuthorizationScope, AuthorizationStore } from '../tools/authorize';

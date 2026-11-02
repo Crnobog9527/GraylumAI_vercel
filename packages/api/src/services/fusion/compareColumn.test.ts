@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { POSITIONING_MARKER } from '../runtime/positioningFallback';
+import { POSITIONING_MARKER } from '../turn/admission/positioningFallback';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const s = vi.hoisted(() => ({ view: null as unknown, group: null as unknown, rpcs: [] as string[], owner: true }));

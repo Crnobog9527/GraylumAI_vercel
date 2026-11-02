@@ -3,11 +3,11 @@
 // profile's tool ceiling, freezes the message budget and the per-call prices, and turns the run into a bill2.v2 run.
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { frozenCallPolicy, type FrozenPaygRun, type FrozenRun } from '../bill2/service';
-import { READ_HISTORY_TOOL } from './agentTools';
-import { freezePaygMessageBudget } from './paygMessageBudget';
+import { frozenCallPolicy, type FrozenPaygRun, type FrozenRun } from '../turn/provider/service';
+import { READ_HISTORY_TOOL } from '../turn/agent/agentTools';
+import { freezePaygMessageBudget } from '../turn/admission/paygMessageBudget';
 import { freezeStagingPaygPricing } from './paygPricing';
-import type { StagingPolicy } from './stagingPolicy';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
 import type { readPaygPolicies } from './realHost';
 
 type PaygContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: string[]; historyRead?: unknown };

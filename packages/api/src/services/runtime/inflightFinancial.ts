@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { BillingRpc, BillingTransport } from '../bill2/service';
-import type { RuntimeBudget } from './budget';
+import type { BillingRpc, BillingTransport } from '../turn/provider/service';
+import type { RuntimeBudget } from '../turn/settings/budget';
 import { runtimeExecutor } from './execute';
-import { denyNewCalls } from './newWorkGate';
+import { denyNewCalls } from '../turn/admission/newWorkGate';
 
 /** A lookup-only host. No SDK execution or new call capability escapes this module. */
 export async function finishOriginalFinancial(input: {

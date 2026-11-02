@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../bill2/service';
-import { createRuntimeBudget } from '../runtime/budget';
-import { parseStagingPolicy } from '../runtime/stagingPolicy';
+import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../turn/provider/service';
+import { createRuntimeBudget } from '../turn/settings/budget';
+import { parseStagingPolicy } from '../turn/settings/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { isSettled, voiceEvidence } from './generation';
 import { voiceRpc } from './state';

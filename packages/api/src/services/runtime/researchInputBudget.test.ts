@@ -4,19 +4,19 @@
 import {expect,it,vi,afterEach} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
-import {runtimeContext} from './runtimeContext';
-import {openRouterBound} from '../bill2/openRouterPolicy';
-import type {FrozenPaygRun} from '../bill2/service';
-import {RESEARCH_PHASE} from './researchTurn';
-import {RESEARCH_TURN_INPUT_BYTES,sentHostBytes} from './researchAdmission';
-import {hostTurnInput} from './hostTurn';
+import {runtimeContext} from '../turn/agent/runtimeContext';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
+import type {FrozenPaygRun} from '../turn/provider/service';
+import {RESEARCH_PHASE} from '../turn/research/researchTurn';
+import {RESEARCH_TURN_INPUT_BYTES,sentHostBytes} from '../turn/research/researchAdmission';
+import {hostTurnInput} from '../turn/agent/hostTurn';
 import {DISABLED_RESEARCH_TOOLS,researchToolsConfigSchema} from '../research/vendors/config';
 import {tikhubRouteId} from '../research/vendors/tikhub';
 import {FIRECRAWL_ROUTE} from '../research/vendors/firecrawl';
 const switchRead=vi.hoisted(()=>({on:false}));
-vi.mock('./newWorkGate',async original=>{
+vi.mock('../turn/admission/newWorkGate',async original=>{
  const gates=(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates;
- return {...await original<typeof import('./newWorkGate')>(),...gates,
+ return {...await original<typeof import('../turn/admission/newWorkGate')>(),...gates,
   readAdmissionSettings:async()=>({...await gates.readAdmissionSettings(),researchEnabled:switchRead.on})};
 });
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId}]})}));
@@ -161,9 +161,9 @@ it('the host block is measured as sent: serialized into the message, then escape
 
 it('a 90000-byte first-step request keeps its saved facts and the next step receives every research tool',async()=>{
  const {captureHostContext}=await import('../opc/captureContext');
- const {runtimeScopeInput}=await import('./context');
- const {groundedCardToolBytes}=await import('./groundedCard');
- const DEFAULT_REPLY_RULE=(await import('./replyLanguage')).replySettingInstructions('zh-Hans');
+ const {runtimeScopeInput}=await import('../turn/agent/context');
+ const {groundedCardToolBytes}=await import('../turn/agent/groundedCard');
+ const DEFAULT_REPLY_RULE=(await import('../turn/agent/replyLanguage')).replySettingInstructions('zh-Hans');
  const {POSITIONING_RESEARCH_TOOLS}=await import('../research/tools/schemas');
  const steps=[{id:'first',title:'First'},{id:'research',title:'Research'}];
  const schema=Array.from({length:7},(_,i)=>({id:`fact${i}`,title:`Fact ${i}`,required:true}));
@@ -207,9 +207,9 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  expect(context.scopeMaterial).toEqual(original);
  expect(scopeMaterial).toEqual(original);
  expect(context.hostTurnContext?.materialProjection).toBe('checklist-dedup-v1');
- const {researchCapacity}=await import('./researchCapacity');
- const {researchToolBytes}=await import('./researchAdmission');
- const {RESEARCH_RESULT_RESERVE_BYTES}=await import('./researchTurn');
+ const {researchCapacity}=await import('../turn/research/researchCapacity');
+ const {researchToolBytes}=await import('../turn/research/researchAdmission');
+ const {RESEARCH_RESULT_RESERVE_BYTES}=await import('../turn/research/researchTurn');
  const beforeHost={...context.hostTurnContext!};delete beforeHost.materialProjection;
  // The old composition really fails; this is not a small fixture that passed even before the fix.
  const oldComposition=researchCapacity({instructions:context.instructions+DEFAULT_REPLY_RULE,

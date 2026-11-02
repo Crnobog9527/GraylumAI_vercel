@@ -3,17 +3,17 @@
 import {expect,it,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
-import {runtimeContext} from './runtimeContext';
-import {openRouterBound} from '../bill2/openRouterPolicy';
-import type {FrozenPaygRun} from '../bill2/service';
-import {toolCallPolicies} from '../bill2/runPolicies';
-import {RESEARCH_PHASE} from './researchTurn';
+import {runtimeContext} from '../turn/agent/runtimeContext';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
+import type {FrozenPaygRun} from '../turn/provider/service';
+import {toolCallPolicies} from '../turn/admission/runPolicies';
+import {RESEARCH_PHASE} from '../turn/research/researchTurn';
 import {DISABLED_RESEARCH_TOOLS,researchToolsConfigSchema} from '../research/vendors/config';
 import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/schemas';
 import {tikhubRouteId} from '../research/vendors/tikhub';
 import {FIRECRAWL_ROUTE} from '../research/vendors/firecrawl';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
-vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate',async original=>({...await original<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>'Pinned skill'})}));

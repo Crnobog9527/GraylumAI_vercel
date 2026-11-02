@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-import { withCatalogRequest } from '../runtime/catalogCache';
+import { withCatalogRequest } from './settings/catalogCache';
 import { MENTOR, organized, prose, tiktokVendors, toolCall } from './__tests__/mentorSynthetic';
 import { turnClients } from './db';
 import { runMentorTurn } from './mentor';

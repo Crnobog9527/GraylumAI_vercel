@@ -5,7 +5,7 @@ import type { FusionMember } from './admission';
 import type { FusionBodyVerdict } from './executor';
 import { checkRevision, DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
 import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
-import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
+import { PAYG_PROFILE_MAX_BYTES } from '../turn/admission/paygHostPolicy';
 import { debateRequest, readReviewSkill, reviewerLabel, reviewLocale, reviewerRequest, summaryRequest, summaryRequestMerged, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
 import type { ReviewPosition, ReviewView } from './reviewRecord';

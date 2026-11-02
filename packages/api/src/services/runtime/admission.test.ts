@@ -2,16 +2,16 @@
 import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {createHash} from 'node:crypto';
-import {stagingProcedureError} from './stagingErrors';
+import {stagingProcedureError} from '../turn/settings/stagingErrors';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
-vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
 vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
-vi.mock('./billingUnitAdmission', async (original) => ({
-  ...(await original<typeof import('./billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
 }));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002',modelId='10000000-0000-4000-8000-000000000003',requestId='10000000-0000-4000-8000-000000000004';
@@ -178,7 +178,7 @@ it.each([true,false])('a session held by an earlier round is repaired once and t
  else{expect(result.message).toBe('RUNTIME_ADMISSION_DENIED');expect(admits).toEqual([requestId]);}
 });
 
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));

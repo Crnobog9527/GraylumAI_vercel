@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { runAutomaticFinancialRecovery } from '@repo/api/src/services/runtime/automaticRecovery';
 import { runTurnRecovery } from '@repo/api/src/services/turn/recovery';
-import { deliverStopLossAlerts } from '@repo/api/src/services/runtime/stopLossNotify';
+import { deliverStopLossAlerts } from '@repo/api/src/services/turn/settings/stopLossNotify';
 import { startScheduledJobRun, finishScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { logSwallowed, swallow } from '@repo/api/src/lib/swallow';
 import { validateCronRequest } from '@/lib/cron-auth';

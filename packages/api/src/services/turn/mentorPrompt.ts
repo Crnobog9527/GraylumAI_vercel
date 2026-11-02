@@ -6,7 +6,7 @@ import { OPENING_EXTRACTION_RULE } from '../opc/agentTurnPrompt';
 import { positioningMentorInstructions } from '../opc/existingPositioning';
 import { ORGANIZER_INSTRUCTIONS } from '../opc/organizerPrompt';
 import { STEP_SUMMARY_INSTRUCTIONS } from '../opc/stepSummary';
-import { hostTurnInput, type HostTurnContext } from '../runtime/hostTurn';
+import { hostTurnInput, type HostTurnContext } from './agent/hostTurn';
 import type { HistoryItem } from './db';
 
 /*

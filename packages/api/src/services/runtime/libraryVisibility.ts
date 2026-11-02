@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {contentVisibilityFence} from '../accountErasure/content';
-import {StagingAccessError,stagingProcedureError} from './stagingErrors';
+import {StagingAccessError,stagingProcedureError} from '../turn/settings/stagingErrors';
 
 /** The frozen context fields the fence needs; the executor reports them before it can emit anything. */
 export type ObservedContext={libraryReferences?:unknown[];libraryRetrieval?:boolean;voiceBound?:boolean};

@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
 vi.mock('@repo/api/src/services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.waffoClient, getWaffoOperationsClient: mocks.waffoClient }));
-vi.mock('@repo/api/src/services/runtime/staleChargedRounds', () => ({ findStaleChargedRounds: mocks.staleRounds }));
+vi.mock('@repo/api/src/services/turn/settings/staleChargedRounds', () => ({ findStaleChargedRounds: mocks.staleRounds }));
 vi.mock('@repo/api/src/services/payments/stripeCardReconciliation', () => ({ reconcileStripeCardPayments: mocks.stripeCard }));
 vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeClient }));
 vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mocks.reportStripeCard,
@@ -38,7 +38,7 @@ vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancia
 vi.mock('@repo/api/src/services/voice/recovery', () => ({ recoverVoiceGenerations: mocks.voice }));
 vi.mock('@repo/api/src/services/research/priceRefresh', () => ({ refreshResearchPrices: mocks.researchPrices }));
 vi.mock('@repo/api/src/services/research/runtime/secrets', () => ({ platformSecretReader: () => async () => 'key' }));
-vi.mock('@repo/api/src/services/bill2/stuckCalls', () => ({ findStuckPaygCalls: mocks.stuckCalls }));
+vi.mock('@repo/api/src/services/turn/settings/stuckCalls', () => ({ findStuckPaygCalls: mocks.stuckCalls }));
 vi.mock('@repo/api/src/services/bill2/receiptRetention', () => ({ scrubExpiredReceiptOutput: mocks.receiptRetention }));
 vi.mock('@repo/api/src/services/fusion/background', () => ({ kickStalledReviews: mocks.fusionKick }));
 vi.mock('@repo/api/src/services/report/fees', () => ({ settleDueReportFees: mocks.reportFees }));

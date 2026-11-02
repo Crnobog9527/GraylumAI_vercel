@@ -1,18 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {allowedOutput} from './moderation';
 import {logger} from '../../lib/logger';
-import { agentTurnResult } from './agentTurnResult';
-import { questionMessageFromArguments, QUESTION_CONTRACT, askQuestionTool } from './agentTools';
+import { agentTurnResult } from '../turn/agent/agentTurnResult';
+import { questionMessageFromArguments, QUESTION_CONTRACT, askQuestionTool } from '../turn/agent/agentTools';
 import { terminalAgentReplyFailure } from './terminalAgentReply';
-import { NativeProgressProjection, type NativeTextSource } from './nativeProgress';
+import { NativeProgressProjection, type NativeTextSource } from '../turn/agent/nativeProgress';
 import { visibleText, prepareNativePrimary, completedOutput } from './nativeOutput';
 import { stoppedResult } from './stoppedResult';
-import { runtimeContext } from './runtimeContext';
+import { runtimeContext } from '../turn/agent/runtimeContext';
 import { paygOwnerDatabase } from './paygOwner';
 import { executorRpc, type RuntimeExecutorOptions } from './executorRpc';
-import type { authoritativeBilling } from '../bill2/service';
+import type { authoritativeBilling } from '../turn/provider/service';
 import type { RuntimeExecution } from './paygResume';
-import type { RuntimeProgress } from './progress';
+import type { RuntimeProgress } from '../turn/agent/progress';
 import { runtimeIdentityGuard } from '../modelIdentity/runtimeGuard';
 import { frozenBrandIdentity } from '../modelIdentity/brandIdentity';
 

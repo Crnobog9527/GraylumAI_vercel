@@ -2,13 +2,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { canonicalAccount, type CanonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
-import { discoverSkillCatalog, entryContentSource, moduleUsesVoice, pinnedCatalogEntry } from '../runtime/skillCatalog';
-import { admitCatalogVoice } from '../runtime/voiceCatalog';
+import { discoverSkillCatalog, entryContentSource, moduleUsesVoice, pinnedCatalogEntry } from './skills/skillCatalog';
+import { admitCatalogVoice } from './admission/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
 import { REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
-import { rowFor } from '../runtime/settingsRows';
-import { admitOwnPosts } from '../runtime/workspacePosts';
+import { rowFor } from './settings/settingsRows';
+import { admitOwnPosts } from './agent/workspacePosts';
 import { databaseSkillSource } from '../skills/databaseSource';
 import type { ChatToolDeps } from './tools/chatTools';
 import { FREE_RESULT_RESERVE_BYTES } from './tools/plan';
