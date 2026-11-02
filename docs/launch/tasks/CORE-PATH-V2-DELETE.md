@@ -265,6 +265,41 @@ staging 上旧表的行数（只读查询，2026-11-03）：`runtime_executions`
 - F 必须等 B4、B5、B8b、B9 的 `turn` 侧改写，和批次 C 对 163 个保留函数的改写（其中 63 个只靠通用小函数连着）都做完。现在这两块的量是 F 之前的主要工作。
 - 本 PR 只更新盘点数据（`CORE-PATH-V2-DELETE-INVENTORY.md`）和本节，**没有迁移、没有代码删除**；F 的迁移与代码删除按"清单清零"那一刻的盘点再写。
 
+### 7.2 收缩：少改写，能删就不改（2026-11-03，总控要求）
+
+做法：①"待删"名单里，源文本不碰任何待删表、也只调保留函数的，**移到保留清单，不改写不改名**（不动点算出，不是人工挑的）；
+②保留函数里，只有"碰待删表或剩下的待删函数"的才算要改写；③再按"能否从现役入口走到"分：走不到的**随 F 一起 DROP，不改写**。
+入口 = 现役 Node 的 RPC 调用、触发器、cron；脚本 `narrow.mjs`、`reach2.mjs` 在共享笔记目录（不进仓库）。
+
+| 项 | 原数 | 收缩后 |
+|---|---|---|
+| 待删名单（按命名规则圈的） | 201 | **128**；另外 **73 个移到保留清单**（下面） |
+| 其中走得到的（要先有人接走调用方或改写调用它的函数） | 79 | **37** |
+| 其中走不到的（随 F 直接 DROP） | 122 | **91** |
+| 引用待删对象的保留函数 | 188 | **124**（对收缩后的名单重算） |
+| 其中走得到的（**必须整段改写**，或先把入口删掉） | 163 | **103** |
+| 其中走不到的（随 F 直接 DROP，不改写） | 25 | **21** |
+
+**保留清单（73 个，原在待删名单里）**，理由：源文本不碰待删表，只调保留函数；`runtime_*`/`bill2_*` 只是命名：
+`bill2_actor`、`bill2_decimal`、`bill2_scope_allowed` 与它的 4 层 `_before_*`、`bill2_create_draft`、`bill2_revoke_draft`、`bill2_erasure_*`（4）、`bill2_financial_projection`、`bill2_outcome_projection`、`bill2_legacy_*`（6，**账务，单独批给总控审，见下**）、`bill2_payg_*`（9，价目与校验）、`bill2_public`、`bill2_tool_*`（2）、`bill2_unit_multiplier`、`bill2_calls_kind_guard`、`bill2_receipt_raw_scrub`、`bill2_run_erasure_guard`，
+`runtime_material`、`runtime_work_projection`（和 `_before_opc`）、`runtime_material_allowed`（和 `_before_b1`）、`runtime_check_memo_*`（4）、`runtime_source`、`runtime_workspace_*`（4）、`runtime_session_results_*`/`runtime_session_result_title`、`runtime_session_names_owner_guard`、`runtime_stop_loss_*`（6，新路径止损在用）、`runtime_update_stop_loss`/`runtime_update_rate_limits`/`runtime_rate_limits_patch`、`runtime_rw_flag`、`runtime_set_stop_new_calls`、`runtime_capacity_marker_*`（2）、`runtime_admit_source_check`、`runtime_context_allowed_before_workspace`、`runtime_load_skill_*`（2）、`runtime_mentor_history_draft`。
+注意：留下的函数里仍有名字带旧前缀的，F 之后可以另行改名（不是删除）。
+
+**必须整段改写的 103 个，按业务分批（每批几十个以内，一批一个迁移，迁移号逐批向总控要）：**
+
+| 批 | 业务 | 个数 | 谁 | 内容 |
+|---|---|---|---|---|
+| R1 | 定位/选题/work_item/素材 | 33 | 本窗口（拆 R1a 读/查询 17、R1b 执行侧 16） | 去掉 `*_from_execution`、`opc_data_execution`、`opc_result_link_available` 等对 `runtime_executions` 的旧分支（同 0458 的做法） |
+| R2 | 注销/内容删除 | 25 | V2-9 窗口 | `account_erasure_*`、`content_erasure_*` 去掉旧 run/receipt 一侧 |
+| R3 | 评审团/对比 | 22 | 视 B4/B5 结果：旧入口删了就**随 F 删**，不改写 | `fusion_*` |
+| R4 | 复盘/社媒 | 6 | 复盘窗口（#1624 B8b） | `publish_monitor_review_*`、`billed_*` |
+| R5 | 新路径回合 | 6 | 本窗口，mig-go 审，闭包不放宽 | `turn_open`、`turn_plan_context`、`turn_mentor_context`、`turn_report_admit`、`turn_stop`、`workspace_turn_read` 去掉旧执行检查 |
+| R6 | 研究/报告/其他 | 8 | 本窗口 | `research_*` 4、`report_final_snapshot`、`report_model_window`、`topic_turn_source`、`voice_run_recovery` |
+| R7 | **账务（总控亲审）** | 3 | 总控审 | `atomic_settle`、`atomic_refund`、`billing_reconcile_day`，加上上面保留清单里的 `bill2_legacy_*` 是否留 |
+
+R1–R6 之间文件不重叠（函数不同），R2 给 V2-9、R4 给复盘窗口，本窗口做 R1、R5、R6。每批：本机跑相关套件和 `check-turn-budget`，闭包棘轮不放宽。
+F（DROP）仍排最后，验收和复测通过、总控放行才做。
+
 ## 8. 发现的问题（不在本任务范围，已记录）
 
 - `docs/runbooks/BILL2_V1_PENDING_READONLY.sql` 引用 10 个待删函数，删除时要一并处理。
