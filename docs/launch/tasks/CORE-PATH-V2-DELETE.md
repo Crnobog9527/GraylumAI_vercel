@@ -321,6 +321,7 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 
 另外：
 - `packages/api/src/services/opc/opc.integration.ts` 是 v3 工作台（`run-workbench.mjs` 的 opcMode）手动运行的集成套件，CI 不跑；它的 116 个用例里有 **73 个走旧路径**（旧执行、旧计划结果、旧视频流程，浏览器用例居多），其中调用 `planResult`、`saveResult`、`planRequestState`、`positionHistory`、`contentFromExecution`、`videoExecutionCheck` 等已删方法的，随旧路径在 F 一起删，并按第 5 节写“旧场景 → 新测试”对照表。
+- `packages/api/src/services/runtime/runtime.integration.ts`（2074–2096 行附近）和 `upgrade.integration.ts`（121、144 行）里还有向已删的 `runtime.execute` 发 HTTP 请求的用例，测旧执行器的断线与重启恢复，只在带本地应用的工作台里手动跑；随 `services/runtime` 在 F 一起删，新路径的恢复由 turn-core 的 recovery 用例和 turn-recovery 套件覆盖，对照表里写明。
 - `opc.saveWorkResult` 路由已收窄为只收 `turnId`；`services/opc/service.ts` 里 `saveWorkResult(executionId)` 的旧分支和 `opc_work_result`，随上面那个集成用例一起在 F 删。
 - 静态无调用方的入口已分两批删：`opc` 路由 11 个（#1647）、`runtime` 路由 9 个（#1648）。
 
