@@ -8,7 +8,7 @@ import { logger } from '../../../lib/logger';
 import { deriveFrozenPrices } from '../../../shared/modelPriceBound';
 import { decimal } from '../provider/decimal';
 import { openRouterBound, type OpenRouterLimits } from '../provider/openRouterPolicy';
-import type { FrozenRun } from '../provider/service';
+import type { FrozenRun } from '../provider/frozenRun';
 import { BillingUnitConfigError, readBillingUnitSettings, readMultiplierSnapshot } from '../../billingUnit';
 import { isOpenRouterEndpoint, resolveOpenAICompatibleEndpoint } from '../../providerUtils';
 import { isAdmittedRoute, matchedProfile, paygProductionSettings, paygTemplate, PAYG_PRODUCTION_SETTING, PAYG_PROFILE_MAX_BYTES,

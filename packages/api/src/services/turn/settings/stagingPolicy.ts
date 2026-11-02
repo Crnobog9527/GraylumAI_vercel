@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
-import {frozenCallPolicy,type BillingRpc} from '../provider/service';
+import {frozenCallPolicy,type BillingRpc} from '../provider/frozenRun';
 import {modelCallPolicies,toolCallPolicies} from '../admission/runPolicies';
 import type {ToolCallPolicy} from '../provider/toolBilling';
 import {decimal} from '../provider/decimal';
