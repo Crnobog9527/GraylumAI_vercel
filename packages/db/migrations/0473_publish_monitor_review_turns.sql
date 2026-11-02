@@ -10,7 +10,9 @@
 --   * publish_monitor_review_step: the same actions (authorize / observe / skip) over the turn: a delivered completed turn completes the
 --     review; a closed turn that did not deliver ends it, or retries an interruption (up to 3 attempts sharing one cost cap, the known
 --     cost of the failed attempt taken off it, an unknown cost never retried); an unsettled turn keeps the claim.
---   * publish_monitor_reviews: the page reads the body from the turn's saved assistant message and the tables from the saved pack.
+--   * publish_monitor_reviews: the page reads the body from the turn's saved assistant message and the tables from the saved pack;
+--     both are shown only while every source account of the pack is still visible, and a trigger on social_connections wipes the pack and
+--     the saved text when a source account is disconnected (marked deleting) or deleted.
 -- The admit / call / result guard functions on the old tables stay until batch F. Repeatable: CREATE OR REPLACE / IF NOT EXISTS only.
 -- Recovery: re-apply 0457's publish_monitor_review_claim, review_step and 0289-era publish_monitor_reviews (packages/db/functions
 -- history); turn_id and the new functions can stay.
@@ -232,7 +234,8 @@ BEGIN
    'createdAt',r.created_at,'sessionId',r.runtime_session_id,'executionId',coalesce(r.turn_id::text,r.runtime_execution_id::text),
    -- The body is the turn's saved assistant message (or, for a row written before B8b, the execution's result); a deleted
    -- conversation or an erasing account shows nothing.
-   'body',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL THEN
+   'body',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL
+      AND (r.pack IS NULL OR runtime_workspace_posts_visible(a,r.pack)) THEN
      (SELECT m.content FROM session_messages m WHERE m.session_id=s.id AND m.turn_id=r.turn_id AND m.role='assistant'
        AND m.deleted_at IS NULL ORDER BY m.seq DESC LIMIT 1)
     WHEN r.status='completed' AND r.turn_id IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN x.result->>'body' END,
@@ -255,10 +258,25 @@ BEGIN
   WHERE r.actor_id=a ORDER BY r.created_at DESC LIMIT 52) q),'[]'::jsonb);
 END $$;
 
+-- A review is written from the user's own posts: when a source account is disconnected (marked deleting, then deleted) the saved
+-- tables and the text that quotes those posts go with it, as the old path's source-deletion propagation did for its executions.
+CREATE OR REPLACE FUNCTION public.publish_monitor_review_wipe_sources() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF TG_OP='UPDATE' AND NOT (NEW.status='deleting' AND OLD.status IS DISTINCT FROM 'deleting') THEN RETURN NEW; END IF;
+ WITH wiped AS (UPDATE social_review_runs SET pack=NULL WHERE actor_id=OLD.actor_id AND pack IS NOT NULL
+   AND coalesce(pack->'source_connections','[]'::jsonb) ? OLD.id::text RETURNING runtime_session_id,turn_id)
+ DELETE FROM session_messages m USING wiped w WHERE m.session_id=w.runtime_session_id AND m.turn_id=w.turn_id;
+ RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+DROP TRIGGER IF EXISTS social_connections_wipe_review_sources ON public.social_connections;
+CREATE TRIGGER social_connections_wipe_review_sources BEFORE UPDATE OF status OR DELETE ON public.social_connections
+ FOR EACH ROW EXECUTE FUNCTION public.publish_monitor_review_wipe_sources();
+
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_review_session','publish_monitor_review_save_pack',
-   'publish_monitor_review_claim','publish_monitor_review_step','publish_monitor_reviews') LOOP
+   'publish_monitor_review_claim','publish_monitor_review_step','publish_monitor_reviews','publish_monitor_review_wipe_sources') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f);
  END LOOP;

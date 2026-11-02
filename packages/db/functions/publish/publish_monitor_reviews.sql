@@ -15,7 +15,8 @@ BEGIN
    'createdAt',r.created_at,'sessionId',r.runtime_session_id,'executionId',coalesce(r.turn_id::text,r.runtime_execution_id::text),
    -- The body is the turn's saved assistant message (or, for a row written before B8b, the execution's result); a deleted
    -- conversation or an erasing account shows nothing.
-   'body',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL THEN
+   'body',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL
+      AND (r.pack IS NULL OR runtime_workspace_posts_visible(a,r.pack)) THEN
      (SELECT m.content FROM session_messages m WHERE m.session_id=s.id AND m.turn_id=r.turn_id AND m.role='assistant'
        AND m.deleted_at IS NULL ORDER BY m.seq DESC LIMIT 1)
     WHEN r.status='completed' AND r.turn_id IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN x.result->>'body' END,

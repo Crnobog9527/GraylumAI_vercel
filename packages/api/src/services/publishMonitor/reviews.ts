@@ -85,7 +85,10 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:Revi
   const saved=await db.rpc('publish_monitor_review_save_pack',{p_id:c.id,p_token:c.token,p_pack:pack});
   if(saved.error||saved.data!==true)return;
   const result=await runReviewTurn(turnDeps(db,options),{id:c.id,actorId:c.actorId,sessionId:c.sessionId,requestId:c.requestId,
-   modelId:c.modelId!,maxCostUsd:c.maxCostUsd},pack,async()=>(await step(db,c,'authorize')).allowed);
+   modelId:c.modelId!,maxCostUsd:c.maxCostUsd},pack,async()=>(await step(db,c,'authorize')).allowed,async()=>{
+    const visible=await db.rpc('runtime_workspace_posts_visible',{p_actor_id:c.actorId,p_result:pack});
+    return !visible.error&&visible.data===true;
+   });
   if(result.kind==='skipped'){await step(db,c,'skip',result.reason);return;}
   if(result.kind==='deferred'){
    // Nothing opened: the claim expires and the next batch takes it again.

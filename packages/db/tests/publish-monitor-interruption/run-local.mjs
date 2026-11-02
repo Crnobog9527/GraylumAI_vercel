@@ -9,7 +9,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 import {createFixture} from '../payg/fixture.mjs';
 import {rpc as nativeRpc} from '../erasure-b2a/cases.mjs';
-import {laterRedefinitions} from '../publish-monitor/fixtures.mjs';
+import {fixtureSql,laterRedefinitions} from '../publish-monitor/fixtures.mjs';
 
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 async function service(client,work){
@@ -152,6 +152,25 @@ try{
  assert.equal((await reload(capped.review)).status,'skipped');
  report.checks.push('an exhausted cap ends the period instead of retrying');
 
+ // 6b. A source account disconnected: the saved tables and the text that quotes its posts go with it.
+ const source=await fixture();
+ await c.query(fixtureSql);
+ await one('SELECT pm_test.member($1,$2) v',[source.actor,'xiaohongshu']);
+ const connection=await one(`INSERT INTO social_connections(actor_id,business_id,account_project_id,role,source,platform,status,consent_read)
+  SELECT actor_id,business_id,project_id,'own','manual',platform,'connected',true FROM opc_accounts WHERE actor_id=$1 LIMIT 1 RETURNING id v`,[source.actor]);
+ const sourcePack={kind:'my_posts',status:'available',window_days:90,source_connections:[connection],review:{rows:[{views:7}]}};
+ assert.equal(await svc('SELECT publish_monitor_review_save_pack($1,$2,$3) v',[source.review.id,source.review.token,JSON.stringify(sourcePack)]),true);
+ await turn(source);
+ await step(source.review,'observe');
+ let page=(await rpc(c,'publish_monitor_reviews',source.actor)).find(r=>r.id===source.review.id);
+ assert.equal(page.body,'KEEP_GENERATED_REVIEW');
+ await c.query(`UPDATE social_connections SET status='deleting',business_id=NULL,account_project_id=NULL,display_hint=NULL,profile_ref=NULL,
+  consent_read=false,consent_auto_track=false,consent_publish=false WHERE id=$1`,[connection]);
+ page=(await rpc(c,'publish_monitor_reviews',source.actor)).find(r=>r.id===source.review.id);
+ assert.deepEqual([page.body,page.tables],[null,null],'hidden as soon as the source is disconnected');
+ assert.equal(await one('SELECT pack v FROM social_review_runs WHERE id=$1',[source.review.id]),null,'the saved pack is gone');
+ assert.equal(await one('SELECT count(*)::int v FROM session_messages WHERE turn_id=$1',[(await reload(source.review)).turn_id]),0,'the saved text is gone');
+ report.checks.push('disconnecting a source account wipes the review pack and text and hides them at once');
  // 7. A review claimed before this migration may already have a Runtime execution: it is never started again as a turn.
  const legacyDone=await fixture();
  const legacyRow=await reload(legacyDone.review);

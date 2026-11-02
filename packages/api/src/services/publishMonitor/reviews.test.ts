@@ -97,8 +97,15 @@ it('advance saves the code-computed pack, runs one turn with the frozen claim, a
  expect(m.pack).toHaveBeenCalledWith(expect.anything(),c.actorId,{kind:'workspace_posts_request',windowDays:90,entitled:false,review:true});
  expect(d.calls.find(x=>x[0]==='publish_monitor_review_save_pack')![1]).toEqual({p_id:c.id,p_token:c.token,p_pack:PACK});
  expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({id:c.id,actorId:c.actorId,sessionId:c.sessionId,
-  requestId:c.requestId,modelId:c.modelId,maxCostUsd:c.maxCostUsd}),PACK,expect.any(Function));
+  requestId:c.requestId,modelId:c.modelId,maxCostUsd:c.maxCostUsd}),PACK,expect.any(Function),expect.any(Function));
  expect(stepActions(d.calls).at(-1)).toEqual(['observe',null]);
+});
+it('the visibility of the pack\'s sources is asked right before the turn is saved, through the database check',async()=>{
+ const d=database({default:{}},{runtime_workspace_posts_visible:false});
+ m.run.mockImplementationOnce(async(_deps,_claim,_pack,_authorize,visible:()=>Promise<boolean>)=>{
+  expect(await visible()).toBe(false);return {kind:'deferred',code:'x'};});
+ await advanceReview(d.db,c,options());
+ expect(d.calls.find(x=>x[0]==='runtime_workspace_posts_visible')![1]).toEqual({p_actor_id:c.actorId,p_result:PACK});
 });
 it('the 90-day window is used only for an account whose window is that long',async()=>{
  await advanceReview(database({default:{}},{runtime_workspace_post_window:90}).db,c,options());

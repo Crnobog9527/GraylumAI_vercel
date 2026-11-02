@@ -53,7 +53,7 @@ const REFUSED_AS_CONFIGURATION = new Set(['TURN_PAYG_DISABLED', 'TURN_MODEL_NOT_
  * paid call (the user's switch or entitlement may have changed since the claim) and a false answer stops with nothing sent.
  */
 export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInput, pack: unknown,
-  authorize: () => Promise<boolean>): Promise<ReviewTurnResult> {
+  authorize: () => Promise<boolean>, visible: () => Promise<boolean> = async () => true): Promise<ReviewTurnResult> {
   const { admin } = deps, db = turnDatabase(deps.clients);
   const configuration = readAdmissionConfiguration(admin);
   const config = readCoreConfig(await configuration);
@@ -122,6 +122,9 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
         return modelCall(callDeps, quote, request, onChunk).catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       } });
     if (!output.trim()) throw new Error('REVIEW_EMPTY');
+    // A source account disconnected while the text was written: nothing that quotes its posts is saved or charged; the next attempt
+    // reads the data again without it.
+    if (!(await visible())) throw new TurnStop('TURN_TOMBSTONED');
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: REVIEW_REQUEST + '(数据已保存在复盘记录中)' }, { role: 'assistant', content: output }] });
     return { kind: 'done', turnId: opened.turnId, closeKind: closed.closeKind as CloseKind, delivered: closed.closeKind === 'completed' };
