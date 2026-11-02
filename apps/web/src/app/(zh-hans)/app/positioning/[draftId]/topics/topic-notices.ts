@@ -38,6 +38,21 @@ export function topicWorkspaceStale(boundVersionId: unknown, currentVersionId: u
 export const STALE_WORKSPACE_NOTICE =
   '你已更新过正式定位，这个选题工作区基于旧版本，不能再采用或继续对话；原对话和计划保留，只能查看。';
 
+/** The first message after the user starts the topic work again on the updated positioning (the old conversation is not sent to the model). */
+export const REBIND_OPENING_INPUT = '定位已更新。请只根据最新的已确认定位和选题方法，提出第一周选题候选；区分已确认事实与建议，缺少必要信息时先问我。';
+
+/** One request id per draft and new positioning version, kept in this browser, so a double click or a refresh never opens twice. */
+export function rebindOpeningRequestId(storage: Pick<Storage, 'getItem' | 'setItem'>, draftId: string, versionId: string, fresh: () => string) {
+  const key = 'opc-topic-rebind-opening:' + draftId + ':' + versionId;
+  try {
+    const kept = storage.getItem(key);
+    if (kept) return kept;
+    const id = fresh();
+    storage.setItem(key, id);
+    return id;
+  } catch { return fresh(); }
+}
+
 /** The user-facing text of a reply without the machine-readable plan or adoption block. */
 export function replyProse(text: string | null | undefined) {
   if (!text) return '';

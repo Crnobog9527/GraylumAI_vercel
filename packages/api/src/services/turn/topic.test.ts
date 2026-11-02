@@ -74,6 +74,26 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     expect(t.events.at(-1)).toMatchObject({ type: 'result', turnId: 9, body: 'Topics', chargedCredits: 7 });
   });
 
+  it('sends the model only the messages after the re-bind floor, keeping the old ones out of its context', async () => {
+    const item = (seq: number, role: 'user' | 'assistant', content: string) => ({ seq, role, content, contentHash: 'a'.repeat(64) });
+    const t = harness({ source: { data: { ...workspace, historyFloor: 2 } },
+      open: () => ({ turnId: 9, state: 'running', replay: false, reservedCredits: 30, reservedUsd: 0.3, positioning: { positioned: true, refusals24h: 0 },
+        history: [item(1, 'user', 'OLD_ASK'), item(2, 'assistant', 'OLD_CANDIDATES'), item(3, 'user', 'NEW_ASK'), item(4, 'assistant', 'NEW_REPLY')] }) });
+    runs('Topics');
+    await runTopicTurn(t.deps, input, t.emit);
+    const sent = JSON.stringify(await (h.runtime.mock.calls[0]![0] as { session: { getItems: () => Promise<unknown[]> } }).session.getItems());
+    expect(sent).toContain('NEW_ASK'); expect(sent).toContain('NEW_REPLY');
+    expect(sent).not.toContain('OLD_ASK'); expect(sent).not.toContain('OLD_CANDIDATES');
+  });
+
+  it('without a floor (a workspace never re-bound) sends the whole visible history as before', async () => {
+    const t = harness({ open: () => ({ turnId: 9, state: 'running', replay: false, reservedCredits: 30, reservedUsd: 0.3,
+      positioning: { positioned: true, refusals24h: 0 }, history: [{ seq: 1, role: 'user', content: 'FIRST_ASK', contentHash: 'a'.repeat(64) }] }) });
+    runs('Topics');
+    await runTopicTurn(t.deps, input, t.emit);
+    expect(JSON.stringify(await (h.runtime.mock.calls[0]![0] as { session: { getItems: () => Promise<unknown[]> } }).session.getItems())).toContain('FIRST_ASK');
+  });
+
   it('builds the prompt from the Skill, the workspace rules and the frozen material, without tools or a positioning check', async () => {
     const t = harness(); runs('Topics');
     await runTopicTurn(t.deps, input, t.emit);

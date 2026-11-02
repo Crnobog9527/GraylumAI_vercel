@@ -38,7 +38,9 @@ export type TopicInput = { actorId: string; draftId: string; requestId: string; 
 const MAX_INPUT_BYTES = 90000;
 const CODE = /\b(OPC_[A-Z_]+|CONTENT_ERASED)\b/;
 const source = z.object({ sessionId: z.string().uuid(), moduleId: z.string().uuid(), skillId: z.string().uuid(),
-  revisionId: z.string().uuid(), packageHash: z.string(), resources: z.array(z.string()).min(1), material: z.unknown() }).passthrough();
+  revisionId: z.string().uuid(), packageHash: z.string(), resources: z.array(z.string()).min(1), material: z.unknown(),
+  // Messages up to this seq are from before the workspace was re-bound to a newer positioning: shown, never sent to the model.
+  historyFloor: z.number().int().nonnegative().default(0) }).passthrough();
 
 export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
@@ -55,7 +57,7 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
   if (error) return emit({ type: 'error', code: CODE.exec(error.message ?? '')?.[1] ?? 'TURN_OPEN_FAILED' });
   const workspace = source.safeParse(data);
   if (!workspace.success) return emit({ type: 'error', code: 'TURN_OPEN_FAILED' });
-  const { sessionId, moduleId, skillId, revisionId, packageHash, resources, material } = workspace.data;
+  const { sessionId, moduleId, skillId, revisionId, packageHash, resources, material, historyFloor } = workspace.data;
 
   // 2. The quote of the workspace's module, before anything is frozen.
   let quote;
@@ -116,7 +118,7 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
     const callDeps = { db, slots: deps.slots, actorId: input.actorId, turnId, nextSeq: () => ++seq,
       adapter: openRouterAdapter({ credential: quote.credential, transport: deps.transport }) };
     const left = quote.inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192;
-    const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
+    const history = trimHistory(projectHistory(opened.history.filter(message => message.seq > historyFloor)), Math.max(left, 0));
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),
       maxOutputTokens: quote.outputLimit, maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,

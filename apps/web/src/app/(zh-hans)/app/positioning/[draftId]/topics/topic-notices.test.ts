@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
+import { rebindOpeningRequestId, topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
 import { DEFINITE_REFUSAL_NOTICE } from '@/app/(zh-hans)/app/runtime/gate-notices';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
@@ -58,4 +58,14 @@ it('calls a topic workspace stale only when it is bound to a version other than 
   expect(topicWorkspaceStale('v9', 'v10')).toBe(true);
   expect(topicWorkspaceStale('v10', 'v10')).toBe(false);
   for (const [bound, current] of [[undefined, 'v10'], ['v9', undefined], ['', 'v10'], ['v9', null]]) expect(topicWorkspaceStale(bound, current)).toBe(false);
+});
+
+it('keeps one opening request id per draft and new positioning version, so a double click never opens twice', () => {
+  const memory = new Map<string, string>();
+  const storage = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => void memory.set(k, v) };
+  let n = 0;
+  const fresh = () => 'id-' + ++n;
+  expect(rebindOpeningRequestId(storage, 'd', 'v2', fresh)).toBe('id-1');
+  expect(rebindOpeningRequestId(storage, 'd', 'v2', fresh)).toBe('id-1');
+  expect(rebindOpeningRequestId(storage, 'd', 'v3', fresh)).toBe('id-2');
 });
