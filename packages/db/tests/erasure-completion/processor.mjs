@@ -46,7 +46,7 @@ export async function runProcessor(db,processAccountErasure,report){
  const review=(await db.query('SELECT stage,review_codes,next_review_at FROM account_erasure_requests WHERE profile_id=$1',
   [unknown.actor])).rows[0];
  assert.equal(review.stage,'billing_pending');
- assert.ok(review.review_codes.includes('ERASURE_FINANCIAL_PENDING_REVIEW'),JSON.stringify(review));
+ assert.ok(review.review_codes.includes('ERASURE_FINANCIAL_EVIDENCE_REVIEW'),JSON.stringify(review));
  assert.ok(review.next_review_at,'missing provider/cost receives a durable review date');
  const callState=(await db.query('SELECT provider_id,selected_cost_usd FROM bill2_calls WHERE id=$1',[unknownCall.id])).rows[0];
  assert.equal(callState.provider_id,null);assert.equal(callState.selected_cost_usd,null);

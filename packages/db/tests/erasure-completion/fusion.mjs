@@ -39,8 +39,18 @@ export async function runFusionExecutor({db,Client,connectionString,require,runA
   // The summary's failure count also covers unrelated housekeeping (e.g. the off-database manifest without Redis
   // in this environment), so this case checks the subject's own outcome.
   const done=await runAccountErasureExecutor(client);
-  const request=(await db.query('SELECT stage,executor_error_codes FROM account_erasure_requests WHERE profile_id=$1',[f.actor])).rows[0];
-  assert.equal(request.stage,'completed',JSON.stringify({done,request}));assert.deepEqual(request.executor_error_codes,[]);
+  // The processor settles nothing itself any more: a run still prepared (not settled/refunded) keeps the account in billing_pending,
+  // the money untouched and Auth not removed, until the run is closed out (before F, a one-off cleanup of the old runs).
+  const stage=async()=>(await db.query('SELECT stage,executor_error_codes FROM account_erasure_requests WHERE profile_id=$1',[f.actor])).rows[0];
+  let request=await stage();
+  assert.equal(request.stage,'billing_pending',JSON.stringify({done,request}));
+  assert.equal(sdk.authDeletes(),0,'an unsettled old run blocks Auth removal');
+  assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[f.actor])).rows[0].credits,credits,'money untouched while pending');
+  await rpc(db,'bill2_cancel',f.actor,f.run);await rpc(db,'bill2_finalize',f.actor,f.run);
+  await db.query('UPDATE account_erasure_requests SET executor_attempted_at=NULL WHERE profile_id=$1',[f.actor]);
+  const again=await runAccountErasureExecutor(client);
+  request=await stage();
+  assert.equal(request.stage,'completed',JSON.stringify({again,request}));assert.deepEqual(request.executor_error_codes,[]);
   assert.equal((await db.query('SELECT count(*)::int n FROM fusion_call_outputs WHERE actor_id=$1',[f.actor])).rows[0].n,0);
   assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[f.actor])).rows[0].credits,credits,'money unchanged');
   assert.equal(sdk.authDeletes(),1);

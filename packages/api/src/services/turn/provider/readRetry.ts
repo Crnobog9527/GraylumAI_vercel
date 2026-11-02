@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 import type { RuntimeBudget } from '../settings/budget';
-import type { BillingRpc } from './service';
+import type { BillingRpc } from './frozenRun';
 
 // Audited reads only: no dispatch, recovery claim, receipt write, finalize or runtime_response
 // (whose authorization chain takes material row locks). No caller-supplied RPC names widen this list.

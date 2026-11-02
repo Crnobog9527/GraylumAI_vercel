@@ -3,7 +3,7 @@ import type {z} from 'zod';
 import {applyPromptCache,type PromptCachePolicy} from './promptCache';
 import {decimal} from './decimal';
 import {openRouterBound} from './openRouterPolicy';
-import type {frozenCallPolicy} from './service';
+import type {frozenCallPolicy} from './frozenRun';
 import {normalizeOpenRouterHistory} from './openRouterHistory';
 import {matchesFrozenReasoning,reasoningPolicy,type ReasoningPolicy} from '../admission/reasoningPolicy';
 import {AGENT_TOOL_NAMES,FREE_CHAT_TOOL_NAMES,SOURCE_TOOL_NAMES} from '../agent/agentTools';
