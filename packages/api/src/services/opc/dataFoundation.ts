@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { opcAdoptTopics, opcTopicDraft } from '../../shared/opcRequests';
 
@@ -36,6 +37,14 @@ export const briefAdoption = z.object({
   brief: z.string().trim().min(1).max(2000),
 }).strict();
 
+// Definite refusals of the topic RPCs: the request was understood and turned down, so they are not server faults.
+// The code stays in the message; the client tells them apart by it.
+const topicRefusals: Record<string, 'CONFLICT' | 'FORBIDDEN'> = {
+  OPC_VERSION_CONFLICT: 'CONFLICT', OPC_REQUEST_CONFLICT: 'CONFLICT', OPC_TOPIC_ALREADY_ADOPTED: 'CONFLICT',
+  OPC_BUSINESS_CONFLICT: 'CONFLICT', OPC_ACCOUNT_CONFLICT: 'CONFLICT', OPC_DUPLICATE_ITEM: 'CONFLICT',
+  OPC_DENIED: 'FORBIDDEN', OPC_BUSINESS_DENIED: 'FORBIDDEN', OPC_SOURCE_DENIED: 'FORBIDDEN',
+};
+
 type ActorRpc<T> = (name: string, args: Record<string, unknown>) => Promise<T>;
 
 // Reuse the OPC service authentication and bounded error mapping.
@@ -46,7 +55,9 @@ export function dataFoundationService<T>(rpc: ActorRpc<T>) {
     catch (error) {
       // Existing topic clients clear their frozen pending operation for this permanent refusal.
       if (error instanceof Error && ['OPC_DATA_SOURCE_DENIED', 'OPC_TOPIC_SOURCE_INVALID',
-        'OPC_TOPIC_SOURCE_REQUIRED'].includes(error.message)) throw new Error('OPC_SOURCE_DENIED');
+        'OPC_TOPIC_SOURCE_REQUIRED'].includes(error.message)) throw new TRPCError({ code: 'FORBIDDEN', message: 'OPC_SOURCE_DENIED' });
+      const code = error instanceof Error ? topicRefusals[error.message] : undefined;
+      if (code && error instanceof Error) throw new TRPCError({ code, message: error.message });
       throw error;
     }
   }
