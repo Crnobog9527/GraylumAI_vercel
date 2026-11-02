@@ -150,7 +150,7 @@ END $$;
 -- 'failed' (closed, nothing delivered). A closed turn whose settlement is still pending keeps the review claimed ('cost_pending').
 CREATE OR REPLACE FUNCTION public.publish_monitor_review_step(p_id uuid,p_token uuid,p_action text,p_reason text DEFAULT NULL::text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE r social_review_runs;x turns;allowed boolean;spent numeric;st text;
+DECLARE r social_review_runs;x turns;lx runtime_executions;allowed boolean;spent numeric;st text;
 BEGIN
  SELECT * INTO r FROM social_review_runs WHERE id=p_id FOR UPDATE;
  IF r.id IS NULL OR r.lease_token IS DISTINCT FROM p_token OR r.status<>'claimed'
@@ -159,6 +159,24 @@ BEGIN
  allowed:=publish_monitor_review_allowed(r.actor_id) AND r.created_at>=(SELECT auto_review_enabled_at
   FROM social_monitor_settings WHERE actor_id=r.actor_id);
  SELECT * INTO x FROM turns WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id AND kind='review';
+ -- A review claimed before this migration may already have a Runtime execution on a BILL2 run (written by the old path). It is never
+ -- started again as a turn: it completes when its execution completed, ends when the execution ended and its bill is settled, and
+ -- otherwise keeps the claim for the old financial recovery (which still owns its held credits).
+ IF x.id IS NULL THEN
+  SELECT * INTO lx FROM runtime_executions WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id;
+  IF lx.id IS NOT NULL THEN
+   UPDATE social_review_runs SET runtime_execution_id=lx.id,bill2_run_id=lx.billing_run_id WHERE id=r.id;
+   IF lx.state='completed' THEN
+    UPDATE social_review_runs SET status='completed',finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
+    RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',NULL,'state','completed','expired',false);
+   ELSIF lx.state IN ('cancelled','failed') AND coalesce((SELECT closed FROM bill2_runs WHERE id=lx.billing_run_id),true) THEN
+    UPDATE social_review_runs SET status='skipped',skip_reason=coalesce(p_reason,'RUNTIME_ENDED'),
+     finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
+    RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',NULL,'state','failed','expired',false);
+   END IF;
+   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',NULL,'state','cost_pending','expired',false);
+  END IF;
+ END IF;
  IF x.id IS NOT NULL AND r.turn_id IS DISTINCT FROM x.id THEN
   UPDATE social_review_runs SET turn_id=x.id WHERE id=r.id;
  END IF;
@@ -197,7 +215,7 @@ BEGIN
   'cadence',r.cadence,'businessId',r.business_id,'attempt',r.attempt,
   -- A scheduler-owned review has no user present to resume it: a turn still running after 15 minutes is expired (the caller
   -- closes it as interrupted and then skips); the turn recovery job closes what the caller never reaches.
-  'expired',st='running' AND r.created_at<=clock_timestamp()-interval '15 minutes');
+  'expired',coalesce(st='running' AND r.created_at<=clock_timestamp()-interval '15 minutes',false));
 END $$;
 
 CREATE OR REPLACE FUNCTION public.publish_monitor_reviews(a uuid) RETURNS jsonb
@@ -209,12 +227,12 @@ BEGIN
    'createdAt',r.created_at,'sessionId',r.runtime_session_id,'executionId',coalesce(r.turn_id::text,r.runtime_execution_id::text),
    -- The body is the turn's saved assistant message (or, for a row written before B8b, the execution's result); a deleted
    -- conversation or an erasing account shows nothing.
-   'body',CASE WHEN r.status='completed' AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL THEN
+   'body',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL THEN
      (SELECT m.content FROM session_messages m WHERE m.session_id=s.id AND m.turn_id=r.turn_id AND m.role='assistant'
        AND m.deleted_at IS NULL ORDER BY m.seq DESC LIMIT 1)
     WHEN r.status='completed' AND r.turn_id IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN x.result->>'body' END,
    -- The numeric table comes only from the host's code-computed result saved with the review. Model text is never parsed into it.
-   'tables',CASE WHEN r.status='completed' AND r.pack IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL
+   'tables',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND r.pack IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL
       AND runtime_workspace_posts_visible(a,r.pack) THEN r.pack->'review'
     WHEN r.status='completed' AND r.turn_id IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN
     (SELECT t.result->'review' FROM runtime_tool_calls t WHERE t.execution_id=x.id AND t.result->>'kind'='my_posts'

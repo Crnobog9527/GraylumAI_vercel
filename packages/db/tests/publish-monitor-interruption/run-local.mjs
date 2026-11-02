@@ -141,6 +141,29 @@ try{
  assert.equal((await reload(capped.review)).status,'skipped');
  report.checks.push('an exhausted cap ends the period instead of retrying');
 
+ // 7. A review claimed before this migration may already have a Runtime execution: it is never started again as a turn.
+ const legacyDone=await fixture();
+ const legacyRow=await reload(legacyDone.review);
+ await c.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state,result)
+  VALUES($1,$2,$3,'{}',0,'completed',$4)`,[legacyDone.actor,legacyRow.runtime_session_id,legacyRow.runtime_request_id,JSON.stringify({body:'LEGACY_REVIEW'})]);
+ const legacyObserved=await step(legacyDone.review,'observe');
+ assert.deepEqual([legacyObserved.state,legacyObserved.turnId],['completed',null]);
+ assert.equal((await reload(legacyDone.review)).status,'completed');
+ const legacyHistory=(await rpc(c,'publish_monitor_reviews',legacyDone.actor)).find(r=>r.id===legacyDone.review.id);
+ assert.equal(legacyHistory.body,'LEGACY_REVIEW','a review written before the migration keeps its body');
+ const legacyOpen=await fixture();
+ const openRow=await reload(legacyOpen.review);
+ await c.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state)
+  VALUES($1,$2,$3,'{}',0,'running')`,[legacyOpen.actor,openRow.runtime_session_id,openRow.runtime_request_id]);
+ assert.equal((await step(legacyOpen.review,'observe')).state,'cost_pending');
+ assert.equal((await step(legacyOpen.review,'skip','RUNTIME_INTERRUPTED')).state,'cost_pending');
+ const stillOpen=await reload(legacyOpen.review);
+ assert.deepEqual([stillOpen.status,stillOpen.attempt],['claimed',1]);
+ // Nothing opened yet and well past the deadline: the answer says so with a plain boolean, never NULL.
+ const idle=await fixture();
+ await c.query("UPDATE social_review_runs SET created_at=now()-interval '30 minutes' WHERE id=$1",[idle.review.id]);
+ assert.strictEqual((await step(idle.review,'observe')).expired,false);
+ report.checks.push('a review with a pre-migration execution is observed, not restarted; an idle claim answers expired=false');
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
  const before2=await one(catalog);

@@ -24,7 +24,7 @@ const claimSchema=z.object({id:z.string().uuid(),actorId:z.string().uuid(),token
 export type ReviewClaim=z.infer<typeof claimSchema>;
 export type ReviewStep={env:Record<string,string|undefined>;defer:(work:()=>Promise<void>)=>void;budget:RuntimeBudget;turn?:ReviewTurnDeps};
 const stepResult=z.object({allowed:z.boolean(),actorId:z.string().uuid(),turnId:z.number().int().positive().nullable().optional(),
- state:z.string().nullable().optional(),expired:z.boolean().optional()}).passthrough();
+ state:z.string().nullable().optional(),expired:z.boolean().nullish().transform(v=>v===true)}).passthrough();
 async function step(db:SupabaseClient,c:ReviewClaim,action:string,reason?:string){
  const r=await db.rpc('publish_monitor_review_step',{p_id:c.id,p_token:c.token,p_action:action,p_reason:reason??null});
  if(r.error)throw new Error('PUBLISH_MONITOR_REVIEW_STEP_FAILED');
