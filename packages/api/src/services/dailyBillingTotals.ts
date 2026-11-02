@@ -71,3 +71,22 @@ export async function readDailyBillingTotals(supabase: SupabaseClient, start: st
     entries: { unattributed: integer(entries.unattributed), notApplied: integer(entries.notApplied) },
   };
 }
+
+// ARCH-FIX E2: each settled call's ledger rows sum to its charge less compensation; packs and subscription grants agree with
+// the credit-source ledger. V2-12 R7: a settled turn's spend rows (and its not-returned freeze row) equal what the turn charged.
+export function ledgerMismatches({ calls, turns, sources }: DailyBillingTotals): string[] {
+  const out: string[] = [];
+  if (calls.mismatched > 0) {
+    out.push(`Call ledger rows do not match the charge for ${calls.mismatched} of ${calls.settledCalls} settled calls`
+      + ` (${calls.sample.join(', ')})`);
+  }
+  if (turns.mismatched > 0) {
+    out.push(`Turn ledger rows do not match the charge for ${turns.mismatched} of ${turns.settledTurns} settled turns`
+      + ` (${turns.sample.map((row) => `${row.actorId}:${row.turnId}`).join(', ')})`);
+  }
+  if (sources.mismatched > 0) {
+    const sample = sources.sample.map((row) => `${row.kind}:${row.id}`).join(', ');
+    out.push(`Credit source ledgers disagree for ${sources.mismatched} sources (${sample})`);
+  }
+  return out;
+}
