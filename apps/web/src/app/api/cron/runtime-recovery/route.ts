@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { runAutomaticFinancialRecovery } from '@repo/api/src/services/runtime/automaticRecovery';
 import { runTurnRecovery } from '@repo/api/src/services/turn/recovery';
 import { deliverStopLossAlerts } from '@repo/api/src/services/turn/settings/stopLossNotify';
 import { startScheduledJobRun, finishScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
@@ -45,14 +44,13 @@ export async function GET(request: Request) {
     ? capped('runtime_recovery_run_record_finish_failed', finishScheduledJobRun({ supabase: db, runId, status, summary, error })) : undefined;
   let response: NextResponse;
   try {
-    const [summary, turns] = await Promise.all([runAutomaticFinancialRecovery(db),
-      runTurnRecovery(db, started + TURN_RECOVERY_END_MS)]);
-    // An unconfirmed or time-deferred automatic stale-round refund keeps the job failing (alerting) until a later run settles it;
-    // so does a turn that could not be recovered (it keeps its lease and is claimed again).
-    const success = summary.failed === 0 && (summary.staleRounds?.failed ?? 0) === 0
-      && (summary.staleRounds?.deferred ?? 0) === 0 && turns.failed === 0;
-    await finish(success ? 'success' : 'error', { ...summary, turns });
-    response = NextResponse.json({ success, ...summary, turns }, { status: success ? 200 : 500 });
+    // CORE-PATH-V2 V2-12 B10: the old BILL2 financial recovery, owner-lost and stale-round refund segments are gone (no old-path
+    // round can start any more; the old test rows go with their tables in batch F). Only the turns recovery runs.
+    const turns = await runTurnRecovery(db, started + TURN_RECOVERY_END_MS);
+    // A turn that could not be recovered keeps its lease and is claimed again, and keeps the job failing (alerting) until then.
+    const success = turns.failed === 0;
+    await finish(success ? 'success' : 'error', { turns });
+    response = NextResponse.json({ success, turns }, { status: success ? 200 : 500 });
   } catch {
     await finish('error', {}, 'RUNTIME_RECOVERY_FAILED');
     response = NextResponse.json({ error: 'Runtime recovery failed' }, { status: 500 });
