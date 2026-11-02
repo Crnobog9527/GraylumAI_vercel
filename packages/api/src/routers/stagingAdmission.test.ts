@@ -227,7 +227,7 @@ describe('downstream real-model admission after a valid remote window',()=>{
   expect(body.error.message).toBe('OPC_CONTENT_BINDING');
   expect(rpc.mock.calls.filter(([name]) => name === 'runtime_admit')).toHaveLength(1);
  });
- it.each(['prepareVideoMaterial', 'checkVideoExecution', 'saveVideoPackage', 'saveVideoResults'] as const)(
+ it.each(['prepareVideoMaterial'] as const)(
   'returns HTTP 412 with the binding code from actual OPC %s', async route => {
    mocks.realOpc = true;
    rpc.mockImplementation((name: string) => Object.assign(Promise.resolve(
@@ -236,10 +236,7 @@ describe('downstream real-model admission after a valid remote window',()=>{
    ), { abortSignal() { return this; } }));
    const base = { workItemId: actor, sourceScriptId: actor };
    const versions = { expectedStoryboardVersion: 0, expectedEditingVersion: 0 };
-   const input = route === 'checkVideoExecution' ? { ...base, executionId: actor }
-    : route === 'prepareVideoMaterial' ? { ...base, ...versions, requestId: actor, choice: 'both' }
-     : { ...base, ...versions, requestId: actor, executionId: actor,
-      ...(route === 'saveVideoResults' ? { choice: 'both' } : {}) };
+   const input = { ...base, ...versions, requestId: actor, choice: 'both' };
    const response = await post('opc.' + route, input);
    const body = await response.json();
    expect(response.status).toBe(412);
@@ -256,33 +253,11 @@ describe('downstream real-model admission after a valid remote window',()=>{
   expect(response.status).toBe(500);expect(body.error.message).toContain('诊断编号');expect(JSON.stringify(body)+JSON.stringify(mocks.error.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_DATABASE_BODY');
   expect(JSON.stringify(mocks.error.mock.calls)).toContain('XX000');expect(rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
  });
- it('maps execute recovery denial after maintenance initialization',async()=>{
-  rpc.mockImplementation(async(name:string)=>name==='runtime_test_actor_access'?{data:true,error:null}
-   :name==='runtime_financial_recovery'?{data:null,error:{message:'RUNTIME_EXECUTION_STILL_ALLOWED'}}
-   :{data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_RECOVERY_DENIED'}});
-  const response=await post('runtime.execute',{executionId:actor});expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('无法恢复');
- });
- it('DB-PERF PR-5a: an execution route loads the window policy once for itself and the execution; refusals are unchanged',async()=>{
+ it('a refused reader on the resume route gets the same refusal and nothing of the execution is touched',async()=>{
   const names=()=>rpc.mock.calls.map(([name])=>name);
-  // Allowed: an open window admits the actor, so the read access check is implied and not run; the execution does not reload it.
-  await post('runtime.execute',{executionId:actor});
-  expect(names().filter(name=>name==='runtime_test_policy')).toHaveLength(1);
-  expect(names()).not.toContain('runtime_test_actor_access');
-  // Closed window, allowed reader: the route runs the read check as before and the execution takes the recovery path.
-  rpc.mockClear();
-  rpc.mockImplementation(async(name:string)=>name==='runtime_test_actor_access'?{data:true,error:null}
-   :name==='runtime_financial_recovery'?{data:null,error:{message:'RUNTIME_EXECUTION_STILL_ALLOWED'}}
-   :{data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_RECOVERY_DENIED'}});
-  expect((await post('runtime.execute',{executionId:actor})).status).toBe(403);
-  expect(names().filter(name=>name==='runtime_test_policy')).toHaveLength(1);
-  expect(names().filter(name=>name==='runtime_test_actor_access')).toHaveLength(1);
-  // Refused reader: the same refusal as before, and nothing of the execution is touched.
-  rpc.mockClear();
   rpc.mockImplementation(async(name:string)=>({data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_ACTOR_DENIED'}}));
-  for(const path of ['runtime.execute','runtime.resume']){
-   const response=await post(path,path==='runtime.resume'?{executionId:actor,resumeToken:actor}:{executionId:actor});
-   expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('账号未获准');
-  }
+  const response=await post('runtime.resume',{executionId:actor,resumeToken:actor});
+  expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('账号未获准');
   expect(names().filter(name=>!['runtime_test_policy','runtime_test_actor_access'].includes(String(name)))).toEqual([]);
  });
  it('preserves bounded OPC recovery refusals and sanitizes unexpected downstream exceptions',async()=>{

@@ -215,8 +215,21 @@ describe('cost report dashboard query', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  function caller(rows: Array<Record<string, unknown>>, queryError: unknown = null, role = 'admin') {
+  let rpcCalls: Array<[string, Record<string, unknown>]> = [];
+  function caller(rows: Array<Record<string, unknown>>, queryError: unknown = null, role = 'admin',
+    turnRows: Array<Record<string, unknown>> = [], rpcError: unknown = null) {
+    rpcCalls = [];
     const admin = {
+      rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push([name, args]);
+        const builder = {
+          order() { return builder; },
+          async range(from: number, to: number) {
+            return { data: turnRows.slice(from, to + 1), error: rpcError };
+          },
+        };
+        return builder;
+      },
       from(table: string) {
         if (table === 'profiles') {
           return {
@@ -252,6 +265,33 @@ describe('cost report dashboard query', () => {
     expect(dashboard.distribution[0]?.calls).toBe(1001);
     expect(dashboard.topUsers[0]?.totalCalls).toBe(1001);
     expect(dashboard.trend).toHaveLength(7);
+  });
+
+  it('counts core-path turn calls (no token_stats row) in today and the month, per user and per model', async () => {
+    const old = [{ user_id: 'user-1', model_used: 'model-a', total_credits: 2, total_cost_usd: '0.1',
+      cached_tokens: 0, input_tokens: 10, created_at: '2026-03-29T08:00:00.000Z' }];
+    const turn = [
+      { call_key: '7:1', user_id: 'user-2', model_used: 'model-b', total_credits: 30, total_cost_usd: '0.24',
+        cached_tokens: null, input_tokens: null, created_at: '2026-03-29T11:00:00.000Z' },
+      { call_key: '7:2', user_id: 'user-2', model_used: 'model-b', total_credits: 0, total_cost_usd: '0.01',
+        cached_tokens: null, input_tokens: null, created_at: '2026-03-28T10:00:00.000Z' },
+    ];
+    const c = caller(old, null, 'admin', turn);
+    const dashboard = await c.getDashboard({ days: 7, limit: 10, metric: 'usd' });
+    expect(rpcCalls[0]![0]).toBe('turn_admin_cost_rows');
+    expect(dashboard.overview.monthCalls).toBe(3);
+    expect(dashboard.overview.todayCalls).toBe(2);
+    expect(dashboard.overview.todayCost).toBeCloseTo(0.34, 9);
+    expect(dashboard.overview.todayCredits).toBe(32);
+    expect(dashboard.distribution.find((m) => m.modelId === 'model-b')?.calls).toBe(2);
+    expect(dashboard.topUsers[0]).toMatchObject({ userId: 'user-2', totalCalls: 2 });
+    // Token counts are not recorded per turn call: the cache figures are unknown, not zero.
+    expect(dashboard.cacheEfficiency.cacheHits).toBeNull();
+  });
+
+  it('reports a failed turn-call read rather than a report without them', async () => {
+    await expect(caller([], null, 'admin', [], { code: 'PGRST_ERROR' }).getDashboard({ days: 7 }))
+      .rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
   });
 
   it('reports query failure rather than a fabricated empty report', async () => {
