@@ -36,6 +36,7 @@ AS $function$
   );
 $function$;
 
+
 CREATE OR REPLACE FUNCTION public.account_erasure_note_error(p_profile_id uuid, p_code text)
  RETURNS void
  LANGUAGE plpgsql
@@ -70,6 +71,7 @@ BEGIN
  WHERE profile_id=p_profile_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'ACCOUNT_ERASURE_REQUEST_MISSING' USING ERRCODE='P0002';END IF;
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.account_erasure_financial_proof(p_profile_id uuid)
  RETURNS jsonb
@@ -124,6 +126,7 @@ BEGIN
  RETURN jsonb_build_object('financialPending',pending,'manualReview',manual);
 END $function$;
 
+
 CREATE OR REPLACE FUNCTION public.account_erasure_financial_batch(p_limit integer DEFAULT 20, p_profile_id uuid DEFAULT NULL::uuid, p_after_run_id uuid DEFAULT NULL::uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -159,6 +162,7 @@ BEGIN
  RETURN result;
 END $function$;
 
+
 CREATE OR REPLACE FUNCTION public.account_erasure_work_batch(p_profile_id uuid, p_limit integer DEFAULT 20, p_after_run_id uuid DEFAULT NULL::uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -174,6 +178,7 @@ BEGIN
  RETURN proof||jsonb_build_object('requestId',request.request_id,'stage',request.stage,
   'runs','[]'::jsonb,'nextRunId',NULL);
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.account_erasure_body_remaining(p_profile_id uuid)
  RETURNS bigint
@@ -236,6 +241,7 @@ BEGIN
  END LOOP;
  RETURN total;
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.account_erasure_scrub_runtime(p_profile_id uuid)
  RETURNS jsonb
@@ -306,6 +312,7 @@ BEGIN
   END LOOP;
   RETURN counts;
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.account_erasure_scrub_content(p_profile_id uuid)
  RETURNS jsonb
@@ -495,6 +502,7 @@ BEGIN
   RETURN counts;
 END $function$;
 
+
 CREATE OR REPLACE FUNCTION public.account_erasure_prune_business(p_profile_id uuid, p_limit integer DEFAULT 100)
  RETURNS integer
  LANGUAGE plpgsql
@@ -550,7 +558,7 @@ BEGIN
   -- identities (already body-scrubbed by B1) until the financial review is resolved.
   IF legacy_evidence AND (t LIKE 'artifact_%' OR t IN ('agent_slice_links','opc_result_links')) THEN CONTINUE; END IF;
   FOR item IN EXECUTE format('SELECT ctid AS row_tid,to_jsonb(x) AS body FROM public.%I x
-   WHERE public.erasure_business_owner(%L,to_jsonb(x))=$1 LIMIT $2 FOR UPDATE SKIP LOCKED',t)
+   WHERE public.erasure_business_owner(%1$L,to_jsonb(x))=$1 LIMIT $2 FOR UPDATE SKIP LOCKED',t)
    USING p_profile_id,p_limit-removed LOOP
    -- Body-bearing rows must have passed B1. Conversation deletion also retains its original
    -- legacy guards, and a RETURN NULL is observed as zero affected rows, never completion.
@@ -581,6 +589,7 @@ BEGIN
  END IF;
  RETURN removed;
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.erasure_business_owner(t text, j jsonb)
  RETURNS uuid
@@ -641,6 +650,7 @@ BEGIN
  RETURN result;
 END $function$;
 
+
 CREATE OR REPLACE FUNCTION public.content_erasure_ledger_owned(j jsonb)
  RETURNS boolean
  LANGUAGE sql
@@ -651,6 +661,7 @@ AS $function$
  -- and the core-path turns keep their own receipts. Account erasure still closes every ledger row of a deleted account.
  SELECT false;
 $function$;
+
 
 CREATE OR REPLACE FUNCTION public.content_erasure_capture_steps(steps jsonb)
  RETURNS jsonb
@@ -697,6 +708,7 @@ BEGIN
  RETURN result;
 END $function$;
 
+
 CREATE OR REPLACE FUNCTION public.content_erasure_artifact_readable(a uuid, vid uuid)
  RETURNS boolean
  LANGUAGE plpgsql
@@ -729,6 +741,7 @@ BEGIN
  RETURN true;
 EXCEPTION WHEN insufficient_privilege OR raise_exception THEN RETURN false;
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.content_erasure_saved_readable(a uuid, cid uuid)
  RETURNS boolean
@@ -764,6 +777,7 @@ BEGIN
 EXCEPTION WHEN insufficient_privilege OR raise_exception THEN RETURN false;
 END $function$;
 
+
 CREATE OR REPLACE FUNCTION public.content_erasure_parent_guard()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -798,6 +812,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.content_erasure_mark_session(a uuid, target uuid)
  RETURNS jsonb
@@ -872,6 +887,7 @@ BEGIN
 EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.content_erasure_scope(a uuid, k text, target uuid)
  RETURNS jsonb
@@ -978,6 +994,7 @@ BEGIN
     OR turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions))
     OR target_project_id=ANY(projects) OR source_version_id=ANY(versions))),'[]'::jsonb));
 END $function$;
+
 
 CREATE OR REPLACE FUNCTION public.content_erasure_confirm(a uuid, k text, target uuid, expected_hash text)
  RETURNS jsonb
@@ -1241,6 +1258,7 @@ BEGIN
 EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
 END $function$;
+
 
 DROP FUNCTION IF EXISTS public.account_erasure_detach_runtime(p_profile_id uuid, p_run_id uuid);
 DROP FUNCTION IF EXISTS public.account_erasure_scrub_calls(p_profile_id uuid, p_run_id uuid);

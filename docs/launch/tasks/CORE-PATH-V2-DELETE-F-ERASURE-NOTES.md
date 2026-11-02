@@ -47,20 +47,32 @@
 需要 F 的负责人知道的两处取舍：
 
 1. `fusion_call_outputs` 的正文表保留，但它和会话的唯一联系是被删的 `fusion_billing_groups.source_session_id`。删内容时只能经 `fusion_compares`
-   找到它；F 之后没有 group 的输出行只会在**账号注销**时被清（按 `actor_id`）。建议 F 把这张表的现有行一并清空或随评审团一起删（评审团已随 F 删除）。
+   找到它；F 之后没有 group 的输出行只会在**账号注销**时被清（按 `actor_id`）。建议 F 把这张表的现有行一并清空或随评审团一起删（评审团函数随 F 删除）。
 2. 由旧执行保存的内容版本（`opc_content_versions.execution_id` 非空）F 之后读不到（原来执行行不存在时也是读不到，且 #1617 已让旧执行一律读不到）。
 
 ## 3. 验证
 
-本机从文件建库，套上 F 草稿（15 张旧表、164 个函数删除，守卫里把评审团 / `opc_capture_apply` 这批 V2-8 名下的暂时放行）：
+本机从文件建库，套上 F 草稿（15 张旧表、164 个函数删除；守卫里 V2-8 名下的评审团等暂时放行），逐块跑：
 
 - 守卫：注销相关函数名全部不再出现；剩下的只有评审团 21 个、`opc_capture_apply`、`opc_work_result`、`opc_video_runtime_binding_guard`（V2-8 名下）。
-- `turn-erasure` 套件：带 F 通过，不带 F 通过（新路径的全部用例）。
-- `erasure-completion`、`content-erasure`：见下一节。
+- `turn-erasure`（新路径）：带 F 通过，不带 F 通过。
+- `erasure-completion` 的 executor 块（账号注销从确认到完成的端到端，含工单、存储、Auth、清单同步）：带 F 通过（7 项）。**前提：`services/library/cleanup.ts` 不再调用 F 要删的 `runtime_library_propagate`**，否则图书馆清理记一次失败，账号停在 `ERASURE_STORAGE_PENDING`（V2-8 清单第 110 行已列；Node 分支 `claude/v2-12-r2c-node-for-f` 已含这个改动）。
+- 带 F 通过前发现并修掉一处：`account_erasure_prune_business` 的格式串参数不够（会让注销卡住），段文件已是修后的版本。
 
-## 4. F 的 PR 里要删或改写的旧路径用例（跑完回填）
+## 4. F 的 PR 里要删或改写的旧路径用例
 
-见 PR 描述。
+带 F 时下面这些按设计失败，因为它们造数据靠的是旧函数/旧表（失败点已实测）：
+
+| 套件 / 文件 | 失败点 | 处理 |
+|---|---|---|
+| `content-erasure`：`dependencies.mjs`（`runDependencies`） | 旧执行依赖报告（`KEEP_INDEPENDENT_REPORT`）为空 | 删：测的是旧执行依赖闭包 |
+| `content-erasure`：`cases.mjs`、`instant.mjs`、`wrapped-patch.mjs`、`payg.mjs`、`video.mjs`、`producers.mjs`、`fusion.mjs`、`capture-v3.mjs`、`scope-speed.mjs` 等含 `runtime_executions` / `bill2_*` 的块 | 用旧函数造执行或 run | 删旧路径用例；回合版等价由 `turn-erasure` 的 13 块覆盖，缺的（见下）补进 `turn-erasure` |
+| `erasure-completion`：`cases.mjs`、`leaves.mjs` | `bill2_prepare` 不存在 | 去掉造旧 run 的部分，保留不依赖旧表的断言 |
+| `erasure-completion`：`owned-runtime-prune.mjs`、`owned-session-prune.mjs`、`fusion.mjs` | 旧运行表 / 评审团旧函数；`run-local.mjs` 里的 "0355 patch installed" 断言查的是旧迁移补丁文本 | 删（旧运行表行没了） |
+| `erasure-binding`、`erasure-run`、`erasure-call`、`erasure-b2b` 四个套件 | 全部直接调用已删的 `account_erasure_scrub_run/calls/receipts/detach_runtime` | 整套删 |
+| `erasure-b2a/fixture.sql` | 插旧会话、执行、run | 去掉旧行 |
+
+保持有效、F 之后继续跑的：`turn-erasure`、`erasure-completion` 的 executor 块与支付 / 工单 / 存储相关块。
 
 ## 5. F 前 staging 未结清旧 run 的处理（只读核对 2026-11-03，没有写任何东西）
 
