@@ -86,8 +86,8 @@ export function describeRequest(tool: ResearchToolName, rawArgs: unknown): { que
   switch (tool) {
     case "social_search":
       // A discovery subcall that searched accounts is stored under the same tool: say so instead of "keyword posts".
-      return { query: strings(args.keywords).join("、"),
-        line: `${platformLabel(text(args.platform))} · ${args.dataKind === "account_search" ? DATA_KIND_LABELS.account_search : DATA_KIND_LABELS.keyword_posts}` };
+      const kind = args.dataKind === "account_search" ? DATA_KIND_LABELS.account_search : DATA_KIND_LABELS.keyword_posts;
+      return { query: strings(args.keywords).join("、"), line: `${platformLabel(text(args.platform))} · ${kind}` };
     case "social_account":
       return { query: text(args.account), line: `${platformLabel(text(args.platform))} · 账号资料和近期作品` };
     case "web_search":
