@@ -13,6 +13,7 @@
 | `scripts/loadtest/reset-accounts.mjs` | 每批前重置 100 个测试账号 | staging（只许 `LOADTEST_ALLOWED_HOST`） |
 | `scripts/loadtest/core-path-load.mjs` | 3.2 节 100 人驱动：6 档、10 分钟冷却、30 人基线比对、失败过多自停 | staging 的 `POST /api/turn`；**不带 `--go` 只打印计划** |
 | `scripts/loadtest/sample-waits.mjs` | 每 5 秒采 `pg_stat_activity` 等待事件和 `pg_locks` 按类型计数 | staging 数据库，只读角色，两条 SELECT |
+| `scripts/loadtest/sample-connections.mjs` | 每秒按角色/应用/状态数 staging 库的客户端连接，读 `max_connections`（可选池设置），`--summarize` 出过线判定 | staging 数据库，只读角色，只读 SELECT；管理接口只发 GET |
 | `scripts/loadtest/single-machine.mjs` | 3.3.3 单机压测：本机 Docker 库，N 个虚拟用户，模型换成计时器；量 k、等待、WAL、写入行数 | 只碰本机 Docker，不联网 |
 | `scripts/loadtest/extrapolate.mjs` | 把单机结果算成报告里的 k 稳定性、等待是否持平、各规格量级表和"没覆盖什么" | 只读 JSON |
 | `scripts/loadtest/lib/core.mjs`、`lib/extrapolate.mjs` | 纯函数：档位、节奏、判定、外推算术（有单测） | 无 |
@@ -49,6 +50,8 @@ node scripts/loadtest/core-path-load.mjs --series --go --out "$OUT"
 - 30 人基线和上一批差 > 10% 本批作废（`baselineValid`）；本批是首批就写"无可比基线"。
 - 判定用 `judgeStage`（失败 0、57014 为 0、整轮 p95 ≤ 桩回复 + 2 秒、CPU 均值 < 60%、交换区不涨、`LWLock:LockManager` < 2%）；
   **取不到的数按未通过算**，不按通过算。达不到就写"最多撑多少人、差多少"（`capacityWords`），不说做到了。
+
+**Vercel 一侧的最终 100 人验收（只准备，未运行）：** 见 `vercel-run-plan.md`（桩可达、钩子、`--calibrate`、连接采样、过线、花费）。
 
 ## 4. 单机 500/2000/5000 怎么跑（本机，不花钱）
 
