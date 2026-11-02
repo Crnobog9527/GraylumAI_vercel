@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { databaseRuntimeResearchStore } from './store';
+import { databaseRuntimeResearchStore } from './researchStore';
 
 const scope = { userId: 'actor', sessionId: 'session', executionId: 'answer' };
 function harness(responses: unknown[] = []) {

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { TurnView } from '@repo/api/src/services/turn/view';
-import { topicExecutions, topicPathDecided, topicRequestSeen, topicSendOutcome, turnRunningNotice } from './use-topic-turn-path';
+import { topicExecutions, topicRequestSeen, topicSendOutcome, turnRunningNotice } from './use-topic-turn-path';
 
 const R = '00000000-0000-4000-8000-000000000001';
 const view = (over: Partial<TurnView> = {}): TurnView => ({ activeTurn: null, lastTurn: null, calls: [], messages: [
@@ -18,12 +18,6 @@ describe('the topic workspace on the turn path (CORE-PATH-V2 V2-10b)', () => {
     const shown = topicExecutions(view({ activeTurn: active }));
     expect(shown.activeExecution).toBe('turn:10');
     expect(shown.executions.at(-1)).toMatchObject({ executionId: 'turn:10', state: 'running' });
-  });
-
-  it('decides the path only when the switch, the old history and the turn history have all answered', () => {
-    expect(topicPathDecided({ choices: true, old: true, turns: true })).toBe(true);
-    for (const missing of ['choices', 'old', 'turns'])
-      expect(topicPathDecided({ choices: true, old: true, turns: true, [missing]: false })).toBe(false);
   });
 
   it('counts a dropped send as sent only when the read back shows it', () => {

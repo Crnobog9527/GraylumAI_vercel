@@ -19,7 +19,6 @@ import { findStaleChargedRounds } from '@repo/api/src/services/turn/settings/sta
 import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/stripeCardReconciliation';
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
-import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
 import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
 import { settleDueReportFees } from '@repo/api/src/services/report/fees';
 import { findStuckPaygCalls } from '@repo/api/src/services/turn/settings/stuckCalls';
@@ -41,12 +40,6 @@ const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 async function runStaleRoundReconciliation(supabase: SupabaseClient) {
   try { return await findStaleChargedRounds(supabase); }
   catch { return { success: false, findings: [], total: 0, truncated: false, scanFailed: true }; }
-}
-
-/** FUSION-REVIEW: cancel undispatched calls past their dispatch deadline, recover and settle the rest. */
-async function runFusionRecovery(supabase: SupabaseClient) {
-  try { return await recoverFusionFinancials(supabase); }
-  catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
 }
 
 /** VOICE: settle generations whose page closed before they finished; scrub runs whose source document was deleted. */
@@ -178,7 +171,7 @@ export async function GET(request: Request) {
     logger.system.cronJob('billing-reconcile', 'started');
     // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees,
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, fusionKick, stuckCalls, reportFees,
       voice, researchPrices, receiptRetention] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
@@ -186,11 +179,7 @@ export async function GET(request: Request) {
       runWaffoReconciliation(supabase),
       runStaleRoundReconciliation(supabase),
       runStripeCardReconciliation(supabase),
-      (async () => {
-        // Kick before recovery resets idle timestamps; do not delay the independent financial audits.
-        const fusionKick = await runFusionKick(supabase, new URL(request.url).origin);
-        return { fusionKick, fusion: await runFusionRecovery(supabase) };
-      })(),
+      runFusionKick(supabase, new URL(request.url).origin),
       runStuckCallScan(supabase),
       runReportFeeSettlement(supabase),
       runVoiceRecovery(supabase),
@@ -198,7 +187,7 @@ export async function GET(request: Request) {
       runReceiptRetention(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success
+      && staleRounds.success && stripeCard.success && fusionKick.success && stuckCalls.success
       && reportFees.success && voice.success && researchPrices.success && receiptRetention.success;
 
     if (!success) {
@@ -212,7 +201,6 @@ export async function GET(request: Request) {
           ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`]),
           ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`]),
 
-          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
           ...(stuckCalls.success ? [] : [`PAYG calls with unknown cost need manual settlement: ${stuckCalls.total}`]),
           ...(fusionKick.success ? [] : ['Fusion review kick failed']),
           ...(reportFees.success ? [] : ['Report price settlement failed']),
@@ -225,7 +213,6 @@ export async function GET(request: Request) {
           waffo,
           staleRounds,
           stripeCard,
-          fusion,
           stuckCalls,
           fusionKick,
           reportFees,
@@ -270,7 +257,6 @@ export async function GET(request: Request) {
       waffo,
       staleRounds,
       stripeCard,
-      fusion,
       stuckCalls,
       fusionKick,
       reportFees,
