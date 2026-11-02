@@ -37,7 +37,7 @@ try{
  const unnamed=await open(a);await begin(a,unnamed.turnId,1,'decision');await record(a,unnamed.turnId,1,'{}');await close(a,unnamed.turnId);
  const running=await open(a);await begin(a,running.turnId);
  const [from,to]=window();
- const before=await one('select (select count(*) from turns)::int+(select count(*) from turn_calls)::int v');
+ let before=await one('select (select count(*) from turns)::int+(select count(*) from turn_calls)::int v');
  const r=await one('select turn_admin_model_report($1,$2) v',[from,to]);
  assert.deepEqual(r.models.map(m=>m.model).sort(),['decision (model not recorded)','example/decisions','example/model'],'decision calls are their own model lines, never the main model');
  const main=r.models.find(m=>m.model==='example/model'),decision=r.models.find(m=>m.model==='example/decisions');
@@ -60,10 +60,28 @@ try{
  assert.equal((await one('select turn_admin_unsettled_turns(100) v')).total,0,'a closed, settled turn leaves the list');
  assert.equal((await one('select turn_admin_unsettled_turns(0) v')).turns.length,0);
  report.checks.push('unsettled list: the open turn with its in-flight call, content-free keys only, still listed while closed with an unknown cost, gone once settled');
+ // The admin cost monitor reads the same calls as rows shaped like token_stats: one per known, spent model or decision call, the turn's
+ // charged credits on its first row only, so sums by day, user or window are right.
+ const two=await open(a);await begin(a,two.turnId);await record(a,two.turnId);await begin(a,two.turnId,2);await record(a,two.turnId,2);await close(a,two.turnId);
+ before=await one('select (select count(*) from turns)::int+(select count(*) from turn_calls)::int v');
+ const rowsOf=async()=>(await c.query('select * from turn_admin_cost_rows($1,$2) order by call_key',[from,to])).rows;
+ const rows=await rowsOf();
+ assert.equal(rows.length,7,'every ok model or decision call is a row, in-flight and failed ones are not');
+ assert.ok(rows.every(row=>row.user_id===a.actor&&row.cached_tokens===null&&row.input_tokens===null&&row.created_at instanceof Date));
+ assert.equal(rows.reduce((n,row)=>n+row.total_credits,0),await one('select coalesce(sum(charged_credits),0)::int v from turns where actor_id=$1',[a.actor]),
+  "credits are the turns' charged credits, counted once per turn");
+ const twoRows=rows.filter(row=>row.call_key.startsWith(two.turnId+':'));
+ assert.deepEqual(twoRows.map(row=>row.total_credits>0),[true,false],'the charged credits sit on the first call only');
+ assert.deepEqual(rows.map(row=>row.model_used).sort().filter((m,i,all)=>all.indexOf(m)===i),['decision (model not recorded)','example/decisions','example/model']);
+ assert.equal(Number(rows.find(row=>row.model_used==='example/decisions').total_cost_usd),0.01);
+ assert.equal(rows.reduce((n,row)=>n+Number(row.total_cost_usd),0).toFixed(2),
+  Number(await one('select coalesce(sum(turn_call_spent_usd(call_kind,nominal_usd,actual_usd)),0) v from turn_calls where status=\'ok\'')).toFixed(2),'the cost is the cost the turn closed with');
+ assert.equal((await c.query('select * from turn_admin_cost_rows($1,$2)',[new Date(Date.now()-5*864e5).toISOString(),new Date(Date.now()-4*864e5).toISOString()])).rows.length,0,'a window without calls is empty');
+ report.checks.push('cost rows: one per spent call in token_stats shape, credits once per turn, decision calls under their own model, empty window is empty');
  for(const [f,t] of [[to,from],[from,from],[new Date(Date.now()-93*864e5).toISOString(),to],[null,to]])
-  assert.match(await refusal(c.query('select turn_admin_model_report($1,$2)',[f,t])),/TURN_REPORT_WINDOW_INVALID/);
+  for(const fn of ['turn_admin_model_report','turn_admin_cost_rows'])assert.match(await refusal(c.query('select * from '+fn+'($1,$2)',[f,t])),/TURN_REPORT_WINDOW_INVALID/);
  assert.equal(await one('select (select count(*) from turns)::int+(select count(*) from turn_calls)::int v'),before+0,'nothing was written');
- for(const fn of ['turn_admin_model_report(timestamptz,timestamptz)','turn_admin_unsettled_turns(integer)'])
+ for(const fn of ['turn_admin_model_report(timestamptz,timestamptz)','turn_admin_cost_rows(timestamptz,timestamptz)','turn_admin_unsettled_turns(integer)'])
   for(const [role,expected] of [['anon',false],['authenticated',false],['service_role',true]])
    assert.equal(await one("select has_function_privilege($1,'public.'||$2,'EXECUTE') v",[role,fn]),expected,role+' '+fn);
  report.checks.push('bad windows (reversed, empty, over 92 days, null) refused; nothing written; only service_role may execute');
