@@ -235,7 +235,7 @@ BEGIN
    -- The body is the turn's saved assistant message (or, for a row written before B8b, the execution's result); a deleted
    -- conversation or an erasing account shows nothing.
    'body',CASE WHEN r.status='completed' AND r.turn_id IS NOT NULL AND s.id IS NOT NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL
-      AND (r.pack IS NULL OR runtime_workspace_posts_visible(a,r.pack)) THEN
+      AND r.pack IS NOT NULL AND runtime_workspace_posts_visible(a,r.pack) THEN
      (SELECT m.content FROM session_messages m WHERE m.session_id=s.id AND m.turn_id=r.turn_id AND m.role='assistant'
        AND m.deleted_at IS NULL ORDER BY m.seq DESC LIMIT 1)
     WHEN r.status='completed' AND r.turn_id IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN x.result->>'body' END,
@@ -264,9 +264,11 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_wipe_sources() RETURNS 
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
  IF TG_OP='UPDATE' AND NOT (NEW.status='deleting' AND OLD.status IS DISTINCT FROM 'deleting') THEN RETURN NEW; END IF;
+ -- The review's turn is found by its request id too: the text may already be saved while turn_id is not yet written back.
  WITH wiped AS (UPDATE social_review_runs SET pack=NULL WHERE actor_id=OLD.actor_id AND pack IS NOT NULL
-   AND coalesce(pack->'source_connections','[]'::jsonb) ? OLD.id::text RETURNING runtime_session_id,turn_id)
- DELETE FROM session_messages m USING wiped w WHERE m.session_id=w.runtime_session_id AND m.turn_id=w.turn_id;
+   AND coalesce(pack->'source_connections','[]'::jsonb) ? OLD.id::text RETURNING actor_id,runtime_session_id,runtime_request_id,turn_id)
+ DELETE FROM session_messages m USING wiped w WHERE m.session_id=w.runtime_session_id AND (m.turn_id=w.turn_id OR m.turn_id IN
+   (SELECT t.id FROM turns t WHERE t.actor_id=w.actor_id AND t.request_id=w.runtime_request_id AND t.kind='review'));
  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
 END $$;
 DROP TRIGGER IF EXISTS social_connections_wipe_review_sources ON public.social_connections;

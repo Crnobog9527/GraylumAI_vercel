@@ -171,6 +171,31 @@ try{
  assert.equal(await one('SELECT pack v FROM social_review_runs WHERE id=$1',[source.review.id]),null,'the saved pack is gone');
  assert.equal(await one('SELECT count(*)::int v FROM session_messages WHERE turn_id=$1',[(await reload(source.review)).turn_id]),0,'the saved text is gone');
  report.checks.push('disconnecting a source account wipes the review pack and text and hides them at once');
+ // 6c. The source goes away after the text was saved but before the scheduler wrote the turn back: found by its request id, nothing shows.
+ const gap=await fixture();
+ await one('SELECT pm_test.member($1,$2) v',[gap.actor,'douyin']);
+ const gapConnection=await one(`INSERT INTO social_connections(actor_id,business_id,account_project_id,role,source,platform,status,consent_read)
+  SELECT actor_id,business_id,project_id,'own','manual',platform,'connected',true FROM opc_accounts WHERE actor_id=$1 AND platform='douyin' LIMIT 1 RETURNING id v`,[gap.actor]);
+ assert.equal(await svc('SELECT publish_monitor_review_save_pack($1,$2,$3) v',[gap.review.id,gap.review.token,
+  JSON.stringify({kind:'my_posts',status:'available',window_days:90,source_connections:[gapConnection],review:{rows:[]}})]),true);
+ const gapTurn=await turn(gap);
+ assert.equal(await one('SELECT turn_id v FROM social_review_runs WHERE id=$1',[gap.review.id]),null,'turn_id not written back yet');
+ await c.query(`UPDATE social_connections SET status='deleting',business_id=NULL,account_project_id=NULL,display_hint=NULL,profile_ref=NULL,
+  consent_read=false,consent_auto_track=false,consent_publish=false WHERE id=$1`,[gapConnection]);
+ assert.equal(await one('SELECT count(*)::int v FROM session_messages WHERE turn_id=$1',[gapTurn.id]),0);
+ await step(gap.review,'observe');
+ const gapPage=(await rpc(c,'publish_monitor_reviews',gap.actor)).find(r=>r.id===gap.review.id);
+ assert.deepEqual([gapPage.status,gapPage.body,gapPage.tables],['completed',null,null],'a wiped pack never lets the text through');
+ report.checks.push('a source disconnected before the turn was linked still wipes the text, and an emptied pack hides it');
+
+ // 6d. A review voided because its source went away is not charged, whatever receipts the call left.
+ const voided=await fixture();
+ const voidedTurn=await svc('SELECT turn_open($1,$2,$3,$4,$5) v',[voided.actor,voided.review.sessionId,voided.review.requestId,'review',JSON.stringify(POLICY)]);
+ await svc("SELECT turn_call_begin($1,$2,1,'model',$3,NULL,NULL,$4,'0.04','6') v",[voided.actor,voidedTurn.turnId,randomUUID(),hash('v')]);
+ await svc("SELECT turn_call_record($1,$2,1,'ok','0.01','0.01','{}'::jsonb,NULL,$3,'body') v",[voided.actor,voidedTurn.turnId,hash('pv')]);
+ const voidedClose=await svc("SELECT turn_close($1,$2,'erased','[]'::jsonb,false,true,NULL) v",[voided.actor,voidedTurn.turnId]);
+ assert.equal(voidedClose.chargedCredits,0,'an erased review with a full refund charges nothing');
+ report.checks.push('a voided (erased) review is refunded in full even after a priced call');
  // 7. A review claimed before this migration may already have a Runtime execution: it is never started again as a turn.
  const legacyDone=await fixture();
  const legacyRow=await reload(legacyDone.review);

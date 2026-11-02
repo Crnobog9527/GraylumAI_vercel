@@ -10,8 +10,10 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_wipe_sources()
 AS $function$
 BEGIN
  IF TG_OP='UPDATE' AND NOT (NEW.status='deleting' AND OLD.status IS DISTINCT FROM 'deleting') THEN RETURN NEW; END IF;
+ -- The review's turn is found by its request id too: the text may already be saved while turn_id is not yet written back.
  WITH wiped AS (UPDATE social_review_runs SET pack=NULL WHERE actor_id=OLD.actor_id AND pack IS NOT NULL
-   AND coalesce(pack->'source_connections','[]'::jsonb) ? OLD.id::text RETURNING runtime_session_id,turn_id)
- DELETE FROM session_messages m USING wiped w WHERE m.session_id=w.runtime_session_id AND m.turn_id=w.turn_id;
+   AND coalesce(pack->'source_connections','[]'::jsonb) ? OLD.id::text RETURNING actor_id,runtime_session_id,runtime_request_id,turn_id)
+ DELETE FROM session_messages m USING wiped w WHERE m.session_id=w.runtime_session_id AND (m.turn_id=w.turn_id OR m.turn_id IN
+   (SELECT t.id FROM turns t WHERE t.actor_id=w.actor_id AND t.request_id=w.runtime_request_id AND t.kind='review'));
  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
 END $function$;

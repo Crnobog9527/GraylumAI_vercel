@@ -117,5 +117,5 @@ it('a source account disconnected while the text was written: nothing is saved, 
   const d = deps();
   const result = await runReviewTurn(d.deps, claim, { kind: 'my_posts' }, async () => true, async () => false);
   expect(result).toEqual({ kind: 'done', turnId: 9, closeKind: 'erased', delivered: false });
-  expect(of(d.calls, 'turn_close')[0]).toMatchObject({ p_close_kind: 'erased', p_delivered: false, p_messages: [] });
+  expect(of(d.calls, 'turn_close')[0]).toMatchObject({ p_close_kind: 'erased', p_delivered: false, p_messages: [], p_refund_all: true });
 });

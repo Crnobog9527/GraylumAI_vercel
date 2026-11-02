@@ -130,11 +130,13 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
     return { kind: 'done', turnId: opened.turnId, closeKind: closed.closeKind as CloseKind, delivered: closed.closeKind === 'completed' };
   } catch (error) {
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
+    // Nothing delivered (a failure, or a review voided because its source was disconnected or the account is being erased) is never
+    // charged, whatever receipts the call left.
     // A pause for credits ends a scheduled review (no user is there to resume it): the turn closes at once as failed with nothing
     // delivered, the freeze comes back and the week ends as "余额不足，未复盘".
     const paused = code === 'TURN_PAUSED_FOR_CREDITS';
     const kind: CloseKind = code === 'TURN_CALL_UNKNOWN' ? 'interrupted' : code === 'TURN_TOMBSTONED' ? 'erased' : 'failed';
-    const closed = await swallow('weekly_review_turn_close_failed', close(kind, { refundAll: kind === 'failed',
+    const closed = await swallow('weekly_review_turn_close_failed', close(kind, { refundAll: kind === 'failed' || kind === 'erased',
       failureCode: code.toLowerCase() }), undefined, { category: 'ai' });
     if (paused && closed) return { kind: 'skipped', reason: 'BALANCE_LOW' };
     return { kind: 'done', turnId: opened.turnId, closeKind: kind, delivered: false };
