@@ -24,6 +24,25 @@ export async function readPlanTurn(sessionId: string, requestId: string, deps: P
 }
 
 /**
+ * Reads the request's turn until it closes: a recovery on this page finishes it, and a failed read is read again (READS times, then it
+ * stops until the next watch). `failed` tells whether the last read failed. Returns the stop function.
+ */
+export function watchPlanTurn(sessionId: string, requestId: string, on: { turn: (turn: PlanTurn | null) => void; failed: (failed: boolean) => void },
+  deps: { read?: typeof readPlanTurn; schedule?: (run: () => void, ms: number) => unknown; cancel?: (timer: unknown) => void } = {}) {
+  const readTurn = deps.read ?? readPlanTurn, schedule = deps.schedule ?? setTimeout, cancel = deps.cancel ?? (timer => clearTimeout(timer as never));
+  let timer: unknown, left = READS, gone = false;
+  const read = async () => {
+    const next = await readTurn(sessionId, requestId).catch(() => undefined);
+    if (gone) return;
+    if (next !== undefined) on.turn(next);
+    on.failed(next === undefined);
+    if (next?.state !== "closed" && --left > 0) timer = schedule(() => void read(), READ_MS);
+  };
+  void read();
+  return () => { gone = true; cancel(timer); };
+}
+
+/**
  * The retained request's turn, for the page's recovery: `turn` is undefined until it is read and null when the request has none.
  * `state.error` is set while the last read failed and nothing is known yet; `recheck` reads again, also after the reads ran out.
  */
@@ -32,17 +51,7 @@ export function usePlanTurn(sessionId: string | undefined, requestId: string | u
   useEffect(() => {
     setTurn(undefined); setFailed(false);
     if (!sessionId || !requestId) return;
-    // Read until the turn closes: a recovery on this page finishes it, and a failed read is read again.
-    let timer: ReturnType<typeof setTimeout>, left = READS, gone = false;
-    const read = async () => {
-      const next = await readPlanTurn(sessionId, requestId).catch(() => undefined);
-      if (gone) return;
-      if (next !== undefined) setTurn(next);
-      setFailed(next === undefined);
-      if (next?.state !== "closed" && --left > 0) timer = setTimeout(() => void read(), READ_MS);
-    };
-    void read();
-    return () => { gone = true; clearTimeout(timer); };
+    return watchPlanTurn(sessionId, requestId, { turn: setTurn, failed: setFailed });
   }, [sessionId, requestId, attempt]);
   const error = failed && turn === undefined ? new Error("TURN_PLAN_READ_FAILED") : null;
   return { turn, state: { isLoading: Boolean(requestId) && turn === undefined && !error, error }, recheck: () => setAttempt(count => count + 1) };
