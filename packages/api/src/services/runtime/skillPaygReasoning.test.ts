@@ -8,7 +8,7 @@ import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import type {PaygHostProfile} from '../turn/admission/paygHostPolicy';
 // The real readPaygHostPolicies decides admission here; only pricing/billing-unit freezing is stubbed.
-vi.mock('./paygPricing',()=>({freezeStagingPaygPricing:async(_admin:unknown,policies:{payg:unknown}[])=>policies.map(p=>({...p,
+vi.mock('../turn/admission/paygPricing',()=>({freezeStagingPaygPricing:async(_admin:unknown,policies:{payg:unknown}[])=>policies.map(p=>({...p,
  payg:{...p.payg as object,pricingHash:'a'.repeat(64)}}))}));
 vi.mock('../turn/admission/newWorkGate',async original=>({...await original<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));

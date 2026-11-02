@@ -14,7 +14,7 @@ import {testIdentityGuard,testPrimaryModel} from '../__tests__/fixtures/runtimeG
 import {replySettingInstructions} from '../turn/agent/replyLanguage';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
 vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
-vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
+vi.mock('../turn/admission/paygPricing', async original => ({...(await original<typeof import('../turn/admission/paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 // New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
 const DEFAULT_REPLY_RULE=replySettingInstructions('zh-Hans');
 const skill='Pinned skill 正文';
