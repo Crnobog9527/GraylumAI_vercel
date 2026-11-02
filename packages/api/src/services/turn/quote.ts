@@ -2,18 +2,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { deriveFrozenPrices, deriveListPrices } from '../../shared/modelPriceBound';
 import { validateNominalBound, type NominalPricing } from '../../shared/nominalPricing';
-import { openRouterBound, type OpenRouterLimits } from '../bill2/openRouterPolicy';
+import { openRouterBound, type OpenRouterLimits } from './provider/openRouterPolicy';
 import { readMultiplierSnapshot } from '../billingUnit';
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
-import { readAdmissionModel } from '../runtime/admissionConfiguration';
-import { rowFor, type ConfigurationRows } from '../runtime/settingsRows';
+import { readAdmissionModel } from './admission/admissionConfiguration';
+import { rowFor, type ConfigurationRows } from './settings/settingsRows';
 import { RUNTIME_PAYG_SETTING } from './settingKeys';
-import { admittedOutputLimit } from '../runtime/admissionLimits';
-import { isAdmittedRoute, matchedProfile, PAYG_PROFILE_MAX_BYTES, paygProductionSettings } from '../runtime/paygHostPolicy';
-import { FREE_CHAT_REQUEST_FORMAT } from '../runtime/providerRequest';
-import { pricingEndpoint, readPricingStates, type PricingDeps } from '../runtime/pricingAdmission';
-import { admitReasoning } from '../runtime/reasoningAdmission';
-import type { ReasoningPolicy } from '../runtime/reasoningPolicy';
+import { admittedOutputLimit } from './admission/admissionLimits';
+import { isAdmittedRoute, matchedProfile, PAYG_PROFILE_MAX_BYTES, paygProductionSettings } from './admission/paygHostPolicy';
+import { FREE_CHAT_REQUEST_FORMAT } from './provider/providerRequest';
+import { pricingEndpoint, readPricingStates, type PricingDeps } from './admission/pricingAdmission';
+import { admitReasoning } from './admission/reasoningAdmission';
+import type { ReasoningPolicy } from './admission/reasoningPolicy';
 import type { ModelCall } from './call';
 
 /*

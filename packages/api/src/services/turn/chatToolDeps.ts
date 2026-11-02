@@ -2,13 +2,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { canonicalAccount, type CanonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
-import { discoverSkillCatalog, moduleUsesVoice, pinnedCatalogEntry } from '../runtime/skillCatalog';
-import { admitCatalogVoice } from '../runtime/voiceCatalog';
+import { discoverSkillCatalog, entryContentSource, moduleUsesVoice, pinnedCatalogEntry } from './skills/skillCatalog';
+import { admitCatalogVoice } from './admission/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
 import { REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
-import { rowFor } from '../runtime/settingsRows';
-import { admitOwnPosts } from '../runtime/workspacePosts';
+import { rowFor } from './settings/settingsRows';
+import { admitOwnPosts } from './agent/workspacePosts';
 import { databaseSkillSource } from '../skills/databaseSource';
 import type { ChatToolDeps } from './tools/chatTools';
 import { FREE_RESULT_RESERVE_BYTES } from './tools/plan';
@@ -28,10 +28,11 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
         privateClient: admin, moduleId: entry.moduleId, skillId: entry.skillId, revisionId: entry.revisionId });
       const listed = await discoverSkillCatalog(client, admin, { maxResultBytes: FREE_RESULT_RESERVE_BYTES, excludeSocial: false, actorId });
       // A work item's method is the revision it is bound to, in place of what the catalog lists for its module.
-      const catalog = pin ? withPinnedSkill(listed, pin, await pinnedCatalogEntry(sourceOf(pin), pin, FREE_RESULT_RESERVE_BYTES,
-        await moduleUsesVoice(admin, pin.moduleId))) : listed;
+      const pinned = pin ? await pinnedCatalogEntry(sourceOf(pin), pin, FREE_RESULT_RESERVE_BYTES, await moduleUsesVoice(admin, pin.moduleId)) : null;
+      const catalog = pin ? withPinnedSkill(listed, pin, pinned) : listed;
       const prepared = await prepareSkills(catalog, sourceOf, FREE_RESULT_RESERVE_BYTES);
-      return { catalog, prepared };
+      const contentSource = pin && pinned ? await entryContentSource(sourceOf(pin), pinned, FREE_RESULT_RESERVE_BYTES) : undefined;
+      return { catalog, prepared, ...(contentSource ? { contentSource } : {}) };
     },
     async voice(actorId, catalog) {
       const voice = await admitCatalogVoice(admin, actorId, catalog);

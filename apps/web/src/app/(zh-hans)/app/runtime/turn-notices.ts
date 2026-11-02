@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { ToolAvailability } from '@repo/api/src/services/turn/tools/types';
+import { CONTENT_SOURCE_MESSAGES } from '@repo/api/src/shared/contentSourceMessages';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 
 /*
@@ -13,6 +14,7 @@ const REFUSED: Record<string, string> = {
   TURN_RATE_LIMITED: '发送太频繁，这条消息没有发送。请稍后再试。',
   TURN_NEW_CALLS_PAUSED: '服务暂时暂停了新请求，这条消息没有发送，也没有扣费。',
   TURN_LIMIT_UNAVAILABLE: '暂时无法确认用量，这条消息没有发送，也没有扣费。请稍后再试。',
+  STOP_LOSS_REACHED: '今天服务的用量已达上限，这条消息没有发送，也没有扣费。请稍后再试。',
   TURN_SESSION_BUSY: '这个对话还有一轮回复没结束，请等它完成后再发送。',
   TURN_INPUT_TOO_LARGE: '这条消息太长，超过了模型的输入上限。请缩短后再发送。',
   TURN_CORE_DISABLED: '对话服务正在切换，请刷新页面后再试。',
@@ -28,8 +30,13 @@ const REFUSED: Record<string, string> = {
   TURN_RESUME_INPUT_LOST: '这一轮无法继续，已全额退回积分。请重新发送。',
   TURN_UNAUTHENTICATED: '登录已过期，请重新登录后再发送。',
   POSITIONING_REQUIRED: POSITIONING_REQUIRED_NOTICE,
+  OPC_BUSINESS_ARCHIVED: '这个业务已归档，这条消息没有发送，也没有扣费。',
+  OPC_VIDEO_TYPE_REQUIRED: '这条选题不是视频类型，不能生成口播稿或分镜，这条消息没有发送，也没有扣费。',
+  OPC_CONTENT_BINDING: '分镜或剪辑的准备内容已变化，这条消息没有发送，也没有扣费。请刷新后再试。',
+  ...CONTENT_SOURCE_MESSAGES,
 };
 const FAILED: Record<string, string> = {
+  TURN_WORK_SOURCE_ERASED: '这条选题的来源稿件刚被删除或更换，这条消息没有发出，积分已退回。请刷新后再试。',
   TURN_TOMBSTONED: '这个对话已删除，本轮回复没有保存。',
   TURN_PROVIDER_402: '模型服务暂时不可用，本轮已全额退回积分。',
   TURN_PROVIDER_BUSY: '模型服务繁忙，本轮已全额退回积分。请稍后再试。',
@@ -40,7 +47,8 @@ const GENERIC = '这条消息没有完成。请刷新后查看结果，不要重
 
 export function turnCodeNotice(code: string): { text: string; kept: boolean } {
   if (REFUSED[code]) return { text: REFUSED[code], kept: true };
-  return { text: FAILED[code] ?? GENERIC, kept: false };
+  // An unknown code is shown, small, so the next failure says what it was.
+  return { text: FAILED[code] ?? `${GENERIC}（代码 ${code}）`, kept: false };
 }
 
 const TOOL_LABEL: Record<string, string> = { social_search: '社媒搜索', social_account: '账号数据', web_search: '网页搜索', web_fetch: '网页读取',

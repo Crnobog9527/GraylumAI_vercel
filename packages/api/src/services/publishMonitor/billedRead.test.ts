@@ -12,14 +12,14 @@ const POSTS = '/xiaohongshu/app_v2/get_user_posted_notes';
 const mocks = vi.hoisted(() => ({ tools: { enabled: true, tikhub: true } }));
 vi.mock('../research/vendors/config', async original => ({ ...(await original<object>()), readResearchToolsConfig: async () => ({ config: { enabled: mocks.tools.enabled,
   vendors: { tikhub: { enabled: mocks.tools.tikhub } } } }) }));
-vi.mock('../runtime/stagingPolicy', async original => ({ ...(await original<object>()), loadStagingPolicy: async () => ({ id: '00000000-0000-4000-8000-0000000000aa',
+vi.mock('../turn/settings/stagingPolicy', async original => ({ ...(await original<object>()), loadStagingPolicy: async () => ({ id: '00000000-0000-4000-8000-0000000000aa',
   callPolicies: [], creditsPerUsd: '100', multiplier: '6', expiresAt: '2099-01-01T00:00:00.000Z',
   toolPolicies: [policy(PROFILE), policy(POSTS)] }) }));
 vi.mock('../billingUnit', async original => ({ ...(await original<object>()), readMultiplierSnapshot: async () => ({ version: 'bill-unit-v2',
   creditsPerUsd: '100', defaultMultiplier: '6', models: {}, providers: {}, hash: 'f'.repeat(64) }) }));
 vi.mock('../billingProviderPrices', async original => ({ ...(await original<object>()), readProviderPrices: async () => ({ config: { entries: [] } }), resolveProviderPrice: () => ({}),
   resolveProviderMultipliers: () => ({}) }));
-vi.mock('../bill2/toolBilling', async original => ({ ...(await original<object>()),
+vi.mock('../turn/provider/toolBilling', async original => ({ ...(await original<object>()),
   toolCallPolicy: (input: { route: string }) => policy(input.route) }));
 import { billedTikhubRead } from './billedRead';
 import type { ResearchCallResult } from '../research/vendors/types';

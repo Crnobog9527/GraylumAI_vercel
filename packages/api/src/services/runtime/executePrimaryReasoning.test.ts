@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
-import { openRouterBound } from '../bill2/openRouterPolicy';
-import { frozenReasoningFields } from './reasoningPolicy';
-import type { runRuntime } from './runner';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
+import { frozenReasoningFields } from '../turn/admission/reasoningPolicy';
+import type { runRuntime } from '../turn/agent/runner';
 const runner = vi.hoisted(() => ({ run: vi.fn<typeof runRuntime>() }));
-vi.mock('./runner', () => ({ runRuntime: runner.run }));
+vi.mock('../turn/agent/runner', () => ({ runRuntime: runner.run }));
 const id = '10000000-0000-4000-8000-000000000001';
 const providerLimits = { providerSlug: 'anthropic', contextTokens: 10000,
   promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' };

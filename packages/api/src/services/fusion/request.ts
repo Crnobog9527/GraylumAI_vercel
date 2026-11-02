@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { z } from 'zod';
-import type { frozenCallPolicy } from '../bill2/service';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import type { frozenCallPolicy } from '../turn/provider/service';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
 import { openRouterSearchParameters } from '../openRouterSearch';
-import { PURPOSE_INPUT_CAPS } from '../runtime/purposeBudgets';
-import { frozenReasoningFields, type ReasoningPolicy } from '../runtime/reasoningPolicy';
+import { PURPOSE_INPUT_CAPS } from '../turn/settings/purposeBudgets';
+import { frozenReasoningFields, type ReasoningPolicy } from '../turn/admission/reasoningPolicy';
 
 /** The input snapshot (report + collected material) reuses the interactive 90000-byte cap; the whole
  * request (with instructions and, for the summary, the opinions) stays within the per-call profile bound. */

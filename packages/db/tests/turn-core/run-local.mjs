@@ -13,6 +13,9 @@ import {planCases} from './plan-cases.mjs';
 import {reportCases} from './report-cases.mjs';
 import {topicAccountCases,topicCases} from './topic-cases.mjs';
 import {reportFinalCases} from './report-final-cases.mjs';
+import {workContentCases} from './work-content-cases.mjs';
+import {holdCases} from './hold-cases.mjs';
+import {stopLossCases} from './stop-loss-cases.mjs';
 import {workResultCases} from './work-result-cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 // V2-7a: a report opens only for a Gold account's confirmed round (turn_report_admit); the fixture builds one per call.
@@ -741,9 +744,9 @@ try{
    'turn_report_read(uuid,uuid,uuid,bigint)'])
    for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]])
     assert.equal(await one("select has_function_privilege($1,$2,'EXECUTE') v",[role,'public.'+fn]),want,`${fn} ${role}`);
-  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)','turn_positioned(uuid)',
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint,integer)','turn_tombstones(uuid,uuid,jsonb)','turn_positioned(uuid)',
    'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)'])
-  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint)','turn_tombstones(uuid,uuid,jsonb)',
+  for(const fn of ['turn_settle_credits(uuid,uuid,integer,bigint,integer)','turn_tombstones(uuid,uuid,jsonb)',
    'turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)',
    'turn_report_admit(uuid,uuid,jsonb)'])
    assert.equal(await one("select has_function_privilege('service_role',$1,'EXECUTE') v",['public.'+fn]),false,fn);
@@ -794,5 +797,8 @@ try{
  await reportFinalCases({c,one,open,begin,record,account,reportSource,reportPolicy,refusal,report});
  await topicAccountCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
  await workResultCases({c,db,one,open,begin,record,close,account,policy,refusal,report});
+ await holdCases({c,one,open,begin,record,close,balance,account,policy,refusal,peer,report});
+ await stopLossCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
+ await workContentCases({c,one,open,begin,record,close,account,policy,refusal,report});
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

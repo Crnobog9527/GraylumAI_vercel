@@ -17,7 +17,7 @@ vi.mock('./fusionCalls', async original => ({ ...await original<object>(), fusio
 vi.mock('./compareQuote', () => ({ priceCompareColumns: m.price }));
 vi.mock('./fusionQuote', () => ({ fusionQuote: m.quote }));
 vi.mock('../models/openRouterKey', () => ({ readOpenRouterKeyOrUnset: m.key }));
-vi.mock('../runtime/admissionConfiguration', () => ({ readAdmissionConfiguration: m.configuration }));
+vi.mock('./admission/admissionConfiguration', () => ({ readAdmissionConfiguration: m.configuration }));
 import { handleCompareStart, handleTurnEstimate, type FusionHttpDeps } from './fusionHttp';
 import { CORE_PATH_SETTING } from './chat';
 

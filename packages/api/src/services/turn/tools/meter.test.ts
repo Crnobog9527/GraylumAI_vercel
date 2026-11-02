@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { TurnStop } from '../call';
 import { TurnDatabaseError } from '../db';
 import { paidToolCall, settleToolCall, ToolLimitReached } from './meter';
 import { ledger, result } from './__tests__/fixtures';
@@ -96,6 +97,14 @@ describe('one paid tool call is one row: begin, subcalls, record (2.5.2)', () =>
   it('the database refuses past the frozen limit: nothing written, nothing sent', async () => {
     const h = ledger({ begin: () => new TurnDatabaseError('TURN_CALL_LIMIT') });
     await expect(paidToolCall(h.deps, call, async () => undefined)).rejects.toBeInstanceOf(ToolLimitReached);
+    expect(h.writes).toEqual([]);
+  });
+
+  it('the stop-loss refuses a tool mid-turn: a stop that survives the SDK, nothing sent', async () => {
+    const h = ledger({ begin: () => new TurnDatabaseError('STOP_LOSS_REACHED') }), run = vi.fn();
+    await expect(paidToolCall(h.deps, call, run)).rejects.toBeInstanceOf(TurnStop);
+    await expect(paidToolCall(h.deps, call, run)).rejects.toThrow('STOP_LOSS_REACHED');
+    expect(run).not.toHaveBeenCalled();
     expect(h.writes).toEqual([]);
   });
 });

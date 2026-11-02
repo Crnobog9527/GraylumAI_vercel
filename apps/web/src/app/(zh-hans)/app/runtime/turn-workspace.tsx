@@ -16,7 +16,8 @@ import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import {
-  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor, saveDraftReferences,
+  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending,
+  requestIdFor, saveDraftReferences,
 } from './send-input';
 import {
   COMPOSER_REFERENCES_ENABLED, referenceRequest, referencesNamedIn, type LibraryReference,
@@ -25,6 +26,7 @@ import { positioningRequiredNotice } from './positioning-required';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from './turn-notices';
 import { workRowsOf } from './turn-work-rows';
+import { useStoredSendCleanup } from './use-stored-send-cleanup';
 import { useTurnChat } from './use-turn-chat';
 import workStyles from './runtime-work.module.css';
 
@@ -56,6 +58,13 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     if (id) localStorage.setItem('opc-runtime-skill:' + sessionId, id); else localStorage.removeItem('opc-runtime-skill:' + sessionId);
   };
   const update = (value: string) => { setInput(value); localStorage.setItem('opc-runtime-input:' + sessionId, value); };
+
+  // A send the server stored (found by its request id after a reload) leaves the box again; the references the kept draft still names stay
+  // (the same document may be named again after the put-back text); the rest go with it.
+  useStoredSendCleanup(sessionId, chat, input, (next, pending) => {
+    setInput(next); localStorage.setItem('opc-runtime-input:' + sessionId, next);
+    if (pending.references?.length) updateReferences(COMPOSER_REFERENCES_ENABLED ? referencesNamedIn(next, references) : []);
+  });
 
   async function send(text = input) {
     if (!text.trim() || chat.busy) return;
@@ -110,7 +119,9 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
       actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];
   const pendingText = outgoing ?? (chat.view?.activeTurn && !paused ? '' : null);
-  return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen} onToggleRight={() => setPanelOpen(open => !open)}
+  return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen}
+    turnBusy={chat.creditsBusy}
+    onToggleRight={() => setPanelOpen(open => !open)}
     right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
     <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
       <RuntimeHeader title="工作对话"/>
@@ -139,10 +150,10 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
         </section>
       </div>
       <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
-        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill} path="turn"
+        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill}
           blockedReason={COMPOSER_REFERENCES_ENABLED && referencesNamedIn(input, references).length
             ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。' : undefined}
-          onStarted={(compareId, _names, _session, turn) => { update(''); compare.add(compareId, turn); void compare.refresh(); }}
+          onStarted={compareId => { update(''); compare.add(compareId); void compare.refresh(); }}
           onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
           skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}/>

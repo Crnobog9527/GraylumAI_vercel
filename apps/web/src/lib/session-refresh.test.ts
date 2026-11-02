@@ -20,7 +20,7 @@ function refresher(secondsLeft: number | null, refreshed: { token?: string; erro
 describe('isSessionRefreshRequired', () => {
   it('matches exactly the Runtime refusal the server sends', () => {
     // The server's mapping (stagingErrors.ts) must keep this text, or the client stops recognising it.
-    const server = readFileSync(new URL('../../../../packages/api/src/services/runtime/stagingErrors.ts', import.meta.url), 'utf8');
+    const server = readFileSync(new URL('../../../../packages/api/src/services/turn/settings/stagingErrors.ts', import.meta.url), 'utf8');
     expect(server).toContain(`RUNTIME_STAGING_AUTH_REFRESH_REQUIRED: ['PRECONDITION_FAILED', '${SESSION_REFRESH_REQUIRED_MESSAGE}']`);
     expect(isSessionRefreshRequired(new Error(SESSION_REFRESH_REQUIRED_MESSAGE))).toBe(true);
     expect(isSessionRefreshRequired({ message: 'RUNTIME_STAGING_AUTH_REFRESH_REQUIRED' })).toBe(true);

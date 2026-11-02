@@ -113,6 +113,33 @@ class CIWorkflowsTest < Minitest::Test
       refute jobs.fetch(id).key?('needs'), id
     end
   end
+  # Owner 2026-11-01: the suites the pull request CI excludes run every night, outside the required checks.
+  # GitHub fires schedule / workflow_dispatch only from the default branch (main), so the run is triggered by pushes to staging instead.
+  def test_excluded_suites_run_on_pushes_to_staging_only_and_are_never_a_required_check
+    nightly = YAML.safe_load(File.read("#{ROOT}/workflows/nightly-db-suites.yml"))
+    events = nightly['on'] || nightly[true]
+    assert_equal ['push'], events.keys
+    assert_equal({'branches'=>['staging']}, events.fetch('push'))
+    assert_equal({'group'=>'excluded-db-suites','cancel-in-progress'=>true}, nightly.fetch('concurrency'))
+    assert_equal({'contents'=>'read'}, nightly.fetch('permissions'))
+    job = nightly.fetch('jobs').fetch('excluded-suites')
+    required = GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']
+    refute_includes required, job.fetch('name').sub(/ \(.*\)\z/, '')
+    assert_equal({'contents'=>'read'}, job.fetch('permissions'))
+    assert_equal false, job.fetch('strategy').fetch('fail-fast')
+    shards = job.fetch('strategy').fetch('matrix').fetch('shard')
+    assert_equal (1..shards.length).to_a, shards
+    assert_operator job.fetch('timeout-minutes'), :<=, 60
+    runs = job.fetch('steps').map { |step| step['run'] }.compact
+    assert_equal 1, runs.count("env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded --shard ${{ matrix.shard }}/#{shards.length}")
+    job.fetch('steps').each do |step|
+      refute step.key?('continue-on-error'), step['name']
+      refute step.key?('env'), step['name']
+    end
+    refute nightly.key?('secrets')
+    ci_runs = @ci.fetch('jobs').values.flat_map { |j| j['steps'].map { |step| step['run'] }.compact }
+    refute ci_runs.any? { |run| run.include?('--excluded') }, 'pull request CI must not run the excluded list'
+  end
   def test_a_newer_push_to_the_same_pull_request_cancels_the_older_run_but_a_push_to_a_branch_never_does
     concurrency = @ci.fetch('concurrency')
     assert_equal "${{ github.event_name == 'pull_request' }}", concurrency.fetch('cancel-in-progress')
@@ -169,7 +196,10 @@ class CIWorkflowsTest < Minitest::Test
     [@ci,@security].each do |workflow|
       events=workflow['on'] || workflow[true]
       %w[pull_request push].each do |event|
-        assert_equal ['branches'], events.fetch(event).keys
+        # CI alone also lists the pull_request types: the default three plus ready_for_review, so marking a draft ready runs CI again.
+        expected_keys = workflow.equal?(@ci) && event == 'pull_request' ? ['branches', 'types'] : ['branches']
+        assert_equal expected_keys, events.fetch(event).keys
+        assert_equal %w[opened ready_for_review reopened synchronize], events[event]['types'].sort if expected_keys.include?('types')
         assert_includes events[event]['branches'], 'staging'
       end
       assert_equal [{'cron'=>'0 9 * * 1'}], events.fetch('schedule')

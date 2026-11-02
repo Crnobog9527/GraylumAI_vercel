@@ -4,7 +4,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { appRouter } from '@repo/api/src/root';
 import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
-import { withCatalogRequest } from '@repo/api/src/services/runtime/catalogCache';
+import { withCatalogRequest } from '@repo/api/src/services/turn/settings/catalogCache';
 import { createTRPCContext,createRuntimeBudget,withRuntimeBudget } from '@repo/api/src/trpc';
 
 export const maxDuration = 300;

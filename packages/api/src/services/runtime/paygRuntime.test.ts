@@ -2,8 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { syntheticJpeg } from '../__tests__/fixtures/syntheticJpeg';
 import { runtimePaygCall } from './paygRuntime';
-import type { FrozenPaygRun } from '../bill2/service';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import type { FrozenPaygRun } from '../turn/provider/service';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
 const modelId = '10000000-0000-4000-8000-000000000001';
 const pricingHash = 'a'.repeat(64);
 const limits = { providerSlug: 'local', contextTokens: 300000, promptUsdPerMillion: '1.25',

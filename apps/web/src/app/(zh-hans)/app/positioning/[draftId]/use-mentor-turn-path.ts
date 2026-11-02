@@ -7,6 +7,7 @@ import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from "@/app/(zh-hans)/app/runtime/t
 import type { TurnView } from "@repo/api/src/services/turn/view";
 import { trpc } from "@/trpc/client";
 import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
+import { turnBusyForCredits } from "@/components/opc/credits-label";
 import type { MentorRequest } from "./mentor-turn";
 import { mentorOnTurnPath, mentorPathReady } from "./mentor-path-gate";
 import {
@@ -55,7 +56,10 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
   history.current = projected;
   const merged = useRef<{ old?: unknown; projected?: unknown; data?: unknown }>({});
   const paused = view?.activeTurn?.pauseReason === "waiting_credits" ? view.activeTurn : null;
-  return { on, ready, turns: projected.turns, owns: isTurnExecution, stepOpened,
+  // The sidebar balance while a turn holds its freeze (a draft or reply being made, also after a refresh): see credits-label.ts.
+  const creditsBusy = Boolean(sessionId) && turnBusyForCredits({ viewRead: view !== null, viewFailed: failed, busy: Boolean(view?.activeTurn),
+    paused: Boolean(paused) });
+  return { on, ready, creditsBusy, turns: projected.turns, owns: isTurnExecution, stepOpened,
     /** 继续 after a pause for credits: the server has what was asked, so any device can press it. */
     notices(stream: (open: () => Promise<AsyncIterable<AgentTurnEvent>>) => void): ChatNotice[] {
       if (!paused) return [];

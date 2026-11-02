@@ -6,7 +6,7 @@
 export const WITHOUT_APP_SUITES = {
   cdc: {files: ['src/scripts/ac0Probe/cdcB2Eval.integration.ts'], prefix: 'CDC_EVAL: ', excluded: []},
   bill2: {
-    files: ['src/services/bill2/billing.integration.ts'],
+    files: ['src/services/turn/provider/billing.integration.ts'],
     prefix: 'BILL2: ',
     excluded: [],
   },
@@ -17,7 +17,7 @@ export const WITHOUT_APP_SUITES = {
       'src/services/bill2/agentCorePlanB.integration.ts', 'src/services/runtime/platformFailure.integration.ts',
       'src/services/runtime/staleChargedRounds.integration.ts', 'src/services/runtime/positioningRefusal.integration.ts',
       'src/services/fusion/fusion.integration.ts', 'src/services/runtime/researchTurn.integration.ts',
-      'src/services/runtime/libraryRead.integration.ts', 'src/services/fusion/compare.integration.ts',
+      'src/services/runtime/libraryRead.integration.ts',
       'src/services/turn/chat.integration.ts', 'src/services/turn/mentor.integration.ts', 'src/services/turn/compare.integration.ts',
       'src/services/turn/tools.integration.ts'],
     prefix: 'RUNTIME: ',

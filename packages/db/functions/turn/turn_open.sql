@@ -35,7 +35,14 @@ BEGIN
     OR coalesce((p_policy->'stopLoss'->>'poolSize')::numeric, 0) < 1
     OR coalesce((p_policy->'stopLoss'->>'uFastUsd')::numeric, -1) < 0
     OR coalesce((p_policy->'stopLoss'->>'uBigUsd')::numeric, -1) < 0
-    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits'] THEN
+    -- holdCredits: only a chat or mentor turn freezes less than G and tops up (turn_call_begin); a fixed-price kind keeps H = G.
+    OR (p_policy ? 'holdCredits' AND (p_kind NOT IN ('chat','mentor') OR jsonb_typeof(p_policy->'holdCredits') <> 'number'
+      OR (p_policy->>'holdCredits')::numeric <> floor((p_policy->>'holdCredits')::numeric)
+      OR (p_policy->>'holdCredits')::numeric < 1 OR (p_policy->>'holdCredits')::numeric > (p_policy->>'gCredits')::numeric))
+    -- holdUsd: the same for the stop-loss; only with holdCredits, never above U_turn.
+    OR (p_policy ? 'holdUsd' AND (NOT p_policy ? 'holdCredits' OR jsonb_typeof(p_policy->'holdUsd') <> 'number'
+      OR (p_policy->>'holdUsd')::numeric < 0 OR (p_policy->>'holdUsd')::numeric > (p_policy->>'uTurnUsd')::numeric))
+    OR p_policy ?| ARRAY['day','bucket','holdId','heldCredits','carriedCredits','topUps'] THEN
     RAISE EXCEPTION 'TURN_POLICY_INVALID' USING ERRCODE='22023';
   END IF;
 
@@ -89,13 +96,16 @@ BEGIN
       RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';
     END IF;
 
-    -- 3. Stop-loss (2.5.1): reserve U_turn on the own bucket row first, then read the day's sum, then check with the band B.
+    -- 3. Stop-loss (2.5.1): reserve the first reservation (U_turn, or one call's holdUsd where the turn tops up, Owner 11-01) on the
+    -- own bucket row first, then read the day's sum, then check with the band B.
     -- On a resume the paused turn's reservation is still counted here (it is released by its close below): refusing earlier,
     -- never later.
-    IF (p_policy->'stopLoss'->>'p')::int < (p_policy->'stopLoss'->>'poolSize')::int THEN
+    -- The band's proof needs U_fast to bound what one transaction adds, so a holdUsd above it is a configuration fault.
+    IF (p_policy->'stopLoss'->>'p')::int < (p_policy->'stopLoss'->>'poolSize')::int
+      OR coalesce((p_policy->>'holdUsd')::numeric, 0) > (p_policy->'stopLoss'->>'uFastUsd')::numeric THEN
       RAISE EXCEPTION 'TURN_STOP_LOSS_CONFIG' USING ERRCODE='22023';
     END IF;
-    u_turn := (p_policy->>'uTurnUsd')::numeric;
+    u_turn := coalesce((p_policy->>'holdUsd')::numeric, (p_policy->>'uTurnUsd')::numeric);
     v_bucket := CASE WHEN p_kind IN ('report','compare','jury','jury_adopt') THEN -1 ELSE abs(hashtext(p_actor_id::text)) % 16 END;
     INSERT INTO daily_spend AS d (day, bucket, reserved_usd) VALUES (v_day, v_bucket, u_turn)
       ON CONFLICT (day, bucket) DO UPDATE SET reserved_usd = d.reserved_usd + excluded.reserved_usd;
@@ -113,7 +123,8 @@ BEGIN
       PERFORM public.turn_resume_close(p_actor_id, p_resume_of, carried);
     END IF;
 
-    -- 4. Credits: H = min(G_turn, available); below the start threshold the turn does not open. The balance is read under the
+    -- 4. Credits: H = min(the first freeze, available), the first freeze being G_turn, or one call's bound where the turn tops up
+    -- (Owner 11-01: "选 A 补冻"); below the start threshold the turn does not open. The balance is read under the
     -- account lock taken first: two sessions of one account in different stop-loss buckets never size H on the same balance.
     -- The account is checked again here (same lock) before anything is frozen.
     SELECT * INTO prof FROM profiles WHERE id = p_actor_id;
@@ -123,7 +134,7 @@ BEGIN
     END IF;
     -- The freeze covers the carried credits too (the continuation settles them).
     IF p_kind = 'report' THEN PERFORM public.turn_report_admit(p_actor_id, p_session_id, p_policy); END IF;
-    g := (p_policy->>'gCredits')::int + carried;
+    g := coalesce((p_policy->>'holdCredits')::int, (p_policy->>'gCredits')::int) + carried;
     available := greatest(public.credit_available(p_actor_id), 0);
     -- The balance, not the freeze, is held against the start threshold L (as bill2_payg_claim): a balance that covers one
     -- normal turn starts it, and the freeze H may be below L when one call's bound G is (Owner 10-28, restating 10-01).

@@ -18,7 +18,7 @@ vi.mock('../fusion/reviewCore', async original => ({ ...(await original<typeof i
 vi.mock('./fusionCalls', async original => ({ ...(await original<typeof import('./fusionCalls')>()),
   runGroup: m.runGroup, fusionDatabase: () => ({ close: m.close, open: m.open }),
   fusionCoreSetting: { safeParse: (value: unknown) => ({ success: true, data: value }) } }));
-vi.mock('../runtime/admissionConfiguration', async original => ({ ...(await original<typeof import('../runtime/admissionConfiguration')>()),
+vi.mock('./admission/admissionConfiguration', async original => ({ ...(await original<typeof import('./admission/admissionConfiguration')>()),
   readAdmissionConfiguration: async () => m.admission() }));
 vi.mock('./fusionQuote', () => ({ fusionQuote: async (_a: unknown, i: { modelId: string }) => ({ modelId: i.modelId, q: '100',
   multiplier: '6', outputLimit: 100, reasoning: {}, policy: {} }), fusionCall: (quote: object) => ({ ...quote, upperUsd: '0.01' }) }));

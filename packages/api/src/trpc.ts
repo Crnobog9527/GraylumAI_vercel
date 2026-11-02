@@ -5,7 +5,7 @@ import { getAuthProvider, isEmailVerified } from './lib/auth';
 import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 import { logger } from './lib/logger';
 import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
-import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/runtime/budget';
+import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/turn/settings/budget';
 import { openingGrantDigests } from './services/accountErasure/openingGrantIdentity';
 import { procedureRateLimit } from './middleware/procedureRateLimit';
 export {createRuntimeBudget,withRuntimeBudget};

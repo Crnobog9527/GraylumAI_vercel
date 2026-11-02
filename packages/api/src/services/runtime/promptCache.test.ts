@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
-import {frozenCallPolicy} from '../bill2/service';
+import {frozenCallPolicy} from '../turn/provider/service';
 import {createHash} from 'node:crypto';
 import golden from './promptCacheGolden.json';
-import {openRouterRequestBody,type RequestContext} from './providerRequest';
-import {openRouterBound} from '../bill2/openRouterPolicy';
-import {applyPromptCache,freezePromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {openRouterRequestBody,type RequestContext} from '../turn/provider/providerRequest';
+import {openRouterBound} from '../turn/provider/openRouterPolicy';
+import {applyPromptCache,freezePromptCache,PROMPT_CACHE_OVERHEAD_BYTES} from '../turn/provider/promptCache';
 const instructions='技能内容\n固定规则\n\n变化内容';
 const input={real:true,role:'skill',model:'anthropic/test',cacheWriteUsdPerMillion:'2.5',
  instructions,skillChars:4,stableAdditionalPrefix:'固定规则\n\n'};

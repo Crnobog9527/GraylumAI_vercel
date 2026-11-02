@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { catalogRead } from '../runtime/catalogCache';
+import { catalogRead } from './settings/catalogCache';
 import {
   activateSkill, assertPath, batchBytes, batchFiles, frozenDescriptor, identityOf, readSkillResources, sameIdentity,
   type PackageIdentity, type SkillSource,
 } from '../skills/loader';
 import { loadOrganizerTemplate } from '../skills/organizerTemplate';
-import { SKILL_FILE_MAX_BYTES, SKILL_FILE_TRACE_BYTES, skillFileParameters, skillFileTool, type SkillFileBinding } from '../runtime/skillFile';
-import type { RuntimeTool } from '../runtime/runner';
+import { SKILL_FILE_MAX_BYTES, SKILL_FILE_TRACE_BYTES, skillFileParameters, skillFileTool, type SkillFileBinding } from './skills/skillFile';
+import type { RuntimeTool } from './agent/runner';
 
 /*
  * CORE-PATH-V2 2.7 (kind=mentor): the pinned Skill of a positioning draft. turn_open has already checked, in the same

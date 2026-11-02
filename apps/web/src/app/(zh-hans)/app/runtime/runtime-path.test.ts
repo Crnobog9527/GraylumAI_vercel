@@ -1,32 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { runtimePathChoice, type RuntimePathInput } from './runtime-path';
-
-const base: RuntimePathInput = { routeSession: 's1', choicesSettled: true, corePathV2: true, heldLoaded: true, held: false, viewSettled: true,
-  scopeKind: 'positioning_draft' };
-const choose = (over: Partial<RuntimePathInput>) => runtimePathChoice({ ...base, ...over });
+import { runtimePathChoice } from './runtime-path';
 
 describe('which workspace a conversation opens in', () => {
-  it('renders nothing until the switch and the probe have answered (the old workspace would take the first-send marker)', () => {
-    // The first send from the start page lands here with the switch on: before `choices` answers the old workspace must not mount.
-    expect(choose({ choicesSettled: false })).toBe('loading');
-    expect(choose({ choicesSettled: false, corePathV2: false })).toBe('loading');
-    expect(choose({ heldLoaded: false })).toBe('loading');
-    expect(choose({ choicesSettled: false, heldLoaded: false })).toBe('loading');
+  it('renders nothing until the conversation scope has been read', () => {
+    expect(runtimePathChoice({ viewSettled: false })).toBe('loading');
+    expect(runtimePathChoice({ viewSettled: false, scopeKind: 'work_item' })).toBe('loading');
   });
-  it('opens the turn workspace for a conversation without old history once the view has answered', () => {
-    expect(choose({ viewSettled: false })).toBe('loading');
-    expect(choose({})).toBe('turn');
+  it('opens a free conversation and a work item on the turn path', () => {
+    expect(runtimePathChoice({ viewSettled: true, scopeKind: 'positioning_draft' })).toBe('turn');
+    expect(runtimePathChoice({ viewSettled: true, scopeKind: 'work_item' })).toBe('work');
   });
-  it('opens every free conversation on the turn path with the switch on, old-path history or not; a work item or a failed view stays old', () => {
-    expect(choose({ scopeKind: 'work_item' })).toBe('old');
-    expect(choose({ scopeKind: undefined })).toBe('old');
-  });
-  it('follows the switch only: off and nothing of the turn path held is the old workspace, held replies stay on the turn path', () => {
-    expect(choose({ corePathV2: false })).toBe('old');
-    expect(choose({ corePathV2: false, held: true })).toBe('turn');
-  });
-  it('a new conversation page without a session has no marker to lose and starts on the old workspace', () => {
-    expect(choose({ routeSession: '', choicesSettled: false })).toBe('old');
+  it('shows a failed or unknown read as unreadable, never as another workspace', () => {
+    expect(runtimePathChoice({ viewSettled: true })).toBe('unreadable');
+    expect(runtimePathChoice({ viewSettled: true, scopeKind: 'something_else' })).toBe('unreadable');
   });
 });

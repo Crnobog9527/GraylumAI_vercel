@@ -2,13 +2,13 @@
 import { resumeLimits, type ResumeRead } from './resume';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { assertSeparateSummaryModel, summaryPolicy } from '../artifacts/summaryPolicy';
-import { readAdmissionConfiguration, readAdmissionModule } from '../runtime/admissionConfiguration';
-import { readAdmissionSettings, type SettingsRead } from '../runtime/newWorkGate';
-import { AGENT_TURN_REQUEST_FORMAT } from '../runtime/providerRequest';
-import { readPurposeBudgets } from '../runtime/purposeBudgets';
-import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
-import { rowFor } from '../runtime/settingsRows';
-import type { PricingDeps } from '../runtime/pricingAdmission';
+import { readAdmissionConfiguration, readAdmissionModule } from './admission/admissionConfiguration';
+import { readAdmissionSettings, type SettingsRead } from './admission/newWorkGate';
+import { AGENT_TURN_REQUEST_FORMAT } from './provider/providerRequest';
+import { readPurposeBudgets } from './settings/purposeBudgets';
+import { RESEARCH_THRESHOLDS_KEY } from './research/researchAdmission';
+import { rowFor } from './settings/settingsRows';
+import type { PricingDeps } from './admission/pricingAdmission';
 import { CORE_PATH_SETTING, coreSetting, HISTORY_ITEMS } from './chat';
 import { startThresholdCredits, turnPolicy } from './policy';
 import { chatQuote, QuoteError, type ChatQuote } from './quote';
@@ -99,7 +99,7 @@ export function mentorPolicy(catalog: MentorCatalog,
   const resumedRows = left?.paidTools && research ? Math.min(BENCHMARK_ROWS, input.left!.paidTools) : 0;
   // turn_mentor_context reads its input from policy.mentor (the per-kind hook of turn_open).
   const priced = onlyOrganizer ? organizer! : mentor;
-  return { ...turnPolicy({ q: mentor.q, multiplier: priced.multiplier, modelUpperUsd: priced.upperUsd,
+  return { ...turnPolicy({ topUp: true, q: mentor.q, multiplier: priced.multiplier, modelUpperUsd: priced.upperUsd,
     startThresholdCredits: catalog.startCredits, pricing: mentor.pricing,
     limits: onlyOrganizer ? { model: 1, paidTools: 0, freeTools: 0, decisions: 0 }
       : left ? { ...left, ...(resumedRows ? { toolRows: resumedRows } : {}) } : full,

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_FUSION_SETTINGS, fusionSettings, readFusionSettings } from './settings';
-import { PURPOSE_OUTPUT_CAP } from '../runtime/purposeBudgets';
+import { PURPOSE_OUTPUT_CAP } from '../turn/settings/purposeBudgets';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const enabled = { ...DEFAULT_FUSION_SETTINGS, review: { ...DEFAULT_FUSION_SETTINGS.review, enabled: true,

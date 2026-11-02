@@ -12,7 +12,7 @@ import { Redis } from '@upstash/redis';
 import { RateLimitError } from '../lib/rateLimitError';
 import { logger } from '../lib/logger';
 import { redisEnvironment } from './redisEnvironment';
-import { runtimeRateLimitsSchema, type RuntimeRateLimits } from './runtime/rateLimitSettings';
+import { runtimeRateLimitsSchema, type RuntimeRateLimits } from './turn/settings/rateLimitSettings';
 
 // ============================================
 // 类型定义

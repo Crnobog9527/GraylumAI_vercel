@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { openRouterBound } from '../bill2/openRouterPolicy';
-import { createRuntimeBudget, RUNTIME_WORK_MS } from '../runtime/budget';
-import { modelCall, type ModelCall } from './call';
+import { openRouterAdapter } from './provider/openRouterAdapter';
+import { openRouterBound } from './provider/openRouterPolicy';
+import { createRuntimeBudget, RUNTIME_WORK_MS } from './settings/budget';
+import { modelCall, TurnStop, type ModelCall } from './call';
 import type { CounterStore } from './limiter';
-import type { TurnDatabase } from './db';
+import { TurnDatabaseError, type TurnDatabase } from './db';
 
 const limits = { providerSlug: 'synthetic', contextTokens: 10000, promptUsdPerMillion: '2', completionUsdPerMillion: '10', requestUsd: '0' };
 const identity = { provider: 'openrouter' as const, account: 'test', model: 'test/model', protocol: 'openrouter-chat-v1' as const,
@@ -81,6 +81,14 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
       expect(transport).not.toHaveBeenCalled();
       expect(kinds(h.writes)).toEqual(writes);
     }
+  });
+
+  it('the stop-loss refusing a model call mid-turn is a stop that survives the SDK, and nothing is sent', async () => {
+    const h = harness({ begin: () => { throw new TurnDatabaseError('STOP_LOSS_REACHED'); } }), transport = vi.fn();
+    const failure = await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body).catch(e => e);
+    expect(failure).toBeInstanceOf(TurnStop);
+    expect(failure.code).toBe('STOP_LOSS_REACHED');
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it('only an attempt proven unsent is retried, as a new row; a request the whitelist refuses is not', async () => {

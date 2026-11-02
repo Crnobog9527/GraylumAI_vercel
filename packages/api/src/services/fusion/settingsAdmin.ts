@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
-import { admissionDeadline } from '../runtime/admissionLimits';
-import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
-import { realRuntimeEnvironment } from '../runtime/productionEnvironment';
-import { loadProductionPolicy } from '../runtime/productionPolicy';
-import { parseStagingPolicy, type StagingPolicy } from '../runtime/stagingPolicy';
+import { admissionDeadline } from '../turn/admission/admissionLimits';
+import { stagingRuntimeWindow } from '../turn/settings/stagingEnvironment';
+import { realRuntimeEnvironment } from '../turn/settings/productionEnvironment';
+import { loadProductionPolicy } from '../turn/settings/productionPolicy';
+import { parseStagingPolicy, type StagingPolicy } from '../turn/settings/stagingPolicy';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type FusionPhase } from './models';
 import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readReviewSkill, resolveReviewSkill } from './reviewPrompts';

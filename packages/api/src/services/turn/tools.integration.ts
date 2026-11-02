@@ -6,9 +6,9 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
-import { clearCatalogCache, withCatalogRequest } from '../runtime/catalogCache';
-import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from '../runtime/libraryAdmission';
-import type { PositioningClassifier } from '../runtime/positioningGate';
+import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
+import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from './admission/libraryAdmission';
+import type { PositioningClassifier } from './admission/positioningGate';
 import type { VendorCalls } from '../research/runtime/subcall';
 import type { ResearchCallResult } from '../research/vendors/types';
 import { runResumedTurn } from './resumeTurn';
@@ -434,10 +434,13 @@ it('RUNTIME: CORE-PATH-V2 V2-10: paused after the model asked for a search and b
   const f = await setup(), bodies: string[] = [];
   const parallel = vi.fn(async () => searchResult());
   const asking = searchingModel(bodies);
-  // The freeze runs out while the first reply comes back: the search's turn_call_begin finds nothing left and pauses the turn there.
+  // The balance runs out while the first reply comes back: the search's turn_call_begin finds nothing left and pauses the turn there.
   const first: typeof fetch = async (url, init) => {
     const response = await asking(url, init);
-    if (bodies.length === 1) await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+    if (bodies.length === 1) {
+      await db.query("update turns set reserved_credits=0 where actor_id=$1 and state='running'", [f.actor]);
+      await db.query('update profiles set credits=0 where id=$1', [f.actor]); // nothing left to top up from (Owner 11-01)
+    }
     return response;
   };
   const out = await turn(f, first, suppliers(parallel));

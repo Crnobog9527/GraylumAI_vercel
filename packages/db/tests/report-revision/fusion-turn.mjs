@@ -134,7 +134,7 @@ export async function runFusionTurn({db,report,Client,connectionString}) {
       JSON.stringify({start:{...fields,config}})),/FUSION_REVIEW_STALE/);
     await assert.rejects(compareOn([{sourceVersionId:erased.versionId}]),/FUSION_COMPARE_SOURCE_REVOKED/);
     assert.equal((await db.query('SELECT count(*)::int n FROM fusion_reviews WHERE actor_id=$1',[erased.actor])).rows[0].n,0);
-    assert.equal((await db.query('SELECT count(*)::int n FROM turns WHERE actor_id=$1',[erased.actor])).rows[0].n,0);
+    assert.equal((await db.query('SELECT count(*)::int n FROM turns WHERE actor_id=$1 AND kind<>\'report\'',[erased.actor])).rows[0].n,0);
     assert.equal(await wallet(db,erased.actor),5000);
     report.checks.push('turn path: a refused open (credits below price + hold, not Gold, no turn path) leaves no review and no freeze; the read before it refuses a stale version; a source erased after that read is refused by the open itself (jury and compare)');
   }
@@ -159,7 +159,7 @@ export async function runFusionTurn({db,report,Client,connectionString}) {
         await first.query('COMMIT');
         assert.match((await racing).e ?? '', /TURN_COMPARE_ACTIVE|FUSION_REVIEW_ACTIVE/);
       } finally { await first.end(); await second.end(); }
-      assert.equal((await db.query('SELECT count(*)::int n FROM turns WHERE actor_id=$1',[f.actor])).rows[0].n,1);
+      assert.equal((await db.query('SELECT count(*)::int n FROM turns WHERE actor_id=$1 AND kind<>\'report\'',[f.actor])).rows[0].n,1);
     }
     report.checks.push('turn path: a review and a compare started at once in two conversations of one account: the second is refused, either order');
   }

@@ -1,10 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { FrozenCall } from '../bill2/service';
+import type { FrozenCall } from '../turn/provider/service';
 
 /** The review record (0236). Progress lives on the server; every write takes the review row lock first. */
 const uuid = z.string().uuid();
+/** Ids the database derives with md5(...)::uuid (a turn-path review's step groups and calls) carry no version or variant bits, so
+ * the strict RFC check of uuid() refuses most of them. Their shape is checked, not their version. */
+const derivedId = z.guid();
 export const reviewState = z.enum(['running', 'paused', 'stopped', 'interrupted', 'revision_failed', 'incomplete', 'completed']);
 export type ReviewState = z.infer<typeof reviewState>;
 export const ENDED_STATES: ReadonlySet<ReviewState> = new Set(['stopped', 'interrupted', 'revision_failed', 'incomplete', 'completed']);
@@ -17,7 +20,7 @@ const reviewView = z.object({
   attempt: z.number().int().min(1), draftId: uuid, sourceVersionId: uuid, sourceSessionId: uuid,
   versionHash: z.string(), materials: z.record(z.string(), z.record(z.string(), z.object({ value: z.unknown(), status: z.unknown() }))),
   materialsHash: z.string().regex(/^[a-f0-9]{64}$/), config: z.record(z.string(), z.unknown()),
-  steps: z.array(z.object({ round: z.number(), phase: z.string(), attempt: z.number(), groupId: uuid, stepKey: z.string(),
+  steps: z.array(z.object({ round: z.number(), phase: z.string(), attempt: z.number(), groupId: derivedId, stepKey: z.string(),
     claimedAt: z.string() })),
   outcome: z.unknown().nullable(), revisionId: uuid.nullable(), endedAt: z.string().nullable(),
   /** The user's per-section choice (0256), once made. */
@@ -26,7 +29,7 @@ const reviewView = z.object({
   fee: reviewFee.nullable().optional(),
   /** CORE-PATH-V2 V2-7b: the jury turn of a review on the turn path (null on the BILL2 path). */
   turnId: z.number().int().positive().nullable().optional(),
-  calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
+  calls: z.array(z.object({ groupId: derivedId, runId: derivedId, callId: derivedId, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
     verdict: z.string().nullable(), settled: z.boolean(), state: z.string(),
     dispatchedAt: z.string().nullable().optional(), settledAt: z.string().nullable().optional(),
     /** The turn call sequence (turn path only). */

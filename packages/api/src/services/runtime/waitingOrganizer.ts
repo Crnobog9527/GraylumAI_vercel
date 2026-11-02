@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
-import {StagingAccessError} from './stagingErrors';
+import {StagingAccessError} from '../turn/settings/stagingErrors';
 import type {ResumeInput} from './paygRuntime';
 
 const waitingOrganizer = z.object({

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildMultiplierSnapshot, multiplierForCall, multiplierForProviderCall, readMultiplierSnapshot } from './billingUnit';
-import { weightedAggregateCredits } from './bill2/weighted';
+import { weightedAggregateCredits } from './turn/admission/weighted';
 import {
   parseProviderPrices,
   providerPricesView,

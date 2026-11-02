@@ -1,19 +1,19 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
+import { openRouterAdapter } from './provider/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { TOPIC_WORKSPACE_INSTRUCTION } from '../opc/topicInstructions';
-import { readAdmissionConfiguration, readAdmissionModule } from '../runtime/admissionConfiguration';
-import { assertRuntimeRequestCapacity, runtimeScopeInput } from '../runtime/context';
-import { readAdmissionSettings } from '../runtime/newWorkGate';
-import { freezeSharedPromptCache } from '../runtime/promptCache';
-import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
-import { readPurposeBudgets } from '../runtime/purposeBudgets';
-import { replySettingInstructions } from '../runtime/replyLanguage';
-import { RESEARCH_THRESHOLDS_KEY } from '../runtime/researchAdmission';
-import { runRuntime } from '../runtime/runner';
-import { rowFor } from '../runtime/settingsRows';
+import { readAdmissionConfiguration, readAdmissionModule } from './admission/admissionConfiguration';
+import { assertRuntimeRequestCapacity, runtimeScopeInput } from './agent/context';
+import { readAdmissionSettings } from './admission/newWorkGate';
+import { freezeSharedPromptCache } from './provider/promptCache';
+import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from './provider/providerRequest';
+import { readPurposeBudgets } from './settings/purposeBudgets';
+import { replySettingInstructions } from './agent/replyLanguage';
+import { RESEARCH_THRESHOLDS_KEY } from './research/researchAdmission';
+import { runRuntime } from './agent/runner';
+import { rowFor } from './settings/settingsRows';
 import { swallow } from '../../lib/swallow';
 import { modelCall, TurnStop } from './call';
 import { CLOSES, GATE_CODES, HISTORY_ITEMS, readCoreConfig, type ChatDeps } from './chat';
@@ -104,7 +104,8 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
     const shared = withBrandIdentity(skill, guard);
     const instructions = shared + '\n' + TOPIC_WORKSPACE_INSTRUCTION + '\n'
       + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage));
-    const current = runtimeScopeInput(input.text, material);
+    // The date, for the plan's calendar days; in the message, so the shared prompt stays cached.
+    const current = runtimeScopeInput(`Today is ${new Date().toISOString().slice(0, 10)}.\n\n${input.text}`, material);
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
       quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: false });
     const request: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: [], network: 'deny',

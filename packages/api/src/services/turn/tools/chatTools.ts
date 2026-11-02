@@ -6,17 +6,17 @@ import type { CanonicalAccount } from '../../research/tools/accountLinks';
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
 import { platformSecretReader, type SecretReader } from '../../research/runtime/secrets';
 import type { VendorCalls } from '../../research/runtime/subcall';
-import { researchToolBytes } from '../../runtime/researchAdmission';
-import { FREE_CHAT_RESEARCH } from '../../runtime/researchTurn';
-import { chatResearchEnabled } from '../../runtime/freeChatResearch';
-import { admitLibraryRetrieval } from '../../runtime/libraryAdmission';
+import { researchToolBytes } from '../research/researchAdmission';
+import { FREE_CHAT_RESEARCH } from '../research/researchTurn';
+import { chatResearchEnabled } from '../research/freeChatResearch';
+import { admitLibraryRetrieval } from '../admission/libraryAdmission';
 import { libraryAddendum, WORKSPACE_CONTEXT_INSTRUCTIONS, WORKSPACE_STRATEGY_INSTRUCTIONS,
-  WORKSPACE_STRATEGY_RESULT_BYTES } from '../../runtime/primaryInstructions';
-import { OWN_POSTS_INSTRUCTIONS, OWN_POSTS_RESERVE } from '../../runtime/workspacePosts';
-import { loadSkillToolBytes } from '../../runtime/loadSkillTool';
-import { skillCatalogInstructions, type SkillCatalogEntry } from '../../runtime/skillCatalog';
-import type { ConfigurationRows } from '../../runtime/settingsRows';
-import type { RuntimeTool } from '../../runtime/runner';
+  WORKSPACE_STRATEGY_RESULT_BYTES } from '../agent/primaryInstructions';
+import { OWN_POSTS_INSTRUCTIONS, OWN_POSTS_RESERVE } from '../agent/workspacePosts';
+import { loadSkillToolBytes } from '../skills/loadSkillTool';
+import { skillCatalogInstructions, type SkillCatalogEntry } from '../skills/skillCatalog';
+import type { ConfigurationRows } from '../settings/settingsRows';
+import type { RuntimeTool } from '../agent/runner';
 import { TurnStop } from '../call';
 import type { CounterStore } from '../limiter';
 import type { TurnClients } from '../db';
@@ -35,7 +35,7 @@ import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
  */
 export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
-  skills?: (actorId: string, pin?: WorkSkill) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills }>;
+  skills?: (actorId: string, pin?: WorkSkill) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills; contentSource?: 'script' | 'storyboard' }>;
   /** The confirmed voice of the catalog's writing Skills: a per-user system paragraph, and the version turn_open freezes. */
   voice?: (actorId: string, catalog: SkillCatalogEntry[]) => Promise<{ text: string; versionId?: string } | undefined>;
   /** Offer read_source over the user's own library (library_turn_read through the read client) while the two library switches are
@@ -60,7 +60,7 @@ export type ChatToolsSetup = {
   /** Frozen into the turn: revoking this version stops the turn (voice tombstone). */
   voiceVersionId?: string;
   /** What the user chose for this message, as a line for the model, or the code that refuses it before anything opens. */
-  selection(chosen: ChatSelection): { note: string; skill?: WorkSkill } | { refused: string };
+  selection(chosen: ChatSelection): { note: string; skill?: WorkSkill; contentSource?: 'script' | 'storyboard' } | { refused: string };
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean; workspaceContext?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
@@ -146,7 +146,9 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
         if (!plan.available.includes('read_source')) return { refused: 'TURN_REFERENCES_UNAVAILABLE' };
         note += `\nThe user attached ${chosen.references.map((_item, index) => `doc-${index + 1}`).join(', ')}: read them with read_source before answering.`;
       }
-      return { note, ...(skill ? { skill } : {}) };
+      // Only the pinned Skill: the saved content a derived work method reads (workflow.yaml contentSource).
+      const contentSource = skill && skill.moduleId === input.pin?.moduleId ? skills?.contentSource : undefined;
+      return { note, ...(skill ? { skill } : {}), ...(contentSource ? { contentSource } : {}) };
     },
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),

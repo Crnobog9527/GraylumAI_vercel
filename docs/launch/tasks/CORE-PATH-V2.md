@@ -186,6 +186,8 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 
 ### 2.5 计费：一轮冻结一次、结算一次
 
+> 2026-11-01 更新：下表的"开轮冻结一次"已被 Owner 决定取代（MASTER_PLAN 2.1）：`chat`、`mentor` 开轮只冻一次调用，`turn_call_begin` 补冻。
+
 沿用 BILL-PAYG 第七版的全部数学（q、m、U、L、G=ceil(q×U×m)、H=min(G,A)、名义费用 n、W、N、C+E=N 守恒），只改"什么时候写库"：
 
 | 现在（v2 逐调用） | 主路径 v2 |
@@ -205,6 +207,10 @@ Redis 继续只做限流，不放状态（10-25 R1 结论不变）。
 | 积分记录只显示实际变动（10-25） | 冻结不进 `credit_transactions`，记在 `turns.reserved_credits`；收轮写一笔净扣（D）与一笔平台承担（E，`kind='platform_absorb'`） |
 
 #### 2.5.1 每日止损：开轮预占、收轮回补（回应 #1508 审查 P1）
+
+> 2026-11-01 更新（Owner"同意两项"，MASTER_PLAN 2.1，迁移 0453）：`chat`、`mentor` 开轮只预占 `holdUsd`（一次模型 + 最大一个付费工具 + 定位检查的上界），不再预占 U_turn；`turn_call_begin` 在本次上界 U_i 没被覆盖时补预占，步骤和判定与下面的开轮三步相同（先锁自己的桶、再读开轮那天的总和、再查 s + B ≤ L），超限 `STOP_LOSS_REACHED`，回合按失败全退收轮。`turns.reserved_usd` 是已预占累计，收轮和恢复链按它回补。固定价 kind 不变。下面的证明仍成立，把"开轮事务"读成"开轮或补预占事务"，`U_fast` 读成**一个事务最多新增的预占**（不小于 `holdUsd` 和普通桶 kind 的 U_turn；0453 之前按 2.83 美元一次调用已超过配置的 1.5，证明实际不成立）；每次调用发出前都已预占，所以 `spent ≤ reserved` 不变。
+>
+> 日限 L、预留带 B、并发轮数的关系：一轮在途占 `holdUsd`（staging 约 3 美元），同时能跑的轮数 ≈ (L − B − 当天已花) / holdUsd。staging P=8、U_fast=3、U_big=5 时 B=26，L=100 约 24 轮；L≥10×B 要求 L≥260。压测在途 N 轮需要 L ≥ 3N + 26 + 当天已花。
 
 旧设计只在收轮累加，开轮看不到在途回合，并发时超额没有上界。改法：
 
@@ -305,7 +311,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
 | 怎么做 | `atomic_pre_deduct(actor, H, …)`：**真的从 `profiles.credits` 里扣掉**（`credits = balance_before − p_amount`），`billing_history` 留预扣记录 | `daily_spend.reserved_usd += U_turn`：只是一个计数，不碰任何余额 |
 | `turns` 里记什么 | `reserved_credits = H`：**只是"已经预扣了多少"的记录**，收轮时用来算退多少（退 H−D）；**可用余额永远不再减它** | `policy.upper_usd = U_turn`：收轮回补用 |
 | 可用余额 A 怎么算 | 现有 `credit_available`：`profiles.credits` − 隔离的赠送余量 − 退款包 hold − 拒付 pending hold（现有算法一条不改）。因为预扣已经在 `credits` 里扣掉了，**不减 `turns.reserved_credits`**；否则余额 1000、冻结 400 会被算成 200 而不是 600，同一账号的其他会话会被错误拒绝 | 不参与 A |
-| 回合中途"够不够" | 只看 `turns` 自己的行：`H − Σ已记名义积分 ≥ min(下一次调用上界, L)` 否则 `paused(waiting_credits)`；**不读 `profiles`** | `turn_call_begin` 不再碰 `daily_spend`（预占在开轮一次做完） |
+| 回合中途"够不够" | 只看 `turns` 自己的行：`H − Σ已记名义积分 ≥ min(下一次调用上界, L)` 否则 `paused(waiting_credits)`；**不读 `profiles`** | 已覆盖本次上界的调用不碰 `daily_spend`；没覆盖才在 `turn_call_begin` 补预占（Owner 2026-11-01，见 2.5.1 更新），超限止损拒绝 |
 | 收轮 | `turn_settle_credits`：结算 D、退还 H−D 到 `profiles.credits`，守恒 `restored + D = H` | `spent += n_total, reserved −= U_turn` |
 | 崩溃/未知成本 | 该笔份额留在预扣里（2.5.2），`turns.reserved_credits` 不变，直到恢复任务结算 | 同 2.5.2 |
 
@@ -613,7 +619,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
   （`runtime_session_names` 并入 `sessions.title`。）
 - 函数：`runtime/` 111 个中除 `runtime_start`（改写为建会话）外全部；`billing/` 102 个中 `bill2_*` 全部（`atomic_*`、`credit_*` 账本函数保留）；
   `fusion/` 63 个中计费与推进相关的（产物读写保留）；`report/` 的 `report_fee_*`、`report_stop`、`report_admission_check`；`other/` 中 `catalog_versions_snapshot` 保留。
-  目标：`packages/db/functions` 从 939 降到约 450（主路径相关从约 330 降到约 20）。
+  验收（Owner 2026-11-02 "同意改口径"，取代原"函数数从 939 降到约 450"）：待删名单清零，保留函数不引用待删对象，闭包棘轮不放宽；不再按函数总数验收（现状 1023 个，只删名单剩约 815 个）。
 - Node：`services/runtime/` 315 个文件和 `services/bill2/` 56 个文件整体删除，新目录 `services/turn/`（目标 ≤ 60 个文件，每个 ≤ 500 行）；
   `routers/runtime.ts`、`fusionReview.ts`、`fusionCompare.ts` 的计费部分改调 `services/turn`。
 
@@ -725,7 +731,7 @@ V2-2 → V2-3 → V2-4 ─┬→ V2-5 ──┐
 | 提示缓存 #1502（导师历史标记 + SKILL.md 断点） | **按新路径改写**（V2-5）：三个断点规则不变，hostTurnContext/材料位置、历史投影占位算法按 2.9 节第 3、5 条重写；`hostTurnAdmission.test.ts` 的断言作为 V2-5 验收原样迁入。原 PR 关闭 |
 | #1503 复核脚本 | 改读 `turn_calls` 缓存 token 列后合并（V2-13 之前） |
 | #1504 `tool_choice:"none"` 放行 | 已合并；V2-5 开场轮对齐依赖它 |
-| 运营教练复盘 #1481（迁移 0407）、#1483 | 主路径完成后以 `kind=review` 接核：#1481 的数据地基（结算事实、实验账本）与主路径无关，可在 V2-2 之后由总控择机上库合并；#1483 要改成不走 `REVIEW_PROMPT`+旧 Runtime，而是 V2-6 的"固定 Skill"入口，等 V2-12 后改写 |
+| 运营教练复盘 #1481（迁移 0457）、#1483 | 主路径完成后以 `kind=review` 接核：#1481 的数据地基（结算事实、实验账本）与主路径无关，可在 V2-2 之后由总控择机上库合并；#1483 要改成不走 `REVIEW_PROMPT`+旧 Runtime，而是 V2-6 的"固定 Skill"入口，等 V2-12 后改写 |
 | 图片生成规划 | 上线后；按新 `kind=image` 接入，冻结额按张数 |
 | ARCH-FIX 未完成的线 | 与主路径重叠的（线 C 工具参数、线 D 卡住回合收尾、线 A 入口限流）在 V2-6/V2-8/V2-4 内完成并在 PR 标题带 ARCH-FIX；不重叠的（线 B 上传存储、线 E 订阅积分隔离与对账、线 G 收据保留期改读 `turn_calls`）照原计划 |
 | REL-1 核心 12 项未通过的（10-27 清单） | 1⑤ 报告停止退款与确认、1② 兜底 B、7② 长对话删除、9③ >500 拒绝、10⑤ 周复盘：前四项由 V2-7a/V2-5/V2-9/V2-7b 直接解决并在 V2-11 e2e 覆盖；周复盘随复盘任务上线后 |

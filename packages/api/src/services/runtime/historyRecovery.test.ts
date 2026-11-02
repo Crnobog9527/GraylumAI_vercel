@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
 import {recoverOpenRouterHistory,assertLatestHistoryRetained} from './historyRecovery';
-import {SOURCE_TOOL_NAMES} from './agentTools';
-import {projectOpenRouterItemsForSizing} from './openRouterHistory';
+import {SOURCE_TOOL_NAMES} from '../turn/agent/agentTools';
+import {projectOpenRouterItemsForSizing} from '../turn/provider/openRouterHistory';
 const user={role:'user',content:'Synthetic question'};
 const answer={role:'assistant',content:'Synthetic answer'};
 const invalid={role:'assistant',content:[{type:'output_text',text:'Synthetic answer',providerData:{plugins:[]}}]};

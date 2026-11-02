@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { beginPaygExecution, type RuntimeExecution } from './paygResume';
-import { StagingAccessError } from './stagingErrors';
+import { StagingAccessError } from '../turn/settings/stagingErrors';
 const id = '10000000-0000-4000-8000-000000000001';
 function fixture(state = 'waiting_credits', staging = false) {
   const execution = { executionId: id, state, cursor: 3, epoch: 2, remainingCalls: 1,

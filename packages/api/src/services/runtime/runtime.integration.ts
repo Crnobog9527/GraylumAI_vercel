@@ -8,14 +8,14 @@ import { randomUUID, createHash } from 'node:crypto';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { PostgresSession } from './session';
+import { PostgresSession } from '../turn/agent/session';
 import {assertLongSessionPerformance} from './runtimePerformance.integration';
-import { runRuntime } from './runner';
+import { runRuntime } from '../turn/agent/runner';
 import {readRuntimeView,retainedOutputReason} from './view';
 import {readNativeRuntimeView} from './nativeView';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
-import './catalogCache.integration';
+import '../turn/settings/catalogCache.integration';
 import './payg.integration';
 import './reliability.integration';
 import './nativeStopView.integration';
@@ -24,11 +24,11 @@ import {registerReportTests} from '../report/report.integration';
 import {registerPaygHostTests} from './paygHost.integration';
 import './gateWiring.integration';
 import {registerAdmissionGateTests} from './admissionGate.integration';
-import {createRuntimeBudget,withRuntimeBudget} from './budget';
+import {createRuntimeBudget,withRuntimeBudget} from '../turn/settings/budget';
 import {runtimeActor} from './actor';
-import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';
+import {postgresJsonbBytes,assertFrozenPayloads} from '../turn/provider/payloadSize';
 import { runtimeAdmissionService } from './admission';
-import { activateRuntimeCandidate } from './matching';
+import { activateRuntimeCandidate } from '../turn/agent/matching';
 import {clearSkillResourceCache,packageHash,sha256} from '../skills/loader';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { workbenchService } from '../artifacts/workbench';
@@ -37,9 +37,9 @@ import { publishSkillPackage } from '../skills/publication';
 import { chromium } from '../../../../../apps/web/node_modules/@playwright/test';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { authoritativeBilling } from '../bill2/service';
-import {loadStagingPolicy,loadStagingRecoveryPolicy,assertStagingReadAccess} from './stagingPolicy';
+import { openRouterAdapter } from '../turn/provider/openRouterAdapter';
+import { authoritativeBilling } from '../turn/provider/service';
+import {loadStagingPolicy,loadStagingRecoveryPolicy,assertStagingReadAccess} from '../turn/settings/stagingPolicy';
 import {stagingTransport} from './stagingTransport';
 import {runtimeRouter} from '../../routers/runtime';
 import {opcRouter} from '../../routers/opc';
@@ -2451,7 +2451,7 @@ it('RUNTIME: MENTOR-BUDGET: only the service role can write and read back the ex
 });
 
 it('RUNTIME: price renewal uses real version conditions and preserves a concurrent administrator save', async () => {
- const { admitPricing, PRICE_SNAPSHOT_MAX_AGE_MS } = await import('./pricingAdmission');
+ const { admitPricing, PRICE_SNAPSHOT_MAX_AGE_MS } = await import('../turn/admission/pricingAdmission');
  const { readOpenRouterPricing } = await import('../models/openRouterCatalog');
  const id=randomUUID(), model='synthetic/pricing', now=Date.now();
  const config=pricingConfig(model,'synthetic','1','2');
@@ -2476,8 +2476,8 @@ it('RUNTIME: price renewal uses real version conditions and preserves a concurre
  await expect(admitPricing(admin,[{...quote,providerLimits:{...quote.providerLimits,promptUsdPerMillion:'0.9'}}])).rejects.toThrow('RUNTIME_PRICE_INCREASED');
 },30000);
 
-vi.mock('./newWorkGate', async importOriginal => ({
- ...await importOriginal<typeof import('./newWorkGate')>(),
+vi.mock('../turn/admission/newWorkGate', async importOriginal => ({
+ ...await importOriginal<typeof import('../turn/admission/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 
@@ -2531,7 +2531,7 @@ it('RUNTIME: automatic pending inventory isolates actors, covers unknown live ca
  const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'a'.repeat(64)};
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
- const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ const {fixtureEvidence}=await import('../turn/provider/fixtureAdapter');
  const evidence=fixtureEvidence(JSON.stringify({id:'synthetic-auto-'+c.id,model:'runtime-m',final:false,
   cost:null,currency:'USD',coverage:'request_total'}),call,'response');
  await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_evidence:evidence});
@@ -2558,7 +2558,7 @@ it('RUNTIME: admission and background recovery share a claim and settle a synthe
  const call={...f.billing.callPolicy[0],protocol:'fixture-cost-v1' as const,phase:'ordinary',requestHash:'b'.repeat(64)};
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
- const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ const {fixtureEvidence}=await import('../turn/provider/fixtureAdapter');
  const raw=(cost:string|null,final:boolean)=>JSON.stringify({id:'synthetic-recovery-'+c.id,
   model:'runtime-m',final,cost,currency:'USD',coverage:'request_total'});
  await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,
@@ -2587,7 +2587,7 @@ it('RUNTIME: automatic recovery finishes a durable cost receipt after the origin
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:e.runId,p_sequence:1,p_payload:call});
  await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,p_token:c.dispatchToken});
  await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:e.executionId});
- const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ const {fixtureEvidence}=await import('../turn/provider/fixtureAdapter');
  await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:e.runId,p_call_id:c.id,
   p_evidence:fixtureEvidence(JSON.stringify({id:'synthetic-durable-'+c.id,model:'runtime-m',final:true,
    cost:'0.003',currency:'USD',coverage:'request_total'}),call,'lookup')});
@@ -2609,7 +2609,7 @@ it('RUNTIME: insufficient credits recovers an old hold then admits the same requ
  const c=await rpc('bill2_claim',{p_actor_id:f.actorId,p_run_id:old.runId,p_sequence:1,p_payload:call});
  await rpc('bill2_dispatch',{p_actor_id:f.actorId,p_run_id:old.runId,p_call_id:c.id,p_token:c.dispatchToken});
  await rpc('runtime_cancel',{p_actor_id:f.actorId,p_execution_id:old.executionId});
- const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+ const {fixtureEvidence}=await import('../turn/provider/fixtureAdapter');
  await rpc('bill2_record',{p_actor_id:f.actorId,p_run_id:old.runId,p_call_id:c.id,
   p_evidence:fixtureEvidence(JSON.stringify({id:'synthetic-admission-'+c.id,model:'runtime-m',final:true,
    cost:'0',currency:'USD',coverage:'request_total'}),call,'lookup')});
@@ -2643,7 +2643,7 @@ it.each(['durable-response','unknown-lookup','settled-lookup-only'] as const)(
  'RUNTIME: C2 fresh PAYG host recovers stop after original host loss (%s)',async scenario=>{
   // Reuse the local SQL PAYG fixture: no configured provider, real account or external request.
   const {createFixture,claim}=await import(new URL('../../../../db/tests/payg/fixture.mjs',import.meta.url).href);
-  const {fixtureEvidence}=await import('../bill2/fixtureAdapter');
+  const {fixtureEvidence}=await import('../turn/provider/fixtureAdapter');
   const f=await createFixture(db,{lookupSupported:true});
   f.claimPayload.phase='ordinary';
   const policy=f.payload.callPolicy[0];policy.payg.purposes=['ordinary'];

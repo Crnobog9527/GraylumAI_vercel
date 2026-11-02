@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {projectOpenRouterItemsForSizing} from './openRouterHistory';
+import {projectOpenRouterItemsForSizing} from '../turn/provider/openRouterHistory';
 
 export function latestHistoryTurn(history: unknown[]): unknown[] {
   const start = history.findLastIndex(item => (item as {role?: unknown} | null)?.role === 'user');

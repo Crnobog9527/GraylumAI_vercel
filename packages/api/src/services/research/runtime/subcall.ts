@@ -6,9 +6,8 @@
 // without its BILL2 link, and an unsent one is cancelled so a stable discovery cursor can move to a successor.
 // Nothing is sent unless every earlier step passed. A sent request is never resent or switched to another supplier.
 import { createHash } from 'node:crypto';
-import { BillingClaimRejection } from '../../bill2/claimFailure';
-import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy } from '../../bill2/toolBilling';
-import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
+import { BillingClaimRejection } from '../../turn/provider/claimFailure';
+import { toolClaimPayload, toolResultEvidence, type ToolCallPolicy, type ToolClaimPayload } from '../../turn/provider/toolBilling';
 import { callFirecrawl } from '../vendors/firecrawl';
 import { callParallel, type ParallelMode } from '../vendors/parallel';
 import { callTikhub, type TikhubCall } from '../vendors/tikhub';
@@ -30,6 +29,21 @@ export interface VendorCalls {
   firecrawl: typeof callFirecrawl;
 }
 const REAL_VENDORS: VendorCalls = { tikhub: callTikhub, parallel: callParallel, firecrawl: callFirecrawl };
+
+/** The billing steps of one subcall: the turn core's own ledger (turn/tools/benchmark) or the BILL2 steps (bill2/toolSubcall, publish monitor). */
+export type ToolClaim =
+  | { state: 'claimed'; callId: string; token: string }
+  | { state: 'waiting_credits' }
+  /** The same sequence was claimed before (a replay): it must not be sent again from here. */
+  | { state: 'replayed'; callId: string };
+
+export interface ToolSubcallBilling {
+  readonly runId: string;
+  claim(sequence: number, payload: ToolClaimPayload): Promise<ToolClaim>;
+  /** true only when this process may send the request now. */
+  dispatch(callId: string, token: string): Promise<boolean>;
+  record(callId: string, evidence: ReturnType<typeof toolResultEvidence>): Promise<{ accountClosed: boolean; contentDeleted: boolean }>;
+}
 
 /** Host-owned evidence for one subcall: a research operation bound to the answer at creation (0263). */
 export interface EvidencePort {

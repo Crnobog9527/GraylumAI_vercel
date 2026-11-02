@@ -167,6 +167,12 @@ export const MIN_BUSINESS_REASON = 30;
 export const thinReason = (reason: string) => [...reason.trim()].length < MIN_BUSINESS_REASON
   || /^(没有|缺乏|缺少|无)(任何)?(依据|来源|证据|数据)[。.]?$/.test(reason.trim());
 
+/** The first `max` characters (whole code points) of a text, marked when cut. */
+const short = (text: string, max: number) => {
+  const chars = [...text];
+  return chars.length <= max ? text : max === 0 ? '' : `${chars.slice(0, max).join('')}…`;
+};
+
 /** What the summary sees of a review started with the evidence check: the issues merged by code (each with the seats that
  * raised it and its verified evidence), the key decisions with every seat's view, and a plain note of what was held back. */
 export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewContext, merge: MergeResult,
@@ -177,7 +183,12 @@ export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewCont
   const report = reportBodyText(context.report);
   // Trimming never drops a verified critical or major issue: level 2 drops minor ones, level 3 also keeps only one view per issue.
   const kept = merge.issues.filter(issue => level >= 2 ? issue.severity !== 'minor' : true)
-    .map(issue => level >= 3 ? { ...issue, views: issue.views.slice(0, 1) } : issue);
+    .map(issue => level >= 3 ? { ...issue, views: issue.views.slice(0, 1) } : issue)
+    // Levels 4–5 keep every issue but shorten its texts, so the request is bounded by the issue count rather than by how long
+    // the reviewers wrote (a long opinion full of unmergeable severe issues is otherwise too large at level 3).
+    .map(issue => level < 4 ? issue : { ...issue, quotes: issue.quotes.slice(0, 1).map(quote => short(quote, level >= 5 ? 0 : 60)).filter(Boolean),
+      views: issue.views.map(view => ({ reviewer: view.reviewer, perspective: short(view.perspective, 20),
+        problem: short(view.problem, level >= 5 ? 60 : 160), suggestion: short(view.suggestion, level >= 5 ? 60 : 160) })) });
   const held = merge.dropped.length + Object.values(merge.droppedEarlier).reduce((total, count) => total + count, 0);
   const cut = merge.issues.length - kept.length;
   const decisions = DECISIONS.map(decision => ({ decision, views: opinions.flatMap(({ reviewer, opinion }) =>
@@ -189,7 +200,7 @@ export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewCont
       // Already merged by code: one entry per issue, with the seats that raised it. Quotes were checked against the report.
       issues: kept.map(issue => ({ section: issue.section, severity: issue.severity, kind: issue.kind, raisedBy: issue.reviewers,
         quotes: issue.quotes, anchor: issue.anchor, views: issue.views })),
-      note: cut > 0 ? `为了放得下，另有 ${cut} 条次要意见没有交给你。` : held === 0 ? '三位评审提出的意见都已按章节合并，没有被拦下的。'
+      note: level >= 4 ? '为了放得下，每条意见的文字已被缩短，请以章节和严重程度为准。' : cut > 0 ? `为了放得下，另有 ${cut} 条次要意见没有交给你。` : held === 0 ? '三位评审提出的意见都已按章节合并，没有被拦下的。'
         : `评审另外提了 ${held} 条意见，因为没有核对得上的原文引用，没有交给你。${kept.length ? '' : '下面没有可用的意见清单，只按关键决定判断。'}` }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }

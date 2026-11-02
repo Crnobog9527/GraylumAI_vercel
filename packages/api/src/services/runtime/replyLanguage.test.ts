@@ -2,14 +2,14 @@
 import {describe,expect,it,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
-import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
-import {REPLY_LANGUAGE_SETTINGS,frozenReplyRule,replySettingInstructions} from './replyLanguage';
-import {runtimeContext} from './runtimeContext';
+import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from '../turn/agent/primaryInstructions';
+import {REPLY_LANGUAGE_SETTINGS,frozenReplyRule,replySettingInstructions} from '../turn/agent/replyLanguage';
+import {runtimeContext} from '../turn/agent/runtimeContext';
 import {effectiveReplyLocale,entryLocaleHint,REPLY_LOCALES} from '../../shared/replyLanguage';
 vi.mock('../redisRateLimiter', () => ({ checkRuntimeRateLimit: async () => ({ success: true }) }));
 vi.mock('./automaticRecovery', () => ({ runAutomaticFinancialRecovery: async () => ({ failed: 0 }) }));
-vi.mock('./billingUnitAdmission', async (original) => ({
-  ...(await original<typeof import('./billingUnitAdmission')>()),
+vi.mock('../turn/admission/billingUnitAdmission', async (original) => ({
+  ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
 }));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002';

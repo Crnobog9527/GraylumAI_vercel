@@ -6,12 +6,12 @@ import { capturePendingInput, captureResolveInput } from "../services/opc/captur
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
-import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
+import {loadStagingPolicy,assertStagingReadAccess} from '../services/turn/settings/stagingPolicy';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
-import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
+import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/turn/settings/stagingErrors';
 import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
-import { realHostMode } from "../services/runtime/productionEnvironment";
+import { realHostMode } from "../services/turn/settings/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
 import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultSaveTurn, sessionResultsList,
   sessionResultsService } from "../services/opc/sessionResults";
@@ -28,9 +28,11 @@ import {
   opcTopicDraft,
   opcLibraryEdit,
   opcContentFromExecution,
+  opcContentFromTurn,
   opcContentManualSave,
   opcVideoPackage,
   opcVideoResults,
+  opcVideoResultsFromTurn,
   opcVideoExecutionCheck,
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
@@ -284,6 +286,9 @@ export const opcRouter = router({
   saveContentResult: procedure
     .input(opcContentFromExecution)
     .mutation(({ ctx, input }) => ctx.opc.contentFromExecution(input)),
+  saveContentFromTurn: procedure
+    .input(opcContentFromTurn)
+    .mutation(({ ctx, input }) => ctx.opc.contentFromTurn(input)),
   saveContentManual: procedure
     .input(opcContentManualSave)
     .mutation(({ ctx, input }) => ctx.opc.contentManualSave(input)),
@@ -293,6 +298,9 @@ export const opcRouter = router({
   saveVideoResults: procedure
     .input(opcVideoResults)
     .mutation(({ ctx, input }) => ctx.opc.videoResults(input)),
+  saveVideoResultsFromTurn: procedure
+    .input(opcVideoResultsFromTurn)
+    .mutation(({ ctx, input }) => ctx.opc.videoResultsFromTurn(input)),
   checkVideoExecution: procedure
     .input(opcVideoExecutionCheck)
     .mutation(({ ctx, input }) => ctx.opc.videoExecutionCheck(input)),

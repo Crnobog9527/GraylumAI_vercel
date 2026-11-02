@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // RT-3b PR-3: tool-route prices live beside the model prices of a run and a staging window; every reader splits them.
 import { describe, expect, it, vi } from 'vitest';
-import { modelCallPolicies, toolCallPolicies } from '../bill2/runPolicies';
-import { toolCallPolicy } from '../bill2/toolBilling';
-import { openRouterBound } from '../bill2/openRouterPolicy';
-import { parseStagingPolicy } from './stagingPolicy';
-import { StagingAccessError } from './stagingErrors';
+import { modelCallPolicies, toolCallPolicies } from '../turn/admission/runPolicies';
+import { toolCallPolicy } from '../turn/provider/toolBilling';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
+import { parseStagingPolicy } from '../turn/settings/stagingPolicy';
+import { StagingAccessError } from '../turn/settings/stagingErrors';
 import { beginPaygExecution, type RuntimeExecution } from './paygResume';
-import { runRuntime, type RuntimeTool } from './runner';
+import { runRuntime, type RuntimeTool } from '../turn/agent/runner';
 
 const id = '10000000-0000-4000-8000-000000000001';
 const limits = { providerSlug: 'vendor/fp8', contextTokens: 32000, promptUsdPerMillion: '1', completionUsdPerMillion: '2', requestUsd: '0' };

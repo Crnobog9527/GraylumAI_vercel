@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { assertCompareFits, compareRequest, type CompareParts } from '../fusion/compareSnapshot';
-import { decimal, DECIMAL_SCALE } from '../bill2/decimal';
+import { decimal, DECIMAL_SCALE } from './provider/decimal';
 import { fusionRequestBody } from '../fusion/request';
 import { TurnStop, type ModelCall } from './call';
 import { fusionCall, type FusionQuote } from './fusionQuote';

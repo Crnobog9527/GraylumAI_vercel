@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
+import { PURPOSE_OUTPUT_CAP } from '../turn/provider/responseCapacity';
 
 /** Fusion settings (Master Plan §4.5): one existing system_settings row, no new table. The database
  * admission (0235 fusion_group_admit) reads the same row in its transaction. */
@@ -98,7 +98,8 @@ export type FusionSettings = z.infer<typeof fusionSettings>;
 export const DEFAULT_FUSION_SETTINGS: FusionSettings = {
   version: 1,
   review: { enabled: false, reviewerModelIds: [], summaryModelId: null, skillId: null, maxRounds: 1,
-    opinionOutputTokens: 4096,
+    // A reviewer's opinion: 4096 cut a long Chinese one off mid-string in a staging run (the seat then counted as no opinion).
+    opinionOutputTokens: 8192,
     // The summary writes the whole report plus a ruling per issue: 16384 was cut off in a staging run (#962).
     summaryOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null, fixedPriceCredits: 1500,
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 }, displayNames: DEFAULT_PANEL_NAMES, reviewerRoles: {} },

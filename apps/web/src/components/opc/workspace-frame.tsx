@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { BookOpen, Grid2X2, LogOut, Menu, PanelRightClose, Sparkles, UserRound, X } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { sidebarCreditsLabel } from './credits-label';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import { createClient } from '@/lib/supabase';
 import { buildAppHref } from '@/lib/site-config';
@@ -34,8 +35,10 @@ type Business = {businessId:string;accounts:Account[]};
 type Draft = UnassignedDraft&{createdAt?:string;currentVersion?:number};
 
 /** The accepted U0/U1 shell, with real owned OPC projections instead of demo state. */
-export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice,revealRight}:{
- children:ReactNode;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
+export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice,revealRight,turnBusy=false}:{
+ children:ReactNode;
+ /** A conversation turn is running: the sidebar does not show the balance its freeze leaves (credits-label.ts). */
+ turnBusy?:boolean;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
  /** Changes to a new number when the page wants the right panel shown, also on a phone (where it is an overlay). */
  revealRight?:number;
  activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start'|'review';notice?:string;
@@ -142,6 +145,9 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  },[sidebarActor,restoredActor,library.isSuccess,drafts.isSuccess,conversations.isSuccess,library.data,drafts.data,conversations.data,groupOpen,expanded,archiveView,saveSidebar]);
  useEffect(()=>{saveSidebar();},[groupOpen,expanded,archiveView,saveSidebar]);
  const credits=useCreditsBalance();
+ const idleCredits=useRef<number|null>(null);
+ const shown=sidebarCreditsLabel({status:credits.status,credits:credits.credits,busy:turnBusy,lastIdle:idleCredits.current});
+ idleCredits.current=shown.idle;
  const createTicket=trpc.ticket.createTicket.useMutation();
  const changeWorkUi=trpc.opc.workUiChange.useMutation();
  const changeAccountUi=trpc.opc.accountUiChange.useMutation();
@@ -257,7 +263,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
     <RailNotices items={[discussion.error&&{text:discussion.error,role:'alert' as const},uiError&&{text:uiError,role:'alert' as const},
      conversationRename.error&&{text:conversationRename.error,role:'alert' as const},
      conversationErasure.notice&&{text:conversationErasure.notice.text,role:conversationErasure.notice.tone==='error'?'alert' as const:'status' as const}].filter(Boolean) as Array<{text:string;role:'alert'|'status'}>}/>
-    <RailBottom creditsLabel={credits.status==='ready'?credits.credits:'查看'} creditsOpen={bottomPanel==='credits'} profileOpen={bottomPanel==='profile'}
+    <RailBottom creditsLabel={shown.label} creditsOpen={bottomPanel==='credits'} profileOpen={bottomPanel==='profile'}
      avatar={(profile.data?.nickname??profile.data?.email??'我').slice(0,1)} name={profile.data?.nickname??profile.data?.email??'个人中心'}
      membership={membershipText(profile,'普通会员','查看账户')}
      onFeedback={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}} onCredits={event=>openBottomPanel('credits',event.currentTarget)}

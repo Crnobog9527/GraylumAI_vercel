@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { STOPPED_NOTICE } from "./stop-reply";
 import {
   readReportRecord, REPORT_DISABLED_NOTICE, REPORT_EMPTY_NOTICE, REPORT_INCOMPLETE_NOTICE, REPORT_INTRO, REPORT_STOPPED_NOTICE,
-  REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
-  reportResultRefusal, reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
-  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, reportActionLabel, reportFeeText, needsReattach, newerRead, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
+  REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportCanStart, reportProgressing, reportRecordKey,
+  reportResultRefusal, reportStartRefusal, reportView, writeReportRecord, type ReportStatus,
+  generationOffer, reportActionLabel, reportFeeText, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
 } from "./report-gen";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -64,10 +64,6 @@ describe("reportView", () => {
     expect(view.kind).toBe("progress");
     expect(reportProgressing({ state })).toBe(true);
   });
-  it("only attaches a stream to states the server can still run or replay", () => {
-    expect(["prepared", "running", "interrupted"].every(state => reportAttachable({ state }))).toBe(true);
-    expect(["stopping", "cost_pending", "completed", "waiting_credits", "cancelled"].some(state => reportAttachable({ state }))).toBe(false);
-  });
   it.each(["completed", "cancelled"])("%s without a body has no report and allows a new request", state => {
     const saved = status({ state, body: null, completeness: null, candidate: false });
     expect(reportView(saved)).toEqual({ kind: "empty", notice: REPORT_EMPTY_NOTICE });
@@ -115,11 +111,6 @@ describe("report record", () => {
     expect(() => writeReportRecord(broken, "k", { requestId: id })).not.toThrow();
     expect(readReportRecord(null, "k")).toBeNull();
   });
-  it("reads only a uuid executionId from reportStart", () => {
-    expect(startedExecution({ executionId: id, runId: id, state: "prepared" })).toBe(id);
-    expect(startedExecution({ admitted: false })).toBeNull();
-    expect(startedExecution(null)).toBeNull();
-  });
 });
 
 describe("reportResultRefusal", () => {
@@ -137,7 +128,6 @@ describe("reportResultRefusal", () => {
 describe("restoring and offering", () => {
   const other = "99999999-2222-4333-8444-555555555555";
   const at = (executionId: string | null) => ({ kind: "known", executionId }) as const;
-  const replacement = "33333333-2222-4333-8444-555555555555";
   it("takes the server's report over a missing or stale local pointer", () => {
     expect(shownExecution(null, at(id), null)).toBe(id);
     expect(shownExecution(null, at(id), { requestId: other, executionId: other })).toBe(id);
@@ -145,29 +135,10 @@ describe("restoring and offering", () => {
     expect(shownExecution(null, { kind: "failed" }, { requestId: other, executionId: other })).toBe(other);
     expect(shownExecution(null, { kind: "pending" }, null)).toBeNull();
   });
-  it("keeps a just-started execution against the page query and against reads that find none yet", () => {
-    const pin = { executionId: other, generation: 2 };
+  it("keeps a just-started report against the page read until the read names it", () => {
+    const pin = { executionId: other };
     expect(shownExecution(pin, at(id), null)).toBe(other);
     expect(shownExecution(pin, { kind: "pending" }, null)).toBe(other);
-    expect(shownExecution(pin, at(id), null, { executionId: null, generation: 3 })).toBe(other);
-  });
-  it("follows a replacement report named by a read that started after the pin", () => {
-    const pin = { executionId: other, generation: 2 };
-    expect(shownExecution(pin, at(other), null, { executionId: replacement, generation: 3 })).toBe(replacement);
-    expect(shownExecution(pin, at(other), null, { executionId: other, generation: 3 })).toBe(other);
-  });
-  it("a read in flight across reportStart that answers late never passes for caught up", () => {
-    // Generation 1: a read starts while the old empty report is the newest.
-    const oldRead = { executionId: id, generation: 1 };
-    // Generation 2: this tab starts a new report and pins it; generation 3: the read after the start.
-    const pin = { executionId: other, generation: 2 };
-    const afterStart = { executionId: other, generation: 3 };
-    // The late old answer arrives after the pinned start: still the pinned report.
-    expect(shownExecution(pin, at(id), null, newerRead(null, oldRead))).toBe(other);
-    // Arriving after the newer read, it does not replace it either.
-    expect(newerRead(afterStart, oldRead)).toBe(afterStart);
-    expect(shownExecution(pin, at(id), null, newerRead(afterStart, oldRead))).toBe(other);
-    expect(newerRead(oldRead, afterStart)).toBe(afterStart);
   });
   const known = { kind: "known", executionId: null } as const;
   it("offers a first start only for a round the server shows without a report", () => {
@@ -202,17 +173,6 @@ describe("restoring and offering", () => {
     expect(reportFeeText({ credits: 500, state: "held", chargedCredits: null })).toBeNull();
     expect(reportFeeText(null)).toBeNull();
     expect(reportStartRefusal(new Error("REPORT_CREDITS")).text).toBe("可用积分不够，报告没有开始生成。充值后再试。");
-  });
-  it("re-attaches a stream that ended with the execution unfinished on the server", () => {
-    expect(needsReattach({ state: "pending" })).toBe(true);
-    expect(needsReattach({ state: "interrupted" })).toBe(true);
-    for (const state of ["completed", "cancelled", "waiting_credits", "waiting_resume", "cost_pending"])
-      expect(needsReattach({ state })).toBe(false);
-    expect(needsReattach(null)).toBe(false);
-  });
-  it("bounds the attach retries", () => {
-    expect(ATTACH_RETRY_DELAYS_MS.map((_, attempt) => attachRetryDelay(attempt))).toEqual(ATTACH_RETRY_DELAYS_MS);
-    expect(attachRetryDelay(ATTACH_RETRY_DELAYS_MS.length)).toBeNull();
   });
 });
 

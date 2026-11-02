@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../bill2/service';
-import { OPENROUTER_RESPONSE_TIMEOUT_MS } from '../bill2/openRouterPolicy';
-import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
-import { newWorkGate, type RuntimeCallGate } from '../runtime/newWorkGate';
+import { authoritativeBilling, type BillingRpc, type BillingTransport } from '../turn/provider/service';
+import { OPENROUTER_RESPONSE_TIMEOUT_MS } from '../turn/provider/openRouterPolicy';
+import { createRuntimeBudget, type RuntimeBudget } from '../turn/settings/budget';
+import { newWorkGate, type RuntimeCallGate } from '../turn/admission/newWorkGate';
 import { runtimeGateEnvironment } from '../runtime/realHost';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { fusionResponseText } from '../fusion/executor';

@@ -18,6 +18,27 @@ describe('turn policy (CORE-PATH-V2 2.5.3, Fable 10-28)', () => {
       .toMatchObject({ gCredits: 30, uTurnUsd: 0.05 });
   });
 
+  it('a turn that tops up freezes one model call plus the largest paid tool first; without it nothing is sent to the database', () => {
+    const limits = { model: 4, paidTools: 2, freeTools: 1, decisions: 0 };
+    const p = turnPolicy({ ...base, topUp: true, limits, paidToolUpperUsd: ['0.01', '0.02'] });
+    expect(p.holdCredits).toBe(callCredits('100', '0.05', '6') + callCredits('100', '0.02', '6'));
+    expect(p.holdCredits).toBeLessThan(p.gCredits);
+    expect(turnPolicy({ ...base, limits, paidToolUpperUsd: ['0.01', '0.02'] })).not.toHaveProperty('holdCredits');
+    expect(turnPolicy({ ...base, topUp: true, limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 } }).holdCredits).toBe(callCredits('100', '0.05', '6'));
+  });
+
+  it('the stop-loss reserves one call, the largest paid tool and the positioning check first; never above U_turn', () => {
+    const limits = { model: 4, paidTools: 2, freeTools: 1, decisions: 1 };
+    const p = turnPolicy({ ...base, topUp: true, limits, paidToolUpperUsd: ['0.01', '0.02'], decisionUpperUsd: '0.001' });
+    expect(p.holdUsd).toBe(0.071);
+    expect(p.uTurnUsd).toBe(0.231);
+    expect(turnPolicy({ ...base, limits, paidToolUpperUsd: ['0.01', '0.02'], decisionUpperUsd: '0.001' })).not.toHaveProperty('holdUsd');
+    expect(turnPolicy({ ...base, topUp: true, limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 0 } }).holdUsd).toBe(0.05);
+    // A mentor's organizer on a dearer model: the larger of the two.
+    expect(turnPolicy({ ...base, topUp: true, limits: { model: 2, paidTools: 0, freeTools: 0, decisions: 0 },
+      otherModelCalls: [{ upperUsd: '0.08', multiplier: '6' }] }).holdUsd).toBe(0.08);
+  });
+
   it('refuses limits that do not add up and a check without its bound', () => {
     expect(() => turnPolicy({ ...base, limits: { model: 2, paidTools: 0, freeTools: 0, decisions: 1 }, decisionUpperUsd: '0.001' })).toThrow();
     expect(() => turnPolicy({ ...base, limits: { model: 1, paidTools: 0, freeTools: 0, decisions: 1 } })).toThrow('TURN_POLICY_INVALID');

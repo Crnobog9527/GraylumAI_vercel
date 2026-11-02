@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ admit: vi.fn(), billing: {} as Record<string, ReturnType<typeof vi.fn>>, text: vi.fn() }));
 vi.mock('./admission', () => ({ admitVoiceRun: mocks.admit }));
-vi.mock('../bill2/service', async importOriginal => ({ ...await importOriginal<object>(), authoritativeBilling: () => mocks.billing }));
+vi.mock('../turn/provider/service', async importOriginal => ({ ...await importOriginal<object>(), authoritativeBilling: () => mocks.billing }));
 vi.mock('../fusion/executor', () => ({ fusionResponseText: mocks.text }));
 vi.mock('../runtime/stagingTransport', () => ({ stagingTransport: () => ({}) }));
 import { generateVoiceProfile } from './generation';

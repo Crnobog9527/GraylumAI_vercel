@@ -5,8 +5,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { researchExecution, responseAfterResearch } from './researchExecution';
-import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
-import { toolCallPolicy } from '../bill2/toolBilling';
+import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from '../turn/research/researchTurn';
+import { toolCallPolicy } from '../turn/provider/toolBilling';
 import { tikhubRouteId, type TikhubCall } from '../research/vendors/tikhub';
 import type { ResearchCallResult } from '../research/vendors/types';
 

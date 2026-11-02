@@ -3,23 +3,23 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { ASK_QUESTION_TOOL, INVALID_REPLY_NOTICE } from '../../shared/agentTurn';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
-import { openRouterAdapter } from '../bill2/openRouterAdapter';
-import { agentTurnResult } from '../runtime/agentTurnResult';
-import { assertRuntimeRequestCapacity } from '../runtime/context';
+import { openRouterAdapter } from './provider/openRouterAdapter';
+import { agentTurnResult } from './agent/agentTurnResult';
+import { assertRuntimeRequestCapacity } from './agent/context';
 import { cardSources, groundedCardFallback, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse,
-  type CardSources } from '../runtime/groundedCard';
-import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from '../runtime/providerRequest';
-import { freezeSharedPromptCache } from '../runtime/promptCache';
-import { replySettingInstructions } from '../runtime/replyLanguage';
-import { runRuntime } from '../runtime/runner';
-import { RESEARCH_REFRESH_NOTE } from '../runtime/hostTurn';
+  type CardSources } from './agent/groundedCard';
+import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from './provider/providerRequest';
+import { freezeSharedPromptCache } from './provider/promptCache';
+import { replySettingInstructions } from './agent/replyLanguage';
+import { runRuntime } from './agent/runner';
+import { RESEARCH_REFRESH_NOTE } from './agent/hostTurn';
 import { withResearchRefresh } from '../opc/researchRefresh';
 import { canonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
-import { carriesAccountLink, requiresBenchmarkResearch, researchInputHost } from '../runtime/researchAdmissionGuard';
-import { researchContextFrom, withResearchContext } from '../runtime/researchHostContext';
-import { skillFileToolBytes } from '../runtime/skillFile';
-import type { PricingDeps } from '../runtime/pricingAdmission';
+import { carriesAccountLink, requiresBenchmarkResearch, researchInputHost } from './research/researchAdmissionGuard';
+import { researchContextFrom, withResearchContext } from './research/researchHostContext';
+import { skillFileToolBytes } from './skills/skillFile';
+import type { PricingDeps } from './admission/pricingAdmission';
 import { modelCall, TurnStop } from './call';
 import { CLOSES, GATE_CODES, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
@@ -263,8 +263,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), gate: callGate,
         template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
       catch (error) {
-        // A deletion ends the turn; a credit pause keeps it waiting (not closed, so a resume can still organize this reply).
-        if (error instanceof TurnStop && (error.code === 'TURN_TOMBSTONED' || error.code === 'TURN_PAUSED_FOR_CREDITS')) throw error;
+        // A deletion ends the turn; a credit pause keeps it waiting (not closed, so a resume can still organize this reply); the
+        // stop-loss closes it failed with everything refunded (ENGINEERING 5).
+        if (error instanceof TurnStop && (error.code === 'TURN_TOMBSTONED' || error.code === 'TURN_PAUSED_FOR_CREDITS'
+          || error.code === 'STOP_LOSS_REACHED')) throw error;
         logSwallowed('turn_mentor_organizer_failed', error, { category: 'ai' });
       }
     }

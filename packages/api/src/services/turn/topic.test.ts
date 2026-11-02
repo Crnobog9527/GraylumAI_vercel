@@ -13,17 +13,17 @@ import { handleTopicTurn, type TopicHttpDeps } from './topicHttp';
 const h = vi.hoisted(() => ({ call: vi.fn(), runtime: vi.fn(), chatQuote: vi.fn(), module: vi.fn() }));
 vi.mock('./chat', async original => ({ ...await original<object>(), readCoreConfig: () => ({ enabled: true, decisionUpperUsd: '0.01',
   stopLoss: { limitUsd: 100, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 } }) }));
-vi.mock('../runtime/admissionConfiguration', async original => ({ ...await original<object>(),
+vi.mock('./admission/admissionConfiguration', async original => ({ ...await original<object>(),
   readAdmissionConfiguration: async () => ({ data: [{ key: 'billing_payg_start_thresholds', value: { version: 'v1',
     thresholds: [{ model: 'anthropic/claude-sonnet-5.5', purpose: 'ordinary', credits: 12 }] } }], error: null }), readAdmissionModule: h.module }));
-vi.mock('../runtime/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
-vi.mock('../runtime/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
+vi.mock('./settings/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
+vi.mock('./admission/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
 vi.mock('./reportSkill', async original => ({ ...await original<object>(), reportSkillText: async () => 'SKILL TEXT' }));
-vi.mock('../runtime/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
-vi.mock('../runtime/providerRequest', async original => ({ ...await original<object>(), openRouterRequestBody: () => 'REQUEST' }));
-vi.mock('../bill2/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: () => ({}) }));
+vi.mock('./agent/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
+vi.mock('./provider/providerRequest', async original => ({ ...await original<object>(), openRouterRequestBody: () => 'REQUEST' }));
+vi.mock('./provider/openRouterAdapter', async original => ({ ...await original<object>(), openRouterAdapter: () => ({}) }));
 vi.mock('./call', async original => ({ ...await original<object>(), modelCall: h.call }));
-vi.mock('../runtime/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
+vi.mock('./agent/runner', async original => ({ ...await original<object>(), runRuntime: h.runtime }));
 vi.mock('./quote', async original => ({ ...await original<object>(), chatQuote: h.chatQuote }));
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -79,7 +79,10 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     await runTopicTurn(t.deps, input, t.emit);
     const run = h.runtime.mock.calls[0]![0] as Run;
     expect(run.instructions.startsWith("SKILL TEXT\nThis turn runs inside the user's first-week topic workspace")).toBe(true);
-    expect(JSON.parse(run.input)).toMatchObject({ userRequest: input.text, scopeMaterial: { revision: 1, content: { material: 'CONFIRMED' } } });
+    expect(run.instructions).toContain('YYYY-MM-DD');
+    expect(String(run.input)).toMatch(/Today is \d{4}-\d{2}-\d{2}/);
+    expect(JSON.parse(run.input).userRequest).toContain(input.text);
+    expect(JSON.parse(run.input)).toMatchObject({ scopeMaterial: { revision: 1, content: { material: 'CONFIRMED' } } });
     expect([run.maxTurns, run.tools]).toEqual([1, []]);
   });
 

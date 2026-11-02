@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { vi } from 'vitest';
-import type { ToolCallPolicy } from '../../../bill2/toolBilling';
+import type { ToolCallPolicy } from '../../provider/toolBilling';
 import type { ResearchCallResult, ResearchVendor } from '../../../research/vendors/types';
 import type { CounterStore } from '../../limiter';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../../../research/vendors/config';
 import { tikhubRouteId } from '../../../research/vendors/tikhub';
 import { FIRECRAWL_ROUTE } from '../../../research/vendors/firecrawl';
-import { CHAT_RESEARCH_KEY } from '../../../runtime/freeChatResearch';
-import { RESEARCH_PHASE } from '../../../runtime/researchTurn';
+import { CHAT_RESEARCH_KEY } from '../../research/freeChatResearch';
+import { RESEARCH_PHASE } from '../../research/researchTurn';
 import type { ToolCallDeps } from '../types';
 
 // Shared doubles for the V2-6 tool tests (under __tests__, so the code-size rules treat it as test code).
