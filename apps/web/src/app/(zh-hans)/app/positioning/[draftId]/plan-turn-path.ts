@@ -23,11 +23,14 @@ export async function readPlanTurn(sessionId: string, requestId: string, deps: P
   return (await response.json() as { plan: PlanTurn | null }).plan;
 }
 
-/** The retained request's turn, for the page's recovery: undefined until it is read, null when the request has none. */
+/**
+ * The retained request's turn, for the page's recovery: `turn` is undefined until it is read and null when the request has none.
+ * `state.error` is set while the last read failed and nothing is known yet; `recheck` reads again, also after the reads ran out.
+ */
 export function usePlanTurn(sessionId: string | undefined, requestId: string | undefined) {
-  const [turn, setTurn] = useState<PlanTurn | null | undefined>(undefined);
+  const [turn, setTurn] = useState<PlanTurn | null | undefined>(undefined), [failed, setFailed] = useState(false), [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    setTurn(undefined);
+    setTurn(undefined); setFailed(false);
     if (!sessionId || !requestId) return;
     // Read until the turn closes: a recovery on this page finishes it, and a failed read is read again.
     let timer: ReturnType<typeof setTimeout>, left = READS, gone = false;
@@ -35,12 +38,14 @@ export function usePlanTurn(sessionId: string | undefined, requestId: string | u
       const next = await readPlanTurn(sessionId, requestId).catch(() => undefined);
       if (gone) return;
       if (next !== undefined) setTurn(next);
+      setFailed(next === undefined);
       if (next?.state !== "closed" && --left > 0) timer = setTimeout(() => void read(), READ_MS);
     };
     void read();
     return () => { gone = true; clearTimeout(timer); };
-  }, [sessionId, requestId]);
-  return turn;
+  }, [sessionId, requestId, attempt]);
+  const error = failed && turn === undefined ? new Error("TURN_PLAN_READ_FAILED") : null;
+  return { turn, state: { isLoading: Boolean(requestId) && turn === undefined && !error, error }, recheck: () => setAttempt(count => count + 1) };
 }
 
 /** What the page's recovery shows for a retained request that never opened a turn: nothing was admitted, started or charged. */

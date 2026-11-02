@@ -215,8 +215,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * distinguish "never admitted" from "admitted, outcome unknown" truthfully
    * instead of assuming a cancellation or a zero cost.
    */
-  const retainedTurn = usePlanTurn(read.data?.sessionId, retainedPlan?.requestId);
-  const retainedState = { isLoading: Boolean(retainedPlan?.requestId) && retainedTurn === undefined, error: null as Error | null };
+  const { turn: retainedTurn, state: retainedState, recheck: recheckRetained } = usePlanTurn(read.data?.sessionId, retainedPlan?.requestId);
   /** The bound topic workspace of this draft (the consented entry target). */
   const bindTopic = trpc.opc.consentTopicWorkspace.useMutation();
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
@@ -962,6 +961,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         : retainedStateData.materialRevoked ? "原请求来源已撤回，不能继续恢复。"
         : retainedStateData.hasResult ? "服务端已保存这条请求的完成结果，可以按原身份恢复读取。"
         : "原请求结果尚未确定；继续使用原身份恢复，不会重复执行或重复扣费。"}</p>
+      {retainedState.error && <Button onClick={recheckRetained}>重新核对</Button>}
       <Button disabled={busy || !retainedStateData?.admitted || retainedStateData.materialRevoked || Boolean(retainedState.error)} onClick={() => void run(async () => {
         const retained = readRetainedPlan();
         if (!retained || retained.kind === "invalid") throw new Error("OPC_REQUEST_INVALID");
@@ -1378,7 +1378,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             ? "服务端记录这条请求已取消；继续只会按原身份核对，不会重新派发。"
                             : `服务端已记录这条请求（${retainedStateData.state ?? "状态未知"}）：结果尚未确定，继续会按原身份恢复，不会重复派发或重复扣费。`}
               </p>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-3">{retainedState.error && <Button onClick={recheckRetained}>重新核对</Button>}
                 <Button disabled={busy} onClick={() => void consentPlan()}>
                   继续这条原请求
                 </Button>
