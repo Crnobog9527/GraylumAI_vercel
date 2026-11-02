@@ -150,10 +150,10 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
         </section>
       </div>
       <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
-        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill} path="turn"
+        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill}
           blockedReason={COMPOSER_REFERENCES_ENABLED && referencesNamedIn(input, references).length
             ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。' : undefined}
-          onStarted={(compareId, _names, _session, turn) => { update(''); compare.add(compareId, turn); void compare.refresh(); }}
+          onStarted={compareId => { update(''); compare.add(compareId); void compare.refresh(); }}
           onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
           skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}/>
