@@ -27,8 +27,8 @@ BEGIN
    -- that certainly cost nothing (not sent, rejected, refused 402, unusable) is not unknown.
    (k.actual_usd IS NULL AND k.status NOT IN ('no_charge_402','not_sent','rejected','unusable')) actual_unknown,
    -- A decision call (the positioning check) is a real model call paid by the platform: it is attributed to the model its receipt
-   -- names (usage.model), not to the turn's main model.
-   CASE WHEN k.call_kind='decision' THEN coalesce(nullif(k.usage->>'model',''), t.policy->'models'->>(k.model_id::text), 'unknown')
+   -- names (usage.model), never to the turn's main model or a compare column (one without a recorded model gets its own line).
+   CASE WHEN k.call_kind='decision' THEN coalesce(nullif(k.usage->>'model',''), 'decision (model not recorded)')
     ELSE coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model', 'unknown') END model
   FROM turn_calls k JOIN turns t ON t.actor_id=k.actor_id AND t.id=k.turn_id
   WHERE k.call_kind IN ('model','decision') AND k.dispatched_at>=p_from AND k.dispatched_at<p_to

@@ -33,17 +33,20 @@ try{
  const check=await open(a);await begin(a,check.turnId,1,'decision');await record(a,check.turnId,1,JSON.stringify({model:'example/decisions'}));await close(a,check.turnId);
  // A call whose supplier cost never arrived: the nominal cost is the upper-bound fallback, the actual cost stays empty.
  const noActual=await open(a);await begin(a,noActual.turnId);await record(a,noActual.turnId,1,'{}',null);await close(a,noActual.turnId);
+ // A decision call whose receipt names no model is never attributed to the turn's main model.
+ const unnamed=await open(a);await begin(a,unnamed.turnId,1,'decision');await record(a,unnamed.turnId,1,'{}');await close(a,unnamed.turnId);
  const running=await open(a);await begin(a,running.turnId);
  const [from,to]=window();
  const before=await one('select (select count(*) from turns)::int+(select count(*) from turn_calls)::int v');
  const r=await one('select turn_admin_model_report($1,$2) v',[from,to]);
- assert.deepEqual(r.models.map(m=>m.model).sort(),['example/decisions','example/model'],'the decision call is its own model line');
+ assert.deepEqual(r.models.map(m=>m.model).sort(),['decision (model not recorded)','example/decisions','example/model'],'decision calls are their own model lines, never the main model');
  const main=r.models.find(m=>m.model==='example/model'),decision=r.models.find(m=>m.model==='example/decisions');
  assert.deepEqual([main.calls,main.unknownCostCalls,main.unknownActualCalls],[3,1,2],'the in-flight call and the call without an actual cost are counted unknown apart');
  assert.equal(Number(main.nominalUsd),0.02,'only the known cost is summed');
  assert.deepEqual([decision.calls,decision.unknownCostCalls,decision.unknownActualCalls,Number(decision.nominalUsd)],[1,0,0,0.01],'the positioning check is counted and costed');
- assert.deepEqual([r.totals.calls,r.totals.unknownCostCalls,r.totals.unknownActualCalls,r.totals.turns,r.totals.unsettledTurns],[4,1,2,4,1]);
- assert.equal(Number(r.totals.nominalUsd),0.03);
+ assert.deepEqual([r.totals.calls,r.totals.unknownCostCalls,r.totals.unknownActualCalls,r.totals.turns,r.totals.unsettledTurns],[5,1,2,5,1]);
+ assert.equal(Number(r.totals.nominalUsd),0.04);
+ assert.equal(r.models.find(m=>m.model==='decision (model not recorded)').calls,1);
  assert.equal(r.byDate.length,1);
  report.checks.push('model report: calls grouped by model, the call without a cost counted unknown and not summed, the open turn counted unsettled');
  const u=await one('select turn_admin_unsettled_turns(100) v');
