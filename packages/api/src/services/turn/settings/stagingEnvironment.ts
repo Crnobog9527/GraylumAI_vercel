@@ -26,3 +26,14 @@ export function stagingRuntimeWindow(env: Record<string, string | undefined>, ma
   if (!maintenance && env.V3_RUNTIME_STAGING_ENABLED !== 'true') throw new StagingAccessError('RUNTIME_STAGING_DISABLED');
   return window.data;
 }
+
+/** Loopback tests remain separate from the explicitly enabled Staging host. */
+export function runtimeLocalEndpoint(env: Record<string, string | undefined> = process.env) {
+  const endpoint = env.V3_RUNTIME_LOCAL_ENDPOINT;
+  for (const value of [endpoint, env.NEXT_PUBLIC_SUPABASE_URL]) {
+    if (!value) throw new Error('RUNTIME_DISABLED');
+    const u = new URL(value);
+    if (u.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(u.hostname) || u.username || u.password) throw new Error('RUNTIME_DISABLED');
+  }
+  return endpoint!;
+}

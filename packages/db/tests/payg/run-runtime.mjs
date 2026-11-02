@@ -9,7 +9,6 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runtimeCases} from './runtime.mjs';
-import {meteringReviewCases} from './metering-review.mjs';
 
 const mode = process.argv.slice(2).join(' ');
 const development = mode==='--local-only --development';
@@ -90,7 +89,6 @@ try {
   await db.connect();
   await db.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
   await runtimeCases({db,Client,connectionString,report});
-  await meteringReviewCases({db,Client,connectionString,report});
 } catch (error) {
   report.failed = String(error.stack??error);
   report.databaseError = {code:error.code,detail:error.detail,where:error.where,position:error.position};

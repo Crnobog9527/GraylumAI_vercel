@@ -19,7 +19,7 @@ import { databaseSkillSource, userVisibleModules } from '../services/skills/data
 import { discoverSkills } from '../services/skills/loader';
 import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/turn/settings/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
-import {runtimeLocalEndpoint} from '../services/turn/settings/localEndpoint';
+import {runtimeLocalEndpoint} from '../services/turn/settings/stagingEnvironment';
 import { swallow } from '../lib/swallow';
 
 // Viewing a conversation's scope and the report document calls do not admit new work. Source/actor checks still run in their

@@ -14,6 +14,15 @@
 | web | `trpc/link-routing.ts`、`trpc/provider.tsx`、`app/api/trpc/[trpc]/route.ts`：现在没有任何流式 tRPC 过程，去掉 `STREAMED` 名单、`stream` 链路分支和 `timing.retain` |
 | 配置 | `packages/api/package.json` 的 `automaticRecovery` 导出、`tsconfig.json` / `type-check-baseline.json` 里的旧集成文件、`apps/web/tsconfig.json` 的 runtime/bill2 include、`eslint-suppressions.json`（`--prune-suppressions`）、`scripts/code-size-baseline.json`（`--update`，只下调）、`packages/db/tests/v3/without-app.mjs`（CI 强制的 runtime 套件清单只留 turn 下四个文件，去掉已删文件、三条随旧套件的排除项和 `cdc` 套件）、`run-workbench.mjs`（去掉 `--cdc-b2-eval`、`--runtime-upgrade-only` 改为明确报错、去掉 erasureBrowser 引用） |
 
+## 1b. 追加三项（总控 11-03，见 f-node-drop-check.md）
+
+- `bill2PlatformAlerts.ts`：rpc 改为 `turn_platform_absorb_report(p_from,p_to)`（#1661），字段形状不变，告警保留。
+- 删后台旧计费复核入口：`routers/billingReport.ts` 的 `meteringReviewSnapshot`/`reviewMetering`、`turn/settings/meteringReview.ts`、其路由测试和 `packages/db/tests/payg/metering-review.mjs`（含 `run-runtime.mjs` 的调用）。
+- 删陈旧已扣费回合补偿：`turn/settings/staleChargedRounds.ts`（含测试和 package.json 导出）；定时段在 cron 里早已移除，没有调用方。
+- `runtime_library_propagate`：`library/cleanup.ts` 不再调用，返回值去掉 `references`。
+- `runtimeLocalEndpoint` 并入 `stagingEnvironment.ts`（环境以参数传入，避免新增直读 process.env 的文件）。
+- **没做**：`turn/provider/service.ts` 的 `authoritativeBilling`（bill2_* 分支）。它现在只剩测试和 `billing.integration.ts` 在用，但 CI 的 `--bill2-core-only` 步骤（ci.yml、`test-ci-workflows.rb`、`without-app.mjs` 的 bill2 套件）还在跑它；删它必须同时去掉这个 CI 步骤，属于改 CI，要 Owner 同意。其余文件只引用它的类型（`frozenRun`）不受影响。
+
 ## 2. 新增（为了让保留的路由不再依赖旧目录）
 
 - `services/opc/runtimeStart.ts`：`runtime.start` 原来经 `runtimeAdmissionService().start`，这里只剩 `runtime_start` 一次 RPC，错误映射与原来一致（已归档、绑定拒绝、SQL 拒绝、其它按运维故障）。
