@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
-import { planTurnState, readPlanTurn, runPlanTurn, type PlanTurn } from "./plan-turn-path";
+import { planTurnState, readPlanTurn, runPlanTurn, watchPlanTurn, type PlanTurn } from "./plan-turn-path";
 
 const ids = { sessionId: "00000000-0000-4000-8000-000000000001", moduleId: "00000000-0000-4000-8000-000000000002" };
 const request = { requestId: "00000000-0000-4000-8000-000000000003", stepId: "s", input: "one week" };
@@ -55,5 +55,43 @@ describe("the plan on the turn path (CORE-PATH-V2 V2-10b)", () => {
     expect(await readPlanTurn(ids.sessionId, request.requestId, harness([null], () => new Response()).deps)).toBeNull();
     expect(planTurnState(turn())).toEqual({ admitted: true, materialRevoked: false, hasResult: true, state: "completed" });
     expect(planTurnState(turn({ state: "running", valid: false }))).toMatchObject({ hasResult: false, state: "running" });
+  });
+});
+
+describe("watching a retained request's turn", () => {
+  const watch = (read: () => Promise<PlanTurn | null>) => {
+    const seen: Array<string | PlanTurn | null> = [], timers: Array<() => void> = [];
+    const stop = watchPlanTurn(ids.sessionId, request.requestId, { turn: value => seen.push(value), failed: failed => seen.push(failed ? "failed" : "ok") },
+      { read, schedule: run => timers.push(run) });
+    const tick = async () => { await Promise.resolve(); await Promise.resolve(); timers.shift()?.(); await Promise.resolve(); await Promise.resolve(); };
+    return { seen, stop, tick, timers };
+  };
+  it("reports a failing read as failed, keeps reading, and stops reading once the reads run out", async () => {
+    let reads = 0;
+    const watching = watch(async () => { reads++; throw new Error("down"); });
+    for (let i = 0; i < 130; i++) await watching.tick();
+    expect(watching.seen.every(value => value === "failed")).toBe(true);
+    expect(reads).toBe(120);
+    expect(watching.timers).toHaveLength(0);
+  });
+  it("recovers when a later watch (the recheck button) reads the turn", async () => {
+    let up = false;
+    const read = async () => { if (!up) throw new Error("down"); return turn({ state: "running" }); };
+    const first = watch(read);
+    await first.tick();
+    expect(first.seen).toContain("failed");
+    first.stop();
+    up = true;
+    const second = watch(read);
+    await second.tick();
+    expect(second.seen.slice(0, 2)).toEqual([expect.objectContaining({ state: "running" }), "ok"]);
+  });
+  it("answers null for a request with no turn and stops reading a closed one", async () => {
+    const none = watch(async () => null);
+    await none.tick();
+    expect(none.seen.slice(0, 2)).toEqual([null, "ok"]);
+    const closed = watch(async () => turn());
+    await closed.tick();
+    expect(closed.timers).toHaveLength(0);
   });
 });
