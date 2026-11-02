@@ -8,7 +8,7 @@ import type { AuthorizationScope, AuthorizationStore } from '../research/tools/a
 import type { SocialPlatform } from '../research/vendors/types';
 import type { EvidencePort } from '../research/runtime/subcall';
 import { TURN_BILLING_RUN, type CardConfirmation, type CardPayload, type DiscoveryRecord, type FetchClaim, type FetchState,
-  type RuntimeOperation, type RuntimePlan, type RuntimeResearchScope, type RuntimeResearchStore, type SelectionCard,
+  type RuntimeOperation, type RuntimePlan, type RuntimeResearchScope, type SelectionCard,
   type ShortfallCard } from '../research/runtime/store';
 
 // The old runtime's research store (BILL2 receipts, runtime_executions). The turn core uses turn/tools/benchmarkStore instead;
