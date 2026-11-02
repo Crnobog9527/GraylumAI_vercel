@@ -295,8 +295,12 @@ BEGIN
  SELECT coalesce(jsonb_agg(x.line ORDER BY x.seq,x.n),'[]'::jsonb) INTO output FROM (
   SELECT c.seq,l.n,jsonb_build_object(
    'callId',(substr(h.v,1,12)||'4'||substr(h.v,14,3)||'8'||substr(h.v,18,15))::uuid,'toolName',c.tool_name,'args',NULL::jsonb,
-   'query',CASE WHEN left(w.body,1)='[' AND jsonb_typeof((w.body::jsonb)->(l.n::integer-1)->'display'->'query')='string'
-     THEN (w.body::jsonb)->(l.n::integer-1)->'display'->>'query' END,
+   -- A general lookup keeps `display` on each result of its raw body; a benchmark batch keeps its operations there (result.call.query),
+   -- one per subcall of the row, so they are read by position only when the counts agree.
+   'query',coalesce(
+     CASE WHEN jsonb_typeof(j.b->(l.n::integer-1)->'display'->'query')='string' THEN j.b->(l.n::integer-1)->'display'->>'query' END,
+     CASE WHEN jsonb_typeof(j.b)='array' AND jsonb_array_length(j.b)=jsonb_array_length(c.usage->'results')
+       AND jsonb_typeof(j.b->(l.n::integer-1)->'result'->'call'->'query')='string' THEN j.b->(l.n::integer-1)->'result'->'call'->>'query' END),
    'platform',l.v->'call'->>'platform','dataKind',l.v->'call'->>'dataKind',
    'source',CASE
      WHEN l.v IS NULL OR l.v->>'outcome'='unknown' OR jsonb_typeof(l.v->'costUsd')<>'string' THEN 'tool_unknown'
@@ -318,6 +322,7 @@ BEGIN
    SELECT NULL::jsonb,0::bigint WHERE (jsonb_typeof(c.usage->'results')='array' AND jsonb_array_length(c.usage->'results')>0) IS NOT TRUE
   ) l
   CROSS JOIN LATERAL (SELECT md5(t.id::text||':'||c.seq||':'||l.n) v) h
+  CROSS JOIN LATERAL (SELECT CASE WHEN left(w.body,1)='[' THEN w.body::jsonb END b) j
   WHERE c.turn_id=t.id AND c.actor_id=a AND c.call_kind='tool' AND c.status IN ('ok','unusable','unknown')
  ) x;
  RETURN output;
