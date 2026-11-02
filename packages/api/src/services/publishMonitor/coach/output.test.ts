@@ -54,13 +54,19 @@ describe('coach_json checks (RC-2)', () => {
   });
 
   it('caps experiments, one per pillar, and drops proposals this cadence may not make', () => {
-    const other = { ...good, match: { pillar_key: 'p1' } }, third = { ...good, match: { pillar_key: 'p2' } };
+    const other = { ...good, match: { pillar_key: 'p1', platform: 'xiaohongshu' } }, third = { ...good, match: { pillar_key: 'p2', platform: 'xiaohongshu' } };
     const r = out({ experiments: [good, { ...good }, other, third, { ...good, match: { pillar_key: 'p1', platform: 'x' } }],
       strategy_proposal: { summary: '换赛道', evidence: { post_ids: [post] } }, stage_suggestion: 'growing',
       pillar_mix_proposal: { target: { p1: 1 }, evidence: { post_ids: [post] } } });
     expect(r.experiments.map(e => e.match.pillar_key)).toEqual(['p3', 'p1', 'p2']);
     expect(r.rejected.map(x => `${x.path}:${x.reason}`)).toEqual(['experiments.1:pillar_repeated', 'experiments.4:too_many',
       'pillar_mix_proposal:not_this_cadence', 'strategy_proposal:not_this_cadence', 'stage_suggestion:not_this_cadence']);
+  });
+
+  it('an experiment must name its platform', () => {
+    const r = out({ experiments: [{ ...good, match: { pillar_key: 'p3' } }] });
+    expect(r.experiments).toEqual([]);
+    expect(r.rejected.map(x => `${x.path}:${x.reason}`)).toEqual(['experiments.0:platform_required']);
   });
 
   it('a long-run experiment with a funnel layer is rejected: it would be settled as a rate experiment', () => {
@@ -82,7 +88,7 @@ describe('coach_json checks (RC-2)', () => {
     expect(basics.mode).toBe('basics_only');
     const diagnosed = basics.diagnostics.posts[0];
     const basicsExperiment = { kind: 'basics', layer: 'hook', hypothesis: '开头是自我介绍，2 秒就走', action: '下 2 条开头用场景+数字',
-      metric: 'bounce_2s', target: { max: 0.5 }, match: { pillar_key: 'p1' },
+      metric: 'bounce_2s', target: { max: 0.5 }, match: { pillar_key: 'p1', platform: 'douyin' },
       evidence: { post_ids: [diagnosed.post_id], metrics: [`diagnostics:${diagnosed.post_id}:bounce_2s`] } };
     const r = out({ experiments: [basicsExperiment, basicsExperiment, basicsExperiment, good],
       diagnoses: [{ post_id: diagnosed.post_id, stuck_layer: 'hook', problem_span: '大家好，我是小林', rewrite: ['改写一'] },

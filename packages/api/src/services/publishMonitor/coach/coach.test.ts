@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { basicsPass, diagnosePost, handbookSchema, type Handbook } from './funnel';
-import { conclude, ledgerView } from './ledger';
+import { conclude, freezeBaseline, ledgerView } from './ledger';
 import { stageSection } from './sections';
 import { buildPack, packBytes, type Cadence } from './pack';
 import { packRowsSchema } from './rows';
@@ -144,6 +144,22 @@ describe('experiment ledger (RC-2): verdicts by code match the designed outcomes
     expect(result).toMatchObject({ samples: 3, verdict: 'worked' });
   });
 
+  it('platforms are never mixed in one baseline or verdict', () => {
+    const { e, fresh } = basics();
+    const post = (id: string, platform: string, daysAgo: number, views: number) => ({ ...factFor(fresh[0]!, { postId: simId(id), platform,
+      postedAt: new Date(NOW - daysAgo * 86400000).toISOString(), day7: { views } }) });
+    const noPlatform = { ...e, metric: 'views', layer: null, kind: 'tactic' as const, target_line: null, target_mult: 1.3, match: { pillar_key: 'p1' },
+      baseline: { metric: 'views', median: 5000, samples: 6, window_weeks: 8, basis: 'day7' },
+      period_start: new Date(NOW - 10 * 86400000).toISOString().slice(0, 10), period_end: new Date(NOW - 1 * 86400000).toISOString().slice(0, 10) };
+    // 100 views on one platform and 10000 on the other, each stable; only the share of posts per platform changes.
+    const facts = [post('a1', 'douyin', 5, 100), post('a2', 'douyin', 4, 100), post('b1', 'xiaohongshu', 3, 10000)];
+    expect(conclude(noPlatform, facts, [])).toMatchObject({ verdict: 'inconclusive', reason: 'mixed_platforms' });
+    const baselineFacts = [post('c1', 'douyin', 30, 100), post('c2', 'xiaohongshu', 31, 10000)];
+    expect(freezeBaseline({ pillar_key: 'p1' }, 'views', baselineFacts, new Date(NOW).toISOString().slice(0, 10))).toBeNull();
+    expect(freezeBaseline({ pillar_key: 'p1', platform: 'douyin' }, 'views', baselineFacts, new Date(NOW).toISOString().slice(0, 10)))
+      .toMatchObject({ median: 100, samples: 1 });
+  });
+
   it('several captures of one post are one sample, not several', () => {
     const { e, fresh, facts } = basics();
     const first = fresh[0]!;
@@ -249,6 +265,17 @@ describe('review pack (RC-2)', () => {
     expect(pack.strategy.missing).toBe(true);
     expect(pack.gaps[0]).toMatchObject({ missing: ['strategy'] });
     expect(pack.limits.strategy_proposal).toBe(true);
+  });
+});
+
+describe('funnel diagnoses (RC-2 picks)', () => {
+  it('three different posts are diagnosed, the newest capture of each: repeated captures of one post do not crowd out the others', () => {
+    const r = rows('A');
+    const base = r.diagnostics[0]!;
+    const mk = (n: number, postKey: string, capturedOn: string) => ({ ...base, id: simId(`d${n}`), postId: simId(postKey), capturedOn, reviewRunId: null });
+    const ds = [mk(1, 'p-bad', '2026-10-26'), mk(2, 'p-bad', '2026-10-25'), mk(3, 'p-bad', '2026-10-24'), mk(4, 'p-ok1', '2026-10-23'), mk(5, 'p-ok2', '2026-10-22')];
+    const pack = loose(buildPack({ rows: { ...r, diagnostics: ds }, cadence: 'weekly', businessId: simId('A'), now: NOW, handbooks }));
+    expect(pack.diagnostics.posts.map((p: { post_id: string }) => p.post_id)).toEqual([simId('p-bad'), simId('p-ok1'), simId('p-ok2')]);
   });
 });
 

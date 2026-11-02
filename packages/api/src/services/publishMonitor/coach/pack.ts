@@ -28,8 +28,11 @@ function clip(value: unknown, max: number): unknown {
 }
 
 function diagnosticsSection(rows: PackRows, input: PackInput, period: ReturnType<typeof periodOf>) {
-  const fresh = rows.diagnostics.filter(d => d.reviewRunId === null && utcDay(d.capturedOn) >= period.start - 7)
-    .toSorted((a, b) => b.capturedOn.localeCompare(a.capturedOn)).slice(0, 3);
+  // Three different posts, the newest capture of each: several captures of one post are not three posts.
+  const newest = rows.diagnostics.filter(d => d.reviewRunId === null && utcDay(d.capturedOn) >= period.start - 7)
+    .toSorted((a, b) => b.capturedOn.localeCompare(a.capturedOn) || a.id.localeCompare(b.id));
+  const fresh = [...new Map(newest.map(d => [d.postId, d] as const).reverse()).values()]
+    .toSorted((a, b) => b.capturedOn.localeCompare(a.capturedOn) || a.id.localeCompare(b.id)).slice(0, 3);
   const posts = fresh.map(d => diagnosePost(d, input.handbooks.get(d.platform) ?? null, rows.diagnostics));
   const pass = basicsPass(posts, input.handbooks);
   const stuck: Record<string, number> = {};

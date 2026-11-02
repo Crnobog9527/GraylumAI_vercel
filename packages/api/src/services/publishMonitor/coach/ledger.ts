@@ -24,9 +24,11 @@ export function matches(match: Match, fact: Pick<Fact, 'pillarKey' | 'platform' 
 export function freezeBaseline(match: Match, metric: string, facts: Fact[], proposedOn: string) {
   const end = utcDay(proposedOn), start = end - 56;
   const tags = match.format_tags ?? [];
-  const values = facts.filter(f => f.pillarKey === match.pillar_key && (!match.platform || f.platform === match.platform)
-    && !(tags.length && tags.every(t => f.formatTags.includes(t))) && utcDay(f.postedAt) >= start && utcDay(f.postedAt) < end)
-    .map(f => day7Metric(f, metric)).filter((v): v is number => v !== null);
+  const pool = facts.filter(f => f.pillarKey === match.pillar_key && (!match.platform || f.platform === match.platform)
+    && !(tags.length && tags.every(t => f.formatTags.includes(t))) && utcDay(f.postedAt) >= start && utcDay(f.postedAt) < end);
+  // Platforms are never mixed: an experiment that names no platform has a baseline only when its pillar lives on one.
+  if (!match.platform && new Set(pool.map(f => f.platform)).size > 1) return null;
+  const values = pool.map(f => day7Metric(f, metric)).filter((v): v is number => v !== null);
   const mid = median(values);
   return mid === null ? null : { metric, median: round(mid, 4), samples: values.length, window_weeks: 8, basis: 'day7' };
 }
@@ -71,6 +73,12 @@ function decide(e: Experiment, matched: string[], values: number[], extra: { shi
 export function conclude(e: Experiment, facts: Fact[], diagnostics: Diagnostic[]): Conclusion {
   const matchedFacts = facts.filter(f => matches(e.match, f) && inPeriod(f.postedAt, e));
   const platforms = e.match.platform ? [e.match.platform] : [...new Set(matchedFacts.map(f => f.platform))];
+  // Platforms are never mixed in one verdict: a named platform is required, and an old experiment without one that spans several
+  // platforms can only be inconclusive (a change in where the user posts is not an effect).
+  if (!e.match.platform && platforms.length > 1) {
+    return { verdict: 'inconclusive', reason: 'mixed_platforms', lean: null, matched_posts: matchedFacts.map(f => f.postId),
+      samples: matchedFacts.length, median: null, vs_baseline: null, next_status: e.extended_once ? 'concluded' : 'extended' };
+  }
   const treated = new Set(matchedFacts.map(f => f.postId));
   const shift = platforms.some(p => platformShift(facts, p, utcDay(e.period_start), utcDay(e.period_end), treated).detected);
   const lowVolume = weeklyRate(e, facts) < LOW_VOLUME_PER_WEEK;

@@ -100,6 +100,8 @@ export function checkOutput(text: string, pack: PackView): CheckedOutput {
     if (out.experiments.length >= pack.limits.experiments_max) return reject(path, 'too_many');
     if (!pack.limits.experiment_kinds.includes(x.kind)) return reject(path, 'kind_not_allowed');
     if (!pillars.has(x.match.pillar_key)) return reject(path, 'unknown_pillar');
+    // Same platform only: an experiment names the platform it runs on (rates and views differ by platform).
+    if (!x.match.platform) return reject(path, 'platform_required');
     // One long-run experiment per pillar per period (tech plan v1); basics experiments are about the opening, not the pillar.
     if (x.kind !== 'basics' && usedPillars.has(x.match.pillar_key)) return reject(path, 'pillar_repeated');
     if (!cited(x.evidence)) return reject(path, 'no_evidence');
