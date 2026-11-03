@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { resultsDirectory, testModelId } from './support/config';
 import { coreSql } from './support/db';
-import { expect, test } from './support/fixtures';
+import { expect, requireBudget, test } from './support/fixtures';
 import { cheapestOther, modelsInLabels, readActiveModels } from './support/models';
 import { startFreeChat, waitForRuntimeTurn, runtimeBox } from './support/freeChat';
 import { readCredits } from './support/ui';
@@ -12,8 +12,10 @@ import { readCredits } from './support/ui';
  * Journey 5: compare two models. The left column is the test model, the right one the cheapest other model on the back-office
  * compare list. Both columns answer; the total charge is exactly the sum of the column charges.
  */
-test('journey 5: two models answer and the total equals the sum of the columns @cheap', async ({ openAs, meter }) => {
+test('journey 5: two models answer and the total equals the sum of the columns @cheap @daily', async ({ openAs, meter }) => {
   test.setTimeout(10 * 60_000);
+  // About $0.03 on the test models (2026-10-28): skipped, not started, when the day's daily budget has less left.
+  await requireBudget(meter, 0.06);
   const { page } = await openAs('gold');
   await page.goto('/app/profile');
   const before = await readCredits(page);
