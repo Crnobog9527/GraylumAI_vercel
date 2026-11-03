@@ -15,28 +15,43 @@ export type ChatImages = {
   remove: (id: string) => void; set: (images: ChatImage[]) => void;
 };
 
+/**
+ * Prepares the image files among `files` for the message, at most CHAT_MAX_IMAGES in all. `held` counts the images already attached
+ * plus those still being prepared by earlier calls, so overlapping adds (a drop while a paste is still being made a JPEG) share the
+ * limit; `pending` moves by one per file, up when it is taken and down when it is done, so sending waits until every add has finished.
+ */
+export async function prepareChatImages(files: Iterable<File> | ArrayLike<File> | null | undefined, deps: {
+  held: () => number; pending: (change: 1 | -1) => void; attach: (image: ChatImage) => void; refuse: (message: string) => void;
+  make?: (file: File) => Promise<ChatImage>;
+}) {
+  const picked = imageFiles(files);
+  if (!picked.length) return;
+  const room = CHAT_MAX_IMAGES - deps.held();
+  if (picked.length > room) deps.refuse(`一条消息最多附 ${CHAT_MAX_IMAGES} 张图片，多出的没有加入。`);
+  const taken = picked.slice(0, Math.max(room, 0));
+  taken.forEach(() => deps.pending(1));
+  for (const file of taken) {
+    try { deps.attach(await (deps.make ?? chatImageFromFile)(file)); }
+    catch (cause) { deps.refuse(cause instanceof Error ? cause.message : '这张图片读不了，请换一张再试。'); }
+    finally { deps.pending(-1); }
+  }
+}
+
 export function useChatImages(): ChatImages {
-  const [images, setImages] = useState<ChatImage[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [images, setImages] = useState<ChatImage[]>([]), [pending, setPending] = useState(0), [error, setError] = useState('');
   const current = useRef(images); current.current = images;
+  const preparing = useRef(0);
   const add = useCallback(async (files: Iterable<File> | ArrayLike<File> | null | undefined) => {
-    const picked = imageFiles(files);
-    if (!picked.length) return;
     setError('');
-    const room = CHAT_MAX_IMAGES - current.current.length;
-    if (picked.length > room) setError(`一条消息最多附 ${CHAT_MAX_IMAGES} 张图片，多出的没有加入。`);
-    if (room <= 0) return;
-    setBusy(true);
-    try {
-      for (const file of picked.slice(0, room)) {
-        try {
-          const image = await chatImageFromFile(file);
-          setImages(old => old.length < CHAT_MAX_IMAGES ? [...old, image] : old);
-        } catch (cause) { setError(cause instanceof Error ? cause.message : '这张图片读不了，请换一张再试。'); }
-      }
-    } finally { setBusy(false); }
+    await prepareChatImages(files, {
+      held: () => current.current.length + preparing.current,
+      pending: change => { preparing.current += change; setPending(count => count + change); },
+      attach: image => setImages(old => old.length < CHAT_MAX_IMAGES ? [...old, image] : old),
+      refuse: setError,
+    });
   }, []);
   const remove = useCallback((id: string) => { setImages(old => old.filter(image => image.id !== id)); setError(''); }, []);
-  return { images, busy, error, add, remove, set: setImages };
+  return { images, busy: pending > 0, error, add, remove, set: setImages };
 }
 
 /** The thumbnails above the text, each removable, with the processing state and any refusal. */

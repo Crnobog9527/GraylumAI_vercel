@@ -163,7 +163,9 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
       <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
         <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill}
           blockedReason={COMPOSER_REFERENCES_ENABLED && referencesNamedIn(input, references).length
-            ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。' : undefined}
+            ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。'
+            // Compare sends no image: with screenshots attached it would charge several models that never saw them.
+            : images.images.length || images.busy ? '附了图片的消息暂时不能多模型对比，请移除图片后再试。' : undefined}
           onStarted={compareId => { update(''); compare.add(compareId); void compare.refresh(); }}
           onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
