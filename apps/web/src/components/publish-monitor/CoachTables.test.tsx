@@ -25,8 +25,10 @@ const pack = {
     followers: [{ platform: 'tiktok', now: { date: '2026-11-03', value: 5200 }, weeks4_ago: { date: '2026-10-06', value: 5000 }, weeks8_ago: null }] },
   diagnostics: { posts: [{ post_id: 'n1', platform: 'tiktok', captured_on: '2026-11-02', video_seconds: 28, drop_second: 4,
     rates: { avg_watch_seconds: 6, avg_watch_pct: 0.2143, complete_rate: 0.11, bounce_2s: 0.62, retain_3s: 0.31, likes: 12, made_up: 3 },
-    vs_own_median: { retain_3s: 0.8 }, stuck_layer: 'hook',
-    layer_results: [{ layer: 'hook', name: '开头留人', status: 'fail', line: { bounce_2s: { max: 0.5 }, retain_3s: { min: 0.45 } } }] }],
+    vs_own_median: { retain_3s: 0.8, complete_rate: 0.5 }, stuck_layer: 'hook',
+    layer_results: [{ layer: 'hook', name: '开头留人', status: 'fail', line: { bounce_2s: { max: 0.5 }, retain_3s: { min: 0.45 }, avg_watch_seconds: { min: 5 } } }] },
+  { post_id: 'old', platform: 'tiktok', captured_on: '2026-11-01', opening_text: '  你可能一直做错了这一步', rates: { views: 300 }, stuck_layer: null,
+    layer_results: [] }],
     handbook: [{ platform: 'tiktok', calibration: 'owner_confirmed', version: 'v1', source: '行业经验值（第三方），非平台官方' }] },
   ledger: {
     to_review: [{ id: 'e1', hypothesis: '开头先给结论', result: { verdict: 'inconclusive', reason: 'samples_lt_3', samples: 2, vs_baseline: 1.12,
@@ -79,7 +81,7 @@ describe('the brand review tables', () => {
     expect(coach.extras.worst.map(p => p.postId)).toEqual(['a']);
     const html = renderToStaticMarkup(<CoachTables coach={coach} />);
     const text = html.replace(/<[^>]*>/g, '');
-    for (const words of ['本周最好的作品', '本周最差的作品', '单条诊断', '五分钟上手', '6 秒', '28 秒', '21.4%', '11%', '第 4 秒', '开头留人', '2 秒跳出率 62%（参考线 ≤50%）', '3 秒留存 31%（参考线 ≥45%，自己中位数的 0.80 倍）', '点赞 12', '诊断参考线来源：行业经验值（第三方），非平台官方',
+    for (const words of ['本周最好的作品', '本周最差的作品', '单条诊断', '五分钟上手', '6 秒', '28 秒', '21.4%', '11%', '第 4 秒', '开头留人', '2 秒跳出率 62%（参考线 ≤50%）', '3 秒留存 31%（参考线 ≥45%，自己中位数的 0.80 倍）', '点赞 12', '平均观看 6 秒（参考线 ≥5 秒）', '完播率 11%（自己中位数的 0.50 倍）', '开头：你可能一直做错了这一步', '11/01', '诊断参考线来源：行业经验值（第三方），非平台官方',
       '上周实验完成情况', '开头先给结论', '还看不出', '符合条件的作品不到 3 条', '2 条', '1.12 倍', '再观察一期',
       '进行中：每周多发一条（10/27–11/09）', '10/26 结论：标题带数字 · 有效']) expect(text).toContain(words);
     for (const code of ['samples_lt_3', 'inconclusive', 'extended', 'worked', 'hook<', 'made_up', 'bounce_2s']) expect(html).not.toContain(code);

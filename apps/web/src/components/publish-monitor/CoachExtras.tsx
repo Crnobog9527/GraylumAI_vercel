@@ -43,10 +43,11 @@ const NEXT_TEXT: Record<string, string> = { extended: '再观察一期', conclud
 /** The diagnosis keys (funnel.ts RATE_KEYS and COUNT_KEYS) in words; a key not listed here is not shown rather than shown as a code. */
 const METRIC_TEXT: Record<string, string> = { impressions_ctr: '曝光点击率', bounce_2s: '2 秒跳出率', retain_3s: '3 秒留存', retain_5s: '5 秒留存',
   retain_30s: '30 秒留存', like_rate: '点赞率', comment_rate: '评论率', save_rate: '收藏率', share_rate: '分享率', follow_rate: '关注率',
-  profile_visit_rate: '主页访问率', engage_rate: '互动率', views: '播放', likes: '点赞', comments: '评论', saves: '收藏', shares: '分享',
+  profile_visit_rate: '主页访问率', engage_rate: '互动率', avg_watch_seconds: '平均观看', avg_watch_pct: '平均观看比例', complete_rate: '完播率',
+  views: '播放', likes: '点赞', comments: '评论', saves: '收藏', shares: '分享',
   followers_gained: '涨粉', profile_visits: '主页访问' };
 const COUNTS = new Set(['views', 'likes', 'comments', 'saves', 'shares', 'followers_gained', 'profile_visits']);
-/** Shown in their own columns. */
+/** Shown in their own columns: listed again here only for their line or own-median ratio, which those columns do not carry. */
 const OWN_COLUMNS = new Set(['avg_watch_seconds', 'avg_watch_pct', 'complete_rate']);
 const asPct = (n: number) => `${Number((n * 100).toFixed(1))}%`;
 
@@ -54,12 +55,13 @@ function metricsOf(d: Record<string, unknown>, stuck: Record<string, unknown> | 
   const rates = rec(d.rates), lines = rec(stuck?.line), own = rec(d.vs_own_median);
   return Object.entries(rates).flatMap(([key, value]) => {
     const label = METRIC_TEXT[key];
-    if (OWN_COLUMNS.has(key) || !label || typeof value !== 'number' || !Number.isFinite(value)) return [];
-    const show = (n: number) => (COUNTS.has(key) ? String(n) : asPct(n));
+    if (!label || typeof value !== 'number' || !Number.isFinite(value)) return [];
+    const show = (n: number) => (COUNTS.has(key) ? String(n) : key === 'avg_watch_seconds' ? `${Number(n.toFixed(1))} 秒` : asPct(n));
     const line = rec(lines[key]), min = num(line.min), max = num(line.max);
     const ref = [max !== null ? `≤${show(max)}` : null, min !== null ? `≥${show(min)}` : null].filter(Boolean).join('、');
     const ratio = num(own[key]);
     const notes = [ref ? `参考线 ${ref}` : null, ratio !== null ? `自己中位数的 ${ratio.toFixed(2)} 倍` : null].filter(Boolean);
+    if (OWN_COLUMNS.has(key) && !notes.length) return [];
     return [`${label} ${show(value)}${notes.length ? `（${notes.join('，')}）` : ''}`];
   });
 }
@@ -89,7 +91,10 @@ export function coachExtras(pack: Record<string, unknown>): CoachExtrasData {
     if (typeof d.post_id !== 'string' || typeof d.platform !== 'string') return [];
     const rates = rec(d.rates);
     const stuck = list(d.layer_results).find(l => l.layer === d.stuck_layer);
-    return [{ postId: d.post_id, title: titles.get(d.post_id) ?? '', platform: d.platform, capturedOn: str(d.captured_on),
+    // The pack's post lists are optional (a basics-only pack has none): the capture's own opening text names the post then.
+    const opening = str(d.opening_text)?.trim();
+    const title = titles.get(d.post_id) ?? (opening ? `开头：${Array.from(opening).slice(0, 30).join('')}` : '');
+    return [{ postId: d.post_id, title, platform: d.platform, capturedOn: str(d.captured_on),
       avgWatchSeconds: num(rates.avg_watch_seconds), videoSeconds: num(d.video_seconds), avgWatchPct: num(rates.avg_watch_pct),
       completeRate: num(rates.complete_rate), dropSecond: num(d.drop_second), stuck: stuck ? str(stuck.name) : null,
       metrics: metricsOf(d, stuck) }];
@@ -156,15 +161,17 @@ export function CoachExtras({ extras }: { extras: CoachExtrasData }) {
       {best.length > 0 && <PickTable label="本周最好的作品" picks={best} />}
       {worst.length > 0 && <PickTable label="本周最差的作品" picks={worst} />}
       {diagnoses.length > 0 && (
-        <table className="w-full min-w-[880px] text-left text-xs" aria-label="单条诊断">
+        <table className="w-full min-w-[960px] text-left text-xs" aria-label="单条诊断">
           <caption className="pb-1 text-left font-medium">单条诊断</caption>
-          <thead><tr><th className={th}>作品</th><th className={th}>平台</th><th className={th}>平均观看</th><th className={th}>视频时长</th>
+          <thead><tr><th className={th}>作品</th><th className={th}>平台</th><th className={th}>截图日期</th>
+            <th className={th}>平均观看</th><th className={th}>视频时长</th>
             <th className={th}>平均观看比例</th><th className={th}>完播率</th><th className={th}>流失</th><th className={th}>卡在</th>
             <th className={th}>其他指标</th></tr></thead>
           <tbody>{diagnoses.map(d => (
             <tr key={d.postId} className="border-t align-top" style={row}>
               <td className={`max-w-[200px] ${cell}`}>{d.title || '—'}</td><td className={cell}>{platformName(d.platform)}</td>
-              <td className={cell}>{seconds(d.avgWatchSeconds)}</td><td className={cell}>{seconds(d.videoSeconds)}</td>
+              <td className={cell}>{shortDay(d.capturedOn)}</td><td className={cell}>{seconds(d.avgWatchSeconds)}</td>
+              <td className={cell}>{seconds(d.videoSeconds)}</td>
               <td className={cell}>{pct(d.avgWatchPct)}</td><td className={cell}>{pct(d.completeRate)}</td>
               <td className={cell}>{dash(d.dropSecond, v => `第 ${v} 秒`)}</td><td className={cell}>{d.stuck ?? '—'}</td>
               <td className={`max-w-[280px] ${cell}`}>{d.metrics.length ? d.metrics.join('；') : '—'}</td></tr>))}</tbody>
