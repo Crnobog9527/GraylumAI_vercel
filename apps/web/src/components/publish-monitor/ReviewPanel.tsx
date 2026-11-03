@@ -13,12 +13,18 @@ import { dataErrorMessage, errorCode, formatDay, formatMetric, metricLabel, plat
  * part is the model's; the numbers come only from the stored host table (`tables`), never parsed from the text.
  */
 export type Review = { id: string; periodStart: string; status: 'claimed' | 'completed' | 'skipped'; body: string | null;
-  tables: unknown; notice: string | null; skipReason?: string | null };
+  tables: unknown; notice: string | null; skipReason?: string | null;
+  /** Brand coach reviews: which rhythm and which brand (absent or weekly without a brand: the plain weekly review). */
+  cadence?: string; businessName?: string | null };
 
 type Row = { postId: string; title: string; ageDays: number; status: 'available' | 'too_new' | 'insufficient_samples';
   comparisons: Record<string, { value: number; median: number; samples: number; relative: 'above' | 'below' | 'same' }> };
 type Week = { start: string; end: string; published: number; matched_posts: number; status: string };
 const RELATIVE = { above: '高于', below: '低于', same: '持平' } as const;
+/** The title of a review by its rhythm; anything unknown reads as the weekly one. */
+const PERIOD_TITLE: Record<string, string> = { weekly: '这一周', monthly: '月度复盘', quarterly: '季度体检', chat: '对话里的复盘' };
+export const reviewTitle = (review: Pick<Review, 'periodStart' | 'cadence' | 'businessName'>) =>
+  `${review.businessName ? `${review.businessName} · ` : ''}${formatDay(review.periodStart)} ${PERIOD_TITLE[review.cadence ?? 'weekly'] ?? PERIOD_TITLE.weekly}`;
 const STATUS = { too_new: '太新，下周再看', insufficient_samples: '样本不足' } as const;
 
 /** The brand review's code-computed pack (`review_pack` version 2): posts whose day 7 fell in the period, and the pillar scoreboard. */
@@ -112,7 +118,7 @@ function ReviewCard({ review }: { review: Review }) {
   return (
     <article className="space-y-3 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{formatDay(review.periodStart)} 这一周</h3>
+        <h3 className="text-sm font-semibold">{reviewTitle(review)}</h3>
         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
           {review.notice ?? (review.status === 'claimed' ? '正在生成…' : review.status === 'skipped' ? '这一周没有复盘' : '')}</span>
       </header>
