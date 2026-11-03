@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { handbookSchema } from './funnel';
-import { COACH_INSTRUCTIONS } from '../../turn/review';
+import { COACH_CONTRACT } from '../../turn/review';
 import { checkOutput, evidenceRefs } from './output';
 import { buildPack } from './pack';
 import { packRowsSchema } from './rows';
@@ -61,11 +61,11 @@ describe('coach_json checks (RC-2)', () => {
     for (const pack of [full, basics, loose(buildPack({ rows: rowsA, cadence: 'monthly', businessId: simId('A'), now: NOW, handbooks: new Map() }))])
       for (const ref of evidenceRefs(pack).metrics) seen.add(template(ref));
     expect([...seen].length).toBeGreaterThanOrEqual(4);
-    for (const form of seen) expect(COACH_INSTRUCTIONS, form).toContain(form);
+    for (const form of seen) expect(COACH_CONTRACT, form).toContain(form);
     // And the two kinds of experiment are told apart: a multiple for a tactic, a line and a funnel layer for a basics experiment.
-    expect(COACH_INSTRUCTIONS).toContain('target 写 {"mult"');
-    expect(COACH_INSTRUCTIONS).toContain('{"max":数值} 或 {"min":数值}');
-    expect(COACH_INSTRUCTIONS).toContain('没有 stuck_layer 就只提 tactic');
+    expect(COACH_CONTRACT).toContain('target 写 {"mult"');
+    expect(COACH_CONTRACT).toContain('{"max":数值} 或 {"min":数值}');
+    expect(COACH_CONTRACT).toContain('没有 stuck_layer 就只提 tactic');
   });
 
   it('a missing or broken block keeps the prose and records nothing', () => {

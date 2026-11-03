@@ -9,18 +9,21 @@ const state = vi.hoisted(() => ({
 const mutation = vi.hoisted(() => () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null,
   data: undefined }));
 vi.mock('@/trpc/client', () => ({ trpc: {
-  useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() },
-    settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() } } } }),
+  useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() }, trend: { invalidate: vi.fn() },
+    settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() }, pillars: { invalidate: vi.fn() } } } }),
   opc: { library: { useQuery: () => state.library } },
   publishMonitor: {
     connections: { useQuery: () => state.connections }, data: { useQuery: () => state.data },
+    trend: { useQuery: () => ({ isPending: true }) },
     postHistory: { useQuery: () => ({ isPending: true }) },
     refresh: { useMutation: mutation }, disconnect: { useMutation: mutation }, linkPost: { useMutation: mutation },
     addBenchmark: { useMutation: mutation }, connectTikhub: { useMutation: mutation }, manualImport: { useMutation: mutation },
     settings: { useQuery: () => ({ data: { autoReviewEnabled: true, autoReviewEnabledAt: '2026-10-20T00:00:00Z' } }) },
     setAutoReview: { useMutation: mutation },
     features: { useQuery: () => state.features },
-    review: { list: { useQuery: (_: unknown, o?: { enabled?: boolean }) => { state.reviewAsked.push(o?.enabled !== false); return state.reviews; } } },
+    review: { list: { useQuery: (_: unknown, o?: { enabled?: boolean }) => { state.reviewAsked.push(o?.enabled !== false); return state.reviews; } },
+      pillars: { useQuery: () => ({ isPending: false, error: null, data: [] }) },
+      savePillars: { useMutation: () => ({ mutate: () => {}, isPending: false }) } },
   },
 } }));
 import { DataReviewView } from './DataReviewView';
@@ -60,11 +63,12 @@ describe('data review page access follows the server', () => {
     expect(html).toContain('/app/profile?tab=subscription');
     expect(text(html)).not.toContain('作品数据（近');
   });
-  it('shows the posts tab for a member, with the window from the server', () => {
+  it('a member opens on the trend dashboard; the posts tab is still there', () => {
     state.data = ok({ windowDays: 30, connections: [{ id: 'c1', platform: 'x' }], posts: [post()] });
     const html = renderToStaticMarkup(<DataReviewView />);
-    expect(text(html)).toContain('作品数据（近 30 天）');
-    expect(text(html)).toContain('合成作品');
+    expect(html).toContain('id="pm-trend"');
+    expect(text(html)).toContain('作品数据');
+    expect(text(html)).not.toContain('作品数据（近');
   });
 });
 

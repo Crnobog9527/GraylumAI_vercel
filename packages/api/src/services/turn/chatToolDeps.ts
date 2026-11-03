@@ -6,13 +6,14 @@ import { discoverSkillCatalog, entryContentSource, moduleUsesVoice, pinnedCatalo
 import { admitCatalogVoice } from './admission/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
-import { REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
+import { COACH_SWITCH, REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
 import { rowFor } from './settings/settingsRows';
 import { admitOwnPosts } from './agent/workspacePosts';
 import { databaseSkillSource } from '../skills/databaseSource';
 import type { ChatToolDeps } from './tools/chatTools';
 import { FREE_RESULT_RESERVE_BYTES } from './tools/plan';
 import { prepareSkills, withPinnedSkill } from './tools/skills';
+import { memberCatalog } from './skills/coachGate';
 
 /*
  * CORE-PATH-V2 V2-6: what POST /api/turn gives a free chat for its tools. All of it runs before turn_open: the Skill catalog with
@@ -29,9 +30,11 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
       const listed = await discoverSkillCatalog(client, admin, { maxResultBytes: FREE_RESULT_RESERVE_BYTES, excludeSocial: false, actorId });
       // A work item's method is the revision it is bound to, in place of what the catalog lists for its module.
       const pinned = pin ? await pinnedCatalogEntry(sourceOf(pin), pin, FREE_RESULT_RESERVE_BYTES, await moduleUsesVoice(admin, pin.moduleId)) : null;
-      const catalog = pin ? withPinnedSkill(listed, pin, pinned) : listed;
+      // After the pin is put in: a work item pinned to the coach Skill before a downgrade must not bring the member method back.
+      const catalog = await memberCatalog(admin, actorId, pin ? withPinnedSkill(listed, pin, pinned) : listed);
       const prepared = await prepareSkills(catalog, sourceOf, FREE_RESULT_RESERVE_BYTES);
-      const contentSource = pin && pinned ? await entryContentSource(sourceOf(pin), pinned, FREE_RESULT_RESERVE_BYTES) : undefined;
+      const pinnedListed = pinned !== null && catalog.some(entry => entry.revisionId === pinned.revisionId);
+      const contentSource = pin && pinned && pinnedListed ? await entryContentSource(sourceOf(pin), pinned, FREE_RESULT_RESERVE_BYTES) : undefined;
       return { catalog, prepared, ...(contentSource ? { contentSource } : {}) };
     },
     async voice(actorId, catalog) {
@@ -45,9 +48,9 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
       const [sources, tier] = await Promise.all([admin.rpc('opc_workspace_sources', { p_actor_id: actorId }),
         postsOn ? swallow('turn_tools_posts_tier_unavailable', readOwnDataTier(admin, actorId), null) : null]);
       if (sources.error) throw new Error('TURN_WORKSPACE_UNAVAILABLE');
+      const on = async (key: string) => rowFor(await configuration, key).data?.value === true;
       return { sources: sources.data as string[], strategy: true, posts: !tier ? null : { windowDays: tier.ownDataWindowDays,
-        benchmarks: tier.level === 'gold' && tier.allowBenchmarkMonitor,
-        review: rowFor(await configuration, REVIEW_SWITCH).data?.value === true } };
+        benchmarks: tier.level === 'gold' && tier.allowBenchmarkMonitor, review: await on(REVIEW_SWITCH), coach: await on(COACH_SWITCH) } };
     },
     async benchmarkAccounts(actorId, sessionId) {
       const { data, error } = await admin.rpc('research_chat_benchmark_accounts', { a: actorId, s: sessionId, e: null });

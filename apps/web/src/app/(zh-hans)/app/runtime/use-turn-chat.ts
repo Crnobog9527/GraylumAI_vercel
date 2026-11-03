@@ -35,7 +35,8 @@ export const closedTurnSeen = (seen: number | null | undefined, view: Pick<TurnV
   return { changed: id !== undefined && id !== seen, id };
 };
 export type TurnChoice = { moduleId?: string; references?: ReadonlyArray<{ kind: 'library_document'; documentId: string; version: number }>;
-  /** A work item's conversation (V2-10b): the server reads its checks, method and brief. */ workItem?: boolean };
+  /** A work item's conversation (V2-10b): the server reads its checks, method and brief. */ workItem?: boolean;
+  /** PUBLISH-MONITOR B2: one JPEG data URL sent with this message only (never stored). */ image?: string };
 /**
  * A refusal before the stream, or an error event without a turn whose code is a definite refusal: no turn was opened, so nothing was
  * stored or charged. The codes of a failed database call are not: turn_open may have committed and its answer been lost (the turn and its

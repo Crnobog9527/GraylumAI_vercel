@@ -22,7 +22,8 @@ import { COACH_OUTPUT_TOKENS, REQUEST_ROOM_BYTES, runReviewTurn, type ReviewClai
 
 const claim: ReviewClaimInput = { id: '11111111-1111-4111-8111-111111111111', actorId: '22222222-2222-4222-8222-222222222222',
   sessionId: '55555555-5555-4555-8555-555555555555', requestId: '44444444-4444-4444-8444-444444444444',
-  modelId: '66666666-6666-4666-8666-666666666666', maxCostUsd: '1', cadence: 'weekly', attempt: 1, coach: true };
+  modelId: '66666666-6666-4666-8666-666666666666', maxCostUsd: '1', cadence: 'weekly', attempt: 1, coach: true,
+  coachMethod: '方法：先看 mode，再看卡点。' };
 // Staging's Sonnet 5.5 route: 2.2 / 11 USD per million, 1M context; the context-window bound alone is 2.56 USD.
 const limits = { providerSlug: 'anthropic', contextTokens: 1_000_000, promptUsdPerMillion: '2.2', completionUsdPerMillion: '11', requestUsd: '0' };
 const nominalPricing = { version: 'nominal-v1' as const, pricingHash: 'a'.repeat(64), endpointTag: 'anthropic',
@@ -55,9 +56,9 @@ beforeEach(() => {
 });
 
 it('a coach review runs from the turn through the real request builder and the body-measured bound, and the adapter accepts what is sent', async () => {
-  const { COACH_REQUEST, COACH_INSTRUCTIONS } = await import('./review');
+  const { COACH_REQUEST, coachInstructions } = await import('./review');
   const { withBrandIdentity } = await import('../modelIdentity/brandIdentity');
-  const bytes = Buffer.byteLength(COACH_REQUEST + JSON.stringify(pack.review)) + Buffer.byteLength(withBrandIdentity(COACH_INSTRUCTIONS, true)) + REQUEST_ROOM_BYTES;
+  const bytes = Buffer.byteLength(COACH_REQUEST + JSON.stringify(pack.review)) + Buffer.byteLength(withBrandIdentity(coachInstructions(claim.coachMethod!), true)) + REQUEST_ROOM_BYTES;
   const quote = quoteFor(bytes);
   m.quote.mockResolvedValue(quote);
   const result = await runReviewTurn(deps(), claim, pack, async () => true);
@@ -77,6 +78,18 @@ it('a coach review runs from the turn through the real request builder and the b
   await expect(adapter.prepareDispatch({ input: body + ' ' }, call.identity)).rejects.toThrow('QUOTE_CONFLICT');
 });
 
+it('a coach review without the Skill method waits: nothing is quoted, opened or sent', async () => {
+  const result = await runReviewTurn(deps(), { ...claim, coachMethod: undefined }, pack, async () => true);
+  expect(result).toEqual({ kind: 'deferred', code: 'COACH_METHOD_UNAVAILABLE' });
+  expect(m.quote).not.toHaveBeenCalled();
+  expect(m.sent).toHaveLength(0);
+});
+it('the method comes before the contract in the instructions, and the contract is always last', async () => {
+  const { coachInstructions, COACH_CONTRACT } = await import('./review');
+  const text = coachInstructions('方法正文');
+  expect(text.startsWith('方法正文')).toBe(true);
+  expect(text.endsWith(COACH_CONTRACT)).toBe(true);
+});
 it('a request larger than the one the turn froze is stopped before anything is sent', async () => {
   const quote = quoteFor(2_000);
   m.quote.mockResolvedValue(quote);

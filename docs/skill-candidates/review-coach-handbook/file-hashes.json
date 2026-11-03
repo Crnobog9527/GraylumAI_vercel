@@ -1,0 +1,30 @@
+[
+  {
+    "package": "review-coach",
+    "path": "SKILL.md",
+    "mediaType": "text/markdown",
+    "bytes": 4836,
+    "sha256": "ff69dd4c03550295226f4ba02169caa962477dadfa43d01ce1290ddfff0b0265"
+  },
+  {
+    "package": "review-coach",
+    "path": "workflow.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 172,
+    "sha256": "1460eb66a9879b1b93da7dfa3dda25c81926e97a882f29855e6f51d75f9445e4"
+  },
+  {
+    "package": "review-coach",
+    "path": "handbook/douyin.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 2290,
+    "sha256": "c2bb5cf5005a8b3fb128b175d4616e5d15c41c4b9f2e245d2280cffc2664e5f4"
+  },
+  {
+    "package": "review-coach",
+    "path": "handbook/tiktok.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 1862,
+    "sha256": "664b212638940b5b7dc8319a180f5622aa5af23dfb8fadb4daafba45b0e8c780"
+  }
+]

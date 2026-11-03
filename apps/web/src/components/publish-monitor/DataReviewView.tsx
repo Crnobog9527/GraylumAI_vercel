@@ -11,6 +11,7 @@ import { dataErrorMessage, errorCode } from './labels';
 import { ManualImport } from './ManualImport';
 import { PostsPanel, type Post } from './PostsPanel';
 import { ReviewPanel } from './ReviewPanel';
+import { TrendCharts, TrendSkeleton } from './TrendCharts';
 
 /**
  * PUBLISH-MONITOR PR-7: "数据复盘" — connected accounts, the user's own post data, table import and weekly reviews.
@@ -30,10 +31,10 @@ export function DataReviewView() {
   // The account list comes from the library query, so adding a brand account refreshes it too.
   const changed = () => {
     void utils.publishMonitor.connections.invalidate(); void utils.publishMonitor.data.invalidate();
-    void utils.opc.library.invalidate();
+    void utils.opc.library.invalidate(); void utils.publishMonitor.trend.invalidate();
   };
 
-  if (connections.isPending || data.isPending) return <Shell><p className="text-sm">正在读取…</p></Shell>;
+  if (connections.isPending || data.isPending) return <Shell><TrendSkeleton /></Shell>;
   if (blocked === 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED') return <Shell><Upgrade /></Shell>;
   if (blocked || !connections.data || !data.data) {
     return (
@@ -51,13 +52,16 @@ export function DataReviewView() {
   return (
     <Shell>
       {library.error && <p role="alert" className="text-sm">读不到你的品牌账号列表，连接和导入暂时不能选账号。</p>}
-      <Tabs defaultValue="posts">
-        <TabsList>
+      <Tabs defaultValue="trend">
+        {/* Five tabs are wider than a 390px phone: the bar scrolls sideways instead of widening the page. */}
+        <TabsList className="max-w-full justify-start overflow-x-auto">
+          <TabsTrigger value="trend">数据趋势</TabsTrigger>
           <TabsTrigger value="posts">作品数据</TabsTrigger>
           <TabsTrigger value="accounts">账号</TabsTrigger>
           <TabsTrigger value="review">每周复盘</TabsTrigger>
           <TabsTrigger value="import">表格导入</TabsTrigger>
         </TabsList>
+        <TabsContent value="trend" className="pt-4"><TrendCharts gold={gold} /></TabsContent>
         <TabsContent value="posts" className="pt-4">
           <PostsPanel windowDays={windowDays} posts={data.data.posts as Post[]} connections={data.data.connections}
             accountOf={id => accountOfConnection.get(id)} onLinked={changed} />

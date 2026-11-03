@@ -17,6 +17,8 @@ const REFUSED: Record<string, string> = {
   STOP_LOSS_REACHED: '今天服务的用量已达上限，这条消息没有发送，也没有扣费。请稍后再试。',
   TURN_SESSION_BUSY: '这个对话还有一轮回复没结束，请等它完成后再发送。',
   TURN_INPUT_TOO_LARGE: '这条消息太长，超过了模型的输入上限。请缩短后再发送。',
+  TURN_IMAGE_INVALID: '这张截图读不了（需要压缩后不超过 600 KB、边长不超过 2048 像素），这条消息没有发送，也没有扣费。请换一张截图再试。',
+  TURN_IMAGE_UNSUPPORTED: '当前模型不支持看图，这条消息没有发送，也没有扣费。可以去掉截图，或把截图里的数字直接打出来再发送。',
   TURN_CORE_DISABLED: '对话服务正在切换，请刷新页面后再试。',
   TURN_SESSION_ERASED: '这个对话已删除。',
   TURN_SESSION_DENIED: '无法访问这个对话。',
@@ -41,6 +43,8 @@ const FAILED: Record<string, string> = {
   TURN_PROVIDER_402: '模型服务暂时不可用，本轮已全额退回积分。',
   TURN_PROVIDER_BUSY: '模型服务繁忙，本轮已全额退回积分。请稍后再试。',
   TURN_PAUSED_FOR_CREDITS: TURN_PAUSED_NOTICE,
+  // A turn with a screenshot cannot pause (the image is kept nowhere to send again): it ends refunded instead.
+  TURN_IMAGE_CREDITS_LOW: '积分不足，带截图的这一轮没有完成，已全额退回积分。充值后请重新附上截图发送。',
   TURN_CALL_UNKNOWN: '模型回复中断，正在核对本轮结果，已用积分以记录为准。',
 };
 const GENERIC = '这条消息没有完成。请刷新后查看结果，不要重复发送相同内容。';
