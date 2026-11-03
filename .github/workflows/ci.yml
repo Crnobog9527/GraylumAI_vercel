@@ -390,7 +390,8 @@ jobs:
   sim-e2e:
     name: Run simulated-model browser tests
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Measured 9m52s on CI (2026-11-03); the 30-minute ceiling of docs/ENGINEERING.md section 7 leaves about 20 minutes.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
