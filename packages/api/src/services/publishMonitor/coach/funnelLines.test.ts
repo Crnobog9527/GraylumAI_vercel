@@ -81,6 +81,18 @@ describe('the own excellent line (top 20% of the last 10)', () => {
     expect(middle.own_excellent).toEqual([]);
   });
 
+  it('repeated captures of one post count once, and the post\'s own other captures are not its history', () => {
+    const repeated = [0.1, 0.12, 0.15, 0.18, 0.2].map(v => ({ ...post({ complete_rate: v }), postId: '20000000-0000-4000-8000-000000000001' }));
+    expect(diagnosePost(post({ complete_rate: 0.9 }), HANDBOOK, repeated).own_excellent).toEqual([]);
+    const current = post({ complete_rate: 0.5 });
+    const self = history.slice(0, 5).map(h => ({ ...h, postId: current.postId }));
+    expect(diagnosePost(current, HANDBOOK, [...self, ...history.slice(5, 9)]).own_excellent).toEqual([]);
+  });
+
+  it('too few views: no excellent mark either', () => {
+    expect(diagnosePost(post({ views: 10, complete_rate: 0.9 }), HANDBOOK, history).own_excellent).toEqual([]);
+  });
+
   it('fewer than five own posts: no excellent line', () => {
     expect(diagnosePost(post({ complete_rate: 0.9 }), HANDBOOK, history.slice(0, 4)).own_excellent).toEqual([]);
   });

@@ -100,16 +100,20 @@ function inconsistencies(rates: Record<string, number>): string[] {
 /** history: the user's other confirmed diagnostics on this platform, newest first (the last 10 are used). */
 export function diagnosePost(d: Diagnostic, handbook: Handbook | null, history: Diagnostic[]): PostDiagnosis {
   const { rates, derived } = withDerived(d);
-  const own = history.filter(h => h.id !== d.id && h.platform === d.platform).slice(0, 10).map(h => withDerived(h).rates);
+  // One entry per other post (its newest capture, history being newest first): repeated captures of one post are not ten posts.
+  const others = [...new Map(history.filter(h => h.postId !== d.postId && h.platform === d.platform).reverse().map(h => [h.postId, h] as const))
+    .values()].reverse();
+  const own = others.slice(0, 10).map(h => withDerived(h).rates);
   const vsOwn: Record<string, number> = {};
   for (const [key, value] of Object.entries(rates)) {
     const mid = median(own.map(r => r[key]).filter((v): v is number => v !== undefined));
     if (mid && own.length >= 3) vsOwn[key] = round(value / mid, 2);
   }
   const counts: readonly string[] = COUNT_KEYS;
-  const ownExcellent = Object.entries(rates).filter(([key, value]) => !counts.includes(key)
-    && excellent(key, value, own.map(r => r[key]).filter((v): v is number => v !== undefined)) === true).map(([key]) => key);
   const tooFew = handbook?.min_views !== undefined && rates.views !== undefined && rates.views < handbook.min_views;
+  // Too few views: nothing is judged, not even against the user's own posts.
+  const ownExcellent = tooFew ? [] : Object.entries(rates).filter(([key, value]) => !counts.includes(key)
+    && excellent(key, value, own.map(r => r[key]).filter((v): v is number => v !== undefined)) === true).map(([key]) => key);
   const calibrated = handbook?.calibration === 'owner_confirmed' && !tooFew;
   const ownLine = (value: Record<string, number>) => Object.keys(value).some(k => k in vsOwn) ? 'own_median' as const : 'none' as const;
   const results: LayerResult[] = (handbook?.funnel ?? []).map(l => {
