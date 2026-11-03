@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.fusion_review_source(p_actor_id uuid, p_review
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE rv fusion_reviews; ver artifact_versions; r artifact_rounds;
+DECLARE rv fusion_reviews; ver artifact_versions; r artifact_rounds; accounts jsonb;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
   SELECT * INTO rv FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id;
@@ -16,9 +16,15 @@ BEGIN
   SELECT * INTO r FROM artifact_rounds WHERE id=ver.round_id;
   IF rv.id IS NULL OR ver.id IS NULL OR r.id IS NULL OR ver.report_hash IS DISTINCT FROM rv.version_hash
     OR NOT content_erasure_artifact_readable(p_actor_id,ver.id) THEN RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
+  accounts:=ver.report#>'{generatedReport,data,data,benchmarks,accounts}';
   RETURN jsonb_build_object('body',ver.report#>>'{generatedReport,body}',
     'sections',r.workflow#>'{reportGeneration,sections}','maxCharacters',r.workflow#>'{reportGeneration,maxCharacters}',
     'declared',coalesce((SELECT jsonb_agg(jsonb_build_object('stepId',st->>'id','fieldIds',
       coalesce((SELECT jsonb_agg(i->>'id') FROM jsonb_array_elements(coalesce(st->'information','[]')) i),'[]'))
-      ORDER BY o) FROM jsonb_array_elements(r.workflow->'steps') WITH ORDINALITY x(st,o)),'[]'));
+      ORDER BY o) FROM jsonb_array_elements(r.workflow->'steps') WITH ORDINALITY x(st,o)),'[]'),
+    'adoptedBenchmarks',CASE WHEN jsonb_typeof(ver.report#>'{generatedReport,data,data}')='object' THEN
+      coalesce((SELECT jsonb_agg(jsonb_build_object('platform',a->>'platform','account',a->>'account',
+        'metrics',CASE WHEN jsonb_typeof(a->'metrics')='object' THEN a->'metrics' ELSE NULL END))
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accounts)='array' THEN accounts ELSE '[]'::jsonb END) a
+        WHERE jsonb_typeof(a)='object'),'[]'::jsonb) END);
 END $function$;

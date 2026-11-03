@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { spendCapUsd } from './config';
+import { DAILY_SPEND_CAP_USD, spendCapUsd, spendSince } from './config';
 import { dbSpendReader, SpendCapExceeded, SpendMeter, type SpendStore } from './spend';
 
 const sequence = (...values: number[]) => { let i = 0; return async () => values[Math.min(i++, values.length - 1)]!; };
@@ -34,6 +34,31 @@ describe('spendCapUsd', () => {
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: '2.1' })).toThrow();
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: '0' })).toThrow();
     expect(() => spendCapUsd({ CORE_E2E_MAX_USD: 'abc' })).toThrow();
+  });
+
+  it('daily mode allows the approved 0.5 a day and can only be lowered', () => {
+    expect(DAILY_SPEND_CAP_USD).toBe(0.5);
+    expect(spendCapUsd({ CORE_E2E_DAILY: '1' })).toBe(0.5);
+    expect(spendCapUsd({ CORE_E2E_DAILY: '1', CORE_E2E_MAX_USD: '0.2' })).toBe(0.2);
+    expect(() => spendCapUsd({ CORE_E2E_DAILY: '1', CORE_E2E_MAX_USD: '0.6' })).toThrow();
+  });
+});
+
+describe('spendSince', () => {
+  it('counts from the run start, or in daily mode from the start of its UTC day', () => {
+    expect(spendSince('2026-11-03T17:20:00.000Z', {})).toBe('2026-11-03T17:20:00.000Z');
+    expect(spendSince('2026-11-03T17:20:00.000Z', { CORE_E2E_DAILY: '1' })).toBe('2026-11-03T00:00:00.000Z');
+  });
+});
+
+describe('daily mode', () => {
+  it('takes what earlier runs of the day spent as the baseline, and stops at the day cap', async () => {
+    const meter = new SpendMeter(0.5, sequence(0.3, 0.3, 0.38, 0.38, 0.52), undefined, true);
+    expect(await meter.remainingUsd()).toBeCloseTo(0.2);
+    expect((await meter.finishJourney('a')).usd).toBeCloseTo(0.08);
+    expect(meter.runUsd).toBeCloseTo(0.08);
+    expect(await meter.remainingUsd()).toBeCloseTo(0.12);
+    await expect(meter.checkpoint('b')).rejects.toBeInstanceOf(SpendCapExceeded);
   });
 });
 

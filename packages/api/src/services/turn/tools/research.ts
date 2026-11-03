@@ -10,7 +10,7 @@ import { parallelModeFor } from '../../research/vendors/parallel';
 import type { ResearchItem, SocialKind, SocialPlatform } from '../../research/vendors/types';
 import type { SupplierRequest } from '../../research/runtime/subcall';
 import { callDisplay } from '../../research/runtime/toolContext';
-import type { ResearchTurnEvent } from '../../../shared/researchTurn';
+import { SUPPLIER_UNAVAILABLE_REASON, supplierUnavailable, type ResearchTurnEvent } from '../../../shared/researchTurn';
 import { INVALID_RESEARCH_ARGUMENTS, fastSearchOnly, researchToolDescription, researchToolParameters } from '../research/researchRuntimeTool';
 import type { RuntimeTool } from '../agent/runner';
 import type { TurnReplay } from '../resume';
@@ -32,6 +32,9 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_key, item)
 
 /** The explicit "ran but returned nothing" result (product observation: a Xiaohongshu search answered "这次没取到数据"). */
 export const NO_DATA_REASON = 'NO_DATA_RETURNED';
+/** What the model tells the user when the data supplier could not serve a call (not the user's keywords; nobody is charged). */
+export const SUPPLIER_DOWN_MESSAGE = '对标数据供应商暂时不可用（不是关键词的问题）。'
+  + '如实告诉用户“对标数据暂时取不到，请稍后再试”，不要建议换关键词。';
 
 export type ResearchToolsInput = {
   /** A resume: the receipts that answer calls already paid for (resume.ts). */
@@ -141,7 +144,8 @@ async function runSteps(input: ResearchToolsInput, ledger: SubcallLedger, planne
     const answered = ['ok', 'partial'].includes(result.outcome) ? 'succeeded' as const : 'failed' as const;
     input.onCall?.emit({ type: 'research_call', ...line, ...result.outcome === 'not_sent' ? { state: 'failed' as const } : {
       state: result.outcome === 'unknown' ? 'unknown' as const : answered,
-      evidenceId: line.callId, credits: subcallCredits(receipt, input.onCall.q) } });
+      evidenceId: line.callId, credits: subcallCredits(receipt, input.onCall.q),
+      ...(result.outcome === 'failed' && supplierUnavailable(result.reason) ? { unavailable: true as const } : {}) } });
     if (result.outcome !== 'ok' && result.outcome !== 'partial') { stoppedAt = result.reason ?? result.outcome; break; }
     fetchedAt ??= result.fetchedAt;
     // A supplier answer cut to its item or byte limit stays partial: the model is told data is missing.
@@ -213,7 +217,11 @@ export function researchTools(input: ResearchToolsInput): RuntimeTool[] {
       if (outcome === 'not_sent') return toolEnvelope({ status: 'unavailable', reason: value.stoppedAt ?? 'NOT_SENT' });
       if (outcome === 'unknown') return toolEnvelope({ status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN',
         ...(value.items.length ? { items: value.items } : {}) });
-      if (outcome === 'no_data') return toolEnvelope({ status: 'unavailable', reason: NO_DATA_REASON });
+      if (outcome === 'no_data') {
+        const down = supplierUnavailable(value.stoppedAt);
+        return toolEnvelope({ status: 'unavailable', reason: down ? SUPPLIER_UNAVAILABLE_REASON : NO_DATA_REASON,
+          ...(down ? { message: SUPPLIER_DOWN_MESSAGE } : {}) });
+      }
       return toolEnvelope({ status: value.stoppedAt || value.cut ? 'partial' : 'ok', reason: value.stoppedAt ?? value.cut,
         items: value.items, truncated: value.cut !== null,
         ...(value.fetchedAt ? { fetchedAt: value.fetchedAt } : {}) });

@@ -69,6 +69,24 @@ export async function runFusionTurn({db,report,Client,connectionString}) {
     // The frozen source reads; one group claimed with its first sequence, a seat recorded with its answer.
     const source = await service(db,'fusion_review_source',f.actor,rv.id);
     assert.ok(source.body && source.sections.length);
+    // The jury sees only the benchmarks the report adopted (platform, account, the host's numbers and fetch time): none while the
+    // version has no stored data, and never the accounts of an earlier failed check or the draft's materials.
+    assert.equal(source.adoptedBenchmarks,null,'no stored data is unknown, not an empty list');
+    // The version's stored data is written once by 定稿; the immutability trigger is bypassed for the fixture only.
+    await db.query('SET session_replication_role=replica');
+    await db.query(`UPDATE artifact_versions SET report=jsonb_set(report,'{generatedReport,data}',$2::jsonb) WHERE id=$1`,[rv.source_version_id,JSON.stringify({
+      dataVersion:1,data:{benchmarks:{accounts:[
+        {platform:'xiaohongshu',account:'new-a',why:'x',metrics:{followers:1200,medianViews:null,engagementRate:null,weeklyPosts:3,capturedAt:'2026-11-03T08:40:00Z'}},
+        {platform:'xiaohongshu',account:'new-b',metrics:null},'junk']}}})]);
+    await db.query('SET session_replication_role=origin');
+    assert.deepEqual((await service(db,'fusion_review_source',f.actor,rv.id)).adoptedBenchmarks,[
+      {platform:'xiaohongshu',account:'new-a',metrics:{followers:1200,medianViews:null,engagementRate:null,weeklyPosts:3,capturedAt:'2026-11-03T08:40:00Z'}},
+      {platform:'xiaohongshu',account:'new-b',metrics:null}]);
+    // Stored data that adopted no benchmark is a confirmed empty list.
+    await db.query('SET session_replication_role=replica');
+    await db.query(`UPDATE artifact_versions SET report=jsonb_set(report,'{generatedReport,data}',$2::jsonb) WHERE id=$1`,[rv.source_version_id,JSON.stringify({dataVersion:1,data:{}})]);
+    await db.query('SET session_replication_role=origin');
+    assert.deepEqual((await service(db,'fusion_review_source',f.actor,rv.id)).adoptedBenchmarks,[]);
     await service(db,'fusion_review_turn_step',f.actor,rv.id,JSON.stringify({round:1,phase:'review',attempt:1}),JSON.stringify({state:'claim',fromSeq:1}));
     await service(db,'turn_fusion_begin',f.actor,opened.turnId,1,'model',randomUUID(),null,null,hash('r1'),0.1,6);
     await service(db,'turn_fusion_record',f.actor,opened.turnId,1,'ok',0.05,0.05,JSON.stringify({verdict:'usable'}),null,hash('p1'),null,

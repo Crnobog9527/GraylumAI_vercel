@@ -80,6 +80,8 @@ export interface DeepenInput {
   coverage: DiscoveryCoverage;
   pay: (platform: SocialPlatform, request: SupplierRequest, kind: keyof PlatformCoverage['spent']) => Promise<Step | null>;
   screen: (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => Promise<void>;
+  /** Reads the shared profile cache for these accounts in one call, before they are screened (a cache hit is no lookup). */
+  warm?: (batch: Array<{ platform: SocialPlatform; authorId: string; authorPosts: EvidenceItem[] }>) => Promise<void>;
   /** A full card (candidatesMax selectable): the deeper layers stop there. */
   enough: () => boolean;
   /** A card can show (candidatesMin selectable): the speculative web layer only runs while it cannot. */
@@ -93,6 +95,7 @@ export interface DeepenInput {
  */
 export async function deepen(input: DeepenInput): Promise<void> {
   const { ctx, d, posts, coverage, pay, screen, enough, isStopped } = input;
+  const warm = input.warm ?? (async () => undefined);
   const done = () => isStopped() || enough();
   for (const platform of d.platforms) {
     const cover = coverage.platforms[platform]!;
@@ -102,6 +105,7 @@ export async function deepen(input: DeepenInput): Promise<void> {
         if (done()) return;
         const result = await pay(platform, socialRequest(ctx, platform, 'account_search', { keyword })!, 'accountSearches');
         if (!result || isStopped()) break;
+        await warm(result.items.flatMap(lead => typeof lead.fields.id === 'string' ? [{ platform, authorId: lead.fields.id, authorPosts: [] }] : []));
         for (const lead of result.items) {
           if (done()) return;
           if (typeof lead.fields.id === 'string') {
@@ -127,6 +131,7 @@ export async function deepen(input: DeepenInput): Promise<void> {
         const newcomers = [...new Set(found.map(post => post.fields.authorId)
           .filter((id): id is string => typeof id === 'string' && !seen.has(id)))];
         next.push({ keyword, cursor: result.nextCursor, fresh: newcomers.length });
+        await warm(newcomers.map(authorId => ({ platform, authorId, authorPosts: entries.filter(post => post.fields.authorId === authorId) })));
         for (const authorId of newcomers) {
           if (done()) return;
           const own = entries.filter(post => post.fields.authorId === authorId);
@@ -153,7 +158,9 @@ export async function deepen(input: DeepenInput): Promise<void> {
         const query = `${keyword} ${PLATFORM_NAMES[platform] ?? platform} creators`;
         const result = await pay(platform, { vendor: 'parallel', route: web.route, query, mode: 'fast' }, 'webSearches');
         if (!result || isStopped()) break;
-        for (const lead of result.items.flatMap(item => webLeads(item, platform))) {
+        const leads = result.items.flatMap(item => webLeads(item, platform));
+        await warm(leads.map(authorId => ({ platform, authorId, authorPosts: [] })));
+        for (const lead of leads) {
           if (done() || input.cardable()) break;
           await screen(platform, lead, null, []);
         }

@@ -1,12 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import type { ResearchTurnEvent } from '../../../shared/researchTurn';
+import { supplierUnavailable, type ResearchTurnEvent } from '../../../shared/researchTurn';
 import type { AuthorizationScope } from '../tools/authorize';
 import type { ResearchToolsConfig } from '../vendors/config';
 import { selectRoute } from '../vendors/config';
 import type { SocialKind, SocialPlatform } from '../vendors/types';
 import { runSubcall, type SubcallContext, type SubcallOutcome, type SupplierRequest } from './subcall';
 import type { RuntimeResearchStore } from './store';
+import type { ProfileCachePort } from './profileCache';
 
 export interface ResearchToolContext {
   scope: AuthorizationScope;
@@ -18,6 +19,8 @@ export interface ResearchToolContext {
   now: () => Date;
   /** false = too little of this reply's time is left for another paid lookup and the reply after it (missing: no limit). */
   lookupTime?: () => boolean;
+  /** The shared profile cache (0493); without it every candidate author's profile is looked up. */
+  profileCache?: ProfileCachePort;
 }
 /** Stable across a resumed discovery; different users/discoveries never share evidence. */
 export function stableResearchId(...parts: string[]): string {
@@ -54,6 +57,7 @@ export async function executeResearchCall(ctx: ResearchToolContext, budget: Tool
   ctx.emit({ type: 'research_call', callId: operationId, toolName, args, ...display,
     state: outcome.sent ? (outcome.result.outcome === 'unknown' ? 'unknown'
       : ['ok', 'partial'].includes(outcome.result.outcome) ? 'succeeded' : 'failed') : 'failed',
-    ...(outcome.sent ? { evidenceId: outcome.operationId, credits } : {}) });
+    ...(outcome.sent ? { evidenceId: outcome.operationId, credits } : {}),
+    ...(outcome.sent && outcome.result.outcome === 'failed' && supplierUnavailable(outcome.result.reason) ? { unavailable: true as const } : {}) });
   return outcome;
 }

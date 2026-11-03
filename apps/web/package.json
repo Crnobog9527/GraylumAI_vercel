@@ -26,7 +26,8 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report",
     "test:e2e:core-path": "playwright test -c playwright.core-path.config.ts",
-    "test:e2e:core-path:cheap": "playwright test -c playwright.core-path.config.ts --grep @cheap"
+    "test:e2e:core-path:cheap": "playwright test -c playwright.core-path.config.ts --grep @cheap",
+    "test:e2e:core-path:daily": "CORE_E2E_DAILY=1 playwright test -c playwright.core-path.config.ts --grep @daily"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.3.1",

@@ -145,3 +145,17 @@ it('accounts that differ only by case stay apart on a case-sensitive platform', 
   const tiktok = make({ fetches: [{ id: fetchId, attempt, platform: 'tiktok', account: 'abc', state: 'succeeded', evidence: { platform: 'tiktok' } }] });
   expect(await tiktok.store.fetchClaim('tiktok', 'ABC')).toMatchObject({ claimed: false });
 });
+
+// Review of #1677: the in-process count must agree with research_benchmark_rounds, or the coach is told a choice card is shown that
+// research_turn_apply then refuses to save.
+it('a discovery the supplier could not serve at all (supplierDown) is not a round for the shortfall card; a normal or part-served one is', async () => {
+  const discoveryId = '77777777-7777-4777-8777-777777777777';
+  const discovery = { discoveryId, keywords: ['k'], platforms: ['tiktok'], cursor: {}, state: 'running', keywordConfirmationId: opId };
+  const prior = { shortfall: { rounds: 1, qualified: 1, card: null }, discoveries: [discovery] };
+  for (const [cursor, due] of [[{ supplierDown: true, accounts: [] }, false], [{ accounts: [] }, true], [{ accounts: [{ key: 'tiktok:x' }] }, true]] as const) {
+    const s = make(prior);
+    await s.store.discoverySave(discoveryId, cursor as never, 'completed');
+    expect(await s.store.offerShortfall(opId), JSON.stringify(cursor)).toEqual(due ? expect.objectContaining({ offeredRounds: 2, offeredQualified: 1 }) : null);
+  }
+});
+

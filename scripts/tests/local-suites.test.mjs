@@ -11,7 +11,7 @@ import { judgeVolatility, loadAllow } from '../../packages/db/tests/baseline/vol
 
 const root = resolve(import.meta.dirname, '../..');
 // Ratchets: lowering these is the point of the work; raising them needs a reviewed reason.
-const MAX_EXCLUDED_SUITES = 86;
+const MAX_EXCLUDED_SUITES = 72;
 const MAX_VOLATILITY_ALLOWED = 0;
 // erasure-run and bill-unit left with the old runs and BILL2 path (V2-12); their turn-path counterparts are turn-erasure and turn-core.
 const REQUIRED_IN_CI = ['pay-dispute', 'pay-waffo', 'pay-waffo-delivery', 'monthly-refund', 'package-refund',
@@ -101,4 +101,20 @@ test('shards are disjoint, together cover every suite, and are balanced by measu
   const total = ci.reduce((sum, suite) => sum + weight(suite), 0);
   const slowest = Math.max(...[1, 2, 3, 4].map(k => suitesForShard(ci, k, 4, durations).reduce((sum, suite) => sum + weight(suite), 0)));
   assert.ok(slowest <= total / 4 + Math.max(...ci.map(weight)), `slowest shard ${slowest}s is not balanced (total ${total}s)`);
+});
+
+test('the Waffo delivery and PAY-FAILOVER checks stay split into parallel suites without losing any step (Owner 2026-11-03)', () => {
+  const found = new Set(discoverSuites());
+  for (const suite of ['pay-waffo-delivery/run-local.mjs', 'pay-waffo-delivery/structure-local.mjs', 'pay-failover/run-local.mjs']) {
+    assert.ok(found.has(suite) && !(suite in loadExcluded().suites), `${suite} must be a discovered suite that runs in CI`);
+  }
+  const read = path => readFileSync(resolve(root, path), 'utf8');
+  const delivery = read('packages/db/tests/pay-waffo-delivery/run-local.mjs');
+  // The apply-twice and fingerprint check is handed to the structure half, never dropped: it is switched on only by --structure-only.
+  assert.match(delivery, /fingerprint: structureOnly && !process\.argv\.includes\('--quick'\) \? fingerprint : undefined/);
+  assert.match(read('packages/db/tests/pay-waffo-delivery/structure-local.mjs'), /process\.argv\.push\('--structure-only'\)/);
+  // The 0221-onward repeat check over Waffo data stays in the behaviour half, unchanged.
+  assert.match(delivery, /repeat over Waffo data preserves structure/);
+  assert.ok(!read('packages/db/tests/pay-waffo/run-local.mjs').includes('pay-failover/run-local.mjs"') && !/spawnSync\(process\.execPath/.test(read('packages/db/tests/pay-waffo/run-local.mjs')),
+    'pay-waffo no longer runs PAY-FAILOVER as a child: it is its own suite');
 });
