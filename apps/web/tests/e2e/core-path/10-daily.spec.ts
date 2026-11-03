@@ -16,7 +16,8 @@ import { readCredits, sendAndWait, settleOpening } from './support/ui';
  * fits; the compare journey (05, also @daily) runs before these. The last test lists every turn the run touched and fails if
  * any is still open or unsettled. Run with: pnpm test:e2e:core-path:daily (README, "每日真实模型检查").
  */
-test.describe.configure({ mode: 'serial' });
+// Not a serial group: a failed or capped journey must not skip the ones after it, above all the last check for frozen credits.
+// One worker runs the tests in file order (playwright.core-path.config.ts); the benchmark journey skips without the mentor's draft.
 
 /** About what each journey costs on staging's models (2026-10 measurements, rounded up); used only to skip, never to bill. */
 const RESERVE = { chat: 0.05, mentor: 0.08, report: 0.05, benchmark: 0.3 };
@@ -59,6 +60,8 @@ test('daily: a new draft opens one turn, reopening it opens none, one mentor rep
   const url = await startPositioning(page);
   await settleOpening(page);
   const opening = await settledTurnsAfter(gold.id, mark);
+  // The opening is a paid turn of its own: stop here if it took the day past the cap, before the next paid message.
+  await meter.checkpoint('daily: mentor opening');
   expect(opening.map(turn => turn.kind), 'starting a draft opens at most its first step\'s opening').toEqual(opening.length ? ['mentor'] : []);
   await mkdir(resultsDirectory, { recursive: true });
   await writeFile(draftFile(), new URL(url).pathname);
