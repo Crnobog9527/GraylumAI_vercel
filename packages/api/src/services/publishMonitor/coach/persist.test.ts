@@ -57,10 +57,43 @@ it('stores only the target that fits the kind, whatever else the experiment carr
   expect(payloadOf(d.rpc).p_payload.experiments.map(e => [e.target_mult, e.target_line])).toEqual([[1.5, null], [null, { max: 0.5 }]]);
 });
 
-it('saves nothing for an unparsed block, reports a refused lease, and fails loudly on a database error', async () => {
+it('the baseline is frozen on the posts the code tagged from their titles too, not on the untagged rows the database still holds', async () => {
+  const pillarName = rows.profile!.pillars.find(p => rows.facts.some(f => f.pillarKey === p.key && f.platform === platform))!;
+  const stripped = { ...rows, facts: rows.facts.map(f => (f.pillarKey === pillarName.key
+    ? { ...f, pillarKey: null, pillarSource: null, title: `【${pillarName.name}】 ${f.title ?? ''}` } : f)) };
+  const rpc = vi.fn(async (name: string) => (name === 'publish_monitor_review_pack_rows' ? { data: stripped, error: null } : { data: { saved: true }, error: null }));
+  const experiment = { kind: 'tactic' as const, layer: null, hypothesis: 'h', action: 'a', metric: 'views', target: { mult: 1.5 },
+    match: { pillar_key: pillarName.key, platform }, evidence: { post_ids: [], metrics: [] } };
+  await saveCoachLedger({ rpc } as never, claim, simId('B'), pack, checked({ experiments: [experiment] }));
+  const baseline = (payloadOf({ mock: { calls: rpc.mock.calls } } as never).p_payload.experiments[0]!.baseline) as { samples: number } | null;
+  expect(baseline).not.toBeNull();
+  expect(baseline!.samples).toBeGreaterThanOrEqual(3);
+  // The same posts with titles that name no pillar stay untagged, and the baseline is honestly empty.
+  const unnamed = { ...stripped, facts: stripped.facts.map(f => (f.pillarKey === null ? { ...f, title: '没有栏目' } : f)) };
+  const rpc2 = vi.fn(async (name: string) => (name === 'publish_monitor_review_pack_rows' ? { data: unnamed, error: null } : { data: { saved: true }, error: null }));
+  await saveCoachLedger({ rpc: rpc2 } as never, claim, simId('B'), pack, checked({ experiments: [experiment] }));
+  expect(payloadOf({ mock: { calls: rpc2.mock.calls } } as never).p_payload.experiments[0]!.baseline).toBeNull();
+});
+
+it('an unusable block drops only what the model proposed: the verdicts of the pack and the code\'s title tags are still saved', async () => {
   const d = database();
-  expect(await saveCoachLedger(d.db, claim, simId('B'), pack, checked({ parsed: false }))).toBe(false);
-  expect(d.rpc).not.toHaveBeenCalled();
+  const auto = [{ post_id: simId('P2'), pillar_key: 'p2' }];
+  expect(await saveCoachLedger(d.db, claim, simId('B'), { ...pack, auto_tags: auto }, checked({ parsed: false }))).toBe(true);
+  expect(payloadOf(d.rpc).p_payload).toEqual({ experiments: [], verdict_notes: [], tags: auto });
+});
+
+it('the model\'s tags come first, the code\'s after them without repeating a post, and one save never carries more than 40', async () => {
+  const d = database();
+  const model = [{ post_id: simId('P1'), pillar_key: 'p1' }];
+  const auto = [{ post_id: simId('P1'), pillar_key: 'p3' }, ...Array.from({ length: 60 }, (_, i) => ({ post_id: simId(`A${i}`), pillar_key: 'p2' }))];
+  await saveCoachLedger(d.db, claim, simId('B'), { ...pack, auto_tags: auto }, checked({ tags: model }));
+  const tags = payloadOf(d.rpc).p_payload.tags as Array<{ post_id: string; pillar_key: string }>;
+  expect(tags).toHaveLength(40);
+  expect(tags[0]).toEqual(model[0]);
+  expect(tags.filter(tag => tag.post_id === simId('P1'))).toHaveLength(1);
+});
+
+it('reports a refused lease, and fails loudly on a database error', async () => {
   expect(await saveCoachLedger(database({ saved: false }).db, claim, simId('B'), pack, checked())).toBe(false);
   await expect(saveCoachLedger(database(null, { code: 'XX000' }).db, claim, simId('B'), pack, checked()))
     .rejects.toThrow('PUBLISH_MONITOR_COACH_LEDGER_SAVE_FAILED');

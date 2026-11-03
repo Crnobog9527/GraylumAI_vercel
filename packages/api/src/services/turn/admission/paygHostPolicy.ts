@@ -6,6 +6,7 @@ import { reasoningPolicy, frozenReasoningFields, type ReasoningPolicy } from './
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { FrozenRun } from '../provider/frozenRun';
 import { PAYG_MAX_TOOLS } from './paygPolicy';
+import { imageInputPolicy } from '../provider/imageInput';
 import { stagingRuntimeWindow } from '../settings/stagingEnvironment';
 import type { StagingPolicy } from '../settings/stagingPolicy';
 import { StagingAccessError } from '../settings/stagingErrors';
@@ -77,6 +78,9 @@ const profileFields = {
   maxTools: z.number().int().min(2).max(PAYG_MAX_TOOLS), maxSchemaBytes: z.literal(16384),
   // Every purpose at most once (nine since fusion_compare); a profile covering all of them must not be refused.
   purposes: z.array(phase).min(1).max(9),
+  // PUBLISH-MONITOR B2: the route reads one inline JPEG in a free chat (LIB-2d's allowance and limits). Absent: the model does not
+  // take images here, and a chat with an image is refused before anything is frozen.
+  imageInput: imageInputPolicy.optional(),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
     'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream', 'fusion-text-v1-stream'])).min(1).max(6),
   reasoningVariants: z.array(z.object({

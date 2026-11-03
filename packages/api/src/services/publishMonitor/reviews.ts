@@ -14,6 +14,9 @@ import {readReviewSettings} from './reviewSettings';
 import {buildPack,type Cadence} from './coach/pack';
 import {COACH_READ_WEEKS,readPackRows} from './coach/rows';
 import {saveCoachLedger} from './coach/persist';
+import {MAX_AUTO_TAGS,tagFromTitles} from './coach/autotag';
+import {loadCoachHandbooks} from './coach/handbooks';
+import type {Handbook} from './coach/funnel';
 import type {CheckedOutput} from './coach/output';
 
 /*
@@ -64,16 +67,24 @@ export async function prepareReview(db:SupabaseClient,c:ReviewClaim):Promise<boo
 const CADENCES=['weekly','monthly','quarterly','chat'];
 /**
  * The operations coach's pack of one brand (RC-3): the RC-2 review pack, all numbers computed in code, wrapped so the page's tables and the
- * source-visibility check read it like the plain pack (its own connections are the sources). Handbooks of the private Skill package are not
- * loaded yet: a platform without one is diagnosed on its own data only.
+ * source-visibility check read it like the plain pack (its own connections are the sources). `handbooks` are those of the private Skill
+ * package (coach/handbooks.ts): a platform without one is diagnosed on its own data only.
  */
-export async function readCoachPack(db:SupabaseClient,actor:string,businessId:string,cadence:string,now=Date.now()){
+export async function readCoachPack(db:SupabaseClient,actor:string,businessId:string,cadence:string,now=Date.now(),
+ handbooks:Map<string,Handbook>=new Map()){
  const kind=CADENCES.includes(cadence)?cadence as Cadence:'weekly';
  // The pack's own windows (8/12 weeks, the 35-63 day stage, the 8-week baseline before each post) all sit inside what is read;
  // open experiments need their posts too.
- const rows=await readPackRows(db,actor,businessId,COACH_READ_WEEKS);
- const review=buildPack({rows,cadence:kind,businessId,now,handbooks:new Map()});
- return {kind:'review_pack',status:'available',window_days:90,source_connections:[...new Set(rows.followers.map(f=>f.connectionId))],review};
+ const read=await readPackRows(db,actor,businessId,COACH_READ_WEEKS);
+ // A post whose title names one of the brand's pillars is tagged by code first; the model only sees (and tags) what is left.
+ const pillars=read.profile?.pillars??[];
+ const facts=tagFromTitles(read.facts,pillars),recent=tagFromTitles(read.recent,pillars);
+ const rows={...read,facts:facts.items,recent:recent.items};
+ const review=buildPack({rows,cadence:kind,businessId,now,handbooks});
+ // Kept with the saved pack (never sent to the model) so the review's save writes them down, a few at a time.
+ const autoTags=[...facts.tags,...recent.tags].slice(0,MAX_AUTO_TAGS);
+ return {kind:'review_pack',status:'available',window_days:90,source_connections:[...new Set(rows.followers.map(f=>f.connectionId))],review,
+  ...(autoTags.length?{auto_tags:autoTags}:{})};
 }
 /** The user's own posts of the last 90 days with the review tables, all computed in code (no model, no refresh, no provider). */
 export async function readReviewPack(db:SupabaseClient,actor:string){
@@ -98,7 +109,8 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:Revi
   if(!state.allowed){await step(db,c,'skip','DISABLED');return;}
   // A brand's review (the coach switched on) reads the coach pack; a plain weekly review reads the own-posts pack.
   const coach=Boolean(state.businessId);
-  const pack=coach?await readCoachPack(db,c.actorId,state.businessId!,state.cadence??'weekly'):await readReviewPack(db,c.actorId);
+  const pack=coach?await readCoachPack(db,c.actorId,state.businessId!,state.cadence??'weekly',Date.now(),
+   await loadCoachHandbooks(db,options.env)):await readReviewPack(db,c.actorId);
   if(!pack){await step(db,c,'skip','CONFIGURATION_REQUIRED');return;}
   const saved=await db.rpc('publish_monitor_review_save_pack',{p_id:c.id,p_token:c.token,p_pack:pack});
   if(saved.error||saved.data!==true)return;

@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { CHAT_MAX_IMAGES, IMAGE_MAX_DATA_URL_BYTES } from './provider/imageInput';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { compareSkillInput, loadCompareTurnParts } from '../fusion/compareLoad';
@@ -25,7 +26,9 @@ export const turnRequest = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('chat'), ...common, text: z.string().trim().min(1).max(200_000), moduleId: z.string().uuid().optional(),
     workItem: z.literal(true).optional(),
     references: z.array(z.object({ kind: z.literal('library_document'), documentId: z.string().uuid(),
-      version: z.number().int().positive() }).strict()).min(1).max(8).optional() }).strict(),
+      version: z.number().int().positive() }).strict()).min(1).max(8).optional(),
+    // PUBLISH-MONITOR B2: JPEG data URLs for this message only (chatImage.ts checks them and keeps them nowhere).
+    images: z.array(z.string().min(1).max(IMAGE_MAX_DATA_URL_BYTES)).min(1).max(CHAT_MAX_IMAGES).optional() }).strict(),
   // V2-5: the positioning mentor. moduleId is the draft's module (the turn is quoted for its model; turn_open refuses any other);
   // text is the user's words, or the host's opening marker. 8000 characters, as the old mentor request.
   z.object({ kind: z.literal('mentor'), ...common, moduleId: z.string().uuid(), stepId: z.string().min(1).max(128),
@@ -106,5 +109,6 @@ export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): P
     ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) }, emit));
   const chosen = { ...(input.moduleId ? { moduleId: input.moduleId } : {}), ...(input.references ? { references: input.references } : {}) };
   return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text,
-    ...(input.workItem ? { workItem: true } : {}), ...(Object.keys(chosen).length ? { chosen } : {}) }, emit));
+    ...(input.workItem ? { workItem: true } : {}), ...(Object.keys(chosen).length ? { chosen } : {}),
+    ...(input.images ? { images: input.images } : {}) }, emit));
 }

@@ -52,10 +52,12 @@ export default function ResetPasswordPage() {
   if (phase.kind === 'signout-pending') notice = { tone: 'info', message: SIGNOUT_PENDING_MESSAGE };
   const signOutRetry = phase.kind === 'signout-pending' || (phase.kind === 'blocked' && !phase.signedOut);
 
+  // The form below exists only once the recovery session has been checked in the browser, so it is never on the page before its scripts.
+  // method="post" is the backstop: a native submit must never put a field in the URL.
   return (
     <AuthPageCard icon={LockKeyhole} title="设置新密码" description="新密码至少 8 位。设置成功后，所有设备都需要用新密码重新登录。">
       {phase.kind === 'ready' ? (
-        <form className="space-y-4" onSubmit={handleSubmit}>
+        <form className="space-y-4" method="post" onSubmit={handleSubmit}>
           <div className="space-y-2">
             <Label htmlFor="new-password" className="text-[#f2f2f2]">
               新密码

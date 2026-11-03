@@ -45,7 +45,7 @@ function diagnosticsSection(rows: PackRows, input: PackInput, period: ReturnType
     missing_rates: [...new Set(posts.flatMap(p => basicsKeys(p.platform).filter(k => p.rates[k] === undefined)))].sort(),
     handbook: [...new Set(posts.map(p => p.platform))].map(platform => {
       const h = input.handbooks.get(platform);
-      return { platform, calibration: h?.calibration ?? 'none', version: h?.version ?? null };
+      return { platform, calibration: h?.calibration ?? 'none', version: h?.version ?? null, source: h?.source ?? null };
     }),
     candidates: posts.length ? [] : candidates,
     rate_keys: RATE_KEYS,

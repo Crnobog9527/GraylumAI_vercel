@@ -32,6 +32,8 @@ DECLARE
   v_intercepted_overrun INTEGER := 0;
   v_intercepted_restoration INTEGER := 0;
   v_spend uuid;
+  -- What the user reads in the credit records: a review turn says which review it was; every other turn keeps 'AI turn'.
+  v_description text:='AI turn';
   -- A turn's first freeze keeps the keys it always had; a top-up settles under its own, so each part repeats safely.
   v_key text := 'turn:'||p_turn_id||CASE WHEN p_part>0 THEN ':part'||p_part ELSE '' END;
 BEGIN
@@ -150,9 +152,12 @@ BEGIN
   -- row, not a spend, keeps the records equal to the balance (as bill2 release rows and billing_reconcile_day count it).
   -- D <= H, so a turn never overruns its freeze (v_intercepted_overrun stays 0).
   IF p_actual_credits > 0 THEN
+    SELECT CASE WHEN t.kind = 'review' THEN CASE t.policy#>>'{review,cadence}' WHEN 'monthly' THEN '月度复盘' WHEN 'quarterly' THEN '季度体检'
+        WHEN 'chat' THEN '对话复盘' ELSE '每周复盘' END END INTO v_description FROM turns t WHERE t.id = p_turn_id;
+    v_description := coalesce(v_description, 'AI turn');
     INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,source_type,source_id,
      idempotency_key,balance_before,balance_after,metadata)
-    VALUES(p_user_id,-p_actual_credits,'consumption','AI turn','spend','turn_spend','ai_task',p_turn_id::text,
+    VALUES(p_user_id,-p_actual_credits,'consumption',v_description,'spend','turn_spend','ai_task',p_turn_id::text,
      v_key||':spend',v_balance_after+p_actual_credits+v_intercepted_restoration,v_balance_after+v_intercepted_restoration,
      jsonb_build_object('turnId',p_turn_id,'preDeductId',p_pre_deduct_id))
     RETURNING id INTO v_spend;
