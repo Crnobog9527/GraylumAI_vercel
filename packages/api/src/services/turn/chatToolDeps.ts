@@ -6,7 +6,7 @@ import { discoverSkillCatalog, entryContentSource, moduleUsesVoice, pinnedCatalo
 import { admitCatalogVoice } from './admission/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
-import { REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
+import { COACH_SWITCH, REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
 import { rowFor } from './settings/settingsRows';
 import { admitOwnPosts } from './agent/workspacePosts';
 import { databaseSkillSource } from '../skills/databaseSource';
@@ -45,9 +45,9 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
       const [sources, tier] = await Promise.all([admin.rpc('opc_workspace_sources', { p_actor_id: actorId }),
         postsOn ? swallow('turn_tools_posts_tier_unavailable', readOwnDataTier(admin, actorId), null) : null]);
       if (sources.error) throw new Error('TURN_WORKSPACE_UNAVAILABLE');
+      const on = async (key: string) => rowFor(await configuration, key).data?.value === true;
       return { sources: sources.data as string[], strategy: true, posts: !tier ? null : { windowDays: tier.ownDataWindowDays,
-        benchmarks: tier.level === 'gold' && tier.allowBenchmarkMonitor,
-        review: rowFor(await configuration, REVIEW_SWITCH).data?.value === true } };
+        benchmarks: tier.level === 'gold' && tier.allowBenchmarkMonitor, review: await on(REVIEW_SWITCH), coach: await on(COACH_SWITCH) } };
     },
     async benchmarkAccounts(actorId, sessionId) {
       const { data, error } = await admin.rpc('research_chat_benchmark_accounts', { a: actorId, s: sessionId, e: null });
