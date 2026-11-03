@@ -58,7 +58,7 @@ describe('one handbook file', () => {
 
 describe('loading the handbooks of a package', () => {
   it('keeps the readable valid ones and leaves out a missing, failing or invalid one', async () => {
-    const files = { 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.json': '{"platform":"tiktok"}' };
+    const files = { 'handbook/douyin.yaml': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.yaml': '{"platform":"tiktok"}' };
     const map = await loadHandbooks(async path => files[path as keyof typeof files] ?? null);
     expect([...map.keys()]).toEqual(['douyin']);
     expect(warn).toHaveBeenCalledWith('billing', 'coach_handbook_invalid', { platform: 'tiktok' });
@@ -66,18 +66,18 @@ describe('loading the handbooks of a package', () => {
     expect(failing.size).toBe(0);
   });
 
-  it('reads handbook/<platform>.json of the pinned package through fusion_review_skill_file', async () => {
-    const d = database({ 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.json': JSON.stringify(handbookOf('tiktok', 'draft')) });
+  it('reads handbook/<platform>.yaml of the pinned package through fusion_review_skill_file', async () => {
+    const d = database({ 'handbook/douyin.yaml': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.yaml': JSON.stringify(handbookOf('tiktok', 'draft')) });
     const map = await loadHandbooks(packageReader(d.db, PACKAGE));
     expect([...map.keys()].sort()).toEqual(['douyin', 'tiktok']);
     expect(map.get('tiktok')?.calibration).toBe('draft');
     expect(d.rpc).toHaveBeenCalledWith('fusion_review_skill_file', expect.objectContaining({ p_skill_id: PACKAGE.skillId,
-      p_revision_id: PACKAGE.revisionId, p_package_hash: PACKAGE.packageHash, p_path: 'handbook/douyin.json' }));
+      p_revision_id: PACKAGE.revisionId, p_package_hash: PACKAGE.packageHash, p_path: 'handbook/douyin.yaml' }));
   });
 
   it('an error from the package read is a thrown read failure, not an empty handbook', async () => {
-    const d = database({ 'handbook/douyin.json': new Error('boom') });
-    await expect(packageReader(d.db, PACKAGE)('handbook/douyin.json')).rejects.toThrow('COACH_HANDBOOK_READ_FAILED');
+    const d = database({ 'handbook/douyin.yaml': new Error('boom') });
+    await expect(packageReader(d.db, PACKAGE)('handbook/douyin.yaml')).rejects.toThrow('COACH_HANDBOOK_READ_FAILED');
   });
 });
 
@@ -89,12 +89,12 @@ describe('the handbooks of this deployment', () => {
   });
 
   it('an unreadable package is an empty Map: the review still runs, on the user\'s own data', async () => {
-    const d = database({ 'handbook/douyin.json': new Error('down'), 'handbook/tiktok.json': new Error('down') });
+    const d = database({ 'handbook/douyin.yaml': new Error('down'), 'handbook/tiktok.yaml': new Error('down') });
     expect((await loadCoachHandbooks(d.db, { [HANDBOOK_PACKAGE_ENV]: JSON.stringify(PACKAGE) })).size).toBe(0);
   });
 
   it('reads the package on every review, so a revoked handbook is never served from memory', async () => {
-    const files = { 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.json': JSON.stringify(handbookOf('tiktok')) };
+    const files = { 'handbook/douyin.yaml': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.yaml': JSON.stringify(handbookOf('tiktok')) };
     const d = database(files);
     await loadCoachHandbooks(d.db, ENV);
     await loadCoachHandbooks(d.db, ENV);
@@ -108,7 +108,7 @@ describe('the pack built with loaded handbooks (simulated account A)', () => {
   const diagnostics = (rates: Record<string, number>) => rows.diagnostics.slice(0, 3).map(d => ({ ...d, platform: 'douyin', rates, reviewRunId: null, capturedOn: AS_OF }));
   const pack = (handbooks: Map<string, Handbook>, rates: Record<string, number>) => JSON.parse(JSON.stringify(
     buildPack({ rows: { ...rows, diagnostics: diagnostics(rates) }, cadence: 'weekly', businessId: simId('A'), now: NOW, handbooks })));
-  const loaded = async () => loadHandbooks(packageReader(database({ 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')) }).db, PACKAGE));
+  const loaded = async () => loadHandbooks(packageReader(database({ 'handbook/douyin.yaml': JSON.stringify(handbookOf('douyin')) }).db, PACKAGE));
   const GOOD = { bounce_2s: 0.3, retain_3s: 0.6, retain_5s: 0.5, like_rate: 0.06 };
   const BAD = { bounce_2s: 0.95, retain_3s: 0.1, retain_5s: 0.05 };
 

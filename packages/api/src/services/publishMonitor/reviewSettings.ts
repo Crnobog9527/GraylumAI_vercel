@@ -2,6 +2,8 @@
 import {z} from 'zod';
 import type {SupabaseClient} from '@supabase/supabase-js';
 export const REVIEW_SWITCH='publish_monitor_review_enabled';
+/** The operations coach (Owner 2026-10-27): the scheduled brand reviews and, in a free chat, the review read (block E). */
+export const COACH_SWITCH='publish_monitor_coach_enabled';
 export const REVIEW_MODEL='publish_monitor_review_model_id';
 export const REVIEW_CAP='publish_monitor_review_max_usd';
 export async function readReviewSettings(db:Pick<SupabaseClient,'from'>){

@@ -1,16 +1,37 @@
 [
   {
     "package": "review-coach",
-    "path": "handbook/douyin.json",
-    "mediaType": "application/json",
+    "path": "handbook/douyin.yaml",
+    "mediaType": "text/yaml",
     "bytes": 2118,
     "sha256": "d40adc627ca342a7cc0f756a6b866b929d90199ad7361476f4c7085261d6da3a"
   },
   {
     "package": "review-coach",
-    "path": "handbook/tiktok.json",
-    "mediaType": "application/json",
+    "path": "handbook/tiktok.yaml",
+    "mediaType": "text/yaml",
     "bytes": 1690,
     "sha256": "61a0e269a36b148cbadc72cb896e2d55d6e324a63827be415949b3ead0ab8bbc"
+  },
+  {
+    "package": "review-coach",
+    "path": "SKILL.md",
+    "mediaType": "text/markdown",
+    "bytes": 874,
+    "sha256": "a840bd3374d37553a3a12ca8a95e48a30f19067ce3c07f36e58f5367cef6f3c0"
+  },
+  {
+    "package": "review-coach",
+    "path": "method.md",
+    "mediaType": "text/markdown",
+    "bytes": 4300,
+    "sha256": "621d7d6b2bfb38b55564aae71f88ad7c8397d17f47b69077ee2d74c0ca7c7624"
+  },
+  {
+    "package": "review-coach",
+    "path": "workflow.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 193,
+    "sha256": "d232d58753bc443a484ddd9e1270c0d6bcff0ec2cab59084988d43f0744d6a2b"
   }
 ]

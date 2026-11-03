@@ -21,6 +21,7 @@ import { TurnStop } from '../call';
 import type { CounterStore } from '../limiter';
 import type { TurnClients } from '../db';
 import { libraryTurnReader } from './source';
+import { COACH_REVIEW_INSTRUCTIONS } from './coachReview';
 import { NO_ACCESS, sourceDescription, workspaceTurnReader, type WorkspaceAccess } from './workspace';
 import { planTurnTools, READ_SOURCE_CALLS, RESEARCH_INPUT_BYTES, type ResearchSetup } from './plan';
 import { researchInstructions, READ_SOURCE_DESCRIPTION, turnTools, type SourceReader } from './index';
@@ -109,7 +110,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const catalogText = skillCatalogInstructions(catalog);
   const libraryText = libraryAddendum(false, sourceOffered && Boolean(library));
   const workspaceRead = sourceOffered && workspaceOn;
-  const workspaceText = workspaceRead ? WORKSPACE_CONTEXT_INSTRUCTIONS : '', postsText = workspaceRead && access.posts ? OWN_POSTS_INSTRUCTIONS : '';
+  const workspaceText = workspaceRead ? WORKSPACE_CONTEXT_INSTRUCTIONS : '';
+  const postsText = workspaceRead && access.posts ? OWN_POSTS_INSTRUCTIONS + (access.posts.coach ? COACH_REVIEW_INSTRUCTIONS : '') : '';
   const voice = input.tools.voice && catalog.length
     ? await swallow('turn_tools_voice_unavailable', input.tools.voice(input.actorId, catalog), undefined) : undefined;
   const { plan, research: setup } = await planTurnTools({ admin: input.admin, configuration: input.configuration, offered,

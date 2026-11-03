@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach,expect,it,vi} from 'vitest';
 import {logger} from '../../lib/logger';
-const m=vi.hoisted(()=>({run:vi.fn(),pack:vi.fn(),settings:vi.fn(),close:vi.fn(),rows:vi.fn(),build:vi.fn(),save:vi.fn()}));
+const m=vi.hoisted(()=>({run:vi.fn(),pack:vi.fn(),settings:vi.fn(),close:vi.fn(),rows:vi.fn(),build:vi.fn(),save:vi.fn(),method:vi.fn()}));
 vi.mock('../turn/review',()=>({runReviewTurn:m.run}));
 vi.mock('../turn/agent/workspacePosts',()=>({resolvePostSource:m.pack}));
 vi.mock('../turn/db',()=>({turnClients:(db:unknown)=>({write:db,read:db}),turnDatabase:()=>({close:m.close})}));
@@ -11,6 +11,7 @@ vi.mock('./reviewSettings',()=>({readReviewSettings:m.settings}));
 vi.mock('./coach/rows',()=>({readPackRows:m.rows,COACH_READ_WEEKS:52}));
 vi.mock('./coach/pack',()=>({buildPack:m.build}));
 vi.mock('./coach/persist',()=>({saveCoachLedger:m.save}));
+vi.mock('./coach/method',()=>({loadCoachMethod:m.method}));
 import {createRuntimeBudget} from '../turn/settings/budget';
 import {readFileSync} from 'node:fs';
 import {advanceReview,claimSchema,prepareReview,runWeeklyReviews,type ReviewClaim,type ReviewStep} from './reviews';
@@ -36,7 +37,8 @@ function database(steps:Record<string,Record<string,unknown>>,extra:Record<strin
 }
 const stepActions=(calls:Calls)=>calls.filter(x=>x[0]==='publish_monitor_review_step').map(x=>[x[1].p_action,x[1].p_reason]);
 beforeEach(()=>{vi.clearAllMocks();m.settings.mockResolvedValue({enabled:true});m.pack.mockResolvedValue(PACK);m.close.mockResolvedValue({});
- m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'completed',delivered:true});});
+ m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'completed',delivered:true});
+ m.method.mockResolvedValue({ok:true,text:'方法正文'});});
 
 it('a review already completed, skipped, retried or waiting on its cost is left alone',async()=>{
  for(const state of ['completed','failed','cost_pending','retrying']){
@@ -112,6 +114,25 @@ it('a brand review reads the coach pack of its brand and cadence, saves it wrapp
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,52);
 });
+it('a coach review runs with the Skill method; without it the claim is left to expire: no pack read or saved, no turn',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888';
+ m.rows.mockResolvedValue({followers:[],profile:null,facts:[],recent:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
+ expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({coach:true,coachMethod:'方法正文'}),expect.anything(),expect.any(Function),expect.any(Function));
+ m.run.mockClear();m.rows.mockClear();m.method.mockResolvedValue({ok:false,reason:'NOT_CONFIGURED'});
+ const waiting=database({default:{businessId:BUSINESS,cadence:'weekly'}});
+ await advanceReview(waiting.db,c,options());
+ expect(m.run).not.toHaveBeenCalled();expect(m.rows).not.toHaveBeenCalled();
+ expect(waiting.calls.some(x=>x[0]==='publish_monitor_review_save_pack')).toBe(false);
+ expect(stepActions(waiting.calls)).toEqual([['authorize',null]]);
+});
+it('a plain weekly review never reads the coach method and is never held up by it',async()=>{
+ m.method.mockResolvedValue({ok:false,reason:'NOT_CONFIGURED'});
+ await advanceReview(database({default:{}}).db,c,options());
+ expect(m.method).not.toHaveBeenCalled();
+ expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.not.objectContaining({coach:true}),expect.anything(),expect.any(Function),expect.any(Function));
+ expect((m.run.mock.calls[0]![1] as Record<string,unknown>).coachMethod).toBeUndefined();
+});
 it('a brand review builds its pack with the handbooks of the pinned Skill package; without the setting the Map is empty',async()=>{
  const BUSINESS='88888888-8888-4888-8888-888888888888';
  m.rows.mockResolvedValue({followers:[],profile:null,facts:[],recent:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
@@ -121,7 +142,7 @@ it('a brand review builds its pack with the handbooks of the pinned Skill packag
  await advanceReview(d.db,c,{...options(),env});
  const given=m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>;
  expect([...given.keys()]).toEqual(['douyin']);
- expect(d.calls.some(x=>x[0]==='fusion_review_skill_file'&&x[1].p_path==='handbook/douyin.json')).toBe(true);
+ expect(d.calls.some(x=>x[0]==='fusion_review_skill_file'&&x[1].p_path==='handbook/douyin.yaml')).toBe(true);
  m.build.mockClear();
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect((m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>).size).toBe(0);

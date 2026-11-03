@@ -216,6 +216,29 @@ try {
   assert.ok(lost.length > 0 && lost.every(f => f.missing_fields.includes('day7')), JSON.stringify(outage));
   report.checks.push(`settled ${settled} posts: day-7/30 and import values equal the dataset's ground truth; outage marks day7 missing`);
 
+  // Block A trend rows: owner scoped, plan window only, day-7 numbers from the facts, followers only where the platform has them.
+  const trend = await svc('SELECT publish_monitor_trend_series($1,90) v', [sim]);
+  assert.equal(trend.connections.length, dataset.accounts.flatMap(a => a.connections).length);
+  const since = Date.now() - 90 * 86_400_000;
+  for (const conn of trend.connections) {
+    const key = Object.keys(businesses).find(k => businesses[k] === conn.businessId);
+    const truth = dataset.accounts.flatMap(a => a.posts).filter(p => p.account === key && p.platform === conn.platform
+      && p.visibility !== 'not_imported'
+      && Date.parse(p.postedAt) >= since);
+    assert.ok(Math.abs(conn.posts.length - truth.length) <= 2, `${conn.platform} ${conn.posts.length} vs ${truth.length}`);
+    assert.ok(conn.posts.every(p => Date.parse(p.postedAt) >= since - 86_400_000));
+    assert.ok(conn.posts.some(p => p.day7 && Number.isFinite(p.day7.views)), conn.platform);
+    const spec = dataset.accounts.find(a => a.key === key).connections.find(x => x.platform === conn.platform);
+    if (!spec.followersProvided) assert.deepEqual(conn.followers, []);
+    else assert.ok(conn.followers.length > 0 && conn.followers.every(f => Number.isFinite(f.value)), conn.platform);
+  }
+  assert.deepEqual((await svc('SELECT publish_monitor_trend_series($1,30) v', [gold])).connections
+    .filter(x => trend.connections.some(t => t.id === x.id)), []);
+  await assert.rejects(svc('SELECT publish_monitor_trend_series($1,0) v', [sim]), /PUBLISH_MONITOR_INPUT_INVALID/);
+  assert.deepEqual((await c.query(`SELECT has_function_privilege(r,'publish_monitor_trend_series(uuid,integer)','EXECUTE') ok
+   FROM unnest(ARRAY['anon','authenticated','service_role']) r`)).rows.map(r => r.ok), [false, false, true]);
+  report.checks.push('trend rows: own connections only, 90-day posts with day-7 numbers, followers only where provided, service-role only');
+
   // Review pack rows: one round trip, owner and brand scoped, long-run facts not cut to the 90-day window.
   const runId = await v(`INSERT INTO social_review_runs(actor_id,business_id,period_start,status,runtime_request_id,finished_at)
    VALUES($1,$2,current_date,'completed',gen_random_uuid(),now()) RETURNING id v`, [sim, businesses.A]);
