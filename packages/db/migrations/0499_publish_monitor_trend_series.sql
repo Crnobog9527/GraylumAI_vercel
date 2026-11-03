@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- PUBLISH-MONITOR block A (9999, placeholder number until the controller assigns one): the rows behind the weekly trend charts on
+-- PUBLISH-MONITOR block A (0499): the rows behind the weekly trend charts on
 -- the "数据复盘" page (Owner 2026-10-27: followers, per-post views median, engagement rate and posting frequency by week). One read-only
 -- function, per own connection: when it was connected, its account-level follower points and its posts with their day-7 numbers,
 -- all inside the plan's window. Weeks, medians and rates are computed by the host (same rules as the review pack), never here.
