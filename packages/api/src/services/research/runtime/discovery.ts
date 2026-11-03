@@ -61,9 +61,12 @@ export const SUPPLIER_UNAVAILABLE_NEXT_STEP = '对标数据供应商暂时不可
   + '如实告诉用户“对标数据暂时取不到，请稍后再试”；'
   + '不要建议换关键词，不要说已经搜完，也不要提“用现有对标先生成”。用户贴账号主页链接核对同样会受影响，稍后再试即可。';
 
-/** The round the supplier could not serve: it said so, the round ran to its end, and nothing at all came out of it. */
-export const supplierDownRound = (round: { supplierDown: boolean; stopped: boolean; shown: boolean; found: number }) =>
-  round.supplierDown && !round.stopped && !round.shown && round.found === 0;
+/**
+ * The round the supplier could not serve: it said so, the round ran to its end, and not one step of it brought anything back (no post, no
+ * lead, no profile, no web page). A round whose search returned posts but whose profile lookups were refused got data: it is not this.
+ */
+export const supplierDownRound = (round: { supplierDown: boolean; stopped: boolean; shown: boolean; gotData: boolean }) =>
+  round.supplierDown && !round.stopped && !round.shown && !round.gotData;
 
 /** A round searched to the end without one selectable account (with any, the card is shown: Owner 2026-10-23). */
 export function candidateShortage() {
@@ -184,7 +187,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   let stopped = false;
   let stopReason: string | undefined;
   let stopBudget = false;
-  let supplierDown = false;
+  let supplierDown = false, gotData = false;
   const posts = new Map<SocialPlatform, EvidenceItem[]>();
   const found: FoundAccount[] = [];
   let authorCursor = 0;
@@ -199,6 +202,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     if (!result.stopped) spent.spent[kind] += 1;
     complete &&= result.complete;
     if (result.supplierDown) supplierDown = true;
+    if (result.items.length > 0) gotData = true;
     if (result.stopped) {
       stopped = true;
       stopReason = result.reason;
@@ -252,6 +256,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     const cached = kind ? cacheHits.get(`${platform}\n${kind}\n${account}`) : undefined;
     if (cached && !await ctx.store.readOperation(stableResearchId(d.discoveryId, String(index)))) {
       index += 1; // the slot stays unused, so later steps keep their ids
+      gotData = true;
       screened.add(`${platform}:${account}`);
       authorCursor += 1;
       const ref = `pc:${createHash('sha256').update(`${platform}\n${kind}\n${account}`).digest('hex').slice(0, 24)}#1`;
@@ -327,7 +332,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   if (ctx.profileCache) {
     for (const entry of cacheWrites.values()) await ctx.profileCache.write(entry.platform, entry.kind, entry.rows).catch(() => undefined);
   }
-  const down = supplierDownRound({ supplierDown, stopped, shown: false, found: found.length });
+  const down = supplierDownRound({ supplierDown, stopped, shown: false, gotData });
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit, executions: replies,
     ...(stopped && resumable ? { continueFrom: ctx.executionId } : {}), ...(down ? { supplierDown: true } : {}) },
   stopped ? 'running' : 'completed');
