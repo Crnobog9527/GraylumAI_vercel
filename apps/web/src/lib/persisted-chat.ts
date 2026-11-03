@@ -36,7 +36,8 @@ export function writeCachedChatView(userId: string | null, sessionId: string, vi
     const own = JSON.stringify(view);
     const others = load(userId, options).filter(item => item.sessionId !== sessionId);
     // An empty read (a refusal, a deleted conversation) is not worth keeping, and replaces nothing worth showing: the entry goes.
-    const keep = own.length <= MAX_CONVERSATION_BYTES && view.messages.length > 0;
+    // Images are sent with a message and never stored (the saved text says "[截图×N]"); should one ever show up here, nothing is kept.
+    const keep = own.length <= MAX_CONVERSATION_BYTES && view.messages.length > 0 && !own.includes('data:image/');
     let entries = !keep ? others : [{ sessionId, savedAt: options?.now ?? Date.now(), view }, ...others];
     entries = entries.slice(0, MAX_CONVERSATIONS);
     const write = () => JSON.stringify({ v: 1, build: options?.build ?? buildOf(), userId, entries } satisfies Saved);

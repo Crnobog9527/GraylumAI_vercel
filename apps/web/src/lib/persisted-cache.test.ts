@@ -135,6 +135,13 @@ describe('persisted chat view', () => {
     expect(readCachedChatView(USER, 'c1', { storage: s, now: NOW, build: 'b1' })).toBeNull();
   });
 
+  it('never keeps image content', () => {
+    const s = storage();
+    writeCachedChatView(USER, 'c1', { messages: [{ id: 'm1', content: '[截图×1] data:image/jpeg;base64,AAAA' }] } as never, { storage: s, now: NOW, build: 'b1' });
+    expect(s.data.get(CHAT_KEY) ?? '').not.toContain('data:image');
+    expect(readCachedChatView(USER, 'c1', { storage: s, now: NOW, build: 'b1' })).toBeNull();
+  });
+
   it('keeps 20 conversations, skips a huge one, and survives a full storage', () => {
     const s = storage();
     for (let i = 0; i < 25; i++) writeCachedChatView(USER, `c${i}`, view, { storage: s, now: NOW, build: 'b1' });
