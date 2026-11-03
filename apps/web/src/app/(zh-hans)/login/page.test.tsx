@@ -23,15 +23,19 @@ import { LoginPageContent } from './page';
 describe('/login with a retired invite link', () => {
   it.each([
     ['invite=OLDCODE', '登录', false],
-    ['action=signup&invite=OLDCODE', '创建账户', true],
+    ['action=signup&invite=OLDCODE', '注册', true],
     ['action=login', '登录', false],
-    ['action=signup', '创建账户', true],
+    ['action=signup', '注册', true],
   ])('renders the normal form for ?%s without any invitation field or request', (query, submit, signup) => {
     params.current = new URLSearchParams(query);
     routers.length = 0;
     const markup = renderToStaticMarkup(createElement(LoginPageContent));
     expect(markup).toContain(`>${submit}`);
     expect(markup).toContain('type="email"');
+    // The server-rendered form cannot be submitted before the page's scripts have taken it over: its submit button is off and says so,
+    // and a native submit would post, never put a field in the address.
+    expect(markup).toMatch(/<button[^>]*type="submit"[^>]*disabled=""[^>]*>加载中\.\.\./);
+    expect(markup).toContain('method="post"');
     expect(markup.includes('id="nickname"')).toBe(signup);
     expect(markup).not.toContain('invite-code');
     expect(markup).not.toContain('邀请码');
