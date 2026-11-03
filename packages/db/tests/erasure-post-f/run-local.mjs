@@ -146,17 +146,14 @@ try {
   for (const [name, leak] of leaks) {
     await c.query('begin');
     try {
-      await leak();
+      await leak(); // a refused write fails the suite: the leak must be written to prove the audit sees it
       assert.equal(status(await audit(a, { inTransaction: true }), name)?.ok, false, `${name} must fail after a leak`);
       tried++;
-    } catch (e) {
-      // A table that refuses the write is a stronger guarantee than the audit: say so, but do not fail the suite for it.
-      report.checks.push(`leak ${name}: refused by the database itself (${String(e.message).slice(0, 80)})`);
     } finally { await c.query('rollback'); }
   }
-  assert.ok(tried >= 1, 'at least one leak is visible to the audit');
+  assert.equal(tried, 3, 'every injected leak is written and caught by the audit');
   assert.deepEqual(failures(await audit(a)), [], 'the leaks were rolled back');
-  report.checks.push(`audit red after a leak: ${tried} of 3 injected leaks caught (rest refused by the database)`);
+  report.checks.push(`audit red after a leak: ${tried} of 3 injected leaks caught`);
 
   // 4. The audit writes nothing: a read-only transaction ran it, and the proofs it calls are STABLE.
   assert.match(await refusal(c.query('begin read only').then(() => c.query('update profiles set credits=credits where id=$1', [a.actor])).finally(() => c.query('rollback'))), /read-only/);
