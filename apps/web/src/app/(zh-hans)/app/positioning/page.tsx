@@ -16,6 +16,7 @@ import { readStartEntry, retainedMatches, START_TEXT, type StartMode } from './s
 import { grantOpeningIntent } from './[draftId]/opening-intent';
 import { ProfileArchiveList } from '@/components/opc/profile-archive/ProfileArchiveList';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
+import { READ_RETRY } from '@/trpc/read-retry';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:StartMode;businessId:string|null;businessName?:string};
 type StartAccount={projectId:string;platform:string;account:string;businessName:string;strategyDraftId?:string|null;sourceVersionId?:string|null;pendingStrategyDraftId?:string|null;sourceVersion?:number;displayName?:string;profile?:Record<string,{value?:string;label?:string;status?:string}>|null;items:Array<{workItemId:string;sessionId:string;title:string}>};
 const startOperationKey="opc-start-operation";
@@ -28,7 +29,7 @@ export default function PositioningHome() {
   const free = useFreeConversation({ withReferences: true });
   const [skillId,setSkillId]=useState('');
   // Same Skill the composer would send: the chosen one, else the account default; not ready until the choices are loaded.
-  const composerChoices=trpc.runtime.choices.useQuery(undefined,{retry:false,staleTime:RUNTIME_CHOICES_STALE_MS});
+  const composerChoices=trpc.runtime.choices.useQuery(undefined,{staleTime:RUNTIME_CHOICES_STALE_MS,...READ_RETRY});
   const compareChoice=composerChoices.data?.skills.find(x=>skillId?x.moduleId===skillId:x.moduleId===composerChoices.data?.defaultSkill?.moduleId);
   const compareSkill={ready:Boolean(composerChoices.data&&(!(skillId||composerChoices.data.defaultSkill)||compareChoice)),
     skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};
@@ -40,8 +41,8 @@ export default function PositioningHome() {
     const wanted=wantedModule.current;
     if(wanted&&composerChoices.data?.skills.some(x=>x.moduleId===wanted)){setSkillId(wanted);wantedModule.current='';}
   },[composerChoices.data]);
-  const catalog = trpc.opc.catalog.useQuery(undefined,{retry:false}),
-    list = trpc.opc.list.useQuery(undefined,{retry:false}),
+  const catalog = trpc.opc.catalog.useQuery(undefined,READ_RETRY),
+    list = trpc.opc.list.useQuery(undefined,READ_RETRY),
     library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),
     start = trpc.opc.start.useMutation();
   const [methodDialog,setMethodDialog]=useState(false),

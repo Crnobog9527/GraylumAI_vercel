@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { changedFiles, decide, isSkippablePath } from '../ci-test-scope.mjs';
+import { changedFiles, decide, isDocsPath, isSkippablePath } from '../ci-test-scope.mjs';
 
 const pr = files => decide({ eventName: 'pull_request', baseRef: 'staging', files });
 
@@ -14,6 +14,36 @@ test('a pure front-end or documentation pull request skips the database jobs', (
   assert.equal(pr(['apps/web/src/app/(zh-hans)/pricing/page.tsx', 'apps/web/src/app/globals.css']).full, false);
   assert.equal(pr(['docs/ENGINEERING.md', 'docs/launch/design/x.html', 'README.md']).full, false);
   assert.equal(pr(['docs/a.md', 'apps/web/src/components/a.module.css']).full, false);
+});
+
+test('docs_only is true only when every changed file is plainly a document', () => {
+  assert.equal(pr(['docs/ENGINEERING.md', 'docs/launch/design/x.html', 'README.md']).docsOnly, true);
+  assert.equal(pr(['docs/runbook.md', 'docs/img/shot.png', 'docs/data/table.csv', 'docs/notes.txt', 'AGENTS.md']).docsOnly, true);
+  // Documentation next to front-end changes is not documentation only, and neither is the front-end alone.
+  assert.equal(pr(['apps/web/src/components/landing/Hero.tsx']).docsOnly, false);
+  assert.equal(pr(['docs/a.md', 'apps/web/src/components/a.module.css']).docsOnly, false);
+});
+
+test('a pull request that changes a code or data file is never judged documentation only, alone or next to documents', () => {
+  const code = [
+    'apps/web/src/app/api/turn/route.ts', 'apps/web/src/components/a.tsx', 'apps/web/tests/e2e/sim/support.ts', 'packages/api/src/x.ts',
+    'packages/db/migrations/0001_x.sql', 'scripts/a.mjs', 'scripts/ci-test-scope.mjs', '.github/workflows/ci.yml', '.github/scripts/x.rb',
+    'package.json', 'pnpm-lock.yaml', 'turbo.json', 'apps/web/package.json',
+    // Under docs/, but code or data that tooling can run or read.
+    'docs/validation/run.mjs', 'docs/schema.sql', 'docs/api.graphql', 'docs/launch/data.json', 'docs/log.jsonl', 'docs/.gitignore',
+    // Markdown that is not a document of this repository's own docs: content and fixtures.
+    'apps/web/README.md', 'apps/web/content/post.md', 'packages/api/README.md', 'scripts/README.md', '.github/pull_request_template.md',
+  ];
+  for (const path of code) {
+    assert.equal(isDocsPath(path), false, path);
+    assert.equal(pr([path]).docsOnly, false, path);
+    assert.equal(pr(['docs/a.md', path]).docsOnly, false, `docs/a.md with ${path}`);
+  }
+  // Unknown, missing or empty input, a push, or a base other than staging: never documentation only either.
+  for (const input of [{ eventName: 'push', baseRef: 'staging', files: ['docs/a.md'] }, { eventName: 'pull_request', baseRef: 'main', files: ['docs/a.md'] },
+    { eventName: 'pull_request', baseRef: 'staging', files: [] }, { eventName: 'pull_request', baseRef: 'staging', files: null }]) {
+    assert.equal(decide(input).docsOnly, false, JSON.stringify(input));
+  }
 });
 
 test('anything outside the allow-list runs the full suite, even mixed with allowed files', () => {

@@ -28,7 +28,7 @@ const outputSchema = z.object({
 export type CoachExperiment = z.infer<typeof experiment>;
 
 /** The pieces of a pack the checks need (the pack itself is untyped JSON once built). */
-type PackView = { mode: string; cadence: string; limits: { experiments_max: number; experiment_kinds: string[];
+export type PackView = { mode: string; cadence: string; limits: { experiments_max: number; experiment_kinds: string[];
   strategy_proposal: boolean; pillar_mix_proposal: boolean }; strategy: { pillars: Array<{ key: string }> };
   diagnostics: { posts: Array<{ post_id: string; stuck_layer: string | null; rates: Record<string, number> }> };
   ledger: { to_review: Array<{ id: string; result?: { matched_posts: string[] } }> };
@@ -49,7 +49,7 @@ const BLOCK_START = '```coach_json';
 const BLOCK = /```coach_json\s*\n([\s\S]*?)\n```\s*$/;
 
 /** The references a model may cite: every post and every number row present in this pack. */
-function refs(p: PackView) {
+export function evidenceRefs(p: PackView) {
   const posts = new Set([...(p.this_period?.settled_posts ?? []), ...(p.this_period?.too_new ?? []), ...(p.untagged_posts ?? []),
     ...p.diagnostics.posts].map(x => x.post_id).concat(p.ledger.to_review.flatMap(e => e.result?.matched_posts ?? [])));
   const metrics = new Set([...(p.scoreboard ?? []).map(r => `scoreboard:${r.pillar}:${r.platform}`),
@@ -76,7 +76,7 @@ export function checkOutput(text: string, pack: PackView): CheckedOutput {
   const o = top.data, reject = (path: string, reason: string) => { out.rejected.push({ path, reason }); };
   out.parsed = true;
   out.mode_mismatch = o.mode !== pack.mode;
-  const { posts, metrics } = refs(pack);
+  const { posts, metrics } = evidenceRefs(pack);
   const pillars = new Set(pack.strategy.pillars.map(x => x.key));
   const cited = (e: z.infer<typeof evidence>) => (e.post_ids.length || e.metrics.length)
     && e.post_ids.every(id => posts.has(id)) && e.metrics.every(m => metrics.has(m));
