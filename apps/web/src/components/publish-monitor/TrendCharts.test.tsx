@@ -41,4 +41,12 @@ describe('trend charts', () => {
     state.trend = { isPending: false, error: { message: 'PUBLISH_MONITOR_UNAVAILABLE', data: {} }, data: undefined };
     expect(renderToStaticMarkup(<TrendCharts gold={false} />)).toContain('role="alert"');
   });
+
+  it('while reading shows a wordless skeleton, never loading text or a spinner', () => {
+    state.trend = { isPending: true };
+    const html = renderToStaticMarkup(<TrendCharts gold={false} />);
+    expect(html).toContain('data-testid="trend-skeleton"');
+    expect(text(html)).not.toMatch(/读取|加载/);
+    expect(html).not.toContain('animate-spin');
+  });
 });

@@ -30,12 +30,25 @@ export function TrendCharts({ gold }: { gold: boolean }) {
           按周统计，每周截至昨天。播放/浏览和互动率取作品发布满 7 天时的数据，只在同一个平台里比较。
           {gold ? '90 天趋势从连接日起记录。' : ''}</p>
       </div>
-      {trend.isPending ? <p className="text-sm">正在读取…</p>
+      {trend.isPending ? <TrendSkeleton />
         : trend.error ? <p role="alert" className="text-sm">{dataErrorMessage(errorCode(trend.error))}</p>
           : (trend.data.series as TrendSeries[]).length === 0
             ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>还没有连接账号。连接后每天记录，第一周数据满 7 天后出现在这里。</p>
             : (trend.data.series as TrendSeries[]).map(s => <SeriesCard key={s.connectionId} series={s} gold={gold} />)}
     </section>
+  );
+}
+
+/** While the query runs: the card's shape with no words or spinner (Owner: no "loading" text on pages). */
+export function TrendSkeleton() {
+  return (
+    <div aria-busy="true" data-testid="trend-skeleton" className="min-w-0 space-y-3 rounded-lg border p-4"
+      style={{ borderColor: 'var(--border-primary)' }}>
+      <div className="h-4 w-32 animate-pulse rounded" style={{ background: 'var(--border-primary)' }} />
+      <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+        {[0, 1, 2, 3].map(i => <div key={i} className="h-40 animate-pulse rounded" style={{ background: 'var(--border-primary)' }} />)}
+      </div>
+    </div>
   );
 }
 

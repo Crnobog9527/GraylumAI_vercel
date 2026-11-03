@@ -11,7 +11,7 @@ import { dataErrorMessage, errorCode } from './labels';
 import { ManualImport } from './ManualImport';
 import { PostsPanel, type Post } from './PostsPanel';
 import { ReviewPanel } from './ReviewPanel';
-import { TrendCharts } from './TrendCharts';
+import { TrendCharts, TrendSkeleton } from './TrendCharts';
 
 /**
  * PUBLISH-MONITOR PR-7: "数据复盘" — connected accounts, the user's own post data, table import and weekly reviews.
@@ -34,7 +34,7 @@ export function DataReviewView() {
     void utils.opc.library.invalidate();
   };
 
-  if (connections.isPending || data.isPending) return <Shell><p className="text-sm">正在读取…</p></Shell>;
+  if (connections.isPending || data.isPending) return <Shell><TrendSkeleton /></Shell>;
   if (blocked === 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED') return <Shell><Upgrade /></Shell>;
   if (blocked || !connections.data || !data.data) {
     return (
