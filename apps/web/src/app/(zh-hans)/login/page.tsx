@@ -23,6 +23,7 @@ import { AuthRedirectNotice } from '@/components/auth/AuthRedirectNotice';
 import { GoogleIcon } from '@/components/auth/GoogleIcon';
 import { FORGOT_PASSWORD_PATH, PASSWORD_RESET_DONE_MESSAGE } from '@/lib/passwordRecovery';
 import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
+import { useHydrated } from '@/hooks/use-hydrated';
 
 type AuthMode = 'login' | 'signup';
 
@@ -50,6 +51,7 @@ export function LoginPageContent() {
     retry: false,
     refetchOnWindowFocus: false,
   });
+  const hydrated = useHydrated();
   const [mode, setMode] = useState<AuthMode>(() => (searchParams.get('action') === 'signup' ? 'signup' : 'login'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -200,16 +202,12 @@ export function LoginPageContent() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (mode === 'signup') {
-      await handleSignup();
-      return;
-    }
-
-    await handleLogin();
+    await (mode === 'signup' ? handleSignup() : handleLogin());
   };
 
-  const isBusy = pendingAction !== null;
-  const submitLabel = mode === 'signup' ? '创建账户' : '登录';
+  // Off until the page's scripts have taken the form over (hooks/use-hydrated.ts); method="post" keeps a native submit out of the URL.
+  const isBusy = pendingAction !== null || !hydrated;
+  const submitLabel = !hydrated ? '加载中...' : mode === 'signup' ? '创建账户' : '登录';
   const submitBusyLabel = mode === 'signup' ? '创建中...' : '登录中...';
   const siteName =
     typeof systemSettings?.site_name === 'string' && systemSettings.site_name.trim()
@@ -356,7 +354,7 @@ export function LoginPageContent() {
                     </div>
                   </div>
 
-                  <form className="space-y-4" onSubmit={handleSubmit}>
+                  <form className="space-y-4" method="post" onSubmit={handleSubmit}>
                     {mode === 'signup' && (
                       <>
                         <div className="space-y-2">

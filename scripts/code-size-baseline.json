@@ -25,7 +25,7 @@
   "apps/web/src/app/(zh-hans)/app/workbench/agent-first-preview/agent-first-workspace-sample.tsx": {"lines":537,"longLines":21},
   "apps/web/src/app/(zh-hans)/app/workbench/marketplace/page.tsx": {"longLines":4},
   "apps/web/src/app/(zh-hans)/app/workbench/search/page.tsx": {"longLines":9},
-  "apps/web/src/app/(zh-hans)/login/page.tsx": {"lines":521,"longLines":2},
+  "apps/web/src/app/(zh-hans)/login/page.tsx": {"lines":519,"longLines":2},
   "apps/web/src/app/(zh-hans)/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/components/admin/AdminSidebar.tsx": {"longLines":2},
   "apps/web/src/components/admin/StatsCard.tsx": {"longLines":1},
