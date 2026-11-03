@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { FusionMember } from './admission';
 
 /** R14 refusals of an adoption that retrying cannot fix (finished as refused); transient ones (REPORT_UNAVAILABLE, auth)
  * are retried by the client. */
@@ -26,11 +25,3 @@ export function claimOutcome(error: unknown): { kind: string; reason?: string } 
   if (!/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(code) || TRANSIENT.has(code)) return null;
   return { kind: 'claim_refused', reason: code };
 }
-/** The bounds of exactly the members claimed now: a retry of some seats gets only theirs (#962 review). A member
- * without a frozen bound (a phase the estimate did not allow) gets zero, so it can never be claimed. */
-export const memberCaps = (caps: Record<string, { credits: number; usd: string }> | undefined, members: FusionMember[]) => {
-  if (!caps) return {};
-  const own = members.map(member => caps[member.modelId] ?? { credits: 0, usd: '0' });
-  const micros = own.reduce((sum, cap) => sum + Math.round(Number(cap.usd) * 1e6), 0);
-  return { maxCredits: own.reduce((sum, cap) => sum + cap.credits, 0), maxUsd: (micros / 1e6).toFixed(6), memberCaps: own };
-};

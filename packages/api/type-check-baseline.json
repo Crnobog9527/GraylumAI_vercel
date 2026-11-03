@@ -17,6 +17,5 @@
   "src/services/__tests__/workbench.integration.ts",
   "src/services/opc/mentor-browser.integration.ts",
   "src/services/opc/opc.integration.ts",
-  "src/services/runtime/runtime.integration.ts",
   "src/trpc.test.ts"
 ]

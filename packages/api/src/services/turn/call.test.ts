@@ -84,6 +84,34 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     }
   });
 
+  it('a request that does not match its frozen quote is refused before sending: the row is closed as unsent and nothing is charged', async () => {
+    const payg = (bytes: number) => ({ policyId: 'policy', policyVersion: 'v1', profileVersion: 'v1', evidenceVersion: 'fixture-v1', bytes,
+      templateTokens: 0, marginTokens: 0, promptTokensUpper: bytes, messages: 1, tools: 0, schemaBytes: 0,
+      pricingHash: call.pricing.pricingHash, endpointTag: 'synthetic', nominalPricing: call.pricing });
+    const exact = Buffer.byteLength(body);
+    // The frozen byte count (or the frozen upper bound) differs from the body that is about to leave.
+    for (const frozenIdentity of [{ ...identity, payg: payg(exact + 1) }, { ...identity, upperUsd: '1' }]) {
+      const h = harness(), transport = vi.fn();
+      await expect(modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) },
+        { ...call, identity: frozenIdentity }, body)).rejects.toThrow('TURN_CALL_DENIED');
+      expect(kinds(h.writes)).toEqual(['begin', 'record:not_sent']);
+      expect(h.writes[1]![1]).toMatchObject({ actualUsd: null, nominalUsd: null });
+      expect(transport).not.toHaveBeenCalled();
+    }
+  });
+
+  it('an erasure that began while the call ran: the final receipt keeps billing, but the answer is not handed back', async () => {
+    const h = harness(), transport = vi.fn(async () => new Response(completion('gen-9'), { headers: { 'x-generation-id': 'gen-9' } }));
+    const record = h.deps.db.record as unknown as ReturnType<typeof vi.fn>;
+    record.mockImplementation(async (a: Record<string, unknown>) => { h.writes.push(['record', a]);
+      return { status: a.status, creditsLow: false, ...quiet, accountErasing: true }; });
+    const failure = await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body).catch(e => e);
+    expect(failure).toBeInstanceOf(TurnStop);
+    expect(failure.code).toBe('TURN_TOMBSTONED');
+    expect(JSON.stringify([failure.message, failure.code])).not.toContain('hello');
+    expect(kinds(h.writes)).toEqual(['begin', 'identity', 'record:ok']);
+  });
+
   it('the stop-loss refusing a model call mid-turn is a stop that survives the SDK, and nothing is sent', async () => {
     const h = harness({ begin: () => { throw new TurnDatabaseError('STOP_LOSS_REACHED'); } }), transport = vi.fn();
     const failure = await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body).catch(e => e);

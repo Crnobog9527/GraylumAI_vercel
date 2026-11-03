@@ -167,21 +167,12 @@ it('admission refuses an uncovered purpose and a changed policy version', async 
 });
 
 it('the shared host entry points choose production only on the production deployment', async () => {
-  const { loadStagingPolicy, assertStagingReadAccess, loadStagingRecoveryPolicy } = await import('../settings/stagingPolicy');
+  const { loadStagingPolicy, assertStagingReadAccess } = await import('../settings/stagingPolicy');
   const f = fixture();
   expect((await loadStagingPolicy(f.admin as never, actor, env)).mode).toBe('production');
   expect(f.rpc.mock.calls.map(c => c[0])).toEqual(['runtime_production_access']);
   await assertStagingReadAccess(f.admin as never, actor, { ...env, V3_RUNTIME_PRODUCTION_ENABLED: 'false' });
   expect(f.rpc.mock.calls.at(-1)![0]).toBe('runtime_production_access');
-  const frozen = (await loadProductionPolicy(f.admin, actor, env));
-  f.rpc.mockResolvedValueOnce({ data: { ...frozen, expiresAt: frozen.expiresAt }, error: null });
-  const execution = '40000000-0000-4000-8000-000000000004';
-  const recovered = await loadStagingRecoveryPolicy(f.admin as never, actor, execution, { ...env, V3_RUNTIME_PRODUCTION_ENABLED: 'false' });
-  expect(f.rpc).toHaveBeenLastCalledWith('runtime_production_recovery_policy', { p_actor_id: actor, p_execution_id: execution });
-  expect(recovered).toMatchObject({ mode: 'production', id: 'prod-2026-10-17' });
-  // A recovered policy that is not production is refused on the production host (no window crosses over).
-  f.rpc.mockResolvedValueOnce({ data: { ...frozen, mode: undefined, id: MODELS[0].id }, error: null });
-  await expect(loadStagingRecoveryPolicy(f.admin as never, actor, execution, env)).rejects.toThrow('RUNTIME_PRODUCTION_TARGET_DENIED');
 });
 
 it('the staging deployment never reads production state', async () => {

@@ -3,18 +3,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-// In-memory stand-ins for the database record (0236/0256), admission and settings. The orchestration,
-// prompts and host checks under test are the real ones.
+// In-memory stand-ins for the database record (0236/0256) and group admission. The decision logic (reviewCore), prompts
+// and host checks under test are the real ones.
+//
+// Production note: a review is started and advanced by turn/jury.ts. The `driver` below is TEST-ONLY: it drives the
+// in-memory record with the same reviewCore the jury uses, to keep the shared decision logic covered. Old scenario ->
+// new test (scenarios of the removed BILL2 flow that are not driven here):
+//  - estimate / fixed price / acceptedCredits refusal -> turn/jury.test.ts 'jury frozen price', 'jury estimate quotes'
+//  - retried start returns the existing review -> turn/jury.test.ts 'a repeat of the request finds its review'
+//  - price rose / setting changed / seat above its cap ends the step -> turn/jury.test.ts 'a price changed since the start',
+//    'a switch turned off, a lost membership...', 'a seat above its frozen cap'
+//  - ended review claims nothing -> turn/jury.test.ts 'an ended review or one on the BILL2 path is not advanced'
+//  - report too large before first claim -> the size check itself (reviewCore.fitsWhenSent, called by turn/jury.ts at open) is
+//    'a report too large for one call does not fit' below; the open-time wiring has no jury.test.ts case
+//  - re-judging a saved body that has no verdict, and the archived legacy summary re-judge (fusion_call_verdict, removed with
+//    the BILL2 review): none on the turn path; its saved answers carry the verdict from the call itself
 type Call = { groupId: string; runId: string; callId: string; modelId: string; phase: string; dispatched: boolean;
   verdict: string | null; settled: boolean; state: string; dispatchedAt?: string; settledAt?: string };
 const raceReservation = vi.hoisted(() => ({ value: null as Record<string, unknown> | null }));
 const sourceBody = vi.hoisted(() => ({ value: null as string | null }));
 const applyRefusal = vi.hoisted(() => ({ value: '' }));
 const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
-const creditCaps = vi.hoisted(() => [] as Array<number | undefined>);
-const usdCaps = vi.hoisted(() => [] as Array<string | undefined>);
-const memberCapsSeen = vi.hoisted(() => [] as unknown[]);
-const priceRise = vi.hoisted(() => ({ phase: '', code: 'FUSION_ESTIMATE_EXCEEDED' }));
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string; instructions?: string }>);
 // The reviewing user's profile language (Owner 2026-10-24); null means none set.
 const profile = vi.hoisted(() => ({ replyLanguage: null as string | null }));
@@ -24,33 +33,9 @@ const db = vi.hoisted(() => ({ review: null as Record<string, unknown> | null, c
   groups: new Map<string, { groupId: string; runs: Array<{ runId: string; index: number; phase: string; body: string; call: { model: string } }> }>() }));
 const ids = { reviewers: ['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000a3'],
   summary: '00000000-0000-4000-8000-0000000000b1' };
-vi.mock('./settings', () => ({ readFusionSettings: async () => ({ version: 1, compare: { enabled: false }, review: { enabled: true,
-  reviewerModelIds: ids.reviewers, summaryModelId: ids.summary, skillId: '00000000-0000-4000-8000-0000000000c1', maxRounds: 2, reviewerRoles: {},
-  opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: '5', fixedPriceCredits: 1500, dispatchMinutes: 10,
-  breaker: { platformUsd: '2', noDeliveryCalls: 10 } } }) }));
-vi.mock('../turn/settings/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ creditsPerUsd: '100', callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
-  multiplier: '3', outputLimit: 8192, providerLimits: { providerSlug: 'x', contextTokens: 400000, promptUsdPerMillion: '0.1', completionUsdPerMillion: '0.1', requestUsd: '0' } })) }) }));
 vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import('./reviewPrompts')>()),
   resolveReviewSkill: async () => ({ skillId: '00000000-0000-4000-8000-0000000000c1', revisionId: '00000000-0000-4000-8000-0000000000c2', packageHash: 'a'.repeat(64) }),
   readReviewSkill: async () => ({ reviewer: 'review', summary: 'summarize', rubric: 'rubric' }) }));
-vi.mock('./admission', async original => ({ ...(await original<typeof import('./admission')>()),
-  admitFusionGroup: async (input: { requestId: string; members: Array<{ modelId: string; phase: string; request: { input: string; instructions?: string } }>;
-    outputTokens: { opinion: number; summary: number }; maxCredits?: number; maxUsd?: string; memberCaps?: unknown }) => {
-    caps.push(input.outputTokens);
-    creditCaps.push(input.maxCredits);
-    usdCaps.push(input.maxUsd);
-    memberCapsSeen.push(input.memberCaps);
-    // Prices rose after start: the real admission refuses a group above the frozen cap before freezing anything.
-    if (input.members.some(m => m.phase === priceRise.phase)) throw new Error(priceRise.code);
-    const existing = db.groups.get(input.requestId);
-    if (existing) return { ...existing, replayed: true };
-    const group = { groupId: randomUUID(), runs: input.members.map((m, index) => ({ runId: randomUUID(), index, phase: m.phase,
-      body: m.request.input, call: { model: m.modelId } })) };
-    requests.push(...input.members.map(m => ({ modelId: m.modelId, phase: m.phase, input: m.request.input, instructions: m.request.instructions })));
-    db.groups.set(input.requestId, group);
-    return { ...group, replayed: false };
-  },
-  replayFusionGroup: async (_a: unknown, _b: unknown, requestId: string) => db.groups.get(requestId) ?? null }));
 vi.mock('./reviewRecord', async original => {
   const real = await original<typeof import('./reviewRecord')>();
   const view = () => ({ ...db.review!, calls: db.calls.map(c => ({ ...c })) });
@@ -89,7 +74,11 @@ vi.mock('./reviewRecord', async original => {
 });
 import { reviewFlow } from './review';
 import { summaryRequest } from './reviewPrompts';
-import { DECISIONS } from './hostChecks';
+import { checkRevision, DECISIONS, parseOpinion } from './hostChecks';
+import { reviewCore, config as reviewConfig, type FusionMember, type Source } from './reviewCore';
+import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
+import { readReplyLocale } from '../turn/agent/replyLanguage';
+import { derivedUuid } from './derivedUuid';
 import { reviewerRequest, reviewLanguageRule, reviewLocale } from './reviewPrompts';
 
 const sections = ['定位', '结语'];
@@ -120,6 +109,90 @@ const revision = (value: string) => JSON.stringify({
   body: `## 定位\n${value}\n## 结语\n原结语`,
   steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value, changed: true }] }],
   changeNotes: [{ section: '定位', wordingOnly: false, note: '更具体', fields: [{ stepId: 's1', fieldId: 'goal' }] }] });
+
+type Verdict = 'usable' | 'format_invalid' | 'revision_invalid';
+type Group = { groupId: string; runs: Array<{ runId: string; index: number; phase: string; body: string; call: { model: string } }> };
+// Stand-in for group admission: one frozen run per member, the same request id gives the same group back.
+const admitGroup = (input: { requestId: string; members: FusionMember[]; outputTokens: { opinion: number; summary: number } }) => {
+  caps.push(input.outputTokens);
+  const existing = db.groups.get(input.requestId);
+  if (existing) return { ...existing, replayed: true };
+  const group: Group = { groupId: randomUUID(), runs: input.members.map((m, index) => ({ runId: randomUUID(), index, phase: m.phase,
+    body: m.request.input, call: { model: m.modelId } })) };
+  requests.push(...input.members.map(m => ({ modelId: m.modelId, phase: m.phase, input: m.request.input, instructions: m.request.instructions })));
+  db.groups.set(input.requestId, group);
+  return { ...group, replayed: false };
+};
+const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
+// TEST-ONLY driver (see the note at the top): start / continue / dispatch over the in-memory record, with the real reviewCore.
+function driver(deps: { admin: SupabaseClient; actorId: string;
+  executor: { run: (run: unknown, claimed: { runId: string; id: string; state: string; fresh: boolean }, judge: (text: string) => Verdict) => Promise<unknown> } }) {
+  const { admin, actorId } = deps;
+  // The module mock above supplies the in-memory start / claim / advance; the production record keeps only read, replay, adoption and fee.
+  const record = reviewRecord(admin, actorId) as ReturnType<typeof reviewRecord> & {
+    start: (input: Record<string, unknown>) => Promise<ReviewView>;
+    claim: (id: string, at: ReviewPosition, groupId: string, items: Array<{ runId: string; payload: never }>) => Promise<unknown>;
+    advance: (id: string, from: ReviewPosition, to: Record<string, unknown>) => Promise<ReviewView> };
+  const core = reviewCore(admin, actorId);
+  const done = (call: ReviewView['calls'][number]) => call.verdict !== null;
+  async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {
+    const cfg = reviewConfig.parse(view.config);
+    const members = await core.buildMembers(view, src, at, models);
+    const group = admitGroup({ requestId: derivedUuid(`${view.reviewId}:${stepKey(at)}`), members,
+      outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens } });
+    return record.claim(view.reviewId, at, group.groupId, group.runs.map(run => ({ runId: run.runId, payload: run.call as never })));
+  }
+  const finish = (view: ReviewView, state: 'completed' | 'incomplete' | 'revision_failed', outcome: Record<string, unknown>) =>
+    record.advance(view.reviewId, { round: view.round, phase: view.phase, attempt: view.attempt }, { state, outcome });
+  return {
+    async start(input: { requestId: string; draftId: string; sourceVersionId: string }) {
+      const replyLocale = await readReplyLocale(admin, actorId);
+      return record.start({ ...input, config: { estimateUsd: '1', estimateCredits: 1500, maxRounds: 2, reviewers: ids.reviewers,
+        evidence: true, roles: ids.reviewers.map(() => null), summary: ids.summary, opinionTokens: 1000, summaryTokens: 2000,
+        skill: { skillId: '00000000-0000-4000-8000-0000000000c1', revisionId: '00000000-0000-4000-8000-0000000000c2', packageHash: 'a'.repeat(64) },
+        replyLocale } } as never);
+    },
+    async continue(reviewId: string): Promise<{ review: ReviewView; calls: ReviewView['calls'] }> {
+      let view = (await record.read(reviewId))!;
+      if (ENDED_STATES.has(view.state)) return { review: view, calls: [] };
+      const src = await core.readSource(reviewId);
+      const cfg = reviewConfig.parse(view.config);
+      for (let guard = 0; guard < 8; guard++) {
+        if (ENDED_STATES.has(view.state)) return { review: view, calls: [] };
+        const at: ReviewPosition = { round: view.round, phase: view.phase, attempt: view.attempt };
+        const current = view.calls.filter(call => view.steps.some(s => s.groupId === call.groupId && s.stepKey === stepKey(at)));
+        const models = at.phase === 'review' ? cfg.reviewers : [cfg.summary];
+        if (!current.length) {
+          const here = core.callsAt(view, at.round, at.phase === 'review' ? 'review' : 'summary');
+          const pending = models.filter(id => !here.some(call => done(call) && !(call.verdict === 'no_delivery' && !call.dispatched) && call.modelId === id));
+          await claimStep(view, src, at, pending.length ? pending : models);
+          view = (await record.read(reviewId))!;
+          return { review: view, calls: view.calls.filter(call => !done(call)) };
+        }
+        if (current.some(call => !done(call))) return { review: view, calls: current.filter(call => !done(call)) };
+        const next = await core.decide(view, src, at);
+        view = next.state === 'running' ? await record.advance(reviewId, at, next) : await finish(view, next.state, next.outcome);
+      }
+      return { review: view, calls: [] };
+    },
+    async dispatch(reviewId: string, callId: string) {
+      const view = await record.read(reviewId);
+      if (!view || ENDED_STATES.has(view.state)) throw new Error('FUSION_REVIEW_ENDED');
+      const call = view.calls.find(c => c.callId === callId);
+      const step = call && view.steps.find(s => s.groupId === call.groupId);
+      if (!call || !step || call.dispatched || call.verdict !== null) throw new Error('FUSION_REVIEW_STEP_CONFLICT');
+      const group = db.groups.get(derivedUuid(`${reviewId}:${step.stepKey}`));
+      const run = group?.runs.find(r => r.runId === call.runId);
+      if (!run) throw new Error('FUSION_REVIEW_STEP_CONFLICT');
+      const src = await core.readSource(reviewId);
+      const rules = await core.opinionRules(view, src, step.round, call.modelId ?? null);
+      const judge = (text: string): Verdict => run.phase === 'fusion_review'
+        ? (parseOpinion(text, rules) ? 'usable' : 'format_invalid')
+        : (checkRevision(text, core.revisionInput(view, src)).ok ? 'usable' : 'revision_invalid');
+      return deps.executor.run(run, { runId: call.runId, id: callId, state: call.state, fresh: false }, judge);
+    },
+  };
+}
 function setup(script: (call: Call) => string | null, refuse?: string) {
   const proposals: unknown[] = [];
   const applied: unknown[] = [];
@@ -133,12 +206,14 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
     call.verdict = judge(text); call.settled = true; call.settledAt = clock.next();
     return { state: 'judged', verdict: call.verdict, text };
   }) };
-  const flow = reviewFlow({ admin, actorId: randomUUID(), executor: executor as never,
+  const actorId = randomUUID();
+  const flow = { ...reviewFlow({ admin, actorId,
     propose: async input => { if (refuse) throw new Error(refuse); proposals.push(input);
       return { revisionId: '00000000-0000-4000-8000-0000000000d1', diffHash: 'f'.repeat(64), diff: { changes: [], cascade: [] } }; },
     apply: async input => { if (applyRefusal.value) throw new Error(applyRefusal.value); applied.push(input);
       return { versionId: '00000000-0000-4000-8000-0000000000e1' }; },
-    decline: async input => { declined.push(input); return null; } });
+    decline: async input => { declined.push(input); return null; } }),
+    ...driver({ admin, actorId, executor: executor as never }) };
   const runAll = async () => {
     const step = await flow.continue(String(db.review!.reviewId));
     for (const call of step.calls) await flow.dispatch(String(db.review!.reviewId), call.callId);
@@ -148,24 +223,7 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
 }
 
 describe('review flow', () => {
-  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; profile.replyLanguage = null; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; memberCapsSeen.length = 0; priceRise.phase = ''; priceRise.code = 'FUSION_ESTIMATE_EXCEEDED'; });
-
-  it('estimates the fixed price without creating anything, and refuses a start at another price than the user agreed to', async () => {
-    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
-    const input = { draftId: randomUUID(), sourceVersionId: randomUUID() };
-    const estimate = await t.flow.estimate(input);
-    expect(estimate).toMatchObject({ maxRounds: 2, reviewers: ids.reviewers.length, estimateCredits: 1500 });
-    // The balance must also cover the largest step's temporary call hold (released at zero charge, 0294).
-    expect(estimate.holdCredits).toBeGreaterThan(0);
-    expect(estimate.requiredCredits).toBe(1500 + estimate.holdCredits);
-    expect(db.review).toBeNull();
-    for (const accepted of [1499, 1501]) {
-      await expect(t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: accepted })).rejects.toThrow('FUSION_REVIEW_ESTIMATE_CHANGED');
-    }
-    expect(db.review).toBeNull();
-    const started = await t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: 1500 });
-    expect(started.config).toMatchObject({ estimateCredits: 1500, fixedPrice: { credits: 1500, holdCredits: estimate.holdCredits } });
-  });
+  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; profile.replyLanguage = null; caps.length = 0; });
 
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
@@ -391,81 +449,6 @@ describe('review flow', () => {
     expect(t.applied).toEqual([]);
   });
 
-  it('a report too large for a request ends the review before anything is claimed or charged', async () => {
-    const t = setup(() => opinion('major'));
-    // Escaped size counts: 100k quotes become 400k bytes once nested in the request JSON.
-    sourceBody.value = `## 定位\n${'"'.repeat(100_000)}\n## 结语\n原结语`;
-    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    sourceBody.value = null;
-    expect(started).toMatchObject({ state: 'incomplete', outcome: { kind: 'input_too_large', phase: 'review' } });
-    expect((await t.flow.continue(String(db.review!.reviewId))).calls).toEqual([]);
-    expect(db.calls).toEqual([]);
-  });
-
-  it('runs the size preflight before the first claim even when start never did (crash after the record was created)', async () => {
-    const t = setup(() => opinion('major'));
-    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    sourceBody.value = `## 定位\n${'"'.repeat(100_000)}\n## 结语\n原结语`;
-    db.review!.state = 'paused'; // paused by the daily job while idle
-    const end = await t.flow.continue(String(db.review!.reviewId));
-    sourceBody.value = null;
-    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'input_too_large' } });
-    expect(db.calls).toEqual([]);
-  });
-
-  it('never holds more credits than the maximum shown at start: a pricier later step ends the review uncharged', async () => {
-    const t = setup(() => opinion('major'));
-    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    type Caps = Record<'review' | 'debate' | 'summary', Record<string, { credits: number; usd: string }>>;
-    const cfg = started.config as { estimateUsd: string; callCaps: Caps; fixedPrice: { holdCredits: number } };
-    const all = Object.values(cfg.callCaps).flatMap(phase => Object.values(phase));
-    const phaseSum = (phase: Record<string, { credits: number }>) => Object.values(phase).reduce((n, cap) => n + cap.credits, 0);
-    // The temporary hold a start must cover is the largest step's, not the sum of all steps.
-    expect(cfg.fixedPrice.holdCredits).toBe(Math.max(...Object.values(cfg.callCaps).map(phaseSum)));
-    expect(all.reduce((sum, cap) => sum + Number(cap.usd), 0)).toBeGreaterThanOrEqual(Number(cfg.estimateUsd) - 1e-9);
-    priceRise.phase = 'fusion_summary';
-    await t.runAll();
-    const end = await t.flow.continue(String(db.review!.reviewId));
-    const sum = (phase: Record<string, { credits: number; usd: string }>) => Object.values(phase).reduce((n, cap) => n + cap.credits, 0);
-    expect(creditCaps[0]).toBe(sum(cfg.callCaps.review));
-    expect(creditCaps.at(-1)).toBe(cfg.callCaps.summary[ids.summary]!.credits);
-    expect(usdCaps.at(-1)).toBe(cfg.callCaps.summary[ids.summary]!.usd);
-    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'price_changed', phase: 'summary' } });
-    expect(db.calls.some(call => call.phase === 'fusion_summary')).toBe(false);
-  });
-
-  it('a setting changed after round 1 ends the review at the refused step instead of leaving it stuck', async () => {
-    const t = setup(() => opinion('major'));
-    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    priceRise.phase = 'fusion_summary'; priceRise.code = 'FUSION_REVIEW_DISABLED';
-    await t.runAll();
-    const end = await t.flow.continue(String(db.review!.reviewId));
-    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'claim_refused', phase: 'summary', reason: 'FUSION_REVIEW_DISABLED' } });
-    // Any other coded refusal ends the step too (a revoked Skill, a denied test window), not only listed ones.
-    db.review!.state = 'running';
-    priceRise.code = 'RUNTIME_STAGING_POLICY_DENIED';
-    expect((await t.flow.continue(String(db.review!.reviewId))).review)
-      .toMatchObject({ state: 'incomplete', outcome: { kind: 'claim_refused', reason: 'RUNTIME_STAGING_POLICY_DENIED' } });
-    // A transient failure is thrown for a retry, never turned into an end state.
-    db.review!.state = 'running';
-    priceRise.code = 'FUSION_ADMISSION_UNAVAILABLE';
-    await expect(t.flow.continue(String(db.review!.reviewId))).rejects.toThrow('FUSION_ADMISSION_UNAVAILABLE');
-  });
-
-  it('a retry of only some seats is capped by those seats alone', async () => {
-    const t = setup(() => opinion('major'));
-    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    const caps = (started.config as { callCaps: Record<string, Record<string, { credits: number; usd: string }>> }).callCaps.review!;
-    await t.flow.continue(String(db.review!.reviewId));
-    // The first seat's call expired before dispatch; the others delivered.
-    Object.assign(db.calls[0]!, { verdict: 'no_delivery', settled: true, settledAt: clock.next() });
-    await t.runAll();
-    await t.flow.continue(String(db.review!.reviewId));
-    expect(creditCaps.at(-1)).toBe(caps[ids.reviewers[0]!]!.credits);
-    expect(usdCaps.at(-1)).toBe(caps[ids.reviewers[0]!]!.usd);
-    expect(memberCapsSeen.at(-1)).toEqual([caps[ids.reviewers[0]!]]);
-  });
-
   it('trims the opinions a summary carries until its serialized request fits the byte cap', async () => {
     const long = '很长的理由'.repeat(390);
     const big = JSON.stringify({ decisions: DECISIONS.map(decision => ({ decision, strongestCase: long, strongestAlternative: long,
@@ -517,17 +500,6 @@ describe('review flow', () => {
     expect(events.map(e => e.type)).toContain('revision_ready_for_choice');
   });
 
-  it('a retried start returns the existing review before any check that may have changed', async () => {
-    const t = setup(() => opinion('major'));
-    const requestId = randomUUID();
-    const first = await t.flow.start({ requestId, draftId: randomUUID(), sourceVersionId: randomUUID() });
-    const settings = await import('./settings');
-    const spy = vi.spyOn(settings, 'readFusionSettings');
-    const again = await t.flow.start({ requestId, draftId: randomUUID(), sourceVersionId: randomUUID() });
-    expect(again.reviewId).toBe(first.reviewId);
-    expect(spy).not.toHaveBeenCalled();
-  });
-
   it('keeps the event stream open while a saved body still awaits its verdict after a stop', async () => {
     const t = setup(() => opinion('major'));
     await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
@@ -568,32 +540,6 @@ describe('review flow', () => {
     expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('revision_invalid');
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'revision_failed' });
     expect(t.proposals).toEqual([]);
-  });
-
-  it('re-judges a saved body that never got a verdict before deciding (crash between save and verdict)', async () => {
-    const t = setup(() => opinion(null));
-    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.flow.continue(String(db.review!.reviewId));
-    for (const call of db.calls) { call.dispatched = true; db.outputs.set(call.callId, 'malformed'); }
-    await t.flow.continue(String(db.review!.reviewId));
-    expect(db.calls.map(c => c.verdict)).toEqual(['format_invalid', 'format_invalid', 'format_invalid']);
-    expect(db.review).toMatchObject({ state: 'incomplete' });
-  });
-
-  it.each(['usable', 'revision_invalid'])('rejudges an archived legacy summary as %s without claiming or dispatching', async verdict => {
-    const t = setup(() => opinion('major'));
-    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.runAll();
-    await t.flow.continue(started.reviewId);
-    const summary = db.calls.find(call => call.phase === 'fusion_summary')!;
-    summary.dispatched = true;
-    db.outputs.set(summary.callId, verdict === 'usable' ? revision('新目标') : revision('新目标').slice(0, -40));
-    db.review!.state = 'paused'; // The SQL archive repair leaves unjudged records recoverable, never ended or charged.
-    const before = { calls: db.calls.length, groups: db.groups.size, requests: requests.length };
-    expect(await t.flow.rejudge(started.reviewId)).toContain(summary.callId);
-    expect(summary.verdict).toBe(verdict);
-    expect(db.review!.state).toBe('paused');
-    expect({ calls: db.calls.length, groups: db.groups.size, requests: requests.length }).toEqual(before);
   });
 
   it('a summary that changes no section ends as no change (refunded, 0294), never as a revision to choose and pay for', async () => {
@@ -651,12 +597,21 @@ describe('review flow', () => {
     expect(request.instructions).toContain('不要提到你是哪个模型');
   });
 
-  it('offers no stop or end once started (Owner 2026-10-17); an ended review claims and dispatches nothing', async () => {
+  it('a report too large for one call does not fit; a normal report does (the check the jury makes before anything is sent)', async () => {
     const t = setup(() => opinion('major'));
-    expect('stop' in t.flow || 'end' in t.flow).toBe(false);
-    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    db.review!.state = 'stopped';
-    expect(await t.flow.continue(String(db.review!.reviewId))).toMatchObject({ review: { state: 'stopped' }, calls: [] });
-    await expect(t.flow.dispatch(String(db.review!.reviewId), randomUUID())).rejects.toThrow('FUSION_REVIEW_ENDED');
+    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    const core = reviewCore(admin, randomUUID());
+    const skill = { reviewer: 'review', summary: 'summarize', rubric: 'rubric' };
+    const view = (await t.flow.read(String(started.reviewId)));
+    expect(core.fitsWhenSent(view as never, await core.readSource(String(started.reviewId)), skill as never)).toBe(true);
+    // Escaped size counts: 100k quotes become 400k bytes once nested in the request JSON.
+    sourceBody.value = `## 定位\n${'"'.repeat(100_000)}\n## 结语\n原结语`;
+    try {
+      expect(core.fitsWhenSent(view as never, await core.readSource(String(started.reviewId)), skill as never)).toBe(false);
+    } finally { sourceBody.value = null; }
+  });
+
+  it('offers no stop or end once started (Owner 2026-10-17)', () => {
+    expect('stop' in setup(() => opinion('major')).flow || 'end' in setup(() => opinion('major')).flow).toBe(false);
   });
 });

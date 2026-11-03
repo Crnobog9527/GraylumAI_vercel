@@ -1,13 +1,10 @@
 import { archiveBusinessInput, archiveBusiness, listBusinesses } from '../services/opc/businessArchive';
-import {executionVisibility} from '../services/runtime/libraryVisibility';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/turn/settings/stagingPolicy';
-import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/turn/settings/stagingErrors';
 import {topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
@@ -20,10 +17,8 @@ import {
   opcStart,
   opcPlan,
   opcHandoff,
-  opcGenerate,
   opcInformation,
   opcTopicBind,
-  opcTopicTurn,
   opcTopicDraft,
   opcLibraryEdit,
   opcContentFromTurn,
@@ -44,13 +39,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
-  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real,
-    token => executeOriginalExecution({
-      admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
-      authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint: real ? undefined : runtimeLocalEndpoint(),
-      // DB-PERF PR-5a: this request already loaded the policy (above), so the execution does not load it again.
-      policyChecked: real ? { ok: true as const } : undefined,
-    }, token.executionId, undefined, token)), stagingPolicy: real } });
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real), stagingPolicy: real } });
   if (!result.ok && !isOpcRefusal(result.error.cause)) throw stagingProcedureError(result.error, path);
   return result;
 });
@@ -94,52 +83,6 @@ export const opcRouter = router({
   information: procedure
     .input(opcInformation)
     .mutation(({ ctx, input }) => ctx.opc.information(input)),
-  prepareStep: procedure
-    .input(opcGenerate)
-    .mutation(({ ctx, input }) => ctx.opc.prepareStep(input)),
-  // One streamed request per mentor turn (AC-1): the unchanged prepareStep
-  // admission, an `admitted` event with the execution id, then the same
-  // original execution and progress delivery as runtime.executeStream.
-  // Replay, reservation and replay-only recovery are those two paths'.
-  mentorTurnStream: procedure
-    .input(opcGenerate.extend({textProtocol:z.literal('textDelta-v1').optional()}))
-    .mutation(async function* ({ ctx, input, path }): AsyncGenerator<AgentTurnEvent> {
-      // The route returns before this stream ends; release this stream's reference.
-      const timing = ctx.runtimeBudget?.timing;
-      try {
-        let admitted: { executionId: string };
-        let maintenanceEndpoint: string | undefined;
-        try {
-          if (input.purpose !== "mentor") throw new Error("OPC_STEP_DENIED");
-          // Same executor host as runtime.executeStream, resolved before any
-          // admission exists. A loaded Staging policy already proved enabled
-          // window access for this actor, which implies the read access check.
-          if (!ctx.stagingPolicy) {
-            try { maintenanceEndpoint = runtimeLocalEndpoint(); }
-            catch { await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env); }
-          }
-          const request=opcGenerate.parse(Object.fromEntries(Object.entries(input).filter(([key])=>key!=='textProtocol')));
-          const prepare = () => ctx.opc.prepareStep(request);
-          const prepared = timing ? await timing.run(prepare) : await prepare();
-          if (prepared.admitted === false) {
-            yield { type: "result" as const, result: prepared };
-            return;
-          }
-          admitted = z.object({ executionId: z.string().uuid() }).passthrough().parse(prepared);
-        } catch (cause) {
-          throw isOpcRefusal(cause) ? cause : stagingProcedureError(cause, path);
-        }
-        yield { type: "admitted" as const, executionId: admitted.executionId };
-        const visibility = executionVisibility(ctx.supabaseAdmin, ctx.user.id, admitted.executionId);
-        yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
-          admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
-          authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint, visibility,
-          policyChecked: ctx.stagingPolicy ? { ok: true as const } : undefined,
-        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol, visibility.visible);
-      } finally {
-        timing?.release();
-      }
-    }),
   revise: procedure
     .input(
       z
@@ -183,18 +126,15 @@ export const opcRouter = router({
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).edit(input)),
   sessionResultDelete: procedure.input(sessionResultFamily)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).remove(input)),
-  // The bound topic workspace of the draft: binding read, the single explicit
-  // bind, and one normal Agent turn inside it. All three keep their server-side
-  // authorization; nothing here trusts a client-supplied session or Skill.
+  // The bound topic workspace of the draft: binding read and the single explicit
+  // bind. Both keep their server-side authorization; nothing here trusts a
+  // client-supplied session or Skill. The topic turn itself is POST /api/turn.
   topicWorkspace: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.topicRead(input.draftId)),
   consentTopicWorkspace: procedure
     .input(opcTopicBind.omit({ requestId: true }))
     .mutation(({ ctx, input }) => ctx.opc.topicConsent(input)),
-  topicTurn: procedure
-    .input(opcTopicTurn)
-    .mutation(({ ctx, input }) => ctx.opc.prepareTopicTurn(input)),
   saveTopicDraft: procedure
     .input(opcTopicDraft)
     .mutation(({ ctx, input }) => ctx.opc.topicDraft(input)),
