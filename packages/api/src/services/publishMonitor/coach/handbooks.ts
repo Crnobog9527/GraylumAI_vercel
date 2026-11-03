@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /**
- * REVIEW-COACH block C: loads the platform handbooks (machine-readable part, `handbook/<platform>.json`) of the coach Skill package into
+ * REVIEW-COACH block C: loads the platform handbooks (machine-readable part, `handbook/<platform>.yaml`) of the coach Skill package into
  * the Map the review pack is built with. The text itself lives only in the private repository graylum-skills and the published package;
  * this repository holds the loader and the schema, never a handbook. A handbook that cannot be read or fails the schema is left out:
  * that platform is then diagnosed on the user's own data only, which is exactly what a missing handbook means to buildPack.
@@ -36,11 +36,12 @@ export function parseHandbook(text: string, platform: string): Handbook | null {
   } catch { return null; }
 }
 
-/** Reads `handbook/<platform>.json` of every platform through `read`; a platform that is missing, unreadable or invalid is left out. */
+/** A Skill package only holds Markdown and YAML files, so a handbook is a `.yaml` file whose text is strict JSON (valid YAML too).
+ * Reads `handbook/<platform>.yaml` of every platform through `read`; a platform that is missing, unreadable or invalid is left out. */
 export async function loadHandbooks(read: HandbookReader, platforms: readonly string[] = HANDBOOK_PLATFORMS): Promise<Map<string, Handbook>> {
   const loaded = await Promise.all(platforms.map(async platform => {
     let text: string | null;
-    try { text = await read(`handbook/${platform}.json`); }
+    try { text = await read(`handbook/${platform}.yaml`); }
     catch (error) { logSwallowed('coach_handbook_unavailable', error, { category: 'billing', platform }); return null; }
     if (text === null) return null;
     const handbook = parseHandbook(text, platform);
