@@ -12,6 +12,7 @@ import {
   type RecoveryAttempt,
   type RecoveryHistory,
 } from "./step-recovery";
+export { useOpeningGate } from "./opening-intent";
 
 /**
  * The refetch interval of the draft's Runtime history. It re-reads while the
