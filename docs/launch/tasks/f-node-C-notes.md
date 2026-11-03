@@ -209,5 +209,8 @@
 | `loadStagingRecoveryPolicy`（`turn/settings/stagingPolicy.ts`） | `productionPolicy.test.ts` 删该函数的断言（生产恢复策略；非生产策略被拒） | 被测代码在生产中已无调用方，随之删除，不需要等价测试；`loadStagingPolicy` 的断言保留 |
 | `filterPostEntries`（`turn/agent/workspacePosts.ts`，随 `sourceRuntimeTool` 删除后无任何引用） | 没有单独测试 | 被测代码在生产中已无调用方，随之删除 |
 | `lib/use-payg-resume.ts`、`lib/payg-wait.ts`（web） | 删 `payg-wait.test.ts` 整个文件（约 35 个用例，测旧暂停提示、继续令牌、`paygResumeController`、去充值入口） | #1657 合并后这两个库没有任何调用方（`git grep` 复核）；它们绑定的 `runtime.resume`、`executionId` 暂停模型随旧路径删除。新路径的暂停与继续由回合工作区自己的提示和 `turn/*` 的测试覆盖，本 PR 不需要等价测试 |
+| `executionLoadSkillTool`（`turn/skills/loadSkillTool.ts`，保留工具定义和字节估算） | `loadSkillTool.test.ts` 删「load_skill」组里 9 个用例中的 8 个（读取冻结包并记账、回放不再读、永久拒绝、被撤销的包、缓存后撤销、不确定失败向上抛、次数上限、拒绝也计数），保留「declares a small fixed tool definition」和目录文本两个用例 | 无等价：被测的是旧执行器里的 `runtime_tool` 记账与回放，新路径没有这套；新路径的 Skill 加载见 `turn/tools/skills.ts` 与 `turn/tools/chatTools.test.ts` |
+| `executionSkillFileTool`（`turn/skills/skillFileExecution.ts`，保留 `ToolRpc` 类型） | 删 `skillFileExecution.test.ts` 整个文件，2 个用例：「claims before reading, freezes once and replays the exact persisted JSON byte order」「does not read private data if execution ownership/cancellation/erasure claim is denied」 | 被测代码在生产中已无调用方，随之删除；无等价：新路径没有“先认领再读取、冻结后回放”的工具记账 |
+| `readFrozenSkillFile`、`frozenFile`、`FrozenSkillFile`（`turn/skills/skillFile.ts`，删上面两项后新出现的死代码） | `skillFile.test.ts` 删 8 个用例（读取精确的已发布字节、路径穿越被拒、额外参数被拒、另一版本被拒、回放时撤销、损坏的已保存字节、超大资源、源字节损坏），保留 `skillFileContinuationBytes` 的用例 | 被测代码在生产中已无调用方，随之删除，不需要等价测试 |
 
 删完后我用同样方法再查了一轮（以本次删除涉及的文件和被删代码引用过的名字为范围）：没有再冒出只剩测试引用的导出。**未碰**：`report/fees.ts`、`cron/billing-reconcile`、`opc/sessionResults.ts`、`routers/opc.ts`、`session-results.tsx`（V2-9）。
