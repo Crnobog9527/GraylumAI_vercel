@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
-import { BENCHMARK_ROUTE_KINDS, BENCHMARK_RULES } from '../vendors/config';
+import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
 import { toolEnvelope } from '../tools/envelope';
@@ -13,6 +13,8 @@ import { executeResearchCall, socialRequest, stableResearchId, type ResearchTool
 import type { DiscoveryRecord } from './store';
 import { requestIdentity, type SupplierRequest } from './subcall';
 import { shortfallNotice } from './shortfall';
+import type { CachedProfile } from './profileCache';
+import { createHash } from 'node:crypto';
 import { deepen, discoveryCap, discoveryCoverage, total, type PlatformCoverage } from './discoveryLayers';
 
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
@@ -23,6 +25,8 @@ interface StepResult {
   reason?: string; budget?: boolean;
   /** The supplier answered that it cannot serve us (402, 401/403, 429, 5xx): not "no results" and not about the keywords. */
   supplierDown?: boolean;
+  /** When the supplier answered, and whether this call sent the request now (a replayed operation did not). */
+  fetchedAt?: string; fresh?: boolean;
   /** A keyword search's next page (BENCHMARK-COVERAGE), from the answer or the saved operation. */
   nextCursor?: string;
 }
@@ -116,6 +120,7 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
       // A replayed operation keeps what the supplier said: a continued round must not turn an outage into "not enough candidates".
       ...(prior.result?.outcome === 'failed' && supplierUnavailable(typeof prior.result.reason === 'string' ? prior.result.reason : null)
         ? { supplierDown: true } : {}),
+      ...(typeof prior.result?.fetchedAt === 'string' ? { fetchedAt: prior.result.fetchedAt } : {}),
       ...(typeof saved === 'string' ? { nextCursor: saved } : {}) };
   }
   // This reply's lookups or its time ran out: the round stops before planning anything and continues on the next reply.
@@ -127,6 +132,7 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
   return { operationId, items: outcome.sent ? outcome.result.items : [],
     complete: outcome.sent && ['ok', 'partial'].includes(outcome.result.outcome), stopped: !outcome.sent,
     ...(outcome.sent && outcome.result.nextCursor ? { nextCursor: outcome.result.nextCursor } : {}),
+    ...(outcome.sent ? { fresh: true, fetchedAt: outcome.result.fetchedAt } : {}),
     ...(outcome.sent && outcome.result.outcome === 'failed' && supplierUnavailable(outcome.result.reason) ? { supplierDown: true } : {}),
     ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
@@ -202,25 +208,68 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   };
   const screened = new Set<string>();
   const enough = () => selectCandidates(found, true).enough;
+  // The shared profile cache (0493): profiles read within 24 hours by any search are not looked up (and not paid for) again. One batched
+  // read per batch of authors, one batched write at the end; each cached lookup still takes its place in the operation order, so a
+  // continued round replays the same ids (a slot that holds a saved operation is always replayed, never answered from the cache).
+  const cacheHits = new Map<string, CachedProfile>(), cacheAsked = new Set<string>();
+  const cacheWrites = new Map<string, { platform: string; kind: string; rows: Array<{ account: string } & CachedProfile> }>();
+  const cacheKind = (request: SupplierRequest) => request.vendor === 'tikhub' ? request.call.kind : null;
+  const warm = async (batch: Array<{ platform: SocialPlatform; authorId: string; authorPosts: EvidenceItem[] }>) => {
+    if (!ctx.profileCache) return;
+    for (const platform of d.platforms) {
+      const wanted = new Map<string, string>();
+      for (const author of batch.filter(a => a.platform === platform)) {
+        const account = canonicalAccount(platform, author.authorId);
+        const request = account ? authorLookup(ctx, platform, account, author.authorPosts) : null;
+        const kind = request ? cacheKind(request) : null;
+        if (account && kind && !screened.has(`${platform}:${account}`) && !cacheAsked.has(`${platform}\n${kind}\n${account}`)) wanted.set(account, kind);
+      }
+      for (const kind of new Set(wanted.values())) {
+        const accounts = [...wanted].filter(([, k]) => k === kind).map(([account]) => account);
+        accounts.forEach(account => cacheAsked.add(`${platform}\n${kind}\n${account}`));
+        const hits = await ctx.profileCache.read(platform, kind, accounts).catch(() => new Map<string, CachedProfile>());
+        for (const [account, hit] of hits) cacheHits.set(`${platform}\n${kind}\n${account}`, hit);
+      }
+    }
+  };
+  /** Turns one profile (looked up now, replayed, or cached) into a scored account of this round. */
+  const addFound = (platform: SocialPlatform, account: string, authorId: string, label: string | null, authorPosts: EvidenceItem[],
+    request: SupplierRequest, item: ResearchItem, ref: string) => {
+    // A video detail speaks for its own channel only: a different channel's numbers never screen this author.
+    if (request.vendor === 'tikhub' && request.call.kind === 'post_detail' && item.fields.authorId !== authorId) return;
+    const metrics = accountMetrics({ profile: { ...item, ref }, posts: authorPosts }, ctx.now());
+    const name = accountName(item.fields.name, label);
+    found.push({ key: `${platform}:${account}`, platform, account, ...(name ? { name } : {}), evidenceRef: ref, metrics,
+      classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
+  };
   /** One paid lookup that screens an author (or an account-search lead); each account at most once. */
   const screen = async (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => {
     const account = canonicalAccount(platform, authorId);
     if (!account || screened.has(`${platform}:${account}`)) return;
     const request = authorLookup(ctx, platform, account, authorPosts);
     if (!request) { complete = false; return; }
+    const kind = cacheKind(request);
+    const cached = kind ? cacheHits.get(`${platform}\n${kind}\n${account}`) : undefined;
+    if (cached && !await ctx.store.readOperation(stableResearchId(d.discoveryId, String(index)))) {
+      index += 1; // the slot stays unused, so later steps keep their ids
+      screened.add(`${platform}:${account}`);
+      authorCursor += 1;
+      const ref = `pc:${createHash('sha256').update(`${platform}\n${kind}\n${account}`).digest('hex').slice(0, 24)}#1`;
+      addFound(platform, account, authorId, label, authorPosts, request, cached.profile, ref);
+      return;
+    }
     const result = await pay(platform, request, 'profiles');
     if (!result || result.stopped) return;
     screened.add(`${platform}:${account}`);
     authorCursor += 1;
     const profile = result.items[0];
-    // A video detail speaks for its own channel only: a different channel's numbers never screen this author.
-    if (!profile || (request.vendor === 'tikhub' && request.call.kind === 'post_detail'
-      && profile.fields.authorId !== authorId)) return;
-    const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` }, posts: authorPosts }, ctx.now());
-    const name = accountName(profile.fields.name, label);
-    found.push({ key: `${platform}:${account}`, platform, account, ...(name ? { name } : {}),
-      evidenceRef: `${result.operationId}#1`, metrics,
-      classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
+    if (!profile) return;
+    if (kind && result.fresh && result.complete && result.fetchedAt) {
+      const entry = cacheWrites.get(`${platform}\n${kind}`) ?? { platform, kind, rows: [] };
+      entry.rows.push({ account, profile, fetchedAt: result.fetchedAt });
+      cacheWrites.set(`${platform}\n${kind}`, entry);
+    }
+    addFound(platform, account, authorId, label, authorPosts, request, profile, `${result.operationId}#1`);
   };
   const firstPages = new Map<string, { cursor?: string; fresh: number }>();
   for (const platform of d.platforms) {
@@ -246,9 +295,12 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     // Too few candidates in this batch: widen the scan within this call's own allowance (a stop at the allowance saves the
     // wider limit; the next reply re-reads paid operations and continues), so a reply never ends a round early by itself.
     while (!stopped) {
-      for (const [offset, author] of authors.slice(scanned, authorLimit).entries()) {
-        // Past the first batch, the eighth selectable account ends the scan: no further profile is paid for.
-        if (scanned + offset >= AUTHOR_BATCH && enough()) break;
+      const batch = authors.slice(scanned, authorLimit);
+      await warm(batch.map(author => ({ platform: author.platform, authorId: author.authorId,
+        authorPosts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) })));
+      for (const author of batch) {
+        // The eighth selectable account ends the scan, also inside the first batch: no further profile is looked up or paid for.
+        if (enough()) break;
         await screen(author.platform, author.authorId, author.author,
           (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId));
         if (stopped) break;
@@ -259,11 +311,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     }
   }
   // BENCHMARK-COVERAGE: still short of a card after every first-page author, search deeper before calling it a shortfall.
-  // Deeper layers stop at a full card (candidatesMax, plan §3 item 1); once the round is searched to the end, a card shows
-  // whatever is selectable, even below candidatesMin (Owner 2026-10-23).
-  const full = () => selectCandidates(found, true).selectable.length >= BENCHMARK_RULES.candidatesMax;
-  if (!stopped && !full()) {
-    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, cardable: enough, isStopped: () => stopped });
+  // Deeper layers stop at the eighth selectable account (candidatesMin, Owner 2026-11-03: stop as soon as there are 8); once the round
+  // is searched to the end, a card shows whatever is selectable, even below candidatesMin (Owner 2026-10-23).
+  if (!stopped && !enough()) {
+    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough, cardable: enough, isStopped: () => stopped });
   }
   const resumable = stopReason === 'ROUND_LIMIT';
   // Which replies this round took (each reply once, also when one is replayed) and, while it waits for its next reply, the
@@ -272,6 +323,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     .filter((x): x is string => typeof x === 'string'), ctx.executionId])].slice(-REPLIES_KEPT);
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   // The supplier could not serve the round and nothing came out of it: the round is saved but not counted (0492, Owner 2026-11-03).
+  // The cache never decides the search: a write that fails costs only the next search a lookup.
+  if (ctx.profileCache) {
+    for (const entry of cacheWrites.values()) await ctx.profileCache.write(entry.platform, entry.kind, entry.rows).catch(() => undefined);
+  }
   const down = supplierDownRound({ supplierDown, stopped, shown: false, found: found.length });
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit, executions: replies,
     ...(stopped && resumable ? { continueFrom: ctx.executionId } : {}), ...(down ? { supplierDown: true } : {}) },
