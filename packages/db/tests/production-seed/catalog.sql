@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved.
 -- This code is proprietary and confidential.
--- Independent expected catalog: REL-1-BUILD-PREP §1.3/1.4; MASTER_PLAN §2.1 item 51 F/G/J/S/T.
+-- Independent expected catalog: REL-1-BUILD-PREP §2.3/2.4; MASTER_PLAN §2.1 item 51 F/G/J/S/T.
 DO $$ BEGIN
   IF (SELECT jsonb_agg(jsonb_build_array(name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,
       monthly_bonus_credits,package_discount,allow_fusion_review,allow_fusion_compare,library_storage_bytes,
