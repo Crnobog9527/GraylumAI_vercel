@@ -11,6 +11,7 @@ import {
   dataInput, historyInput, linkInput, linkPost, manualRefresh, readData, readPostHistory, refreshInput,
 } from '../services/publishMonitor/data';
 import { addAccountInput, addBrandAccount } from '../services/publishMonitor/accounts';
+import { readTrend } from '../services/publishMonitor/trend';
 import { importManualRows, manualImportInput } from '../services/publishMonitor/manualImport';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import {
@@ -58,6 +59,9 @@ export const publishMonitorRouter = router({
   // PR-3a: the user's own posts and daily snapshots inside their plan's window (Pro 30 days, Gold 90).
   data: protectedProcedure.input(dataInput).query(({ ctx, input }) =>
     safe(ctx, async () => readData(ctx.supabaseAdmin, ctx.profileId, await dataWindow(ctx), input))),
+  // Block A: weekly trend charts over the same plan window (Gold 90 days, recorded from the connection day); read only.
+  trend: protectedProcedure.query(({ ctx }) =>
+    safe(ctx, async () => readTrend(ctx.supabaseAdmin, ctx.profileId, await dataWindow(ctx)))),
   postHistory: protectedProcedure.input(historyInput).query(({ ctx, input }) =>
     safe(ctx, async () => readPostHistory(ctx.supabaseAdmin, ctx.profileId, await dataWindow(ctx), input))),
   linkPost: protectedProcedure.input(linkInput).mutation(({ ctx, input }) => safe(ctx, async () => {
