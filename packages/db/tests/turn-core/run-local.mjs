@@ -18,6 +18,7 @@ import {workContentCases} from './work-content-cases.mjs';
 import {holdCases} from './hold-cases.mjs';
 import {stopLossCases} from './stop-loss-cases.mjs';
 import {workResultCases} from './work-result-cases.mjs';
+import {bRewriteCases} from './b-rewrite-cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 // V2-7a: a report opens only for a Gold account's confirmed round (turn_report_admit); the fixture builds one per call.
 db.sql(read('packages/db/tests/content-erasure/fixture.sql'));db.sql(read('packages/db/tests/turn-core/report-fixture.sql'));
@@ -801,6 +802,7 @@ try{
  await topicAccountCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
  await topicRebindCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await workResultCases({c,db,one,open,begin,record,close,account,policy,refusal,report});
+ await bRewriteCases({c,db,one,account,open,refusal,peer,report});
  await holdCases({c,one,open,begin,record,close,balance,account,policy,refusal,peer,report});
  await stopLossCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await workContentCases({c,one,open,begin,record,close,account,policy,refusal,report});
