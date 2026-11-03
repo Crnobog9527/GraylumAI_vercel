@@ -75,6 +75,16 @@ describe('persisted query cache', () => {
     expect(() => clearPersistedCache({ storage: throwing })).not.toThrow();
   });
 
+  it('does not write back a read that was invalidated, nor keep what was saved for it', () => {
+    const s = storage();
+    const qc = client([[key(['opc', 'sessionResults'], { sessionId: 'gone' }), ['r']], [key(['opc', 'list']), ['a']]]);
+    persistQueryCache(qc, USER, { storage: s, now: NOW, build: 'b1' });
+    void qc.invalidateQueries({ refetchType: 'none' });
+    persistQueryCache(qc, USER, { storage: s, now: NOW, build: 'b1' });
+    expect(s.data.get(CACHE_KEY) ?? '').not.toContain('gone');
+    expect(s.data.get(CACHE_KEY) ?? '').not.toContain('"a"');
+  });
+
   it('writes nothing for nobody and clears what was there', () => {
     const s = storage();
     persistQueryCache(client([[key(['opc', 'list']), ['a']]]), USER, { storage: s, now: NOW, build: 'b1' });

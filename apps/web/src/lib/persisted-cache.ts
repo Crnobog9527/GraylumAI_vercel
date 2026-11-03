@@ -59,9 +59,12 @@ export function limitQueries(queries: Queries, now: number): Queries {
   });
 }
 
-/** What is in the client now: the listed reads that succeeded. */
+/**
+ * What is in the client now: the listed reads that succeeded and are still valid. A read marked invalid (a deleted conversation or result
+ * invalidates the reads that showed it) is not saved, even when nothing has read it again yet.
+ */
 export function selectQueries(client: QueryClient, now: number = Date.now()): Queries {
-  return limitQueries(dehydrate(client, { shouldDehydrateQuery: query => query.state.status === 'success' }).queries, now);
+  return limitQueries(dehydrate(client, { shouldDehydrateQuery: query => query.state.status === 'success' && !query.state.isInvalidated }).queries, now);
 }
 
 function savedQueries(storage: NonNullable<ReturnType<typeof storageOf>>, userId: string, now: number, build: string): Queries {
@@ -79,6 +82,8 @@ export function persistQueryCache(client: QueryClient, userId: string | null, op
     // What is in memory replaces what was saved for the same read; the rest of what was saved stays (the page may not have asked for it).
     const now = options?.now ?? Date.now(), build = options?.build ?? buildOf();
     const merged = new Map(savedQueries(storage, userId, now, build).map(query => [query.queryHash, query]));
+    // What was saved for a read that is invalid now goes too, not only what would be written.
+    for (const query of client.getQueryCache().getAll()) if (query.state.isInvalidated) merged.delete(query.queryHash);
     for (const query of selectQueries(client, now)) merged.set(query.queryHash, query);
     let queries = limitQueries([...merged.values()], now);
     const write = () => JSON.stringify({ v: 1, build, userId, savedAt: now, queries } satisfies Saved);

@@ -2,7 +2,7 @@
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { isUnauthorizedError } from '@/lib/auth-recovery';
@@ -58,6 +58,8 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   // Saved page data (lib/persisted-cache.ts): put back before the first paint, so a reload shows the last content at once while the same
   // reads run again behind it and replace it. Saved again, a moment after any read changes, and when the page is hidden.
   const knownUser = useRef<string | null>(null);
+  // Bumped when the user changes: the pages (and what they hold in state) mount again, so nothing of the last user stays on screen.
+  const [epoch, setEpoch] = useState(0);
   useLayoutEffect(() => {
     knownUser.current = readSessionUserIdSync();
     restoreQueryCache(queryClient, knownUser.current);
@@ -115,6 +117,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
         if (event === 'SIGNED_OUT' || (user && knownUser.current && user !== knownUser.current)) {
           clearPersistedCache();
           queryClient.clear();
+          setEpoch(count => count + 1);
         }
         knownUser.current = event === 'SIGNED_OUT' ? null : user ?? knownUser.current;
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
@@ -160,7 +163,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        {children}
+        <Fragment key={epoch}>{children}</Fragment>
         {recovery.notice && (
           <UnauthorizedNotice
             reason={recovery.notice}
