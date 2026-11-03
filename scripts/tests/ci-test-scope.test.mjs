@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { changedFiles, decide, isDraft, isSkippablePath } from '../ci-test-scope.mjs';
+import { changedFiles, decide, isSkippablePath } from '../ci-test-scope.mjs';
 
 const pr = files => decide({ eventName: 'pull_request', baseRef: 'staging', files });
 
@@ -84,28 +84,12 @@ test('changedFiles reads the pull request from its merge commit and gives up on 
   }
 });
 
-test('a draft pull request skips the database jobs whatever it changes; a ready one is judged by its files', () => {
-  const draft = (files, baseRef = 'staging') => decide({ eventName: 'pull_request', baseRef, files, draft: true });
-  assert.equal(draft(['packages/api/src/routers/billing.ts']).full, false);
-  assert.equal(draft(null).full, false);
-  assert.equal(draft([], 'main').full, false);
-  const ready = (files, draftFlag) => decide({ eventName: 'pull_request', baseRef: 'staging', files, draft: draftFlag });
-  for (const flag of [false, undefined, null, 'true', 1]) {
-    assert.equal(ready(['packages/api/src/routers/billing.ts'], flag).full, true, `draft=${String(flag)} is not a draft`);
-    assert.equal(ready(['docs/a.md'], flag).full, false);
+test('a draft flag changes nothing: every pull request is judged by its files (Owner 2026-11-03)', () => {
+  for (const draft of [true, false, undefined]) {
+    const judge = files => decide({ eventName: 'pull_request', baseRef: 'staging', files, draft });
+    assert.equal(judge(['packages/api/src/routers/billing.ts']).full, true, `draft=${String(draft)} runs the database jobs`);
+    assert.equal(judge(null).full, true);
+    assert.equal(judge(['docs/a.md']).full, false, 'the allow-list still applies');
+    assert.equal(decide({ eventName: 'pull_request', baseRef: 'main', files: ['docs/a.md'], draft }).full, true);
   }
-  for (const eventName of ['push', 'schedule', undefined]) {
-    assert.equal(decide({ eventName, baseRef: 'staging', files: ['docs/a.md'], draft: true }).full, true, 'a draft flag means nothing outside pull requests');
-  }
-});
-
-test('isDraft reads the pull request payload and treats anything unreadable as ready', () => {
-  const payload = draft => () => JSON.stringify({ pull_request: { draft } });
-  assert.equal(isDraft('x', payload(true)), true);
-  assert.equal(isDraft('x', payload(false)), false);
-  assert.equal(isDraft('x', () => JSON.stringify({ pull_request: {} })), false);
-  assert.equal(isDraft('x', () => JSON.stringify({})), false);
-  assert.equal(isDraft('x', () => 'not json'), false);
-  assert.equal(isDraft('x', () => { throw new Error('no file'); }), false);
-  assert.equal(isDraft('x', payload('true')), false, 'only the boolean true counts');
 });
