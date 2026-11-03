@@ -76,7 +76,7 @@ export function needsManualSettlement(
 }
 
 /** Read-only: the turns recovery has not closed or settled yet. Content-free; an operator matches them by id. */
-export function UnsettledTurnsCard() {
+function UnsettledTurnsList() {
   const view = trpc.billingReport.unsettledTurns.useQuery();
   const data = view.data;
   return <Card data-testid="unsettled-turns">
@@ -106,4 +106,39 @@ export function UnsettledTurnsCard() {
         }
     </CardContent>
   </Card>;
+}
+
+/** Read-only: calls settled at zero because the provider said "no such generation" after 24 hours (Owner 2026-11-03). */
+function AbsentRefundsCard() {
+  const view = trpc.billingReport.absentRefunds.useQuery();
+  const data = view.data;
+  return <Card data-testid="absent-refunds">
+    <CardHeader>
+      <CardTitle>供应商查无而自动退还的调用</CardTitle>
+      <CardDescription>开轮满 24 小时后，供应商对该调用的编号明确回答“查无此次生成”，费用记 0、冻结积分全部退回。
+        如果供应商其实收了钱，由平台承担。每一笔都留在这里，只读。</CardDescription>
+    </CardHeader>
+    <CardContent className="space-y-2">
+      {view.error ? <div role="alert">无法读取，请稍后重试。</div>
+        : !data ? <p>读取中…</p>
+        : !data.available ? <p role="alert">列表暂不可用（数据库读取函数尚未应用或读取失败）；这里不显示 0 冒充没有。</p>
+        : data.total === 0 ? <p>还没有这类调用。</p>
+        : <>
+          <p className="text-xs">共 {data.total} 笔{data.total > data.calls.length ? `，只列出最近的 ${data.calls.length} 笔` : ''}。</p>
+          <table className="w-full text-sm"><thead><tr>
+            <th className="text-left">回合</th><th className="text-left">调用</th><th className="text-left">供应商编号</th>
+            <th className="text-left">查询结果</th><th className="text-right">冻结积分</th><th className="text-right">实扣积分</th>
+            <th className="text-left">结清时间</th>
+          </tr></thead><tbody>{data.calls.map((call) => <tr key={`${call.turnId}-${call.seq}`}>
+            <td>{call.turnId}</td><td>{call.seq}</td><td className="break-all">{call.providerId}</td><td>HTTP {call.httpStatus}（查无）</td>
+            <td className="text-right">{call.reservedCredits}</td><td className="text-right">{call.chargedCredits ?? '—'}</td>
+            <td>{call.settledAt}</td>
+          </tr>)}</tbody></table></>
+        }
+    </CardContent>
+  </Card>;
+}
+
+export function UnsettledTurnsCard() {
+  return <><UnsettledTurnsList /><AbsentRefundsCard /></>;
 }

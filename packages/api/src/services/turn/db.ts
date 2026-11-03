@@ -54,6 +54,7 @@ export type RecoveryItem = z.infer<typeof recoveryClaim>[number];
 const recovered = z.object({ action: z.enum(['interrupt', 'expire', 'settle']), skipped: z.boolean().optional(),
   closeKind: z.string().optional(), settlement: z.enum(['pending', 'done']).nullable().optional() }).passthrough();
 export type Recovered = z.infer<typeof recovered>;
+const absentSettled = z.object({ settled: z.boolean(), reason: z.string().optional(), replay: z.boolean().optional() }).passthrough();
 const stopped = z.object({ turnId: z.number().int().positive(), state: z.enum(['stopping', 'closed', 'confirmation_required']),
   chargeable: z.boolean(), replay: z.boolean(), closeKind: z.string().nullable().optional(),
   chargedCredits: z.number().int().nullable().optional(), fixedCredits: z.number().int().optional() });
@@ -132,6 +133,13 @@ export function turnDatabase(clients: TurnClients) {
     claimRecovery: (limit: number) => call(w, 'turn_recovery_claim', { p_limit: limit }, recoveryClaim),
     recover: (a: { actorId: string; turnId: number; action: RecoveryAction }) =>
       call(w, 'turn_recover', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_action: a.action }, recovered),
+    /**
+     * An unknown model call the provider answered "no such generation" for (404, a complete answer), on a turn at least 24 hours old
+     * (Owner 2026-11-03): settled at zero cost in the database, which re-checks every condition under lock; repeating it is harmless.
+     */
+    settleAbsent: (a: { actorId: string; turnId: number; seq: number; providerId: string; httpStatus: number; payloadHash: string }) =>
+      call(w, 'turn_call_settle_absent', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_provider_id: a.providerId,
+        p_http_status: a.httpStatus, p_payload_hash: a.payloadHash }, absentSettled),
     /** The user's stop of a running report (V2-7a); not part of a turn's own writes. */
     stop: (a: { actorId: string; turnId: number; confirmed: boolean; stopAt: number | null }) =>
       call(w, 'turn_stop', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_confirmed: a.confirmed, p_stop_at: a.stopAt }, stopped),
