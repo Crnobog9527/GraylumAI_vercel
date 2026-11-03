@@ -17,6 +17,12 @@ import { CALLS, CANDIDATE_CARD, CHARGES, FOLLOW_UP_CARD, KEYWORD_CARD, NOW, ROWS
 describe("describeCall", () => {
   const views = CALLS.map(describeCall);
 
+  it("says 对标数据暂时取不到 when the supplier itself could not serve the call, and keeps 没有取到数据 for an empty answer (round 13)", () => {
+    const failed = CALLS.find(call => call.state === "failed")!;
+    expect(describeCall({ ...failed, unavailable: true })).toMatchObject({ state: "missing", detail: "对标数据暂时取不到，请稍后再试。" });
+    expect(describeCall(failed)).toMatchObject({ state: "missing", detail: "这次没有取到数据。" });
+  });
+
   it("maps the four stream states to 成功 / 这次没查到 / 待核 and 正在搜", () => {
     expect(views.map(view => view.state)).toEqual(["success", "success", "pending", "missing", "running"]);
   });

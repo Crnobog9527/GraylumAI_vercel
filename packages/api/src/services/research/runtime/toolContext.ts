@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import type { ResearchTurnEvent } from '../../../shared/researchTurn';
+import { supplierUnavailable, type ResearchTurnEvent } from '../../../shared/researchTurn';
 import type { AuthorizationScope } from '../tools/authorize';
 import type { ResearchToolsConfig } from '../vendors/config';
 import { selectRoute } from '../vendors/config';
@@ -54,6 +54,7 @@ export async function executeResearchCall(ctx: ResearchToolContext, budget: Tool
   ctx.emit({ type: 'research_call', callId: operationId, toolName, args, ...display,
     state: outcome.sent ? (outcome.result.outcome === 'unknown' ? 'unknown'
       : ['ok', 'partial'].includes(outcome.result.outcome) ? 'succeeded' : 'failed') : 'failed',
-    ...(outcome.sent ? { evidenceId: outcome.operationId, credits } : {}) });
+    ...(outcome.sent ? { evidenceId: outcome.operationId, credits } : {}),
+    ...(outcome.sent && outcome.result.outcome === 'failed' && supplierUnavailable(outcome.result.reason) ? { unavailable: true as const } : {}) });
   return outcome;
 }

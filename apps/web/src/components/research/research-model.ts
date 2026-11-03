@@ -127,6 +127,7 @@ export function describeCall(call: ResearchCall): CallView {
     case "running": return { ...base, state: "running", detail: null };
     case "succeeded": return { ...base, state: "success", detail: null };
     case "unknown": return { ...base, state: "pending", detail: "这次没有拿到确定结果，正在核对。" };
-    default: return { ...base, state: "missing", detail: "这次没有取到数据。" };
+    // The supplier itself could not serve the call (payment, key, rate limit, server error): not "no data" for this keyword.
+    default: return { ...base, state: "missing", detail: call.unavailable ? "对标数据暂时取不到，请稍后再试。" : "这次没有取到数据。" };
   }
 }

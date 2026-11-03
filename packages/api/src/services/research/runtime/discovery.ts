@@ -7,7 +7,7 @@ import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
-import type { ResearchCandidateOption } from '../../../shared/researchTurn';
+import { SUPPLIER_UNAVAILABLE_REASON, supplierUnavailable, type ResearchCandidateOption } from '../../../shared/researchTurn';
 import type { ResearchItem, SocialPlatform } from '../vendors/types';
 import { executeResearchCall, socialRequest, stableResearchId, type ResearchToolContext, type ToolAllowance } from './toolContext';
 import type { DiscoveryRecord } from './store';
@@ -21,6 +21,8 @@ interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account
 interface StepResult {
   items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean;
   reason?: string; budget?: boolean;
+  /** The supplier answered that it cannot serve us (402, 401/403, 429, 5xx): not "no results" and not about the keywords. */
+  supplierDown?: boolean;
   /** A keyword search's next page (BENCHMARK-COVERAGE), from the answer or the saved operation. */
   nextCursor?: string;
 }
@@ -49,6 +51,15 @@ function authorLookup(ctx: ResearchToolContext, platform: SocialPlatform, accoun
   const postId = authorPosts.map(post => post.fields.id).find((id): id is string => typeof id === 'string');
   return postId ? socialRequest(ctx, platform, 'post_detail', { account, postId }) : null;
 }
+
+/** The supplier could not serve the round (round 13: TikHub answered 402): say so, never suggest other keywords or count it as a search. */
+export const SUPPLIER_UNAVAILABLE_NEXT_STEP = '对标数据供应商暂时不可用（不是关键词的问题，也没有扣用户积分）。'
+  + '如实告诉用户“对标数据暂时取不到，请稍后再试”；'
+  + '不要建议换关键词，不要说已经搜完，也不要提“用现有对标先生成”。用户贴账号主页链接核对同样会受影响，稍后再试即可。';
+
+/** The round the supplier could not serve: it said so, the round ran to its end, and nothing at all came out of it. */
+export const supplierDownRound = (round: { supplierDown: boolean; stopped: boolean; shown: boolean; found: number }) =>
+  round.supplierDown && !round.stopped && !round.shown && round.found === 0;
 
 /** A round searched to the end without one selectable account (with any, the card is shown: Owner 2026-10-23). */
 export function candidateShortage() {
@@ -113,6 +124,7 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
   return { operationId, items: outcome.sent ? outcome.result.items : [],
     complete: outcome.sent && ['ok', 'partial'].includes(outcome.result.outcome), stopped: !outcome.sent,
     ...(outcome.sent && outcome.result.nextCursor ? { nextCursor: outcome.result.nextCursor } : {}),
+    ...(outcome.sent && outcome.result.outcome === 'failed' && supplierUnavailable(outcome.result.reason) ? { supplierDown: true } : {}),
     ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
 
@@ -163,6 +175,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   let stopped = false;
   let stopReason: string | undefined;
   let stopBudget = false;
+  let supplierDown = false;
   const posts = new Map<SocialPlatform, EvidenceItem[]>();
   const found: FoundAccount[] = [];
   let authorCursor = 0;
@@ -176,6 +189,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     // Counted only when dispatched now or replayed from a saved operation: a step stopped before sending never happened.
     if (!result.stopped) spent.spent[kind] += 1;
     complete &&= result.complete;
+    if (result.supplierDown) supplierDown = true;
     if (result.stopped) {
       stopped = true;
       stopReason = result.reason;
@@ -262,14 +276,17 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
   // candidate card: the host may now offer the shortfall choice (0320 decides).
-  const shortfall = !stopped && !shown ? await shortfallNotice(ctx) : undefined;
+  // The supplier could not serve the round and nothing was found: say that, not "searched to the end, nothing found".
+  const down = supplierDownRound({ supplierDown, stopped, shown, found: found.length });
+  const shortfall = !stopped && !shown && !down ? await shortfallNotice(ctx) : undefined;
   // The round goes on in the next reply: tell the page (it continues on the user's behalf, plan §4.2 / PR-7).
   if (stopped && resumable) ctx.emit({ type: 'research_continue', discoveryId: d.discoveryId });
   return toolEnvelope({ ...(shortfall ? { shortfall } : {}), status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
-    : complete && shown ? 'ok' : 'partial',
-    reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
+    : down ? 'unavailable' : complete && shown ? 'ok' : 'partial',
+    reason: stopped ? stopReason : down ? SUPPLIER_UNAVAILABLE_REASON : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
-    ...(insufficient ? candidateShortage() : {}),
+    ...(down ? { message: '对标数据供应商暂时不可用。', nextStep: SUPPLIER_UNAVAILABLE_NEXT_STEP, availableCandidates: 0 }
+      : insufficient ? candidateShortage() : {}),
     // The host shows the card, not the model's text: say so, or the model may deny a card the user can see.
     ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
       : { candidateCard: { shown: false } }),
