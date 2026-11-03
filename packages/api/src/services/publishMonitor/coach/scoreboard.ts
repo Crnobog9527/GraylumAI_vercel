@@ -53,7 +53,8 @@ export function historyScoreboard(facts: Fact[]): HistoryRow[] {
     // Posts first seen after day 7 stay history for good, also once their day-30 snapshot arrived (basis then reads day30).
     if (f.day7 || !f.importCumulative) continue;
     const views = f.importCumulative.views;
-    if (views === undefined || f.missing.includes('views')) continue;
+    // The import snapshot's own value decides: fact.missing also carries the day-30 snapshot's gaps, which cannot void it.
+    if (typeof views !== 'number') continue;
     const key = `${f.pillarKey ?? UNTAGGED}\u0000${f.platform}`;
     groups.set(key, [...(groups.get(key) ?? []), views]);
   }

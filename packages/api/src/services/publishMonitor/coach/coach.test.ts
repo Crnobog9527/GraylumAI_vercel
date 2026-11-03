@@ -68,6 +68,14 @@ describe('scorecards (RC-2, simulated accounts)', () => {
     expect(historyScoreboard(settled)).toEqual(before);
   });
 
+  it('B: a day-30 snapshot without views does not void an import snapshot that has them', () => {
+    const r = rows('B');
+    const before = historyScoreboard(r.facts);
+    const gapped = r.facts.map(f => f.basis === 'cumulative_at_import' && !f.day7
+      ? { ...f, basis: 'day30' as const, day30: { likes: 1 }, day30On: '2026-10-20', missing: [...f.missing, 'views'] } : f);
+    expect(historyScoreboard(gapped)).toEqual(before);
+  });
+
   it('A: samples count every settled post, views_samples only those with a view count', () => {
     const r = rows('A');
     const pick = r.facts.filter(f => f.day7 && f.platform === 'douyin' && (f.pillarKey ?? 'untagged') === 'p1'
@@ -255,6 +263,15 @@ describe('review pack (RC-2)', () => {
       const pack = loose(buildPack({ rows: rows(key), cadence, businessId: simId(key), now: NOW, handbooks }));
       expect(packBytes(pack)).toBeLessThanOrEqual(REVIEW_PACK_RESERVE);
       for (const section of ['strategy', 'stage', 'diagnostics', 'ledger', 'gaps', 'rules']) expect(pack).toHaveProperty(section);
+    }
+  });
+
+  it.each(data.accounts.map(a => a.key))('account %s: best and worst only point at settled posts the pack still lists', key => {
+    for (const cadence of cadences) {
+      const period = loose(buildPack({ rows: rows(key), cadence, businessId: simId(key), now: NOW, handbooks })).this_period;
+      if (!period) continue;
+      const listed = new Set(period.settled_posts.map((p: { post_id: string }) => p.post_id));
+      for (const id of [...period.best, ...period.worst]) expect(listed.has(id)).toBe(true);
     }
   });
 

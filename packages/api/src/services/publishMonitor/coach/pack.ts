@@ -107,7 +107,7 @@ export const packBytes = (pack: unknown) => Buffer.byteLength(JSON.stringify(pac
 function trim(pack: Record<string, unknown>) {
   const steps: Array<() => boolean> = [
     () => pop(pack, ['untagged_posts']),
-    () => pop(pack, ['this_period', 'settled_posts']),
+    () => popSettled(pack),
     () => pop(pack, ['this_period', 'too_new']),
     () => pop(pack, ['ledger', 'recent_concluded']),
     () => pop(pack, ['history_scoreboard']),
@@ -131,6 +131,15 @@ function pop(pack: Record<string, unknown>, path: string[]) {
   for (const key of path) at = (at as Record<string, unknown> | undefined)?.[key];
   if (!Array.isArray(at) || !at.length) return false;
   at.pop();
+  return true;
+}
+/** Drops the oldest listed settled post, and with it any best / worst reference to it: the model may only cite what it can still see. */
+function popSettled(pack: Record<string, unknown>) {
+  if (!pop(pack, ['this_period', 'settled_posts'])) return false;
+  const period = pack.this_period as { settled_posts: Array<{ post_id: string }>; best?: string[]; worst?: string[] };
+  const kept = new Set(period.settled_posts.map(p => p.post_id));
+  if (period.best) period.best = period.best.filter(id => kept.has(id));
+  if (period.worst) period.worst = period.worst.filter(id => kept.has(id));
   return true;
 }
 function popFewest(pack: Record<string, unknown>, key: string) {
