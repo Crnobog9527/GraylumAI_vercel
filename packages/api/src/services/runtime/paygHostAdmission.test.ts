@@ -7,7 +7,7 @@ import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { openRouterBound } from '../turn/provider/openRouterPolicy';
 const mocks=vi.hoisted(()=>({host:vi.fn(),freeze:vi.fn()}));
 vi.mock('../turn/admission/paygHostPolicy',async original=>({...(await original<typeof import('../turn/admission/paygHostPolicy')>()),readPaygHostPolicies:mocks.host}));
-vi.mock('./paygPricing',()=>({freezeStagingPaygPricing:mocks.freeze}));
+vi.mock('../turn/admission/paygPricing',()=>({freezeStagingPaygPricing:mocks.freeze}));
 vi.mock('../turn/admission/newWorkGate',()=>({readNewWorkSettings:()=>({}),readAdmissionSettings:async()=>({ok:true,primaryModelId:'10000000-0000-4000-8000-000000000003'}),
   newWorkGate:()=>({message:async()=>({ok:true})}),requireNewWork:()=>{}}));
 vi.mock('../turn/admission/billingUnitAdmission',async original=>({

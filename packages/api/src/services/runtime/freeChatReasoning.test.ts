@@ -12,7 +12,7 @@ import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import type {ReasoningConfig} from '../../shared/modelReasoning';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
 vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
-vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
+vi.mock('../turn/admission/paygPricing', async original => ({...(await original<typeof import('../turn/admission/paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 vi.mock('../turn/admission/billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),

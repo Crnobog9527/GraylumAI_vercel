@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { readPaygHostPolicies } from '../turn/admission/paygHostPolicy';
-import { readPaygProductionPolicies } from '../turn/settings/productionPolicy';
-import type { StagingPolicy } from '../turn/settings/stagingPolicy';
+import { readPaygHostPolicies } from '../admission/paygHostPolicy';
+import { readPaygProductionPolicies } from './productionPolicy';
+import type { StagingPolicy } from './stagingPolicy';
 
 /** RUNTIME-PROD: the contract fields that tell the three hosts apart. Production carries no test window. */
 export const isProductionPolicy = (policy: StagingPolicy | undefined) => policy?.mode === 'production';

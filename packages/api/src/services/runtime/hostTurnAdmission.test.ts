@@ -18,7 +18,7 @@ const DEFAULT_REPLY_RULE=replySettingInstructions('zh-Hans');
 import {applyPromptCache} from '../turn/provider/promptCache';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
 vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
-vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
+vi.mock('../turn/admission/paygPricing', async original => ({...(await original<typeof import('../turn/admission/paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 const skill='Pinned skill 正文';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
