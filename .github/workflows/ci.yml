@@ -151,7 +151,6 @@ jobs:
       contents: read
     outputs:
       full: ${{ steps.scope.outputs.full }}
-      docs_only: ${{ steps.scope.outputs.docs_only }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -388,9 +387,6 @@ jobs:
   # call, no network beyond the runner's loopback. Not a required check yet: it is added as a separate job first.
   sim-e2e:
     name: Run simulated-model browser tests
-    # A pull request that changes documentation only has nothing for a browser test to find. Front-end changes still run it.
-    needs: [scope]
-    if: needs.scope.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     # Measured 9m52s on CI (2026-11-03); the 30-minute ceiling of docs/ENGINEERING.md section 7 leaves about 20 minutes.
     timeout-minutes: 30

@@ -88,12 +88,12 @@ class CIWorkflowsTest < Minitest::Test
       refute work.key?('continue-on-error')
     end
   end
-  def test_scope_job_gates_exactly_the_two_database_jobs_and_the_simulated_tests
+  def test_scope_job_gates_exactly_the_two_database_jobs
     jobs = @ci.fetch('jobs')
     scope = jobs.fetch('scope')
     assert_equal 'Decide test scope', scope.fetch('name')
     refute scope.key?('needs'); refute scope.key?('if'); refute scope.key?('continue-on-error'); refute scope.key?('env')
-    assert_equal({'full'=>'${{ steps.scope.outputs.full }}','docs_only'=>'${{ steps.scope.outputs.docs_only }}'}, scope.fetch('outputs'))
+    assert_equal({'full'=>'${{ steps.scope.outputs.full }}'}, scope.fetch('outputs'))
     assert_equal({'contents'=>'read'}, scope.fetch('permissions'))
     checkout = scope.fetch('steps').first
     assert_equal 0, checkout.fetch('with').fetch('fetch-depth')
@@ -105,12 +105,8 @@ class CIWorkflowsTest < Minitest::Test
       assert_equal ['scope'], jobs.fetch(id).fetch('needs'), id
       assert_equal "needs.scope.outputs.full == 'true'", jobs.fetch(id).fetch('if'), id
     end
-    # The simulated-model browser tests (not a required check) skip for a documentation-only pull request, and for nothing else.
-    sim = jobs.fetch('sim-e2e')
-    assert_equal ['scope'], sim.fetch('needs')
-    assert_equal "needs.scope.outputs.docs_only != 'true'", sim.fetch('if')
-    # Every other job runs unconditionally: the skip covers the two database jobs and, for documentation only, the simulated tests.
-    gated = %w[integration db-suites sim-e2e unit-check lint-check typecheck security-unit-tests build security-e2e-tests]
+    # Every other job runs unconditionally: the skip covers the two database jobs only.
+    gated = %w[integration db-suites unit-check lint-check typecheck security-unit-tests build security-e2e-tests]
     (jobs.keys - gated).each do |id|
       refute jobs.fetch(id).key?('if'), id
       refute jobs.fetch(id).key?('needs'), id

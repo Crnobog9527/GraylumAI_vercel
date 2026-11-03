@@ -3,11 +3,7 @@
 // integration tests"). Everything else in CI always runs. The default is the full suite; a run skips only when it is
 //   - a pull request into staging whose changed files are all on the allow-list below (Owner 2026-11-01: pure front-end and docs PRs).
 // A draft pull request is judged exactly like a ready one (Owner 2026-11-03 replaced the 2026-11-01 draft skip).
-// It also says whether the pull request is documentation only (docs_only): the simulated-model browser tests skip then, and only then
-// (a front-end change is exactly what a browser test is for). docs_only reads the same documentation rule as the allow-list and adds
-// nothing to it.
-// Usage (CI): node scripts/ci-test-scope.mjs   -- reads GITHUB_EVENT_NAME / GITHUB_BASE_REF, writes full=true|false and
-// docs_only=true|false to $GITHUB_OUTPUT.
+// Usage (CI): node scripts/ci-test-scope.mjs   -- reads GITHUB_EVENT_NAME / GITHUB_BASE_REF, writes full=true|false to $GITHUB_OUTPUT.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -33,21 +29,15 @@ export function isSkippablePath(path) {
   return /\.(tsx|css)$/.test(name) || /\.test\.tsx?$/.test(name);
 }
 
-// Documentation only: on the allow-list through its documentation rule (docs/ or .md), never through the front-end rule.
-export function isDocsPath(path) {
-  return isSkippablePath(path) && (path.startsWith('docs/') || path.endsWith('.md'));
-}
-
-// { full, docsOnly, reason }. Unknown, missing or empty input always means the full suite, and never docs only.
+// { full, reason }. Unknown, missing or empty input always means the full suite.
 export function decide({ eventName, baseRef, files }) {
-  const full = reason => ({ full: true, docsOnly: false, reason });
-  if (eventName !== 'pull_request') return full(`event is ${eventName || 'unknown'}, not a pull request`);
-  if (baseRef !== 'staging') return full(`pull request base is ${baseRef || 'unknown'}, not staging`);
-  if (!Array.isArray(files)) return full('the changed-file list is unavailable');
-  if (files.length === 0) return full('the changed-file list is empty');
+  if (eventName !== 'pull_request') return { full: true, reason: `event is ${eventName || 'unknown'}, not a pull request` };
+  if (baseRef !== 'staging') return { full: true, reason: `pull request base is ${baseRef || 'unknown'}, not staging` };
+  if (!Array.isArray(files)) return { full: true, reason: 'the changed-file list is unavailable' };
+  if (files.length === 0) return { full: true, reason: 'the changed-file list is empty' };
   const blocking = files.find(file => !isSkippablePath(file));
-  if (blocking !== undefined) return full(`${JSON.stringify(blocking)} is not on the allow-list`);
-  return { full: false, docsOnly: files.every(isDocsPath), reason: `all ${files.length} changed files are on the allow-list` };
+  if (blocking !== undefined) return { full: true, reason: `${JSON.stringify(blocking)} is not on the allow-list` };
+  return { full: false, reason: `all ${files.length} changed files are on the allow-list` };
 }
 
 // Files the pull request changes: the checked-out merge commit against its first parent (the base branch tip).
@@ -64,7 +54,7 @@ export function changedFiles(git = (...args) => execFileSync('git', args, { enco
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const eventName = process.env.GITHUB_EVENT_NAME;
   const baseRef = process.env.GITHUB_BASE_REF;
-  const { full, docsOnly, reason } = decide({ eventName, baseRef, files: eventName === 'pull_request' ? changedFiles() : null });
-  console.log(`full=${full} docs_only=${docsOnly}: ${reason}`);
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `full=${full}\ndocs_only=${docsOnly}\n`);
+  const { full, reason } = decide({ eventName, baseRef, files: eventName === 'pull_request' ? changedFiles() : null });
+  console.log(`full=${full}: ${reason}`);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `full=${full}\n`);
 }

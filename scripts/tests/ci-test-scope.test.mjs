@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { changedFiles, decide, isDocsPath, isSkippablePath } from '../ci-test-scope.mjs';
+import { changedFiles, decide, isSkippablePath } from '../ci-test-scope.mjs';
 
 const pr = files => decide({ eventName: 'pull_request', baseRef: 'staging', files });
 
@@ -14,23 +14,6 @@ test('a pure front-end or documentation pull request skips the database jobs', (
   assert.equal(pr(['apps/web/src/app/(zh-hans)/pricing/page.tsx', 'apps/web/src/app/globals.css']).full, false);
   assert.equal(pr(['docs/ENGINEERING.md', 'docs/launch/design/x.html', 'README.md']).full, false);
   assert.equal(pr(['docs/a.md', 'apps/web/src/components/a.module.css']).full, false);
-});
-
-test('docs_only is true only when every changed file is documentation (the simulated browser tests skip then, front-end changes do not)', () => {
-  assert.equal(pr(['docs/ENGINEERING.md', 'docs/launch/design/x.html', 'README.md']).docsOnly, true);
-  assert.equal(pr(['docs/runbook.md']).docsOnly, true);
-  assert.equal(pr(['apps/web/src/components/landing/Hero.tsx']).docsOnly, false);
-  assert.equal(pr(['docs/a.md', 'apps/web/src/components/a.module.css']).docsOnly, false);
-  assert.equal(pr(['docs/a.md', 'packages/api/src/x.ts']).docsOnly, false);
-  // A markdown file inside an excluded path is neither skippable nor documentation.
-  for (const path of ['scripts/README.md', '.github/pull_request_template.md', 'packages/api/README.md']) {
-    assert.equal(isDocsPath(path), false, path);
-    assert.equal(pr([path]).docsOnly, false, path);
-  }
-  for (const input of [{ eventName: 'push', baseRef: 'staging', files: ['docs/a.md'] }, { eventName: 'pull_request', baseRef: 'main', files: ['docs/a.md'] },
-    { eventName: 'pull_request', baseRef: 'staging', files: [] }, { eventName: 'pull_request', baseRef: 'staging', files: null }]) {
-    assert.equal(decide(input).docsOnly, false, JSON.stringify(input));
-  }
 });
 
 test('anything outside the allow-list runs the full suite, even mixed with allowed files', () => {
