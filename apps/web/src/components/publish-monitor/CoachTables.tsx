@@ -25,7 +25,8 @@ export function pillarLabel(key: string, names: ReadonlyMap<string, string>): st
 export function coachTable(tables: unknown): CoachTable {
   const t = rec(tables);
   if (t.kind !== 'review_pack' || t.version !== 2) return EMPTY_COACH;
-  const names = new Map(list(rec(t.strategy).pillars).flatMap(p => (typeof p.key === 'string' && typeof p.name === 'string' ? [[p.key, p.name] as const] : [])));
+  const names = new Map(list(rec(t.strategy).pillars).flatMap(p =>
+    (typeof p.key === 'string' && typeof p.name === 'string' ? [[p.key, p.name] as const] : [])));
   const posts = list(rec(t.this_period).settled_posts).flatMap(p => {
     const day7 = rec(p.day7);
     return typeof p.post_id === 'string' && typeof p.platform === 'string'
@@ -33,7 +34,8 @@ export function coachTable(tables: unknown): CoachTable {
         relative: num(day7.vs_platform_median) }] : [];
   });
   const scores = list(t.scoreboard).flatMap(r => typeof r.pillar === 'string' && typeof r.platform === 'string' && typeof r.samples === 'number'
-    ? [{ pillar: pillarLabel(r.pillar, names), platform: r.platform, samples: r.samples, views: num(r.views_median), relative: num(r.vs_platform_median) }] : []);
+    ? [{ pillar: pillarLabel(r.pillar, names), platform: r.platform, samples: r.samples, views: num(r.views_median),
+      relative: num(r.vs_platform_median) }] : []);
   const vsPrev = rec(rec(t.this_period).day7_views_median_vs_prev), trend = rec(rec(t.stage).day7_views_trend);
   const followers = new Map(list(rec(t.stage).followers).flatMap(f => (typeof f.platform === 'string' ? [[f.platform, f] as const] : [])));
   const platforms = [...new Set([...Object.keys(vsPrev), ...Object.keys(trend), ...followers.keys()])].sort();
@@ -80,8 +82,10 @@ export function CoachTables({ coach }: { coach: CoachTable }) {
             <th className={th}>前 4 周</th><th className={th}>变化</th><th className={th}>粉丝（现在 / 4 周前 / 8 周前）</th></tr></thead>
           <tbody>{coach.trends.map(r => (
             <tr key={r.platform} className="border-t" style={row}>
-              <td className="py-1 pr-3">{platformName(r.platform)}</td><td className="py-1 pr-3">{views(r.current)}</td><td className="py-1 pr-3">{views(r.previous)}</td>
-              <td className="py-1 pr-3">{views(r.recent4w)}</td><td className="py-1 pr-3">{views(r.previous4w)}</td><td className="py-1 pr-3">{percent(r.change)}</td>
+              <td className="py-1 pr-3">{platformName(r.platform)}</td>
+              <td className="py-1 pr-3">{views(r.current)}</td><td className="py-1 pr-3">{views(r.previous)}</td>
+              <td className="py-1 pr-3">{views(r.recent4w)}</td><td className="py-1 pr-3">{views(r.previous4w)}</td>
+              <td className="py-1 pr-3">{percent(r.change)}</td>
               <td className="py-1 pr-3">{count(r.followersNow)} / {count(r.followers4w)} / {count(r.followers8w)}</td></tr>))}</tbody>
         </table>
       )}
