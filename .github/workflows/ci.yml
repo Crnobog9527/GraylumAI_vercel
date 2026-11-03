@@ -384,6 +384,39 @@ jobs:
 
       # Browser reports, storage state, traces, videos, and screenshots are intentionally not uploaded.
 
+  # Layer 1 of the three-layer validation (Owner 2026-11-03): the core-path journeys in a real browser against a local app, a
+  # disposable database built from repository files and a deterministic simulated model (scripts/e2e-sim). No secret, no paid
+  # call, no network beyond the runner's loopback. Not a required check yet: it is added as a separate job first.
+  sim-e2e:
+    name: Run simulated-model browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium
+
+      - name: Simulated-model browser tests
+        run: node scripts/e2e-sim/run.mjs
+
   integration:
     name: Run billing and recovery integration tests (${{ matrix.shard }}/2)
     needs: [scope]
