@@ -4,6 +4,7 @@ import { logger } from '../lib/logger';
 import { RateLimitError } from '../lib/rateLimitError';
 import { ConnectError } from '../services/publishMonitor/connect';
 import { DataError } from '../services/publishMonitor/data';
+import { DiagnosticError } from '../services/publishMonitor/diagnostics';
 import { ManualImportError } from '../services/publishMonitor/manualImport';
 import { RefreshError } from '../services/publishMonitor/refresh';
 import { TikhubConnectionError } from '../services/publishMonitor/tikhub';
@@ -46,7 +47,7 @@ function toTrpc(cause: unknown): TRPCError {
     return new RateLimitError('rate_limited', 3600);
   }
   const code = cause instanceof PublishMonitorError || cause instanceof ConnectError || cause instanceof DataError
-    || cause instanceof RefreshError || cause instanceof ManualImportError || cause instanceof TikhubConnectionError
+    || cause instanceof RefreshError || cause instanceof ManualImportError || cause instanceof DiagnosticError || cause instanceof TikhubConnectionError
     ? cause.code
     : cause instanceof PostForMeNotConfigured ? 'PUBLISH_MONITOR_PROVIDER_UNAVAILABLE' : 'PUBLISH_MONITOR_UNAVAILABLE';
   if (code === 'PUBLISH_MONITOR_BUSINESS_NOT_READY') return new TRPCError({ code: 'PRECONDITION_FAILED', message: code, cause });

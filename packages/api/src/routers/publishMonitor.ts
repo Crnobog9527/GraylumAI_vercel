@@ -19,6 +19,7 @@ import {
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import { publishMonitorAdminRouter } from './publishMonitorAdmin';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
+import { publishMonitorDiagnosticsRouter } from './publishMonitorDiagnostics';
 import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
 
@@ -97,5 +98,6 @@ export const publishMonitorRouter = router({
     return addBrandAccount(ctx.supabaseAdmin, ctx.profileId, input);
   })),
   connect: publishMonitorConnectRouter,
+  diagnostics: publishMonitorDiagnosticsRouter,
   publish: publishMonitorPublishRouter,
 });
