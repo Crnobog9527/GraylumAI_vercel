@@ -17,7 +17,7 @@ it.each([
 });
 it('maps missing interactive configuration to the specified code and actionable Chinese message',()=>{
  expect(()=>admitReasoning({model_id:model},'interactive','synthetic/fp8',4096)).toThrow('RUNTIME_REASONING_NOT_CONFIGURED');
- expect(stagingProcedureError(new StagingAccessError('RUNTIME_REASONING_NOT_CONFIGURED'),'runtime.prepare')).toMatchObject({code:'PRECONDITION_FAILED',message:'请在后台为这个模型设置“交互对话”的思考方式。'});
+ expect(stagingProcedureError(new StagingAccessError('RUNTIME_REASONING_NOT_CONFIGURED'),'runtime.start')).toMatchObject({code:'PRECONDITION_FAILED',message:'请在后台为这个模型设置“交互对话”的思考方式。'});
 });
 it.each([undefined,{},configuredReasoning(model)])('defaults an unset organizer purpose without catalog or route requirements %#',config=>{
  expect(admitReasoning({model_id:model,config},'organize','other/route',256)).toEqual({parameter:'none'});

@@ -238,6 +238,18 @@ export async function holdCases(t){
   try{assert.ok((await win()).sample.some(s=>String(s.turnId)===String(o.turnId)),'a charged turn with a pending provider cost is checked');}
   finally{await c.query("update credit_transactions set amount=$2 where id=$1",[spend.rows[0].id,spend.rows[0].amount]);}
  }
+ // V2-12: the platform-absorbed cost report reads turns (same row shape as the BILL2 one), and the session scope read is narrow.
+ {
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);await close(a,o.turnId);
+  await c.query("update turns set absorbed_credits=7 where actor_id=$1 and id=$2",[a.actor,o.turnId]);
+  const rows=(await c.query("select * from turn_platform_absorb_report(now()-interval '1 day',now()+interval '1 minute')")).rows;
+  const mine=rows.filter(r=>r.platform_cap_credits==='7');
+  assert.equal(mine.length>=1,true,'the absorbed turn is reported: '+JSON.stringify(rows));
+  assert.equal(mine[0].platform_bound_credits,'0');assert.equal(mine[0].call_multiplier,'1');assert.match(mine[0].utc_date,/^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(Number(mine[0].credits_per_usd)>0,true);
+  assert.match(await refusal(one('select runtime_session_scope($1,$2) v',[(await account(10)).actor,a.session])),/RUNTIME_SCOPE_DENIED/);
+ }
  // A turn closed on an earlier day and settled now (recovery) is checked where it was settled, not where it closed.
  {
   const win=(from,to)=>one("select billing_reconcile_day(now()-$1::interval,now()-$2::interval) v",[from,to]).then(r=>r.turns);

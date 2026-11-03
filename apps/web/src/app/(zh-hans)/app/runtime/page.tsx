@@ -42,6 +42,7 @@ function RuntimePath({routeSession}:{routeSession:string}){
  if(path==='loading')return <p>正在读取工作…</p>;
  if(path==='turn')return <TurnWorkspace sessionId={routeSession}/>;
  if(path==='legacy')return <LegacyConversation/>;
- if(path==='work')return <WorkItemWorkspace sessionId={routeSession} workItemId={view.data!.scope!.workItemId}/>;
+ const scope=view.data?.scope;
+ if(path==='work'&&scope?.kind==='work_item')return <WorkItemWorkspace sessionId={routeSession} workItemId={scope.workItemId}/>;
  return <main className="p-6"><p role="alert">暂时无法读取这项工作。</p><Button variant="outline" onClick={()=>void view.refetch()}>重新读取</Button></main>;
 }

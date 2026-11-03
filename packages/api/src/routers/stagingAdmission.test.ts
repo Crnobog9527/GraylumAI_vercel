@@ -1,21 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { pricingConfig } from '../services/__tests__/fixtures/runtimePricing';
-import { configuredReasoning } from '../services/__tests__/fixtures/runtimeReasoning';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-const mocks = vi.hoisted(() => ({ realOpc: false, realAdmission: false, prepareStep: vi.fn(), catalog: vi.fn(), list: vi.fn(), library: vi.fn(), captureResolve: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
+const mocks = vi.hoisted(() => ({ realOpc: false, catalog: vi.fn(), list: vi.fn(), library: vi.fn(), captureResolve: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock('../lib/logger', () => ({ logger: { info: mocks.info, error: mocks.error, warn: vi.fn() } }));
-vi.mock('../services/opc/service', async original => { const actual = await original<typeof import('../services/opc/service')>(); return { ...actual, opcService: (...args: Parameters<typeof actual.opcService>) => mocks.realOpc ? actual.opcService(...args) : ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library, captureResolve: mocks.captureResolve, prepareStep: mocks.realAdmission ? async (input:{requestId:string;input:string;organizeAfter:boolean}) => (await import('../services/runtime/admission')).runtimeAdmissionService(args[0],args[1],{real:args[2],paygHost:true,account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:100,inputBytes:8000,historyItems:20}).prepare({sessionId:actor,requestId:input.requestId,input:input.input,organizeAfter:input.organizeAfter,selection:{kind:'ordinary',modelId:actor},network:'deny'}) : mocks.prepareStep }) }; });
-vi.mock('../services/runtime/admission', async original => {const actual=await original<typeof import('../services/runtime/admission')>();return {...actual,runtimeAdmissionService:(...args:Parameters<typeof actual.runtimeAdmissionService>)=>mocks.realAdmission?actual.runtimeAdmissionService(...args):{start:mocks.start}};});
+vi.mock('../services/opc/service', async original => { const actual = await original<typeof import('../services/opc/service')>(); return { ...actual, opcService: (...args: Parameters<typeof actual.opcService>) => mocks.realOpc ? actual.opcService(...args) : ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library, captureResolve: mocks.captureResolve }) }; });
 import { opcRouter } from './opc';
 import { runtimeRouter } from './runtime';
 import { router } from '../trpc';
-import { testPrimaryModel } from '../services/__tests__/fixtures/runtimeGates';
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 // I1: a real host admits only through a per-call (v2) profile; mock the profile reader and price freeze.
 vi.mock('../services/turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../services/turn/admission/paygHostPolicy')>()),
   readPaygHostPolicies: (await import('../services/__tests__/fixtures/paygAdmission')).paygHostPolicies}));
-vi.mock('../services/runtime/paygPricing', async original => ({...(await original<typeof import('../services/runtime/paygPricing')>()),
+vi.mock('../services/turn/admission/paygPricing', async original => ({...(await original<typeof import('../services/turn/admission/paygPricing')>()),
   freezeStagingPaygPricing: (await import('../services/__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 vi.mock('../services/turn/admission/billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('../services/turn/admission/billingUnitAdmission')>()),
@@ -23,7 +19,6 @@ vi.mock('../services/turn/admission/billingUnitAdmission', async (original) => (
 }));
 const app = router({ opc: opcRouter, runtime: runtimeRouter });
 const actor = '00000000-0000-4000-8000-000000000001';
-testPrimaryModel.id = actor;
 const windowId = '00000000-0000-4000-8000-000000000002';
 const remote = {
   V3_RUNTIME_STAGING_ENABLED: 'true', VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
@@ -38,28 +33,17 @@ const policy = { id: windowId, expiresAt: '2099-01-01T00:00:00Z', creditsPerUsd:
   providerLimits: { providerSlug: 'synthetic', contextTokens: 10000, promptUsdPerMillion: '2', completionUsdPerMillion: '0', requestUsd: '0' },
 }] };
 const rpc = vi.fn();
-const summaryId='00000000-0000-4000-8000-000000000003';
-let modelFault:string|null=null,summaryModel=summaryId;
-// Real free chat requires the administrator's interactive reasoning on the quoted route.
-function interactiveReasoning(model:string){
-  const reasoning=configuredReasoning(model).reasoning;
-  return {...reasoning,route:'synthetic',catalog:{...reasoning.catalog!,endpoints:reasoning.catalog!.endpoints.map(e=>({...e,tag:'synthetic'}))}};
-}
-
 function context(privileged = true) {
   const profile = { select() { return this; }, eq() { return this; }, single: async () => ({ data: { id: actor, role: 'user', status: 'active', nickname: 'Fixture', email: 'fixture@example.test', created_at: '2020-01-01', credits: 100 }, error: null }) };
-  const client = { from: (table:string) => {
-    if(!mocks.realAdmission||table==='profiles')return profile;
-    if(table==='system_settings')return {select(){return this;},eq(){return this;},maybeSingle:async()=>({data:null,error:null}),in:async()=>({data:[{key:'v3_summary_model_id',value:summaryModel},{key:'v3_summary_max_tokens',value:128}],error:null})};
-    let id=actor;const query={in:async(_key:string,ids:string[])=>({data:ids.map(id=>({id,model_id:id===actor?'test/model':'test/summary',config:pricingConfig(id===actor?'test/model':'test/summary','synthetic','2','0')})),error:null}),select(){return this;},eq(_key:string,value:string){id=value;return this;},single:async()=>({data:{id,model_id:id===actor?'test/model':'test/summary',provider:'openrouter',is_active:modelFault==='inactive'?'false':'true',input_limit:10000,max_tokens:1000,config:{reasoning:interactiveReasoning(id===actor?'test/model':'test/summary')}},error:modelFault&&modelFault!=='inactive'?{code:modelFault,message:'SYNTHETIC_PRIVATE_DATABASE_BODY'}:null})};return query;
-  }, rpc, auth: { getUser: async () => ({ data: { user: { id: actor, email_confirmed_at: '2026-01-01T00:00:00Z' } }, error: null }) } };
+  const client = { from: () => profile, rpc, auth: { getUser: async () => ({ data: { user: { id: actor, email_confirmed_at: '2026-01-01T00:00:00Z' } }, error: null }) } };
   return { user: { id: actor, email: 'fixture@example.test' }, isEmailVerified: true, supabase: client, supabaseAuth: client, supabaseAdmin: client, hasSupabaseAdminPrivileges: privileged } as never;
 }
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.realOpc = false;mocks.realAdmission=false;modelFault=null;summaryModel=summaryId;
+  vi.clearAllMocks(); mocks.realOpc = false;
   for (const [key, value] of Object.entries(remote)) vi.stubEnv(key, value);
-  mocks.catalog.mockResolvedValue([]); mocks.list.mockResolvedValue({ drafts: [], accounts: [] }); mocks.library.mockResolvedValue({ businesses: [] }); mocks.start.mockResolvedValue({ sessionId: actor });
-  rpc.mockImplementation(async (name: string) => ({ data: name === 'runtime_test_policy' ? policy : name === 'runtime_test_actor_access' ? true : [], error: null }));
+  mocks.catalog.mockResolvedValue([]); mocks.list.mockResolvedValue({ drafts: [], accounts: [] }); mocks.library.mockResolvedValue({ businesses: [] }); 
+  rpc.mockImplementation(async (name: string) => ({ data: name === 'runtime_test_policy' ? policy : name === 'runtime_test_actor_access' ? true
+    : name === 'runtime_start' ? { sessionId: actor } : [], error: null }));
 });
 afterEach(() => vi.unstubAllEnvs());
 const libraryInput = { search: '', from: null, to: null };
@@ -141,21 +125,21 @@ describe('remote staging admission and HTTP error boundary', () => {
     expect(mocks.library).not.toHaveBeenCalled();
   });
   it('answers runtime.view with 200 for the owner and a plain 404 for a foreign or missing session', async () => {
-    const owned = { sessionId: actor, scope: { kind: 'positioning_draft' }, activeExecution: null, executions: [] };
+    const owned = { sessionId: actor, scope: { kind: 'positioning_draft' }, legacy: false };
     const view = async (denied: boolean) => {
       rpc.mockImplementation(async (name: string) => ({ data: name === 'runtime_test_policy' ? policy : name === 'runtime_test_actor_access' ? true
-        : name === 'runtime_view_with_work_items' && !denied ? { view: owned, workItems: {} } : null,
-        error: name === 'runtime_view_with_work_items' && denied ? { code: 'P0001', message: 'RUNTIME_SCOPE_DENIED' } : null }));
+        : name === 'runtime_session_scope' && !denied ? owned : null,
+        error: name === 'runtime_session_scope' && denied ? { code: 'P0001', message: 'RUNTIME_SCOPE_DENIED' } : null }));
       const url = 'http://localhost/api/trpc/runtime.view?input=' + encodeURIComponent(JSON.stringify({ sessionId: actor }));
       return fetchRequestHandler({ endpoint: '/api/trpc', req: new Request(url), router: app, createContext: () => context() });
     };
     const allowed = await view(false);
     expect(allowed.status).toBe(200);
-    // DB-PERF PR-5a: the view and its work rows are one call.
-    expect(rpc.mock.calls.map(([name]) => name).filter(name => String(name).startsWith('runtime_view')))
-      .toEqual(['runtime_view_with_work_items']);
-    expect(rpc.mock.calls.map(([name]) => name)).not.toContain('runtime_work_items');
-    expect((await allowed.json()).result.data).toMatchObject({ sessionId: actor, mode: 'staging_test' });
+    // Only the scope is read: no history, no executions, no work rows.
+    expect(rpc.mock.calls.map(([name]) => name).filter(name => String(name).startsWith('runtime_view') || String(name).startsWith('runtime_work')))
+      .toEqual([]);
+    expect(rpc.mock.calls.map(([name]) => name)).toContain('runtime_session_scope');
+    expect((await allowed.json()).result.data).toEqual({ sessionId: actor, scope: { kind: 'positioning_draft' }, legacy: false, mode: 'staging_test' });
     const refused = await view(true);
     expect(refused.status).toBe(404);
     const body = await refused.json();
@@ -191,42 +175,11 @@ it('preserves unexpected database faults as sanitized 500 rather than schema una
   expect(JSON.stringify(mocks.error.mock.calls)).not.toContain('private SQL');
 });
 
-describe('downstream real-model admission after a valid remote window',()=>{
- const stepInput={draftId:actor,requestId:windowId,stepId:'step-1',purpose:'mentor' as const,questionId:'time',organizeAfter:true,input:'Synthetic reply'};
- const runtimeInput={sessionId:actor,requestId:windowId,input:'Synthetic reply',selection:{kind:'ordinary' as const,modelId:actor},organizeAfter:true,network:'deny' as const};
- function configure(allModels:boolean){
-  mocks.realAdmission=true;
-  const calls=allModels?[...policy.callPolicies,{...policy.callPolicies[0],modelId:summaryId,model:'test/summary'}]:policy.callPolicies;
-  rpc.mockImplementation(async(name:string)=>({data:name==='runtime_test_policy'?{...policy,callPolicies:calls}:name==='runtime_test_actor_access'?true:name==='runtime_session_context'?{scope:{kind:'positioning_draft',draftId:actor},dialogueModelId:actor,dialogueModel:'test/model'}:name==='runtime_admission_replay'?null:name==='runtime_admit'?{executionId:windowId}:
-   name==='runtime_positioning_gate'?{positioned:true,refusals24h:0}:[],error:null}));
- }
+describe('downstream OPC errors after a valid remote window',()=>{
  async function post(path:string,input:unknown){
   return fetchRequestHandler({endpoint:'/api/trpc',req:new Request('http://localhost/api/trpc/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}),router:app,createContext:()=>context()});
  }
- it.each(['opc.prepareStep','runtime.prepare'])('returns 412 before admission when %s needs an unapproved organizer',async path=>{
-  configure(false);const response=await post(path,path==='opc.prepareStep'?stepInput:runtimeInput),body=await response.json();
-  expect(response.status).toBe(412);expect(body.error.data.code).toBe('PRECONDITION_FAILED');expect(body.error.message).toContain('所需模型尚未获准');
-  expect(rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);expect(JSON.stringify(body)).not.toContain('CAPABILITY_UNVERIFIED');
- });
- it.each(['opc.prepareStep','runtime.prepare'])('admits separate primary and organizer models for %s only when both are approved',async path=>{
-  configure(true);const response=await post(path,path==='opc.prepareStep'?stepInput:runtimeInput);expect(response.status).toBe(200);
-  const admitted=rpc.mock.calls.find(([name])=>name==='runtime_admit')!;expect(admitted).toBeDefined();
-  expect(admitted[1].p_payload.modelId).toBe(actor);expect(admitted[1].p_payload.attachedOrganizer.modelId).toBe(summaryId);
-  expect(admitted[1].p_billing.callPolicy.map((call:{modelId:string})=>call.modelId)).toEqual([actor,summaryId]);
- });
- it('returns HTTP 412 with the binding code from actual runtime admission', async () => {
-  configure(true);
-  const normalRpc = rpc.getMockImplementation()!;
-  rpc.mockImplementation(async (name: string, ...args: unknown[]) => name === 'runtime_admit'
-   ? { data: null, error: { code: 'P0001', message: 'OPC_CONTENT_BINDING' } }
-   : normalRpc(name, ...args));
-  const response = await post('runtime.prepare', runtimeInput);
-  const body = await response.json();
-  expect(response.status).toBe(412);
-  expect(body.error.data).toMatchObject({ code: 'PRECONDITION_FAILED', httpStatus: 412 });
-  expect(body.error.message).toBe('OPC_CONTENT_BINDING');
-  expect(rpc.mock.calls.filter(([name]) => name === 'runtime_admit')).toHaveLength(1);
- });
+ const resolveInput={draftId:actor,requestId:windowId,stepId:'step-0',fieldId:'goal',executionId:actor,hash:'hash',action:'accept' as const,expectedVersion:0};
  it.each(['prepareVideoMaterial'] as const)(
   'returns HTTP 412 with the binding code from actual OPC %s', async route => {
    mocks.realOpc = true;
@@ -243,30 +196,11 @@ describe('downstream real-model admission after a valid remote window',()=>{
    expect(body.error.data).toMatchObject({ code: 'PRECONDITION_FAILED', httpStatus: 412 });
    expect(body.error.message).toBe('OPC_CONTENT_BINDING');
   });
- it.each(['inactive','PGRST116','same_model','missing_summary'])('reports known %s model configuration as unavailable without admitting',async fault=>{
-  configure(true);if(['inactive','PGRST116'].includes(fault))modelFault=fault;else summaryModel=fault==='same_model'?actor:'';
-  const response=await post('opc.prepareStep',stepInput);expect(response.status).toBe(503);expect((await response.json()).error.message).toContain('模型配置暂不可用');
-  expect(rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
- });
- it.each(['opc.prepareStep','runtime.prepare'])('keeps unknown model database faults in %s at sanitized 500',async path=>{
-  configure(true);modelFault='XX000';const response=await post(path,path==='opc.prepareStep'?stepInput:runtimeInput),body=await response.json();
-  expect(response.status).toBe(500);expect(body.error.message).toContain('诊断编号');expect(JSON.stringify(body)+JSON.stringify(mocks.error.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_DATABASE_BODY');
-  expect(JSON.stringify(mocks.error.mock.calls)).toContain('XX000');expect(rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
- });
- it('a refused reader on the resume route gets the same refusal and nothing of the execution is touched',async()=>{
-  const names=()=>rpc.mock.calls.map(([name])=>name);
-  rpc.mockImplementation(async(name:string)=>({data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_ACTOR_DENIED'}}));
-  const response=await post('runtime.resume',{executionId:actor,resumeToken:actor});
-  expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('账号未获准');
-  expect(names().filter(name=>!['runtime_test_policy','runtime_test_actor_access'].includes(String(name)))).toEqual([]);
- });
  it('preserves bounded OPC recovery refusals and sanitizes unexpected downstream exceptions',async()=>{
-  mocks.prepareStep.mockRejectedValueOnce(new Error('OPC_ANSWER_SOURCE_DENIED'));
-  await expect(app.createCaller(context()).opc.prepareStep(stepInput)).rejects.toMatchObject({message:'OPC_ANSWER_SOURCE_DENIED'});
-  mocks.prepareStep.mockRejectedValueOnce(new Error('OPC_REQUEST_CONFLICT'));
-  await expect(app.createCaller(context()).opc.prepareStep(stepInput)).rejects.toMatchObject({message:'OPC_REQUEST_CONFLICT'});
-  mocks.prepareStep.mockRejectedValueOnce(new Error('SYNTHETIC_PRIVATE_UNEXPECTED_BODY'));
-  const response=await post('opc.prepareStep',stepInput),body=await response.json();expect(response.status).toBe(500);expect(body.error.message).toContain('诊断编号');
+  mocks.captureResolve.mockRejectedValueOnce(new Error('OPC_REQUEST_CONFLICT'));
+  await expect(app.createCaller(context()).opc.captureResolve(resolveInput)).rejects.toMatchObject({message:'OPC_REQUEST_CONFLICT'});
+  mocks.captureResolve.mockRejectedValueOnce(new Error('SYNTHETIC_PRIVATE_UNEXPECTED_BODY'));
+  const response=await post('opc.captureResolve',resolveInput),body=await response.json();expect(response.status).toBe(500);expect(body.error.message).toContain('诊断编号');
   expect(JSON.stringify(body)+JSON.stringify(mocks.error.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_UNEXPECTED_BODY');
  });
 });

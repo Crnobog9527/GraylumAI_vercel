@@ -51,15 +51,18 @@ const restoredArgs = previewState && !lifecycle.bootstrap && !structuralPreviewA
   ? [...initialArgs, ...previewState.structuralArgs] : initialArgs;
 // Retired previews remain removable; no retired test or resume mode is allowed.
 const args = lifecycle.controlOnly ? restoredArgs.filter(arg => !RETIRED_FLAGS.includes(arg)) : restoredArgs;
-if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--cdc-b2-eval','--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--without-app','--workbench-restart-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve','--schema-from-files'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--without-app','--workbench-restart-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve','--schema-from-files'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if (lifecycle.controlOnly) { controlPreview(previewOptions, previewState, docker); return; }
 if (previewState && !lifecycle.bootstrap) validateResumeState(previewState, structuralPreviewArgs(args));
 if(args.includes('--real-skill-only')&&lifecycle.runTests&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
 const legacyRef=args.find(arg=>arg.startsWith('--legacy-ref='))?.slice(13);
 if(legacyRef&&!/^[a-f0-9]{40}$/.test(legacyRef))throw new Error('exact legacy ref required');
-const runtimeUpgrade=args.includes('--runtime-upgrade-only');
-const upgradeMode=args.includes('--bill2-upgrade-only')||runtimeUpgrade;
+// The old executor's upgrade suite went with services/runtime (CORE-PATH-V2 V2-12 F-Node).
+if(args.includes('--runtime-upgrade-only'))throw new Error('RUNTIME_UPGRADE_RETIRED');
+const runtimeUpgrade=false;
+if(args.includes('--bill2-upgrade-only'))throw new Error('BILL2_UPGRADE_RETIRED');
+const upgradeMode=runtimeUpgrade;
 if (serve && legacyRef) throw new Error('persistent preview does not support legacy upgrade tests');
 if(upgradeMode&&!legacyRef)throw new Error('upgrade compatibility requires an exact old runtime');
 let legacyRoot;
@@ -80,10 +83,8 @@ const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
 const capacityCapture=!previewOptions.persistent&&!stagingHost&&Boolean(casePattern?.includes('CAPACITY'));
 // CI path: database/API integration subsets without the local application or a browser.
 const withoutApp=args.includes('--without-app');
-const cdcEval=args.includes('--cdc-b2-eval');
-if(cdcEval&&(!withoutApp||!runtimeMode||!stagingSchema||!process.env.V3_REAL_SKILL_INPUT))throw new Error('CDC_LOCAL_INPUT_REQUIRED');
-const withoutAppSuite=!withoutApp?null:cdcEval?'cdc':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
-if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error('--without-app requires --cdc-b2-eval or --runtime-only --with-staging-schema, without preview, legacy ref or case pattern');
+const withoutAppSuite=!withoutApp?null:runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
+if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error('--without-app requires --runtime-only --with-staging-schema, without preview, legacy ref or case pattern');
 // DB-BASELINE: build the schema from repository files only (baseline/build-from-files.mjs) instead of
 // the local fixture; database/API suites and explicitly bounded Runtime cases.
 const schemaFromFiles=args.includes('--schema-from-files')||opcMode;
@@ -862,7 +863,7 @@ try {
     ...cleanEnv,
     ...(await localRateLimit?.start()),
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
-    ...((args.includes('--real-skill-only')||opcMode||cdcEval) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
+    ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: serve ? "production" : "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
@@ -977,10 +978,8 @@ try {
         "run",
         "--config",
         rateLimitCases?.config ?? "vitest.integration.config.ts",
-        ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/turn/provider/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
-        ...(runtimeMode&&!withoutApp&&casePattern?.startsWith('^ERASURE_BROWSER:')
-          ? ['src/services/runtime/erasureBrowser.integration.ts'] : []),
-        ...(runtimeMode ? WITHOUT_APP_SUITES[cdcEval ? "cdc" : "runtime"].files : []),
+        ...(withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
+        ...(runtimeMode ? WITHOUT_APP_SUITES.runtime.files : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',
           ...(c2StopOffline ? [c2StopOrganizer ? 'src/services/opc/mentor-stop-organizer.browser.integration.ts' : 'src/services/opc/mentor-stop.browser.integration.ts']
             : mentorStreamTest ? ['src/services/opc/mentor-browser.integration.ts'] : [])] : []),

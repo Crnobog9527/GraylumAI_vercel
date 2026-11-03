@@ -11,6 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
+import { ensurePositioningProfilePlans } from '../__tests__/fixtures/positioningProfilePlans';
 import { opcService } from '../opc/service';
 import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
 import { publishSkillPackage } from '../skills/publication';
@@ -54,6 +55,7 @@ let saved: Array<{ key: string; value: unknown }> = [];
 const rest = () => createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false } });
 beforeAll(async () => {
   await db.connect();
+  await ensurePositioningProfilePlans(db);
   saved = (await db.query('select key,value from system_settings where key = any($1)', [SETTINGS])).rows;
 });
 afterAll(async () => {

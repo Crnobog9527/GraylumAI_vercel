@@ -6,7 +6,7 @@ import {
   unmarkLiveReload,
 } from "./live-prefix";
 import { readAgentTurn } from "./mentor-turn";
-import { isPaygWaiting } from "@/lib/payg-wait";
+import { isPaused } from "./turn-pause";
 import { stopRequestFor, type StopRequest } from "./stop-reply";
 
 type PrefixStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -151,7 +151,7 @@ export function liveReplyController(options: {
         if (id) read(id, -1);
         // A lost stream or a still-running execution waits (a stopped turn still saving too); a finished one
         // without a completed result says so. A BILL-PAYG pause is not unfinished: history shows its notice.
-        if (id && result?.state !== "completed" && !isPaygWaiting(result?.state))
+        if (id && result?.state !== "completed" && !isPaused(result?.state))
           live.mark(id, !result || result.state === "pending" || result.state === "stopping" ? "waiting" : "incomplete");
         // The result is stored: 停止 would change nothing any more, so it goes away at once, before history catches up.
         else if (id && current?.executionId === id) show({ ...current, finished: true });

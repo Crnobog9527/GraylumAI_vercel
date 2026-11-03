@@ -40,7 +40,7 @@ it.each([['CONTEXT_CAPACITY','RESEARCH_TOOLS_CONTEXT_CAPACITY',RESEARCH_TOOLS_CO
  state.rejection={reason};const f=fixture();
  const refusal=await guardResearchAdmission(f.input).catch(error=>error);
  expect(refusal.message).toBe(code);
- expect(stagingProcedureError(refusal,'opc.mentorTurnStream')).toMatchObject({code:'PRECONDITION_FAILED',message});
+ expect(stagingProcedureError(refusal,'opc.captureResolve')).toMatchObject({code:'PRECONDITION_FAILED',message});
 });
 it('a non-PAYG research step is safely diagnosed and refused too',async()=>{
  const f=fixture();Object.assign(f.input.billing,{contractVersion:'bill2.v1'});
@@ -81,7 +81,7 @@ it.each([['step-1',false],['step-3',false],['step-2',true]] as const)('%s: a tur
  state.rejection={reason:'CONTEXT_CAPACITY'};const f=fixture();asStep(f,step,`帮我看看这个账号 ${link}`);
  const refusal=await guardResearchAdmission(f.input).catch(error=>error);
  expect(refusal.message).toBe(benchmark?'RESEARCH_TOOLS_CONTEXT_CAPACITY':'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY');
- expect(stagingProcedureError(refusal,'opc.mentorTurnStream')).toMatchObject({message:benchmark?RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE
+ expect(stagingProcedureError(refusal,'opc.captureResolve')).toMatchObject({message:benchmark?RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE
   :RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY_MESSAGE});
  expect(f.insert).toHaveBeenCalledWith(expect.objectContaining({context:expect.objectContaining({required:true,reason:'CONTEXT_CAPACITY'})}));
 });
@@ -89,7 +89,7 @@ it('a link turn refused because the tools are unavailable says the link check ne
  const f=fixture();asStep(f,'step-1',link);
  const refusal=await guardResearchAdmission(f.input).catch(error=>error);
  expect(refusal.message).toBe('RESEARCH_TOOLS_LINK_UNAVAILABLE');
- const shown=stagingProcedureError(refusal,'opc.mentorTurnStream');
+ const shown=stagingProcedureError(refusal,'opc.captureResolve');
  expect(shown).toMatchObject({code:'PRECONDITION_FAILED',message:RESEARCH_TOOLS_LINK_UNAVAILABLE_MESSAGE});
  expect(shown.message).toContain('账号链接');expect(shown.message).toContain('未扣积分');expect(shown.message).not.toContain('搜索暂时不可用');
 });

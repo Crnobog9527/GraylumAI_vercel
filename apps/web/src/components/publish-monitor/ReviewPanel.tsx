@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { trpc } from '@/trpc/client';
-import { dataErrorMessage, errorCode, formatDay, formatMetric, metricLabel } from './labels';
+import { dataErrorMessage, errorCode, formatDay, formatMetric, metricLabel, platformName } from './labels';
 
 /**
  * PUBLISH-MONITOR PR-7 (plan §5): the weekly reviews and, for Gold, the automatic weekly review switch. The written
@@ -21,14 +21,35 @@ type Week = { start: string; end: string; published: number; matched_posts: numb
 const RELATIVE = { above: '高于', below: '低于', same: '持平' } as const;
 const STATUS = { too_new: '太新，下周再看', insufficient_samples: '样本不足' } as const;
 
+/** The brand review's code-computed pack (`review_pack` version 2): posts whose day 7 fell in the period, and the pillar scoreboard. */
+type CoachPost = { postId: string; title: string; platform: string; views: number | null; relative: number | null };
+type CoachScore = { pillar: string; platform: string; samples: number; views: number | null; relative: number | null };
+type CoachTable = { posts: CoachPost[]; scores: CoachScore[] };
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+function coachTable(tables: unknown): CoachTable {
+  const t = tables && typeof tables === 'object' ? tables as Record<string, unknown> : {};
+  if (t.kind !== 'review_pack' || t.version !== 2) return { posts: [], scores: [] };
+  const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object') : []);
+  const period = t.this_period && typeof t.this_period === 'object' ? t.this_period as Record<string, unknown> : {};
+  const posts = list(period.settled_posts).flatMap(p => {
+    const day7 = p.day7 && typeof p.day7 === 'object' ? p.day7 as Record<string, unknown> : {};
+    return typeof p.post_id === 'string' && typeof p.platform === 'string'
+      ? [{ postId: p.post_id, title: typeof p.title === 'string' ? p.title : '', platform: p.platform, views: num(day7.views),
+        relative: num(day7.vs_platform_median) }] : [];
+  });
+  const scores = list(t.scoreboard).flatMap(r => typeof r.pillar === 'string' && typeof r.platform === 'string' && typeof r.samples === 'number'
+    ? [{ pillar: r.pillar, platform: r.platform, samples: r.samples, views: num(r.views_median), relative: num(r.vs_platform_median) }] : []);
+  return { posts, scores };
+}
+
 /** Only the shapes the page can show safely; anything else in the stored table is ignored, never guessed. */
-export function reviewTable(tables: unknown): { rows: Row[]; weeks: Week[] } {
+export function reviewTable(tables: unknown): { rows: Row[]; weeks: Week[]; coach: CoachTable } {
   const t = tables && typeof tables === 'object' ? tables as { rows?: unknown; weekly?: unknown } : {};
   const rows = Array.isArray(t.rows) ? t.rows.filter((r): r is Row => !!r && typeof r === 'object'
     && typeof (r as Row).postId === 'string' && typeof (r as Row).ageDays === 'number') : [];
   const weeks = Array.isArray(t.weekly) ? t.weekly.filter((w): w is Week => !!w && typeof w === 'object'
     && typeof (w as Week).start === 'string' && typeof (w as Week).published === 'number') : [];
-  return { rows, weeks };
+  return { rows, weeks, coach: coachTable(tables) };
 }
 
 export function ReviewPanel({ gold }: { gold: boolean }) {
@@ -77,7 +98,7 @@ function AutoReviewSwitch() {
 function ReviewCard({ review }: { review: Review }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const utils = trpc.useUtils();
-  const { rows, weeks } = reviewTable(review.tables);
+  const { rows, weeks, coach } = reviewTable(review.tables);
   async function download() {
     setBusy(true); setError('');
     try {
@@ -103,6 +124,7 @@ function ReviewCard({ review }: { review: Review }) {
         </ul>
       )}
       {rows.length > 0 && <AgeTable rows={rows} />}
+      {(coach.posts.length > 0 || coach.scores.length > 0) && <CoachTables coach={coach} />}
       {review.status === 'completed' && review.body && (
         <Button size="sm" variant="outline" disabled={busy} onClick={download}>导出</Button>
       )}
@@ -135,6 +157,37 @@ function AgeTable({ rows }: { rows: Row[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+const relative = (v: number | null) => (v === null ? '—' : `${v.toFixed(2)} 倍`);
+const views = (v: number | null) => (v === null ? '—' : formatMetric('views', v));
+
+/** The brand review's numbers, read from the stored pack only; the written part never carries a table of its own. */
+function CoachTables({ coach }: { coach: CoachTable }) {
+  return (
+    <div className="space-y-3 overflow-x-auto">
+      {coach.posts.length > 0 && (
+        <table className="w-full min-w-[480px] text-left text-xs" aria-label="本期满 7 天的作品">
+          <thead><tr><th className="pr-3 font-medium">作品</th><th className="pr-3 font-medium">平台</th>
+            <th className="pr-3 font-medium">第 7 天浏览</th><th className="pr-3 font-medium">相对该平台中位数</th></tr></thead>
+          <tbody>{coach.posts.map(p => (
+            <tr key={p.postId} className="border-t align-top" style={{ borderColor: 'var(--border-primary)' }}>
+              <td className="max-w-[200px] py-1 pr-3">{p.title || '（没有标题）'}</td><td className="py-1 pr-3">{platformName(p.platform)}</td>
+              <td className="py-1 pr-3">{views(p.views)}</td><td className="py-1 pr-3">{relative(p.relative)}</td></tr>))}</tbody>
+        </table>
+      )}
+      {coach.scores.length > 0 && (
+        <table className="w-full min-w-[480px] text-left text-xs" aria-label="内容方向成绩单">
+          <thead><tr><th className="pr-3 font-medium">内容方向</th><th className="pr-3 font-medium">平台</th><th className="pr-3 font-medium">作品数</th>
+            <th className="pr-3 font-medium">浏览中位数</th><th className="pr-3 font-medium">相对该平台中位数</th></tr></thead>
+          <tbody>{coach.scores.map(r => (
+            <tr key={`${r.pillar}:${r.platform}`} className="border-t" style={{ borderColor: 'var(--border-primary)' }}>
+              <td className="py-1 pr-3">{r.pillar}</td><td className="py-1 pr-3">{platformName(r.platform)}</td><td className="py-1 pr-3">{r.samples}</td>
+              <td className="py-1 pr-3">{views(r.views)}</td><td className="py-1 pr-3">{relative(r.relative)}</td></tr>))}</tbody>
+        </table>
+      )}
     </div>
   );
 }

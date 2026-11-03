@@ -13,9 +13,13 @@ const VAULT_STUB = resolve(__dirname, '../../../../db/tests/platform-secrets/vau
  * first when the database has none.
  * Clears this process's secret cache so the next read sees the new key.
  */
-export async function seedTestPlatformSecret(db: Query, slot: PlatformSecretSlot, key: string) {
+async function ensureVaultStub(db: Query) {
   const vault = await db.query("SELECT to_regclass('vault.secrets') IS NOT NULL AS present") as { rows: Array<{ present: boolean }> };
   if (!vault.rows[0]?.present) await db.query(readFileSync(VAULT_STUB, 'utf8'));
+}
+
+export async function seedTestPlatformSecret(db: Query, slot: PlatformSecretSlot, key: string) {
+  await ensureVaultStub(db);
   const name = `graylum.platform.${slot}`;
   await db.query('DELETE FROM vault.secrets WHERE name=$1', [name]);
   await db.query(`INSERT INTO platform_secrets(slot,vault_secret_id,last4,revision,updated_at)
@@ -31,6 +35,8 @@ export async function seedTestOpenRouterKey(db: Query, key: string) {
 
 /** LOCAL TEST DATABASES ONLY. Empties a platform slot ("not filled in"). */
 export async function clearTestPlatformSecret(db: Query, slot: PlatformSecretSlot) {
+  // No test may depend on an earlier file having loaded the Vault stand-in.
+  await ensureVaultStub(db);
   const name = `graylum.platform.${slot}`;
   await db.query('DELETE FROM vault.secrets WHERE name=$1', [name]);
   await db.query('UPDATE platform_secrets SET vault_secret_id=NULL,last4=NULL,revision=revision+1,updated_at=now() WHERE slot=$1', [slot]);

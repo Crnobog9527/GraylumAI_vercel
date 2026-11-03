@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe,it,expect,vi} from 'vitest';
-import {contentConfirmation,contentVisibilityFence,previewContentErasure,confirmContentErasure} from './content';
+import {contentConfirmation,previewContentErasure,confirmContentErasure} from './content';
 const id='00000000-0000-4000-8000-000000000001';
 const actor='00000000-0000-4000-8000-000000000002';
 const hash='a'.repeat(64);
@@ -26,21 +26,6 @@ describe('content erasure API boundary',()=>{
   const db={rpc:vi.fn().mockResolvedValue({data:null,error:{message}})};
   await expect(confirmContentErasure(db,actor,{kind:'answer',id,previewHash:hash,acknowledged:true}))
    .rejects.toMatchObject({code,message});
- });
- it('fails closed on private errors and rechecks visibility every time',async()=>{
-  const db={rpc:vi.fn().mockResolvedValue({data:'visible',error:null})};
-  const visible=contentVisibilityFence(db,actor,id);expect(await visible()).toBeNull();
-  expect(db.rpc).toHaveBeenCalledWith('runtime_execution_visibility',{p_actor_id:actor,p_execution_id:id,p_voice:false,p_library:false});
-  db.rpc.mockResolvedValue({data:null,error:{message:'CONTENT_ERASED',code:'42501'}});
-  await expect(visible()).rejects.toMatchObject({message:'CONTENT_ERASED'});
-  db.rpc.mockResolvedValue({data:null,error:{message:'PRIVATE_DATABASE_BODY'}});
-  await expect(visible()).rejects.toMatchObject({message:'CONTENT_ERASURE_UNAVAILABLE',cause:undefined});
-  db.rpc.mockResolvedValue({data:true,error:null}); // the old boolean answer is not a visibility answer
-  await expect(visible()).rejects.toMatchObject({message:'CONTENT_ERASURE_UNAVAILABLE'});
-  db.rpc.mockResolvedValue({data:'library',error:null});
-  expect(await visible({library:true})).toBe('library');
-  expect(db.rpc).toHaveBeenLastCalledWith('runtime_execution_visibility',{p_actor_id:actor,p_execution_id:id,p_voice:false,p_library:true});
-  expect(db.rpc).toHaveBeenCalledTimes(5);
  });
 });
 

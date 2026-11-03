@@ -68,8 +68,9 @@ export function buildRoster(inputs, system) {
 
 /** The complete organizer system prompt the checked-out backend sends for these turns. */
 export function promptAt(repo) {
-  const read = file => readFileSync(join(repo, 'packages/api/src/services/opc', file), 'utf8');
-  return organizerSystem({ prompt: read('organizerPrompt.ts'), answerCard: read('answerCard.ts'), service: read('service.ts') });
+  const read = (dir, file) => { try { return readFileSync(join(repo, 'packages/api/src/services', dir, file), 'utf8'); } catch { return undefined; } };
+  return organizerSystem({ prompt: read('opc', 'organizerPrompt.ts'), answerCard: read('opc', 'answerCard.ts'),
+    service: read('opc', 'service.ts'), mentor: read('turn', 'mentorPrompt.ts') });
 }
 
 /** The halted V3 ledger is carried whole: its settled amount, every unknown hold and its unsettled reserve (never released).

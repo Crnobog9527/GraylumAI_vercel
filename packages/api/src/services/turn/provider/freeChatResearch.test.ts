@@ -4,7 +4,7 @@
 import {describe,expect,it} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {openRouterBound} from './openRouterPolicy';
-import type {FrozenPaygRun} from './service';
+import type {FrozenPaygRun} from './frozenRun';
 import {toolCallPolicies} from '../admission/runPolicies';
 import {DISABLED_RESEARCH_TOOLS,researchToolsConfigSchema} from '../../research/vendors/config';
 import {tikhubRouteId} from '../../research/vendors/tikhub';
