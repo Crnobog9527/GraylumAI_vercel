@@ -35,6 +35,7 @@ import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
 import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
+import { chatImage, IMAGE_MARK, withImage } from './chatImage';
 
 /*
  * CORE-PATH-V2 kind=chat (2.7): a free-chat turn without tools (V2-4a; the free tools come in V2-4b). Database work is
@@ -78,7 +79,9 @@ function workMaterial(work: WorkItemTurn | null): string {
 export type ChatInput = { actorId: string; sessionId: string; requestId: string; text: string; chosen?: ChatSelection;
   /** The page's work_item conversation (V2-10b): reads its checks, method and brief before the open. */ workItem?: boolean;
   /** A resumed work turn: the request that claimed its material (the resume has its own id). */ workRequest?: string;
-  /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead } };
+  /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead };
+  /** PUBLISH-MONITOR B2: one JPEG data URL sent with this message only; never saved, logged or written anywhere (chatImage.ts). */
+  image?: string };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
@@ -100,6 +103,11 @@ export const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients), started = Date.now();
+  // The image is checked before anything is read or frozen: one JPEG within LIB-2d's limits (the route's own allowance is checked again
+  // after the quote). The model sees, and the conversation keeps, the text marked with IMAGE_MARK; the image itself is in no row.
+  const image = input.image === undefined ? null : chatImage(input.image);
+  if (input.image !== undefined && !image) return emit({ type: 'error', code: 'TURN_IMAGE_INVALID' });
+  const text = image ? IMAGE_MARK + input.text : input.text;
   // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
   const configuration = readAdmissionConfiguration(admin);
   const config = readCoreConfig(await configuration);
@@ -131,18 +139,23 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   try {
     // With tools the quote allows the research ceiling; the turn narrows it again unless research is usable (V2-6).
     quote = await chatQuote(admin, { configuration: await configuration, modelId: serverChatModel(settings),
-      inputBytes: deps.tools ? Math.max(interactiveBytes, RESEARCH_INPUT_BYTES) : interactiveBytes, deps: deps.pricing });
+      inputBytes: deps.tools ? Math.max(interactiveBytes, RESEARCH_INPUT_BYTES) : interactiveBytes, deps: deps.pricing,
+      ...(image ? { image: true } : {}) });
   } catch (error) {
     // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.
     const message = error instanceof Error ? error.message : '';
     return emit({ type: 'error', code: error instanceof QuoteError ? error.code : /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message
       : 'TURN_QUOTE_UNAVAILABLE' });
   }
+  if (image && (!quote.imageInput || image.dataUrlBytes > quote.imageInput.maxDataUrlBytes || image.width > quote.imageInput.maxEdge
+    || image.height > quote.imageInput.maxEdge)) return emit({ type: 'error', code: 'TURN_IMAGE_INVALID' });
+  // The data URL is outside the text budget (as LIB-2d): every byte check of the request adds it back.
+  const imageBytes = image?.dataUrlBytes ?? 0;
 
   // The current message with the smallest instructions must fit the input budget, or nothing opens (the request bytes are
   // checked again before sending, with everything in them).
   const guard = settings.ok ? settings.identityGuard ?? true : true;
-  const requiredBytes = Buffer.byteLength(input.text) + Buffer.byteLength(material) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard));
+  const requiredBytes = Buffer.byteLength(text) + Buffer.byteLength(material) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard));
   // With tools the research ceiling may hold the message; it is checked again below against what the plan allows.
   if (requiredBytes > (deps.tools ? quote.inputLimit : Math.min(quote.inputLimit, interactiveBytes)))
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
@@ -280,13 +293,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
     // The tool definitions and the room kept for tool results are part of what the history may not take (V2-6).
-    const current = material + input.text + chosen.note + (tools?.plan.note ?? '');
+    const current = material + text + chosen.note + (tools?.plan.note ?? '');
     const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192
       - (tools ? tools.plan.reserveBytes + tools.definitionBytes : 0);
     const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
     // The reply streams. Under the fallback rule nothing is sent while the text so far could still be the refusal marker, which
     // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
-    let text = '', sentChars = 0, holding = fallback;
+    let reply = '', sentChars = 0, holding = fallback;
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
         callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q }, ...(replay ? { replay } : {}) }) : null;
@@ -298,21 +311,22 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       ...(built?.tools.length ? { firstToolCallOnly: true, research: { freeChat: 'core-path-v2' }, maxToolCalls: built.maxToolCalls } : {}),
       // Each tool return adds to the next request: the oldest history goes first, so the turn keeps fitting (V2-6).
       ...(built?.tools.length && tools ? { filterModelInput: (items: AgentInputItem[], text: string) =>
-        fitToolTurn(items, text, history.length, inputLimit - 8192 - tools!.definitionBytes) } : {}),
-      // The history was trimmed above; the SDK appends what this returns to nothing else, so the current message goes last.
-      selectHistory: async (items, incoming) => [...items, ...incoming],
+        fitToolTurn(items, text, history.length, inputLimit - 8192 - tools!.definitionBytes + imageBytes) } : {}),
+      // The history was trimmed above; the SDK appends what this returns to nothing else, so the current message goes last. The image
+      // joins the current message here, in memory only (the session writes nothing back, history.ts).
+      selectHistory: async (items, incoming) => [...items, ...(image ? withImage(incoming, image.url) : incoming)],
       onText: delta => {
-        text += delta;
+        reply += delta;
         if (holding) {
-          const start = text.trimStart();
+          const start = reply.trimStart();
           if (POSITIONING_MARKER.startsWith(start) || start.startsWith(POSITIONING_MARKER)) return;
           holding = false;
         }
-        if (text.length > sentChars) { emit({ type: 'text', delta: text.slice(sentChars) }); sentChars = text.length; }
+        if (reply.length > sentChars) { emit({ type: 'text', delta: reply.slice(sentChars) }); sentChars = reply.length; }
       },
       exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
-        try { assertRuntimeRequestCapacity(request, inputLimit); }
+        try { assertRuntimeRequestCapacity(request, inputLimit + imageBytes); }
         catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
         const stored = replay?.model();
         if (stored) return stored;
@@ -322,19 +336,22 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
           .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       },
     });
-    const reply = output || text;
+    const answer = output || reply;
     // The fallback refusal: never shown or saved; Graylum bears the model cost (the stop-loss still counts it).
-    if (fallback && isPositioningRefusal(reply)) {
+    if (fallback && isPositioningRefusal(answer)) {
       await close('failed', { refundAll: true, failureCode: 'positioning_required' });
       return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
     }
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
     const closed = await close('completed', { delivered: true,
-      messages: [{ role: 'user', content: input.text }, { role: 'assistant', content: reply }] });
+      messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }] });
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
-    emit({ type: 'result', turnId: opened.turnId, body: reply, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
+    emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
   } catch (error) {
-    const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
+    const thrown = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
+    // A turn with an image never pauses: a resume could not send the image again (it is kept nowhere), so it ends now, refunded in
+    // full, and the user sends the screenshot again after topping up.
+    const code = image && thrown === 'TURN_PAUSED_FOR_CREDITS' ? 'TURN_IMAGE_CREDITS_LOW' : thrown;
     // Paused for credits: the turn waits (recovery or a resume closes it); everything else closes now.
     // The resume needs nothing from the browser. A save that fails leaves it to expire: runResumedTurn refunds it.
     if (code === 'TURN_PAUSED_FOR_CREDITS') await swallow('turn_pause_save_failed', db.pauseSave({ actorId: input.actorId,

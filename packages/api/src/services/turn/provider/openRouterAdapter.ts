@@ -157,7 +157,13 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    }
    // LIB-2d: an image part only when the frozen quote measured this exact one (re-measured here).
    const image=measureImage(parsed??{},{maxDataUrlBytes:IMAGE_MAX_DATA_URL_BYTES,maxEdge:IMAGE_MAX_EDGE});
-   if((image||payg?.image)&&(!payg?.image||!isDeepStrictEqual(image,payg.image)
+   // PUBLISH-MONITOR B2: a turn-core chat call (no payg quote) may carry the one image its quote admitted, within that allowance, on
+   // the context-window bound (image tokens are prompt tokens) and with max_price.image = 0 (imageUsd '0').
+   const allowance=!payg&&identity.providerLimits.imageUsd==='0'?identity.imageInput:undefined;
+   if(image&&allowance){
+    if(image.dataUrlBytes>allowance.maxDataUrlBytes||image.width>allowance.maxEdge||image.height>allowance.maxEdge)
+     throw new Error('BILL2_PROVIDER_REQUEST_DENIED');
+   }else if((image||payg?.image)&&(!payg?.image||!isDeepStrictEqual(image,payg.image)
      ||!IMAGE_PURPOSES.has(String(identity.phase))))throw new Error('BILL2_PROVIDER_REQUEST_DENIED');
    const quote=payg?openRouterCallBound(identity.providerLimits,identity.outputLimit,payg.promptTokensUpper,payg.image?.tokensUpper??0)
     :openRouterBound(identity.providerLimits,identity.outputLimit);

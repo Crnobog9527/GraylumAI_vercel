@@ -8,6 +8,8 @@ import {
 } from '@/components/chat-display/runtime-messages';
 import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
 import { WorkComposer } from '@/components/opc/work-composer';
+import { ComposerImage } from '@/components/opc/composer-image';
+import type { ChatImage } from '@/lib/chat-image';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
@@ -50,6 +52,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
   const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
   const [skillId, setSkillId] = useState(''), [references, setReferences] = useState<LibraryReference[]>([]);
+  const [image, setImage] = useState<ChatImage | null>(null);
   useEffect(() => {
     const draft = openingDraftWithReferences(localStorage, sessionId);
     setInput(draft.text); setSkillId(localStorage.getItem('opc-runtime-skill:' + sessionId) ?? '');
@@ -78,14 +81,16 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     url.searchParams.set('request', requestId); history.replaceState(null, '', url);
     rememberPending(localStorage, sessionId, { requestId, text, input: text, references: sent });
     setReferences([]);
+    // The screenshot goes with this message only; it comes back to the box with the text when the message was not sent.
+    const sentImage = image; setImage(null);
     const restore = clearForSend(setInput, text, saved => {
       localStorage.setItem('opc-runtime-input:' + sessionId, saved); markPendingRestored(localStorage, sessionId);
     });
     setOutgoing(text);
     const answer = await chat.send(text, requestId, { ...(skillId ? { moduleId: skillId } : {}),
-      ...(sent.length ? { references: referenceRequest(sent) } : {}) });
+      ...(sent.length ? { references: referenceRequest(sent) } : {}), ...(sentImage ? { image: sentImage.url } : {}) });
     setOutgoing(null);
-    if (answer === 'kept') { restore(); updateReferences(sent); }
+    if (answer === 'kept') { restore(); updateReferences(sent); setImage(sentImage); }
     if (answer !== 'unknown') {
       forgetPending(localStorage, sessionId);
       const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);
@@ -160,7 +165,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
           onStarted={compareId => { update(''); compare.add(compareId); void compare.refresh(); }}
           onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
-          skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}/>
+          skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}
+          attachment={<ComposerImage image={image} onChange={setImage} disabled={chat.busy}/>}/>
       </div></footer>
     </main>
   </WorkspaceFrame>;

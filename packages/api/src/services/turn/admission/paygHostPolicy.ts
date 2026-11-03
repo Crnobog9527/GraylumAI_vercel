@@ -31,10 +31,8 @@ const admittedRoutes: Readonly<Record<string,string>> = {
 export const isAdmittedRoute = (model: string, endpointTag: string) => admittedRoutes[model] === endpointTag;
 // fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
 // fusion_compare: FUSION-COMPARE columns (0290), one plain-text streamed answer per model (fusion-text-v1-stream).
-// publish_monitor_screenshot: PUBLISH-MONITOR B2, one back-office screenshot read by the model (one inline JPEG, imageInput).
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',
-  'fusion_review', 'fusion_summary', 'fusion_compare', 'publish_monitor_screenshot']);
-export const SCREENSHOT_PHASE = 'publish_monitor_screenshot' as const;
+  'fusion_review', 'fusion_summary', 'fusion_compare']);
 const sharedEvidence = {
   maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
   outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
@@ -78,9 +76,10 @@ const profileFields = {
   // Up to 9 (0267). The positioning mentor profiles need at least 9: the research tools are offered all or nothing, so a
   // smaller profile (2 or 3) leaves them out entirely. A profile that is too small only loses the optional tools.
   maxTools: z.number().int().min(2).max(PAYG_MAX_TOOLS), maxSchemaBytes: z.literal(16384),
-  // Every purpose at most once (ten since publish_monitor_screenshot); a profile covering all of them must not be refused.
-  purposes: z.array(phase).min(1).max(10),
-  // The one inline image a call of this route may carry (LIB-2d's allowance); required for, and only used by, the screenshot purpose.
+  // Every purpose at most once (nine since fusion_compare); a profile covering all of them must not be refused.
+  purposes: z.array(phase).min(1).max(9),
+  // PUBLISH-MONITOR B2: the route reads one inline JPEG in a free chat (LIB-2d's allowance and limits). Absent: the model does not
+  // take images here, and a chat with an image is refused before anything is frozen.
   imageInput: imageInputPolicy.optional(),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
     'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream', 'fusion-text-v1-stream'])).min(1).max(6),
@@ -113,8 +112,6 @@ const fusionScope = (p: ProfileCore) => {
 const outputEvidence = (p: ProfileCore) => p.outputLimit <= p.evidence.outputLimit
   && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit
     && v.testedOutputLimit === p.evidence.testedOutputLimit);
-/** An image allowance belongs to the screenshot purpose and that purpose needs one: no other use may carry an image. */
-const imageScope = (p: ProfileCore) => (p.imageInput !== undefined) === p.purposes.includes(SCREENSHOT_PHASE);
 const sameRouteEvidence = (p: ProfileCore) => p.reasoningVariants.every(v => {
   if (!v.outputSemanticsEvidence) return v.outputStressSamples >= 2;
   return p.model === 'anthropic/claude-sonnet-5.5' && p.endpointTag === 'anthropic'
@@ -125,14 +122,12 @@ const sameRouteEvidence = (p: ProfileCore) => p.reasoningVariants.every(v => {
       && source.evidenceReference === v.evidenceReference && source.manifestHash === v.manifestHash);
 });
 export const paygHostProfile = z.object({ ...profileFields, expiresAt: z.string().datetime() }).strict()
-  .refine(imageScope, { message: 'PAYG_IMAGE_SCOPE' })
   .refine(fusionScope, { message: 'PAYG_FUSION_EVIDENCE_SCOPE' })
   .refine(outputEvidence, { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' })
   .refine(sameRouteEvidence, { message: 'PAYG_SAME_ROUTE_NONE_EVIDENCE_REQUIRED' });
 /** RUNTIME-PROD: the same evidence rules without a calendar expiry (Owner 2026-10-07: production admission has no
  * fixed end date; it is resampled only when the model, route or live metering changes). */
 export const paygProductionProfile = z.object(profileFields).strict()
-  .refine(imageScope, { message: 'PAYG_IMAGE_SCOPE' })
   .refine(fusionScope, { message: 'PAYG_FUSION_EVIDENCE_SCOPE' })
   .refine(outputEvidence, { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' })
   .refine(sameRouteEvidence, { message: 'PAYG_SAME_ROUTE_NONE_EVIDENCE_REQUIRED' });

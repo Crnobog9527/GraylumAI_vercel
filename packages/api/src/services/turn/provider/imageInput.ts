@@ -7,9 +7,8 @@
  */
 import { z } from 'zod';
 
-/** Purposes that may send an image: the old path's library_ocr (0286's SQL list) and the turn core's back-office screenshot read
- * (PUBLISH-MONITOR B2), whose quote carries the measured image (bodyBound.ts). */
-export const IMAGE_PURPOSES: ReadonlySet<string> = new Set(['library_ocr', 'publish_monitor_screenshot']);
+/** Purposes that may send an image. PUBLISH-MONITOR PR-3c adds its own purpose here and in 0286's SQL list. */
+export const IMAGE_PURPOSES: ReadonlySet<string> = new Set(['library_ocr']);
 export const JPEG_DATA_URL_PREFIX = 'data:image/jpeg;base64,';
 /** Hard ceilings; a stable policy may only lower them. 819_223 bytes = prefix + base64 of a 614,400-byte JPEG. */
 export const IMAGE_MAX_DATA_URL_BYTES = 819_223;

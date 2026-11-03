@@ -43,7 +43,9 @@ const profile = (model: string, route: string) => ({ model, endpointTag: route, 
     manifestHash: 'b'.repeat(64), outputStressSamples: 2, includesReasoning: true }], outputLimit: 8192,
   evidence: { reference: 'sim-only', manifestHash: 'a'.repeat(64), distinctSamples: 60, messageStressSamples: 12, maxVerifiedMessages: 128,
     completeCells: 15, variantsPerCell: 4, maxPromptToBytes: 0.5, maxPromptToUpper: 0.4, outputLimit: 8192, testedOutputLimit: 512,
-    outputSemantics: 'max-tokens-includes-reasoning', includesReasoning: true, cacheCovered: true, costBoundPassed: true } });
+    outputSemantics: 'max-tokens-includes-reasoning', includesReasoning: true, cacheCovered: true, costBoundPassed: true },
+  // PUBLISH-MONITOR B2: the chat model reads one screenshot per message (LIB-2d's allowance); the compare model does not.
+  ...(model === SIM_MODELS[0].modelId ? { imageInput: { maxDataUrlBytes: 819_223, maxEdge: 2048 } } : {}) });
 
 async function createUser(email: string, password: string): Promise<string> {
   const response = await fetch(`${apiUrl}/auth/v1/admin/users`, { method: 'POST',
