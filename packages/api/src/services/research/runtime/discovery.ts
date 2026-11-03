@@ -342,7 +342,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // Deeper layers stop at the eighth selectable account (candidatesMin, Owner 2026-11-03: stop as soon as there are 8); once the round
   // is searched to the end, a card shows whatever is selectable, even below candidatesMin (Owner 2026-10-23).
   if (!stopped && !enough()) {
-    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough, cardable: enough, isStopped: () => stopped });
+    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough, cardable: enough, warm, isStopped: () => stopped });
   }
   const resumable = stopReason === 'ROUND_LIMIT';
   // Which replies this round took (each reply once, also when one is replayed) and, while it waits for its next reply, the

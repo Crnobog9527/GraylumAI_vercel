@@ -442,5 +442,23 @@ describe('the shared profile cache', () => {
     expect(vi.mocked(f.store.createCard).mock.calls[0]![1].options).toEqual(controlOptions);
     expect(JSON.stringify(second)).not.toContain('OPERATION_IDENTITY_MISMATCH');
   });
+
+  // Review of #1679: the deeper layers (account search, next pages, web leads) screen accounts too; their accounts are read from the cache
+  // in one call before they are screened, so a cached lead is no paid lookup.
+  it('an account found by the deeper account search is served from the cache, not looked up', async () => {
+    const cache = sharedCache(() => now);
+    for (const lead of ['leadone', 'leadtwo']) cache.rows.set(`tiktok\naccount_profile\n${lead}`,
+      { profile: { fields: { id: lead, name: `Profile ${lead}`, followers: 50000 }, missing: [] }, fetchedAt: now.toISOString() });
+    const f = fixture('tiktok', { firstPage: () => [], leads: keyword => keyword === 'one' ? ['leadone', 'leadtwo', 'leadfresh'] : [] },
+      ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
+    f.ctx.profileCache = cache.port;
+    await f.run();
+    // The empty first page brings no author; the account search names three leads, two of them cached.
+    expect(f.kindsSent()).toContain('account_search');
+    expect(profiles(f).map(r => r.vendor === 'tikhub' && r.call.account)).toEqual(['leadfresh']);
+    expect(cache.reads.some(batch => batch.includes('leadone') && batch.includes('leadtwo') && batch.includes('leadfresh'))).toBe(true);
+    // The one that was looked up is written back for the next search.
+    expect(cache.writes[cache.writes.length - 1]).toEqual(['leadfresh']);
+  });
 });
 
