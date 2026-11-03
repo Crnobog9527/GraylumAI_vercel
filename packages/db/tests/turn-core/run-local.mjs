@@ -326,6 +326,22 @@ try{
   assert.deepEqual((await c.query("select amount from credit_transactions where user_id=$1 and reason_code='turn_spend'",[a.actor])).rows,[{amount:-150}]);
   report.checks.push('a freeze lowers the available balance once: 1000 -> freeze 400 -> 600 available to another session; close D=150 -> 850, one -150 record');
  }
+ // 12b. 0497: the credit record of a review turn names the review; every other kind of turn keeps "AI turn".
+ {
+  for (const [cadence,label] of [['weekly','每周复盘'],['monthly','月度复盘'],['quarterly','季度体检'],['chat','对话复盘'],[undefined,'每周复盘']]) {
+   const a=await account(1000);
+   const t=await open(a,{kind:'review',pol:policy({review:{mode:'weekly',id:randomUUID(),...(cadence?{cadence}:{}),attempt:1,maxCostUsd:'1'}})});
+   await begin(a,t.turnId,1,{upper:0.5});await record(a,t.turnId,1,{n:0.25});
+   const charged=(await close(a,t.turnId,'completed',{messages:[]})).chargedCredits;
+   assert.ok(charged>0,String(cadence));
+   assert.deepEqual((await c.query("select description,amount from credit_transactions where user_id=$1 and reason_code='turn_spend'",[a.actor])).rows,
+    [{description:label,amount:-charged}],String(cadence));
+  }
+  const a=await account(1000),t=await open(a,{});
+  await begin(a,t.turnId,1,{upper:0.5});await record(a,t.turnId,1,{n:0.25});await close(a,t.turnId,'completed',{messages:[]});
+  assert.deepEqual((await c.query("select description from credit_transactions where user_id=$1 and reason_code='turn_spend'",[a.actor])).rows,[{description:'AI turn'}]);
+  report.checks.push('0497: the spend row of a review turn reads 每周复盘 / 月度复盘 / 季度体检 / 对话复盘 by its cadence; a chat turn still reads AI turn');
+ }
  // 13. turn_open returns what the prompt needs from the account (no extra round trip): the reply language, and for a free chat
  // the positioning gate (confirmed positioning, refusals in 24 hours counted on turns closed for it).
  {

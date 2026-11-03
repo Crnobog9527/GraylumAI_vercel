@@ -61,20 +61,20 @@ describe('review title', () => {
 
 describe('stored review table', () => {
   it('reads rows and weeks it recognises and ignores anything else', () => {
-    expect(reviewTable(null)).toEqual({ rows: [], weeks: [], coach: { posts: [], scores: [] } });
+    expect(reviewTable(null)).toEqual({ rows: [], weeks: [], coach: { posts: [], scores: [], trends: [] } });
     expect(reviewTable({ rows: [{ postId: 'a', ageDays: 1, status: 'too_new', comparisons: {} }, { nope: 1 }],
       weekly: [{ start: '2026-10-01', end: '2026-10-08', published: 2, matched_posts: 0, status: 'data_accumulating' }, 'x'] }))
       .toEqual({ rows: [{ postId: 'a', ageDays: 1, status: 'too_new', comparisons: {} }],
         weeks: [{ start: '2026-10-01', end: '2026-10-08', published: 2, matched_posts: 0, status: 'data_accumulating' }],
-        coach: { posts: [], scores: [] } });
+        coach: { posts: [], scores: [], trends: [] } });
   });
   it('reads the brand review pack\'s settled posts and scoreboard, and nothing from a pack of another shape', () => {
     const pack = { kind: 'review_pack', version: 2, scoreboard: [{ pillar: 'tips', platform: 'tiktok', samples: 4, views_median: 1200,
       er_median: 0.05, vs_platform_median: 1.5 }, { nope: 1 }], this_period: { settled_posts: [{ post_id: 'p1', platform: 'tiktok', title: 'T',
       day7: { status: 'available', views: 900, vs_platform_median: null } }, { post_id: 2 }] } };
     expect(reviewTable(pack).coach).toEqual({ posts: [{ postId: 'p1', title: 'T', platform: 'tiktok', views: 900, relative: null }],
-      scores: [{ pillar: 'tips', platform: 'tiktok', samples: 4, views: 1200, relative: 1.5 }] });
-    expect(reviewTable({ ...pack, version: 1 }).coach).toEqual({ posts: [], scores: [] });
+      scores: [{ pillar: '未分类', platform: 'tiktok', samples: 4, views: 1200, relative: 1.5 }], trends: [] });
+    expect(reviewTable({ ...pack, version: 1 }).coach).toEqual({ posts: [], scores: [], trends: [] });
   });
 });
 

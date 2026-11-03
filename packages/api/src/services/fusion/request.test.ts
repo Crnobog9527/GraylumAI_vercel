@@ -32,21 +32,15 @@ describe('Fusion request bytes', () => {
     expect(() => assertSnapshotSize('好'.repeat(29990), { a: 'x'.repeat(100) })).toThrow('FUSION_INPUT_TOO_LARGE');
     expect(() => assertSnapshotSize('x'.repeat(89000), { a: 'x' })).not.toThrow();
   });
-  it('PROMPT-CACHE-ALL: an Anthropic route with a write price marks the system message and the last earlier turn; text unchanged', async () => {
+  it('marks no cache breakpoint, also on an Anthropic route with a write price (one request per seat or column, never read again)', async () => {
     const cachedLimits = { ...providerLimits, cacheWriteUsdPerMillion: '3.75' };
     const cachedPolicy = { ...policy, providerLimits: cachedLimits, upperUsd: openRouterBound(cachedLimits, 8192).upperUsd };
     const history = [{ role: 'user' as const, content: 'q1' }, { role: 'assistant' as const, content: 'a1' }];
-    const mark = (text: string) => [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
     const body = JSON.parse(fusionRequestBody(cachedPolicy, { ...request, history }, 4096));
-    expect(body.messages).toEqual([{ role: 'system', content: mark(request.instructions) }, history[0],
-      { role: 'assistant', content: mark('a1') }, { role: 'user', content: request.input }]);
-    // A review has no history: only the system breakpoint. Same request on two different kinds of day: same bytes.
+    expect(body.messages).toEqual([{ role: 'system', content: request.instructions }, ...history, { role: 'user', content: request.input }]);
     expect(JSON.parse(fusionRequestBody(cachedPolicy, request, 4096)).messages)
-      .toEqual([{ role: 'system', content: mark(request.instructions) }, { role: 'user', content: request.input }]);
-    expect(fusionRequestBody(cachedPolicy, { ...request, history }, 4096)).toBe(fusionRequestBody(cachedPolicy, { ...request, history }, 4096));
-    // Not for a route without a write price (the existing bytes above) nor for another vendor.
-    expect(JSON.parse(fusionRequestBody({ ...cachedPolicy, model: 'google/gemini-3.8-flash' }, { ...request, history }, 4096)).messages[0].content)
-      .toBe(request.instructions);
+      .toEqual([{ role: 'system', content: request.instructions }, { role: 'user', content: request.input }]);
+    expect(fusionRequestBody(cachedPolicy, { ...request, history }, 4096)).not.toContain('cache_control');
     const transport = vi.fn<typeof fetch>(async () => new Response('data: [DONE]\n\n'));
     const adapter = openRouterAdapter({ credential: async () => 'LOCAL_SYNTHETIC_KEY', transport, allowWorkspaceRead: true, allowAgentTools: true });
     const sent = fusionRequestBody(cachedPolicy, { ...request, history }, 4096);
