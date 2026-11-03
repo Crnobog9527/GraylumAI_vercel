@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { FrozenCall } from '../turn/provider/service';
+import type { FrozenCall } from '../turn/provider/frozenRun';
 
 /** The review record (0236). Progress lives on the server; every write takes the review row lock first. */
 const uuid = z.string().uuid();

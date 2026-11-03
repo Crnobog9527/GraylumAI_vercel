@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { z } from 'zod';
-import type { frozenCallPolicy } from '../turn/provider/service';
+import type { frozenCallPolicy } from '../turn/provider/frozenRun';
 import { openRouterBound } from '../turn/provider/openRouterPolicy';
 import { openRouterSearchParameters } from '../openRouterSearch';
 import { PURPOSE_INPUT_CAPS } from '../turn/settings/purposeBudgets';

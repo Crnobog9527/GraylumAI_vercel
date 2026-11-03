@@ -61,7 +61,8 @@ if(legacyRef&&!/^[a-f0-9]{40}$/.test(legacyRef))throw new Error('exact legacy re
 // The old executor's upgrade suite went with services/runtime (CORE-PATH-V2 V2-12 F-Node).
 if(args.includes('--runtime-upgrade-only'))throw new Error('RUNTIME_UPGRADE_RETIRED');
 const runtimeUpgrade=false;
-const upgradeMode=args.includes('--bill2-upgrade-only')||runtimeUpgrade;
+if(args.includes('--bill2-upgrade-only'))throw new Error('BILL2_UPGRADE_RETIRED');
+const upgradeMode=runtimeUpgrade;
 if (serve && legacyRef) throw new Error('persistent preview does not support legacy upgrade tests');
 if(upgradeMode&&!legacyRef)throw new Error('upgrade compatibility requires an exact old runtime');
 let legacyRoot;
@@ -977,7 +978,7 @@ try {
         "run",
         "--config",
         rateLimitCases?.config ?? "vitest.integration.config.ts",
-        ...(upgradeMode ? ["src/services/turn/provider/upgrade.integration.ts"] : withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
+        ...(withoutApp ? [] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(runtimeMode ? WITHOUT_APP_SUITES.runtime.files : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',
           ...(c2StopOffline ? [c2StopOrganizer ? 'src/services/opc/mentor-stop-organizer.browser.integration.ts' : 'src/services/opc/mentor-stop.browser.integration.ts']

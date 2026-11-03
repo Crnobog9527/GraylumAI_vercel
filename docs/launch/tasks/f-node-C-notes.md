@@ -163,3 +163,8 @@
 - 原第 1526 行：it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates the current round", async () =>
 - 原第 2224 行：it("OPC: a local record without consent is checked on the server and only recovered by an explicit continue",
 - 原第 4456 行：for (const sample of [
+
+## 追加：删旧 BILL2 provider 层（authoritativeBilling）
+- 删除 `turn/provider/service.ts`、`readRetry.ts`，以及只测这一层的 `service.test.ts`、`erasure.test.ts`、`paygService.test.ts`、`upgrade.integration.ts`；`--bill2-upgrade-only` 改为抛 `BILL2_UPGRADE_RETIRED`（CI 不引用）。类型导入改指向 `./frozenRun`。
+- 旧场景 → 新测试：这几个文件测的是 bill2 run 的 prepare/claim/dispatch/record/finalize/回收链路（含 PAYG 策略校验、waiting_credits、拒付待定回退、回收只查不重发），这条链路随 F 不再存在，新路径的对应保护在 `turn_*` 的 SQL 测试里。本 PR 内没有逐条等价的 Node 测试：**无（链路已删除）**。
+- 现役代码里不再有 F 的 DROP 名单中的 bill2_* / `runtime_receipt_saved` / `fusion_group_claim` 引号字符串（测试文件除外）。

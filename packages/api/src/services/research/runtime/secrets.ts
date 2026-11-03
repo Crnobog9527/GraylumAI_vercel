@@ -3,7 +3,7 @@
 // subcall. The admin Vault is the only source. A database failure is "unavailable"; the value is only passed to the
 // adapter and is never logged, returned or stored.
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BillingRpc } from '../../turn/provider/service';
+import type { BillingRpc } from '../../turn/provider/frozenRun';
 import { getPlatformSecret, PlatformSecretError } from '../../platformSecrets';
 import type { ResearchVendor } from '../vendors/types';
 

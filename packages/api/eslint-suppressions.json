@@ -342,19 +342,6 @@
       "count": 1
     }
   },
-  "src/services/turn/provider/service.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 2
-    }
-  },
-  "src/services/turn/provider/upgrade.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/trpc.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 26
