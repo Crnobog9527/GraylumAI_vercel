@@ -2,7 +2,8 @@
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
-import React, { Fragment, useEffect, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { usePathname } from 'next/navigation';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { isUnauthorizedError } from '@/lib/auth-recovery';
@@ -19,7 +20,14 @@ import { mutationAffectsRuntimeChoices } from '@/lib/runtime-choices';
 import { clearPersistedCache, forgetPending, persistQueryCache, restoreQueryCache } from '@/lib/persisted-cache';
 import { readSessionUserIdSync } from '@/lib/session-user';
 
+const inSignedInArea = (pathname: string | null) => pathname === '/app' || Boolean(pathname?.startsWith('/app/'));
+const noSubscription = () => () => undefined;
+
 export default function Provider({ children }: { children: React.ReactNode }) {
+  const signedInArea = inSignedInArea(usePathname());
+  // False while the server's HTML is being taken over, true from the first client-only render on (the server's HTML for these pages is empty anyway).
+  const mounted = useSyncExternalStore(noSubscription, () => true, () => false);
+  const restored = useRef(false);
   // The query client is created once; it reaches the latest recovery handler through this ref.
   const onUnauthorizedRef = useRef<() => void>(() => undefined);
   const [queryClient] = useState(() => {
@@ -52,9 +60,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
         },
       },
     });
-    // Saved page data goes in before the first child renders, so the first frame already has it (the reads run again behind it).
     if (typeof window !== 'undefined') {
-      restoreQueryCache(client, readSessionUserIdSync());
       // From here on, any invalidation (a deleted conversation, say) ends "not confirmed yet" for the reads it names. Done on the call, not
       // on the cache's event: a read that is already marked invalid raises no event when it is invalidated again.
       const invalidate = client.invalidateQueries.bind(client);
@@ -65,6 +71,12 @@ export default function Provider({ children }: { children: React.ReactNode }) {
     }
     return client;
   });
+  // Saved page data goes in before the signed-in pages first render. Those pages are drawn by the browser only (nothing is rendered for
+  // them on the server, so there is no server HTML for the saved data to disagree with), and the public pages never see it.
+  if (mounted && signedInArea && !restored.current) {
+    restored.current = true;
+    restoreQueryCache(queryClient, readSessionUserIdSync());
+  }
   const [supabase] = useState(() => createClient());
   // Saved page data (lib/persisted-cache.ts), put back above: a reload shows the last content at once while the same reads run again
   // behind it and replace it. Saved again a moment after any read changes, and when the page is hidden.
@@ -177,7 +189,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <Fragment key={epoch}>{children}</Fragment>
+        <Fragment key={epoch}>{signedInArea && !mounted ? null : children}</Fragment>
         {recovery.notice && (
           <UnauthorizedNotice
             reason={recovery.notice}

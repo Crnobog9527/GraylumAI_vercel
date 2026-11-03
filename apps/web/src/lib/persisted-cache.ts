@@ -116,6 +116,9 @@ export function restoreQueryCache(client: QueryClient, userId: string | null, op
   const storage = storageOf(options);
   if (!storage) return false;
   try {
+    // The saved conversations belong to one user too: another user's (or nobody's) are dropped here, whatever the reads below find.
+    const chat = storage.getItem(CHAT_KEY);
+    if (chat && (userId === null || (JSON.parse(chat) as { userId?: unknown }).userId !== userId)) storage.removeItem(CHAT_KEY);
     const raw = storage.getItem(CACHE_KEY);
     if (!raw) return false;
     const saved = JSON.parse(raw) as Partial<Saved>;

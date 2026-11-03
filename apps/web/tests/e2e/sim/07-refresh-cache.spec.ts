@@ -13,6 +13,9 @@ const HOLD = /\/api\/(turn|trpc)/;
 
 test('a reload shows the last conversation and the list at once, and another user sees none of it', async ({ page, context }) => {
   const evidence = watchPage(page);
+  const hydrationErrors: string[] = [];
+  page.on('pageerror', error => { if (/hydrat/i.test(error.message)) hydrationErrors.push(error.message.slice(0, 120)); });
+  page.on('console', message => { if (message.type() === 'error' && /hydrat/i.test(message.text())) hydrationErrors.push(message.text().slice(0, 120)); });
   await signIn(page, 'alice');
   const session = await startFreeChat(page, '用两句话说明新账号为什么要先想清楚给谁看。');
   await expect(replies(page).first()).toBeVisible({ timeout: 120_000 }).catch(async error => { await evidence('after the reply'); throw error; });
@@ -41,6 +44,8 @@ test('a reload shows the last conversation and the list at once, and another use
   expect(await page.evaluate(() => (window as unknown as { __placeholderSeen: boolean }).__placeholderSeen), 'no placeholder in any frame').toBe(false);
   await expect(page.locator('body')).not.toContainText(WAITING_WORDS);
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('graylum:')).length)).toBeGreaterThan(0);
+
+  expect(hydrationErrors, 'the saved copy never makes the server HTML and the first client render disagree').toEqual([]);
 
   // Phone width: the same first frame, nothing overflowing sideways.
   await page.setViewportSize({ width: 390, height: 844 });

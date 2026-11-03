@@ -100,6 +100,13 @@ describe('persisted query cache', () => {
     expect(s.data.get(CACHE_KEY) ?? '').not.toContain('"a"');
   });
 
+  it('drops the saved conversations of another user when it restores, even with no saved reads', () => {
+    const s = storage();
+    writeCachedChatView(OTHER, 'c1', view, { storage: s, now: NOW, build: 'b1' });
+    expect(restoreQueryCache(new QueryClient(), USER, { storage: s, now: NOW, build: 'b1' })).toBe(false);
+    expect(s.data.has(CHAT_KEY)).toBe(false);
+  });
+
   it('writes nothing for nobody and clears what was there', () => {
     const s = storage();
     persistQueryCache(client([[key(['opc', 'list']), ['a']]]), USER, { storage: s, now: NOW, build: 'b1' });
