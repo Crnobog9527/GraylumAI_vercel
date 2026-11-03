@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { dehydrate, hydrate, type DehydratedState, type QueryClient } from '@tanstack/react-query';
-import { CACHE_BUILD } from '@/lib/site-config';
+import { cacheBuild } from '@/lib/site-config';
 
 /*
  * UI-FINISH: what the logged-in pages read most (the conversation list, the open conversation, the profile and balance) is kept in this
@@ -28,7 +28,7 @@ export const MAX_BYTES = 1_500_000;
 type Saved = { v: 1; build: string; userId: string; savedAt: number; queries: DehydratedState['queries'] };
 export type Options = { storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>; now?: number; build?: string };
 
-export const buildOf = () => CACHE_BUILD;
+export const buildOf = cacheBuild;
 export const storageOf = (options?: Options) => { try { return options?.storage ?? globalThis.localStorage ?? null; } catch { return null; } };
 
 /** `opc.conversations` for a tRPC key `[['opc','conversations'], {...}]`; null for anything else. */

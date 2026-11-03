@@ -189,4 +189,4 @@ export {
 };
 
 /** The build the browser's saved page data belongs to (next.config.ts sets it from the commit; `dev` locally and in CI). */
-export const CACHE_BUILD = process.env.NEXT_PUBLIC_CACHE_BUILD ?? 'dev';
+export const cacheBuild = (): string => { try { return process.env.NEXT_PUBLIC_CACHE_BUILD ?? 'dev'; } catch { return 'dev'; } };
