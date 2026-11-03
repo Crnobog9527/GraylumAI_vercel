@@ -14,7 +14,8 @@ beforeEach(()=>{
 it('shows loading without claiming an empty directory or a new user',()=>{
  state.library={...state.library,isSuccess:false,isPending:true,data:undefined};
  const html=renderToStaticMarkup(<HomePage/>);
- expect(html).toContain('正在读取账号与资料');
+ expect(html).toContain('aria-busy="true"');
+  expect(html).not.toContain('正在读取');
  expect(html).not.toContain('暂无已发布');expect(html).not.toContain('开始新手引导');
 });
 it('starts 我已有定位 in the Agent workspace, not the library (R15)',()=>{
