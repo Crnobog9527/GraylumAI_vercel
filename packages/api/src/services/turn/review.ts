@@ -12,14 +12,18 @@ import { runRuntime } from './agent/runner';
 import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, type RequestContext } from './provider/providerRequest';
 import { freezeSharedPromptCache } from './provider/promptCache';
 import { modelCall, TurnStop } from './call';
+import { bodyBoundCall } from './bodyBound';
+import { PAYG_PROFILE_MAX_BYTES } from './admission/paygHostPolicy';
 import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
 import { readCoreConfig, GATE_CODES, type ChatDeps } from './chat';
 import { checkOutput, type CheckedOutput } from '../publishMonitor/coach/output';
 import { startThresholdCredits, turnPolicy } from './policy';
 import { turnSession } from './history';
 import { MIN_MODEL_DISPATCH_MS, type RuntimeBudget } from './settings/budget';
-import { chatQuote, QuoteError } from './quote';
+import { chatQuote, QuoteError, type ChatQuote } from './quote';
+import { openRouterBound } from './provider/openRouterPolicy';
 import { swallow } from '../../lib/swallow';
+import { logger } from '../../lib/logger';
 
 /*
  * CORE-PATH-V2 V2-12 B8b (Owner 2026-11-02 "复盘必须开"): the weekly review as a kind='review' turn, started by the scheduler for the user.
@@ -45,10 +49,28 @@ export const COACH_INSTRUCTIONS = '你是 Graylum 的运营教练，正在为用
   + '"verdict_notes":[{"experiment_id","note"}],"experiments":[{"kind":"tactic|basics|pillar_mix","layer":null,"hypothesis","action","metric",'
   + '"target":{"mult":1.3},"match":{"pillar_key","platform","format_tags":[]},"evidence":{"post_ids":[],"metrics":[]}}],"tags":[{"post_id","pillar_key"}],'
   + '"pillar_mix_proposal":null,"strategy_proposal":null,"stage_suggestion":null}。'
-  + '实验数量和种类不得超过包里 limits 的限制，每个实验必须写明平台，长期实验不写 layer；没有把握的字段留空数组或 null。';
+  + '实验数量和种类不得超过包里 limits 的限制，每个实验必须写明平台；没有把握的字段留空数组或 null。'
+  + '实验分两种写法：tactic（战术）的 layer 写 null，metric 只能是 views/likes/comments/shares/saves/followers_gained/engagement_rate 之一，'
+  + 'target 写 {"mult":1.1 到 5 之间的倍数}；basics（基本功）只在包里 diagnostics 给出了 stuck_layer 时才提，layer 写那个环节，metric 写该环节的指标，'
+  + 'target 写 {"max":数值} 或 {"min":数值}（不写 mult）；没有 stuck_layer 就只提 tactic。'
+  + 'evidence 里 post_ids 只能抄包里出现过的作品 id；metrics 只能是下面的完整写法之一，写成别的会被丢弃，拿不准就留空数组、只写 post_ids：'
+  + 'scoreboard:<支柱key>:<平台>、history:<支柱key>:<平台>、stage:followers:<平台>、stage:posts_8w、stage:day7_views_trend、'
+  + 'ledger:<实验id>、diagnostics:<作品id>:<指标名>。';
 export const COACH_REQUEST = '请为这个品牌写本期复盘。下面是代码计算的复盘包（JSON）：\n';
 /** The reply is capped far below the model's limit: a review is a page, not a report. */
 export const REVIEW_OUTPUT_TOKENS = 2000;
+/** The coach's answer is the reading and then a structured block: 2000 tokens (reasoning included) cut that block off. */
+export const COACH_OUTPUT_TOKENS = 4000;
+/** The policy the request body is built under: its upperUsd is the policy's own (context-window) bound that openRouterRequestBody
+ * re-checks against its limits; the money bound of the call is the body-measured one (bodyBoundCall), made after the body exists. */
+export function reviewCallPolicy(quote: ChatQuote) {
+  return { modelId: quote.modelId, provider: 'openrouter', account: quote.identity.account, model: quote.model,
+    protocol: 'openrouter-chat-v1' as const, providerLimits: quote.providerLimits,
+    upperUsd: openRouterBound(quote.providerLimits, quote.outputLimit).upperUsd, outputLimit: quote.outputLimit,
+    inputLimit: quote.inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
+}
+/** Room kept above the request text and instructions for the reply-language lines and the request's own wrapping. */
+export const REQUEST_ROOM_BYTES = 8192;
 
 export type ReviewClaimInput = { id: string; actorId: string; sessionId: string; requestId: string; modelId: string; maxCostUsd: string;
   cadence?: string; attempt?: number;
@@ -81,16 +103,28 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
   const guard = settings.ok ? settings.identityGuard ?? true : true;
   const coachPack = claim.coach ? (pack as { review: object }).review : null;
   const text = (coachPack ? COACH_REQUEST : REVIEW_REQUEST) + JSON.stringify(coachPack ?? pack);
+  const instructionsBase = withBrandIdentity(coachPack ? COACH_INSTRUCTIONS : REVIEW_INSTRUCTIONS, guard);
+  // The request is known before it opens: its bytes plus room for the reply-language lines and the request's own wrapping are the
+  // most that may be sent (assertRuntimeRequestCapacity), and the call's bound is the price of that much prompt and the review's
+  // output cap (reasoning included, as max_tokens counts it), not of the whole context window (bodyBoundCall measures the exact body
+  // again before it is sent).
+  const outputTokens = claim.coach ? COACH_OUTPUT_TOKENS : REVIEW_OUTPUT_TOKENS;
+  const requestBytes = Buffer.byteLength(text) + Buffer.byteLength(instructionsBase) + REQUEST_ROOM_BYTES;
+  if (requestBytes > PAYG_PROFILE_MAX_BYTES) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
   let quote;
-  try { quote = await chatQuote(admin, { configuration: await configuration, modelId: claim.modelId, inputBytes: 32000, deps: deps.pricing }); }
-  catch (error) {
+  try {
+    quote = await chatQuote(admin, { configuration: await configuration, modelId: claim.modelId, inputBytes: requestBytes,
+      bound: { promptBytes: requestBytes, outputTokens }, deps: deps.pricing });
+  } catch (error) {
     const code = error instanceof QuoteError ? error.code : 'TURN_QUOTE_UNAVAILABLE';
+    // Any other failure of the quote (e.g. the model's reasoning not configured for this use) is deferred as one code; the cause is
+    // logged as a fixed code only, never text, so a stuck review can be told from a missing setting.
+    if (!(error instanceof QuoteError)) logger.warn('billing', 'weekly_review_quote_failed', { reviewId: claim.id,
+      code: String((error as { code?: unknown } | undefined)?.code ?? (error instanceof Error ? error.message : 'UNKNOWN')).slice(0, 64) });
     return REFUSED_AS_CONFIGURATION.has(code) ? { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' } : { kind: 'deferred', code };
   }
   // The user's review cap must cover one call's bound; a lower cap (or a pricier model) never silently shortens the call.
   if (Number(quote.upperUsd) > Number(claim.maxCostUsd)) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
-  const instructionsBase = withBrandIdentity(coachPack ? COACH_INSTRUCTIONS : REVIEW_INSTRUCTIONS, guard);
-  if (Buffer.byteLength(text) + Buffer.byteLength(instructionsBase) + 4096 > quote.inputLimit) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
   const thresholds = rowFor(await configuration, RESEARCH_THRESHOLDS_KEY);
   const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q, quote.multiplier);
   if (startCredits === undefined) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
@@ -130,11 +164,9 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
       cacheWriteUsdPerMillion: quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: false });
     const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, textStream: PLAIN_TEXT_STREAM, tools: [], network: 'deny',
       reasoning: quote.reasoning, ...(promptCache ? { promptCache } : {}) };
-    const callPolicy = { modelId: quote.modelId, provider: 'openrouter', account: quote.identity.account, model: quote.model,
-      protocol: 'openrouter-chat-v1' as const, providerLimits: quote.providerLimits, upperUsd: quote.upperUsd, outputLimit: quote.outputLimit,
-      inputLimit: quote.inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
+    const callPolicy = reviewCallPolicy(quote);
     const output = await runRuntime({ model: quote.model, instructions, input: text, session: turnSession([]),
-      maxOutputTokens: Math.min(quote.outputLimit, REVIEW_OUTPUT_TOKENS), maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,
+      maxOutputTokens: Math.min(quote.outputLimit, outputTokens), maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,
       selectHistory: async (items, incoming) => [...items, ...incoming], onText: () => undefined,
       exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
@@ -146,11 +178,19 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
         // The user's switch or entitlement may have changed since the turn opened: asked again right before the paid request, and a
         // "no" stops it with nothing sent (the freeze comes back with the failed close).
         if (!(await authorize())) { stopped = new TurnStop('TURN_CALL_DENIED'); throw stopped; }
-        return modelCall(callDeps, quote, request, onChunk).catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
+        // The bound of this exact body (never above the frozen one): the adapter measures the same body and refuses any other.
+        let call;
+        try { call = bodyBoundCall(quote, request, outputTokens); }
+        catch (error) { if (error instanceof TurnStop) stopped = error; throw error; }
+        return modelCall(callDeps, call, request, onChunk).catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       } });
     if (!output.trim()) throw new Error('REVIEW_EMPTY');
     // The coach's structured block is checked item by item against the pack; what is saved as the reading is the prose without it.
     const checked = coachPack ? checkOutput(output, coachPack as Parameters<typeof checkOutput>[1]) : null;
+    // Items the check dropped are not saved anywhere: their paths and reasons (fixed codes, never text) are logged so a review that
+    // proposed nothing can be told from one whose proposals were refused.
+    if (checked?.rejected.length) logger.info('billing', 'coach_output_rejected', { reviewId: claim.id, parsed: checked.parsed,
+      rejected: checked.rejected.slice(0, 12).map(item => `${item.path}:${item.reason}`) });
     const reading = checked ? checked.body : output;
     if (!reading.trim()) throw new Error('REVIEW_EMPTY');
     // A source account disconnected while the text was written: nothing that quotes its posts is saved or charged; the next attempt

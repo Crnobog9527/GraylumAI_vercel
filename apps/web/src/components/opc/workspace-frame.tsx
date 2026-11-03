@@ -28,6 +28,7 @@ import {
 import { useAccountDiscussion } from './use-account-discussion';
 import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import styles from './workspace-frame.module.css';
+import { READ_RETRY } from '@/trpc/read-retry';
 
 type Item = {workItemId:string;sessionId:string;title:string;chatName?:string;uiRevision?:number;pinned?:boolean;archived?:boolean;deleted?:boolean;brief:string|null;day:string;revision:number;contentType?:string;lastActivityAt?:string};
 type Account = {projectId:string;platform:string;account:string;displayName?:string;uiRevision?:number;strategyDraftId?:string|null;pendingStrategyDraftId?:string|null;sourceVersionId?:string|null;sourceVersion?:number|null;profile?:Record<string,{label?:string;value?:string;status?:string}>|null;items:Item[]};
@@ -106,7 +107,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const visibleConversations=(conversations.data??[]).filter(row=>!conversationErasure.hidden.has(row.sessionId));
  const profile=trpc.user.getUserProfile.useQuery();
  // PUBLISH-MONITOR PR-7: 数据复盘 becomes a link once its admin switch is on (public booleans, no user data).
- const publishMonitor=trpc.publishMonitor.features.useQuery(undefined,{retry:false,staleTime:300_000});
+ const publishMonitor=trpc.publishMonitor.features.useQuery(undefined,{staleTime:300_000,...READ_RETRY});
  const historyRef=useRef<HTMLDivElement>(null);
  const sidebarActor=profile.data?.id;
  const [restoredActor,setRestoredActor]=useState<string>();
@@ -170,7 +171,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const assigned=new Set([...platforms.values()].flat().map(account=>account.strategyDraftId).filter(Boolean));
  const unassigned=((drafts.data?.drafts??[]) as Draft[]).filter(draft=>!assigned.has(draft.draftId));
  // The jury's mark on a draft row; the jury may be off or unreachable, which simply shows no mark.
- const reviews=trpc.fusionReview.mine.useQuery({limit:50},{enabled:unassigned.length>0||assigned.size>0,retry:false,staleTime:30_000});
+ const reviews=trpc.fusionReview.mine.useQuery({limit:50},{enabled:unassigned.length>0||assigned.size>0,staleTime:30_000,...READ_RETRY});
  const reviewMarks=latestByDraft(Array.isArray(reviews.data)?reviews.data:[]);
  const reviewNote=(draftId:string)=>{const mark=draftMark(reviewMarks.get(draftId))?.label;return mark?' · '+mark:'';};
  async function changeRecord(item:Item,action:'rename'|'pin'|'unpin'|'archive'|'restore'|'delete',name?:string){

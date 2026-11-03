@@ -10,7 +10,7 @@ import { expect, type Page } from '@playwright/test';
 import postgres, { type Sql } from 'postgres';
 
 /** What scripts/e2e-sim/run.mjs seeded (packages/api/src/scripts/e2eSim/seed.ts). Local, disposable accounts only. */
-export interface SimSeed { users: Record<'alice' | 'bob' | 'carol', { id: string; email: string; password: string }>; models: Record<string, string> }
+export interface SimSeed { users: Record<'alice' | 'bob' | 'carol' | 'warm', { id: string; email: string; password: string }>; models: Record<string, string> }
 export type SimRole = keyof SimSeed['users'];
 
 export const seed = (): SimSeed => JSON.parse(readFileSync(process.env.SIM_SEED_FILE!, 'utf8')) as SimSeed;
@@ -40,10 +40,23 @@ export async function simCalls(): Promise<Array<{ model: string; role: string; f
   return ((await (await fetch(`${process.env.SIM_ORIGIN}/__sim/calls`)).json()) as { calls: Array<{ model: string; role: string; fault: string | null }> }).calls;
 }
 
+/**
+ * Waits until the page's scripts have taken over the login form: React marks a DOM node it has hydrated with a `__reactProps$…` key. The
+ * form is rendered on the server and shows up long before its submit handler is attached; a click in between submits the form
+ * natively (the page goes to /login? and nothing is signed in), which is what failed a journey on CI on 2026-11-03.
+ */
+export async function waitForHydratedForm(page: Page) {
+  await page.waitForFunction(() => {
+    const form = document.querySelector('form');
+    return form !== null && Object.keys(form).some(key => key.startsWith('__reactProps$'));
+  }, undefined, { timeout: 60_000 });
+}
+
 /** Signs in through the real login page. */
 export async function signIn(page: Page, role: SimRole) {
   const user = seed().users[role];
   await page.goto('/login');
+  await waitForHydratedForm(page);
   await page.locator('#email, input[type="email"]').first().fill(user.email);
   await page.locator('#password, input[type="password"]').first().fill(user.password);
   await page.locator('button[type="submit"]').first().click();
@@ -102,4 +115,21 @@ export async function runRecovery() {
   const response = await fetch(`${process.env.SIM_BASE_URL}/api/cron/runtime-recovery`,
     { headers: { authorization: `Bearer ${process.env.SIM_CRON_SECRET}` }, signal: AbortSignal.timeout(90_000) });
   return { status: response.status, body: await response.json().catch(() => null) as unknown };
+}
+
+/**
+ * Failure evidence for a journey that waits on the page: the CI job uploads no screenshot or trace, so what the page showed, what
+ * the browser logged and which requests failed must reach the job log. Local simulated data only.
+ */
+export function watchPage(page: Page) {
+  const failed: string[] = [], errors: string[] = [];
+  page.on('response', response => { if (response.status() >= 400) failed.push(`${response.status()} ${response.request().method()} ${response.url().replace(/^https?:\/\/[^/]+/, '').slice(0, 120)}`); });
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text().slice(0, 200)); });
+  page.on('pageerror', error => errors.push(String(error.message).slice(0, 200)));
+  return async function report(label: string) {
+    const text = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '(no page text)');
+    console.log(`[page evidence] ${label} url=${page.url().replace(/session=[0-9a-f-]+/, 'session=…')}\n`
+      + `failed requests: ${JSON.stringify(failed.slice(-15))}\nbrowser errors: ${JSON.stringify(errors.slice(-10))}\n`
+      + `page text: ${text.replace(/\s+/g, ' ').slice(0, 600)}`);
+  };
 }

@@ -61,6 +61,53 @@ it('a call bound above the review cap opens nothing and ends the week as a confi
  expect(of(d.calls,'turn_open')).toHaveLength(0);
  expect(m.run).not.toHaveBeenCalled();
 });
+it('the call is quoted on the request it will send: the bound is made on its bytes and the review\'s own output, and a bigger pack asks for more',async()=>{
+ const {REVIEW_REQUEST,REVIEW_INSTRUCTIONS,REQUEST_ROOM_BYTES,REVIEW_OUTPUT_TOKENS}=await import('./review');
+ const {withBrandIdentity}=await import('../modelIdentity/brandIdentity');
+ const bytes=(pack:object)=>Buffer.byteLength(REVIEW_REQUEST+JSON.stringify(pack))+Buffer.byteLength(withBrandIdentity(REVIEW_INSTRUCTIONS,true))+REQUEST_ROOM_BYTES;
+ for(const pack of [{kind:'my_posts'},{kind:'my_posts',rows:'x'.repeat(30000)}]){
+  m.quote.mockClear();
+  await runReviewTurn(deps().deps,claim,pack,async()=>true);
+  expect(m.quote).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({inputBytes:bytes(pack),
+   bound:{promptBytes:bytes(pack),outputTokens:REVIEW_OUTPUT_TOKENS}}));
+ }
+ expect(bytes({kind:'my_posts',rows:'x'.repeat(30000)})).toBeGreaterThan(bytes({kind:'my_posts'})+29000);
+});
+it('a coach review asks for the larger output cap in its quote and in the request, a plain one for the small one',async()=>{
+ const {COACH_OUTPUT_TOKENS,REVIEW_OUTPUT_TOKENS}=await import('./review');
+ await runReviewTurn(deps().deps,{...claim,coach:true},{review:{kind:'review_pack'}},async()=>true);
+ expect(m.quote).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({bound:expect.objectContaining({outputTokens:COACH_OUTPUT_TOKENS})}));
+ expect(m.run).toHaveBeenLastCalledWith(expect.objectContaining({maxOutputTokens:COACH_OUTPUT_TOKENS}));
+ await runReviewTurn(deps().deps,claim,{kind:'my_posts'},async()=>true);
+ expect(m.quote).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({bound:expect.objectContaining({outputTokens:REVIEW_OUTPUT_TOKENS})}));
+ expect(m.run).toHaveBeenLastCalledWith(expect.objectContaining({maxOutputTokens:REVIEW_OUTPUT_TOKENS}));
+});
+it('a quote that fails with something other than a quote error is deferred and its cause is logged as a code',async()=>{
+ const {logger}=await import('../../lib/logger');
+ const warn=vi.spyOn(logger,'warn').mockImplementation(()=>undefined);
+ m.quote.mockRejectedValueOnce(Object.assign(new Error('RUNTIME_REASONING_NOT_CONFIGURED'),{code:'RUNTIME_REASONING_NOT_CONFIGURED'}));
+ expect(await runReviewTurn(deps().deps,claim,{kind:'my_posts'},async()=>true)).toEqual({kind:'deferred',code:'TURN_QUOTE_UNAVAILABLE'});
+ expect(warn).toHaveBeenCalledWith('billing','weekly_review_quote_failed',{reviewId:claim.id,code:'RUNTIME_REASONING_NOT_CONFIGURED'});
+ warn.mockRestore();
+});
+it('what the coach check drops is logged by path and reason, never as text',async()=>{
+ const {logger}=await import('../../lib/logger');
+ const info=vi.spyOn(logger,'info').mockImplementation(()=>undefined);
+ // The model answered without the structured block: the reading is kept and the dropped part is on record.
+ await runReviewTurn(deps().deps,{...claim,coach:true},{review:{mode:'full',cadence:'weekly',limits:{experiments_max:3,experiment_kinds:['tactic'],
+  strategy_proposal:false,pillar_mix_proposal:false},strategy:{pillars:[]},diagnostics:{posts:[]},ledger:{to_review:[]},stage:{followers:[]}}},async()=>true);
+ expect(info).toHaveBeenCalledWith('billing','coach_output_rejected',{reviewId:claim.id,parsed:false,rejected:[':no_block']});
+ info.mockRestore();
+});
+it('a request too large for any profile opens nothing, and a quote refused as too large is a configuration skip',async()=>{
+ const d=deps();
+ expect(await runReviewTurn(d.deps,claim,{rows:'x'.repeat(200000)},async()=>true)).toEqual({kind:'skipped',reason:'CONFIGURATION_REQUIRED'});
+ expect(m.quote).not.toHaveBeenCalled();
+ const {QuoteError}=await import('./quote');
+ m.quote.mockRejectedValueOnce(new QuoteError('TURN_INPUT_TOO_LARGE'));
+ expect(await runReviewTurn(d.deps,claim,{kind:'my_posts'},async()=>true)).toEqual({kind:'skipped',reason:'CONFIGURATION_REQUIRED'});
+ expect(of(d.calls,'turn_open')).toHaveLength(0);
+});
 it('a model that is not admitted, or no start threshold for it, is a configuration skip; other quote failures are deferred',async()=>{
  m.quote.mockRejectedValueOnce(Object.assign(new Error('x'),{code:'TURN_MODEL_NOT_ADMITTED'}));
  expect((await runReviewTurn(deps().deps,claim,{},async()=>true)).kind).toBe('deferred');

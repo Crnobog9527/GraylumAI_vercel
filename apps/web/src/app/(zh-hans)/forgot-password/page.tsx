@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
+import { useHydrated } from '@/hooks/use-hydrated';
 import {
   AUTH_INPUT_CLASS,
   AUTH_LINK_CLASS,
@@ -36,6 +37,7 @@ export default function ForgotPasswordPage() {
 
 function ForgotPasswordContent() {
   const searchParams = useSearchParams();
+  const hydrated = useHydrated();
   const [email, setEmail] = useState('');
   const [pending, setPending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -94,7 +96,8 @@ function ForgotPasswordContent() {
       title="重置密码"
       description="填写注册时使用的邮箱，我们会发送一封重置密码的邮件。通过邮件中的链接设置新密码后，用新密码登录。"
     >
-      <form className="space-y-4" onSubmit={handleSubmit}>
+      {/* method="post": a native submit (before the page's scripts have taken the form over) must never put a field in the URL. */}
+      <form className="space-y-4" method="post" onSubmit={handleSubmit}>
         <div className="space-y-2">
           <Label htmlFor="email" className="text-[#f2f2f2]">
             邮箱
@@ -113,8 +116,10 @@ function ForgotPasswordContent() {
 
         {status && <AuthStatusBanner status={status} />}
 
-        <Button type="submit" disabled={pending || cooldown > 0} className={AUTH_PRIMARY_BUTTON_CLASS}>
-          {pending ? (
+        <Button type="submit" disabled={pending || cooldown > 0 || !hydrated} className={AUTH_PRIMARY_BUTTON_CLASS}>
+          {!hydrated ? (
+            '加载中...'
+          ) : pending ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
               发送中...
