@@ -17,17 +17,13 @@ export function assertSnapshotSize(report: string, materials: unknown) {
 /** `history`: earlier turns of the conversation as plain messages (compare columns, FUSION-COMPARE §3.2); reviews send none. */
 export type FusionRequest = { instructions: string; input: string; history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   responseFormat?: Record<string, unknown> };
-const cached = (text: string) => [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
-/** PROMPT-CACHE-ALL: on an Anthropic route with a frozen write price, the host-written system message (shared by every
- * review or compare of the same kind) and the last earlier turn of a compare are cache breakpoints; the text is unchanged. */
-const messagesOf = (request: FusionRequest, cache = false) => {
-  const history = request.history ?? [];
-  return [{ role: 'system', content: cache ? cached(request.instructions) : request.instructions },
-    ...history.map((turn, index) => cache && index === history.length - 1 && turn.content ? { ...turn, content: cached(turn.content) } : turn),
-    { role: 'user', content: request.input }];
-};
-export const cacheMarkersFor = (policy: Pick<z.infer<typeof frozenCallPolicy>, 'model' | 'providerLimits'>) =>
-  policy.model.startsWith('anthropic/') && policy.providerLimits?.cacheWriteUsdPerMillion !== undefined;
+/**
+ * No cache breakpoints (2026-11-04, staging's 14 days of real calls): each review seat and each compare column is one request that
+ * nothing reads again within the cache's 5 minutes (jury 15 writes, compare 4, 0 reads), so a breakpoint only added Anthropic's 1.25x
+ * write price. #1501's markers are withdrawn here; the free chat, mentor, report and the scheduled review keep theirs.
+ */
+const messagesOf = (request: FusionRequest) =>
+  [{ role: 'system', content: request.instructions }, ...(request.history ?? []), { role: 'user', content: request.input }];
 
 /** Exact provider bytes for one Fusion call. The host writes every message: no brand identity
  * statement is added (Fusion shows the real model name), no history, no tools and no tool_choice;
@@ -47,7 +43,7 @@ export function fusionRequestBody(policy: z.infer<typeof frozenCallPolicy>, requ
   const { plugins } = openRouterSearchParameters(policy.model, false);
   return JSON.stringify({
     model: policy.model, stream: true, stream_options: { include_usage: true }, store: false,
-    messages: messagesOf(request, cacheMarkersFor(policy)),
+    messages: messagesOf(request),
     provider: openRouterBound(policy.providerLimits, policy.outputLimit).routing, max_tokens: outputLimit,
     ...frozenReasoningFields(reasoning),
     ...(request.responseFormat ? { response_format: request.responseFormat } : {}),

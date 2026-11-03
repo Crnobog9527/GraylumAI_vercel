@@ -142,7 +142,7 @@ it('a brand review builds its pack with the handbooks of the pinned Skill packag
  await advanceReview(d.db,c,{...options(),env});
  const given=m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>;
  expect([...given.keys()]).toEqual(['douyin']);
- expect(d.calls.some(x=>x[0]==='fusion_review_skill_file'&&x[1].p_path==='handbook/douyin.json')).toBe(true);
+ expect(d.calls.some(x=>x[0]==='fusion_review_skill_file'&&x[1].p_path==='handbook/douyin.yaml')).toBe(true);
  m.build.mockClear();
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect((m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>).size).toBe(0);
