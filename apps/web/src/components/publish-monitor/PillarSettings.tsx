@@ -19,7 +19,8 @@ type Brand = { businessId: string; businessName: string | null; pillars: Array<{
 const SAVE_ERRORS: Record<string, string> = {
   PUBLISH_MONITOR_PILLAR_NAME_INVALID: '名称要 1–40 个字。',
   PUBLISH_MONITOR_PILLAR_NAME_DUPLICATE: '两个内容方向不能同名。',
-  PUBLISH_MONITOR_PILLAR_KEY_INVALID: '这个品牌的内容方向刚在别处改过，请刷新页面后再改。',
+  PUBLISH_MONITOR_PILLAR_KEY_INVALID: '这个品牌的内容方向刚在别处改过，已重新读取，请再改一次。',
+  PUBLISH_MONITOR_PILLARS_CHANGED: '这个品牌的内容方向刚在别处改过，已重新读取，请再改一次。',
   PUBLISH_MONITOR_BUSINESS_NOT_FOUND: '找不到这个品牌，可能已删除或归档。',
 };
 const muted = { color: 'var(--text-secondary)' };
@@ -45,7 +46,7 @@ export function PillarSettings() {
           删除后这个方向下的作品会回到“未分类”。名称用标题里真会出现的词（例如“读书笔记”），至少 2 个字，复盘才能按标题自动归类。</p>
       </div>
       {pillars.isPending ? <PillarSkeleton />
-        : (pillars.data as Brand[]).map(b => <BrandPillars key={`${b.businessId}:${b.pillars.map(p => `${p.key}=${p.name}`).join('|')}`} brand={b} />)}
+        : (pillars.data as Brand[]).map(b => <BrandPillars key={b.businessId} brand={b} />)}
     </section>
   );
 }
@@ -65,10 +66,23 @@ function BrandPillars({ brand }: { brand: Brand }) {
   // Each draft row has its own id, so moving or deleting a row never moves another row's typing.
   const [rows, setRows] = useState<DraftRow[]>(() => saved.map((r, uid) => ({ ...r, uid })));
   const [nextUid, setNextUid] = useState(saved.length);
+  // When the saved list changes (this save, or another window's that made this one out of date) the draft starts again from it;
+  // the save's message stays, so the user knows why.
+  const savedText = JSON.stringify(saved);
+  const [seen, setSeen] = useState(savedText);
+  if (seen !== savedText) {
+    setSeen(savedText);
+    setRows(saved.map((r, uid) => ({ ...r, uid: nextUid + uid })));
+    setNextUid(nextUid + saved.length);
+  }
   const plain = rows.map(r => ({ key: r.key, name: r.name }));
   const save = trpc.publishMonitor.review.savePillars.useMutation({ onSuccess: () => utils.publishMonitor.review.pillars.invalidate(),
     // Changed elsewhere meanwhile: read the current list again so the next try starts from it.
-    onError: e => { if (errorCode(e) === 'PUBLISH_MONITOR_PILLAR_KEY_INVALID') void utils.publishMonitor.review.pillars.invalidate(); } });
+    onError: e => {
+      if (['PUBLISH_MONITOR_PILLAR_KEY_INVALID', 'PUBLISH_MONITOR_PILLARS_CHANGED'].includes(errorCode(e) ?? '')) {
+        void utils.publishMonitor.review.pillars.invalidate();
+      }
+    } });
   const dirty = JSON.stringify(plain) !== JSON.stringify(saved);
   const problem = draftProblem(rows);
   const removed = saved.filter(s => !rows.some(r => r.key === s.key)).map(s => s.name);
@@ -97,7 +111,8 @@ function BrandPillars({ brand }: { brand: Brand }) {
         <Button type="button" size="sm" variant="outline" disabled={rows.length >= PILLARS_MAX}
           onClick={() => { setRows([...rows, { key: null, name: '', uid: nextUid }]); setNextUid(nextUid + 1); }}>添加内容方向</Button>
         {dirty && <Button type="button" size="sm" disabled={!!problem || save.isPending}
-          onClick={() => save.mutate({ businessId: brand.businessId, pillars: plain.map(r => ({ key: r.key, name: r.name.trim() })) })}>保存</Button>}
+          onClick={() => save.mutate({ businessId: brand.businessId, pillars: plain.map(r => ({ key: r.key, name: r.name.trim() })),
+            base: brand.pillars.map(p => ({ key: p.key, name: p.name })) })}>保存</Button>}
         {dirty && <Button type="button" size="sm" variant="ghost" disabled={save.isPending}
           onClick={() => { setRows(saved.map((r, uid) => ({ ...r, uid }))); save.reset(); }}>
           撤销</Button>}

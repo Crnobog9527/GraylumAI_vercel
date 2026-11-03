@@ -16,9 +16,12 @@ export const pillarsSaveInput=z.object({businessId:z.string().uuid(),
  pillars:z.array(z.object({key:z.string().regex(/^[a-z0-9_]{1,16}$/).nullable(),name:z.string().trim().min(1)
   // Characters, as the database counts them (an emoji is one), not UTF-16 units.
   .refine(n=>Array.from(n).length<=40)}).strict())
-  .max(PILLARS_MAX)}).strict();
+  .max(PILLARS_MAX),
+ /** The list the page read: a save built on an out-of-date list is refused (PILLARS_CHANGED) instead of undoing another window. */
+ base:z.array(z.object({key:z.string().regex(/^[a-z0-9_]{1,16}$/),name:z.string().max(200)}).strict()).max(PILLARS_MAX)}).strict();
 /** Codes the page can say in words; anything else is the generic failure. */
 const USER_ERRORS=['PUBLISH_MONITOR_PILLAR_NAME_INVALID','PUBLISH_MONITOR_PILLAR_NAME_DUPLICATE','PUBLISH_MONITOR_PILLAR_KEY_INVALID',
+ 'PUBLISH_MONITOR_PILLARS_CHANGED',
  'PUBLISH_MONITOR_BUSINESS_NOT_FOUND','PUBLISH_MONITOR_ACCOUNT_CLOSED','PUBLISH_MONITOR_INPUT_INVALID'] as const;
 type Rpc=Pick<SupabaseClient,'rpc'>;
 /** The comparison title tagging uses (coach/autotag.ts): names equal under it are one name. */
@@ -39,7 +42,7 @@ export async function readPillars(db:Rpc,actor:string){
 export async function savePillars(db:Rpc,actor:string,input:z.infer<typeof pillarsSaveInput>){
  const names=input.pillars.map(p=>pillarNameKey(p.name));
  if(new Set(names).size!==names.length)throw new TRPCError({code:'BAD_REQUEST',message:'PUBLISH_MONITOR_PILLAR_NAME_DUPLICATE'});
- const r=await db.rpc('publish_monitor_coach_pillars_save',{a:actor,p_business_id:input.businessId,p_pillars:input.pillars});
+ const r=await db.rpc('publish_monitor_coach_pillars_save',{a:actor,p_business_id:input.businessId,p_pillars:input.pillars,p_base:input.base});
  if(r.error)fail(r.error.message);
  return z.object({businessId:z.string().uuid(),pillars:z.array(pillar),source:z.literal('user'),removed:z.array(z.string())}).parse(r.data);
 }
