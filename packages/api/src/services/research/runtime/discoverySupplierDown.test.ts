@@ -15,7 +15,7 @@ const id = '11111111-1111-4111-8111-111111111111';
 const discoveryId = '22222222-2222-4222-8222-222222222222';
 const now = new Date('2026-11-03T08:00:00Z');
 
-function fixture(reason: string, httpStatus: number) {
+function fixture(reason: string, httpStatus: number, posts?: string[]) {
   const operations = new Map<string, RuntimeOperation>();
   const discoveries = new Map<string, DiscoveryRecord>();
   const evidence = { open: vi.fn(), dispatch: vi.fn(), finish: vi.fn(), link: vi.fn(), cancel: vi.fn() };
@@ -48,6 +48,15 @@ function fixture(reason: string, httpStatus: number) {
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
     if (request.vendor !== 'tikhub') throw new Error('unexpected vendor');
+    // `posts`: the keyword searches work and return these authors' posts; only the other lookups are refused.
+    if (posts && request.call.kind === 'keyword_posts') {
+      const items = posts.map((author, n) => ({ fields: { id: `${author}-v${n}`, authorId: author, author: `Name ${author}`, title: 'video',
+        publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] as string[] }));
+      operations.set(operationId, { state: 'succeeded', identityHash: requestIdentity(request),
+        result: { items, outcome: 'ok', reason: null, fetchedAt: now.toISOString(), truncated: false } });
+      return { sent: true, operationId, callId: id, result: { vendor: 'tikhub', route: request.route, outcome: 'ok', reason: null,
+        httpStatus: 200, supplierMayCharge: true, usage: { unit: 'call', units: '1' }, items, truncated: false, fetchedAt: now.toISOString() } };
+    }
     operations.set(operationId, { state: 'failed', identityHash: requestIdentity(request),
       result: { items: [], outcome: 'failed', reason, fetchedAt: now.toISOString(), truncated: false } });
     return { sent: true, operationId, callId: id, result: { vendor: 'tikhub', route: request.route, outcome: 'failed', reason,
@@ -99,5 +108,16 @@ describe('a benchmark discovery the supplier could not serve', () => {
       expect(again.reason).not.toBe('SUPPLIER_UNAVAILABLE');
       expect(f.discoveries.get(discoveryId)?.cursor).not.toHaveProperty('supplierDown');
     }
+  });
+
+  it('the search returned posts and only the profile lookups were refused: the round got data, so it is no outage round (review P2)', async () => {
+    const f = fixture('HTTP_402', 402, ['a0', 'a1', 'a2']);
+    const envelope = JSON.parse(await discover(f.ctx, start, { left: 25, used: 0 }));
+    expect(envelope.reason).not.toBe('SUPPLIER_UNAVAILABLE');
+    expect(envelope.nextStep ?? '').not.toContain('不要建议换关键词，不要说已经搜完');
+    expect(f.discoveries.get(discoveryId)?.cursor).not.toHaveProperty('supplierDown');
+    const again = JSON.parse(await discover(f.ctx, { discoveryId } as never, { left: 25, used: 0 }));
+    expect(again.reason).not.toBe('SUPPLIER_UNAVAILABLE');
+    expect(f.discoveries.get(discoveryId)?.cursor).not.toHaveProperty('supplierDown');
   });
 });
