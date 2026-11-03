@@ -24,7 +24,7 @@ setup('start the run clock', async () => {
   await mkdir(resultsDirectory, { recursive: true });
   await saveAccounts({});
   // A new run starts from nothing: last run's spend state (it may be over the cap) and compare choice must not leak in.
-  await Promise.all(['spend.json', 'summary.md', 'compare-model.json'].map(name => rm(path.join(resultsDirectory, name), { force: true })));
+  await Promise.all(['spend.json', 'summary.md', 'compare-model.json', 'daily-turns.json', 'daily-draft.txt'].map(name => rm(path.join(resultsDirectory, name), { force: true })));
   await writeFile(path.join(resultsDirectory, 'run.json'), JSON.stringify({ startedAt: new Date().toISOString() }));
 });
 
