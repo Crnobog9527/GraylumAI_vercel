@@ -12,8 +12,9 @@ const root = resolve(import.meta.dirname, '../..');
 // Ratchets: lowering these is the point of the work; raising them needs a reviewed reason.
 const MAX_EXCLUDED_SUITES = 86;
 const MAX_VOLATILITY_ALLOWED = 0;
+// erasure-run and bill-unit left with the old runs and BILL2 path (V2-12); their turn-path counterparts are turn-erasure and turn-core.
 const REQUIRED_IN_CI = ['pay-dispute', 'pay-waffo', 'pay-waffo-delivery', 'monthly-refund', 'package-refund',
-  'erasure-run', 'erasure-completion', 'bill-unit', 'credit-sources', 'publish-monitor', 'report-revision',
+  'erasure-completion', 'credit-sources', 'publish-monitor', 'report-revision',
   'stripe-upgrade-overlap', 'paywall-profile-archive'];
 
 test('excluded suites exist, carry a reason and a date, and never exceed the ratchet', () => {
