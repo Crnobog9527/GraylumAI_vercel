@@ -4,7 +4,7 @@
 //   - a pull request into staging whose changed files are all on the allow-list below (Owner 2026-11-01: pure front-end and docs PRs).
 // A draft pull request is judged exactly like a ready one (Owner 2026-11-03 replaced the 2026-11-01 draft skip).
 // It also says whether the pull request is documentation only (docs_only): the simulated-model browser tests skip then, and only then
-// (a front-end change is exactly what a browser test is for). docs_only reads the same documentation rule as the allow-list and adds
+// (a front-end change is exactly what a browser test is for). docs_only is a subset of the allow-list (isDocsPath below) and adds
 // nothing to it.
 // Usage (CI): node scripts/ci-test-scope.mjs   -- reads GITHUB_EVENT_NAME / GITHUB_BASE_REF, writes full=true|false and
 // docs_only=true|false to $GITHUB_OUTPUT.
@@ -33,9 +33,14 @@ export function isSkippablePath(path) {
   return /\.(tsx|css)$/.test(name) || /\.test\.tsx?$/.test(name);
 }
 
-// Documentation only: on the allow-list through its documentation rule (docs/ or .md), never through the front-end rule.
+// Documentation only (docs_only): a file that is on the allow-list AND is plainly a document. Narrower than the allow-list on purpose:
+//   - under docs/ or at the repository root (README.md, AGENTS.md ...), never a markdown file elsewhere (apps/web/content, fixtures);
+//   - with a documentation extension. docs/ also holds .mjs, .sql, .graphql and .json files: those can be run or read by tooling,
+//     so a change to one of them is not documentation only.
+const DOCUMENT_EXTENSION = /\.(md|txt|csv|png|jpe?g|gif|svg|html)$/i;
 export function isDocsPath(path) {
-  return isSkippablePath(path) && (path.startsWith('docs/') || path.endsWith('.md'));
+  if (!isSkippablePath(path) || !DOCUMENT_EXTENSION.test(path)) return false;
+  return path.startsWith('docs/') || !path.includes('/');
 }
 
 // { full, docsOnly, reason }. Unknown, missing or empty input always means the full suite, and never docs only.
