@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChatInlineNotice } from "@/components/chat/ChatInlineNotice";
 import styles from "./capture-checklist.module.css";
 import { EMPTY_VALUE, type ChecklistField, type ReviewProblem, type VisibleStep } from "./capture-state";
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export type StepReviewProps = {
   title: string;
@@ -50,7 +51,7 @@ export function StepReviewDialog(props: StepReviewProps) {
         <header><h2>核对并确认：{props.title}</h2>
           <button type="button" aria-label="关闭核对" disabled={props.busy} onClick={props.onClose}>×</button></header>
         <p>确认的是下面你看到的这一版内容。还没处理的“根据对话整理的更新”不会被确认，确认后仍可采用。</p>
-        {props.loading && <ChatInlineNotice tone="status" busy>正在读取已保存的内容，请稍候再核对。</ChatInlineNotice>}
+        {props.loading && <PageSkeleton compact rows={2} label="已保存的内容读取中"/>}
         {props.loadError && <ChatInlineNotice tone="warning" alert>
           读取未完成，暂时不能确认。请关闭核对页后重试，你的输入仍保留。
         </ChatInlineNotice>}

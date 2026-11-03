@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import type { LibraryDocument } from '@/hooks/use-library-documents';
 import { libraryErrorMessage } from '@/lib/library-documents/format';
 import styles from './my-documents.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /** Segments shown per screen (the range endpoint allows up to 50). */
 export const READER_PAGE = 5;
@@ -45,7 +46,7 @@ export function DocumentReader({ doc }: { doc: LibraryDocument }) {
 
   const error = directory.error ?? page.error;
   if (error) return <p role="alert" className={styles.error}>{libraryErrorMessage(error)}</p>;
-  if (directory.isPending) return <p className={styles.hint}>正在读取内容…</p>;
+  if (directory.isPending) return <PageSkeleton compact rows={3} label="内容读取中"/>;
   if (!total) {
     return <p className={styles.hint}>{doc.format === 'pdf'
       ? '这个 PDF 没有可以直接读取的文字。扫描页需要识别后才能显示，识别功能即将开放。'
@@ -67,7 +68,7 @@ export function DocumentReader({ doc }: { doc: LibraryDocument }) {
     </nav>}
     <div className={styles.readerBody}>
       <p className={styles.hint}>第 {start + 1}–{last} 段，共 {total} 段{current ? ' · ' + current.title : ''}</p>
-      {page.isPending && <p className={styles.hint}>正在读取内容…</p>}
+      {page.isPending && <PageSkeleton compact rows={3} label="内容读取中"/>}
       {segments.map((segment) => <section key={segment.ordinal} className={styles.segment} aria-label={'第 ' + (segment.ordinal + 1) + ' 段'}>
         {starts.has(segment.ordinal) && <h4>{segment.title}</h4>}
         {starts.has(segment.ordinal) && doc.format !== 'pdf' ? bodyWithoutHeading(segment.body, segment.title) : segment.body}

@@ -1,9 +1,9 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { JOB_OPEN, jobSummary, platformName, publishErrorMessage, type JobState } from '@/lib/publish-monitor/publish-flow';
 import { trpc } from '@/trpc/client';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
  * One publish job, read from the server only (never a media link). An open job is re-read every 15 seconds from our
@@ -16,7 +16,7 @@ export function PublishStatus({ jobId, onRetry, onDone }: { jobId: string; onRet
     retry: false, refetchInterval: query => (query.state.data && JOB_OPEN(query.state.data.state as JobState) ? 15_000 : false),
   });
   const refresh = trpc.publishMonitor.publish.refresh.useMutation({ onSuccess: () => job.refetch() });
-  if (job.isLoading) return <div className="flex justify-center p-6"><Loader2 className="h-5 w-5 animate-spin" /></div>;
+  if (job.isLoading) return <PageSkeleton compact rows={2} label="发布状态读取中" />;
   if (job.error || !job.data) {
     return <p role="alert" className="text-sm">{publishErrorMessage(job.error?.message, job.error?.data?.code)}</p>;
   }

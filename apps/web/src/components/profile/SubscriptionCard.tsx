@@ -22,6 +22,7 @@ import { useMethodCheckout } from '@/components/paywall/useMethodCheckout';
 import { MethodCheckoutDialog, type MethodCheckoutTarget } from '@/components/paywall/MethodCheckoutDialog';
 import { CHECKOUT_COPY, founderSeatsLeft } from '@/components/paywall/methodCheckout';
 import { pickPaywallPlans } from '@/components/paywall/paywallPlans';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 export { ProfileCatalogState, CreditPackagesSection };
 
 interface MockUser {
@@ -341,9 +342,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       {/* Plans Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {plansLoading ? (
-          <div className="col-span-3 text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
-            加载中...
-          </div>
+          <div className="col-span-3"><PageSkeleton compact rows={3} label="会员方案读取中" /></div>
         ) : plansError ? (
           <ProfileCatalogState
             status="unavailable"

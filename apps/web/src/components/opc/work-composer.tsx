@@ -12,6 +12,7 @@ import { ComposerView, SkillMenuView } from './composer-view';
 import { attachmentAccept, attachmentFormatsText, useComposerAttachments } from './composer-attachments';
 import { ComposerImages, type ChatImages } from './composer-image';
 import { CHAT_MAX_IMAGES, imageFiles } from '@/lib/chat-image';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
  * One input surface for free conversation, positioning and topic work.
@@ -95,7 +96,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
   onToggleSkills={toggleSkills}
   skillMenu={<SkillMenuView query={query} onQuery={setQuery} onClose={()=>setMenu(null)} skills={skills} onPick={changeSkill}
    hint={onSkillChange?'加载到本对话，不自动发送':'使用此技能开展独立对话'}
-   status={choices.isLoading?<p role="status">正在读取技能…</p>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:undefined}/>}
+   status={choices.isLoading?<PageSkeleton compact rows={2} label="技能读取中"/>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:undefined}/>}
   counter={nearLimit?{length:value.length,max:maxLength}:null}
   skillName={selected?choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能':undefined}
   sendDisabled={cannotSend} onSend={sendAndFocus} status={attachments.status} error={error} note={note}/>;

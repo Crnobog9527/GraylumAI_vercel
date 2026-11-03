@@ -6,6 +6,7 @@ import { trpc } from '@/trpc/client';
 import { canClearRequestId, generationJustEnded, voiceErrorCode, voiceErrorMessage, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
 import { MyVoiceView } from './my-voice-view';
 import styles from './my-voice.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /** A generation request id survives a refresh, so retrying the same click never starts a second paid call. */
 const REQUEST_KEY = 'voice-generate-request';
@@ -65,7 +66,7 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
     });
   }
 
-  if (query.isPending) return <div className={styles.root}><p className={styles.hint}>正在读取…</p></div>;
+  if (query.isPending) return <div className={styles.root}><PageSkeleton compact rows={3} label="我的文风读取中" /></div>;
   if (!state) return <div className={styles.root}><p className={styles.warn}>{voiceErrorMessage(query.error)}</p>
     <button type="button" onClick={() => void query.refetch()}>重试</button></div>;
   return <MyVoiceView state={state} preferred={preferred ?? []} busy={busy} generating={generate.isPending}

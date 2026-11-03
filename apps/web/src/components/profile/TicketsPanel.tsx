@@ -18,6 +18,7 @@ import {
 import { trpc } from '@/trpc/client';
 import { logClientDevError } from '@/lib/client-log';
 import { useTicketAttachments } from '@/hooks/use-ticket-attachments';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 interface MockUser {
   email?: string;
@@ -167,9 +168,7 @@ const TicketListView = memo(function TicketListView({
 
       {/* Ticket List */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
-        </div>
+        <PageSkeleton compact rows={4} label="工单读取中" />
       ) : errorMessage ? (
         <div className="text-center py-12">
           <AlertCircle className="h-12 w-12 mx-auto mb-4" style={{ color: '#EF4444' }} />

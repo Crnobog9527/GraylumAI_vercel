@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import { AmountFactList, DocumentStatusBadge, PaymentDocumentLinks } from '@/components/payments/PaymentDocumentLinks';
 import { buildUserAmountFactRows, getPaymentChannelLabel, getTaxInclusivePaid } from '@/lib/payment-display';
 import { getBillingRecordStatusPresentation } from './billingRecordStatus';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat('en-US', {
@@ -54,9 +55,7 @@ export default function BillingRecordsCard() {
       </div>
 
       {isLoading ? (
-        <div className="py-8 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
-          正在加载账单记录...
-        </div>
+        <PageSkeleton compact rows={3} label="账单记录读取中" />
       ) : isError ? (
         <div
           role="alert"

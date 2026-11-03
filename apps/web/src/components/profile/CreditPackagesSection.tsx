@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
 import { CreditPackagePriceTag } from './creditPackagePrice';
 import { ProfileCatalogState } from './ProfileCatalogState';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   PACK_MEMBERS_ONLY_NOTICE, PACK_RENEWAL_GRACE_NOTICE, creditPackBuyState, isPaidMember, memberPackReady, type PackEntitlement,
 } from './creditPackageGate';
@@ -79,9 +80,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {isLoading ? (
-          <div className="col-span-4 text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
-            加载中...
-          </div>
+          <div className="col-span-4"><PageSkeleton compact rows={3} label="积分包读取中" /></div>
         ) : isError ? (
           <ProfileCatalogState
             status="unavailable"
