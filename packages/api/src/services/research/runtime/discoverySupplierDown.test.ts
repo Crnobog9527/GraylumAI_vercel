@@ -64,7 +64,7 @@ const start = { keywordConfirmationId: id, platforms: ['xiaohongshu'] } as never
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('a benchmark discovery the supplier could not serve', () => {
-  it('says the supplier is unavailable and shows no card', async () => {
+  it('says the supplier is unavailable, saves the round with the mark (0492: not a round) and shows no card', async () => {
     const f = fixture('HTTP_402', 402);
     const envelope = JSON.parse(await discover(f.ctx, start, { left: 25, used: 0 }));
     expect(envelope).toMatchObject({ status: 'unavailable', reason: 'SUPPLIER_UNAVAILABLE', candidateCard: { shown: false }, availableCandidates: 0 });
@@ -73,7 +73,7 @@ describe('a benchmark discovery the supplier could not serve', () => {
     // Web searches in the same round may have been charged: the coach is never told that nothing was.
     expect(envelope.nextStep).not.toContain('扣用户积分');
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'completed' });
+    expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'completed', cursor: { supplierDown: true } });
   });
 
   it('continued with every operation replayed from what was saved: still the outage, not "not enough candidates" (review P2)', async () => {
@@ -86,6 +86,7 @@ describe('a benchmark discovery the supplier could not serve', () => {
     expect(subcall.mock.calls.length).toBe(sentBefore);
     expect(again).toMatchObject({ status: 'unavailable', reason: 'SUPPLIER_UNAVAILABLE' });
     expect(again.reason).not.toBe('NOT_ENOUGH_CANDIDATES');
+    expect(f.discoveries.get(discoveryId)?.cursor).toMatchObject({ supplierDown: true });
   });
 
   it('a normal empty answer is still "not enough candidates", replayed or not', async () => {
@@ -96,6 +97,7 @@ describe('a benchmark discovery the supplier could not serve', () => {
       expect(first.reason).not.toBe('SUPPLIER_UNAVAILABLE');
       const again = JSON.parse(await discover(f.ctx, { discoveryId } as never, { left: 25, used: 0 }));
       expect(again.reason).not.toBe('SUPPLIER_UNAVAILABLE');
+      expect(f.discoveries.get(discoveryId)?.cursor).not.toHaveProperty('supplierDown');
     }
   });
 });
