@@ -323,7 +323,7 @@ it('RUNTIME: CORE-PATH-V2 V2-12: a confirmation card from before a mentor turn c
   const read = async () => (await f.steps())['step-0'];
   const saveInfo = async (values: Record<string, unknown>) => { const s = await read();
     await service.information({ draftId: f.draftId, requestId: randomUUID(), stepId: 'step-0', expectedVersion: s.version,
-      values: { ...s.information, ...values } }); return read(); };
+      values: { goal: tuple('', 'unknown', 'unknown'), other: tuple('', 'unknown', 'unknown'), ...s.information, ...values } }); return read(); };
   const saveBody = async (body: string) => { const s = await read();
     await workbench.execute({ action: 'save', projectId: ids.project_id, roundId: ids.round_id, requestId: randomUUID(), stepId: 'step-0',
       expectedVersion: s.version, body, evidenceIds: [] }); return read(); };
