@@ -6053,7 +6053,6 @@
   "idx:turn_calls.turn_calls_cost_pending": "ebd2a3573411",
   "idx:turn_calls.turn_calls_dispatched": "1aca0c6cb90a",
   "idx:turn_calls.turn_calls_in_flight": "e870a7d12a0e",
-  "idx:turn_calls.turn_calls_lookup_absent": "3a404ca5394b",
   "idx:turn_calls.turn_calls_pkey": "0abe13a225c9",
   "idx:turns.turns_actor_id_request_id_key": "7006e097a8bf",
   "idx:turns.turns_live": "c2b43512a645",

@@ -8,8 +8,9 @@
 -- freed by the existing turn_recover('settle') pass, never here. If the provider did charge, Graylum bears it. Idempotent and
 -- race-free: the profile, session and turn are locked in turn_recover's order, a repeat returns the first outcome, and nothing but a
 -- cost_pending unknown model call of a closed turn can be settled. turn_admin_absent_refunds lists these settlements (read-only).
--- Compatible: new functions and one partial index only; no existing function or table shape changes. Repeatable: CREATE OR REPLACE /
--- IF NOT EXISTS. Recovery: drop the two functions and the index (calls already settled keep their zero cost on record).
+-- Compatible: two new functions only; no existing function, index or table shape changes (an index on turn_calls would add a lock to every
+-- turn's call writes and break the turn lock budget; the admin list is a rare read of a small table and scans it). Repeatable: CREATE OR
+-- REPLACE. Recovery: drop the two functions (calls already settled keep their zero cost on record).
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -54,8 +55,6 @@ BEGIN
     WHERE turn_id = p_turn_id AND seq = p_seq AND status = 'unknown' AND cost_pending;
   RETURN jsonb_build_object('settled', true, 'replay', false, 'turnId', p_turn_id, 'seq', p_seq);
 END $function$;
-
-CREATE INDEX IF NOT EXISTS turn_calls_lookup_absent ON public.turn_calls (settled_at DESC) WHERE usage->>'source' = 'lookup_absent';
 
 CREATE OR REPLACE FUNCTION public.turn_admin_absent_refunds(p_limit integer DEFAULT 100)
  RETURNS jsonb
