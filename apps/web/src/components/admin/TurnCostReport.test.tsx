@@ -82,4 +82,16 @@ describe('turn cost report cards', () => {
       failureCode: 'turn_call_unknown', inFlightCalls: 0, costPendingCalls: 1 }] };
     expect(renderToStaticMarkup(<UnsettledTurnsCard />)).toContain('需人工');
   });
+  it('keeps every table inside a horizontally scrolling box so a narrow screen scrolls instead of squeezing the columns', () => {
+    fixture.unsettled = { available: true, total: 1, turns: [{ turnId: 5, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending',
+      closeKind: 'interrupted', openedAt: '2026-11-03T03:50:33Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 30, chargedCredits: null,
+      failureCode: null, inFlightCalls: 0, costPendingCalls: 1 }] };
+    fixture.absent = { available: true, total: 1, calls: [{ turnId: 2024, seq: 1, actorId: 'a', kind: 'mentor', source: 'lookup_absent',
+      providerId: 'gen-1', httpStatus: 404, settledAt: '2026-11-04T04:00:00Z', openedAt: '2026-11-03T03:50:33Z', reservedCredits: 864,
+      chargedCredits: 0, settlement: 'done', state: 'closed' }] };
+    const html = renderToStaticMarkup(<UnsettledTurnsCard />);
+    const tables = html.match(/<table/g)?.length ?? 0;
+    expect(tables).toBe(2);
+    expect(html.match(/<div class="overflow-x-auto"><table class="w-full min-w-max/g)?.length).toBe(tables);
+  });
 });
