@@ -20,6 +20,24 @@ import { createStub, ORGANIZER_MARK } from '../loadtest/openrouter-stub.mjs';
 const json = (res, status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(body)); };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * The organizer's checklist patches for the simulated method: when the user really answered (not an opening), every required field
+ * of the step the turn was for that is still empty gets a provisional value, so the step can be confirmed. Null: the stub's empty answer.
+ */
+export function organizerPatches(body) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const text = String(messages[messages.map(m => m?.role).lastIndexOf('user')]?.content ?? '');
+  const at = text.indexOf(ORGANIZER_MARK);
+  let input;
+  try { input = JSON.parse(text.slice(0, at).trim()); } catch { return null; }
+  if (!input?.userInput) return null;
+  const step = (input.checklist ?? []).find(item => item.id === input.originalStepId);
+  const patches = (step?.fields ?? []).filter(field => field.required && !field.value)
+    .map(field => ({ stepId: step.id, fieldId: field.id, value: `模拟回答：${field.title}`, status: 'provisional', nature: 'fact',
+      basis: 'user_statement' }));
+  return patches.length ? JSON.stringify({ inputKind: 'answer', notes: [], patches }) : null;
+}
+
 function roleOf(body) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const last = messages.map(m => m?.role).lastIndexOf('user');
@@ -101,6 +119,23 @@ export function createSim({ timings = { firstByteMs: 200, intervalMs: 15, chunks
       res.end('data: [DONE]\n\n');
       receipts.set(id, { id, model: body.model, total_cost: 0, finish_reason: 'stop', native_tokens_prompt: usage.prompt_tokens,
         native_tokens_completion: 20, native_tokens_reasoning: 0, native_tokens_cached: 0 });
+      return;
+    }
+    const patched = role === 'organizer' && !fault ? organizerPatches(body) : null;
+    if (patched) {
+      const prompt = Math.floor(raw.length / 8);
+      const usage = { prompt_tokens: prompt, completion_tokens: patched.length, total_tokens: prompt + patched.length, cost: 0 };
+      receipts.set(id, { id, model: body.model, total_cost: 0, finish_reason: 'stop', native_tokens_prompt: usage.prompt_tokens,
+        native_tokens_completion: usage.completion_tokens, native_tokens_reasoning: 0, native_tokens_cached: 0 });
+      if (!body.stream) {
+        const choices = [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: patched } }];
+        return json(res, 200, { id, model: body.model, object: 'chat.completion', choices, usage }, { 'x-generation-id': id });
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'x-generation-id': id });
+      res.write(frame([{ index: 0, delta: { role: 'assistant', content: patched }, finish_reason: null }]));
+      res.write(frame([{ index: 0, delta: {}, finish_reason: 'stop' }]));
+      res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', model: body.model, choices: [], usage })}\n\n`);
+      res.end('data: [DONE]\n\n');
       return;
     }
     // No fault: replay the body into the stub.

@@ -8,9 +8,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import pg from 'pg';
+import { createClient } from '@supabase/supabase-js';
+import { makePackage, makeWorkflow } from '../../services/__tests__/fixtures/artifacts';
 import { ensurePositioningProfilePlans } from '../../services/__tests__/fixtures/positioningProfilePlans';
 import { pricingConfig } from '../../services/__tests__/fixtures/runtimePricing';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from '../../services/fusion/settings';
+import { publishSkillPackage } from '../../services/skills/publication';
 import { seedTestOpenRouterKey } from '../../services/models/openRouterKey.testing';
 import { paygProductionSettings } from '../../services/turn/admission/paygHostPolicy';
 import { CORE_PATH_SETTING, RUNTIME_PAYG_SETTING } from '../../services/turn/settingKeys';
@@ -51,6 +54,23 @@ async function createUser(email: string, password: string): Promise<string> {
   return body.id;
 }
 
+/**
+ * A synthetic positioning method (no real Skill text): a published package and a three-step workflow whose steps each require one
+ * field ("goal"), as services/turn/mentor.integration.ts builds it. The start page offers the first catalog entry, which is this one.
+ */
+async function seedMentorSkill(db: pg.Client, modelId: string) {
+  const owner = randomUUID(), moduleId = randomUUID();
+  await db.query("insert into profiles(id,role,credits) values($1,'admin',0)", [owner]);
+  const pack = makePackage(), registration = 'sim-positioning', flow = makeWorkflow(3);
+  flow.steps.forEach(step => { step.information = [{ id: 'goal', title: '目标', required: true, profileKey: `goal_${step.id}` },
+    { id: 'other', title: '其他', required: false }]; });
+  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)', [pack.id, registration, owner]);
+  await db.query('insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)', [moduleId, '模拟定位方法', pack.id, modelId]);
+  await publishSkillPackage(createClient(apiUrl, service, { auth: { persistSession: false } }), owner, pack);
+  await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+    [registration, moduleId, pack.id, pack.revisionId, flow, '模拟定位方法']);
+}
+
 async function main() {
   const out = process.argv[3];
   if (!out) throw new Error('output file required');
@@ -82,12 +102,16 @@ async function main() {
     await set(FUSION_SETTINGS_KEY, { ...DEFAULT_FUSION_SETTINGS, compare: { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true,
       allowedModelIds: both, defaultModelIds: both, minModels: 2, answerOutputTokens: 4096, maxBudgetUsd: '5' } });
     await ensurePositioningProfilePlans(db);
+    // The mentor (positioning drafts): the organizer model and its limits, as mentor.integration.ts sets them.
+    await set('v3_summary_model_id', models[SIM_MODELS[1].modelId]);
+    await set('v3_summary_max_tokens', 2048);
+    await seedMentorSkill(db, models[SIM_MODELS[0].modelId]!);
     await set('primary_model_id', models[SIM_MODELS[0].modelId]);
     await set('billing_credits_per_usd', 100);
     await set('billing_token_price_multiplier', 6);
     await set('runtime_rw_v2', { catalogCache: true });
     await set('billing_payg_start_thresholds', { version: 'sim', thresholds: SIM_MODELS.flatMap(m =>
-      ['ordinary', 'mentor', 'compare'].map(purpose => ({ model: m.modelId, purpose, typicalUsd: '0.04' }))) });
+      ['ordinary', 'skill', 'attached_organizer', 'compare'].map(purpose => ({ model: m.modelId, purpose, typicalUsd: '0.04' }))) });
     await seedTestOpenRouterKey(db, 'LOCAL_SIMULATED_OPENROUTER_KEY');
 
     // Two accounts: each journey that charges uses its own, so balances are exact. Passwords stay in the run's private directory.
