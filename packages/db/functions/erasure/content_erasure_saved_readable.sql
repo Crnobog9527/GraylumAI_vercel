@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.content_erasure_saved_readable(a uuid, cid uui
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE c opc_content_versions;p artifact_projects;v artifact_versions;r artifact_rounds;
- current_id uuid:=cid;seen uuid[]:='{}';first_row boolean:=true;e runtime_executions;
+ current_id uuid:=cid;seen uuid[]:='{}';first_row boolean:=true;
 BEGIN
  IF opc_content_allowed(a,cid) THEN RETURN true; END IF;
  LOOP
@@ -26,11 +26,9 @@ BEGIN
   -- Retain current package/actor authorization even when the source body is gone.
   PERFORM read_skill_package(a,p.module_id,p.skill_id,r.revision_id,r.package_hash,NULL);
   IF v.erased_at IS NULL AND NOT opc_source_allowed(a,v.id) THEN RETURN false; END IF;
-  IF c.execution_id IS NOT NULL THEN
-   SELECT * INTO e FROM runtime_executions WHERE id=c.execution_id AND actor_id=a;
-   IF e.id IS NULL OR (e.content_deleted_at IS NULL AND NOT runtime_history_available(e.id)) THEN RETURN false; END IF;
-  END IF;
-  -- A deleted conversation leaves the version readable, as a deleted execution does; an account being erased does not.
+  -- CORE-PATH-V2 V2-12 F: a version saved from an old execution has no execution to read from any more.
+  IF c.execution_id IS NOT NULL THEN RETURN false; END IF;
+  -- A deleted conversation leaves the version readable; an account being erased does not.
   IF c.turn_id IS NOT NULL AND EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=a AND t.id=c.turn_id
     AND (turn_tombstones(a,t.session_id,'{}'::jsonb)->>'accountErasing')::boolean) THEN RETURN false; END IF;
   seen:=array_append(seen,current_id);current_id:=c.source_content_id;first_row:=false;

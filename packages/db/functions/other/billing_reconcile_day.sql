@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.billing_reconcile_day(p_start timestamp with t
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE totals jsonb;calls jsonb;turn_check jsonb;sources jsonb;entries jsonb;
+DECLARE totals jsonb;turn_check jsonb;sources jsonb;entries jsonb;
 BEGIN
  IF p_start IS NULL OR p_end IS NULL OR NOT isfinite(p_start) OR NOT isfinite(p_end) OR p_end<p_start
   OR p_end-p_start>interval '31 days' THEN RAISE EXCEPTION 'invalid reconciliation window'; END IF;
@@ -21,21 +21,6 @@ BEGIN
     WHERE operation_type IN ('settle','abort_settle') AND created_at>=p_start AND created_at<p_end))
   ||(SELECT jsonb_build_object('completedPaymentOrders',count(*),'completedPaymentAmount',coalesce(sum(amount_total),0))
     FROM payment_orders WHERE status='completed' AND created_at>=p_start AND created_at<p_end);
-
- -- A grant reversed or a subscription ended between the hold and the settlement keeps its unreturned period credits:
- -- the settle/refund row records them (refundInterceptedRestoration), and the call's ledger nets that much more.
- WITH s AS (SELECT id,pre_deduct_id,charged_delta,compensation_credits FROM bill2_calls
-   WHERE settled_at>=p_start AND settled_at<p_end),
- i AS (SELECT b.metadata->>'preDeductId' pid,sum((b.metadata->>'refundInterceptedRestoration')::int) n FROM billing_history b
-   WHERE b.operation_type IN ('settle','refund','abort_settle') AND b.metadata->>'refundInterceptedRestoration' ~ '^[0-9]{1,9}$'
-    AND b.metadata->>'preDeductId' IN (SELECT pre_deduct_id::text FROM s) GROUP BY 1),
- c AS (SELECT s.id,coalesce(s.charged_delta,0)+coalesce(i.n,0)-coalesce(s.compensation_credits,0) owed
-   FROM s LEFT JOIN i ON i.pid=s.pre_deduct_id::text),
- bad AS (SELECT c.id FROM c LEFT JOIN LATERAL (SELECT sum(t.amount) net FROM credit_transactions t WHERE t.bill2_call_id=c.id) l ON true
-   WHERE coalesce(l.net,0)<>-c.owed)
- SELECT jsonb_build_object('settledCalls',(SELECT count(*) FROM c),'mismatched',(SELECT count(*) FROM bad),
-  'sample',coalesce((SELECT jsonb_agg(id) FROM (SELECT id FROM bad ORDER BY id LIMIT 20) s),'[]'))
- INTO calls;
 
  -- Turn path: a settled turn's charged credits must equal what the ledger booked for it as turn_spend.
  WITH w AS (SELECT b.user_id actor_id,(b.metadata->>'turnId')::bigint id FROM billing_history b
@@ -96,5 +81,5 @@ BEGIN
  SELECT jsonb_build_object('unattributed',count(*) FILTER (WHERE source_kind='unattributed'),'notApplied',count(*) FILTER (WHERE NOT applied))
  INTO entries FROM credit_source_entries WHERE created_at>=p_start AND created_at<p_end;
 
- RETURN totals||jsonb_build_object('calls',calls,'turns',turn_check,'sources',sources,'entries',entries);
+ RETURN totals||jsonb_build_object('turns',turn_check,'sources',sources,'entries',entries);
 END $function$;

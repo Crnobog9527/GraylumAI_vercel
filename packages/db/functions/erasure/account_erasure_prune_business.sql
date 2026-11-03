@@ -34,12 +34,10 @@ BEGIN
  -- VOICE erasure
  -- VOICE references
  FOREACH t IN ARRAY ARRAY[
-  'runtime_voice_references',
   'voice_profiles','voice_profile_versions','voice_billing_scrubs',
   'analytics_checkout_ids','analytics_consent_withdrawals',
   'payment_notices',
   'founder_wall_entries','founder_community_status',
-  'runtime_library_references',
   'social_metric_snapshots','social_posts','social_review_runs','social_publish_jobs',
   'social_connect_requests','social_connections','social_monitor_settings',
   'library_document_segments','library_recognition_units','library_documents',
@@ -47,8 +45,7 @@ BEGIN
   'opc_item_edits','opc_items','opc_plans','opc_turns',
   'opc_topic_openings','opc_topic_draft_versions','opc_topic_workspaces','opc_handoffs',
   'opc_account_strategy_drafts','opc_draft_businesses','opc_accounts','opc_businesses',
-  'opc_drafts','opc_library_requests','runtime_history_dependencies','runtime_tool_calls',
-  'runtime_session_batches','runtime_session_history','runtime_executions','runtime_scope_material',
+  'opc_drafts','opc_library_requests','runtime_scope_material',
   -- 0271 legacy chat tables
   'runtime_sessions','conversation_context_snapshots','messages',
   'conversations','agent_slice_links','artifact_work_references','artifact_evidence_restrictions',
@@ -56,29 +53,11 @@ BEGIN
   'artifact_evidence','artifact_rounds','artifact_projects'
  ] LOOP
   EXIT WHEN removed>=p_limit;
-  -- Legacy financial evidence is not covered by BILL2 projection: keep its original context
+  -- Legacy financial evidence is not covered by a projection: keep its original context
   -- identities (already body-scrubbed by B1) until the financial review is resolved.
   IF legacy_evidence AND (t LIKE 'artifact_%' OR t IN ('agent_slice_links','opc_result_links')) THEN CONTINUE; END IF;
-  -- 0355: session-owned Runtime rows are found through the owner's sessions, not by serializing each row.
-  IF t IN ('runtime_session_batches','runtime_session_history') THEN
-   FOR item IN EXECUTE format('SELECT ctid AS row_tid,to_jsonb(x) AS body FROM public.%I x
-    WHERE x.session_id IN (SELECT s.id FROM public.runtime_sessions s WHERE s.actor_id=$1)
-    LIMIT $2 FOR UPDATE SKIP LOCKED',t)
-    USING p_profile_id,p_limit-removed LOOP
-    IF item.body ? 'erased_at' AND item.body->>'erased_at' IS NULL THEN CONTINUE; END IF;
-    BEGIN
-     EXECUTE format('DELETE FROM public.%I WHERE ctid=$1',t) USING item.row_tid;
-     GET DIAGNOSTICS n=ROW_COUNT;removed:=removed+n;
-    EXCEPTION WHEN foreign_key_violation OR check_violation OR lock_not_available THEN
-     NULL;
-    END;
-   END LOOP;
-   CONTINUE;
-  END IF;
   FOR item IN EXECUTE format('SELECT ctid AS row_tid,to_jsonb(x) AS body FROM public.%I x
-   WHERE %s LIMIT $2 FOR UPDATE SKIP LOCKED',t,
-   CASE WHEN t='runtime_executions' THEN 'x.actor_id=$1'
-    ELSE format('public.erasure_business_owner(%L,to_jsonb(x))=$1',t) END)
+   WHERE public.erasure_business_owner(%1$L,to_jsonb(x))=$1 LIMIT $2 FOR UPDATE SKIP LOCKED',t)
    USING p_profile_id,p_limit-removed LOOP
    -- Body-bearing rows must have passed B1. Conversation deletion also retains its original
    -- legacy guards, and a RETURN NULL is observed as zero affected rows, never completion.
@@ -88,8 +67,6 @@ BEGIN
     ) THEN CONTINUE; END IF;
    IF t LIKE 'social_%' AND public.publish_monitor_erasure_retained(t,item.body) THEN CONTINUE; END IF;
    IF item.body ? 'erased_at' AND item.body->>'erased_at' IS NULL THEN CONTINUE; END IF;
-   IF t='runtime_executions' AND EXISTS(SELECT 1 FROM bill2_runs b
-     WHERE b.session_ref=(item.body->>'session_id')::uuid) THEN CONTINUE; END IF;
    BEGIN
     EXECUTE format('DELETE FROM public.%I WHERE ctid=$1',t) USING item.row_tid;
     GET DIAGNOSTICS n=ROW_COUNT;removed:=removed+n;

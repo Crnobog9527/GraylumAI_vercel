@@ -28,10 +28,7 @@ WITH exempt(t, reason) AS (VALUES
   ('founder_community_status', 'user_id'), ('payment_notices', 'user_id'),
   ('analytics_checkout_ids', 'user_id'), ('analytics_consent_withdrawals', 'user_id')
 ), runtime_ref(t, how) AS (VALUES
-  ('runtime_executions', 'pruned before runtime_sessions'), ('runtime_session_batches', 'pruned'),
-  ('runtime_session_history', 'pruned'), ('runtime_scope_material', 'pruned'), ('runtime_tool_calls', 'pruned'),
-  ('runtime_history_dependencies', 'pruned'), ('runtime_voice_references', 'pruned'),
-  ('runtime_library_references', 'pruned'), ('opc_drafts', 'pruned'), ('opc_turns', 'pruned'),
+  ('runtime_scope_material', 'pruned'), ('opc_drafts', 'pruned'), ('opc_turns', 'pruned'),
   ('opc_topic_workspaces', 'pruned'), ('opc_result_links', 'pruned'), ('opc_content_versions', 'pruned'),
   ('opc_data_events', 'deleted by account_erasure_scrub_content'),
   ('fusion_compares', 'deleted by account_erasure_scrub_content'),
@@ -41,7 +38,6 @@ WITH exempt(t, reason) AS (VALUES
   ('research_refresh_grants', 'deleted by account_erasure_scrub_content'),
   ('research_benchmarks', 'deleted by account_erasure_scrub_content'),
   ('research_benchmark_shortfalls', 'deleted by account_erasure_scrub_content'),
-  ('bill2_runs', 'financial; account_erasure_detach_runtime moves session_ref to erased_session_id'),
   ('research_plans', 'financial evidence, erased and immutable; 0393 keeps the erased session shell as its context')
 ), erasure_src AS (
   SELECT string_agg(pg_get_functiondef(p.oid), E'\n') AS s FROM pg_proc p
@@ -70,7 +66,7 @@ WHERE k.contype = 'f' AND k.confrelid = 'public.profiles'::regclass AND k.confde
 UNION ALL
 SELECT k.conrelid::regclass::text, 'runtime_ref_not_reviewed', k.conname FROM pg_constraint k
 WHERE k.contype = 'f' AND k.confdeltype NOT IN ('c', 'n')
-  AND k.confrelid IN ('public.runtime_sessions'::regclass, 'public.runtime_executions'::regclass)
+  AND k.confrelid = 'public.runtime_sessions'::regclass
   AND NOT EXISTS (SELECT 1 FROM runtime_ref r WHERE r.t = k.conrelid::regclass::text)
 UNION ALL
 SELECT r.t, 'runtime_ref_missing', r.how FROM runtime_ref r WHERE to_regclass('public.' || quote_ident(r.t)) IS NULL

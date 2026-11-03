@@ -19,12 +19,10 @@ BEGIN
  -- VOICE erasure
  -- VOICE references
  CASE
- WHEN t='runtime_voice_references' THEN RETURN (j->>'actor_id')::uuid;
  WHEN t IN ('voice_profiles','voice_profile_versions','voice_billing_scrubs') THEN RETURN (j->>'actor_id')::uuid;
  WHEN t IN ('analytics_checkout_ids','analytics_consent_withdrawals') THEN RETURN (j->>'user_id')::uuid;
  WHEN t='payment_notices' THEN RETURN (j->>'user_id')::uuid;
  WHEN t IN ('founder_wall_entries','founder_community_status') THEN RETURN (j->>'user_id')::uuid;
- WHEN t='runtime_library_references' THEN RETURN (j->>'actor_id')::uuid;
  WHEN t IN ('social_monitor_settings','social_connections','social_posts',
   'social_metric_snapshots','social_review_runs','social_connect_requests','social_publish_jobs')
   THEN RETURN (j->>'actor_id')::uuid;
@@ -33,7 +31,7 @@ BEGIN
  WHEN t IN ('opc_content_versions','opc_handoffs','opc_library_requests','opc_topic_workspaces',
   'opc_topic_draft_versions','opc_video_material_bindings','opc_account_strategy_request_bases',
   'opc_account_strategy_drafts','opc_accounts','opc_businesses','opc_drafts','artifact_projects',
-  'runtime_sessions','runtime_executions') THEN RETURN (j->>'actor_id')::uuid;
+  'runtime_sessions') THEN RETURN (j->>'actor_id')::uuid;
  -- 0271 legacy chat tables
  WHEN t='conversations' THEN RETURN (j->>'user_id')::uuid;
  WHEN t IN ('messages','conversation_context_snapshots','artifact_chat_turns','artifact_chats') THEN
@@ -45,9 +43,11 @@ BEGIN
    WHERE r.id=(j->>'round_id')::uuid;
  -- CORE-PATH-V2 V2-7a2: a report finalized from a turn names its owner on the link.
  WHEN t='opc_result_links' AND j->>'turn_actor_id' IS NOT NULL THEN RETURN (j->>'turn_actor_id')::uuid;
- WHEN t IN ('runtime_tool_calls','runtime_history_dependencies','opc_result_links') THEN
-  SELECT actor_id INTO result FROM runtime_executions WHERE id=(j->>'execution_id')::uuid;
- WHEN t IN ('runtime_scope_material','runtime_session_history','runtime_session_batches') THEN
+ -- CORE-PATH-V2 V2-12 F: a link made from an old execution (no turn) is owned through the project of its evidence.
+ WHEN t='opc_result_links' THEN
+  SELECT p.actor_id INTO result FROM artifact_evidence ev JOIN artifact_projects p ON p.id=ev.project_id
+   WHERE ev.id=(j->>'evidence_id')::uuid;
+ WHEN t='runtime_scope_material' THEN
   SELECT actor_id INTO result FROM runtime_sessions WHERE id=(j->>'session_id')::uuid;
  WHEN t IN ('opc_turns','opc_topic_openings','opc_plans','opc_draft_businesses') THEN
   SELECT actor_id INTO result FROM opc_drafts WHERE draft_id=(j->>'draft_id')::uuid;

@@ -20,13 +20,8 @@ BEGIN
    WHERE p.id=p_profile_id AND p.status='deleted' AND p.is_deleted='true') THEN
    RAISE EXCEPTION 'ERASURE_BATCH_ACTOR_DENIED' USING ERRCODE='42501';
   END IF;
-  SELECT EXISTS(SELECT 1 FROM bill2_runs r WHERE r.actor_id=p_profile_id
-   AND (NOT r.closed OR r.state NOT IN ('settled','refunded')
-    OR EXISTS(SELECT 1 FROM runtime_executions e JOIN runtime_sessions s ON s.id=e.session_id
-     WHERE e.billing_run_id=r.id AND e.actor_id=p_profile_id
-     AND (e.state NOT IN ('completed','cancelled') OR s.active_execution=e.id)))) INTO pending;
-  -- CORE-PATH-V2 V2-12: an open or unsettled core-path turn is money in flight too.
-  pending:=pending OR EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_profile_id AND (t.state<>'closed' OR t.settlement='pending'));
+  -- CORE-PATH-V2 V2-12 F: an open or unsettled core-path turn is money in flight.
+  SELECT EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_profile_id AND (t.state<>'closed' OR t.settlement='pending')) INTO pending;
   IF p_code='BILLING_CLEAR' AND pending THEN
    RAISE EXCEPTION 'ERASURE_BILLING_STILL_PENDING';
   END IF;

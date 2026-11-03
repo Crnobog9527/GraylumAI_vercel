@@ -13,12 +13,13 @@ AS $function$
       'round',rv.round,'createdAt',rv.created_at,'endedAt',rv.ended_at,'sourceVersionId',rv.source_version_id,
       'breakerCleared',CASE WHEN rv.breaker_cleared_at IS NULL THEN NULL ELSE jsonb_build_object('at',rv.breaker_cleared_at,
         'by',rv.breaker_cleared_by,'reason',rv.breaker_clear_reason,'batch',rv.breaker_clear_batch) END,'reviewers',rv.config->'reviewers','summary',rv.config->'summary',
-      'costUsd',coalesce((SELECT sum(coalesce(c.selected_cost_usd,0)) FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id
-        WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (s->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) s)),0),
-      'chargedCredits',coalesce((SELECT sum(coalesce(br.charged,0)) FROM bill2_runs br
-        WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (s->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) s)),0)
-        +coalesce((SELECT charged_credits FROM fusion_review_fees WHERE review_id=rv.id),0),
-      'fee',fusion_review_fee_view(rv.id)) x
+      'costUsd',coalesce((SELECT sum(coalesce(c.actual_usd,c.nominal_usd,0)) FROM turn_calls c
+        WHERE c.actor_id=rv.actor_id AND c.turn_id=rv.turn_id AND c.call_kind='model'),0),
+      'chargedCredits',coalesce((SELECT t.charged_credits FROM turns t WHERE t.actor_id=rv.actor_id AND t.id=rv.turn_id),0),
+      'fee',(SELECT jsonb_build_object('credits',(t.policy->>'fixedCredits')::int,
+        'state',CASE WHEN t.charged_credits IS NULL THEN 'held' WHEN t.charged_credits>0 THEN 'charged' ELSE 'refunded' END,
+        'chargedCredits',t.charged_credits,'reason',t.close_kind,'settledAt',CASE WHEN t.charged_credits IS NOT NULL THEN t.closed_at END)
+        FROM turns t WHERE t.actor_id=rv.actor_id AND t.id=rv.turn_id)) x
     FROM fusion_reviews rv
     WHERE p_before_created IS NULL OR (rv.created_at,rv.id)<(p_before_created,coalesce(p_before_id,'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid))
     ORDER BY rv.created_at DESC, rv.id DESC LIMIT least(greatest(coalesce(p_limit,20),1),100)) q;

@@ -32,51 +32,16 @@ BEGIN
   conversation_ids := ARRAY(SELECT id FROM conversations WHERE user_id = p_profile_id FOR UPDATE SKIP LOCKED);
 
   FOR g IN SELECT * FROM (VALUES
-    ('runtime_executions',
-      'payload = NULL, result = NULL, primary_result = NULL, match_result = NULL, erased_at = $2',
-      't.actor_id = $1 AND EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = t.session_id AND s.actor_id = $1)',
-      't.session_id = ANY($3) AND t.state IN (''completed'',''cancelled'') AND (t.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b
-      WHERE b.id = t.billing_run_id AND b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded'')))'),
-    ('runtime_history_dependencies',
-      'erased_at = $2',
-      'EXISTS (SELECT 1 FROM runtime_executions e WHERE e.id = t.execution_id AND e.actor_id = $1)',
-      'EXISTS (SELECT 1 FROM runtime_executions e WHERE e.id = t.execution_id AND e.actor_id = $1 AND e.session_id = ANY($3) AND e.state IN
-      (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
-      b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded''))) ) AND EXISTS (SELECT 1 FROM runtime_executions e WHERE e.id =
-      t.dependency_id AND e.actor_id = $1 AND e.session_id = ANY($3) AND e.state IN (''completed'',''cancelled'') AND (e.billing_run_id IS NULL
-      OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND b.actor_id = $1 AND b.closed AND b.state IN
-      (''settled'',''refunded''))) )'),
-    ('runtime_session_batches',
-      'items = NULL, erased_at = $2',
-      'EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = t.session_id AND s.actor_id = $1)',
-      'EXISTS (SELECT 1 FROM runtime_executions e WHERE e.id = t.execution_id AND e.actor_id = $1 AND e.session_id = ANY($3) AND e.state IN
-      (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
-      b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded''))) AND e.session_id = t.session_id)'),
-    ('runtime_session_history',
-      'item = NULL, erased_at = $2',
-      'EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = t.session_id AND s.actor_id = $1)',
-      'EXISTS (SELECT 1 FROM runtime_executions e WHERE e.id = t.execution_id AND e.actor_id = $1 AND e.session_id = ANY($3) AND e.state IN
-      (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
-      b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded''))) AND e.session_id = t.session_id)'),
-    ('runtime_tool_calls',
-      'arguments = NULL, result = NULL, erased_at = $2',
-      'EXISTS (SELECT 1 FROM runtime_executions e WHERE e.id = t.execution_id AND e.actor_id = $1)',
-      'EXISTS (SELECT 1 FROM runtime_executions e WHERE e.id = t.execution_id AND e.actor_id = $1 AND e.session_id = ANY($3) AND e.state IN
-      (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
-      b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded''))) )'),
     ('runtime_scope_material',
       'request = NULL, content = NULL, content_hash = NULL, erased_at = $2',
       'EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = t.session_id AND s.actor_id = $1)',
-      't.session_id = ANY($3) AND NOT EXISTS (SELECT 1 FROM runtime_executions e WHERE e.session_id = t.session_id AND NOT (e.state IN
-      (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
-      b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded'')))))'),
+      -- CORE-PATH-V2 V2-12 F: material goes with its conversation once no turn is open on it.
+      't.session_id = ANY($3) AND NOT EXISTS (SELECT 1 FROM runtime_sessions s WHERE s.id = t.session_id AND s.active_turn_id IS NOT NULL)'),
     ('runtime_sessions',
       'scope = NULL, start_payload = NULL, erased_at = $2',
       't.actor_id = $1',
       -- CORE-PATH-V2: a session with a turn still open is erased once the turn closes (it releases active_turn_id there).
-      't.id = ANY($3) AND t.active_turn_id IS NULL AND NOT EXISTS (SELECT 1 FROM runtime_executions e WHERE e.session_id = t.id AND NOT (e.state IN
-      (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
-      b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded'')))))'),
+      't.id = ANY($3) AND t.active_turn_id IS NULL'),
     -- 0271 legacy chat tables
     ('messages',
       'content = NULL, erased_at = $2',

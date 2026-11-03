@@ -21,9 +21,7 @@ BEGIN
     OR NOT content_erasure_artifact_readable(p_actor_id, ver.id) THEN RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
   IF fusion_compare_active(p_actor_id)
     OR EXISTS (SELECT 1 FROM fusion_reviews WHERE actor_id = p_actor_id AND state IN ('running','paused') AND request_id <> p_request_id)
-    OR EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare' AND state IN ('running','paused','stopping'))
-    OR EXISTS (SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id = c.run_id WHERE br.actor_id = p_actor_id
-      AND br.fusion_group_id IS NOT NULL AND fusion_call_in_flight(c)) THEN
+    OR EXISTS (SELECT 1 FROM turns WHERE actor_id = p_actor_id AND kind = 'compare' AND state IN ('running','paused','stopping')) THEN
     RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE';
   END IF;
   SELECT coalesce(jsonb_object_agg(s.key, (SELECT coalesce(jsonb_object_agg(f.key, jsonb_build_object('value', f.value->'value',

@@ -23,11 +23,6 @@ BEGIN
   RETURN jsonb_build_object('kind','session','id',target,'status','deleted','alreadyDeleted',true,
    'preservedSavedVersions',0,'financialReviewCount',0);
  END IF;
- -- Writers that copy a result out of this conversation (saving a work result, capture, history
- -- dependencies) lock its execution rows first and then check availability, so taking the same
- -- rows here serializes them with the marker: a copy committed first is visible to the checks
- -- below and cleaned now; a writer that waits sees the committed marker and is refused.
- PERFORM id FROM runtime_executions WHERE session_id=target AND actor_id=a ORDER BY id FOR UPDATE;
  -- Read-only scope (no account-wide locks). The marker alone is enough only when nothing outside
  -- this conversation holds a copy: a free conversation (no work, draft or topic binding), every scoped
  -- execution in it, no saved content, work, data event, result link, captured field, library
@@ -45,8 +40,6 @@ BEGIN
  local:=unbound AND s.scope->>'kind'='positioning_draft' AND s.scope->>'workItemId' IS NULL
   AND NOT EXISTS(SELECT 1 FROM opc_drafts d WHERE d.session_id=target)
   AND NOT EXISTS(SELECT 1 FROM opc_topic_workspaces t WHERE t.session_id=target)
-  AND NOT EXISTS(SELECT 1 FROM runtime_executions e WHERE e.id=ANY(ids) AND e.session_id<>target)
-  AND NOT EXISTS(SELECT 1 FROM fusion_billing_groups fg WHERE fg.source_session_id=target)
   AND NOT EXISTS(SELECT 1 FROM fusion_compares fcmp WHERE fcmp.session_id=target)
   AND jsonb_array_length(scope->'projects')=0 AND jsonb_array_length(scope->'versions')=0
   AND jsonb_array_length(scope->'contents')=0 AND jsonb_array_length(scope->'affectedSources')=0
