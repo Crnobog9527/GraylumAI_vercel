@@ -348,6 +348,8 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 
 **第四次生成（2026-11-03，基线 staging + #1662 + B 类改写 #1669）**：生成时带 `--keep-table runtime_test_windows` 和 `F_KEEP=`（B 类改写后保留的函数：`runtime_session_results_list_turns`、`runtime_session_result_save_turn`、`runtime_session_result_edit`、`runtime_session_result_versions`、`runtime_session_result_view`、`runtime_session_result_turn_view`、`runtime_positioning_gate`、`runtime_test_actor_access`、`opc_capture_apply`、`fusion_review_start`、`fusion_review_fee_settle`、`fusion_review_archive_reconcile`；A 类：`runtime_test_policy`、`runtime_production_access`、`runtime_production_database`）。守卫点名 **4 个**（`fusion_compare_context`、`fusion_group_claim`、`fusion_review_claim`、`fusion_review_close`），都是 D 类，调用方是 Node 死代码；严格检查剩 14 个函数名，全部是 D 类 Node 死代码或 `services/runtime/admission.ts`（C 路在 #1662 之后继续删）。本机演练（含 #1662 临时合并）：去守卫后 332 ms 应用成功，旧表 0 张留下，外键 0 条。
 
+**第五次生成（2026-11-03，基线 staging + #1662 `6cf5823cb` + #1668 `37da67978` + B 类改写 #1669，临时合并）**：守卫 **零**。整个迁移（含守卫）在带旧数据的本机库上一次应用成功，旧表 0 张留下，外键 0 条。生成参数：`--keep-table runtime_test_windows`，`F_KEEP`（同第四次的 15 个名字），`F_DROP=fusion_compare_stop_archived`（没有任何调用方、又调用被删的 `fusion_compare_stop`，一起删）。`F_STRICT` 只剩一处：`runtime_tool` ← `turn/skills/loadSkillTool.ts` 的 `executionLoadSkillTool` 与 `turn/skills/skillFileExecution.ts` 的 `executionSkillFileTool`，这两个函数没有生产调用方（调用方在已删的 `services/runtime`），删掉即归零。
+
 ### 7.5 注销与内容删除（R2，V2-9 窗口）留给 F 的清单
 
 来源：V2-9 窗口的 `R2-leftovers-for-F.md`（共享笔记目录，2026-11-03）。R2a（#1649）已合并，R2b（#1651）只去掉结算；旧内容清除和 detach 按总控决定保留到 F。**F 要把下面这些函数整段改写成不碰旧表的版本（或随 F 删），和批次 F 的迁移同时上库；F 迁移的自检守卫在它们没改完时会拒绝运行。**
