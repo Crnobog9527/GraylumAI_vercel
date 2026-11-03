@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { CHECKOUT_COPY, methodCopy, TERMS_LINKS, refundPolicyHref, type CheckoutMethod, type MethodPurchase } from './methodCheckout';
 import type { MethodCheckout } from './useMethodCheckout';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 type Props = {
   checkout: MethodCheckout;
@@ -62,7 +63,7 @@ export function MethodCheckoutForm(props: Props) {
   // A refusal belongs to the item it was about; choosing another item starts clean.
   useEffect(() => { clearOutcome(); }, [purchaseKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (checkout.loading) return <p className="text-sm" style={muted}>正在确认付款方式…</p>;
+  if (checkout.loading) return <PageSkeleton compact rows={2} label="付款方式读取中"/>;
   if (checkout.failed) {
     return <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>暂时无法确认付款方式，请稍后再试。</p>;
   }

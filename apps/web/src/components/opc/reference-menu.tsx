@@ -7,6 +7,7 @@ import { REFERENCE_LIMIT, sameReferences, type LibraryReference, type ReferenceQ
 import { QueryNotice } from './query-notice';
 import { ReferenceMenuView } from './composer-view';
 import styles from './work-composer.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 type ListedDocument = {
   id: string; kind: string; status: string; filename: string | null; content_version: number;
@@ -114,7 +115,7 @@ export function useComposerReferences(enabled: boolean, box: RefObject<ComposerE
   const menu = open ? <ReferenceMenuView choices={choices.map(item => ({ id: item.id, label: item.filename ?? '未命名文档' }))}
     highlighted={highlighted} onPick={index => pick(choices[index])}
     footnote={<>{REFERENCE_LIMIT_NOTICE}AI 会按需读取引用文档的内容。</>}
-    status={loading && !choices.length ? <p role="status">正在读取资料库…</p>
+    status={loading && !choices.length ? <PageSkeleton compact rows={2} label="资料库读取中"/>
       : list.error ? <QueryNotice error={list.error} label="资料库" retry={() => list.refetch()}/> : undefined}/>
     : notice ? <p role="alert" className={styles.note}>{notice}</p> : null;
 

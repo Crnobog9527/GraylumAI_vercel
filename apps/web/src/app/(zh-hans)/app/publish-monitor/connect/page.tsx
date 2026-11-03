@@ -3,12 +3,12 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { connectErrorMessage } from '@/lib/publish-monitor-messages';
 import { trpc } from '@/trpc/client';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
  * PUBLISH-MONITOR PR-2b-2 confirmation page (plan §4.1): nothing is written until the user picks one account here.
@@ -37,7 +37,7 @@ function ConnectConfirm({ requestId, providerFailed, ownedElsewhere }: { request
 
   if (confirm.data) return <Message title="连接成功" text="已连接。作品数据会在第一次读取完成后出现。" back />;
   if (cancel.data) return <Message title="已取消" text="没有连接任何账号；这次授权导入的新账号会被清理。" back />;
-  if (pending.isLoading) return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div>;
+  if (pending.isLoading) return <PageSkeleton rows={3} label="连接信息读取中" />;
   if (pending.error || !pending.data) return <Message title="无法继续" text={connectErrorMessage(pending.error?.message)} />;
 
   const data = pending.data;

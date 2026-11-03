@@ -9,6 +9,7 @@ import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { allSettled, billingSettled, chargedCredits, totalChargedCredits, columnPhase, compareErrorText, heldCredits,
   stoppedLabel, type ColumnPhase, type ReadColumn } from './compare-view';
 import styles from './compare.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 type View = { compareId: string; state: string; question?: string | null; chargedCredits?: number; columns: ReadColumn[];
   adoption?: { column: number; executionId?: string } | null };
@@ -56,7 +57,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
     void utils.credits.getCreditsSummary.invalidate();
   }, [data, compareId, utils]);
 
-  if (!data) return <section className={styles.card} aria-busy="true"><p className={styles.muted}>正在读取对比…</p></section>;
+  if (!data) return <section className={styles.card} aria-busy="true"><PageSkeleton compact rows={3} label="对比读取中"/></section>;
   const adoptedColumn = data.adoption?.column ?? null;
   const ended = data.state !== 'running' && !liveTurn.open && allSettled(data.columns);
 

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { trpc } from '@/trpc/client';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   canGrant,
   changeConsent,
@@ -74,7 +75,7 @@ export function DataUseConsentView({ state, loading, loadFailed, retrying, onRet
       </div>
 
       <div className="mt-3 text-sm" aria-live="polite">
-        {loading && <p style={{ color: 'var(--text-tertiary)' }}>正在读取…</p>}
+        {loading && <PageSkeleton compact rows={1} label="设置读取中" />}
         {!loading && loadFailed && (
           <div className="flex flex-wrap items-center gap-2" role="alert">
             <span style={{ color: '#fca5a5' }}>暂时无法读取你的选择，请稍后重试。</span>

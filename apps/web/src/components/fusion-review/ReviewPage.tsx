@@ -16,6 +16,7 @@ import { ReviewLive } from './ReviewLive';
 import { ReviewResult } from './ReviewResult';
 import { useLiveReview } from './use-live-review';
 import styles from './review-page.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 const codeOf = (error: unknown) => (error instanceof Error ? error.message : '');
 
@@ -65,7 +66,7 @@ export function ReviewPage({ draftId, reviewId }: { draftId: string; reviewId: s
       <button type="button" className={styles.linkButton} onClick={reload}>重新读取</button></p></main>);
   }
   if (!raw || !jury || !source || !report || !events.data) {
-    return shell(null, <main className={styles.main}><p className={styles.state} role="status">正在读取评审…</p></main>);
+    return shell(null, <main className={styles.main}><PageSkeleton label="评审读取中"/></main>);
   }
   const result = <ReviewResult draftId={draftId} detail={jury} source={source} names={names} fee={raw.fee} onChanged={reload} />;
   if (endedOnArrival.current) return shell(null, <main className={styles.main}>{result}</main>);

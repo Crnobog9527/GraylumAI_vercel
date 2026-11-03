@@ -3,13 +3,13 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   CONTACT_MAX, CONTACT_MIN, EXPERT_CONSULT_COPY as COPY, NEED_MAX, NEED_MIN, expertConsultErrorText, type ExpertConsultSource,
 } from './expertConsultCopy';
@@ -32,7 +32,7 @@ export function ExpertConsultForm({ source }: { source: ExpertConsultSource }) {
   const tickets = { label: COPY.tickets, href: '/app/profile?tab=tickets' };
 
   if (send.data || state.data?.pending) return <Message title={COPY.sentTitle} text={COPY.sentText} action={tickets} />;
-  if (state.isLoading) return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div>;
+  if (state.isLoading) return <PageSkeleton rows={3} label="资格读取中" />;
   if (state.error || !state.data) return <Message title={COPY.pageTitle} text={COPY.loadFailed} />;
   if (!state.data.eligible || send.error?.message === 'EXPERT_CONSULT_NOT_ELIGIBLE') {
     return <Message title={COPY.notEligibleTitle} text={COPY.notEligibleText}

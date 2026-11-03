@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,6 +17,7 @@ import ModuleCard from '@/components/modules/ModuleCard';
 import ModuleDetailDialog from '@/components/modules/ModuleDetailDialog';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 // Module type for detail dialog
 interface ModuleData {
@@ -366,9 +367,7 @@ function MarketplacePageContent() {
 
         {/* 模块卡片网格 */}
         {isModulesLoading ? (
-          <div className="flex items-center justify-center py-24">
-            <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-          </div>
+          <PageSkeleton compact rows={6} label="功能读取中" />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-12">
             {modules.map((module, index) => (

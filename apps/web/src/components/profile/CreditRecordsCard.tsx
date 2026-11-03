@@ -1,12 +1,13 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, Loader2 } from 'lucide-react';
+import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { CREDITS_SUMMARY_QUERY_OPTIONS } from './creditsSummaryQuery';
 import { SummaryRetryButton, SummaryStatValue } from './SummaryRetry';
 import { TransactionSearchCharges } from '@/components/research/transaction-search-charges';
 import { formatCreditsBalance } from '@/components/credits/balancePresentation';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   countsAsCreditSpend,
   getCreditLedgerLabel,
@@ -285,9 +286,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         </div>
 
         {isLoadingTx ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-          </div>
+          <PageSkeleton compact rows={5} label="积分记录读取中" />
         ) : records.isError ? (
           <div role="alert" className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
             <p>积分记录暂时无法读取，请重试。</p>

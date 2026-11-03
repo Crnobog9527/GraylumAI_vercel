@@ -7,6 +7,7 @@ import { VersionCompare } from './version-compare';
 import { ContentErasureDialog } from './content-erasure-dialog';
 import { ContentDraftView } from './content-draft-view';
 import styles from './content-editor.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export type ContentVersion={id:string;kind:string;version:number;status:string;title?:string|null;body:string|null;contentAvailable?:boolean;sourceContentId:string|null;executionId:string|null;requestId:string};
 export type EditableItem={workItemId:string;sessionId:string;title:string;brief:string|null;contentType?:string;platform:string;account:string;sourceAvailable:boolean;content:ContentVersion[]};
@@ -125,7 +126,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   }
  }
  useImperativeHandle(ref,()=>({finalize:()=>{void save('final');}}));
- if(!draft)return <p className={styles.loading}>正在读取当前成果…</p>;
+ if(!draft)return <PageSkeleton compact rows={4} label="当前成果读取中"/>;
  const unavailable=!item.sourceAvailable||Boolean(latest&&latest.contentAvailable===false);
  return <ContentDraftView platform={item.platform} account={item.account} contentLabel={contentLabel} unavailable={unavailable}
   title={draft.title} body={draft.body} onTitle={title=>change({title})} onBody={body=>change({body})}

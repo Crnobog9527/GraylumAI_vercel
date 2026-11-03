@@ -248,7 +248,8 @@ describe('my documents container', () => {
   it('says it is still reading, not that upload is closed, while the list loads', () => {
     state.list = { isSuccess: false, isPending: true, error: null, data: undefined, refetch: vi.fn() };
     const { html, text } = render(<MyDocuments scan={scanStub}/>);
-    expect(text).toContain('正在读取我的文档…');
+    expect(html).toContain('aria-busy="true"'); // grey bars, no words
+    expect(text).not.toContain('正在读取');
     expect(text).not.toContain('上传暂未开放');
     expect(text).not.toContain('还没有文件');
     expect(html).not.toContain('type="file"');
@@ -291,7 +292,8 @@ describe('document reader', () => {
     state.segments = { isPending: true, data: undefined };
     const { html, text } = render(<DocumentReader doc={doc()}/>);
     expect(html).toContain('aria-label="目录"');
-    expect(text).toContain('正在读取内容…');
+    expect(html).toContain('aria-busy="true"');
+    expect(text).not.toContain('正在读取');
     expect(html).not.toContain('<section');
   });
   it('shows a Word or Markdown heading once, not again as the first body line', () => {

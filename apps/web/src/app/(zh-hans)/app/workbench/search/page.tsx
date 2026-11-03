@@ -6,6 +6,7 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { trpc } from '@/trpc/client';
 import { useScrollPosition } from '@/components/opc/use-scroll-position';
 import styles from './workspace-search.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 type Work = { workItemId:string;sessionId:string;title:string;chatName?:string;brief:string|null;archived?:boolean;deleted?:boolean;uiRevision?:number };
 type Account = { projectId:string;platform:string;account:string;displayName?:string;strategyDraftId?:string|null;items:Work[] };
@@ -54,7 +55,7 @@ export default function WorkspaceSearch(){
     {unassigned.map(draft=><Link className={styles.row} href={'/app/positioning/'+draft.draftId} key={draft.draftId}><strong>{draft.businessName??'新账号'} · 定位分析</strong><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}
     {!library.isLoading&&!drafts.isLoading&&!strategies.length&&!works.length&&!unassigned.length&&<p className={styles.empty}>没有匹配的工作。</p>}
    </section>
-   <section aria-label="功能"><h2>功能</h2>{modules.isLoading&&<p className={styles.empty}>正在读取功能…</p>}{modules.error&&<p role="alert">功能目录暂不可用。</p>}{skills.map(module=><Link className={styles.row} href={'/app/workbench/marketplace?module='+encodeURIComponent(module.id)+'&returnTo='+encodeURIComponent(back)} key={module.id}><strong>{module.title}</strong><small>{module.description}</small></Link>)}{!modules.isLoading&&!skills.length&&<p className={styles.empty}>没有匹配的功能。</p>}{modules.data?.hasMore&&<Link className={styles.more} href={'/app/workbench/marketplace?returnTo='+encodeURIComponent(back)}>在功能广场浏览更多 →</Link>}</section>
+   <section aria-label="功能"><h2>功能</h2>{modules.isLoading&&<PageSkeleton compact rows={3} label="功能读取中"/>}{modules.error&&<p role="alert">功能目录暂不可用。</p>}{skills.map(module=><Link className={styles.row} href={'/app/workbench/marketplace?module='+encodeURIComponent(module.id)+'&returnTo='+encodeURIComponent(back)} key={module.id}><strong>{module.title}</strong><small>{module.description}</small></Link>)}{!modules.isLoading&&!skills.length&&<p className={styles.empty}>没有匹配的功能。</p>}{modules.data?.hasMore&&<Link className={styles.more} href={'/app/workbench/marketplace?returnTo='+encodeURIComponent(back)}>在功能广场浏览更多 →</Link>}</section>
   </div>
  </main></WorkspaceFrame>;
 }

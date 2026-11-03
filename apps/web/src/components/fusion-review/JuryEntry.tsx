@@ -13,6 +13,7 @@ import { ACTIVE, reviewHref, startErrorText, toPanel } from './review-adapter';
 import styles from './jury-entry.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
 import { QueryNotice } from '@/components/opc/query-notice';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 const codeOf = (error: unknown) => (error instanceof Error ? error.message : '');
 type Estimate = { estimateCredits?: number; requiredCredits?: number };
@@ -129,7 +130,7 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
             {required && required > cap ? <p>开始时可用积分需要至少 {required.toLocaleString('zh-CN')}：
               其中 {(required - cap).toLocaleString('zh-CN')} 是评审过程中每一步的临时冻结，这一步结束就退回。</p> : null}
           </> : estimate.error ? <p role="alert" className={styles.error}>{startErrorText(codeOf(estimate.error))}</p>
-            : <p role="status">正在读取评审价格…</p>}
+            : <PageSkeleton compact rows={1} label="评审价格读取中"/>}
           {error ? <p role="alert" className={styles.error}>{error}</p> : null}
           <div className={styles.actions}>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={start.isPending}>先不用</Button>

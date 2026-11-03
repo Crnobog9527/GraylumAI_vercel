@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
 import { PublishResultLink } from '@/app/(zh-hans)/app/publish-monitor/publish/publish-entry';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   RESULT_TYPES, RESULT_TYPE_LABEL, groupResults, resultErrorText, saveProblem, saveRequestId,
   type ResultType, type SessionResultItem,
@@ -146,7 +147,7 @@ export function ResultCardView({ item, mode, draft, error, pending, versions, hi
     {mode === 'history' && <ol aria-label="历史版本" className="space-y-2 border-t pt-2">
       {(versions ?? []).map(version => <li key={version.id}><span className="text-xs text-[var(--text-tertiary)]">第 {version.version} 版</span>
         <p className="max-h-32 overflow-auto whitespace-pre-wrap">{version.body}</p></li>)}
-      {!versions && !historyError && <li className="text-xs">正在读取历史版本…</li>}
+      {!versions && !historyError && <li className="text-xs"><PageSkeleton compact rows={2} label="历史版本读取中"/></li>}
       {!versions && historyError && <li className="text-xs" role="alert">历史版本暂时读不出来。
         <Button size="sm" variant="ghost" onClick={onRetryHistory}>重试</Button></li>}
     </ol>}

@@ -3,12 +3,12 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { platformName, publishErrorMessage, publishTargets, type Connection } from '@/lib/publish-monitor/publish-flow';
 import { clearAttempt, loadAttempt } from '@/lib/publish-monitor/publish-recovery';
 import { trpc } from '@/trpc/client';
 import { PublishForm } from './publish-form';
 import { PublishStatus } from './publish-status';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
  * PUBLISH-MONITOR PR-5: one-click publishing of one topic (?item=<work item id>) or of one saved result of a free
@@ -84,7 +84,7 @@ function Workbench({ source }: { source: Source }) {
   const failure = connections.error ?? options.error ?? library.error ?? (isItem ? null : versions.error);
   if (failure) return <p role="alert">{publishErrorMessage(failure.message, failure.data?.code)}</p>;
   if (!library.data || !connections.data || !options.data || (!isItem && !versions.data)) {
-    return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div>;
+    return <PageSkeleton rows={4} label="发布信息读取中" />;
   }
   const businesses = (library.data.businesses ?? []) as Business[];
   const all = connections.data as Connection[];
