@@ -6,10 +6,9 @@ import { databaseSkillSource } from '../skills/databaseSource';
 import { activateFreeChatSkill } from '../skills/stepGuide';
 import { readWorkspaceCapability } from '../turn/agent/workspacePosts';
 import { compareRpc } from './compareAdmission';
-import { compareRequest, compareRequestBytes, type CompareParts } from './compareSnapshot';
+import type { CompareParts } from './compareSnapshot';
 import { FUSION_INPUT_CAP } from './request';
 import { readReplyLocale } from '../turn/agent/replyLanguage';
-import { REPLY_LOCALES } from '../../shared/replyLanguage';
 
 /** What the browser sends to estimate or start a compare: the same Skill selection field as an ordinary turn. */
 export const compareSkillInput = z.object({ kind: z.literal('skill'), moduleId: z.string().uuid(), revisionId: z.string().uuid(),
@@ -20,30 +19,6 @@ export type CompareRequestInput = { sessionId: string; question: string; modelId
 const SKILL_BYTES = Math.floor(FUSION_INPUT_CAP / 2);
 /** Workspace kinds a compare freezes: the confirmed positioning and account strategies (the bodies a free turn reads most). */
 const WORKSPACE_KINDS = new Set(['positioning', 'strategy']);
-
-/** Visible text of one stored history item; null for tool calls, results and anything else that is not a message. */
-export function historyTurn(item: unknown): CompareParts['history'][number] | null {
-  if (!item || typeof item !== 'object') return null;
-  const { role, content } = item as { role?: unknown; content?: unknown };
-  if (role !== 'user' && role !== 'assistant') return null;
-  const text = typeof content === 'string' ? content : Array.isArray(content)
-    ? content.filter(part => part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
-      && ['input_text', 'output_text'].includes(String((part as { type?: unknown }).type)))
-      .map(part => (part as { text: string }).text).join('') : '';
-  return text ? { role, text } : null;
-}
-
-/** The oldest turns go first until the request fits the per-call cap (the question itself is never cut: an oversized
- * question is refused by the size check later). Same direction as an ordinary turn's history selection. Measured with the
- * longest reply-language rule, so the turns kept (part of the request identity) never depend on the language setting:
- * a retry after the user changed it keeps the same history and finds the frozen group. */
-export function fitHistory(parts: CompareParts): CompareParts {
-  let history = parts.history;
-  const bytes = (h: CompareParts['history']) => Math.max(...REPLY_LOCALES.map(replyLocale =>
-    compareRequestBytes(compareRequest({ ...parts, history: h, positioningFallback: true, replyLocale }))));
-  while (history.length && bytes(history) > FUSION_INPUT_CAP) history = history.slice(1);
-  return { ...parts, history };
-}
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 

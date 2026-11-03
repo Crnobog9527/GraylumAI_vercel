@@ -6,7 +6,6 @@
  * transaction that returns its body (runtime_execution checkpoint_source); the host never picks "latest" itself.
  */
 import { z } from 'zod';
-import { selectRuntimeHistory } from './context';
 import { StagingAccessError } from '../settings/stagingErrors';
 
 export const contentSourceKind = z.enum(['script', 'storyboard']);
@@ -19,15 +18,8 @@ export type FrozenSourceContent = z.infer<typeof frozenSourceContent>;
 export const CONTENT_SOURCE_CODES = {
   missing: 'RUNTIME_CONTENT_SOURCE_MISSING',
   stale: 'RUNTIME_CONTENT_SOURCE_STALE',
-  tooLarge: 'RUNTIME_CONTENT_SOURCE_TOO_LARGE',
 } as const;
-export type ContentSourceCode = typeof CONTENT_SOURCE_CODES[keyof typeof CONTENT_SOURCE_CODES];
 const refusalCode = z.enum([CONTENT_SOURCE_CODES.missing, CONTENT_SOURCE_CODES.stale]);
-
-/** Executor: the turn ends with this code before the content call (the match call, if any, stays settled). */
-export class ContentSourceRefusal extends Error {
-  constructor(readonly code: ContentSourceCode) { super(code); }
-}
 
 const KIND_NAMES: Record<ContentSourceKind, string> = { script: 'final script', storyboard: 'storyboard' };
 const header = (kind: ContentSourceKind, version: number) =>
@@ -37,18 +29,6 @@ const header = (kind: ContentSourceKind, version: number) =>
 /** The injected text goes into this call's instructions only: it never enters the Session history of later turns. */
 export function withInjectedSource(instructions: string, kind: ContentSourceKind, version: number, body: string) {
   return instructions + header(kind, version) + body;
-}
-
-/** Throws when the injected instructions cannot fit this call; nothing is dispatched for the content. */
-export function assertSourceFits(sizing: { input: string; instructions: string; inputBytes: number; toolBytes: number }) {
-  try {
-    selectRuntimeHistory([], [{ role: 'user', content: sizing.input }],
-      { instructions: sizing.instructions, inputBytes: sizing.inputBytes, historyItems: 0, toolBytes: sizing.toolBytes });
-  } catch (error) {
-    if (error instanceof Error && error.message === 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')
-      throw new ContentSourceRefusal(CONTENT_SOURCE_CODES.tooLarge);
-    throw error;
-  }
 }
 
 /** Refusals raised by SQL (runtime_admit, 0276) that reach the user with their own fixed message. */
