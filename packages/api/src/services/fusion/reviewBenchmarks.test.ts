@@ -22,7 +22,7 @@ describe('the benchmarks a review reads', () => {
     expect(reviewer.adoptedBenchmarks!.map(a => a.account)).toEqual(['new-a', 'new-b', 'new-c']);
     expect(JSON.stringify(reviewer.adoptedBenchmarks)).not.toContain('old-');
     expect(JSON.stringify(reviewer.adoptedBenchmarks)).toContain('2026-11-03T08:40:00Z');
-    // Stored with none adopted: an empty list. No stored list at all (an older report, or the function before 0494): null, not [].
+    // Stored with none adopted: an empty list. No stored list at all (an older report, or the function before 0493): null, not [].
     expect(inputOf(reviewerRequest(skill, context(source.parse(row({ adoptedBenchmarks: [] }))), 'evidence')).adoptedBenchmarks).toEqual([]);
     expect(inputOf(reviewerRequest(skill, context(source.parse(row({}))), 'evidence')).adoptedBenchmarks).toBeNull();
   });

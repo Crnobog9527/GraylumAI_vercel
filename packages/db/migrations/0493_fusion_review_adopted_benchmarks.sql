@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- FUSION-REVIEW (jury input, 0494): fusion_review_source also returns
+-- FUSION-REVIEW (jury input, 0493): fusion_review_source also returns
 -- adoptedBenchmarks, the benchmark accounts the report actually adopted with the numbers and fetch time the host attached when the
 -- report was finalized (artifact_versions.report #> generatedReport.data.data.benchmarks.accounts: platform, account, metrics). The report
 -- text carries only account names; before this the reviewers had nothing to check a benchmark against except the draft's

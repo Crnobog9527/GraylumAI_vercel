@@ -49,7 +49,7 @@ export const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().
 const adoptedBenchmark = z.object({ platform: z.string(), account: z.string(),
   metrics: z.object({ followers: z.number().nullable(), medianViews: z.number().nullable(), engagementRate: z.number().nullable(),
     weeklyPosts: z.number().nullable(), capturedAt: z.string().nullable() }).passthrough().nullable().catch(null) }).passthrough();
-// adoptedBenchmarks: null = the version has no stored data (unknown); [] = stored and none adopted. A missing key (before 0494) is unknown too.
+// adoptedBenchmarks: null = the version has no stored data (unknown); [] = stored and none adopted. A missing key (before 0493) is unknown too.
 export const source = z.object({
   adoptedBenchmarks: z.array(adoptedBenchmark).max(30).nullable().catch(null).default(null),
   body: z.string().min(1), sections: z.array(z.string()).min(1), maxCharacters: z.number().int().positive(),
