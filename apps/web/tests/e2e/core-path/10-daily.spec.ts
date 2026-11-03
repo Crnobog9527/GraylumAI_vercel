@@ -16,16 +16,12 @@ import { readCredits, sendAndWait, settleOpening } from './support/ui';
 // Not a serial group: a failed or capped journey must not skip the ones after it, above all the last check for frozen credits.
 // One worker runs the tests in file order (playwright.core-path.config.ts).
 
-/**
- * About what each journey costs on staging's models (2026-10/11 measurements, rounded up); used only to skip, never to bill. The benchmark
- * confirm is not a daily journey: one supplier fetch cost $0.45 on 2026-11-03 (the run went $0.089 past the cap); round 14 of the
- * manual acceptance covers it (the simulated layer 1 does not yet).
- */
-const RESERVE = { chat: 0.05, mentor: 0.08, report: 0.05 };
+// The benchmark confirm is not a daily journey: one supplier fetch cost $0.45 on 2026-11-03 (the run went $0.089 past the cap); round 14
+// of the manual acceptance covers it (the simulated layer 1 does not yet). Every paid step is pre-checked (spend.ts, SpendMeter.precheck).
 
 test('daily: one free-chat message is one charged turn and survives a reload @daily', async ({ openAs, meter }) => {
   test.setTimeout(6 * 60_000);
-  await requireBudget(meter, RESERVE.chat);
+  await requireBudget(meter, 'chat');
   const pro = (await requireAccounts()).pro;
   const { page } = await openAs('pro');
   await page.goto('/app/profile');
@@ -53,7 +49,7 @@ test('daily: one free-chat message is one charged turn and survives a reload @da
 
 test('daily: a new draft opens one turn, reopening it opens none, one mentor reply is one turn @daily', async ({ openAs, meter, browser }) => {
   test.setTimeout(8 * 60_000);
-  await requireBudget(meter, RESERVE.mentor);
+  await requireBudget(meter, 'mentor');
   const gold = (await requireAccounts()).gold;
   const { page } = await openAs('gold');
   const mark = await lastTurnId(gold.id);
@@ -85,7 +81,7 @@ test('daily: a new draft opens one turn, reopening it opens none, one mentor rep
 
 test('daily: a report stopped at once is refunded in full @daily', async ({ openAs, meter }) => {
   test.setTimeout(8 * 60_000);
-  await requireBudget(meter, RESERVE.report);
+  await requireBudget(meter, 'report');
   // A kept draft whose three steps are confirmed with a qualified benchmark (CORE_E2E_DRAFT_URL). The daily check never makes one: a
   // benchmark search costs about the whole day's budget (2026-11-03: $0.45 for one fetch).
   const readyDraft = process.env.CORE_E2E_DRAFT_URL ?? '';
@@ -101,6 +97,7 @@ test('daily: a report stopped at once is refunded in full @daily', async ({ open
   expect(ready, 'the ready draft offers a report').toBe(true);
   const before = await readCredits(page);
   const mark = await lastTurnId(gold.id);
+  await meter.precheck('report', 'daily: report start');
   await startReport(page);
   await stopButton(page).click();
   await expect(reportDialog(page).getByText(/已停止/).first()).toBeVisible({ timeout: 60_000 });
