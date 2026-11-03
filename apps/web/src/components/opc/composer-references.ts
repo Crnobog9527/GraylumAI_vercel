@@ -5,7 +5,7 @@ import type { EditorState } from '@tiptap/pm/state';
 
 /**
  * UI-B: `@` picks a library document and leaves an inline reference in the message box.
- * Off by default. References are kept apart from the text and travel in `runtime.prepare`'s own `references`
+ * Off by default. References are kept apart from the text and travel in the turn request's own `references`
  * field (LIB-4b, #1022); the server switch `library_agent_read_enabled` must be on as well.
  */
 // Next inlines NEXT_PUBLIC_* at build time; bundles without `process` (component test fixtures) read it as off.
@@ -18,7 +18,7 @@ export type LibraryReference = { documentId: string; version: number; label: str
 /** Distinct documents one message may reference (LIB-4b `LIBRARY_REFERENCE_LIMIT`). */
 export const REFERENCE_LIMIT = 5;
 
-/** The request field of `runtime.prepare`; absent (not `[]`) when there is nothing to send, so old requests stay byte-identical. */
+/** The `references` field of the turn request; absent (not `[]`) when there is nothing to send, so old requests stay byte-identical. */
 export function referenceRequest(references: readonly LibraryReference[]) {
   return references.map(item => ({ kind: 'library_document' as const, documentId: item.documentId, version: item.version }));
 }

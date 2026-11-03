@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { adoptable, currentFinalScript, guideRequest, latestVersion, replyOfRequest, scriptSourceTurn, videoRequest, type ContentVersion } from './work-turn-path';
 
 const version = (over: Partial<ContentVersion>): ContentVersion => ({ id: 'a', kind: 'script', version: 1, status: 'final', body: 'b', sourceContentId: null,
-  executionId: null, turnId: null, requestId: 'r', ...over });
+  turnId: null, requestId: 'r', ...over });
 
 describe('a work item on the turn path', () => {
   it('finds the turn behind a manual revision, and stops on a broken chain', () => {
