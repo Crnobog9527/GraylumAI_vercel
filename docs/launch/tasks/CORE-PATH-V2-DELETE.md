@@ -342,6 +342,8 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 
 **按名字判断不够（2026-11-03 补记）**：`fusion_call_output_read` 新路径评审团在用（`turn/jury.ts → reviewCore`），之前被误放进删除清单，已改写成只读 `fusion_turn_outputs` 并进 `KEEP_FUSION`。F 前置段另新增 `runtime_session_scope(p_actor_id, p_session_id)`（给收窄后的 `runtime.view` 用）。生成器新增 `NODE-STILL-CALLS` 检查：把所有非测试 Node 代码里出现的、等于数据库函数名且在删除清单里的名字列出来，`F_STRICT=1` 时有就失败；**用 C 路删完旧 Node 之后的代码跑一遍，剩下的才是真调用，每个都必须改写或保留**。当前基线的 45 个名字和归属（V2-9、C、需产品面处理、需核对）见共享笔记目录的 `f-node-drop-check.md`。F 只有在 `F_STRICT=1` 通过、守卫清零、两者都满足时才算准备好。
 
+**第二次重新生成（2026-11-03，基线 staging + #1661 的 0488）**：16 张表、141 个函数、24 条外键、39 个触发器；守卫点名的“留下但仍碰旧对象”的函数 56 个（C 路删 Node 后应归零）。`runtime_session_scope` 改由 #1661 的迁移 0488 新建，F 不再自带（生成时需要 0488 已在树里）。生成器修了两处：①字面 `\\n\\n` 写进 SQL，psql 报 `invalid command \\n`；②返回被删表行类型的函数（如 `opc_data_execution` 的 `RETURNS runtime_executions`）漏列，导致 `DROP TABLE` 因依赖失败，现在按“返回类型”也列入删除。本机演练（1500 个旧执行、7500 条历史、27.9 万条历史依赖）：守卫按预期拒绝；去掉守卫后迁移 113 ms 成功，旧表全部消失，保留表数据不变（`credit_transactions` 1501 行），指向被删表的外键 0 条。
+
 ### 7.5 注销与内容删除（R2，V2-9 窗口）留给 F 的清单
 
 来源：V2-9 窗口的 `R2-leftovers-for-F.md`（共享笔记目录，2026-11-03）。R2a（#1649）已合并，R2b（#1651）只去掉结算；旧内容清除和 detach 按总控决定保留到 F。**F 要把下面这些函数整段改写成不碰旧表的版本（或随 F 删），和批次 F 的迁移同时上库；F 迁移的自检守卫在它们没改完时会拒绝运行。**

@@ -1,10 +1,10 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- CORE-PATH-V2 V2-12 batch F: IRREVERSIBLE. Drops the old runtime / BILL2 path: 15 tables and 166 functions, and the foreign keys
+-- CORE-PATH-V2 V2-12 batch F: IRREVERSIBLE. Drops the old runtime / BILL2 path: 16 tables and 141 functions, and the foreign keys
 -- from kept tables to them. There is no way back after this migration except restoring a backup (CORE-PATH-V2-DELETE.md section 4).
 -- Data: staging holds old-path TEST rows only (thousands of rows in runtime_executions, bill2_runs/calls/receipts, ...); the production database
 -- has not been built yet, so no real user data is in these tables. Kept tables that pointed at them keep their column values (plain, unconstrained).
--- Kept on purpose (not old path): runtime_scope_material, runtime_session_names, runtime_session_results, runtime_test_windows.
+-- Kept on purpose (not old path): runtime_scope_material, runtime_session_names, runtime_session_results.
 -- The first statement is a guard: it refuses to run while any function that stays still names a dropped table or calls a dropped function
 -- (plpgsql would otherwise fail only when called). Whole object lists are generated from the recomputed inventory; nothing is dropped with CASCADE.
 BEGIN;
@@ -328,30 +328,7 @@ BEGIN
   RETURN NULL;
 END $function$;
 
--- ---- new functions ----\n-- New in F: the narrowed runtime.view reads a session's scope only (no executions, history or work items).
--- legacy: the session has no turn and was created before this database's first turn (an old-path conversation of staging test data).
--- Production was built on the new path, so there it is always false. Refusals are runtime_view's: CONTENT_ERASED (42501) and RUNTIME_SCOPE_DENIED.
-CREATE OR REPLACE FUNCTION public.runtime_session_scope(p_actor_id uuid, p_session_id uuid)
- RETURNS jsonb
- LANGUAGE plpgsql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE s runtime_sessions;
-BEGIN
- -- D7 read boundary
- IF EXISTS(SELECT 1 FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id AND (erased_at IS NOT NULL OR content_deleted_at IS NOT NULL)) THEN
-  RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501';
- END IF;
- PERFORM bill2_actor(p_actor_id);
- SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
- IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED'; END IF;
- RETURN jsonb_build_object('sessionId',s.id,'scope',s.scope,
-  'legacy',NOT EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.session_id=s.id)
-    AND s.created_at < coalesce((SELECT min(opened_at) FROM turns),s.created_at) - interval '1 hour');
-END $function$;
-REVOKE ALL ON FUNCTION public.runtime_session_scope(uuid,uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.runtime_session_scope(uuid,uuid) TO service_role;\n\n-- ---- erasure segment (R2c) ----
+-- ---- erasure segment (R2c) ----
 -- Format: whole-function CREATE OR REPLACE plus 6 DROP FUNCTION IF EXISTS; no BEGIN/COMMIT; safe to run twice. The generator splices it in after
 -- billing_reconcile_day and before DO $guard$. It touches only the 24 functions named below (no other function, table or trigger).
 -- CORE-PATH-V2 V2-12 batch F, pre-drop rewrite segment: account erasure and content deletion (R2c, 24 functions).
@@ -1608,40 +1585,40 @@ DECLARE bad text;
 BEGIN
   SELECT string_agg(DISTINCT p.proname, ', ' ORDER BY p.proname) INTO bad
   FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace AND n.nspname='public'
-  WHERE p.proname <> ALL (ARRAY['atomic_abort_settle','atomic_finalize_ai_abort','atomic_finalize_ai_failure','atomic_finalize_ai_success','bill2_admin_call_report','bill2_call_erasure_guard','bill2_cancel','bill2_claim','bill2_close','bill2_dispatch','bill2_erasure_closed','bill2_erasure_receipt_projection','bill2_erasure_view','bill2_evidence_immutable','bill2_execution_allowed','bill2_finalize','bill2_payg_absorb_report','bill2_payg_admin_settle_call','bill2_payg_block_lock','bill2_payg_call_stuck','bill2_payg_claim','bill2_payg_compensate','bill2_payg_finalize','bill2_payg_financial_binding','bill2_payg_lock_models','bill2_payg_metering_hash','bill2_payg_metering_review_snapshot','bill2_payg_review_invalidate_receipt','bill2_payg_review_metering','bill2_payg_stuck_calls','bill2_payg_tool_settlement','bill2_payg_validate_quote','bill2_payg_validate_tool_quote','bill2_pending_calls','bill2_prepare','bill2_private_input','bill2_public','bill2_read','bill2_receipt_raw_due','bill2_receipts_scrub_raw','bill2_record','bill2_record_tool','bill2_recovery_claim','bill2_revoke_unstarted_dispatch','bill2_tool_cost_reconcile','bill2_tool_pending_guard','bill2_usage_total','content_erasure_visible','fusion_billing_guard','fusion_call_in_flight','fusion_compare_adopt','fusion_compare_begin','fusion_compare_claim','fusion_compare_dispatch_claim','fusion_compare_dispatch_release','fusion_compare_read','fusion_compare_stop','fusion_compare_unjudged','fusion_group_fee_guard','fusion_pending_financial_batch','fusion_review_end_paused','fusion_review_fee_hold','fusion_review_fee_settle','fusion_review_fee_settle_due','fusion_review_fee_settle_internal','fusion_review_fee_view','fusion_review_pause_idle','fusion_review_unjudged','opc_brief_adoption','opc_content_from_execution','opc_content_reaction','opc_data_execution','opc_plan_request_state','opc_plan_result','opc_save_result','opc_video_execution_check','opc_video_package_from_execution','opc_video_results_from_execution','opc_video_runtime_binding_guard','report_admission_check','report_fee_hold','report_fee_settle','report_fee_settle_due','report_fee_settle_internal','report_fee_terminal_settlement','report_fee_view','report_stop','research_runtime_call_charge','research_runtime_link','research_user_message','runtime_admission_replay','runtime_admit','runtime_admit_commit','runtime_admit_precheck','runtime_billing_allowed','runtime_binding_guard','runtime_cancel','runtime_cancel_with_code','runtime_context_allowed','runtime_direct_billing_allowed','runtime_direct_billing_allowed_before_opc','runtime_direct_billing_allowed_before_topic','runtime_execution','runtime_execution_visibility','runtime_financial_recovery','runtime_history_availability','runtime_history_availability_before_memo','runtime_history_available','runtime_history_available_before_memo','runtime_interrupt_capacity','runtime_interrupted_recovery','runtime_library_propagate','runtime_library_read','runtime_library_references_freeze','runtime_library_sources_gone','runtime_library_tool_guard','runtime_library_visible','runtime_load_skill_allowed','runtime_load_skill_entry','runtime_load_skill_result_valid','runtime_matching_call_guard','runtime_mentor_history','runtime_mentor_history_draft','runtime_mentor_history_guard','runtime_mentor_messages','runtime_pending_financial_batch','runtime_positioning_gate','runtime_production_recovery_policy','runtime_read_verified','runtime_receipt_saved','runtime_response','runtime_session_context','runtime_session_items','runtime_session_result_edit','runtime_session_result_save','runtime_session_result_save_turn','runtime_session_result_turn_view','runtime_session_result_versions','runtime_session_result_view','runtime_session_results_list','runtime_session_results_list_turns','runtime_source_checkpoint','runtime_stale_charged_rounds','runtime_stale_round_compensate','runtime_stop_loss_call_guard','runtime_stop_loss_settled','runtime_test_actor_access','runtime_test_budget_guard','runtime_test_dispatch_guard','runtime_test_recovery_policy','runtime_tool','runtime_view','runtime_view_with_work_items','runtime_voice_references_freeze','runtime_voice_source_gone','runtime_voice_sources_gone','runtime_work_items','runtime_workspace_benchmark_guard','runtime_workspace_posts_guard','runtime_workspace_posts_history_erased','runtime_workspace_posts_history_visible','runtime_workspace_posts_receipt_ready','runtime_workspace_tool_guard','voice_billing_scrub','voice_run_recovery'])
-    AND regexp_replace(p.prosrc,'--[^\n]*','','g') ~* '\m(runtime_executions|runtime_session_history|runtime_history_dependencies|runtime_tool_calls|runtime_session_batches|runtime_library_references|runtime_voice_references|bill2_runs|bill2_calls|bill2_receipts|bill2_provider_ids|fusion_billing_groups|fusion_billing_group_steps|report_fees|fusion_review_fees)\M';
+  WHERE p.proname <> ALL (ARRAY['bill2_admin_call_report','bill2_call_erasure_guard','bill2_cancel','bill2_claim','bill2_close','bill2_dispatch','bill2_erasure_closed','bill2_erasure_receipt_projection','bill2_erasure_view','bill2_evidence_immutable','bill2_execution_allowed','bill2_finalize','bill2_payg_absorb_report','bill2_payg_admin_settle_call','bill2_payg_block_lock','bill2_payg_call_stuck','bill2_payg_claim','bill2_payg_compensate','bill2_payg_finalize','bill2_payg_financial_binding','bill2_payg_lock_models','bill2_payg_metering_hash','bill2_payg_metering_review_snapshot','bill2_payg_review_invalidate_receipt','bill2_payg_review_metering','bill2_payg_stuck_calls','bill2_payg_tool_settlement','bill2_payg_validate_quote','bill2_payg_validate_tool_quote','bill2_pending_calls','bill2_prepare','bill2_private_input','bill2_public','bill2_read','bill2_receipt_raw_due','bill2_receipts_scrub_raw','bill2_record','bill2_record_tool','bill2_recovery_claim','bill2_revoke_unstarted_dispatch','bill2_tool_cost_reconcile','bill2_tool_pending_guard','bill2_usage_total','fusion_billing_guard','fusion_call_in_flight','fusion_group_fee_guard','fusion_review_fee_hold','fusion_review_fee_settle','fusion_review_fee_settle_due','fusion_review_fee_settle_internal','fusion_review_fee_view','opc_data_execution','opc_video_runtime_binding_guard','report_admission_check','report_fee_hold','report_fee_settle','report_fee_settle_due','report_fee_settle_internal','report_fee_terminal_settlement','report_fee_view','report_stop','runtime_admission_replay','runtime_admit','runtime_admit_commit','runtime_admit_precheck','runtime_billing_allowed','runtime_binding_guard','runtime_cancel','runtime_cancel_with_code','runtime_context_allowed','runtime_direct_billing_allowed','runtime_direct_billing_allowed_before_opc','runtime_direct_billing_allowed_before_topic','runtime_execution','runtime_execution_visibility','runtime_financial_recovery','runtime_history_availability','runtime_history_availability_before_memo','runtime_history_available','runtime_history_available_before_memo','runtime_interrupt_capacity','runtime_interrupted_recovery','runtime_library_propagate','runtime_library_read','runtime_library_references_freeze','runtime_library_sources_gone','runtime_library_tool_guard','runtime_library_visible','runtime_load_skill_allowed','runtime_load_skill_entry','runtime_load_skill_result_valid','runtime_matching_call_guard','runtime_mentor_history','runtime_mentor_history_draft','runtime_mentor_history_guard','runtime_mentor_messages','runtime_pending_financial_batch','runtime_positioning_gate','runtime_production_access','runtime_production_allowed','runtime_production_database','runtime_production_enabled','runtime_production_recovery_policy','runtime_read_verified','runtime_receipt_saved','runtime_response','runtime_session_context','runtime_session_items','runtime_session_result_edit','runtime_session_result_save','runtime_session_result_save_turn','runtime_session_result_turn_view','runtime_session_result_versions','runtime_session_result_view','runtime_session_results_list','runtime_session_results_list_turns','runtime_source_checkpoint','runtime_stale_charged_rounds','runtime_stale_round_compensate','runtime_stop_loss_call_guard','runtime_stop_loss_settled','runtime_test_actor_access','runtime_test_budget_guard','runtime_test_dispatch_guard','runtime_test_policy','runtime_test_recovery_policy','runtime_test_window_allowed','runtime_tool','runtime_view','runtime_view_with_work_items','runtime_voice_references_freeze','runtime_voice_source_gone','runtime_voice_sources_gone','runtime_work_items','runtime_workspace_benchmark_guard','runtime_workspace_posts_guard','runtime_workspace_posts_history_erased','runtime_workspace_posts_history_visible','runtime_workspace_posts_receipt_ready','runtime_workspace_tool_guard'])
+    AND regexp_replace(p.prosrc,'--[^\n]*','','g') ~* '\m(runtime_executions|runtime_session_history|runtime_history_dependencies|runtime_tool_calls|runtime_session_batches|runtime_library_references|runtime_voice_references|runtime_test_windows|bill2_runs|bill2_calls|bill2_receipts|bill2_provider_ids|fusion_billing_groups|fusion_billing_group_steps|report_fees|fusion_review_fees)\M';
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'V2_12_F_REFERENCES_REMAIN_TABLES: %', bad; END IF;
   SELECT string_agg(DISTINCT p.proname, ', ' ORDER BY p.proname) INTO bad
   FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace AND n.nspname='public'
-  WHERE p.proname <> ALL (ARRAY['atomic_abort_settle','atomic_finalize_ai_abort','atomic_finalize_ai_failure','atomic_finalize_ai_success','bill2_admin_call_report','bill2_call_erasure_guard','bill2_cancel','bill2_claim','bill2_close','bill2_dispatch','bill2_erasure_closed','bill2_erasure_receipt_projection','bill2_erasure_view','bill2_evidence_immutable','bill2_execution_allowed','bill2_finalize','bill2_payg_absorb_report','bill2_payg_admin_settle_call','bill2_payg_block_lock','bill2_payg_call_stuck','bill2_payg_claim','bill2_payg_compensate','bill2_payg_finalize','bill2_payg_financial_binding','bill2_payg_lock_models','bill2_payg_metering_hash','bill2_payg_metering_review_snapshot','bill2_payg_review_invalidate_receipt','bill2_payg_review_metering','bill2_payg_stuck_calls','bill2_payg_tool_settlement','bill2_payg_validate_quote','bill2_payg_validate_tool_quote','bill2_pending_calls','bill2_prepare','bill2_private_input','bill2_public','bill2_read','bill2_receipt_raw_due','bill2_receipts_scrub_raw','bill2_record','bill2_record_tool','bill2_recovery_claim','bill2_revoke_unstarted_dispatch','bill2_tool_cost_reconcile','bill2_tool_pending_guard','bill2_usage_total','content_erasure_visible','fusion_billing_guard','fusion_call_in_flight','fusion_compare_adopt','fusion_compare_begin','fusion_compare_claim','fusion_compare_dispatch_claim','fusion_compare_dispatch_release','fusion_compare_read','fusion_compare_stop','fusion_compare_unjudged','fusion_group_fee_guard','fusion_pending_financial_batch','fusion_review_end_paused','fusion_review_fee_hold','fusion_review_fee_settle','fusion_review_fee_settle_due','fusion_review_fee_settle_internal','fusion_review_fee_view','fusion_review_pause_idle','fusion_review_unjudged','opc_brief_adoption','opc_content_from_execution','opc_content_reaction','opc_data_execution','opc_plan_request_state','opc_plan_result','opc_save_result','opc_video_execution_check','opc_video_package_from_execution','opc_video_results_from_execution','opc_video_runtime_binding_guard','report_admission_check','report_fee_hold','report_fee_settle','report_fee_settle_due','report_fee_settle_internal','report_fee_terminal_settlement','report_fee_view','report_stop','research_runtime_call_charge','research_runtime_link','research_user_message','runtime_admission_replay','runtime_admit','runtime_admit_commit','runtime_admit_precheck','runtime_billing_allowed','runtime_binding_guard','runtime_cancel','runtime_cancel_with_code','runtime_context_allowed','runtime_direct_billing_allowed','runtime_direct_billing_allowed_before_opc','runtime_direct_billing_allowed_before_topic','runtime_execution','runtime_execution_visibility','runtime_financial_recovery','runtime_history_availability','runtime_history_availability_before_memo','runtime_history_available','runtime_history_available_before_memo','runtime_interrupt_capacity','runtime_interrupted_recovery','runtime_library_propagate','runtime_library_read','runtime_library_references_freeze','runtime_library_sources_gone','runtime_library_tool_guard','runtime_library_visible','runtime_load_skill_allowed','runtime_load_skill_entry','runtime_load_skill_result_valid','runtime_matching_call_guard','runtime_mentor_history','runtime_mentor_history_draft','runtime_mentor_history_guard','runtime_mentor_messages','runtime_pending_financial_batch','runtime_positioning_gate','runtime_production_recovery_policy','runtime_read_verified','runtime_receipt_saved','runtime_response','runtime_session_context','runtime_session_items','runtime_session_result_edit','runtime_session_result_save','runtime_session_result_save_turn','runtime_session_result_turn_view','runtime_session_result_versions','runtime_session_result_view','runtime_session_results_list','runtime_session_results_list_turns','runtime_source_checkpoint','runtime_stale_charged_rounds','runtime_stale_round_compensate','runtime_stop_loss_call_guard','runtime_stop_loss_settled','runtime_test_actor_access','runtime_test_budget_guard','runtime_test_dispatch_guard','runtime_test_recovery_policy','runtime_tool','runtime_view','runtime_view_with_work_items','runtime_voice_references_freeze','runtime_voice_source_gone','runtime_voice_sources_gone','runtime_work_items','runtime_workspace_benchmark_guard','runtime_workspace_posts_guard','runtime_workspace_posts_history_erased','runtime_workspace_posts_history_visible','runtime_workspace_posts_receipt_ready','runtime_workspace_tool_guard','voice_billing_scrub','voice_run_recovery'])
-    AND regexp_replace(p.prosrc,'--[^\n]*','','g') ~* '\m(atomic_abort_settle|atomic_finalize_ai_abort|atomic_finalize_ai_failure|atomic_finalize_ai_success|bill2_admin_call_report|bill2_call_erasure_guard|bill2_cancel|bill2_claim|bill2_close|bill2_dispatch|bill2_erasure_closed|bill2_erasure_receipt_projection|bill2_erasure_view|bill2_evidence_immutable|bill2_execution_allowed|bill2_finalize|bill2_payg_absorb_report|bill2_payg_admin_settle_call|bill2_payg_block_lock|bill2_payg_call_stuck|bill2_payg_claim|bill2_payg_compensate|bill2_payg_finalize|bill2_payg_financial_binding|bill2_payg_lock_models|bill2_payg_metering_hash|bill2_payg_metering_review_snapshot|bill2_payg_review_invalidate_receipt|bill2_payg_review_metering|bill2_payg_stuck_calls|bill2_payg_tool_settlement|bill2_payg_validate_quote|bill2_payg_validate_tool_quote|bill2_pending_calls|bill2_prepare|bill2_private_input|bill2_public|bill2_read|bill2_receipt_raw_due|bill2_receipts_scrub_raw|bill2_record|bill2_record_tool|bill2_recovery_claim|bill2_revoke_unstarted_dispatch|bill2_tool_cost_reconcile|bill2_tool_pending_guard|bill2_usage_total|content_erasure_visible|fusion_billing_guard|fusion_call_in_flight|fusion_compare_adopt|fusion_compare_begin|fusion_compare_claim|fusion_compare_dispatch_claim|fusion_compare_dispatch_release|fusion_compare_read|fusion_compare_stop|fusion_compare_unjudged|fusion_group_fee_guard|fusion_pending_financial_batch|fusion_review_end_paused|fusion_review_fee_hold|fusion_review_fee_settle|fusion_review_fee_settle_due|fusion_review_fee_settle_internal|fusion_review_fee_view|fusion_review_pause_idle|fusion_review_unjudged|opc_brief_adoption|opc_content_from_execution|opc_content_reaction|opc_data_execution|opc_plan_request_state|opc_plan_result|opc_save_result|opc_video_execution_check|opc_video_package_from_execution|opc_video_results_from_execution|opc_video_runtime_binding_guard|report_admission_check|report_fee_hold|report_fee_settle|report_fee_settle_due|report_fee_settle_internal|report_fee_terminal_settlement|report_fee_view|report_stop|research_runtime_call_charge|research_runtime_link|research_user_message|runtime_admission_replay|runtime_admit|runtime_admit_commit|runtime_admit_precheck|runtime_billing_allowed|runtime_binding_guard|runtime_cancel|runtime_cancel_with_code|runtime_context_allowed|runtime_direct_billing_allowed|runtime_direct_billing_allowed_before_opc|runtime_direct_billing_allowed_before_topic|runtime_execution|runtime_execution_visibility|runtime_financial_recovery|runtime_history_availability|runtime_history_availability_before_memo|runtime_history_available|runtime_history_available_before_memo|runtime_interrupt_capacity|runtime_interrupted_recovery|runtime_library_propagate|runtime_library_read|runtime_library_references_freeze|runtime_library_sources_gone|runtime_library_tool_guard|runtime_library_visible|runtime_load_skill_allowed|runtime_load_skill_entry|runtime_load_skill_result_valid|runtime_matching_call_guard|runtime_mentor_history|runtime_mentor_history_draft|runtime_mentor_history_guard|runtime_mentor_messages|runtime_pending_financial_batch|runtime_positioning_gate|runtime_production_recovery_policy|runtime_read_verified|runtime_receipt_saved|runtime_response|runtime_session_context|runtime_session_items|runtime_session_result_edit|runtime_session_result_save|runtime_session_result_save_turn|runtime_session_result_turn_view|runtime_session_result_versions|runtime_session_result_view|runtime_session_results_list|runtime_session_results_list_turns|runtime_source_checkpoint|runtime_stale_charged_rounds|runtime_stale_round_compensate|runtime_stop_loss_call_guard|runtime_stop_loss_settled|runtime_test_actor_access|runtime_test_budget_guard|runtime_test_dispatch_guard|runtime_test_recovery_policy|runtime_tool|runtime_view|runtime_view_with_work_items|runtime_voice_references_freeze|runtime_voice_source_gone|runtime_voice_sources_gone|runtime_work_items|runtime_workspace_benchmark_guard|runtime_workspace_posts_guard|runtime_workspace_posts_history_erased|runtime_workspace_posts_history_visible|runtime_workspace_posts_receipt_ready|runtime_workspace_tool_guard|voice_billing_scrub|voice_run_recovery)\s*\(';
+  WHERE p.proname <> ALL (ARRAY['bill2_admin_call_report','bill2_call_erasure_guard','bill2_cancel','bill2_claim','bill2_close','bill2_dispatch','bill2_erasure_closed','bill2_erasure_receipt_projection','bill2_erasure_view','bill2_evidence_immutable','bill2_execution_allowed','bill2_finalize','bill2_payg_absorb_report','bill2_payg_admin_settle_call','bill2_payg_block_lock','bill2_payg_call_stuck','bill2_payg_claim','bill2_payg_compensate','bill2_payg_finalize','bill2_payg_financial_binding','bill2_payg_lock_models','bill2_payg_metering_hash','bill2_payg_metering_review_snapshot','bill2_payg_review_invalidate_receipt','bill2_payg_review_metering','bill2_payg_stuck_calls','bill2_payg_tool_settlement','bill2_payg_validate_quote','bill2_payg_validate_tool_quote','bill2_pending_calls','bill2_prepare','bill2_private_input','bill2_public','bill2_read','bill2_receipt_raw_due','bill2_receipts_scrub_raw','bill2_record','bill2_record_tool','bill2_recovery_claim','bill2_revoke_unstarted_dispatch','bill2_tool_cost_reconcile','bill2_tool_pending_guard','bill2_usage_total','fusion_billing_guard','fusion_call_in_flight','fusion_group_fee_guard','fusion_review_fee_hold','fusion_review_fee_settle','fusion_review_fee_settle_due','fusion_review_fee_settle_internal','fusion_review_fee_view','opc_data_execution','opc_video_runtime_binding_guard','report_admission_check','report_fee_hold','report_fee_settle','report_fee_settle_due','report_fee_settle_internal','report_fee_terminal_settlement','report_fee_view','report_stop','runtime_admission_replay','runtime_admit','runtime_admit_commit','runtime_admit_precheck','runtime_billing_allowed','runtime_binding_guard','runtime_cancel','runtime_cancel_with_code','runtime_context_allowed','runtime_direct_billing_allowed','runtime_direct_billing_allowed_before_opc','runtime_direct_billing_allowed_before_topic','runtime_execution','runtime_execution_visibility','runtime_financial_recovery','runtime_history_availability','runtime_history_availability_before_memo','runtime_history_available','runtime_history_available_before_memo','runtime_interrupt_capacity','runtime_interrupted_recovery','runtime_library_propagate','runtime_library_read','runtime_library_references_freeze','runtime_library_sources_gone','runtime_library_tool_guard','runtime_library_visible','runtime_load_skill_allowed','runtime_load_skill_entry','runtime_load_skill_result_valid','runtime_matching_call_guard','runtime_mentor_history','runtime_mentor_history_draft','runtime_mentor_history_guard','runtime_mentor_messages','runtime_pending_financial_batch','runtime_positioning_gate','runtime_production_access','runtime_production_allowed','runtime_production_database','runtime_production_enabled','runtime_production_recovery_policy','runtime_read_verified','runtime_receipt_saved','runtime_response','runtime_session_context','runtime_session_items','runtime_session_result_edit','runtime_session_result_save','runtime_session_result_save_turn','runtime_session_result_turn_view','runtime_session_result_versions','runtime_session_result_view','runtime_session_results_list','runtime_session_results_list_turns','runtime_source_checkpoint','runtime_stale_charged_rounds','runtime_stale_round_compensate','runtime_stop_loss_call_guard','runtime_stop_loss_settled','runtime_test_actor_access','runtime_test_budget_guard','runtime_test_dispatch_guard','runtime_test_policy','runtime_test_recovery_policy','runtime_test_window_allowed','runtime_tool','runtime_view','runtime_view_with_work_items','runtime_voice_references_freeze','runtime_voice_source_gone','runtime_voice_sources_gone','runtime_work_items','runtime_workspace_benchmark_guard','runtime_workspace_posts_guard','runtime_workspace_posts_history_erased','runtime_workspace_posts_history_visible','runtime_workspace_posts_receipt_ready','runtime_workspace_tool_guard'])
+    AND regexp_replace(p.prosrc,'--[^\n]*','','g') ~* '\m(bill2_admin_call_report|bill2_call_erasure_guard|bill2_cancel|bill2_claim|bill2_close|bill2_dispatch|bill2_erasure_closed|bill2_erasure_receipt_projection|bill2_erasure_view|bill2_evidence_immutable|bill2_execution_allowed|bill2_finalize|bill2_payg_absorb_report|bill2_payg_admin_settle_call|bill2_payg_block_lock|bill2_payg_call_stuck|bill2_payg_claim|bill2_payg_compensate|bill2_payg_finalize|bill2_payg_financial_binding|bill2_payg_lock_models|bill2_payg_metering_hash|bill2_payg_metering_review_snapshot|bill2_payg_review_invalidate_receipt|bill2_payg_review_metering|bill2_payg_stuck_calls|bill2_payg_tool_settlement|bill2_payg_validate_quote|bill2_payg_validate_tool_quote|bill2_pending_calls|bill2_prepare|bill2_private_input|bill2_public|bill2_read|bill2_receipt_raw_due|bill2_receipts_scrub_raw|bill2_record|bill2_record_tool|bill2_recovery_claim|bill2_revoke_unstarted_dispatch|bill2_tool_cost_reconcile|bill2_tool_pending_guard|bill2_usage_total|fusion_billing_guard|fusion_call_in_flight|fusion_group_fee_guard|fusion_review_fee_hold|fusion_review_fee_settle|fusion_review_fee_settle_due|fusion_review_fee_settle_internal|fusion_review_fee_view|opc_data_execution|opc_video_runtime_binding_guard|report_admission_check|report_fee_hold|report_fee_settle|report_fee_settle_due|report_fee_settle_internal|report_fee_terminal_settlement|report_fee_view|report_stop|runtime_admission_replay|runtime_admit|runtime_admit_commit|runtime_admit_precheck|runtime_billing_allowed|runtime_binding_guard|runtime_cancel|runtime_cancel_with_code|runtime_context_allowed|runtime_direct_billing_allowed|runtime_direct_billing_allowed_before_opc|runtime_direct_billing_allowed_before_topic|runtime_execution|runtime_execution_visibility|runtime_financial_recovery|runtime_history_availability|runtime_history_availability_before_memo|runtime_history_available|runtime_history_available_before_memo|runtime_interrupt_capacity|runtime_interrupted_recovery|runtime_library_propagate|runtime_library_read|runtime_library_references_freeze|runtime_library_sources_gone|runtime_library_tool_guard|runtime_library_visible|runtime_load_skill_allowed|runtime_load_skill_entry|runtime_load_skill_result_valid|runtime_matching_call_guard|runtime_mentor_history|runtime_mentor_history_draft|runtime_mentor_history_guard|runtime_mentor_messages|runtime_pending_financial_batch|runtime_positioning_gate|runtime_production_access|runtime_production_allowed|runtime_production_database|runtime_production_enabled|runtime_production_recovery_policy|runtime_read_verified|runtime_receipt_saved|runtime_response|runtime_session_context|runtime_session_items|runtime_session_result_edit|runtime_session_result_save|runtime_session_result_save_turn|runtime_session_result_turn_view|runtime_session_result_versions|runtime_session_result_view|runtime_session_results_list|runtime_session_results_list_turns|runtime_source_checkpoint|runtime_stale_charged_rounds|runtime_stale_round_compensate|runtime_stop_loss_call_guard|runtime_stop_loss_settled|runtime_test_actor_access|runtime_test_budget_guard|runtime_test_dispatch_guard|runtime_test_policy|runtime_test_recovery_policy|runtime_test_window_allowed|runtime_tool|runtime_view|runtime_view_with_work_items|runtime_voice_references_freeze|runtime_voice_source_gone|runtime_voice_sources_gone|runtime_work_items|runtime_workspace_benchmark_guard|runtime_workspace_posts_guard|runtime_workspace_posts_history_erased|runtime_workspace_posts_history_visible|runtime_workspace_posts_receipt_ready|runtime_workspace_tool_guard)\s*\(';
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'V2_12_F_REFERENCES_REMAIN_FUNCTIONS: %', bad; END IF;
 END
 $guard$;
 
-ALTER TABLE public.ai_usage_logs DROP CONSTRAINT IF EXISTS ai_usage_logs_bill2_call_id_fkey;
+ALTER TABLE public.token_stats DROP CONSTRAINT IF EXISTS token_stats_bill2_run_id_fkey;
 ALTER TABLE public.ai_usage_logs DROP CONSTRAINT IF EXISTS ai_usage_logs_bill2_run_id_fkey;
-ALTER TABLE public.credit_transactions DROP CONSTRAINT IF EXISTS credit_transactions_bill2_call_id_fkey;
 ALTER TABLE public.credit_transactions DROP CONSTRAINT IF EXISTS credit_transactions_bill2_run_id_fkey;
-ALTER TABLE public.fusion_call_outputs DROP CONSTRAINT IF EXISTS fusion_call_outputs_call_ref;
-ALTER TABLE public.fusion_call_outputs DROP CONSTRAINT IF EXISTS fusion_call_outputs_group_ref;
-ALTER TABLE public.fusion_call_outputs DROP CONSTRAINT IF EXISTS fusion_call_outputs_run_ref;
-ALTER TABLE public.fusion_compares DROP CONSTRAINT IF EXISTS fusion_compares_group_ref;
-ALTER TABLE public.opc_content_versions DROP CONSTRAINT IF EXISTS opc_content_versions_execution_id_fkey;
-ALTER TABLE public.opc_data_events DROP CONSTRAINT IF EXISTS opc_data_events_execution_id_fkey;
 ALTER TABLE public.opc_result_links DROP CONSTRAINT IF EXISTS opc_result_links_execution_id_fkey;
-ALTER TABLE public.research_account_fetches DROP CONSTRAINT IF EXISTS research_account_fetches_execution_id_fkey;
-ALTER TABLE public.research_account_fetches DROP CONSTRAINT IF EXISTS research_account_fetches_last_success_execution_id_fkey;
-ALTER TABLE public.research_benchmark_shortfalls DROP CONSTRAINT IF EXISTS research_benchmark_shortfalls_execution_id_fkey;
-ALTER TABLE public.research_benchmarks DROP CONSTRAINT IF EXISTS research_benchmarks_execution_id_fkey;
-ALTER TABLE public.research_discoveries DROP CONSTRAINT IF EXISTS research_discoveries_execution_id_fkey;
+ALTER TABLE public.opc_content_versions DROP CONSTRAINT IF EXISTS opc_content_versions_execution_id_fkey;
+ALTER TABLE public.credit_transactions DROP CONSTRAINT IF EXISTS credit_transactions_bill2_call_id_fkey;
+ALTER TABLE public.token_stats DROP CONSTRAINT IF EXISTS token_stats_bill2_call_id_fkey;
+ALTER TABLE public.ai_usage_logs DROP CONSTRAINT IF EXISTS ai_usage_logs_bill2_call_id_fkey;
+ALTER TABLE public.opc_data_events DROP CONSTRAINT IF EXISTS opc_data_events_execution_id_fkey;
+ALTER TABLE public.fusion_call_outputs DROP CONSTRAINT IF EXISTS fusion_call_outputs_call_ref;
+ALTER TABLE public.fusion_call_outputs DROP CONSTRAINT IF EXISTS fusion_call_outputs_run_ref;
+ALTER TABLE public.fusion_call_outputs DROP CONSTRAINT IF EXISTS fusion_call_outputs_group_ref;
 ALTER TABLE public.research_operations DROP CONSTRAINT IF EXISTS research_operations_bill2_call_id_fkey;
 ALTER TABLE public.research_plans DROP CONSTRAINT IF EXISTS research_plans_execution_id_fkey;
-ALTER TABLE public.research_refresh_grants DROP CONSTRAINT IF EXISTS research_refresh_grants_source_execution_id_fkey;
-ALTER TABLE public.research_refresh_grants DROP CONSTRAINT IF EXISTS research_refresh_grants_used_execution_id_fkey;
 ALTER TABLE public.research_selection_cards DROP CONSTRAINT IF EXISTS research_selection_cards_execution_id_fkey;
-ALTER TABLE public.token_stats DROP CONSTRAINT IF EXISTS token_stats_bill2_call_id_fkey;
-ALTER TABLE public.token_stats DROP CONSTRAINT IF EXISTS token_stats_bill2_run_id_fkey;
+ALTER TABLE public.research_discoveries DROP CONSTRAINT IF EXISTS research_discoveries_execution_id_fkey;
+ALTER TABLE public.research_account_fetches DROP CONSTRAINT IF EXISTS research_account_fetches_execution_id_fkey;
+ALTER TABLE public.research_account_fetches DROP CONSTRAINT IF EXISTS research_account_fetches_last_success_execution_id_fkey;
+ALTER TABLE public.research_refresh_grants DROP CONSTRAINT IF EXISTS research_refresh_grants_used_execution_id_fkey;
+ALTER TABLE public.research_refresh_grants DROP CONSTRAINT IF EXISTS research_refresh_grants_source_execution_id_fkey;
+ALTER TABLE public.research_benchmarks DROP CONSTRAINT IF EXISTS research_benchmarks_execution_id_fkey;
+ALTER TABLE public.fusion_compares DROP CONSTRAINT IF EXISTS fusion_compares_group_ref;
+ALTER TABLE public.research_benchmark_shortfalls DROP CONSTRAINT IF EXISTS research_benchmark_shortfalls_execution_id_fkey;
 ALTER TABLE public.runtime_session_results DROP CONSTRAINT IF EXISTS runtime_session_results_source_execution_id_fkey;
 
 DROP TRIGGER IF EXISTS bill2_evidence_immutable ON public.bill2_receipts;
@@ -1684,173 +1661,148 @@ DROP TRIGGER IF EXISTS bill2_payg_zz_block_lock ON public.bill2_calls;
 DROP TRIGGER IF EXISTS runtime_a_test_dispatch_guard ON public.bill2_calls;
 DROP TRIGGER IF EXISTS report_fee_terminal_settlement ON public.runtime_executions;
 
-DROP FUNCTION IF EXISTS public.atomic_abort_settle(p_user_id uuid, p_pre_deduct_id uuid, p_consumed_credits integer, p_consumed_tokens jsonb, p_model_id text, p_reason text);
-DROP FUNCTION IF EXISTS public.atomic_finalize_ai_abort(p_user_id uuid, p_conversation_id uuid, p_user_message text, p_partial_assistant_message text, p_model_used text, p_total_cost_usd numeric, p_consumed_credits integer, p_pre_deduct_id uuid, p_usage jsonb, p_token_metadata jsonb, p_usage_metadata jsonb, p_request_id text, p_input_length integer, p_latency_ms integer, p_search_count integer, p_ip_address text, p_user_agent text);
-DROP FUNCTION IF EXISTS public.atomic_finalize_ai_failure(p_user_id uuid, p_model_used text, p_reason text, p_pre_deduct_id uuid, p_conversation_id uuid, p_request_id text, p_input_length integer, p_latency_ms integer, p_ip_address text, p_user_agent text, p_usage_metadata jsonb);
-DROP FUNCTION IF EXISTS public.atomic_finalize_ai_success(p_user_id uuid, p_conversation_id uuid, p_user_message text, p_assistant_message text, p_model_used text, p_total_cost_usd numeric, p_total_credits integer, p_pre_deduct_id uuid, p_usage jsonb, p_token_metadata jsonb, p_usage_metadata jsonb, p_request_id text, p_input_length integer, p_latency_ms integer, p_search_count integer, p_ip_address text, p_user_agent text);
-DROP FUNCTION IF EXISTS public.bill2_admin_call_report(p_from timestamp with time zone, p_to timestamp with time zone, p_limit integer);
-DROP FUNCTION IF EXISTS public.bill2_call_erasure_guard();
-DROP FUNCTION IF EXISTS public.bill2_cancel(p_actor_id uuid, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.bill2_claim(p_actor_id uuid, p_run_id uuid, p_sequence integer, p_payload jsonb);
-DROP FUNCTION IF EXISTS public.bill2_close(p_actor_id uuid, p_run_id uuid, p_outcome text, p_result jsonb);
-DROP FUNCTION IF EXISTS public.bill2_dispatch(p_actor_id uuid, p_run_id uuid, p_call_id uuid, p_token uuid, p_rotate boolean, p_payload jsonb);
-DROP FUNCTION IF EXISTS public.bill2_erasure_closed(a uuid, pre uuid);
-DROP FUNCTION IF EXISTS public.bill2_erasure_receipt_projection(e jsonb, c bill2_calls);
-DROP FUNCTION IF EXISTS public.bill2_erasure_view(r bill2_runs, is_closed boolean);
-DROP FUNCTION IF EXISTS public.bill2_evidence_immutable();
-DROP FUNCTION IF EXISTS public.bill2_execution_allowed(a uuid, p jsonb);
-DROP FUNCTION IF EXISTS public.bill2_finalize(p_actor_id uuid, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.bill2_payg_absorb_report(p_from timestamp with time zone, p_to timestamp with time zone);
-DROP FUNCTION IF EXISTS public.bill2_payg_admin_settle_call(p_admin_id uuid, p_request_id uuid, p_call_id uuid, p_verified_cost_usd numeric, p_reason text);
-DROP FUNCTION IF EXISTS public.bill2_payg_block_lock();
-DROP FUNCTION IF EXISTS public.bill2_payg_call_stuck(c bill2_calls, r bill2_runs);
-DROP FUNCTION IF EXISTS public.bill2_payg_claim(a uuid, rid uuid, seq integer, p jsonb);
-DROP FUNCTION IF EXISTS public.bill2_payg_compensate(r bill2_runs, c bill2_calls);
-DROP FUNCTION IF EXISTS public.bill2_payg_finalize(a uuid, rid uuid);
-DROP FUNCTION IF EXISTS public.bill2_payg_financial_binding(r bill2_runs);
-DROP FUNCTION IF EXISTS public.bill2_payg_lock_models(r bill2_runs);
-DROP FUNCTION IF EXISTS public.bill2_payg_metering_hash(c bill2_calls);
-DROP FUNCTION IF EXISTS public.bill2_payg_metering_review_snapshot(p_actor_id uuid, p_call_id uuid);
-DROP FUNCTION IF EXISTS public.bill2_payg_review_invalidate_receipt();
-DROP FUNCTION IF EXISTS public.bill2_payg_review_metering(p_actor_id uuid, p_call_id uuid, p_request_id uuid, p_review jsonb);
-DROP FUNCTION IF EXISTS public.bill2_payg_stuck_calls(p_limit integer);
-DROP FUNCTION IF EXISTS public.bill2_payg_tool_settlement(r bill2_runs, c bill2_calls, erasing boolean);
-DROP FUNCTION IF EXISTS public.bill2_payg_validate_quote(r bill2_runs, p jsonb);
-DROP FUNCTION IF EXISTS public.bill2_payg_validate_tool_quote(r bill2_runs, p jsonb);
-DROP FUNCTION IF EXISTS public.bill2_pending_calls(p_actor_id uuid, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_workspace_benchmark_guard();
+DROP FUNCTION IF EXISTS public.runtime_production_access(p_actor_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_production_enabled();
+DROP FUNCTION IF EXISTS public.runtime_production_recovery_policy(p_actor_id uuid, p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_public(r bill2_runs);
 DROP FUNCTION IF EXISTS public.bill2_prepare(p_actor_id uuid, p_request_id uuid, p_payload jsonb);
 DROP FUNCTION IF EXISTS public.bill2_private_input(p_actor_id uuid, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.bill2_public(r bill2_runs);
-DROP FUNCTION IF EXISTS public.bill2_read(p_actor_id uuid, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.bill2_receipt_raw_due(x bill2_receipts);
-DROP FUNCTION IF EXISTS public.bill2_receipts_scrub_raw(p_limit integer);
-DROP FUNCTION IF EXISTS public.bill2_record(p_actor_id uuid, p_run_id uuid, p_call_id uuid, p_evidence jsonb);
-DROP FUNCTION IF EXISTS public.bill2_record_tool(r bill2_runs, c bill2_calls, e jsonb, h text, erasing boolean);
-DROP FUNCTION IF EXISTS public.bill2_recovery_claim(p_actor_id uuid, p_run_id uuid, p_call_id uuid);
-DROP FUNCTION IF EXISTS public.bill2_revoke_unstarted_dispatch(p_actor_id uuid, p_run_id uuid, p_call_id uuid, p_token uuid, p_request_hash text, p_inspect boolean);
-DROP FUNCTION IF EXISTS public.bill2_tool_cost_reconcile(p_admin_id uuid, p_call_id uuid, p_cost text, p_evidence_hash text);
-DROP FUNCTION IF EXISTS public.bill2_tool_pending_guard(p_call_id uuid);
-DROP FUNCTION IF EXISTS public.bill2_usage_total(rid uuid, field text);
-DROP FUNCTION IF EXISTS public.content_erasure_visible(a uuid, eid uuid);
-DROP FUNCTION IF EXISTS public.fusion_billing_guard();
-DROP FUNCTION IF EXISTS public.fusion_call_in_flight(c bill2_calls);
-DROP FUNCTION IF EXISTS public.fusion_compare_adopt(p_actor_id uuid, p_compare_id uuid, p_column integer, p_request_id uuid, p_billing jsonb, p_items jsonb);
-DROP FUNCTION IF EXISTS public.fusion_compare_begin(p_actor_id uuid, p_request_id uuid, p_session_id uuid, p_request jsonb);
-DROP FUNCTION IF EXISTS public.fusion_compare_claim(p_actor_id uuid, p_compare_id uuid, p_items jsonb);
-DROP FUNCTION IF EXISTS public.fusion_compare_dispatch_claim(p_actor_id uuid, p_call_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_compare_dispatch_release(p_actor_id uuid, p_call_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_compare_read(p_actor_id uuid, p_compare_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_compare_stop(p_actor_id uuid, p_compare_id uuid, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_compare_unjudged(p_limit integer);
-DROP FUNCTION IF EXISTS public.fusion_group_fee_guard();
-DROP FUNCTION IF EXISTS public.fusion_pending_financial_batch(p_limit integer, p_after_created timestamp with time zone, p_after_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_review_end_paused(p_idle interval, p_limit integer);
-DROP FUNCTION IF EXISTS public.fusion_review_fee_hold(rv fusion_reviews, v jsonb, cfg jsonb);
-DROP FUNCTION IF EXISTS public.fusion_review_fee_settle(p_actor_id uuid, p_review_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_review_fee_settle_due(p_limit integer);
-DROP FUNCTION IF EXISTS public.fusion_review_fee_settle_internal(p_review_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_review_fee_view(p_review_id uuid);
-DROP FUNCTION IF EXISTS public.fusion_review_pause_idle(p_idle interval);
-DROP FUNCTION IF EXISTS public.fusion_review_unjudged(p_limit integer);
-DROP FUNCTION IF EXISTS public.opc_brief_adoption(p_actor_id uuid, p_request_id uuid, p_work_item_id uuid, p_expected_revision bigint, p_execution_id uuid, p_original text, p_brief text);
-DROP FUNCTION IF EXISTS public.opc_content_from_execution(p_actor_id uuid, p_work_item_id uuid, p_request_id uuid, p_expected_version bigint, p_kind text, p_status text, p_execution_id uuid, p_source_content_id uuid);
-DROP FUNCTION IF EXISTS public.opc_content_reaction(p_actor_id uuid, p_request_id uuid, p_execution_id uuid, p_action text, p_reason text);
-DROP FUNCTION IF EXISTS public.opc_data_execution(a uuid, eid uuid);
-DROP FUNCTION IF EXISTS public.opc_plan_request_state(p_actor_id uuid, p_draft_id uuid, p_request_id uuid);
-DROP FUNCTION IF EXISTS public.opc_plan_result(p_actor_id uuid, p_draft_id uuid, p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.opc_save_result(p_actor_id uuid, p_draft_id uuid, p_execution_id uuid, p_step_id text, p_request_id uuid);
-DROP FUNCTION IF EXISTS public.opc_video_execution_check(p_actor_id uuid, p_work_item_id uuid, p_execution_id uuid, p_source_script_id uuid);
-DROP FUNCTION IF EXISTS public.opc_video_package_from_execution(p_actor_id uuid, p_work_item_id uuid, p_request_id uuid, p_execution_id uuid, p_source_script_id uuid, p_expected_storyboard_version bigint, p_expected_editing_version bigint);
-DROP FUNCTION IF EXISTS public.opc_video_results_from_execution(p_actor_id uuid, p_work_item_id uuid, p_request_id uuid, p_execution_id uuid, p_source_script_id uuid, p_expected_storyboard_version bigint, p_expected_editing_version bigint, p_storyboard boolean, p_editing boolean);
-DROP FUNCTION IF EXISTS public.opc_video_runtime_binding_guard();
-DROP FUNCTION IF EXISTS public.report_admission_check(a uuid, sid uuid, context jsonb, billing jsonb);
-DROP FUNCTION IF EXISTS public.report_fee_hold(e runtime_executions, billing jsonb);
-DROP FUNCTION IF EXISTS public.report_fee_settle(p_actor_id uuid, p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.report_fee_settle_due(p_limit integer);
-DROP FUNCTION IF EXISTS public.report_fee_settle_internal(p_execution_id uuid, p_refund boolean);
-DROP FUNCTION IF EXISTS public.report_fee_terminal_settlement();
-DROP FUNCTION IF EXISTS public.report_fee_view(p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.report_stop(p_actor_id uuid, p_execution_id uuid, p_stop jsonb, p_confirmed boolean);
-DROP FUNCTION IF EXISTS public.research_runtime_call_charge(a uuid, s uuid, e uuid, p_call uuid);
-DROP FUNCTION IF EXISTS public.research_runtime_link(a uuid, p_plan uuid, s uuid, e uuid, p_discovery uuid, p_operation uuid, p_call uuid);
-DROP FUNCTION IF EXISTS public.research_user_message(a uuid, s uuid, e uuid);
-DROP FUNCTION IF EXISTS public.runtime_admission_replay(p_actor_id uuid, p_request_id uuid, p_request jsonb);
-DROP FUNCTION IF EXISTS public.runtime_admit(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb);
-DROP FUNCTION IF EXISTS public.runtime_admit_commit(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb, p_pre jsonb);
-DROP FUNCTION IF EXISTS public.runtime_admit_precheck(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb);
-DROP FUNCTION IF EXISTS public.runtime_billing_allowed(a uuid, p jsonb, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_binding_guard();
-DROP FUNCTION IF EXISTS public.runtime_cancel(p_actor_id uuid, p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_cancel_with_code(p_actor_id uuid, p_execution_id uuid, p_code text);
-DROP FUNCTION IF EXISTS public.runtime_context_allowed(p_actor_id uuid, p_context jsonb);
-DROP FUNCTION IF EXISTS public.runtime_direct_billing_allowed(a uuid, p jsonb, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_direct_billing_allowed_before_opc(a uuid, p jsonb, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_direct_billing_allowed_before_topic(a uuid, p jsonb, p_run_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_execution(p_actor_id uuid, p_execution_id uuid, p_action text, p_result jsonb);
-DROP FUNCTION IF EXISTS public.runtime_execution_visibility(p_actor_id uuid, p_execution_id uuid, p_voice boolean, p_library boolean);
-DROP FUNCTION IF EXISTS public.runtime_financial_recovery(p_actor_id uuid, p_execution_id uuid, p_finish boolean);
-DROP FUNCTION IF EXISTS public.runtime_history_availability(p_execution_ids uuid[]);
-DROP FUNCTION IF EXISTS public.runtime_history_availability_before_memo(p_execution_ids uuid[]);
-DROP FUNCTION IF EXISTS public.runtime_history_available(p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_history_available_before_memo(p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_interrupt_capacity(p_actor_id uuid, p_execution_id uuid, p_epoch bigint, p_code text);
-DROP FUNCTION IF EXISTS public.runtime_interrupted_recovery(p_actor_id uuid, p_execution_id uuid, p_epoch bigint, p_limit integer);
-DROP FUNCTION IF EXISTS public.runtime_library_propagate(p_actor_id uuid, p_limit integer);
-DROP FUNCTION IF EXISTS public.runtime_library_read(p_actor_id uuid, p_execution_id uuid, p_query text);
-DROP FUNCTION IF EXISTS public.runtime_library_references_freeze();
-DROP FUNCTION IF EXISTS public.runtime_library_sources_gone(p_actor_id uuid, p_execution_ids uuid[]);
-DROP FUNCTION IF EXISTS public.runtime_library_tool_guard();
-DROP FUNCTION IF EXISTS public.runtime_library_visible(p_actor_id uuid, p_execution_id uuid, p_result jsonb);
-DROP FUNCTION IF EXISTS public.runtime_load_skill_allowed(e runtime_executions, p_call_id text, p_arguments jsonb);
-DROP FUNCTION IF EXISTS public.runtime_load_skill_entry(e runtime_executions, p_arguments jsonb);
-DROP FUNCTION IF EXISTS public.runtime_load_skill_result_valid(e runtime_executions, p_arguments jsonb, p_result jsonb);
-DROP FUNCTION IF EXISTS public.runtime_matching_call_guard();
-DROP FUNCTION IF EXISTS public.runtime_mentor_history(p_actor_id uuid, p_execution_id uuid, p_query text);
-DROP FUNCTION IF EXISTS public.runtime_mentor_history_draft(p_actor_id uuid, e runtime_executions);
-DROP FUNCTION IF EXISTS public.runtime_mentor_history_guard();
-DROP FUNCTION IF EXISTS public.runtime_mentor_messages(p_actor_id uuid, e runtime_executions);
-DROP FUNCTION IF EXISTS public.runtime_pending_financial_batch(p_actor_id uuid, p_limit integer);
-DROP FUNCTION IF EXISTS public.runtime_positioning_gate(p_actor_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_production_recovery_policy(p_actor_id uuid, p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_read_verified(a uuid, eid uuid);
-DROP FUNCTION IF EXISTS public.runtime_receipt_saved(p_actor_id uuid, p_execution_id uuid, p_run_id uuid, p_call_id uuid, p_evidence jsonb);
-DROP FUNCTION IF EXISTS public.runtime_response(p_actor_id uuid, p_execution_id uuid, p_sequence integer, p_request_hash text);
-DROP FUNCTION IF EXISTS public.runtime_session_context(p_actor_id uuid, p_session_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_session_items(p_actor_id uuid, p_session_id uuid, p_execution_id uuid, p_action text, p_items jsonb, p_limit integer, p_batch integer);
-DROP FUNCTION IF EXISTS public.runtime_session_result_edit(p_actor_id uuid, p_family_id uuid, p_request_id uuid, p_expected_version integer, p_title text, p_body text);
-DROP FUNCTION IF EXISTS public.runtime_session_result_save(p_actor_id uuid, p_session_id uuid, p_execution_id uuid, p_request_id uuid, p_result_type text, p_title text, p_excerpt text);
-DROP FUNCTION IF EXISTS public.runtime_session_result_save_turn(p_actor_id uuid, p_session_id uuid, p_turn_id bigint, p_request_id uuid, p_result_type text, p_title text, p_excerpt text);
+DROP FUNCTION IF EXISTS public.bill2_pending_calls(p_actor_id uuid, p_run_id uuid);
 DROP FUNCTION IF EXISTS public.runtime_session_result_turn_view(r runtime_session_results, p_versions integer);
-DROP FUNCTION IF EXISTS public.runtime_session_result_versions(p_actor_id uuid, p_family_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_session_result_view(r runtime_session_results, p_versions integer);
-DROP FUNCTION IF EXISTS public.runtime_session_results_list(p_actor_id uuid, p_session_id uuid);
 DROP FUNCTION IF EXISTS public.runtime_session_results_list_turns(p_actor_id uuid, p_session_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_source_checkpoint(p_actor_id uuid, s runtime_sessions, e runtime_executions, b bill2_runs, p_result jsonb);
-DROP FUNCTION IF EXISTS public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer);
-DROP FUNCTION IF EXISTS public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer, p_created_since timestamp with time zone);
-DROP FUNCTION IF EXISTS public.runtime_stale_round_compensate(p_run_id uuid, p_cutoff timestamp with time zone);
-DROP FUNCTION IF EXISTS public.runtime_stop_loss_call_guard();
-DROP FUNCTION IF EXISTS public.runtime_stop_loss_settled();
-DROP FUNCTION IF EXISTS public.runtime_test_actor_access(p_actor_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_test_budget_guard();
-DROP FUNCTION IF EXISTS public.runtime_test_dispatch_guard();
-DROP FUNCTION IF EXISTS public.runtime_test_recovery_policy(p_actor_id uuid, p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_tool(p_actor_id uuid, p_execution_id uuid, p_call_id text, p_name text, p_arguments jsonb, p_action text, p_result jsonb);
-DROP FUNCTION IF EXISTS public.runtime_view(p_actor_id uuid, p_session_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_view_with_work_items(p_actor_id uuid, p_session_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_voice_references_freeze();
-DROP FUNCTION IF EXISTS public.runtime_voice_source_gone(p_execution_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_voice_sources_gone(p_actor_id uuid, p_execution_ids uuid[]);
-DROP FUNCTION IF EXISTS public.runtime_work_items(p_actor_id uuid, p_session_id uuid);
-DROP FUNCTION IF EXISTS public.runtime_workspace_benchmark_guard();
-DROP FUNCTION IF EXISTS public.runtime_workspace_posts_guard();
-DROP FUNCTION IF EXISTS public.runtime_workspace_posts_history_erased(p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_session_result_save_turn(p_actor_id uuid, p_session_id uuid, p_turn_id bigint, p_request_id uuid, p_result_type text, p_title text, p_excerpt text);
+DROP FUNCTION IF EXISTS public.runtime_history_available_before_memo(p_execution_id uuid);
 DROP FUNCTION IF EXISTS public.runtime_workspace_posts_history_visible(p_execution_id uuid);
 DROP FUNCTION IF EXISTS public.runtime_workspace_posts_receipt_ready(p jsonb, c bill2_calls);
+DROP FUNCTION IF EXISTS public.runtime_workspace_posts_history_erased(p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_execution_allowed(a uuid, p jsonb);
+DROP FUNCTION IF EXISTS public.bill2_record(p_actor_id uuid, p_run_id uuid, p_call_id uuid, p_evidence jsonb);
+DROP FUNCTION IF EXISTS public.bill2_cancel(p_actor_id uuid, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_finalize(p_actor_id uuid, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_usage_total(rid uuid, field text);
+DROP FUNCTION IF EXISTS public.runtime_binding_guard();
+DROP FUNCTION IF EXISTS public.bill2_erasure_closed(a uuid, pre uuid);
+DROP FUNCTION IF EXISTS public.bill2_erasure_view(r bill2_runs, is_closed boolean);
+DROP FUNCTION IF EXISTS public.runtime_direct_billing_allowed_before_opc(a uuid, p jsonb, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_admission_replay(p_actor_id uuid, p_request_id uuid, p_request jsonb);
+DROP FUNCTION IF EXISTS public.runtime_cancel(p_actor_id uuid, p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_admit(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb);
+DROP FUNCTION IF EXISTS public.runtime_execution(p_actor_id uuid, p_execution_id uuid, p_action text, p_result jsonb);
+DROP FUNCTION IF EXISTS public.runtime_billing_allowed(a uuid, p jsonb, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_matching_call_guard();
+DROP FUNCTION IF EXISTS public.runtime_receipt_saved(p_actor_id uuid, p_execution_id uuid, p_run_id uuid, p_call_id uuid, p_evidence jsonb);
+DROP FUNCTION IF EXISTS public.runtime_session_items(p_actor_id uuid, p_session_id uuid, p_execution_id uuid, p_action text, p_items jsonb, p_limit integer, p_batch integer);
+DROP FUNCTION IF EXISTS public.runtime_tool(p_actor_id uuid, p_execution_id uuid, p_call_id text, p_name text, p_arguments jsonb, p_action text, p_result jsonb);
+DROP FUNCTION IF EXISTS public.runtime_library_sources_gone(p_actor_id uuid, p_execution_ids uuid[]);
+DROP FUNCTION IF EXISTS public.runtime_history_available(p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_direct_billing_allowed_before_topic(a uuid, p jsonb, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_test_actor_access(p_actor_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_test_dispatch_guard();
+DROP FUNCTION IF EXISTS public.runtime_history_availability(p_execution_ids uuid[]);
+DROP FUNCTION IF EXISTS public.bill2_claim(p_actor_id uuid, p_run_id uuid, p_sequence integer, p_payload jsonb);
+DROP FUNCTION IF EXISTS public.runtime_test_recovery_policy(p_actor_id uuid, p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_test_window_allowed(a uuid, p jsonb);
+DROP FUNCTION IF EXISTS public.bill2_receipt_raw_due(x bill2_receipts);
+DROP FUNCTION IF EXISTS public.bill2_receipts_scrub_raw(p_limit integer);
+DROP FUNCTION IF EXISTS public.runtime_direct_billing_allowed(a uuid, p jsonb, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_read(p_actor_id uuid, p_run_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_payg_finalize(a uuid, rid uuid);
+DROP FUNCTION IF EXISTS public.opc_video_runtime_binding_guard();
+DROP FUNCTION IF EXISTS public.runtime_view(p_actor_id uuid, p_session_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer);
+DROP FUNCTION IF EXISTS public.bill2_payg_call_stuck(c bill2_calls, r bill2_runs);
+DROP FUNCTION IF EXISTS public.bill2_payg_admin_settle_call(p_admin_id uuid, p_request_id uuid, p_call_id uuid, p_verified_cost_usd numeric, p_reason text);
+DROP FUNCTION IF EXISTS public.runtime_library_read(p_actor_id uuid, p_execution_id uuid, p_query text);
+DROP FUNCTION IF EXISTS public.runtime_test_budget_guard();
+DROP FUNCTION IF EXISTS public.bill2_payg_lock_models(r bill2_runs);
+DROP FUNCTION IF EXISTS public.bill2_payg_financial_binding(r bill2_runs);
+DROP FUNCTION IF EXISTS public.bill2_payg_absorb_report(p_from timestamp with time zone, p_to timestamp with time zone);
+DROP FUNCTION IF EXISTS public.bill2_payg_validate_quote(r bill2_runs, p jsonb);
+DROP FUNCTION IF EXISTS public.bill2_payg_claim(a uuid, rid uuid, seq integer, p jsonb);
+DROP FUNCTION IF EXISTS public.bill2_recovery_claim(p_actor_id uuid, p_run_id uuid, p_call_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_revoke_unstarted_dispatch(p_actor_id uuid, p_run_id uuid, p_call_id uuid, p_token uuid, p_request_hash text, p_inspect boolean);
+DROP FUNCTION IF EXISTS public.bill2_payg_review_invalidate_receipt();
+DROP FUNCTION IF EXISTS public.bill2_payg_metering_hash(c bill2_calls);
+DROP FUNCTION IF EXISTS public.bill2_payg_metering_review_snapshot(p_actor_id uuid, p_call_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_payg_review_metering(p_actor_id uuid, p_call_id uuid, p_request_id uuid, p_review jsonb);
+DROP FUNCTION IF EXISTS public.runtime_financial_recovery(p_actor_id uuid, p_execution_id uuid, p_finish boolean);
+DROP FUNCTION IF EXISTS public.bill2_call_erasure_guard();
+DROP FUNCTION IF EXISTS public.bill2_erasure_receipt_projection(e jsonb, c bill2_calls);
+DROP FUNCTION IF EXISTS public.runtime_mentor_messages(p_actor_id uuid, e runtime_executions);
+DROP FUNCTION IF EXISTS public.runtime_voice_references_freeze();
+DROP FUNCTION IF EXISTS public.runtime_voice_source_gone(p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_stop_loss_call_guard();
+DROP FUNCTION IF EXISTS public.bill2_evidence_immutable();
+DROP FUNCTION IF EXISTS public.bill2_close(p_actor_id uuid, p_run_id uuid, p_outcome text, p_result jsonb);
+DROP FUNCTION IF EXISTS public.runtime_session_context(p_actor_id uuid, p_session_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_voice_sources_gone(p_actor_id uuid, p_execution_ids uuid[]);
+DROP FUNCTION IF EXISTS public.runtime_stop_loss_settled();
+DROP FUNCTION IF EXISTS public.runtime_cancel_with_code(p_actor_id uuid, p_execution_id uuid, p_code text);
+DROP FUNCTION IF EXISTS public.opc_data_execution(a uuid, eid uuid);
+DROP FUNCTION IF EXISTS public.fusion_call_in_flight(c bill2_calls);
 DROP FUNCTION IF EXISTS public.runtime_workspace_tool_guard();
-DROP FUNCTION IF EXISTS public.voice_billing_scrub(p_run_id uuid);
-DROP FUNCTION IF EXISTS public.voice_run_recovery(p_run_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_stale_round_compensate(p_run_id uuid, p_cutoff timestamp with time zone);
+DROP FUNCTION IF EXISTS public.runtime_context_allowed(p_actor_id uuid, p_context jsonb);
+DROP FUNCTION IF EXISTS public.runtime_mentor_history_draft(p_actor_id uuid, e runtime_executions);
+DROP FUNCTION IF EXISTS public.runtime_mentor_history_guard();
+DROP FUNCTION IF EXISTS public.fusion_billing_guard();
+DROP FUNCTION IF EXISTS public.runtime_mentor_history(p_actor_id uuid, p_execution_id uuid, p_query text);
+DROP FUNCTION IF EXISTS public.runtime_positioning_gate(p_actor_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_tool_pending_guard(p_call_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_record_tool(r bill2_runs, c bill2_calls, e jsonb, h text, erasing boolean);
+DROP FUNCTION IF EXISTS public.runtime_pending_financial_batch(p_actor_id uuid, p_limit integer);
+DROP FUNCTION IF EXISTS public.bill2_admin_call_report(p_from timestamp with time zone, p_to timestamp with time zone, p_limit integer);
+DROP FUNCTION IF EXISTS public.bill2_payg_validate_tool_quote(r bill2_runs, p jsonb);
+DROP FUNCTION IF EXISTS public.bill2_payg_tool_settlement(r bill2_runs, c bill2_calls, erasing boolean);
+DROP FUNCTION IF EXISTS public.bill2_tool_cost_reconcile(p_admin_id uuid, p_call_id uuid, p_cost text, p_evidence_hash text);
+DROP FUNCTION IF EXISTS public.runtime_test_policy(p_actor_id uuid, p_window_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_library_references_freeze();
+DROP FUNCTION IF EXISTS public.bill2_payg_stuck_calls(p_limit integer);
+DROP FUNCTION IF EXISTS public.runtime_library_tool_guard();
+DROP FUNCTION IF EXISTS public.runtime_library_propagate(p_actor_id uuid, p_limit integer);
+DROP FUNCTION IF EXISTS public.runtime_work_items(p_actor_id uuid, p_session_id uuid);
+DROP FUNCTION IF EXISTS public.bill2_dispatch(p_actor_id uuid, p_run_id uuid, p_call_id uuid, p_token uuid, p_rotate boolean, p_payload jsonb);
+DROP FUNCTION IF EXISTS public.bill2_payg_compensate(r bill2_runs, c bill2_calls);
+DROP FUNCTION IF EXISTS public.runtime_source_checkpoint(p_actor_id uuid, s runtime_sessions, e runtime_executions, b bill2_runs, p_result jsonb);
+DROP FUNCTION IF EXISTS public.runtime_interrupt_capacity(p_actor_id uuid, p_execution_id uuid, p_epoch bigint, p_code text);
+DROP FUNCTION IF EXISTS public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer, p_created_since timestamp with time zone);
+DROP FUNCTION IF EXISTS public.runtime_production_database();
+DROP FUNCTION IF EXISTS public.runtime_production_allowed(a uuid, p jsonb, p_prepare boolean);
+DROP FUNCTION IF EXISTS public.fusion_group_fee_guard();
+DROP FUNCTION IF EXISTS public.fusion_review_fee_hold(rv fusion_reviews, v jsonb, cfg jsonb);
+DROP FUNCTION IF EXISTS public.fusion_review_fee_view(p_review_id uuid);
+DROP FUNCTION IF EXISTS public.fusion_review_fee_settle_internal(p_review_id uuid);
+DROP FUNCTION IF EXISTS public.fusion_review_fee_settle(p_actor_id uuid, p_review_id uuid);
+DROP FUNCTION IF EXISTS public.fusion_review_fee_settle_due(p_limit integer);
+DROP FUNCTION IF EXISTS public.report_fee_hold(e runtime_executions, billing jsonb);
+DROP FUNCTION IF EXISTS public.report_fee_view(p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.report_fee_settle(p_actor_id uuid, p_execution_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_workspace_posts_guard();
+DROP FUNCTION IF EXISTS public.report_fee_settle_internal(p_execution_id uuid, p_refund boolean);
+DROP FUNCTION IF EXISTS public.report_fee_settle_due(p_limit integer);
+DROP FUNCTION IF EXISTS public.runtime_library_visible(p_actor_id uuid, p_execution_id uuid, p_result jsonb);
+DROP FUNCTION IF EXISTS public.report_admission_check(a uuid, sid uuid, context jsonb, billing jsonb);
+DROP FUNCTION IF EXISTS public.runtime_interrupted_recovery(p_actor_id uuid, p_execution_id uuid, p_epoch bigint, p_limit integer);
+DROP FUNCTION IF EXISTS public.runtime_session_result_view(r runtime_session_results, p_versions integer);
+DROP FUNCTION IF EXISTS public.runtime_session_result_save(p_actor_id uuid, p_session_id uuid, p_execution_id uuid, p_request_id uuid, p_result_type text, p_title text, p_excerpt text);
+DROP FUNCTION IF EXISTS public.runtime_session_result_edit(p_actor_id uuid, p_family_id uuid, p_request_id uuid, p_expected_version integer, p_title text, p_body text);
+DROP FUNCTION IF EXISTS public.runtime_session_results_list(p_actor_id uuid, p_session_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_session_result_versions(p_actor_id uuid, p_family_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_load_skill_entry(e runtime_executions, p_arguments jsonb);
+DROP FUNCTION IF EXISTS public.runtime_load_skill_allowed(e runtime_executions, p_call_id text, p_arguments jsonb);
+DROP FUNCTION IF EXISTS public.runtime_load_skill_result_valid(e runtime_executions, p_arguments jsonb, p_result jsonb);
+DROP FUNCTION IF EXISTS public.runtime_view_with_work_items(p_actor_id uuid, p_session_id uuid);
+DROP FUNCTION IF EXISTS public.runtime_execution_visibility(p_actor_id uuid, p_execution_id uuid, p_voice boolean, p_library boolean);
+DROP FUNCTION IF EXISTS public.bill2_payg_block_lock();
+DROP FUNCTION IF EXISTS public.runtime_history_availability_before_memo(p_execution_ids uuid[]);
+DROP FUNCTION IF EXISTS public.runtime_read_verified(a uuid, eid uuid);
+DROP FUNCTION IF EXISTS public.runtime_response(p_actor_id uuid, p_execution_id uuid, p_sequence integer, p_request_hash text);
+DROP FUNCTION IF EXISTS public.report_fee_terminal_settlement();
+DROP FUNCTION IF EXISTS public.runtime_admit_commit(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb, p_pre jsonb);
+DROP FUNCTION IF EXISTS public.runtime_admit_precheck(p_actor_id uuid, p_session_id uuid, p_request_id uuid, p_payload jsonb, p_billing jsonb);
+DROP FUNCTION IF EXISTS public.report_stop(p_actor_id uuid, p_execution_id uuid, p_stop jsonb, p_confirmed boolean);
 
-DROP TABLE IF EXISTS public.runtime_executions, public.runtime_session_history, public.runtime_history_dependencies, public.runtime_tool_calls, public.runtime_session_batches, public.runtime_library_references, public.runtime_voice_references, public.bill2_runs, public.bill2_calls, public.bill2_receipts, public.bill2_provider_ids, public.fusion_billing_groups, public.fusion_billing_group_steps, public.report_fees, public.fusion_review_fees;
+DROP TABLE IF EXISTS public.runtime_executions, public.runtime_session_history, public.runtime_history_dependencies, public.runtime_tool_calls, public.runtime_session_batches, public.runtime_library_references, public.runtime_voice_references, public.runtime_test_windows, public.bill2_runs, public.bill2_calls, public.bill2_receipts, public.bill2_provider_ids, public.fusion_billing_groups, public.fusion_billing_group_steps, public.report_fees, public.fusion_review_fees;
 
 COMMIT;
