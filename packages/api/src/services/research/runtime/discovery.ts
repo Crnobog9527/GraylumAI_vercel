@@ -14,6 +14,7 @@ import type { DiscoveryRecord } from './store';
 import { requestIdentity, type SupplierRequest } from './subcall';
 import { shortfallNotice } from './shortfall';
 import type { CachedProfile } from './profileCache';
+import { swallow } from '../../../lib/swallow';
 import { createHash } from 'node:crypto';
 import { deepen, discoveryCap, discoveryCoverage, total, type PlatformCoverage } from './discoveryLayers';
 
@@ -243,7 +244,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       for (const kind of new Set(wanted.values())) {
         const accounts = [...wanted].filter(([, k]) => k === kind).map(([account]) => account);
         accounts.forEach(account => cacheAsked.add(`${platform}\n${kind}\n${account}`));
-        const hits = await ctx.profileCache.read(platform, kind, accounts).catch(() => new Map<string, CachedProfile>());
+        const hits = await swallow('research_profile_cache_read_failed', ctx.profileCache.read(platform, kind, accounts),
+          new Map<string, CachedProfile>(), { category: 'api' });
         for (const [account, hit] of hits) cacheHits.set(`${platform}\n${kind}\n${account}`, hit);
       }
     }
@@ -351,7 +353,9 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // The supplier could not serve the round and nothing came out of it: the round is saved but not counted (0492, Owner 2026-11-03).
   // The cache never decides the search: a write that fails costs only the next search a lookup.
   if (ctx.profileCache) {
-    for (const entry of cacheWrites.values()) await ctx.profileCache.write(entry.platform, entry.kind, entry.rows).catch(() => undefined);
+    for (const entry of cacheWrites.values()) {
+      await swallow('research_profile_cache_write_failed', ctx.profileCache.write(entry.platform, entry.kind, entry.rows), undefined, { category: 'api' });
+    }
   }
   const down = supplierDownRound({ supplierDown, stopped, shown: false, gotData });
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit, executions: replies,
