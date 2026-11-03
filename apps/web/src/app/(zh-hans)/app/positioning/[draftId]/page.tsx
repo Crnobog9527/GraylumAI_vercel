@@ -76,7 +76,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     :streamTurn(()=>utils.client.runtime.executeStream.mutate({...input,textProtocol:TEXT_PROTOCOL}),input.executionId)};
   /** A mentor turn in one request: admission, then the same execution stream (AC-1). */
   const mentorTurn=(request:MentorRequest,onAdmitted?:(id:string)=>void)=>
-    streamTurn(turnPath.open(request,read.data,()=>utils.client.opc.mentorTurnStream.mutate({...request,textProtocol:TEXT_PROTOCOL})),undefined,onAdmitted);
+    streamTurn(turnPath.open(request,read.data),undefined,onAdmitted);
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>

@@ -61,12 +61,7 @@ BEGIN
   -- the claim stays recoverable, or a later admission observes the revocation.
   PERFORM 1 FROM runtime_sessions WHERE id=binding.session_id AND actor_id=p_actor_id FOR UPDATE;
   SELECT * INTO m FROM runtime_scope_material WHERE session_id=binding.session_id AND revision=binding.material_revision;
-  IF m.session_id IS NULL OR EXISTS(
-   SELECT 1 FROM runtime_executions e WHERE e.actor_id=p_actor_id AND e.session_id=binding.session_id
-    AND e.payload#>>'{scopeMaterial,sessionId}'=binding.session_id::text
-    AND e.payload#>>'{scopeMaterial,revision}'=binding.material_revision::text
-    AND e.payload#>>'{scopeMaterial,hash}'=m.content_hash
-  ) OR EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.request_id=p_request_id)
+  IF m.session_id IS NULL OR EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=p_actor_id AND t.request_id=p_request_id)
   THEN RAISE EXCEPTION 'OPC_CONTENT_PENDING';END IF;
   result:=runtime_material(p_actor_id,binding.session_id,'revoke',NULL,binding.material_revision,NULL);
   RETURN result||jsonb_build_object('abandoned',true);
@@ -107,13 +102,11 @@ BEGIN
  -- therefore blocks a second paid dispatch.
  FOR conflict IN
   -- The claimed request ran on the old path or as a turn: a turn that closed any other way than completed retries like a cancelled execution.
-  SELECT b.*,coalesce(e.id::text,t.id::text) execution_id,
-   coalesce(e.state,CASE WHEN t.close_kind='completed' THEN 'completed' WHEN t.close_kind IS NOT NULL THEN 'cancelled' WHEN t.id IS NOT NULL THEN 'running' END) execution_state,
-   coalesce(e.result->>'body',e.primary_result->>'body',
-    (SELECT string_agg(sm.content,E'\n\n' ORDER BY sm.seq) FROM session_messages sm WHERE sm.session_id=t.session_id AND sm.turn_id=t.id AND sm.role='assistant' AND sm.visible)) raw,
+  SELECT b.*,t.id::text execution_id,
+   CASE WHEN t.close_kind='completed' THEN 'completed' WHEN t.close_kind IS NOT NULL THEN 'cancelled' WHEN t.id IS NOT NULL THEN 'running' END execution_state,
+   (SELECT string_agg(sm.content,E'\n\n' ORDER BY sm.seq) FROM session_messages sm WHERE sm.session_id=t.session_id AND sm.turn_id=t.id AND sm.role='assistant' AND sm.visible) raw,
    material_row.revoked material_revoked
   FROM opc_video_material_bindings b
-  LEFT JOIN runtime_executions e ON e.actor_id=b.actor_id AND e.request_id=b.request_id
   LEFT JOIN LATERAL opc_turn_latest(b.actor_id,b.request_id) t ON true
   LEFT JOIN runtime_scope_material material_row ON material_row.session_id=b.session_id AND material_row.revision=b.material_revision
   WHERE b.actor_id=p_actor_id AND b.work_item_id=p_work_item_id AND b.request_id<>p_request_id

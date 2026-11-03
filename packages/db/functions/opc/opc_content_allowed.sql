@@ -20,7 +20,7 @@ BEGIN
   SELECT wi.* INTO i FROM opc_items wi WHERE wi.work_item_id=c.work_item_id;
   SELECT ap.* INTO p FROM artifact_projects ap WHERE ap.id=i.work_item_id AND ap.actor_id=p_actor_id;
   IF i.work_item_id IS NULL OR p.id IS NULL OR NOT opc_source_allowed(p_actor_id,i.source_version_id)
-   OR (c.execution_id IS NOT NULL AND NOT runtime_history_available(c.execution_id))
+   OR c.execution_id IS NOT NULL
    OR (c.turn_id IS NOT NULL AND NOT opc_content_turn_available(p_actor_id,c.turn_id)) THEN RETURN false;END IF;
   seen:=array_append(seen,current_id);current_id:=c.source_content_id;
  END LOOP;

@@ -46,8 +46,7 @@ BEGIN
     AND d.project_id = (SELECT cv.project_id FROM artifact_versions cv WHERE cv.id = b.current_source_version_id)
    JOIN runtime_sessions rs ON rs.id = d.session_id AND rs.actor_id = p_actor_id AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL
    JOIN research_benchmarks rb ON rb.session_id = d.session_id AND rb.actor_id = p_actor_id
-   WHERE db.business_id = b.id AND (rb.turn_id IS NOT NULL OR EXISTS (SELECT 1 FROM runtime_executions x WHERE x.id = rb.execution_id
-     AND x.actor_id = p_actor_id AND x.session_id = d.session_id AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
+   WHERE db.business_id = b.id AND rb.turn_id IS NOT NULL
    GROUP BY d.session_id ORDER BY max(rb.fetched_at) DESC, d.session_id LIMIT 1) s
   WHERE b.actor_id = p_actor_id AND b.erased_at IS NULL AND b.current_source_version_id = ANY(p_allowed)
   UNION ALL
@@ -95,8 +94,7 @@ BEGIN
     ORDER BY b.qualified DESC, b.followers DESC NULLS LAST, b.platform, b.account), '[]'::jsonb)::text INTO body
   FROM (SELECT rb.* FROM research_benchmarks rb
     WHERE rb.actor_id = p_actor_id AND rb.session_id = bench_session
-      AND (rb.turn_id IS NOT NULL OR EXISTS (SELECT 1 FROM runtime_executions x WHERE x.id = rb.execution_id
-       AND x.actor_id = p_actor_id AND x.session_id = rb.session_id AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
+      AND rb.turn_id IS NOT NULL
     ORDER BY rb.qualified DESC, rb.followers DESC NULLS LAST, rb.platform, rb.account LIMIT 30) b;
   cap := 8000;
   entry := entry - 'accounts' - 'qualified' - 'fetchedAt';

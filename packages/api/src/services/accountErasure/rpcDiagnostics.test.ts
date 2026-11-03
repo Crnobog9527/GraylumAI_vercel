@@ -14,7 +14,7 @@ describe('durable erasure RPC diagnostics', () => {
   it('does not persist arbitrary operation names or thrown transport details', () => {
     expect(erasureRpcDiagnostic('PRIVATE', { code: '42501' })).toBe('ERASURE_RPC_OTHER_42501');
     expect(erasureRpcDiagnostic('__proto__', null)).toBe('ERASURE_RPC_OTHER_DATABASE_ERROR');
-    expect(erasureRpcDiagnostic('bill2_cancel', new Error('SECRET'), 'transport')).toBe('ERASURE_RPC_BILL2_CANCEL_TRANSPORT_UNKNOWN');
+    expect(erasureRpcDiagnostic('account_erasure_scrub_content', new Error('SECRET'), 'transport')).toBe('ERASURE_RPC_SCRUB_CONTENT_TRANSPORT_UNKNOWN');
     expect(erasureRpcDiagnostic('account_erasure_auth_begin', null, 'timeout')).toBe('ERASURE_RPC_AUTH_BEGIN_TIMEOUT_UNKNOWN');
   });
 });

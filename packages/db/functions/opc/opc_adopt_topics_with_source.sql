@@ -44,13 +44,6 @@ BEGIN
     WHERE event.actor_id=p_actor_id AND event.project_id=project AND event.source_version_id=p_source_version_id
      AND event.action='topic_draft' AND v.erased_at IS NULL AND v.source_version_id=p_source_version_id
      AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.body) o WHERE o->>'id'=item->>'id')
-    UNION
-    -- Before R9 the client already used execution UUID as its save request UUID.
-    SELECT e.id FROM submitted v JOIN runtime_executions e ON e.id=v.request_id
-     JOIN opc_topic_workspaces w ON w.draft_id=v.draft_id AND w.session_id=e.session_id
-    WHERE e.actor_id=p_actor_id AND v.source_version_id=p_source_version_id
-     AND v.erased_at IS NULL AND e.state='completed' AND runtime_history_available(e.id)
-     AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.body) o WHERE o->>'id'=item->>'id')
    ) candidate;
    IF cardinality(ids) IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_REQUIRED';END IF;
    eid:=ids[1];
