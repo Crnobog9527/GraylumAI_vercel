@@ -8,7 +8,7 @@
 > **2026-11-02 刷新（只更新现状，不改任何 Owner 决定）**：依据 Master Plan 第 2.1 节截至 2026-11-02 的全部条目（**第 2.1 节和旧文字冲突时，以第 2.1 节为准**）、
 > staging `5cfb5ff42` 的代码与迁移目录、`docs/launch/tasks/CORE-PATH-V2.md`、`docs/validation/core-path-v2/result-20261101.md`，
 > 以及总控提供的 2026-11-02 只读核对（不在仓库里，是二手材料，凡引用处标"未核实"）。本次刷新的要点：
-> ① 2026-10-28 Owner 推迟上线、重做每轮对话主路径（CORE-PATH-V2），**11-10 冻结、11-15 上线的日期已作废，现在没有定日期**（第 1.4 节）；
+> ① 2026-10-28 Owner 推迟上线、重做每轮对话主路径（CORE-PATH-V2），10-28 后一度没有上线日；**Owner 2026-11-03 定上线日 2026-11-15**（第 1.4 节，Master Plan 第 2.1 节 11-03），冻结日沿用 11-10（总控 11-03 确认）；
 > ② 迁移清单更新到当前最新号 0471（第 2 节）；
 > ③ 新增第 3.0a 节"主路径重做后正式环境多出来的东西"（`core_path_v2` 设置、每日止损、连接池数字）；
 > ④ 2026-11-02 Owner 决定"运营教练复盘上线时必须开"，删除第 1.1 节第 2 条的"复盘整体先关"例外；
@@ -43,9 +43,8 @@
 
 ### 1.1 规则（Owner 2026-10-23 晚，Master Plan 第 2.1 节）
 
-1. **核心 12 项全部验收通过才上线。** 日期：**现在没有上线日，也没有冻结日。** 2026-10-26 定的"冻结 11-10、上线 11-15"已被 Owner 2026-10-28 取代
-   （Master Plan 第 2.1 节 2026-10-28："新上线日期在主路径计划定稿后由 Owner 另定"）；同日 CORE-PATH-V2 决定 2 写的是"主路径通过 100 人验收后 7 天内上线"。
-   本手册的口径：**主路径 100 人验收通过后，由 Owner 另行定上线日期**（第 1.4 节）。总控每周三、周六向 Owner 汇报进度，不再汇报"能否保住 11-15"。
+1. **核心 12 项全部验收通过才上线。** 日期：**上线日 2026-11-15**（Owner 2026-11-03，Master Plan 第 2.1 节；取代 10-28 之后"日期待定"的状态）。冻结日沿用 11-10（Owner 11-03 没有再改，总控 11-03 确认）。
+   同日 Owner 定：运营教练复盘、七个平台一键发布、删旧数据库表、100 人复测都必须在上线前完成，100 人复测没过就继续优化（第 1.4 节）。
 2. **核心项不能用"关开关、对外隐藏"降级上线。** 赶不上就顺延上线日。**没有例外**：原先"Post for Me 正式项目或 TikHub 价格来不及时作品复盘整体先关"的例外已删除——
    Owner 2026-10-26 说"作品复盘上线开"，2026-11-02 再次确认**运营教练复盘上线时必须开**（2026-11-02 决定来自总控转达的 Owner 指令，**第 2.1 节还没有这条记录，待总控补**；
    起点是 2026-10-27 "改为运营教练复盘，上线前做完"）。一键发布同样不在任何例外内。
@@ -53,7 +52,7 @@
 4. 每一项的"验收通过"都要对应**最终冻结版本**（AGENTS 第 4 节第 5 条）：冻结后又改了受影响的代码，要复验改动部分，不用从头重跑。
    NOT_RUN 不算通过；只有本机测试、没有 staging 浏览器记录的页面类项目也不算通过。
 5. 第 1.2 节的放行标准是**冻结版本在 staging 上的验收**，是进入建库（第 3.2 节 Q1）的前提；标"（正式）"的部分只能在正式库建好后验证，放到公开开放前核对（第 3.7 节 O-1），不挡建库。
-6. 除 12 项外，上线还需要：第 3 节正式环境步骤全部完成并读回；第 4 节冒烟、真钱付款退款和同日对账无误；备份恢复演练通过或 Owner 明确批准延期（第 7 节 E2）；Owner 同意公开开放。
+6. 除 12 项外，上线还需要：第 3 节正式环境步骤全部完成并读回；第 4 节冒烟和同日对账无误（正式站不做真钱付款测试，Owner 2026-11-03：staging 付款链路全部测通即可，上线后真实用户订阅出问题再解决）；备份恢复演练（Owner 2026-11-03 改为在 staging 原地恢复）通过或 Owner 明确批准延期（第 7 节 E2）；Owner 同意公开开放。
 
 ### 1.2 核心 12 项逐项放行标准
 
@@ -112,17 +111,17 @@
 内容对话剩余 7 个 PR（不含成果夹和 LOAD-SKILL）、"一窗口一选题"提醒、整理纪要、首字速度优化、新一轮定位沿用上一轮对标
 （上线时每轮重新对标）、MODERATION（上线时继续暂缓）、MOBILE-UX、ANALYTICS-POSTHOG、GA4 方案。见第 5 节。
 
-### 1.4 上线日期（2026-11-02）
+### 1.4 上线日期（2026-11-03 更新）
 
-- **日期还没定。** 旧日期 11-10（冻结）和 11-15（上线）作废（Owner 2026-10-28 推迟上线，Master Plan 第 2.1 节）。
-- **Owner 在 100 人验收通过后自己定上线日期**；2026-10-28 CORE-PATH-V2 决定 2 的说法是"验收通过后 7 天内上线"，这是目标，不是承诺，具体哪天由 Owner 定。
-  "验收通过"以 Owner 当次明确说通过为起点；AI 不替 Owner 宣布通过。
-- 日期定下后，才倒推冻结日和第 3 节各步的排期；在这之前所有正式环境步骤都**不排期、不预约**。
-- 总控 2026-11-02 估计"代码与 staging 验收收口约还要 5–8 天，之后正式环境搭建约 4–6 天"。**这是估计，不是决定，不写进任何对外承诺。**
+- **上线日 2026-11-15**（Owner 2026-11-03："全力推进，不要找任何借口"，Master Plan 第 2.1 节 11-03），取代 10-28 推迟上线后"日期待定"的状态。
+- 冻结日：沿用 11-10（Owner 2026-10-26 定的"冻结 11-10、上线 11-15"，11-03 Owner 没有再改；总控 2026-11-03 确认沿用）。
+- 11-03 同日 Owner 的"上线必须有"：运营教练复盘和七个平台一键发布、删旧数据库表（V2-12 批次 F）、100 人复测，都必须在上线前完成；复测没过就继续优化（"七个平台"以第 7 节 E1 的 9 个平台名单为准，总控 11-03 确认）。
+- 11-03 同日：正式站不做真钱付款测试（staging 付款链路全部测通为前提）；备份恢复演练改在 staging 原地恢复。
+- 倒排的各步排期由总控另出；"验收通过"以 Owner 当次明确说通过为起点，AI 不替 Owner 宣布通过。
 
 ## 2. 冻结后的规则
 
-冻结日**现在没有定**（原 11-10 已作废，第 1.4 节）：Owner 定了上线日期后再定冻结日。冻结不等于上线日：冻结之后一直到上线都按下面做。
+冻结日 11-10（第 1.4 节）：冻结后按下面做。冻结不等于上线日：冻结之后一直到上线都按下面做。
 
 1. **冻结前要完成**：
    - CORE-PATH-V2 全部合并，并完成最后一步 V2-12（删除旧路径的数据库表和函数，**不可逆**，按计划排在所有改接新路径的 PR 之后、复验通过之后）；
@@ -156,15 +155,15 @@
 ① `main` 还是旧依赖（Next 有严重漏洞），**绝不能单独部署 `main`**，只能在 staging 合并进 `main` 时一起部署；
 ② Vercel 正式变量**先**换成新 Supabase 项目，**再**合并 `main`，否则部署出来连的是旧库；
 ③ 域名：先撤 `www → app` 的临时 307，先把 Stripe、Post for Me 回调主机改成 `www.graylum.com`，**最后**才放旧主机到 www 的 308，否则无限循环。
-站点恢复、模型调用开放、真钱付款是三件事，三次分别批准，不能一句话全包。
+站点恢复、模型调用开放是两件事，分别批准，不能一句话全包（正式站不做真钱付款测试，Owner 2026-11-03）。
 
 **总顺序（2026-11-02 刷新；每个箭头都是一次停下来等 Owner）**：
-① 主路径在 staging 上完成并通过 **100 人验收**（Owner 当次说通过）→ ② Owner 定上线日期（第 1.4 节）→ ③ 旧路径删除（V2-12）完成、冻结版本选定、核心 12 项全部 PASS（Q1）→
+① 主路径在 staging 上完成并通过 **100 人验收**（Owner 当次说通过）→ ② 上线日 2026-11-15（Owner 11-03，第 1.4 节）→ ③ 旧路径删除（V2-12）完成、冻结版本选定、核心 12 项全部 PASS（Q1）→
 ④ 批准包（Q2）、Owner 同意（Q3）、三地区一致（Q4）→ ⑤ 建库日：B1 建库 → B2 标记 → B3–B12 配置（含连接池数字、日限，第 3.0a 节）→ ⑥ V1–V4 Vercel 变量 → M1 合并到 `main` 部署（站点仍暂停）→
-⑦ 冒烟日 S-1…S-8 + 第 4 节冒烟 → ⑧ 同日对账无误、备份恢复演练通过 → ⑨ O-1…O-6 公开开放。
+⑦ 冒烟日 S-1…S-8 + 第 4 节冒烟 → ⑧ 同日对账无误、备份恢复演练（staging 原地恢复）通过 → ⑨ O-1…O-6 公开开放。
 第 3.1 节（P1…P9）是 Owner 外部事项，可以在 ① 之前就做，不依赖冻结版本，但**每一项仍要 Owner 自己操作或当次批准**。
 
-预备底稿（2026-10-26）：B8 的 staging 对照表、Q2 批准包草稿、上线第一天告警值守表见 [REL-1-BUILD-PREP](REL-1-BUILD-PREP.md)；建库日按当天的 staging 重查。
+建库日从头到尾的顺序清单（2026-11-03）、B8 的 staging 对照表、上线第一天告警值守表见 [REL-1-BUILD-PREP](REL-1-BUILD-PREP.md)；建库日按当天的 staging 重查。
 
 ### 3.0 已经完成的（只在步骤里核对，不用再做）
 
@@ -233,20 +232,22 @@
 
 每一步都读回，每一步后停下等 Owner 确认。每组数值 Owner 当次批准。
 
+**先后顺序（2026-11-03 更正）**：后台页面（读取价格、管理员注册、密钥槽、止损金额、研究工具上限确认、Skill 发布）要等站点指向新库**部署之后**才有，所以下面凡是要用后台的动作（B3 的"读取价格"、B3a 的 Skill 发布、B7 的 `hardCapAttested`、B10、B11、全量核对 B8／B9）都排在第 3.4 节 V1–V4、M1 部署和第 3.5 节 S-1 恢复站点**之后**，顺序见 [REL-1-BUILD-PREP](REL-1-BUILD-PREP.md) 第 1 部分第 30a–30f 步；只写数据库的 B1、B2、B3（除读取价格）、B4–B7（除 `hardCapAttested`）、B12 仍在部署之前。期间新调用和付款路由保持关。
+
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
 | B1 | ★ Owner 批准 → 总控 | `Graylum_main` 从空库建库（按 Master Plan 第 2.1 节 2026-10-25 BASELINE-SQUASH：冻结后先做干净起点，三方一致才用；不一致退回下面的旧方式）：平台前置 → `packages/db/baseline`（0000）→ 全部迁移（同名 bridge 紧挨在迁移前）；**每个文件整段交给服务端执行，不用 `psql -f`** | 只读抓指纹，和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 |
 | B2 | ★ Owner 批准 → 总控 | 写正式库标记：`runtime_environment="production"`，读回 `runtime_production_database()` 为 true；正式库启用的测试窗口为 0（**绝不在 staging 写**） | 读回 |
-| B3 | ★ Owner 批准 → 总控 | 配置类数据：套餐（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，免费每月 0、每年 0）、积分包和会员折扣、`billing_credits_per_usd`=100、`billing_token_price_multiplier`=6、模型和线路（导入后在后台点"读取价格"，不从 staging 复制价格）、`runtime_purpose_budgets`、已发布的 Skill 和模块、输出上限 32768。不复制 staging 的测试账号、对话、订单、流水、沙盒编号、测试窗口 | 逐项读回 |
-| B3a | ★ Owner 确认 → 总控 | **首批创作 Skill 正式发布前，Owner 看过样例并单独确认**（Master Plan 第 2.1 节 2026-10-17：只豁免 staging 测试发布，正式版本仍须单独确认）。确认前这些 Skill 不在正式库发布（可以导入但保持未发布）；不能用"同意建库""同意上线"这类通用批准代替 | Owner 原话记在上线记录；正式后台 Skill 版本读回 |
+| B3 | ★ Owner 批准 → 总控 | 配置类数据：套餐（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，免费每月 0、每年 0）、积分包和会员折扣、`billing_credits_per_usd`=100、`billing_token_price_multiplier`=6、模型和线路（用 SQL 写入；"读取价格"要用后台，排在部署之后；不从 staging 复制价格）、`runtime_purpose_budgets`、已发布的 Skill 和模块、输出上限 32768。不复制 staging 的测试账号、对话、订单、流水、沙盒编号、测试窗口 | 逐项读回 |
+| B3a | ★ Owner 确认 → 总控 | （排在部署并恢复站点之后）**首批创作 Skill 正式发布前，Owner 看过样例并单独确认**（Master Plan 第 2.1 节 2026-10-17：只豁免 staging 测试发布，正式版本仍须单独确认）。确认前这些 Skill 不在正式库发布（可以导入但保持未发布）；不能用"同意建库""同意上线"这类通用批准代替 | Owner 原话记在上线记录；正式后台 Skill 版本读回 |
 | B4 | ★ Owner 批准 → 总控 | 正式准入档案（今天叫 `runtime_payg_production`，主路径重做完成后合并成一份 `runtime_payg`，见第 3.0a 节；结构同 staging，去掉 windowId 和到期日；模型 id 字符串和线路可照抄取证，`ai_models` 的 uuid 要用正式库的）。**必须覆盖**：对话和报告模型（Claude、Gemini）；整理模型（`v3_summary_model_id` 指向 GPT-6 Luna）要有 `organizer` 用途、`serial-tools-v6-reasoning` 格式和报价（文风生成用它）；评审团三位评审和汇总；对比四个模型的 `fusion_compare` 用途和 `fusion-text-v1-stream` 格式；自由对话研究工具 `maxTools` ≥5、定位导师回合 ≥9；档案用途上限 9 | 读回；应急关闭写 `{"enabled":false}` |
 | B5 | ★ Owner 批准 → 总控 | 付款配置：`payment_terms_version`＝`{"version":"<已发布版本>"}`（对象）；Stripe 正式目录绑定写进 `payment_provider_refs`（第 3.6 节 S4 的 SQL，每个套餐/积分包/方式/周期恰好一条当前 live 映射）；`launch_baseline_at`（建库后、第一笔真钱前）；微信、支付宝 `annualVerified=true`（路由 `enabled` 仍关）；新购买渠道 `payment_method_routes.newPurchaseChannel` 缺省就是 `stripe`，读回即可（旧键 `payment_new_purchase_channel` 只剩后台旧面板读取，写不写不影响用户） | 逐个读回；会员页 `termsVersion` 不为空、可结账 |
 | B6 | ★ Owner 批准 → 总控 | 限流和停止：`runtime_rate_limits` 消息 10/分钟、200/天，调用 30/分钟、600/天，`stopNewCalls`＝开（这些数字是 10-24 的值，主路径重做后是否仍适用**未核实**，建库日按当天 staging 读回值对照） | 读回 |
-| B7 | ★ Owner 批准 → 总控 | 功能配置（取值来自 Owner 已定的决定）：对比 `fusion_settings.compare`（允许 Sonnet/Gemini/Sol/Opus 的正式 uuid，默认 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，`minModels`=2，`answerOutputTokens`=8192，`maxBudgetUsd` 随实现改成“用户扣的积分合计 ≤ 500 积分”，Owner 2026-10-26；旧值 3.5 作废）；Sol、Opus 的 `config.reasoning.purposes.interactive` 加低思考档；`allow_fusion_compare` 和评审团只给 Gold；研究工具 `chat_research_tools_enabled`、`research_tools_config`（三家供应商 `enabled` 且 `hardCapAttested`、已验证平台、每条回答子调用 ≤12）、`billing_provider_prices`（未过期）、`billing_payg_start_thresholds`；资料库 `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`chat_my_posts_enabled`、`library_upload_enabled`、`library_scan_recognition_enabled`；作品复盘 `publish_monitor_enabled`（JSON 布尔 `true`）、`_review_enabled`、`_review_model_id`、`_review_max_usd`＝每份复盘平台成本上限 1 美元（Owner 2026-10-27，取代 0.30；字段名和格式以当天 staging 读回为准，**未核实**）；一键发布 `publish_monitor_publish_platforms`（名单见第 7 节 E1）、`publish_monitor_publish_quota`（条数和 Post for Me 套餐一致，不填就不能发布）、`publish_monitor_publish_listed`；P3 的独占项目确认后才打开孤儿清扫删除 `publish_monitor_orphan_sweep_delete`（默认只记录不删）；自由对话主力模型 `primary_model_id`（正式库 `ai_models` 的 uuid，且这个模型在 B4 准入档案里，不配则自由对话全部被拒）；定位报告开关 `runtime_report_generation`＝`{"enabled":true}`（空库没有迁移写它，不写则定位报告全部 REPORT_DISABLED）；写作 Skill `modules.uses_user_voice`（`short-video-script`、`post-and-article`、`video-storyboard`、`video-editing-guide`）；`model_identity_guard` 开 | B8 差异表 |
-| B8 | 总控（只读 staging，需批准读新库） | **种子配置全量核对**：列出 staging 全部 `system_settings` 键、套餐、积分包、模型、Skill 发布状态、`payment_provider_refs`，和新库逐项对照；每个差异补上或写明为什么不需要 | 差异表没有未处理项，附在执行记录 |
+| B7 | ★ Owner 批准 → 总控 | 功能配置（取值来自 Owner 已定的决定）：对比 `fusion_settings.compare`（允许 Sonnet/Gemini/Sol/Opus 的正式 uuid，默认 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，`minModels`=2，`answerOutputTokens`=8192，`maxBudgetUsd` 随实现改成“用户扣的积分合计 ≤ 500 积分”，Owner 2026-10-26；旧值 3.5 作废）；Sol、Opus 的 `config.reasoning.purposes.interactive` 加低思考档；`allow_fusion_compare` 和评审团只给 Gold；研究工具 `chat_research_tools_enabled`、`research_tools_config`（三家供应商 `enabled`；`hardCapAttested` 要正式管理员在后台勾，排在部署和管理员注册之后、各家上限设好之后；已验证平台、每条回答子调用 ≤12）、`billing_provider_prices`（未过期）、`billing_payg_start_thresholds`；资料库 `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`chat_my_posts_enabled`、`library_upload_enabled`、`library_scan_recognition_enabled`；作品复盘 `publish_monitor_enabled`（JSON 布尔 `true`）、`_review_enabled`、`_review_model_id`、`_review_max_usd`＝每份复盘平台成本上限 1 美元（Owner 2026-10-27，取代 0.30；字段名和格式以当天 staging 读回为准，**未核实**）；一键发布 `publish_monitor_publish_platforms`（名单见第 7 节 E1）、`publish_monitor_publish_quota`（条数和 Post for Me 套餐一致，不填就不能发布）、`publish_monitor_publish_listed`；P3 的独占项目确认后才打开孤儿清扫删除 `publish_monitor_orphan_sweep_delete`（默认只记录不删）；自由对话主力模型 `primary_model_id`（正式库 `ai_models` 的 uuid，且这个模型在 B4 准入档案里，不配则自由对话全部被拒）；定位报告开关 `runtime_report_generation`＝`{"enabled":true}`（空库没有迁移写它，不写则定位报告全部 REPORT_DISABLED）；写作 Skill `modules.uses_user_voice`（`short-video-script`、`post-and-article`、`video-storyboard`、`video-editing-guide`）；`model_identity_guard` 开 | B8 差异表 |
+| B8 | 总控（只读 staging，需批准读新库） | （排在部署并恢复站点之后）**种子配置全量核对**：列出 staging 全部 `system_settings` 键、套餐、积分包、模型、Skill 发布状态、`payment_provider_refs`，和新库逐项对照；每个差异补上或写明为什么不需要 | 差异表没有未处理项，附在执行记录 |
 | B9 | 总控（需批准只读） | Vault 已装、0259 已应用；没有"付款方式为空、未关闭、未付款"的旧路径订单；两个资料库桶私有、`storage.objects` / `storage.buckets` 上没有策略 | 只读 SQL |
-| B10 | ★ Owner 注册；授权 Owner 批准 → 总控 | Owner 在新项目注册自己的管理员账号，总控授予管理员角色 | 管理员能进后台、普通账号被拒 |
-| B11 | ★ Owner 操作 | 正式后台填密钥槽：`openrouter`、`postforme`、`postforme_webhook`（至少 16 位，和 Post for Me 一侧末 4 位一致）、`tikhub`、`parallel`、`firecrawl`、`resend`（付款提醒和止损告警共用）；后台"客服邮箱" `support_email` 填收止损告警和专家预约提醒的邮箱；**注意它也会公开显示**在关于我们、无障碍、博客、维护页等页面，所以要填可以对外公开的客服邮箱（2026-10-26 建库准备核对更正） | 每个槽位显示"后台已填写"（只看状态和末 4 位） |
+| B10 | ★ Owner 注册；授权 Owner 批准 → 总控 | （排在部署并恢复站点之后）Owner 在新项目注册自己的管理员账号，总控授予管理员角色 | 管理员能进后台、普通账号被拒 |
+| B11 | ★ Owner 操作 | （排在部署并恢复站点之后）正式后台填密钥槽：`openrouter`、`postforme`、`postforme_webhook`（至少 16 位，和 Post for Me 一侧末 4 位一致）、`tikhub`、`parallel`、`firecrawl`、`resend`（付款提醒和止损告警共用）；后台"客服邮箱" `support_email` 填收止损告警和专家预约提醒的邮箱；**注意它也会公开显示**在关于我们、无障碍、博客、维护页等页面，所以要填可以对外公开的客服邮箱（2026-10-26 建库准备核对更正） | 每个槽位显示"后台已填写"（只看状态和末 4 位） |
 | B12 | ★ Owner 批准 → 总控 | 主路径设置（第 3.0a 节）：按 **E4 连接池数字 → `core_path_v2.stopLoss` 的 `poolSize`／`p` → 日限 `limitUsd`** 的顺序写 `core_path_v2`（含 `uFastUsd`、`uBigUsd`、`decisionUpperUsd`），再写 `runtime_payg`；每个数字 Owner 当次批准 | 逐项读回，且 `poolSize` ＝ `p` ≥ 正式库实际连接池大小；日限 ≥ 10×B |
 
 ### 3.4 部署前：Vercel 正式变量（只对新部署生效）
@@ -298,7 +299,7 @@
 | O-3 | ★ Owner 操作 | 撤掉部署访问保护；作废 S-3 的绕过口令并从回调地址上去掉 | 公众能打开首页；Stripe 回调仍成功 |
 | O-4 | ★ Owner 批准 → 总控 | 关掉 `stopNewCalls`，其他限流保持初始值 | 一个公开测试身份完成一次对话 |
 | O-5 | ★ Owner 操作 | Google Search Console、Bing 提交站点和 sitemap | 后台显示已验证 |
-| O-6 | 总控 | 记录正式部署地址和编号、Stripe 模式、冒烟结果、真钱付款退款结果 | 记录贴在上线 PR |
+| O-6 | 总控 | 记录正式部署地址和编号、Stripe 模式、冒烟结果 | 记录贴在上线 PR |
 
 ## 4. 上线当天的冒烟和回滚
 
@@ -313,8 +314,8 @@
 | K5 | 文风：上传 1–2 篇本人写的文章 → 学习文风 → 确认 | 一笔按量扣费，没有重复 |
 | K6 | 评审团和对比：Gold 身份各一次完整流程并采用（先做对比的"正式模式准入"验证） | 各列之和等于合计；评审采用后报告更新 |
 | K7 | 作品复盘和一键发布：页面能开、导入表格、按档位显示；**不做真实对外发布** | 页面按档位显示；名单外平台返回 `PUBLISH_MONITOR_PLATFORM_NOT_OPEN` |
-| K8 | 真钱付款再退款：银行卡一笔小额订阅；微信、支付宝年付 279 / 496 / 621 美元各一笔；年付首购、创始首购、Pro 升 Gold 首购的后台退款入口；手续费默认"不扣"；付一笔退一笔 | `payment_orders`、`credit_transactions`、订阅和积分一致，退款后收回；创始名额不放回；退款回跳后续费状态不变 |
-| K9 | 拒付金额口径：沙盒里争议金额 29.28 和订单 30.45 差 1.17（订单 $29 + 税 $1.45），用真实一笔对照一次 | 说清原因，记进 PAY-DISPUTE-GUARD；说不清就不开放订阅类收款 |
+| K8 | ~~真钱付款再退款~~ **已取消（Owner 2026-11-03）**：staging 付款链路全部测通，正式站不测，上线后真实用户订阅出问题再解决。原写法见 Git 历史 | 不再是通过标准 |
+| K9 | ~~拒付金额口径用真实一笔对照~~ **随 K8 取消**（它需要真钱付款）。沙盒里争议金额与订单差 1.17（订单 $29 + 税 $1.45）的原因仍是 PAY-DISPUTE-GUARD 的待说清项，不挡上线（Owner 2026-11-03） | 不再是通过标准 |
 | K10 | 邮件：付款提醒一封；后台手动运行一次"Runtime 成本与余额告警"检查 | 测试邮箱收到；止损告警进 `support_email`，标题没有 `[staging]` |
 | K11 | 每日对账 | 同日对账有成功记录，不是 BLOCKED |
 | K12 | TikHub 价格：手工刷新一次（每条最多 7 天有效，过期工具直接不可用）；之后看每日刷新任务有记录 | 价格行未过期 |
@@ -394,9 +395,9 @@
 22. 我来撤掉 www 到 app 的临时跳转，生成冒烟专用的回调绕过口令，验证通过后放 app 到 www 的 308。
 23. 同意冒烟窗口内临时关闭 `stopNewCalls`、打开四条付款路由，冒烟结束后重新打开 `stopNewCalls`。
 24. 同意正式小额冒烟：用 `<测试身份>` 调用 `<模型和次数>`，总预算不超过 `<金额>` 美元。
-25. 同意上线当天真实付款再退款：银行卡 `<金额和笔数>`，微信和支付宝年付 279 / 496 / 621 美元各一笔，退款后核对到账和收回。
+25. ~~同意上线当天真实付款再退款~~ 已取消（Owner 2026-11-03：正式站不做真钱付款测试）。
 26. 同意 X 和 YouTube 各真实发布验收一次 `<账号和内容>`。
-27. 同意用单独的隔离演练项目在公开开放前演练一次备份恢复和删除重放，费用 `<金额>`。（E2）
+27. 同意在 staging 用备份恢复功能原地演练一次备份恢复和删除重放。（E2；Owner 2026-11-03 原话：直接用 staging 的备份恢复功能做恢复测试，数据丢了没关系）
 28. Waffo 后台的拒付邮件通知已打开。（E5，Owner 亲手做）
 29. 我来在 Waffo 提交正式审核；通过后建 12 个正式一次性商品、填正式密钥，渠道保持 Stripe。（S-8，可在上线后）
 
@@ -412,10 +413,10 @@
 | # | 事项 | 推荐 | 可复制 |
 | --- | --- | --- | --- |
 | E1 | **已定（Owner 2026-10-24：「E1 选 A，七个平台一起开」，见 Master Plan 第 2.1 节）**：名单 tiktok、instagram、youtube、facebook、x、threads、linkedin、pinterest、bluesky 一起开放（TikTok 商业号不开放）；只有 X、YouTube 有测试账号 | 上线前 X、YouTube 各真实发布验收一次（每次 Owner 当次批准）；其余 7 个平台首次真实发布在用户侧，上线首周盯失败率 | 已回复 |
-| E2 | **已定（Owner 2026-10-24：「E2 上线前做备份恢复演练」）**：完整的"恢复备份 → 重放删除"演练按 [DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)，仍是公开开放前的门槛，不延期；演练在单独的隔离 Pro 项目里做（不接 Vercel、定时任务、付款回调） | 演练费用需 Owner 当次确认：「同意用单独的隔离演练项目在公开开放前演练一次备份恢复和删除重放，费用 `<金额>`。」 | 已回复；费用待确认 |
+| E2 | **已定（Owner 2026-10-24：「E2 上线前做备份恢复演练」；2026-11-03 改法）**：完整的"恢复备份 → 重放删除"演练按 [DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)，仍是公开开放前的门槛，不延期；**Owner 2026-11-03：直接用 staging 的备份恢复功能原地恢复**，取代原来"单独的隔离 Pro 项目"的写法（staging 没有真实用户，数据丢了没关系） | 在 staging 上做，需先告诉总控（staging 写操作） | 「同意在 staging 用备份恢复功能原地演练一次备份恢复和删除重放。」 |
 | E3 | **已定（Owner 2026-10-24：「Firecrawl 不开零保留，直接上线」，取代同日先前的"开零保留"）**：Firecrawl 不开零保留，不挡上线 | — | 已回复 |
-| E4 | **待办：正式库 PostgREST 连接池**（Master Plan 第 2.1 节 2026-10-25（晚））。staging 现在是 8；正式库**上线前要问 Owner**，Owner 同意后才设（需 Owner 生成的 Supabase 管理令牌，放本机密钥文件，不进仓库、日志或 PR）。不设会回到约 20 人就卡。**2026-11-01 的 100 人压测（报告 `result-20261101.md`）是在池 8 上跑的**，新路径正式池该设多少没有单独复测；这个数字还决定 `core_path_v2` 的 `poolSize`／`p` 和日限（第 3.0a 节），所以**必须先于日限确定** | 总控用 100 人压测结果和真实数字问 Owner | 「同意把正式库的 PostgREST 连接池设成 `<数字>`。」 |
-| E5 | **待办：Waffo 后台打开拒付邮件通知 `notifyChargeback`**（#1355 的建议）。Owner 亲手在 Waffo 后台做；没打开时拒付只靠我们这边的对账发现 | 上线前做；做完告诉总控 | 「Waffo 后台的拒付邮件通知已打开。」 |
+| E4 | **待办（建库日 Owner 操作，建库日清单第 8 步，要在设置每日花费上限和 `core_path_v2` 之前）：正式库 PostgREST 连接池**（Master Plan 第 2.1 节 2026-10-25（晚））。staging 现在是 8；正式库**上线前要问 Owner**，Owner 同意后才设（需 Owner 生成的 Supabase 管理令牌，放本机密钥文件，不进仓库、日志或 PR）。不设会回到约 20 人就卡。**2026-11-01 的 100 人压测（报告 `result-20261101.md`）是在池 8 上跑的**，新路径正式池该设多少没有单独复测；这个数字还决定 `core_path_v2` 的 `poolSize`／`p` 和日限（第 3.0a 节），所以**必须先于日限确定** | 总控用 100 人压测结果和真实数字问 Owner | 「同意把正式库的 PostgREST 连接池设成 `<数字>`。」 |
+| E5 | **待办（建库日 Owner 操作）：Waffo 后台打开拒付邮件通知 `notifyChargeback`**（#1355 的建议）。Owner 亲手在 Waffo 后台做；没打开时拒付只靠我们这边的对账发现 | 上线前做；做完告诉总控 | 「Waffo 后台的拒付邮件通知已打开。」 |
 
 ## 8. 旧版（2026-10-17）条目去向
 
@@ -458,7 +459,7 @@
 | D3、D5、D6 Stripe 设置 | 保留 → P2 |
 | D4a 回调绕过口令 | 保留 → S-3 |
 | D7、D8a | 保留 → V2、B5 |
-| D9 真钱付款退款、H4 小额冒烟 | 保留 → 第 4.1 节 K2、K8 |
+| D9 真钱付款退款、H4 小额冒烟 | H4 保留 → 第 4.1 节 K2；D9 真钱付款退款 **已取消**（Owner 2026-11-03，K8） |
 | E1 单主机 `/app` 代码 | **已完成**（#1206、#1225）；域名切换顺序保留 → S-2、S-4 |
 | E2 撤 307、E3 `SITE_INDEXING`、E4 搜索引擎 | 保留 → S-2、O-2、O-5 |
 | F1–F7、F9 功能开关 | 保留 → B7；"没验收就关"的写法**已取代**（核心项不降级） |
