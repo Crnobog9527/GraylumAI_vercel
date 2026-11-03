@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({
 const mutation = vi.hoisted(() => () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null,
   data: undefined }));
 vi.mock('@/trpc/client', () => ({ trpc: {
-  useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() },
+  useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() }, trend: { invalidate: vi.fn() },
     settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() } } } }),
   opc: { library: { useQuery: () => state.library } },
   publishMonitor: {

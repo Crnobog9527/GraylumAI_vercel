@@ -44,6 +44,13 @@ describe('trendSeries', () => {
     expect(s!.weeks.every(w => w.posts === 0 && w.viewsMedian === null)).toBe(true);
   });
 
+  it('a settled post outside the shown whole weeks does not make views "not provided"', () => {
+    const day = isoDay(Math.floor(now / DAY_MS) - 1 - 7 * 4 - 1);
+    const [s] = trendSeries({ windowDays: 30, connections: [conn({ posts: [{ postedAt: `${day}T10:00:00Z`, day7: day7(100) }] })] }, now);
+    expect(s!.gaps.views).toBe('accumulating');
+    expect(s!.gaps.engagement).toBe('accumulating');
+  });
+
   it('a follower snapshot taken only today is still accumulating, not "not provided"', () => {
     const [s] = trendSeries({ windowDays: 30, connections: [conn({ followers: [{ date: isoDay(Math.floor(now / DAY_MS)), value: 80 }] })] }, now);
     expect(s!.gaps.followers).toBe('accumulating');

@@ -57,7 +57,9 @@ export function trendSeries(rows: Rows, now: number): TrendSeries[] {
         viewsMedian: viewsMid === null ? null : Math.round(viewsMid), viewsSamples: views.length,
         engagementMedian: rateMid === null ? null : round(rateMid, 4), followers, note });
     }
-    const settled = c.posts.filter(p => p.day7).length;
+    // Only posts inside the shown weeks decide a gap: a settled post in the window's cut-off first days says nothing about them.
+    const shownFrom = last - 7 * count + 1;
+    const settled = c.posts.filter(p => p.day7 && utcDay(p.postedAt) >= shownFrom && utcDay(p.postedAt) <= last).length;
     const gaps: TrendSeries['gaps'] = {};
     // Followers: whether the platform gives them depends on the source alone; a snapshot taken today (after the last week)
     // still means accumulating, not "not provided".

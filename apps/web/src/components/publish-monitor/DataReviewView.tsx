@@ -31,7 +31,7 @@ export function DataReviewView() {
   // The account list comes from the library query, so adding a brand account refreshes it too.
   const changed = () => {
     void utils.publishMonitor.connections.invalidate(); void utils.publishMonitor.data.invalidate();
-    void utils.opc.library.invalidate();
+    void utils.opc.library.invalidate(); void utils.publishMonitor.trend.invalidate();
   };
 
   if (connections.isPending || data.isPending) return <Shell><TrendSkeleton /></Shell>;
