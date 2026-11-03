@@ -109,6 +109,9 @@ try {
   const swept = await one('select content_erasure_sweep_sessions(200,null,null) v');
   report.samples.longConversationCleanupMs = Math.round(performance.now() - start);
   assert.ok(swept.cleaned >= 1 && swept.failed === 0, JSON.stringify(swept));
+  const rawOf = session => one('select count(*)::int v from turn_call_raw r join turns t on t.id=r.turn_id where t.session_id=$1', [session]);
+  assert.equal(await rawOf(a.session), 0, 'the deleted long conversation: all 401 response bodies are gone');
+  assert.equal(await rawOf(second), 1, 'the account\'s other conversation keeps its body');
   const mid = await audit(a);
   assert.equal(status(mid, 'turn_call_raw_rows').actual > 0, true, 'the other conversation of the account is still there');
   assert.equal(await one('select count(*)::int v from session_messages where session_id=$1 and (content<>\'\' or visible)', [a.session]), 0);

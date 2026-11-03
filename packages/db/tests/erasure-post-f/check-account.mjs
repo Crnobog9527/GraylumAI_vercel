@@ -5,7 +5,8 @@
 // Options: --save-baseline <file> (before the erasure: remember the billing records) / --compare <file> (after: they must be unchanged),
 //          --print-sql (print the SQL instead of running it). Refuses any project that is not the staging project.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 const STAGING_REF = 'gvcpmcunmfrbxuwimxfa';
@@ -31,7 +32,13 @@ export const baselineOf = rows => Object.fromEntries(rows.filter(r => KEPT.inclu
 function runStaging(sql, workdir) {
   const refFile = resolve(workdir, 'supabase/.temp/project-ref');
   if (!existsSync(refFile) || readFileSync(refFile, 'utf8').trim() !== STAGING_REF) throw new Error('workdir is not linked to the staging project');
-  const r = spawnSync('supabase', ['db', 'query', '--linked', '--workdir', workdir, '-o', 'json', sql], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  // The SQL starts with a comment line, so it goes in as a file: as an argument the CLI would read it as an option.
+  const dir = mkdtempSync(resolve(tmpdir(), 'erasure-audit-'));
+  const file = resolve(dir, 'audit.sql');
+  writeFileSync(file, sql);
+  let r;
+  try { r = spawnSync('supabase', ['db', 'query', '--linked', '--workdir', workdir, '-o', 'json', '-f', file], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }); }
+  finally { rmSync(dir, { recursive: true, force: true }); }
   if (r.status !== 0) throw new Error((r.stderr || r.stdout).slice(-2000));
   const out = JSON.parse(r.stdout);
   const rows = Array.isArray(out) ? out : out.rows;
