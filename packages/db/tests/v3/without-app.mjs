@@ -4,12 +4,35 @@
 // excluded by exact name here, and the Vitest result must match this list.
 
 export const WITHOUT_APP_SUITES = {
+  cdc: {files: ['src/scripts/ac0Probe/cdcB2Eval.integration.ts'], prefix: 'CDC_EVAL: ', excluded: []},
   runtime: {
-    files: [
+    files: ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts',
+      'src/services/runtime/terminalReply.integration.ts', 'src/services/runtime/historyCache.integration.ts',
+      'src/services/opc/agentCorePlanB.integration.ts',
+      'src/services/bill2/agentCorePlanB.integration.ts', 'src/services/runtime/platformFailure.integration.ts',
+      'src/services/runtime/staleChargedRounds.integration.ts',
+      'src/services/fusion/fusion.integration.ts', 'src/services/runtime/researchTurn.integration.ts',
+      'src/services/runtime/libraryRead.integration.ts',
       'src/services/turn/chat.integration.ts', 'src/services/turn/mentor.integration.ts', 'src/services/turn/compare.integration.ts',
       'src/services/turn/tools.integration.ts'],
     prefix: 'RUNTIME: ',
-    excluded: [],
+    excluded: [
+      {
+        name: 'RUNTIME: browser ordinary and document Skill survive refresh, actual process restart and fresh login',
+        cases: 1,
+        reason: 'launches a desktop Chrome and drives the local Next application, then restarts it',
+      },
+      {
+        name: 'RUNTIME: attached organizer search=',
+        cases: 3,
+        reason: 'reads the persisted result through the local Next application HTTP route runtime.view',
+      },
+      {
+        name: 'RUNTIME: actual HTTP disconnect keeps late output in original scope and killed process preserves unknown without resend',
+        cases: 1,
+        reason: 'disconnects from and kills the local Next application process',
+      },
+    ],
   },
 };
 

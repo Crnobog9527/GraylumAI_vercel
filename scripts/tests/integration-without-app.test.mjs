@@ -3,39 +3,62 @@ import test from 'node:test';
 import { verifyWithoutAppResults, withoutAppPattern, WITHOUT_APP_SUITES } from '../../packages/db/tests/v3/without-app.mjs';
 
 const runtime = WITHOUT_APP_SUITES.runtime;
+const excludedNames = [
+  runtime.excluded[0].name,
+  'RUNTIME: attached organizer search=false stopAfterPrimary=false preserves original run',
+  'RUNTIME: attached organizer search=true stopAfterPrimary=false preserves original run',
+  'RUNTIME: attached organizer search=false stopAfterPrimary=true preserves original run',
+  runtime.excluded[2].name,
+];
 const file = (name, assertionResults, status = 'passed') => ({ name: '/tmp/copy/packages/api/' + name, status, assertionResults });
 const pass = (fullName) => ({ fullName, status: 'passed' });
 const skip = (fullName) => ({ fullName, status: 'skipped' });
 const runtimeReport = (extra = [], failed = 0) => ({
   numFailedTests: failed,
   testResults: [
-    file(runtime.files[0], [pass('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in three writes, settles once'), ...extra]),
-    file(runtime.files[1], [pass('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Skill file, applies the organizer patch')]),
-    file(runtime.files[2], [pass('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns')]),
-    file(runtime.files[3], [pass('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes')]),
+    file(runtime.files[0], [pass('RUNTIME: atomic draft/session/start replay'), ...excludedNames.map(skip), ...extra]),
+    file(runtime.files[1], [pass('RUNTIME: streaming saved receipt replays')]),
+    file(runtime.files[2], [pass('RUNTIME: terminal paid reply cancels once')]),
+    file(runtime.files[3], [pass('RUNTIME: H1 frozen history replays')]),
+    file(runtime.files[4], [pass('RUNTIME: R13 capture and confirmation')]),
+    file(runtime.files[5], [pass('RUNTIME: v2 R13 financial conservation')]),
+    file(runtime.files[6], [pass('RUNTIME: platform failure restores charged credits once')]),
+    file(runtime.files[7], [pass('RUNTIME: stale charged rounds are reported through the function')]),
+    file(runtime.files[8], [pass('RUNTIME: Fusion group admission, streamed dispatch, saved body, verdict and per-run settlement')]),
+    file(runtime.files[9], [pass('RUNTIME: a research mentor turn claims the subcall between its model calls')]),
+    file(runtime.files[10], [pass('RUNTIME: library document deleted mid-stream hides late text, deltas and result and keeps no copy')]),
+    file(runtime.files[11], [pass('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in three writes, settles once')]),
+    file(runtime.files[12], [pass('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Skill file, applies the organizer patch')]),
+    file(runtime.files[13], [pass('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns')]),
+    file(runtime.files[14], [pass('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes')]),
   ],
 });
 
-test('name patterns select the suite prefix', () => {
+test('name patterns select the suite prefix and exclude exactly the app-only cases', () => {
   const pattern = new RegExp(withoutAppPattern('runtime'));
-  assert.ok(pattern.test('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens'));
+  assert.ok(pattern.test('RUNTIME: atomic draft/session/start replay, admission and SDK append identities'));
+  assert.ok(pattern.test('RUNTIME: streaming saved receipt replays through SDK after completion failure'));
+  for (const name of excludedNames) assert.ok(!pattern.test(name), name);
   assert.ok(!pattern.test('OPC: anything'));
 });
 
-test('verification passes only when every case passed', () => {
+test('verification passes only when every non-excluded case passed', () => {
   const result = verifyWithoutAppResults('runtime', runtimeReport());
   assert.deepEqual(result.errors, []);
-  assert.equal(result.passed, runtime.files.length);
-  assert.equal(result.skipped, 0);
+  assert.equal(result.passed, 15);
+  assert.equal(result.skipped, 5);
 });
 
-test('verification fails closed on failures, unlisted skips, missing files and unexpected files', () => {
+test('verification fails closed on failures, unlisted skips, missing files and stale exclusions', () => {
   assert.ok(verifyWithoutAppResults('runtime', runtimeReport([], 1)).errors.length);
   assert.ok(verifyWithoutAppResults('runtime', runtimeReport([skip('RUNTIME: staging window runs')])).errors.length);
   assert.ok(verifyWithoutAppResults('runtime', runtimeReport([{ fullName: 'RUNTIME: x', status: 'failed' }])).errors.length);
   const missingFile = runtimeReport();
   missingFile.testResults.pop();
   assert.ok(verifyWithoutAppResults('runtime', missingFile).errors.some((error) => error.includes('no passing case')));
+  const stale = runtimeReport();
+  stale.testResults[0].assertionResults = stale.testResults[0].assertionResults.filter((test) => !test.fullName.includes('organizer'));
+  assert.ok(verifyWithoutAppResults('runtime', stale).errors.some((error) => error.includes('expected 3')));
   const unexpected = runtimeReport();
   unexpected.testResults.push(file('src/services/__tests__/workbench.integration.ts', []));
   assert.ok(verifyWithoutAppResults('runtime', unexpected).errors.some((error) => error.includes('unexpected test file')));
