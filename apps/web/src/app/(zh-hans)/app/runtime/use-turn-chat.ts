@@ -1,9 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ToolAvailability } from '@repo/api/src/services/turn/tools/types';
 import type { TurnView } from '@repo/api/src/services/turn/view';
 import { runTurn } from '@/lib/turn-stream';
+import { readCachedChatView, writeCachedChatView } from '@/lib/persisted-chat';
+import { readSessionUserIdSync } from '@/lib/session-user';
 import type { ResearchCall } from '@/components/research/research-model';
 import { workItemFromResearchCall, type WorkItem } from '@/components/chat-display/agent-work-model';
 import { readTurnView } from '@/app/(zh-hans)/app/positioning/[draftId]/mentor-turn-path';
@@ -54,6 +56,11 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   const [view, setView] = useState<TurnView | null>(null), [viewFailed, setViewFailed] = useState(false);
   const [live, setLive] = useState<LiveTurn | null>(null), [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<{ code: string; text: string } | null>(null);
+  // The last read of this conversation, kept in this browser: shown before the first paint, replaced by the read below.
+  useLayoutEffect(() => {
+    const saved = readCachedChatView(readSessionUserIdSync(), sessionId);
+    if (saved) setView(old => old ?? saved);
+  }, [sessionId]);
   const alive = useRef(true), settled = useRef(onSettled);
   useEffect(() => { settled.current = onSettled; }, [onSettled]);
   // Not a poll: one more read a while after a close, one when another tab says its turn closed, and one whenever the user comes back to the window.
@@ -77,7 +84,7 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     const next = await readTurnView(sessionId, fetcher);
     if (!alive.current) return null;
     setViewFailed(!next);
-    if (next) setView(next);
+    if (next) { setView(next); writeCachedChatView(readSessionUserIdSync(), sessionId, next); }
     return next;
   }, [sessionId, fetcher]);
   useEffect(() => { void read(); }, [read]);

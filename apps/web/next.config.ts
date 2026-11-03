@@ -42,6 +42,8 @@ const reportOnlyCsp = [
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // The browser's saved page data (lib/persisted-cache.ts) is dropped whenever the build changes: new code never reads old data's shape.
+  env: { NEXT_PUBLIC_CACHE_BUILD: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ?? "dev" },
   // One root layout per language (app/(zh-hans), app/zh-tw): an address that matches no route is answered by
   // app/global-not-found.tsx, since no single layout covers it.
   experimental: { globalNotFound: true },

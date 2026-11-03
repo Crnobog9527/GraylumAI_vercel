@@ -2,7 +2,7 @@
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { isUnauthorizedError } from '@/lib/auth-recovery';
@@ -16,6 +16,8 @@ import { toast } from 'sonner';
 import { isProfileArchivedError, PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { PROFILE_BUSINESSES_KEY } from '@/components/opc/profile-archive/profile-archive-api';
 import { mutationAffectsRuntimeChoices } from '@/lib/runtime-choices';
+import { clearPersistedCache, persistQueryCache, restoreQueryCache } from '@/lib/persisted-cache';
+import { readSessionUserIdSync } from '@/lib/session-user';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   // The query client is created once; it reaches the latest recovery handler through this ref.
@@ -53,6 +55,26 @@ export default function Provider({ children }: { children: React.ReactNode }) {
     return client;
   });
   const [supabase] = useState(() => createClient());
+  // Saved page data (lib/persisted-cache.ts): put back before the first paint, so a reload shows the last content at once while the same
+  // reads run again behind it and replace it. Saved again, a moment after any read changes, and when the page is hidden.
+  const knownUser = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    knownUser.current = readSessionUserIdSync();
+    restoreQueryCache(queryClient, knownUser.current);
+  }, [queryClient]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const save = () => { timer = undefined; persistQueryCache(queryClient, readSessionUserIdSync()); };
+    const flush = () => { if (timer) clearTimeout(timer); save(); };
+    const hidden = () => { if (document.visibilityState === 'hidden') flush(); };
+    const unsubscribe = queryClient.getQueryCache().subscribe(() => { timer ??= setTimeout(save, 1500); });
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      unsubscribe(); window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', hidden);
+      if (timer) clearTimeout(timer);
+    };
+  }, [queryClient]);
   const recovery = useUnauthorizedRecovery(supabase, queryClient);
   const { handleUnauthorized } = recovery;
   useEffect(() => {
@@ -88,6 +110,13 @@ export default function Provider({ children }: { children: React.ReactNode }) {
         accessTokenRef.current = session?.access_token ?? null;
         sessionPromiseRef.current = Promise.resolve(accessTokenRef.current);
 
+        // Signing out, or a different user signing in on this browser: nothing the last user read stays in memory or in storage.
+        const user = session?.user?.id?.toLowerCase() ?? null;
+        if (event === 'SIGNED_OUT' || (user && knownUser.current && user !== knownUser.current)) {
+          clearPersistedCache();
+          queryClient.clear();
+        }
+        knownUser.current = event === 'SIGNED_OUT' ? null : user ?? knownUser.current;
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
           queryClient.invalidateQueries({ refetchType: 'active' });
         }

@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 type QueryError = { message?: string; data?: { code?: string } | null };
 export function workspaceErrorMessage(error: QueryError | null | undefined): string {
   switch (error?.data?.code) {
@@ -18,6 +19,7 @@ export function QueryNotice({ error, loading, label, retry }: {
   error?: QueryError | null; loading?: boolean; label: string; retry: () => unknown;
 }) {
   if (error) return <p role="alert">{label}：{workspaceErrorMessage(error)} <button type="button" onClick={() => { void retry(); }}>重试</button></p>;
-  if (loading) return <p role="status">正在读取{label}…</p>;
+  // Still reading: grey bars, no words (UI-FINISH). The label stays for screen readers.
+  if (loading) return <PageSkeleton rows={1} label={`${label}读取中`} />;
   return null;
 }
