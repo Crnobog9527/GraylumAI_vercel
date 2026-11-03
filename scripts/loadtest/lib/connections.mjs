@@ -11,16 +11,17 @@ export const CONNECTION_LINE = {
 };
 export const POSTGREST_ROLE = 'authenticator';
 
-// sample: { t, rows: [{ usename, application_name, state, backend_type, n }], idleInTxMaxSeconds }; limits: { maxConnections, reserved, ... }
+// sample: { t, rows: [{ current_db, usename, application_name, state, backend_type, n }], idleInTxMaxSeconds }; limits: { maxConnections, reserved, ... }
 const clientRows = sample => (sample.rows ?? []).filter(r => r.backend_type === 'client backend');
 const totalOf = rows => rows.reduce((sum, r) => sum + Number(r.n), 0);
 
 export function summarizeConnections(samples, limits = {}) {
-  let peakTotal = 0, peakActive = 0, idleInTxMax = 0;
+  let peakTotal = 0, peakCurrentDb = 0, peakActive = 0, idleInTxMax = 0;
   const peakByRole = {}, peakByApp = {};
   for (const sample of samples) {
     const rows = clientRows(sample);
-    peakTotal = Math.max(peakTotal, totalOf(rows));
+    peakTotal = Math.max(peakTotal, totalOf(rows)); // whole instance, the sampler's own connection included
+    peakCurrentDb = Math.max(peakCurrentDb, totalOf(rows.filter(r => r.current_db)));
     peakActive = Math.max(peakActive, totalOf(rows.filter(r => r.state === 'active')));
     idleInTxMax = Math.max(idleInTxMax, Number(sample.idleInTxMaxSeconds) || 0);
     const role = {}, app = {};
@@ -32,7 +33,7 @@ export function summarizeConnections(samples, limits = {}) {
     for (const [k, v] of Object.entries(role)) peakByRole[k] = Math.max(peakByRole[k] ?? 0, v);
     for (const [k, v] of Object.entries(app)) peakByApp[k] = Math.max(peakByApp[k] ?? 0, v);
   }
-  return { samples: samples.length, peakTotal, peakActive, idleInTxMaxSeconds: Number(idleInTxMax.toFixed(1)), peakByRole, peakByApp, limits };
+  return { samples: samples.length, peakTotal, peakCurrentDb, peakActive, idleInTxMaxSeconds: Number(idleInTxMax.toFixed(1)), peakByRole, peakByApp, limits };
 }
 
 // Unknown values are not passes: a missing sample or limit makes the line fail with known:false.
@@ -56,12 +57,17 @@ export function judgeConnections(summary, line = CONNECTION_LINE) {
 }
 
 // One-user calibration (no contention): what a turn costs on its own beyond the stub's own reply time.
-// stubSeconds: first byte + chunks x interval of the stub (6 s for chat). Thresholds follow the 11-01 report (fixed ~9 s, line = reply + 2 s).
+// stubSeconds: first byte + chunks x interval of the stub (6 s for chat). Without a measured network baseline (roundTripMs) the
+// source of the extra time is NOT decided: it can be the driver's distance, the tunnel or work inside the turn.
 export function classifyFixedOverhead({ p50Ms, stubSeconds, lineSeconds = 2, roundTripMs = null }) {
   if (!Number.isFinite(p50Ms)) return { overheadSeconds: null, reading: 'not measured' };
   const overheadSeconds = Number((p50Ms / 1000 - stubSeconds).toFixed(2));
-  const reading = overheadSeconds <= lineSeconds ? 'within the line: the 11-01 fixed ~9 s was the local round trip, not the app'
-    : overheadSeconds <= 5 ? 'between the line and 5 s: partly the local round trip, partly app work; run a staged re-measure before deciding'
-      : 'above 5 s with one user: not concurrency and not the driver\'s distance; it is serial work inside the turn (needs app-side timing)';
-  return { overheadSeconds, reading, roundTripMs };
+  if (!Number.isFinite(roundTripMs)) {
+    return { overheadSeconds, source: 'undetermined', roundTripMs: null,
+      reading: `extra ${overheadSeconds} s per turn; source undetermined (no network baseline measured): do not attribute it to the app or to the network` };
+  }
+  const residualSeconds = Number((overheadSeconds - roundTripMs / 1000).toFixed(2));
+  const reading = residualSeconds <= lineSeconds ? 'within the line after one measured round trip'
+    : `${residualSeconds} s remain after one measured round trip: not explained by distance alone; attribute it only with in-app stage timing`;
+  return { overheadSeconds, residualSeconds, source: residualSeconds <= lineSeconds ? 'network baseline' : 'undetermined', roundTripMs, reading };
 }

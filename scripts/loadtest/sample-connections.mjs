@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Connection sampler for the Vercel-side 100-user validation: once a second, the client connections of the STAGING database grouped by
-// role / application / state, plus how long the oldest "idle in transaction" session has waited. Once at the start: max_connections
+// Connection sampler for the Vercel-side 100-user validation: once a second, the client connections of the WHOLE PostgreSQL instance
+// (max_connections is per instance, so every database counts, and so does this sampler's own connection), grouped by
+// database / role / application / state with a flag for the current database, plus how long the oldest "idle in transaction" session has waited.
+// Once at the start: max_connections
 // and (when SUPABASE_MANAGEMENT_TOKEN and SUPABASE_PROJECT_REF are in the environment) the pooler and PostgREST pool settings.
 //   LOADTEST_DATABASE_URL   connection string of the STAGING database, a role that may read pg_stat_activity of other roles
 //                           (pg_read_all_stats); environment only, never printed
@@ -19,8 +21,8 @@ import { summarizeConnections, judgeConnections } from './lib/connections.mjs';
 const flag = (name, dflt) => { const i = process.argv.indexOf('--' + name); return i > 0 ? process.argv[i + 1] : dflt; };
 
 export async function sampleConnections(client) {
-  const rows = (await client.query(`SELECT usename, application_name, state, backend_type, count(*)::int AS n FROM pg_stat_activity
-    WHERE datname = current_database() AND pid <> pg_backend_pid() GROUP BY 1, 2, 3, 4`)).rows;
+  const rows = (await client.query(`SELECT datname = current_database() AS current_db, usename, application_name, state, backend_type,
+    count(*)::int AS n FROM pg_stat_activity GROUP BY 1, 2, 3, 4, 5`)).rows;
   const idle = (await client.query(`SELECT coalesce(max(extract(epoch FROM now() - state_change)), 0)::float AS s FROM pg_stat_activity
     WHERE state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()`)).rows[0];
   return { t: Date.now(), rows, idleInTxMaxSeconds: idle.s };

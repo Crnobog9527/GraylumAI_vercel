@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 1 | 给**一个能被 Vercel 够到的地址**放桩（`openrouter-stub.mjs`，要 `LOAD_STUB_HOST/PORT/PREFIX`）。推荐 A：Owner 机器上跑桩 + 免费隧道（Owner 照做步骤见 `owner-tunnel-steps.md`；不用新账号，有隧道 1 跳的偏差，见第 3 节）；B：单独一个 Vercel 项目放桩（同区域更干净，但要新建项目）| 应用够不到本机；`openrouter.ai` 地址写死在代码里 | 总控定 A/B，B 要 Owner 批 |
 | 2 | 在 graylumai-staging 项目设两个环境变量：`LOADTEST_MODEL_STUB_URL`（https 桩地址含密路径）和 `LOADTEST_STUB_DB_HOST`（staging Supabase 主机），**跑完立即删掉并重新部署** | 钩子（本 PR）只有这两个都在、且应用连的库就是该主机时才改道；两个变量都不在时代码什么都不做 | 总控（Vercel staging 设置） |
-| 3 | 采样器要一个**读 pg_stat_activity 的 staging 只读角色连接串**（需 `pg_read_all_stats`），可选再给管理令牌 + 项目标识读池设置 | 只读；放本机环境变量，不进仓库 | Owner/总控提供 |
+| 3 | 采样器按**整个 PostgreSQL 实例**统计连接（含采样器自己的一条；当前库的数字另列），要一个**读 pg_stat_activity 的 staging 只读角色连接串**（需 `pg_read_all_stats`），可选再给管理令牌 + 项目标识读池设置 | 只读；放本机环境变量，不进仓库 | Owner/总控提供 |
 | 4 | 日限临时调到 300（上批同做法），跑完调回；100 个测试账号（沿用 loadtest211–310 或重置）| 桩的"花费"记在账上约 31.6 美元，不是真钱 | 总控 |
 | 5 | 向总控要一个 staging 空闲时段；期间不合并、不写 staging（AGENTS 第 8 节）| 同账号并行会串输入 | 总控 |
 | 6 | 确认 staging 部署的是含本 PR 的版本 | 没有钩子就会真的打 OpenRouter | 总控 |
@@ -50,7 +50,7 @@ node scripts/loadtest/sample-connections.mjs --summarize "$OUT/connections.jsonl
 
 | 问题 | 怎么量 | 过线 / 读法 |
 |---|---|---|
-| ① 固定约 9 秒是不是本机往返 | `--calibrate` 的 p50 减去桩 6 秒（`classifyFixedOverhead`）；再看整套各档 p50 是否仍是同一个数 | 开销 ≤ 2 秒：基本是本机往返；2–5 秒：一部分是；> 5 秒：与并发和距离无关，是回合内串行工作，需要应用内分段计时。整轮 p95 ≤ 8 秒沿用 3.1 节。方案 A 的隧道每次模型调用多约 0.05–0.15 秒、一轮最多 3 次，偏差 ≤ 约 0.5 秒，读结果时扣掉 |
+| ① 固定约 9 秒是不是本机往返 | `--calibrate` 的 p50 减去桩 6 秒（`classifyFixedOverhead`）；再看整套各档 p50 是否仍是同一个数 | 只报"每轮多出几秒"，**来源写"未确定"**：没有网络基线（`roundTripMs`）或应用内分段计时，就不下"是本机往返"或"是应用内串行"的结论。要下结论，先量一次从驱动机到 Vercel 的往返作基线，或加应用内分段计时。整轮 p95 ≤ 8 秒沿用 3.1 节。方案 A 的隧道每次模型调用多约 0.05–0.15 秒、一轮最多 3 次，偏差 ≤ 约 0.5 秒，读结果时扣掉 |
 | ② 真 Vercel 下数据库连接数 | `sample-connections`（每秒）| 客户端连接峰值 ≤ 可用连接（`max_connections` − 保留）的 **75%**；`authenticator` 峰值 ≤ `db_pool`（读不到管理接口时按 staging 的 8）；"事务内空闲"最长 ≤ 5 秒；未读到的数按不通过 |
 | ③ 真 Redis 限流 | 驱动记录 429 次数；Vercel 日志的 Redis 超时 | 100 人 2.5 分钟里 429 为 0（限流 `ai_stream` 每人每分钟 20 次、同 IP `ip_session` 每分钟 600 次；整套从一台机器出，约 330 次/分，余量不到 2 倍，出现 429 要先分清是 IP 限流还是产品限流）；`rate_limit_unavailable` 为 0 |
 

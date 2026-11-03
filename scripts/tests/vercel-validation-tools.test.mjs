@@ -33,12 +33,27 @@ test('connection checks fail on over-limit, idle in transaction, and unknown val
   assert.ok(none.every(c => !c.ok && !c.known), 'no samples and no limits is not a pass');
 });
 
-test('fixed overhead reading follows the line and the 5 second split', () => {
-  assert.match(classifyFixedOverhead({ p50Ms: 7500, stubSeconds: 6 }).reading, /local round trip, not the app/);
-  assert.match(classifyFixedOverhead({ p50Ms: 9500, stubSeconds: 6 }).reading, /partly/);
-  assert.match(classifyFixedOverhead({ p50Ms: 15000, stubSeconds: 6 }).reading, /serial work inside the turn/);
+test('fixed overhead is reported as extra seconds with an undetermined source unless a network baseline exists', () => {
+  const none = classifyFixedOverhead({ p50Ms: 15000, stubSeconds: 6 });
+  assert.equal(none.overheadSeconds, 9);
+  assert.equal(none.source, 'undetermined');
+  assert.doesNotMatch(none.reading, /serial|in the turn|local round trip, not the app/);
+  assert.match(classifyFixedOverhead({ p50Ms: 7500, stubSeconds: 6, roundTripMs: 1000 }).reading, /within the line/);
+  const far = classifyFixedOverhead({ p50Ms: 15000, stubSeconds: 6, roundTripMs: 1000 });
+  assert.equal(far.residualSeconds, 8);
+  assert.equal(far.source, 'undetermined');
   assert.equal(classifyFixedOverhead({ p50Ms: null, stubSeconds: 6 }).reading, 'not measured');
 });
+
+test('connection peak counts the whole instance and lists the current database apart', () => {
+  const rows = [{ current_db: true, usename: 'authenticator', state: 'idle', backend_type: 'client backend', n: 5 },
+    { current_db: false, usename: 'postgres', state: 'active', backend_type: 'client backend', n: 3 }];
+  const summary = summarizeConnections([{ rows, idleInTxMaxSeconds: 0 }], { maxConnections: 10, reserved: 0 });
+  assert.equal(summary.peakTotal, 8);
+  assert.equal(summary.peakCurrentDb, 5);
+  assert.equal(judgeConnections(summary)[0].ok, false); // 8 > 75% of 10
+});
+
 
 test('managed limits are read with GET only, kept as numbers, and missing without a token', async () => {
   assert.deepEqual(await readManagedLimits({}, async () => { throw new Error('no call expected'); }), {});
