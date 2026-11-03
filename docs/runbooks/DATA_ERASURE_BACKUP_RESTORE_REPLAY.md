@@ -1,7 +1,7 @@
 # 从备份恢复后重放删除（库外删除清单）
 
-> **还没有演练过。** staging 目前没有每日备份、PITR 也没开（2026-10-12 只读核对），所以这份流程只在本机测试库里验证过
-> 各个函数，没有做过一次真实的"恢复 → 重放 → 开放"。正式上线前要按 DATA-ERASURE T16 用虚构账号演练一次。
+> **已在 staging 做过一次真实的平台备份恢复演练（2026-11-03，见文末"演练记录"）**，结果成功；但那次**没有**覆盖"重放库外删除清单"
+> 这一步（备份之后没有需要重放的删除，且 staging 没有真实用户）。正式环境上线前仍要按 DATA-ERASURE T16 用虚构账号把"恢复 → 重放 → 开放"完整走一遍。
 > 依据：[DATA-ERASURE.md](../launch/tasks/DATA-ERASURE.md) §8、E7、附录 C [S8]；
 > [保留期核对清单](DATA_ERASURE_RETENTION_CHECKLISTS.md) 缺口第 5 条。
 
@@ -38,7 +38,8 @@ Redis 键名：`graylum:erasure-manifest:<kind>:<目标编号>`，值是上面�
 - 数据库里的待同步记录，超过 35 天的（不管有没有同步）由每天的注销定时任务删除。
 - 依据 [S8]：Supabase 每日备份可访问窗口 Pro 7 天、Team 14 天、Enterprise 30 天；PITR 最长 28 天。
   35 天覆盖其中最长的 30 天，再留几天余量。
-- staging：没有每日备份，PITR 未开（2026-10-12 只读核对）。
+- staging：2026-10-12 只读核对时没有每日备份；2026-11-03 起有每日物理备份（保留 8 份），PITR 仍未开。
+  `supabase backups restore` 只支持 PITR，所以每日备份只能在后台（Database → Backups → Scheduled backups）点恢复。
 - **正式环境：套餐和备份窗口未核实，上线前核对。** 如果正式环境的备份或 PITR 保留期超过 30 天，
   必须先把 35 天调大（代码 `ERASURE_MANIFEST_TTL_SECONDS` 和迁移里的 `35 days` 一起改），否则清单会比备份先过期。
 
@@ -107,3 +108,25 @@ Redis 键名：`graylum:erasure-manifest:<kind>:<目标编号>`，值是上面�
 - 同步：`packages/api/src/services/accountErasure/offdbManifest.ts`
 - 导出脚本：`scripts/erasure-manifest-export.mjs`
 - 本机测试：`node packages/db/tests/erasure-offdb-manifest/run-local.mjs --local-only`
+
+## 演练记录
+
+### 2026-11-03：staging 原地恢复到每日备份（上线手册 E2）
+
+Owner 批准（原话："你就直接用 staging 的备份恢复功能来做恢复测试就好了。反正没有真实用户，无所谓的，这些数据都是不必要保存的，丢了也没关系。"），
+范围只限 staging（项目号 `gvcpmcunmfrbxuwimxfa`，每一步都核对过；没有用 Supabase MCP 连接器，只用本机 `supabase` CLI 的只读查询和 Management API）。
+
+| 步骤 | 做了什么 | 结果 / 用时（UTC） |
+|---|---|---|
+| 1 列备份 | `supabase backups list`：8 份每日物理备份（10-27 至 11-03），最新 11-03 10:05:10；`pitr_enabled=false` | 11:28；CLI 的 `backups restore` 只认 PITR，每日备份只能在后台点，所以改由 Owner 操作 |
+| 2 恢复前证据（只读） | ledger 424 行、末项 0496；193 张表约 20.9 万行；`auth.users` 329、`storage.objects` 41；备份时刻口径的关键表行数；结构指纹 3203 组（`fingerprint.sql`，只读事务），与仓库空库重建比对有 30 处演练前就存在的差异 | 12:35–12:50，约 15 分钟（多数时间花在按表精确计数和空库重建比对） |
+| 3 恢复 | Owner 在后台选 11-03 10:05:10 UTC 那份，原地 Restore；期间项目离线 | Owner 估计：恢复约 2～3 分钟，不超过 5 分钟（没有精确时间戳）；12:50 UTC 确认已经可以连接 |
+| 4 恢复后核对 | ledger 421 行、末项 0492（备份之后的 0493、0494、0496 都消失，与预期一致）；`profiles` 342、`credit_transactions` 25776、`billing_history` 19929、`credit_source_entries` 13477、`runtime_sessions` 1356、`auth.users` 329、`storage.objects` 41 | 全部与备份时刻的数完全一致 |
+| 5 补迁移 | 用仓库原文件按 0493 → 0494 → 0496 顺序整段执行（各自一个事务），每条执行后写 ledger | 各 12–14 秒，共约 40 秒；ledger 回到 424 行；结构指纹 3203 组与恢复前逐组一致，比对仓库的差异仍是同样 30 处 |
+| 6 冒烟 | 不登录部分：首页 200、`/login` 200、`/app/runtime` 未登录 307 跳登录；定时任务恢复运行（最近 10 分钟 11 条）；0494 的函数在 | 登录、自由对话一轮、后台页面等需要真实浏览器的部分不由本记录负责，见 PR 的 Validation handoff |
+
+问题与结论：
+- 第 3 步需要人在后台点，CLI 做不到；写进了上面的"保留多久"一节。
+- ledger 的 `version` 是上库时刻的时间戳，不是迁移号；恢复后补回的三条拿到的是新时间戳（20261103125120 / 125134 / 125149），名字不变。
+- 结构指纹的 30 处差异（`ai_models`、`bill2_calls`/`bill2_runs`、`report_fees`、`runtime_executions`/`runtime_tool_calls`、`turns`/`turn_calls` 的权限与策略，`library_documents`、`library_document_segments` 的索引）在演练前就存在，不是恢复造成的，本次不处理；已提交的 `staging-fingerprint.json` 停在 10-09，需要另行刷新。
+- 没有覆盖：重放库外删除清单、Storage 文件内容比对、Auth 用户密码/会话（行数一致，未逐一登录验证）、正式环境（套餐和备份窗口仍未核实）。
