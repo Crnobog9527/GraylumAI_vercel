@@ -13,6 +13,7 @@ import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import { ensurePositioningProfilePlans } from '../__tests__/fixtures/positioningProfilePlans';
 import { opcService } from '../opc/service';
+import { workbenchService } from '../artifacts/workbench';
 import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
 import { publishSkillPackage } from '../skills/publication';
 import { CORE_PATH_SETTING } from './chat';
@@ -131,7 +132,7 @@ async function setup(input: { benchmarkStep?: boolean } = {}) {
   await seedTestOpenRouterKey(db, 'LOCAL_SYNTHETIC_OPENROUTER_KEY');
   const steps = async () => (await db.query('select r.steps from artifact_rounds r join opc_drafts d on d.round_id=r.id where d.draft_id=$1',
     [draft.draftId])).rows[0].steps;
-  return { actor, session, moduleId, draftId: draft.draftId, steps };
+  return { actor, session, moduleId, draftId: draft.draftId, steps, user, admin };
 }
 
 /** A Supabase client that counts its Postgres round trips by REST path. */
@@ -315,6 +316,51 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a checklist edited while the turn runs turns the
   const after = (await f.steps())['step-0'].fieldMeta.goal;
   expect(after.suggestion).toBeUndefined();
   expect(after.withdrawnSuggestion).toMatchObject({ value: 'Sell coffee to students' });
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-12: a confirmation card from before a mentor turn changed the step is refused, and confirmed content stays after a later patch', async () => {
+  const f = await setup(), service = opcService(f.user, f.admin), workbench = workbenchService(f.user, f.admin);
+  const ids = (await db.query('select project_id, round_id from opc_drafts where draft_id=$1', [f.draftId])).rows[0] as { project_id: string; round_id: string };
+  const tuple = (value: string, status: string, nature: string) => ({ value, status, nature });
+  const read = async () => (await f.steps())['step-0'];
+  const saveInfo = async (values: Record<string, unknown>) => { const s = await read();
+    await service.information({ draftId: f.draftId, requestId: randomUUID(), stepId: 'step-0', expectedVersion: s.version,
+      values: { ...s.information, ...values } }); return read(); };
+  const saveBody = async (body: string) => { const s = await read();
+    await workbench.execute({ action: 'save', projectId: ids.project_id, roundId: ids.round_id, requestId: randomUUID(), stepId: 'step-0',
+      expectedVersion: s.version, body, evidenceIds: [] }); return read(); };
+  const confirm = (card: { version: number; reviewVersion: number }, requestId = randomUUID()) => workbench.execute({ action: 'confirm',
+    projectId: ids.project_id, roundId: ids.round_id, requestId, stepId: 'step-0', expectedVersion: card.version,
+    expectedReviewVersion: card.reviewVersion });
+  const organizing = (patches: unknown[]) => transport((body, n) => body.model !== ORGANIZER ? prose('gen-reply-' + n, 'Noted.')
+    : organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', notes: [], patches })));
+  // Every field starts empty and untouched, so a later organizer patch on a field the user never saved is applied, not only suggested.
+  await db.query(`update artifact_rounds r set steps=(select jsonb_object_agg(s.key,
+    s.value || jsonb_build_object('information',(select jsonb_object_agg(f->>'id',
+      jsonb_build_object('value','','status','unknown','nature','unknown'))
+      from jsonb_array_elements(r.workflow->'steps') w,jsonb_array_elements(w->'information') f where w->>'id'=s.key)))
+    from jsonb_each(r.steps) s) where r.id=$1`, [ids.round_id]);
+  await saveInfo({ goal: tuple('user selected value', 'confirmed', 'fact') });
+  const before = await saveBody('Original ready body');
+  // A mentor turn organizes a new value into the same step after the card was shown.
+  const other = organizing([{ stepId: 'step-0', fieldId: 'other', value: 'new other', status: 'provisional', nature: 'fact', basis: 'user_statement' }]);
+  await turn(f, { text: 'something else', transport: other.fn });
+  const changed = await read();
+  expect(changed.information.other?.value, JSON.stringify({ before, changed })).toBe('new other');
+  expect(changed.version).toBeGreaterThan(before.version);
+  await expect(confirm(before)).rejects.toThrow('ARTIFACT_REVIEW_REQUIRED');
+  // Seen again, the step confirms once (a repeat of the same request is the same confirmation), and a later patch stays a suggestion.
+  await saveInfo({ goal: tuple('user selected value', 'confirmed', 'fact') });
+  const ready = await saveBody('Confirmed user selected value');
+  const requestId = randomUUID();
+  await confirm(ready, requestId); await confirm(ready, requestId);
+  const confirmed = await read(); expect(confirmed.valid).toBe(true);
+  const late = organizing([{ stepId: 'step-0', fieldId: 'goal', value: 'must remain a suggestion', status: 'provisional', nature: 'fact', basis: 'user_statement' }]);
+  await turn(f, { text: 'one more thing', transport: late.fn });
+  const after = await read();
+  expect(after.information).toEqual(confirmed.information);
+  expect(after.body).toBe(confirmed.body); expect(after.valid).toBe(true);
+  expect(after.fieldMeta.goal.suggestion.value).toBe('must remain a suggestion');
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5: relation locks of turn_open for a mentor turn against a free chat (measured, plan 3.1)', async () => {

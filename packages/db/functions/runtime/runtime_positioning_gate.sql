@@ -9,6 +9,6 @@ CREATE OR REPLACE FUNCTION public.runtime_positioning_gate(p_actor_id uuid)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
  SELECT jsonb_build_object('positioned',public.opc_has_confirmed_positioning(p_actor_id),
-  'refusals24h',(SELECT count(*) FROM public.runtime_executions e WHERE e.actor_id=p_actor_id
-   AND e.state='cancelled' AND e.unavailable_reason='positioning_required' AND e.created_at>=now()-interval '24 hours'));
+  'refusals24h',(SELECT count(*) FROM public.turns r WHERE r.actor_id=p_actor_id AND r.failure_code='positioning_required'
+   AND r.closed_at>now()-interval '24 hours'));
 $function$;
