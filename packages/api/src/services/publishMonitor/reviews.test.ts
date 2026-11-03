@@ -126,6 +126,13 @@ it('a coach review runs with the Skill method; without it the claim is left to e
  expect(waiting.calls.some(x=>x[0]==='publish_monitor_review_save_pack')).toBe(false);
  expect(stepActions(waiting.calls)).toEqual([['authorize',null]]);
 });
+it('a plain weekly review never reads the coach method and is never held up by it',async()=>{
+ m.method.mockResolvedValue({ok:false,reason:'NOT_CONFIGURED'});
+ await advanceReview(database({default:{}}).db,c,options());
+ expect(m.method).not.toHaveBeenCalled();
+ expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.not.objectContaining({coach:true}),expect.anything(),expect.any(Function),expect.any(Function));
+ expect((m.run.mock.calls[0]![1] as Record<string,unknown>).coachMethod).toBeUndefined();
+});
 it('a brand review builds its pack with the handbooks of the pinned Skill package; without the setting the Map is empty',async()=>{
  const BUSINESS='88888888-8888-4888-8888-888888888888';
  m.rows.mockResolvedValue({followers:[],profile:null,facts:[],recent:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});

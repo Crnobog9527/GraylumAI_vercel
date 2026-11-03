@@ -33,3 +33,9 @@ it('no pinned package, an unreadable or empty or oversized file: unavailable wit
     expect(warn).toHaveBeenCalledWith('billing', 'coach_method_unavailable', { surface: 'chat', reason });
   }
 });
+it('the size limit is on the file as read: exactly the limit is accepted, one byte more is not', async () => {
+  const ok = await loadCoachMethod(admin({ data: b64('a'.repeat(MAX_COACH_METHOD_BYTES)), error: null }), env);
+  expect(ok).toMatchObject({ ok: true });
+  expect(await loadCoachMethod(admin({ data: b64('a'.repeat(MAX_COACH_METHOD_BYTES + 1)), error: null }), env))
+    .toEqual({ ok: false, reason: 'TOO_LARGE' });
+});
