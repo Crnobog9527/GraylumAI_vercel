@@ -350,6 +350,10 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 
 **第五次生成（2026-11-03，基线 staging + #1662 `6cf5823cb` + #1668 `37da67978` + B 类改写 #1669，临时合并）**：守卫 **零**。整个迁移（含守卫）在带旧数据的本机库上一次应用成功，旧表 0 张留下，外键 0 条。生成参数：`--keep-table runtime_test_windows`，`F_KEEP`（同第四次的 15 个名字），`F_DROP=fusion_compare_stop_archived`（没有任何调用方、又调用被删的 `fusion_compare_stop`，一起删）。`F_STRICT` 只剩一处：`runtime_tool` ← `turn/skills/loadSkillTool.ts` 的 `executionLoadSkillTool` 与 `turn/skills/skillFileExecution.ts` 的 `executionSkillFileTool`，这两个函数没有生产调用方（调用方在已删的 `services/runtime`），删掉即归零。
 
+**第六次生成（2026-11-03，基线 staging（含 #1662）+ #1669）**：注销段改用 #1659 最新 head（`160376ea9`）的 `CORE-PATH-V2-DELETE-F-ERASURE-SEGMENT.sql`，修掉旧写法 `erasure_business_owner(%L,to_jsonb(x))=$1`（执行时报 `format too few arguments`，注销会卡在清理业务数据）为 `%1$L`。生成器加了检查：迁移里的注销段必须与段文件（去首尾空白后）逐字节一致，否则报 `F_SEGMENT_MISMATCH`，通过时打印段的 sha256 前 16 位（`224bab89c5349c1a`）。15 张表、174 个函数、24 条外键、39 个触发器；`F_STRICT` 干净（无 NODE-STILL-CALLS）。
+**本机演练（真实注销，含业务数据清理）**：带 2 个业务、2 个账号、2 份草稿的账户 → 整个批次 F（含守卫）410 ms 应用成功 → `account_erasure_confirm_with_digests` 关闭账户 → `work_batch`、`scrub_content`、`scrub_runtime`、`scrub_turns` 全部成功 → 记录库存储证明（和执行器的库步骤一致）→ `account_erasure_local_cleanup` 一遍走完（errors 空、remaining 0）→ 业务/账号/草稿 2/2/2 → 0/0/0，`account_erasure_prune_business` 直接调用返回 0。
+**F 的前置条件**：#1660（注销处理器不再调用会被 F 删的 `account_erasure_scrub_*`/`detach_runtime`）必须已合并；#1669（迁移 0490）已上库；#1662 已合并（已）。
+
 ### 7.5 注销与内容删除（R2，V2-9 窗口）留给 F 的清单
 
 来源：V2-9 窗口的 `R2-leftovers-for-F.md`（共享笔记目录，2026-11-03）。R2a（#1649）已合并，R2b（#1651）只去掉结算；旧内容清除和 detach 按总控决定保留到 F。**F 要把下面这些函数整段改写成不碰旧表的版本（或随 F 删），和批次 F 的迁移同时上库；F 迁移的自检守卫在它们没改完时会拒绝运行。**
