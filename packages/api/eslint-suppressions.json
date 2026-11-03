@@ -261,19 +261,6 @@
       "count": 2
     }
   },
-  "src/services/turn/provider/service.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 2
-    }
-  },
-  "src/services/turn/provider/upgrade.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/services/billingReconciliation.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
@@ -301,13 +288,10 @@
   },
   "src/services/opc/opc.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 66
+      "count": 13
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 2
-    },
-    "prefer-const": {
-      "count": 1
     }
   },
   "src/services/opc/service.ts": {
@@ -318,62 +302,6 @@
   "src/services/providerUsage.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
-    }
-  },
-  "src/services/runtime/admission.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    }
-  },
-  "src/services/runtime/admissionReasoning.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
-  "src/services/turn/agent/agentTools.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/services/runtime/executeReasoning.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/services/turn/provider/openRouterHistory.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/services/turn/admission/reasoningAdmission.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/services/turn/agent/runnerReasoningGuard.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    }
-  },
-  "src/services/runtime/runtime.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 7
-    }
-  },
-  "src/services/runtime/streaming.integration.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/services/runtime/upgrade.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
     }
   },
   "src/services/stripe.ts": {
@@ -390,6 +318,26 @@
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
+  "src/services/turn/admission/reasoningAdmission.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "src/services/turn/agent/agentTools.ts": {
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
+  "src/services/turn/agent/runnerReasoningGuard.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "src/services/turn/provider/openRouterHistory.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }

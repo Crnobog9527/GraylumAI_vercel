@@ -38,7 +38,10 @@ export async function readDailyBillingTotals(supabase: SupabaseClient, start: st
   const data = record(result.data);
   // The turns block arrives with migration 0487; before it is applied the function has none, so it reads as zero turns.
   const turns = data.turns === undefined ? { settledTurns: 0, mismatched: 0, sample: [] } : record(data.turns);
-  const calls = record(data.calls), sources = record(data.sources), entries = record(data.entries);
+  // The old per-call ledger block is gone from the function once the old execution path is dropped (V2-12 F); a result without it
+  // reads as no settled calls and no mismatches. A block that is present is still validated.
+  const calls = data.calls === undefined ? { settledCalls: 0, mismatched: 0, sample: [] } : record(data.calls);
+  const sources = record(data.sources), entries = record(data.entries);
   return {
     tokenStatsCount: integer(data.tokenStatsCount),
     tokenStatsCredits: integer(data.tokenStatsCredits),

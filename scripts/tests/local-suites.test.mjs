@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { NOT_A_SUITE, discoverSuites, loadExcluded } from '../../packages/db/tests/run-local-suites.mjs';
+import { loadDurations, suitesForShard } from '../../packages/db/tests/shard-assign.mjs';
 import { judgeVolatility, loadAllow } from '../../packages/db/tests/baseline/volatility-check.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -78,4 +79,26 @@ test('"not a suite:" entries are real files that run no test, and the nightly li
   const nightly = Object.keys(suites).filter(suite => !NOT_A_SUITE.test(suites[suite]));
   assert.equal(nightly.length + notSuites.length, Object.keys(suites).length);
   assert.ok(nightly.every(suite => !/(^|\/)local-db\.mjs$|local-rate-limit(-cases|-case-report|-images|-test-setup)?\.mjs$/.test(suite)));
+});
+
+test('shards are disjoint, together cover every suite, and are balanced by measured duration', () => {
+  const durations = loadDurations();
+  const found = new Set(discoverSuites());
+  for (const suite of Object.keys(durations.seconds)) assert.ok(found.has(suite), `${suite} is in suite-durations.json but no such suite exists`);
+  const { suites: excluded } = loadExcluded();
+  const lists = [discoverSuites().filter(suite => !(suite in excluded)), discoverSuites().filter(suite => suite in excluded), ['a/x-local.mjs', 'b/y-local.mjs', 'c/z-local.mjs']];
+  for (const list of lists) {
+    for (const shards of [1, 2, 3, 4, 7]) {
+      const parts = Array.from({ length: shards }, (_, index) => suitesForShard(list, index + 1, shards, durations));
+      assert.deepEqual(parts.flat().sort(), [...list].sort(), `${shards} shards must hold every suite exactly once`);
+      assert.equal(parts.flat().length, new Set(parts.flat()).size, 'shards must be disjoint');
+      assert.deepEqual(parts.map((_, index) => suitesForShard(list, index + 1, shards, durations)), parts, 'the split must be deterministic');
+    }
+  }
+  // The slowest of four shards may not exceed the longest single suite plus an even share of the rest (greedy bound).
+  const weight = suite => durations.seconds[suite] ?? durations.defaultSeconds;
+  const ci = lists[0];
+  const total = ci.reduce((sum, suite) => sum + weight(suite), 0);
+  const slowest = Math.max(...[1, 2, 3, 4].map(k => suitesForShard(ci, k, 4, durations).reduce((sum, suite) => sum + weight(suite), 0)));
+  assert.ok(slowest <= total / 4 + Math.max(...ci.map(weight)), `slowest shard ${slowest}s is not balanced (total ${total}s)`);
 });

@@ -8,7 +8,7 @@ import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema, selectRoute } from 
 import { tikhubRouteId } from '../../research/vendors/tikhub';
 import { FIRECRAWL_ROUTE } from '../../research/vendors/firecrawl';
 import { toolModelId } from '../provider/toolBilling';
-import type { FrozenPaygRun } from '../provider/service';
+import type { FrozenPaygRun } from '../provider/frozenRun';
 import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
 import type { StagingPolicy } from '../settings/stagingPolicy';
 

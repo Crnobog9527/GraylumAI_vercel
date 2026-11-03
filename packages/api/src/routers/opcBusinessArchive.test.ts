@@ -57,8 +57,8 @@ it('keeps the archive denial stable across OPC, runtime and report paid paths',(
  expect(()=>throwOpcRpcError(error)).toThrow('OPC_BUSINESS_ARCHIVED');
  expect(()=>stagingRpcFailure(error)).toThrow('OPC_BUSINESS_ARCHIVED');
  try {stagingRpcFailure(error);} catch(cause) {
-  expect(stagingProcedureError(cause,'runtime.prepare')).toMatchObject({code:'FORBIDDEN'});
-  expect(stagingProcedureError(cause,'runtime.prepare').message).toContain('OPC_BUSINESS_ARCHIVED');
+  expect(stagingProcedureError(cause,'runtime.start')).toMatchObject({code:'FORBIDDEN'});
+  expect(stagingProcedureError(cause,'runtime.start').message).toContain('OPC_BUSINESS_ARCHIVED');
  }
  expect(()=>reportError(error)).toThrow('OPC_BUSINESS_ARCHIVED');
  expect(claimFailure(error)).toBeInstanceOf(BillingClaimRejection);

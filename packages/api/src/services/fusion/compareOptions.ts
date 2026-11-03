@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readMembershipEntitlements } from '../membershipEntitlements';
 import { FUSION_COMPARE_SURFACE, publicModelChoices } from '../modelIdentity/display';
-import type { BillingRpc } from '../turn/provider/service';
+import type { BillingRpc } from '../turn/provider/frozenRun';
 import { loadStagingPolicy } from '../turn/settings/stagingPolicy';
 import { readFusionSettings } from './settings';
 import { fusionModelOptions } from './settingsAdmin';

@@ -7,8 +7,8 @@
 // --excluded (after each push to staging, .github/workflows/nightly-db-suites.yml): run the suites the list excludes instead of the others. Entries whose reason
 // starts with "not a suite:" (helper modules, templates, wrappers) are skipped. Many of these suites refuse to start when CI is set, so the
 // nightly workflow runs `env -u CI ... --local-only --excluded`; run it only on a throwaway checkout, some suites rewrite tracked result files.
-// Each suite is started with the same flag (--ci / --local-only) and must accept it. --shard K/N keeps every
-// N-th suite starting at the K-th, so CI can spread the suites over N parallel jobs (each runs its own share).
+// Each suite is started with the same flag (--ci / --local-only) and must accept it. --shard K/N keeps the K-th of N
+// duration-balanced shares (shard-assign.mjs, suite-durations.json), so CI can spread the suites over N parallel jobs.
 // Database build snapshot (Owner 2026-11-01): when two or more of the chosen suites start their database through localDb()
 // (runtime-view-perf/local-db.mjs), the repository files are replayed into one database once, the container is stopped cleanly and
 // committed as a local image, and each of those suites starts its own fresh container from that image. A suite that needs the real
@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { suitesForShard } from './shard-assign.mjs';
 
 const testsDir = import.meta.dirname;
 const root = resolve(testsDir, '../../..');
@@ -51,9 +52,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const [shard, shards] = args.includes('--shard') ? args[args.indexOf('--shard') + 1].split('/').map(Number) : [1, 1];
   if (!(shards >= 1 && shard >= 1 && shard <= shards)) throw new Error('--shard must be K/N with 1 <= K <= N');
   const nightly = args.includes('--excluded');
-  const suites = discoverSuites().filter(suite => (nightly ? suite in excluded && !NOT_A_SUITE.test(excluded[suite]) : !(suite in excluded))
-    && (!only || only.includes(suite.split('/')[0]) || only.includes(suite)))
-    .filter((_, index) => index % shards === shard - 1);
+  const suites = suitesForShard(discoverSuites().filter(suite => (nightly ? suite in excluded && !NOT_A_SUITE.test(excluded[suite]) : !(suite in excluded))
+    && (!only || only.includes(suite.split('/')[0]) || only.includes(suite))), shard, shards);
   if (args.includes('--list')) {
     console.log(suites.join('\n'));
   } else {

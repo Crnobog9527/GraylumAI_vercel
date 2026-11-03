@@ -11,6 +11,7 @@
  */
 import { SIMULATED_ACCOUNTS, type AccountSpec, type ExperimentSpec, type PlatformSpec, type SimSource,
   type SimStage, type SimVerdict } from './simulatedAccounts.ts';
+import { simulatedDiagnostics, type SimDiagnostic } from './simulatedDiagnostics.ts';
 
 export const DATA_WINDOW_DAYS = 90;
 export const SNAPSHOT_RETENTION_DAYS = 100;
@@ -39,6 +40,8 @@ export type SimAccount = {
   outages: Array<{ platform: string; from: string; to: string }>;
   shifts: Array<{ platform: string; from: string; effect: number }>;
   posts: SimPost[]; snapshots: SimSnapshot[]; settled: SimSettled[]; experiments: SimExperiment[];
+  /** Confirmed back-office rates (manual entry) for the funnel diagnosis; loaded only where the 0407 table exists. */
+  diagnostics: SimDiagnostic[];
 };
 export type SimDataset = { kind: 'review_coach_simulation'; version: 1; seed: number; asOf: string; accounts: SimAccount[] };
 
@@ -220,7 +223,7 @@ function buildAccount(spec: AccountSpec, seed: number, day: (daysAgo: number) =>
       reason: t.reason })) },
     outages: spec.outages.map(o => ({ platform: o.platform, from: day(o.fromDaysAgo), to: day(o.toDaysAgo) })),
     shifts: spec.shifts.map(s => ({ platform: s.platform, from: day(s.fromDaysAgo), effect: s.effect })),
-    posts, snapshots, settled,
+    posts, snapshots, settled, diagnostics: simulatedDiagnostics(spec.key, posts, day),
     // The generator's own levers (effect, persists, postsPerWeek) stay out: a review must find them from the data.
     experiments: spec.experiments.map(e => ({ id: e.id, kind: e.kind, hypothesis: e.hypothesis, action: e.action,
       metric: e.metric, targetMult: e.targetMult, match: e.match, proposedDaysAgo: e.proposedDaysAgo,

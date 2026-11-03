@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption, type RuntimeModelRow } from '../models/runtimeEligibility';
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import type { z } from 'zod';
-import type { frozenCallPolicy } from '../turn/provider/service';
+import type { frozenCallPolicy } from '../turn/provider/frozenRun';
 import { PURPOSE_OUTPUT_CAP } from '../turn/provider/responseCapacity';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
 import { readPaygHostPolicies } from '../turn/admission/paygHostPolicy';

@@ -2,7 +2,7 @@
 import type {AgentInputItem} from '@openai/agents';
 import {expect,it} from 'vitest';
 import {freezePaygMessageBudget} from './paygMessageBudget';
-import type {FrozenRun} from '../provider/service';
+import type {FrozenRun} from '../provider/frozenRun';
 import {selectRuntimeHistory} from '../agent/context';
 const policies=[{modelId:'primary',payg:{maxMessages:128}},{modelId:'summary',payg:{maxMessages:128}}] as FrozenRun['callPolicy'];
 it('preserves the v1 100-item history with a 128-message profile and tool reserves',()=>{

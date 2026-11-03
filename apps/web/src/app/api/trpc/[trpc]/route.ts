@@ -64,17 +64,12 @@ async function readMaintenanceMode(budgetFetch:typeof fetch): Promise<{ value: b
   return { value: data?.value === true || data?.value === 'true', read: true };
 }
 
-// Streamed procedures keep running after the Response is returned; each one
-// releases its own timing reference when its execution settles.
-const STREAMED_PROCEDURES = new Set(['runtime.executeStream', 'runtime.resumeStream', 'opc.mentorTurnStream']);
-
 const handler = async (req: NextRequest) => {
   // Before authentication/maintenance: batched procedures share this deadline.
   const runtimeBudget=createRuntimeBudget();
   try {
     const procedurePaths = parseTrpcProcedurePaths(req.nextUrl.pathname);
     runtimeBudget.timing.setProcedures(procedurePaths);
-    runtimeBudget.timing.retain(procedurePaths.filter((path) => STREAMED_PROCEDURES.has(path)).length);
   } catch {
     // Timing is measurement only; the maintenance check parses paths again.
   }

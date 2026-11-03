@@ -73,19 +73,3 @@ export async function assertStagingReadAccess(database:BillingRpc,actorId:string
  if(r.error)stagingRpcFailure(r.error,'RUNTIME_TEST_ACTOR_DENIED','RUNTIME_STAGING_ACTOR_DENIED');
  if(r.data!==true)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
 }
-/** Only original private bindings, for GET receipt lookup; never SDK/POST. */
-export async function loadStagingRecoveryPolicy(database:BillingRpc,actorId:string,executionId:string,env:Record<string,string|undefined>):Promise<StagingPolicy>{
- if(realRuntimeEnvironment(env)==='production'){
-  productionRuntimeTarget(env,true);
-  const r=await database.rpc('runtime_production_recovery_policy',
-   {p_actor_id:z.string().uuid().parse(actorId),p_execution_id:z.string().uuid().parse(executionId)});
-  if(r.error)stagingRpcFailure(r.error,'RUNTIME_TEST_RECOVERY_DENIED','RUNTIME_STAGING_RECOVERY_DENIED');
-  const policy=parseStagingPolicy(r.data);
-  if(policy.mode!=='production')throw new StagingAccessError('RUNTIME_PRODUCTION_TARGET_DENIED');
-  return policy;
- }
- stagingRuntimeWindow(env,true);
- const r=await database.rpc('runtime_test_recovery_policy',{p_actor_id:z.string().uuid().parse(actorId),p_execution_id:z.string().uuid().parse(executionId)});
- if(r.error)stagingRpcFailure(r.error,'RUNTIME_TEST_RECOVERY_DENIED','RUNTIME_STAGING_RECOVERY_DENIED');
- return parseStagingPolicy(r.data);
-}

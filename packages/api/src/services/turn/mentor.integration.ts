@@ -11,6 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
+import { ensurePositioningProfilePlans } from '../__tests__/fixtures/positioningProfilePlans';
 import { opcService } from '../opc/service';
 import { workbenchService } from '../artifacts/workbench';
 import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
@@ -55,6 +56,7 @@ let saved: Array<{ key: string; value: unknown }> = [];
 const rest = () => createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false } });
 beforeAll(async () => {
   await db.connect();
+  await ensurePositioningProfilePlans(db);
   saved = (await db.query('select key,value from system_settings where key = any($1)', [SETTINGS])).rows;
 });
 afterAll(async () => {
@@ -337,6 +339,8 @@ it('RUNTIME: CORE-PATH-V2 V2-12: a confirmation card from before a mentor turn c
   // A mentor turn organizes a new value into the same step after the card was shown.
   const other = organizing([{ stepId: 'step-0', fieldId: 'other', value: 'new other', status: 'provisional', nature: 'fact', basis: 'user_statement' }]);
   await turn(f, { text: 'something else', transport: other.fn });
+  const changed = await read();
+  expect(changed.information.other?.value, JSON.stringify({ before, changed })).toBe('new other');
   await expect(confirm(before)).rejects.toThrow('ARTIFACT_REVIEW_REQUIRED');
   // Seen again, the step confirms once (a repeat of the same request is the same confirmation), and a later patch stays a suggestion.
   await saveInfo({ goal: tuple('user selected value', 'confirmed', 'fact') });

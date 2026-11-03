@@ -25,7 +25,7 @@ it.each(['context', 'billing'])('rejects only above the exact SQL boundary, for 
 it('maps oversized admission to a readable stable public code without exposing input',()=>{
  let cause:unknown;
  try{assertFrozenPayloads({privateInput:'x'.repeat(262144)},{});}catch(error){cause=error;}
- const error=stagingProcedureError(cause,'runtime.prepare');
+ const error=stagingProcedureError(cause,'runtime.start');
  expect(error.code).toBe('BAD_REQUEST');expect(error.message).toContain('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE');
  expect(error.message).not.toContain('privateInput');
 });
