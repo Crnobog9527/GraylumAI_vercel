@@ -309,3 +309,16 @@ describe('publish-monitor manual import (PR-3b)', () => {
       .rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
+
+describe('publish-monitor weekly trend', () => {
+  it('free accounts are refused; the window always comes from the plan (Gold 90 days)', async () => {
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 0 });
+    const none = vi.fn();
+    await expect(caller(none, true).trend()).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    expect(none).not.toHaveBeenCalled();
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 90 });
+    const rpc = vi.fn().mockResolvedValue({ data: { windowDays: 90, connections: [] }, error: null });
+    await expect(caller(rpc, true).trend()).resolves.toEqual({ windowDays: 90, series: [] });
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_trend_series', { a: actor, p_window_days: 90 });
+  });
+});

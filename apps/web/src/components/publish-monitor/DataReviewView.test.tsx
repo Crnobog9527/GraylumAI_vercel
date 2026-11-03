@@ -14,6 +14,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
   opc: { library: { useQuery: () => state.library } },
   publishMonitor: {
     connections: { useQuery: () => state.connections }, data: { useQuery: () => state.data },
+    trend: { useQuery: () => ({ isPending: true }) },
     postHistory: { useQuery: () => ({ isPending: true }) },
     refresh: { useMutation: mutation }, disconnect: { useMutation: mutation }, linkPost: { useMutation: mutation },
     addBenchmark: { useMutation: mutation }, connectTikhub: { useMutation: mutation }, manualImport: { useMutation: mutation },
@@ -60,11 +61,12 @@ describe('data review page access follows the server', () => {
     expect(html).toContain('/app/profile?tab=subscription');
     expect(text(html)).not.toContain('作品数据（近');
   });
-  it('shows the posts tab for a member, with the window from the server', () => {
+  it('a member opens on the trend dashboard; the posts tab is still there', () => {
     state.data = ok({ windowDays: 30, connections: [{ id: 'c1', platform: 'x' }], posts: [post()] });
     const html = renderToStaticMarkup(<DataReviewView />);
-    expect(text(html)).toContain('作品数据（近 30 天）');
-    expect(text(html)).toContain('合成作品');
+    expect(html).toContain('id="pm-trend"');
+    expect(text(html)).toContain('作品数据');
+    expect(text(html)).not.toContain('作品数据（近');
   });
 });
 
