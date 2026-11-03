@@ -94,16 +94,12 @@ describe('the handbooks of this deployment', () => {
     expect((await loadCoachHandbooks(d.db, ACTOR, { [HANDBOOK_PACKAGE_ENV]: JSON.stringify({ ...PACKAGE, revisionId: 'r-down' }) })).size).toBe(0);
   });
 
-  it('a complete set is kept under its package hash; a partial one is read again next time', async () => {
+  it('reads the package on every review, so a revoked handbook is never served from memory', async () => {
     const files = { 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.json': JSON.stringify(handbookOf('tiktok')) };
-    const full = database(files), env = { [HANDBOOK_PACKAGE_ENV]: JSON.stringify({ ...PACKAGE, revisionId: 'r-full' }) };
-    await loadCoachHandbooks(full.db, ACTOR, env);
-    await loadCoachHandbooks(full.db, ACTOR, env);
-    expect(full.rpc).toHaveBeenCalledTimes(2);
-    const half = database({ 'handbook/douyin.json': files['handbook/douyin.json'] }), envHalf = { [HANDBOOK_PACKAGE_ENV]: JSON.stringify({ ...PACKAGE, revisionId: 'r-half' }) };
-    await loadCoachHandbooks(half.db, ACTOR, envHalf);
-    await loadCoachHandbooks(half.db, ACTOR, envHalf);
-    expect(half.rpc).toHaveBeenCalledTimes(4);
+    const d = database(files);
+    await loadCoachHandbooks(d.db, ACTOR, ENV);
+    await loadCoachHandbooks(d.db, ACTOR, ENV);
+    expect(d.rpc).toHaveBeenCalledTimes(4);
   });
 });
 

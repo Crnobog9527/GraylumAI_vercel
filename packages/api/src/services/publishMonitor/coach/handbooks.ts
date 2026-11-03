@@ -53,10 +53,6 @@ export async function loadHandbooks(read: HandbookReader, platforms: readonly st
   return new Map(loaded.flatMap(handbook => handbook ? [[handbook.platform, handbook] as const] : []));
 }
 
-/** A package is immutable under its hash, so a parsed handbook set never goes stale; only a complete answer is kept. */
-const cache = new Map<string, Map<string, Handbook>>();
-const MAX_CACHE = 8;
-
 /** The pinned package's files through read_skill_package (the same checked read the Skill loaders make, on the actor's behalf). */
 export function packageReader(db: Pick<SupabaseClient, 'rpc'>, actorId: string, pack: HandbookPackage): HandbookReader {
   return async path => {
@@ -76,17 +72,10 @@ export async function loadCoachHandbooks(db: Pick<SupabaseClient, 'rpc'>, actorI
   Promise<Map<string, Handbook>> {
   const pack = readHandbookPackage(env);
   if (!pack) return new Map();
-  const key = JSON.stringify(pack);
-  const hit = cache.get(key);
-  if (hit) return hit;
   try {
-    const handbooks = await loadHandbooks(packageReader(db, actorId, pack));
-    // An unreadable platform must be tried again on the next review; only a set with every platform present is kept.
-    if (handbooks.size === HANDBOOK_PLATFORMS.length) {
-      cache.set(key, handbooks);
-      for (const oldest of cache.keys()) { if (cache.size <= MAX_CACHE) break; cache.delete(oldest); }
-    }
-    return handbooks;
+    // Read on every review (two small files, once a week per brand): read_skill_package re-checks the module, the publication and
+    // revocations each time, so a revoked handbook stops being used at once and every instance gives the same answer.
+    return await loadHandbooks(packageReader(db, actorId, pack));
   } catch (error) {
     logger.warn('billing', 'coach_handbooks_failed', { code: errorCode(error) });
     return new Map();
