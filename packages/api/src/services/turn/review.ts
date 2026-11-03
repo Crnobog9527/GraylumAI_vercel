@@ -20,7 +20,8 @@ import { checkOutput, type CheckedOutput } from '../publishMonitor/coach/output'
 import { startThresholdCredits, turnPolicy } from './policy';
 import { turnSession } from './history';
 import { MIN_MODEL_DISPATCH_MS, type RuntimeBudget } from './settings/budget';
-import { chatQuote, QuoteError } from './quote';
+import { chatQuote, QuoteError, type ChatQuote } from './quote';
+import { openRouterBound } from './provider/openRouterPolicy';
 import { swallow } from '../../lib/swallow';
 
 /*
@@ -51,6 +52,16 @@ export const COACH_INSTRUCTIONS = '你是 Graylum 的运营教练，正在为用
 export const COACH_REQUEST = '请为这个品牌写本期复盘。下面是代码计算的复盘包（JSON）：\n';
 /** The reply is capped far below the model's limit: a review is a page, not a report. */
 export const REVIEW_OUTPUT_TOKENS = 2000;
+/** The coach's answer is the reading and then a structured block: 2000 tokens (reasoning included) cut that block off. */
+export const COACH_OUTPUT_TOKENS = 4000;
+/** The policy the request body is built under: its upperUsd is the policy's own (context-window) bound that openRouterRequestBody
+ * re-checks against its limits; the money bound of the call is the body-measured one (bodyBoundCall), made after the body exists. */
+export function reviewCallPolicy(quote: ChatQuote) {
+  return { modelId: quote.modelId, provider: 'openrouter', account: quote.identity.account, model: quote.model,
+    protocol: 'openrouter-chat-v1' as const, providerLimits: quote.providerLimits,
+    upperUsd: openRouterBound(quote.providerLimits, quote.outputLimit).upperUsd, outputLimit: quote.outputLimit,
+    inputLimit: quote.inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
+}
 /** Room kept above the request text and instructions for the reply-language lines and the request's own wrapping. */
 export const REQUEST_ROOM_BYTES = 8192;
 
@@ -87,14 +98,16 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
   const text = (coachPack ? COACH_REQUEST : REVIEW_REQUEST) + JSON.stringify(coachPack ?? pack);
   const instructionsBase = withBrandIdentity(coachPack ? COACH_INSTRUCTIONS : REVIEW_INSTRUCTIONS, guard);
   // The request is known before it opens: its bytes plus room for the reply-language lines and the request's own wrapping are the
-  // most that may be sent (assertRuntimeRequestCapacity), and the call's bound is the price of that much prompt and REVIEW_OUTPUT_TOKENS,
-  // not of the whole context window (bodyBoundCall measures the exact body again before it is sent).
+  // most that may be sent (assertRuntimeRequestCapacity), and the call's bound is the price of that much prompt and the review's
+  // output cap (reasoning included, as max_tokens counts it), not of the whole context window (bodyBoundCall measures the exact body
+  // again before it is sent).
+  const outputTokens = claim.coach ? COACH_OUTPUT_TOKENS : REVIEW_OUTPUT_TOKENS;
   const requestBytes = Buffer.byteLength(text) + Buffer.byteLength(instructionsBase) + REQUEST_ROOM_BYTES;
   if (requestBytes > PAYG_PROFILE_MAX_BYTES) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
   let quote;
   try {
     quote = await chatQuote(admin, { configuration: await configuration, modelId: claim.modelId, inputBytes: requestBytes,
-      bound: { promptBytes: requestBytes, outputTokens: REVIEW_OUTPUT_TOKENS }, deps: deps.pricing });
+      bound: { promptBytes: requestBytes, outputTokens }, deps: deps.pricing });
   } catch (error) {
     const code = error instanceof QuoteError ? error.code : 'TURN_QUOTE_UNAVAILABLE';
     return REFUSED_AS_CONFIGURATION.has(code) ? { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' } : { kind: 'deferred', code };
@@ -140,11 +153,9 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
       cacheWriteUsdPerMillion: quote.providerLimits.cacheWriteUsdPerMillion, instructions, prefixChars: shared.length, historyMarker: false });
     const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, textStream: PLAIN_TEXT_STREAM, tools: [], network: 'deny',
       reasoning: quote.reasoning, ...(promptCache ? { promptCache } : {}) };
-    const callPolicy = { modelId: quote.modelId, provider: 'openrouter', account: quote.identity.account, model: quote.model,
-      protocol: 'openrouter-chat-v1' as const, providerLimits: quote.providerLimits, upperUsd: quote.upperUsd, outputLimit: quote.outputLimit,
-      inputLimit: quote.inputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };
+    const callPolicy = reviewCallPolicy(quote);
     const output = await runRuntime({ model: quote.model, instructions, input: text, session: turnSession([]),
-      maxOutputTokens: Math.min(quote.outputLimit, REVIEW_OUTPUT_TOKENS), maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,
+      maxOutputTokens: Math.min(quote.outputLimit, outputTokens), maxTurns: 1, reasoning: quote.reasoning, tools: [], stream: true,
       selectHistory: async (items, incoming) => [...items, ...incoming], onText: () => undefined,
       exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
@@ -158,7 +169,7 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
         if (!(await authorize())) { stopped = new TurnStop('TURN_CALL_DENIED'); throw stopped; }
         // The bound of this exact body (never above the frozen one): the adapter measures the same body and refuses any other.
         let call;
-        try { call = bodyBoundCall(quote, request, REVIEW_OUTPUT_TOKENS); }
+        try { call = bodyBoundCall(quote, request, outputTokens); }
         catch (error) { if (error instanceof TurnStop) stopped = error; throw error; }
         return modelCall(callDeps, call, request, onChunk).catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       } });

@@ -73,6 +73,15 @@ it('the call is quoted on the request it will send: the bound is made on its byt
  }
  expect(bytes({kind:'my_posts',rows:'x'.repeat(30000)})).toBeGreaterThan(bytes({kind:'my_posts'})+29000);
 });
+it('a coach review asks for the larger output cap in its quote and in the request, a plain one for the small one',async()=>{
+ const {COACH_OUTPUT_TOKENS,REVIEW_OUTPUT_TOKENS}=await import('./review');
+ await runReviewTurn(deps().deps,{...claim,coach:true},{review:{kind:'review_pack'}},async()=>true);
+ expect(m.quote).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({bound:expect.objectContaining({outputTokens:COACH_OUTPUT_TOKENS})}));
+ expect(m.run).toHaveBeenLastCalledWith(expect.objectContaining({maxOutputTokens:COACH_OUTPUT_TOKENS}));
+ await runReviewTurn(deps().deps,claim,{kind:'my_posts'},async()=>true);
+ expect(m.quote).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({bound:expect.objectContaining({outputTokens:REVIEW_OUTPUT_TOKENS})}));
+ expect(m.run).toHaveBeenLastCalledWith(expect.objectContaining({maxOutputTokens:REVIEW_OUTPUT_TOKENS}));
+});
 it('a request too large for any profile opens nothing, and a quote refused as too large is a configuration skip',async()=>{
  const d=deps();
  expect(await runReviewTurn(d.deps,claim,{rows:'x'.repeat(200000)},async()=>true)).toEqual({kind:'skipped',reason:'CONFIGURATION_REQUIRED'});
