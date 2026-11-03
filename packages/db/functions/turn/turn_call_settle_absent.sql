@@ -16,11 +16,12 @@ BEGIN
   END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
-  -- Lock order as turn_recover: the profile, the session, then the turn (and its call).
+  -- Lock order as turn_recover: the profile, the session, then the turn; the turn's row lock serializes every writer of its calls
+  -- (turn_call_record and turn_close take it first), so the call is read under it and written by a conditional UPDATE.
   PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
-  SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq FOR UPDATE;
+  SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
   IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
   -- The same settlement again (a repeat or a concurrent run that lost the lock): the first outcome, nothing written.
   IF c.status = 'rejected' AND c.usage->>'source' = 'lookup_absent' THEN
@@ -38,6 +39,6 @@ BEGIN
       payload_hash = p_payload_hash,
       usage = jsonb_build_object('source', 'lookup_absent', 'providerId', p_provider_id, 'httpStatus', p_http_status,
         'queriedAt', at_time, 'turnOpenedAt', t.opened_at)
-    WHERE turn_id = p_turn_id AND seq = p_seq;
+    WHERE turn_id = p_turn_id AND seq = p_seq AND status = 'unknown' AND cost_pending;
   RETURN jsonb_build_object('settled', true, 'replay', false, 'turnId', p_turn_id, 'seq', p_seq);
 END $function$;

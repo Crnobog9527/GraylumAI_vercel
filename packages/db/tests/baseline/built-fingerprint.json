@@ -4462,7 +4462,7 @@
   "fn:turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "89de7745166a",
   "fn:turn_call_identity(uuid,bigint,integer,text)": "40ec987e5d70",
   "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "695c0bd42275",
-  "fn:turn_call_settle_absent(uuid,bigint,integer,text,integer,text)": "8105739591c4",
+  "fn:turn_call_settle_absent(uuid,bigint,integer,text,integer,text)": "f14ff941fc03",
   "fn:turn_call_spent_usd(text,numeric,numeric)": "5d8a4767f2ec",
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "dd750bbc2bcd",
   "fn:turn_fusion_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "2b5745934e54",
