@@ -116,6 +116,12 @@ describe('accounts', () => {
     const t = render([own({ id: 'i', platform: 'instagram', status: 'reauth_required' })]);
     expect(t).toContain('重新授权');
   });
+  it('offers publishing consent on a live Post for Me connection that has none, through the connect form', () => {
+    expect(render([own({ platform: 'instagram' })])).toContain('允许一键发布');
+    expect(render([own({ platform: 'bluesky', consentPublish: true })])).not.toContain('允许一键发布');
+    expect(render([own({ source: 'tikhub', platform: 'douyin' })])).not.toContain('允许一键发布');
+    expect(render([own({ status: 'reauth_required' })])).not.toContain('允许一键发布');
+  });
   it('shows benchmark accounts only to Gold', () => {
     expect(render([])).not.toContain('对标账号（Gold）');
     expect(render([], true)).toContain('对标账号（Gold）');
