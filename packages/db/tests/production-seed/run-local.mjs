@@ -17,6 +17,11 @@ const seed = read('packages/db/seeds/production_non_secret_baseline.sql');
 const block = /\$build_day\$[\s\S]*?\$build_day\$/;
 const required = JSON.parse(seed.match(block)[0].slice('$build_day$'.length, -'$build_day$'.length));
 assert.equal(Object.keys(required).length, 7);
+// runtime_payg is build-day step B12 (Owner-approved numbers), never written by this seed; the checklist must carry the
+// chat model's image input policy (chat attachments, #1702) or production would say the model cannot see images.
+assert.ok(!/runtime_payg/.test(seed.replace(/--.*$/gm, '')), 'the seed must not write runtime_payg');
+assert.ok(read('docs/launch/tasks/REL-1-BUILD-PREP.md').includes('"imageInput": {"maxDataUrlBytes": 819223, "maxEdge": 2048}'),
+  'BUILD-PREP must list the chat model imageInput policy');
 assert.ok(Object.values(required).every(value => value === null || typeof value === 'object'));
 const ids = ['11','12','13','14','15','16'].map(tail => `90000000-0000-4000-8000-0000000000${tail}`);
 const models = ['anthropic/claude-sonnet-5.5','google/gemini-3.8-flash','openai/gpt-6.1-sol',
