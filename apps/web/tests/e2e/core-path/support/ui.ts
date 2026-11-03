@@ -82,6 +82,9 @@ export async function settleOpening(page: Page, timeoutMs = 150_000) {
  */
 export async function sendAndWait(page: Page, text: string, meter?: SpendMeter, label = 'turn', timeoutMs = 150_000) {
   await settleOpening(page, timeoutMs);
+  // An opening the page started on its own (a new draft, or the next step after a confirm) is a paid turn: check the budget once it
+  // has settled, before this message starts another paid turn.
+  if (meter) await meter.checkpoint(`${label} (opening before it)`);
   const before = await assistantMessages(page).count();
   const box = chatBox(page);
   await box.click();
