@@ -9,7 +9,8 @@ import { ShortfallCardView, type ShortfallCard, type ShortfallChoice } from "@/c
 import { focusReply } from "./agent-turn-display";
 
 /** The fallback B rule as the page says it (Owner 10-20, 10-27): one qualified benchmark and two search rounds. */
-export const FALLBACK_RULE_TEXT = "至少有 1 个合格对标，并且已经找过两轮（搜完一次关键词算一轮；贴链接核对一次，取到账号资料也算一轮）时，"
+export const FALLBACK_RULE_TEXT = "至少有 1 个合格对标，并且已经找过两轮（搜完一次关键词算一轮，对标数据暂时取不到的那次不算；"
+  + "贴链接核对一次，取到账号资料也算一轮）时，"
   + "可在对话里的选择卡确认用现有对标先生成；报告会注明样本不足。";
 
 export type ReportPreflight = {

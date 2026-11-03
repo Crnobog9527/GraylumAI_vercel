@@ -162,6 +162,9 @@ const envSchema = z.object({
   V3_RUNTIME_LOCAL_ENDPOINT: optionalString,
   // CORE-PATH-V2 2.8: the database host this deployment declares; POST /api/turn refuses when it is not the one it connects to.
   TURN_DATABASE_HOST: optionalString,
+  // Staging load tests only (apps/web/src/lib/loadtest-model-stub.ts): both unset everywhere else.
+  LOADTEST_MODEL_STUB_URL: optionalString,
+  LOADTEST_STUB_DB_HOST: optionalString,
 });
 
 /** 代码里允许读取的全部环境变量名；safeguard 测试要求代码里读取的每个环境变量名都在这里。 */

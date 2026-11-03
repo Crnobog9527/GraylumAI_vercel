@@ -36,11 +36,21 @@ export function argumentsFor(tool) {
   return out;
 }
 
+// `prefix` (LOAD_STUB_PREFIX): a secret path segment in front of everything, so a stub reachable from the internet answers only the
+// deployment that was told the full base URL. GET /healthz answers 200; GET /__stats answers the call count and the peak concurrency.
 export function createStub({ firstByteMs = 1500, intervalMs = 50, chunks = 90, secondChunks = 50, decisionsMs = 300,
-  toolName = 'read_skill_file' } = {}) {
+  toolName = 'read_skill_file', prefix = '' } = {}) {
   const generations = new Map();
+  const stats = { calls: 0, active: 0, peak: 0 };
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://stub.invalid');
+    if (req.method === 'GET' && url.pathname === '/healthz') { res.writeHead(200).end('ok'); return; }
+    if (req.method === 'GET' && url.pathname === '/__stats') return json(res, 200, stats);
+    if (prefix) {
+      if (!url.pathname.startsWith(`/${prefix}/`)) { res.writeHead(404).end(); return; }
+      url.pathname = url.pathname.slice(prefix.length + 1);
+    }
+    if (req.method === 'POST') { stats.calls++; stats.active++; stats.peak = Math.max(stats.peak, stats.active); res.on('close', () => { stats.active--; }); }
     if (req.method === 'GET' && url.pathname.endsWith('/generation')) {
       const data = generations.get(url.searchParams.get('id'));
       return json(res, data ? 200 : 404, data ? { data } : { error: 'generation not found' });
@@ -120,5 +130,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const host = process.env.LOAD_STUB_HOST;
   const port = Number(process.env.LOAD_STUB_PORT);
   if (!host || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Set LOAD_STUB_HOST and LOAD_STUB_PORT explicitly');
-  createStub().listen(port, host, () => console.log(`Load stub listening on ${host}:${port}`));
+  createStub({ prefix: process.env.LOAD_STUB_PREFIX ?? '' }).listen(port, host, () => console.log(`Load stub listening on ${host}:${port}`));
 }
