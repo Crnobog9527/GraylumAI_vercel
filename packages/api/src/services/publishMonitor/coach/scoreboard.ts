@@ -7,6 +7,8 @@ import type { Fact } from './rows';
 import { DAY_MS, SHIFT_RATIO, day7Metric, median, round, utcDay } from './stats';
 
 export type ScoreRow = { pillar: string; platform: string; basis: 'day7'; weeks: number; samples: number;
+  /** Posts that really have a day-7 view count; the median and the ratio rest on these only. */
+  views_samples: number;
   views_median: number | null; er_median: number | null; vs_platform_median: number | null };
 export type HistoryRow = { pillar: string; platform: string; basis: 'cumulative_at_import'; samples: number;
   views_median: number | null };
@@ -34,20 +36,22 @@ export function scoreboard(facts: Fact[], now: number, weeks: number): ScoreRow[
   }
   return [...groups].map(([key, rows]) => {
     const [pillar, platform] = key.split('\u0000') as [string, string];
-    const views = median(rows.map(f => day7Metric(f, 'views')).filter((v): v is number => v !== null));
+    const viewValues = rows.map(f => day7Metric(f, 'views')).filter((v): v is number => v !== null);
+    const views = median(viewValues);
     const er = median(rows.map(f => day7Metric(f, 'engagement_rate')).filter((v): v is number => v !== null));
     const base = platformMedian.get(platform) ?? null;
     return { pillar, platform, basis: 'day7' as const, weeks, samples: rows.length,
-      views_median: views === null ? null : Math.round(views), er_median: er === null ? null : round(er, 4),
+      views_samples: viewValues.length, views_median: views === null ? null : Math.round(views), er_median: er === null ? null : round(er, 4),
       vs_platform_median: views !== null && base ? round(views / base, 2) : null };
   }).sort((a, b) => a.platform.localeCompare(b.platform) || a.pillar.localeCompare(b.pillar));
 }
 
-/** Posts first seen after day 7 (connected later): compared only with each other, never with day-7 values. */
+/** Posts first seen after day 7 (connected later; they have no day-7 snapshot): compared only with each other, never with day-7 values. */
 export function historyScoreboard(facts: Fact[]): HistoryRow[] {
   const groups = new Map<string, number[]>();
   for (const f of facts) {
-    if (f.basis !== 'cumulative_at_import' || !f.importCumulative) continue;
+    // Posts first seen after day 7 stay history for good, also once their day-30 snapshot arrived (basis then reads day30).
+    if (f.day7 || !f.importCumulative) continue;
     const views = f.importCumulative.views;
     if (views === undefined || f.missing.includes('views')) continue;
     const key = `${f.pillarKey ?? UNTAGGED}\u0000${f.platform}`;

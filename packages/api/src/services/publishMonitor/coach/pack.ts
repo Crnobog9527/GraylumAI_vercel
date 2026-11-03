@@ -93,7 +93,7 @@ export function buildPack(input: PackInput) {
       const keys = (rows.profile?.pillars ?? []).map(p => p.key);
       pack.quarterly = { strategy_fit: { pillars_never_posted: keys.filter(k => !sb.some(r => r.pillar === k)),
         pillars_consistently_below: keys.filter(k => {
-          const own = sb.filter(r => r.pillar === k && r.samples >= 3);
+          const own = sb.filter(r => r.pillar === k && r.views_samples >= 3);
           return own.length > 0 && own.every(r => r.vs_platform_median !== null && r.vs_platform_median < 0.8);
         }) } };
     }

@@ -59,6 +59,27 @@ describe('scorecards (RC-2, simulated accounts)', () => {
     expect(r.facts.filter(f => f.basis === 'cumulative_at_import').some(f => day7Posts.has(f.postId))).toBe(false);
   });
 
+  it('B: an imported post that later gets its day-30 snapshot stays in the history scorecard', () => {
+    const r = rows('B');
+    const before = historyScoreboard(r.facts);
+    const settled = r.facts.map(f => f.basis === 'cumulative_at_import' && !f.day7
+      ? { ...f, basis: 'day30' as const, day30: { views: 999999 }, day30On: '2026-10-20' } : f);
+    expect(settled.some(f => f.basis === 'day30' && f.importCumulative)).toBe(true);
+    expect(historyScoreboard(settled)).toEqual(before);
+  });
+
+  it('A: samples count every settled post, views_samples only those with a view count', () => {
+    const r = rows('A');
+    const pick = r.facts.filter(f => f.day7 && f.platform === 'douyin' && (f.pillarKey ?? 'untagged') === 'p1'
+      && utcDay(f.postedAt) >= Math.floor(NOW / 86_400_000) - 26 * 7).slice(0, 3);
+    expect(pick).toHaveLength(3);
+    const only = new Set(pick.map(f => f.postId));
+    const facts = r.facts.filter(f => !f.day7 || f.platform !== 'douyin' || (f.pillarKey ?? 'untagged') !== 'p1' || only.has(f.postId))
+      .map((f, i) => only.has(f.postId) && f.postId !== pick[0]!.postId ? { ...f, day7: { likes: 5 + i } } : f);
+    const row = scoreboard(facts, NOW, 26).find(x => x.pillar === 'p1' && x.platform === 'douyin')!;
+    expect(row).toMatchObject({ samples: 3, views_samples: 1 });
+  });
+
   it('C: a pillar strong on one platform and weak on another stays per platform; the TikTok shift is detected', () => {
     const board = scoreboard(rows('C').facts, NOW - 70 * 86_400_000, 16);
     expect(board.find(r => r.pillar === 'p2' && r.platform === 'xiaohongshu')!.vs_platform_median).toBeGreaterThan(1.2);
