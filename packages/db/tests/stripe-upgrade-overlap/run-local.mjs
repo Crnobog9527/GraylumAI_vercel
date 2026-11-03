@@ -239,6 +239,6 @@ try {
 
 // The required CI billing job calls this runner. Keep new failover fixtures isolated and sequential;
 // the separate baseline job already checks every migration's repeat application and final fingerprint.
-const failover=spawnSync(process.execPath,[resolve(root,'packages/db/tests/pay-failover/run-local.mjs'),'--quick'],
+const failover=spawnSync(process.execPath,[resolve(root,'packages/db/tests/pay-failover/run-local.mjs'),process.argv[2],'--quick'],
   {cwd:root,stdio:'inherit',timeout:600000});
 if(failover.status!==0||failover.error)throw new Error(failover.error?.message??'PAY_FAILOVER_DATABASE_TEST_FAILED');
