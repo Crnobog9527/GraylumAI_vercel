@@ -5,7 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ features: {} as Record<string, unknown>, reviews: {} as Record<string, unknown> }));
 vi.mock('next/link', () => ({ default: ({ children }: { children: unknown }) => children }));
 vi.mock('@/trpc/client', () => ({ trpc: { useUtils: () => ({ publishMonitor: { settings: { invalidate: vi.fn() } } }),
-  publishMonitor: { features: { useQuery: () => state.features }, review: { list: { useQuery: () => state.reviews } },
+  publishMonitor: { features: { useQuery: () => state.features }, review: { list: { useQuery: () => state.reviews }, pillars: { useQuery: () => ({ isPending: true }) },
+    savePillars: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     settings: { useQuery: () => ({ data: undefined }) }, setAutoReview: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } } } }));
 import { ReviewPanel } from './ReviewPanel';
 

@@ -309,6 +309,46 @@ try {
   assert.equal((await c.query(`SELECT has_function_privilege('authenticated','publish_monitor_review_save_coach(uuid,uuid,jsonb)','EXECUTE') ok`)).rows[0].ok, false);
   report.checks.push('RC-3b: verdicts come from the saved pack (note added, second extension refused), experiments and tags written once under the lease');
 
+  // Block D: the user edits a brand's pillars. Keys stay, a new pillar gets a never-used key, a deleted one sends its posts to 未分类.
+  await c.query("UPDATE social_post_facts SET pillar_key='p1',pillar_source='user' WHERE post_id=$1", [untagged[1]]);
+  await c.query(`UPDATE social_coach_profiles SET pillar_mix_target='{"p1":0.5,"p2":0.5}' WHERE business_id=$1`, [businesses.A]);
+  const brandsListed = await svc('SELECT publish_monitor_coach_pillars($1) v', [sim]);
+  assert.deepEqual(brandsListed.find(b => b.businessId === businesses.A).pillars.map(x => x.key), ['p1', 'p2']);
+  const savePillars = (actor, business, list) => svc('SELECT publish_monitor_coach_pillars_save($1,$2,$3) v', [actor, business, JSON.stringify(list)]);
+  const edited = await savePillars(sim, businesses.A, [{ key: 'p2', name: ' 改名b ' }, { key: null, name: '新方向' }]);
+  assert.deepEqual(edited.removed, ['p1']);
+  assert.deepEqual(edited.pillars.map(x => [x.key === 'p2' ? 'p2' : /^u[0-9a-f]{8}$/.test(x.key) ? 'new' : x.key, x.name, x.definition]),
+    [['p2', '改名b', '改名b'], ['new', '新方向', '新方向']]);
+  assert.deepEqual((await c.query('SELECT post_id,pillar_key FROM social_post_facts WHERE post_id=ANY($1) ORDER BY pillar_key NULLS LAST', [untagged]))
+    .rows.map(x => x.pillar_key), ['p2', null], 'the renamed pillar keeps its post; the deleted one goes back to 未分类');
+  const profileAfter = await v('SELECT to_jsonb(p) v FROM social_coach_profiles p WHERE business_id=$1', [businesses.A]);
+  assert.deepEqual([profileAfter.pillars_source, profileAfter.pillar_mix_target], ['user', { p2: 0.5 }]);
+  await assert.rejects(savePillars(sim, businesses.A, [{ key: 'p1', name: 'x' }]), /PILLAR_KEY_INVALID/, 'a deleted key cannot come back');
+  await assert.rejects(savePillars(sim, businesses.A, [{ key: null, name: 'A' }, { key: null, name: 'a' }]), /PILLAR_NAME_DUPLICATE/);
+  await assert.rejects(savePillars(sim, businesses.A, [{ key: null, name: '  ' }]), /PILLAR_NAME_INVALID/);
+  await assert.rejects(savePillars(sim, businesses.A, Array.from({ length: 7 }, (_, i) => ({ key: null, name: `n${i}` }))), /INPUT_INVALID/);
+  await assert.rejects(savePillars(gold, businesses.A, []), /BUSINESS_NOT_FOUND/);
+  assert.deepEqual((await v('SELECT pillars v FROM social_coach_profiles WHERE business_id=$1', [businesses.A])).map(x => x.name), ['改名b', '新方向'],
+    'a refused save changes nothing');
+  await assert.rejects(savePillars(sim, businesses.A, [{ key: null, name: '读书 笔记' }, { key: null, name: '读书笔记' }]), /PILLAR_NAME_DUPLICATE/,
+    'names title tagging cannot tell apart are one name');
+  const kept = edited.pillars.find(x => x.key !== 'p2').key;
+  await savePillars(sim, businesses.A, [{ key: kept, name: '新方向' }]);
+  assert.equal(await v('SELECT pillar_mix_target v FROM social_coach_profiles WHERE business_id=$1', [businesses.A]), null,
+    'a mix target with nothing left is no target');
+  // Saving before the first review makes the same first-sight row the claim would (positioning version kept).
+  await c.query('DELETE FROM social_coach_profiles WHERE business_id=$1', [businesses.B]);
+  await savePillars(sim, businesses.B, [{ key: null, name: '只有一个' }]);
+  assert.deepEqual(await v(`SELECT jsonb_build_array(p.strategy_version_id IS NOT DISTINCT FROM b.current_source_version_id,p.pillars_source,
+    p.strategy_check_stages=(SELECT coalesce(jsonb_object_agg(project_id::text,stage),'{}') FROM opc_accounts
+     WHERE actor_id=b.actor_id AND business_id=b.id AND erased_at IS NULL)) v
+   FROM social_coach_profiles p JOIN opc_businesses b ON b.id=p.business_id WHERE p.business_id=$1`, [businesses.B]), [true, 'user', true]);
+  assert.deepEqual((await c.query(`SELECT f,has_function_privilege(r,f,'EXECUTE') ok FROM unnest(ARRAY['anon','authenticated','service_role']) r,
+   unnest(ARRAY['publish_monitor_coach_pillars(uuid)','publish_monitor_coach_pillars_save(uuid,uuid,jsonb)',
+    'publish_monitor_coach_extracted_pillars(uuid)']) f ORDER BY f,r`)).rows.map(x => x.ok),
+  [false, false, false, false, false, true, false, false, true]);
+  report.checks.push('block D: pillar edit keeps keys, new key never reused, deleted pillar untags its posts and leaves the mix target');
+
   // Migration 0496: the review list names each review's cadence and brand, and its notices name the period.
   const listed = async () => (await svc('SELECT publish_monitor_reviews($1) v', [sim])) ?? [];
   const brandName = await v('SELECT name v FROM opc_businesses WHERE id=$1', [businesses.A]);
