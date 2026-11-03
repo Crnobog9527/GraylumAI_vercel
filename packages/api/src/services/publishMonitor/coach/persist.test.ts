@@ -57,10 +57,26 @@ it('stores only the target that fits the kind, whatever else the experiment carr
   expect(payloadOf(d.rpc).p_payload.experiments.map(e => [e.target_mult, e.target_line])).toEqual([[1.5, null], [null, { max: 0.5 }]]);
 });
 
-it('saves nothing for an unparsed block, reports a refused lease, and fails loudly on a database error', async () => {
+it('an unusable block drops only what the model proposed: the verdicts of the pack and the code\'s title tags are still saved', async () => {
   const d = database();
-  expect(await saveCoachLedger(d.db, claim, simId('B'), pack, checked({ parsed: false }))).toBe(false);
-  expect(d.rpc).not.toHaveBeenCalled();
+  const auto = [{ post_id: simId('P2'), pillar_key: 'p2' }];
+  expect(await saveCoachLedger(d.db, claim, simId('B'), { ...pack, auto_tags: auto }, checked({ parsed: false }))).toBe(true);
+  expect(payloadOf(d.rpc).p_payload).toEqual({ experiments: [], verdict_notes: [], tags: auto });
+});
+
+it('the model\'s tags come first, the code\'s after them without repeating a post, and one save never carries more than 40', async () => {
+  const d = database();
+  const model = [{ post_id: simId('P1'), pillar_key: 'p1' }];
+  const auto = [{ post_id: simId('P1'), pillar_key: 'p3' }, ...Array.from({ length: 60 }, (_, i) => ({ post_id: simId(`A${i}`), pillar_key: 'p2' }))];
+  await saveCoachLedger(d.db, claim, simId('B'), { ...pack, auto_tags: auto }, checked({ tags: model }));
+  const tags = payloadOf(d.rpc).p_payload.tags as Array<{ post_id: string; pillar_key: string }>;
+  expect(tags).toHaveLength(40);
+  expect(tags[0]).toEqual(model[0]);
+  expect(tags.filter(tag => tag.post_id === simId('P1'))).toHaveLength(1);
+});
+
+it('reports a refused lease, and fails loudly on a database error', async () => {
+  const d = database();
   expect(await saveCoachLedger(database({ saved: false }).db, claim, simId('B'), pack, checked())).toBe(false);
   await expect(saveCoachLedger(database(null, { code: 'XX000' }).db, claim, simId('B'), pack, checked()))
     .rejects.toThrow('PUBLISH_MONITOR_COACH_LEDGER_SAVE_FAILED');

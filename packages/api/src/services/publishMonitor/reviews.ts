@@ -14,6 +14,7 @@ import {readReviewSettings} from './reviewSettings';
 import {buildPack,type Cadence} from './coach/pack';
 import {COACH_READ_WEEKS,readPackRows} from './coach/rows';
 import {saveCoachLedger} from './coach/persist';
+import {MAX_AUTO_TAGS,tagFromTitles} from './coach/autotag';
 import type {CheckedOutput} from './coach/output';
 
 /*
@@ -71,9 +72,16 @@ export async function readCoachPack(db:SupabaseClient,actor:string,businessId:st
  const kind=CADENCES.includes(cadence)?cadence as Cadence:'weekly';
  // The pack's own windows (8/12 weeks, the 35-63 day stage, the 8-week baseline before each post) all sit inside what is read;
  // open experiments need their posts too.
- const rows=await readPackRows(db,actor,businessId,COACH_READ_WEEKS);
+ const read=await readPackRows(db,actor,businessId,COACH_READ_WEEKS);
+ // A post whose title names one of the brand's pillars is tagged by code first; the model only sees (and tags) what is left.
+ const pillars=read.profile?.pillars??[];
+ const facts=tagFromTitles(read.facts,pillars),recent=tagFromTitles(read.recent,pillars);
+ const rows={...read,facts:facts.items,recent:recent.items};
  const review=buildPack({rows,cadence:kind,businessId,now,handbooks:new Map()});
- return {kind:'review_pack',status:'available',window_days:90,source_connections:[...new Set(rows.followers.map(f=>f.connectionId))],review};
+ // Kept with the saved pack (never sent to the model) so the review's save writes them down, a few at a time.
+ const autoTags=[...facts.tags,...recent.tags].slice(0,MAX_AUTO_TAGS);
+ return {kind:'review_pack',status:'available',window_days:90,source_connections:[...new Set(rows.followers.map(f=>f.connectionId))],review,
+  ...(autoTags.length?{auto_tags:autoTags}:{})};
 }
 /** The user's own posts of the last 90 days with the review tables, all computed in code (no model, no refresh, no provider). */
 export async function readReviewPack(db:SupabaseClient,actor:string){
