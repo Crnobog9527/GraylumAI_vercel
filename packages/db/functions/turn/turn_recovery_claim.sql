@@ -56,7 +56,9 @@ BEGIN
   INTO lookup FROM leased l;
   n := n - jsonb_array_length(lookup);
   IF n = 0 THEN RETURN live || lookup; END IF;
-  -- 3. Closed turns still settling (partial index turns_settlement_pending), least recently tried first: a final receipt that
+  -- 3. (0494) A call that never got a provider id (the supplier sent nothing before the deadline) cannot be looked up; once its turn is
+  -- 24 hours old it is claimed with providerId null and the job settles it at zero through turn_call_settle_no_identity.
+  -- Closed turns still settling (partial index turns_settlement_pending), least recently tried first: a final receipt that
   -- arrived after the last pass, or an unknown model cost whose provider id can be looked up. The lease is the lookup interval.
   WITH due AS (
     SELECT t.actor_id, t.id, t.closed_at FROM turns t
@@ -64,6 +66,8 @@ BEGIN
       AND (t.recovery_lease_until IS NULL OR t.recovery_lease_until <= now())
       AND EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = t.id
         AND ((k.cost_pending AND k.provider_id IS NOT NULL AND k.call_kind = 'model')
+          OR (k.cost_pending AND k.provider_id IS NULL AND k.call_kind = 'model' AND k.status = 'unknown'
+            AND t.opened_at <= now() - interval '24 hours')
           OR (NOT k.cost_pending AND k.settled_at > t.updated_at)))
     ORDER BY t.recovery_lease_until NULLS FIRST, t.updated_at LIMIT n
     FOR UPDATE OF t SKIP LOCKED
@@ -80,7 +84,8 @@ BEGIN
         'model', coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model'),
         'pricing', coalesce(t.policy->'pricings'->(k.model_id::text), t.policy->'pricing'),
         'upperUsd', k.upper_usd::text) ORDER BY k.seq), '[]'::jsonb)
-      FROM turn_calls k JOIN turns t ON t.actor_id = l.actor_id AND t.id = k.turn_id WHERE k.turn_id = l.id AND k.cost_pending AND k.provider_id IS NOT NULL AND k.call_kind = 'model'))),
+      FROM turn_calls k JOIN turns t ON t.actor_id = l.actor_id AND t.id = k.turn_id WHERE k.turn_id = l.id AND k.cost_pending AND k.call_kind = 'model'
+        AND (k.provider_id IS NOT NULL OR (k.status = 'unknown' AND t.opened_at <= now() - interval '24 hours'))))),
     '[]'::jsonb)
   INTO settle FROM leased l;
   RETURN live || lookup || settle;

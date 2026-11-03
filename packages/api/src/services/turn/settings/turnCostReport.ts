@@ -22,10 +22,12 @@ const unsettled = z.object({
     costPendingCalls: count }).strict()).max(200),
 }).strict();
 // turn_admin_absent_refunds: the unknown model calls settled at zero because the provider answered "no such generation" (Owner 2026-11-03).
+// Before 0494 is applied the list has no source field: such a row is a lookup_absent one.
 const absentRefunds = z.object({
   total: count,
-  calls: z.array(z.object({ turnId: z.number().int(), seq: z.number().int(), actorId: z.string().uuid(), kind: z.string(), providerId: z.string(),
-    httpStatus: z.number().int(), settledAt: z.string(), openedAt: z.string(), reservedCredits: count, chargedCredits: count.nullable(),
+  calls: z.array(z.object({ turnId: z.number().int(), seq: z.number().int(), actorId: z.string().uuid(), kind: z.string(),
+    source: z.enum(['lookup_absent', 'no_identity_24h']).default('lookup_absent'), providerId: z.string().nullable(),
+    httpStatus: z.number().int().nullable(), settledAt: z.string(), openedAt: z.string(), reservedCredits: count, chargedCredits: count.nullable(),
     settlement: z.string().nullable(), state: z.string() }).strict()).max(200),
 }).strict();
 export type TurnModelReport = z.infer<typeof modelReport>;
