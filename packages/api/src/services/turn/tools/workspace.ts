@@ -4,6 +4,7 @@ import { dataSchema } from '../../publishMonitor/data';
 import { historiesSchema, reviewFrom, reviewPosts, supplementSchema, type History } from '../../publishMonitor/reviewData';
 import { fitReview, NO_ENTITLEMENT, ownPostsResult } from '../agent/workspacePosts';
 import type { TurnClients } from '../db';
+import { COACH_REVIEW_ENTRY, COACH_REVIEW_ID, readCoachReview } from './coachReview';
 import { READ_SOURCE_GUIDE, type SourceRead } from './source';
 
 /*
@@ -12,11 +13,14 @@ import { READ_SOURCE_GUIDE, type SourceRead } from './source';
  * owner's key, over exactly that. The model picks an id or a window; it can never widen them: a window above the tier is refused here
  * and the database only reads versions in the list. Library queries pass through to the library reader.
  */
-export type PostsAccess = { windowDays: number; benchmarks: boolean; review: boolean };
+/** `coach`: the coach switch is on, so the index lists the chat review (block E); it shares the post reads and their room. */
+export type PostsAccess = { windowDays: number; benchmarks: boolean; review: boolean; coach?: boolean };
 export type WorkspaceAccess = { sources: string[]; strategy: boolean; posts: PostsAccess | null };
 export const NO_ACCESS: WorkspaceAccess = { sources: [], strategy: false, posts: null };
 const MAX_POST_READS = 2;
 const UNAVAILABLE = { text: JSON.stringify({ kind: 'unavailable' }) };
+const READ_LIMIT = { text: JSON.stringify({ kind: 'unavailable', reason: 'read_limit', note: '本条回答的作品读取次数已用完' }) };
+const NO_COACH_ENTITLEMENT = '运营复盘是 Pro/Gold 会员功能，这次先按定位和资料回答';
 const WORKSPACE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|strategy_report:[0-9a-f-]{36})$/;
 
 export const sourceDescription = (library: boolean) => 'Read owned business context only when relevant. Omit query to list '
@@ -55,15 +59,23 @@ export function workspaceTurnReader(read: TurnClients['read'], actorId: string, 
       const index = await workspace('');
       return { text: JSON.stringify(index.kind !== 'workspace_index' ? index : { ...index, entries: [...index.entries ?? [],
         ...windows.map(days => ({ id: `my_posts:${days}`, kind: 'my_posts', name: `我的作品 · ${days} 天`, windowDays: days,
-          use: 'Saved own post metrics, free to read. Default 14 days. At most two reads per answer.' }))] }) };
+          use: 'Saved own post metrics, free to read. Default 14 days. At most two reads per answer.' })),
+        ...(access.posts?.coach ? [COACH_REVIEW_ENTRY] : [])] }) };
     }
     const posts = /^my_posts(?::(14|30|90))?$/.exec(query);
     if (posts) {
       const days = Number(posts[1] ?? 14);
       if (!access.posts || !windows.includes(days)) return UNAVAILABLE;
-      if (++postReads > MAX_POST_READS) return { text: JSON.stringify({ kind: 'unavailable', reason: 'read_limit', note: '本条回答的作品读取次数已用完' }) };
+      if (++postReads > MAX_POST_READS) return READ_LIMIT;
       if (access.posts.windowDays <= 0) return { text: JSON.stringify({ kind: 'my_posts', status: 'no_entitlement', note: NO_ENTITLEMENT, window_days: 14 }) };
       return readPosts(read, actorId, sessionId, access.posts, days);
+    }
+    const coach = COACH_REVIEW_ID.exec(query);
+    if (coach) {
+      if (!access.posts?.coach) return UNAVAILABLE;
+      if (++postReads > MAX_POST_READS) return READ_LIMIT;
+      if (access.posts.windowDays <= 0) return { text: JSON.stringify({ kind: 'coach_review', status: 'no_entitlement', note: NO_COACH_ENTITLEMENT }) };
+      return readCoachReview(read, actorId, sessionId, coach[1] ?? null);
     }
     if (WORKSPACE_ID.test(query)) {
       // Room was kept for one strategy result (up to 52000 bytes), whatever the read limit is.

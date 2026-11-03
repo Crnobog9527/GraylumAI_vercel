@@ -388,10 +388,25 @@ it('RUNTIME: CORE-PATH-V2 V2-6 B: read_source reads the workspace and own posts 
   expect(await posts(other.actor, other.session, true)).toMatchObject({ data: { connections: [], posts: [] },
     review: { histories: [], followers: [], posts: [] } });
   expect(await posts(other.actor, f.session)).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
+
+  // PUBLISH-MONITOR block E: the chat review reads only the owner's brand with an own connection.
+  await db.query('set session_replication_role = replica');
+  await db.query(`insert into social_connections(id,actor_id,business_id,account_project_id,role,source,platform,status)
+    values($1,$2,$3,$4,'own','manual','tiktok','connected')`, [randomUUID(), f.actor, main.business, randomUUID()]);
+  await db.query('set session_replication_role = origin');
+  const coach = (actor: string, session: string, brand: string | null) =>
+    db.query('select coach_pack_turn_read($1,$2,$3) r', [actor, session, brand]).then(r => r.rows[0].r);
+  const review = JSON.parse((await workspaceTurnReader(read, f.actor, f.session,
+    { ...access, posts: { windowDays: 30, benchmarks: false, review: false, coach: true } })('coach_review')).text);
+  expect(review).toMatchObject({ kind: 'coach_review', status: 'available', review: { cadence: 'chat', business_id: main.business } });
+  expect(await coach(other.actor, other.session, main.business)).toEqual({ kind: 'unavailable', reason: 'brand_not_found' });
+  expect(await coach(other.actor, other.session, null)).toEqual({ kind: 'coach_review', status: 'no_brand' });
+  expect(await coach(other.actor, f.session, main.business)).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
   // The account being erased reads nothing at all.
   await db.query('insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now())', [f.actor, randomUUID()]);
   expect(await posts(f.actor, f.session)).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
   expect(await free(f.actor, f.session, '', [])).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
+  expect(await coach(f.actor, f.session, null)).toEqual({ kind: 'unavailable', reason: 'source_deleted' });
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-6: the call limits refuse a research call before anything is written or sent', async () => {
