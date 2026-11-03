@@ -8,6 +8,10 @@ import { Button } from "@/components/ui/button";
 import { ShortfallCardView, type ShortfallCard, type ShortfallChoice } from "@/components/research/shortfall-card";
 import { focusReply } from "./agent-turn-display";
 
+/** The fallback B rule as the page says it (Owner 10-20, 10-27): one qualified benchmark and two rounds that returned data. */
+export const FALLBACK_RULE_TEXT = "至少有 1 个合格对标，并且已经找过两轮（贴链接核对一次，也算一轮；没取到数据的不算）时，"
+  + "可在对话里的选择卡确认用现有对标先生成；报告会注明样本不足。";
+
 export type ReportPreflight = {
   canGenerate: boolean; qualified: number; required: number; rounds: number; card: ShortfallCard | null;
 };
@@ -27,6 +31,6 @@ export function ReportBenchmarkGate({ value, failed, busy, onRetry, onChoose }: 
     <Button variant="outline" disabled={busy} onClick={focusReply}>继续找对标</Button>
     {value.qualified >= 1 && value.rounds >= 2 && value.card && !value.card.choice && value.card.required >= value.required
       ? <ShortfallCardView card={value.card} disabled={busy} onChoose={onChoose} />
-      : <p>找过两轮仍不足时（贴链接核对一次，也算一轮），可在对话里的选择卡确认用现有对标先生成；报告会注明样本不足。</p>}
+      : <p>{FALLBACK_RULE_TEXT}目前已找过 {value.rounds} 轮、{value.qualified} 个合格。</p>}
   </section>;
 }
