@@ -771,25 +771,24 @@ describe('full 25-subcall benchmark discovery', () => {
     expect(f.store.createCard).not.toHaveBeenCalled();
     const firstIds = subcall.mock.calls.map(([context]) => context.newId());
 
+    // Owner 2026-11-03: the scan ends at the eighth selectable account. Ten searches and eight profiles (nine when the fourth profile
+    // is unknown and one more author is needed) fit two replies, where the old twelve-profile ceiling took three.
     f.ctx.executionId = refreshId;
-    expect(await f.makeExecute()('benchmark_discover', { discoveryId }))
-      .toMatchObject({ status: 'partial', reason: 'ROUND_LIMIT', continue: true });
-    expect(subcall).toHaveBeenCalledTimes(24);
-    expect(f.store.createCard).not.toHaveBeenCalled();
-
-    f.ctx.executionId = '44444444-4444-4444-8444-444444444444';
     const completed = await f.makeExecute()('benchmark_discover', { discoveryId });
+    const total = unknown ? 19 : 18;
     expect(completed).toMatchObject({ status: unknown ? 'partial' : 'ok',
-      reason: unknown ? 'DISCOVERY_PARTIAL' : null, continue: false });
+      reason: unknown ? 'DISCOVERY_PARTIAL' : null, continue: false, candidateCard: { shown: true, selectable: 8 } });
     if (unknown) expect(completed).not.toHaveProperty('message');
-    expect(subcall).toHaveBeenCalledTimes(25);
-    expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'completed', cursor: { attempted: 25 } });
+    expect(subcall).toHaveBeenCalledTimes(total);
+    expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'completed', cursor: { attempted: total } });
+    // Nothing paid for in the first reply was paid for again: its twelve ids are the first twelve of the whole run.
+    expect(subcall.mock.calls.slice(0, 12).map(([context]) => context.newId())).toEqual(firstIds);
 
     const requests = subcall.mock.calls.map(([, request]) => request);
     const searches = requests.filter(request => request.vendor === 'tikhub' && request.call.kind === 'keyword_posts');
     const profiles = requests.filter(request => request.vendor === 'tikhub' && request.call.kind === 'account_profile');
     expect(searches).toHaveLength(10);
-    expect(profiles).toHaveLength(15);
+    expect(profiles).toHaveLength(total - 10);
     for (const platform of ['tiktok', 'x']) {
       expect(searches.flatMap(request => request.vendor === 'tikhub' && request.call.platform === platform
         ? [request.call.keyword] : [])).toEqual(keywords);
@@ -797,30 +796,10 @@ describe('full 25-subcall benchmark discovery', () => {
     // Five searches per platform all contain the same eight authors: each chosen author is fetched only once.
     const profileKeys = profiles.flatMap(request => request.vendor === 'tikhub'
       ? [`${request.call.platform}:${request.call.account}`] : []);
-    expect(new Set(profileKeys).size).toBe(15);
-    expect(profileKeys).toEqual([
-      ...Array.from({ length: 8 }, (_, i) => `tiktok:author${i}`),
-      ...Array.from({ length: 7 }, (_, i) => `x:author${i}`),
-    ]);
-    const allIds = subcall.mock.calls.map(([context]) => context.newId());
-    expect(allIds).toEqual(Array.from({ length: 25 }, (_, i) => stableResearchId(discoveryId, String(i))));
-    expect(new Set(allIds).size).toBe(25);
-    for (const operationId of firstIds) expect(f.store.readOperation).toHaveBeenCalledWith(operationId);
-    const candidates = f.store.createCard.mock.calls[0]?.[1].options ?? [];
-    expect(candidates.filter(option => option.selectable).length).toBeGreaterThanOrEqual(8);
-    expect(f.store.createCard.mock.calls[0]?.[0]).toBe(stableResearchId(discoveryId, 'first-card'));
-
-    // A further recovery still validates every saved operation, including unknown. Its store read
-    // already recovered the receipt/plan binding, so discovery must not fetch all 25 plans again.
-    f.store.readPlan.mockClear();
-    f.store.readOperation.mockClear();
-    expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({
-      status: unknown ? 'partial' : 'ok', continue: false,
-    });
-    expect(f.store.readOperation).toHaveBeenCalledTimes(25);
-    expect(f.store.readPlan).not.toHaveBeenCalled();
-    expect(subcall).toHaveBeenCalledTimes(25);
-    expect(f.store.discoveryStart).toHaveBeenCalledTimes(1);
+    expect(new Set(profileKeys).size).toBe(total - 10);
+    // A repeated call replays the finished round and sends nothing.
+    expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({ status: unknown ? 'partial' : 'ok' });
+    expect(subcall).toHaveBeenCalledTimes(total);
   });
 });
 
@@ -893,14 +872,16 @@ describe('discovery stops paying for profiles once the eighth candidate qualifie
 });
 
 describe('candidate card total option ceiling', () => {
-  it('fits twelve qualified accounts plus head references into twelve total options', async () => {
+  // The scan stops at the eighth selectable account (Owner 2026-11-03): a discovery card holds eight selectable accounts plus the head
+  // references met on the way; the twelve-option ceiling of the card itself (propose_more_candidates) is unchanged.
+  it('stops at eight selectable accounts and adds the head references met on the way', async () => {
     const f = fixture(20);
     f.setAuthors(15);
     const successfulCall = subcall.getMockImplementation()!;
     subcall.mockImplementation(async (context, request) => {
       const outcome = await successfulCall(context, request);
       if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'account_profile'
-        && ['author7', 'author8', 'author9'].includes(request.call.account ?? '')) {
+        && ['author0', 'author1', 'author2'].includes(request.call.account ?? '')) {
         outcome.result.items = [item({ followers: 500000 })];
         f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request), result: { items: outcome.result.items } });
       }
@@ -908,10 +889,10 @@ describe('candidate card total option ceiling', () => {
     });
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
     const options = f.store.createCard.mock.calls[0]?.[1].options ?? [];
-    expect(options).toHaveLength(12);
-    expect(options.filter(option => option.selectable)).toHaveLength(9);
+    expect(options).toHaveLength(11);
+    expect(options.filter(option => option.selectable)).toHaveLength(8);
     expect(options.filter(option => !option.selectable)).toHaveLength(3);
     expect(options.filter(option => !option.selectable).map(option => option.account).sort())
-      .toEqual(['author7', 'author8', 'author9']);
+      .toEqual(['author0', 'author1', 'author2']);
   });
 });
