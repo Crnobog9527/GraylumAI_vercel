@@ -9,7 +9,7 @@ import {withRuntimeBudget,type RuntimeBudget} from '../settings/budget';
 import {openRouterBound,openRouterCallBound,OPENROUTER_RESPONSE_TIMEOUT_MS,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
 import {decimal} from './decimal';
 import {paygCallQuote} from '../admission/paygPolicy';
-import {IMAGE_MAX_DATA_URL_BYTES,IMAGE_MAX_EDGE,IMAGE_PURPOSES,measureImage} from './imageInput';
+import {CHAT_MAX_IMAGES,IMAGE_MAX_DATA_URL_BYTES,IMAGE_MAX_EDGE,IMAGE_PURPOSES,measureImage,measureImages} from './imageInput';
 import {isDeepStrictEqual} from 'node:util';
 import {validateNominalBound} from '../../../shared/nominalPricing';
 import {createHash} from 'node:crypto';
@@ -156,8 +156,13 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
     validateNominalBound(payg.nominalPricing,{...identity.providerLimits,...payg});
    }
    // LIB-2d: an image part only when the frozen quote measured this exact one (re-measured here).
-   const image=measureImage(parsed??{},{maxDataUrlBytes:IMAGE_MAX_DATA_URL_BYTES,maxEdge:IMAGE_MAX_EDGE});
-   if((image||payg?.image)&&(!payg?.image||!isDeepStrictEqual(image,payg.image)
+   // PUBLISH-MONITOR B2: a turn-core chat call (no payg quote) may carry the images its quote admitted (at most CHAT_MAX_IMAGES, each
+   // within that allowance), on the context-window bound (image tokens are prompt tokens) with max_price.image = 0 (imageUsd '0').
+   const allowance=!payg&&identity.providerLimits.imageUsd==='0'?identity.imageInput:undefined;
+   let image:ReturnType<typeof measureImage>=null;
+   if(allowance){try{image=measureImages(parsed??{},allowance,CHAT_MAX_IMAGES)[0]??null;}catch{throw new Error('BILL2_PROVIDER_REQUEST_DENIED');}}
+   else image=measureImage(parsed??{},{maxDataUrlBytes:IMAGE_MAX_DATA_URL_BYTES,maxEdge:IMAGE_MAX_EDGE});
+   if(!allowance&&(image||payg?.image)&&(!payg?.image||!isDeepStrictEqual(image,payg.image)
      ||!IMAGE_PURPOSES.has(String(identity.phase))))throw new Error('BILL2_PROVIDER_REQUEST_DENIED');
    const quote=payg?openRouterCallBound(identity.providerLimits,identity.outputLimit,payg.promptTokensUpper,payg.image?.tokensUpper??0)
     :openRouterBound(identity.providerLimits,identity.outputLimit);

@@ -16,6 +16,7 @@ import { admitReasoning } from './admission/reasoningAdmission';
 import type { ReasoningPolicy } from './admission/reasoningPolicy';
 import type { ModelCall } from './call';
 import type { PaygCallQuote } from './admission/paygPolicy';
+import { imageTokensUpper, type ImageInputPolicy } from './provider/imageInput';
 
 /*
  * CORE-PATH-V2 2.8 (Fable 10-28): one quote path for staging and production, no test window, no environment branch. The route
@@ -30,7 +31,7 @@ export const DEFAULT_MODEL_CONCURRENCY = 20;
 
 export class QuoteError extends Error {
   constructor(readonly code: 'TURN_PAYG_DISABLED' | 'TURN_MODEL_NOT_ADMITTED' | 'TURN_PRICE_UNAVAILABLE' | 'TURN_PROVIDER_KEY_UNAVAILABLE'
-    | 'TURN_BILLING_UNIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE') { super(code); }
+    | 'TURN_BILLING_UNIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE' | 'TURN_IMAGE_UNSUPPORTED') { super(code); }
 }
 
 /** The matched profile's per-request rules, as FusionQuote.profile: one call's bound can be measured on its exact body (bodyBoundCall). */
@@ -50,6 +51,8 @@ export type ChatQuote = ModelCall & {
   providerLimits: OpenRouterLimits; credential: () => Promise<string>;
   /** The matched profile's rules for a body-measured call (see RequestBound). */
   profile: BodyProfile;
+  /** PUBLISH-MONITOR B2: present on a quote made for a request with one image (the route's allowance; also on identity). */
+  imageInput?: ImageInputPolicy;
 };
 
 export type Row = { id: string; model_id: string; config: unknown; updated_at: string; is_active?: unknown; max_tokens?: unknown };
@@ -68,7 +71,11 @@ export function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoin
     ...(prices.cacheWriteUsdPerMillion !== undefined ? { cacheWriteUsdPerMillion: prices.cacheWriteUsdPerMillion } : {}) };
   validateNominalBound(nominal, { ...limits, promptTokensUpper: limits.contextTokens, pricingHash: snapshot.pricingHash,
     endpointTag: endpoint.tag });
-  return { limits, nominal: nominal as NominalPricing };
+  // PUBLISH-MONITOR B2: an image is billed as prompt tokens on the routes Graylum admits for it. A route that also prices the image itself
+  // would cost more than the user's nominal charge says, so a request with an image refuses it (imageFree false).
+  const imagePrices = [endpoint.base.image, ...endpoint.overrides.map(override => override.prices.image ?? endpoint.base.image)];
+  const imageFree = imagePrices.every(price => price === undefined || Number(price) === 0);
+  return { limits, nominal: nominal as NominalPricing, imageFree };
 }
 
 /** What a quoted call is for: the profile must cover exactly this use (free chat by default; the mentor's Skill call and its
@@ -80,6 +87,8 @@ const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_RE
 
 export async function chatQuote(admin: SupabaseClient, input: { configuration: ConfigurationRows; modelId: string; inputBytes: number;
   deps?: PricingDeps; use?: QuoteUse; bound?: RequestBound;
+  /** PUBLISH-MONITOR B2: the request carries one inline JPEG; the route must admit it (TURN_IMAGE_UNSUPPORTED otherwise). */
+  image?: boolean;
   /** The platform key this request already read fresh (a second quote in one request reads it once, OR-1). */ key?: string })
   : Promise<ChatQuote> {
   const use = input.use ?? FREE_CHAT_USE;
@@ -99,7 +108,8 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
   catch { throw new QuoteError('TURN_PRICE_UNAVAILABLE'); }
   const state = states.get(input.modelId);
   if (!state) throw new QuoteError('TURN_PRICE_UNAVAILABLE');
-  const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag);
+  const route = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag), nominal = route.nominal;
+  let limits = route.limits;
   const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens, use.outputCap);
   const reasoning = admitReasoning(row.data, use.purpose, limits.providerSlug, outputLimit);
   // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): its phase and purpose, its
@@ -109,10 +119,19 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],
     [{ modelId: input.modelId, phase: use.phase, outputLimit, requestFormat: use.requestFormat, reasoning }]);
   if (!profile || profile.endpointTag !== candidate.endpointTag) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
+  // An image needs the route's image allowance (set by the administrator only for a model that reads images) and a route that does not
+  // price the image itself. Its cost is then prompt tokens: the context-window bound below already covers them (a request cannot hold
+  // more prompt tokens than the context), a body bound adds the largest image the allowance lets through, and max_price.image = 0
+  // (imageUsd) keeps OpenRouter from routing to a provider that would charge for it.
+  if (input.image && (!profile.imageInput || !route.imageFree)) throw new QuoteError('TURN_IMAGE_UNSUPPORTED');
+  const imageInput = input.image ? profile.imageInput : undefined;
+  if (imageInput) limits = { ...limits, imageUsd: '0' };
+  const imageTokens = imageInput ? imageTokensUpper(imageInput.maxEdge, imageInput.maxEdge) : 0;
   let upperUsd: string;
   if (input.bound) {
-    const promptTokensUpper = Math.min(input.bound.promptBytes, profile.maxBytes) + profile.templateTokens + profile.marginTokens;
-    try { upperUsd = openRouterCallBound(limits, Math.min(outputLimit, input.bound.outputTokens ?? outputLimit), promptTokensUpper).upperUsd; }
+    const promptTokensUpper = Math.min(input.bound.promptBytes, profile.maxBytes) + imageTokens + profile.templateTokens + profile.marginTokens;
+    try { upperUsd = openRouterCallBound(limits, Math.min(outputLimit, input.bound.outputTokens ?? outputLimit), promptTokensUpper,
+      imageTokens).upperUsd; }
     catch { throw new QuoteError('TURN_INPUT_TOO_LARGE'); }
   } else upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
@@ -128,7 +147,7 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, providerLimits: limits,
     defaultMultiplier: unit.defaultMultiplier, maxTools: profile.maxTools,
     identity: { provider: 'openrouter', account: openRouterAccount(key), model, protocol: 'openrouter-chat-v1',
-      providerLimits: limits, outputLimit, upperUsd },
+      providerLimits: limits, outputLimit, upperUsd, ...(imageInput ? { imageInput } : {}) },
     reasoning,
     outputLimit, inputLimit: Math.min(input.inputBytes, PAYG_PROFILE_MAX_BYTES),
     concurrency: DEFAULT_MODEL_CONCURRENCY, credential: async () => key,
@@ -136,5 +155,6 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
       evidenceVersion: profile.evidenceVersion, pricingHash: state.snapshot.pricingHash, endpointTag: profile.endpointTag,
       nominalPricing: nominal, templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,
       maxBytes: profile.maxBytes, maxMessages: profile.maxMessages, maxSchemaBytes: profile.maxSchemaBytes },
+    ...(imageInput ? { imageInput } : {}),
   };
 }
