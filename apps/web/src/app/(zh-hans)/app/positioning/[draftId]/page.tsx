@@ -242,9 +242,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     writeInformation: input => information.mutateAsync(input),
     transition: input => change.mutateAsync(input as Parameters<typeof change.mutateAsync>[0]),
     run, nonAnswers: nonAnswersFor, setError, setRunning,
-    onConfirmed: stepId => { gate.grant();
-      const flow = (snap?.workflow.steps ?? []) as Step[], index = flow.findIndex(step => step.id === stepId);
-      if (!d?.accountRevision && index >= 0 && index < flow.length - 1) setActiveStep(flow[index + 1]!.id);
+    onConfirmed: stepId => {
+      const flow = (snap?.workflow.steps ?? []) as Step[], index = flow.findIndex(step => step.id === stepId), next = flow[index + 1];
+      if (!d?.accountRevision && index >= 0 && next) { gate.grant(next.id, d?.roundId ?? null); setActiveStep(next.id); }
     },
   });
   const captureResolve = trpc.opc.captureResolve.useMutation(), capturePending = trpc.opc.capturePending.useMutation();
@@ -417,12 +417,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const question = d.information[step.id].schema[0] as { id: string } | undefined;
     if (!question) return;
     const turns = (d.turns ?? []) as Array<{ stepId: string; roundId?: string | null; kind: string }>;
-    if (turnPath.stepOpened(turns, step.id, d.roundId)) return;
+    if (turnPath.stepOpened(turns, step.id, d.roundId)) return gate.clear();
     // A retained explicit mentor request already owns this step's next turn.
     if (sessionStorage.getItem("opc-step:" + draftId + ":" + step.id)) return;
     if (sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + step.id)) return;
     const key = openingEntryKey(draftId, d.roundId, step.id, question.id);
-    if (autoOpening.current.has(key) || !gate.admit(step.id)) return;
+    if (autoOpening.current.has(key) || !gate.admit(step.id, d.roundId, stepIndex === 0)) return;
     autoOpening.current.add(key);
     openingInFlight.current.add(step.id);
     setOpeningSteps([...openingInFlight.current]);
