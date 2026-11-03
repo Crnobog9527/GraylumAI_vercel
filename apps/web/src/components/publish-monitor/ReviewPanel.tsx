@@ -23,8 +23,10 @@ type Week = { start: string; end: string; published: number; matched_posts: numb
 const RELATIVE = { above: '高于', below: '低于', same: '持平' } as const;
 /** The title of a review by its rhythm; anything unknown reads as the weekly one. */
 const PERIOD_TITLE: Record<string, string> = { weekly: '这一周', monthly: '月度复盘', quarterly: '季度体检', chat: '对话里的复盘' };
-export const reviewTitle = (review: Pick<Review, 'periodStart' | 'cadence' | 'businessName'>) =>
-  `${review.businessName ? `${review.businessName} · ` : ''}${formatDay(review.periodStart)} ${PERIOD_TITLE[review.cadence ?? 'weekly'] ?? PERIOD_TITLE.weekly}`;
+export const reviewTitle = (review: Pick<Review, 'periodStart' | 'cadence' | 'businessName'>) => {
+  const period = PERIOD_TITLE[review.cadence ?? 'weekly'] ?? PERIOD_TITLE.weekly;
+  return `${review.businessName ? `${review.businessName} · ` : ''}${formatDay(review.periodStart)} ${period}`;
+};
 const STATUS = { too_new: '太新，下周再看', insufficient_samples: '样本不足' } as const;
 
 /** The brand review's code-computed pack (`review_pack` version 2): posts whose day 7 fell in the period, and the pillar scoreboard. */
