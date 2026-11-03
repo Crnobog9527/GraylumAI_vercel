@@ -56,7 +56,8 @@
 | # | 谁 | 做什么 | 怎么确认 | 详见 |
 | --- | --- | --- | --- | --- |
 | 24 | ★ Owner 做 | **密钥类变量**（只列名字）：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL`；`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`（第 2 步新端点的）、`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`；`OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`；`UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN`（正式 Redis）；`SENTRY_AUTH_TOKEN`；Waffo 正式四件（`WAFFO_MERCHANT_ID` 等，S-8 审核通过后才有） | 变量名清单读回（不读值） | V1 |
-| 25 | ★ 批准 → 总控 | **非密钥变量**：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV`、`NEXT_PUBLIC_APP_ENV`；**`TURN_DATABASE_HOST`＝正式 Supabase 的主机名**（主路径新增：和实际连接的库不一致或没设时，`/api/turn` 全部返回 503 `TURN_DATABASE_MISMATCH`）；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（今天代码仍读，V2-12 后重核）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`、`NEXT_PUBLIC_TERMLY_WEBSITE_UUID`；`NEXT_PUBLIC_SENTRY_DSN`（缺了所有告警静默）、`SENTRY_ENVIRONMENT`、`SENTRY_ORG`、`SENTRY_PROJECT`；`PAYMENT_NOTICE_FROM`；`NEXT_PUBLIC_COMPOSER_REFERENCES=on`；资料库 `NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION`、`NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION`、`NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION`（照 staging）；`LANDING_PROMO_OFFERS`（落地页显示首月和创始价，按 staging 当天值，见第 4 部分问题 20）。**`SITE_INDEXING` 这时不设** | 变量名清单和本行对照 | V2 |
+| 25 | ★ 批准 → 总控 | **非密钥变量**：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV`、`NEXT_PUBLIC_APP_ENV`；**`TURN_DATABASE_HOST`＝正式 Supabase 的主机名**（主路径新增：**缺了会让 `/api/turn` 全部 503**（`TURN_DATABASE_MISMATCH`），冒烟第 31 步第一项先查它）；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（今天代码仍读，V2-12 后重核）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`、`NEXT_PUBLIC_TERMLY_WEBSITE_UUID`；`NEXT_PUBLIC_SENTRY_DSN`（缺了所有告警静默）、`SENTRY_ENVIRONMENT`、`SENTRY_ORG`、`SENTRY_PROJECT`；`PAYMENT_NOTICE_FROM`；`NEXT_PUBLIC_COMPOSER_REFERENCES=on`；资料库 `NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION`、`NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION`、`NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION`（照 staging）；`LANDING_PROMO_OFFERS=on`（落地页显示 Gold 首月 $49 和创始价；**先做第 25a 步**，见第 4 部分问题 20）。**`SITE_INDEXING` 这时不设** | 变量名清单和本行对照 | V2 |
+| 25a | ★ 批准 → 总控（staging 验收先行） | 打开 `LANDING_PROMO_OFFERS` 之前，先在 staging 把落地页开、关两种状态各验一遍（#987 的 A/B 验收：关时只显示标准价；开时显示首月和创始价，名额为 0 或读取失败时创始块整块隐藏，JSON-LD 不含创始价）；通过后才在正式变量里设 `on`，属于正式环境设置，Owner 当次批准 | #987 上 A/B 两份验收记录 | — |
 | 26 | 总控只读 | **不能设**：任何 `V3_RUNTIME_STAGING_*`、`WAFFO_TEST_*`、`E2E_*`、`LOADTEST_*`、`LANDING_PREVIEW_FEATURES`、`ANTHROPIC_API_KEY`、`OPENROUTER_API_KEY`、`PAYMENT_NOTICE_TEST_RECIPIENTS`；`EXPECTED_APP_HOST` 也不加（只有本机检查脚本读） | 名字清单里没有 | V3 |
 | 27 | 总控只读 | **定时任务**（`apps/web/vercel.json`，Vercel Pro，全部要 `CRON_SECRET`，没有就 503）：每分钟 `runtime-recovery`；每 5 分钟 `account-erasure`、`library-cleanup`；每 10 分钟 `fusion-recovery`、`social-monitor`；每天 02:00 `tickets/auto-close`、03:00 `release-subscription-credits`、03:30 `ticket-attachments-cleanup`、04:00 `billing-reconcile`、10:00 `diagnostics`（UTC） | 第一次部署后 Vercel Cron 页列出 10 个；冒烟日看到调用记录不是 503 | A2 |
 | 28 | ★ 批准 → 总控 | **合并到 `main`**（合并即正式部署）：冻结版本从 staging 合并到 `main`；`main` 上 Dependency Audit 通过、不新增豁免；部署时站点保持暂停、`stopNewCalls` 开 | CI 全绿；部署连的是新库 | M1 |
@@ -67,7 +68,7 @@
 | --- | --- | --- | --- | --- |
 | 29 | ★ Owner 做（站点恢复，单独一次批准） | Vercel 取消暂停，部署访问保护保持开 | 未登录公众被挡住 | S-1 |
 | 30 | ★ Owner 做 | 域名：先撤 www→app 的 307，再把 `graylum.com` 改回 308→www；生成冒烟专用的回调绕过口令，只加在 Stripe 和 Post for Me 回调上；验证通过后放 `app.graylum.com`→www 的 308 | 没有链式跳转；Stripe 测试事件成功、错误签名 400 | S-2–S-4 |
-| 31 | 总控 | 受控身份发一条消息，返回"新调用暂停"（不是 5xx） | 限流连上 Redis | S-5 |
+| 31 | 总控 | **先查 `TURN_DATABASE_HOST`**：受控身份打开一次对话，`/api/turn` 不是 503 `TURN_DATABASE_MISMATCH`（缺了或和实际库不一致时**全部对话 503**）；再发一条消息，返回"新调用暂停"（不是 5xx） | 没有 `TURN_DATABASE_MISMATCH`；限流连上 Redis | S-5 |
 | 32 | ★ 批准（模型调用开放，单独一次批准） | 冒烟窗口内临时关 `stopNewCalls`，结束后立刻重新打开 | 读回 | S-6 |
 | 33 | ★ 批准（金额、次数、总预算） → 总控 | **冒烟**：K1 注册／开户 500／找回密码／Google 登录；K2 一次成功、一次拒绝、一次重复、回执对账；K3 定位第 1 步加一次对标；K4 @ 文档、写作 Skill、对话内研究；K5 文风；K6 Gold 评审团和对比各一次；K7 作品复盘页、运营教练复盘真实生成一次、名单外平台被拒；K10 后台手动跑一次成本告警检查；K11 每日对账；K12 TikHub 价格手工刷新一次；K13 首字速度 20 次（不挡上线）。**不做 K8 真钱付款和 K9**（Owner 11-03：staging 付款链路全部测通即可，正式站不测） | 每项记录贴上线 PR | 4.1 |
 | 34 | ★ 批准（每次） | 一键发布：X、YouTube 各真实发布一次（Owner 在场授权账号） | 帖子在平台上可见，扣费 6 积分／平台 | 核心 10 ③ |
@@ -335,9 +336,9 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 16. **钱包到期提醒的真实发信没在 staging 验过**（PAY-NOTIFY，10-26）：提醒只发到账户本人登录邮箱，且必须在 `PAYMENT_NOTICE_TEST_RECIPIENTS` 名单里；只有每天 03:00 UTC 的定时任务发信；staging 没有 7 天内到期的微信/支付宝年付单。10-26 只核对现有一条 founder_ended 提醒的去向。上线前演练：用一个登录邮箱在名单里的测试账号、一张 7 天内到期的钱包年付单，等定时任务发出并读回 `payment_notices`（state=sent）。
 17. **一键发布的平台名单 staging 是空的**（`publish_monitor_publish_platforms`）：只有名单里的平台在页面上开放发布。Owner 在场授权 X/YouTube 那次验收前，总控先在 staging 写 `["x","youtube"]`；正式按第 7 节 E1 的平台写。
 18. **历史迁移 0005 会在空库里建诊断测试账户**：逐个迁移建库会把它带进正式库。种子不新增、不改账户（测试比较执行前后账户完全一致）。建库后、开放前由总控决定怎么处理（第 1 部分第 37 步）。
-19. **存储容量**：Owner 11-03 按 IMAGE-GEN 方案定 Pro 2 GB、Gold 10 GB（免费不变）。方案把它放在图片生成版本里（目标 11-25）；种子按现值 500 MB / 2 GB 写。上线当天就提高还是随图片版本提高，由总控确认；要提前的话改种子两个数字即可。
-20. **`LANDING_PROMO_OFFERS`**：不等于 `on` 时落地页只显示标准价，不显示 Gold 首月 $49 和创始价。正式上线设不设没有找到明确记录，按冻结时 staging 的值和总控意见定。
-21. **"七个平台"和名单里的 9 个**：Owner 11-03 说"七个平台一键发布上线前必须完成"，种子按 10-24 E1 的 9 个平台写。一键发布窗口的笔记已把这一点列为"需总控确认"；如果只开 7 个，改种子里的平台数组即可。
+19. ~~**存储容量**~~ 已定（总控 11-03）：上线保持 Pro 500 MB / Gold 2 GB；IMAGE-GEN 第 13.1 节批的 Pro 2 GB / Gold 10 GB 随图片版本（约 11-25）作为那个版本的配置变更一起改。种子已加注释。
+20. ~~**`LANDING_PROMO_OFFERS`**~~ 已定（总控 11-03，见上线撤回清单）：上线时设 `on`；前提是先在 staging 做 #987 的开/关 A/B 验收（第 1 部分第 25a 步），正式设置要 Owner 批准。
+21. ~~**"七个平台"和名单里的 9 个**~~ 已定（总控 11-03）：以 Master Plan 10-24 E1 为准，9 个平台都开放；正式发帖只验证 X 和 YouTube。
 22. **`TURN_DATABASE_HOST` 是主路径新增的必填变量**，REL-1 第 3.4 节 V2 没有点名；没设或和实际连接的库不一致时，`/api/turn` 全部 503。已写进第 1 部分第 25 步，REL-1 V2 也该补上。
 23. **REL-1 第 3.3 节 B7 的作品复盘一行没提 `publish_monitor_coach_enabled`**；种子已写 `true`，B7 也该补上。
 24. **REL-1 第 4.1 节 K8、K9（真钱付款）和第 7 节 E2（隔离项目演练）已被 Owner 11-03 的决定取代**，REL-1 正文还没改；本文件第 1 部分已按新决定写。

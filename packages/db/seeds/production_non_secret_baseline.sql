@@ -263,6 +263,8 @@ BEGIN
   -- PREP 2.3 / REL B3/B7. PLAN §2.1 item 51 F/G/J: $29/$69 monthly, $279/$621 yearly;
   -- monthly credits 29*120=3480 / 69*130=8970; yearly 12 monthly grants = 41760/107640.
   -- Free 0/0: PLAN 2026-10-14 (signup 500 is a separate existing grant, never an extra seed).
+  -- Storage stays 50 MB / 500 MB / 2 GB: Pro 2 GB / Gold 10 GB (PLAN 2026-11-03, IMAGE-GEN-PLAN 13.1) ships with the
+  -- image release (~11-25) as that release's own configuration change, not at launch (controller 2026-11-03).
   -- Discounts 95/90: item 51; entitlement columns: PREP 2.3, PLAN 2026-10-17 and REL B7 (Gold only Fusion).
   -- First month $49 (PLAN 2026-10-12, item 51 G/H/I), founder $496/year (item 51 F/J/P and 10-14):
   -- checkout offers, NOT extra plan rows; B5/S4 maps them privately. Never replace Gold standard prices.
