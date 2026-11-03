@@ -6,6 +6,7 @@ import { createRuntimeBudget, RUNTIME_WORK_MS } from './settings/budget';
 import { modelCall, TurnStop, type ModelCall } from './call';
 import type { CounterStore } from './limiter';
 import { TurnDatabaseError, type TurnDatabase } from './db';
+import { logger } from '../../lib/logger';
 
 const limits = { providerSlug: 'synthetic', contextTokens: 10000, promptUsdPerMillion: '2', completionUsdPerMillion: '10', requestUsd: '0' };
 const identity = { provider: 'openrouter' as const, account: 'test', model: 'test/model', protocol: 'openrouter-chat-v1' as const,
@@ -136,6 +137,22 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     expect(JSON.parse(out).choices[0].message.content).toBe('hello');
     expect(kinds(h.writes)).toEqual(['begin', 'identity']);
     expect(h.writes[1]![1]).toMatchObject({ providerId: 'gen-body' });
+  });
+
+  it('says why an unknown call ended: the transport issue, status and whether a provider id was seen (round 12, turn 2024)', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const h = harness();
+    const transport = vi.fn(async () => new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"id":"gen-9","choi'));
+      controller.error(new Error('connection lost'));
+    } }), { headers: { 'x-generation-id': 'gen-9' } }));
+    await expect(modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body))
+      .rejects.toThrow('TURN_CALL_UNKNOWN');
+    const line = warn.mock.calls.find(([, label]) => label === 'turn_call_unknown');
+    warn.mockRestore();
+    expect(line?.[2]).toMatchObject({ turnId: 1, seq: 1, stage: 'observation', httpStatus: 200, complete: false,
+      transportIssue: 'body_interrupted', providerIdSeen: true });
+    expect(JSON.stringify(line)).not.toContain('KEY');
   });
 
   it('a final cost without the token counts is not charged as min(c, U) here: the call stays open for the recovery lookup', async () => {

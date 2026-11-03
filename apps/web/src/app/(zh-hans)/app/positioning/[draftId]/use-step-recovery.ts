@@ -11,6 +11,7 @@ import {
   type RecoveryAttempt,
   type RecoveryHistory,
 } from "./step-recovery";
+export { useOpeningGate } from "./opening-intent";
 
 /**
  * Finish retained envelopes without the user: once history proves an
