@@ -32,7 +32,7 @@ const filled = {
     defaultModelIds: ids.slice(0,3), minModels: 2, answerOutputTokens: 8192, maxBudgetUsd: '5',
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } },
   review: { enabled: true, reviewerModelIds: [ids[0],ids[2],ids[4]], summaryModelId: ids[3], skillId: skill,
-    maxRounds: 1, opinionOutputTokens: 4096, summaryOutputTokens: 32768, maxBudgetUsd: '5',
+    maxRounds: 1, opinionOutputTokens: 8192, summaryOutputTokens: 32768, maxBudgetUsd: '5',
     fixedPriceCredits: 1500, dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 },
     displayNames: { reviewers: ['评审 A','评审 B','评审 C'], summary: '汇总' }, reviewerRoles: { [ids[0]]: 'evidence', [ids[2]]: 'finance', [ids[4]]: 'execution' } } },
   primary_model_id: ids[0], v3_summary_model_id: ids[5], publish_monitor_review_model_id: ids[0],

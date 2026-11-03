@@ -17,7 +17,8 @@
 -- billing_payg_start_thresholds: OBJECT {version,thresholds}, frozen design (PREP 2.2 A; REL B7).
 -- fusion_settings: OBJECT per services/fusion/settings.ts; production UUIDs, compare enabled, four allowed
 -- Sonnet/Flash/Sol/Opus, defaults Sonnet/Flash/Sol, minModels=2, answerOutputTokens=8192, maxBudgetUsd="5";
--- Review template defaults follow services/fusion/settings.ts; frozen review budget must be supplied.
+-- Review template defaults follow services/fusion/settings.ts (opinionOutputTokens 8192 since #1600: 4096 cut long
+-- Chinese opinions off in staging); frozen review budget must be supplied.
 -- PLAN 2026-10-20: Sonnet=evidence, Sol=finance, Argon=execution; fill reviewerRoles with those UUID keys.
 -- review uses Sonnet/Sol/Argon and Opus summary (PLAN 2026-10-25/26; PREP 2.2 A, 1.5; REL B7).
 -- primary_model_id: production Sonnet 5.5 UUID; v3_summary_model_id: production GPT-6 Luna UUID (PREP 2.2 A).
@@ -59,7 +60,7 @@ DECLARE
         "minModels":2,"answerOutputTokens":8192,"maxBudgetUsd":"5","dispatchMinutes":10,
         "breaker":{"platformUsd":"2","noDeliveryCalls":10}},
       "review": {"enabled":true,"reviewerModelIds":[null,null,null],"summaryModelId":null,"skillId":null,
-        "maxRounds":1,"opinionOutputTokens":4096,"summaryOutputTokens":32768,"maxBudgetUsd":null,
+        "maxRounds":1,"opinionOutputTokens":8192,"summaryOutputTokens":32768,"maxBudgetUsd":null,
         "fixedPriceCredits":1500,"dispatchMinutes":10,"breaker":{"platformUsd":"2","noDeliveryCalls":10},
         "displayNames":{"reviewers":["评审 A","评审 B","评审 C"],"summary":"汇总"},"reviewerRoles":null}
     },
