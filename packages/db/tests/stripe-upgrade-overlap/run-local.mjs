@@ -228,6 +228,7 @@ try {
   sql(read('packages/db/migrations/0484_core_path_v2_report_research_topic_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
   sql(read('packages/db/migrations/0485_core_path_v2_opc_functions_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
   sql(read('packages/db/migrations/0486_core_path_v2_opc_work_capture_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql')); // V2-12 B-rewrites: rewrites fusion_review_archive_reconcile, which 0326 replays
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
