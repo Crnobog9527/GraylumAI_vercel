@@ -99,7 +99,7 @@ it('the visibility of the pack\'s sources is asked right before the turn is save
 });
 it('a brand review reads the coach pack of its brand and cadence, saves it wrapped like the plain pack, and runs the turn as a coach review',async()=>{
  const BUSINESS='88888888-8888-4888-8888-888888888888',CONN='99999999-9999-4999-8999-999999999999';
- m.rows.mockResolvedValue({followers:[{connectionId:CONN},{connectionId:CONN}]});
+ m.rows.mockResolvedValue({followers:[{connectionId:CONN},{connectionId:CONN}],profile:null,facts:[],recent:[]});
  m.build.mockReturnValue({kind:'review_pack',mode:'full'});
  const d=database({default:{businessId:BUSINESS,cadence:'monthly',attempt:2}});
  await advanceReview(d.db,c,options());
@@ -114,7 +114,7 @@ it('a brand review reads the coach pack of its brand and cadence, saves it wrapp
 });
 it('a delivered brand review writes its checked output to the ledger before it completes; a failed write does not undo the review',async()=>{
  const BUSINESS='88888888-8888-4888-8888-888888888888';
- m.rows.mockResolvedValue({followers:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ m.rows.mockResolvedValue({followers:[],profile:null,facts:[],recent:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
  m.save.mockResolvedValue(true);
  m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'completed',delivered:true,coach:{parsed:true}});
  const d=database({default:{businessId:BUSINESS,cadence:'weekly'}});
@@ -132,6 +132,20 @@ it('a delivered brand review writes its checked output to the ledger before it c
  m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'interrupted',delivered:false,coach:{parsed:true}});
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect(m.save).not.toHaveBeenCalled();
+});
+it('a post whose title names a pillar is tagged by code before the pack is built, and the tags travel with the saved pack, not to the model',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888',pillars=[{key:'p1',name:'读书笔记',definition:'读书笔记'},{key:'p2',name:'穿搭灵感',definition:'穿搭灵感'}];
+ const fact=(postId:string,title:string,pillarKey:string|null=null)=>({postId,title,pillarKey,pillarSource:null,platform:'tiktok'});
+ m.rows.mockResolvedValue({followers:[],profile:{pillars},facts:[fact('a','【读书笔记】 x'),fact('b','没有栏目'),fact('c','【穿搭灵感】 y','p1')],
+  recent:[fact('d','今天的穿搭灵感')]});
+ m.build.mockReturnValue({kind:'review_pack'});
+ const {readCoachPack}=await import('./reviews');
+ const pack=await readCoachPack({} as never,c.actorId,BUSINESS,'weekly');
+ const built=m.build.mock.calls.at(-1)![0] as {rows:{facts:Array<{postId:string;pillarKey:string|null}>;recent:Array<{postId:string;pillarKey:string|null}>}};
+ expect(built.rows.facts.map(f=>[f.postId,f.pillarKey])).toEqual([['a','p1'],['b',null],['c','p1']]);
+ expect(built.rows.recent.map(f=>f.pillarKey)).toEqual(['p2']);
+ expect(pack.auto_tags).toEqual([{post_id:'a',pillar_key:'p1'},{post_id:'d',pillar_key:'p2'}]);
+ expect(JSON.stringify(pack.review)).not.toContain('auto_tags');
 });
 it('the 90-day window is used only for an account whose window is that long',async()=>{
  await advanceReview(database({default:{}},{publish_monitor_post_window:90}).db,c,options());

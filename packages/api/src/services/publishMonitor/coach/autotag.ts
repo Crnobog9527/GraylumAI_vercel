@@ -4,7 +4,7 @@
  * name ("【读书笔记】 …", "#读书笔记", or the name inside the text) belongs to that pillar; a title that carries two, or none, is left
  * for the model. Pure and deterministic, so the same facts always give the same tags.
  */
-import type { Fact, Pillar } from './rows';
+import type { Pillar } from './rows';
 
 const MIN_NAME_CHARACTERS = 2;
 /** The most auto tags one review saves (the save function takes 40 tags in all, the model's among them). */

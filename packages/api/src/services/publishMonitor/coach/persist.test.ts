@@ -76,7 +76,6 @@ it('the model\'s tags come first, the code\'s after them without repeating a pos
 });
 
 it('reports a refused lease, and fails loudly on a database error', async () => {
-  const d = database();
   expect(await saveCoachLedger(database({ saved: false }).db, claim, simId('B'), pack, checked())).toBe(false);
   await expect(saveCoachLedger(database(null, { code: 'XX000' }).db, claim, simId('B'), pack, checked()))
     .rejects.toThrow('PUBLISH_MONITOR_COACH_LEDGER_SAVE_FAILED');
