@@ -81,10 +81,11 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const read = useCallback(async () => {
+    const reader = readSessionUserIdSync(); // who asked: a read that ends after another user signed in must not be saved under them
     const next = await readTurnView(sessionId, fetcher);
     if (!alive.current) return null;
     setViewFailed(!next);
-    if (next) { setView(next); writeCachedChatView(readSessionUserIdSync(), sessionId, next); }
+    if (next) { setView(next); if (reader && reader === readSessionUserIdSync()) writeCachedChatView(reader, sessionId, next); }
     return next;
   }, [sessionId, fetcher]);
   useEffect(() => { void read(); }, [read]);

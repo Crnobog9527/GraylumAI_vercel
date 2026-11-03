@@ -106,6 +106,13 @@ describe('persisted chat view', () => {
     expect(s.data.has(CHAT_KEY)).toBe(false);
   });
 
+  it('forgets a conversation whose read came back empty instead of keeping or showing it', () => {
+    const s = storage();
+    writeCachedChatView(USER, 'c1', view, { storage: s, now: NOW, build: 'b1' });
+    writeCachedChatView(USER, 'c1', { messages: [] } as never, { storage: s, now: NOW, build: 'b1' });
+    expect(readCachedChatView(USER, 'c1', { storage: s, now: NOW, build: 'b1' })).toBeNull();
+  });
+
   it('keeps 20 conversations, skips a huge one, and survives a full storage', () => {
     const s = storage();
     for (let i = 0; i < 25; i++) writeCachedChatView(USER, `c${i}`, view, { storage: s, now: NOW, build: 'b1' });

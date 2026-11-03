@@ -66,7 +66,12 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const save = () => { timer = undefined; persistQueryCache(queryClient, readSessionUserIdSync()); };
+    const save = () => {
+      timer = undefined;
+      // Only for the user whose data this page holds: another tab may have signed someone else in a moment ago.
+      const user = readSessionUserIdSync();
+      if (user && user === knownUser.current) persistQueryCache(queryClient, user);
+    };
     const flush = () => { if (timer) clearTimeout(timer); save(); };
     const hidden = () => { if (document.visibilityState === 'hidden') flush(); };
     const unsubscribe = queryClient.getQueryCache().subscribe(() => { timer ??= setTimeout(save, 1500); });
@@ -116,8 +121,10 @@ export default function Provider({ children }: { children: React.ReactNode }) {
         const user = session?.user?.id?.toLowerCase() ?? null;
         if (event === 'SIGNED_OUT' || (user && knownUser.current && user !== knownUser.current)) {
           clearPersistedCache();
-          queryClient.clear();
-          setEpoch(count => count + 1);
+          // Pages that are open drop what they hold. A different user: the pages mount again (nothing in their state is the last user's);
+          // signing out: the data goes but the pages stay, so a flow that signs out and then says "done" (erasure, password reset) keeps its place.
+          if (event === 'SIGNED_OUT') void queryClient.resetQueries();
+          else { queryClient.clear(); setEpoch(count => count + 1); }
         }
         knownUser.current = event === 'SIGNED_OUT' ? null : user ?? knownUser.current;
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
