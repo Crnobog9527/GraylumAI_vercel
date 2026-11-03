@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { classifyErasureError } from '@/lib/content-erasure';
 import { trpc } from '@/trpc/client';
-import { runtimePathChoice } from './runtime-path';
+import { LEGACY_CONVERSATION_NOTICE, runtimePathChoice } from './runtime-path';
 import { TurnWorkspace } from './turn-workspace';
 import { WorkItemWorkspace } from './work-item-workspace';
 
@@ -21,6 +21,14 @@ function NewTask(){
  useEffect(()=>{router.replace('/app/positioning');},[router]);
  return <p>正在进入新任务…</p>;
 }
+/** `runtime.view` flags a conversation without turns as `legacy`; read defensively until every deployed server sends it. */
+const legacyOf=(data:unknown)=>Boolean(data&&typeof data==='object'&&(data as {legacy?:unknown}).legacy===true);
+/** A conversation the old execution path produced is not shown any more: say so and offer a new one, never a blank page. */
+function LegacyConversation(){
+ const router=useRouter();
+ return <main className="p-6"><p role="status">{LEGACY_CONVERSATION_NOTICE}</p>
+  <Button variant="outline" onClick={()=>router.push('/app/positioning')}>开始新对话</Button></main>;
+}
 /** CORE-PATH-V2: every free conversation and work item runs on the turn path; the conversation's scope decides the workspace. */
 function RuntimePath({routeSession}:{routeSession:string}){
  const router=useRouter();
@@ -29,9 +37,11 @@ function RuntimePath({routeSession}:{routeSession:string}){
  // NOT_FOUND (someone else's or a missing one, which read the same) leaves the same way.
  const erased=Boolean(view.error)&&(classifyErasureError(view.error,'preview').type==='gone'||view.error?.data?.code==='NOT_FOUND');
  useEffect(()=>{if(erased)router.replace('/app/positioning');},[erased,router]);
- const path=runtimePathChoice({viewSettled:Boolean(view.data)||Boolean(view.error),scopeKind:view.data?.scope?.kind});
+ const path=runtimePathChoice({viewSettled:Boolean(view.data)||Boolean(view.error),viewFailed:Boolean(view.error)&&!view.data,
+  scopeKind:view.data?.scope?.kind,legacy:legacyOf(view.data)});
  if(path==='loading')return <p>正在读取工作…</p>;
  if(path==='turn')return <TurnWorkspace sessionId={routeSession}/>;
+ if(path==='legacy')return <LegacyConversation/>;
  if(path==='work')return <WorkItemWorkspace sessionId={routeSession} workItemId={view.data!.scope!.workItemId}/>;
  return <main className="p-6"><p role="alert">暂时无法读取这项工作。</p><Button variant="outline" onClick={()=>void view.refetch()}>重新读取</Button></main>;
 }
