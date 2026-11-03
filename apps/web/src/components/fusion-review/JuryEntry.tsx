@@ -11,6 +11,8 @@ import { estimateFusion, startJury } from '@/lib/turn-fusion';
 import { resolveSeatNames, SEATS } from '@/components/landing/preview-jury/jury-events';
 import { ACTIVE, reviewHref, startErrorText, toPanel } from './review-adapter';
 import styles from './jury-entry.module.css';
+import { READ_RETRY } from '@/trpc/read-retry';
+import { QueryNotice } from '@/components/opc/query-notice';
 
 const codeOf = (error: unknown) => (error instanceof Error ? error.message : '');
 type Estimate = { estimateCredits?: number; requiredCredits?: number };
@@ -49,14 +51,14 @@ export function JuryEntry({ draftId, report, busy }: {
 
 function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourceVersionId: string; busy: boolean }) {
   const router = useRouter();
-  const available = trpc.fusionReview.available.useQuery(undefined, { staleTime: 60_000, retry: false });
+  const available = trpc.fusionReview.available.useQuery(undefined, { staleTime: 60_000, ...READ_RETRY });
   const enabled = available.data?.enabled === true;
   // The server's own membership answer (the same one a start is refused by): a plan without the jury sees the entry as
   // Gold-only and goes straight to the upgrade page instead of being told only after pressing 开始评审 (Owner 2026-10-20).
-  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { enabled, staleTime: 60_000, retry: false });
+  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { enabled, staleTime: 60_000, ...READ_RETRY });
   const goldOnly = entitlements.data?.allowFusionReview === false;
-  const mine = trpc.fusionReview.mine.useQuery({ draftId, limit: 1 }, { enabled, retry: false, staleTime: 15_000 });
-  const panel = trpc.fusionReview.panel.useQuery(undefined, { enabled, staleTime: Infinity, retry: false });
+  const mine = trpc.fusionReview.mine.useQuery({ draftId, limit: 1 }, { enabled, staleTime: 15_000, ...READ_RETRY });
+  const panel = trpc.fusionReview.panel.useQuery(undefined, { enabled, staleTime: Infinity, ...READ_RETRY });
   const [starting, setStarting] = useState(false);
   const start = { isPending: starting };
   const [open, setOpen] = useState(false);
@@ -68,6 +70,8 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   const required = estimate.data?.requiredCredits;
   const [error, setError] = useState('');
   const requestId = useRef('');
+  // The switch could not be read even after its retries: say so instead of dropping the entry.
+  if (available.isError && !available.data) return <QueryNotice error={available.error} label="评审团" retry={() => available.refetch()} />;
   if (!enabled) return null;
   const latest = mine.data?.[0];
   const names = resolveSeatNames(toPanel(panel.data));
