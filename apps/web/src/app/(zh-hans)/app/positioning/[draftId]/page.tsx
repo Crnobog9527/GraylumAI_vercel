@@ -30,7 +30,7 @@ import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage
   MentorWelcome } from "@/components/chat-display/mentor-messages";
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry, useOpeningFailureNotice } from "./mentor-notices";
-import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
+import { useAutoStepRecovery, useHistoryPolling, useOpeningGate } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
 import { NO_PLAN_TURN, planTurnState, readPlanTurn, runPlanTurn, usePlanTurn } from "./plan-turn-path";
@@ -242,8 +242,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     writeInformation: input => information.mutateAsync(input),
     transition: input => change.mutateAsync(input as Parameters<typeof change.mutateAsync>[0]),
     run, nonAnswers: nonAnswersFor, setError, setRunning,
-    onConfirmed: stepId => {
-      // Confirmed: move on to the next step, whose opening the Agent sends by itself.
+    onConfirmed: stepId => { gate.grant();
       const flow = (snap?.workflow.steps ?? []) as Step[], index = flow.findIndex(step => step.id === stepId);
       if (!d?.accountRevision && index >= 0 && index < flow.length - 1) setActiveStep(flow[index + 1]!.id);
     },
@@ -399,7 +398,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    */
   const autoOpening = useRef(new Set<string>());
   const openingInFlight = useRef(new Set<string>());
-  const [openingSteps, setOpeningSteps] = useState<string[]>([]);
+  const [openingSteps, setOpeningSteps] = useState<string[]>([]), gate = useOpeningGate(draftId);
   const [notice, setNotice] = useState(""), openingFailed = useOpeningFailureNotice(d, history.data?.executions, notice, setNotice);
   useEffect(() => {
     if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted || !turnPath.ready) return; // read-only; path undecided
@@ -423,7 +422,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (sessionStorage.getItem("opc-step:" + draftId + ":" + step.id)) return;
     if (sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + step.id)) return;
     const key = openingEntryKey(draftId, d.roundId, step.id, question.id);
-    if (autoOpening.current.has(key)) return;
+    if (autoOpening.current.has(key) || !gate.admit(step.id)) return;
     autoOpening.current.add(key);
     openingInFlight.current.add(step.id);
     setOpeningSteps([...openingInFlight.current]);
@@ -457,7 +456,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         setOpeningSteps([...openingInFlight.current]);
       }
     })();
-  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed, turnPath.ready]);
+  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed, turnPath.ready, gate.asked]);
   const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, historyFailed: history.isError, draftId, recover: recoverPendingStep,
     steps: (d?.snapshot.workflow.steps ?? []) as Step[],
     ready: !planView && hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
@@ -1186,7 +1185,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...turnPath.notices(open => void run(() => streamTurn(open))),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
-                    saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
+                    saving: hasUnsavedInformation, error, notice, freeError: free.error,
+                    opening: gate.offer(step.id, openingSteps.length === 0 && !busy), replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   </MentorChatLog>
