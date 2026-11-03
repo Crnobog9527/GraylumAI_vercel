@@ -168,3 +168,23 @@
 - 删除 `turn/provider/service.ts`、`readRetry.ts`，以及只测这一层的 `service.test.ts`、`erasure.test.ts`、`paygService.test.ts`、`upgrade.integration.ts`；`--bill2-upgrade-only` 改为抛 `BILL2_UPGRADE_RETIRED`（CI 不引用）。类型导入改指向 `./frozenRun`。
 - 旧场景 → 新测试：这几个文件测的是 bill2 run 的 prepare/claim/dispatch/record/finalize/回收链路（含 PAYG 策略校验、waiting_credits、拒付待定回退、回收只查不重发），这条链路随 F 不再存在，新路径的对应保护在 `turn_*` 的 SQL 测试里。本 PR 内没有逐条等价的 Node 测试：**无（链路已删除）**。
 - 现役代码里不再有 F 的 DROP 名单中的 bill2_* / `runtime_receipt_saved` / `fusion_group_claim` 引号字符串（测试文件除外）。
+
+## 被删 4 个测试文件的对照表（旧场景 → 现由谁覆盖）
+被删文件都在 `services/turn/provider/`，测的是旧 BILL2 provider 层（`authoritativeBilling`）。「turn-core」等指 `packages/db/tests/` 下的目录；「覆盖」列写文件名和用例名，用例名取自该文件的 `it(...)`、`checks.push(...)` 说明。
+
+| 被删文件 | 旧场景 | 现在的覆盖 |
+|---|---|---|
+| `service.test.ts` | 结算只经 `bill2_finalize`（settled / refunded / unknown 三种） | `turn-core/run-local.mjs`：「chat turn: … settle D=min(N,H) once …」「idempotent: repeated … close change nothing」；`turn/call.test.ts`：「writes begin before sending, … then the final receipt …」 |
+| `service.test.ts` | 剩余时间装不下一次完整查询时，不消耗回收领取 | 近似覆盖：`turn/recovery.test.ts`「keeps going over full batches and stops before the deadline, leaving the rest leased for the next run」。新路径是按租约领取，没有“先领取再查询”的两步，所以逐条等价的场景不存在 |
+| `service.test.ts` | 传输层证明“没开始发”才撤销本次派发（confirmed / lost-commit / not-committed / inspect-unavailable / started-error 五种） | 部分覆盖：`turn/call.test.ts`「only an attempt proven unsent is retried, as a new row; …」「no concurrency slot … closes the row as certainly unsent, never as unknown」；`turn-core/run-local.mjs`「… not_sent and rejected attempts are retried without u…」。**缺口：旧的“撤销写入结果不明时先查询再重试一次（write → inspect → write）”没有等价测试**；新路径是 `begin` 先写、没发就按 unsent 关闭，没有这套两步协议 |
+| `erasure.test.ts` | 账号确认删除后（at-record）、内容被删（content-deleted）时，不再返回供应商内容，收据只记一次，第二次派发返回 dispatched:false | 数据库侧：`turn-core/run-local.mjs`「a late receipt after erasure began or the conversation was deleted keeps billing, stores no response text; …」「a deleted conversation, an erasing account or a revoked voice source is returned by every call write; close saves nothing and closes erased」；`turn-erasure/run-local.mjs`「instant generating: deleted mid-turn; … later receipt keeps billing and stores no body …」；`turn-core/run-local.mjs`「idempotent: repeated … receipt … change nothing」。**缺口：Node 层“删除后返回对象里不含供应商内容”的断言没有等价测试**，目前只有库里不存正文的保护 |
+| `erasure.test.ts` | 已关闭的原运行，回收只用既有查询领取，绝不重新派发 | `turn/recovery.test.ts`「looks up a paused turn's open model cost and records it, leaving the turn paused for its resume」「prices a cost found by provider id as a live receipt is …, then settles once」；`turn-core/recovery-local.mjs`「late receipt: interrupted with unknown model cost -> claimed for settlement with its provider id -> receipt -> settled once …」 |
+| `paygService.test.ts` | 只有 core v2 入口接受零预留和完整 PAYG 策略 | `turn/admission/paygPolicy.test.ts`「strict stable/call contracts bind identity, exact T and profile bounds」 |
+| `paygService.test.ts` | 普通 `prepareRun` 拒绝 v2、保持 v1 默认合同 | 随 F 删除：v1 run 合同和 `prepareRun` 都不再存在 |
+| `paygService.test.ts` | 最终字节证据不符时，在适配器预检和持久派发之前拒绝 | 部分覆盖：`turn/admission/paygPolicy.test.ts`「measures final UTF-8 bytes and includes cache-block bytes once」；`turn/call.test.ts`「a short freeze or a tombstone stops before anything is sent; …」。**缺口：新路径没有“字节与冻结证据不符就在派发前拒绝”的专门测试** |
+| `paygService.test.ts` | `waiting_credits` 映射成稳定错误，且不产生派发凭据 | `turn/mentor.integration.ts`「an organizer the remaining freeze cannot start pauses the turn (waiting for credits), never closes it」；`turn-core/run-local.mjs`「… a short freeze pauses the turn before sending; …」 |
+| `paygService.test.ts` | 明确的 PAYG 占位拒绝被保留，且不给派发凭据 | `turn/provider/claimFailure.test.ts`（保留，未删）；`turn/call.test.ts`「a 402 costs nothing and stops the turn」 |
+| `paygService.test.ts` | 数据库早于 0261 不认 403 待定拒绝时，回退成普通观测 | 随 F 删除：这是迁移 0261 之前的数据库兼容，正式库新建，没有这种库；待定拒绝本身仍由 `turn/provider/openRouterRejection.test.ts` 覆盖 |
+| `upgrade.integration.ts` | 旧应用经过迁移 0105 后仍可用，代码回退后保留未决身份 | 随 F 删除：它依赖精确的旧提交和旧 `BillingService`，测的是 bill2 表首次引入时的升级与回退；F 之后这些表不存在，正式库新建，没有旧数据要保留。F 自己的回退由 V2-8 的迁移验证负责，不在本 PR |
+
+**找不到等价覆盖的 3 处**（已在表里标“缺口”）：① 撤销派发的 write → inspect → write 协议；② Node 层“账号删除后返回对象不含供应商内容”；③ 字节与冻结证据不符时在派发前拒绝。这三处对应的旧机制（`dispatchOnce` 两步撤销、旧派发凭据）已随 `authoritativeBilling` 删除；若总控认为要补新路径的等价 Node 测试，请指示，我在本 PR 里补。
