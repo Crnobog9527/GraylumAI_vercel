@@ -33,15 +33,12 @@
 OUT=$HOME/graylum-loadtest/vercel-final   # 仓库外
 # 1. 桩：LOAD_STUB_HOST=… LOAD_STUB_PORT=… LOAD_STUB_PREFIX=<随机串> node scripts/loadtest/openrouter-stub.mjs
 # 2. 自检：curl <桩地址>/healthz 返回 ok；先只跑 1 个账号 1 轮（--calibrate --turns 1 --go），再看 <桩地址>/__stats 的 calls > 0（证明钩子生效；为 0 立即停，别往下跑）
-# 3. 无争用基线（5 分钟）
-node scripts/loadtest/core-path-load.mjs --out "$OUT/calibrate" --calibrate --go
-# 4. 另开终端采连接（整套约 70 分钟 = 4200 秒）
-node scripts/loadtest/sample-connections.mjs --out "$OUT/connections.jsonl" --seconds 4200
-node scripts/loadtest/sample-waits.mjs --out "$OUT/waits.jsonl" --seconds 4200 --every 5
-# 5. 整套 30→50→75→100→50→100，档间冷却 10 分钟
-node scripts/loadtest/core-path-load.mjs --out "$OUT/series" --series --go
-# 6. 收尾：摘要；删环境变量并重新部署；日限调回
-node scripts/loadtest/sample-connections.mjs --summarize "$OUT/connections.jsonl"
+# 3–6. 一条命令：先跑 5 分钟无争用基线（不开采样器）；再把两个采样器放到后台（打印 PID 和日志路径）；
+#      再启动整套 30→50→75→100→50→100（档间冷却 10 分钟）；驱动结束后等采样器退出（宽限 30 秒，超时停掉）；
+#      最后打印连接汇总，并检查两份采样的时间段确实覆盖了驱动的时间段（不覆盖则命令以失败退出）
+scripts/loadtest/run-all.sh          # 采样时长默认 4800 秒，可用 SAMPLE_SECONDS 改
+# 先在本机确认编排没问题（十几秒，不连网络和数据库）：scripts/loadtest/run-all.sh --dry-run
+# 7. 收尾：删环境变量并重新部署；日限调回
 ```
 
 **短版**（总控要缩短时）：`--calibrate` + `--stage 100` 跑两次，约 25 分钟；只能回答 9 秒来源和 100 人连接数，不含 30→100 的爬坡对比。

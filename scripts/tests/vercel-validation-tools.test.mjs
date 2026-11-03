@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStub } from '../loadtest/openrouter-stub.mjs';
+import { coverage } from '../loadtest/lib/coverage.mjs';
 import { summarizeConnections, judgeConnections, classifyFixedOverhead } from '../loadtest/lib/connections.mjs';
 import { readManagedLimits } from '../loadtest/sample-connections.mjs';
 import { regionOf, placeOf } from '../loadtest/core-path-load.mjs';
@@ -89,4 +90,12 @@ test('a stub with a secret prefix answers only under it; healthz and stats are o
   const stats = await (await fetch(`${origin}/__stats`)).json();
   assert.equal(stats.calls, 1);
   assert.equal(stats.peak, 1);
+});
+
+test('sampler coverage fails when samples start after, or stop before, the driver window', () => {
+  const window = { startMs: 1000, endMs: 11000 };
+  assert.equal(coverage([500, 6000, 11500], window, 2000).ok, true);
+  assert.equal(coverage([4000, 6000, 11500], window, 2000).ok, false); // started late
+  assert.equal(coverage([500, 6000, 8000], window, 2000).ok, false); // stopped early
+  assert.equal(coverage([], window, 2000).ok, false);
 });
