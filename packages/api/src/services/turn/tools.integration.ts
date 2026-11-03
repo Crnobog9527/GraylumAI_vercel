@@ -399,6 +399,7 @@ it('RUNTIME: CORE-PATH-V2 V2-6 B: read_source reads the workspace and own posts 
   const review = JSON.parse((await workspaceTurnReader(read, f.actor, f.session,
     { ...access, posts: { windowDays: 30, benchmarks: false, review: false, coach: true } })('coach_review')).text);
   expect(review).toMatchObject({ kind: 'coach_review', status: 'available', review: { cadence: 'chat', business_id: main.business } });
+  expect(await coach(f.actor, f.session, main.business)).toMatchObject({ kind: 'coach_rows', businessId: main.business });
   expect(await coach(other.actor, other.session, main.business)).toEqual({ kind: 'unavailable', reason: 'brand_not_found' });
   expect(await coach(other.actor, other.session, null)).toEqual({ kind: 'coach_review', status: 'no_brand' });
   expect(await coach(other.actor, f.session, main.business)).toEqual({ kind: 'unavailable', reason: 'source_deleted' });

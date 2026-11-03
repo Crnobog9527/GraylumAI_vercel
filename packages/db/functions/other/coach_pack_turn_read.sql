@@ -17,15 +17,18 @@ BEGIN
   RETURN jsonb_build_object('kind', 'unavailable', 'reason', 'source_deleted');
  END IF;
  -- The brands a review can cover: the scheduled coach's (an own connection, the brand neither erased nor archived).
- SELECT coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name) ORDER BY x.id), '[]') INTO brands FROM (
-  SELECT DISTINCT b.id, b.name FROM opc_businesses b JOIN social_connections c ON c.business_id = b.id AND c.actor_id = p_actor_id
-   AND c.role = 'own' AND c.status IN ('connected', 'reauth_required', 'quarantined')
-  WHERE b.actor_id = p_actor_id AND b.erased_at IS NULL AND b.archived_at IS NULL LIMIT 20) x;
  IF biz IS NULL THEN
+  SELECT coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name) ORDER BY x.id), '[]') INTO brands FROM (
+   SELECT DISTINCT b.id, b.name FROM opc_businesses b JOIN social_connections c ON c.business_id = b.id AND c.actor_id = p_actor_id
+    AND c.role = 'own' AND c.status IN ('connected', 'reauth_required', 'quarantined')
+   WHERE b.actor_id = p_actor_id AND b.erased_at IS NULL AND b.archived_at IS NULL ORDER BY b.id LIMIT 20) x;
   IF jsonb_array_length(brands) = 0 THEN RETURN jsonb_build_object('kind', 'coach_review', 'status', 'no_brand'); END IF;
   IF jsonb_array_length(brands) > 1 THEN RETURN jsonb_build_object('kind', 'coach_brands', 'brands', brands); END IF;
   biz := (brands->0->>'id')::uuid;
- ELSIF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(brands) e WHERE (e->>'id')::uuid = biz) THEN
+ -- A named brand is checked on its own, so one beyond the listed twenty can still be read.
+ ELSIF NOT EXISTS (SELECT 1 FROM opc_businesses b JOIN social_connections c ON c.business_id = b.id AND c.actor_id = p_actor_id
+    AND c.role = 'own' AND c.status IN ('connected', 'reauth_required', 'quarantined')
+   WHERE b.id = biz AND b.actor_id = p_actor_id AND b.erased_at IS NULL AND b.archived_at IS NULL) THEN
   RETURN jsonb_build_object('kind', 'unavailable', 'reason', 'brand_not_found');
  END IF;
  -- The rows of publish_monitor_review_pack_rows(actor, brand, 52), each table by the owner.

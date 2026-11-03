@@ -3690,7 +3690,7 @@
   "fn:billing_reconcile_day(timestamp with time zone,timestamp with time zone)": "770ed84472f3",
   "fn:catalog_versions_bump()": "5ab5b8adc4e0",
   "fn:catalog_versions_snapshot()": "9e84498a8d99",
-  "fn:coach_pack_turn_read(uuid,uuid,uuid)": "494e2568d974",
+  "fn:coach_pack_turn_read(uuid,uuid,uuid)": "6327b92041c3",
   "fn:content_erasure_artifact_readable(uuid,uuid)": "da710b3fa067",
   "fn:content_erasure_capture_copy(jsonb,jsonb)": "b8320654d942",
   "fn:content_erasure_capture_steps(jsonb)": "81b75c872950",
