@@ -16,6 +16,7 @@ import { admitReasoning } from './admission/reasoningAdmission';
 import type { ReasoningPolicy } from './admission/reasoningPolicy';
 import type { ModelCall } from './call';
 import type { PaygCallQuote } from './admission/paygPolicy';
+import { imageTokensUpper, type ImageInputPolicy } from './provider/imageInput';
 
 /*
  * CORE-PATH-V2 2.8 (Fable 10-28): one quote path for staging and production, no test window, no environment branch. The route
@@ -30,18 +31,22 @@ export const DEFAULT_MODEL_CONCURRENCY = 20;
 
 export class QuoteError extends Error {
   constructor(readonly code: 'TURN_PAYG_DISABLED' | 'TURN_MODEL_NOT_ADMITTED' | 'TURN_PRICE_UNAVAILABLE' | 'TURN_PROVIDER_KEY_UNAVAILABLE'
-    | 'TURN_BILLING_UNIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE') { super(code); }
+    | 'TURN_BILLING_UNIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE' | 'TURN_IMAGE_NOT_ADMITTED') { super(code); }
 }
 
 /** The matched profile's per-request rules, as FusionQuote.profile: one call's bound can be measured on its exact body (bodyBoundCall). */
 export type BodyProfile = Omit<PaygCallQuote, 'bytes' | 'promptTokensUpper' | 'messages' | 'tools' | 'schemaBytes' | 'image'>
-  & { maxBytes: number; maxMessages: number; maxSchemaBytes: number };
+  & { maxBytes: number; maxMessages: number; maxSchemaBytes: number;
+    /** The route's one-image allowance, on a quote for the screenshot use only (bodyBoundCall measures the image against it). */
+    imageInput?: ImageInputPolicy };
 
 /** Opt-in tighter bound of a quote whose request size is known before it is sent (a review): the prompt is at most `promptBytes`
  * bytes of request body (a token is at least one byte) plus the profile's template and margin tokens, and the output at most
  * `outputTokens`; not the whole context window. The call is then sent with a body-measured identity (bodyBoundCall) that the
  * adapter re-measures, and the request is refused when it is larger than `promptBytes` (assertRuntimeRequestCapacity). */
 export type RequestBound = { promptBytes: number; outputTokens?: number };
+/** The screenshot use (PUBLISH-MONITOR B2): one inline JPEG at most the profile's maxEdge on each side, outside promptBytes. */
+const IMAGE_PHASE = 'publish_monitor_screenshot';
 
 export type ChatQuote = ModelCall & {
   model: string; q: string; reasoning: ReasoningPolicy; outputLimit: number; inputLimit: number;
@@ -68,13 +73,17 @@ export function routeLimits(row: Row, snapshot: Parameters<typeof pricingEndpoin
     ...(prices.cacheWriteUsdPerMillion !== undefined ? { cacheWriteUsdPerMillion: prices.cacheWriteUsdPerMillion } : {}) };
   validateNominalBound(nominal, { ...limits, promptTokensUpper: limits.contextTokens, pricingHash: snapshot.pricingHash,
     endpointTag: endpoint.tag });
-  return { limits, nominal: nominal as NominalPricing };
+  // An image is billed as prompt tokens on the routes Graylum admits; a route that also prices the image itself would cost more than the
+  // user's nominal charge says, so the screenshot use refuses it (imageFree false).
+  const imagePrices = [endpoint.base.image, ...endpoint.overrides.map(override => override.prices.image ?? endpoint.base.image)];
+  const imageFree = imagePrices.every(price => price === undefined || Number(price) === 0);
+  return { limits, nominal: nominal as NominalPricing, imageFree };
 }
 
 /** What a quoted call is for: the profile must cover exactly this use (free chat by default; the mentor's Skill call and its
  * organizer use the agent-turn format, V2-5; a report its own report phase, V2-7a). outputCap: a lower output limit of that
  * use (the organizer's summary limit). */
-export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer' | 'report'; requestFormat: string;
+export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer' | 'report' | typeof IMAGE_PHASE; requestFormat: string;
   purpose: 'interactive' | 'organize'; outputCap?: number };
 const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_REQUEST_FORMAT, purpose: 'interactive' };
 
@@ -99,7 +108,8 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
   catch { throw new QuoteError('TURN_PRICE_UNAVAILABLE'); }
   const state = states.get(input.modelId);
   if (!state) throw new QuoteError('TURN_PRICE_UNAVAILABLE');
-  const { limits, nominal } = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag);
+  const route = routeLimits(state.row as Row, state.snapshot, candidate.endpointTag), nominal = route.nominal;
+  let limits = route.limits;
   const outputLimit = admittedOutputLimit(candidate.outputLimit, row.data.max_tokens, use.outputCap);
   const reasoning = admitReasoning(row.data, use.purpose, limits.providerSlug, outputLimit);
   // The profile must cover this exact use, as admission checks it (paygHostPolicy.matchedProfile): its phase and purpose, its
@@ -109,10 +119,16 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],
     [{ modelId: input.modelId, phase: use.phase, outputLimit, requestFormat: use.requestFormat, reasoning }]);
   if (!profile || profile.endpointTag !== candidate.endpointTag) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
+  // The screenshot use needs the route's image allowance, a route that does not price the image itself, and a bounded request; its
+  // bound counts the largest image the allowance lets through (bodyBoundCall then measures the real one).
+  const image = use.phase === IMAGE_PHASE;
+  if (image && (!profile.imageInput || !route.imageFree || !input.bound)) throw new QuoteError('TURN_IMAGE_NOT_ADMITTED');
+  if (image) limits = { ...limits, imageUsd: '0' };
+  const imageTokens = image ? imageTokensUpper(profile.imageInput!.maxEdge, profile.imageInput!.maxEdge) : 0;
   let upperUsd: string;
   if (input.bound) {
-    const promptTokensUpper = Math.min(input.bound.promptBytes, profile.maxBytes) + profile.templateTokens + profile.marginTokens;
-    try { upperUsd = openRouterCallBound(limits, Math.min(outputLimit, input.bound.outputTokens ?? outputLimit), promptTokensUpper).upperUsd; }
+    const promptTokensUpper = Math.min(input.bound.promptBytes, profile.maxBytes) + imageTokens + profile.templateTokens + profile.marginTokens;
+    try { upperUsd = openRouterCallBound(limits, Math.min(outputLimit, input.bound.outputTokens ?? outputLimit), promptTokensUpper, imageTokens).upperUsd; }
     catch { throw new QuoteError('TURN_INPUT_TOO_LARGE'); }
   } else upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
@@ -135,6 +151,7 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     profile: { policyId: RUNTIME_PAYG_SETTING, policyVersion: parsed.data.policyVersion, profileVersion: profile.profileVersion,
       evidenceVersion: profile.evidenceVersion, pricingHash: state.snapshot.pricingHash, endpointTag: profile.endpointTag,
       nominalPricing: nominal, templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,
-      maxBytes: profile.maxBytes, maxMessages: profile.maxMessages, maxSchemaBytes: profile.maxSchemaBytes },
+      maxBytes: profile.maxBytes, maxMessages: profile.maxMessages, maxSchemaBytes: profile.maxSchemaBytes,
+      ...(image ? { imageInput: profile.imageInput } : {}) },
   };
 }
