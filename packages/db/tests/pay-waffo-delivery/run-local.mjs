@@ -21,6 +21,10 @@ import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.
 assert.ok(process.argv[2] === '--local-only' && !process.env.CI || process.argv[2] === '--ci' && process.env.CI,
   'use --local-only locally or --ci in CI; only an isolated local database is supported');
 
+// Two entry points share this file (Owner 2026-11-03 CI-SHARD-BALANCE): run-local.mjs builds the database with every migration applied
+// once and runs the behaviour cases; structure-local.mjs (passes --structure-only) runs the same build with the apply-twice and
+// structure-fingerprint check on every migration before 0221 and stops before the cases. Together they hold the checks of the old single run.
+const structureOnly = process.argv.includes('--structure-only');
 const root = resolve(import.meta.dirname, '../../../..');
 const name = `graylum-waffo-${randomUUID().slice(0, 8)}`;
 const command = (argv, input) => {
@@ -52,7 +56,7 @@ try {
       if (/\/(\d{4})_/.test(path) && Number(path.match(/\/(\d{4})_/)[1]) >= 221) { deferred.push(path); return { ok: true }; }
       return apply(readFileSync(resolve(root, path), 'utf8'));
     },
-    applyServerOnly: apply, fingerprint: process.argv.includes('--quick') ? undefined : fingerprint,
+    applyServerOnly: apply, fingerprint: structureOnly && !process.argv.includes('--quick') ? fingerprint : undefined,
   });
   assert.equal(report.failed, null, JSON.stringify(report));
   const before = fingerprint();
@@ -61,6 +65,11 @@ try {
     sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
   }
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
+  if (structureOnly) {
+    console.log(JSON.stringify({result:'PASS',part:'structure',replay:report}));
+    docker(['rm','-f',name]); // process.exit skips the finally block below; no client is connected yet
+    process.exit(0);
+  }
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'waffo', user: 'postgres', password: 'local-test-only', statement_timeout: 15000 });

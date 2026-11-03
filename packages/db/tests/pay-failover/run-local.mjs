@@ -9,6 +9,10 @@ import pg from 'pg';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+// MAINT-P1: same contract as the other run-local suites: --local-only on a developer machine, --ci in CI. Also run as its own CI suite
+// (full, with the per-migration repeat check) and, with --quick, as a child of stripe-upgrade-overlap.
+assert.ok(process.argv[2]==='--local-only'&&!process.env.CI || process.argv[2]==='--ci'&&process.env.CI,
+ 'use --local-only locally or --ci in CI; only an isolated local database is supported');
 const root=resolve(import.meta.dirname,'../../../..');
 const name=`graylum-failover-${randomUUID().slice(0,8)}`;
 const command=(argv,input)=>{
