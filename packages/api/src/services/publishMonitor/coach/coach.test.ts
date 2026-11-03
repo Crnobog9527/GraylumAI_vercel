@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { basicsPass, diagnosePost, handbookSchema, type Handbook } from './funnel';
 import { conclude, freezeBaseline, ledgerView } from './ledger';
-import { stageSection } from './sections';
+import { stageSection, thisPeriod } from './sections';
 import { buildPack, packBytes, type Cadence } from './pack';
 import { packRowsSchema } from './rows';
 import { historyScoreboard, platformShift, scoreboard } from './scoreboard';
@@ -287,6 +287,25 @@ describe('review pack (RC-2)', () => {
       const listed = new Set(period.settled_posts.map((p: { post_id: string }) => p.post_id));
       for (const id of [...period.best, ...period.worst]) expect(listed.has(id)).toBe(true);
     }
+  });
+
+  it('best and worst never list the same post: with three ranked posts the middle one is only best; with two there is no worst', () => {
+    const base = rows('A');
+    const day = (ago: number) => new Date(NOW - ago * 86_400_000).toISOString();
+    const post = (id: string, ago: number, views: number) => ({ postId: simId(id), platform: 'douyin', postedAt: day(ago), title: null, url: null,
+      pillarKey: 'p1', pillarSource: 'user' as const, formatTags: [], basis: 'day7' as const, day7: { views }, day7On: day(ago).slice(0, 10),
+      day30: null, day30On: null, importCumulative: null, importOn: null, missing: [] });
+    // One older post gives every listed post a platform median to be ranked against; the three listed ones were posted 8-10 days ago.
+    const old = post('old', 40, 100);
+    const period = (listed: ReturnType<typeof post>[]) => loose(thisPeriod({ ...base, facts: [old, ...listed], recent: [] },
+      { start: Math.floor(NOW / 86_400_000) - 7, end: Math.floor(NOW / 86_400_000) - 1, prevStart: Math.floor(NOW / 86_400_000) - 14,
+        prevEnd: Math.floor(NOW / 86_400_000) - 8 }));
+    const three = period([post('a', 8, 300), post('b', 9, 200), post('c', 10, 50)]);
+    expect(three.best).toEqual([simId('a'), simId('b')]);
+    expect(three.worst).toEqual([simId('c')]);
+    const four = period([post('a', 8, 300), post('b', 9, 200), post('c', 10, 50), post('d', 8, 20)]);
+    expect(four.worst).toEqual([simId('d'), simId('c')]);
+    expect(period([post('a', 8, 300), post('b', 9, 200)]).worst).toEqual([]);
   });
 
   it('A with two of three posts stuck at the hook is basics only: no long-run sections, basics experiments only', () => {

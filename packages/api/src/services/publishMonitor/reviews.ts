@@ -16,6 +16,7 @@ import {COACH_READ_WEEKS,readPackRows} from './coach/rows';
 import {saveCoachLedger} from './coach/persist';
 import {MAX_AUTO_TAGS,tagFromTitles} from './coach/autotag';
 import {loadCoachHandbooks} from './coach/handbooks';
+import {loadCoachMethod} from './coach/method';
 import type {Handbook} from './coach/funnel';
 import type {CheckedOutput} from './coach/output';
 
@@ -109,6 +110,10 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:Revi
   if(!state.allowed){await step(db,c,'skip','DISABLED');return;}
   // A brand's review (the coach switched on) reads the coach pack; a plain weekly review reads the own-posts pack.
   const coach=Boolean(state.businessId);
+  // The method comes from the published coach Skill; without it nothing is opened or charged and the claim is tried again later
+  // (the cause is logged by the reader as a fixed code, so a review that keeps waiting can be seen).
+  const method=coach?await loadCoachMethod(db,options.env):null;
+  if(method&&!method.ok){logger.warn('billing','weekly_review_deferred',{reviewId:c.id,code:'COACH_METHOD_UNAVAILABLE'});return;}
   const pack=coach?await readCoachPack(db,c.actorId,state.businessId!,state.cadence??'weekly',Date.now(),
    await loadCoachHandbooks(db,options.env)):await readReviewPack(db,c.actorId);
   if(!pack){await step(db,c,'skip','CONFIGURATION_REQUIRED');return;}
@@ -116,7 +121,7 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:Revi
   if(saved.error||saved.data!==true)return;
   const result=await runReviewTurn(turnDeps(db,options),{id:c.id,actorId:c.actorId,sessionId:c.sessionId,requestId:c.requestId,
    modelId:c.modelId!,maxCostUsd:c.maxCostUsd,...(state.cadence?{cadence:state.cadence}:{}),
-   attempt:(state.attempt??1),coach},pack,async()=>(await step(db,c,'authorize')).allowed,async()=>{
+   attempt:(state.attempt??1),coach,...(method?.ok?{coachMethod:method.text}:{})},pack,async()=>(await step(db,c,'authorize')).allowed,async()=>{
     const visible=await db.rpc('publish_monitor_pack_visible',{p_actor_id:c.actorId,p_result:pack});
     return !visible.error&&visible.data===true;
    });
