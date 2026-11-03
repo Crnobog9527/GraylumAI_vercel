@@ -99,8 +99,10 @@ test('daily: the benchmark confirm opens one turn and fills the table @daily', a
   const mark = await lastTurnId(gold.id);
   try { await completeBenchmarkStep(page, meter); }
   catch (error) {
-    // Known supplier gap (Xiaohongshu search returned no data, 2026-11-03): no candidate card at all is a skip, not a failure.
-    if (await page.locator(CANDIDATES).count()) throw error;
+    // Known supplier gap (Xiaohongshu search returned no data, 2026-11-03): only the page's own "the supplier gave nothing" notice
+    // makes this a skip. No keyword card, a failed research query or any other assertion stays a failure.
+    const supplierEmpty = page.getByText(/这次没有取到数据|对标数据暂时取不到/);
+    if (await page.locator(CANDIDATES).count() || !(await supplierEmpty.count())) throw error;
     await meter.finishJourney('daily: benchmark (no candidates)');
     test.skip(true, 'skipped: the search supplier returned no candidates (供应商无数据)');
   }
