@@ -319,6 +319,23 @@ Seedream 已被 Owner 排除；Qwen、混元同属中国厂商，Owner 没提，
 **另两项（Owner 已于 0.2 批准，真改时单独审查）：**① 在 `scripts/db-function-closure.mjs` 名单里登记 3 张模板目录表（"往名单加表要 Owner 批准"）；
 ② `erasure-storage-buckets.test.mjs` 新增"不含用户数据的平台桶"清单（见 6.2）。
 
+### 6.5 可借用的开源（Owner 要求尽量借用现成东西；总控调研，2026-11-03 转述）
+
+许可证结论来自总控的调研，**本方案没有逐项复核**；真正引入前，实施窗口要在 PR 里贴出该项目许可证原文链接和版本，并让独立审查确认。
+
+| 类别 | 项目 | 用在哪 | 怎么用 |
+|---|---|---|---|
+| **直接作为依赖（MIT）** | `react-photo-album` | 模板系列网格、"我的图片"瀑布流（6.3 的 `SeriesCard` 列表、`MyImages`） | 正常 `pnpm add`，锁精确版本；仓库目前没有这个依赖（已检查 `apps/web/package.json`） |
+| | `react-dropzone` | 参考图上传（`UploadZone`） | 同上；文件类型、大小、张数仍按我们自己的 `uploadPolicy` 校验，它只负责选文件 |
+| **只参考交互，改写后再用（MIT）** | `fancyboi999/Loomic` 的 `home-discovery-gallery`、`home-example-browser`、`image-attachment-bar`、`canvas-image-gen-panel` | 看模板卡片、示例浏览、上传预览、生成面板的做法，对应弹窗左右两栏和结果区 | 不整份拷贝；按我们的组件规范和 `DESIGN.md` 改写。**它的积分、Agent、Worker 一律不碰**，我们的计费、对话、回合走主路径 |
+| **只参考内容（MIT）** | `freestylefly/awesome-gpt-image-2` | 模板分类、提示词的结构写法 | 只学分类与结构；**提示词我们自己写**，商用前逐条核对出处与版权，来源记在模板备注里（第 7 节） |
+| **二期才用** | Excalidraw 或 `react-konva` | 画布编辑、局部重绘 | 不进 MVP；二期再评估 |
+| **禁用** | tldraw（生产环境需商业授权）、LobeHub（衍生品需授权）、AGPL / GPL 项目、没有许可证的项目、MuAPI 一类 | — | 不引入、不参考代码 |
+
+- **预计节省 0.5–1.5 天**，主要在网格、上传、弹窗；计费主路径、退款、对话落库没有现成的可借，整体排期（第 11 节）不变。
+- **引入规则**：① 保留原项目的版权声明（依赖随包带，改写的代码在文件头注明来源与许可证）；② 凡涉及**上传、图片 URL、Markdown 渲染**的借用代码，按我们的校验和 XSS 规则重新过一遍（魔数校验、`uploadPolicy`、签名链接、`safe-error-message`、不渲染不可信 HTML）；③ 新增依赖要过 CI 的 Dependency Review / Audit，不绕过。
+- 引入任何一个新依赖或拷贝一段开源代码，都在对应 PR 的"改动"一栏列出名称、版本、许可证。
+
 ## 7. 模板、系列与 Skill 设计
 
 **目标**：Owner 能挑选、排序、上下架模板；用户点一下就做同款。**对用户统一叫"技能 / Skill"，内部不强求每个都配 Skill**（Owner 2026-11-03）。
