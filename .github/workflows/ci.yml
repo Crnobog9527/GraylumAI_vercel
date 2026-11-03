@@ -4,8 +4,6 @@ name: CI
 on:
   pull_request:
     branches: [main, staging]
-    # The default types plus ready_for_review: marking a draft ready runs CI again, and that run is judged as a ready pull request.
-    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main, staging]
 
@@ -141,10 +139,10 @@ jobs:
       - name: Test required-check contracts
         run: ruby .github/scripts/test-ci-workflows.rb
 
-  # Owner 2026-11-01: two cases skip the two slow database jobs below. A draft pull request runs the quick checks only; the
-  # database jobs run when it is marked ready. A ready pull request into staging whose every changed file is on the allow-list in
-  # scripts/ci-test-scope.mjs (documentation, and page / component / style files with their tests) skips them too. Everything else
-  # runs the full suite: pushes, scheduled runs, ready pull requests into main, and any run whose changed-file list cannot be read.
+  # Owner 2026-11-01: one case skips the two slow database jobs below. A pull request into staging whose every changed file is on the
+  # allow-list in scripts/ci-test-scope.mjs (documentation, and page / component / style files with their tests) skips them. Everything
+  # else runs the full suite: pushes, scheduled runs, pull requests into main, and any run whose changed-file list cannot be read.
+  # Owner 2026-11-03: a draft pull request is judged like a ready one (it no longer skips them just for being a draft).
   scope:
     name: Decide test scope
     runs-on: ubuntu-latest
