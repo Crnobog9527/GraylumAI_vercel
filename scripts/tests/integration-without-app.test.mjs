@@ -20,17 +20,16 @@ const runtimeReport = (extra = [], failed = 0) => ({
     file(runtime.files[1], [pass('RUNTIME: streaming saved receipt replays')]),
     file(runtime.files[2], [pass('RUNTIME: terminal paid reply cancels once')]),
     file(runtime.files[3], [pass('RUNTIME: H1 frozen history replays')]),
-    file(runtime.files[4], [pass('RUNTIME: R13 capture and confirmation')]),
-    file(runtime.files[5], [pass('RUNTIME: v2 R13 financial conservation')]),
-    file(runtime.files[6], [pass('RUNTIME: platform failure restores charged credits once')]),
-    file(runtime.files[7], [pass('RUNTIME: stale charged rounds are reported through the function')]),
-    file(runtime.files[8], [pass('RUNTIME: Fusion group admission, streamed dispatch, saved body, verdict and per-run settlement')]),
-    file(runtime.files[9], [pass('RUNTIME: a research mentor turn claims the subcall between its model calls')]),
-    file(runtime.files[10], [pass('RUNTIME: library document deleted mid-stream hides late text, deltas and result and keeps no copy')]),
-    file(runtime.files[11], [pass('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in three writes, settles once')]),
-    file(runtime.files[12], [pass('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Skill file, applies the organizer patch')]),
-    file(runtime.files[13], [pass('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns')]),
-    file(runtime.files[14], [pass('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes')]),
+    file(runtime.files[4], [pass('RUNTIME: v2 R13 financial conservation')]),
+    file(runtime.files[5], [pass('RUNTIME: platform failure restores charged credits once')]),
+    file(runtime.files[6], [pass('RUNTIME: stale charged rounds are reported through the function')]),
+    file(runtime.files[7], [pass('RUNTIME: Fusion group admission, streamed dispatch, saved body, verdict and per-run settlement')]),
+    file(runtime.files[8], [pass('RUNTIME: a research mentor turn claims the subcall between its model calls')]),
+    file(runtime.files[9], [pass('RUNTIME: library document deleted mid-stream hides late text, deltas and result and keeps no copy')]),
+    file(runtime.files[10], [pass('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in three writes, settles once')]),
+    file(runtime.files[11], [pass('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Skill file, applies the organizer patch')]),
+    file(runtime.files[12], [pass('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns')]),
+    file(runtime.files[13], [pass('RUNTIME: CORE-PATH-V2 V2-6: a free chat searches once: one tool row, the continuation in three writes')]),
   ],
 });
 
@@ -45,7 +44,7 @@ test('name patterns select the suite prefix and exclude exactly the app-only cas
 test('verification passes only when every non-excluded case passed', () => {
   const result = verifyWithoutAppResults('runtime', runtimeReport());
   assert.deepEqual(result.errors, []);
-  assert.equal(result.passed, 15);
+  assert.equal(result.passed, 14);
   assert.equal(result.skipped, 5);
 });
 

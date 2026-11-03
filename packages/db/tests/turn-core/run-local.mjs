@@ -802,7 +802,7 @@ try{
  await topicAccountCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,report});
  await topicRebindCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await workResultCases({c,db,one,open,begin,record,close,account,policy,refusal,report});
- await bRewriteCases({c,db,one,account,open,refusal,report});
+ await bRewriteCases({c,db,one,account,open,refusal,peer,report});
  await holdCases({c,one,open,begin,record,close,balance,account,policy,refusal,peer,report});
  await stopLossCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await workContentCases({c,one,open,begin,record,close,account,policy,refusal,report});

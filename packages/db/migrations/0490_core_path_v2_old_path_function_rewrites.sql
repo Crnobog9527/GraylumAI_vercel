@@ -11,7 +11,7 @@
 --     turn_open returns, not old executions cancelled for it.
 --   runtime_test_actor_access: the "has an old run of a test window" branch is gone (no turn records a window); the window list stays.
 --   opc_capture_apply: capture of old completed mentor executions has nothing left to process (a mentor reply is a turn's reply);
---     the guards and the draft/scope refusal stay, the batch is empty, an execution id is refused.
+--     the guards, the draft/scope refusal and the lock order (session row, then project) stay, the batch is empty, an execution id is refused.
 --   fusion_review_fee_settle: a review's price is its jury turn's freeze, not a fee row: no fee row, returns NULL as before for a review without one.
 --   fusion_review_archive_reconcile: an archived business ends its running or paused reviews as incomplete (source_archived); no old fee,
 --     billing group or provider call remains to cancel or settle.
@@ -20,6 +20,15 @@
 -- Repeatable: whole-function CREATE OR REPLACE. Recovery: re-apply the previous text from git history; nothing is written or removed.
 BEGIN;
 SET LOCAL lock_timeout='5s';
+
+-- Guard (controller 2026-11-03): no old review fee may still be held. fusion_review_fee_settle below no longer settles anything and
+-- batch F drops fusion_review_fees, so a held fee would vanish with the table: refuse instead (staging held 0 rows when checked).
+DO $guard$
+BEGIN
+  IF EXISTS(SELECT 1 FROM fusion_review_fees WHERE state='held') THEN
+    RAISE EXCEPTION 'V2_12_B_HELD_REVIEW_FEES: settle or refund the held review fees before this migration';
+  END IF;
+END $guard$;
 
 CREATE OR REPLACE FUNCTION public.runtime_session_result_view(r runtime_session_results, p_versions integer)
  RETURNS jsonb
@@ -81,6 +90,9 @@ BEGIN
  SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND draft_id=p_draft_id;
  IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)),false)
  THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ -- Lock order unchanged from before: the draft's session row, then the project (every checklist writer takes them the same way).
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
+ PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  -- Nothing is left to capture from: a mentor reply is a turn's reply (applied by turn_close), and no execution exists to name.
  IF p_execution_id IS NOT NULL THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
  RETURN jsonb_build_object('processed','[]'::jsonb,'remaining',0,'hasMore',false);

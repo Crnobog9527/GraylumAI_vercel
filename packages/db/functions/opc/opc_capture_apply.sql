@@ -16,6 +16,9 @@ BEGIN
  SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND draft_id=p_draft_id;
  IF d.draft_id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)),false)
  THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
+ -- Lock order unchanged from before: the draft's session row, then the project (every checklist writer takes them the same way).
+ PERFORM 1 FROM runtime_sessions WHERE id=d.session_id AND actor_id=p_actor_id FOR UPDATE;
+ PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  -- Nothing is left to capture from: a mentor reply is a turn's reply (applied by turn_close), and no execution exists to name.
  IF p_execution_id IS NOT NULL THEN RAISE EXCEPTION 'OPC_CAPTURE_DENIED';END IF;
  RETURN jsonb_build_object('processed','[]'::jsonb,'remaining',0,'hasMore',false);

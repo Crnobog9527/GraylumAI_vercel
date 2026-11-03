@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {read} from '../runtime-view-perf/local-db.mjs';
 
-export async function bRewriteCases({c,db,one,account,open,refusal,report}){
+export async function bRewriteCases({c,db,one,account,open,refusal,peer,report}){
  db.sql(read('packages/db/tests/turn-core/b-rewrite-old.sql'));
  const source=a=>one('select turn_test.topic_source($1) v',[a.actor]);
  const resultRow=async(a,session,over={})=>{
@@ -118,5 +118,36 @@ export async function bRewriteCases({c,db,one,account,open,refusal,report}){
   assert.equal(replayed.reviewId??replayed.id,reviewId,'a replay of the archived business\'s review still answers');
   await c.query('update opc_businesses set archived_at=null where id=$1',[src.business]);
   report.checks.push('B-rewrite fusion_review_start / fusion_review_archive_reconcile: a known request replays (also after archiving), anything else is invalid or a conflict; an archived business ends its running review as incomplete (source_archived)');
+ }
+ // 7. opc_capture_apply keeps its lock order: it waits for a writer holding the project row (as the old function did before any read of
+ // an execution), and goes on when the writer commits.
+ {
+  const a=await account(1000),src=await source(a),writer=await peer();
+  try{
+   await writer.query('begin');
+   await writer.query('select 1 from artifact_projects where id=$1 for update',[src.project]);
+   let done=false;
+   const pending=one('select opc_capture_apply($1,$2,null) v',[a.actor,src.draft]).then(v=>{done=true;return v;});
+   await new Promise(r=>setTimeout(r,500));
+   assert.equal(done,false,'the capture waits for the project lock');
+   await writer.query('commit');
+   assert.deepEqual(await pending,{processed:[],remaining:0,hasMore:false});
+  }finally{await writer.end();}
+  report.checks.push('B-rewrite opc_capture_apply: still takes the draft session row, then the project row, and waits for a writer that holds the project');
+ }
+ // 8. The migration refuses to run while an old review fee is still held (batch F drops the table; a freeze must not vanish with it).
+ {
+  const a=await account(1000);
+  const migration=read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql');
+  const review=randomUUID();
+  await c.query("insert into fusion_review_fees(review_id,actor_id,credits,pre_deduct_id,state) values($1,$2,100,$3,'held')",[review,a.actor,randomUUID()]);
+  try{
+   assert.match(await refusal(c.query(migration)),/V2_12_B_HELD_REVIEW_FEES/);
+  }finally{
+   await c.query('rollback').catch(()=>{});
+   await c.query('delete from fusion_review_fees where review_id=$1',[review]);
+  }
+  await c.query(migration);   // no held fee left: applies again (repeatable)
+  report.checks.push('B-rewrite migration 0490 refuses to run while a review fee is held, and applies again once none is');
  }
 }

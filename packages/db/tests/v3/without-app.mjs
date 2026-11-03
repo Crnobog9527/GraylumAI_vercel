@@ -8,7 +8,6 @@ export const WITHOUT_APP_SUITES = {
   runtime: {
     files: ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts',
       'src/services/runtime/terminalReply.integration.ts', 'src/services/runtime/historyCache.integration.ts',
-      'src/services/opc/agentCorePlanB.integration.ts',
       'src/services/bill2/agentCorePlanB.integration.ts', 'src/services/runtime/platformFailure.integration.ts',
       'src/services/runtime/staleChargedRounds.integration.ts',
       'src/services/fusion/fusion.integration.ts', 'src/services/runtime/researchTurn.integration.ts',
