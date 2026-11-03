@@ -8,7 +8,7 @@ import {
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 import { REOPENED_HINT } from "@/components/chat-display/turn-steps-model";
-import { isPaygWaiting } from "@/lib/payg-wait";
+import { isPaused } from "./turn-pause";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving } from "./stop-reply";
 
 /** Under a reply that stopped at the single-answer length limit (completeness `length_limit`), outside its text. */
@@ -260,8 +260,8 @@ export function mentorReplyDisplay(source: MentorReplySource): { text: string; c
   if (body.kind === "invalid") stored = INVALID_REPLY_NOTICE;
   else if (body.kind === "oversized") stored = OVERSIZED_REPLY_NOTICE;
   // The turn's own state (正在回复…, 费用待核实, 已停止) comes first; the omitted-history note is added under it.
-  // A BILL-PAYG pause carries its own notice and actions (payg-wait.ts).
-  const state = stored || card || isPaygWaiting(source.state) ? undefined : unavailableNotice(source);
+  // A BILL-PAYG pause carries its own notice and actions.
+  const state = stored || card || isPaused(source.state) ? undefined : unavailableNotice(source);
   const stateNotice = state && historyNotice ? { ...state, text: state.text + "\n" + historyNotice.text } : state ?? historyNotice;
   return withNotice(stored, truncated ?? stateNotice);
 }

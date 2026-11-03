@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { erasureRpcDiagnostic } from './rpcDiagnostics';
-import type { BillingRpc } from '../turn/provider/service';
+import type { BillingRpc } from '../turn/provider/frozenRun';
 import {
   batchSchema, beginSchema, contentRemaining, localSchema,
   resultSchema, storageReadySchema, storageSchema, workSchema,

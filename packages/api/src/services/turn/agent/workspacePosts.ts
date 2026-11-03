@@ -37,11 +37,6 @@ export async function ownPostsBudget(admin:SupabaseClient,actor:string,on:boolea
  const bytes=(r.data>0?OWN_POSTS_RESERVE:1200)+Buffer.byteLength(OWN_POSTS_INSTRUCTIONS);
  return fits(bytes)?{on:true,calls:r.data>0?Math.max(baseCalls,6):baseCalls,bytes}:{on:false,calls:baseCalls,bytes:0};
 }
-export function filterPostEntries(source:unknown,enabled:boolean):unknown{
- if(enabled||!source||typeof source!=='object')return source;
- const value=source as {kind?:string;entries?:Array<{kind?:string}>};
- return value.kind==='workspace_index'?{...value,entries:value.entries?.filter(e=>e.kind!=='my_posts')}:source;
-}
 const NOT_CONNECTED='我还看不到你发布的作品数据。你可以在『作品数据』里连接账号或导入表格，我就能按真实数据给建议。这次先按你的定位和资料来。';
 export const NO_ENTITLEMENT='读你的作品数据是 Pro/Gold 会员功能，这次先按定位和资料回答';
 const unavailable={kind:'unavailable',dependencies:[]};

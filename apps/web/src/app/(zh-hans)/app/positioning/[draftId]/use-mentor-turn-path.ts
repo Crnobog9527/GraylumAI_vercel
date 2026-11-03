@@ -55,7 +55,6 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
   const projected = useMemo(() => view ? turnHistory(view) : { executions: [], turns: [], activeExecution: null }, [view]);
   const history = useRef<TurnHistory>(projected);
   history.current = projected;
-  const merged = useRef<{ old?: unknown; projected?: unknown; data?: unknown }>({});
   const paused = view?.activeTurn?.pauseReason === "waiting_credits" ? view.activeTurn : null;
   // The sidebar balance while a turn holds its freeze (a draft or reply being made, also after a refresh): see credits-label.ts.
   const creditsBusy = Boolean(sessionId) && turnBusyForCredits({ viewRead: view !== null, viewFailed: failed, busy: Boolean(view?.activeTurn),
@@ -82,16 +81,15 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
           history.current)));
       };
     },
-    /** The old view, with this conversation's turns after its executions; refetching reads both. */
-    withOld<T extends { data?: unknown; refetch: () => Promise<unknown> }>(old: T): T {
-      if (!on && !projected.executions.length) return old;
-      // One object per change: the page's effects depend on this data.
-      if (merged.current.old !== old.data || merged.current.projected !== projected) {
-        const data = old.data as { executions?: unknown[]; activeExecution?: string | null } | undefined;
-        merged.current = { old: old.data, projected, data: data && { ...data, executions: [...(data.executions ?? []), ...projected.executions],
-          activeExecution: data.activeExecution ?? projected.activeExecution } };
-      }
-      return { ...old, data: merged.current.data, refetch: async () => { await reload(); return old.refetch(); } };
+    /** The conversation's history as the page reads it: this conversation's turns projected as executions (V2-12: the old view is gone). */
+    history: {
+      data: view ? { executions: projected.executions, activeExecution: projected.activeExecution } : undefined,
+      isError: failed && !view,
+      refetch: async () => {
+        const next = await reload();
+        return { data: next ? { executions: turnHistory(next).executions, activeExecution: turnHistory(next).activeExecution } : undefined,
+          error: next ? null : new Error("TURN_VIEW_UNREADABLE") };
+      },
     },
     /** A turn this page no longer streams (a reload, a dropped stream): wait for its close, never send again. */
     settled: async (executionId: string): Promise<AgentTurnOutcome> => {

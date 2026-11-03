@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
 import {
-  assertPath, identityOf, readSkillResource, readSkillResources, sameIdentity, validateDescriptor,
-  readResourceBatch, sha256, SkillLoadError, type SkillSource, type PackageDescriptor,
+  identityOf, readSkillResource, readSkillResources, validateDescriptor,
+  readResourceBatch, SkillLoadError, type SkillSource, type PackageDescriptor,
 } from '../../skills/loader';
 import type {RuntimeTool} from '../agent/runner';
 
@@ -42,41 +42,9 @@ export const skillFileBinding = z.object({
 }).strict();
 export type SkillFileBinding = z.infer<typeof skillFileBinding>;
 export const skillFileParameters = z.object({path: z.string().min(1).max(240)}).strict();
-const frozenFile = skillFileBinding.extend({
-  path: z.string().min(1).max(240), sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  content: z.string().max(SKILL_FILE_MAX_BYTES),
-}).strict();
-export type FrozenSkillFile = z.infer<typeof frozenFile>;
-
 /** Only a verified package identity enters the frozen execution, never a caller's selection. */
 export function freezeSkillFileBinding(descriptor: PackageDescriptor): SkillFileBinding {
   return skillFileBinding.parse(identityOf(validateDescriptor(descriptor)));
-}
-
-/** Replay retains saved bytes but still checks current publication/revocation access. */
-export async function readFrozenSkillFile(input: {
-  source: SkillSource; binding: SkillFileBinding; arguments: unknown; saved: unknown | null;
-}): Promise<FrozenSkillFile> {
-  const binding = skillFileBinding.parse(input.binding);
-  const {path} = skillFileParameters.parse(input.arguments);
-  assertPath(path);
-  const descriptors = await input.source.list();
-  const descriptor = descriptors.map(validateDescriptor).find(item => sameIdentity(item, binding));
-  if (!descriptor || await input.source.state(binding) !== 'enabled')
-    throw new Error('RUNTIME_SKILL_FILE_DENIED');
-  const file = descriptor.files.find(item => item.path === path);
-  if (!file) throw new Error('RUNTIME_SKILL_FILE_DENIED');
-  if (file.bytes > SKILL_FILE_MAX_BYTES) throw new Error('RUNTIME_SKILL_FILE_TOO_LARGE');
-  if (input.saved !== null) {
-    const saved = frozenFile.parse(input.saved);
-    if (!sameIdentity(saved, binding) || saved.path !== path || saved.sha256 !== file.sha256 ||
-      Buffer.byteLength(saved.content) !== file.bytes || sha256(saved.content) !== file.sha256)
-      throw new Error('RUNTIME_SKILL_FILE_CONFLICT');
-    return saved;
-  }
-  const content = await readSkillResource(input.source, binding, path, SKILL_FILE_MAX_BYTES);
-  if (content.includes('\0')) throw new Error('RUNTIME_SKILL_FILE_INVALID');
-  return {...binding, path, sha256: file.sha256, content};
 }
 
 export function skillFileTool(execute: RuntimeTool['execute']): RuntimeTool {

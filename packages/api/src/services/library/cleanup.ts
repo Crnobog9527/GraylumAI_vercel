@@ -51,12 +51,10 @@ export async function cleanupLibrary(client: SupabaseClient, options: {
       })) released++;
     } catch { failed++; }
   }
-  // CORE-PATH-V2 V2-12 F: no finished execution holds a copy of a deleted document any more (runtime_library_propagate is dropped).
-  const references = { processed: 0, waiting: 0 };
   const backlog = await libraryRpc<{ pending: number; overdue: number; oldestDeletedAt: string | null }>(
     client, 'library_cleanup_backlog', { a: options.actorId ?? null },
   );
-  return { checked, released, failed, references, ...backlog, budgetExhausted: checked < rows.length };
+  return { checked, released, failed, ...backlog, budgetExhausted: checked < rows.length };
 }
 
 /** Batch ownership lookup means retained/claimed objects never consume one network round trip each.

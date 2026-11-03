@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { readProviderPrices, resolveProviderPrice, resolveProviderMultipliers } from '../billingProviderPrices';
 import { decimal } from '../turn/provider/decimal';
-import type { BillingRpc } from '../turn/provider/service';
+import type { BillingRpc } from '../turn/provider/frozenRun';
 import { toolCallPolicy, type ToolCallPolicy } from '../turn/provider/toolBilling';
 import { requestIdentity, ResearchPause, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest } from '../research/runtime/subcall';
 import { TURN_BILLING_RUN } from '../research/runtime/store';

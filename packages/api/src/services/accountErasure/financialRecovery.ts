@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import type { BillingRpc } from '../turn/provider/service';
+import type { BillingRpc } from '../turn/provider/frozenRun';
 import { createRuntimeBudget, type RuntimeBudget } from '../turn/settings/budget';
 
 // Only the counts and reasons are read. The items (old runs) are not settled from here any more: a run still open keeps the

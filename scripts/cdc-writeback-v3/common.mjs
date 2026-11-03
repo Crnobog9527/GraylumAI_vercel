@@ -63,14 +63,20 @@ export function organizerInstructions(source) {
   return value;
 }
 
-// opcService.prepareStep composes the organizer system prompt with these lines; a different composition needs a new freeze.
+// The organizer system prompt is composed by these lines; a different composition needs a new freeze.
+// Checkouts before CORE-PATH-V2 F compose it in opcService.prepareStep (opc/service.ts); from F on the turn path composes it in
+// turn/mentorPrompt.ts organizerInstructions. The frozen prompt text is the same either way.
 export const composition = Object.freeze([
   'organizerInstructions += "\\n" + ANSWER_CARD_RULE;',
   'if (organizerInstructions && opening) organizerInstructions += "\\n" + OPENING_EXTRACTION_RULE;',
 ]);
+export const turnComposition =
+  "const host = ORGANIZER_INSTRUCTIONS + '\\n' + ANSWER_CARD_RULE + (opening ? '\\n' + OPENING_EXTRACTION_RULE : '');";
 /** The complete system prompt production sends for a non-opening organizer turn (every turn in this roster). */
-export function organizerSystem({ prompt, answerCard, service }) {
-  assert(composition.every(line => service.includes(line)), 'V3_PROMPT_COMPOSITION_CHANGED');
+export function organizerSystem({ prompt, answerCard, service, mentor }) {
+  const composed = (typeof service === 'string' && composition.every(line => service.includes(line)))
+    || (typeof mentor === 'string' && mentor.includes(turnComposition));
+  assert(composed, 'V3_PROMPT_COMPOSITION_CHANGED');
   const rule = stringConstant(answerCard, 'ANSWER_CARD_RULE');
   assert(rule.includes('answeredCard'), 'V3_PROMPT_VALUE');
   return organizerInstructions(prompt) + '\n' + rule;

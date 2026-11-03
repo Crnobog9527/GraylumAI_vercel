@@ -31,6 +31,9 @@ export function loadable(account, tag = '') {
       created_at: p.visibility === 'daily' ? p.postedAt : `${connectedOn[p.platform]}T12:00:00Z` })),
     snapshots: account.snapshots.map(s => ({ platform: s.platform, post_key: s.postKey, captured_on: s.capturedOn,
       metrics: s.metrics, missing: s.missingFields })),
+    diagnostics: (account.diagnostics ?? []).map(x => ({ platform: x.platform,
+      platform_post_id: account.posts.find(p => p.key === x.postKey).platformPostId, source: x.source, rates: x.rates,
+      opening_text: x.openingText, video_seconds: x.videoSeconds, drop_second: x.dropSecond, captured_on: x.capturedOn })),
   };
 }
 
@@ -102,6 +105,16 @@ BEGIN
  LEFT JOIN social_posts sp ON sp.connection_id=(ids->>s.platform)::uuid AND sp.platform_post_id=p.platform_post_id
  WHERE s.post_key IS NULL OR sp.id IS NOT NULL
  ON CONFLICT DO NOTHING;
+ -- Back-office rate diagnostics only where migration 0407 created their table.
+ IF to_regclass('public.social_post_diagnostics') IS NOT NULL THEN
+  INSERT INTO social_post_diagnostics(actor_id,business_id,post_id,platform,source,rates,opening_text,video_seconds,drop_second,
+   captured_on,confirmed_at)
+  SELECT a,b,sp.id,x.platform,x.source,x.rates,x.opening_text,x.video_seconds,x.drop_second,x.captured_on,now()
+  FROM jsonb_to_recordset(d->'diagnostics') x(platform text,platform_post_id text,source text,rates jsonb,opening_text text,
+   video_seconds integer,drop_second integer,captured_on date)
+  JOIN social_posts sp ON sp.connection_id=(ids->>x.platform)::uuid AND sp.platform_post_id=x.platform_post_id
+  ON CONFLICT DO NOTHING;
+ END IF;
 END $do$;`;
 }
 

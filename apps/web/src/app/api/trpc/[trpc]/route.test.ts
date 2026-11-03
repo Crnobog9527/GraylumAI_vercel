@@ -70,7 +70,7 @@ it('DB-PERF PR-5a: reads the maintenance switch at most once per two seconds; a 
  let maintenance=false;const reads=vi.fn(async()=>({data:{value:maintenance},error:null}));
  mocks.admin.mockReturnValue({from:()=>({select:()=>({eq:()=>({maybeSingle:reads})})})});
  mocks.handle.mockImplementation(async()=>new Response('handled'));
- const req=()=>({url:'http://localhost/api/trpc/runtime.executeStream',nextUrl:{pathname:'/api/trpc/runtime.executeStream'},
+ const req=()=>({url:'http://localhost/api/trpc/runtime.start',nextUrl:{pathname:'/api/trpc/runtime.start'},
   headers:new Headers(),cookies:{getAll:()=>[]}} as unknown as NextRequest);
  expect(await(await POST(req())).text()).toBe('handled');
  maintenance=true;now+=1_500;

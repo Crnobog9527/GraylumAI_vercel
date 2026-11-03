@@ -4,7 +4,6 @@ import { RUNTIME_CHOICES_STALE_MS } from "@/lib/runtime-choices";
 import { trpc } from "@/trpc/client";
 import { TurnRefused } from "./mentor-turn-path";
 import { useTurnReport } from "./use-turn-report";
-import { usePaygResume } from "@/lib/use-payg-resume";
 import { liveReplyAfter, startLiveReply, type LiveReply } from "./agent-turn-display";
 import { readAgentTurn } from "./mentor-turn";
 import { finishReportStop, reportStopBufferAfter, reportStopController, type ReportStopPhase } from "./report-stop";
@@ -59,7 +58,6 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const refusal = reportResultRefusal(result);
     if (refusal) setRefusal(refusal);
   };
-  const payg = usePaygResume(reread, refuse);
 
   const timers = useRef<RecoveryTimers | null>(null);
   useEffect(() => {
@@ -167,7 +165,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   };
 
   return {
-    executionId, status: shown, live, streaming, refusal, payg, offer,
+    executionId, status: shown, live, streaming, refusal, offer,
     start: () => void run("start"),
     restart: () => void run("restart"),
     stop: () => void stop(),

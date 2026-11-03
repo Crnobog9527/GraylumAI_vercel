@@ -6,6 +6,7 @@ import { createRuntimeBudget, RUNTIME_WORK_MS } from './settings/budget';
 import { modelCall, TurnStop, type ModelCall } from './call';
 import type { CounterStore } from './limiter';
 import { TurnDatabaseError, type TurnDatabase } from './db';
+import { logger } from '../../lib/logger';
 
 const limits = { providerSlug: 'synthetic', contextTokens: 10000, promptUsdPerMillion: '2', completionUsdPerMillion: '10', requestUsd: '0' };
 const identity = { provider: 'openrouter' as const, account: 'test', model: 'test/model', protocol: 'openrouter-chat-v1' as const,
@@ -83,6 +84,34 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     }
   });
 
+  it('a request that does not match its frozen quote is refused before sending: the row is closed as unsent and nothing is charged', async () => {
+    const payg = (bytes: number) => ({ policyId: 'policy', policyVersion: 'v1', profileVersion: 'v1', evidenceVersion: 'fixture-v1', bytes,
+      templateTokens: 0, marginTokens: 0, promptTokensUpper: bytes, messages: 1, tools: 0, schemaBytes: 0,
+      pricingHash: call.pricing.pricingHash, endpointTag: 'synthetic', nominalPricing: call.pricing });
+    const exact = Buffer.byteLength(body);
+    // The frozen byte count (or the frozen upper bound) differs from the body that is about to leave.
+    for (const frozenIdentity of [{ ...identity, payg: payg(exact + 1) }, { ...identity, upperUsd: '1' }]) {
+      const h = harness(), transport = vi.fn();
+      await expect(modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) },
+        { ...call, identity: frozenIdentity }, body)).rejects.toThrow('TURN_CALL_DENIED');
+      expect(kinds(h.writes)).toEqual(['begin', 'record:not_sent']);
+      expect(h.writes[1]![1]).toMatchObject({ actualUsd: null, nominalUsd: null });
+      expect(transport).not.toHaveBeenCalled();
+    }
+  });
+
+  it('an erasure that began while the call ran: the final receipt keeps billing, but the answer is not handed back', async () => {
+    const h = harness(), transport = vi.fn(async () => new Response(completion('gen-9'), { headers: { 'x-generation-id': 'gen-9' } }));
+    const record = h.deps.db.record as unknown as ReturnType<typeof vi.fn>;
+    record.mockImplementation(async (a: Record<string, unknown>) => { h.writes.push(['record', a]);
+      return { status: a.status, creditsLow: false, ...quiet, accountErasing: true }; });
+    const failure = await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body).catch(e => e);
+    expect(failure).toBeInstanceOf(TurnStop);
+    expect(failure.code).toBe('TURN_TOMBSTONED');
+    expect(JSON.stringify([failure.message, failure.code])).not.toContain('hello');
+    expect(kinds(h.writes)).toEqual(['begin', 'identity', 'record:ok']);
+  });
+
   it('the stop-loss refusing a model call mid-turn is a stop that survives the SDK, and nothing is sent', async () => {
     const h = harness({ begin: () => { throw new TurnDatabaseError('STOP_LOSS_REACHED'); } }), transport = vi.fn();
     const failure = await modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body).catch(e => e);
@@ -136,6 +165,22 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
     expect(JSON.parse(out).choices[0].message.content).toBe('hello');
     expect(kinds(h.writes)).toEqual(['begin', 'identity']);
     expect(h.writes[1]![1]).toMatchObject({ providerId: 'gen-body' });
+  });
+
+  it('says why an unknown call ended: the transport issue, status and whether a provider id was seen (round 12, turn 2024)', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const h = harness();
+    const transport = vi.fn(async () => new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"id":"gen-9","choi'));
+      controller.error(new Error('connection lost'));
+    } }), { headers: { 'x-generation-id': 'gen-9' } }));
+    await expect(modelCall({ ...h.deps, adapter: openRouterAdapter({ credential: async () => 'KEY', transport }) }, call, body))
+      .rejects.toThrow('TURN_CALL_UNKNOWN');
+    const line = warn.mock.calls.find(([, label]) => label === 'turn_call_unknown');
+    warn.mockRestore();
+    expect(line?.[2]).toMatchObject({ turnId: 1, seq: 1, stage: 'observation', httpStatus: 200, complete: false,
+      transportIssue: 'body_interrupted', providerIdSeen: true });
+    expect(JSON.stringify(line)).not.toContain('KEY');
   });
 
   it('a final cost without the token counts is not charged as min(c, U) here: the call stays open for the recovery lookup', async () => {

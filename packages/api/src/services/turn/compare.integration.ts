@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from '../fusion/settings';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
+import { ensurePositioningProfilePlans } from '../__tests__/fixtures/positioningProfilePlans';
 import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
 import type { RuntimeCallGate } from './admission/newWorkGate';
 import type { PositioningClassifier } from './admission/positioningGate';
@@ -36,6 +37,7 @@ let saved: Array<{ key: string; value: unknown }> = [];
 const models = PAIRS.map(() => randomUUID());
 beforeAll(async () => {
   await db.connect();
+  await ensurePositioningProfilePlans(db);
   saved = (await db.query('select key,value from system_settings where key = any($1)', [SETTINGS])).rows;
   const profiles = PAIRS.map(([model, endpointTag]) => ({ model, endpointTag, protocol: 'openrouter-chat-v1', profileVersion: 'test-only',
     evidenceVersion: 'test-only', admissionPath: 'empirical', templateTokens: 4096, marginTokens: 4096, maxBytes: 196608,

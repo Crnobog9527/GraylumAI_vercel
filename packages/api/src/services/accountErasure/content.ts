@@ -172,21 +172,6 @@ export async function sweepErasedConversations(database: SweepDatabase, deadline
   }
   return { ...last, cleaned };
 }
-/** Recheck before returning buffered text/results. No positive cache survives a
- * deletion. The existing invocation still completes its original money recovery.
- * DB-PERF PR-2A: the same round trip also checks the voice version and library references the
- * execution froze, when asked; it returns which of them is gone, and null when all are shown. */
-export function contentVisibilityFence(database: Database, actorId: string, executionId: string) {
-  return async (sources: { voice?: boolean; library?: boolean } = {}): Promise<'voice' | 'library' | null> => {
-    const response = await database.rpc('runtime_execution_visibility', { p_actor_id: actorId,
-      p_execution_id: executionId, p_voice: sources.voice === true, p_library: sources.library === true });
-    if (response.error) fail(response.error);
-    if (response.data === 'voice' || response.data === 'library') return response.data;
-    if (response.data !== 'visible') fail(null);
-    return null;
-  };
-}
-
 /** Recognize only the exact database tombstone refusal; other errors stay private. */
 export function throwIfContentErased(error: unknown) {
   if (typeof error === 'object' && error !== null && 'code' in error && 'message' in error
