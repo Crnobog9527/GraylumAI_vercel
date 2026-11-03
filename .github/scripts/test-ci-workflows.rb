@@ -18,11 +18,9 @@ class CIWorkflowsTest < Minitest::Test
   # Unit Tests is the one gate that may accept a skipped worker (the two database jobs, only when the scope job says so), so it has its own truth table.
   UNIT_GATE = {'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration','DB_SUITES_RESULT'=>'db-suites','CONTRACTS_RESULT'=>'ci-contracts',
                'LEDGER_RESULT'=>'migration-ledger','SCOPE_RESULT'=>'scope'}.freeze
-  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
-                      'node packages/db/tests/payg/run-runtime.mjs --ci',
-                      'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
+  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
                       'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql,packages/db/tests/runtime-view-perf/fixture.sql,packages/db/tests/content-erasure/fixture.sql,packages/db/tests/content-erasure-perf/fixture.sql,packages/db/tests/content-erasure-perf/assertions.sql'].freeze
-  INTEGRATION_SHARDS = {1 => [INTEGRATION_RUNS[0], INTEGRATION_RUNS[1], INTEGRATION_RUNS[3]], 2 => [INTEGRATION_RUNS[2]]}.freeze
+  INTEGRATION_SHARDS = {1 => [INTEGRATION_RUNS[1]], 2 => [INTEGRATION_RUNS[0]]}.freeze
   def test_required_context_names_unique
     names = [@ci, @security].flat_map { |w| w.fetch('jobs').values.map { |j| j.fetch('name') } }
     (GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|

@@ -389,7 +389,7 @@ jobs:
     needs: [scope]
     if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
-    # Shard 1: BILL2 + PAYG + empty-database build (about 7.5 minutes of tests); shard 2: runtime recovery (about 7.5 minutes).
+    # Shard 1: empty-database build; shard 2: runtime recovery. (The old BILL2 billing and PAYG runtime steps left with the old path, V2-12.)
     strategy:
       fail-fast: false
       matrix:
@@ -461,14 +461,6 @@ jobs:
       # per-run synthetic JWTs; the schema is built from repository files only
       # (--schema-from-files: platform stand-in -> packages/db/baseline -> every migration). No secrets, no provider network, no Next app or
       # browser; the runner lists and verifies the excluded app-only cases.
-      - name: Integration — BILL2 billing
-        if: matrix.shard == 1
-        run: node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files
-
-      - name: Integration — PAYG runtime waiting, resume and metering review
-        if: matrix.shard == 1
-        run: node packages/db/tests/payg/run-runtime.mjs --ci
-
       - name: Integration — Runtime recovery and streaming
         if: matrix.shard == 2
         run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
