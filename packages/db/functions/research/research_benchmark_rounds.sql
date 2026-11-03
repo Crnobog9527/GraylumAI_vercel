@@ -11,10 +11,12 @@ AS $function$
   SELECT (
     SELECT count(*) FROM research_discoveries d
     WHERE d.actor_id=a AND d.session_id=s AND d.state='completed' AND d.turn_id IS NOT NULL
+      AND coalesce(d.cursor->>'supplierDown','')<>'true'
   )::integer + (
-    -- A turn's pasted-link check, unless that turn also completed a discovery (one turn, one round, as above).
+    -- A turn's pasted-link check, unless that turn also completed a counted discovery (one turn, one round, as above).
     SELECT count(DISTINCT p)::integer FROM research_account_fetches f CROSS JOIN LATERAL unnest(f.pasted_turns) p
     WHERE f.actor_id=a AND f.session_id=s AND NOT EXISTS (SELECT 1 FROM research_discoveries d
-      WHERE d.turn_id=p AND d.actor_id=a AND d.session_id=s AND d.state='completed')
+      WHERE d.turn_id=p AND d.actor_id=a AND d.session_id=s AND d.state='completed'
+        AND coalesce(d.cursor->>'supplierDown','')<>'true')
   )
 $function$;
