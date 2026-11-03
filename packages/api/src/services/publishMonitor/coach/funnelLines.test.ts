@@ -89,6 +89,15 @@ describe('the own excellent line (top 20% of the last 10)', () => {
     expect(diagnosePost(current, HANDBOOK, [...self, ...history.slice(5, 9)]).own_excellent).toEqual([]);
   });
 
+  it('the ten posts are the ten newest posts, each by its newest capture, even when a recent post also has an older capture', () => {
+    const recentNew = { ...post({ complete_rate: 0.9 }), postId: '30000000-0000-4000-8000-000000000001' };
+    const recentOld = { ...post({ complete_rate: 0.1 }), postId: recentNew.postId };
+    const rest = [0.8, ...Array(9).fill(0.1)].map(v => post({ complete_rate: v }));
+    const newestFirst = [recentNew, ...rest, recentOld];
+    // The ten newest posts are A (0.9) and the first nine of the rest (0.8 and eight 0.1s): 0.5 is below the top fifth (>= 0.8).
+    expect(diagnosePost(post({ complete_rate: 0.5 }), HANDBOOK, newestFirst).own_excellent).toEqual([]);
+  });
+
   it('too few views: no excellent mark either', () => {
     expect(diagnosePost(post({ views: 10, complete_rate: 0.9 }), HANDBOOK, history).own_excellent).toEqual([]);
   });

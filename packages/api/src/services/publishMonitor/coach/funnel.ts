@@ -101,8 +101,8 @@ function inconsistencies(rates: Record<string, number>): string[] {
 export function diagnosePost(d: Diagnostic, handbook: Handbook | null, history: Diagnostic[]): PostDiagnosis {
   const { rates, derived } = withDerived(d);
   // One entry per other post (its newest capture, history being newest first): repeated captures of one post are not ten posts.
-  const others = [...new Map(history.filter(h => h.postId !== d.postId && h.platform === d.platform).reverse().map(h => [h.postId, h] as const))
-    .values()].reverse();
+  const seen = new Set<string>();
+  const others = history.filter(h => h.postId !== d.postId && h.platform === d.platform && !seen.has(h.postId) && seen.add(h.postId));
   const own = others.slice(0, 10).map(h => withDerived(h).rates);
   const vsOwn: Record<string, number> = {};
   for (const [key, value] of Object.entries(rates)) {
