@@ -4231,7 +4231,7 @@
   "fn:publish_monitor_review_step(uuid,uuid,text,text)": "7985af3bee43",
   "fn:publish_monitor_review_supplement(uuid,integer)": "2d35aec6a06d",
   "fn:publish_monitor_review_wipe_sources()": "96c22bcfa318",
-  "fn:publish_monitor_reviews(uuid)": "68aedbb775af",
+  "fn:publish_monitor_reviews(uuid)": "0ede0b0b84b7",
   "fn:publish_monitor_session(uuid,uuid)": "4934a39d1ec4",
   "fn:publish_monitor_set_auto_review(uuid,boolean)": "9342ea1c4874",
   "fn:publish_monitor_settings(uuid)": "c6dcff3ddfe7",

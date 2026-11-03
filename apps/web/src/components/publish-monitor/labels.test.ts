@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { brandsFromLibrary } from './brands';
 import { connectRoute, dataErrorMessage, errorCode, formatDay, metricCell, metricColumns, platformName } from './labels';
-import { reviewTable } from './ReviewPanel';
+import { reviewTable, reviewTitle } from './ReviewPanel';
 
 describe('metric cells (plan §9 item 2: a missing field is never 0)', () => {
   const snapshot = { metrics: { likes: 0, views: 1200, completion_rate: 41.5 }, missingFields: ['views_unique', 'shares'] };
@@ -46,6 +46,16 @@ describe('library brands', () => {
       { projectId: 'p', platform: 'x', account: 'main', items: [{ workItemId: 'w', title: '' }] }, { projectId: '', platform: 'x' }] }] });
     expect(brands).toEqual([{ businessId: 'b', name: '未命名品牌', accounts: [{ projectId: 'p', platform: 'x', label: 'main',
       businessId: 'b', businessName: '未命名品牌', items: [{ workItemId: 'w', title: '未命名内容' }] }] }]);
+  });
+});
+
+describe('review title', () => {
+  it('names the brand and the rhythm of a coach review; a plain weekly review reads as before', () => {
+    expect(reviewTitle({ periodStart: '2026-11-03' })).toBe('2026-11-03 这一周');
+    expect(reviewTitle({ periodStart: '2026-11-03', cadence: 'weekly', businessName: null })).toBe('2026-11-03 这一周');
+    expect(reviewTitle({ periodStart: '2026-11-03', cadence: 'monthly', businessName: '复盘测试品牌' })).toBe('复盘测试品牌 · 2026-11-03 月度复盘');
+    expect(reviewTitle({ periodStart: '2026-11-03', cadence: 'quarterly', businessName: 'B' })).toBe('B · 2026-11-03 季度体检');
+    expect(reviewTitle({ periodStart: '2026-11-03', cadence: 'something-new' })).toBe('2026-11-03 这一周');
   });
 });
 
