@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- PUBLISH-MONITOR block E (number 9999 is a placeholder; the controller assigns the real one at merge): a review asked for in a free
+-- PUBLISH-MONITOR block E (number 0498 assigned by the controller): a review asked for in a free
 -- chat (Owner 2026-10-27, "用户主动要求复盘"). read_source reads one brand's coach review rows in the middle of a turn, and the host
 -- builds the same review pack as the scheduled coach (publishMonitor/coach/pack.ts, cadence 'chat'). Nothing is fetched from a supplier.
 -- publish_monitor_review_pack_rows cannot be that read: it is not a free read (ENGINEERING section 5, free-read rule of 2026-10-28,
