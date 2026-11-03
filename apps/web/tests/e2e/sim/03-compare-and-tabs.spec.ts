@@ -9,7 +9,8 @@ test.beforeEach(resetSim);
  * balance and the credit records lost; nothing stays frozen.
  */
 // Not yet runnable locally: the compare picker's options (services/fusion/compareOptions.ts) read the host's staging window policy
-// (loadStagingPolicy), which the local stack does not emulate yet; the button stays hidden. Next step of layer 1.
+// (loadStagingPolicy), which the local stack does not emulate yet; the button stays hidden. Needs the same staging-host emulation as
+// 04-mentor.spec.ts; deferred by the controller on 2026-11-03.
 test.fixme('compare: one turn, two answered columns, the total is the sum of the columns and what the balance lost', async ({ page }) => {
   const carol = seed().users.carol;
   await signIn(page, 'carol');

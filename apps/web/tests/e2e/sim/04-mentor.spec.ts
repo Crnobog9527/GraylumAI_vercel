@@ -13,7 +13,8 @@ test.beforeEach(resetSim);
 // Not yet runnable locally (2026-11-03): with V3_RUNTIME_LOCAL_ENDPOINT set (needed for runtime.start on a loopback host) the draft
 // page runs its old isolated demo mode ("本地模拟 · 回复、保存与交接均为演示"), not the turn path. These journeys need the local app to
 // pass for the staging host instead (synthetic Supabase host routed to the gateway for server and browser, the staging environment,
-// and a runtime_test_windows row with frozen call policies), the same work compare and the jury need. Next step of layer 1.
+// and a runtime_test_windows row with frozen call policies), the same work compare and the jury need (about half a day). Deferred by
+// the controller on 2026-11-03: the report journey and its stop are left to the final real-model acceptance before launch (layer 3).
 const journey = test.fixme;
 
 const coachBox = (page: Page) => page.getByRole('textbox', { name: '给 AI 教练的回复' });
