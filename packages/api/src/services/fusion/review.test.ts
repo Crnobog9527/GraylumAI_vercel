@@ -128,7 +128,11 @@ const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.att
 function driver(deps: { admin: SupabaseClient; actorId: string;
   executor: { run: (run: unknown, claimed: { runId: string; id: string; state: string; fresh: boolean }, judge: (text: string) => Verdict) => Promise<unknown> } }) {
   const { admin, actorId } = deps;
-  const record = reviewRecord(admin, actorId);
+  // The module mock above supplies the in-memory start / claim / advance; the production record keeps only read, replay, adoption and fee.
+  const record = reviewRecord(admin, actorId) as ReturnType<typeof reviewRecord> & {
+    start: (input: Record<string, unknown>) => Promise<ReviewView>;
+    claim: (id: string, at: ReviewPosition, groupId: string, items: Array<{ runId: string; payload: never }>) => Promise<unknown>;
+    advance: (id: string, from: ReviewPosition, to: Record<string, unknown>) => Promise<ReviewView> };
   const core = reviewCore(admin, actorId);
   const done = (call: ReviewView['calls'][number]) => call.verdict !== null;
   async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {

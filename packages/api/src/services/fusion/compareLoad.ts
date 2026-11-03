@@ -16,16 +16,10 @@ export const compareSkillInput = z.object({ kind: z.literal('skill'), moduleId: 
   task: z.string().max(128).optional() }).strict();
 export type CompareRequestInput = { sessionId: string; question: string; modelIds: string[]; skill?: z.infer<typeof compareSkillInput> };
 
-/** Earlier turns read for a compare, newest kept first when the snapshot must shrink to the input cap. */
-const HISTORY_ITEMS = 200;
 /** A Skill may use at most this share of the per-call input cap, leaving room for history and the question. */
 const SKILL_BYTES = Math.floor(FUSION_INPUT_CAP / 2);
 /** Workspace kinds a compare freezes: the confirmed positioning and account strategies (the bodies a free turn reads most). */
 const WORKSPACE_KINDS = new Set(['positioning', 'strategy']);
-
-const contextSchema = z.object({ revision: z.number().int().nonnegative(), busy: z.boolean(),
-  items: z.array(z.object({ revision: z.number(), item: z.unknown() })), scopeMaterial: z.unknown().optional(),
-  materialRevision: z.string() }).passthrough();
 
 /** Visible text of one stored history item; null for tool calls, results and anything else that is not a message. */
 export function historyTurn(item: unknown): CompareParts['history'][number] | null {
@@ -96,28 +90,3 @@ export async function loadCompareTurnParts(deps: { admin: SupabaseClient; user: 
   return { skill, workspace, references: [], question: input.question, replyLocale };
 }
 
-export type CompareChoice = { sessionId: string; historyRevision: number; modelIds: string[]; parts: CompareParts;
-  /** The session's work-material token read with the context (fusion_compare_context.materialRevision), never defaulted:
-   * begin, admission and adoption compare against it. */
-  materialRevision: string };
-
-/** Reads everything a compare freezes (FUSION-COMPARE §3.2): the conversation history and work material from one
- * transaction (fusion_compare_context), the selected Skill through the ordinary user-scoped checks, and the confirmed
- * workspace sources. Library references are not offered in the first version (compareStart refuses them). */
-export async function loadCompareChoice(deps: { admin: SupabaseClient; user: SupabaseClient; actorId: string },
-  input: CompareRequestInput): Promise<CompareChoice> {
-  const { admin, actorId } = deps;
-  const context = contextSchema.parse(await compareRpc<unknown>(admin, 'fusion_compare_context',
-    { p_actor_id: actorId, p_session_id: input.sessionId, p_limit: HISTORY_ITEMS }));
-  // A turn is running in the main conversation: its answer is not in the history yet, so a compare now would answer
-  // a different conversation than the user sees once it lands.
-  if (context.busy) throw new Error('FUSION_COMPARE_SESSION_BUSY');
-  const [skill, workspace, replyLocale] = await Promise.all([
-    input.skill ? loadSkill(admin, deps.user, input.skill) : null,
-    loadWorkspace(admin, actorId, input.sessionId), readReplyLocale(admin, actorId)]);
-  const history = context.items.map(row => historyTurn(row.item)).filter((turn): turn is NonNullable<typeof turn> => turn !== null);
-  const parts = fitHistory({ skill, positioningFallback: false, history, scopeMaterial: context.scopeMaterial ?? undefined,
-    workspace, references: [], question: input.question, replyLocale });
-  return { sessionId: input.sessionId, historyRevision: context.revision, modelIds: input.modelIds, parts,
-    materialRevision: context.materialRevision };
-}

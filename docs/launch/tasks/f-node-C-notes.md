@@ -190,3 +190,23 @@
 **缺口处理结果（总控 11-03 决定）**：① 不补；② ③ 已在 `turn/call.test.ts` 补测试。
 
 **新路径缺的一处保护（请总控定，我没有自己设计）**：`turn/call.ts` 里，“回答可用但费用或用量还不是终局”的分支（`!evidence.final || …`）会直接把回答返回给 SDK，不经过 `record`，也没有墓碑检查；`identity` 写入的返回值里也不带墓碑状态。所以如果账号在这次调用进行中开始擦除，且这次回答的费用不是终局，回答仍会被交给后续流程。终局收据分支有 `tombstoned(recorded)` 检查，已测。库侧保护不变：回合关闭时按 erased 处理、不保存正文。
+
+## 追加删除：生产代码里已无调用方的导出（总控 11-03 指示，V2-8 按函数查过）
+删除前我用 `git grep -w` 逐个复核：下列导出在生产代码中都没有调用方，只剩测试在用。
+
+| 删除的导出（文件） | 只测它的测试 → 处理 | 备注 |
+|---|---|---|
+| `executionMentorHistoryTool`（`turn/agent/mentorHistory.ts`） | 没有单独测试 | 文件里其余导出（`mentorHistoryTool` 等）保留 |
+| `PostgresSession`（`turn/agent/session.ts`，保留 `SessionRpc`） | 删 `session.test.ts` 整个文件（3 个用例，全测这个类的 `runtime_session_items` 读写）：随旧执行器的会话存储删除，新路径的回合历史由 `turn/history.test.ts` 覆盖 | `SessionRpc` 仍被 `workspacePosts.ts`、`publishMonitor/reviews.ts` 使用 |
+| `sourceRuntimeTool()`（`turn/research/sourceRuntimeTool.ts`，保留 `sourceToolBytes`） | 删 `sourceRuntimeTool.test.ts` 整个文件（2 个用例，测旧工具的 `runtime_tool` 认领与回放）：新路径工具走 `turn/research/*` 的工具测试；`sourceToolBytes` 仍由 `libraryReadTool.test.ts`、`primaryInstructions.test.ts` 间接使用 | |
+| `readLibrary`（`turn/research/libraryReadTool.ts`） | `libraryReadTool.test.ts` 删「library read execution」整组（5 个用例，测旧 `runtime_library_*` 读与回放）；保留 `libraryQuery` 路由和检索路由两组 | 新路径对应读取在 `turn/research/researchRuntimeTool.test.ts`（未逐条核对用例名） |
+| `endPositioningRefusal`（`turn/admission/positioningFallback.ts`） | `positioningGate.test.ts` 删「ends a refused PAYG round through fail_platform with positioning_required」1 个用例：它测的是旧 `runtime_execution fail_platform` / `runtime_cancel` 收尾，随旧执行器删除；标记识别 `isPositioningRefusal` 的用例保留 | **无等价测试**：新路径拒绝后的收尾（回合以 erased/failed 关闭、退款）不在此文件，由 `turn-core/run-local.mjs` 的 white-listed failure refunds all 覆盖 |
+| `checkpointContentSource` / `injectContentSource` / `admitContentSource`（`turn/agent/contentSource.ts`） | `contentSource.test.ts` 删「A2 executor content source」5 个用例和「A2 admission …」3 个用例，改写为 1 个 `withInjectedSource` 用例（正文只进当次指令）；匹配计划那组保留 | **无等价测试**：旧的 checkpoint / 准入拒绝码（MISSING / STALE / TOO_LARGE）在新路径没有对应实现，见下方“新出现的死代码” |
+| `contentVisibilityFence`（`accountErasure/content.ts`） | `content.test.ts` 删「fails closed on private errors and rechecks visibility every time」1 个用例（测旧 `runtime_execution_visibility`） | 新路径的可见性保护见 `turn-erasure/run-local.mjs`「turn check: …CONTENT_ERASED…」 |
+| `loadCompareChoice` 与 `CompareChoice` 类型（`fusion/compareLoad.ts`） | `compareLoad.test.ts` 删 4 个用例（读历史与材料、画像语言、主对话忙时拒绝、冻结定位与策略来源）及其 mock；保留 `historyTurn`、`fitHistory` 用例 | 新路径的比较读取在 `turn/compareQuote.test.ts` 等（未逐条核对） |
+| `reviewRecord` 的 `start` / `claim` / `advance` / `close`（`fusion/reviewRecord.ts`） | `review.test.ts` 的测试专用驱动本来就用内存替身实现这四个方法，只补了类型 | 评审团现役路径在 `turn/jury.ts`；`replay`、`recordAdoption`、`read`、`settleFee` 保留 |
+| `captureCompleted`（`opc/capture.ts`） | `capture.test.ts` 删 2 个用例（完成后补抓取失败不影响结果回收、停滞调用按期限中止）；保留 `capturePending` 两个用例 | 无等价测试：该函数的唯一用途是旧执行器完成后补抓取 |
+| `loadStagingRecoveryPolicy`（`turn/settings/stagingPolicy.ts`） | `productionPolicy.test.ts` 删该函数的断言（生产恢复策略 + 非生产策略被拒） | 新路径回收不读这个策略；`loadStagingPolicy` 的断言保留 |
+
+**新出现的死代码（本次删除造成，未删，请总控定）**：`contentSource.ts` 里的 `assertSourceFits`、`ContentSourceRefusal`、`CONTENT_SOURCE_CODES.tooLarge`，在 `injectContentSource` 删除后已无调用方。
+**未碰**：`report/fees.ts`、`cron/billing-reconcile`、`opc/sessionResults.ts`、`routers/opc.ts`、`session-results.tsx`（V2-9）。

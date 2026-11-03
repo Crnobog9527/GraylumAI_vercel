@@ -129,27 +129,6 @@ it('recognizes only a reply that starts with the structured marker', () => {
   expect(isPositioningRefusal('[[GRAYLUM_POSITIONING')).toBe(false);
 });
 
-it('ends a refused PAYG round through fail_platform with positioning_required', async () => {
-  const { endPositioningRefusal } = await import('./positioningFallback');
-  const args = { p_execution_id: 'e' };
-  const cancelled = vi.fn(async () => ({ state: 'cancelled' }));
-  expect(await endPositioningRefusal(cancelled as never, args, true))
-    .toEqual({ state: 'cancelled', unavailable: 'positioning_required', code: POSITIONING_REQUIRED });
-  expect(cancelled).toHaveBeenCalledExactlyOnceWith('runtime_execution',
-    { p_execution_id: 'e', p_action: 'fail_platform', p_result: { unavailable_reason: 'positioning_required' } });
-  expect(await endPositioningRefusal(vi.fn(async () => ({ state: 'cost_pending' })) as never, args, true))
-    .toEqual({ state: 'cost_pending' });
-  // Unknown call outcome (round left open) or a lost response: interrupt for normal recovery, never claim "not charged".
-  for (const outcome of [async () => ({ state: 'running' }), async () => { throw new Error('lost'); }]) {
-    const rpc = vi.fn(async (_name: string, value: Record<string, unknown>) => value.p_action === 'interrupt' ? {} : outcome());
-    expect(await endPositioningRefusal(rpc as never, args, true)).toEqual({ state: 'pending' });
-    expect(rpc.mock.calls.map(call => call[1].p_action)).toEqual(['fail_platform', 'interrupt']);
-  }
-  const local = vi.fn(async () => ({ state: 'cancelled' }));
-  expect(await endPositioningRefusal(local as never, args, false)).toEqual({ state: 'cancelled', code: POSITIONING_REQUIRED });
-  expect(local).toHaveBeenCalledExactlyOnceWith('runtime_cancel', args);
-});
-
 it('uses only the credential the approved staging window quoted for this model', async () => {
   const { createHash } = await import('node:crypto');
   const account = (key: string) => 'openrouter-key:' + createHash('sha256').update(key).digest('hex');
