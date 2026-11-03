@@ -67,7 +67,8 @@ const expected = {
   billing_credits_per_usd: '100', billing_token_price_multiplier: '6', runtime_report_generation: { enabled: true },
   chat_research_tools_enabled: true, library_agent_read_enabled: true, chat_library_retrieval_enabled: true,
   library_scan_recognition_enabled: true, library_upload_enabled: true, chat_my_posts_enabled: true,
-  publish_monitor_enabled: true, publish_monitor_review_enabled: true, publish_monitor_review_max_usd: '0.30',
+  publish_monitor_enabled: true, publish_monitor_review_enabled: true, publish_monitor_coach_enabled: true,
+  publish_monitor_review_max_usd: '1',
   publish_monitor_publish_platforms: ['tiktok','instagram','youtube','facebook','x','threads','linkedin','pinterest','bluesky'],
   ...filled,
 };
@@ -141,7 +142,7 @@ const cases = [
   read('packages/db/tests/production-seed/mapped-price.sql').replaceAll('__FILLED_SEED__', () => body(rendered(filled))),
   `DO $$ BEGIN IF (${objects}) IS DISTINCT FROM (SELECT * FROM seed_schema_before)
     THEN RAISE EXCEPTION 'seed changed persistent schema'; END IF; END $$;`,
-  `SELECT 'PASS production seed: 20 typed settings, 3 plans, 3 packs; placeholders/atomic failure/replay/mapped prices/schema';`,
+  `SELECT 'PASS production seed: 21 typed settings, 3 plans, 3 packs; placeholders/atomic failure/replay/mapped prices/schema';`,
 ].join('\n');
 const temp = mkdtempSync(resolve(tmpdir(), 'graylum-production-seed-'));
 try {

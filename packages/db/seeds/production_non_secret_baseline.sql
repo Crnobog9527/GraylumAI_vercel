@@ -3,7 +3,7 @@
 -- This code is proprietary and confidential.
 --
 -- REL-1 B3/B7 only. NOT a migration or an automatic deployment step.
--- Sources below are repository-relative. PREP = docs/launch/tasks/REL-1-BUILD-PREP.md §1;
+-- Sources below are repository-relative. PREP = docs/launch/tasks/REL-1-BUILD-PREP.md §2 (B8 reference tables);
 -- PLAN = docs/launch/MASTER_PLAN.md §2.1; REL = docs/launch/tasks/REL-1.md §3.3.
 -- Owner approval on build day is still required. Send this entire file to the server as one SQL string.
 -- Never run on staging. No keys, identities, email addresses, provider IDs, price snapshots or test windows.
@@ -13,31 +13,34 @@
 -- Model/Skill imports, routing/reasoning config and the 32768 output ceiling are separate B3/B7 checks;
 -- this file neither invents model prices/routes nor publishes Skills. Its UUIDs reference those imports.
 -- All null fields below (including nested fields) are REQUIRED placeholders; no row is written until every field is replaced.
--- runtime_purpose_budgets: JSON STRING containing frozen-budget JSON (PREP 1.2 A; REL B3).
--- billing_payg_start_thresholds: OBJECT {version,thresholds}, frozen design (PREP 1.2 A; REL B7).
+-- runtime_purpose_budgets: JSON STRING containing frozen-budget JSON (PREP 2.2 A; REL B3).
+-- billing_payg_start_thresholds: OBJECT {version,thresholds}, frozen design (PREP 2.2 A; REL B7).
 -- fusion_settings: OBJECT per services/fusion/settings.ts; production UUIDs, compare enabled, four allowed
 -- Sonnet/Flash/Sol/Opus, defaults Sonnet/Flash/Sol, minModels=2, answerOutputTokens=8192, maxBudgetUsd="5";
 -- Review template defaults follow services/fusion/settings.ts; frozen review budget must be supplied.
 -- PLAN 2026-10-20: Sonnet=evidence, Sol=finance, Argon=execution; fill reviewerRoles with those UUID keys.
--- review uses Sonnet/Sol/Argon and Opus summary (PLAN 2026-10-25/26; PREP 1.2 A, 1.5; REL B7).
--- primary_model_id: production Sonnet 5.5 UUID; v3_summary_model_id: production GPT-6 Luna UUID (PREP 1.2 A).
--- publish_monitor_review_model_id: production UUID, deliberately NULL until build day (PREP 1.2 A).
+-- review uses Sonnet/Sol/Argon and Opus summary (PLAN 2026-10-25/26; PREP 2.2 A, 1.5; REL B7).
+-- primary_model_id: production Sonnet 5.5 UUID; v3_summary_model_id: production GPT-6 Luna UUID (PREP 2.2 A).
+-- publish_monitor_review_model_id: production UUID, deliberately NULL until build day (PREP 2.2 A).
 -- publish_monitor_publish_quota: OBJECT {limit,periodAnchor}; actual paid project's positive integer limit
--- and ISO timestamp from Post for Me, not staging quota (PREP 1.2 A; REL B7).
+-- and ISO timestamp from Post for Me, not staging quota (PREP 2.2 A; REL B7).
 --
--- Deliberate omissions, keyed to PREP §1 (not silently treated as completed):
--- 1.2 A: runtime_payg_staging NEVER copied; runtime_payg_production is a separate B4 approval.
+-- Deliberate omissions, keyed to PREP §2 (not silently treated as completed):
+-- 2.2 E (CORE-PATH-V2): core_path_v2, runtime_payg and runtime_rw_v2 are B12, written separately after E4: their numbers
+-- (daily limit, pool size = p) are Owner-approved, and V2-12 (#1645) changes their shape. Without core_path_v2 every turn
+-- is refused (TURN_CORE_DISABLED), so B12 is not optional.
+-- 2.2 A: runtime_payg_staging NEVER copied; runtime_payg_production is a separate B4 approval.
 -- payment_terms_version/payment_method_routes/launch_baseline_at/payment_provider_refs belong to B5.
 -- runtime_rate_limits belongs to B6; runtime_stop_loss/support_email/secrets are entered by Owner (B11/P4).
 -- research_tools_config: formal admin must re-attest supplier hard caps through the admin UI (B7/P4);
 -- that config contains an account UUID/time, prohibited here. billing_provider_prices: K12 refresh only.
--- 1.2 B: every 'not needed/legacy' key and every 'pending controller decision' key is omitted, including
+-- 2.2 B: every 'not needed/legacy' key and every 'pending controller decision' key is omitted, including
 -- v3_summary_max_tokens/max_input_characters/founder_community_entry/home_analysis_module_id.
 -- Deleted check-in keys are never written. No staging-only pricing, windows or connection-test records.
--- 1.2 C: model_identity_guard uses enabled default; orphan deletion and publish_listed wait for their gates.
--- 1.2 D: runtime_environment is a separate B2 step, checked below but never set here.
--- 1.5/1.6: model and private Skill content imported separately; no Qwen or unapproved Skill publication.
--- 1.7/1.8: live payment mappings and secret slots are separate operations, never copied from staging.
+-- 2.2 C: model_identity_guard uses enabled default; orphan deletion and publish_listed wait for their gates.
+-- 2.2 D: runtime_environment is a separate B2 step, checked below but never set here.
+-- 2.5/2.6: model and private Skill content imported separately; no Qwen or unapproved Skill publication.
+-- 2.7/2.8: live payment mappings and secret slots are separate operations, never copied from staging.
 --
 -- Recovery: only before traffic/payment, restore the three affected tables from the approved pre-seed
 -- configuration snapshot in one transaction; an empty disposable build may instead be rebuilt from files.
@@ -226,38 +229,41 @@ BEGIN
   ) THEN RAISE EXCEPTION 'SEED_PRICE_REPLACEMENT_REQUIRED'; END IF;
 
   INSERT INTO public.system_settings (key, value) VALUES
-    -- PREP 1.2 A / REL B3; PLAN 2026-10-01 BILL-UNIT q=100, m=6 (NOT staging m=3).
+    -- PREP 2.2 A / REL B3; PLAN 2026-10-01 BILL-UNIT q=100, m=6 (NOT staging m=3).
     ('billing_credits_per_usd', '"100"'::jsonb),
     ('billing_token_price_multiplier', '"6"'::jsonb),
-    -- PREP 1.2 B + §4 problem 1; REL B7: object, not scalar boolean.
+    -- PREP 2.2 B + §4 problem 1; REL B7: object, not scalar boolean.
     ('runtime_report_generation', '{"enabled":true}'::jsonb),
-    -- PREP 1.2 A / REL B7, core 11 research tools.
+    -- PREP 2.2 A / REL B7, core 11 research tools.
     ('chat_research_tools_enabled', 'true'::jsonb),
-    -- PREP 1.2 A / REL B7, core 4 library; PLAN 2026-10-17 automatic context.
+    -- PREP 2.2 A / REL B7, core 4 library; PLAN 2026-10-17 automatic context.
     ('library_agent_read_enabled', 'true'::jsonb),
     ('chat_library_retrieval_enabled', 'true'::jsonb),
     ('library_scan_recognition_enabled', 'true'::jsonb),
     ('library_upload_enabled', 'true'::jsonb),
-    -- PREP 1.2 A / REL B7; PLAN 2026-10-26: works review opens at launch.
+    -- PREP 2.2 A / REL B7; PLAN 2026-10-26: works review opens at launch.
     ('chat_my_posts_enabled', 'true'::jsonb),
     ('publish_monitor_enabled', 'true'::jsonb),
     ('publish_monitor_review_enabled', 'true'::jsonb),
-    ('publish_monitor_review_max_usd', '"0.30"'::jsonb),
-    -- PREP 1.2 A / REL §7 E1; PLAN 2026-10-24 (recorded 10-25): all nine platforms.
+    -- PLAN 2026-10-27: operations-coach review (0457 claim path) before launch; PLAN 2026-11-02: reviews must be on.
+    ('publish_monitor_coach_enabled', 'true'::jsonb),
+    -- PLAN 2026-10-27 (supplement): 1 USD platform cost cap per review, screenshot reading included; replaces 0.30.
+    ('publish_monitor_review_max_usd', '"1"'::jsonb),
+    -- PREP 2.2 A / REL §7 E1; PLAN 2026-10-24 (recorded 10-25): all nine platforms.
     ('publish_monitor_publish_platforms',
       '["tiktok","instagram","youtube","facebook","x","threads","linkedin","pinterest","bluesky"]'::jsonb)
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
   WHERE system_settings.value IS DISTINCT FROM EXCLUDED.value;
 
-  -- PREP 1.2 A / REL B3/B7: required build-day values, with their sources above the placeholder block.
+  -- PREP 2.2 A / REL B3/B7: required build-day values, with their sources above the placeholder block.
   INSERT INTO public.system_settings (key, value) SELECT key, value FROM jsonb_each(build_day)
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
   WHERE system_settings.value IS DISTINCT FROM EXCLUDED.value;
 
-  -- PREP 1.3 / REL B3/B7. PLAN §2.1 item 51 F/G/J: $29/$69 monthly, $279/$621 yearly;
+  -- PREP 2.3 / REL B3/B7. PLAN §2.1 item 51 F/G/J: $29/$69 monthly, $279/$621 yearly;
   -- monthly credits 29*120=3480 / 69*130=8970; yearly 12 monthly grants = 41760/107640.
   -- Free 0/0: PLAN 2026-10-14 (signup 500 is a separate existing grant, never an extra seed).
-  -- Discounts 95/90: item 51; entitlement columns: PREP 1.3, PLAN 2026-10-17 and REL B7 (Gold only Fusion).
+  -- Discounts 95/90: item 51; entitlement columns: PREP 2.3, PLAN 2026-10-17 and REL B7 (Gold only Fusion).
   -- First month $49 (PLAN 2026-10-12, item 51 G/H/I), founder $496/year (item 51 F/J/P and 10-14):
   -- checkout offers, NOT extra plan rows; B5/S4 maps them privately. Never replace Gold standard prices.
   INSERT INTO public.membership_plans AS p (name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,
@@ -287,7 +293,7 @@ BEGIN
     EXCLUDED.allow_weekly_auto_review,EXCLUDED.positioning_profile_limit,EXCLUDED.history_retention_days,EXCLUDED.is_active,
     EXCLUDED.sort_order);
 
-  -- PREP 1.4; PLAN item 51 S/T + item 50: $9.90/990, $29.90/2990, $99.90/9990+1000.
+  -- PREP 2.4; PLAN item 51 S/T + item 50: $9.90/990, $29.90/2990, $99.90/9990+1000.
   -- These are deterministic INTERNAL catalog IDs, not any platform's identifiers. No Stripe columns are written.
   -- Pro/Gold discounts round DOWN to $0.10 at checkout (item 51 T); no test packages imported/deactivated here.
   INSERT INTO public.credit_packages AS p (id,name,price,credits_amount,bonus_credits,sort_order,is_popular,active)
