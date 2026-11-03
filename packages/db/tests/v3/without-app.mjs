@@ -5,11 +5,6 @@
 
 export const WITHOUT_APP_SUITES = {
   cdc: {files: ['src/scripts/ac0Probe/cdcB2Eval.integration.ts'], prefix: 'CDC_EVAL: ', excluded: []},
-  bill2: {
-    files: ['src/services/turn/provider/billing.integration.ts'],
-    prefix: 'BILL2: ',
-    excluded: [],
-  },
   runtime: {
     files: ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts',
       'src/services/runtime/terminalReply.integration.ts', 'src/services/runtime/historyCache.integration.ts',

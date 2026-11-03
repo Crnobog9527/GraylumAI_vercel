@@ -48,7 +48,7 @@ describe('profile archive helpers', () => {
 
   it('shows the friendly notice for an archived refusal on any admission path', () => {
     const cause = Object.assign(new Error('OPC_BUSINESS_ARCHIVED'), { data: { code: 'FORBIDDEN', path: 'other.path' } });
-    expect(gateAdmissionNotice(cause, ['opc.mentorTurnStream'])).toBe(PROFILE_ARCHIVE_TEXT.archivedRefusal);
+    expect(gateAdmissionNotice(cause, ['opc.topicTurn'])).toBe(PROFILE_ARCHIVE_TEXT.archivedRefusal);
     expect(PROFILE_ARCHIVE_TEXT.archivedRefusal).not.toMatch(/积分|OPC_/);
   });
 

@@ -13,7 +13,6 @@ export type ContentVersion = {
   body: string | null;
   title?: string | null;
   sourceContentId: string | null;
-  executionId: string | null;
   turnId?: number | null;
   requestId: string;
 };
