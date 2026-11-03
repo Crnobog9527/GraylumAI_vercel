@@ -247,6 +247,8 @@ BEGIN
     ('publish_monitor_enabled', 'true'::jsonb),
     ('publish_monitor_review_enabled', 'true'::jsonb),
     -- PLAN 2026-10-27: operations-coach review (0457 claim path) before launch; PLAN 2026-11-02: reviews must be on.
+    -- Also gates the chat's coach review read (2026-11-04). The weekly review additionally needs the published coach Skill wired by the
+    -- PUBLISH_MONITOR_HANDBOOK_PACKAGE Vercel variable (PREP step 30e1); that is not a database setting, so it is not written here.
     ('publish_monitor_coach_enabled', 'true'::jsonb),
     -- PLAN 2026-10-27 (supplement): 1 USD platform cost cap per review, screenshot reading included; replaces 0.30.
     ('publish_monitor_review_max_usd', '"1"'::jsonb),
