@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
+import { DAY_MS, isoDay } from './coach/stats';
 import { readTrend, trendSeries } from './trend';
 
 const now = Date.parse('2026-11-03T12:00:00Z');
@@ -41,6 +42,11 @@ describe('trendSeries', () => {
     const [s] = trendSeries({ windowDays: 30, connections: [conn()] }, now);
     expect(s!.gaps).toEqual({ followers: 'accumulating', views: 'accumulating', engagement: 'accumulating' });
     expect(s!.weeks.every(w => w.posts === 0 && w.viewsMedian === null)).toBe(true);
+  });
+
+  it('a follower snapshot taken only today is still accumulating, not "not provided"', () => {
+    const [s] = trendSeries({ windowDays: 30, connections: [conn({ followers: [{ date: isoDay(Math.floor(now / DAY_MS)), value: 80 }] })] }, now);
+    expect(s!.gaps.followers).toBe('accumulating');
   });
 });
 

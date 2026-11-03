@@ -59,7 +59,9 @@ export function trendSeries(rows: Rows, now: number): TrendSeries[] {
     }
     const settled = c.posts.filter(p => p.day7).length;
     const gaps: TrendSeries['gaps'] = {};
-    const followers = gapOf(weeks.map(w => w.followers), c.followers.length, c.source !== 'postforme');
+    // Followers: whether the platform gives them depends on the source alone; a snapshot taken today (after the last week)
+    // still means accumulating, not "not provided".
+    const followers = gapOf(weeks.map(w => w.followers), 0, c.source !== 'postforme');
     const views = gapOf(weeks.map(w => w.viewsMedian), settled, true);
     const engagement = gapOf(weeks.map(w => w.engagementMedian), settled, true);
     if (followers) gaps.followers = followers;
