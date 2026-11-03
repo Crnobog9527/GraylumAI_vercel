@@ -115,9 +115,9 @@ async function main() {
     await seedTestOpenRouterKey(db, 'LOCAL_SIMULATED_OPENROUTER_KEY');
 
     // Two accounts: each journey that charges uses its own, so balances are exact. Passwords stay in the run's private directory.
-    // carol is a Gold member (compare and the jury are Gold features).
+    // carol is a Gold member (compare and the jury are Gold features); warm only compiles the app's routes before the journeys.
     const users: Record<string, { id: string; email: string; password: string }> = {};
-    for (const role of ['alice', 'bob', 'carol']) {
+    for (const role of ['alice', 'bob', 'carol', 'warm']) {
       const email = `sim-${role}-${randomUUID().slice(0, 8)}@example.test`, password = randomBytes(18).toString('base64url');
       const id = await createUser(email, password);
       await db.query('insert into profiles(id,email,credits) values($1,$2,0) on conflict(id) do nothing', [id, email]);
