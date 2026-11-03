@@ -37,9 +37,10 @@ touch ~/graylum-loadtest/env.private && chmod 600 ~/graylum-loadtest/env.private
 open -e ~/graylum-loadtest/env.private
 ```
 
-在打开的文本里写下面五行，`<…>` 换成真实值后保存。**前三项由总控告知；只读连接串在 Supabase staging 项目的 Database 设置里按总控说明建**：
+在打开的文本里写下面六行，`<…>` 换成真实值后保存。**网址、应用主机、账号文件路径由总控告知；只读连接串在 Supabase staging 项目的 Database 设置里按总控说明建**：
 
 ```text
+export LOADTEST_MODEL_STUB_URL='<终端 A 第 ① 块里 = 后面的整串，和填进 Vercel 的一样>'
 export LOADTEST_BASE_URL='<graylumai-staging 的网址，总控给>'
 export LOADTEST_ALLOWED_APP_HOST='<上面网址里的主机名>'
 export LOADTEST_ACCOUNTS_FILE='<账号文件的完整路径，总控给>'
@@ -47,14 +48,14 @@ export LOADTEST_DATABASE_URL='<只读连接串>'
 export LOADTEST_ALLOWED_DB_HOST='<连接串里的主机名>'
 ```
 
-**6. 终端 B：1 个账号自检**（证明应用确实改道到了桩；不通过就不要开整套）：
+**6. 终端 B：1 个账号自检**（脚本自动判定，不用眼睛看；证明应用确实改道到了桩，也就是这次没有任何模型花费）：
 
 ```bash
 source ~/graylum-loadtest/env.private
-node scripts/loadtest/core-path-load.mjs --out ~/graylum-loadtest/selfcheck-$(date +%s) --calibrate --turns 1 --go
+scripts/loadtest/selfcheck.sh
 ```
 
-然后把终端 A 第 ③ 块里的命令整条复制到终端 B 运行（里面的地址已填好），看 `__stats` 那一段的结果：`calls` 要**大于 0**。等于 0 说明钩子没生效（变量没填对或没重新部署），停下，告诉总控。通过后告诉总控"隧道已起、两个变量已加、已重新部署、自检通过"。
+脚本先读桩的调用计数，跑 1 个账号 1 轮，再读一次，**计数增加了才算通过**，输出 `PASS`。输出 `STOP` 就是没通过（应用没改道、变量没填对或没重新部署、或这一轮失败），**不要开整套**，把输出告诉总控。（第 3 步的流式自检本身也会让计数增加，所以不能只看计数是否大于 0。）通过后告诉总控"隧道已起、两个变量已加、已重新部署、自检通过"。
 
 **7. 终端 B：正式开跑**（总控确认时段后；约 1 小时 45 分钟，期间保持终端 A、B 都开着）：
 

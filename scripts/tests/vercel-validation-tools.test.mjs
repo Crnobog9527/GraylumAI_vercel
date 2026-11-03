@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStub } from '../loadtest/openrouter-stub.mjs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -129,4 +129,33 @@ test('run-all refuses a directory holding an earlier run and a second run reads 
   const fresh = runAll({ RUN_ROOT: root });
   assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
   assert.doesNotMatch(fresh.stdout, /run-old/);
+});
+
+const selfcheck = async (driverCmd) => {
+  const stub = createStub({ prefix: 'p' });
+  await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${stub.address().port}`;
+  // the check only accepts https for the real tunnel; here the origin is read with URL(), which is protocol-agnostic
+  const child = spawn('bash', ['scripts/loadtest/selfcheck.sh'], { cwd: join(import.meta.dirname, '../..'),
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, LOADTEST_MODEL_STUB_URL: `${base}/p`, LOADTEST_ALLOWED_APP_HOST: 'app.example.test',
+      DRIVER_CMD: driverCmd.replaceAll('BASE', base) } });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', d => { stdout += d; }); child.stderr.on('data', d => { stderr += d; });
+  const status = await new Promise(resolve => child.on('close', resolve));
+  const run = { status, stdout, stderr };
+  stub.close();
+  return run;
+};
+
+test('selfcheck passes only when the stub counter goes up during the one-account turn', async () => {
+  // the stream check of the tunnel already called the stub once: that must not count
+  const hit = await selfcheck(`curl -s -m 10 -H 'content-type: application/json' -d '{"model":"x","stream":false,"messages":[{"role":"user","content":"hi"}]}' BASE/p/api/v1/chat/completions >/dev/null`);
+  assert.equal(hit.status, 0, hit.stdout + hit.stderr);
+  assert.match(hit.stdout, /PASS/);
+  const miss = await selfcheck('true');
+  assert.equal(miss.status, 1);
+  assert.match(miss.stderr, /NOT rerouted/);
+  const failed = await selfcheck('exit 3');
+  assert.equal(failed.status, 1);
+  assert.match(failed.stderr, /turn failed/);
 });
