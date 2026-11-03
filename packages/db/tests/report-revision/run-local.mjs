@@ -9,10 +9,6 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
-import {runFusionReview} from './fusion-review.mjs';
-import {runFusionBackground} from './fusion-background.mjs';
-import {runFusionFee} from './fusion-fee.mjs';
-import {runFusionPausedEnd} from './fusion-paused-end.mjs';
 import {runFusionVersionMarks} from './fusion-version-marks.mjs';
 import {runReportFee} from './report-fee.mjs';
 import {runFusionTurn} from './fusion-turn.mjs';
@@ -34,9 +30,11 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-// 0223 (R14), 0294 (Fusion fixed price) and 0295 (report fixed price) are each re-applied twice after the full build;
-// 0319 patches 0294's settlement, so it is re-applied after it (a bare 0294 replay would put the old settlement back).
-const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packages/db/migrations/0294_fusion_fixed_price.sql','packages/db/migrations/0295_report_fixed_price.sql',
+// 0223 (R14) and 0295 (report fixed price) are each re-applied twice after the full build. 0294 (Fusion fixed price) and 0436 (V2-7b)
+// are no longer replayed: they patch fusion_review_start / fusion_review_fee_settle / fusion_review_archive_reconcile by their old text,
+// which migration 0490 rewrote (V2-12 B-rewrites); the old fee path they define is gone with its tests (fusion-fee, fusion-review,
+// fusion-background, fusion-paused-end, removed in the same change).
+const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packages/db/migrations/0295_report_fixed_price.sql',
   'packages/db/migrations/0319_fusion_provider_refusal_verdict.sql',
   'packages/db/migrations/0334_runtime_interrupted_recovery.sql',
   // 0383 patches 0294's review check and 0295's report hold (ARCH-FIX E1 shared quarantine check).
@@ -45,8 +43,7 @@ const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packag
   'packages/db/migrations/0412_report_stop_limit.sql',
   // V2-7a: report_fee_hold and report_stop as they stand with the turn path (both replayed above in their older text).
   'packages/db/migrations/0429_core_path_v2_report.sql',
-  // CORE-PATH-V2 V2-7b replaces fusion functions the re-applied migrations above define again (review view, start, claim).
-  'packages/db/migrations/0436_core_path_v2_fusion.sql'];
+  ];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -87,10 +84,6 @@ try {
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
  await runCases({db:client,Client,connectionString,report});
- await runFusionReview({db:client,Client,connectionString,report});
- await runFusionBackground({db:client,Client,connectionString,report});
- await runFusionFee({db:client,Client,connectionString,report});
- await runFusionPausedEnd({db:client,Client,connectionString,report});
  await runFusionVersionMarks({db:client});
  await runReportFee({db:client,Client,connectionString,report});
  await runFusionTurn({db:client,Client,connectionString,report});
