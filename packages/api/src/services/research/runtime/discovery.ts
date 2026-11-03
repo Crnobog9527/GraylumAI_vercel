@@ -19,6 +19,15 @@ import { deepen, discoveryCap, discoveryCoverage, total, type PlatformCoverage }
 
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   missing: z.array(z.string()) });
+/** The cached profiles a round used, kept in its cursor with their slots (see discover). */
+const CACHED_PROFILES_MAX_BYTES = 12_000;
+const savedCachedProfile = z.object({ slot: z.number().int().nonnegative(), key: z.string(), profile: itemSchema, fetchedAt: z.string() });
+type SavedCachedProfile = z.infer<typeof savedCachedProfile>;
+const savedCachedProfiles = (cursor: Record<string, unknown>): SavedCachedProfile[] => {
+  const parsed = z.array(savedCachedProfile).safeParse(cursor.cachedProfiles);
+  return parsed.success ? parsed.data : [];
+};
+const cachedProfilesBytes = (used: ReadonlyMap<number, SavedCachedProfile>) => JSON.stringify([...used.values()]).length;
 interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account: string; evidenceRef: string; name?: string }
 interface StepResult {
   items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean;
@@ -216,6 +225,9 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // read per batch of authors, one batched write at the end; each cached lookup still takes its place in the operation order, so a
   // continued round replays the same ids (a slot that holds a saved operation is always replayed, never answered from the cache).
   const cacheHits = new Map<string, CachedProfile>(), cacheAsked = new Set<string>();
+  // Every cached profile this round used is saved in the cursor with its slot: a continued round replays it from there, whatever the
+  // shared cache holds by then (expired, unreadable), so the operation order, the caps and the result never change (review of #1679).
+  const usedCached = new Map<number, SavedCachedProfile>(savedCachedProfiles(d.cursor).map(entry => [entry.slot, entry] as const));
   const cacheWrites = new Map<string, { platform: string; kind: string; rows: Array<{ account: string } & CachedProfile> }>();
   const cacheKind = (request: SupplierRequest) => request.vendor === 'tikhub' ? request.call.kind : null;
   const warm = async (batch: Array<{ platform: SocialPlatform; authorId: string; authorPosts: EvidenceItem[] }>) => {
@@ -253,14 +265,23 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     const request = authorLookup(ctx, platform, account, authorPosts);
     if (!request) { complete = false; return; }
     const kind = cacheKind(request);
-    const cached = kind ? cacheHits.get(`${platform}\n${kind}\n${account}`) : undefined;
-    if (cached && !await ctx.store.readOperation(stableResearchId(d.discoveryId, String(index)))) {
+    const cacheKey = `${platform}\n${kind}\n${account}`;
+    // A slot a cached profile took in an earlier reply is replayed from the cursor; else a live hit takes the slot if it holds no operation.
+    const replayed = usedCached.get(index);
+    const live = kind ? cacheHits.get(cacheKey) : undefined;
+    let hit = replayed?.key === cacheKey ? replayed : undefined;
+    if (!hit && !replayed && live && !await ctx.store.readOperation(stableResearchId(d.discoveryId, String(index)))) {
+      const entry = { slot: index, key: cacheKey, profile: live.profile, fetchedAt: live.fetchedAt };
+      // The cursor has room for only so many (it is one row of 64 KB with the found accounts): the rest are looked up like any author.
+      if (cachedProfilesBytes(usedCached) + JSON.stringify(entry).length <= CACHED_PROFILES_MAX_BYTES) { usedCached.set(index, entry); hit = entry; }
+    }
+    if (hit) {
       index += 1; // the slot stays unused, so later steps keep their ids
       gotData = true;
       screened.add(`${platform}:${account}`);
       authorCursor += 1;
-      const ref = `pc:${createHash('sha256').update(`${platform}\n${kind}\n${account}`).digest('hex').slice(0, 24)}#1`;
-      addFound(platform, account, authorId, label, authorPosts, request, cached.profile, ref);
+      const ref = `pc:${createHash('sha256').update(cacheKey).digest('hex').slice(0, 24)}#1`;
+      addFound(platform, account, authorId, label, authorPosts, request, hit.profile, ref);
       return;
     }
     const result = await pay(platform, request, 'profiles');
@@ -334,6 +355,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   }
   const down = supplierDownRound({ supplierDown, stopped, shown: false, gotData });
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit, executions: replies,
+    ...(usedCached.size ? { cachedProfiles: [...usedCached.values()] } : {}),
     ...(stopped && resumable ? { continueFrom: ctx.executionId } : {}), ...(down ? { supplierDown: true } : {}) },
   stopped ? 'running' : 'completed');
   const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');

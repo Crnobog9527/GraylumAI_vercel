@@ -407,5 +407,40 @@ describe('the shared profile cache', () => {
     expect(cache.rows.size).toBe(8);
     expect(cache.writes.flat().length).toBe(8);                      // 2 + 6, the first two were not written again
   });
+
+  // Review of #1679: a cached profile took an operation slot but was not saved, so a continued round that no longer found it in the cache
+  // paid at that slot instead and the later slots drifted. The profiles a round used are kept in its cursor with their slots.
+  it.each([['expired', (cache: ReturnType<typeof sharedCache>) => cache.rows.clear()],
+    ['unreadable', (cache: ReturnType<typeof sharedCache>) => { cache.port.read = async () => { throw new Error('cache down'); }; }],
+  ] as const)('paused after cache hits, continued once the cache is %s: the same result in the same order', async (_name, spoil) => {
+    const hot = ['a0', 'a1', 'a2'];
+    const warm = (cache: ReturnType<typeof sharedCache>) => hot.forEach(account => cache.rows.set(`tiktok\naccount_profile\n${account}`,
+      { profile: { fields: { id: account, name: `Profile ${account}`, followers: 50000 }, missing: [] }, fetchedAt: now.toISOString() }));
+    // The control: one uninterrupted reply with the cache warm throughout.
+    const control = sharedCache(() => now); warm(control);
+    const whole = fixture('tiktok', nine); whole.ctx.profileCache = control.port;
+    await whole.run();
+    const controlOptions = vi.mocked(whole.store.createCard).mock.calls[0]![1].options;
+    const controlAccounts = profiles(whole).map(r => r.vendor === 'tikhub' && r.call.account);
+    expect(controlAccounts).toEqual(['a3', 'a4', 'a5', 'a6', 'a7']);
+    // The round: three hits and two paid lookups, then this reply runs out of time.
+    vi.clearAllMocks();
+    const cache = sharedCache(() => now); warm(cache);
+    const f = fixture('tiktok', nine); f.ctx.profileCache = cache.port;
+    let lookups = 0;
+    f.ctx.lookupTime = () => lookups++ < 5;
+    const first = await f.run();
+    expect(first).toMatchObject({ continue: true, reason: 'ROUND_LIMIT' });
+    expect(profiles(f).map(r => r.vendor === 'tikhub' && r.call.account)).toEqual(['a3', 'a4']);
+    expect(f.discoveries.get(discoveryId)?.cursor).toMatchObject({ cachedProfiles: hot.map((account, slot) => expect.objectContaining({ slot: 3 + slot })) });
+    // The cache is gone by the next reply: the three profiles come from the saved round, not from a lookup.
+    spoil(cache);
+    f.ctx.lookupTime = () => true;
+    const second = await f.run(29, { discoveryId });
+    expect(profiles(f).map(r => r.vendor === 'tikhub' && r.call.account)).toEqual(controlAccounts);
+    expect(second).toMatchObject({ continue: false, candidateCard: { shown: true, selectable: 8 } });
+    expect(vi.mocked(f.store.createCard).mock.calls[0]![1].options).toEqual(controlOptions);
+    expect(JSON.stringify(second)).not.toContain('OPERATION_IDENTITY_MISMATCH');
+  });
 });
 
