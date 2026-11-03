@@ -10,7 +10,7 @@ const mutation = vi.hoisted(() => () => ({ mutate: () => {}, mutateAsync: async 
   data: undefined }));
 vi.mock('@/trpc/client', () => ({ trpc: {
   useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() }, trend: { invalidate: vi.fn() },
-    settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() } } } }),
+    settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() }, pillars: { invalidate: vi.fn() } } } }),
   opc: { library: { useQuery: () => state.library } },
   publishMonitor: {
     connections: { useQuery: () => state.connections }, data: { useQuery: () => state.data },
@@ -21,7 +21,9 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     settings: { useQuery: () => ({ data: { autoReviewEnabled: true, autoReviewEnabledAt: '2026-10-20T00:00:00Z' } }) },
     setAutoReview: { useMutation: mutation },
     features: { useQuery: () => state.features },
-    review: { list: { useQuery: (_: unknown, o?: { enabled?: boolean }) => { state.reviewAsked.push(o?.enabled !== false); return state.reviews; } } },
+    review: { list: { useQuery: (_: unknown, o?: { enabled?: boolean }) => { state.reviewAsked.push(o?.enabled !== false); return state.reviews; } },
+      pillars: { useQuery: () => ({ isPending: false, error: null, data: [] }) },
+      savePillars: { useMutation: () => ({ mutate: () => {}, isPending: false }) } },
   },
 } }));
 import { DataReviewView } from './DataReviewView';
