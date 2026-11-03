@@ -24,7 +24,8 @@ export interface JourneySpend {
   cumulativeUsd: number;
 }
 
-interface SpendState { capUsd: number; totalUsd: number; exceeded: boolean; journeys: JourneySpend[]; lastSeenUsd?: number }
+/** `baselineUsd`: what was already spent when this run began (daily mode counts the whole UTC day); this run spent total - baseline. */
+interface SpendState { capUsd: number; totalUsd: number; exceeded: boolean; journeys: JourneySpend[]; lastSeenUsd?: number; baselineUsd?: number }
 
 /** Where the running state lives: a file, so a restarted worker keeps the journeys and the "exceeded" flag. */
 export interface SpendStore { load(): Promise<SpendState | null>; save(state: SpendState): Promise<void> }
@@ -61,16 +62,38 @@ export function dbSpendReader(sql: Sql, actorIds: readonly string[], sinceIso: s
 export class SpendMeter {
   private state: SpendState | undefined;
 
+  /**
+   * With `countsEarlierSpend` (daily mode: the reader counts from the start of the UTC day) the first reading is what earlier runs
+   * of the day spent: it is the run's baseline, so the first journey is not billed for them.
+   */
   constructor(readonly capUsd: number, private readonly read: SpendReader,
-    private readonly store: SpendStore = { load: async () => null, save: async () => undefined }) {}
+    private readonly store: SpendStore = { load: async () => null, save: async () => undefined }, private readonly countsEarlierSpend = false) {}
 
   private async current(): Promise<SpendState> {
-    this.state ??= (await this.store.load()) ?? { capUsd: this.capUsd, totalUsd: 0, exceeded: false, journeys: [] };
+    if (this.state) return this.state;
+    const stored = await this.store.load();
+    if (stored) this.state = stored;
+    else {
+      const baseline = this.countsEarlierSpend ? await this.read() : 0;
+      this.state = { capUsd: this.capUsd, totalUsd: baseline, baselineUsd: baseline, exceeded: false, journeys: [] };
+      await this.store.save(this.state);
+    }
     return this.state;
   }
 
   get journeys(): readonly JourneySpend[] { return this.state?.journeys ?? []; }
   get totalUsd() { return this.state?.totalUsd ?? 0; }
+  /** What this run itself spent (the total minus what earlier runs of the day had spent). */
+  get runUsd() { return (this.state?.totalUsd ?? 0) - (this.state?.baselineUsd ?? 0); }
+
+  /**
+   * How much of the cap is left right now. A journey whose usual cost does not fit is skipped instead of started: the hard stop
+   * below only fires after a turn, so it cannot keep one costly turn from going past the cap.
+   */
+  async remainingUsd(): Promise<number> {
+    await this.current();
+    return this.capUsd - (await this.read());
+  }
 
   /**
    * Called before a test starts: once the cap has been passed, no later test may make a paid call. The "exceeded" flag is

@@ -6,18 +6,28 @@ import { test as base, expect, type BrowserContext, type Page } from '@playwrigh
 import { gotoWithBypass } from '../../support/deploymentProtection';
 import { coreSql } from './db';
 import { requireAccounts } from './accounts';
-import { resultsDirectory, spendCapUsd, statePathFor, type CoreRole } from './config';
+import { dailyMode, resultsDirectory, spendCapUsd, spendSince, statePathFor, type CoreRole } from './config';
 import { dbSpendReader, fileSpendStore, SpendMeter } from './spend';
 
 let shared: SpendMeter | undefined;
 
-/** One meter per worker process; the DB total is cumulative since run.json, so a restarted worker keeps counting. */
+/**
+ * One meter per worker process; the DB total is cumulative since run.json (in daily mode since the start of that UTC day), so a
+ * restarted worker keeps counting.
+ */
 export async function spendMeter(): Promise<SpendMeter> {
   if (shared) return shared;
   const { startedAt } = JSON.parse(await readFile(path.join(resultsDirectory, 'run.json'), 'utf8')) as { startedAt: string };
   const accounts = await requireAccounts();
-  shared = new SpendMeter(spendCapUsd(), dbSpendReader(coreSql(), Object.values(accounts).map(account => account.id), startedAt), fileSpendStore());
+  const reader = dbSpendReader(coreSql(), Object.values(accounts).map(account => account.id), spendSince(startedAt));
+  shared = new SpendMeter(spendCapUsd(), reader, fileSpendStore(), dailyMode());
   return shared;
+}
+
+/** Skips (never fails) a journey whose usual cost no longer fits under the cap; the summary lists it as skipped for budget. */
+export async function requireBudget(meter: SpendMeter, reserveUsd: number) {
+  const left = await meter.remainingUsd();
+  base.skip(left < reserveUsd, `budget: $${left.toFixed(4)} left, this journey needs about $${reserveUsd.toFixed(2)}`);
 }
 
 interface Fixtures {

@@ -41,7 +41,7 @@ import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrant
 import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
 import { fulfillRecoveredPaidCheckout, syncMethodCheckoutReturn } from '../services/payments/methodCheckoutSync';
-import { loadCardPortalSubscription, openStripePortal } from '../services/payments/stripePortal';
+import { loadCardPortalSubscription, openStripePortal, portalUnavailable } from '../services/payments/stripePortal';
 import { assertCreditPackageMembership } from '../services/payments/creditPackageMembership';
 import { mapPurchaseCheckoutError } from '../services/payments/purchaseCheckoutError';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
@@ -1025,22 +1025,20 @@ export const paymentsRouter = router({
   createCustomerPortalSession: protectedProcedure
     .input(z.object({ returnUrl: z.string().url().optional() }).strict().optional())
     .mutation(async ({ ctx, input }) => {
-      const returnUrl = getStripePortalReturnUrl(input?.returnUrl);
-      assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
-      const stripe = getStripeClient();
-      const card = await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(stripe));
-      const subscription = card ? null : await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
-      if (!card && (!subscription?.stripe_customer_id || !subscription.stripe_subscription_id)) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: '当前没有可管理的订阅' });
-      }
-      try {
+      try { // any step can fail with a plain Error: answered "not available" and logged, never a 500 (round 13)
+        const returnUrl = getStripePortalReturnUrl(input?.returnUrl);
+        assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
+        const stripe = getStripeClient();
+        const card = await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(stripe));
+        const subscription = card ? null : await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
+        if (!card && (!subscription?.stripe_customer_id || !subscription.stripe_subscription_id)) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '当前没有可管理的订阅' });
+        }
         return await openStripePortal(stripe, card
           ? { subscriptionId: card.stripeSubscriptionId, orderIds: card.orderIds, userId: ctx.profileId, returnUrl }
           : { subscriptionId: subscription!.stripe_subscription_id!, expectedCustomer: subscription!.stripe_customer_id,
             userId: ctx.profileId, returnUrl });
-      } catch (error) {
-        throw createSafeServiceUnavailableError(error, '订阅管理暂不可用，请稍后重试');
-      }
+      } catch (error) { throw portalUnavailable(error); }
     }),
   getMembershipEligibilityMatrix: protectedProcedure
     .query(async ({ ctx }) => {
