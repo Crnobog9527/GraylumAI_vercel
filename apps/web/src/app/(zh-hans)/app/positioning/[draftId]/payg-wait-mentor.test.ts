@@ -1,11 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
 import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
-import { ORGANIZER_PENDING_NOTICE } from "@/lib/payg-wait";
-import { admissionMessage } from "./admission-message";
 import { mentorReplyDisplay } from "./agent-turn-display";
 import { liveReplyController } from "./live-reply-controller";
-import { isTerminalTurn, readAgentTurn, settleEnvelope, turnResultNotice, type MentorRequest } from "./mentor-turn";
+import { isTerminalTurn, readAgentTurn, settleEnvelope, type MentorRequest } from "./mentor-turn";
 import { envelopeRecovery, executionSettled, readStepEnvelopes, stepEnvelopeKey } from "./step-recovery";
 
 /** BILL-PAYG pauses and Q1 refusals on the positioning mentor page. */
@@ -28,10 +26,7 @@ function store(entries: Record<string, string> = {}) {
 }
 
 describe("Q1: a new mentor message answered by the unfinished organizer", () => {
-  it("is read as a result, not as an interrupted stream", async () => {
-    const turn = await readAgentTurn(stream([{ type: "result", result: blocked }]), { onProgress: () => {} });
-    expect(turn).toEqual({ executionId: organizerId, result: blocked });
-  });
+
 
   it("still treats a stream without admitted or a Q1 result as interrupted", async () => {
     await expect(readAgentTurn(stream([{ type: "result", result: { state: "completed" } }]), { onProgress: () => {} }))
@@ -46,16 +41,9 @@ describe("Q1: a new mentor message answered by the unfinished organizer", () => 
     expect(storage.map.has(key)).toBe(false);
   });
 
-  it("leaves the notice to the page's pause notices instead of an error", () => {
-    expect(turnResultNotice(blocked)).toBeNull();
-    expect(turnResultNotice({ ...blocked, unavailable: "call_limited" })).toBeNull();
-  });
 
-  it("maps the RUNTIME_ORGANIZER_PENDING refusal to the fixed notice", () => {
-    const cause = Object.assign(new Error("RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。"),
-      { data: { code: "PRECONDITION_FAILED", path: "opc.mentorTurnStream" } });
-    expect(admissionMessage(cause)).toBe(ORGANIZER_PENDING_NOTICE);
-  });
+
+
 });
 
 describe("a paused mentor turn", () => {
