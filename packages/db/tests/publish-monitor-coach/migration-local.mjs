@@ -8,7 +8,17 @@ import { generateDataset } from '../../../api/src/services/publishMonitor/coach/
 import { seedSql } from './seed-sql.mjs';
 
 const MIGRATION = 'packages/db/migrations/0457_publish_monitor_review_coach_foundation.sql';
-const OLD_KEYS = ['actorId', 'id', 'maxCostUsd', 'modelId', 'requestId', 'sessionId', 'token'];
+const SAMPLES = JSON.parse(read('packages/db/tests/publish-monitor-coach/claim-samples.json'));
+// Claims as the app's scheduler test builds them (reviews.test.ts reads the same file): same keys, same kind of value per key.
+const kind = value => (value === null ? 'null' : typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value) ? 'uuid' : typeof value);
+const NULLABLE = ['modelId', 'businessId'];
+const sameShape = (actual, sample) => {
+  assert.deepEqual(Object.keys(actual).sort(), Object.keys(sample).sort());
+  for (const key of Object.keys(sample)) {
+    const [a, b] = [kind(actual[key]), kind(sample[key])];
+    assert.ok(a === b || (NULLABLE.includes(key) && (a === 'null' || b === 'null')), `${key}: ${a} vs ${b}`);
+  }
+};
 const db = await localDb(), c = db.client, report = { build: db.build, checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const svc = async (sql, args = []) => {
@@ -64,7 +74,7 @@ try {
 
   // Coach setting absent: the old claim exactly, one per user, the old output shape the deployed app parses strictly.
   const [legacy] = await claim();
-  assert.deepEqual(Object.keys(legacy).sort(), OLD_KEYS);
+  sameShape(legacy, SAMPLES.legacy);
   assert.deepEqual(await claim(), []);
   const legacyRow = await run(legacy.id);
   assert.equal(legacyRow.business_id, null); assert.equal(legacyRow.cadence, 'weekly'); assert.equal(legacyRow.attempt, 1);
@@ -104,8 +114,7 @@ try {
   report.checks.push('turning the coach on adds no early review after a recent old-style review');
   await c.query('DELETE FROM social_review_runs WHERE actor_id=$1', [gold]);
   const [first] = await claim();
-  // The same key list the app's scheduler test builds its claims from (reviews.test.ts), so the two sides cannot drift apart.
-  assert.deepEqual(Object.keys(first).sort(), JSON.parse(read('packages/db/tests/publish-monitor-coach/claim-keys.json')));
+  sameShape(first, SAMPLES.brand);
   assert.equal(first.cadence, 'weekly'); assert.equal(first.attempt, 1);
   assert.deepEqual(await claim(), []);
   await finish(first.id, '1 minute');

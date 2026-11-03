@@ -204,17 +204,17 @@ it('cron accepts the claims exactly as the database returns them, plain ones and
  expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:2,scheduled:2,failed:0});
  expect(defer).toHaveBeenCalledTimes(2);
 });
-// The key list publish_monitor_review_claim_item() returns (checked against the real function by the database suite publish-monitor-coach).
-const CLAIM_KEYS:string[]=JSON.parse(readFileSync(new URL('../../../../db/tests/publish-monitor-coach/claim-keys.json',import.meta.url),'utf8'));
-it('the scheduler takes a claim with exactly the keys the database function returns, and schedules its turn',async()=>{
- expect(Object.keys(claimSchema.shape).sort()).toEqual(CLAIM_KEYS);
- const real=Object.fromEntries(CLAIM_KEYS.map(k=>[k,(c as Record<string,unknown>)[k]??null]));
- Object.assign(real,{businessId:'88888888-8888-4888-8888-888888888888',cadence:'monthly',attempt:1});
- const d=database({observe:{},default:{}},{publish_monitor_review_claim:[real]});
+// Claims as publish_monitor_review_claim_item() returns them: the database suite publish-monitor-coach asserts the real function's output
+// has these keys and kinds of value (the old claim without the coach keys, and the brand coach's with them).
+const SAMPLES:Record<string,Record<string,unknown>>=JSON.parse(readFileSync(new URL('../../../../db/tests/publish-monitor-coach/claim-samples.json',import.meta.url),'utf8'));
+it('the scheduler takes claims as the database function returns them, plain and brand, and schedules each one\'s turn',async()=>{
+ const claims=Object.values(SAMPLES).map((claim,i)=>({...claim,id:`aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${i}`}));
+ expect(Object.keys(claimSchema.shape).sort()).toEqual([...new Set(claims.flatMap(claim=>Object.keys(claim)))].sort());
+ const d=database({observe:{},default:{}},{publish_monitor_review_claim:claims});
  const defer=vi.fn();
- expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:1,scheduled:1,failed:0});
- await defer.mock.calls[0]![0]();
- expect(m.run).toHaveBeenCalledTimes(1);
+ expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:2,scheduled:2,failed:0});
+ for(const call of defer.mock.calls)await call[0]();
+ expect(m.run).toHaveBeenCalledTimes(2);
 });
 it('a feature switched off still reaches existing claims; a missing claim function is only an off feature',async()=>{
  m.settings.mockResolvedValue({enabled:false});
