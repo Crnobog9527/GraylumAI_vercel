@@ -90,6 +90,15 @@ it('a quote that fails with something other than a quote error is deferred and i
  expect(warn).toHaveBeenCalledWith('billing','weekly_review_quote_failed',{reviewId:claim.id,code:'RUNTIME_REASONING_NOT_CONFIGURED'});
  warn.mockRestore();
 });
+it('what the coach check drops is logged by path and reason, never as text',async()=>{
+ const {logger}=await import('../../lib/logger');
+ const info=vi.spyOn(logger,'info').mockImplementation(()=>undefined);
+ // The model answered without the structured block: the reading is kept and the dropped part is on record.
+ await runReviewTurn(deps().deps,{...claim,coach:true},{review:{mode:'full',cadence:'weekly',limits:{experiments_max:3,experiment_kinds:['tactic'],
+  strategy_proposal:false,pillar_mix_proposal:false},strategy:{pillars:[]},diagnostics:{posts:[]},ledger:{to_review:[]},stage:{followers:[]}}},async()=>true);
+ expect(info).toHaveBeenCalledWith('billing','coach_output_rejected',{reviewId:claim.id,parsed:false,rejected:[':no_block']});
+ info.mockRestore();
+});
 it('a request too large for any profile opens nothing, and a quote refused as too large is a configuration skip',async()=>{
  const d=deps();
  expect(await runReviewTurn(d.deps,claim,{rows:'x'.repeat(200000)},async()=>true)).toEqual({kind:'skipped',reason:'CONFIGURATION_REQUIRED'});
