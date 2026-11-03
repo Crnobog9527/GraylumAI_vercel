@@ -29,7 +29,8 @@
 | 5 | ★ Owner 做 | **花费上限**：OpenRouter 正式密钥每日美元上限、不自动充值、禁 BYOK；TikHub、Parallel、Firecrawl 各自硬上限 | 各家后台读回 | P4 |
 | 6 | ★ Owner 做 | 拿到正式 hCaptcha sitekey、Termly 网站编号；生成正式专用的 `OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`（不复用 staging） | 第 24、25 步变量名清单里有 | P5 |
 | 7 | ★ Owner 做 | 日志和备份保留期 ≤30 天：正式 Sentry、Vercel、Resend、`Graylum_main` 每日备份和 PITR | 各后台读回 | P6 |
-| 8 | ★ 批准 | **正式库连接池数字**（E4）：Owner 定 PostgREST 连接池大小。它决定第 14 步的 `poolSize`／`p` 和日限，**必须最先定** | 读回 | E4、3.0a |
+| 8 | ★ 批准 | **正式库连接池数字**（E4）：Owner 定 PostgREST 连接池大小。它决定第 17 步的 `poolSize`／`p` 和日限，**必须先于设置每日花费上限和 `core_path_v2`**。建库日 Owner 操作（需 Owner 生成的 Supabase 管理令牌，放本机密钥文件，不进仓库、日志或 PR） | 读回 | E4、3.0a |
+| 8a | ★ Owner 做 | **Waffo 后台打开拒付邮件通知** `notifyChargeback`（没打开时拒付只靠我们这边的对账发现）。建库日 Owner 亲手操作，做完告诉总控 | Owner 回复"Waffo 后台的拒付邮件通知已打开" | E5 |
 | 9 | ★ 批准 → 总控 | 正式只读核验（P9）：Vercel 项目仍暂停、Pro、sfo1；`Graylum_main` 是 Pro、PostgreSQL 17、有 `supabase_vault`；三地区一致（Supabase us-west-1、Vercel sfo1、Upstash us-west-1）；Vercel 正式变量**只读名字** | 每项 PASS／NOT_RUN 写进批准包 | P9、Q4 |
 | 10 | ★ 批准 | **冻结版本和批准包**（Q3）：冻结版本的 CI、独立审查、核心 12 项验收、100 人复测都对应同一个版本 | 总控记 Owner 原话 | Q1–Q3 |
 
@@ -37,7 +38,7 @@
 
 | # | 谁 | 做什么 | 怎么确认 | 详见 |
 | --- | --- | --- | --- | --- |
-| 11 | ★ 批准 → 总控 | **从迁移文件建库**：平台前置 → `packages/db/baseline`（0000）→ 全部迁移到冻结版本的最后一个号（含 V2-12 的 0495；今天最后一个是 0496）；每个文件整段交服务端执行，不用 `psql -f`。干净起点（BASELINE-SQUASH）三方一致才用，否则逐个迁移 | 只读抓指纹，和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 | B1 |
+| 11 | ★ 批准 → 总控 | **从迁移文件建库**：平台前置 → `packages/db/baseline`（0000）→ 全部迁移到冻结版本的最后一个号（含 V2-12 的 0495；今天最后一个是 0496）；每个文件整段交服务端执行，不用 `psql -f`。**走逐个迁移回放**：Master Plan 第 2.1 节 2026-10-25 BASELINE-SQUASH 只规定"起点建库、逐个迁移建库、staging 指纹三方逐对象一致才用干净起点，不一致就退回旧方式"，所以直接按顺序回放全部迁移就满足那条决定，不需要先做干净起点；若冻结前干净起点已做好且三方一致，才可改用 | 只读抓指纹，和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 | B1 |
 | 12 | ★ 批准 → 总控 | **正式库标记**：`runtime_environment="production"`（绝不在 staging 写） | `runtime_production_database()` 为 true；测试窗口为 0 | B2 |
 | 13 | ★ 批准 → 总控 | **模型导入**：Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol、Opus 5.5、Gemini 4 Argon、GPT-6 Luna 共 6 个（Qwen 不导入，见第 4 部分问题 8）；导入后在后台点"读取价格"，不从 staging 抄价格和连接测试记录；Sol、Opus 加低思考档；输出上限 32768 | 后台模型页读回；记下 6 个正式 uuid | B3、B7 |
 | 14 | ★ 批准 → 总控 | **Skill 导入**：从私密仓库 `graylum-skills` 导入定位、写作、评审团评审（内部）、运营教练复盘的 Skill 和模块，**全部保持未发布**；评审团内部 Skill 记下 uuid（第 15 步要填） | 后台 Skill 版本读回，状态都是未发布 | B3 |
@@ -73,7 +74,7 @@
 | 33 | ★ 批准（金额、次数、总预算） → 总控 | **冒烟**：K1 注册／开户 500／找回密码／Google 登录；K2 一次成功、一次拒绝、一次重复、回执对账；K3 定位第 1 步加一次对标；K4 @ 文档、写作 Skill、对话内研究；K5 文风；K6 Gold 评审团和对比各一次；K7 作品复盘页、运营教练复盘真实生成一次、名单外平台被拒；K10 后台手动跑一次成本告警检查；K11 每日对账；K12 TikHub 价格手工刷新一次；K13 首字速度 20 次（不挡上线）。**不做 K8 真钱付款和 K9**（Owner 11-03：staging 付款链路全部测通即可，正式站不测） | 每项记录贴上线 PR | 4.1 |
 | 34 | ★ 批准（每次） | 一键发布：X、YouTube 各真实发布一次（Owner 在场授权账号） | 帖子在平台上可见，扣费 6 积分／平台 | 核心 10 ③ |
 | 35 | ★ 批准 | 打开四条付款路由（`card`、`card_cn`、`wechat_pay`、`alipay`），逐个读回；只开，不在正式站付真钱 | 结账页能建单（不付款） | S-6 |
-| 36 | 总控 + ★ Owner | 告警演练：Sentry 每条规则"发送测试通知"，确认 Owner 收到 | Owner 回复收到 | 第 3.2 节 |
+| 36 | 总控 + ★ Owner | **生产 Sentry 测试告警**：确认第 25 步的 `NEXT_PUBLIC_SENTRY_DSN` 已生效且 `SENTRY_ENVIRONMENT` 能分开正式和 staging；在 Sentry 正式项目对每条通知规则点"发送测试通知"，并手动触发一次"Runtime 成本与余额告警"检查（K10），确认 Owner 的邮箱／手机真的收到一条。部署访问保护还开着时做 | Owner 回复收到；结果记在上线 PR | 第 3.2 节 |
 
 ### 1.5 公开开放（冒烟和对账无误、核心 12 项 PASS、备份恢复演练已通过之后）
 
@@ -83,7 +84,8 @@
 | 38 | ★ 批准 → 总控 | **`SITE_INDEXING=public` 并重新部署**（构建时读，不重新部署不生效） | `/robots.txt` 放行搜索爬虫、拒绝训练爬虫；首页和公开页响应头没有 `X-Robots-Tag: noindex`，`/app`、登录页仍有；**canonical 检查**：首页和任意一个公开页的 `<link rel="canonical">`、`og:url` 都是 `https://www.graylum.com/...`（代码里写死 `SITE_ORIGIN`），不出现 `app.graylum.com` 或 vercel.app；`/sitemap.xml` 只有 www 地址 | O-2 |
 | 39 | ★ Owner 做 | 撤掉部署访问保护；作废回调绕过口令并从回调地址上去掉 | 公众能打开首页；Stripe 回调仍成功 | O-3 |
 | 40 | ★ 批准 → 总控 | 关 `stopNewCalls`，其他限流保持初始值 | 一个公开测试身份完成一次对话 | O-4 |
-| 41 | ★ Owner 做 | Google Search Console、Bing 提交站点和 sitemap；删 Vercel 正式里的过渡期旧变量和 E2E 凭证 | 后台显示已验证 | O-5、V4 |
+| 41 | ★ Owner 做 | Google Search Console、Bing 提交站点和 sitemap；删 Vercel 正式里的过渡期旧变量 | 后台显示已验证 | O-5、V4 |
+| 41a | ★ Owner 做 + 总控 | **E2E 测试账号和凭证清理**（`docs/RELEASE_PREP_CHECKLIST.md`）：在 Vercel 正式环境移除 `E2E_*` 凭证（`E2E_TEST_PASSWORD`、`E2E_ADMIN_PASSWORD` 等，名字清单里不应再出现）；正式库里若有 E2E 测试账号（包括迁移 0005 自带的诊断账户，第 4 部分问题 18），由总控列出后经 Owner 批准删除或停用 | 变量名清单没有 `E2E_*`；账号清单读回 | V4 |
 | 42 | 总控 | 记录正式部署地址、Stripe 模式、冒烟结果；Waffo 正式审核和映射（S-8）可以在上线后 | 贴上线 PR | O-6、S-8 |
 
 **三道刹车**（随时可用，见 REL-1 第 4.2 节）：模型出问题 → 打开 `stopNewCalls`（或 `runtime_payg` 写 `{"enabled":false}`）；付款出问题 → 关对应付款路由；整站出问题 → Owner 在 Vercel 重新暂停或开部署访问保护。
@@ -327,7 +329,7 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 7. **`v3_summary_max_tokens`**：staging 4096、缺省 2048，正式取哪个没有记录。
 8. **`Qwen3.8 Max`** 在 staging 启用但没有任何引用，名字前多一个空格；正式建议不导入。
 9. ~~**REL-1 日期过期**~~ 已由 #1638 刷新；Owner 11-03 定上线日 11-15，冻结日 11-10 是否沿用由总控确认。
-10. **B1 没写干净起点建库**（BASELINE-SQUASH，Owner 10-25）：三方一致才用干净起点，否则退回逐个迁移。
+10. ~~**B1 没写干净起点建库**~~ 已核对原文（11-03）：BASELINE-SQUASH 的干净起点只在三方逐对象一致时才用，不一致退回旧方式；所以逐个迁移回放满足决定，清单第 11 步已写明走回放。
 11. **V2 没点名 `NEXT_PUBLIC_SENTRY_DSN`**，而缺了它所有告警静默；也没有合成告警演练和 Sentry 通知规则这一步（第 3.2 节）。
 12. **staging 的止损金额全是空的**：止损告警在 staging 从没真正发过一封，正式第一次发信就是上线后。建议冒烟日 K10 用一个很低的告警线真实触发一次再改回。
 13. **REL-1 第 3.6 节说钱包"六个会员产品、七个价格"**，staging 当前有效的一次性会员价格是 6 条（标准月/年各 2、创始 1、Gold 首月 1）。以 S4 脚本输出为准，B5 读回时核对。
@@ -341,4 +343,4 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 21. ~~**"七个平台"和名单里的 9 个**~~ 已定（总控 11-03）：以 Master Plan 10-24 E1 为准，9 个平台都开放；正式发帖只验证 X 和 YouTube。
 22. **`TURN_DATABASE_HOST` 是主路径新增的必填变量**，REL-1 第 3.4 节 V2 没有点名；没设或和实际连接的库不一致时，`/api/turn` 全部 503。已写进第 1 部分第 25 步，REL-1 V2 也该补上。
 23. **REL-1 第 3.3 节 B7 的作品复盘一行没提 `publish_monitor_coach_enabled`**；种子已写 `true`，B7 也该补上。
-24. **REL-1 第 4.1 节 K8、K9（真钱付款）和第 7 节 E2（隔离项目演练）已被 Owner 11-03 的决定取代**，REL-1 正文还没改；本文件第 1 部分已按新决定写。
+24. ~~REL-1 的 K8、K9（真钱付款）和 E2（隔离项目演练）已被 Owner 11-03 决定取代~~ 已在同一 PR 里改正 REL-1 正文（上线日 11-15、K8/K9 取消、E2 改在 staging、E4/E5 标建库日 Owner 操作）。
