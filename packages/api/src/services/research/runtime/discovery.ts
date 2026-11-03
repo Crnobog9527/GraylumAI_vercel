@@ -268,16 +268,18 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const replies = [...new Set([...(Array.isArray(d.cursor.executions) ? d.cursor.executions : [])
     .filter((x): x is string => typeof x === 'string'), ctx.executionId])].slice(-REPLIES_KEPT);
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
+  // The supplier could not serve the round and nothing came out of it: the round is saved but not counted (0492, Owner 2026-11-03).
+  const down = supplierDownRound({ supplierDown, stopped, shown: false, found: found.length });
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit, executions: replies,
-    ...(stopped && resumable ? { continueFrom: ctx.executionId } : {}) }, stopped ? 'running' : 'completed');
+    ...(stopped && resumable ? { continueFrom: ctx.executionId } : {}), ...(down ? { supplierDown: true } : {}) },
+  stopped ? 'running' : 'completed');
   const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');
   const shown = onCard > 0;
   const insufficient = !stopped && !shown;
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
   // candidate card: the host may now offer the shortfall choice (0320 decides).
-  // The supplier could not serve the round and nothing was found: say that, not "searched to the end, nothing found".
-  const down = supplierDownRound({ supplierDown, stopped, shown, found: found.length });
+  // A supplier-down round says so (above), not "searched to the end, nothing found".
   const shortfall = !stopped && !shown && !down ? await shortfallNotice(ctx) : undefined;
   // The round goes on in the next reply: tell the page (it continues on the user's behalf, plan §4.2 / PR-7).
   if (stopped && resumable) ctx.emit({ type: 'research_continue', discoveryId: d.discoveryId });
