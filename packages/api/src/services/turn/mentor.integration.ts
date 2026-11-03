@@ -325,7 +325,7 @@ it('RUNTIME: CORE-PATH-V2 V2-12: a confirmation card from before a mentor turn c
   const read = async () => (await f.steps())['step-0'];
   const saveInfo = async (values: Record<string, unknown>) => { const s = await read();
     await service.information({ draftId: f.draftId, requestId: randomUUID(), stepId: 'step-0', expectedVersion: s.version,
-      values: { goal: tuple('', 'unknown', 'unknown'), other: tuple('', 'unknown', 'unknown'), ...s.information, ...values } }); return read(); };
+      values: { ...s.information, ...values } }); return read(); };
   const saveBody = async (body: string) => { const s = await read();
     await workbench.execute({ action: 'save', projectId: ids.project_id, roundId: ids.round_id, requestId: randomUUID(), stepId: 'step-0',
       expectedVersion: s.version, body, evidenceIds: [] }); return read(); };
@@ -334,6 +334,12 @@ it('RUNTIME: CORE-PATH-V2 V2-12: a confirmation card from before a mentor turn c
     expectedReviewVersion: card.reviewVersion });
   const organizing = (patches: unknown[]) => transport((body, n) => body.model !== ORGANIZER ? prose('gen-reply-' + n, 'Noted.')
     : organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', notes: [], patches })));
+  // Every field starts empty and untouched, so a later organizer patch on a field the user never saved is applied, not only suggested.
+  await db.query(`update artifact_rounds r set steps=(select jsonb_object_agg(s.key,
+    s.value || jsonb_build_object('information',(select jsonb_object_agg(f->>'id',
+      jsonb_build_object('value','','status','unknown','nature','unknown'))
+      from jsonb_array_elements(r.workflow->'steps') w,jsonb_array_elements(w->'information') f where w->>'id'=s.key)))
+    from jsonb_each(r.steps) s) where r.id=$1`, [ids.round_id]);
   await saveInfo({ goal: tuple('user selected value', 'confirmed', 'fact') });
   const before = await saveBody('Original ready body');
   // A mentor turn organizes a new value into the same step after the card was shown.
@@ -341,6 +347,7 @@ it('RUNTIME: CORE-PATH-V2 V2-12: a confirmation card from before a mentor turn c
   await turn(f, { text: 'something else', transport: other.fn });
   const changed = await read();
   expect(changed.information.other?.value, JSON.stringify({ before, changed })).toBe('new other');
+  expect(changed.version).toBeGreaterThan(before.version);
   await expect(confirm(before)).rejects.toThrow('ARTIFACT_REVIEW_REQUIRED');
   // Seen again, the step confirms once (a repeat of the same request is the same confirmation), and a later patch stays a suggestion.
   await saveInfo({ goal: tuple('user selected value', 'confirmed', 'fact') });
