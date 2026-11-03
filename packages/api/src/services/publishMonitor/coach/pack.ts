@@ -103,6 +103,9 @@ export function buildPack(input: PackInput) {
 
 export const packBytes = (pack: unknown) => Buffer.byteLength(JSON.stringify(pack));
 
+/** The most the `trimmed_rows` note can add to a pack: the key and a number of up to four digits. */
+const TRIMMED_NOTE_BYTES = Buffer.byteLength(',"trimmed_rows":9999');
+
 /** Drops the least important rows first; strategy, stage, diagnostics, ledger.to_review and gaps are never cut. */
 function trim(pack: Record<string, unknown>) {
   const steps: Array<() => boolean> = [
@@ -116,7 +119,9 @@ function trim(pack: Record<string, unknown>) {
     () => pop(pack, ['ledger', 'running']),
   ];
   let trimmed = 0;
-  while (packBytes(pack) > REVIEW_PACK_RESERVE) {
+  // The `trimmed_rows` note is added after the loop: its bytes are kept free in the loop, or a pack trimmed to just under the reserve
+  // would pass the loop and then be pushed over it by the note (seen: a monthly pack at 16,008 of 16,000 bytes, so no review at all).
+  while (packBytes(pack) + TRIMMED_NOTE_BYTES > REVIEW_PACK_RESERVE) {
     const step = steps.find(run => run());
     if (!step) break;
     trimmed++;

@@ -266,6 +266,20 @@ describe('review pack (RC-2)', () => {
     }
   });
 
+  it('a pack always fits the reserve whatever the day: trimming leaves room for its own note (monthly account A was 16,008 of 16,000 bytes)', () => {
+    for (const day of [0, 2, 9, 16]) {
+      const asOf = new Date(Date.parse('2026-10-25T00:00:00Z') + day * 86_400_000).toISOString().slice(0, 10);
+      const now = Date.parse(asOf + 'T00:00:00Z'), set = generateDataset({ asOf });
+      for (const account of set.accounts) for (const cadence of cadences) {
+        const accountRows = packRowsSchema.parse(packRowsFor(set, account, { now }));
+        // No handbooks, as the host builds it today (they are not loaded yet): every platform is diagnosed on its own data.
+        const pack = loose(buildPack({ rows: accountRows, cadence, businessId: simId(account.key), now, handbooks: new Map() }));
+        expect(packBytes(pack), `${asOf} ${account.key} ${cadence}`).toBeLessThanOrEqual(REVIEW_PACK_RESERVE);
+        if (pack.trimmed_rows !== undefined) expect(pack.trimmed_rows).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it.each(data.accounts.map(a => a.key))('account %s: best and worst only point at settled posts the pack still lists', key => {
     for (const cadence of cadences) {
       const period = loose(buildPack({ rows: rows(key), cadence, businessId: simId(key), now: NOW, handbooks })).this_period;
