@@ -112,6 +112,20 @@ it('a brand review reads the coach pack of its brand and cadence, saves it wrapp
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,52);
 });
+it('a brand review builds its pack with the handbooks of the pinned Skill package; without the setting the Map is empty',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888';
+ m.rows.mockResolvedValue({followers:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ const handbook={platform:'douyin',version:'t',calibration:'draft',labels:{},funnel:[{layer:'hook',name:'h',keys:['retain_3s'],basics:true,pass:{}}]};
+ const d=database({default:{businessId:BUSINESS,cadence:'weekly'}},{read_skill_package:Buffer.from(JSON.stringify(handbook)).toString('base64')});
+ const env={PUBLISH_MONITOR_HANDBOOK_PACKAGE:JSON.stringify({moduleId:'m',skillId:'s',revisionId:'r-reviews-test',packageHash:'b'.repeat(64)})};
+ await advanceReview(d.db,c,{...options(),env});
+ const given=m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>;
+ expect([...given.keys()]).toEqual(['douyin']);
+ expect(d.calls.some(x=>x[0]==='read_skill_package'&&x[1].p_actor_id===c.actorId&&x[1].p_path==='handbook/douyin.json')).toBe(true);
+ m.build.mockClear();
+ await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
+ expect((m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>).size).toBe(0);
+});
 it('a delivered brand review writes its checked output to the ledger before it completes; a failed write does not undo the review',async()=>{
  const BUSINESS='88888888-8888-4888-8888-888888888888';
  m.rows.mockResolvedValue({followers:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
