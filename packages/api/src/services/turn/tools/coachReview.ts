@@ -15,14 +15,14 @@ export const COACH_REVIEW_ID = /^coach_review(?::([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-
 export const COACH_REVIEW_ENTRY = { id: 'coach_review', kind: 'coach_review', name: '运营复盘',
   use: 'Code-computed operations review pack of the user\'s brand from saved data. Read it when the user asks for a review (复盘).' };
 
-export const COACH_REVIEW_INSTRUCTIONS = '\nWhen the user asks for a review of their operations (复盘), or sends screenshots of a platform '
-  + 'dashboard (the message starts with [截图] or [截图×N]) and asks for an analysis: when the Skill catalog lists an operations review Skill, load it first; read the coach_review '
-  + 'entry from the owned-source index (when it lists several brands, read coach_review:<id> of the brand the user means, or ask which '
-  + 'one). List the numbers you read from a screenshot so the user can correct them. The pack is saved data computed by code: never '
-  + 'claim a refresh, never call research tools for it. Compare only the same platform and basis; too_new posts are not judged; missing '
-  + 'is not zero; verdicts and basics_pass are code\'s, explain them without changing them. When mode is basics_only, talk only about '
-  + 'the basics. Write the current performance, what worked (cite posts), the experiments, and next steps; suggestions are proposals '
-  + 'only, nothing is created, published or saved. No coach_json block.';
+export const COACH_REVIEW_INSTRUCTIONS = '\nWhen the user asks for a review of their operations (复盘), or sends screenshots of a '
+  + 'platform dashboard (the message starts with [截图] or [截图×N]) and asks for an analysis: when the Skill catalog lists an '
+  + 'operations review Skill, load it first; read the coach_review entry from the owned-source index (when it lists several brands, '
+  + 'read coach_review:<id> of the brand the user means, or ask which one). List the numbers you read from a screenshot so the user can '
+  + 'correct them. The pack is saved data computed by code: never claim a refresh, never call research tools for it. Compare only the '
+  + 'same platform and basis; too_new posts are not judged; missing is not zero; verdicts and basics_pass are code\'s, explain them '
+  + 'without changing them. When mode is basics_only, talk only about the basics. Write the current performance, what worked (cite '
+  + 'posts), the experiments, and next steps; suggestions are proposals only, nothing is created, published or saved. No coach_json block.';
 
 const turnRead = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('coach_rows'), businessId: z.string().uuid(), rows: packRowsSchema }),
