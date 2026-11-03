@@ -36,17 +36,21 @@ export function blockingProjectIds(own: Connection[]): Set<string> {
 export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged }: { brands: Brand[];
   connections: Connection[]; refresh: Map<string, RefreshState>; gold: boolean; onChanged: () => void }) {
   const [adding, setAdding] = useState(false), [preselect, setPreselect] = useState('');
+  const [upgrade, setUpgrade] = useState(false);
   const own = connections.filter(c => c.role === 'own');
   const benchmarks = connections.filter(c => c.role === 'benchmark');
   const accounts = accountIndex(brands);
-  const connected = blockingProjectIds(own);
+  const blocking = blockingProjectIds(own);
+  // Adding publishing to a live connection goes through the same form, so that one account must stay selectable.
+  const connected = upgrade ? new Set([...blocking].filter(id => id !== preselect)) : blocking;
   return (
     <section className="space-y-4" aria-labelledby="pm-accounts">
       <div className="flex items-center justify-between gap-2">
         <h2 id="pm-accounts" className="text-base font-semibold">我的账号</h2>
-        <Button variant="outline" onClick={() => { setPreselect(''); setAdding(value => !value); }}>{adding ? '收起' : '连接账号'}</Button>
+        <Button variant="outline" onClick={() => { setPreselect(''); setUpgrade(false); setAdding(value => !value); }}>{adding ? '收起' : '连接账号'}</Button>
       </div>
-      {adding && <ConnectForm key={preselect} brands={brands} connected={connected} initialProjectId={preselect}
+      {adding && <ConnectForm key={`${preselect}:${upgrade}`} brands={brands} connected={connected}
+        initialProjectId={preselect} initialPublish={upgrade}
         onConnected={() => { setAdding(false); onChanged(); }} onAccountAdded={onChanged} />}
       {own.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -56,7 +60,7 @@ export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged
           {own.map(c => {
             const account = c.accountProjectId ? accounts.get(c.accountProjectId) : undefined;
             return <ConnectionRow key={c.id} connection={c} refresh={refresh.get(c.id)} onChanged={onChanged}
-              onReauthorize={projectId => { setPreselect(projectId); setAdding(true); }}
+              onReauthorize={(projectId, publish) => { setPreselect(projectId); setUpgrade(publish); setAdding(true); }}
               title={`${account?.businessName ?? '品牌'} · ${platformName(c.platform)} · ${account?.label ?? c.displayHint ?? ''}`} />;
           })}
         </ul>
@@ -75,12 +79,14 @@ function stateLine(c: Connection, refresh: RefreshState | undefined): string {
 }
 
 function ConnectionRow({ connection: c, refresh, title, onChanged, onReauthorize }: { connection: Connection;
-  refresh: RefreshState | undefined; title: string; onChanged: () => void; onReauthorize: (projectId: string) => void }) {
+  refresh: RefreshState | undefined; title: string; onChanged: () => void;
+  onReauthorize: (projectId: string, publish: boolean) => void }) {
   const doRefresh = trpc.publishMonitor.refresh.useMutation();
   const disconnect = trpc.publishMonitor.disconnect.useMutation();
   const [confirming, setConfirming] = useState(false);
   const error = doRefresh.error ?? disconnect.error;
   const needsReauth = c.source === 'postforme' && (c.status === 'reauth_required' || c.status === 'quarantined');
+  const canAddPublish = c.source === 'postforme' && c.status === 'connected' && !c.consentPublish;
   return (
     <li className="space-y-2 p-3 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -98,7 +104,9 @@ function ConnectionRow({ connection: c, refresh, title, onChanged, onReauthorize
             onClick={() => doRefresh.mutate({ connectionId: c.id }, { onSuccess: onChanged })}>
             {doRefresh.isPending ? '正在刷新…' : '刷新数据'}</Button>
         )}
-        {needsReauth && c.accountProjectId && <Button size="sm" onClick={() => onReauthorize(c.accountProjectId!)}>重新授权</Button>}
+        {needsReauth && c.accountProjectId && <Button size="sm" onClick={() => onReauthorize(c.accountProjectId!, false)}>重新授权</Button>}
+        {canAddPublish && c.accountProjectId && <Button size="sm" variant="outline"
+          onClick={() => onReauthorize(c.accountProjectId!, true)}>允许一键发布</Button>}
         {confirming ? <>
           <span className="self-center">断开后不再读取这个账号，已读到的作品数据会一起删除。确定吗？</span>
           <Button size="sm" variant="destructive" disabled={disconnect.isPending}
