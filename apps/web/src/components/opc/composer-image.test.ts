@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
-import { prepareChatImages } from './composer-image';
+import { prepareChatImages, restoredImages } from './composer-image';
 import type { ChatImage } from '@/lib/chat-image';
 
 const file = (name: string) => new File([new Uint8Array([1])], name, { type: 'image/png' });
@@ -42,4 +42,13 @@ it('counts images still being prepared against the four-image limit, and ignores
   await Promise.all([first, second]);
   expect(h.attached).toHaveLength(4);
   expect(h.pending()).toBe(0);
+});
+
+// Review on #1702: a refused send gives its images back without dropping those added while it was being sent.
+it('gives a refused message its images back ahead of those added meanwhile, at most four', () => {
+  const image = (id: string) => ({ id, name: id, url: 'data:image/jpeg;base64,AA==' });
+  expect(restoredImages([image('a'), image('b')], [image('new')])).toEqual({ images: [image('a'), image('b'), image('new')], dropped: 0 });
+  expect(restoredImages([image('a'), image('b'), image('c')], [image('x'), image('y')]))
+    .toEqual({ images: [image('a'), image('b'), image('c'), image('x')], dropped: 1 });
+  expect(restoredImages([], [image('new')])).toEqual({ images: [image('new')], dropped: 0 });
 });

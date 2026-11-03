@@ -89,7 +89,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     const answer = await chat.send(text, requestId, { ...(skillId ? { moduleId: skillId } : {}),
       ...(sent.length ? { references: referenceRequest(sent) } : {}), ...(sentImages.length ? { images: sentImages.map(image => image.url) } : {}) });
     setOutgoing(null);
-    if (answer === 'kept') { restore(); updateReferences(sent); images.set(sentImages); }
+    if (answer === 'kept') { restore(); updateReferences(sent); images.restore(sentImages); }
     if (answer !== 'unknown') {
       forgetPending(localStorage, sessionId);
       const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);

@@ -13,7 +13,18 @@ export type ChatImages = {
   images: ChatImage[]; busy: boolean; error: string;
   add: (files: Iterable<File> | ArrayLike<File> | null | undefined) => Promise<void>;
   remove: (id: string) => void; set: (images: ChatImage[]) => void;
+  /** A message that was not sent gives its images back, ahead of any added while it was being sent (restoredImages). */
+  restore: (sent: readonly ChatImage[]) => void;
 };
+
+/**
+ * The images back in the box after a message was not sent: the sent ones first (they belong to the text that comes back), then those
+ * added meanwhile, at most CHAT_MAX_IMAGES; `dropped` counts the newest that no longer fit.
+ */
+export function restoredImages(sent: readonly ChatImage[], current: readonly ChatImage[]) {
+  const merged = [...sent, ...current.filter(image => !sent.some(old => old.id === image.id))];
+  return { images: merged.slice(0, CHAT_MAX_IMAGES), dropped: Math.max(merged.length - CHAT_MAX_IMAGES, 0) };
+}
 
 /**
  * Prepares the image files among `files` for the message, at most CHAT_MAX_IMAGES in all. `held` counts the images already attached
@@ -51,7 +62,13 @@ export function useChatImages(): ChatImages {
     });
   }, []);
   const remove = useCallback((id: string) => { setImages(old => old.filter(image => image.id !== id)); setError(''); }, []);
-  return { images, busy: pending > 0, error, add, remove, set: setImages };
+  const restore = useCallback((sent: readonly ChatImage[]) => {
+    if (!sent.length) return;
+    const next = restoredImages(sent, current.current);
+    current.current = next.images; setImages(next.images);
+    if (next.dropped) setError(`一条消息最多附 ${CHAT_MAX_IMAGES} 张图片：退回的图片已放回，之后新加的有 ${next.dropped} 张放不下，请重新添加。`);
+  }, []);
+  return { images, busy: pending > 0, error, add, remove, set: setImages, restore };
 }
 
 /** The thumbnails above the text, each removable, with the processing state and any refusal. */
