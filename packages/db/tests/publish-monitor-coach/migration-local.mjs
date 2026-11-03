@@ -104,7 +104,8 @@ try {
   report.checks.push('turning the coach on adds no early review after a recent old-style review');
   await c.query('DELETE FROM social_review_runs WHERE actor_id=$1', [gold]);
   const [first] = await claim();
-  assert.deepEqual(Object.keys(first).sort(), [...OLD_KEYS, 'attempt', 'businessId', 'cadence'].sort());
+  // The same key list the app's scheduler test builds its claims from (reviews.test.ts), so the two sides cannot drift apart.
+  assert.deepEqual(Object.keys(first).sort(), JSON.parse(read('packages/db/tests/publish-monitor-coach/claim-keys.json')));
   assert.equal(first.cadence, 'weekly'); assert.equal(first.attempt, 1);
   assert.deepEqual(await claim(), []);
   await finish(first.id, '1 minute');
@@ -233,6 +234,48 @@ try {
   await assert.rejects(svc('SELECT publish_monitor_review_pack_rows($1,$2,30) v', [gold, businesses.A]), /BUSINESS_NOT_FOUND/);
   await assert.rejects(svc('SELECT publish_monitor_review_pack_rows($1,$2,0) v', [sim, businesses.A]), /INPUT_INVALID/);
   report.checks.push('pack rows return facts beyond 100 days, experiments and diagnostics for the owner brand only');
+
+  // RC-3b (migration 0490): a delivered brand review writes its checked output into the ledger and the facts, once, under its lease.
+  await c.query(`INSERT INTO social_coach_profiles(actor_id,business_id,pillars,pillars_source) VALUES($1,$2,$3,'user')
+   ON CONFLICT(actor_id,business_id) DO UPDATE SET pillars=EXCLUDED.pillars`,
+  [sim, businesses.A, JSON.stringify([{ key: 'p1', name: 'a', definition: 'a' }, { key: 'p2', name: 'b', definition: 'b' }])]);
+  const experiment = (start, end, extended = false) => v(`INSERT INTO social_review_experiments(actor_id,business_id,proposed_in,kind,status,
+   hypothesis,action,metric,target_mult,match,evidence,period_start,period_end,extended_once) VALUES($1,$2,$3,'tactic','running','h','a','views',1.5,
+   '{"pillar_key":"p1","platform":"xiaohongshu"}','{"post_ids":[]}',current_date+$4::int,current_date+$5::int,$6) RETURNING id v`,
+  [sim, businesses.A, runId, start, end, extended]);
+  const [done, retry, outside, spent] = [await experiment(-40, -20), await experiment(-40, -20), await experiment(-40, -20), await experiment(-40, -20, true)];
+  const result = (verdict, next) => ({ verdict, reason: null, lean: null, matched_posts: [], samples: 4, median: 10, vs_baseline: 1.6, next_status: next });
+  const leaseToken = await v('SELECT gen_random_uuid() v');
+  const coachRun = await v(`INSERT INTO social_review_runs(actor_id,business_id,period_start,status,runtime_request_id,lease_token,lease_expires_at,pack)
+   VALUES($1,$2,current_date-400,'claimed',gen_random_uuid(),$3,now()+interval '1 hour',$4) RETURNING id v`,
+  [sim, businesses.A, leaseToken, JSON.stringify({ review: { ledger: { to_review: [{ id: done, result: result('worked', 'concluded') },
+    { id: retry, result: result('inconclusive', 'extended') }, { id: spent, result: result('inconclusive', 'extended') }] } } })]);
+  const untagged = (await c.query('SELECT post_id FROM social_post_facts WHERE business_id=$1 AND pillar_key IS NULL LIMIT 2', [businesses.A])).rows.map(r => r.post_id);
+  const otherBrand = await v('SELECT post_id v FROM social_post_facts WHERE business_id=$1 AND pillar_key IS NULL LIMIT 1', [businesses.B]);
+  assert.equal(untagged.length, 2); assert.ok(otherBrand);
+  const newExperiment = { kind: 'tactic', layer: null, hypothesis: 'h2', action: 'a2', metric: 'views', target_mult: 1.5, target_line: null,
+    match: { pillar_key: 'p2', platform: 'xiaohongshu' }, baseline: { metric: 'views', median: 9, samples: 5, window_weeks: 8, basis: 'day7' },
+    evidence: { post_ids: [], metrics: [] }, period_start: '2030-01-01', period_end: '2030-01-07' };
+  const payload = { experiments: [newExperiment], verdict_notes: [{ experiment_id: done, note: '数据够，做法有效' }, { experiment_id: outside, note: 'x' }],
+    tags: [{ post_id: untagged[0], pillar_key: 'p2' }, { post_id: untagged[1], pillar_key: 'p9' }, { post_id: otherBrand, pillar_key: 'p1' }] };
+  const save = (body, token = leaseToken) => svc('SELECT publish_monitor_review_save_coach($1,$2,$3) v', [coachRun, token, JSON.stringify(body)]);
+  const row = id => v('SELECT to_jsonb(e) v FROM social_review_experiments e WHERE id=$1', [id]);
+  assert.deepEqual(await save(payload), { saved: true, concluded: 2, proposed: 1, tagged: 1 });
+  const [d, r, o, sp] = [await row(done), await row(retry), await row(outside), await row(spent)];
+  assert.deepEqual([d.status, d.verdict, d.verdict_in, d.verdict_detail.note], ['concluded', 'worked', coachRun, '数据够，做法有效']);
+  assert.deepEqual([r.status, r.extended_once, r.verdict, r.verdict_in], ['extended', true, null, coachRun]);
+  assert.equal(r.period_end, await v(`SELECT (current_date-20+21)::text v`), 'extended by its own length');
+  assert.deepEqual([o.status, o.verdict_in, o.verdict_detail], ['running', null, null], 'a verdict note alone never concludes anything');
+  assert.deepEqual([sp.status, sp.verdict_in], ['running', null], 'a second extension is not given');
+  const created = await v('SELECT to_jsonb(e) v FROM social_review_experiments e WHERE proposed_in=$1', [coachRun]);
+  assert.deepEqual([created.status, created.hypothesis, created.baseline.median, created.period_start], ['running', 'h2', 9, '2030-01-01']);
+  assert.deepEqual((await c.query('SELECT post_id,pillar_key,pillar_source FROM social_post_facts WHERE post_id=ANY($1) OR post_id=$2 ORDER BY pillar_key NULLS LAST',
+    [untagged, otherBrand])).rows.map(x => [x.pillar_key, x.pillar_source]), [['p2', 'model'], [null, null], [null, null]]);
+  assert.deepEqual(await save(payload), { saved: true, concluded: 0, proposed: 0, tagged: 0 }, 'saving twice changes nothing');
+  assert.deepEqual(await save(payload, await v('SELECT gen_random_uuid() v')), { saved: false });
+  await assert.rejects(save({ experiments: [newExperiment, newExperiment, newExperiment, newExperiment] }), /INPUT_INVALID/);
+  assert.equal((await c.query(`SELECT has_function_privilege('authenticated','publish_monitor_review_save_coach(uuid,uuid,jsonb)','EXECUTE') ok`)).rows[0].ok, false);
+  report.checks.push('RC-3b: verdicts come from the saved pack (note added, second extension refused), experiments and tags written once under the lease');
 
   // Erasure: counted, and removed with their parents.
   const before = await v('SELECT publish_monitor_erasure_remaining($1) v', [sim]);

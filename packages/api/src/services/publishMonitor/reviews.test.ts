@@ -1,17 +1,19 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach,expect,it,vi} from 'vitest';
 import {logger} from '../../lib/logger';
-const m=vi.hoisted(()=>({run:vi.fn(),pack:vi.fn(),settings:vi.fn(),close:vi.fn(),rows:vi.fn(),build:vi.fn()}));
+const m=vi.hoisted(()=>({run:vi.fn(),pack:vi.fn(),settings:vi.fn(),close:vi.fn(),rows:vi.fn(),build:vi.fn(),save:vi.fn()}));
 vi.mock('../turn/review',()=>({runReviewTurn:m.run}));
 vi.mock('../turn/agent/workspacePosts',()=>({resolvePostSource:m.pack}));
 vi.mock('../turn/db',()=>({turnClients:(db:unknown)=>({write:db,read:db}),turnDatabase:()=>({close:m.close})}));
 vi.mock('../turn/admission/newWorkGate',()=>({newWorkGate:()=>({})}));
 vi.mock('../turn/limiter',()=>({redisCounterStore:()=>({})}));
 vi.mock('./reviewSettings',()=>({readReviewSettings:m.settings}));
-vi.mock('./coach/rows',()=>({readPackRows:m.rows}));
+vi.mock('./coach/rows',()=>({readPackRows:m.rows,COACH_READ_WEEKS:52}));
 vi.mock('./coach/pack',()=>({buildPack:m.build}));
+vi.mock('./coach/persist',()=>({saveCoachLedger:m.save}));
 import {createRuntimeBudget} from '../turn/settings/budget';
-import {advanceReview,prepareReview,runWeeklyReviews,type ReviewClaim,type ReviewStep} from './reviews';
+import {readFileSync} from 'node:fs';
+import {advanceReview,claimSchema,prepareReview,runWeeklyReviews,type ReviewClaim,type ReviewStep} from './reviews';
 const c:ReviewClaim={id:'11111111-1111-4111-8111-111111111111',actorId:'22222222-2222-4222-8222-222222222222',
  token:'33333333-3333-4333-8333-333333333333',requestId:'44444444-4444-4444-8444-444444444444',
  sessionId:'55555555-5555-4555-8555-555555555555',modelId:'66666666-6666-4666-8666-666666666666',maxCostUsd:'0.100000000000'};
@@ -30,7 +32,7 @@ function database(steps:Record<string,Record<string,unknown>>,extra:Record<strin
   }
   return {data:name in other?other[name]:true,error:null};
  });
- return {calls,db:{rpc} as never};
+ return {calls,rpc,db:{rpc} as never};
 }
 const stepActions=(calls:Calls)=>calls.filter(x=>x[0]==='publish_monitor_review_step').map(x=>[x[1].p_action,x[1].p_reason]);
 beforeEach(()=>{vi.clearAllMocks();m.settings.mockResolvedValue({enabled:true});m.pack.mockResolvedValue(PACK);m.close.mockResolvedValue({});
@@ -110,6 +112,27 @@ it('a brand review reads the coach pack of its brand and cadence, saves it wrapp
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,52);
 });
+it('a delivered brand review writes its checked output to the ledger before it completes; a failed write does not undo the review',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888';
+ m.rows.mockResolvedValue({followers:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ m.save.mockResolvedValue(true);
+ m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'completed',delivered:true,coach:{parsed:true}});
+ const d=database({default:{businessId:BUSINESS,cadence:'weekly'}});
+ await advanceReview(d.db,c,options());
+ expect(m.save).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({id:c.id}),BUSINESS,expect.objectContaining({review:{kind:'review_pack',mode:'full'}}),{parsed:true});
+ const order=[...m.save.mock.invocationCallOrder,...d.rpc.mock.invocationCallOrder.filter((_,i)=>d.rpc.mock.calls[i]![0]==='publish_monitor_review_step'&&d.rpc.mock.calls[i]![1].p_action==='observe')];
+ expect(order[0]).toBeLessThan(order[1]!);
+ m.save.mockRejectedValue(new Error('PUBLISH_MONITOR_COACH_LEDGER_SAVE_FAILED'));
+ const failed=database({default:{businessId:BUSINESS,cadence:'weekly'}});
+ await advanceReview(failed.db,c,options());
+ expect(stepActions(failed.calls).at(-1)).toEqual(['observe',null]);
+ // a plain weekly review and a turn that delivered nothing never touch the ledger
+ m.save.mockClear();
+ await advanceReview(database({default:{}}).db,c,options());
+ m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'interrupted',delivered:false,coach:{parsed:true}});
+ await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
+ expect(m.save).not.toHaveBeenCalled();
+});
 it('the 90-day window is used only for an account whose window is that long',async()=>{
  await advanceReview(database({default:{}},{publish_monitor_post_window:90}).db,c,options());
  expect(m.pack).toHaveBeenCalledWith(expect.anything(),c.actorId,expect.objectContaining({entitled:true}));
@@ -180,6 +203,18 @@ it('cron accepts the claims exactly as the database returns them, plain ones and
  const defer=vi.fn();
  expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:2,scheduled:2,failed:0});
  expect(defer).toHaveBeenCalledTimes(2);
+});
+// The key list publish_monitor_review_claim_item() returns (checked against the real function by the database suite publish-monitor-coach).
+const CLAIM_KEYS:string[]=JSON.parse(readFileSync(new URL('../../../../db/tests/publish-monitor-coach/claim-keys.json',import.meta.url),'utf8'));
+it('the scheduler takes a claim with exactly the keys the database function returns, and schedules its turn',async()=>{
+ expect(Object.keys(claimSchema.shape).sort()).toEqual(CLAIM_KEYS);
+ const real=Object.fromEntries(CLAIM_KEYS.map(k=>[k,(c as Record<string,unknown>)[k]??null]));
+ Object.assign(real,{businessId:'88888888-8888-4888-8888-888888888888',cadence:'monthly',attempt:1});
+ const d=database({observe:{},default:{}},{publish_monitor_review_claim:[real]});
+ const defer=vi.fn();
+ expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:1,scheduled:1,failed:0});
+ await defer.mock.calls[0]![0]();
+ expect(m.run).toHaveBeenCalledTimes(1);
 });
 it('a feature switched off still reaches existing claims; a missing claim function is only an off feature',async()=>{
  m.settings.mockResolvedValue({enabled:false});

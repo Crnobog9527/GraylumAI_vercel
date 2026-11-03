@@ -64,6 +64,9 @@ export const packRowsSchema = z.object({
 });
 export type PackRows = z.infer<typeof packRowsSchema>;
 
+/** Weeks of facts read for a coach pack: the longest window any section uses, plus the 8-week baseline before its oldest post. */
+export const COACH_READ_WEEKS = 52;
+
 /** One round trip; never refreshes a provider and never reads beyond the owner's brand. */
 export async function readPackRows(db: Pick<SupabaseClient, 'rpc'>, actor: string, businessId: string, weeks: number) {
   const result = await db.rpc('publish_monitor_review_pack_rows', { a: uuid.parse(actor), p_business_id: uuid.parse(businessId),
