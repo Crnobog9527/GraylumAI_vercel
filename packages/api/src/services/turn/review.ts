@@ -55,7 +55,11 @@ export const COACH_INSTRUCTIONS = '你是 Graylum 的运营教练，正在为用
   + 'target 写 {"max":数值} 或 {"min":数值}（不写 mult）；没有 stuck_layer 就只提 tactic。'
   + 'evidence 里 post_ids 只能抄包里出现过的作品 id；metrics 只能是下面的完整写法之一，写成别的会被丢弃，拿不准就留空数组、只写 post_ids：'
   + 'scoreboard:<支柱key>:<平台>、history:<支柱key>:<平台>、stage:followers:<平台>、stage:posts_8w、stage:day7_views_trend、'
-  + 'ledger:<实验id>、diagnostics:<作品id>:<指标名>。';
+  + 'ledger:<实验id>、diagnostics:<作品id>:<指标名>。'
+  + '正文里不要出现内部代码（untagged、p1/p2/p3、字段名）：内容方向用 strategy.pillars 里的名字，没有方向的作品写“未分类”。'
+  + '正文里引用的数字必须能在页面表格里找到，表格就是这些：本期满 7 天的作品（this_period.settled_posts）、内容方向成绩单（scoreboard）、'
+  + '按平台的趋势（this_period.day7_views_median_vs_prev 的本期/上期中位数、stage.day7_views_trend 的近 4 周/前 4 周、stage.followers 的粉丝）；'
+  + '这些以外的数字不要写。tags 要给出 untagged_posts 里你能判断方向的每一条作品（一条一个），判断不了的不要标。';
 export const COACH_REQUEST = '请为这个品牌写本期复盘。下面是代码计算的复盘包（JSON）：\n';
 /** The reply is capped far below the model's limit: a review is a page, not a report. */
 export const REVIEW_OUTPUT_TOKENS = 2000;

@@ -4499,7 +4499,7 @@
   "fn:turn_resume_close(uuid,bigint,integer)": "60d43a0e78eb",
   "fn:turn_resume_read(uuid,uuid,bigint)": "206df5c92ed0",
   "fn:turn_session_view(uuid,uuid,integer)": "142c71f49d9f",
-  "fn:turn_settle_credits(uuid,uuid,integer,bigint,integer)": "3d672c2d1b39",
+  "fn:turn_settle_credits(uuid,uuid,integer,bigint,integer)": "6633feacd065",
   "fn:turn_settle_holds(uuid,turns,integer)": "13220202a6f1",
   "fn:turn_stop(uuid,bigint,boolean,integer)": "0d2aa4bf0602",
   "fn:turn_tombstones(uuid,uuid,jsonb)": "794b9d808628",

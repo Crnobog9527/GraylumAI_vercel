@@ -141,17 +141,13 @@ it('RUNTIME: CORE-PATH-V2 V2-7b: a compare answers in parallel columns, each bou
   expect(adopted.error).toBeNull();
   expect((await db.query('select role,content from session_messages where session_id=$1 order by seq', [f.session])).rows)
     .toEqual([{ role: 'user', content: 'Which plan?' }, { role: 'assistant', content: outputs[0].body }]);
-  // The next compare sees that history, as plain messages after the system message; on the Anthropic route the system message
-  // and the last earlier turn are the cache breakpoints (#1501), and the adapter sends that request.
+  // The next compare sees that history, as plain messages after the system message, with no cache breakpoint on any route (a column
+  // is one request nothing reads again: the breakpoints of #1501 only paid the write price, staging 2026-11-04).
   bodies.length = 0;
   const next = await compare(f, transport, { question: 'And then?' });
   expect(next.at(-1)).toMatchObject({ type: 'result' });
   for (const body of bodies) expect((body.messages as Array<{ role: string }>).map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
-  const anthropic = bodies.find(b => b.model === PAIRS[0][0])!.messages as Array<{ content: unknown }>;
-  expect(JSON.stringify(anthropic[0]!.content)).toContain('cache_control');
-  expect(JSON.stringify(anthropic[2]!.content)).toContain('cache_control');
-  expect(JSON.stringify(anthropic[3]!.content)).not.toContain('cache_control');
-  expect(JSON.stringify(bodies.find(b => b.model === PAIRS[1][0]))).not.toContain('cache_control');
+  for (const body of bodies) expect(JSON.stringify(body)).not.toContain('cache_control');
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-7b: the parts POST /api/turn reads are what a column is sent, on a conversation of the turn path', async () => {
