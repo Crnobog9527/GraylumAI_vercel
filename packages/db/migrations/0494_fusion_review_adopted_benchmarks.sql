@@ -1,12 +1,13 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- FUSION-REVIEW (jury input; placeholder number, the controller assigns the real one): fusion_review_source also returns
+-- FUSION-REVIEW (jury input, 0494): fusion_review_source also returns
 -- adoptedBenchmarks, the benchmark accounts the report actually adopted with the numbers and fetch time the host attached when the
 -- report was finalized (artifact_versions.report #> generatedReport.data.data.benchmarks.accounts: platform, account, metrics). The report
 -- text carries only account names; before this the reviewers had nothing to check a benchmark against except the draft's
 -- free-text materials, which still hold links the user wrote before (and ones that failed to load), so a fetched account could be
--- called unverified next to them. A version without stored data (not finalized) returns an empty list.
+-- called unverified next to them. Three states: a list (stored data, accounts adopted), an empty list (stored data, none adopted) and
+-- null (no stored data, e.g. a report finalized earlier: unknown, which says nothing about whether benchmarks were used).
 -- Compatibility: one more key in the returned object; the deployed app's source schema ignores unknown keys (zod object), and the new
--- app reads a missing key as an empty list. Repeatable: CREATE OR REPLACE only.
+-- app reads a missing key as unknown. Repeatable: CREATE OR REPLACE only.
 -- Recovery: re-apply the previous fusion_review_source (packages/db/functions history); nothing is stored.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -31,9 +32,10 @@ BEGIN
     'declared',coalesce((SELECT jsonb_agg(jsonb_build_object('stepId',st->>'id','fieldIds',
       coalesce((SELECT jsonb_agg(i->>'id') FROM jsonb_array_elements(coalesce(st->'information','[]')) i),'[]'))
       ORDER BY o) FROM jsonb_array_elements(r.workflow->'steps') WITH ORDINALITY x(st,o)),'[]'),
-    'adoptedBenchmarks',coalesce((SELECT jsonb_agg(jsonb_build_object('platform',a->>'platform','account',a->>'account',
-      'metrics',CASE WHEN jsonb_typeof(a->'metrics')='object' THEN a->'metrics' ELSE NULL END))
-      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accounts)='array' THEN accounts ELSE '[]'::jsonb END) a
-      WHERE jsonb_typeof(a)='object'),'[]'));
+    'adoptedBenchmarks',CASE WHEN jsonb_typeof(ver.report#>'{generatedReport,data,data}')='object' THEN
+      coalesce((SELECT jsonb_agg(jsonb_build_object('platform',a->>'platform','account',a->>'account',
+        'metrics',CASE WHEN jsonb_typeof(a->'metrics')='object' THEN a->'metrics' ELSE NULL END))
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accounts)='array' THEN accounts ELSE '[]'::jsonb END) a
+        WHERE jsonb_typeof(a)='object'),'[]'::jsonb) END);
 END $function$;
 COMMIT;

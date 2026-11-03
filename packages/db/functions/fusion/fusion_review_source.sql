@@ -22,8 +22,9 @@ BEGIN
     'declared',coalesce((SELECT jsonb_agg(jsonb_build_object('stepId',st->>'id','fieldIds',
       coalesce((SELECT jsonb_agg(i->>'id') FROM jsonb_array_elements(coalesce(st->'information','[]')) i),'[]'))
       ORDER BY o) FROM jsonb_array_elements(r.workflow->'steps') WITH ORDINALITY x(st,o)),'[]'),
-    'adoptedBenchmarks',coalesce((SELECT jsonb_agg(jsonb_build_object('platform',a->>'platform','account',a->>'account',
-      'metrics',CASE WHEN jsonb_typeof(a->'metrics')='object' THEN a->'metrics' ELSE NULL END))
-      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accounts)='array' THEN accounts ELSE '[]'::jsonb END) a
-      WHERE jsonb_typeof(a)='object'),'[]'));
+    'adoptedBenchmarks',CASE WHEN jsonb_typeof(ver.report#>'{generatedReport,data,data}')='object' THEN
+      coalesce((SELECT jsonb_agg(jsonb_build_object('platform',a->>'platform','account',a->>'account',
+        'metrics',CASE WHEN jsonb_typeof(a->'metrics')='object' THEN a->'metrics' ELSE NULL END))
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(accounts)='array' THEN accounts ELSE '[]'::jsonb END) a
+        WHERE jsonb_typeof(a)='object'),'[]'::jsonb) END);
 END $function$;
