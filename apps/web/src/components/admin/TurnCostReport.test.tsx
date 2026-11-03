@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { TurnModelReportCard, UnsettledTurnsCard } from './TurnCostReport';
+import { needsManualSettlement, TurnModelReportCard, UnsettledTurnsCard } from './TurnCostReport';
 
 const fixture = vi.hoisted(() => ({ report: undefined as unknown, unsettled: undefined as unknown, absent: undefined as unknown }));
 vi.mock('@/trpc/client', () => ({ trpc: { billingReport: {
@@ -64,5 +64,19 @@ describe('turn cost report cards', () => {
     fixture.absent = { available: false };
     html = renderToStaticMarkup(<UnsettledTurnsCard />);
     expect(html).toContain('列表暂不可用'); expect(html).not.toContain('还没有这类调用');
+  });
+  it('marks a closed turn with a cost still unknown after 24 hours as 需人工, and only that one', () => {
+    const turn = { state: 'closed', settlement: 'pending', costPendingCalls: 1, openedAt: '2026-11-03T03:50:33Z' };
+    const day = 24 * 60 * 60 * 1000, opened = Date.parse(turn.openedAt);
+    expect(needsManualSettlement(turn, opened + day - 1)).toBe(false);
+    expect(needsManualSettlement(turn, opened + day)).toBe(true);
+    expect(needsManualSettlement({ ...turn, costPendingCalls: 0 }, opened + day)).toBe(false);
+    expect(needsManualSettlement({ ...turn, state: 'running' }, opened + day)).toBe(false);
+    expect(needsManualSettlement({ ...turn, settlement: 'done' }, opened + day)).toBe(false);
+    fixture.absent = { available: true, total: 0, calls: [] };
+    fixture.unsettled = { available: true, total: 1, turns: [{ turnId: 2024, actorId: 'a', kind: 'mentor', state: 'closed', settlement: 'pending',
+      closeKind: 'interrupted', openedAt: '2026-10-01T00:00:00Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 864, chargedCredits: null,
+      failureCode: 'turn_call_unknown', inFlightCalls: 0, costPendingCalls: 1 }] };
+    expect(renderToStaticMarkup(<UnsettledTurnsCard />)).toContain('需人工');
   });
 });

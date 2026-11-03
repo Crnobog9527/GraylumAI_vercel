@@ -27,7 +27,7 @@ function harness(batches: RecoveryItem[][], lookup: TurnRecoveryDeps['lookup'], 
     claimRecovery: vi.fn(async () => batches.shift() ?? []),
     recover: vi.fn(async (a: { action: string }) => ({ action: a.action, settlement: 'done' as const, closeKind: 'interrupted' })),
     record: vi.fn(async () => ({ status: 'ok', creditsLow: false, sessionTombstoned: false, accountErasing: false, voiceSourceRevoked: false })),
-    settleAbsent: vi.fn(async (_a: unknown) => ({ settled: true })),
+    settleAbsent: vi.fn(async () => ({ settled: true })),
   };
   const deps = { db: db as unknown as TurnRecoveryDeps['db'], lookup, account: 'openrouter-key:synthetic', deadline: 60_000,
     now: () => clock.t };

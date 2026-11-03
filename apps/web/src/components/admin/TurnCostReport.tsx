@@ -63,6 +63,18 @@ export function TurnModelReportCard() {
   </Card>;
 }
 
+const MANUAL_AFTER_MS = 24 * 60 * 60 * 1000;
+/**
+ * A closed turn whose provider cost is still unknown after the 24-hour lookup window (the recovery job looks it up every 10 minutes,
+ * then every 6 hours, and never releases the freeze or presumes the cost zero): an operator must settle it by hand.
+ */
+export function needsManualSettlement(
+  turn: { state: string; settlement: string | null; costPendingCalls: number; openedAt: string }, now = Date.now()) {
+  const opened = Date.parse(turn.openedAt);
+  return turn.state === 'closed' && turn.settlement === 'pending' && turn.costPendingCalls > 0
+    && Number.isFinite(opened) && now - opened >= MANUAL_AFTER_MS;
+}
+
 /** Read-only: the turns recovery has not closed or settled yet. Content-free; an operator matches them by id. */
 function UnsettledTurnsList() {
   const view = trpc.billingReport.unsettledTurns.useQuery();
@@ -70,7 +82,8 @@ function UnsettledTurnsList() {
   return <Card data-testid="unsettled-turns">
     <CardHeader>
       <CardTitle>未结清的对话回合</CardTitle>
-      <CardDescription>还没关闭，或已关闭但费用没有结清的回合。系统会自动恢复和结算，这里只读，用来上线后对账。</CardDescription>
+      <CardDescription>还没关闭，或已关闭但费用没有结清的回合。系统会自动恢复和结算；
+      超过 24 小时仍查不到费用的标“需人工”，冻结不会自动释放。这里只读，用来上线后对账。</CardDescription>
     </CardHeader>
     <CardContent className="space-y-2">
       {view.error ? <div role="alert">无法读取，请稍后重试。</div>
@@ -85,7 +98,8 @@ function UnsettledTurnsList() {
             <th className="text-right">费用待定调用</th><th className="text-left">最后更新</th>
           </tr></thead><tbody>{data.turns.map((turn) => <tr key={turn.turnId}>
             <td>{turn.turnId}</td><td>{turn.kind}</td><td>{turn.state}{turn.closeKind ? `（${turn.closeKind}）` : ''}</td>
-            <td>{turn.settlement ?? '—'}</td><td className="text-right">{turn.reservedCredits}</td>
+            <td>{turn.settlement ?? '—'}
+              {needsManualSettlement(turn) && <strong className="ml-1 text-red-600">需人工</strong>}</td><td className="text-right">{turn.reservedCredits}</td>
             <td className="text-right">{turn.inFlightCalls}</td><td className="text-right">{turn.costPendingCalls}</td>
             <td>{turn.updatedAt}</td>
           </tr>)}</tbody></table></>
