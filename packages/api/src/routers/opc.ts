@@ -10,7 +10,7 @@ import {topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import { realHostMode } from "../services/turn/settings/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
-import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultSaveTurn, sessionResultsList,
+import { sessionResultEdit, sessionResultFamily, sessionResultSaveTurn, sessionResultsList,
   sessionResultsService } from "../services/opc/sessionResults";
 import {
   opcService,
@@ -120,8 +120,6 @@ export const opcRouter = router({
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).list(input)),
   sessionResultVersions: resultReadProcedure.input(sessionResultFamily)
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).versions(input)),
-  sessionResultSave: procedure.input(sessionResultSave)
-    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).save(input)),
   sessionResultSaveTurn: procedure.input(sessionResultSaveTurn)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).saveTurn(input)),
   sessionResultEdit: procedure.input(sessionResultEdit)
