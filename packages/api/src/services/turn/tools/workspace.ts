@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { dataSchema } from '../../publishMonitor/data';
 import { historiesSchema, reviewFrom, reviewPosts, supplementSchema, type History } from '../../publishMonitor/reviewData';
-import { fitReview, NO_ENTITLEMENT, ownPostsResult } from '../agent/workspacePosts';
+import { fitReview, NO_ENTITLEMENT, OWN_POSTS_RESERVE, ownPostsResult, postResultBytes } from '../agent/workspacePosts';
 import type { TurnClients } from '../db';
 import { COACH_REVIEW_ENTRY, COACH_REVIEW_ID, readCoachReview } from './coachReview';
 import { READ_SOURCE_GUIDE, type SourceRead } from './source';
@@ -20,6 +20,8 @@ export const NO_ACCESS: WorkspaceAccess = { sources: [], strategy: false, posts:
 const MAX_POST_READS = 2;
 const UNAVAILABLE = { text: JSON.stringify({ kind: 'unavailable' }) };
 const READ_LIMIT = { text: JSON.stringify({ kind: 'unavailable', reason: 'read_limit', note: '本条回答的作品读取次数已用完' }) };
+const NO_ROOM = { text: JSON.stringify({ kind: 'unavailable', reason: 'read_room', note: '本条回答放不下更多作品数据，请基于已读到的内容回答' }) };
+const NO_ROOM_BYTES = postResultBytes(JSON.parse(NO_ROOM.text));
 const NO_COACH_ENTITLEMENT = '运营复盘是 Pro/Gold 会员功能，这次先按定位和资料回答';
 const WORKSPACE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|strategy_report:[0-9a-f-]{36})$/;
 
@@ -46,7 +48,15 @@ async function readPosts(read: TurnClients['read'], actorId: string, sessionId: 
 export function workspaceTurnReader(read: TurnClients['read'], actorId: string, sessionId: string, access: WorkspaceAccess,
   library?: (query: string) => Promise<SourceRead>) {
   const windows = !access.posts ? [] : [14, 30, 90].filter(days => days === 14 || days <= access.posts!.windowDays);
-  let postReads = 0, strategyReads = 0;
+  let postReads = 0, strategyReads = 0, postBytes = 0;
+  // The post reads of one answer (my_posts and the chat review) share the one room planTurnTools kept (OWN_POSTS_RESERVE), counted
+  // at the size the result travels in: a read that would pass it answers a short note instead, so the next request always fits.
+  const fitRoom = (read: SourceRead): SourceRead => {
+    const bytes = postResultBytes(JSON.parse(read.text));
+    if (postBytes + bytes > OWN_POSTS_RESERVE - NO_ROOM_BYTES) return NO_ROOM;
+    postBytes += bytes;
+    return read;
+  };
   const workspace = async (query: string) => {
     const { data, error } = await read.rpc('workspace_turn_read', { p_actor_id: actorId, p_session_id: sessionId, p_query: query,
       p_allowed: access.sources });
@@ -68,14 +78,14 @@ export function workspaceTurnReader(read: TurnClients['read'], actorId: string, 
       if (!access.posts || !windows.includes(days)) return UNAVAILABLE;
       if (++postReads > MAX_POST_READS) return READ_LIMIT;
       if (access.posts.windowDays <= 0) return { text: JSON.stringify({ kind: 'my_posts', status: 'no_entitlement', note: NO_ENTITLEMENT, window_days: 14 }) };
-      return readPosts(read, actorId, sessionId, access.posts, days);
+      return fitRoom(await readPosts(read, actorId, sessionId, access.posts, days));
     }
     const coach = COACH_REVIEW_ID.exec(query);
     if (coach) {
       if (!access.posts?.coach) return UNAVAILABLE;
       if (++postReads > MAX_POST_READS) return READ_LIMIT;
       if (access.posts.windowDays <= 0) return { text: JSON.stringify({ kind: 'coach_review', status: 'no_entitlement', note: NO_COACH_ENTITLEMENT }) };
-      return readCoachReview(read, actorId, sessionId, coach[1] ?? null);
+      return fitRoom(await readCoachReview(read, actorId, sessionId, coach[1] ?? null));
     }
     if (WORKSPACE_ID.test(query)) {
       // Room was kept for one strategy result (up to 52000 bytes), whatever the read limit is.

@@ -3,12 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { generateDataset } from '../../publishMonitor/coach/simulatedDataset';
 import { REVIEW_PACK_RESERVE } from '../../publishMonitor/coach/stats';
 import { packRowsFor } from '../../publishMonitor/coach/testRows';
+import { OWN_POSTS_RESERVE, postResultBytes } from '../agent/workspacePosts';
 import { NO_ACCESS, workspaceTurnReader, type PostsAccess } from './workspace';
 
-const AS_OF = '2026-10-27';
-const data = generateDataset({ asOf: AS_OF });
+// Dated today: the reader builds the pack at the current time, so the simulated data must be current to be full size.
+const data = generateDataset({ asOf: new Date().toISOString().slice(0, 10) });
 const brand = '00000000-0000-4000-8000-0000000000b1';
-const rows = JSON.parse(JSON.stringify(packRowsFor(data, data.accounts[0]!)));
+const rows = JSON.parse(JSON.stringify(packRowsFor(data, data.accounts.find(a => a.key === 'A')!)));
 const coach = (windowDays: number): PostsAccess => ({ windowDays, benchmarks: false, review: false, coach: true });
 function reader(posts: PostsAccess | null, answer: unknown = { kind: 'coach_rows', businessId: brand, rows }) {
   const rpc = vi.fn(async (name: string) => ({ error: null, data: name === 'coach_pack_turn_read' ? answer : { kind: 'workspace_index', entries: [] } }));
@@ -57,10 +58,18 @@ describe('a review asked for in chat (PUBLISH-MONITOR block E)', () => {
   it('refused: another owner\'s brand comes back unavailable, and the review shares the two post reads of an answer', async () => {
     expect(await parsed(reader(coach(90), { kind: 'unavailable', reason: 'brand_not_found' }).read(`coach_review:${brand}`)))
       .toEqual({ kind: 'unavailable', reason: 'brand_not_found' });
-    const { rpc, read } = reader(coach(90));
+    const { rpc, read } = reader(coach(90), { kind: 'coach_review', status: 'no_brand' });
     await read('coach_review'); await read('coach_review');
     expect(await parsed(read('coach_review'))).toMatchObject({ kind: 'unavailable', reason: 'read_limit' });
     expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it('two reads never pass the room kept before turn_open: a second pack that does not fit is a short note', async () => {
+    const { read } = reader(coach(90));
+    const first = await read('coach_review'), second = await read('coach_review');
+    expect(JSON.parse(first.text)).toMatchObject({ status: 'available' });
+    expect(JSON.parse(second.text)).toMatchObject({ kind: 'unavailable', reason: 'read_room' });
+    expect(postResultBytes(JSON.parse(first.text)) + postResultBytes(JSON.parse(second.text))).toBeLessThanOrEqual(OWN_POSTS_RESERVE);
   });
 
   it('no brand with a connected account: a note, never an empty pack', async () => {
