@@ -161,7 +161,8 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
       if (!record) throw new Error('RESEARCH_SCOPE_DENIED');
       const next = { ...record, cursor, state };
       discoveries.set(id, next); savedDiscoveries.add(id);
-      if (state === 'completed' && record.state !== 'completed') completedRounds++;
+      // As research_benchmark_rounds (0492): a round the supplier could not serve at all (cursor.supplierDown) is not a round.
+      if (state === 'completed' && record.state !== 'completed' && cursor.supplierDown !== true) completedRounds++;
       return next;
     },
     async selectedAccounts(discoveryId) {
