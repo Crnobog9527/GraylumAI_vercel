@@ -16,7 +16,7 @@ import {openRouterBound} from '../turn/provider/openRouterPolicy';
 import {FREE_CHAT_POSITIONING_REDIRECT} from '../turn/agent/primaryInstructions';
 // I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
 vi.mock('../turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../turn/admission/paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
-vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
+vi.mock('../turn/admission/paygPricing', async original => ({...(await original<typeof import('../turn/admission/paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 const admittedSkill = vi.hoisted(() => ({ source: undefined as SkillSource | undefined }));
 vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => admittedSkill.source }));
 // CONTENT-CONVERSATION-DRIVEN: a test may hand admission a ready catalog; otherwise the real (here empty) discovery runs.

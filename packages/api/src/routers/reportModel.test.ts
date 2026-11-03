@@ -8,7 +8,7 @@ vi.mock('../services/turn/settings/stagingPolicy', () => ({ parseStagingPolicy: 
 vi.mock('../services/turn/admission/paygHostPolicy', async original => ({
   ...await original<typeof import('../services/turn/admission/paygHostPolicy')>(), readPaygHostPolicies: mocks.host,
 }));
-vi.mock('../services/runtime/paygPricing', () => ({ freezeStagingPaygPricing: mocks.pricing }));
+vi.mock('../services/turn/admission/paygPricing', () => ({ freezeStagingPaygPricing: mocks.pricing }));
 vi.mock('../services/turn/admission/billingUnitAdmission', () => ({ freezeWindowBillingUnit: mocks.unit }));
 vi.mock('../services/turn/admission/reasoningAdmission', () => ({ admitReasoning: mocks.reasoning }));
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

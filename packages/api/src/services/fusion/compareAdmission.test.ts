@@ -18,7 +18,7 @@ vi.mock('../turn/settings/stagingPolicy', async original => ({ ...(await origina
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(), callPolicies: [] }) }));
 vi.mock('../turn/admission/admissionLimits', async original => ({ ...(await original<typeof import('../turn/admission/admissionLimits')>()),
   admissionDeadline: (at: string) => at }));
-vi.mock('../runtime/paygPricing', async original => ({ ...(await original<typeof import('../runtime/paygPricing')>()),
+vi.mock('../turn/admission/paygPricing', async original => ({ ...(await original<typeof import('../turn/admission/paygPricing')>()),
   freezeStagingPaygPricing: async (_a: unknown, policies: unknown[]) => policies }));
 vi.mock('../turn/admission/billingUnitAdmission', async original => ({ ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2' }) }));

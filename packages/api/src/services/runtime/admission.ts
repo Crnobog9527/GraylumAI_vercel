@@ -46,7 +46,7 @@ import {requireAllowedInput} from './moderation';
 import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from '../turn/provider/providerRequest';
 import {admissionDeadline,admittedOutputLimit,timedAdmission} from '../turn/admission/admissionLimits';
 import {freezeAdmissionPayg} from './admissionPayg';
-import {readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
+import {readPaygPolicies,realContract,runtimeGateEnvironment} from '../turn/settings/realHost';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {admitWithRepair,isAdmitFunction,keptCause} from './admissionRepair';
 import {admission} from './admitSplit';import {readRwV2} from '../turn/agent/rwV2';

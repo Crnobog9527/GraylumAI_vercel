@@ -15,7 +15,7 @@ import { testPrimaryModel } from '../services/__tests__/fixtures/runtimeGates';
 // I1: a real host admits only through a per-call (v2) profile; mock the profile reader and price freeze.
 vi.mock('../services/turn/admission/paygHostPolicy', async original => ({...(await original<typeof import('../services/turn/admission/paygHostPolicy')>()),
   readPaygHostPolicies: (await import('../services/__tests__/fixtures/paygAdmission')).paygHostPolicies}));
-vi.mock('../services/runtime/paygPricing', async original => ({...(await original<typeof import('../services/runtime/paygPricing')>()),
+vi.mock('../services/turn/admission/paygPricing', async original => ({...(await original<typeof import('../services/turn/admission/paygPricing')>()),
   freezeStagingPaygPricing: (await import('../services/__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 vi.mock('../services/turn/admission/billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('../services/turn/admission/billingUnitAdmission')>()),

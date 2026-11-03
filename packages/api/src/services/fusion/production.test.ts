@@ -16,7 +16,7 @@ vi.mock('../turn/settings/productionPolicy', async original => ({ ...(await orig
 vi.mock('./settings', async original => ({ ...(await original<typeof import('./settings')>()), readFusionSettings: async () => ({ review: { enabled: true, reviewerModelIds: [ids.reviewer],
   summaryModelId: ids.summary, opinionOutputTokens: 1000, summaryOutputTokens: 2000, dispatchMinutes: 10 } }) }));
 vi.mock('../membershipEntitlements', async original => ({ ...(await original<typeof import('../membershipEntitlements')>()), readMembershipEntitlements: async () => ({}), assertFusionEntitlement: () => {} }));
-vi.mock('../runtime/paygPricing', async original => ({ ...(await original<typeof import('../runtime/paygPricing')>()),
+vi.mock('../turn/admission/paygPricing', async original => ({ ...(await original<typeof import('../turn/admission/paygPricing')>()),
   freezeStagingPaygPricing: async (_db: unknown, policies: unknown[]) => policies }));
 vi.mock('../turn/admission/billingUnitAdmission', async original => ({ ...(await original<typeof import('../turn/admission/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2',
