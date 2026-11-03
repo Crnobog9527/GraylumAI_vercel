@@ -49,7 +49,13 @@ export const COACH_INSTRUCTIONS = '你是 Graylum 的运营教练，正在为用
   + '"verdict_notes":[{"experiment_id","note"}],"experiments":[{"kind":"tactic|basics|pillar_mix","layer":null,"hypothesis","action","metric",'
   + '"target":{"mult":1.3},"match":{"pillar_key","platform","format_tags":[]},"evidence":{"post_ids":[],"metrics":[]}}],"tags":[{"post_id","pillar_key"}],'
   + '"pillar_mix_proposal":null,"strategy_proposal":null,"stage_suggestion":null}。'
-  + '实验数量和种类不得超过包里 limits 的限制，每个实验必须写明平台，长期实验不写 layer；没有把握的字段留空数组或 null。';
+  + '实验数量和种类不得超过包里 limits 的限制，每个实验必须写明平台；没有把握的字段留空数组或 null。'
+  + '实验分两种写法：tactic（战术）的 layer 写 null，metric 只能是 views/likes/comments/shares/saves/followers_gained/engagement_rate 之一，'
+  + 'target 写 {"mult":1.1 到 5 之间的倍数}；basics（基本功）只在包里 diagnostics 给出了 stuck_layer 时才提，layer 写那个环节，metric 写该环节的指标，'
+  + 'target 写 {"max":数值} 或 {"min":数值}（不写 mult）；没有 stuck_layer 就只提 tactic。'
+  + 'evidence 里 post_ids 只能抄包里出现过的作品 id；metrics 只能是下面的完整写法之一，写成别的会被丢弃，拿不准就留空数组、只写 post_ids：'
+  + 'scoreboard:<支柱key>:<平台>、history:<支柱key>:<平台>、stage:followers:<平台>、stage:posts_8w、stage:day7_views_trend、'
+  + 'ledger:<实验id>、diagnostics:<作品id>:<指标名>。';
 export const COACH_REQUEST = '请为这个品牌写本期复盘。下面是代码计算的复盘包（JSON）：\n';
 /** The reply is capped far below the model's limit: a review is a page, not a report. */
 export const REVIEW_OUTPUT_TOKENS = 2000;
@@ -181,6 +187,10 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
     if (!output.trim()) throw new Error('REVIEW_EMPTY');
     // The coach's structured block is checked item by item against the pack; what is saved as the reading is the prose without it.
     const checked = coachPack ? checkOutput(output, coachPack as Parameters<typeof checkOutput>[1]) : null;
+    // Items the check dropped are not saved anywhere: their paths and reasons (fixed codes, never text) are logged so a review that
+    // proposed nothing can be told from one whose proposals were refused.
+    if (checked?.rejected.length) logger.info('billing', 'coach_output_rejected', { reviewId: claim.id, parsed: checked.parsed,
+      rejected: checked.rejected.slice(0, 12).map(item => `${item.path}:${item.reason}`) });
     const reading = checked ? checked.body : output;
     if (!reading.trim()) throw new Error('REVIEW_EMPTY');
     // A source account disconnected while the text was written: nothing that quotes its posts is saved or charged; the next attempt
