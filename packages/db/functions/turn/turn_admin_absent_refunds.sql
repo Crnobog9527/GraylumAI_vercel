@@ -12,14 +12,15 @@ AS $function$
   SELECT k.turn_id, k.seq, k.provider_id, k.settled_at, k.usage, t.kind, t.actor_id, t.opened_at, t.reserved_credits, t.charged_credits,
     t.settlement, t.state
   FROM turn_calls k JOIN turns t ON t.actor_id = k.actor_id AND t.id = k.turn_id
-  WHERE k.usage->>'source' = 'lookup_absent'
+  WHERE k.usage->>'source' IN ('lookup_absent', 'no_identity_24h')
  ), page AS (
   SELECT * FROM absent ORDER BY settled_at DESC, turn_id LIMIT LEAST(GREATEST(coalesce(p_limit, 100), 1), 200)
  )
  SELECT jsonb_build_object(
   'total', (SELECT count(*) FROM absent),
   'calls', coalesce((SELECT jsonb_agg(jsonb_build_object('turnId', p.turn_id, 'seq', p.seq, 'actorId', p.actor_id, 'kind', p.kind,
-    'providerId', p.provider_id, 'httpStatus', (p.usage->>'httpStatus')::integer, 'settledAt', p.settled_at, 'openedAt', p.opened_at,
+    'source', p.usage->>'source', 'providerId', p.provider_id, 'httpStatus', (p.usage->>'httpStatus')::integer,
+    'settledAt', p.settled_at, 'openedAt', p.opened_at,
     'reservedCredits', p.reserved_credits, 'chargedCredits', p.charged_credits, 'settlement', p.settlement, 'state', p.state)
     ORDER BY p.settled_at DESC, p.turn_id) FROM page p), '[]'::jsonb))
 $function$;

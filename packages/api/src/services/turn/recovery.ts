@@ -22,7 +22,7 @@ export const RECOVERY_LOOKUP_MS = 2_000;
 const RECOVER_STEP_MS = 1_000;
 
 export type TurnRecoveryDeps = {
-  db: Pick<TurnDatabase, 'claimRecovery' | 'recover' | 'record' | 'settleAbsent'>;
+  db: Pick<TurnDatabase, 'claimRecovery' | 'recover' | 'record' | 'settleAbsent' | 'settleNoIdentity'>;
   /** OpenRouter generation lookup with the platform key; null when no key is configured (lookups are then skipped). */
   lookup: ((providerId: string, identity: OpenRouterIdentity, timeoutMs: number) => Promise<TransportObservation>) | null;
   /** The account of the platform key, as the call identity names it. */
@@ -47,6 +47,13 @@ export const lookupAbsent = (observation: TransportObservation) =>
  * once the turn is 24 hours old, and answers "too_early" before that (the call then stays unknown and is looked up again).
  */
 async function lookUp(deps: TurnRecoveryDeps, item: RecoveryItem, call: RecoveryItem['calls'][number]): Promise<'receipt' | 'absent' | null> {
+  // No provider id (the supplier sent nothing before the deadline): nothing to look up; the database settles it at zero once the turn
+  // is 24 hours old and answers "too_early" before that (0494, Owner 2026-11-03).
+  if (call.providerId === null) {
+    if (item.action !== 'settle') return null;
+    const outcome = await deps.db.settleNoIdentity({ actorId: item.actorId, turnId: item.turnId, seq: call.seq });
+    return outcome.settled ? 'absent' : null;
+  }
   // Priced as a live receipt is (call.ts): the price table frozen at open, from the looked-up token counts; min(c, U) only when
   // the counts are missing. A turn that froze no price table is left unknown rather than priced by another rule.
   const pricing = nominalPricing.safeParse(call.pricing);
