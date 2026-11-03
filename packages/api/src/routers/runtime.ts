@@ -1,12 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { reportDocumentInput, reportEditInput, reportFinalizeInput,
   reportFinalizationService } from '../services/report/finalization';
-import {reportRevisionService,revisionApplyInput,revisionDeclineInput,revisionLatestInput,revisionProposeInput,
-  revisionReadInput} from '../services/report/revisionSync';
+import {reportRevisionService,revisionApplyInput,revisionProposeInput} from '../services/report/revisionSync';
 import {executionVisibility} from '../services/runtime/libraryVisibility';
-import {reportEnabled,reportLocate,reportService} from '../services/report/service';
+import {reportEnabled,reportService} from '../services/report/service';
 import {reportPrice} from '../services/report/fees';
-import {reportStart} from '../services/report/contract';
 import {reportPreflight,reportPreflightInput} from '../services/report/preflight';
 import {readNativeRuntimeViewWithWorkItems} from '../services/runtime/nativeView';
 import {withWorkItems} from '../services/runtime/workItems';
@@ -15,7 +13,7 @@ import type {inferProcedureBuilderResolverOptions} from '@trpc/server';
 import type {RuntimeProgress} from '../services/turn/agent/progress';
 import { z } from 'zod';
 import { protectedProcedure,router } from '../trpc';
-import { runtimeAdmissionService,runtimeAdmission,runtimeMaterialInput } from '../services/runtime/admission';
+import { runtimeAdmissionService,runtimeAdmission } from '../services/runtime/admission';
 import {loadStagingPolicy,assertStagingReadAccess,executionRouteAccess,type RealPolicyCheck} from '../services/turn/settings/stagingPolicy';
 import {StagingAccessError,stagingProcedureError} from '../services/turn/settings/stagingErrors';
 import {stagingTransport} from '../services/runtime/stagingTransport';
@@ -108,16 +106,9 @@ export const runtimeRouter=router({
  // R14: sync an adopted review revision back to the confirmed fields. No model call, no charge.
  reportRevisionPropose:maintenanceProcedure.input(revisionProposeInput).mutation(({ctx,input})=>
   reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).propose(input)),
- reportRevisionRead:maintenanceProcedure.input(revisionReadInput).query(({ctx,input})=>
-  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).read(input)),
- reportRevisionLatest:maintenanceProcedure.input(revisionLatestInput).query(({ctx,input})=>
-  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).latest(input)),
  reportRevisionApply:maintenanceProcedure.input(revisionApplyInput).mutation(({ctx,input})=>
   reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).apply(input)),
- reportRevisionDecline:maintenanceProcedure.input(revisionDeclineInput).mutation(({ctx,input})=>
-  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).decline(input)),
  // acceptedCredits: the fixed price the button showed (0295); the service refuses a start at another price.
- reportStart:procedure.input(reportStart.extend({acceptedCredits:z.number().int().positive().optional()})).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
  // The fixed price (0295) is shown on the button; null when it cannot be read (the button then shows no number).
  reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!),
@@ -125,12 +116,6 @@ export const runtimeRouter=router({
  reportPreflight:maintenanceProcedure.input(reportPreflightInput).query(({ctx,input})=>
   reportPreflight(ctx.userScopedSupabase,ctx.supabaseAdmin!,input)),
  // Saved reports stay discoverable whatever the switch or membership is now.
- reportLatest:maintenanceProcedure.input(reportLocate).query(({ctx,input})=>reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,
-  {account:'read-only',costPerCall:'0',...BILLING_UNIT_POLICY,
-   maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).latest(input)),
- reportStatus:maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict()).query(({ctx,input})=>
-  reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,{account:'read-only',costPerCall:'0',...BILLING_UNIT_POLICY,
-   maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).status(input.executionId)),
  choices:procedure.input(z.object({sessionId:z.string().uuid().optional()}).optional()).query(async({ctx,input})=>{
   let work=false;let workModuleId:string|null=null;let workRevisionId:string|null=null;
   if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error){const item=(listing.data.accounts??[]).flatMap((a:{items:Array<{sessionId:string;workItemId:string;moduleId?:string;methodRevisionId?:string}>})=>a.items).find((i:{sessionId:string})=>i.sessionId===input.sessionId);work=Boolean(item);if(item){workModuleId=item.moduleId??null;workRevisionId=item.methodRevisionId??null;}}}
@@ -171,8 +156,6 @@ export const runtimeRouter=router({
   return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:realContract(ctx.real).host.mode,corePathV2};
  }),
  start:procedure.input(z.object({requestId:z.string().uuid(),scope:z.unknown()}).strict()).mutation(({ctx,input})=>ctx.admission.start(input.requestId,input.scope)),
- saveMaterial:procedure.input(runtimeMaterialInput).mutation(({ctx,input})=>ctx.admission.saveMaterial(input)),
- revokeMaterial:procedure.input(z.object({sessionId:z.string().uuid(),revision:z.number().int().positive()}).strict()).mutation(({ctx,input})=>ctx.admission.revokeMaterial(input.sessionId,input.revision)),
  prepare:procedure.input(runtimeAdmission).mutation(({ctx,input})=>ctx.admission.prepare(input)),
  cancel:maintenanceProcedure.input(z.object({executionId:z.string().uuid(),
   stopAt:z.number().int().min(0).max(2147483647).optional(),source:z.enum(['assistant','message','final']).optional(),
@@ -204,7 +187,6 @@ export const runtimeRouter=router({
   },token.executionId,onProgress,token),timing,'runtime.resumeStream',undefined,textProtocol,visibility.visible);}
   finally{timing?.release();}
  }),
- execute:executionProcedure.mutation(options=>executeOriginal(options)),
  executeStream:executionProcedure.mutation(async function*(options){
   // The route returns before this stream ends; release this stream's reference.
   const timing=options.ctx.runtimeBudget?.timing;

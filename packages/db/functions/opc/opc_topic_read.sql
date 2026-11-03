@@ -17,6 +17,5 @@ BEGIN
  SELECT * INTO v FROM artifact_versions WHERE id=w.source_version_id;
  SELECT * INTO o FROM opc_topic_openings WHERE draft_id=p_draft_id;
  RETURN result||jsonb_build_object('sourceRoundId',v.round_id,'sourceVersion',v.version,
-  'opening',CASE WHEN o.request_id IS NOT NULL THEN jsonb_build_object('draftId',p_draft_id,'requestId',o.request_id,'input',o.input,'executionId',coalesce((SELECT e.id FROM runtime_executions e WHERE e.session_id=w.session_id AND e.request_id=o.request_id),
-   (SELECT t.request_id FROM turns t WHERE t.actor_id=p_actor_id AND t.session_id=w.session_id AND t.request_id=o.request_id))) ELSE NULL END);
+  'opening',CASE WHEN o.request_id IS NOT NULL THEN jsonb_build_object('draftId',p_draft_id,'requestId',o.request_id,'input',o.input,'executionId',(SELECT t.request_id FROM turns t WHERE t.actor_id=p_actor_id AND t.session_id=w.session_id AND t.request_id=o.request_id)) ELSE NULL END);
 END $function$;

@@ -665,6 +665,22 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a keyword card is free, reaches the page at clo
   expect((prepared.data as { cards: Array<{ items: string[] }> }).cards[0]!.items).toEqual(['coffee', 'latte art', 'cafe']);
 });
 
+it('RUNTIME: CORE-PATH-V2 V2-5c: a confirmed keyword card reaches the next turn on a step that is not the benchmark step', async () => {
+  const f = await setup();
+  await researchOn();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'propose_keywords', { keywords: ['coffee', 'latte art', 'cafe', 'beans', 'roasting', 'barista'] })
+      : prose('gen-reply-' + n, 'Please pick on the card.'));
+  const out = await turn(f, { text: 'Find benchmarks', transport: first.fn, research: tiktokVendors() });
+  const card = (out.events.find(e => e.type === 'research_card') as { card: { cardId: string } }).card.cardId;
+  const confirmed = await rest().rpc('research_card_confirm', { a: f.actor, p_card: card, p: { selected: ['k0', 'k1', 'k2'] } });
+  const confirmationId = (confirmed.data as { confirmationId: string }).confirmationId;
+  const second = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet) : prose('gen-reply-' + n, 'Searching.'));
+  await turn(f, { text: 'I confirmed the keywords', transport: second.fn, research: tiktokVendors() });
+  expect(JSON.stringify(second.bodies.filter(b => b.model !== ORGANIZER))).toContain(confirmationId);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5c: an unknown supplier result is not the user\'s, and a failed reply keeps what the lookup saved', async () => {
   const f = await setup();
   await researchOn();

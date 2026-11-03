@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | Lint & Type Check | `lint-and-type`：源码大小、Web/API ESLint、Web typegen + tsc、API tsc、API 类型排除基线核验 | 存量 lint/type 基线仍存在，见下文 |
 | TypeScript Check | 复用同一个 `lint-and-type` worker 的完整结果 | 不重复执行第二轮类型检查 |
-| Unit Tests | `test` 和 `integration` 均成功：工作流契约、可信基线迁移账本、API 单测、PAY-1 子集、billing cron、proxy、CI safeguards；BILL2、Runtime、空库文件建库与指纹/开户审计/credit guard | 仅指定集成测试；不含所有 integration 文件 |
+| Unit Tests | `test` 和 `integration` 均成功：工作流契约、可信基线迁移账本、API 单测、PAY-1 子集、billing cron、proxy、CI safeguards；Runtime、空库文件建库与指纹/开户审计/credit guard | 仅指定集成测试；不含所有 integration 文件 |
 | Security Unit Tests | 复用完整 `test` worker，包括 API 的 `securityChecks.test.ts`，以及 BILL2、`billingUnit.test.ts` 等计费单测（旧预扣 `billing.security.test.ts` 已随 LEGACY-CLOSE PR-A 和被测代码一起删除） | 不额外执行一个独立安全测试集，也不依赖 integration worker |
 | Build Check | `build-and-e2e`：Web 全量 Vitest、`pnpm build`、本地启动、secretless Chromium Security E2E | 构建和测试都实际执行；缓存不会替代结果 |
 | Security E2E Tests | 复用同一个 `build-and-e2e`，Playwright 只运行 `security.spec.ts --project=chromium` | 当前 8 项执行、15 项跳过；不是 staging 完整安全验证 |
@@ -38,7 +38,6 @@
 | proxy hostname | 22 | 0 |
 | CI safeguards | 128 | 0 |
 | Web 全量（62 文件通过，1 文件跳过） | 486 | 6 |
-| BILL2 without-app | 79 | 0 |
 | Runtime without-app（runtime 91、streaming 12） | 103 | 5 |
 | Security E2E | 8 | 15 |
 
@@ -117,8 +116,9 @@ session/token cookie 的 HttpOnly（标题中的 Secure 并未实际断言）。
 
 ### 未纳入，与 skipped 不同
 
-API 普通配置仅选 `src/**/*.test.ts`；CI 集成 runner 仅选择 BILL2 的
-`billing.integration.ts` 与 Runtime 的 `runtime.integration.ts`、`streaming.integration.ts`。
+API 普通配置仅选 `src/**/*.test.ts`；CI 集成 runner 仅选择 Runtime 的
+`runtime.integration.ts`、`streaming.integration.ts` 等（见 `without-app.mjs`）。旧 BILL2 计费集成测试（`billing.integration.ts`）
+和旧 PAYG 运行测试已随旧路径删除（V2-12）。
 其余 integration 文件（包括 OPC、工作台等）未被这次 CI 选择，不计入上述 skipped 数量。
 Playwright 只选 security 文件和 Chromium；其他 spec、mobile-chrome、auth setup 不在此次执行。
 secretless 配置主动取消 auth setup 依赖。

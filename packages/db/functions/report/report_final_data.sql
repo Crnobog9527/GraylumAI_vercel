@@ -20,10 +20,11 @@ BEGIN
  -- Benchmark numbers were taken from the table with this hash: it must still be the table now. Same locks and order as
  -- 0268's research_benchmark_report_current, so a refresh either commits first (and this refuses) or waits.
  IF d ? 'benchmarkHash' THEN
-  SELECT x.actor_id,x.session_id INTO a,sid FROM runtime_executions x WHERE x.id=(source->>'executionId')::uuid;
+  -- The report turn's conversation (the document source has proved it is the actor's).
+  SELECT s.actor_id,s.id INTO a,sid FROM runtime_sessions s WHERE s.id=(source->>'sessionId')::uuid;
   PERFORM 1 FROM research_account_fetches WHERE session_id=sid FOR SHARE;
   PERFORM 1 FROM research_benchmarks WHERE session_id=sid FOR SHARE;
-  IF (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM d->>'benchmarkHash' THEN RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
+  IF a IS NULL OR (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM d->>'benchmarkHash' THEN RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
  END IF;
  RETURN jsonb_build_object('data',d-'bodyHash'-'benchmarkHash');
 END $function$;

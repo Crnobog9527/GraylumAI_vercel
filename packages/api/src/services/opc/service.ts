@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { draftReadWithModule } from "./readonlyDraft";
-import {assertCompleteStepResult,STEP_ENVELOPE_INSTRUCTION,opcSaveResult} from './stepOutput';
-export {opcSaveResult} from './stepOutput';
+import {STEP_ENVELOPE_INSTRUCTION} from './stepOutput';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from "../runtime/waitingOrganizer";
 import {StagingAccessError} from "../turn/settings/stagingErrors";
 import {PLAN_INSTRUCTIONS} from "./planPrompt";
@@ -27,7 +26,7 @@ import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
 import {positioningMentorInstructions} from './existingPositioning';
 import { turnContentService } from './turnContent';
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+import { opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentFromTurn, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoResultsFromTurn, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
 export { opcGenerate } from "./answerCard";
@@ -235,33 +234,6 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         searchEnabled: false, researchTools: v.purpose === "mentor", // RT-3b PR-3: still off unless the admin switch is on
       }).prepare(runtimeRequest);
     },
-    async saveResult(value: unknown) {
-      const v = opcSaveResult.parse(value);
-      await assertCompleteStepResult(rpc,v.executionId);
-      return rpc("opc_save_result", {
-        p_draft_id: v.draftId,
-        p_execution_id: v.executionId,
-        p_step_id: v.stepId,
-        p_request_id: v.requestId,
-      });
-    },
-    async planResult(draftId: string, executionId: string) {
-      const value = await rpc("opc_plan_result", {
-        p_draft_id: uuid.parse(draftId),
-        p_execution_id: uuid.parse(executionId),
-      });
-      try {
-        return {
-          ...value,
-          body: z.array(planItem).min(1).max(28).parse(JSON.parse(value.body)),
-        };
-      } catch {
-        // The provider execution is already complete and the RPC proved that
-        // this is its authorized public body. A malformed plan is therefore a
-        // definite response validation failure, not an ambiguous dispatch.
-        throw new Error("OPC_PLAN_RESPONSE_INVALID");
-      }
-    },
     revise: (draftId: string, requestId: string, expectedRoundId: string) =>
       rpc("opc_revise", {
         p_draft_id: uuid.parse(draftId),
@@ -285,17 +257,6 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       );
     },
     list: () => rpc("opc_query", {}),
-    /**
-     * The server's own record of one retained generation request. The local
-     * page uses it to tell "this request never reached the server" apart from
-     * "it was admitted and its outcome is unknown", so it never claims a
-     * cancellation or a zero cost it cannot prove.
-     */
-    planRequestState: (draftId: string, requestId: string) =>
-      rpc("opc_plan_request_state", {
-        p_draft_id: uuid.parse(draftId),
-        p_request_id: uuid.parse(requestId),
-      }),
     /**
      * The persisted topic workspace of one draft: which confirmed positioning
      * version and which pinned method revision it is bound to. It is read from
@@ -410,7 +371,6 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       const v=z.object({workItemId:uuid,requestId:uuid,expectedRevision:z.number().int().positive(),plannedDate:z.string().date().nullable(),status:z.enum(['unpublished','published']),publishedDate:z.string().date().nullable()}).strict().parse(value);
       return rpc('opc_publication_ui_change',{p_work_item_id:v.workItemId,p_request_id:v.requestId,p_expected_revision:v.expectedRevision,p_planned_date:v.plannedDate,p_status:v.status,p_published_date:v.publishedDate});
     },
-    positionHistory: (draftId:string) => rpc('opc_position_history',{p_draft_id:uuid.parse(draftId)}),
     accountStrategyHistory: (accountProjectId:string) => rpc('opc_account_strategy_history',{p_account_project_id:uuid.parse(accountProjectId)}),
     accountStrategySchema: (accountProjectId:string) => rpc('opc_account_strategy_schema',{p_account_project_id:uuid.parse(accountProjectId)}),
     accountStrategyBegin: (accountProjectId:string,requestId:string) => rpc('opc_account_strategy_begin',{p_account_project_id:uuid.parse(accountProjectId),p_request_id:uuid.parse(requestId)}),
@@ -428,51 +388,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_patch: v.patch,
       });
     },
-    contentFromExecution: (value: unknown) => {
-      const v = opcContentFromExecution.parse(value);
-      return rpc("opc_content_from_execution", {
-        p_work_item_id: v.workItemId,
-        p_request_id: v.requestId,
-        p_expected_version: v.expectedVersion,
-        p_kind: v.kind,
-        p_status: v.status,
-        p_execution_id: v.executionId,
-        p_source_content_id: v.sourceContentId,
-      });
-    },
     ...turnContentService(rpc),
-    videoPackage: (value: unknown) => {
-      const v = opcVideoPackage.parse(value);
-      return rpc("opc_video_package_from_execution", {
-        p_work_item_id: v.workItemId,
-        p_request_id: v.requestId,
-        p_execution_id: v.executionId,
-        p_source_script_id: v.sourceScriptId,
-        p_expected_storyboard_version: v.expectedStoryboardVersion,
-        p_expected_editing_version: v.expectedEditingVersion,
-      });
-    },
-    videoResults: (value: unknown) => {
-      const v = opcVideoResults.parse(value);
-      return rpc("opc_video_results_from_execution", {
-        p_work_item_id: v.workItemId,
-        p_request_id: v.requestId,
-        p_execution_id: v.executionId,
-        p_source_script_id: v.sourceScriptId,
-        p_expected_storyboard_version: v.expectedStoryboardVersion,
-        p_expected_editing_version: v.expectedEditingVersion,
-        p_storyboard: v.choice === "both" || v.choice === "storyboard",
-        p_editing: v.choice === "both" || v.choice === "editing",
-      });
-    },
-    videoExecutionCheck: (value: unknown) => {
-      const v = opcVideoExecutionCheck.parse(value);
-      return rpc("opc_video_execution_check", {
-        p_work_item_id: v.workItemId,
-        p_execution_id: v.executionId,
-        p_source_script_id: v.sourceScriptId,
-      });
-    },
     videoMaterialPrepare: (value: unknown) => {
       const v = opcVideoMaterialPrepare.parse(value);
       return rpc("opc_video_material_prepare", {

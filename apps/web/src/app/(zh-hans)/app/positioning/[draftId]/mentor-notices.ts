@@ -2,6 +2,7 @@
 import { createElement } from "react";
 import { CHAT_ACTION, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { livePhaseNotice, type ReplyNotice } from "./agent-turn-display";
+import { OPENING_OFFER_NOTICE } from "./opening-intent";
 import { STOPPED_NOTICE, UNORGANIZED_NOTICE, stopSaving } from "./stop-reply";
 export { useOpeningFailureNotice } from "./opening-notice";
 
@@ -27,6 +28,8 @@ export function mentorTailNotices(ctx: {
   lastTurnText?: string;
   saving: boolean;
   recovery: (Action & { readable: boolean }) | null;
+  /** A step the Agent has not opened yet: the user starts it (and pays for it) with this click. */
+  opening?: Action | null;
   error: string;
   notice: string;
   freeError: string;
@@ -42,6 +45,9 @@ export function mentorTailNotices(ctx: {
     notices.push({ id: "recovery", tone: "warning", label: "恢复提示",
       text: ctx.recovery.readable ? "上一条回复还没确认完成，原请求已保留，重试不会重复扣费。" : "上一条请求无法读取，原始记录已保留。",
       actions: [{ label: CHAT_ACTION.retry, onClick: ctx.recovery.onClick, disabled: ctx.recovery.disabled }] });
+  if (ctx.opening && !ctx.replying && !ctx.livePhase)
+    notices.push({ id: "opening-offer", tone: "status", text: OPENING_OFFER_NOTICE,
+      actions: [{ label: "开始这一步", onClick: ctx.opening.onClick, disabled: ctx.opening.disabled }] });
   const shownByTurn = Boolean(ctx.error && ctx.lastTurnText?.split("\n").includes(ctx.error));
   if (ctx.error && !shownByTurn && !(ctx.recovery && ctx.error === RETRY_PENDING_NOTICE)) notices.push({ id: "error", tone: "error", text: ctx.error });
   if (ctx.notice) notices.push({ id: "notice", tone: "warning", text: ctx.notice });

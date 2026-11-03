@@ -38,13 +38,7 @@ BEGIN
     THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
    admitted:=true;
   END IF;
-  IF ancestor.execution_id IS NOT NULL THEN
-   IF NOT EXISTS(SELECT 1 FROM runtime_executions original WHERE id=ancestor.execution_id
-     AND actor_id=p_actor_id AND session_id=s.id AND state='completed')
-    OR NOT runtime_history_available(ancestor.execution_id)
-    THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
-   admitted:=true;
-  END IF;
+  IF ancestor.execution_id IS NOT NULL THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;
   seen:=array_append(seen,current_id);current_id:=ancestor.source_content_id;
  END LOOP;
  IF NOT admitted THEN RAISE EXCEPTION 'OPC_CONTENT_BINDING';END IF;

@@ -15,7 +15,7 @@ import { toolCallPolicy, type ToolCallPolicy } from '../provider/toolBilling';
 import { BENCHMARK_ROUTE_KINDS, readResearchToolsConfig, RUN_MAX_CALLS, type ResearchToolsConfig } from '../../research/vendors/config';
 import { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../../research/tools/schemas';
 import { RESEARCH_VENDORS, type SocialPlatform } from '../../research/vendors/types';
-import type { FrozenPaygRun } from '../provider/service';
+import type { FrozenPaygRun } from '../provider/frozenRun';
 import { freezePaygMessageBudget } from '../admission/paygMessageBudget';
 import { RESEARCH_TURN_INPUT_CAP } from '../settings/purposeBudgets';
 import { fastSearchOnly, researchToolDescription, researchToolParameters } from './researchRuntimeTool';

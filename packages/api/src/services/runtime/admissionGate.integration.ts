@@ -17,7 +17,8 @@ type Fixture={actor:string;user:SupabaseClient;admin:SupabaseClient;registration
  flow:ReturnType<typeof makeWorkflow>;context:()=>ReturnType<typeof createTRPCContext>;draft:()=>Promise<{draftId:string}>};
 
 export function registerAdmissionGateTests(db:pg.Client,fixture:()=>Promise<Fixture>,modelId:()=>string){
- it.each(['runtime','mentor','stream','topic'] as const)(
+ // V2-12 R1a: the old mentor prepareStep entry ('mentor') is no longer listed here: opc_query shows no old-execution turns.
+ it.each(['runtime','stream','topic'] as const)(
   'RUNTIME: %s admission shares the message gate and refused requests can resume without empty visible turns',async entry=>{
    const f=await fixture(),ctx=await f.context(),opc=opcRouter.createCaller(ctx),runtime=runtimeRouter.createCaller(ctx);
    const service=opcService(f.user,f.admin),artifacts=workbenchService(f.user,f.admin);
@@ -55,7 +56,6 @@ export function registerAdmissionGateTests(db:pg.Client,fixture:()=>Promise<Fixt
      selection:{kind:'ordinary',modelId:modelId()},network:'deny'});
     if(entry==='topic')return opc.topicTurn({draftId:d.draftId,requestId,input:'Synthetic topic'});
     const input={draftId:d.draftId,stepId:'step-0',purpose:'mentor' as const,questionId:'goal',requestId,input:opening?OPENING_INPUT:'Synthetic user turn'};
-    if(entry==='mentor')return opc.prepareStep(input);
     const stream=await opc.mentorTurnStream(input);
     // A refused stream fails while preparing, before any execution event.
     for await(const event of stream)if(event.type==='admitted')return event;
