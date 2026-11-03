@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- PUBLISH-MONITOR block D (9999, placeholder number until the controller assigns one): the user edits a brand's content pillars
+-- PUBLISH-MONITOR block D (0501): the user edits a brand's content pillars
 -- as a simple setting (Owner 2026-11-03: keep "edit content pillars", no confirmation screen for coach suggestions). Add, rename,
 -- delete, reorder; at most 6 (the table's CHECK). Keys never change: a rename keeps the key, so posts keep their tag; a new pillar
 -- gets a fresh key that was never used, so an old experiment or mix target can never point at it. Deleting a pillar sends its
