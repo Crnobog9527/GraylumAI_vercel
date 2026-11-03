@@ -1,8 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {closeAccount,fixture,call} from '../erasure-b2a/cases.mjs';
-import {ready} from '../erasure-binding/cases.mjs';
+import {closeAccount} from '../erasure-b2a/cases.mjs';
 import {recordLibraryProof} from './library-proof.mjs';
 export async function runProcessor(db,processAccountErasure,report){
  const database={async rpc(name,args){
@@ -29,32 +28,7 @@ export async function runProcessor(db,processAccountErasure,report){
   {stage:'completed',retry:false,remaining:0,manualReview:0,errorCodes:[]});
  assert.equal(removes,1);assert.equal(storageCalls,1);
  assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[minimal.actor])).rows[0].credits,37);
- const normal=await ready(db,{scrub:false});
- await recordLibraryProof(db,normal);
- const balance=(await db.query('SELECT credits FROM profiles WHERE id=$1',[normal.actor])).rows[0].credits;
- const completed=await processAccountErasure({profileId:normal.actor,...adapters});
- assert.equal(completed.stage,'completed',JSON.stringify(completed));assert.equal(completed.retry,false);
- assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[normal.actor])).rows[0].credits,balance);
- assert.equal((await db.query('SELECT count(*)::int n FROM runtime_sessions WHERE actor_id=$1',[normal.actor])).rows[0].n,0);
- assert.equal((await db.query('SELECT session_ref,erased_execution_id FROM bill2_runs WHERE id=$1',[normal.run])).rows[0].erased_execution_id,normal.execution);
- assert.equal(removes,2);
- const unknown=await fixture(db);const unknownCall=await call(db,unknown);await closeAccount(db,unknown);
- const originalBalance=(await db.query('SELECT credits FROM profiles WHERE id=$1',[unknown.actor])).rows[0].credits;
- const pending=await processAccountErasure({profileId:unknown.actor,...adapters});
- assert.equal(pending.retry,true);assert.notEqual(pending.stage,'completed');assert.ok(pending.remaining>0||pending.manualReview>0);
- assert.equal(removes,2,'unknown finance cannot reach Auth removal');
- const review=(await db.query('SELECT stage,review_codes,next_review_at FROM account_erasure_requests WHERE profile_id=$1',
-  [unknown.actor])).rows[0];
- assert.equal(review.stage,'billing_pending');
- assert.ok(review.review_codes.includes('ERASURE_FINANCIAL_EVIDENCE_REVIEW'),JSON.stringify(review));
- assert.ok(review.next_review_at,'missing provider/cost receives a durable review date');
- const callState=(await db.query('SELECT provider_id,selected_cost_usd FROM bill2_calls WHERE id=$1',[unknownCall.id])).rows[0];
- assert.equal(callState.provider_id,null);assert.equal(callState.selected_cost_usd,null);
- assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[unknown.actor])).rows[0].credits,originalBalance);
- await processAccountErasure({profileId:unknown.actor,...adapters});
- const retryReview=(await db.query('SELECT next_review_at FROM account_erasure_requests WHERE profile_id=$1',[unknown.actor])).rows[0];
- assert.equal(retryReview.next_review_at.getTime(),review.next_review_at.getTime(),'daily retries cannot postpone review');
- report.checks.push('missing provider/cost: original money/identity retained, durable review and fixed due date, no Auth deletion');
+ // (V2-12 F: the settled-Runtime and unknown-finance cases built old runs; a turn with an unknown cost is erased in turn-erasure.)
  const uncertain={actor:randomUUID()};
  await db.query('INSERT INTO profiles(id,credits) VALUES($1,19)',[uncertain.actor]);await closeAccount(db,uncertain);
  await recordLibraryProof(db,uncertain);
@@ -78,5 +52,5 @@ export async function runProcessor(db,processAccountErasure,report){
   [uncertain.actor])).rows[0];
  assert.deepEqual(final.review_codes,[]);assert.equal(final.next_review_at,null);assert.ok(final.progress_expires_at);
  report.checks.push('Auth uncertainty is persisted before dispatch; resumed intent reads only and clears review after absence proof');
- report.checks.push('actual TypeScript processor with real service-role RPCs: minimal and settled Runtime complete; unknown finance blocks Auth; money preserved');
+ report.checks.push('actual TypeScript processor with real service-role RPCs: a minimal account completes; Auth uncertainty is persisted; money preserved');
 }

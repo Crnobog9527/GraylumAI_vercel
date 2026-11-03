@@ -10,13 +10,9 @@ import {resolve,dirname,relative} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
-import {runFusionExecutor} from './fusion.mjs';
 import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
-import {runOwnedRuntimePrune} from './owned-runtime-prune.mjs';
-import {runOwnedSessionPrune} from './owned-session-prune.mjs';
-import {runResearchRetained} from './research-retained.mjs';
 import {runPruneDiagnostics} from './prune-diagnostics.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {startRedisDouble} from './redis-double.mjs';
@@ -77,12 +73,7 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- // The optimization is built through the canonical migration chain; repeat its final version too.
- const optimized=snapshot();
- // 0395 patches the 0355 text, so it is replayed after it.
- for(const file of ['0333_erasure_prune_owned_runtime.sql','0355_erasure_prune_session_tables.sql','0395_erasure_prune_error_codes.sql'])
-  ok(sql(read('packages/db/migrations/'+file)));
- assert.deepEqual(snapshot(),optimized,'runtime owner optimizations repeat without catalog drift');
+ // (V2-12 F: the replay of 0333/0355/0395, the old runtime owner pruning, went with the old tables it names.)
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -112,7 +103,6 @@ try {
  redis=await startRedisDouble();Object.assign(process.env,redis.env);
  const {runAccountErasureExecutor}=await import(module('executor'));
  await runExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report,safeupdate:Boolean(safeupdateLibrary)});
- await runFusionExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report});
  const synced=[...redis.store].filter(([key])=>key.startsWith('graylum:erasure-manifest:account:'));
  assert.ok(synced.length>0,'completed erasures reached the off-database manifest');
  for(const [,entry] of synced)assert.deepEqual(Object.keys(JSON.parse(entry.value)).sort(),['confirmedAt','kind','profileId','targetId']);
@@ -120,9 +110,6 @@ try {
  report.checks.push('executor syncs the off-database manifest: ids and times only, nothing left unsynced');
  await runCases(client,report);
  await runLeaves(client,report);
- await runOwnedSessionPrune(client,report);
- await runOwnedRuntimePrune(client,report);
- await runResearchRetained(client,report);
  await runPruneDiagnostics(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
  const {processAccountErasure}=await import(module('processor'));

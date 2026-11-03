@@ -10,7 +10,6 @@ import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
 import {runFusionVersionMarks} from './fusion-version-marks.mjs';
-import {runReportFee} from './report-fee.mjs';
 import {runFusionTurn} from './fusion-turn.mjs';
 const mode=process.argv.slice(2).join(' ');
 const development=mode==='--local-only --development';
@@ -61,7 +60,10 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- for(const path of migrations){
+ // A migration that still names an object batch F drops (the old run tables and functions) cannot be replayed on the finished database
+// (V2-12 F); the ones that only mention them in a comment still can.
+const OLD_OBJECTS=/^(?!\s*--).*\b(runtime_executions|bill2_prepare|bill2_runs|bill2_calls|bill2_claim|bill2_close|bill2_receipts|runtime_tool_calls|runtime_session_history|runtime_admit\w*|runtime_cancel|report_fees|report_fee_hold|fusion_billing_groups|fusion_review_fees)\b/m;
+for(const path of migrations.filter(path=>!OLD_OBJECTS.test(read(path)))){
   let migration=read(path);
   // 0334 patches the organizer-pending gate of runtime_admit and opc_step_material; V2-12 R1b removed that gate from
   // opc_step_material, so a replay on the finished database patches runtime_admit only.
@@ -85,7 +87,6 @@ try {
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
  await runCases({db:client,Client,connectionString,report});
  await runFusionVersionMarks({db:client});
- await runReportFee({db:client,Client,connectionString,report});
  await runFusionTurn({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');

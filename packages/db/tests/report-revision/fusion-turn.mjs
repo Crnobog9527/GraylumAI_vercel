@@ -54,18 +54,13 @@ export async function runFusionTurn({db,report,Client,connectionString}) {
     assert.ok(opened.turnId && opened.reviewId);
     const rv = (await db.query('SELECT * FROM fusion_reviews WHERE id=$1',[opened.reviewId])).rows[0];
     assert.equal(Number(rv.turn_id),opened.turnId);assert.equal(rv.source_session_id,f.session);
-    assert.equal((await db.query('SELECT count(*)::int n FROM fusion_review_fees WHERE review_id=$1',[rv.id])).rows[0].n,0,'no BILL2 fee');
+    // (V2-12 F: fusion_review_fees is gone; the wallet check below shows the price is the turn's freeze, not a fee row.)
     assert.equal(await wallet(db,f.actor),3000-FEE-HOLD);
     assert.equal((await db.query('SELECT session_id FROM turns WHERE id=$1',[opened.turnId])).rows[0].session_id,f.session);
     const again = await open(db,f,request);
     assert.deepEqual([again.turnId,again.reviewId,again.replay],[opened.turnId,opened.reviewId,true]);
     assert.equal(await wallet(db,f.actor),3000-FEE-HOLD,'a repeated start holds once');
-    // The BILL2 review functions refuse or skip it: no group claim, no stop/end, no idle pause, no paused end.
-    await assert.rejects(service(db,'fusion_review_claim',f.actor,rv.id,1,'review',1,randomUUID(),'[]'),/FUSION_REVIEW_DENIED/);
-    await assert.rejects(service(db,'fusion_review_close',f.actor,rv.id,'stopped'),/FUSION_REVIEW_DENIED/);
-    await db.query("UPDATE fusion_reviews SET updated_at=now()-interval '2 days' WHERE id=$1",[rv.id]);
-    await service(db,'fusion_review_pause_idle','1 hour');
-    assert.equal((await db.query('SELECT state FROM fusion_reviews WHERE id=$1',[rv.id])).rows[0].state,'running');
+    // (V2-12 F: the BILL2 review functions - claim, close, idle pause, paused end - are gone, so there is nothing left to skip a turn review.)
     // The frozen source reads; one group claimed with its first sequence, a seat recorded with its answer.
     const source = await service(db,'fusion_review_source',f.actor,rv.id);
     assert.ok(source.body && source.sections.length);
