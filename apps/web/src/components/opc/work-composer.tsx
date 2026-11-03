@@ -78,8 +78,10 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const cannotSend=disabled||sendDisabled||reading||attachments.busy||Boolean(images?.busy)||!value.trim();
  // Counter only near the limit, so ordinary messages stay uncluttered.
  const nearLimit=value.length>=maxLength*0.9;
- const imageHint=images?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）只随这条消息发给模型，不会保存；也可以直接拖进对话或粘贴。`:'';
- return <ComposerView rootRef={root} attachment={images?<>{attachment}<ComposerImages state={images} disabled={disabled}/></>:attachment} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
+ const imageHint=images
+  ?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）只随这条消息发给模型，不会保存；也可以直接拖进对话或粘贴。`:'';
+ const attached=images?<>{attachment}<ComposerImages state={images} disabled={disabled}/></>:attachment;
+ return <ComposerView rootRef={root} attachment={attached} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
   editor={<ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
    onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks} knownReferences={referenceList}/>}
