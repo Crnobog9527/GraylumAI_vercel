@@ -61,6 +61,27 @@ it('a call bound above the review cap opens nothing and ends the week as a confi
  expect(of(d.calls,'turn_open')).toHaveLength(0);
  expect(m.run).not.toHaveBeenCalled();
 });
+it('the call is quoted on the request it will send: the bound is made on its bytes and the review\'s own output, and a bigger pack asks for more',async()=>{
+ const {REVIEW_REQUEST,REVIEW_INSTRUCTIONS,REQUEST_ROOM_BYTES,REVIEW_OUTPUT_TOKENS}=await import('./review');
+ const {withBrandIdentity}=await import('../modelIdentity/brandIdentity');
+ const bytes=(pack:object)=>Buffer.byteLength(REVIEW_REQUEST+JSON.stringify(pack))+Buffer.byteLength(withBrandIdentity(REVIEW_INSTRUCTIONS,true))+REQUEST_ROOM_BYTES;
+ for(const pack of [{kind:'my_posts'},{kind:'my_posts',rows:'x'.repeat(30000)}]){
+  m.quote.mockClear();
+  await runReviewTurn(deps().deps,claim,pack,async()=>true);
+  expect(m.quote).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({inputBytes:bytes(pack),
+   bound:{promptBytes:bytes(pack),outputTokens:REVIEW_OUTPUT_TOKENS}}));
+ }
+ expect(bytes({kind:'my_posts',rows:'x'.repeat(30000)})).toBeGreaterThan(bytes({kind:'my_posts'})+29000);
+});
+it('a request too large for any profile opens nothing, and a quote refused as too large is a configuration skip',async()=>{
+ const d=deps();
+ expect(await runReviewTurn(d.deps,claim,{rows:'x'.repeat(200000)},async()=>true)).toEqual({kind:'skipped',reason:'CONFIGURATION_REQUIRED'});
+ expect(m.quote).not.toHaveBeenCalled();
+ const {QuoteError}=await import('./quote');
+ m.quote.mockRejectedValueOnce(new QuoteError('TURN_INPUT_TOO_LARGE'));
+ expect(await runReviewTurn(d.deps,claim,{kind:'my_posts'},async()=>true)).toEqual({kind:'skipped',reason:'CONFIGURATION_REQUIRED'});
+ expect(of(d.calls,'turn_open')).toHaveLength(0);
+});
 it('a model that is not admitted, or no start threshold for it, is a configuration skip; other quote failures are deferred',async()=>{
  m.quote.mockRejectedValueOnce(Object.assign(new Error('x'),{code:'TURN_MODEL_NOT_ADMITTED'}));
  expect((await runReviewTurn(deps().deps,claim,{},async()=>true)).kind).toBe('deferred');

@@ -12,6 +12,8 @@ import { runRuntime } from './agent/runner';
 import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, type RequestContext } from './provider/providerRequest';
 import { freezeSharedPromptCache } from './provider/promptCache';
 import { modelCall, TurnStop } from './call';
+import { bodyBoundCall } from './bodyBound';
+import { PAYG_PROFILE_MAX_BYTES } from './admission/paygHostPolicy';
 import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
 import { readCoreConfig, GATE_CODES, type ChatDeps } from './chat';
 import { checkOutput, type CheckedOutput } from '../publishMonitor/coach/output';
@@ -49,6 +51,8 @@ export const COACH_INSTRUCTIONS = '你是 Graylum 的运营教练，正在为用
 export const COACH_REQUEST = '请为这个品牌写本期复盘。下面是代码计算的复盘包（JSON）：\n';
 /** The reply is capped far below the model's limit: a review is a page, not a report. */
 export const REVIEW_OUTPUT_TOKENS = 2000;
+/** Room kept above the request text and instructions for the reply-language lines and the request's own wrapping. */
+export const REQUEST_ROOM_BYTES = 8192;
 
 export type ReviewClaimInput = { id: string; actorId: string; sessionId: string; requestId: string; modelId: string; maxCostUsd: string;
   cadence?: string; attempt?: number;
@@ -81,16 +85,22 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
   const guard = settings.ok ? settings.identityGuard ?? true : true;
   const coachPack = claim.coach ? (pack as { review: object }).review : null;
   const text = (coachPack ? COACH_REQUEST : REVIEW_REQUEST) + JSON.stringify(coachPack ?? pack);
+  const instructionsBase = withBrandIdentity(coachPack ? COACH_INSTRUCTIONS : REVIEW_INSTRUCTIONS, guard);
+  // The request is known before it opens: its bytes plus room for the reply-language lines and the request's own wrapping are the
+  // most that may be sent (assertRuntimeRequestCapacity), and the call's bound is the price of that much prompt and REVIEW_OUTPUT_TOKENS,
+  // not of the whole context window (bodyBoundCall measures the exact body again before it is sent).
+  const requestBytes = Buffer.byteLength(text) + Buffer.byteLength(instructionsBase) + REQUEST_ROOM_BYTES;
+  if (requestBytes > PAYG_PROFILE_MAX_BYTES) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
   let quote;
-  try { quote = await chatQuote(admin, { configuration: await configuration, modelId: claim.modelId, inputBytes: 32000, deps: deps.pricing }); }
-  catch (error) {
+  try {
+    quote = await chatQuote(admin, { configuration: await configuration, modelId: claim.modelId, inputBytes: requestBytes,
+      bound: { promptBytes: requestBytes, outputTokens: REVIEW_OUTPUT_TOKENS }, deps: deps.pricing });
+  } catch (error) {
     const code = error instanceof QuoteError ? error.code : 'TURN_QUOTE_UNAVAILABLE';
     return REFUSED_AS_CONFIGURATION.has(code) ? { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' } : { kind: 'deferred', code };
   }
   // The user's review cap must cover one call's bound; a lower cap (or a pricier model) never silently shortens the call.
   if (Number(quote.upperUsd) > Number(claim.maxCostUsd)) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
-  const instructionsBase = withBrandIdentity(coachPack ? COACH_INSTRUCTIONS : REVIEW_INSTRUCTIONS, guard);
-  if (Buffer.byteLength(text) + Buffer.byteLength(instructionsBase) + 4096 > quote.inputLimit) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
   const thresholds = rowFor(await configuration, RESEARCH_THRESHOLDS_KEY);
   const startCredits = startThresholdCredits(thresholds.error ? null : thresholds.data?.value, quote.model, 'ordinary', quote.q, quote.multiplier);
   if (startCredits === undefined) return { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' };
@@ -146,7 +156,11 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
         // The user's switch or entitlement may have changed since the turn opened: asked again right before the paid request, and a
         // "no" stops it with nothing sent (the freeze comes back with the failed close).
         if (!(await authorize())) { stopped = new TurnStop('TURN_CALL_DENIED'); throw stopped; }
-        return modelCall(callDeps, quote, request, onChunk).catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
+        // The bound of this exact body (never above the frozen one): the adapter measures the same body and refuses any other.
+        let call;
+        try { call = bodyBoundCall(quote, request, REVIEW_OUTPUT_TOKENS); }
+        catch (error) { if (error instanceof TurnStop) stopped = error; throw error; }
+        return modelCall(callDeps, call, request, onChunk).catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       } });
     if (!output.trim()) throw new Error('REVIEW_EMPTY');
     // The coach's structured block is checked item by item against the pack; what is saved as the reading is the prose without it.
