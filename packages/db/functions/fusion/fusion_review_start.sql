@@ -8,8 +8,7 @@ CREATE OR REPLACE FUNCTION public.fusion_review_start(p_actor_id uuid, p_request
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE rv fusion_reviews; d opc_drafts; p artifact_projects; r artifact_rounds; ver artifact_versions; v jsonb;
-  usage jsonb; m jsonb; h text;
+DECLARE rv fusion_reviews;
 BEGIN
  -- 0324 archived business guard
  IF true THEN BEGIN
@@ -25,7 +24,6 @@ BEGIN
    END IF;
    RAISE;
   END; END IF;
-
  IF opc_draft_readonly(p_actor_id,p_draft_id) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF; -- 0249 read-only
   PERFORM bill2_actor(p_actor_id);
   PERFORM pg_advisory_xact_lock(hashtextextended('fusion-review:'||p_actor_id::text,0));
@@ -34,43 +32,6 @@ BEGIN
     IF rv.draft_id<>p_draft_id OR rv.source_version_id<>p_source_version_id THEN RAISE EXCEPTION 'FUSION_REVIEW_CONFLICT'; END IF;
     RETURN fusion_review_view(rv);
   END IF;
-  IF jsonb_typeof(p_config) IS DISTINCT FROM 'object' OR coalesce(p_config->>'estimateUsd','')!~'^[0-9]+(\.[0-9]+)?$' THEN
-    RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
-  v:=fusion_review_settings(p_actor_id);
-  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
-  SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR SHARE;
-  -- Re-read the draft under the project lock, as opc_revise/report_revision do: a revise that committed
-  -- meanwhile has moved the draft to a new round, which the freshness check below then refuses.
-  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
-  SELECT * INTO ver FROM artifact_versions WHERE id=p_source_version_id AND project_id=p.id AND erased_at IS NULL;
-  SELECT * INTO r FROM artifact_rounds WHERE id=ver.round_id AND project_id=p.id;
-  -- The same freshness rule as R14 propose: only the current formal version from a generated report.
-  IF d.draft_id IS NULL OR p.id IS NULL OR ver.id IS NULL OR r.state IS DISTINCT FROM 'published' OR d.round_id IS DISTINCT FROM r.id
-    OR ver.version IS DISTINCT FROM p.current_version OR NOT coalesce(ver.report ? 'generatedReport',false)
-    OR NOT content_erasure_artifact_readable(p_actor_id,ver.id) THEN RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
-  IF fusion_compare_active(p_actor_id) OR EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused'))
-    OR EXISTS(SELECT 1 FROM turns WHERE actor_id=p_actor_id AND kind='compare' AND state IN ('running','paused','stopping'))
-    OR EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id WHERE br.actor_id=p_actor_id
-      AND br.fusion_group_id IS NOT NULL AND fusion_call_in_flight(c)) THEN
-    RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE'; END IF;
-  usage:=fusion_review_breaker_usage(p_actor_id);
-  IF (usage->>'noDeliveryCalls')::int>=coalesce((v#>>'{review,breaker,noDeliveryCalls}')::int,10)
-    OR (usage->>'platformUsd')::numeric>=coalesce((v#>>'{review,breaker,platformUsd}')::numeric,2) THEN
-    RAISE EXCEPTION 'FUSION_REVIEW_BREAKER'; END IF;
-  IF (SELECT count(*) FROM (SELECT state FROM fusion_reviews WHERE source_version_id=ver.id AND breaker_cleared_at IS NULL
-      ORDER BY created_at DESC LIMIT 3) last3 WHERE state IN ('incomplete','revision_failed'))=3 THEN
-    RAISE EXCEPTION 'FUSION_REVIEW_VERSION_BLOCKED'; END IF;
-  IF coalesce(v#>>'{review,maxBudgetUsd}','')='' OR (p_config->>'estimateUsd')::numeric>(v#>>'{review,maxBudgetUsd}')::numeric THEN
-    RAISE EXCEPTION 'FUSION_BUDGET_EXCEEDED'; END IF;
-  SELECT coalesce(jsonb_object_agg(s.key,(SELECT coalesce(jsonb_object_agg(f.key,jsonb_build_object('value',f.value->'value',
-      'status',f.value->'status')),'{}') FROM jsonb_each(coalesce(s.value->'information','{}')) f)),'{}')
-    INTO m FROM jsonb_each(r.steps) s;
-  h:=encode(sha256(convert_to(m::text,'UTF8')),'hex');
-  INSERT INTO fusion_reviews(actor_id,request_id,draft_id,project_id,source_session_id,source_version_id,version_hash,
-    materials,materials_hash,config,state,round,phase,attempt)
-  VALUES(p_actor_id,p_request_id,d.draft_id,p.id,d.session_id,ver.id,ver.report_hash,m,h,p_config,'running',1,'review',1)
-  RETURNING * INTO rv;
-  -- 0294 fixed price. On the turn path (CORE-PATH-V2 V2-7b) the price is the jury turn's freeze (turn_fusion_open), not a fee.
-  IF p_config->>'path' IS DISTINCT FROM 'turn' THEN PERFORM fusion_review_fee_hold(rv,v,p_config); END IF;
-  RETURN fusion_review_view(rv);
+  -- A review is created by turn_fusion_open together with its jury turn; this function only answers a known request.
+  RAISE EXCEPTION 'FUSION_REVIEW_INVALID';
 END $function$;
