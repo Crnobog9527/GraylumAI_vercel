@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { expectNothingFrozen, lastTurnId, ledger, readSidebarCredits, replies, resetSim, seed, sidebarCredits, signIn, startFreeChat, turns } from './support';
+import { expectNothingFrozen, lastTurnId, ledger, readSidebarCredits, replies, resetSim, seed, sidebarCredits, signIn, startFreeChat, turns, watchPage } from './support';
 
 /**
  * Free chat on the simulated model: one message is one charged turn; the sidebar balance follows without a reload and matches the
@@ -10,12 +10,13 @@ test.beforeEach(resetSim);
 
 test('free chat: one message is one charged turn, the sidebar follows, a reload keeps the reply and opens nothing', async ({ page }) => {
   const alice = seed().users.alice;
+  const evidence = watchPage(page);
   await signIn(page, 'alice');
   const before = (await ledger(alice.id)).credits;
   const mark = await lastTurnId(alice.id);
 
   const session = await startFreeChat(page, '用两句话说明新账号为什么要先想清楚给谁看。');
-  await expect(replies(page).first()).toBeVisible({ timeout: 120_000 });
+  await expect(replies(page).first()).toBeVisible({ timeout: 120_000 }).catch(async error => { await evidence('after the reply'); throw error; });
   await expect(page.getByText(/测试测试/).first()).toBeVisible();
   await expectNothingFrozen(alice.id);
 
@@ -31,7 +32,7 @@ test('free chat: one message is one charged turn, the sidebar follows, a reload 
   await expect.poll(() => readSidebarCredits(page), { message: 'the sidebar shows the new balance without a reload' }).toBe(after.credits);
 
   await page.reload();
-  await expect(replies(page).first()).toBeVisible({ timeout: 60_000 });
+  await expect(replies(page).first()).toBeVisible({ timeout: 60_000 }).catch(async error => { await evidence('after the reload'); throw error; });
   await expect(page.getByText(/测试测试/).first()).toBeVisible();
   await expect(sidebarCredits(page)).toBeVisible();
   await page.waitForTimeout(3_000);

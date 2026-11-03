@@ -74,7 +74,19 @@ try {
   app = spawn('pnpm', ['--filter', 'web', 'exec', 'next', 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(appPort)],
     { cwd: root, env: appEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const appLog = [];
-  for (const out of [app.stdout, app.stderr]) out.on('data', chunk => { appLog.push(stack.redact(chunk)); if (appLog.length > 400) appLog.shift(); });
+  // The web proxy refuses a request (503) when its rate-limit backend does not answer within its fixed 1 s deadline: count those and
+  // their kind, so a run that failed on a 503 says so even when the log tail no longer shows it.
+  const denials = {};
+  for (const out of [app.stdout, app.stderr]) out.on('data', chunk => {
+    const text = stack.redact(chunk);
+    for (const line of text.split('\n')) {
+      if (!line.includes('web_rate_limit_backend_unavailable_denying_request')) continue;
+      const kind = /"failureKind":"(\w+)"/.exec(line)?.[1] ?? 'unknown';
+      denials[kind] = (denials[kind] ?? 0) + 1;
+    }
+    appLog.push(text);
+    if (appLog.length > 400) appLog.shift();
+  });
   const deadline = Date.now() + 240_000;
   for (;;) {
     if (app.exitCode !== null) throw new Error('local app exited:\n' + appLog.join(''));
@@ -90,6 +102,7 @@ try {
       SIM_DB_URL: stack.dbUrl, SIM_API_URL: stack.apiUrl },
   });
   code = await exit(tests);
+  console.log(`rate-limit refusals by the web proxy (503): ${JSON.stringify(denials)}`);
   if (code !== 0) console.log('--- local app log (last lines) ---\n' + appLog.slice(-80).join(''));
 } catch (error) {
   console.error(stack ? stack.redact(error.message) : error.message);
