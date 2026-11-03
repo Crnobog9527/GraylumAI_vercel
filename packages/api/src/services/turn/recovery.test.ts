@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { TransportObservation } from './provider/fixtureAdapter';
 import type { RecoveryItem } from './db';
-import { RECOVERY_BATCH, recoverTurns, type TurnRecoveryDeps } from './recovery';
+import { lookupAbsent, RECOVERY_BATCH, recoverTurns, type TurnRecoveryDeps } from './recovery';
 
 // CORE-PATH-V2 V2-8: the turns recovery loop. The database side (claim leases, re-checks under lock, settles once) is the
 // turn-core recovery suite; here: lookups become late receipts, nothing unknown is presumed, and the time budget is kept.
@@ -27,6 +27,7 @@ function harness(batches: RecoveryItem[][], lookup: TurnRecoveryDeps['lookup'], 
     claimRecovery: vi.fn(async () => batches.shift() ?? []),
     recover: vi.fn(async (a: { action: string }) => ({ action: a.action, settlement: 'done' as const, closeKind: 'interrupted' })),
     record: vi.fn(async () => ({ status: 'ok', creditsLow: false, sessionTombstoned: false, accountErasing: false, voiceSourceRevoked: false })),
+    settleAbsent: vi.fn(async (_a: unknown) => ({ settled: true })),
   };
   const deps = { db: db as unknown as TurnRecoveryDeps['db'], lookup, account: 'openrouter-key:synthetic', deadline: 60_000,
     now: () => clock.t };
@@ -121,5 +122,67 @@ describe('recoverTurns', () => {
     const { db, deps } = harness([[{ actorId, turnId: 1, action: 'expire', calls: [] }]], null);
     db.recover.mockResolvedValue({ action: 'expire', skipped: true } as never);
     expect(await recoverTurns(deps)).toMatchObject({ skipped: 1, expired: 0 });
+  });
+  describe('the provider says "no such generation" (Owner 2026-11-03, 同意自动退还)', () => {
+    const notFound = () => observed({ error: { message: 'Generation not found' } }, 404);
+    const call = { seq: 1, providerId: 'gen-1', model: 'test/model', pricing, upperUsd: '0.020000000000' };
+
+    it('only an explicit 404 with the whole answer read counts as absent', () => {
+      expect(lookupAbsent(notFound())).toBe(true);
+      for (const status of [200, 401, 408, 429, 500, 502, 503, 504]) expect(lookupAbsent(observed({}, status))).toBe(false);
+      expect(lookupAbsent({ ...notFound(), complete: false })).toBe(false);
+      expect(lookupAbsent({ ...notFound(), transportIssue: 'body_interrupted' })).toBe(false);
+    });
+
+    it('settles the call through the database, then the turn through the usual settle pass', async () => {
+      const { db, deps } = harness([[settle(2024, [call])]], vi.fn(async () => notFound()));
+      const summary = await recoverTurns(deps);
+      expect(db.settleAbsent).toHaveBeenCalledTimes(1);
+      expect(db.settleAbsent).toHaveBeenCalledWith({ actorId, turnId: 2024, seq: 1, providerId: 'gen-1', httpStatus: 404,
+        payloadHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+      expect(db.settleAbsent.mock.invocationCallOrder[0]).toBeLessThan(db.recover.mock.invocationCallOrder[0]!);
+      expect(db.record).not.toHaveBeenCalled();
+      expect(db.recover).toHaveBeenCalledWith({ actorId, turnId: 2024, action: 'settle' });
+      expect(summary).toMatchObject({ lookups: 1, absentSettled: 1, lateReceipts: 0, failed: 0 });
+    });
+
+    it('settles even when the turn froze no price table (nothing is priced)', async () => {
+      const { db, deps } = harness([[settle(1, [{ ...call, pricing: null }])]], vi.fn(async () => notFound()));
+      expect((await recoverTurns(deps)).absentSettled).toBe(1);
+      expect(db.settleAbsent).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([['a timeout', () => Promise.reject(new Error('The operation timed out'))],
+      ['a 500', async () => observed({ error: 'boom' }, 500)], ['a 503', async () => observed({}, 503)], ['a 429', async () => observed({}, 429)],
+      ['a refused key (401)', async () => observed({}, 401)],
+      ['a broken 404 body', async () => ({ ...notFound(), complete: false, transportIssue: 'body_interrupted' as const })]])(
+      'does not settle on %s: the cost stays unknown and is looked up again', async (_name, lookup) => {
+        const { db, deps } = harness([[settle(5, [call])]], vi.fn(lookup));
+        const summary = await recoverTurns(deps);
+        expect(db.settleAbsent).not.toHaveBeenCalled();
+        expect(summary).toMatchObject({ lookups: 1, absentSettled: 0, lateReceipts: 0 });
+      });
+
+    it('before the turn is 24 hours old the database answers too_early: nothing is counted as settled', async () => {
+      const { db, deps } = harness([[settle(6, [call])]], vi.fn(async () => notFound()));
+      db.settleAbsent.mockResolvedValueOnce({ settled: false, reason: 'too_early' } as never);
+      const summary = await recoverTurns(deps);
+      expect(db.settleAbsent).toHaveBeenCalledTimes(1);
+      expect(summary.absentSettled).toBe(0);
+    });
+
+    it('a failing database call is carried on from like any failed lookup and never settles anything itself', async () => {
+      const { db, deps } = harness([[settle(8, [call])]], vi.fn(async () => notFound()));
+      db.settleAbsent.mockRejectedValueOnce(new Error('TURN_CALL_CONFLICT'));
+      const summary = await recoverTurns(deps);
+      expect(summary.absentSettled).toBe(0);
+    });
+
+    it('a turn paused for credits (action lookup) is never settled by an absent answer', async () => {
+      const { db, deps } = harness([[{ actorId, turnId: 9, action: 'lookup', calls: [call] }]], vi.fn(async () => notFound()));
+      await recoverTurns(deps);
+      expect(db.settleAbsent).not.toHaveBeenCalled();
+      expect(db.recover).not.toHaveBeenCalled();
+    });
   });
 });

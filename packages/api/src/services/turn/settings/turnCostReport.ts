@@ -21,6 +21,13 @@ const unsettled = z.object({
     reservedCredits: count, chargedCredits: count.nullable(), failureCode: z.string().nullable(), inFlightCalls: count,
     costPendingCalls: count }).strict()).max(200),
 }).strict();
+// turn_admin_absent_refunds: the unknown model calls settled at zero because the provider answered "no such generation" (Owner 2026-11-03).
+const absentRefunds = z.object({
+  total: count,
+  calls: z.array(z.object({ turnId: z.number().int(), seq: z.number().int(), actorId: z.string().uuid(), kind: z.string(), providerId: z.string(),
+    httpStatus: z.number().int(), settledAt: z.string(), openedAt: z.string(), reservedCredits: count, chargedCredits: count.nullable(),
+    settlement: z.string().nullable(), state: z.string() }).strict()).max(200),
+}).strict();
 export type TurnModelReport = z.infer<typeof modelReport>;
 export type UnsettledTurnReport = z.infer<typeof unsettled>;
 
@@ -40,6 +47,17 @@ export async function unsettledTurns(supabase: Pick<SupabaseClient, 'rpc'>) {
   const parsed = unsettled.safeParse(data);
   if (error || !parsed.success) {
     logger.warn('billing', 'turn_unsettled_unavailable', { code: error?.code ?? 'invalid_shape' });
+    return { available: false as const };
+  }
+  return { available: true as const, ...parsed.data };
+}
+
+/** Read-only: every unknown call settled at zero on the provider's "not found" answer, newest first, so each refund stays on record. */
+export async function absentRefundCalls(supabase: Pick<SupabaseClient, 'rpc'>) {
+  const { data, error } = await supabase.rpc('turn_admin_absent_refunds', { p_limit: 100 });
+  const parsed = absentRefunds.safeParse(data);
+  if (error || !parsed.success) {
+    logger.warn('billing', 'turn_absent_refunds_unavailable', { code: error?.code ?? 'invalid_shape' });
     return { available: false as const };
   }
   return { available: true as const, ...parsed.data };

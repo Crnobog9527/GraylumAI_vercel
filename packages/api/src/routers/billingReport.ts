@@ -4,7 +4,7 @@ import { router, adminProcedure } from '../trpc';
 import {
   meteringReviewInput, reviewMetering, meteringReviewSnapshotInput, meteringReviewSnapshot,
 } from '../services/turn/settings/meteringReview';
-import { turnModelReport, unsettledTurns } from '../services/turn/settings/turnCostReport';
+import { absentRefundCalls, turnModelReport, unsettledTurns } from '../services/turn/settings/turnCostReport';
 
 import {
   absorbConfigSchema, absorbAckInput, readAbsorbConfig, saveAbsorbConfig,
@@ -34,4 +34,6 @@ export const billingReportRouter = router({
     }),
   // Read-only: turns recovery has not closed or settled yet (content-free). Replaces the old stuck PAYG calls list.
   unsettledTurns: adminProcedure.query(({ ctx }) => unsettledTurns(ctx.supabase)),
+  // Read-only: calls settled at zero because the provider said "no such generation" (Owner 2026-11-03); each refund stays on record.
+  absentRefunds: adminProcedure.query(({ ctx }) => absentRefundCalls(ctx.supabase)),
 });

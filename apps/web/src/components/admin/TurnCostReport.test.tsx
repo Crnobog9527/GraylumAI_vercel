@@ -3,10 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { TurnModelReportCard, UnsettledTurnsCard } from './TurnCostReport';
 
-const fixture = vi.hoisted(() => ({ report: undefined as unknown, unsettled: undefined as unknown }));
+const fixture = vi.hoisted(() => ({ report: undefined as unknown, unsettled: undefined as unknown, absent: undefined as unknown }));
 vi.mock('@/trpc/client', () => ({ trpc: { billingReport: {
   turnByModel: { useQuery: () => ({ data: fixture.report, error: null }) },
   unsettledTurns: { useQuery: () => ({ data: fixture.unsettled, error: null }) },
+  absentRefunds: { useQuery: () => ({ data: fixture.absent, error: null }) },
 } } }));
 
 function report(unknown: number) {
@@ -49,5 +50,19 @@ describe('turn cost report cards', () => {
     fixture.unsettled = { available: false };
     html = renderToStaticMarkup(<UnsettledTurnsCard />);
     expect(html).toContain('列表暂不可用'); expect(html).not.toContain('当前没有');
+  });
+  it('lists the calls refunded because the provider said "no such generation", and says when there are none or the list is unavailable', () => {
+    fixture.unsettled = { available: true, total: 0, turns: [] };
+    fixture.absent = { available: true, total: 1, calls: [{ turnId: 2024, seq: 1, actorId: 'a', kind: 'mentor', providerId: 'gen-1793677834-x', httpStatus: 404,
+      settledAt: '2026-11-04T04:00:00Z', openedAt: '2026-11-03T03:50:33Z', reservedCredits: 864, chargedCredits: 0, settlement: 'done', state: 'closed' }] };
+    let html = renderToStaticMarkup(<UnsettledTurnsCard />);
+    expect(html).toContain('供应商查无而自动退还的调用');
+    expect(html).toContain('2024'); expect(html).toContain('gen-1793677834-x'); expect(html).toContain('HTTP 404（查无）');
+    expect(html).not.toContain('<button');
+    fixture.absent = { available: true, total: 0, calls: [] };
+    expect(renderToStaticMarkup(<UnsettledTurnsCard />)).toContain('还没有这类调用');
+    fixture.absent = { available: false };
+    html = renderToStaticMarkup(<UnsettledTurnsCard />);
+    expect(html).toContain('列表暂不可用'); expect(html).not.toContain('还没有这类调用');
   });
 });
