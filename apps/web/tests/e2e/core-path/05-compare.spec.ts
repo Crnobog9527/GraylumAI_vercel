@@ -14,8 +14,8 @@ import { readCredits } from './support/ui';
  */
 test('journey 5: two models answer and the total equals the sum of the columns @cheap @daily', async ({ openAs, meter }) => {
   test.setTimeout(10 * 60_000);
-  // About $0.03 on the test models (2026-10-28): skipped, not started, when the day's daily budget has less left.
-  await requireBudget(meter, 0.06);
+  // Skipped, not started, when the first paid step (a free-chat turn) no longer fits; the compare is checked again before it starts.
+  await requireBudget(meter, 'chat');
   const { page } = await openAs('gold');
   await page.goto('/app/profile');
   const before = await readCredits(page);
@@ -51,6 +51,7 @@ test('journey 5: two models answer and the total equals the sum of the columns @
   await expect(picker.getByText(/最多消耗/)).toBeVisible({ timeout: 60_000 });
   // The turn path's compare cannot be stopped: the price line does not offer it either.
   await expect(picker).not.toContainText('手动停止');
+  await meter.precheck('compare', 'journey 5: compare start');
   await picker.getByRole('button', { name: '开始对比' }).click();
 
   const card = page.getByRole('region', { name: '多模型对比' });

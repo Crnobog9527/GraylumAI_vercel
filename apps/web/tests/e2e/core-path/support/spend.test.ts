@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DAILY_SPEND_CAP_USD, spendCapUsd, spendSince } from './config';
-import { dbSpendReader, SpendCapExceeded, SpendMeter, type SpendStore } from './spend';
+import { dbSpendReader, SpendCapExceeded, SpendMeter, STEP_FLOOR_USD, stepBoundUsd, type SpendStore } from './spend';
 
 const sequence = (...values: number[]) => { let i = 0; return async () => values[Math.min(i++, values.length - 1)]!; };
 
@@ -89,5 +89,28 @@ describe('the cap holds across tests and restarts', () => {
 
   it('never reports zero for an unknown account', () => {
     expect(() => dbSpendReader({} as never, [], '2026-01-01T00:00:00Z')).toThrow(/No billing account/);
+  });
+});
+
+describe('pre-check before a paid step', () => {
+  it('bounds a step by twice its largest recent cost, never below the floor; benchmark never shares a day', async () => {
+    expect(await stepBoundUsd('chat', async () => null)).toBe(0.05);
+    expect(await stepBoundUsd('chat', async () => 0.01)).toBe(0.05);
+    expect(await stepBoundUsd('mentor', async () => 0.04)).toBeCloseTo(0.08);
+    expect(STEP_FLOOR_USD.benchmark).toBe(0.6);
+    expect(await stepBoundUsd('benchmark', async () => null)).toBe(0.6);
+    expect(await stepBoundUsd('benchmark', async () => 0.45)).toBeCloseTo(0.9);
+  });
+
+  it('sends only when the day spent plus the bound stays within the cap, and stops the run otherwise', async () => {
+    const ok = new SpendMeter(0.5, sequence(0.3));
+    ok.history = async () => 0.05;
+    await expect(ok.precheck('mentor', 'turn')).resolves.toBeUndefined();
+    const tight = new SpendMeter(0.5, sequence(0.45));
+    tight.history = async () => 0.05;
+    await expect(tight.precheck('mentor', 'turn')).rejects.toBeInstanceOf(SpendCapExceeded);
+    await expect(tight.assertRoom('next')).rejects.toThrow(/cap already passed/);
+    // 2026-11-03: $0.135 spent, then a benchmark fetch: refused before it is sent.
+    await expect(new SpendMeter(0.5, sequence(0.135)).precheck('benchmark', 'fetch')).rejects.toBeInstanceOf(SpendCapExceeded);
   });
 });

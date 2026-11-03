@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { deriveFrozenPrices, deriveListPrices } from '../../shared/modelPriceBound';
 import { validateNominalBound, type NominalPricing } from '../../shared/nominalPricing';
-import { openRouterBound, type OpenRouterLimits } from './provider/openRouterPolicy';
+import { openRouterBound, openRouterCallBound, type OpenRouterLimits } from './provider/openRouterPolicy';
 import { readMultiplierSnapshot } from '../billingUnit';
 import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readAdmissionModel } from './admission/admissionConfiguration';
@@ -15,6 +15,7 @@ import { pricingEndpoint, readPricingStates, type PricingDeps } from './admissio
 import { admitReasoning } from './admission/reasoningAdmission';
 import type { ReasoningPolicy } from './admission/reasoningPolicy';
 import type { ModelCall } from './call';
+import type { PaygCallQuote } from './admission/paygPolicy';
 
 /*
  * CORE-PATH-V2 2.8 (Fable 10-28): one quote path for staging and production, no test window, no environment branch. The route
@@ -29,14 +30,26 @@ export const DEFAULT_MODEL_CONCURRENCY = 20;
 
 export class QuoteError extends Error {
   constructor(readonly code: 'TURN_PAYG_DISABLED' | 'TURN_MODEL_NOT_ADMITTED' | 'TURN_PRICE_UNAVAILABLE' | 'TURN_PROVIDER_KEY_UNAVAILABLE'
-    | 'TURN_BILLING_UNIT_UNAVAILABLE') { super(code); }
+    | 'TURN_BILLING_UNIT_UNAVAILABLE' | 'TURN_INPUT_TOO_LARGE') { super(code); }
 }
+
+/** The matched profile's per-request rules, as FusionQuote.profile: one call's bound can be measured on its exact body (bodyBoundCall). */
+export type BodyProfile = Omit<PaygCallQuote, 'bytes' | 'promptTokensUpper' | 'messages' | 'tools' | 'schemaBytes' | 'image'>
+  & { maxBytes: number; maxMessages: number; maxSchemaBytes: number };
+
+/** Opt-in tighter bound of a quote whose request size is known before it is sent (a review): the prompt is at most `promptBytes`
+ * bytes of request body (a token is at least one byte) plus the profile's template and margin tokens, and the output at most
+ * `outputTokens`; not the whole context window. The call is then sent with a body-measured identity (bodyBoundCall) that the
+ * adapter re-measures, and the request is refused when it is larger than `promptBytes` (assertRuntimeRequestCapacity). */
+export type RequestBound = { promptBytes: number; outputTokens?: number };
 
 export type ChatQuote = ModelCall & {
   model: string; q: string; reasoning: ReasoningPolicy; outputLimit: number; inputLimit: number;
   /** V2-6: the billing unit's default multiplier (research routes without their own) and the profile's tool ceiling. */
   defaultMultiplier: string; maxTools: number;
   providerLimits: OpenRouterLimits; credential: () => Promise<string>;
+  /** The matched profile's rules for a body-measured call (see RequestBound). */
+  profile: BodyProfile;
 };
 
 export type Row = { id: string; model_id: string; config: unknown; updated_at: string; is_active?: unknown; max_tokens?: unknown };
@@ -66,7 +79,7 @@ export type QuoteUse = { phase: 'ordinary' | 'skill' | 'attached_organizer' | 'r
 const FREE_CHAT_USE: QuoteUse = { phase: 'ordinary', requestFormat: FREE_CHAT_REQUEST_FORMAT, purpose: 'interactive' };
 
 export async function chatQuote(admin: SupabaseClient, input: { configuration: ConfigurationRows; modelId: string; inputBytes: number;
-  deps?: PricingDeps; use?: QuoteUse;
+  deps?: PricingDeps; use?: QuoteUse; bound?: RequestBound;
   /** The platform key this request already read fresh (a second quote in one request reads it once, OR-1). */ key?: string })
   : Promise<ChatQuote> {
   const use = input.use ?? FREE_CHAT_USE;
@@ -96,7 +109,12 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     { modelId: input.modelId, model, protocol: 'openrouter-chat-v1', providerLimits: limits } as Parameters<typeof matchedProfile>[1],
     [{ modelId: input.modelId, phase: use.phase, outputLimit, requestFormat: use.requestFormat, reasoning }]);
   if (!profile || profile.endpointTag !== candidate.endpointTag) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
-  const upperUsd = openRouterBound(limits, outputLimit).upperUsd;
+  let upperUsd: string;
+  if (input.bound) {
+    const promptTokensUpper = Math.min(input.bound.promptBytes, profile.maxBytes) + profile.templateTokens + profile.marginTokens;
+    try { upperUsd = openRouterCallBound(limits, Math.min(outputLimit, input.bound.outputTokens ?? outputLimit), promptTokensUpper).upperUsd; }
+    catch { throw new QuoteError('TURN_INPUT_TOO_LARGE'); }
+  } else upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
   let unit;
   try { unit = await readMultiplierSnapshot(admin, [input.modelId], undefined, { models: [row.data] }); }
@@ -114,5 +132,9 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     reasoning,
     outputLimit, inputLimit: Math.min(input.inputBytes, PAYG_PROFILE_MAX_BYTES),
     concurrency: DEFAULT_MODEL_CONCURRENCY, credential: async () => key,
+    profile: { policyId: RUNTIME_PAYG_SETTING, policyVersion: parsed.data.policyVersion, profileVersion: profile.profileVersion,
+      evidenceVersion: profile.evidenceVersion, pricingHash: state.snapshot.pricingHash, endpointTag: profile.endpointTag,
+      nominalPricing: nominal, templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,
+      maxBytes: profile.maxBytes, maxMessages: profile.maxMessages, maxSchemaBytes: profile.maxSchemaBytes },
   };
 }
