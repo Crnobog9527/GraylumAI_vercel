@@ -66,7 +66,8 @@ export function thisPeriod(rows: PackRows, period: Period) {
       title: text(p.title, 80), note: '太新，下周再看' })),
     by_pillar: byPillar, settled_posts: posts,
     best: ranked.slice(0, 2).map(p => p.post_id),
-    worst: ranked.length > 2 ? ranked.slice(-2).reverse().map(p => p.post_id) : [],
+    // Never a post that is already in best: with 3 ranked posts the middle one is only best.
+    worst: ranked.slice(2).slice(-2).reverse().map(p => p.post_id),
     day7_views_median_vs_prev: vsPrev,
     platform_shift: [...new Set(facts.map(f => f.platform))].map(p => platformShift(facts, p, period.start - 7, period.end - 7))
       .filter(s => s.detected),
