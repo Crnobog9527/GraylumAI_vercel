@@ -23,6 +23,7 @@ import { MIN_MODEL_DISPATCH_MS, type RuntimeBudget } from './settings/budget';
 import { chatQuote, QuoteError, type ChatQuote } from './quote';
 import { openRouterBound } from './provider/openRouterPolicy';
 import { swallow } from '../../lib/swallow';
+import { logger } from '../../lib/logger';
 
 /*
  * CORE-PATH-V2 V2-12 B8b (Owner 2026-11-02 "复盘必须开"): the weekly review as a kind='review' turn, started by the scheduler for the user.
@@ -110,6 +111,10 @@ export async function runReviewTurn(deps: ReviewTurnDeps, claim: ReviewClaimInpu
       bound: { promptBytes: requestBytes, outputTokens }, deps: deps.pricing });
   } catch (error) {
     const code = error instanceof QuoteError ? error.code : 'TURN_QUOTE_UNAVAILABLE';
+    // Any other failure of the quote (e.g. the model's reasoning not configured for this use) is deferred as one code; the cause is
+    // logged as a fixed code only, never text, so a stuck review can be told from a missing setting.
+    if (!(error instanceof QuoteError)) logger.warn('billing', 'weekly_review_quote_failed', { reviewId: claim.id,
+      code: String((error as { code?: unknown } | undefined)?.code ?? (error instanceof Error ? error.message : 'UNKNOWN')).slice(0, 64) });
     return REFUSED_AS_CONFIGURATION.has(code) ? { kind: 'skipped', reason: 'CONFIGURATION_REQUIRED' } : { kind: 'deferred', code };
   }
   // The user's review cap must cover one call's bound; a lower cap (or a pricier model) never silently shortens the call.

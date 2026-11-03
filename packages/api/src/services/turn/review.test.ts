@@ -82,6 +82,14 @@ it('a coach review asks for the larger output cap in its quote and in the reques
  expect(m.quote).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({bound:expect.objectContaining({outputTokens:REVIEW_OUTPUT_TOKENS})}));
  expect(m.run).toHaveBeenLastCalledWith(expect.objectContaining({maxOutputTokens:REVIEW_OUTPUT_TOKENS}));
 });
+it('a quote that fails with something other than a quote error is deferred and its cause is logged as a code',async()=>{
+ const {logger}=await import('../../lib/logger');
+ const warn=vi.spyOn(logger,'warn').mockImplementation(()=>undefined);
+ m.quote.mockRejectedValueOnce(Object.assign(new Error('RUNTIME_REASONING_NOT_CONFIGURED'),{code:'RUNTIME_REASONING_NOT_CONFIGURED'}));
+ expect(await runReviewTurn(deps().deps,claim,{kind:'my_posts'},async()=>true)).toEqual({kind:'deferred',code:'TURN_QUOTE_UNAVAILABLE'});
+ expect(warn).toHaveBeenCalledWith('billing','weekly_review_quote_failed',{reviewId:claim.id,code:'RUNTIME_REASONING_NOT_CONFIGURED'});
+ warn.mockRestore();
+});
 it('a request too large for any profile opens nothing, and a quote refused as too large is a configuration skip',async()=>{
  const d=deps();
  expect(await runReviewTurn(d.deps,claim,{rows:'x'.repeat(200000)},async()=>true)).toEqual({kind:'skipped',reason:'CONFIGURATION_REQUIRED'});
