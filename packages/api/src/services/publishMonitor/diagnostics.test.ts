@@ -13,7 +13,22 @@ describe('single-post diagnosis entry', () => {
     expect(await saveDiagnostic(d.db, actor, { postId: post, rates: { bounce_2s: 0.42, avg_watch_seconds: 7.5 }, openingText: '  第一句\n第二句  ',
       videoSeconds: 30, dropSecond: 4 })).toEqual({ id: post, capturedOn: '2026-11-03' });
     expect(d.rpc).toHaveBeenCalledWith('publish_monitor_diagnostic_save', { a: actor, p_post: post, p_rates: { bounce_2s: 0.42, avg_watch_seconds: 7.5 },
-      p_opening: '第一句\n第二句', p_video: 30, p_drop: 4, p_captured: null });
+      p_opening: '第一句\n第二句', p_video: 30, p_drop: 4, p_captured: null, p_source: 'manual', p_rates_raw: null, p_screenshot_asset: null,
+      p_read_run: null });
+  });
+
+  it('a screenshot read brings its labels, picture key and read id to the same save; a typed entry may not carry them', async () => {
+    const read = '00000000-0000-4000-8000-0000000f0003';
+    const d = db({ id: post, capturedOn: '2026-11-03' });
+    await saveDiagnostic(d.db, actor, { postId: post, rates: { bounce_2s: 0.4 }, source: 'screenshot', ratesRaw: { '2秒跳出率': '40%' },
+      screenshotAsset: 'diag/abc.png', readRunId: read });
+    expect(d.rpc).toHaveBeenCalledWith('publish_monitor_diagnostic_save', expect.objectContaining({ p_source: 'screenshot',
+      p_rates_raw: { '2秒跳出率': '40%' }, p_screenshot_asset: 'diag/abc.png', p_read_run: read }));
+    for (const extra of [{ ratesRaw: { a: 1 } }, { screenshotAsset: 'x' }, { readRunId: read }, { source: 'other' }]) {
+      const e = db({});
+      await expect(saveDiagnostic(e.db, actor, { postId: post, rates: { bounce_2s: 0.4 }, ...extra } as never)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_IMPORT_INVALID' });
+      expect(e.rpc).not.toHaveBeenCalled();
+    }
   });
 
   it('refuses what is not a normalized rate: unknown keys, fractions above 1, negative numbers, empty, a drop after the end', async () => {

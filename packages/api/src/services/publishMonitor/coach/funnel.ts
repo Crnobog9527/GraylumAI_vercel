@@ -5,13 +5,12 @@
  * it only compares with the user's own recent posts.
  */
 import { z } from 'zod';
+import { RATE_KEYS } from '../rateKeys';
 import type { Diagnostic } from './rows';
 import { median, round } from './stats';
 
-/** Normalized back-office rate keys (tech plan v2 section 2.2). Fractions are 0..1; *_seconds are seconds. */
-export const RATE_KEYS = ['impressions_ctr', 'bounce_2s', 'retain_3s', 'retain_5s', 'retain_30s', 'avg_watch_seconds',
-  'avg_watch_pct', 'complete_rate', 'like_rate', 'comment_rate', 'save_rate', 'share_rate', 'follow_rate',
-  'profile_visit_rate'] as const;
+/** Normalized back-office rate keys (tech plan v2 section 2.2): the list lives in rateKeys.ts so the browser can use it. */
+export { RATE_KEYS };
 const LOWER_IS_BETTER = new Set(['bounce_2s']);
 const NOT_FRACTION = new Set(['avg_watch_seconds']);
 

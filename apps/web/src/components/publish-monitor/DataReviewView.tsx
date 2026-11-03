@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { trpc } from '@/trpc/client';
 import { accountIndex, brandsFromLibrary } from './brands';
 import { ConnectionsPanel, type Connection, type RefreshState } from './ConnectionsPanel';
+import { DiagnosticEntry } from './DiagnosticEntry';
 import { dataErrorMessage, errorCode } from './labels';
 import { ManualImport } from './ManualImport';
 import { PostsPanel, type Post } from './PostsPanel';
@@ -56,6 +57,7 @@ export function DataReviewView() {
           <TabsTrigger value="posts">作品数据</TabsTrigger>
           <TabsTrigger value="accounts">账号</TabsTrigger>
           <TabsTrigger value="review">每周复盘</TabsTrigger>
+          <TabsTrigger value="diagnostic">作品诊断</TabsTrigger>
           <TabsTrigger value="import">表格导入</TabsTrigger>
         </TabsList>
         <TabsContent value="posts" className="pt-4">
@@ -67,6 +69,7 @@ export function DataReviewView() {
             onChanged={changed} />
         </TabsContent>
         <TabsContent value="review" className="pt-4"><ReviewPanel gold={gold} /></TabsContent>
+        <TabsContent value="diagnostic" className="pt-4"><DiagnosticEntry /></TabsContent>
         <TabsContent value="import" className="pt-4"><ManualImport brands={brands} onImported={changed} /></TabsContent>
       </Tabs>
     </Shell>

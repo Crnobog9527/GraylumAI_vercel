@@ -29,6 +29,7 @@
     "./src/services/publishMonitor/webhook": "./src/services/publishMonitor/webhook.ts",
     "./src/services/publishMonitor/secrets": "./src/services/publishMonitor/secrets.ts",
     "./src/services/publishMonitor/manualImport": "./src/services/publishMonitor/manualImport.ts",
+    "./src/services/publishMonitor/rateKeys": "./src/services/publishMonitor/rateKeys.ts",
     "./src/services/scheduledJobRuns": "./src/services/scheduledJobRuns.ts",
     "./src/services/ticketAttachmentCleanup": "./src/services/ticketAttachmentCleanup.ts",
     "./src/services/ticketAutoClose": "./src/services/ticketAutoClose.ts",

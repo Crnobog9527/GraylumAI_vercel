@@ -16,12 +16,23 @@ export const diagnosticInput = z.object({
   postId: z.string().uuid(),
   rates: z.partialRecord(z.enum(RATE_KEYS), rate)
     .refine(value => Object.keys(value).length > 0, 'RATES_EMPTY')
-    .refine(value => Object.entries(value).every(([key, v]) => v !== undefined && v <= (key === 'avg_watch_seconds' ? 86_400 : 1)), 'RATE_RANGE'),
+    .refine(value => Object.entries(value).every(([key, v]) => v !== undefined && v <= (key === 'avg_watch_seconds' ? 86_400 : 1)),
+      'RATE_RANGE'),
   openingText: z.string().max(4000).nullable().default(null),
   videoSeconds: z.number().int().min(1).max(86_400).nullable().default(null),
   dropSecond: z.number().int().min(0).max(86_400).nullable().default(null),
   capturedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
-}).strict().refine(input => input.videoSeconds === null || input.dropSecond === null || input.dropSecond <= input.videoSeconds, 'DROP_AFTER_END');
+  /** 'screenshot': a model read the numbers from a picture and the user confirmed them; it brings the labels as read, the picture's
+   * storage key (kept until it is deleted) and the read's request id. 'manual' (the default) carries none of them. */
+  source: z.enum(['manual', 'screenshot']).default('manual'),
+  ratesRaw: z.record(z.string().max(80), z.union([z.number().finite(), z.string().max(80)])).nullable().default(null)
+    .refine(value => value === null || Object.keys(value).length <= 50, 'RAW_TOO_MANY'),
+  screenshotAsset: z.string().min(1).max(512).nullable().default(null),
+  readRunId: z.string().uuid().nullable().default(null),
+}).strict()
+  .refine(input => input.videoSeconds === null || input.dropSecond === null || input.dropSecond <= input.videoSeconds, 'DROP_AFTER_END')
+  .refine(input => input.source === 'screenshot'
+    || (input.ratesRaw === null && input.screenshotAsset === null && input.readRunId === null), 'MANUAL_HAS_READ_FIELDS');
 export type DiagnosticInput = z.input<typeof diagnosticInput>;
 export const diagnosticDeleteInput = z.object({ id: z.string().uuid() }).strict();
 
@@ -57,11 +68,12 @@ export const listDiagnostics = (db: Rpc, profileId: string) =>
 export async function saveDiagnostic(db: Rpc, profileId: string, input: DiagnosticInput) {
   const parsed = diagnosticInput.safeParse(input);
   if (!parsed.success) throw new DiagnosticError('PUBLISH_MONITOR_IMPORT_INVALID');
-  const { postId, rates, openingText, videoSeconds, dropSecond, capturedOn } = parsed.data;
+  const { postId, rates, openingText, videoSeconds, dropSecond, capturedOn, source, ratesRaw, screenshotAsset, readRunId } = parsed.data;
   const text = openingText?.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, '').trim() || null;
   if (text !== null && [...text].length > 2000) throw new DiagnosticError('PUBLISH_MONITOR_IMPORT_INVALID');
   return call(db, 'publish_monitor_diagnostic_save', { a: z.string().uuid().parse(profileId), p_post: postId, p_rates: rates, p_opening: text,
-    p_video: videoSeconds, p_drop: dropSecond, p_captured: capturedOn }, z.object({ id: z.string().uuid(), capturedOn: z.string() }).strict());
+    p_video: videoSeconds, p_drop: dropSecond, p_captured: capturedOn, p_source: source, p_rates_raw: ratesRaw,
+    p_screenshot_asset: screenshotAsset, p_read_run: readRunId }, z.object({ id: z.string().uuid(), capturedOn: z.string() }).strict());
 }
 
 export async function deleteDiagnostic(db: Rpc, profileId: string, input: z.input<typeof diagnosticDeleteInput>) {

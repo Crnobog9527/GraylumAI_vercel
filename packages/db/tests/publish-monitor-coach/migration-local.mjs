@@ -303,6 +303,64 @@ try {
   assert.equal(byId.get(weeklyPlain).notice, '本周复盘生成未完成，这一周已结束，下周会正常安排。', 'weekly notices read as before');
   report.checks.push('0496: the review list returns cadence and brand name; monthly notices name the month, weekly ones are unchanged');
 
+  // Migration 0498: the user's way into social_post_diagnostics (typed rates; a screenshot read brings its own fields to the same save).
+  {
+    const candidates = await svc('SELECT publish_monitor_diagnostic_candidates($1) v', [sim]);
+    assert.ok(candidates.length > 0 && candidates.length <= 30);
+    assert.deepEqual(candidates.map(x => x.postedAt), candidates.map(x => x.postedAt).toSorted().toReversed(), 'newest first');
+    assert.ok(candidates.every(x => x.businessName && x.businessId && x.platform));
+    assert.deepEqual(await svc('SELECT publish_monitor_diagnostic_candidates($1) v', [gold]), [], 'only the user\'s own posts');
+    const target = candidates[0];
+    const save = (rates, extra = {}, who = sim, post = target.postId) => svc(
+      'SELECT publish_monitor_diagnostic_save($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9::jsonb,$10,$11) v',
+      [who, post, JSON.stringify(rates), extra.opening ?? null, extra.video ?? null, extra.drop ?? null, extra.on ?? null,
+        extra.source ?? 'manual', extra.raw ? JSON.stringify(extra.raw) : null, extra.asset ?? null, extra.read ?? null]);
+    const first = await save({ bounce_2s: 0.42, retain_3s: 0.31, avg_watch_seconds: 7.5 }, { opening: '  这家店的隐藏菜单\n第二句  ', video: 30, drop: 4 });
+    const row = (await c.query('SELECT * FROM social_post_diagnostics WHERE id=$1', [first.id])).rows[0];
+    assert.deepEqual([row.source, row.opening_text, row.video_seconds, row.drop_second, row.business_id, row.rates_raw, row.screenshot_asset],
+      ['manual', '这家店的隐藏菜单\n第二句', 30, 4, target.businessId, null, null]);
+    assert.deepEqual(row.rates, { bounce_2s: 0.42, retain_3s: 0.31, avg_watch_seconds: 7.5 });
+    assert.ok(row.confirmed_at, 'saving is the confirmation');
+    // The same post and day is replaced, not added to.
+    const again = await save({ complete_rate: 0.2 });
+    assert.equal(again.id, first.id);
+    assert.deepEqual((await c.query('SELECT rates FROM social_post_diagnostics WHERE id=$1', [first.id])).rows[0].rates, { complete_rate: 0.2 });
+    // A screenshot read keeps what was read, the picture key and the read id; a typed entry may not carry them.
+    const read = await v('SELECT gen_random_uuid() v');
+    const other = candidates[1] ?? target;
+    const shot = await save({ like_rate: 0.05 }, { source: 'screenshot', raw: { '点赞率': '5%' }, asset: 'diag/one.png', read },
+      sim, other.postId);
+    const shotRow = (await c.query('SELECT source,rates_raw,screenshot_asset,read_run_id FROM social_post_diagnostics WHERE id=$1', [shot.id])).rows[0];
+    assert.deepEqual([shotRow.source, shotRow.rates_raw, shotRow.screenshot_asset, shotRow.read_run_id], ['screenshot', { '点赞率': '5%' }, 'diag/one.png', read]);
+    // Refusals, each leaving the stored rows as they were.
+    const refused = async (what, call, pattern = /INPUT_INVALID/) => assert.rejects(call, pattern, what);
+    await refused('unknown key', save({ made_up: 0.1 }));
+    await refused('fraction above 1', save({ bounce_2s: 1.2 }));
+    await refused('negative', save({ bounce_2s: -0.1 }));
+    await refused('not a number', save({ bounce_2s: '0.4' }));
+    await refused('empty', save({}));
+    await refused('seconds above a day', save({ avg_watch_seconds: 90000 }));
+    await refused('drop after the end', save({ bounce_2s: 0.4 }, { video: 10, drop: 11 }));
+    await refused('typed entry with read fields', save({ bounce_2s: 0.4 }, { raw: { a: 1 } }));
+    await refused('unknown source', save({ bounce_2s: 0.4 }, { source: 'other' }));
+    await refused('a day in the future', save({ bounce_2s: 0.4 }, { on: await v("SELECT (now() AT TIME ZONE 'UTC')::date + 1 v") }));
+    await refused('a day before the post', save({ bounce_2s: 0.4 }, { on: '2000-01-01' }));
+    await refused('someone else\'s post', save({ bounce_2s: 0.4 }, {}, gold), /POST_NOT_FOUND/);
+    await refused('a post that does not exist', save({ bounce_2s: 0.4 }, {}, sim, await v('SELECT gen_random_uuid() v')), /POST_NOT_FOUND/);
+    // The coach reads the saved opening lines and rates in its next pack.
+    const rows2 = await svc('SELECT publish_monitor_review_pack_rows($1,$2,30) v', [sim, target.businessId]);
+    assert.ok(rows2.diagnostics.some(d => d.rates.complete_rate === 0.2 || d.rates.like_rate === 0.05));
+    const listed = await svc('SELECT publish_monitor_diagnostics($1) v', [sim]);
+    assert.ok(listed.some(d => d.id === first.id) && listed.some(d => d.id === shot.id));
+    assert.deepEqual(await svc('SELECT publish_monitor_diagnostics($1) v', [gold]), []);
+    // Only the owner removes one.
+    assert.equal(await svc('SELECT publish_monitor_diagnostic_delete($1,$2) v', [gold, shot.id]), false);
+    assert.equal(await svc('SELECT publish_monitor_diagnostic_delete($1,$2) v', [sim, shot.id]), true);
+    const grants = await c.query(`SELECT r,has_function_privilege(r,'publish_monitor_diagnostics(uuid)','EXECUTE') ok FROM unnest(ARRAY['authenticated','service_role']) r ORDER BY 1`);
+    assert.deepEqual(grants.rows.map(x => x.ok), [false, true]);
+    report.checks.push('0498: typed diagnoses are validated and saved once per post and day, a screenshot read keeps its raw labels and picture key, other users\' posts are refused, the coach pack reads them, only the owner deletes');
+  }
+
   // Erasure: counted, and removed with their parents.
   const before = await v('SELECT publish_monitor_erasure_remaining($1) v', [sim]);
   const rows = await v(`SELECT (SELECT count(*) FROM social_post_facts WHERE actor_id=$1)+(SELECT count(*) FROM social_post_diagnostics
