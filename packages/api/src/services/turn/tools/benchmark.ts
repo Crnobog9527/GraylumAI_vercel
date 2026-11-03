@@ -5,7 +5,7 @@ import type { ResearchTurnEvent } from '../../../shared/researchTurn';
 import { decimal } from '../provider/decimal';
 import type { ToolCallPolicy } from '../provider/toolBilling';
 import { platformSecretReader, type SecretReader } from '../../research/runtime/secrets';
-import { profileCache } from '../../research/runtime/profileCache';
+import { sharedProfileCache } from '../../research/runtime/profileCache';
 import { TURN_BILLING_RUN } from '../../research/runtime/store';
 import type { SubcallContext, VendorCalls } from '../../research/runtime/subcall';
 import type { ResearchToolContext } from '../../research/runtime/toolContext';
@@ -141,10 +141,11 @@ export function turnBenchmarkTools(input: BenchmarkToolsInput) {
         ...(display ? { display } : {}) });
     },
   };
+  const profileCache = sharedProfileCache();
   const ctx: ResearchToolContext = { scope, executionId: input.requestId, config: frozenResearchConfig(research), store, subcall,
     emit: event => { if (event.type === 'research_call') vendor = event.dataKind === 'web_search' ? 'parallel'
       : event.dataKind === 'web_fetch' ? 'firecrawl' : 'tikhub'; input.emit(event); },
-    now: () => new Date(), lookupTime: () => left() >= MIN_SUPPLIER_MS + LOOKUP_MS, profileCache: profileCache(input.admin) };
+    now: () => new Date(), lookupTime: () => left() >= MIN_SUPPLIER_MS + LOOKUP_MS, ...(profileCache ? { profileCache } : {}) };
   let used = false;
   const tools: RuntimeTool[] = researchRuntimeTools(ctx, names).map(tool => ({ ...tool, async execute(args, callId) {
     if (used) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });
