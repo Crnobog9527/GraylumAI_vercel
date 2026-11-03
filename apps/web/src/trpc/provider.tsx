@@ -26,7 +26,8 @@ const noSubscription = () => () => undefined;
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   const signedInArea = inSignedInArea(usePathname());
-  // False while the server's HTML is being taken over, true from the first client-only render on (until then the server's HTML for these pages is the empty frame).
+  // False while the server's HTML is being taken over, true from the first client-only render on.
+  // Until then the server's HTML for these pages is the empty frame.
   const mounted = useSyncExternalStore(noSubscription, () => true, () => false);
   const restored = useRef(false);
   // The query client is created once; it reaches the latest recovery handler through this ref.
