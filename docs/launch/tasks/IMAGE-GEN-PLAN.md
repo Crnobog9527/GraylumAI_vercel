@@ -222,7 +222,16 @@ Seedream 已被 Owner 排除；Qwen、混元同属中国厂商，Owner 没提，
 ### 4.3 谁能用：只有 Pro / Gold（Owner 2026-11-03）
 
 - **权益开关**：`membership_plans` 加一列 `allow_image_generation`（和 `allow_fusion_review` 同一类权益列，`NOT NULL`，Pro / Gold 默认 `true`，free 默认 `false`），后台权益页可改。权益变更的上线仍按"权益"规则走 Owner。
-- **三处都要查**：① `planTurnTools`：免费用户的 `generate_image` 被裁剪（新增 `TrimReason = 'not_entitled'`，工具定义字节不变，仍符合 2.9 规则 2）；② `image` 回合的 `turn_open` 拒绝并返回稳定错误码；③ 上传接口和模板接口拒绝免费用户的写入。**不能只靠前端按钮**（ENGINEERING §5）。
+- **三处都要查**：① `planTurnTools`：免费用户的 `generate_image` 被裁剪（新增 `TrimReason = 'not_entitled'`，工具定义字节不变，仍符合 2.9 规则 2）；② `image` 回合的 `turn_open` 拒绝并返回稳定错误码；③ `beginUpload` / `completeUpload` / `startFromTemplate` 拒绝非会员。**不能只靠前端按钮**（ENGINEERING §5）。接口权限按下表分开，只有"生成"和"上传参考图"查会员权益：
+
+| 接口 | 校验 |
+|---|---|
+| 生成：`generate_image` 工具、`image` 回合、`startFromTemplate` | 登录 + `allow_image_generation` |
+| 上传参考图：`beginUpload`、`completeUpload` | 登录 + `allow_image_generation` |
+| 浏览模板：`listSeries`、`getSeries` | 只要登录，**不查会员**（免费用户也能看，点生成才弹"会员专享"） |
+| 看和下载自己的图：`myImages`、`signedUrls` | 只按登录身份和图片归属（`actor_id` 匹配）校验，**不查会员**：会员降级后照样能看、能下载 |
+| 管理自己的图：`deleteImage`、`saveToLibrary` | 登录 + 图片归属；`saveToLibrary` 另受资料库容量限制，不查图片权益 |
+
 - 实际等级沿用 `membershipEntitlements.ts` 的有效等级（退款 / 订阅异常会降为 free，图片功能随之关闭，已生成图片保留可下载）。
 - **免费用户在界面上看到什么**（Owner 没说，我的默认，可改）：左侧导航仍显示"图片创作"，点进去能浏览模板与封面图，点"开始制作"弹出现有的"会员专享"弹窗引导升级；对话里让 AI 生图，Agent 回复"图片功能为会员专享"。好处是展示价值、引导转化；若 Owner 想完全隐藏入口，改成按权益隐藏导航项即可。
 
@@ -277,7 +286,7 @@ Seedream 已被 Owner 排除；Qwen、混元同属中国厂商，Owner 没提，
 | `services/image/templates.ts`（新） | 读目录缓存、按系列组装、校验补充资料字段、**用代码拼提示词** |
 | `services/image/cleanup.ts` + `app/api/cron/image-assets-sweep/route.ts` + `vercel.json` | 每日清理过期对象（输入图 7 天、未保存的生成图 30 天，天数可调）；孤儿对象（有文件无登记行）超过 1 小时对账 |
 | `services/accountErasure/storageTransport.ts`、`storage.ts` | 加 `image-studio` 桶的注销清理；`scripts/tests/erasure-storage-buckets.test.mjs` 两张表 |
-| `routers/image.ts`（新，薄） | `listSeries`、`getSeries`（含模板与媒体 URL）、`beginUpload`、`completeUpload`、`startFromTemplate`（创建新对话 + 首轮请求）、`myImages`、`deleteImage`、`saveToLibrary`、`signedUrls`；全部先查 `allow_image_generation` |
+| `routers/image.ts`（新，薄） | `listSeries`、`getSeries`（含模板与媒体 URL）、`beginUpload`、`completeUpload`、`startFromTemplate`（创建新对话 + 首轮请求）、`myImages`、`deleteImage`、`saveToLibrary`、`signedUrls`；权限按 4.3 的接口权限表分开：生成和上传参考图查 `allow_image_generation`，浏览模板只要登录，自己图片的查看 / 下载 / 删除 / 保存只按登录和归属 |
 | `services/library/*` | `saveToLibrary`：把生成图复制进 `library-documents`（`kind='image'`，走现有容量检查） |
 | 管理端 `app/(zh-hans)/admin/image/*`（新） | 系列与模板的增删改、上下架、排序、封面媒体上传（多图轮播 / GIF，可排序）、每个模板选"固定提示词 / Skill"、参考图规则与补充资料字段；图片模型、成本、倍数、开关、每日上限 |
 | `ai_models.config`（已有 jsonb） | 增加 `modality: 'image'`、`image: { costs: [{size, quality, usd}], multiplier, concurrency }`；对话用的倍数列不动 |
