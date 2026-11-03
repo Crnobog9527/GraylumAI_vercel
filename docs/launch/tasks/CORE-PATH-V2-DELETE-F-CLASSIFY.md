@@ -49,9 +49,60 @@
 | `fusion_review_fee_settle` | `fusion/reviewRecord.ts` | `fusion_review_fees` | **C** | 旧评审团费用结算。新费用在 `turn_close`。要确认 `reviewRecord.ts` 的这次调用是否还在现役评审路径 |
 | `report_fee_settle_due` | `report/fees.ts`（定时任务） | `report_fees`、`bill2_runs/calls`、`runtime_executions` | **D** | 旧报告费用到期结算任务。新报告按回合结算。随 `report/fees.ts` 与它的定时任务入口删 |
 
-## 三、汇总
-- **A（保留）**：`runtime_test_policy`、`runtime_production_access`（含两个小助手 `runtime_production_database`、`bill2_actor` 进 KEEP）；另有 4 个只因 `runtime_test_windows` 被点名的，带保留参数后自然消失。
-- **B（前置改写，函数名不变，Node 不改）**：`runtime_session_results_list_turns`、`runtime_session_result_save_turn`、`runtime_session_result_edit`、`runtime_session_result_versions`（四个共用一个助手改写）、`runtime_execution_visibility`、`runtime_positioning_gate`、`runtime_test_actor_access`、`fusion_review_archive_reconcile`、`fusion_review_close`。
-- **D（调用方在删除范围内，函数随之删除，先确认调用方）**：`fusion_group_claim`、`opc_capture_apply`、`runtime_session_result_save`、`runtime_production_recovery_policy`、`runtime_test_recovery_policy`、`report_fee_settle_due`。
-- **C（要总控定）**：`runtime_tool`、`runtime_mentor_history`、`runtime_session_items`、`runtime_library_visible`、`runtime_library_read`、`runtime_cancel`、`runtime_execution`、`fusion_review_fee_settle`、`fusion_compare_context`、`fusion_review_claim`、`fusion_review_start`。
-  - 共同的问题是同一个：`turn/` 目录里有几个文件（`agent/mentorHistory.ts`、`agent/session.ts`、`research/libraryReadTool.ts`、`research/sourceRuntimeTool.ts`、`admission/positioningFallback.ts`、`agent/contentSource.ts`）仍在用“旧执行 id”调这些函数，但它们的导入方既有要删的 `services/runtime/*`，也有现役的 `turn/agent/runtimeContext.ts`、`turn/admission/libraryAdmission.ts`、`publishMonitor/reviews.ts`。**需要先判断这些适配文件在新路径里是否还有调用路径**；如果只是被旧 `runtime/*` 使用，则整组变 D，C 类清零。
+## 三、C 类的判定结果（2026-11-03，函数级可达性，基线 #1662 `09a34f3f9`）
+方法：先做文件级静态导入图（根 = `apps/web/src/app` 的 route/page/layout/actions + middleware，不含测试）。**文件级几乎全能走到**（例如 `turn/chat.ts → agent/contentSource.ts → agent/runtimeContext.ts → agent/mentorHistory.ts`），太粗，不能据此判断。所以再做函数级：对每个真正发 RPC 的导出函数，查生产代码（排除测试）里有没有调用方。结果：
+
+| 发 RPC 的 Node 函数 | 生产调用方 | 调的 SQL 函数 | 判定 |
+|---|---|---|---|
+| `executionMentorHistoryTool`（`turn/agent/mentorHistory.ts`） | 0 | `runtime_tool`、`runtime_mentor_history` | **D** |
+| `PostgresSession`（`turn/agent/session.ts`；`publishMonitor/reviews.ts` 只导入类型 `SessionRpc`） | 0 | `runtime_session_items` | **D** |
+| `readLibrary`（`turn/research/libraryReadTool.ts`），唯一调用方是 `sourceRuntimeTool()`，而 `sourceRuntimeTool()` 本身 0 个调用方（`libraryAdmission.ts` 只用同文件的 `sourceToolBytes`） | 0 | `runtime_tool`、`runtime_library_visible`、`runtime_library_read` | **D** |
+| `endPositioningRefusal`（`turn/admission/positioningFallback.ts`） | 0 | `runtime_cancel`、`runtime_execution` | **D** |
+| `checkpointContentSource` / `injectContentSource` / `admitContentSource`（`turn/agent/contentSource.ts`） | 0 | `runtime_execution` | **D** |
+| `contentVisibilityFence`（`accountErasure/content.ts`） | 0 | `runtime_execution_visibility` | **D** |
+| `loadCompareChoice`（`fusion/compareLoad.ts`；现役的是同文件的 `loadCompareTurnParts`，不调 SQL 旧函数） | 0 | `fusion_compare_context` | **D** |
+| `captureCompleted`（`opc/capture.ts`；现役的是 `capturePending`，传 `p_execution_id: null`） | 0 | `opc_capture_apply`（执行 id 分支） | 函数 **B**：只保留 `p_draft_id` 分支；Node 删 `captureCompleted` |
+| `reviewRecord(...).claim / advance / close / start`（`fusion/reviewRecord.ts`）：`turn/jury.ts` 与 `fusion/review.ts` 只用 `read`、`replay`、`recordAdoption`、`settleFee` | 0（这四个方法） | `fusion_review_claim`、`fusion_review_advance`、`fusion_review_close`、`fusion_review_start`（新建分支） | claim/advance/close **D**；`fusion_review_start` 只剩 `replay`（已知请求 id 返回现有评审）**B** |
+| `reviewRecord(...).settleFee`（`fusion/review.ts:83`，现役） | 1 | `fusion_review_fee_settle` | **B**：新费用在 `turn_close`，改写成无费用行时返回 NULL（Node 已写 `?? view.fee`） |
+| `sessionResultsService`（`opc/sessionResults.ts`，tRPC `opc.sessionResults*`，前端 `components/opc/session-results.tsx`） | 7 | `runtime_session_results_list_turns`、`_save_turn`、`_edit`、`_versions`、`_save` | list_turns/save_turn/edit/versions **B**（改写共用助手 `runtime_session_result_view`，去掉对 `runtime_history_available` 的调用，函数名不变）；`save`（旧执行入口）**D + 要动 Node 与前端** |
+| `loadStagingRecoveryPolicy`（`turn/settings/stagingPolicy.ts`） | 0 | `runtime_production_recovery_policy`、`runtime_test_recovery_policy` | **D** |
+| `assertStagingReadAccess`（`routers/opc.ts`、`routers/runtime.ts`，现役） | 6 | `runtime_test_actor_access` | **B**（去掉 `bill2_runs` 那一支） |
+| `assertProductionAccess` / `loadStagingPolicy` | 现役 | `runtime_production_access`、`runtime_test_policy` | **A** |
+| `settleDueReportFees`（`report/fees.ts`；`api/cron/billing-reconcile/route.ts:44` 现役） | 1 | `report_fee_settle_due` | **D + 要动 Node**：删这个调用 |
+| `runtime_positioning_gate`（`turn/admission/positioningGate.ts`，`turn/chat.ts`、`compare.ts` 现役） | 现役 | `runtime_positioning_gate` | **B**：`refusals24h` 改数 `turns`（`turn_open` 已有同一表达式） |
+
+## 四、最终分类
+**A（保留，不改）**：`runtime_test_policy`、`runtime_production_access`（含小助手 `runtime_production_database`、`bill2_actor` 进 KEEP）。
+
+**B（前置改写，函数名不变，Node 不改）**：
+`runtime_session_results_list_turns`、`runtime_session_result_save_turn`、`runtime_session_result_edit`、`runtime_session_result_versions`（连同助手 `runtime_session_result_view`）、`runtime_positioning_gate`、`runtime_test_actor_access`、`opc_capture_apply`（去掉执行 id 分支）、`fusion_review_start`（只保留按请求 id 回放）、`fusion_review_fee_settle`（无费用行返回 NULL）、`fusion_review_close`→**改归 D**（见下）、`fusion_review_archive_reconcile`。
+
+**D（随 F 删除，调用方已无生产代码调用）**：
+`runtime_tool`、`runtime_mentor_history`、`runtime_session_items`、`runtime_library_visible`、`runtime_library_read`、`runtime_cancel`、`runtime_execution`、`runtime_execution_visibility`、`fusion_compare_context`、`fusion_review_claim`、`fusion_review_advance`、`fusion_review_close`、`fusion_group_claim`、`runtime_production_recovery_policy`、`runtime_test_recovery_policy`、`runtime_session_result_save`、`report_fee_settle_due`、`opc_work_result`（已在原清单）。
+
+**C（交给总控）：无。** 原来的 11 个全部有结论。
+
+## 五、要动 Node 的文件清单（给总控拆分用）
+这些函数在 Node 里已经没有生产调用方，只是还留着死代码；删掉它们才能让 `F_STRICT` 的 NODE-STILL-CALLS 归零。分成两类：
+
+**只删死代码（不改行为，C 路在 #1662 里或随后删）**
+- `packages/api/src/services/turn/agent/mentorHistory.ts`：删 `executionMentorHistoryTool`（其余导出保留）
+- `packages/api/src/services/turn/agent/session.ts`：删类 `PostgresSession`（保留接口 `SessionRpc`，`publishMonitor/reviews.ts` 导入的是它）
+- `packages/api/src/services/turn/research/sourceRuntimeTool.ts`：删 `sourceRuntimeTool()`（保留 `sourceToolBytes`）
+- `packages/api/src/services/turn/research/libraryReadTool.ts`：删 `readLibrary`（保留 `libraryQuery` 与两个 GUIDE 常量，若仍有人用）
+- `packages/api/src/services/turn/admission/positioningFallback.ts`：删 `endPositioningRefusal`
+- `packages/api/src/services/turn/agent/contentSource.ts`：删 `checkpointContentSource`、`injectContentSource`、`admitContentSource`（保留类型和 `withInjectedSource` 等被现役使用的导出，删前再查一次）
+- `packages/api/src/services/accountErasure/content.ts`：删 `contentVisibilityFence`
+- `packages/api/src/services/fusion/compareLoad.ts`：删 `loadCompareChoice`
+- `packages/api/src/services/fusion/reviewRecord.ts`：删 `start`、`claim`、`advance`、`close` 四个方法（保留 `replay`、`read`、`recordAdoption`、`settleFee`）
+- `packages/api/src/services/opc/capture.ts`：删 `captureCompleted`
+- `packages/api/src/services/turn/settings/stagingPolicy.ts`：删 `loadStagingRecoveryPolicy`
+
+**要改行为（有现役调用方，需要小心）**
+- `packages/api/src/services/report/fees.ts` + `apps/web/src/app/api/cron/billing-reconcile/route.ts`：删 `settleDueReportFees` 及其调用（日对账里的报告费结算，旧表没了）。
+- `packages/api/src/services/opc/sessionResults.ts` + `packages/api/src/routers/opc.ts`（`sessionResultSave`）+ `apps/web/src/components/opc/session-results.tsx`：删“以旧执行 id 保存结果”的 `save` 分支，保留 `save_turn`。前端要确认还有没有按钮走旧保存。
+- 后续（不属 NODE-STILL-CALLS，但同批要查）：`billing_reconcile_day` 的 Node 读取端（`calls` 键缺失要容忍，已在 C 路任务单里）。
+
+## 六、说明
+- 表中“D”的 SQL 函数，在删掉上面的 Node 死代码之后，会从 `reach` 里变成不可达，生成器自动把它们放进删除名单；守卫剩下的 7 个里，`fusion_compare_context`、`fusion_group_claim`、`fusion_review_claim`、`opc_capture_apply`（B 改写后不再碰旧表）、`fusion_review_archive_reconcile`（B）、`fusion_review_close`、`fusion_review_start`（B）都按上面处理。
+- B 类改写要补测试：每个函数一条（调用返回同形状、不读旧表）；`runtime_positioning_gate` 对照 `turn_open` 的 24 小时拒绝计数；`fusion_review_start` 回放用例；`runtime_session_result_*` 用现有的 `session-results` 套件。
