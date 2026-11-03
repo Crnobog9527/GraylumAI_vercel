@@ -68,3 +68,17 @@ test('a reload shows the last conversation and the list at once, and another use
   expect(kept, 'the first user\'s saved data is gone').not.toContain(seed().users.alice.id);
   expect(kept).not.toContain('测试测试');
 });
+
+// A slow network or phone: until the page's scripts arrive the signed-in page is the empty frame (top bar, side column, input box
+// position), never a white page, and it holds nothing of anyone's data.
+test('before the scripts load, a signed-in page is the empty frame, not a white page', async ({ page }) => {
+  await signIn(page, 'alice');
+  await page.goto('/app/positioning');
+  await page.waitForTimeout(3_000);
+  await page.route(/\/_next\/static\/.*\.js/, route => route.abort());
+  await page.goto('/app/positioning', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('signed-in-shell')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('body')).not.toContainText(seed().users.alice.email);
+  await expect(page.locator('body')).not.toContainText(WAITING_WORDS);
+  await page.screenshot({ path: test.info().outputPath('before-scripts.png') });
+});

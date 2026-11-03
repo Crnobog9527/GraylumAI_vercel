@@ -19,13 +19,14 @@ import { PROFILE_BUSINESSES_KEY } from '@/components/opc/profile-archive/profile
 import { mutationAffectsRuntimeChoices } from '@/lib/runtime-choices';
 import { clearPersistedCache, forgetPending, persistQueryCache, restoreQueryCache } from '@/lib/persisted-cache';
 import { readSessionUserIdSync } from '@/lib/session-user';
+import { SignedInShell } from '@/components/opc/signed-in-shell';
 
 const inSignedInArea = (pathname: string | null) => pathname === '/app' || Boolean(pathname?.startsWith('/app/'));
 const noSubscription = () => () => undefined;
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   const signedInArea = inSignedInArea(usePathname());
-  // False while the server's HTML is being taken over, true from the first client-only render on (the server's HTML for these pages is empty anyway).
+  // False while the server's HTML is being taken over, true from the first client-only render on (until then the server's HTML for these pages is the empty frame).
   const mounted = useSyncExternalStore(noSubscription, () => true, () => false);
   const restored = useRef(false);
   // The query client is created once; it reaches the latest recovery handler through this ref.
@@ -189,7 +190,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <Fragment key={epoch}>{signedInArea && !mounted ? null : children}</Fragment>
+        <Fragment key={epoch}>{signedInArea && !mounted ? <SignedInShell /> : children}</Fragment>
         {recovery.notice && (
           <UnauthorizedNotice
             reason={recovery.notice}
