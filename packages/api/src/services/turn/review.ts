@@ -59,9 +59,15 @@ export const COACH_CONTRACT = '以上是你的工作方法。用户消息里是�
   + 'scoreboard:<支柱key>:<平台>、history:<支柱key>:<平台>、stage:followers:<平台>、stage:posts_8w、stage:day7_views_trend、'
   + 'ledger:<实验id>、diagnostics:<作品id>:<指标名>。'
   + '正文里不要出现内部代码（untagged、p1/p2/p3、字段名）：内容方向用 strategy.pillars 里的名字，没有方向的作品写“未分类”。'
-  + '正文里引用的数字必须能在页面表格里找到，表格就是这些：本期满 7 天的作品（this_period.settled_posts）、内容方向成绩单（scoreboard）、'
-  + '按平台的趋势（this_period.day7_views_median_vs_prev 的本期/上期中位数、stage.day7_views_trend 的近 4 周/前 4 周、stage.followers 的粉丝）；'
-  + '这些以外的数字不要写。tags 要给出 untagged_posts 里你能判断方向的每一条作品（一条一个），判断不了的不要标。';
+  + '正文里引用的数字必须能在页面表格里找到，页面上有这些：小结行（period 起止、this_period.published / published_previous、'
+  + 'settled_posts 的篇数、too_new 的篇数）；本期满 7 天的作品（this_period.settled_posts 的第 7 天浏览、相对该平台中位数、互动率）；'
+  + '内容方向成绩单（scoreboard 的作品数、浏览中位数、相对该平台中位数、互动率中位数，近 N 周的 N 是 weeks）；'
+  + '按平台的趋势（this_period.day7_views_median_vs_prev 的本期/上期中位数和样本数、stage.day7_views_trend 的近 4 周/前 4 周/变化、'
+  + 'stage.followers 的现在/4 周前/8 周前粉丝）；本周最好和最差的作品（this_period.best / worst 对应作品的上述数字）；'
+  + '单条诊断（diagnostics.posts 的 rates 各项、video_seconds、drop_second、卡住的环节、参考线、vs_own_median）；'
+  + '实验完成情况（ledger.to_review 的 result 里的 samples / vs_baseline / reason / next_status，ledger.running 的 period，recent_concluded 的 concluded_on）。'
+  + '这些以外的数字不要写（包里别的数字，如 12 周成绩单、支柱占比、战略适配，页面上没有，不要引用）。'
+  + 'tags 要给出 untagged_posts 里你能判断方向的每一条作品（一条一个），判断不了的不要标。';
 /** The coach's instructions: the published method, then the contract (last, so nothing in the method can loosen it). */
 export const coachInstructions = (method: string) => `${method}\n\n${COACH_CONTRACT}`;
 export const COACH_REQUEST = '请为这个品牌写本期复盘。下面是代码计算的复盘包（JSON）：\n';
