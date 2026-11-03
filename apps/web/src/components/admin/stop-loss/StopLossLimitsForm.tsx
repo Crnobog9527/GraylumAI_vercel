@@ -25,7 +25,7 @@ const toDraft = (config: Config): Draft => ({
 });
 const sameConfig = (a: Config, b: Config) => JSON.stringify(toDraft(a)) === JSON.stringify(toDraft(b));
 
-type Usage = { utcDate?: unknown; siteUsd?: unknown };
+type Usage = { utcDate?: unknown; siteUsd?: unknown; reservedUsd?: unknown };
 function UsageSummary({ config, usage, stale }: { config: Config; usage: Usage | null; stale: boolean }) {
   if (!usage) {
     return <p className="text-sm" role="status" data-testid="stop-loss-usage">
@@ -33,6 +33,7 @@ function UsageSummary({ config, usage, stale }: { config: Config; usage: Usage |
     </p>;
   }
   const site = typeof usage.siteUsd === 'string' ? usage.siteUsd : null;
+  const reserved = typeof usage.reservedUsd === 'string' ? usage.reservedUsd : null;
   const line = (limit: string | null, label: string) => {
     if (limit === null) return <p>{label}：未设置，不拦截。</p>;
     const reached = site !== null && reachedLimit(site, limit);
@@ -41,13 +42,14 @@ function UsageSummary({ config, usage, stale }: { config: Config; usage: Usage |
   return <div className="space-y-1 text-sm" data-testid="stop-loss-usage">
     {stale && <p role="status">最新用量暂时读取失败（会自动重试），下面是上一次读取的数字，可能不是最新。</p>}
     <p>今天（UTC {typeof usage.utcDate === 'string' ? usage.utcDate : '—'}）全站实际成本：{formatUsd(site)}</p>
+    {reserved !== null && <p>另有预占（还没花出去，按调用上限暂扣）：{formatUsd(reserved)}，不计入上面的实际成本。</p>}
     {line(config.siteDailyUsd, '全站每日上限')}
     {line(config.siteAlertUsd, '全站每日提醒线')}
     <p>
       每位用户每日上限：{config.userDailyUsd === null ? '未设置，不拦截。' : formatUsd(config.userDailyUsd)}
       （这里只看全站汇总，不列出单个用户的用量）
     </p>
-    <p className="text-xs">成本按已结算调用的供应商实际美元计算，不含还在进行中的调用，所以可能略微超过上限。</p>
+    <p className="text-xs">成本按已结束回合里已知的调用费用计算，不含还在进行中的调用，也不含预占，所以可能略微超过上限。</p>
   </div>;
 }
 

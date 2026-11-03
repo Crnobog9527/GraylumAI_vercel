@@ -31,12 +31,15 @@ function helpers({c,one,open,begin,identity,record,close,policy}){
 }
 
 export async function topicCases(t){
- const {c,one,refusal,report,balance,account,open,close}=t;
+ const {c,one,refusal,report,balance,account,open,close,peer}=t;
  const {source,read,pol,item,topicTurn,save,adopt,events,accounts}=helpers(t);
  // 1. topic_turn_source: what the old prepareTopicTurn checked, refused before anything is frozen.
  {
   const a=await account(1000),src=await source(a),got=await read(a,src);
   assert.equal(got.sessionId,src.topicSession);
+  // V2-12: the narrowed runtime.view reads the session's scope only; a turn-path conversation is not legacy.
+  const sc=await one('select runtime_session_scope($1,$2) v',[a.actor,src.topicSession]);
+  assert.equal(sc.sessionId,src.topicSession);assert.equal(sc.legacy,false);assert.ok(sc.scope);
   assert.deepEqual(got.resources,['report.md']);
   assert.equal(got.material.content.material,'CONFIRMED');
   assert.equal(got.sourceVersionId,src.version);
@@ -48,10 +51,6 @@ export async function topicCases(t){
   await c.query('update runtime_scope_material set revoked=true where session_id=$1',[src.topicSession]);
   assert.match(await refusal(read(a,src)),/OPC_TOPIC_MATERIAL_MISSING/);
   await c.query('update runtime_scope_material set revoked=false where session_id=$1',[src.topicSession]);
-  const old=randomUUID();
-  await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
-   values($1,$2,$3,$4,'{}',0,'completed')`,[randomUUID(),a.actor,src.topicSession,old]);
-  assert.match(await refusal(read(a,src,old)),/OPC_REQUEST_CONFLICT/);
   await c.query('update bill2_drafts set revoked=true where id=$1',[src.draft]);
   assert.match(await refusal(read(a,src)),/OPC_TOPIC_SOURCE_REVOKED/);
   assert.equal(await balance(a),1000);
@@ -113,12 +112,9 @@ export async function topicCases(t){
   await c.query('update opc_businesses set archived_at=null where id=$1',[src.business]);
   report.checks.push('topic: a failed turn, a reply with no topics, another conversation, another account or an archived business is no source');
  }
- // 3c. One request id on one path, whichever came first, under the conversation's lock (never two charges while both paths exist).
+ // 3c. A request id a topic turn holds is refused by the old admission (that function goes with the old path in V2-12 F); the old-path refusals in turn_open are gone.
  {
-  const a=await account(1000),src=await source(a),old=randomUUID();
-  await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
-   values($1,$2,$3,$4,'{}',0,'completed')`,[randomUUID(),a.actor,src.topicSession,old]);
-  assert.match(await refusal(open(a,{kind:'chat',session:src.topicSession,request:old,pol:{...pol(),topic:true}})),/TURN_TOPIC_REQUEST_CONFLICT/);
+  const a=await account(1000),src=await source(a);
   assert.equal(await balance(a),1000,'nothing frozen');
   const {request}=await topicTurn(a,src,'words');
   for(const name of ['runtime_admit_commit','runtime_admit']){
@@ -160,6 +156,110 @@ export async function topicCases(t){
   assert.equal((await c.query('select body from opc_topic_draft_versions where request_id=$1',[their.request])).rows[0].body!==null,true);
   report.checks.push('topic: the opening reads its turn; deleting the conversation erases its events and drafts, and only its own');
  }
+ // Archive (V2-12 R1a, replaces the old "a dispatched BILL2 call blocks archive" case): a running turn of the business makes archive
+ // BUSY, the owner retries after it closes, and an archived business refuses the next turn's source.
+ {
+  const {begin,identity,record}=t;
+  const a=await account(1000),src=await source(a);
+  const o=await open(a,{kind:'chat',session:src.topicSession,pol:pol()});
+  await begin(a,o.turnId,1,{upper:0.05});
+  assert.match(await refusal(one('select opc_business_archive($1,$2) v',[a.actor,src.business])),/OPC_BUSINESS_BUSY/);
+  assert.equal((await c.query('select archived_at from opc_businesses where id=$1',[src.business])).rows[0].archived_at,null);
+  await identity(a,o.turnId,1);await record(a,o.turnId,1,{n:0.01,actual:0.01});
+  await close(a,o.turnId,'completed',{messages:[{role:'user',content:'topics please'},{role:'assistant',content:'words'}]});
+  assert.equal((await one('select opc_business_archive($1,$2) v',[a.actor,src.business])).isArchived,true);
+  assert.match(await refusal(read(a,src)),/OPC_BUSINESS_ARCHIVED/);
+  report.checks.push('archive: a running turn of the business makes archive BUSY; after it closes archive succeeds and the next topic turn is refused as archived');
+ }
+}
+
+// Owner 2026-11-02 (option A): after the positioning is updated the user starts the topic work again on the latest version. The binding row
+// stays immutable except for the one re-bind update; the old conversation stays but is not sent to the model.
+export async function topicRebindCases(t){
+ const {c,one,refusal,account,peer,report}=t,{source,read,item,topicTurn,save,adopt,accounts}=helpers(t);
+ const a=await account(1000),src=await source(a);
+ const old=item(src),oldTurn=await topicTurn(a,src,'Old\n```json\n'+JSON.stringify([old])+'\n```');
+ await save(a,src,oldTurn.request,[old]);
+ assert.equal((await read(a,src)).historyFloor,0,'a workspace never re-bound sends its whole history');
+ const workspace=()=>c.query('select * from opc_topic_workspaces where draft_id=$1',[src.draft]).then(r=>r.rows[0]);
+ // The updated positioning: a second formal version of the same project.
+ const round2=randomUUID(),version2=randomUUID();
+ await c.query('create temp table round_copy as select * from artifact_rounds where id=$1',[src.round]);
+ await c.query('update round_copy set id=$1',[round2]);
+ await c.query('insert into artifact_rounds select * from round_copy');
+ await c.query('drop table round_copy');
+ const consent=(client=c,version=version2)=>client.query('select opc_topic_consent($1,$2,$3) v',[a.actor,src.draft,version]).then(r=>r.rows[0].v);
+ // 1. Nothing newer is formal yet: no re-bind. The binding is untouched and its guard refuses every other change.
+ assert.match(await refusal(consent()),/OPC_TOPIC_SOURCE_CHANGED|OPC_TOPIC_SOURCE_DENIED/);
+ await c.query(`insert into artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)
+  values($1,$2,$3,2,'{"body":"CONFIRMED2"}',repeat('d',64),'[]')`,[version2,src.project,round2]);
+ await c.query('update artifact_projects set current_version=2 where id=$1',[src.project]);
+ const refuseUpdate=async sql=>{await c.query('begin');try{return await refusal(c.query(sql,[src.draft]));}finally{await c.query('rollback');}};
+ assert.match(await refuseUpdate('update opc_topic_workspaces set history_floor_seq=99 where draft_id=$1'),/artifact history immutable/,'no marker');
+ await c.query('begin');
+ await c.query("select set_config('graylum.topic_rebind','guess',true)");
+ assert.match(await refusal(c.query('update opc_topic_workspaces set history_floor_seq=99 where draft_id=$1',[src.draft])),/immutable/,'a wrong marker');
+ await c.query('rollback');
+ await c.query('begin');
+ await c.query("select set_config('graylum.topic_rebind',$1||':'||txid_current(),true)",[src.draft]);
+ assert.match(await refusal(c.query("update opc_topic_workspaces set session_id=gen_random_uuid() where draft_id=$1",[src.draft])),/immutable/,'marker, other column');
+ await c.query('rollback');
+ await c.query('begin');
+ await c.query("select set_config('graylum.topic_rebind',$1||':'||txid_current(),true)",[src.draft]);
+ assert.match(await refusal(c.query("update opc_topic_workspaces set request_id=gen_random_uuid(),source_hash='x' where draft_id=$1",[src.draft])),/immutable/,'marker, one allowed and one other column');
+ await c.query('rollback');
+ assert.match(await refuseUpdate('delete from opc_topic_workspaces where draft_id=$1'),/immutable/,'delete');
+ // The marker opens nothing else: the same marker on rows of other immutable tables changes nothing there.
+ for(const [table,id,set] of [['artifact_versions',version2,"report_hash=repeat('0',64)"],['artifact_rounds',round2,"state='draft'"]]){
+  await c.query('begin');
+  await c.query("select set_config('graylum.topic_rebind',$1||':'||txid_current(),true)",[src.draft]);
+  assert.match(await refusal(c.query(`update ${table} set ${set} where id=$1`,[id])),/immutable/,table+' stays immutable under the marker');
+  await c.query('rollback');
+ }
+ assert.equal((await workspace()).source_version_id,src.version,'untouched');
+ // 2. A turn opens only on the latest version: the workspace behind it is read-only.
+ assert.match(await refusal(read(a,src)),/OPC_TOPIC_SOURCE_CHANGED/);
+ // 3. The re-bind: the same conversation, a new material revision, the floor at the last message.
+ const messages=Number(await one('select max(seq)::int v from session_messages where session_id=$1',[src.topicSession]));
+ // A turn of the old conversation still running (another tab) blocks the re-bind: its messages would land after the floor.
+ await c.query('update runtime_sessions set active_turn_id=(select id from turns where actor_id=$1 limit 1) where id=$2',[a.actor,src.topicSession]);
+ assert.match(await refusal(consent()),/OPC_TOPIC_TURN_ACTIVE/);
+ assert.equal((await workspace()).source_version_id,src.version,'refused: untouched');
+ await c.query('update runtime_sessions set active_turn_id=null where id=$1',[src.topicSession]);
+ const bound=await consent();
+ assert.equal(bound.sourceVersionId,version2);assert.equal(bound.sessionId,src.topicSession);
+ const after=await workspace();
+ assert.equal(after.source_version_id,version2);assert.equal(Number(after.history_floor_seq),messages);assert.equal(Number(after.material_revision),2);
+ const src2={...src,version:version2},got=await read(a,src2);
+ assert.equal(got.historyFloor,messages);assert.equal(got.material.revision,2);assert.equal(got.sourceVersionId,version2);
+ assert.equal(Number(await one('select count(*)::int v from runtime_scope_material where session_id=$1',[src.topicSession])),2);
+ // 4. A second click changes nothing; two at once leave one outcome.
+ assert.equal((await consent()).sourceVersionId,version2);
+ assert.equal(Number(await one('select count(*)::int v from runtime_scope_material where session_id=$1',[src.topicSession])),2,'no second material');
+ // 5. The old candidate cannot be adopted on the new version; a new one saved on it can be saved.
+ assert.match(await refusal(save(a,src2,oldTurn.request,[old],{request:randomUUID(),version:1})),/OPC_TOPIC_SOURCE_INVALID/);
+ const fresh=item(src2),newTurn=await topicTurn(a,src2,'New\n```json\n'+JSON.stringify([fresh])+'\n```');
+ const original=await one('select opc_topic_original($1,$2,$3,$4) v',[a.actor,src.draft,version2,newTurn.request]);
+ assert.equal(original[0].id,fresh.id,'a reply after the re-bind is a source on the new version');
+ const list2=await accounts(a,src);
+ // Saving and adopting both go through that gate; the transition behind them needs a really published version, which this fixture's
+ // hand-made second version is not (that path is covered by the staging acceptance).
+ assert.match(await refusal(adopt(a,src2,[old],list2,{sources:[{itemId:old.id,executionId:oldTurn.request}]})),/OPC_TOPIC_SOURCE_INVALID/,'an old candidate is not adopted');
+ // 6. Concurrency: two accounts-worth of the same click at once on a second workspace.
+ const b=await account(1000),other=await source(b);
+ const r3=randomUUID(),v3=randomUUID();
+ await c.query('create temp table round_copy as select * from artifact_rounds where id=$1',[other.round]);
+ await c.query('update round_copy set id=$1',[r3]);await c.query('insert into artifact_rounds select * from round_copy');await c.query('drop table round_copy');
+ await c.query(`insert into artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids) values($1,$2,$3,2,'{"body":"C2"}',repeat('d',64),'[]')`,[v3,other.project,r3]);
+ await c.query('update artifact_projects set current_version=2 where id=$1',[other.project]);
+ const p1=await peer(),p2=await peer();
+ try{
+  const go=client=>client.query('select opc_topic_consent($1,$2,$3) v',[b.actor,other.draft,v3]).then(r=>r.rows[0].v);
+  const [x,y]=await Promise.all([go(p1),go(p2)]);
+  assert.equal(x.sourceVersionId,v3);assert.equal(y.sourceVersionId,v3);
+ } finally {await p1.end();await p2.end();}
+ assert.equal(Number(await one('select count(*)::int v from runtime_scope_material where session_id=$1',[other.topicSession])),2,'one material for two clicks');
+ report.checks.push('topic re-bind: guard refuses without or with a wrong marker, other columns and deletes; turns only on the latest version; floor, repeat and concurrent clicks');
 }
 
 // Runs after the relation lock count: an account scrub invalidates cached plans, which the count would read as locks of turn_open.

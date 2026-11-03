@@ -8,24 +8,21 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_step(p_id uuid, p_token
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE r social_review_runs;x runtime_executions;allowed boolean;spent numeric;
+DECLARE r social_review_runs;x turns;allowed boolean;spent numeric;st text;why text;
 BEGIN
  SELECT * INTO r FROM social_review_runs WHERE id=p_id FOR UPDATE;
  IF r.id IS NULL OR r.lease_token IS DISTINCT FROM p_token OR r.status<>'claimed'
   OR r.lease_expires_at<=clock_timestamp() THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_LEASE_LOST';END IF;
+ IF p_action NOT IN ('authorize','observe','skip') THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID';END IF;
  allowed:=publish_monitor_review_allowed(r.actor_id) AND r.created_at>=(SELECT auto_review_enabled_at
   FROM social_monitor_settings WHERE actor_id=r.actor_id);
- IF p_action='skip' THEN
-  -- Serialize the terminal decision with a result commit. Native admission locks session -> review,
-  -- so never wait for its execution row while owning the review: a busy owner makes this RPC retry.
-  SELECT * INTO x FROM runtime_executions WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id FOR UPDATE NOWAIT;
- ELSE
-  SELECT * INTO x FROM runtime_executions WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id;
+ SELECT * INTO x FROM turns WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id AND kind='review';
+ IF x.id IS NOT NULL AND r.turn_id IS DISTINCT FROM x.id THEN
+  UPDATE social_review_runs SET turn_id=x.id WHERE id=r.id;
  END IF;
- IF x.id IS NOT NULL THEN
-  UPDATE social_review_runs SET runtime_execution_id=x.id,bill2_run_id=x.billing_run_id WHERE id=r.id;
- END IF;
- IF p_action IN ('observe','skip') AND x.state='completed' THEN
+ st:=CASE WHEN x.id IS NULL THEN NULL WHEN x.state<>'closed' THEN 'running'
+  WHEN x.close_kind='completed' AND x.delivered THEN 'completed' ELSE 'failed' END;
+ IF p_action IN ('observe','skip') AND st='completed' THEN
   UPDATE social_review_runs SET status='completed',finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
   -- Only a completed strategy check consumes a stage change; a skipped one is scheduled again (Owner 2026-10-27).
   IF r.cadence='quarterly' AND r.business_id IS NOT NULL THEN
@@ -33,34 +30,32 @@ BEGIN
      FROM opc_accounts WHERE actor_id=r.actor_id AND business_id=r.business_id AND erased_at IS NULL),
     strategy_checked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE actor_id=r.actor_id AND business_id=r.business_id;
   END IF;
- ELSIF p_action='skip' AND x.result IS NOT NULL THEN
-  -- The owner completed after expiry was observed, but billing can still be cost_pending.
-  -- Keep the original claim so native financial recovery and the next observe can publish it.
-  RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'executionId',x.id,'state',x.state,'expired',false);
- ELSIF p_action='skip' OR p_action='observe' AND x.state IN ('cancelled','failed') THEN
-  -- An unknown financial outcome keeps the claim: existing Runtime recovery owns the held credits.
-  IF x.id IS NOT NULL AND NOT coalesce((SELECT closed FROM bill2_runs WHERE id=x.billing_run_id),false) THEN
-   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'executionId',x.id,'state','cost_pending');END IF;
-  spent:=CASE WHEN x.id IS NULL THEN 0 ELSE (SELECT provider_cost_usd FROM bill2_runs WHERE id=x.billing_run_id) END;
-  IF p_action='skip' AND p_reason='RUNTIME_INTERRUPTED' AND r.attempt<3 AND allowed AND r.max_cost_usd-spent>0 THEN
-   -- A deploy or a killed invocation is not the user's week lost: the settled attempt keeps its own request, bill
-   -- and journal; the next attempt gets a new request in the same session, claimable by the next batch at once.
-   -- Every attempt shares one cap: the known actual cost comes off it; an unknown cost (NULL) never retries.
-   UPDATE social_review_runs SET attempt=attempt+1,runtime_request_id=gen_random_uuid(),runtime_execution_id=NULL,
-    bill2_run_id=NULL,max_cost_usd=r.max_cost_usd-spent,
-    prior_bill2_run_ids=prior_bill2_run_ids||CASE WHEN x.billing_run_id IS NULL THEN '{}'::uuid[] ELSE ARRAY[x.billing_run_id] END,
+ ELSIF p_action='skip' AND st='running' THEN
+  -- The caller closes an expired or disabled turn before it skips; a turn still running here keeps the claim.
+  RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',x.id,'state','running','expired',false);
+ ELSIF p_action='skip' OR p_action='observe' AND st='failed' THEN
+  -- An interruption the turn recovery job closed before this scheduler looked (observe) is retried like one reported by skip.
+  why:=coalesce(p_reason,CASE WHEN p_action='observe' AND x.close_kind IN ('interrupted','failed','expired') THEN 'RUNTIME_INTERRUPTED' END);
+  -- An unknown financial outcome keeps the claim: the turn recovery owns the held credits until the turn is settled.
+  IF x.id IS NOT NULL AND x.settlement IS DISTINCT FROM 'done' THEN
+   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',x.id,'state','cost_pending');END IF;
+  spent:=CASE WHEN x.id IS NULL THEN 0 ELSE (SELECT coalesce(sum(turn_call_spent_usd(call_kind,nominal_usd,actual_usd)) FILTER (WHERE status='ok'),0)
+    +coalesce(sum(actual_usd) FILTER (WHERE status='unusable'),0) FROM turn_calls WHERE turn_id=x.id) END;
+  IF why='RUNTIME_INTERRUPTED' AND r.attempt<3 AND allowed AND r.max_cost_usd-spent>0 THEN
+   -- A deploy or a killed invocation is not the user's week lost: the settled attempt keeps its own request and receipts; the next
+   -- attempt gets a new request in the same session, claimable by the next batch at once. Every attempt shares one cap: the known
+   -- cost comes off it; a turn whose cost is still unknown (settlement pending) never retries (returned above).
+   UPDATE social_review_runs SET attempt=attempt+1,runtime_request_id=gen_random_uuid(),turn_id=NULL,max_cost_usd=r.max_cost_usd-spent,
     created_at=clock_timestamp(),lease_expires_at=clock_timestamp() WHERE id=r.id;
-   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'executionId',x.id,'state','retrying','expired',false);
+   RETURN jsonb_build_object('allowed',false,'actorId',r.actor_id,'turnId',x.id,'state','retrying','expired',false);
   END IF;
-  UPDATE social_review_runs SET status='skipped',skip_reason=coalesce(p_reason,'RUNTIME_ENDED'),
+  UPDATE social_review_runs SET status='skipped',skip_reason=coalesce(why,'RUNTIME_ENDED'),
    finished_at=clock_timestamp(),lease_expires_at=NULL WHERE id=r.id;
- ELSIF p_action NOT IN ('authorize','observe') THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID';END IF;
- RETURN jsonb_build_object('allowed',allowed,'actorId',r.actor_id,'executionId',x.id,'state',x.state,
+ END IF;
+ RETURN jsonb_build_object('allowed',allowed,'actorId',r.actor_id,'turnId',x.id,'state',st,
   'sessionId',r.runtime_session_id,'requestId',r.runtime_request_id,'modelId',r.model_id,'maxCostUsd',r.max_cost_usd::text,
-  -- A scheduler-owned review has no user present to resume it. A live dispatch still owns its lease.
-  -- Return only a deadline decision here: cancellation takes the native session/run locks in a separate RPC,
-  -- never while holding this review row (admission uses session -> review).
-  'expired',r.created_at<=clock_timestamp()-interval '15 minutes' AND x.result IS NULL
-   AND NOT EXISTS(SELECT 1 FROM bill2_runs b WHERE b.id=x.billing_run_id AND NOT b.closed
-    AND b.runtime_dispatch_deadline>clock_timestamp()));
+  'cadence',r.cadence,'businessId',r.business_id,'attempt',r.attempt,
+  -- A scheduler-owned review has no user present to resume it: a turn still running after 15 minutes is expired (the caller
+  -- closes it as interrupted and then skips); the turn recovery job closes what the caller never reaches.
+  'expired',coalesce(st='running' AND r.created_at<=clock_timestamp()-interval '15 minutes',false));
 END $function$;

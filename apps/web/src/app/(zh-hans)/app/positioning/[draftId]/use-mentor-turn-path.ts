@@ -21,7 +21,8 @@ const fetcher: typeof fetch = (...args) => globalThis.fetch(...args);
 /** CORE-PATH-V2 V2-10: the turn path's side of the positioning page. Off, it adds nothing and the page runs on the old path. */
 export function useMentorTurnPath(sessionId: string | undefined, draftId: string) {
   const choices = trpc.runtime.choices.useQuery(sessionId ? { sessionId } : undefined, { enabled: Boolean(sessionId), staleTime: RUNTIME_CHOICES_STALE_MS });
-  const on = Boolean(sessionId && choices.data?.corePathV2);
+  // V2-12: the turn path is the only path; the server answers TURN_CORE_DISABLED itself when its switch is off.
+  const on = Boolean(sessionId);
   const [view, setView] = useState<TurnView | null>(null), [failed, setFailed] = useState(false);
   // The path is known once the switch and the turn path's read of this conversation have answered (see mentor-path-gate.ts).
   const ready = mentorPathReady({ hasSession: Boolean(sessionId), choicesSettled: choices.isSuccess || choices.isError, viewLoaded: view !== null });
@@ -54,7 +55,6 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
   const projected = useMemo(() => view ? turnHistory(view) : { executions: [], turns: [], activeExecution: null }, [view]);
   const history = useRef<TurnHistory>(projected);
   history.current = projected;
-  const merged = useRef<{ old?: unknown; projected?: unknown; data?: unknown }>({});
   const paused = view?.activeTurn?.pauseReason === "waiting_credits" ? view.activeTurn : null;
   // The sidebar balance while a turn holds its freeze (a draft or reply being made, also after a refresh): see credits-label.ts.
   const creditsBusy = Boolean(sessionId) && turnBusyForCredits({ viewRead: view !== null, viewFailed: failed, busy: Boolean(view?.activeTurn),
@@ -72,24 +72,24 @@ export function useMentorTurnPath(sessionId: string | undefined, draftId: string
       return draft && { ...draft, turns: [...(draft.turns ?? []), ...projected.turns] };
     },
     /** The stream of one mentor request: POST /api/turn with the switch on, the old stream otherwise. */
-    open<T>(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined, old: () => Promise<T>) {
+    open(request: MentorRequest, draft: { sessionId: string; moduleId?: string | null } | undefined) {
       // Decided when the turn is sent, after the gate is ready: a send before that waits, and never falls to the old path unasked.
       return async () => {
-        if (!await mentorOnTurnPath(() => gate.current)) return old();
+        // V2-12: the old stream is gone; a conversation whose switch is off cannot send (the real database is built on the turn path).
+        if (!await mentorOnTurnPath(() => gate.current)) throw new Error("TURN_PATH_REQUIRED");
         return readAfter(mentorTurnEvents(mentorTurnBody(request, { sessionId: draft!.sessionId, moduleId: draft!.moduleId! },
           history.current)));
       };
     },
-    /** The old view, with this conversation's turns after its executions; refetching reads both. */
-    withOld<T extends { data?: unknown; refetch: () => Promise<unknown> }>(old: T): T {
-      if (!on && !projected.executions.length) return old;
-      // One object per change: the page's effects depend on this data.
-      if (merged.current.old !== old.data || merged.current.projected !== projected) {
-        const data = old.data as { executions?: unknown[]; activeExecution?: string | null } | undefined;
-        merged.current = { old: old.data, projected, data: data && { ...data, executions: [...(data.executions ?? []), ...projected.executions],
-          activeExecution: data.activeExecution ?? projected.activeExecution } };
-      }
-      return { ...old, data: merged.current.data, refetch: async () => { await reload(); return old.refetch(); } };
+    /** The conversation's history as the page reads it: this conversation's turns projected as executions (V2-12: the old view is gone). */
+    history: {
+      data: view ? { executions: projected.executions, activeExecution: projected.activeExecution } : undefined,
+      isError: failed && !view,
+      refetch: async () => {
+        const next = await reload();
+        return { data: next ? { executions: turnHistory(next).executions, activeExecution: turnHistory(next).activeExecution } : undefined,
+          error: next ? null : new Error("TURN_VIEW_UNREADABLE") };
+      },
     },
     /** A turn this page no longer streams (a reload, a dropped stream): wait for its close, never send again. */
     settled: async (executionId: string): Promise<AgentTurnOutcome> => {

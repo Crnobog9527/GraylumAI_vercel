@@ -5,6 +5,7 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
+import { ensurePositioningProfilePlans } from '../__tests__/fixtures/positioningProfilePlans';
 import { clearCatalogCache, withCatalogRequest } from './settings/catalogCache';
 import type { PositioningClassifier } from './admission/positioningGate';
 import { POSITIONING_MARKER } from './admission/positioningFallback';
@@ -30,6 +31,7 @@ const SETTINGS = [CORE_PATH_SETTING, RUNTIME_PAYG_SETTING, 'primary_model_id', '
 let saved: Array<{ key: string; value: unknown }> = [];
 beforeAll(async () => {
   await db.connect();
+  await ensurePositioningProfilePlans(db);
   saved = (await db.query('select key,value from system_settings where key = any($1)', [SETTINGS])).rows;
 });
 afterAll(async () => {

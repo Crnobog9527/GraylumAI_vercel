@@ -218,7 +218,7 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 | 空库文件建库与逐对象指纹检查（需要本地 Docker） | `node packages/db/tests/run-db-baseline-replay.mjs --local-only` |
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
 | 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
-| 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files`；`node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files`。CI 的 "Unit Tests" 必需检查依赖这两条及空库文件建库检查；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
+| 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files`。CI 的 "Unit Tests" 必需检查依赖这一条及空库文件建库检查；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
 | 数据库行为套件统一入口（CI 同款，需要本地 Docker） | `node packages/db/tests/run-local-suites.mjs --local-only`（CI 用 `--ci`；`--list` 只列出，`--only <目录>` 只跑一个目录）。自动发现 `packages/db/tests/<目录>/` 下文件名带 `-local` 的套件，默认全部进 CI；暂时不能跑的写进 `packages/db/tests/local-suites-excluded.json`（要有原因和日期，只许变少，`scripts/tests/local-suites.test.mjs` 检查）。新套件的入口要接受 `--ci`（在 CI）和 `--local-only`（本机）。被排除的套件在每次推送到 `staging` 后由 `.github/workflows/nightly-db-suites.yml` 跑一遍（GitHub 的定时触发只认默认分支 main，所以不用定时；新推送会取消还没跑完的旧运行，staging 安静下来后才会跑完一次）（`env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded`，在一次性检出里，不是必需检查，红了只是报告、不挡合并）；排除清单里原因以 `not a suite:` 开头的是辅助文件、模板和包装脚本，夜间跳过它们。通过 `localDb()` 建库的套件由入口先建一次库、保存成镜像，每个套件再从镜像启动自己的容器（`db-snapshot/isolation-local.mjs` 检查快照和全新建库一致、一个容器的写入不会影响别的容器）；需要在建库中途写数据的套件（传 `beforeApply`）和自己建库的套件仍各自重放迁移。空库建库回放还会检查：标 STABLE/IMMUTABLE 的函数体里不许写数据或加行锁（PostgREST 对它们开只读事务），误报才可写进 `packages/db/tests/baseline/volatility-allow.json`，同样只许变少 |
 
 - ESLint 用 typescript-eslint 推荐规则检查 TS/TSX，网站另加 React Hooks 的
@@ -242,8 +242,8 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
   第 4 节。
 - 往 CI 加测试或测试套件时，PR 描述写明加入后该 job 的实测总时长，离 30 分钟上限至少留 8 分钟；
   不够就拆成并行 job。不许调大超时时间：调大超时算放宽 CI，要 Owner 批准（2026-10-26 #1404 教训）。
-- CI 默认跑全套。只有一种情况跳过数据库和计费测试（"Run database behaviour suites" 两组和 "Run billing and recovery
-  integration tests"，Owner 2026-11-01 批准）：目标分支是 `staging` 的 PR，并且改动的**每个文件**都在白名单里。
+- CI 默认跑全套。只有一种情况跳过数据库和计费测试（"Run database behaviour suites" 四片和 "Run billing and recovery
+  integration tests" 两片，Owner 2026-11-01 批准）：目标分支是 `staging` 的 PR，并且改动的**每个文件**都在白名单里。
   白名单只有：`docs/**`、`*.md`，以及 `apps/web/src/components/**` 和 `apps/web/src/app/**` 下的页面、组件、样式
   （`.tsx`、`.css`）和它们的测试（`.test.ts`、`.test.tsx`）。`apps/web/src/app/api/**`、`route`/`middleware`/`proxy` 文件、
   `apps/web/src` 下的其他目录、`packages/**`、`supabase/**`、`scripts/**`、`.github/**`、依赖和锁文件都不在白名单里，
@@ -275,8 +275,8 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 - ESLint 和 API 类型检查已经打开，但靠第 7 节的基线放过了已有问题（ESLint：网站 57 个
   文件 130 处、API 102 个文件 587 处；API 类型检查：35 个测试文件共 683 处，排除在外）。
   结合相关功能的改动逐步修掉。
-- 集成测试（`*.integration.ts`，约 2 万行）只有计费（`bill2/billing.integration.ts`）和 Runtime 恢复与流式
-  （`runtime/runtime.integration.ts`、`runtime/streaming.integration.ts`）在 CI 里运行，其中需要网站或浏览器的
+- 集成测试（`*.integration.ts`，约 2 万行）只有 Runtime 恢复与流式
+  （`runtime/runtime.integration.ts`、`runtime/streaming.integration.ts` 等）在 CI 里运行，其中需要网站或浏览器的
   5 个用例被明确排除（见 `packages/db/tests/v3/without-app.mjs`）；定位（OPC）、工作台等其余集成测试仍不在 CI 里；
   网站单元和组件测试已全部在 CI 里运行（`pnpm --filter web test:unit`）。
 - 仓库没有安装代码格式化工具（Prettier）。

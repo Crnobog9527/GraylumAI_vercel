@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { readProviderPrices, resolveProviderPrice, resolveProviderMultipliers } from '../billingProviderPrices';
 import { decimal } from '../turn/provider/decimal';
-import type { BillingRpc } from '../turn/provider/service';
+import type { BillingRpc } from '../turn/provider/frozenRun';
 import { toolCallPolicy, type ToolCallPolicy } from '../turn/provider/toolBilling';
 import { requestIdentity, ResearchPause, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest } from '../research/runtime/subcall';
 import { TURN_BILLING_RUN } from '../research/runtime/store';
@@ -25,7 +25,6 @@ import { rowFor } from '../turn/settings/settingsRows';
 import { openToolRow, ToolLimitReached, type SubcallLedger } from '../turn/tools/meter';
 import { swallow } from '../../lib/swallow';
 import { paidToolBounds } from '../turn/tools/plan';
-import { settleLegacyRun } from './billedReadLegacy';
 import type { ToolCallOutcome } from '../turn/tools/types';
 
 /**
@@ -43,7 +42,7 @@ type Env = Record<string, string | undefined>;
 export const PUBLISH_MONITOR_PHASE = 'publish_monitor';
 const RUN_MINUTES = 30;
 const uuid = z.string().uuid();
-const runView = z.object({ runId: uuid.nullable(), policies: z.array(z.unknown()).optional(), legacy: z.boolean().optional() }).passthrough();
+const runView = z.object({ runId: uuid.nullable(), policies: z.array(z.unknown()).optional() }).passthrough();
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
 export class BilledReadError extends Error {
@@ -114,17 +113,12 @@ export async function admitReadTurn(admin: Admin, routes: string[], now = new Da
 }
 
 /**
- * A run left open by a killed process. Its live ledger attempts are freed (so their keys can be sent again) and it is marked
- * closed. A turn run is settled by the turn recovery job, nothing is settled from here; a legacy run (opened on BILL2 before
- * reads moved to turns) still gets its saved receipts replayed and its hold released (billedReadLegacy.ts). Idempotent.
+ * A run left open by a killed process: its live ledger attempts are freed (so their keys can be sent again) and it is marked closed.
+ * The run's turn is settled by the turn recovery job; nothing is settled from here. Idempotent.
  */
-export async function settleLeftOpenRun(admin: Admin, actorId: string, runId: string, policies: unknown[], legacy = false) {
-  if (legacy) { await settleLegacyRun(admin, actorId, runId, policies); return; }
-  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId },
-    z.array(z.object({ operationId: uuid, live: z.boolean() }).passthrough()));
-  for (const row of rows.filter(item => item.live)) {
-    await rpc(admin, 'publish_monitor_billed_abandon', { p_run_id: runId, p_operation_id: row.operationId }, z.boolean());
-  }
+export async function settleLeftOpenRun(admin: Admin, runId: string) {
+  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId }, z.array(z.object({ operationId: uuid }).passthrough()));
+  for (const row of rows) await rpc(admin, 'publish_monitor_billed_abandon', { p_run_id: runId, p_operation_id: row.operationId }, z.boolean());
   await rpc(admin, 'publish_monitor_billed_closed', { p_run_id: runId }, z.unknown());
 }
 
@@ -193,7 +187,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
   // A run left open by an earlier attempt of this refresh is freed first (its unanswered requests are sent again).
   const open = await rpc(admin, 'publish_monitor_billed_run', { ...keyArgs(keys), p_run_id: null, p_policies: null }, runView.nullable());
   if (open === null) return { kind: 'stale' };
-  if (open.runId) await settleLeftOpenRun(admin, keys.actorId, open.runId, open.policies ?? [], open.legacy === true);
+  if (open.runId) await settleLeftOpenRun(admin, open.runId);
   const results: Partial<Record<SocialKind, ResearchCallResult>> = {};
   const missing: typeof requests = [];
   for (const item of requests) {

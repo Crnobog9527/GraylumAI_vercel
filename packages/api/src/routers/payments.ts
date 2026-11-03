@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { protectedProcedure, adminProcedure, router } from '../trpc';
 import { logger } from '../lib/logger';
+import { subscriptionManagementAvailable } from '../services/payments/subscriptionManagement';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import {
   assertStripeCheckoutConfigured,
@@ -1015,14 +1016,12 @@ export const paymentsRouter = router({
     try { stripe = getStripeClient(); } catch { /* Original credentials unavailable; keep the order visible. */ }
     return listAdminPaymentOrders(ctx.supabase, input, createStripeBillingDocumentLoader(stripe, ctx.supabase));
   }),
-  getSubscriptionManagement: protectedProcedure.query(async ({ ctx }) => {
+  getSubscriptionManagement: protectedProcedure.query(({ ctx }) => subscriptionManagementAvailable(async () => {
     // PAY-STRIPE-MP card subscriptions first (no stored Stripe ids), then legacy Stripe subscriptions.
-    if (await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(getStripeClient()))) {
-      return { available: true };
-    }
+    if (await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(getStripeClient()))) return true;
     const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
-    return { available: Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id) };
-  }),
+    return Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id);
+  })),
   createCustomerPortalSession: protectedProcedure
     .input(z.object({ returnUrl: z.string().url().optional() }).strict().optional())
     .mutation(async ({ ctx, input }) => {

@@ -1,39 +1,29 @@
 import { archiveBusinessInput, archiveBusiness, listBusinesses } from '../services/opc/businessArchive';
-import {executionVisibility} from '../services/runtime/libraryVisibility';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/turn/settings/stagingPolicy';
-import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/turn/settings/stagingErrors';
-import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
+import {topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import { realHostMode } from "../services/turn/settings/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
-import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultSaveTurn, sessionResultsList,
+import { sessionResultEdit, sessionResultFamily, sessionResultSaveTurn, sessionResultsList,
   sessionResultsService } from "../services/opc/sessionResults";
 import {
   opcService,
   opcStart,
   opcPlan,
   opcHandoff,
-  opcGenerate,
-  opcSaveResult,
   opcInformation,
   opcTopicBind,
-  opcTopicTurn,
   opcTopicDraft,
   opcLibraryEdit,
-  opcContentFromExecution,
   opcContentFromTurn,
   opcContentManualSave,
-  opcVideoPackage,
-  opcVideoResults,
   opcVideoResultsFromTurn,
-  opcVideoExecutionCheck,
   opcVideoMaterialPrepare,
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
@@ -49,13 +39,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
-  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real,
-    token => executeOriginalExecution({
-      admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
-      authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint: real ? undefined : runtimeLocalEndpoint(),
-      // DB-PERF PR-5a: this request already loaded the policy (above), so the execution does not load it again.
-      policyChecked: real ? { ok: true as const } : undefined,
-    }, token.executionId, undefined, token)), stagingPolicy: real } });
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real), stagingPolicy: real } });
   if (!result.ok && !isOpcRefusal(result.error.cause)) throw stagingProcedureError(result.error, path);
   return result;
 });
@@ -99,76 +83,6 @@ export const opcRouter = router({
   information: procedure
     .input(opcInformation)
     .mutation(({ ctx, input }) => ctx.opc.information(input)),
-  prepareStep: procedure
-    .input(opcGenerate)
-    .mutation(({ ctx, input }) => ctx.opc.prepareStep(input)),
-  // One streamed request per mentor turn (AC-1): the unchanged prepareStep
-  // admission, an `admitted` event with the execution id, then the same
-  // original execution and progress delivery as runtime.executeStream.
-  // Replay, reservation and replay-only recovery are those two paths'.
-  mentorTurnStream: procedure
-    .input(opcGenerate.extend({textProtocol:z.literal('textDelta-v1').optional()}))
-    .mutation(async function* ({ ctx, input, path }): AsyncGenerator<AgentTurnEvent> {
-      // The route returns before this stream ends; release this stream's reference.
-      const timing = ctx.runtimeBudget?.timing;
-      try {
-        let admitted: { executionId: string };
-        let maintenanceEndpoint: string | undefined;
-        try {
-          if (input.purpose !== "mentor") throw new Error("OPC_STEP_DENIED");
-          // Same executor host as runtime.executeStream, resolved before any
-          // admission exists. A loaded Staging policy already proved enabled
-          // window access for this actor, which implies the read access check.
-          if (!ctx.stagingPolicy) {
-            try { maintenanceEndpoint = runtimeLocalEndpoint(); }
-            catch { await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env); }
-          }
-          const request=opcGenerate.parse(Object.fromEntries(Object.entries(input).filter(([key])=>key!=='textProtocol')));
-          const prepare = () => ctx.opc.prepareStep(request);
-          const prepared = timing ? await timing.run(prepare) : await prepare();
-          if (prepared.admitted === false) {
-            yield { type: "result" as const, result: prepared };
-            return;
-          }
-          admitted = z.object({ executionId: z.string().uuid() }).passthrough().parse(prepared);
-        } catch (cause) {
-          throw isOpcRefusal(cause) ? cause : stagingProcedureError(cause, path);
-        }
-        yield { type: "admitted" as const, executionId: admitted.executionId };
-        const visibility = executionVisibility(ctx.supabaseAdmin, ctx.user.id, admitted.executionId);
-        yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
-          admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
-          authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint, visibility,
-          policyChecked: ctx.stagingPolicy ? { ok: true as const } : undefined,
-        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol, visibility.visible);
-      } finally {
-        timing?.release();
-      }
-    }),
-  saveResult: procedure
-    .input(opcSaveResult)
-    .mutation(({ ctx, input }) => ctx.opc.saveResult(input)),
-  planResult: readProcedure
-    .input(
-      z
-        .object({ draftId: z.string().uuid(), executionId: z.string().uuid() })
-        .strict(),
-    )
-    .query(async ({ ctx, input }) => {
-      try {
-        return {
-          valid: true as const,
-          ...(await ctx.opc.planResult(input.draftId, input.executionId)),
-        };
-      } catch (cause) {
-        if (
-          cause instanceof Error &&
-          cause.message === "OPC_PLAN_RESPONSE_INVALID"
-        )
-          return { valid: false as const };
-        throw cause;
-      }
-    }),
   revise: procedure
     .input(
       z
@@ -183,8 +97,8 @@ export const opcRouter = router({
       ctx.opc.revise(input.draftId, input.requestId, input.expectedRoundId),
     ),
   saveWorkResult: procedure
-    .input(z.union([z.object({ executionId: z.string().uuid() }).strict(), z.object({ turnId: z.number().int().positive() }).strict()]))
-    .mutation(({ ctx, input }) => 'turnId' in input ? ctx.opc.saveWorkResult(input) : ctx.opc.saveWorkResult(input.executionId)),
+    .input(z.object({ turnId: z.number().int().positive() }).strict())
+    .mutation(({ ctx, input }) => ctx.opc.saveWorkResult(input)),
   workResults: readProcedure
     .input(z.object({ sessionId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),
@@ -206,38 +120,21 @@ export const opcRouter = router({
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).list(input)),
   sessionResultVersions: resultReadProcedure.input(sessionResultFamily)
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).versions(input)),
-  sessionResultSave: procedure.input(sessionResultSave)
-    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).save(input)),
   sessionResultSaveTurn: procedure.input(sessionResultSaveTurn)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).saveTurn(input)),
   sessionResultEdit: procedure.input(sessionResultEdit)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).edit(input)),
   sessionResultDelete: procedure.input(sessionResultFamily)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).remove(input)),
-  planRequestState: readProcedure
-    .input(
-      z
-        .object({ draftId: z.string().uuid(), requestId: z.string().uuid() })
-        .strict(),
-    )
-    .query(({ ctx, input }) =>
-      ctx.opc.planRequestState(input.draftId, input.requestId),
-    ),
-  // The bound topic workspace of the draft: binding read, the single explicit
-  // bind, and one normal Agent turn inside it. All three keep their server-side
-  // authorization; nothing here trusts a client-supplied session or Skill.
+  // The bound topic workspace of the draft: binding read and the single explicit
+  // bind. Both keep their server-side authorization; nothing here trusts a
+  // client-supplied session or Skill. The topic turn itself is POST /api/turn.
   topicWorkspace: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.topicRead(input.draftId)),
   consentTopicWorkspace: procedure
     .input(opcTopicBind.omit({ requestId: true }))
     .mutation(({ ctx, input }) => ctx.opc.topicConsent(input)),
-  bindTopicWorkspace: procedure
-    .input(opcTopicBind)
-    .mutation(({ ctx, input }) => ctx.opc.topicBind(input)),
-  topicTurn: procedure
-    .input(opcTopicTurn)
-    .mutation(({ ctx, input }) => ctx.opc.prepareTopicTurn(input)),
   saveTopicDraft: procedure
     .input(opcTopicDraft)
     .mutation(({ ctx, input }) => ctx.opc.topicDraft(input)),
@@ -247,12 +144,6 @@ export const opcRouter = router({
   adoptTopics: procedure
     .input(topicAdoptionWithSource)
     .mutation(({ ctx, input }) => ctx.opc.adoptTopics(input)),
-  recordContentReaction: procedure
-    .input(contentReaction)
-    .mutation(({ctx,input}) => ctx.opc.recordReaction(input)),
-  adoptBrief: procedure
-    .input(briefAdoption)
-    .mutation(({ctx,input}) => ctx.opc.adoptBrief(input)),
   library: readProcedure
     .input(z.object({ search: z.string().max(160).default(''), from: z.string().date().nullable().default(null), to: z.string().date().nullable().default(null) }).strict())
     .query(({ ctx, input }) => ctx.opc.library(input)),
@@ -265,9 +156,6 @@ export const opcRouter = router({
   publicationUiChange: procedure
     .input(z.object({workItemId:z.string().uuid(),requestId:z.string().uuid(),expectedRevision:z.number().int().positive(),plannedDate:z.string().date().nullable(),status:z.enum(['unpublished','published']),publishedDate:z.string().date().nullable()}).strict())
     .mutation(({ctx,input})=>ctx.opc.publicationUiChange(input)),
-  positionHistory: readProcedure
-    .input(z.object({draftId:z.string().uuid()}).strict())
-    .query(({ctx,input})=>ctx.opc.positionHistory(input.draftId)),
   accountStrategyHistory: readProcedure
     .input(z.object({accountProjectId:z.string().uuid()}).strict())
     .query(({ctx,input})=>ctx.opc.accountStrategyHistory(input.accountProjectId)),
@@ -283,27 +171,15 @@ export const opcRouter = router({
   editLibrary: procedure
     .input(opcLibraryEdit)
     .mutation(({ ctx, input }) => ctx.opc.libraryEdit(input)),
-  saveContentResult: procedure
-    .input(opcContentFromExecution)
-    .mutation(({ ctx, input }) => ctx.opc.contentFromExecution(input)),
   saveContentFromTurn: procedure
     .input(opcContentFromTurn)
     .mutation(({ ctx, input }) => ctx.opc.contentFromTurn(input)),
   saveContentManual: procedure
     .input(opcContentManualSave)
     .mutation(({ ctx, input }) => ctx.opc.contentManualSave(input)),
-  saveVideoPackage: procedure
-    .input(opcVideoPackage)
-    .mutation(({ ctx, input }) => ctx.opc.videoPackage(input)),
-  saveVideoResults: procedure
-    .input(opcVideoResults)
-    .mutation(({ ctx, input }) => ctx.opc.videoResults(input)),
   saveVideoResultsFromTurn: procedure
     .input(opcVideoResultsFromTurn)
     .mutation(({ ctx, input }) => ctx.opc.videoResultsFromTurn(input)),
-  checkVideoExecution: procedure
-    .input(opcVideoExecutionCheck)
-    .mutation(({ ctx, input }) => ctx.opc.videoExecutionCheck(input)),
   prepareVideoMaterial: procedure
     .input(opcVideoMaterialPrepare)
     .mutation(({ ctx, input }) => ctx.opc.videoMaterialPrepare(input)),

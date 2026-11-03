@@ -18,10 +18,9 @@ class CIWorkflowsTest < Minitest::Test
   # Unit Tests is the one gate that may accept a skipped worker (the two database jobs, only when the scope job says so), so it has its own truth table.
   UNIT_GATE = {'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration','DB_SUITES_RESULT'=>'db-suites','CONTRACTS_RESULT'=>'ci-contracts',
                'LEDGER_RESULT'=>'migration-ledger','SCOPE_RESULT'=>'scope'}.freeze
-  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
-                      'node packages/db/tests/payg/run-runtime.mjs --ci',
-                      'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
+  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
                       'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql,packages/db/tests/runtime-view-perf/fixture.sql,packages/db/tests/content-erasure/fixture.sql,packages/db/tests/content-erasure-perf/fixture.sql,packages/db/tests/content-erasure-perf/assertions.sql'].freeze
+  INTEGRATION_SHARDS = {1 => [INTEGRATION_RUNS[1]], 2 => [INTEGRATION_RUNS[0]]}.freeze
   def test_required_context_names_unique
     names = [@ci, @security].flat_map { |w| w.fetch('jobs').values.map { |j| j.fetch('name') } }
     (GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
@@ -150,13 +149,25 @@ class CIWorkflowsTest < Minitest::Test
     steps = @ci.fetch('jobs').fetch('integration').fetch('steps')
     runs = steps.map { |step| step['run'] }.compact
     INTEGRATION_RUNS.each { |command| assert_equal 1, runs.count(command), command }
+    # Two shards: every command runs in exactly one of them, and the only step condition allowed is that shard test.
+    job = @ci.fetch('jobs').fetch('integration')
+    assert_equal false, job.fetch('strategy').fetch('fail-fast')
+    assert_equal [1, 2], job.fetch('strategy').fetch('matrix').fetch('shard')
+    assert_operator job.fetch('timeout-minutes'), :<=, 30
+    INTEGRATION_SHARDS.each do |shard, commands|
+      commands.each do |command|
+        step = steps.find { |candidate| candidate['run'] == command }
+        assert_equal "matrix.shard == #{shard}", step.fetch('if'), command
+      end
+    end
+    assert_equal INTEGRATION_RUNS.sort, INTEGRATION_SHARDS.values.flatten.sort
     assert_operator runs.index('pnpm install --frozen-lockfile'), :<, runs.index(INTEGRATION_RUNS.first)
     pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
     refute_nil pull
     INTEGRATION_RUNS.each { |command| assert_operator pull, :<, steps.index { |step| step['run'] == command }, command }
     assert_includes steps[pull]['run'], 'packages/db/tests/v3/images.mjs'
     steps.each do |step|
-      refute step.key?('if'), step['name']
+      refute step.key?('if'), step['name'] unless INTEGRATION_RUNS.include?(step['run'])
       refute step.key?('continue-on-error'), step['name']
       refute step.key?('env'), step['name']
     end

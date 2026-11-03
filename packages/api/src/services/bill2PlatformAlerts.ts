@@ -126,7 +126,7 @@ export async function readAbsorbAlerts(db: SupabaseClient, now = new Date()) {
     const today = now.toISOString().slice(0, 10);
     const from = new Date(Date.parse(today) - 6 * DAY).toISOString();
     const to = new Date(Date.parse(today) + DAY).toISOString();
-    const { data, error } = await db.rpc('bill2_payg_absorb_report', { p_from: from, p_to: to });
+    const { data, error } = await db.rpc('turn_platform_absorb_report', { p_from: from, p_to: to });
     if (error || !Array.isArray(data)) unavailable();
     return { status: 'enabled' as const, config, from, to,
       basis: 'frozen_rate_nominal_equivalent_usd' as const, displayDecimals: 12,

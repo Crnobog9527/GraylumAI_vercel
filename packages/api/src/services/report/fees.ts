@@ -21,13 +21,6 @@ export const reportFee = z.object({ credits: z.number().int().positive(), state:
   chargedCredits: z.number().int().nonnegative().nullable(), reason: z.string().nullable(), settledAt: z.string().nullable() });
 export type ReportFee = z.infer<typeof reportFee>;
 
-/** Daily backstop of the billing reconciliation: settles held report prices whose execution has ended. */
-export async function settleDueReportFees(admin: SupabaseClient): Promise<{ success: boolean; settled: number }> {
-  const result = await admin.rpc('report_fee_settle_due', { p_limit: 200 });
-  if (result.error) return { success: false, settled: 0 };
-  return { success: true, settled: Number(result.data) || 0 };
-}
-
 /** The report's fixed price (0295) is a whole number of credits, 1–999999: anything else would make every report fail. */
 export function validateReportPrice(input: Array<{ key: string; value: unknown }>) {
   for (const setting of input) {

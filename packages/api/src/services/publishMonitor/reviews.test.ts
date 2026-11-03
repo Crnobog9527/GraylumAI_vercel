@@ -1,189 +1,204 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {beforeEach,it,expect,vi} from 'vitest';
+import {beforeEach,expect,it,vi} from 'vitest';
 import {logger} from '../../lib/logger';
-const m=vi.hoisted(()=>({prepare:vi.fn(),execute:vi.fn(),cancel:vi.fn(),policy:vi.fn(),settings:vi.fn(),executor:vi.fn()}));
-vi.mock('../runtime/admission',()=>({runtimeAdmissionService:()=>({prepare:m.prepare})}));
-vi.mock('../runtime/execute',()=>({runtimeExecutor:(options:unknown)=>{m.executor(options);return {execute:m.execute,cancel:m.cancel};}}));
-vi.mock('../turn/settings/stagingPolicy',()=>({loadStagingPolicy:m.policy,loadStagingRecoveryPolicy:m.policy}));
-vi.mock('../runtime/stagingTransport',()=>({stagingTransport:()=>({})}));
-vi.mock('../turn/admission/newWorkGate',()=>({newWorkGate:()=>({calls:vi.fn()})}));
+const m=vi.hoisted(()=>({run:vi.fn(),pack:vi.fn(),settings:vi.fn(),close:vi.fn(),rows:vi.fn(),build:vi.fn()}));
+vi.mock('../turn/review',()=>({runReviewTurn:m.run}));
+vi.mock('../turn/agent/workspacePosts',()=>({resolvePostSource:m.pack}));
+vi.mock('../turn/db',()=>({turnClients:(db:unknown)=>({write:db,read:db}),turnDatabase:()=>({close:m.close})}));
+vi.mock('../turn/admission/newWorkGate',()=>({newWorkGate:()=>({})}));
+vi.mock('../turn/limiter',()=>({redisCounterStore:()=>({})}));
 vi.mock('./reviewSettings',()=>({readReviewSettings:m.settings}));
+vi.mock('./coach/rows',()=>({readPackRows:m.rows}));
+vi.mock('./coach/pack',()=>({buildPack:m.build}));
 import {createRuntimeBudget} from '../turn/settings/budget';
-import {capReviewAdmission} from './reviewAdmission';
-import {advanceReview,prepareReview,runWeeklyReviews,type ReviewClaim} from './reviews';
+import {advanceReview,prepareReview,runWeeklyReviews,type ReviewClaim,type ReviewStep} from './reviews';
 const c:ReviewClaim={id:'11111111-1111-4111-8111-111111111111',actorId:'22222222-2222-4222-8222-222222222222',
  token:'33333333-3333-4333-8333-333333333333',requestId:'44444444-4444-4444-8444-444444444444',
  sessionId:'55555555-5555-4555-8555-555555555555',modelId:'66666666-6666-4666-8666-666666666666',maxCostUsd:'0.100000000000'};
-beforeEach(()=>{vi.clearAllMocks();m.policy.mockResolvedValue({id:'test',creditsPerUsd:'100',multiplier:'6'});
- m.settings.mockResolvedValue({enabled:true});m.prepare.mockResolvedValue({executionId:'existing'});m.execute.mockResolvedValue({state:'completed'});});
-const db=(read:Record<string,unknown>)=>({rpc:vi.fn<(name:string,args:Record<string,unknown>)=>Promise<unknown>>(async()=>({data:read,error:null}))});
-it('recovery finds the original execution and never re-admits or changes the request id',async()=>{
- const d=db({allowed:true,executionId:'original',state:'interrupted'});
- expect(await prepareReview(d as never,c,{})).toBe('original');expect(m.prepare).not.toHaveBeenCalled();
- expect(m.policy).not.toHaveBeenCalled();
-});
-it('a timed-out interrupted review closes its original run and skips the period without another admission or dispatch',async()=>{
- const d={rpc:vi.fn<(name:string,args:Record<string,unknown>)=>Promise<unknown>>(async name=>({data:name==='runtime_cancel'
-  ?{state:'cancelled'}:{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null}))};
- expect(await prepareReview(d as never,c,{})).toBe(null);
- expect(d.rpc).toHaveBeenCalledWith('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:'original'});
- expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({
-  p_id:c.id,p_token:c.token,p_action:'skip',p_reason:'RUNTIME_INTERRUPTED'}));
- expect(m.prepare).not.toHaveBeenCalled();expect(m.execute).not.toHaveBeenCalled();expect(m.policy).not.toHaveBeenCalled();
-});
-it('a timed-out pre-admission review frees its period without inventing a billing run',async()=>{
- const d=db({allowed:true,executionId:null,state:null,expired:true});
- expect(await prepareReview(d as never,c,{})).toBe(null);
- expect(d.rpc.mock.calls.some(([name])=>name==='runtime_cancel')).toBe(false);
- expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_reason:'RUNTIME_INTERRUPTED'}));
- expect(m.prepare).not.toHaveBeenCalled();
-});
-it('an ambiguous cancellation retains the original claim for retry instead of claiming settlement',async()=>{
- const d={rpc:vi.fn(async(name:string)=>name==='runtime_cancel'?{data:null,error:{code:'08006'}}
-  :{data:{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null})};
- await expect(prepareReview(d as never,c,{})).rejects.toThrow('PUBLISH_MONITOR_REVIEW_CANCEL_FAILED');
- expect(d.rpc.mock.calls.some(([name])=>name==='publish_monitor_review_step')).toBe(true);
- expect(d.rpc).toHaveBeenCalledTimes(2);expect(m.prepare).not.toHaveBeenCalled();
-});
-it('completion winning the expiry race is observed as completed rather than overwritten as skipped',async()=>{
- const d={rpc:vi.fn<(name:string,args:Record<string,unknown>)=>Promise<unknown>>(async name=>({data:name==='runtime_cancel'?{state:'completed'}
-  :{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null}))};
- expect(await prepareReview(d as never,c,{})).toBe(null);
- expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_action:'observe'}));
- expect(d.rpc.mock.calls.some(([,args])=>(args as {p_action?:string})?.p_action==='skip')).toBe(false);
-});
-it('a deferred callback that crosses the deadline closes the original run before loading or dispatching a model',async()=>{
- const d={rpc:vi.fn<(name:string,args:Record<string,unknown>)=>Promise<unknown>>(async name=>({data:name==='runtime_cancel'
-  ?{state:'cancelled'}:{allowed:true,executionId:'original',state:'interrupted',expired:true},error:null}))};
- await advanceReview(d as never,c,'original',{},createRuntimeBudget(()=>0));
- expect(d.rpc).toHaveBeenCalledWith('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:'original'});
- expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_reason:'RUNTIME_INTERRUPTED'}));
- expect(m.executor).not.toHaveBeenCalled();expect(m.policy).not.toHaveBeenCalled();
-});
-it('a new admission uses the frozen request, session, model and review cap',async()=>{
- const d=db({allowed:true,executionId:null,state:null});
- expect(await prepareReview(d as never,c,{})).toBe('existing');
- expect(m.prepare).toHaveBeenCalledWith(expect.objectContaining({requestId:c.requestId,sessionId:c.sessionId,
-  selection:{kind:'ordinary',modelId:c.modelId},network:'deny'}));
-});
-it('insufficient balance is skipped without a model dispatch; configuration failures are distinct',async()=>{
- const d=db({allowed:true,executionId:null,state:null});m.prepare.mockRejectedValue(new Error('BILL2_INSUFFICIENT_CREDITS'));
- expect(await prepareReview(d as never,c,{})).toBe(null);
- expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_action:'skip',p_reason:'BALANCE_LOW'}));
- expect(m.execute).not.toHaveBeenCalled();
-});
-it('turning off cancels an existing native execution and prevents new paid work',async()=>{
- const d=db({allowed:false,executionId:'original',state:'prepared'});
- expect(await prepareReview(d as never,c,{})).toBe(null);expect(m.execute).not.toHaveBeenCalled();
- expect(d.rpc).toHaveBeenCalledWith('runtime_cancel',{p_actor_id:c.actorId,p_execution_id:'original'});
-});
-it('a balance pause during generation is cancelled and skipped, no automatic top-up retry',async()=>{
- m.execute.mockResolvedValue({state:'waiting_credits'});const d=db({allowed:true,executionId:'original',state:'running'});
- await advanceReview(d as never,c,'original',{},createRuntimeBudget(()=>0));
- expect(m.cancel).toHaveBeenCalledExactlyOnceWith('original');
- expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({p_reason:'BALANCE_LOW'}));
-});
-it('cron prepares work but defers model execution outside the cron response',async()=>{
- const d={rpc:vi.fn(async(name:string)=>({data:name==='publish_monitor_review_claim'?[c]:{allowed:true,executionId:'original',state:'prepared'},error:null}))};
- const defer=vi.fn();expect(await runWeeklyReviews(d as never,{env:{},defer,budget:createRuntimeBudget(()=>0)},100,()=>0)).toMatchObject({claimed:1,scheduled:1});
- expect(defer).toHaveBeenCalledOnce();expect(m.execute).not.toHaveBeenCalled();
-});
+const PACK={kind:'my_posts',status:'available',review:{rows:[]},window_days:90};
+const options=(defer=vi.fn()):ReviewStep=>({env:{},defer,budget:createRuntimeBudget(),turn:{} as never});
+type Calls=Array<[string,Record<string,unknown>]>;
+/** A database whose step answers come from `steps` (by action) and whose other RPCs return `other`. */
+function database(steps:Record<string,Record<string,unknown>>,extra:Record<string,unknown>={}){
+ const calls:Calls=[];
+ const other:Record<string,unknown>={publish_monitor_post_window:14,...extra};
+ const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
+  calls.push([name,args]);
+  if(name==='publish_monitor_review_step'){
+   const answer=steps[String(args.p_action)]??steps.default;
+   return {data:{allowed:true,actorId:c.actorId,turnId:null,state:null,...answer},error:null};
+  }
+  return {data:name in other?other[name]:true,error:null};
+ });
+ return {calls,db:{rpc} as never};
+}
+const stepActions=(calls:Calls)=>calls.filter(x=>x[0]==='publish_monitor_review_step').map(x=>[x[1].p_action,x[1].p_reason]);
+beforeEach(()=>{vi.clearAllMocks();m.settings.mockResolvedValue({enabled:true});m.pack.mockResolvedValue(PACK);m.close.mockResolvedValue({});
+ m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'completed',delivered:true});});
 
-it('an expired native owner resumes its exact saved epoch/cursor once',async()=>{
- m.execute.mockResolvedValueOnce({state:'waiting_resume',cursor:2,epoch:1}).mockResolvedValueOnce({state:'completed'});
- const d=db({allowed:true,executionId:'original',state:'interrupted'});
- await advanceReview(d as never,c,'original',{},createRuntimeBudget(()=>0));
- expect(m.execute).toHaveBeenCalledTimes(2);
- expect(m.execute).toHaveBeenLastCalledWith('original',undefined,{executionId:'original',cursor:2,epoch:1});
-});
-
-it.each([false,true])('before the review migration, a missing RPC is safe only with the feature off (%s)',async enabled=>{
- m.settings.mockResolvedValue({enabled});
- const d={rpc:vi.fn(async()=>({data:null,error:{code:'PGRST202'}}))};
- const pending=runWeeklyReviews(d as never,{env:{},defer:vi.fn(),budget:createRuntimeBudget(()=>0)},100,()=>0);
- if(enabled)await expect(pending).rejects.toThrow('PUBLISH_MONITOR_REVIEW_CLAIM_FAILED');
- else expect(await pending).toMatchObject({claimed:0,scheduled:0,failed:0,enabled:false});
- expect(m.prepare).not.toHaveBeenCalled();expect(m.execute).not.toHaveBeenCalled();
-});
-
-it.each([180_000,240_000])('a deferred callback shares the original invocation budget after %i ms',async elapsed=>{
- let time=0;const budget=createRuntimeBudget(()=>time);
- const d={rpc:vi.fn(async(name:string)=>({data:name==='publish_monitor_review_claim'?[c]:{allowed:true,executionId:'original',state:'prepared'},error:null}))};
- const work:Array<()=>Promise<void>>=[];
- await runWeeklyReviews(d as never,{env:{},defer:task=>work.push(task),budget},240_000,()=>time);
- time=elapsed;await work[0]!();
- if(elapsed===240_000){expect(m.execute).not.toHaveBeenCalled();expect(m.executor).not.toHaveBeenCalled();}
- else{
-  expect(m.executor.mock.calls[0]![0].budget).toBe(budget);
-  expect(m.executor.mock.calls[0]![0].budget.modelCallTimeout(240_000)).toBe(85_000);
-  expect(m.execute).toHaveBeenCalledOnce();
+it('a review already completed, skipped, retried or waiting on its cost is left alone',async()=>{
+ for(const state of ['completed','failed','cost_pending','retrying']){
+  const d=database({default:{state}});
+  expect(await prepareReview(d.db,c)).toBe(false);
+  expect(stepActions(d.calls)).toEqual([['observe',null]]);
  }
 });
-it('a transient policy failure leaves the same weekly claim recoverable instead of skipping the week',async()=>{
- const d=db({allowed:true,executionId:null,state:null});m.policy.mockRejectedValueOnce(new Error('TEMPORARY_DATABASE_FAILURE'));
- await expect(prepareReview(d as never,c,{})).rejects.toThrow('TEMPORARY_DATABASE_FAILURE');
- expect(d.rpc.mock.calls.some(([,args])=>(args as {p_action?:string}).p_action==='skip')).toBe(false);
- expect(m.prepare).not.toHaveBeenCalled();
- expect(await prepareReview(d as never,c,{})).toBe('existing');
- expect(m.prepare).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({requestId:c.requestId,sessionId:c.sessionId}));
+it('a review turn past its deadline is closed as interrupted and then skipped, with no new admission',async()=>{
+ const d=database({observe:{state:'running',turnId:7,expired:true},default:{}});
+ expect(await prepareReview(d.db,c)).toBe(false);
+ expect(m.close).toHaveBeenCalledWith(expect.objectContaining({actorId:c.actorId,turnId:7,kind:'interrupted',delivered:false}));
+ expect(stepActions(d.calls)).toEqual([['observe',null],['skip','RUNTIME_INTERRUPTED']]);
+ expect(m.run).not.toHaveBeenCalled();
 });
-it('an ambiguous admission response is observed by its original id without a replacement admission or skip',async()=>{
- let observed=0;
- const d={rpc:vi.fn(async()=>({data:{allowed:true,executionId:observed++?'original':null,state:'prepared'},error:null}))};
- m.prepare.mockRejectedValueOnce(new Error('AMBIGUOUS_ADMISSION_RESPONSE'));
- await expect(prepareReview(d as never,c,{})).rejects.toThrow('AMBIGUOUS_ADMISSION_RESPONSE');
- expect(await prepareReview(d as never,c,{})).toBe('original');expect(m.prepare).toHaveBeenCalledOnce();
- expect(d.rpc.mock.calls).toHaveLength(2);expect(m.execute).not.toHaveBeenCalled();
+it('an expired review that never opened a turn is skipped without closing anything',async()=>{
+ const d=database({observe:{expired:true},default:{}});
+ expect(await prepareReview(d.db,c)).toBe(false);
+ expect(m.close).not.toHaveBeenCalled();
+ expect(stepActions(d.calls)).toEqual([['observe',null],['skip','RUNTIME_INTERRUPTED']]);
+});
+it('turning the feature off closes a running turn and skips; nothing new is paid for',async()=>{
+ const d=database({observe:{allowed:false,state:'running',turnId:7},default:{}});
+ expect(await prepareReview(d.db,c)).toBe(false);
+ expect(m.close).toHaveBeenCalledWith(expect.objectContaining({turnId:7,kind:'interrupted'}));
+ expect(stepActions(d.calls)).toEqual([['observe',null],['skip','DISABLED']]);
+});
+it('a turn still running (another invocation) is not started again',async()=>{
+ const d=database({observe:{state:'running',turnId:7}});
+ expect(await prepareReview(d.db,c)).toBe(false);
+ expect(stepActions(d.calls)).toEqual([['observe',null]]);
+});
+it('a claim without a model or a cap is a configuration skip and logs only its allowlisted code',async()=>{
+ const warn=vi.spyOn(logger,'warn').mockImplementation(()=>undefined);
+ const d=database({observe:{},default:{}});
+ expect(await prepareReview(d.db,{...c,modelId:null})).toBe(false);
+ expect(await prepareReview(d.db,{...c,maxCostUsd:'0'})).toBe(false);
+ expect(stepActions(d.calls)).toEqual([['observe',null],['skip','CONFIGURATION_REQUIRED'],['observe',null],['skip','CONFIGURATION_REQUIRED']]);
+ expect(warn).toHaveBeenCalledWith('billing','weekly_review_configuration_refused',{reviewId:c.id,code:'PUBLISH_MONITOR_REVIEW_UNAVAILABLE'});
+});
+it('a healthy new claim is ready to start',async()=>{
+ expect(await prepareReview(database({observe:{}}).db,c)).toBe(true);
 });
 
-it('terminal cap errors free a five-claim batch for later users without dispatching models',async()=>{
- const claims=Array.from({length:6},(_,i)=>({...c,
-  id:'10000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
-  requestId:'20000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
-  actorId:'30000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
-  sessionId:'40000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
-  maxCostUsd:i===5?'0.3':'0.1'}));
- let pending=[...claims];
- const d={rpc:vi.fn(async(name:string,args:Record<string,unknown>)=>{
-  if(name==='publish_monitor_review_claim')return {data:pending.slice(0,Number(args.p_limit)),error:null};
-  if(args.p_action==='skip')pending=pending.filter(row=>row.id!==args.p_id);
-  return {data:{allowed:true,executionId:null,state:null},error:null};
- })};
- m.prepare.mockImplementation(async(input:{requestId:string})=>{
-  const claim=claims.find(row=>row.requestId===input.requestId)!;
-  // Actual admission validator: a positive frozen cap cannot buy the required two calls.
-  capReviewAdmission({maxTurns:3,maxToolCalls:2,ownPosts:true,maxOutputTokens:1000,purposeBudget:{inputBytes:32000}},{contractVersion:'bill2.v2',
-   sourceHash:'original',rules:{creditsPerUsd:'100',multiplier:'6'},
-   callPolicy:[{upperUsd:'9',inputLimit:196608,outputLimit:32768,
-    providerLimits:{providerSlug:'synthetic',contextTokens:1000000,promptUsdPerMillion:'0',completionUsdPerMillion:'0',requestUsd:'0.1'},
-    payg:{maxBytes:196608,templateTokens:4096,marginTokens:4096}}],limits:{maxCalls:6}} as never,{id:claim.id,token:claim.token,maxCostUsd:claim.maxCostUsd});
-  return {executionId:'later-user'};
+it('advance saves the code-computed pack, runs one turn with the frozen claim, and observes a delivered review',async()=>{
+ const d=database({default:{}});
+ await advanceReview(d.db,c,options());
+ expect(m.pack).toHaveBeenCalledWith(expect.anything(),c.actorId,{kind:'workspace_posts_request',windowDays:90,entitled:false,review:true});
+ expect(d.calls.find(x=>x[0]==='publish_monitor_review_save_pack')![1]).toEqual({p_id:c.id,p_token:c.token,p_pack:PACK});
+ expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({id:c.id,actorId:c.actorId,sessionId:c.sessionId,
+  requestId:c.requestId,modelId:c.modelId,maxCostUsd:c.maxCostUsd}),PACK,expect.any(Function),expect.any(Function));
+ expect(stepActions(d.calls).at(-1)).toEqual(['observe',null]);
+});
+it('the visibility of the pack\'s sources is asked right before the turn is saved, through the database check',async()=>{
+ const d=database({default:{}},{publish_monitor_pack_visible:false});
+ m.run.mockImplementationOnce(async(_deps,_claim,_pack,_authorize,visible:()=>Promise<boolean>)=>{
+  expect(await visible()).toBe(false);return {kind:'deferred',code:'x'};});
+ await advanceReview(d.db,c,options());
+ expect(d.calls.find(x=>x[0]==='publish_monitor_pack_visible')![1]).toEqual({p_actor_id:c.actorId,p_result:PACK});
+});
+it('a brand review reads the coach pack of its brand and cadence, saves it wrapped like the plain pack, and runs the turn as a coach review',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888',CONN='99999999-9999-4999-8999-999999999999';
+ m.rows.mockResolvedValue({followers:[{connectionId:CONN},{connectionId:CONN}]});
+ m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ const d=database({default:{businessId:BUSINESS,cadence:'monthly',attempt:2}});
+ await advanceReview(d.db,c,options());
+ expect(m.rows).toHaveBeenCalledWith(expect.anything(),c.actorId,BUSINESS,52);
+ expect(m.build).toHaveBeenCalledWith(expect.objectContaining({cadence:'monthly',businessId:BUSINESS,handbooks:expect.any(Map)}));
+ const wrapped={kind:'review_pack',status:'available',window_days:90,source_connections:[CONN],review:{kind:'review_pack',mode:'full'}};
+ expect(d.calls.find(x=>x[0]==='publish_monitor_review_save_pack')![1]).toEqual({p_id:c.id,p_token:c.token,p_pack:wrapped});
+ expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({coach:true,cadence:'monthly',attempt:2}),wrapped,expect.any(Function),expect.any(Function));
+ expect(m.pack).not.toHaveBeenCalled();
+ await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
+ expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,52);
+});
+it('the 90-day window is used only for an account whose window is that long',async()=>{
+ await advanceReview(database({default:{}},{publish_monitor_post_window:90}).db,c,options());
+ expect(m.pack).toHaveBeenCalledWith(expect.anything(),c.actorId,expect.objectContaining({entitled:true}));
+});
+it('a pack the code cannot build ends the week as a configuration skip before any model call',async()=>{
+ m.pack.mockResolvedValue({kind:'unavailable'});
+ const d=database({default:{}});
+ await advanceReview(d.db,c,options());
+ expect(m.run).not.toHaveBeenCalled();
+ expect(stepActions(d.calls)).toEqual([['authorize',null],['skip','CONFIGURATION_REQUIRED']]);
+});
+it('a review switched off between the claim and the call is skipped as disabled, with no model call',async()=>{
+ const d=database({authorize:{allowed:false},default:{}});
+ await advanceReview(d.db,c,options());
+ expect(m.run).not.toHaveBeenCalled();
+ expect(stepActions(d.calls)).toEqual([['authorize',null],['skip','DISABLED']]);
+});
+it('a lost lease on saving the pack stops without a turn',async()=>{
+ const d=database({default:{}},{publish_monitor_review_save_pack:false});
+ await advanceReview(d.db,c,options());
+ expect(m.run).not.toHaveBeenCalled();
+});
+it('the turn reports what ended the review: a balance skip, a deferral, an interruption, an erasure',async()=>{
+ const cases:Array<[unknown,Array<unknown[]>]>=[
+  [{kind:'skipped',reason:'BALANCE_LOW'},[['skip','BALANCE_LOW']]],
+  [{kind:'skipped',reason:'CONFIGURATION_REQUIRED'},[['skip','CONFIGURATION_REQUIRED']]],
+  [{kind:'deferred',code:'TURN_NEW_CALLS_PAUSED'},[]],
+  [{kind:'done',turnId:9,closeKind:'failed',delivered:false},[['skip','RUNTIME_INTERRUPTED']]],
+  [{kind:'done',turnId:9,closeKind:'interrupted',delivered:false},[['skip','RUNTIME_INTERRUPTED']]],
+  [{kind:'done',turnId:9,closeKind:'erased',delivered:false},[['skip','RUNTIME_ENDED']]]];
+ for(const [result,tail] of cases){
+  m.run.mockResolvedValueOnce(result);
+  const d=database({default:{}});
+  await advanceReview(d.db,c,options());
+  expect(stepActions(d.calls).slice(1)).toEqual(tail);
+ }
+});
+it('the turn asks for authorization right before the paid call, through the review step',async()=>{
+ const d=database({authorize:{allowed:true},default:{}});
+ m.run.mockImplementationOnce(async(_deps,_claim,_pack,authorize:()=>Promise<boolean>)=>{
+  expect(await authorize()).toBe(true);return {kind:'deferred',code:'x'};});
+ await advanceReview(d.db,c,options());
+ expect(stepActions(d.calls).filter(([a])=>a==='authorize')).toHaveLength(2);
+});
+it('an error mid-way leaves the same claim for the next batch and is only logged',async()=>{
+ const warn=vi.spyOn(logger,'warn').mockImplementation(()=>undefined);
+ m.run.mockRejectedValueOnce(new Error('PUBLISH_MONITOR_REVIEW_STEP_FAILED'));
+ const d=database({default:{}});
+ await expect(advanceReview(d.db,c,options())).resolves.toBeUndefined();
+ expect(warn).toHaveBeenCalledWith('billing','weekly_review_interrupted',{reviewId:c.id,code:'PUBLISH_MONITOR_REVIEW_STEP_FAILED'});
+});
+
+it('cron prepares work but defers the model call outside the cron response',async()=>{
+ const d=database({observe:{},default:{}},{publish_monitor_review_claim:[c]});
+ const defer=vi.fn();
+ const result=await runWeeklyReviews(d.db,options(defer),Date.now()+10_000);
+ expect(result).toMatchObject({claimed:1,scheduled:1,skipped:0,failed:0,enabled:true});
+ expect(m.run).not.toHaveBeenCalled();
+ expect(defer).toHaveBeenCalledTimes(1);
+ await defer.mock.calls[0]![0]();
+ expect(m.run).toHaveBeenCalledTimes(1);
+});
+it('cron accepts the claims exactly as the database returns them, plain ones and the brand coach\'s',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888';
+ const plain={...c,businessId:null,cadence:'weekly',attempt:1};
+ const brand={...c,id:'77777777-7777-4777-8777-777777777777',businessId:BUSINESS,cadence:'monthly',attempt:2};
+ const d=database({observe:{},default:{}},{publish_monitor_review_claim:[plain,brand]});
+ const defer=vi.fn();
+ expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:2,scheduled:2,failed:0});
+ expect(defer).toHaveBeenCalledTimes(2);
+});
+it('a feature switched off still reaches existing claims; a missing claim function is only an off feature',async()=>{
+ m.settings.mockResolvedValue({enabled:false});
+ const d={rpc:vi.fn(async()=>({data:null,error:{code:'PGRST202'}}))} as never;
+ expect(await runWeeklyReviews(d,options(),Date.now()+10_000)).toMatchObject({enabled:false,claimed:0});
+ const broken={rpc:vi.fn(async()=>({data:null,error:{code:'XX000'}}))} as never;
+ await expect(runWeeklyReviews(broken,options(),Date.now()+10_000)).rejects.toThrow('PUBLISH_MONITOR_REVIEW_CLAIM_FAILED');
+});
+it('one claim that cannot be prepared does not hold back the rest, and nothing is claimed past the deadline',async()=>{
+ const second={...c,id:'77777777-7777-4777-8777-777777777777'};
+ let n=0;
+ const rpc=vi.fn(async(name:string)=>{
+  if(name==='publish_monitor_review_claim')return {data:[c,second],error:null};
+  if(name==='publish_monitor_review_step'&&++n===1)return {data:null,error:{code:'XX000'}};
+  return {data:{allowed:true,actorId:c.actorId,state:null},error:null};
  });
- const defer=vi.fn(),options={env:{},defer,budget:createRuntimeBudget(()=>0)};
- expect(await runWeeklyReviews(d as never,options,100,()=>0)).toMatchObject({claimed:5,skipped:5,failed:0,scheduled:0});
- expect(pending.map(row=>row.id)).toEqual([claims[5]!.id]);
- expect(d.rpc.mock.calls.filter(([,args])=>args.p_action==='skip').map(([,args])=>args.p_reason))
-  .toEqual(Array(5).fill('CONFIGURATION_REQUIRED'));
- expect(await runWeeklyReviews(d as never,options,100,()=>0)).toMatchObject({claimed:1,scheduled:1,failed:0});
- expect(defer).toHaveBeenCalledOnce();expect(m.execute).not.toHaveBeenCalled();
-});
-it.each(['PUBLISH_MONITOR_REVIEW_UNAVAILABLE','RUNTIME_STAGING_MODEL_DENIED','RUNTIME_STAGING_MODEL_NOT_APPROVED'])(
- 'an explicit review/model configuration refusal is skipped (%s)',async code=>{
- const d=db({allowed:true,executionId:null,state:null});
- m.prepare.mockRejectedValueOnce(new Error(code));
- expect(await prepareReview(d as never,c,{})).toBe(null);
- expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({
-  p_action:'skip',p_reason:'CONFIGURATION_REQUIRED'}));
- expect(m.execute).not.toHaveBeenCalled();
-});
-
-it('configuration refusals log only the exact allowlisted code and reviewId',async()=>{
- const log=vi.spyOn(logger,'warn').mockImplementation(()=>{});
- try{
-  const d=db({allowed:true,executionId:null,state:null});
-  m.prepare.mockRejectedValueOnce(new Error('PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW'));
-  expect(await prepareReview(d as never,c,{})).toBe(null);
-  expect(log).toHaveBeenCalledWith('billing','weekly_review_configuration_refused',{
-   reviewId:c.id,code:'PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW'});
- }finally{log.mockRestore();}
+ const defer=vi.fn();
+ const result=await runWeeklyReviews({rpc} as never,options(defer),Date.now()+10_000);
+ expect(result).toMatchObject({claimed:2,failed:1,scheduled:1});
+ const late=await runWeeklyReviews({rpc} as never,options(),0,()=>1);
+ expect(late).toMatchObject({claimed:2,scheduled:0,skipped:0,failed:0});
 });

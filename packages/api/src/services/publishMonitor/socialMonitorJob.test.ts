@@ -11,7 +11,7 @@ function db(switchValue: unknown, failing: string[] = [], featureOn: boolean | '
       calls.push(name);
       if (failing.includes(name)) return { data: null, error: { message: 'x' } };
       if (name === 'publish_monitor_orphan_classify') return { data: { delete: [], unknownFormat: [], takenOver: [] }, error: null };
-      if (name === 'publish_monitor_snapshot_prune' || name === 'publish_monitor_billed_prune') return { data: 0, error: null };
+      if (name === 'publish_monitor_snapshot_prune' || name === 'publish_monitor_billed_prune' || name === 'publish_monitor_settle_facts') return { data: 0, error: null };
       if (name === 'publish_monitor_stuck_list') return { data: { totals: { connections: 3, requests: 250 }, connections: [], requests: [] }, error: null };
       return { data: [], error: null };
     },
@@ -32,6 +32,25 @@ const windowFor = async () => 30;
 const deps = (): ClientDeps => ({ apiKey: 'pfm_test_FAKEKEY000000000000', limiter: { acquire: async () => ({ ok: true }) },
   fetchImpl: async () => json(200, { data: [], meta: { total: 0, offset: 0, limit: 100 } }) });
 
+describe('settled facts (RC-3)', () => {
+  const batches = (counts: number[]) => { const calls: unknown[] = [];
+    return { calls, db: { rpc: async (name: string, args: unknown) => { calls.push([name, args]); const n = counts.shift();
+      return n === undefined ? { data: null, error: { message: 'x' } } : { data: n, error: null }; } } as never }; };
+  it('settles in batches until one is not full, and counts what it settled', async () => {
+    const { settleFacts } = await import('./socialMonitorJob');
+    const b = batches([500, 500, 120]);
+    expect(await settleFacts(b.db, Date.now() + 60_000)).toBe(1120);
+    expect(b.calls).toEqual(Array(3).fill(['publish_monitor_settle_facts', { p_limit: 500 }]));
+  });
+  it('stops at the deadline and at ten batches; a failing call is an error, never zero', async () => {
+    const { settleFacts } = await import('./socialMonitorJob');
+    expect(await settleFacts(batches([500]).db, 0)).toBe(0);
+    const full = batches(Array(20).fill(500));
+    expect(await settleFacts(full.db, Date.now() + 60_000)).toBe(5000);
+    await expect(settleFacts(batches([]).db, Date.now() + 60_000)).rejects.toThrow('PUBLISH_MONITOR_SETTLE_FACTS_FAILED');
+  });
+});
+
 describe('publish-monitor daily job', () => {
   it('runs retention, open publishes and deletions first, then attempts, then the sweep; deletion of orphans needs the switch to be exactly true', async () => {
     const off = db('true');
@@ -51,13 +70,13 @@ describe('publish-monitor daily job', () => {
     expect(on.calls).toEqual(['publish_monitor_snapshot_prune', 'publish_monitor_billed_prune', 'publish_monitor_publish_reconcile_claim',
       'publish_monitor_billed_orphans',
       'publish_monitor_provider_work_claim', 'publish_monitor_cleanup_claim', 'publish_monitor_refresh_claim',
-      'publish_monitor_orphan_classify', 'publish_monitor_stuck_list']);
+      'publish_monitor_settle_facts', 'publish_monitor_orphan_classify', 'publish_monitor_stuck_list']);
     expect(report.refresh).toEqual({ claimed: 0, outcomes: {} });
   });
 
   it('an unreadable feature switch is a reported refresh failure, not a silent skip', async () => {
     const broken = db(undefined, [], 'unreadable');
-    expect((await runSocialMonitorJob(broken.db, deps(), Date.now() + 60_000, windowFor)).failures).toEqual(['refresh']);
+    expect((await runSocialMonitorJob(broken.db, deps(), Date.now() + 60_000, windowFor)).failures).toEqual(['refresh', 'facts']);
   });
 
   it('without a Post for Me key, retention, held credits and TikHub still run; Post for Me steps are skipped', async () => {

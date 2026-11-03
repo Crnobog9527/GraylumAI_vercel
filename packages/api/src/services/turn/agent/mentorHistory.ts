@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
 import type {RuntimeTool} from './runner';
-import type {ToolRpc} from '../skills/skillFileExecution';
 import {READ_HISTORY_TOOL} from './agentTools';
 import {SKILL_FILE_TRACE_BYTES} from '../skills/skillFile';
 
@@ -32,25 +31,4 @@ export function mentorHistoryToolBytes():number {
  const tool=mentorHistoryTool(async()=>'');
  return Buffer.byteLength(JSON.stringify([{type:'function',function:{name:tool.name,description:tool.description,
   strict:true,parameters:z.toJSONSchema(mentorHistoryParameters)}}]));
-}
-
-/** The execution-owned claim precedes the private read; replay returns the frozen result. */
-export function executionMentorHistoryTool(options:{executionId:string;rpc:ToolRpc;assertCanStart:()=>void;onRefused?:()=>void}):RuntimeTool {
- return mentorHistoryTool(async(arguments_,callId)=>{
-  options.assertCanStart();
-  const {query}=mentorHistoryParameters.parse(arguments_);
-  const args={p_execution_id:options.executionId,p_call_id:callId,p_name:READ_HISTORY_TOOL,p_arguments:arguments_};
-  try {
-   const saved=await options.rpc<{result:unknown}>('runtime_tool',{...args,p_action:'claim'});
-   if(saved.result!==null)return JSON.stringify(saved.result);
-   const result=await options.rpc<unknown>('runtime_mentor_history',{p_execution_id:options.executionId,p_query:query??''});
-   // Persisted JSONB key order is used both initially and on replay.
-   const committed=await options.rpc<{result:unknown}>('runtime_tool',{...args,p_action:'complete',p_result:result});
-   return JSON.stringify(committed.result);
-  } catch(error) {
-   // A revoked or deleted source never becomes readable again: end the turn instead of retrying forever.
-   if(error instanceof Error&&error.message==='RUNTIME_HISTORY_READ_REFUSED')options.onRefused?.();
-   throw error;
-  }
- });
 }

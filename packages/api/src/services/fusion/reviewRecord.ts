@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { FrozenCall } from '../turn/provider/service';
 
 /** The review record (0236). Progress lives on the server; every write takes the review row lock first. */
 const uuid = z.string().uuid();
@@ -57,10 +56,6 @@ export function reviewRecord(admin: SupabaseClient, actorId: string) {
   }
   const view = async (value: Promise<unknown>) => reviewView.parse(await value);
   return {
-    /** Starts (or replays) a review of the current formal version; materials are frozen in the database. */
-    start: (input: { requestId: string; draftId: string; sourceVersionId: string; config: Record<string, unknown> & { estimateUsd: string } }) =>
-      view(rpc('fusion_review_start', { p_request_id: uuid.parse(input.requestId), p_draft_id: uuid.parse(input.draftId),
-        p_source_version_id: uuid.parse(input.sourceVersionId), p_config: input.config })),
     /** The review an earlier start with this request created, or null. The database answers a known request
      * before it reads anything else, and refuses an empty config before any write, so this never creates one. */
     async replay(input: { requestId: string; draftId: string; sourceVersionId: string }): Promise<ReviewView | null> {
@@ -79,23 +74,10 @@ export function reviewRecord(admin: SupabaseClient, actorId: string) {
       const value = await rpc('fusion_review_read', { p_review_id: uuid.parse(reviewId) });
       return value === null ? null : reviewView.parse(value);
     },
-    /** Group claim for the current step inside the review lock (refused once the review ended). */
-    async claim(reviewId: string, at: ReviewPosition, groupId: string, items: Array<{ runId: string; payload: FrozenCall }>) {
-      return await rpc('fusion_review_claim', { p_review_id: uuid.parse(reviewId), p_round: at.round, p_phase: at.phase,
-        p_attempt: at.attempt, p_group_id: uuid.parse(groupId),
-        p_items: items.map(item => ({ runId: item.runId, sequence: 1, payload: item.payload })) }) as {
-        state: 'claimed' | 'waiting_credits'; calls: Array<{ runId: string; id: string; state: string; dispatchToken: string | null }> };
-    },
-    advance: (reviewId: string, from: ReviewPosition, to: ({ state: 'running' } & ReviewPosition)
-      | { state: 'revision_failed' | 'incomplete' | 'completed'; outcome: unknown; revisionId?: string }) =>
-      view(rpc('fusion_review_advance', { p_review_id: uuid.parse(reviewId), p_from: from, p_to: to })),
     /** Settles the held fee of an ended review once its calls have settled (idempotent; 0294). */
     async settleFee(reviewId: string): Promise<ReviewFee | null> {
       const value = await rpc('fusion_review_fee_settle', { p_review_id: uuid.parse(reviewId) });
       return value === null ? null : reviewFee.parse(value);
     },
-    /** stopped: user stop of a running or paused review; interrupted: user ends a paused review. */
-    close: (reviewId: string, state: 'stopped' | 'interrupted') =>
-      view(rpc('fusion_review_close', { p_review_id: uuid.parse(reviewId), p_state: state })),
   };
 }

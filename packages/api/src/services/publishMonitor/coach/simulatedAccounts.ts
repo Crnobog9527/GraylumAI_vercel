@@ -79,10 +79,10 @@ export const SIMULATED_ACCOUNTS: AccountSpec[] = [
     formats: [{ tag: '结论先行', pillarKey: 'p1', fromDaysAgo: 70, share: 0.5 }],
     experiments: [
       { id: 'A-E1', kind: 'tactic', hypothesis: '干货教程开头先给结论，前 3 秒留住人', action: '接下来两周的干货教程全部结论先行',
-        metric: 'views', targetMult: 1.5, match: { pillarKey: 'p1', formatTags: ['结论先行'] },
+        metric: 'views', targetMult: 1.5, match: { pillarKey: 'p1', platform: 'xiaohongshu', formatTags: ['结论先行'] },
         proposedDaysAgo: 84, periodDays: 14, effect: 1.6, persists: true, postsPerWeek: 2, expected: { verdict: 'worked' } },
       { id: 'A-E2', kind: 'tactic', hypothesis: '日常记录蹭热点话题能带来更多曝光', action: '两周内日常记录都挂当周热点话题',
-        metric: 'views', targetMult: 1.3, match: { pillarKey: 'p2', formatTags: ['蹭热点'] },
+        metric: 'views', targetMult: 1.3, match: { pillarKey: 'p2', platform: 'xiaohongshu', formatTags: ['蹭热点'] },
         proposedDaysAgo: 56, periodDays: 14, effect: 0.55, persists: false, postsPerWeek: 2, expected: { verdict: 'failed' } },
     ],
     outages: [], shifts: [],
@@ -136,7 +136,7 @@ export const SIMULATED_ACCOUNTS: AccountSpec[] = [
         expected: { verdict: 'inconclusive', reason: 'platform_shift' } },
     ],
     outages: [],
-    shifts: [{ platform: 'tiktok', fromDaysAgo: 70, effect: 0.5 }],
+    shifts: [{ platform: 'tiktok', fromDaysAgo: 70, effect: 0.4 }],
     stage: { initial: '1_10', transitions: [] },
   },
   {
@@ -153,7 +153,7 @@ export const SIMULATED_ACCOUNTS: AccountSpec[] = [
     formats: [],
     experiments: [
       { id: 'D-E1', kind: 'tactic', hypothesis: '手作过程先放成品，开头更抓人', action: '两周内手作过程先放成品再倒叙',
-        metric: 'views', targetMult: 1.3, match: { pillarKey: 'p1', formatTags: ['成品先出'] },
+        metric: 'views', targetMult: 1.3, match: { pillarKey: 'p1', platform: 'instagram', formatTags: ['成品先出'] },
         proposedDaysAgo: 35, periodDays: 14, effect: 1.4, persists: false, postsPerWeek: 1,
         expected: { verdict: 'inconclusive', reason: 'low_volume' } },
     ],

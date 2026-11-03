@@ -280,6 +280,7 @@ turn_call_begin  →  dispatched ─(供应商返回 generation id，首个事�
   该笔对应的用户冻结份额（min(G_i, 剩余 H)）和日限预占 U_i **都保留**，其余已知调用正常结算；`turns.settlement='pending'`。
   恢复定时任务按 `turn_calls(cost_pending)` 索引找活，用 `provider_id` 查供应商成本（现有 lookup 路径）；查到→按 n/c 结算并释放多余预占；
   按现行规则到期仍查不到的，沿 BILL2 §0.3（未知 ≠ 零，不推定失败、不重发）和 Owner 10-25/10-27 的 24 小时规则处理；
+  **例外（Owner 2026-11-03「同意自动退还」，见 MASTER_PLAN 2.1）**：供应商对该 provider_id 明确回答 404“查无此次生成”、且开轮已满 24 小时再查仍如此，才把这次调用记 0、冻结积分全部退回；超时/5xx/网络错误不算；
   **第三方搜索/社媒工具例外**（Owner 10-13）：对用户按 0 结算、释放用户冻结，供应商成本记 `cost_pending`，日限预占到成本确认或 24 小时后释放。
 - 现有 `streaming.integration.ts` 的"断线保留供应商 id 与冻结、不发第二次 POST、不零退"场景原样迁入 V2-4 的验收。
 

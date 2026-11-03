@@ -3,7 +3,7 @@ import {it,expect,vi} from 'vitest';
 import {createClient} from '@supabase/supabase-js';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './budget';
 import {AUTH_REUSE_MAX_AGE_MS,expiringAuthAfterProvider} from '../provider/authReuse';
-import type {BillingTransport} from '../provider/service';
+import type {BillingTransport} from '../provider/frozenRun';
 
 const A='00000000-0000-4000-8000-00000000000a',B='00000000-0000-4000-8000-00000000000b';
 const AUTH='http://127.0.0.1/auth/v1/user';

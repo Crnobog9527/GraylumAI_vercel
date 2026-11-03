@@ -206,6 +206,65 @@ export async function holdCases(t){
   const r=await one("select billing_reconcile_day(now()-interval '1 day',now()+interval '1 minute') v");
   assert.deepEqual([r.sources.mismatched,r.entries.notApplied],[0,0],JSON.stringify(r.sources));
  }
+ // The turn ledger (V2-12 R7): every settled turn's spend rows equal what it charged; a changed row is named.
+ {
+  const day=()=>one("select billing_reconcile_day(now()-interval '1 day',now()+interval '1 minute') v").then(r=>r.turns);
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);
+  assert.equal((await close(a,o.turnId)).chargedCredits>0,true);
+  const ok=await day();
+  assert.ok(ok.settledTurns>=1);assert.equal(ok.mismatched,0,'balanced: '+JSON.stringify(ok.sample));
+  const row=await c.query("select id,amount from credit_transactions where user_id=$1 and source_type='ai_task' and source_id=$2 and reason_code='turn_spend'",[a.actor,String(o.turnId)]);
+  assert.equal(row.rowCount,1);
+  await c.query("update credit_transactions set amount=amount+1 where id=$1",[row.rows[0].id]);
+  try{
+   const bad=await day();
+   assert.equal(bad.mismatched,1,'unbalanced');
+   assert.deepEqual([bad.sample[0].actorId,String(bad.sample[0].turnId)],[a.actor,String(o.turnId)]);
+  }finally{await c.query("update credit_transactions set amount=$2 where id=$1",[row.rows[0].id,row.rows[0].amount]);}
+  assert.equal((await day()).mismatched,0,'balanced again');
+ // A turn whose paid tool cost is still unknown is settled for the user (charged) while its settlement stays pending: it is checked too.
+ {
+  const win=()=>one("select billing_reconcile_day(now()-interval '1 day',now()+interval '1 minute') v").then(r=>r.turns);
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);
+  await begin(a,o.turnId,2,{kind:'tool',paid:true,upper:0.01});
+  await close(a,o.turnId);
+  const row=(await c.query("select settlement,charged_credits from turns where actor_id=$1 and id=$2",[a.actor,o.turnId])).rows[0];
+  assert.equal(row.settlement,'pending');assert.notEqual(row.charged_credits,null);
+  const spend=await c.query("select id,amount from credit_transactions where user_id=$1 and source_type='ai_task' and source_id=$2 and reason_code='turn_spend'",[a.actor,String(o.turnId)]);
+  assert.equal(spend.rowCount,1);
+  await c.query("update credit_transactions set amount=amount+1 where id=$1",[spend.rows[0].id]);
+  try{assert.ok((await win()).sample.some(s=>String(s.turnId)===String(o.turnId)),'a charged turn with a pending provider cost is checked');}
+  finally{await c.query("update credit_transactions set amount=$2 where id=$1",[spend.rows[0].id,spend.rows[0].amount]);}
+ }
+ // V2-12: the platform-absorbed cost report reads turns (same row shape as the BILL2 one), and the session scope read is narrow.
+ {
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);await close(a,o.turnId);
+  await c.query("update turns set absorbed_credits=7 where actor_id=$1 and id=$2",[a.actor,o.turnId]);
+  const rows=(await c.query("select * from turn_platform_absorb_report(now()-interval '1 day',now()+interval '1 minute')")).rows;
+  const mine=rows.filter(r=>r.platform_cap_credits==='7');
+  assert.equal(mine.length>=1,true,'the absorbed turn is reported: '+JSON.stringify(rows));
+  assert.equal(mine[0].platform_bound_credits,'0');assert.equal(mine[0].call_multiplier,'1');assert.match(mine[0].utc_date,/^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(Number(mine[0].credits_per_usd)>0,true);
+  assert.match(await refusal(one('select runtime_session_scope($1,$2) v',[(await account(10)).actor,a.session])),/RUNTIME_SCOPE_DENIED/);
+ }
+ // A turn closed on an earlier day and settled now (recovery) is checked where it was settled, not where it closed.
+ {
+  const win=(from,to)=>one("select billing_reconcile_day(now()-$1::interval,now()-$2::interval) v",[from,to]).then(r=>r.turns);
+  const a=await account(1000),o=await open(a,{pol:hold()});
+  await begin(a,o.turnId,1);await record(a,o.turnId,1);await close(a,o.turnId);
+  await c.query("update turns set closed_at=now()-interval '3 days' where actor_id=$1 and id=$2",[a.actor,o.turnId]);
+  const row=await c.query("select id,amount from credit_transactions where user_id=$1 and source_type='ai_task' and source_id=$2 and reason_code='turn_spend'",[a.actor,String(o.turnId)]);
+  await c.query("update credit_transactions set amount=amount+1 where id=$1",[row.rows[0].id]);
+  try{
+   const now=await win('1 day','-1 minute'),past=await win('10 days','5 days');
+   assert.ok(now.sample.some(s=>String(s.turnId)===String(o.turnId)),'found in the window of its settlement though it closed 3 days ago');
+   assert.ok(!past.sample.some(s=>String(s.turnId)===String(o.turnId)),'not in a window before its settlement');
+  }finally{await c.query("update credit_transactions set amount=$2 where id=$1",[row.rows[0].id,row.rows[0].amount]);}
+ }
+ }
  report.checks.push('hold top-up: one call frozen at the open, topped up in begin, charge = usage, each freeze settled once with its own keys',
   'hold top-up: no account lock when covered, paused only when the balance cannot, G caps it, repeat begin freezes nothing',
   'hold top-up: failed, expired, unknown cost and resume return or carry every freeze; two conversations share a balance; fixed kinds unchanged; ledger reconciles');

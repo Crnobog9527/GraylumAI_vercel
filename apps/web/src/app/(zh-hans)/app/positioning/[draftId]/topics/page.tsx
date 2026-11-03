@@ -30,6 +30,7 @@ import { lastReplyAdoptionNotice, parseAdoption, parseCandidate } from './topic-
 import { refuseTopic, turnRunningNotice, useTopicTurnPath } from './use-topic-turn-path';
 import { useTopicOpening } from './use-topic-opening';
 import { STALE_WORKSPACE_NOTICE, topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
+import { useTopicRestart } from './use-topic-restart';
 import { StaleWorkspaceNotice } from './stale-workspace-notice';
 import { useTopicInput } from './topic-input';
 type PlanItem = {
@@ -176,17 +177,6 @@ function TopicWorkspaceContent() {
     });
   },[scrollKey,scrollSignature]);
 
-  async function start() {
-    setError('');
-    const sourceVersionId = read.data?.report?.id;
-    if (!sourceVersionId) return;
-    try {
-      const accepted = await bind.mutateAsync({ draftId, sourceVersionId });
-      if (accepted.sourceVersionId !== sourceVersionId) throw new Error('OPC_TOPIC_SOURCE_CHANGED');
-      await workspace.refetch();
-    } catch (cause) { setError(topicFailureMessage(cause)); }
-  }
-
   async function perform(proposed: Operation, fromBox = false) {
     const opensTurn = proposed.kind === 'chat' || proposed.kind === 'adoptTopics'; // A stale workspace opens none, retry included.
     if (!storageKey || operationBusy.current || (stale && opensTurn)) return;
@@ -277,6 +267,9 @@ function TopicWorkspaceContent() {
   const refusedOpening = useTopicOpening({ opening, storageKey, executions: view.data?.executions,
     ready: Boolean(!stale && sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
     send: request => void perform({ kind: 'chat', request }) });
+
+  const start = useTopicRestart({ draftId, stale, sessionId, ready: Boolean(turnPath.decided && view.data && !busy && !pending), bind, setError,
+    current: read.data?.report?.id, bound: workspace.data, refetch: workspace.refetch, send: request => void perform({ kind: 'chat', request }) });
 
   function adoptionRequest(snapshot: CandidateSnapshot, itemIds: string[], requestId = crypto.randomUUID()): AdoptTopicsRequest | null {
     if (stale || accountList.isFetching || accountList.error || !accountList.data) return null;
@@ -428,7 +421,7 @@ function TopicWorkspaceContent() {
 
       {bound && sourceAvailable && (
         <>
-          {stale && <StaleWorkspaceNotice draftId={draftId} />}
+          {stale && <StaleWorkspaceNotice draftId={draftId} busy={busy} onStart={() => void start()} />}
           <div ref={scrollArea} onScroll={rememberScroll} className="min-h-0 flex-1 overflow-y-auto" aria-label="选题对话记录">
             {!executions?.length && (
               <div className="mx-auto flex min-h-48 max-w-xl flex-col items-center justify-center px-6 py-10 text-center">

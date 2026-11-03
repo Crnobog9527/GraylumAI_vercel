@@ -19,14 +19,7 @@ function fixture(result: {data?: unknown; error?: {code: string; message: string
 const item = {id:id(3), familyId:id(3), version:1, versions:1, resultType:'script', title:'早起口播稿', body:'今天早起……',
   sourceExecutionId:id(2), sourceTurnId:null, sourceAvailable:true, createdAt:'2026-10-23T00:00:00Z'};
 
-it('saves a reply excerpt for the session owner: the actor comes from the session, not the input', async () => {
-  const f = fixture({data:item});
-  await expect(f.caller.sessionResultSave({sessionId:id(1), executionId:id(2), requestId:id(4), resultType:'script',
-    title:null, excerpt:'今天早起'})).resolves.toEqual(item);
-  expect(f.rpc).toHaveBeenCalledExactlyOnceWith('runtime_session_result_save', {p_actor_id:id(9), p_session_id:id(1),
-    p_execution_id:id(2), p_request_id:id(4), p_result_type:'script', p_title:null, p_excerpt:'今天早起'});
-});
-it('saves from a turn with the same owner rule: the actor comes from the session, not the input', async () => {
+it('saves a reply for the session owner: the actor comes from the session, not the input', async () => {
   const saved = {...item, sourceExecutionId:null, sourceTurnId:7};
   const f = fixture({data:saved});
   await expect(f.caller.sessionResultSaveTurn({sessionId:id(1), turnId:7, requestId:id(4), resultType:'script',
@@ -57,7 +50,7 @@ it.each([
   ['SESSION_RESULT_LIMIT', 'OPC_RESULT_LIMIT'],
 ])('denies a save with a bounded code when SQL refuses %s', async (sql, code) => {
   const f = fixture({error:{code:'42501', message:sql}});
-  await expect(f.caller.sessionResultSave({sessionId:id(1), executionId:id(2), requestId:id(4), resultType:'copy'}))
+  await expect(f.caller.sessionResultSaveTurn({sessionId:id(1), turnId:7, requestId:id(4), resultType:'copy', title:null, excerpt:null}))
     .rejects.toThrow(code);
 });
 it('reads no folder (null) for a conversation that is not an ordinary free one, never a server error', async () => {
@@ -75,10 +68,14 @@ it.each([['versions','sessionResultVersions',{familyId:id(3)}]] as const)(
 });
 it('rejects an actor in the input, an unknown type and over-long text before the database', async () => {
   const f = fixture({});
-  const base = {sessionId:id(1), executionId:id(2), requestId:id(4), resultType:'script' as const};
-  await expect(f.caller.sessionResultSave({...base, actorId:id(8)} as never)).rejects.toThrow();
-  await expect(f.caller.sessionResultSave({...base, resultType:'minutes'} as never)).rejects.toThrow();
-  await expect(f.caller.sessionResultSave({...base, excerpt:'x'.repeat(20001)})).rejects.toThrow();
+  const base = {sessionId:id(1), turnId:7, requestId:id(4), resultType:'script' as const, title:null};
+  await expect(f.caller.sessionResultSaveTurn({...base, excerpt:null, actorId:id(8)} as never)).rejects.toThrow();
+  await expect(f.caller.sessionResultSaveTurn({...base, excerpt:null, resultType:'minutes'} as never)).rejects.toThrow();
+  await expect(f.caller.sessionResultSaveTurn({...base, excerpt:'x'.repeat(20001)})).rejects.toThrow();
+  // The save keyed by an execution id is gone with the old execution path: it is no longer a route at all.
+  expect(Object.keys(opcRouter._def.procedures)).not.toContain('sessionResultSave');
+  await expect(f.caller.sessionResultSaveTurn({sessionId:id(1), executionId:id(2), requestId:id(4), resultType:'script', title:null,
+    excerpt:null} as never)).rejects.toThrow();
   await expect(f.caller.sessionResultEdit({familyId:id(3), requestId:id(6), expectedVersion:1, title:null, body:''}))
     .rejects.toThrow();
   expect(f.rpc).not.toHaveBeenCalled();

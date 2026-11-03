@@ -22,7 +22,7 @@ export const RECOVERY_LOOKUP_MS = 2_000;
 const RECOVER_STEP_MS = 1_000;
 
 export type TurnRecoveryDeps = {
-  db: Pick<TurnDatabase, 'claimRecovery' | 'recover' | 'record'>;
+  db: Pick<TurnDatabase, 'claimRecovery' | 'recover' | 'record' | 'settleAbsent'>;
   /** OpenRouter generation lookup with the platform key; null when no key is configured (lookups are then skipped). */
   lookup: ((providerId: string, identity: OpenRouterIdentity, timeoutMs: number) => Promise<TransportObservation>) | null;
   /** The account of the platform key, as the call identity names it. */
@@ -31,19 +31,37 @@ export type TurnRecoveryDeps = {
 };
 export type TurnRecoverySummary = {
   claimed: number; interrupted: number; expired: number; settled: number; pending: number; skipped: number;
-  lookups: number; lateReceipts: number; failed: number;
+  lookups: number; lateReceipts: number; absentSettled: number; failed: number;
 };
 
-/** One unknown model cost: its final cost by provider id, recorded as the late receipt; anything less leaves it unknown. */
-async function lookUp(deps: TurnRecoveryDeps, item: RecoveryItem, call: RecoveryItem['calls'][number]): Promise<boolean> {
+/**
+ * The provider's explicit "no such generation": HTTP 404 with the whole answer read. A timeout, a 5xx, a refused key, a rate limit or
+ * a broken body is not evidence of anything and leaves the cost unknown (Owner 2026-11-03).
+ */
+export const lookupAbsent = (observation: TransportObservation) =>
+  observation.httpStatus === 404 && observation.complete === true && observation.transportIssue === null;
+
+/**
+ * One unknown model cost: its final cost by provider id, recorded as the late receipt; anything less leaves it unknown. The one
+ * other outcome is the provider's "no such generation" on a closed turn (action 'settle'): the database settles that call at zero
+ * once the turn is 24 hours old, and answers "too_early" before that (the call then stays unknown and is looked up again).
+ */
+async function lookUp(deps: TurnRecoveryDeps, item: RecoveryItem, call: RecoveryItem['calls'][number]): Promise<'receipt' | 'absent' | null> {
   // Priced as a live receipt is (call.ts): the price table frozen at open, from the looked-up token counts; min(c, U) only when
   // the counts are missing. A turn that froze no price table is left unknown rather than priced by another rule.
   const pricing = nominalPricing.safeParse(call.pricing);
-  if (!deps.lookup || !deps.account || !call.model || !pricing.success) return false;
+  if (!deps.lookup || !deps.account || !call.model) return null;
   const identity: OpenRouterIdentity = { provider: 'openrouter', account: deps.account, model: call.model, protocol: 'openrouter-chat-v1' };
   const observation = await deps.lookup(call.providerId, identity, RECOVERY_LOOKUP_MS);
+  if (lookupAbsent(observation)) {
+    if (item.action !== 'settle') return null;
+    const outcome = await deps.db.settleAbsent({ actorId: item.actorId, turnId: item.turnId, seq: call.seq, providerId: call.providerId,
+      httpStatus: 404, payloadHash: observation.sourceHash });
+    return outcome.settled ? 'absent' : null;
+  }
+  if (!pricing.success) return null;
   const evidence = openRouterEvidence(observation, identity, 'lookup', call.providerId);
-  if (!('final' in evidence) || !evidence.final || typeof evidence.cost !== 'string') return false;
+  if (!('final' in evidence) || !evidence.final || typeof evidence.cost !== 'string') return null;
   const actual = ceil12(evidence.cost);
   const usage = (evidence.usage ?? {}) as Record<string, unknown>;
   const count = (value: unknown) => typeof value === 'number' ? value
@@ -57,13 +75,13 @@ async function lookUp(deps: TurnRecoveryDeps, item: RecoveryItem, call: Recovery
     // nominalSource: actual_fallback when even the lookup has no token counts (BILL_PAYG_PLAN 3A), as the reports count it.
     usage: { ...usage, source: 'lookup', nominalSource: nominal === null ? 'actual_fallback' : 'nominal' }, providerId: call.providerId,
     payloadHash: evidence.sourceHash, raw: evidence.rawBody || null });
-  return true;
+  return 'receipt';
 }
 
 export async function recoverTurns(deps: TurnRecoveryDeps): Promise<TurnRecoverySummary> {
   const now = deps.now ?? Date.now;
   const summary: TurnRecoverySummary = { claimed: 0, interrupted: 0, expired: 0, settled: 0, pending: 0, skipped: 0, lookups: 0,
-    lateReceipts: 0, failed: 0 };
+    lateReceipts: 0, absentSettled: 0, failed: 0 };
   while (now() + RECOVER_STEP_MS < deps.deadline) {
     const batch = await deps.db.claimRecovery(RECOVERY_BATCH);
     summary.claimed += batch.length;
@@ -75,7 +93,9 @@ export async function recoverTurns(deps: TurnRecoveryDeps): Promise<TurnRecovery
           if (now() + RECOVERY_LOOKUP_MS + RECOVER_STEP_MS >= deps.deadline) break;
           summary.lookups++;
           // A failed lookup is not evidence: the cost stays unknown and is looked up again after the lease.
-          if (await swallow('turn_recovery_lookup_failed', lookUp(deps, item, call), false, { category: 'api' })) summary.lateReceipts++;
+          const found = await swallow('turn_recovery_lookup_failed', lookUp(deps, item, call), null, { category: 'api' });
+          if (found === 'receipt') summary.lateReceipts++;
+          else if (found === 'absent') summary.absentSettled++;
         }
         // A paused turn's lookup only records what it finds; the turn stays paused (its resume, or the 24-hour expiry, closes it).
         if (item.action === 'lookup') continue;

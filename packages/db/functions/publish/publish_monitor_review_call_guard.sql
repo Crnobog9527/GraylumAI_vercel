@@ -7,12 +7,4 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_review_call_guard()
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE r social_review_runs;
-BEGIN
- SELECT * INTO r FROM social_review_runs WHERE bill2_run_id=NEW.run_id;
- IF r.id IS NOT NULL AND (TG_OP='INSERT' OR OLD.dispatched_at IS NULL AND NEW.dispatched_at IS NOT NULL)
-  AND (NOT publish_monitor_review_allowed(r.actor_id) OR r.created_at<(SELECT auto_review_enabled_at
-   FROM social_monitor_settings WHERE actor_id=r.actor_id)) THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_DISABLED';END IF;
- RETURN NEW;
-END $function$;
+AS $function$ BEGIN RETURN NEW; END $function$;

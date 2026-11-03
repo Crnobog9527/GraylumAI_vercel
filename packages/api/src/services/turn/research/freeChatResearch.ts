@@ -8,7 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { rowsFor, type ConfigurationRows } from '../settings/settingsRows';
 import { decimal } from '../provider/decimal';
-import type { FrozenPaygRun, FrozenRun } from '../provider/service';
+import type { FrozenPaygRun, FrozenRun } from '../provider/frozenRun';
 import { logger } from '../../../lib/logger';
 import { stagingRpcFailure } from '../settings/stagingErrors';
 import { freezePaygMessageBudget } from '../admission/paygMessageBudget';

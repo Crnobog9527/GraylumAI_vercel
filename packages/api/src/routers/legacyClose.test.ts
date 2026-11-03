@@ -11,7 +11,17 @@ it('removes legacy slice and guided-chat procedures while retaining active works
     expect(procedures).not.toContain(name);
   }
   for (const name of ['workbench.catalog', 'workbench.read', 'workbench.start', 'workbench.execute',
-    'runtime.executeStream', 'opc.mentorTurnStream']) {
+    'runtime.start', 'runtime.choices', 'runtime.view', 'opc.start', 'opc.captureResolve']) {
     expect(procedures).toContain(name);
+  }
+});
+
+// CORE-PATH-V2 V2-12 F-Node: the old execution model has no procedure left. A turn is sent with POST /api/turn; an old one is
+// never reachable again through tRPC.
+it('removes the old execution procedures: nothing can start, resume, stop or stream an old execution', () => {
+  const procedures = Object.keys(appRouter._def.procedures);
+  for (const name of ['runtime.prepare', 'runtime.executeStream', 'runtime.resume', 'runtime.resumeStream', 'runtime.cancel',
+    'opc.prepareStep', 'opc.mentorTurnStream', 'opc.topicTurn']) {
+    expect(procedures).not.toContain(name);
   }
 });
