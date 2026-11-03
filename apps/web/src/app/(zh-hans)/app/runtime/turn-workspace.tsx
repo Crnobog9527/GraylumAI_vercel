@@ -29,6 +29,8 @@ import { workRowsOf } from './turn-work-rows';
 import { useStoredSendCleanup } from './use-stored-send-cleanup';
 import { useTurnChat } from './use-turn-chat';
 import workStyles from './runtime-work.module.css';
+import { READ_RETRY } from '@/trpc/read-retry';
+import { QueryNotice } from '@/components/opc/query-notice';
 
 /*
  * CORE-PATH-V2 V2-10: the free conversation on the turn path (core_path_v2.enabled). Each user message and the reply saved with it
@@ -37,7 +39,8 @@ import workStyles from './runtime-work.module.css';
  */
 export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const utils = trpc.useUtils();
-  const results = trpc.opc.sessionResults.useQuery({ sessionId }, { retry: false });
+  // A failed read asks again twice; if it still fails the page says so (below), so the save button never just goes missing.
+  const results = trpc.opc.sessionResults.useQuery({ sessionId }, READ_RETRY);
   // The conversation's compares: those of the turn path are read and adopted from turns (fusionCompare.turn*), those of the old
   // path as they were; both are listed. Cards follow the history (a saved message has no clock to place one by).
   const compare = useCompareThread(sessionId);
@@ -135,6 +138,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
               savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}
               onOpenResults={() => { setPanelOpen(true); setReveal(count => count + 1); }}/>}
           </RuntimeTurnView>)}
+          {results.isError && <QueryNotice error={results.error} label="本对话成果夹" retry={() => results.refetch()}/>}
           <CompareThread cards={compare.cards} names={compare.names} onQuote={update}
             onAdopted={() => { void compare.refresh(); void chat.reload(); }}/>
           {pendingText !== null && <>
