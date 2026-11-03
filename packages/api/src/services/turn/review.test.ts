@@ -142,3 +142,30 @@ it('a review switched off between the open and the paid request sends nothing: t
   expect(of(d.calls, 'turn_close')[0]).toMatchObject({ p_close_kind: 'failed', p_refund_all: true, p_delivered: false });
   expect(of(d.calls, 'turn_call_begin')).toHaveLength(0);
 });
+
+const BLOCK = '```coach_json\n{"version":2,"mode":"full","diagnoses":[],"verdict_notes":[],"experiments":[],"tags":[],"pillar_mix_proposal":null,"strategy_proposal":null,"stage_suggestion":null}\n```';
+const coachPack = { kind: 'review_pack', status: 'available', window_days: 90, source_connections: [],
+  review: { mode: 'full', cadence: 'weekly', limits: { experiments_max: 3, experiment_kinds: ['tactic', 'basics'], strategy_proposal: false, pillar_mix_proposal: false },
+    strategy: { pillars: [{ key: 'p1' }] }, diagnostics: { posts: [] }, ledger: { to_review: [] }, stage: { followers: [] } } };
+it('a coach review sends the review pack, saves only the prose and returns the checked block', async () => {
+  m.run.mockResolvedValueOnce('本期表现：……\n\n' + BLOCK);
+  const d = deps();
+  const result = await runReviewTurn(d.deps, { ...claim, coach: true }, coachPack, async () => true);
+  const sent = m.run.mock.calls.at(-1)![0] as { input: string; instructions: string };
+  expect(sent.input).toContain('"mode":"full"');
+  expect(sent.input).not.toContain('source_connections');
+  expect(sent.instructions).toContain('coach_json');
+  const [closed] = of(d.calls, 'turn_close');
+  expect(closed!.p_messages).toEqual([expect.objectContaining({ role: 'user' }), { role: 'assistant', content: '本期表现：……' }]);
+  expect(result).toMatchObject({ kind: 'done', delivered: true, coach: { parsed: true, rejected: [] } });
+});
+it('a coach review without a block still saves its prose; an empty reading is a failed turn', async () => {
+  m.run.mockResolvedValueOnce('只有正文');
+  const d = deps();
+  const result = await runReviewTurn(d.deps, { ...claim, coach: true }, coachPack, async () => true);
+  expect(result).toMatchObject({ kind: 'done', delivered: true, coach: { parsed: false, rejected: [{ path: '', reason: 'no_block' }] } });
+  expect(of(d.calls, 'turn_close')[0]!.p_messages).toEqual([expect.anything(), { role: 'assistant', content: '只有正文' }]);
+  m.run.mockResolvedValueOnce(BLOCK);
+  const e = deps();
+  expect(await runReviewTurn(e.deps, { ...claim, coach: true }, coachPack, async () => true)).toMatchObject({ closeKind: 'failed', delivered: false });
+});
