@@ -11,6 +11,10 @@ import { replies, resetSim, signIn, startFreeChat } from './support';
  */
 test.beforeEach(resetSim);
 
+// This journey is about a page that has nothing yet: the copy a reload would show from this browser's saved page data (UI-FINISH)
+// would hide the read. The page also saves when it is left, so the data is dropped as each page starts, before its scripts run.
+const forgetSaved = (page: Page) => page.addInitScript(() => { for (const key of Object.keys(localStorage)) if (key.startsWith('graylum:')) localStorage.removeItem(key); });
+
 const READ = 'opc.sessionResults';
 const procedureFailure = JSON.stringify([{ error: { message: 'Internal error', code: -32603, data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500 } } }]);
 const proxyUnavailable = JSON.stringify({ error: 'Service Unavailable', message: '服务暂时繁忙，请稍后再试', retryAfter: 60 });
@@ -33,6 +37,7 @@ test('a refused read of the results folder is asked again; a proxy 503 is said w
   await signIn(page, 'bob');
   await startFreeChat(page, '读取失败的恢复：说一句话。');
   await expect(replies(page).first()).toBeVisible({ timeout: 120_000 });
+  await forgetSaved(page);
   const notice = page.getByRole('alert').filter({ hasText: '本对话成果夹' });
 
   // A procedure failure once: asked again after a second, then the button is there, and nothing is said.
