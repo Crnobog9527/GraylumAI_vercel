@@ -4,11 +4,6 @@
 // excluded by exact name here, and the Vitest result must match this list.
 
 export const WITHOUT_APP_SUITES = {
-  bill2: {
-    files: ['src/services/turn/provider/billing.integration.ts'],
-    prefix: 'BILL2: ',
-    excluded: [],
-  },
   runtime: {
     files: [
       'src/services/turn/chat.integration.ts', 'src/services/turn/mentor.integration.ts', 'src/services/turn/compare.integration.ts',
