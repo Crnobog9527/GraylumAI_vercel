@@ -3608,6 +3608,11 @@ describe('PAY-1 Customer Portal', () => {
     await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: !noSubscription });
     expect(h.create).not.toHaveBeenCalled();
   });
+  it('a failing availability read answers "not available" instead of a 500', async () => {
+    const h = portalHarness({ readError: true });
+    await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: false });
+    expect(h.create).not.toHaveBeenCalled();
+  });
   it('opens the Portal for a card (Managed Payments) subscription on its own customer, proven by its order metadata', async () => {
     const h = portalHarness({ card: {} });
     await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: true });
@@ -3631,6 +3636,20 @@ describe('PAY-1 Customer Portal', () => {
     const h = portalHarness(options);
     await expect(h.caller.createCustomerPortalSession({})).rejects.toBeInstanceOf(TRPCError);
     expect(h.create).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['the Stripe client cannot be built (key missing)', (h: { caller: unknown }) => { stripeState.getStripeClient.mockImplementation(() => { throw new Error('STRIPE_SECRET_KEY missing'); }); void h; }],
+    ['the application URL is misconfigured', () => { stripeState.getStripePortalReturnUrl.mockImplementation(() => { throw new Error('Invalid portal application URL'); }); }],
+  ])('answers "not available", never a 500, when %s (round 13)', async (_name, break_) => {
+    const h = portalHarness();
+    break_(h);
+    await expect(h.caller.createCustomerPortalSession({})).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '订阅管理暂不可用，请稍后重试' });
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('keeps its own answers: no subscription stays NOT_FOUND, a foreign return URL stays BAD_REQUEST', async () => {
+    await expect(portalHarness({ noSubscription: true }).caller.createCustomerPortalSession({})).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    stripeState.getStripePortalReturnUrl.mockImplementation(() => { throw new TRPCError({ code: 'BAD_REQUEST', message: '无效的返回地址' }); });
+    await expect(portalHarness().caller.createCustomerPortalSession({ returnUrl: 'https://evil.example' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
   it('rejects arbitrary client customer IDs', async () => {
     const h = portalHarness();

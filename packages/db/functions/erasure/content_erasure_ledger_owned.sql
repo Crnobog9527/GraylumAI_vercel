@@ -8,9 +8,25 @@ CREATE OR REPLACE FUNCTION public.content_erasure_ledger_owned(j jsonb)
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
- SELECT EXISTS(SELECT 1 FROM bill2_runs r WHERE r.actor_id=content_erasure_uuid(j->>'user_id') AND r.content_deleted_at IS NOT NULL
-  AND (r.id=content_erasure_uuid(j->>'bill2_run_id') OR r.pre_deduct_id=content_erasure_uuid(j->>'id')
-   OR r.id=content_erasure_uuid(j#>>'{metadata,usage,runId}') OR r.id=content_erasure_uuid(j#>>'{metadata,runId}')
-   OR r.pre_deduct_id=content_erasure_uuid(j#>>'{metadata,preDeductId}')))
-;
+ WITH binding AS MATERIALIZED (
+  SELECT content_erasure_uuid(j->>'user_id') actor_id,
+   array_remove(ARRAY[content_erasure_uuid(j->>'bill2_run_id'),
+    content_erasure_uuid(j#>>'{metadata,usage,runId}'),
+    content_erasure_uuid(j#>>'{metadata,runId}')],NULL) run_ids,
+   array_remove(ARRAY[content_erasure_uuid(j->>'id'),
+    content_erasure_uuid(j#>>'{metadata,preDeductId}')],NULL) pre_ids
+ )
+ SELECT EXISTS(
+  -- OFFSET 0 keeps the identity lookup before the actor/deletion filters. Otherwise the planner
+  -- can scan all of the actor's deleted runs for every unrelated ledger row again.
+  SELECT 1 FROM binding b CROSS JOIN LATERAL (
+   SELECT actor_id,content_deleted_at FROM bill2_runs WHERE id=ANY(b.run_ids) OFFSET 0
+  ) r
+   WHERE r.actor_id=b.actor_id AND r.content_deleted_at IS NOT NULL
+  UNION ALL
+  SELECT 1 FROM binding b CROSS JOIN LATERAL (
+   SELECT actor_id,content_deleted_at FROM bill2_runs WHERE pre_deduct_id=ANY(b.pre_ids) OFFSET 0
+  ) r
+   WHERE r.actor_id=b.actor_id AND r.content_deleted_at IS NOT NULL
+ );
 $function$;

@@ -8,13 +8,13 @@ CREATE OR REPLACE FUNCTION public.research_refresh_create(a uuid, s uuid, p_plat
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE g uuid; src uuid;
+DECLARE g uuid; src uuid; src_turn bigint;
 BEGIN
   PERFORM research_session_owned(a,s,NULL);
-  SELECT last_success_execution_id INTO src FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
+  SELECT last_success_execution_id, last_success_turn_id INTO src, src_turn FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
     AND account_key=encode(sha256(convert_to(s::text||':'||research_account_key(p_platform,p_account),'utf8')),'hex') AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress','failed_charged');
-  IF src IS NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
-  INSERT INTO research_refresh_grants(actor_id,session_id,platform,account,source_execution_id)
-    VALUES(a,s,p_platform,p_account,src) RETURNING id INTO g;
+  IF src IS NULL AND src_turn IS NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
+  INSERT INTO research_refresh_grants(actor_id,session_id,platform,account,source_execution_id,source_turn_id)
+    VALUES(a,s,p_platform,p_account,src,src_turn) RETURNING id INTO g;
   RETURN g;
 END $function$;

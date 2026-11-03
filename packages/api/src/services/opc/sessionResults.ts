@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { stagingRpcFailure } from '../runtime/stagingErrors';
+import { stagingRpcFailure } from '../turn/settings/stagingErrors';
 
 /*
  * CONTENT-CONVERSATION-DRIVEN C1-lite (Owner 2026-10-13, option A): the "本对话成果夹" of an ordinary free
@@ -14,10 +14,9 @@ const title = z.string().max(200).nullable().default(null);
 const body = z.string().min(1).max(20000);
 
 export const sessionResultsList = z.object({ sessionId: uuid }).strict();
-export const sessionResultSave = z.object({
-  sessionId: uuid, executionId: uuid, requestId: uuid, resultType, title,
-  // null saves the whole reply; otherwise the text must appear in the reply verbatim (checked in SQL).
-  excerpt: body.nullable().default(null),
+/** A reply written by a turn is saved from the turn's saved message, which the excerpt is checked against (CORE-PATH-V2). */
+export const sessionResultSaveTurn = z.object({
+  sessionId: uuid, turnId: z.number().int().positive(), requestId: uuid, resultType, title, excerpt: body.nullable().default(null),
 }).strict();
 export const sessionResultEdit = z.object({
   familyId: uuid, requestId: uuid, expectedVersion: z.number().int().min(1).max(50), title, body,
@@ -26,7 +25,8 @@ export const sessionResultFamily = z.object({ familyId: uuid }).strict();
 
 export const sessionResult = z.object({
   id: uuid, familyId: uuid, version: z.number().int().positive(), versions: z.number().int().positive(),
-  resultType, title: z.string(), body: z.string(), sourceExecutionId: uuid.nullable(), sourceAvailable: z.boolean(),
+  resultType, title: z.string(), body: z.string(), sourceExecutionId: uuid.nullable(), sourceTurnId: z.number().int().positive().nullable().default(null),
+  sourceAvailable: z.boolean(),
   createdAt: z.string(),
 }).strict();
 export type SessionResult = z.infer<typeof sessionResult>;
@@ -64,17 +64,17 @@ export function sessionResultsService(database: Database, actorId: string) {
     list: async (input: z.infer<typeof sessionResultsList>) => {
       const sessionId = sessionResultsList.parse(input).sessionId;
       try {
-        return z.array(sessionResult).parse(await call(database, 'runtime_session_results_list',
+        return z.array(sessionResult).parse(await call(database, 'runtime_session_results_list_turns',
           { p_actor_id: actorId, p_session_id: sessionId }));
       } catch (cause) {
         if (cause instanceof Error && cause.message === 'OPC_RESULT_NOT_FOUND') return null;
         throw cause;
       }
     },
-    save: async (input: z.input<typeof sessionResultSave>) => {
-      const v = sessionResultSave.parse(input);
-      return sessionResult.parse(await call(database, 'runtime_session_result_save', {
-        p_actor_id: actorId, p_session_id: v.sessionId, p_execution_id: v.executionId, p_request_id: v.requestId,
+    saveTurn: async (input: z.input<typeof sessionResultSaveTurn>) => {
+      const v = sessionResultSaveTurn.parse(input);
+      return sessionResult.parse(await call(database, 'runtime_session_result_save_turn', {
+        p_actor_id: actorId, p_session_id: v.sessionId, p_turn_id: v.turnId, p_request_id: v.requestId,
         p_result_type: v.resultType, p_title: v.title, p_excerpt: v.excerpt,
       }));
     },

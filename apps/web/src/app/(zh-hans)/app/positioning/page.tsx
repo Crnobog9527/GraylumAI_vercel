@@ -13,6 +13,7 @@ import styles from './start-work.module.css';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { readStartEntry, retainedMatches, START_TEXT, type StartMode } from './start-entry';
+import { grantOpeningIntent } from './[draftId]/opening-intent';
 import { ProfileArchiveList } from '@/components/opc/profile-archive/ProfileArchiveList';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:StartMode;businessId:string|null;businessName?:string};
@@ -31,6 +32,14 @@ export default function PositioningHome() {
   const compareChoice=composerChoices.data?.skills.find(x=>skillId?x.moduleId===skillId:x.moduleId===composerChoices.data?.defaultSkill?.moduleId);
   const compareSkill={ready:Boolean(composerChoices.data&&(!(skillId||composerChoices.data.defaultSkill)||compareChoice)),
     skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};
+  // The marketplace opens the start page with ?module=<id>: that Skill is chosen once the choices confirm it can run
+  // (never swapped for another).
+  const wantedModule=useRef<string|null>(null);
+  useEffect(()=>{
+    if(wantedModule.current===null)wantedModule.current=new URL(location.href).searchParams.get('module')??'';
+    const wanted=wantedModule.current;
+    if(wanted&&composerChoices.data?.skills.some(x=>x.moduleId===wanted)){setSkillId(wanted);wantedModule.current='';}
+  },[composerChoices.data]);
   const catalog = trpc.opc.catalog.useQuery(undefined,{retry:false}),
     list = trpc.opc.list.useQuery(undefined,{retry:false}),
     library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),
@@ -58,7 +67,7 @@ export default function PositioningHome() {
     setError("");sessionStorage.setItem(key,JSON.stringify(op));setPendingStart(op);
     try {
       const {actorId:_,...request}=op;void _;const d=await start.mutateAsync(request);
-      sessionStorage.removeItem(key);setPendingStart(null);location.href="/app/positioning/"+d.draftId;
+      sessionStorage.removeItem(key);setPendingStart(null);grantOpeningIntent(sessionStorage,d.draftId);location.href="/app/positioning/"+d.draftId;
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : '';
       if (code.includes('OPC_PROFILE_LIMIT')) {

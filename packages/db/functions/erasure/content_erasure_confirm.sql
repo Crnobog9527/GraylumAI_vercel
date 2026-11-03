@@ -14,9 +14,9 @@ AS $function$
 
 -- R9 erasure content
 
-DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
+DECLARE scope jsonb; turn_ids bigint[]; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
  refs uuid[]; rounds uuid[]; chats uuid[]; research_ids uuid[]; research_plan_ids uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
- remaining bigint:=0; deleted boolean;
+ remaining bigint:=0; deleted boolean; deleted_runs text[]; deleted_pre text[]; linked uuid[];
 BEGIN
  PERFORM bill2_actor(a);
  -- Runtime writers use session -> execution -> run. NOWAIT prevents inverse
@@ -60,6 +60,7 @@ BEGIN
  SELECT coalesce(array_agg(v::uuid),'{}') INTO projects FROM jsonb_array_elements_text(scope->'projects') v;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO versions FROM jsonb_array_elements_text(scope->'versions') v;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO contents FROM jsonb_array_elements_text(scope->'contents') v;
+ SELECT coalesce(array_agg(v::bigint),'{}') INTO turn_ids FROM jsonb_array_elements_text(scope->'turns') v;
  -- Existing UI writers lock their item/account before updating private settings.
  PERFORM work_item_id FROM opc_items WHERE work_item_id=ANY(projects) ORDER BY work_item_id FOR UPDATE NOWAIT;
  PERFORM project_id FROM opc_accounts WHERE project_id=ANY(projects) ORDER BY project_id FOR UPDATE NOWAIT;
@@ -70,9 +71,12 @@ BEGIN
  chats:=ARRAY(SELECT c.conversation_id FROM artifact_chats c JOIN conversations v ON v.id=c.conversation_id
   WHERE c.project_id=ANY(projects) AND v.user_id=a);
  PERFORM id FROM conversations WHERE id=ANY(chats) ORDER BY id FOR UPDATE NOWAIT;
+ -- CORE-PATH-V2 V2-7a2: evidence linked to these runs, or to a turn of these conversations.
+ linked:=ARRAY(SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids))
+  ||ARRAY(SELECT l.evidence_id FROM opc_result_links l JOIN turns t ON t.actor_id=l.turn_actor_id AND t.id=l.turn_id WHERE t.actor_id=a AND t.session_id=ANY(sessions));
  research_ids:=ARRAY(SELECT DISTINCT o.id FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
   JOIN artifact_evidence e ON e.operation_id=o.id WHERE p.actor_id=a AND
-   (e.project_id=ANY(projects) OR e.id IN (SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids))));
+   (e.project_id=ANY(projects) OR e.id=ANY(linked)));
  -- 0263 runtime research: conversation searches have no artifact evidence.
  research_plan_ids:=ARRAY(SELECT p.id FROM research_plans p WHERE p.actor_id=a AND (p.session_id=ANY(sessions) OR p.execution_id=ANY(ids) OR p.discovery_id IN (
    SELECT d.id FROM research_discoveries d JOIN research_selection_cards c ON c.confirmation_id=d.keyword_confirmation_id
@@ -90,9 +94,17 @@ BEGIN
  END IF;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO refs FROM jsonb_array_elements_text(scope->'references') v;
  refs:=refs||ids||sessions||projects||versions||contents||rounds;
+ -- CORE-PATH-V2 V2-7a2: a report turn's request id is its executionId in the edit and publish requests, which hold the edited text.
+ refs:=refs||ARRAY(SELECT request_id FROM turns WHERE actor_id=a AND session_id=ANY(sessions) AND kind='report');
+ -- CORE-PATH-V2 V2-10b: a topic turn's request id is its executionId in the topic drafts and the adoption requests.
+ refs:=refs||ARRAY(SELECT t.request_id FROM turns t JOIN opc_topic_workspaces w ON w.session_id=t.session_id AND w.actor_id=a
+  WHERE t.actor_id=a AND t.session_id=ANY(sessions) AND t.kind='chat');
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
  PERFORM id FROM bill2_runs WHERE id IN (SELECT billing_run_id FROM runtime_executions WHERE id=ANY(ids))
   ORDER BY id FOR UPDATE NOWAIT;
+ -- CORE-PATH-V2 turns: after the account row and their sessions, the order turn_close takes them. A receipt holding one either committed its
+ -- response body before this (removed below) or runs after and sees the tombstone (turn_call_record stores no body then).
+ PERFORM 1 FROM turns WHERE actor_id=a AND session_id=ANY(sessions) ORDER BY id FOR UPDATE NOWAIT;
  IF EXISTS(SELECT 1 FROM artifact_generations g WHERE g.state NOT IN ('succeeded','refunded')
   AND (g.project_id=ANY(projects) OR content_erasure_references(g.input,refs))) THEN
   RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
@@ -114,10 +126,9 @@ BEGIN
   AND ex.payload#>>'{scopeMaterial,revision}'=b.material_revision::text
  ON CONFLICT DO NOTHING;
  -- 0295 report price
- PERFORM report_fee_settle_internal(held_fee.execution_id,false) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
-  WHERE held_fee.actor_id=a AND held_fee.state='held' AND (fe.id=ANY(ids) OR fe.session_id=ANY(sessions));
- PERFORM report_fee_settle_internal(held_fee.execution_id,true) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
-  WHERE held_fee.actor_id=a AND held_fee.state='held' AND (fe.id=ANY(ids) OR fe.session_id=ANY(sessions));
+ -- V2-12 R2: an old report fee still held is no longer settled from here; it is counted and the delete reports review_required.
+ remaining:=remaining+(SELECT count(*) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
+  WHERE held_fee.actor_id=a AND held_fee.state='held' AND (fe.id=ANY(ids) OR fe.session_id=ANY(sessions)));
  UPDATE runtime_sessions SET content_deleted_at=stamp WHERE id=ANY(sessions) AND content_deleted_at IS NULL;
  UPDATE artifact_projects SET content_deleted_at=stamp WHERE id=ANY(projects) AND content_deleted_at IS NULL;
  UPDATE bill2_runs SET content_deleted_at=stamp WHERE actor_id=a AND content_deleted_at IS NULL
@@ -126,7 +137,6 @@ BEGIN
  -- No adapter, redispatch, new request ID or fabricated provider failure exists here.
  FOR row IN SELECT id,billing_run_id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id LOOP
   IF row.billing_run_id IS NOT NULL THEN
-   financial:=runtime_financial_recovery(a,row.id,true);
    PERFORM account_erasure_scrub_calls(a,row.billing_run_id);
    PERFORM account_erasure_scrub_run(a,row.billing_run_id);
    financial:=account_erasure_scrub_receipts(a,row.billing_run_id,100);
@@ -142,8 +152,6 @@ BEGIN
  FOR row IN SELECT r.id,r.closed FROM bill2_runs r JOIN fusion_compares fc ON fc.group_id=r.fusion_group_id
   WHERE fc.actor_id=a AND content_erasure_references(fc.workspace_dependencies,refs) ORDER BY r.id LOOP
   UPDATE bill2_runs SET content_deleted_at=stamp WHERE id=row.id AND content_deleted_at IS NULL;
-  IF NOT row.closed THEN PERFORM bill2_cancel(a,row.id); END IF;
-  PERFORM bill2_finalize(a,row.id);
   financial:=account_erasure_scrub_calls(a,row.id);
   remaining:=remaining+coalesce((financial->>'remaining')::bigint,0);
   financial:=account_erasure_scrub_run(a,row.id);
@@ -178,8 +186,6 @@ BEGIN
   WHERE g.actor_id=a AND (g.source_session_id=ANY(sessions)
    OR g.source_session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects))) ORDER BY r.id LOOP
   UPDATE bill2_runs SET content_deleted_at=stamp WHERE id=row.id AND content_deleted_at IS NULL;
-  IF NOT row.closed THEN PERFORM bill2_cancel(a,row.id); END IF;
-  PERFORM bill2_finalize(a,row.id);
   -- Anything a scrub could not clear yet is counted (review_required), and the recovery cron
   -- scrubs a content-deleted run again once it settles (PR-3b).
   financial:=account_erasure_scrub_calls(a,row.id);
@@ -214,7 +220,23 @@ BEGIN
  UPDATE bill2_drafts SET revoked=true WHERE actor_id=a AND id IN
   (SELECT (rs.scope->>'draftId')::uuid FROM runtime_sessions rs WHERE rs.id=ANY(sessions) AND rs.scope->>'kind' IN ('positioning_draft','positioning_topic'));
  DELETE FROM runtime_session_names WHERE session_id=ANY(sessions);
- UPDATE runtime_sessions SET scope=NULL,start_payload=NULL,erased_at=stamp WHERE id=ANY(sessions) AND erased_at IS NULL;
+ -- A session with a turn still open keeps its (tombstoned, content-free) shell until that turn closes: an erased row is
+ -- immutable and the closing turn releases active_turn_id on it. The sweep erases it on a later pass.
+ UPDATE runtime_sessions SET scope=NULL,start_payload=NULL,erased_at=stamp WHERE id=ANY(sessions) AND erased_at IS NULL
+  AND active_turn_id IS NULL;
+ -- CORE-PATH-V2 conversation content: the provider response bodies of its turns and its message text. The turns and their
+ -- receipts are billing records and keep their billing fields (plan 4.6).
+ DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions) AND r.turn_id=t.id;
+ UPDATE session_messages SET content='',content_hash=encode(sha256(''::bytea),'hex'),visible=false,deleted_at=coalesce(deleted_at,stamp)
+  WHERE session_id=ANY(sessions) AND (content<>'' OR visible);
+ -- The turns behind deleted content (content_erasure_scope), in conversations that stay. One still running would write its receipt and
+ -- reply after this cleanup, and the conversation has no tombstone to stop it: the delete waits for it (retryable).
+ IF EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND t.state<>'closed' AND NOT t.session_id=ANY(sessions)) THEN
+  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
+ END IF;
+ DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND r.turn_id=t.id;
+ UPDATE session_messages m SET content='',content_hash=encode(sha256(''::bytea),'hex'),visible=false,deleted_at=coalesce(m.deleted_at,stamp)
+  FROM turns t WHERE t.actor_id=a AND t.id=ANY(turn_ids) AND m.session_id=t.session_id AND m.turn_id=t.id AND (m.content<>'' OR m.visible);
  UPDATE opc_content_versions SET body=NULL,title=NULL,erased_at=stamp WHERE id=ANY(contents) AND erased_at IS NULL;
  -- System capture fields and suggestions carry exact execution provenance. Preserve
  -- unrelated manual fields and independently saved published bodies.
@@ -236,11 +258,13 @@ BEGIN
  UPDATE opc_handoffs SET payload=NULL,result=NULL,erased_at=stamp WHERE actor_id=a AND erased_at IS NULL
   AND (content_erasure_references(payload,refs) OR content_erasure_references(result,refs));
  UPDATE opc_topic_draft_versions SET request=NULL,body=NULL,erased_at=stamp WHERE actor_id=a AND erased_at IS NULL
-  AND (source_version_id=ANY(versions) OR request_id=ANY(ids)
+  AND (source_version_id=ANY(versions) OR request_id=ANY(refs)
    OR content_erasure_references(request,refs) OR content_erasure_references(body,refs)
    OR request_id IN (SELECT event.request_id FROM opc_data_events event WHERE event.actor_id=a
-    AND event.action='topic_draft' AND event.execution_id=ANY(ids)));
+    AND event.action='topic_draft' AND (event.execution_id=ANY(ids)
+     OR event.turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions)))));
  DELETE FROM opc_data_events WHERE actor_id=a AND (execution_id=ANY(ids) OR project_id=ANY(projects)
+  OR turn_id IN (SELECT t.id FROM turns t WHERE t.actor_id=a AND t.session_id=ANY(sessions))
   OR target_project_id=ANY(projects) OR source_version_id=ANY(versions));
  -- Frozen source bodies and request caches are system copies, not independent saved content.
  UPDATE opc_turns t SET input_hash=NULL,erased_at=stamp WHERE t.erased_at IS NULL AND
@@ -315,7 +339,7 @@ BEGIN
    WHERE NOT EXISTS(SELECT 1 FROM research_operations o WHERE o.plan_id=p.id
     AND o.id::text=item->>'operationId' AND o.erased_at IS NOT NULL));
  UPDATE artifact_evidence SET payload=NULL,content_hash=NULL,erased_at=stamp WHERE erased_at IS NULL AND
-  (project_id=ANY(projects) OR id IN (SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids)));
+  (project_id=ANY(projects) OR id=ANY(linked));
  UPDATE artifact_requests SET payload=(SELECT jsonb_object_agg(key,value) FROM jsonb_each(coalesce(payload,'{}'))
   WHERE key IN ('sliceExecution','slicePhase')),response=NULL,erased_at=stamp WHERE erased_at IS NULL AND
   EXISTS(SELECT 1 FROM artifact_projects p WHERE p.id=artifact_requests.project_id AND p.actor_id=a)
@@ -324,14 +348,25 @@ BEGIN
  UPDATE artifact_work_references SET creation_payload=NULL,source_hash=NULL,erased_at=stamp WHERE erased_at IS NULL AND
   (project_id=ANY(projects) OR source_version_id=ANY(versions));
  UPDATE artifact_projects SET work_title=NULL,account='erased:'||id,erased_at=stamp WHERE id=ANY(projects) AND erased_at IS NULL;
+ -- content_erasure_ledger_owned is true only for a row naming one of this account's content-deleted runs. Collect those
+ -- runs once and test each row's five identities against them with plain comparisons first, so the function (and the guard
+ -- trigger it feeds) only runs for rows that can be owned; ownership is still decided by content_erasure_ledger_owned.
+ deleted_runs:=ARRAY(SELECT r.id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL);
+ deleted_pre:=ARRAY(SELECT r.pre_deduct_id::text FROM bill2_runs r WHERE r.actor_id=a AND r.content_deleted_at IS NOT NULL
+   AND r.pre_deduct_id IS NOT NULL);
  FOR row IN SELECT * FROM (VALUES
-  ('token_stats','metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('billing_history','reason=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('credit_transactions','description=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2'),
-  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,metadata=erasure_ledger_metadata(metadata),content_erased_at=$2')
+  ('token_stats','content_erased_at=$2'),
+  ('billing_history','reason=NULL,content_erased_at=$2'),
+  ('credit_transactions','description=NULL,content_erased_at=$2'),
+  ('ai_usage_logs','error_message=NULL,ip_address=NULL,user_agent=NULL,content_erased_at=$2')
  ) x(tbl,assignment) LOOP
-  EXECUTE format('UPDATE public.%I t SET %s WHERE t.user_id=$1 AND t.content_erased_at IS NULL AND content_erasure_ledger_owned(to_jsonb(t))',
-   row.tbl,row.assignment) USING a,stamp;
+  EXECUTE format('WITH cand AS MATERIALIZED (SELECT t.ctid c FROM public.%1$I t CROSS JOIN LATERAL (SELECT to_jsonb(t) j) x
+    WHERE t.user_id=$1 AND t.content_erased_at IS NULL
+     AND ((x.j->>''bill2_run_id'')=ANY($3) OR (x.j#>>''{metadata,usage,runId}'')=ANY($3) OR (x.j#>>''{metadata,runId}'')=ANY($3)
+      OR (x.j->>''id'')=ANY($4) OR (x.j#>>''{metadata,preDeductId}'')=ANY($4))
+     AND content_erasure_ledger_owned(x.j))
+   UPDATE public.%1$I t SET %2$s FROM cand WHERE t.ctid=cand.c',
+   row.tbl,row.assignment) USING a,stamp,deleted_runs,deleted_pre;
  END LOOP;
  -- This status is about content. Unknown money remains on its original run.
  RETURN jsonb_build_object('kind',k,'id',target,'status',CASE WHEN remaining>0 THEN 'review_required' ELSE 'deleted' END,

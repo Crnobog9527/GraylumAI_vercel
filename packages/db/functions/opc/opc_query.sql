@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION public.opc_query(p_actor_id uuid, p_draft_id uuid DEF
 AS $function$
 -- 0249 readonly projection
 
-DECLARE projection_result jsonb;information jsonb;binding opc_account_strategy_drafts;source_r artifact_rounds;source_information jsonb;capture_round artifact_rounds;st jsonb;step_id text;field_id text;meta jsonb;metas jsonb;ids uuid[];available_ids uuid[];
+DECLARE projection_result jsonb;information jsonb;binding opc_account_strategy_drafts;source_r artifact_rounds;source_information jsonb;capture_round artifact_rounds;st jsonb;step_id text;field_id text;meta jsonb;metas jsonb;available_ids uuid[];
 BEGIN
  -- D7 read boundary
  IF EXISTS(SELECT 1 FROM opc_drafts d JOIN artifact_projects p ON p.id=d.project_id WHERE d.actor_id=p_actor_id AND d.draft_id=p_draft_id AND p.erased_at IS NOT NULL) THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
@@ -52,15 +52,14 @@ BEGIN
    END IF;
   END IF;
   SELECT * INTO capture_round FROM artifact_rounds WHERE id=(projection_result->>'roundId')::uuid;
-  SELECT coalesce(array_agg(e.id),'{}') INTO ids FROM runtime_executions e JOIN opc_turns t ON t.session_id=e.session_id AND t.request_id=e.request_id
-   WHERE t.round_id=capture_round.id AND t.draft_id=p_draft_id AND t.purpose='mentor' AND t.token::text=e.payload->>'opcTurnToken'
-    AND e.state='completed' AND e.payload->>'revisionId'=capture_round.revision_id::text
-    AND e.payload->>'moduleId'=(SELECT module_id::text FROM artifact_projects WHERE id=capture_round.project_id)
-    AND e.payload#>>'{scopeMaterial,content,work,roundId}'=capture_round.id::text
-    AND e.session_id=(projection_result->>'sessionId')::uuid AND e.actor_id=p_actor_id
-    AND EXISTS(SELECT 1 FROM jsonb_each(capture_round.steps) s,jsonb_each(coalesce(s.value->'fieldMeta','{}')) m
-     WHERE e.id::text IN (m.value#>>'{suggestion,executionId}',m.value#>>'{withdrawnSuggestion,executionId}'));
-  SELECT coalesce(array_agg(execution_id),'{}') INTO available_ids FROM runtime_history_availability(ids) WHERE available;
+  available_ids:='{}';
+  -- V2-5b: suggestions a mentor turn of the new path wrote; their executionId is that turn's request id (turn_mentor_apply).
+  SELECT available_ids||coalesce(array_agg(x.id),'{}') INTO available_ids FROM (
+   SELECT DISTINCT (m.value#>>ARRAY[k,'executionId'])::uuid id FROM jsonb_each(capture_round.steps) s,
+    jsonb_each(coalesce(s.value->'fieldMeta','{}')) m, unnest(ARRAY['suggestion','withdrawnSuggestion']) k
+   WHERE m.value#>>ARRAY[k,'executionId'] ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    AND NOT coalesce((m.value#>>ARRAY[k,'executionId'])=ANY(available_ids::text[]),false)) x
+  WHERE turn_mentor_source_available(p_actor_id,(projection_result->>'sessionId')::uuid,x.id,capture_round.project_id,capture_round.id);
   FOR step_id,st IN SELECT key,value FROM jsonb_each(capture_round.steps) LOOP
    metas:='{}';
    FOR field_id IN SELECT f->>'id' FROM jsonb_array_elements(information->step_id->'schema') f LOOP

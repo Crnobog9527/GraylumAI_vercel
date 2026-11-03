@@ -6,7 +6,7 @@ import { sessionRefreshLink } from './session-refresh-link';
 import { SESSION_REFRESH_REQUIRED_MESSAGE, type SessionRefresher } from '@/lib/session-refresh';
 
 const refusal = () => new Error(SESSION_REFRESH_REQUIRED_MESSAGE);
-const op = (type: 'mutation' | 'query' = 'mutation') => ({ id: 1, type, path: 'opc.mentorTurnStream',
+const op = (type: 'mutation' | 'query' = 'mutation') => ({ id: 1, type, path: 'opc.captureResolve',
   input: { requestId: 'r-1' }, context: {}, signal: null }) as unknown as Operation;
 function session(ok = true): SessionRefresher & { calls: string[] } {
   const calls: string[] = [];

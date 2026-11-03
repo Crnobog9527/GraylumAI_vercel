@@ -9,7 +9,7 @@ vi.mock('./settings', async original => ({ ...(await original<typeof import('./s
   readFusionSettings: async () => ({ version: 1, review: {}, compare: state.compare }) }));
 vi.mock('../membershipEntitlements', async original => ({ ...(await original<typeof import('../membershipEntitlements')>()),
   readMembershipEntitlements: async () => state.entitlements }));
-vi.mock('../runtime/stagingPolicy', async original => ({ ...(await original<typeof import('../runtime/stagingPolicy')>()),
+vi.mock('../turn/settings/stagingPolicy', async original => ({ ...(await original<typeof import('../turn/settings/stagingPolicy')>()),
   loadStagingPolicy: async () => { if (state.windowFails) throw new Error('RUNTIME_STAGING_WINDOW_UNAVAILABLE'); return { id: id(900), callPolicies: [] }; } }));
 vi.mock('./settingsAdmin', () => ({
   fusionModelOptions: async () => ({ models: [id(1), id(2), id(3)].map(modelId => ({ id: modelId, name: 'n', review: true, summary: true,

@@ -17,7 +17,11 @@ AS $function$
 DECLARE entry record; n bigint; total bigint:=(SELECT count(*) FROM opc_data_events WHERE actor_id=p_profile_id)
   +(SELECT count(*) FROM fusion_call_outputs WHERE actor_id=p_profile_id)+(SELECT count(*) FROM fusion_reviews WHERE actor_id=p_profile_id)+(SELECT count(*) FROM fusion_compares WHERE actor_id=p_profile_id)
   +(SELECT count(*) FROM runtime_session_results WHERE actor_id=p_profile_id)
-  +(SELECT count(*) FROM runtime_session_names WHERE actor_id=p_profile_id);
+  +(SELECT count(*) FROM runtime_session_names WHERE actor_id=p_profile_id)
+  -- CORE-PATH-V2 (account_erasure_scrub_turns): message text and provider response bodies still held.
+  +(SELECT count(*) FROM session_messages m JOIN runtime_sessions s ON s.id=m.session_id
+     WHERE s.actor_id=p_profile_id AND (m.content<>'' OR m.visible))
+  +(SELECT count(*) FROM turn_call_raw r JOIN turn_calls c ON c.turn_id=r.turn_id AND c.seq=r.seq WHERE c.actor_id=p_profile_id);
 BEGIN
  FOR entry IN SELECT * FROM (VALUES
   ('runtime_sessions','t.actor_id=$1'),

@@ -2,6 +2,9 @@
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { StripeScope } from './purchaseFacts';
+import { TRPCError } from '@trpc/server';
+import { logger } from '../../lib/logger';
+import { createSafeServiceUnavailableError } from '../../lib/publicError';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
 const OPEN_STATUSES = ['active', 'trialing', 'past_due', 'incomplete', 'unpaid'];
@@ -80,4 +83,12 @@ export async function openStripePortal(stripe: Pick<Stripe, 'subscriptions' | 'b
     },
   });
   return { portalUrl: session.url };
+}
+
+/** What the manage-subscription mutation throws for a failure: its own answers (not found, bad return URL) as they are, anything
+ * else as "not available" with the cause logged, never a 500 (round 13: a missing key, a Stripe outage, two renewing subscriptions). */
+export function portalUnavailable(error: unknown) {
+  if (error instanceof TRPCError) return error;
+  logger.error('billing', 'payments_customer_portal_failed', { message: error instanceof Error ? error.message.slice(0, 200) : 'unknown' });
+  return createSafeServiceUnavailableError(error, '订阅管理暂不可用，请稍后重试');
 }

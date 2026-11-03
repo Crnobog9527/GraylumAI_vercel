@@ -12,18 +12,18 @@ class CIWorkflowsTest < Minitest::Test
     @security = YAML.safe_load(File.read("#{ROOT}/workflows/security.yml"))
   end
   GATES = {'lint-check'=>['Lint & Type Check','lint-and-type'], 'typecheck'=>['TypeScript Check','lint-and-type'],
-           'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration',
-                                        'DB_SUITES_RESULT'=>'db-suites','CONTRACTS_RESULT'=>'ci-contracts','LEDGER_RESULT'=>'migration-ledger'}],
            'security-unit-tests'=>['Security Unit Tests',{'WORK_RESULT'=>'test','CONTRACTS_RESULT'=>'ci-contracts',
                                                           'LEDGER_RESULT'=>'migration-ledger'}],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
-  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
-                      'node packages/db/tests/payg/run-runtime.mjs --ci',
-                      'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
-                      'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql'].freeze
+  # Unit Tests is the one gate that may accept a skipped worker (the two database jobs, only when the scope job says so), so it has its own truth table.
+  UNIT_GATE = {'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration','DB_SUITES_RESULT'=>'db-suites','CONTRACTS_RESULT'=>'ci-contracts',
+               'LEDGER_RESULT'=>'migration-ledger','SCOPE_RESULT'=>'scope'}.freeze
+  INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
+                      'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql,packages/db/tests/runtime-view-perf/fixture.sql,packages/db/tests/content-erasure/fixture.sql,packages/db/tests/content-erasure-perf/fixture.sql,packages/db/tests/content-erasure-perf/assertions.sql'].freeze
+  INTEGRATION_SHARDS = {1 => [INTEGRATION_RUNS[1]], 2 => [INTEGRATION_RUNS[0]]}.freeze
   def test_required_context_names_unique
     names = [@ci, @security].flat_map { |w| w.fetch('jobs').values.map { |j| j.fetch('name') } }
-    (GATES.values.map(&:first) + ['Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
+    (GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']).each do |name|
       assert_equal 1, names.count(name), name
     end
   end
@@ -50,17 +50,124 @@ class CIWorkflowsTest < Minitest::Test
       end
     end
   end
+  RESULTS = ['success', 'failure', 'cancelled', 'skipped', '', 'invalid'].freeze
+  def unit_gate_passes?(step, env)
+    _, _, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'))
+    status.success?
+  end
+  # Owner 2026-11-01: only pull requests whose files are all on the allow-list skip the two database jobs. The gate must accept
+  # exactly that skip and still go red for every failed, cancelled or unexplained one.
+  def test_unit_tests_gate_accepts_only_the_scope_approved_skip
+    job = @ci.fetch('jobs').fetch('unit-check')
+    assert_equal 'Unit Tests', job.fetch('name'); assert_equal 'always()', job.fetch('if')
+    assert_equal UNIT_GATE.values, job.fetch('needs')
+    assert_equal 1, job.fetch('steps').length
+    step = job.fetch('steps').first
+    assert_equal UNIT_GATE.transform_values { |worker| "${{ needs.#{worker}.result }}" }.merge('SCOPE_FULL'=>'${{ needs.scope.outputs.full }}'), step.fetch('env')
+    base = {'WORK_RESULT'=>'success','INTEGRATION_RESULT'=>'success','DB_SUITES_RESULT'=>'success','CONTRACTS_RESULT'=>'success',
+            'LEDGER_RESULT'=>'success','SCOPE_RESULT'=>'success','SCOPE_FULL'=>'true'}
+    assert unit_gate_passes?(step, base)
+    # The three always-required workers and the scope job itself: nothing but success passes, whatever the scope says.
+    %w[WORK_RESULT CONTRACTS_RESULT LEDGER_RESULT SCOPE_RESULT].each do |key|
+      RESULTS.each do |result|
+        %w[true false].each do |full|
+          assert_equal result == 'success', unit_gate_passes?(step, base.merge(key=>result, 'SCOPE_FULL'=>full)), "#{key}=#{result} full=#{full}"
+        end
+      end
+    end
+    # The two database jobs: success always passes; skipped passes only when scope succeeded and said "false".
+    RESULTS.product(RESULTS, RESULTS, ['true', 'false', '', 'invalid']).each do |integration, db_suites, scope, full|
+      env = base.merge('INTEGRATION_RESULT'=>integration, 'DB_SUITES_RESULT'=>db_suites, 'SCOPE_RESULT'=>scope, 'SCOPE_FULL'=>full)
+      allowed_skip = scope == 'success' && full == 'false'
+      ok = ->(result) { result == 'success' || (result == 'skipped' && allowed_skip) }
+      expected = scope == 'success' && ok.call(integration) && ok.call(db_suites)
+      assert_equal expected, unit_gate_passes?(step, env), env.inspect
+    end
+    UNIT_GATE.each_value do |worker|
+      work = @ci.fetch('jobs').fetch(worker)
+      refute work.key?('continue-on-error')
+    end
+  end
+  def test_scope_job_gates_exactly_the_two_database_jobs
+    jobs = @ci.fetch('jobs')
+    scope = jobs.fetch('scope')
+    assert_equal 'Decide test scope', scope.fetch('name')
+    refute scope.key?('needs'); refute scope.key?('if'); refute scope.key?('continue-on-error'); refute scope.key?('env')
+    assert_equal({'full'=>'${{ steps.scope.outputs.full }}'}, scope.fetch('outputs'))
+    assert_equal({'contents'=>'read'}, scope.fetch('permissions'))
+    checkout = scope.fetch('steps').first
+    assert_equal 0, checkout.fetch('with').fetch('fetch-depth')
+    assert_equal false, checkout.fetch('with').fetch('persist-credentials')
+    decide = scope.fetch('steps').find { |step| step['id'] == 'scope' }
+    assert_equal 'node scripts/ci-test-scope.mjs', decide.fetch('run')
+    refute decide.key?('if'); refute decide.key?('env')
+    %w[integration db-suites].each do |id|
+      assert_equal ['scope'], jobs.fetch(id).fetch('needs'), id
+      assert_equal "needs.scope.outputs.full == 'true'", jobs.fetch(id).fetch('if'), id
+    end
+    # Every other job runs unconditionally: the skip covers the two database jobs only.
+    gated = %w[integration db-suites unit-check lint-check typecheck security-unit-tests build security-e2e-tests]
+    (jobs.keys - gated).each do |id|
+      refute jobs.fetch(id).key?('if'), id
+      refute jobs.fetch(id).key?('needs'), id
+    end
+  end
+  # Owner 2026-11-01: the suites the pull request CI excludes run every night, outside the required checks.
+  # GitHub fires schedule / workflow_dispatch only from the default branch (main), so the run is triggered by pushes to staging instead.
+  def test_excluded_suites_run_on_pushes_to_staging_only_and_are_never_a_required_check
+    nightly = YAML.safe_load(File.read("#{ROOT}/workflows/nightly-db-suites.yml"))
+    events = nightly['on'] || nightly[true]
+    assert_equal ['push'], events.keys
+    assert_equal({'branches'=>['staging']}, events.fetch('push'))
+    assert_equal({'group'=>'excluded-db-suites','cancel-in-progress'=>true}, nightly.fetch('concurrency'))
+    assert_equal({'contents'=>'read'}, nightly.fetch('permissions'))
+    job = nightly.fetch('jobs').fetch('excluded-suites')
+    required = GATES.values.map(&:first) + ['Unit Tests','Dependency Audit','Code Security Scan','Workflow Policy Check','Secret Scan']
+    refute_includes required, job.fetch('name').sub(/ \(.*\)\z/, '')
+    assert_equal({'contents'=>'read'}, job.fetch('permissions'))
+    assert_equal false, job.fetch('strategy').fetch('fail-fast')
+    shards = job.fetch('strategy').fetch('matrix').fetch('shard')
+    assert_equal (1..shards.length).to_a, shards
+    assert_operator job.fetch('timeout-minutes'), :<=, 60
+    runs = job.fetch('steps').map { |step| step['run'] }.compact
+    assert_equal 1, runs.count("env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded --shard ${{ matrix.shard }}/#{shards.length}")
+    job.fetch('steps').each do |step|
+      refute step.key?('continue-on-error'), step['name']
+      refute step.key?('env'), step['name']
+    end
+    refute nightly.key?('secrets')
+    ci_runs = @ci.fetch('jobs').values.flat_map { |j| j['steps'].map { |step| step['run'] }.compact }
+    refute ci_runs.any? { |run| run.include?('--excluded') }, 'pull request CI must not run the excluded list'
+  end
+  def test_a_newer_push_to_the_same_pull_request_cancels_the_older_run_but_a_push_to_a_branch_never_does
+    concurrency = @ci.fetch('concurrency')
+    assert_equal "${{ github.event_name == 'pull_request' }}", concurrency.fetch('cancel-in-progress')
+    assert_includes concurrency.fetch('group'), "github.event.pull_request.number"
+    assert_includes concurrency.fetch('group'), 'github.sha'
+  end
   def test_integration_worker_runs_billing_and_recovery_without_secrets
     steps = @ci.fetch('jobs').fetch('integration').fetch('steps')
     runs = steps.map { |step| step['run'] }.compact
     INTEGRATION_RUNS.each { |command| assert_equal 1, runs.count(command), command }
+    # Two shards: every command runs in exactly one of them, and the only step condition allowed is that shard test.
+    job = @ci.fetch('jobs').fetch('integration')
+    assert_equal false, job.fetch('strategy').fetch('fail-fast')
+    assert_equal [1, 2], job.fetch('strategy').fetch('matrix').fetch('shard')
+    assert_operator job.fetch('timeout-minutes'), :<=, 30
+    INTEGRATION_SHARDS.each do |shard, commands|
+      commands.each do |command|
+        step = steps.find { |candidate| candidate['run'] == command }
+        assert_equal "matrix.shard == #{shard}", step.fetch('if'), command
+      end
+    end
+    assert_equal INTEGRATION_RUNS.sort, INTEGRATION_SHARDS.values.flatten.sort
     assert_operator runs.index('pnpm install --frozen-lockfile'), :<, runs.index(INTEGRATION_RUNS.first)
     pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
     refute_nil pull
     INTEGRATION_RUNS.each { |command| assert_operator pull, :<, steps.index { |step| step['run'] == command }, command }
     assert_includes steps[pull]['run'], 'packages/db/tests/v3/images.mjs'
     steps.each do |step|
-      refute step.key?('if'), step['name']
+      refute step.key?('if'), step['name'] unless INTEGRATION_RUNS.include?(step['run'])
       refute step.key?('continue-on-error'), step['name']
       refute step.key?('env'), step['name']
     end
@@ -100,6 +207,7 @@ class CIWorkflowsTest < Minitest::Test
     [@ci,@security].each do |workflow|
       events=workflow['on'] || workflow[true]
       %w[pull_request push].each do |event|
+        # No type list anywhere: the default pull_request types, so a draft runs the same CI as a ready pull request (Owner 2026-11-03).
         assert_equal ['branches'], events.fetch(event).keys
         assert_includes events[event]['branches'], 'staging'
       end
@@ -129,7 +237,7 @@ class CIWorkflowsTest < Minitest::Test
     %w[auth-bootstrap checkout-cancellation skill-runtime year-calendar refund-race billing-cron].each do |suite|
       refute_includes runs, "pnpm test:ci:#{suite}"
     end
-    refute @ci['jobs'].key?('scope')
+    # The only scoping job allowed is the Owner-approved one (2026-11-01), which gates just the two database jobs: test_scope_job_gates_exactly_the_two_database_jobs.
     assert_equal 1, runs.count('node scripts/check-code-size.mjs')
     lint_runs = @ci['jobs']['lint-and-type']['steps'].map { |step| step['run'] }
     assert_includes lint_runs, 'node scripts/check-code-size.mjs'
@@ -246,6 +354,81 @@ class CIWorkflowsTest < Minitest::Test
       end
     end
   end
+
+  # MAINT-P1: the digest-pinned service images are cached as archives. A cache never skips a check: the job still
+  # loads or pulls all three images (same bounded retry on a miss) before any suite runs, and nothing is conditional.
+  def test_pinned_service_images_cache_never_changes_what_is_tested
+    repository = File.expand_path('..', ROOT)
+    images = File.read("#{repository}/packages/db/tests/v3/images.mjs", encoding: 'UTF-8').scan(/^export const \w+ = "([^"]*)";$/).flatten
+    %w[integration db-suites].each do |id|
+      steps = @ci.fetch('jobs').fetch(id).fetch('steps')
+      key = steps.index { |step| step['id'] == 'service-images' }
+      cache = steps.index { |step| step['id'] == 'service-images-cache' }
+      pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
+      refute_nil key; refute_nil cache; refute_nil pull
+      assert_operator key, :<, cache
+      assert_operator cache, :<, pull
+      assert_match(/\Aactions\/cache@[0-9a-f]{40}\z/, steps[cache].fetch("uses"))
+      assert_equal '${{ runner.temp }}/service-images', steps[cache].fetch('with').fetch('path')
+      assert_equal 'service-images-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.service-images.outputs.key }}', steps[cache].fetch('with').fetch('key')
+      refute steps[cache].fetch('with').key?('restore-keys'), 'only the exact digest key may restore images'
+      assert_includes steps[key].fetch('run'), 'packages/db/tests/v3/images.mjs'
+      assert_includes steps[pull].fetch('run'), 'for attempt in 1 2 3 4 5'
+      assert_includes steps[pull].fetch('run'), 'docker pull --quiet "$image"'
+    end
+    steps = @ci.fetch('jobs').fetch('integration').fetch('steps')
+    key_step = steps.find { |step| step['id'] == 'service-images' }
+    pull_step = steps.find { |step| step['name'] == 'Pull pinned service images' }
+    Dir.mktmpdir('service-images-') do |dir|
+      out, err, status = Open3.capture3({'GITHUB_OUTPUT'=>"#{dir}/output"}, 'bash', '-c', key_step.fetch('run'), chdir: repository)
+      assert status.success?, out + err
+      assert_match(/\Akey=[0-9a-f]{64}\n\z/, File.read("#{dir}/output"))
+      # Fake docker: records every call; behavior is chosen per case.
+      bin = "#{dir}/bin"; FileUtils.mkdir_p(bin)
+      File.write("#{bin}/docker", <<~SH)
+        #!/bin/sh
+        echo "$*" >> "$LOG"
+        case "$1" in
+          load) [ "$LOAD_OK" = 1 ] && exit 0 || exit 1 ;;
+          image) [ "$INSPECT_OK" = 1 ] && exit 0 || exit 1 ;;
+          pull) [ "$PULL_OK" = 1 ] && exit 0 || exit 1 ;;
+          save) shift; [ "$1" = --output ] && printf archive > "$2"; exit 0 ;;
+        esac
+      SH
+      File.write("#{bin}/sleep", "#!/bin/sh\nexit 0\n")
+      FileUtils.chmod(0755, ["#{bin}/docker", "#{bin}/sleep"])
+      run = lambda do |cached, load_ok, inspect_ok, pull_ok|
+        temp = "#{dir}/temp#{rand(1_000_000)}"; FileUtils.mkdir_p("#{temp}/service-images")
+        3.times { |n| File.write("#{temp}/service-images/#{n + 1}.tar", 'cached') } if cached
+        log = "#{temp}/log"
+        env = {'PATH'=>"#{bin}:#{ENV.fetch('PATH')}", 'RUNNER_TEMP'=>temp, 'LOG'=>log,
+               'LOAD_OK'=>load_ok, 'INSPECT_OK'=>inspect_ok, 'PULL_OK'=>pull_ok}
+        out, err, status = Open3.capture3(env, 'bash', '-c', pull_step.fetch('run'), chdir: repository)
+        [status.success?, File.exist?(log) ? File.readlines(log).map(&:strip) : [], out + err, temp]
+      end
+      # Cache hit whose images resolve by digest: loaded, never pulled, nothing saved.
+      ok, calls, = run.call(true, '1', '1', '0')
+      assert ok
+      assert_equal 3, calls.count { |c| c.start_with?('load ') }
+      assert_empty calls.select { |c| c.start_with?('pull ') || c.start_with?('save ') }
+      # Cache hit whose images do not resolve by digest: pulled with the original path, then saved again.
+      ok, calls, = run.call(true, '1', '0', '1')
+      assert ok
+      images.each { |image| assert_includes calls, "pull --quiet #{image}" }
+      assert_equal 3, calls.count { |c| c.start_with?('save ') }
+      # Miss: every digest-pinned image is pulled and archived.
+      ok, calls, _, temp = run.call(false, '0', '0', '1')
+      assert ok
+      images.each { |image| assert_includes calls, "pull --quiet #{image}" }
+      assert_equal 3, Dir["#{temp}/service-images/*.tar"].length
+      # A registry that never answers still fails the job after five tries per image: nothing is skipped.
+      ok, calls, out, = run.call(false, '0', '0', '0')
+      refute ok
+      assert_equal 5, calls.count { |c| c.start_with?('pull ') }
+      assert_includes out, 'Failed to pull'
+    end
+  end
+
 
   def test_migration_ledger_runs_in_its_own_unskippable_worker
     ledger = 'CI safeguard — check migration ledger'

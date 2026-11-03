@@ -34,9 +34,17 @@ test('V3 freezes the complete production organizer system prompt, including the 
   const base = organizerInstructions(opc('organizerPrompt.ts')), full = promptAt(fileURLToPath(new URL('../..', import.meta.url)));
   strict.ok(full.startsWith(base + '\n') && full.length > base.length + 1);
   strict.match(full.slice(base.length), /^\nIn answeredCard, selectedOption is the user's choice;.*choice\.$/);
-  const parts = { prompt: opc('organizerPrompt.ts'), answerCard: opc('answerCard.ts'), service: opc('service.ts') };
+  const turn = readFileSync(new URL('../../packages/api/src/services/turn/mentorPrompt.ts', import.meta.url), 'utf8');
+  const parts = { prompt: opc('organizerPrompt.ts'), answerCard: opc('answerCard.ts'), mentor: turn };
+  // The production composition is the turn path's; the prompt text it freezes is unchanged.
   strict.equal(organizerSystem(parts), full);
-  strict.throws(() => organizerSystem({ ...parts, service: parts.service.replace('+= "\\n" + ANSWER_CARD_RULE', '+= ANSWER_CARD_RULE') }),
+  strict.throws(() => organizerSystem({ ...parts, mentor: turn.replace("ANSWER_CARD_RULE + (opening", "(opening") }),
+    /V3_PROMPT_COMPOSITION_CHANGED/);
+  strict.throws(() => organizerSystem({ prompt: parts.prompt, answerCard: parts.answerCard }), /V3_PROMPT_COMPOSITION_CHANGED/);
+  // A checkout from before CORE-PATH-V2 F composed it in opcService.prepareStep; those lines are still accepted for it.
+  const legacy = 'organizerInstructions += "\\n" + ANSWER_CARD_RULE;\nif (organizerInstructions && opening) organizerInstructions += "\\n" + OPENING_EXTRACTION_RULE;';
+  strict.equal(organizerSystem({ prompt: parts.prompt, answerCard: parts.answerCard, service: legacy }), full);
+  strict.throws(() => organizerSystem({ prompt: parts.prompt, answerCard: parts.answerCard, service: legacy.replace('+= "\\n" + ANSWER_CARD_RULE', '+= ANSWER_CARD_RULE') }),
     /V3_PROMPT_COMPOSITION_CHANGED/);
 });
 

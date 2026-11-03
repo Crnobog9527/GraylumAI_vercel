@@ -1,7 +1,7 @@
 "use client";
 import { type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { use, useEffect, useRef, useState, type ReactNode } from "react";
+import { useMemo, use, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
@@ -30,9 +30,11 @@ import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage
   MentorWelcome } from "@/components/chat-display/mentor-messages";
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry, useOpeningFailureNotice } from "./mentor-notices";
-import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
+import { useAutoStepRecovery, useOpeningGate } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
-import { useLiveReply } from "./use-live-reply";
+import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
+import { NO_PLAN_TURN, planTurnState, readPlanTurn, runPlanTurn, usePlanTurn } from "./plan-turn-path";
+import { turnCodeNotice } from "@/app/(zh-hans)/app/runtime/turn-notices";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
@@ -40,10 +42,9 @@ import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
   summaryShown } from "./step-summary";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
-  retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
-import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
+  retainExecution, settleEnvelope, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
@@ -62,8 +63,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
-  const list = trpc.opc.list.useQuery();
-  const prepareStep = trpc.opc.prepareStep.useMutation();
+  const list = trpc.opc.list.useQuery(), turnPath = useMentorTurnPath(read.data?.sessionId, draftId);
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
   const mentorSendInFlight=useRef(false);
@@ -71,11 +71,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const streamTurn=(open:()=>Promise<AsyncIterable<AgentTurnEvent>>,executionId?:string,onAdmitted?:(id:string)=>void)=>
     live.stream(open,{executionId,onAdmitted,onFinished:()=>void utils.credits.getBalance.invalidate(),
       onResult:result=>{const notice=turnResultNotice(result);if(notice)setError(notice);}});
-  const execute={mutateAsync:(input:{executionId:string})=>
-    streamTurn(()=>utils.client.runtime.executeStream.mutate({...input,textProtocol:TEXT_PROTOCOL}),input.executionId)};
+  const execute={mutateAsync:(input:{executionId:string})=>turnPath.settled(input.executionId)};
   /** A mentor turn in one request: admission, then the same execution stream (AC-1). */
   const mentorTurn=(request:MentorRequest,onAdmitted?:(id:string)=>void)=>
-    streamTurn(()=>utils.client.opc.mentorTurnStream.mutate({...request,textProtocol:TEXT_PROTOCOL}),undefined,onAdmitted);
+    streamTurn(turnPath.open(request,read.data),undefined,onAdmitted);
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>
@@ -119,12 +118,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planAccount, setPlanAccount] = useState("");
   const [planStart, setPlanStart] = useState(() => new Date().toISOString().slice(0, 10));
   const [planDays, setPlanDays] = useState(7);
-  const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
-    { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
-      refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
+  const history = turnPath.history;
   const research = useResearchCalls(read.data?.sessionId);
   const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal, stale = live.reopenGraceOver;
-  const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   // State, not a ref: on a client-side return cached history exists before the log mounts.
   const [mentorInput, setMentorInput] = useState("");
@@ -144,10 +140,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       // that legal representation; all other identity fields/extra keys stay exact.
       if (request.organizeAfter === false) delete request.organizeAfter;
       const stopped = history.data.executions?.some((execution: {
-        executionId: string; state: string; request?: MentorRequest;
-        billing?: {closed?: boolean; cancelRequested?: boolean};
+        executionId: string; state: string; request?: MentorRequest | null;
+        billing?: {closed?: boolean; cancelRequested?: boolean} | null;
       }) => execution.state === "cost_pending" && execution.billing?.closed === true &&
-        execution.billing.cancelRequested === true && execution.executionId !== history.data.activeExecution &&
+        execution.billing.cancelRequested === true && execution.executionId !== history.data?.activeExecution &&
         execution.request && sameRequest(request, execution.request));
       // Only an exact server-persisted, stopped request retires this local lock.
       if (stopped && sessionStorage.getItem(key) === raw) {
@@ -214,15 +210,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * distinguish "never admitted" from "admitted, outcome unknown" truthfully
    * instead of assuming a cancellation or a zero cost.
    */
-  const retainedState = trpc.opc.planRequestState.useQuery(
-    { draftId, requestId: retainedPlan?.requestId ?? "" },
-    { enabled: Boolean(retainedPlan?.requestId) },
-  );
+  const { turn: retainedTurn, state: retainedState, recheck: recheckRetained } = usePlanTurn(read.data?.sessionId, retainedPlan?.requestId);
   /** The bound topic workspace of this draft (the consented entry target). */
   const bindTopic = trpc.opc.consentTopicWorkspace.useMutation();
   const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
-  const d = read.data,
+  const d = useMemo(() => turnPath.draft(read.data), [read.data, turnPath.turns]), // eslint-disable-line react-hooks/exhaustive-deps
     snap = d?.snapshot,
     latest = d?.plans?.[0];
   /** Utterances the mentor classified as non-answers in one step: never confirmed as content. */
@@ -245,9 +238,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     transition: input => change.mutateAsync(input as Parameters<typeof change.mutateAsync>[0]),
     run, nonAnswers: nonAnswersFor, setError, setRunning,
     onConfirmed: stepId => {
-      // Confirmed: move on to the next step, whose opening the Agent sends by itself.
-      const flow = (snap?.workflow.steps ?? []) as Step[], index = flow.findIndex(step => step.id === stepId);
-      if (!d?.accountRevision && index >= 0 && index < flow.length - 1) setActiveStep(flow[index + 1]!.id);
+      const flow = (snap?.workflow.steps ?? []) as Step[], index = flow.findIndex(step => step.id === stepId), next = flow[index + 1];
+      if (!d?.accountRevision && index >= 0 && next) { gate.grant(next.id, d?.roundId ?? null); setActiveStep(next.id); }
     },
   });
   const captureResolve = trpc.opc.captureResolve.useMutation(), capturePending = trpc.opc.capturePending.useMutation();
@@ -263,7 +255,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     revise.isPending ||
     change.isPending ||
     savePlan.isPending ||
-    handoff.isPending || payg.busy;
+    handoff.isPending;
   useEffect(() => {
     // Hydrate before persisting: initial/StrictMode effects must not overwrite
     // a saved buffer with the render's empty initial state.
@@ -401,10 +393,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    */
   const autoOpening = useRef(new Set<string>());
   const openingInFlight = useRef(new Set<string>());
-  const [openingSteps, setOpeningSteps] = useState<string[]>([]);
+  const [openingSteps, setOpeningSteps] = useState<string[]>([]), gate = useOpeningGate(draftId);
   const [notice, setNotice] = useState(""), openingFailed = useOpeningFailureNotice(d, history.data?.executions, notice, setNotice);
   useEffect(() => {
-    if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted) return; // read-only: no turn
+    if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted || !turnPath.ready) return; // read-only; path undecided
     // A manual draft (我已有定位, R15) opens too: the mentor asks for the existing positioning first.
     if (d.snapshot.state !== "draft") return;
     const flowSteps: Step[] = d.snapshot.workflow.steps;
@@ -420,21 +412,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const question = d.information[step.id].schema[0] as { id: string } | undefined;
     if (!question) return;
     const turns = (d.turns ?? []) as Array<{ stepId: string; roundId?: string | null; kind: string }>;
-    // One opening per step and round. Any turn of this step in this round (an
-    // earlier opening, or a conversation started on an older page) means the
-    // step is already open. A turn from an older round never suppresses the
-    // current round's opening: the round is part of the request identity.
-    // A projection without round ownership keeps the previous round-blind behaviour.
-    const sameRound = (turn: { roundId?: string | null }) =>
-      !Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId;
-    if (turns.some(turn => turn.stepId === step.id && sameRound(turn) &&
-      (turn.kind === "mentor" || turn.kind === "organizer" || turn.kind === "opening")))
-      return;
+    if (turnPath.stepOpened(turns, step.id, d.roundId)) return gate.clear();
     // A retained explicit mentor request already owns this step's next turn.
     if (sessionStorage.getItem("opc-step:" + draftId + ":" + step.id)) return;
     if (sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + step.id)) return;
     const key = openingEntryKey(draftId, d.roundId, step.id, question.id);
-    if (autoOpening.current.has(key)) return;
+    if (autoOpening.current.has(key) || !gate.admit(step.id, d.roundId, stepIndex === 0)) return;
     autoOpening.current.add(key);
     openingInFlight.current.add(step.id);
     setOpeningSteps([...openingInFlight.current]);
@@ -468,7 +451,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         setOpeningSteps([...openingInFlight.current]);
       }
     })();
-  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed]);
+  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed, turnPath.ready, gate.asked]);
   const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, historyFailed: history.isError, draftId, recover: recoverPendingStep,
     steps: (d?.snapshot.workflow.steps ?? []) as Step[],
     ready: !planView && hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
@@ -623,7 +606,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     // A running execution keeps envelope and bubble until a resume sees a terminal result; a Q1 refusal refills the box.
     if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
     setPendingBubble(old=>old?.requestId===request.requestId?null:old);
-    if(!payg.admitted(result))refusedTurn(sessionStorage,draftId,step.id,request.input,()=>setMentorInput(old=>old.trim()?old:request.input));
     live.clear();
   }
   async function resumeInterruptedOpening() {
@@ -862,18 +844,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * same request can be replayed instead of paying for a second call.
    */
   async function runPlanRequest(request: PlanRequest, sourceRoundId: string | null = d.roundId) {
-      const state = await utils.opc.planRequestState.fetch({ draftId, requestId: request.requestId });
-      if (!state.executionId && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
+      // V2-12: every plan request runs as a turn; a request that already has one is read, not sent again.
+      const ids = { sessionId: read.data?.sessionId as string, moduleId: read.data?.moduleId as string };
+      const turned = await readPlanTurn(ids.sessionId, request.requestId).catch(() => null);
+      if (!turned && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
         setNotice("原请求属于旧定位轮次，服务端尚无可恢复执行；已保留记录，没有按新定位生成。请核对后另行选择新请求。");
         throw new Error("OPC_OLD_REQUEST_NOT_ADMITTED");
       }
-      const prepared = state.executionId ? { executionId: state.executionId }
-        : await prepareStep.mutateAsync(request);
-      if (state.state !== "completed") await execute.mutateAsync({ executionId: prepared.executionId });
-      const candidate = await utils.opc.planResult.fetch({
-        draftId,
-        executionId: prepared.executionId,
-      });
+      const candidate = await runPlanTurn(request, ids, turned).catch(cause => { setNotice(turnCodeNotice((cause as Error).message).text); throw cause; });
       if (!candidate.valid) {
         // This execution completed and returned a body that cannot be used as
         // a plan. It is safe to create a new request after the user edits the
@@ -956,14 +934,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
   /** The server's identity/lifecycle projection for the retained request. */
-  const retainedStateData = retainedState.data as
-    | {
-        admitted?: boolean;
-        state?: string | null;
-        hasResult?: boolean;
-        materialRevoked?: boolean;
-      }
-    | undefined;
+  const retainedStateData = (retainedTurn ? planTurnState(retainedTurn) : retainedTurn === null ? NO_PLAN_TURN : undefined) as
+    { admitted?: boolean; state?: string | null; hasResult?: boolean; materialRevoked?: boolean } | undefined;
   if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d) return <main className="p-6" role="alert">
     {read.error?.data?.code==="NOT_FOUND"?"找不到这份定位，它可能已被删除。":"无法读取这份定位，请检查登录和访问权限。"}<Link href="/app/positioning">返回定位列表</Link></main>;
@@ -982,6 +954,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         : retainedStateData.materialRevoked ? "原请求来源已撤回，不能继续恢复。"
         : retainedStateData.hasResult ? "服务端已保存这条请求的完成结果，可以按原身份恢复读取。"
         : "原请求结果尚未确定；继续使用原身份恢复，不会重复执行或重复扣费。"}</p>
+      {retainedState.error && <Button onClick={recheckRetained}>重新核对</Button>}
       <Button disabled={busy || !retainedStateData?.admitted || retainedStateData.materialRevoked || Boolean(retainedState.error)} onClick={() => void run(async () => {
         const retained = readRetainedPlan();
         if (!retained || retained.kind === "invalid") throw new Error("OPC_REQUEST_INVALID");
@@ -1056,8 +1029,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       return envelope ? { step, ...envelope } : null;
     })
     .filter((entry): entry is { step: Step; raw: string; parsed: StepEnvelope | null } => Boolean(entry));
-  const hasPendingStepRequest = pendingStepRequests.length > 0;
-  const awaitingReply = hasPendingStepRequest && !recoveryNeedsUser.length;
+  const hasPendingStepRequest = pendingStepRequests.length > 0, awaitingReply = hasPendingStepRequest && !recoveryNeedsUser.length;
   // The server execution slot owns concurrency. A stopped historical call may
   // still have pending cost without owning that slot; never infer busy from cost.
   const pendingMentor = mentorExecutions.find(
@@ -1077,7 +1049,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
   }
   /** A step can be confirmed once the steps it depends on are confirmed. */
-  function confirmableStep(step: Step) { if (pendingMentor || awaitingReply || liveOnly || mentorExecutions.some(openOrganizer)) return false;
+  function confirmableStep(step: Step) { if (pendingMentor || awaitingReply || liveOnly) return false;
     if (steps.some(other => other.id !== step.id && confirmation.envelopeState(other.id).kind === "valid")) return false;
     return Boolean(d.accountRevision) || (step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending);
   }
@@ -1089,7 +1061,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (values) void autosave.enqueue(stepId).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
   }
   function checklistProps(): Parameters<typeof CaptureChecklist>[0] {
-    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor) || mentorExecutions.some(openOrganizer);
+    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor);
     return {
       steps, information: d.information, edits: infoEdits, selectedStepId: selectedStep.id, editable: snap.state === "draft",
       valid: Object.fromEntries(steps.map(step => [step.id, Boolean(snap.steps[step.id].valid)])),
@@ -1116,11 +1088,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return <StepReviewDialog title={step.title} schema={info.schema} reviewed={reviewed}
       updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} onDefer={confirmation.setDeferred}
       onEdit={(fieldId, value) => { confirmation.noteEdit(fieldId, editedValue(reviewed.values[fieldId]!, value)); editField(review.stepId, fieldId, value); }}
-      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly) || mentorExecutions.some(openOrganizer)}
+      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly)}
       loading={review.loading} loadError={review.loadError} onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
-    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试':d?.runtimeMode==='production'?undefined:'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<PositioningResultPanel
+    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试':d?.runtimeMode==='production'?undefined:'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} turnBusy={turnPath.creditsBusy} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<PositioningResultPanel
       subtitle={snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'} bodyRef={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></PositioningResultPanel>}>
     <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <PositioningHeader
@@ -1143,7 +1115,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           if (step.id !== selectedStep.id) return null;
           const s = snap.steps[step.id];
           const sendLocked = busy || Boolean(history.data?.activeExecution) || openingSteps.includes(step.id) || Boolean(pendingMentor) ||
-            hasPendingConfirmation || hasPendingStepRequest || free.busy;
+            hasPendingConfirmation || hasPendingStepRequest || free.busy, replying = sendLocked && !recoveryNeedsUser.length;
           const nudged = s.valid || infoEdits[step.id] ? [] : savedFields(sessionStorage, draftId, step.id, d.information[step.id].schema);
           chatShown = true; // Its message list carries the page's notices.
           return (
@@ -1164,10 +1136,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const openingTurn = turn?.kind === "opening" || isOpeningInput(execution.input);
                       const summaryTurn = isStepSummaryInput(execution.input);
                       const live = liveReply?.executionId === execution.executionId ? liveReply : null;
-                      const reply = mentorReplyDisplay({ ...execution, body: execution.body ?? execution.primaryBody,
+                      const next = mentorExecutions[executionIndex + 1];
+                      const reply = mentorReplyDisplay({ ...execution, body: execution.body ?? execution.primaryBody, earlier: Boolean(next),
                         legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card, stopLocal: stopLocal(execution.executionId),
                         active: execution.executionId === history.data?.activeExecution, busy: busy || (awaitingReply && Boolean(liveReply)), stale });
-                      const next = mentorExecutions[executionIndex + 1];
                       if (!next) { lastTurnNotice = showsTurnState(reply.notice); lastTurnText = reply.notice?.text ?? ""; }
                       const status = cardStatus({ isLatest: !next, turn, shown: { roundId: d.roundId, stepId: step.id },
                         reply: next ? { ...mentorTurns.get(next.executionId), input: isOpeningInput(next.input) ? null : next.input }
@@ -1189,7 +1161,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !status.answered && foldedCard === execution.executionId
                             && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
                           {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
-                          <ChatNoticeList notices={[...payg.turnNotices(execution, busy), mentorTurnNotice(execution.executionId, reply.notice,
+                          <ChatNoticeList notices={[mentorTurnNotice(execution.executionId, reply.notice,
                             !busy && execution.executionId === history.data?.activeExecution && turnNeedsRetry(execution, stale)
                             ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
                         </MentorTurnGroup>
@@ -1201,12 +1173,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {liveOnly && <MentorTurnSteps live={liveOnly} reply={liveOnly} calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns} {...research.panel}
-                    disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
+                    disabled={replying ? "busy" : sendLocked || snap.state !== "draft" ||
+                      mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
                     onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
-                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
+                  <ChatNoticeList notices={[...turnPath.notices(open => void run(() => streamTurn(open))),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
-                    saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
+                    saving: hasUnsavedInformation, error, notice, freeError: free.error,
+                    opening: gate.offer(step.id, openingSteps.length === 0 && !busy), replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   </MentorChatLog>
@@ -1324,7 +1298,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
-      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId} published={snap.state === "published"}
+      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} moduleId={read.data.moduleId}
+        sessionId={read.data.sessionId} published={snap.state === "published"}
         projectId={d.projectId} roundId={d.roundId} report={d.report} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
         onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
@@ -1397,7 +1372,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             ? "服务端记录这条请求已取消；继续只会按原身份核对，不会重新派发。"
                             : `服务端已记录这条请求（${retainedStateData.state ?? "状态未知"}）：结果尚未确定，继续会按原身份恢复，不会重复派发或重复扣费。`}
               </p>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-3">{retainedState.error && <Button onClick={recheckRetained}>重新核对</Button>}
                 <Button disabled={busy} onClick={() => void consentPlan()}>
                   继续这条原请求
                 </Button>

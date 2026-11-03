@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.opc_free_conversations(p_actor_id uuid)
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
--- 0232 conversation name
+-- 0232 conversation name; 0444 conversations of the turn path
 
 DECLARE conversations jsonb;memo_opened boolean;
 BEGIN
@@ -16,7 +16,8 @@ BEGIN
  memo_opened:=runtime_check_memo_open();
  PERFORM bill2_actor(p_actor_id);
  WITH recent AS MATERIALIZED (
- SELECT s.id,first_turn.id AS execution_id,first_turn.payload,first_compare.id AS compare_id,first_compare.question AS compare_question,activity.last_activity
+ SELECT s.id,first_turn.id AS execution_id,first_turn.payload,first_compare.id AS compare_id,first_compare.question AS compare_question,first_compare.created_at AS compare_at,
+  first_msg.content AS message_text,first_msg.created_at AS message_at,activity.last_activity
  FROM (
   -- DB-PERF PR-7b-A exclusions first: the permission check runs only on sessions the list can show.
   SELECT candidate.* FROM (
@@ -27,35 +28,36 @@ BEGIN
    OFFSET 0
   ) candidate WHERE bill2_scope_allowed(p_actor_id,candidate.scope)
  ) s
- LEFT JOIN LATERAL (
-  SELECT e.id,e.payload FROM runtime_executions e
-  WHERE e.session_id=s.id AND e.actor_id=p_actor_id AND e.payload->>'role' IN ('ordinary','skill')
-  ORDER BY e.created_at,e.id LIMIT 1
- ) first_turn ON true
+ LEFT JOIN LATERAL (SELECT NULL::uuid AS id, NULL::jsonb AS payload WHERE false) first_turn ON true
  -- FUSION-COMPARE first message: a conversation that so far holds only a compare
  LEFT JOIN LATERAL (
-  SELECT c.id,c.question FROM fusion_compares c
+  SELECT c.id,c.question,c.created_at FROM fusion_compares c
   WHERE c.session_id=s.id AND c.actor_id=p_actor_id AND c.state<>'refused' AND NOT (c.state='admitting' AND c.created_at<=clock_timestamp()-interval '5 minutes')
   ORDER BY c.created_at,c.id LIMIT 1
  ) first_compare ON true
+ -- CORE-PATH-V2: a conversation of the turn path has no execution; its first visible user message names it.
+ LEFT JOIN LATERAL (
+  SELECT m.content,m.created_at FROM session_messages m
+  WHERE m.session_id=s.id AND m.role='user' AND m.visible AND m.deleted_at IS NULL
+  ORDER BY m.seq LIMIT 1
+ ) first_msg ON true
  CROSS JOIN LATERAL (
-  SELECT greatest(max(e.created_at),(SELECT max(c.created_at) FROM fusion_compares c
-   WHERE c.session_id=s.id AND c.actor_id=p_actor_id AND c.state<>'refused' AND NOT (c.state='admitting' AND c.created_at<=clock_timestamp()-interval '5 minutes'))) AS last_activity FROM runtime_executions e
-  WHERE e.session_id=s.id AND e.actor_id=p_actor_id
+  SELECT greatest((SELECT max(c.created_at) FROM fusion_compares c
+   WHERE c.session_id=s.id AND c.actor_id=p_actor_id AND c.state<>'refused' AND NOT (c.state='admitting' AND c.created_at<=clock_timestamp()-interval '5 minutes')),
+   (SELECT max(greatest(t.opened_at,t.closed_at)) FROM turns t WHERE t.session_id=s.id AND t.actor_id=p_actor_id),
+   (SELECT max(m.created_at) FROM session_messages m WHERE m.session_id=s.id AND m.visible AND m.deleted_at IS NULL)) AS last_activity
  ) activity
  -- PR6 scheduled review list filter
- WHERE (first_turn.id IS NOT NULL OR first_compare.id IS NOT NULL)
+ WHERE (first_turn.id IS NOT NULL OR first_compare.id IS NOT NULL OR first_msg.created_at IS NOT NULL)
  AND NOT coalesce(first_turn.payload ? 'weeklyReview',false)
  ORDER BY activity.last_activity DESC,s.id LIMIT 100
  )
  SELECT coalesce(jsonb_agg(jsonb_build_object(
   'sessionId',s.id,
   'title',coalesce((SELECT n.name FROM runtime_session_names n WHERE n.session_id=s.id AND n.actor_id=p_actor_id),
-   CASE WHEN s.execution_id IS NULL
-    THEN CASE WHEN s.compare_question IS NOT NULL THEN left(coalesce(nullif(btrim(s.compare_question),''),'新对话'),80) ELSE '对话记录' END
-   WHEN runtime_history_available(s.execution_id)
-    THEN left(coalesce(nullif(btrim(s.payload->>'input'),''),'新对话'),80)
-    ELSE '对话记录' END),
+   CASE WHEN s.message_at IS NOT NULL AND (s.compare_at IS NULL OR s.message_at<=s.compare_at)
+      THEN left(coalesce(nullif(btrim(s.message_text),''),'新对话'),80)
+     WHEN s.compare_question IS NOT NULL THEN left(coalesce(nullif(btrim(s.compare_question),''),'新对话'),80) ELSE '对话记录' END),
   'lastActivityAt',s.last_activity
  ) ORDER BY s.last_activity DESC,s.id),'[]'::jsonb) INTO conversations
  FROM recent s;

@@ -2,8 +2,8 @@
 import {buildStepSummaryNotice} from './stepSummary';
 import {stepConfirmation} from '../../shared/opcStepConfirmation';
 import {fieldElicitation, type MethodInformationField} from '../../shared/opcMethodPolicy';
-import {GROUNDED_CARD_CONTRACT} from '../runtime/groundedCard';
-import {HOST_TURN_MAX_BYTES, hostTurnContextSchema, type HostTurnContext} from '../runtime/hostTurn';
+import {GROUNDED_CARD_CONTRACT} from '../turn/agent/groundedCard';
+import {HOST_TURN_MAX_BYTES, hostTurnContextSchema, type HostTurnContext} from '../turn/agent/hostTurn';
 import {organizerAnswerCard, type AnsweredCard} from './answerCard';
 
 export type CaptureState = {

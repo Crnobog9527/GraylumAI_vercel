@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { RuntimeCallGate } from '../../runtime/newWorkGate';
-import { DEFAULT_RUNTIME_RATE_LIMITS } from '../../runtime/rateLimitSettings';
+import type { RuntimeCallGate } from '../../turn/admission/newWorkGate';
+import { DEFAULT_RUNTIME_RATE_LIMITS } from '../../turn/settings/rateLimitSettings';
 /** Only explicit offline tests may supply this gate; hosts always build real gates. */
 export const allowTestCalls: RuntimeCallGate = async () => ({ ok: true });
 /** MODEL-IDENTITY-GUARD switch seen by admission through the settings read (default on). */

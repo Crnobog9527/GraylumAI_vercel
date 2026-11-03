@@ -31,7 +31,7 @@ BEGIN
   SELECT * INTO prior FROM opc_data_events WHERE actor_id=p_actor_id AND request_id=p_request_id AND item_key=item->>'id';
   IF p_sources IS NOT NULL THEN
    SELECT (x->>'executionId')::uuid INTO eid FROM jsonb_array_elements(p_sources) x WHERE x->>'itemId'=item->>'id';
-  ELSIF p_source_draft_version_id IS NULL AND prior.request_id IS NOT NULL THEN eid:=prior.execution_id;
+  ELSIF p_source_draft_version_id IS NULL AND prior.request_id IS NOT NULL THEN eid:=opc_data_event_source(prior);
   ELSE
    -- Bind the submitted immutable draft identity even after another tab saves a revision.
    -- Old requests without identity must prove a unique source across history or fail closed.
@@ -40,16 +40,9 @@ BEGIN
      AND (p_source_draft_version_id IS NULL OR id=p_source_draft_version_id)
    )
    SELECT array_agg(DISTINCT candidate.id) INTO ids FROM (
-    SELECT event.execution_id AS id FROM submitted v JOIN opc_data_events event ON event.request_id=v.request_id
+    SELECT opc_data_event_source(event) AS id FROM submitted v JOIN opc_data_events event ON event.request_id=v.request_id
     WHERE event.actor_id=p_actor_id AND event.project_id=project AND event.source_version_id=p_source_version_id
      AND event.action='topic_draft' AND v.erased_at IS NULL AND v.source_version_id=p_source_version_id
-     AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.body) o WHERE o->>'id'=item->>'id')
-    UNION
-    -- Before R9 the client already used execution UUID as its save request UUID.
-    SELECT e.id FROM submitted v JOIN runtime_executions e ON e.id=v.request_id
-     JOIN opc_topic_workspaces w ON w.draft_id=v.draft_id AND w.session_id=e.session_id
-    WHERE e.actor_id=p_actor_id AND v.source_version_id=p_source_version_id
-     AND v.erased_at IS NULL AND e.state='completed' AND runtime_history_available(e.id)
      AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.body) o WHERE o->>'id'=item->>'id')
    ) candidate;
    IF cardinality(ids) IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_REQUIRED';END IF;
@@ -59,15 +52,17 @@ BEGIN
   SELECT o INTO original FROM jsonb_array_elements(original) o WHERE o->>'id'=item->>'id';
   IF original IS NULL THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_INVALID';END IF;
   IF prior.request_id IS NOT NULL AND (prior.action<>'topic_adoption' OR prior.project_id<>project
-   OR prior.execution_id<>eid OR prior.adopted IS DISTINCT FROM item OR prior.source_version_id<>p_source_version_id)
+   OR opc_data_event_source(prior)<>eid OR prior.adopted IS DISTINCT FROM item OR prior.source_version_id<>p_source_version_id)
   THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
-  bound:=bound||jsonb_build_array(jsonb_build_object('executionId',eid,'original',original,'adopted',item));
+  bound:=bound||jsonb_build_array(jsonb_build_object('executionId',eid,'turnId',opc_data_source_turn(p_actor_id,eid),'original',original,'adopted',item));
  END LOOP;
  result:=opc_adopt_topics(p_actor_id,p_draft_id,p_request_id,p_expected_version,p_source_version_id,p_body,p_accounts);
  FOR item IN SELECT value FROM jsonb_array_elements(bound) LOOP
-  INSERT INTO opc_data_events(actor_id,request_id,item_key,action,execution_id,project_id,target_project_id,
+  INSERT INTO opc_data_events(actor_id,request_id,item_key,action,execution_id,turn_actor_id,turn_id,project_id,target_project_id,
    source_version_id,original,adopted)
-  SELECT p_actor_id,p_request_id,item#>>'{adopted,id}','topic_adoption',(item->>'executionId')::uuid,project,
+  SELECT p_actor_id,p_request_id,item#>>'{adopted,id}','topic_adoption',
+   CASE WHEN item->>'turnId' IS NULL THEN (item->>'executionId')::uuid END,
+   CASE WHEN item->>'turnId' IS NOT NULL THEN p_actor_id END,(item->>'turnId')::bigint,project,
    i.work_item_id,p_source_version_id,item->'original',item->'adopted'
   FROM opc_items i WHERE i.plan_id=(result->>'planId')::uuid AND i.item_key=(item#>>'{adopted,id}')::uuid
   ON CONFLICT DO NOTHING;

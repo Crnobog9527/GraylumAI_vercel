@@ -54,6 +54,21 @@ const REVIEWER_FORMAT = [
   '只依据给出的报告和资料，不要联网，需要外部核实的说法标为"待核实"。',
   NO_SELF_IDENTITY,
 ].join('\n');
+/**
+ * `adoptedBenchmarks` is the benchmark accounts the report actually adopted, with the numbers the host attached from its own fetched
+ * table and the time they were fetched (`metrics` null: not fetched). The report text carries only the names. Three states, three rules:
+ * a list (only those accounts are this report's benchmarks), an empty list (the report is confirmed to have adopted none) and null (no
+ * list was saved, e.g. a report finalized before the data was stored: that says nothing about whether benchmarks were used). What the
+ * user wrote in `materials` earlier (links that failed to load, accounts dropped later) is the user's note in every state.
+ */
+export const BENCHMARK_RULE = '对标账号以输入里的 adoptedBenchmarks 为准：只有它列出的账号才是这份报告采用的对标，metrics 是宿主取到的数据和取数时间，'
+  + 'metrics 为 null 才算没取到。materials 里用户以前写过的链接或没取到资料的账号，不是这份报告的对标，不要拿它们去判断 adoptedBenchmarks 里的账号是否核实。';
+export const BENCHMARK_NONE_RULE = '输入里的 adoptedBenchmarks 是空列表，表示已确认这份报告没有采用对标账号：正文里若出现对标账号的数据或结论，按没有来源处理；'
+  + 'materials 里用户以前写过的链接不是这份报告的对标。';
+export const BENCHMARK_UNKNOWN_RULE = '输入里的 adoptedBenchmarks 为 null，表示这份报告没有保存采用的对标列表，不等于没有用对标：不要套用"只有列表里的账号才算对标"，'
+  + '对标账号照常按报告正文核查，正文里数据或来源缺失的标"待核实"，不要因此判错或建议删除。materials 里用户以前写过的链接仍只是用户的笔记。';
+export const benchmarkRule = (adopted: unknown) => (!Array.isArray(adopted) ? BENCHMARK_UNKNOWN_RULE
+  : adopted.length === 0 ? BENCHMARK_NONE_RULE : BENCHMARK_RULE);
 /** The fixed angle of a reviewer seat (Owner 2026-10-20), written by the host so it follows the model it is bound to. */
 export const ROLE_BLOCKS: Record<ReviewerRole, string> = {
   finance: '你这一席的专门任务是算账：把报告自己给出的数字（转化率、客单价、佣金、成本、每周投入时间、粉丝数、发布频率等）逐项算一遍，'
@@ -116,6 +131,8 @@ export const reviewLocale = (config: unknown) => {
 };
 
 export type ReviewContext = { report: string; materials: unknown; sections: string[];
+  /** A list, an empty list (confirmed none) or null/absent (not saved). */
+  adoptedBenchmarks?: unknown;
   /** The review was started with the evidence check: reviewers are asked for quotes/anchors, the summary gets merged issues. */
   evidence?: boolean;
   /** The template's length limit in characters; the host check refuses a longer body, so the model is told the number. */
@@ -128,10 +145,11 @@ const shown = (opinion: Opinion) => ({ decisions: opinion.decisions, issues: opi
   ...(opinion.responses ? { responses: opinion.responses } : {}) });
 
 export function reviewerRequest(skill: ReviewSkillText, context: ReviewContext, role?: ReviewerRole | null): FusionRequest {
-  const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : [])].join('\n');
+  const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : []), benchmarkRule(context.adoptedBenchmarks)].join('\n');
   return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}`
       + reviewLanguageRule(context.replyLocale, 'reviewer'),
-    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections }),
+    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? null }),
     responseFormat: OPINION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
 
@@ -139,10 +157,11 @@ export function reviewerRequest(skill: ReviewSkillText, context: ReviewContext, 
 export function debateRequest(skill: ReviewSkillText, context: ReviewContext, mine: Opinion | null,
   others: Array<{ reviewer: string; opinion: Opinion }>, disputed: string[], role?: ReviewerRole | null): FusionRequest {
   // The seat keeps its angle and the quote/anchor rules in the debate round (reviews started with the evidence check).
-  const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : [])].join('\n');
+  const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : []), benchmarkRule(context.adoptedBenchmarks)].join('\n');
   return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}\n${DEBATE_FORMAT}`
       + reviewLanguageRule(context.replyLocale, 'reviewer'),
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? null,
       mine: mine ? shown(mine) : null, others: others.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })),
       // Exactly these pairs must be answered, each once: every other reviewer on every disputed decision.
       respondTo: others.flatMap(item => disputed.map(decision => ({ reviewer: item.reviewer, decision }))) }),
@@ -155,9 +174,11 @@ export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, o
     ({ fieldId, currentValue: current[step.stepId]?.[fieldId] ?? '' })) }));
   // REPORT-VISUAL: the summary rewrites only the report text. The strategy data block is not sent: adoption always keeps
   // the original block (0300), and a model that edited it wrote change notes for sections whose text never changed.
-  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`
+  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${benchmarkRule(context.adoptedBenchmarks)}\n`
+      + lengthRule(context.maxCharacters)
       + reviewLanguageRule(context.replyLocale, 'summary'),
-    input: JSON.stringify({ report: reportBodyText(context.report), materials: context.materials, sections: context.sections, steps,
+    input: JSON.stringify({ report: reportBodyText(context.report), materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? null, steps,
       opinions: opinions.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
@@ -166,6 +187,12 @@ export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, o
 export const MIN_BUSINESS_REASON = 30;
 export const thinReason = (reason: string) => [...reason.trim()].length < MIN_BUSINESS_REASON
   || /^(没有|缺乏|缺少|无)(任何)?(依据|来源|证据|数据)[。.]?$/.test(reason.trim());
+
+/** The first `max` characters (whole code points) of a text, marked when cut. */
+const short = (text: string, max: number) => {
+  const chars = [...text];
+  return chars.length <= max ? text : max === 0 ? '' : `${chars.slice(0, max).join('')}…`;
+};
 
 /** What the summary sees of a review started with the evidence check: the issues merged by code (each with the seats that
  * raised it and its verified evidence), the key decisions with every seat's view, and a plain note of what was held back. */
@@ -177,19 +204,26 @@ export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewCont
   const report = reportBodyText(context.report);
   // Trimming never drops a verified critical or major issue: level 2 drops minor ones, level 3 also keeps only one view per issue.
   const kept = merge.issues.filter(issue => level >= 2 ? issue.severity !== 'minor' : true)
-    .map(issue => level >= 3 ? { ...issue, views: issue.views.slice(0, 1) } : issue);
+    .map(issue => level >= 3 ? { ...issue, views: issue.views.slice(0, 1) } : issue)
+    // Levels 4–5 keep every issue but shorten its texts, so the request is bounded by the issue count rather than by how long
+    // the reviewers wrote (a long opinion full of unmergeable severe issues is otherwise too large at level 3).
+    .map(issue => level < 4 ? issue : { ...issue, quotes: issue.quotes.slice(0, 1).map(quote => short(quote, level >= 5 ? 0 : 60)).filter(Boolean),
+      views: issue.views.map(view => ({ reviewer: view.reviewer, perspective: short(view.perspective, 20),
+        problem: short(view.problem, level >= 5 ? 60 : 160), suggestion: short(view.suggestion, level >= 5 ? 60 : 160) })) });
   const held = merge.dropped.length + Object.values(merge.droppedEarlier).reduce((total, count) => total + count, 0);
   const cut = merge.issues.length - kept.length;
   const decisions = DECISIONS.map(decision => ({ decision, views: opinions.flatMap(({ reviewer, opinion }) =>
     opinion.decisions.filter(d => d.decision === decision).map(d => ({ reviewer, verdict: d.verdict,
       ...(level >= 1 ? {} : { strongestCase: d.strongestCase, strongestAlternative: d.strongestAlternative, basis: d.basis }) }))) }));
-  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`
+  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${benchmarkRule(context.adoptedBenchmarks)}\n`
+      + lengthRule(context.maxCharacters)
       + reviewLanguageRule(context.replyLocale, 'summary'),
-    input: JSON.stringify({ report, materials: context.materials, sections: context.sections, steps, decisions,
+    input: JSON.stringify({ report, materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? null, steps, decisions,
       // Already merged by code: one entry per issue, with the seats that raised it. Quotes were checked against the report.
       issues: kept.map(issue => ({ section: issue.section, severity: issue.severity, kind: issue.kind, raisedBy: issue.reviewers,
         quotes: issue.quotes, anchor: issue.anchor, views: issue.views })),
-      note: cut > 0 ? `为了放得下，另有 ${cut} 条次要意见没有交给你。` : held === 0 ? '三位评审提出的意见都已按章节合并，没有被拦下的。'
+      note: level >= 4 ? '为了放得下，每条意见的文字已被缩短，请以章节和严重程度为准。' : cut > 0 ? `为了放得下，另有 ${cut} 条次要意见没有交给你。` : held === 0 ? '三位评审提出的意见都已按章节合并，没有被拦下的。'
         : `评审另外提了 ${held} 条意见，因为没有核对得上的原文引用，没有交给你。${kept.length ? '' : '下面没有可用的意见清单，只按关键决定判断。'}` }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }

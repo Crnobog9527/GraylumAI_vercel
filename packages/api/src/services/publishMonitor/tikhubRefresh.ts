@@ -47,7 +47,9 @@ export async function closeOrphanRuns(db: Db): Promise<number> {
   // One run that cannot be settled must not hold back the others' credits: settle them all, then report the failures.
   let failed = 0;
   for (const row of rows) {
-    try { await settleLeftOpenRun(db, { actorId: row.actorId }, row.runId, row.policies); } catch { failed += 1; }
+    try {
+      await settleLeftOpenRun(db, row.runId);
+    } catch { failed += 1; }
   }
   if (failed > 0) throw new Error('PUBLISH_MONITOR_BILLED_RUNS_UNSETTLED');
   return rows.length;

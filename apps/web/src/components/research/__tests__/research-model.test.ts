@@ -17,6 +17,12 @@ import { CALLS, CANDIDATE_CARD, CHARGES, FOLLOW_UP_CARD, KEYWORD_CARD, NOW, ROWS
 describe("describeCall", () => {
   const views = CALLS.map(describeCall);
 
+  it("says 对标数据暂时取不到 when the supplier itself could not serve the call, and keeps 没有取到数据 for an empty answer (round 13)", () => {
+    const failed = CALLS.find(call => call.state === "failed")!;
+    expect(describeCall({ ...failed, unavailable: true })).toMatchObject({ state: "missing", detail: "对标数据暂时取不到，请稍后再试。" });
+    expect(describeCall(failed)).toMatchObject({ state: "missing", detail: "这次没有取到数据。" });
+  });
+
   it("maps the four stream states to 成功 / 这次没查到 / 待核 and 正在搜", () => {
     expect(views.map(view => view.state)).toEqual(["success", "success", "pending", "missing", "running"]);
   });
@@ -95,6 +101,8 @@ describe("benchmark table", () => {
     expect(cellText({ ...youtube, platform: "tiktok" }, "followers", NOW)).toBe("1.9 万");
     expect(formatCount(0)).toBe("0");
     expect(formatLastUpdate("2026-10-13T10:00:00Z", NOW)).toBe("2026-10-13（1 天前）");
+    // 20:30 UTC on 31 Oct is already 1 Nov east of UTC: the date is the UTC one whatever the viewer's zone.
+    expect(formatLastUpdate("2026-10-31T20:30:00Z", NOW)).toContain("2026-10-31");
     expect(cellText(ROWS[1]!, "medianViews", NOW)).toBe(MISSING_TEXT);
   });
 
@@ -133,6 +141,30 @@ describe("server rows from research.toolCharges and research.evidence", () => {
     ]);
     expect(charges.map(charge => charge.callId)).toEqual(["a", "c"]);
     expect(charges.map(chargeText)).toEqual(["0.25 积分", "结算中"]);
+  });
+
+  it("rebuilds what a turn's subcall searched for from its own query and platform", () => {
+    const charges = toSearchCharges([
+      { callId: "a", toolName: "web_search", args: null, source: "tool_usage", credits: "6", query: "咖啡", platform: "web" },
+      { callId: "b", toolName: "social_search", args: null, source: "tool_usage", credits: "1", query: "穿搭", platform: "douyin" },
+      { callId: "c", toolName: "social_account", args: null, source: "tool_unknown", credits: null, query: "sample", platform: "douyin" },
+      { callId: "d", toolName: "benchmark_fetch", args: null, source: "tool_usage", credits: "1", query: "aa_one", platform: "tiktok" },
+      { callId: "e", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "咖啡店", platform: "douyin",
+        dataKind: "search" },
+      { callId: "f", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "acct_x", platform: "douyin",
+        dataKind: "account_profile" },
+      { callId: "g", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1", query: "咖啡 对标", platform: "web",
+        dataKind: "web_search" },
+    ]);
+    expect(charges.map(charge => describeRequest(charge.tool, charge.args)?.query)).toEqual(["咖啡", "穿搭", "sample", "aa_one", "咖啡店", "acct_x", "咖啡 对标"]);
+    expect(charges.slice(4).map(charge => describeRequest(charge.tool, charge.args)?.line)).toEqual(
+      expect.arrayContaining([expect.stringContaining("关键词作品"), expect.stringContaining("账号资料"), "网页搜索"]));
+  });
+
+  it("a discovery subcall that searched accounts is not worded as keyword posts", () => {
+    const [charge] = toSearchCharges([{ callId: "h", toolName: "benchmark_discover", args: null, source: "tool_usage", credits: "1",
+      query: "baby meal prep", platform: "tiktok", dataKind: "account_search" }]);
+    expect(describeRequest(charge!.tool, charge!.args)).toEqual({ query: "baby meal prep", line: "TikTok · 搜索账号" });
   });
 
   it("maps evidence rows without inventing a route or a title", () => {

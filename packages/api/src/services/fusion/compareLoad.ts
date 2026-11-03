@@ -4,53 +4,21 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource } from '../skills/databaseSource';
 import { activateFreeChatSkill } from '../skills/stepGuide';
-import { readWorkspaceCapability } from '../runtime/workspacePosts';
+import { readWorkspaceCapability } from '../turn/agent/workspacePosts';
 import { compareRpc } from './compareAdmission';
-import { compareRequest, compareRequestBytes, type CompareParts } from './compareSnapshot';
-import type { CompareChoice } from './compareStart';
+import type { CompareParts } from './compareSnapshot';
 import { FUSION_INPUT_CAP } from './request';
-import { readReplyLocale } from '../runtime/replyLanguage';
-import { REPLY_LOCALES } from '../../shared/replyLanguage';
+import { readReplyLocale } from '../turn/agent/replyLanguage';
 
 /** What the browser sends to estimate or start a compare: the same Skill selection field as an ordinary turn. */
 export const compareSkillInput = z.object({ kind: z.literal('skill'), moduleId: z.string().uuid(), revisionId: z.string().uuid(),
   task: z.string().max(128).optional() }).strict();
 export type CompareRequestInput = { sessionId: string; question: string; modelIds: string[]; skill?: z.infer<typeof compareSkillInput> };
 
-/** Earlier turns read for a compare, newest kept first when the snapshot must shrink to the input cap. */
-const HISTORY_ITEMS = 200;
 /** A Skill may use at most this share of the per-call input cap, leaving room for history and the question. */
 const SKILL_BYTES = Math.floor(FUSION_INPUT_CAP / 2);
 /** Workspace kinds a compare freezes: the confirmed positioning and account strategies (the bodies a free turn reads most). */
 const WORKSPACE_KINDS = new Set(['positioning', 'strategy']);
-
-const contextSchema = z.object({ revision: z.number().int().nonnegative(), busy: z.boolean(),
-  items: z.array(z.object({ revision: z.number(), item: z.unknown() })), scopeMaterial: z.unknown().optional(),
-  materialRevision: z.string() }).passthrough();
-
-/** Visible text of one stored history item; null for tool calls, results and anything else that is not a message. */
-export function historyTurn(item: unknown): CompareParts['history'][number] | null {
-  if (!item || typeof item !== 'object') return null;
-  const { role, content } = item as { role?: unknown; content?: unknown };
-  if (role !== 'user' && role !== 'assistant') return null;
-  const text = typeof content === 'string' ? content : Array.isArray(content)
-    ? content.filter(part => part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
-      && ['input_text', 'output_text'].includes(String((part as { type?: unknown }).type)))
-      .map(part => (part as { text: string }).text).join('') : '';
-  return text ? { role, text } : null;
-}
-
-/** The oldest turns go first until the request fits the per-call cap (the question itself is never cut: an oversized
- * question is refused by the size check later). Same direction as an ordinary turn's history selection. Measured with the
- * longest reply-language rule, so the turns kept (part of the request identity) never depend on the language setting:
- * a retry after the user changed it keeps the same history and finds the frozen group. */
-export function fitHistory(parts: CompareParts): CompareParts {
-  let history = parts.history;
-  const bytes = (h: CompareParts['history']) => Math.max(...REPLY_LOCALES.map(replyLocale =>
-    compareRequestBytes(compareRequest({ ...parts, history: h, positioningFallback: true, replyLocale }))));
-  while (history.length && bytes(history) > FUSION_INPUT_CAP) history = history.slice(1);
-  return { ...parts, history };
-}
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
@@ -88,23 +56,12 @@ async function loadWorkspace(admin: SupabaseClient, actorId: string, sessionId: 
   return sources;
 }
 
-/** Reads everything a compare freezes (FUSION-COMPARE §3.2): the conversation history and work material from one
- * transaction (fusion_compare_context), the selected Skill through the ordinary user-scoped checks, and the confirmed
- * workspace sources. Library references are not offered in the first version (compareStart refuses them). */
-export async function loadCompareChoice(deps: { admin: SupabaseClient; user: SupabaseClient; actorId: string },
-  input: CompareRequestInput): Promise<CompareChoice> {
-  const { admin, actorId } = deps;
-  const context = contextSchema.parse(await compareRpc<unknown>(admin, 'fusion_compare_context',
-    { p_actor_id: actorId, p_session_id: input.sessionId, p_limit: HISTORY_ITEMS }));
-  // A turn is running in the main conversation: its answer is not in the history yet, so a compare now would answer
-  // a different conversation than the user sees once it lands.
-  if (context.busy) throw new Error('FUSION_COMPARE_SESSION_BUSY');
-  const [skill, workspace, replyLocale] = await Promise.all([
-    input.skill ? loadSkill(admin, deps.user, input.skill) : null,
-    loadWorkspace(admin, actorId, input.sessionId), readReplyLocale(admin, actorId)]);
-  const history = context.items.map(row => historyTurn(row.item)).filter((turn): turn is NonNullable<typeof turn> => turn !== null);
-  const parts = fitHistory({ skill, positioningFallback: false, history, scopeMaterial: context.scopeMaterial ?? undefined,
-    workspace, references: [], question: input.question, replyLocale });
-  return { sessionId: input.sessionId, historyRevision: context.revision, modelIds: input.modelIds, parts,
-    materialRevision: context.materialRevision };
+/** What a compare on the turn path reads before its open: the columns' Skill, sources and language. The history is turn_open's
+ * (session_messages), and an ordinary turn on this path sends no work material, so a column gets none either. */
+export async function loadCompareTurnParts(deps: { admin: SupabaseClient; user: SupabaseClient; actorId: string },
+  input: Pick<CompareRequestInput, 'sessionId' | 'question' | 'skill'>) {
+  const [skill, workspace, replyLocale] = await Promise.all([input.skill ? loadSkill(deps.admin, deps.user, input.skill) : null,
+    loadWorkspace(deps.admin, deps.actorId, input.sessionId), readReplyLocale(deps.admin, deps.actorId)]);
+  return { skill, workspace, references: [], question: input.question, replyLocale };
 }
+

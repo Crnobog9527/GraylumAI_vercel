@@ -4,8 +4,7 @@ import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestio
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from "../../../../../../../../packages/api/src/shared/runtimeInputMessages";
 import { STEP_SUMMARY_PREFIX, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
-import { blockedAdmission, hostNotice, isOrganizerPendingError, type PaygViewFields } from "@/lib/payg-wait";
-import { definiteRefusal } from "@/app/(zh-hans)/app/runtime/gate-notices";
+import { hostNotice, type PausedFields } from "./turn-pause";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {
@@ -33,7 +32,8 @@ export type MentorStepEnvelope<Information> = {
   executionId?: string;
 };
 
-const EXECUTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// An execution of the old path (a uuid) or a turn of the CORE-PATH-V2 path (`turn:<id>`, mentor-turn-path.ts).
+const EXECUTION_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|turn:[1-9][0-9]{0,17})$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -193,9 +193,6 @@ export async function readAgentTurn(
   } finally {
     handlers.onFinished?.();
   }
-  // Q1: the previous organizer answered with only a result; the new request has no execution.
-  const blocked = result && blockedAdmission(result);
-  if (blocked && !executionId) return { executionId: blocked.executionId, result: result! };
   if (!executionId || !result) throw new Error(STREAM_INTERRUPTED);
   return { executionId, result };
 }
@@ -205,8 +202,6 @@ export async function readAgentTurn(
  * Output truncation has none: the turn itself shows it once (mentorReplyDisplay).
  */
 export function turnResultNotice(result: AgentTurnOutcome): string | null {
-  // A Q1 refusal is shown with its "继续" by the page's pause notices (payg-wait.ts).
-  if (blockedAdmission(result)) return null;
   const notice = hostNotice(result);
   if (notice) return notice;
   if (result.unavailable === "output_truncated") return null;
@@ -217,10 +212,11 @@ export function turnResultNotice(result: AgentTurnOutcome): string | null {
 }
 
 export type MentorTurn = { executionId: string; roundId?: string | null; stepId: string; questionId: string | null; kind: string };
-export type MentorExecution = PaygViewFields & {
+export type MentorExecution = PausedFields & {
     request?: MentorRequest | null;
     unavailableReason?: string | null;
     historyOmitted?: boolean;
+    createdAt?: string | null;
     executionId: string;
     input: string | null;
     body: string | null;
@@ -278,10 +274,11 @@ export function isInputTooLong(error: unknown): boolean {
 const releasedRefusals = new WeakSet<object>();
 
 /** Refused before admission (an HTTP 4xx before the `admitted` event): no execution exists, so nothing is kept.
- * A pending earlier organizer is a wait, not a refusal: its request stays for the payg-wait resume. */
+ */
 export function isRefusedBeforeAdmission(error: unknown, admitted: boolean): boolean {
-  return !admitted && ["opc.mentorTurnStream", "opc.prepareStep"].includes(definiteRefusal(error)?.path ?? "")
-    && !isOrganizerPendingError(error);
+  // The turn path's refusals (mentor-turn-path.ts TurnRefused): `kept` is the server's word that nothing was stored or charged.
+  if (!admitted && error instanceof Error && error.name === "TurnRefused" && (error as { kept?: boolean }).kept === true) return true;
+  return false;
 }
 
 /** A refusal whose request was released by releaseRejectedAnswer: its notice must not say the request is kept. */

@@ -23,7 +23,8 @@ export async function runPayg(db,report){
   await assert.rejects(rpc(db,'bill2_dispatch',f.actor,f.run,c.id,c.dispatchToken),/CONTENT_ERASED/);
   if(!settled){
    const inventory=await rpc(db,'runtime_pending_financial_batch',f.actor,20);
-   assert.equal(inventory[0].runId,f.run);assert.equal(inventory[0].finishAllowed,true);
+   // The delete no longer cancels or recovers the open run, so the old recovery inventory does not mark it finishable.
+   assert.equal(inventory[0].runId,f.run);assert.equal(inventory[0].finishAllowed,false);
    await rpc(db,'bill2_record',f.actor,f.run,c.id,receipt);
   }
   await rpc(db,'runtime_financial_recovery',f.actor,f.execution,true);

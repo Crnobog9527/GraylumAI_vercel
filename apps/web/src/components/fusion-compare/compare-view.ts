@@ -48,6 +48,17 @@ const REFUSALS: Record<string, string> = {
   FUSION_COMPARE_REQUEST_CONFLICT: '请求有冲突，请重新开始对比。',
   FUSION_COMPARE_ENDED: '这次对比已经结束。',
   POSITIONING_REQUIRED: '先完成账号定位，再使用这个功能。',
+  // The turn path's own refusals (POST /api/turn/compare): nothing was frozen when one of these comes back.
+  TURN_INSUFFICIENT_CREDITS: '余额不够这次对比的上限，充值后再点一次开始。',
+  TURN_RATE_LIMITED: '操作太频繁，请稍后再试。',
+  TURN_NEW_CALLS_PAUSED: '服务暂时暂停了新请求，请稍后再试。',
+  TURN_LIMIT_UNAVAILABLE: '暂时无法确认用量，请稍后再试。',
+  TURN_SESSION_BUSY: '这个对话正在回答上一条消息，等它结束后再开始对比。',
+  TURN_INPUT_TOO_LARGE: '这次的内容太长，有模型放不下。请缩短问题，或取消勾选放不下的模型后再试。',
+  TURN_CORE_DISABLED: '对话服务正在切换，请刷新页面后再试。',
+  TURN_UNAUTHENTICATED: '登录已过期，请重新登录后再试。',
+  TURN_CREDIT_ACCOUNT_REVIEW: '你的积分账户状态需要我们核对，这次对比没有开始，也没有扣费。请提交工单，我们帮你处理。',
+  TURN_REQUEST_REPLAYED: '这次对比已经开始过了，请在对话里查看。',
 };
 export function compareErrorText(error: unknown): string {
   const message = error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '';
@@ -61,7 +72,8 @@ const RECOVERABLE = new Set(['FUSION_COMPARE_ACTIVE', 'FUSION_COMPARE_DENIED', '
   'FUSION_GROUP_CONFLICT', 'BILL2_REQUEST_CONFLICT', 'FUSION_ADMISSION_UNAVAILABLE']);
 export const isDefiniteRefusal = (error: unknown) => {
   const code = error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '';
-  return !RECOVERABLE.has(code) && /^(FUSION|REPORT)_(?![A-Z_]*UNAVAILABLE)[A-Z_]+$|^POSITIONING_REQUIRED$/.test(code);
+  return !RECOVERABLE.has(code) && (/^(FUSION|REPORT)_(?![A-Z_]*UNAVAILABLE)[A-Z_]+$|^POSITIONING_REQUIRED$/.test(code)
+    || /^TURN_(?!LOST$|REQUEST_REPLAYED$|[A-Z_]*UNAVAILABLE$)[A-Z_]+$/.test(code));
 };
 export const isUpgradeRefusal = (error: unknown) => /FUSION_COMPARE_FORBIDDEN|FUSION_MEMBERSHIP_REQUIRED/
   .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');

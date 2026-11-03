@@ -42,7 +42,7 @@ BEGIN
   IF c.work_item_id<>p_work_item_id OR c.version<>p_expected_version+1
    OR c.source_content_id IS DISTINCT FROM p_source_content_id
    OR c.status<>p_status OR c.title IS DISTINCT FROM clean_title
-   OR c.body<>clean_body OR c.execution_id IS NOT NULL
+   OR c.body<>clean_body OR c.execution_id IS NOT NULL OR c.turn_id IS NOT NULL
    THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
   IF NOT opc_content_allowed(p_actor_id,c.id) THEN RAISE EXCEPTION 'OPC_CONTENT_SOURCE';END IF;
  ELSE
@@ -61,13 +61,13 @@ BEGIN
    -- chain to an admitted Runtime execution, including old revisions.
    IF p_source_content_id IS NULL OR NOT EXISTS(
     WITH RECURSIVE ancestry AS (
-     SELECT id,source_content_id,execution_id,ARRAY[id] visited FROM opc_content_versions
+     SELECT id,source_content_id,execution_id,turn_id,ARRAY[id] visited FROM opc_content_versions
       WHERE id=p_source_content_id AND actor_id=p_actor_id AND work_item_id=p_work_item_id AND kind='script'
      UNION ALL
-     SELECT parent.id,parent.source_content_id,parent.execution_id,ancestry.visited||parent.id
+     SELECT parent.id,parent.source_content_id,parent.execution_id,parent.turn_id,ancestry.visited||parent.id
       FROM opc_content_versions parent JOIN ancestry ON parent.id=ancestry.source_content_id
       WHERE parent.actor_id=p_actor_id AND parent.work_item_id=p_work_item_id AND parent.kind='script' AND NOT parent.id=ANY(ancestry.visited)
-    ) SELECT 1 FROM ancestry WHERE execution_id IS NOT NULL
+    ) SELECT 1 FROM ancestry WHERE execution_id IS NOT NULL OR turn_id IS NOT NULL
    ) THEN RAISE EXCEPTION 'OPC_CONTENT_SOURCE';END IF;
   END IF;
   INSERT INTO opc_content_versions(actor_id,work_item_id,kind,version,status,title,body,

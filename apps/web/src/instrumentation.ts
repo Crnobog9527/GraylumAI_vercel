@@ -10,6 +10,9 @@ export async function register() {
     // The api layer's error logs and swallowed failures go to the same Sentry project (MAINT-P3).
     const { connectApiLogsToSentry } = await import("./lib/api-log-sentry");
     connectApiLogsToSentry();
+    // Staging load tests only: inert unless LOADTEST_MODEL_STUB_URL and LOADTEST_STUB_DB_HOST are both set (lib/loadtest-model-stub.ts).
+    const { installModelStub } = await import("./lib/loadtest-model-stub");
+    installModelStub();
     // 缺必填环境变量只记日志并上报 Sentry，不 throw：漏配要看得见，但不能让整站起不来。
     const { validateEnvOnStartup } = await import("@repo/api/src/lib/envValidator");
     const envResult = validateEnvOnStartup();

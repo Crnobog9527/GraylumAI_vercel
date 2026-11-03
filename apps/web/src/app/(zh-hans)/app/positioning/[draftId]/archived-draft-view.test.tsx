@@ -12,6 +12,9 @@ vi.mock('@/trpc/client', () => ({
     },
   }) }) }),
 }));
+// The turn read of the round's report has answered: no generated report, so the saved version shows.
+vi.mock('./use-turn-report', async importOriginal => ({ ...await importOriginal<typeof import('./use-turn-report')>(),
+  useTurnReport: () => ({ known: true, status: null }) }));
 vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 vi.mock('./report-export-button', () => ({ ReportExport: ({ saved }: { saved?: { body: string } }) =>
   <button data-saved={saved?.body}>导出报告</button> }));
@@ -37,8 +40,8 @@ describe('read-only view of an archived profile', () => {
     expect(html).toContain('导出已确认资料');
     expect(html).not.toMatch(/这段定位对话已删除|整份删除|<textarea|发送|生成报告<\/button>|评审/);
     expect(html).toContain('data-saved="# 定位报告正文"');
-    // Only the existing report reads: this round's generated report is looked up, nothing is started.
-    expect(queried).toEqual(['runtime.reportLatest']);
+    // Only reads: this round's generated report is looked up on its turn (/api/turn/report), nothing is started.
+    expect(queried).toEqual([]);
   });
 
   it('keeps the deleted-conversation wording when not archived', async () => {

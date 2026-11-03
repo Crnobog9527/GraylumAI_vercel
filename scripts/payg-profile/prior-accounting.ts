@@ -2,7 +2,7 @@
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import type {createR5bPlan} from './batch-r5b';
-import {decimal} from '../../packages/api/src/services/bill2/decimal';
+import {decimal} from '../../packages/api/src/services/turn/provider/decimal';
 type Prior=ReturnType<typeof createR5bPlan>['manifest']['batch']['previous'];
 /** Called only after exact reviewed manifest verification. Historical reports stay read-only.
  * No local report means the published audited evidence is authoritative; a present lock

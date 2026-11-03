@@ -73,7 +73,8 @@ BEGIN
     ('runtime_sessions',
       'scope = NULL, start_payload = NULL, erased_at = $2',
       't.actor_id = $1',
-      't.id = ANY($3) AND NOT EXISTS (SELECT 1 FROM runtime_executions e WHERE e.session_id = t.id AND NOT (e.state IN
+      -- CORE-PATH-V2: a session with a turn still open is erased once the turn closes (it releases active_turn_id there).
+      't.id = ANY($3) AND t.active_turn_id IS NULL AND NOT EXISTS (SELECT 1 FROM runtime_executions e WHERE e.session_id = t.id AND NOT (e.state IN
       (''completed'',''cancelled'') AND (e.billing_run_id IS NULL OR EXISTS (SELECT 1 FROM bill2_runs b WHERE b.id = e.billing_run_id AND
       b.actor_id = $1 AND b.closed AND b.state IN (''settled'',''refunded'')))))'),
     -- 0271 legacy chat tables

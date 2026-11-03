@@ -4,7 +4,7 @@
  *
  */
 
-import { testRuntimeStopLoss } from './runtime/stopLossMonitor';
+import { testRuntimeStopLoss } from './turn/settings/stopLossMonitor';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getRateLimiter, DEFAULT_RATE_LIMIT_CONFIGS } from './rateLimiter';
 import { testBillingPrededuct, testBillingIdempotency, testBillingReconcile } from './diagnosticsBilling';

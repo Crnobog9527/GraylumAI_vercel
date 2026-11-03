@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { DEFAULT_RUNTIME_RATE_LIMITS } from '../services/runtime/rateLimitSettings';
+import { DEFAULT_RUNTIME_RATE_LIMITS } from '../services/turn/settings/rateLimitSettings';
 import { runtimeRateLimitsRouter } from './runtimeRateLimits';
 import { settingsRouter } from './settings';
 

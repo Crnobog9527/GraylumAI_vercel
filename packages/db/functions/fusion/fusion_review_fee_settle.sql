@@ -10,6 +10,5 @@ CREATE OR REPLACE FUNCTION public.fusion_review_fee_settle(p_actor_id uuid, p_re
 AS $function$
 BEGIN
   PERFORM bill2_actor(p_actor_id);
-  IF NOT EXISTS(SELECT 1 FROM fusion_review_fees WHERE review_id=p_review_id AND actor_id=p_actor_id) THEN RETURN NULL; END IF;
-  RETURN fusion_review_fee_settle_internal(p_review_id);
+  RETURN NULL;
 END $function$;

@@ -56,6 +56,11 @@ jobs:
       - name: Check no Skill source in public repository
         run: node scripts/check-no-skill-source.mjs
 
+      # CORE-PATH-V2 V2-1: the main path's database functions. Functions under packages/db/functions/turn must stay within
+      # 15 functions / 18 tables per turn kind and free of hot-row locks and session state; every other function is only reported.
+      - name: Check main-path function closure and rules
+        run: node scripts/db-function-closure.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -133,6 +138,35 @@ jobs:
 
       - name: Test required-check contracts
         run: ruby .github/scripts/test-ci-workflows.rb
+
+  # Owner 2026-11-01: one case skips the two slow database jobs below. A pull request into staging whose every changed file is on the
+  # allow-list in scripts/ci-test-scope.mjs (documentation, and page / component / style files with their tests) skips them. Everything
+  # else runs the full suite: pushes, scheduled runs, pull requests into main, and any run whose changed-file list cannot be read.
+  # Owner 2026-11-03: a draft pull request is judged like a ready one (it no longer skips them just for being a draft).
+  scope:
+    name: Decide test scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Decide whether the database jobs run
+        id: scope
+        run: node scripts/ci-test-scope.mjs
 
   migration-ledger:
     name: Check migration ledger
@@ -348,9 +382,13 @@ jobs:
 
       # Browser reports, storage state, traces, videos, and screenshots are intentionally not uploaded.
 
-  integration:
-    name: Run billing and recovery integration tests
+  # Layer 1 of the three-layer validation (Owner 2026-11-03): the core-path journeys in a real browser against a local app, a
+  # disposable database built from repository files and a deterministic simulated model (scripts/e2e-sim). No secret, no paid
+  # call, no network beyond the runner's loopback. Not a required check yet: it is added as a separate job first.
+  sim-e2e:
+    name: Run simulated-model browser tests
     runs-on: ubuntu-latest
+    # Measured 9m52s on CI (2026-11-03); the 30-minute ceiling of docs/ENGINEERING.md section 7 leaves about 20 minutes.
     timeout-minutes: 30
     permissions:
       contents: read
@@ -372,38 +410,99 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Anonymous registry pulls can be rate limited; pulls are read-only and
-      # digest-pinned, so a bounded retry cannot change what is tested.
-      - name: Pull pinned service images
+      - name: Install Playwright browser
+        run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium
+
+      - name: Simulated-model browser tests
+        run: node scripts/e2e-sim/run.mjs
+
+  integration:
+    name: Run billing and recovery integration tests (${{ matrix.shard }}/2)
+    needs: [scope]
+    if: needs.scope.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    # Shard 1: empty-database build; shard 2: runtime recovery. (The old BILL2 billing and PAYG runtime steps left with the old path, V2-12.)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Anonymous registry pulls are rate limited on shared runner addresses. The pinned images are cached as image
+      # archives under a key made of their digests (packages/db/tests/v3/images.mjs): a cache hit docker-loads them, and
+      # a loaded image is used only if it resolves by its exact digest reference, otherwise it is pulled as before.
+      # Every miss pulls with the same bounded retry and the job's post step then stores the archives. The cache holds
+      # only these digest-pinned images; what is tested does not change and no check is skipped.
+      - name: Compute pinned service image key
+        id: service-images
         run: |
           set -euo pipefail
           images="$(node --input-type=module -e 'const m = await import("./packages/db/tests/v3/images.mjs"); console.log(Object.values(m).join("\n"))')"
+          printf 'key=%s\n' "$(printf '%s\n' "$images" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pinned service images
+        id: service-images-cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/service-images
+          key: service-images-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.service-images.outputs.key }}
+
+      - name: Pull pinned service images
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/service-images"
+          mkdir -p "$dir"
+          images="$(node --input-type=module -e 'const m = await import("./packages/db/tests/v3/images.mjs"); console.log(Object.values(m).join("\n"))')"
+          n=0
           for image in $images; do
+            n=$((n + 1))
+            archive="$dir/$n.tar"
+            if [ -s "$archive" ] && docker load --quiet --input "$archive" >/dev/null 2>&1 && docker image inspect "$image" >/dev/null 2>&1; then
+              echo "Loaded cached $image"
+              continue
+            fi
+            rm -f "$archive"
             for attempt in 1 2 3 4 5; do
               if docker pull --quiet "$image"; then break; fi
               if [ "$attempt" -eq 5 ]; then echo "Failed to pull $image" >&2; exit 1; fi
               sleep $((attempt * 15))
             done
+            docker save --output "$archive" "$image"
           done
 
       # Disposable digest-pinned PostgreSQL, PostgREST and GoTrue containers with
       # per-run synthetic JWTs; the schema is built from repository files only
       # (--schema-from-files: platform stand-in -> packages/db/baseline -> every migration). No secrets, no provider network, no Next app or
       # browser; the runner lists and verifies the excluded app-only cases.
-      - name: Integration — BILL2 billing
-        run: node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files
-
-      - name: Integration — PAYG runtime waiting, resume and metering review
-        run: node packages/db/tests/payg/run-runtime.mjs --ci
-
       - name: Integration — Runtime recovery and streaming
+        if: matrix.shard == 2
         run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
 
       # DB-BASELINE: build an empty database from repository files only (platform stand-in ->
       # packages/db/baseline -> every migration) in the pinned PostgreSQL image and require the
       # committed built fingerprint, the account-open audit and the credit-guard paths to hold.
       - name: Integration — Empty-database build from files
-        run: node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql
+        if: matrix.shard == 1
+        run: node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql,packages/db/tests/runtime-view-perf/fixture.sql,packages/db/tests/content-erasure/fixture.sql,packages/db/tests/content-erasure-perf/fixture.sql,packages/db/tests/content-erasure-perf/assertions.sql
 
   lint-check:
     name: Lint & Type Check
@@ -448,12 +547,14 @@ jobs:
   # MAINT-P1b: the run-local database suites have their own worker, split in two, so neither this job nor
   # the integration job comes near its 30-minute limit. Every suite still runs; none is skipped.
   db-suites:
-    name: Run database behaviour suites (${{ matrix.shard }}/2)
+    name: Run database behaviour suites (${{ matrix.shard }}/4)
+    needs: [scope]
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -475,34 +576,69 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Anonymous registry pulls can be rate limited; pulls are read-only and
-      # digest-pinned, so a bounded retry cannot change what is tested.
-      - name: Pull pinned service images
+      # Anonymous registry pulls are rate limited on shared runner addresses. The pinned images are cached as image
+      # archives under a key made of their digests (packages/db/tests/v3/images.mjs): a cache hit docker-loads them, and
+      # a loaded image is used only if it resolves by its exact digest reference, otherwise it is pulled as before.
+      # Every miss pulls with the same bounded retry and the job's post step then stores the archives. The cache holds
+      # only these digest-pinned images; what is tested does not change and no check is skipped.
+      - name: Compute pinned service image key
+        id: service-images
         run: |
           set -euo pipefail
           images="$(node --input-type=module -e 'const m = await import("./packages/db/tests/v3/images.mjs"); console.log(Object.values(m).join("\n"))')"
+          printf 'key=%s\n' "$(printf '%s\n' "$images" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pinned service images
+        id: service-images-cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/service-images
+          key: service-images-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.service-images.outputs.key }}
+
+      - name: Pull pinned service images
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/service-images"
+          mkdir -p "$dir"
+          images="$(node --input-type=module -e 'const m = await import("./packages/db/tests/v3/images.mjs"); console.log(Object.values(m).join("\n"))')"
+          n=0
           for image in $images; do
+            n=$((n + 1))
+            archive="$dir/$n.tar"
+            if [ -s "$archive" ] && docker load --quiet --input "$archive" >/dev/null 2>&1 && docker image inspect "$image" >/dev/null 2>&1; then
+              echo "Loaded cached $image"
+              continue
+            fi
+            rm -f "$archive"
             for attempt in 1 2 3 4 5; do
               if docker pull --quiet "$image"; then break; fi
               if [ "$attempt" -eq 5 ]; then echo "Failed to pull $image" >&2; exit 1; fi
               sleep $((attempt * 15))
             done
+            docker save --output "$archive" "$image"
           done
 
       # Every database suite that starts its own container (packages/db/tests/<dir>/*-local.mjs) runs in one
-      # of the two shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
+      # of the four shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
       - name: Integration — Database behaviour suites (run-local)
-        run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/2
+        run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/4
+
+      # CORE-PATH-V2 V2-1: turn budget, on the same database image in each shard (about half a minute); the old path's numbers
+      # are reported against scripts/turn-budget-baseline.json, a scenario marked "enforce": true may not exceed its baseline.
+      - name: Check turn budget (database round trips, time, locks)
+        run: node scripts/check-turn-budget.mjs --ci
 
   unit-check:
     name: Unit Tests
-    needs: [test, integration, db-suites, ci-contracts, migration-ledger]
+    needs: [test, integration, db-suites, ci-contracts, migration-ledger, scope]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
+      # The two database jobs may be skipped only when the scope job succeeded and said the run is not full. A failed or
+      # cancelled job, or a skip for any other reason, still fails this check.
       - name: Require successful worker validation
         env:
           WORK_RESULT: ${{ needs.test.result }}
@@ -510,11 +646,20 @@ jobs:
           DB_SUITES_RESULT: ${{ needs.db-suites.result }}
           CONTRACTS_RESULT: ${{ needs.ci-contracts.result }}
           LEDGER_RESULT: ${{ needs.migration-ledger.result }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_FULL: ${{ needs.scope.outputs.full }}
         run: |
           set -euo pipefail
-          if [ "$WORK_RESULT" != success ] || [ "$INTEGRATION_RESULT" != success ] ||
-            [ "$DB_SUITES_RESULT" != success ] ||
-            [ "$CONTRACTS_RESULT" != success ] || [ "$LEDGER_RESULT" != success ]; then
+          allowed_skip=false
+          if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_FULL" = false ]; then
+            allowed_skip=true
+          fi
+          database_job_ok() {
+            [ "$1" = success ] || { [ "$1" = skipped ] && [ "$allowed_skip" = true ]; }
+          }
+          if [ "$WORK_RESULT" != success ] || [ "$CONTRACTS_RESULT" != success ] ||
+            [ "$LEDGER_RESULT" != success ] || [ "$SCOPE_RESULT" != success ] ||
+            ! database_job_ok "$INTEGRATION_RESULT" || ! database_job_ok "$DB_SUITES_RESULT"; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
           fi

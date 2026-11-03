@@ -7,7 +7,7 @@ import { validatePaygAdminSetting } from '../services/adminSettings';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema,
 } from '../services/membershipEntitlementConfig';
-import { RUNTIME_RATE_LIMIT_KEY } from '../services/runtime/rateLimitSettings';
+import { RUNTIME_RATE_LIMIT_KEY } from '../services/turn/settings/rateLimitSettings';
 import { parseSearchSurcharge } from '../services/searchPricing';
 import { BILLING_UNIT_SETTING_KEYS, parseCreditsPerUsd, parseMultiplier } from '../services/billingUnit';
 import { PROVIDER_PRICES_KEY } from '../services/billingProviderPrices';

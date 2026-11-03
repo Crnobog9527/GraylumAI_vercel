@@ -13,5 +13,6 @@ AS $function$
  FROM (SELECT b.* FROM social_billed_runs b LEFT JOIN social_connections c ON c.id=b.connection_id
   WHERE b.closed_at IS NULL AND (c.id IS NULL OR c.refresh_id IS DISTINCT FROM b.refresh_id
    OR c.lease_expires_at IS NULL OR c.lease_expires_at<clock_timestamp()-interval '1 hour')
+   AND NOT EXISTS(SELECT 1 FROM turns t WHERE t.request_id=b.run_id AND t.actor_id=b.actor_id AND t.state<>'closed')
   ORDER BY b.created_at LIMIT LEAST(GREATEST(p_limit,1),200)) b
 $function$;

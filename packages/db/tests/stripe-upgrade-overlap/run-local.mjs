@@ -20,6 +20,13 @@ const laterMigrations=number=>readdirSync(resolve(root,'packages/db/migrations')
 // 0385 also patches claim_daily_checkin, which 0396 retired; a replay on the finished database skips that one patch.
 const replayable=file=>{
   const text=read('packages/db/migrations/'+file);
+  // 0334 patches the organizer-pending gate of runtime_admit and opc_step_material; V2-12 R1b removed that gate from opc_step_material
+  // (the organizer belongs to the old path), so a replay on the finished database patches runtime_admit only.
+  if(file.startsWith('0334_')) {
+    const gone=",\n  'public.opc_step_material(uuid,uuid,uuid,text,text,text)']";
+    assert.ok(text.includes(gone),'0334 still lists opc_step_material in its patch');
+    return text.replace(gone,']');
+  }
   if(!file.startsWith('0385_'))return text;
   const checkinPatch=/SELECT pg_temp\.e3_patch\('public\.claim_daily_checkin\(uuid\)',[\s\S]*?\$r\$\);\n/;
   assert.ok(checkinPatch.test(text),'0385 still carries the check-in patch this replay removes');
@@ -37,6 +44,16 @@ docker(['image','inspect',POSTGRES_IMAGE]);
 const name='graylum-upgrade-'+randomUUID().slice(0,8);
 const sql=input=>docker(['exec','-i',name,'psql','-XqAt','-U','postgres','-d','upgrade',
   '-v','ON_ERROR_STOP=1','-f','/dev/stdin'],input);
+// 0391 checks the md5 of the claim it replaces; 0416 (DB-RW-A) later turned one row lock of that claim into a switch, so put
+// the original single statement back before 0391 is replayed on a finished database (the replay of 0416 after it restores
+// the switch).
+const restoreClaimThresholdLock=()=>{
+  const claim=sql("SELECT pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure);");
+  const switched=" IF runtime_rw_flag('sharedRowLocks') THEN SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds';\n"
+    +" ELSE SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;END IF;\n";
+  const original=" SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;\n";
+  if(claim.includes(switched))sql(claim.replace(switched,original)+';');
+};
 const clients=[];
 try {
   docker(['run','-d','--pull=never','--name',name,'-e','POSTGRES_DB=upgrade','-e','POSTGRES_HOST_AUTH_METHOD=trust',
@@ -174,7 +191,10 @@ try {
   assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
   sql(read(walletMigration));
   // Forward-fix every later extension too; 0335 intentionally extends the same wallet functions.
-  for(const file of laterMigrations(330))sql(replayable(file));
+  for(const file of laterMigrations(330)) {
+    if(file.startsWith('0391_'))restoreClaimThresholdLock();
+    sql(replayable(file));
+  }
   assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');
   cases.push('wallet-migration-interruption-atomic','wallet-migration-repeat-acl-unchanged','wallet-recovery-preserves-paid-data');
   sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
@@ -192,7 +212,23 @@ try {
   sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
   sql(read('packages/db/migrations/0383_credit_grant_quarantine.sql')); // ARCH-FIX E1 patches atomic_pre_deduct
   sql(replayable('0385_billing_ledger_constraints.sql')); // ARCH-FIX E3 patches atomic_pre_deduct
+  restoreClaimThresholdLock();
   sql(read('packages/db/migrations/0391_credit_available.sql')); // MAINT-P4 replaces atomic_pre_deduct's hold formula
+  sql(read('packages/db/migrations/0416_db_rw_a_shared_row_locks.sql')); // DB-RW-A removes shared row locks from claim, admit and the permission chain
+  sql(read('packages/db/migrations/0449_core_path_v2_topic_turn.sql')); // V2-10b runtime_admit refuses a request the turn path holds
+  sql(read('packages/db/migrations/0450_core_path_v2_work_item_content.sql')); // V2-10b C2 rewrites what 0449 replays (content_erasure_*)
+  sql(read('packages/db/migrations/0451_core_path_v2_hold_top_up.sql')); // the hold top-up rewrites turn_open, which 0449 replays
+  sql(read('packages/db/migrations/0452_core_path_v2_work_check_no_claim_hold.sql')); // 0450 rewrites opc_work_check, which 0452 changed
+  sql(read('packages/db/migrations/0453_core_path_v2_stop_loss_top_up.sql')); // the stop-loss top-up rewrites turn_open, which 0449 replays
+  sql(read('packages/db/migrations/0454_core_path_v2_stale_claim.sql')); // 0450 rewrites opc_video_material_prepare, which 0454 changed
+  sql(read('packages/db/migrations/0459_core_path_v2_voice.sql')); // V2-12 B7 rewrites turn_open, which 0449 replays (and turn_close, turn_tombstones, turn_user_charge, turn_call_record)
+  sql(read('packages/db/migrations/0476_core_path_v2_topic_rebind.sql')); // the topic re-bind rewrites topic_turn_source, opc_topic_consent and opc_topic_original, which 0449 replays (and artifact_immutable)
+  sql(read('packages/db/migrations/0480_core_path_v2_content_erasure_no_old_settle.sql')); // V2-12 R2b rewrites content_erasure_confirm, which 0450 replays
+  sql(read('packages/db/migrations/0483_core_path_v2_turn_functions_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0484_core_path_v2_report_research_topic_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0485_core_path_v2_opc_functions_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0486_core_path_v2_opc_work_capture_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
+  sql(read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql')); // V2-12 B-rewrites: rewrites fusion_review_archive_reconcile, which 0326 replays
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
@@ -204,6 +240,6 @@ try {
 
 // The required CI billing job calls this runner. Keep new failover fixtures isolated and sequential;
 // the separate baseline job already checks every migration's repeat application and final fingerprint.
-const failover=spawnSync(process.execPath,[resolve(root,'packages/db/tests/pay-failover/run-local.mjs'),'--quick'],
+const failover=spawnSync(process.execPath,[resolve(root,'packages/db/tests/pay-failover/run-local.mjs'),process.argv[2],'--quick'],
   {cwd:root,stdio:'inherit',timeout:600000});
 if(failover.status!==0||failover.error)throw new Error(failover.error?.message??'PAY_FAILOVER_DATABASE_TEST_FAILED');

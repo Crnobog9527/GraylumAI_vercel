@@ -26,11 +26,6 @@ BEGIN
   IF t.token IS NULL OR t.purpose IS DISTINCT FROM p_purpose OR t.step_id IS DISTINCT FROM p_step_id OR t.input_hash IS DISTINCT FROM artifact_hash(to_jsonb(p_input)) OR m.content->>'brief' IS DISTINCT FROM p_purpose||':'||p_step_id OR m.revoked THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
   RETURN jsonb_build_object('revision',m.revision,'turnToken',t.token);
  END IF;
- IF EXISTS(SELECT 1 FROM runtime_executions pending JOIN bill2_runs pr ON pr.id=pending.billing_run_id
-  WHERE pending.session_id=d.session_id AND pr.contract_version='bill2.v2' AND pending.primary_result IS NOT NULL
-   AND pending.payload ? 'attachedOrganizer' AND pending.result IS NULL
-   AND pending.state IN ('waiting_credits','waiting_resume','running','interrupted','cost_pending')
-   AND NOT pr.cancel_requested AND pending.failure_code IS DISTINCT FROM 'RUNTIME_INTERRUPTED_RELEASED') THEN RAISE EXCEPTION 'RUNTIME_ORGANIZER_PENDING';END IF;
  SELECT x INTO spec FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=p_step_id;
  IF p_purpose IN ('step','mentor') AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(spec->'dependsOn') dep WHERE (r.steps->dep->>'valid')::boolean IS DISTINCT FROM true) THEN RAISE EXCEPTION 'OPC_DEPENDENCIES_UNCONFIRMED';END IF;
  SELECT coalesce(max(revision),0) INTO n FROM runtime_scope_material WHERE session_id=d.session_id;

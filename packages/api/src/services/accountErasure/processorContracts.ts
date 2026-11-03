@@ -12,14 +12,6 @@ export const batchSchema = z.object({
   reason: z.enum(['call_set_open', 'billing_pending', 'content_pending', 'binding_busy', 'no_runtime_binding']).optional(),
 }).strict();
 export const detachSchema = z.union([batchSchema, z.object({ detached: z.literal(true) }).strict()]);
-export const financialSchema = z.object({
-  id: z.string().uuid(), state: z.enum(['prepared', 'dispatched', 'unknown', 'cost_pending', 'settled', 'refunded']),
-  executionId: z.string().uuid().nullable().optional(),
-});
-export const recoverySchema = z.object({
-  executionId: z.string().uuid(), runId: z.string().uuid(),
-  state: z.enum(['prepared', 'running', 'interrupted', 'waiting_credits', 'cost_pending', 'completed', 'cancelled']),
-});
 export const localSchema = z.object({
   remaining: count, manualReview: count, errors: z.array(z.string().regex(/^[A-Z0-9_]{1,64}$/)).max(100),
 }).strict();
@@ -39,6 +31,7 @@ export const ERASURE_CONTENT_TABLES: ReadonlySet<string> = new Set([
   'runtime_executions', 'runtime_history_dependencies', 'runtime_session_batches', 'runtime_session_history',
   'runtime_tool_calls', 'runtime_scope_material', 'runtime_sessions', 'ordinary_chat_requests', 'messages',
   'conversation_context_snapshots', 'conversations', 'artifact_chat_turns', 'artifact_chat_summaries',
+  'turn_call_raw', 'session_messages', 'fusion_turn_outputs',
   'artifact_generations', 'artifact_rounds', 'artifact_evidence', 'artifact_confirmations', 'artifact_candidates',
   'artifact_versions', 'artifact_requests', 'artifact_work_references', 'artifact_evidence_restrictions',
   'agent_slice_calls', 'agent_slice_links', 'agent_slice_executions', 'artifact_projects', 'research_operations', 'research_plans',

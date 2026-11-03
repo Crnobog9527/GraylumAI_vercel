@@ -73,6 +73,7 @@ export function describeErasureResult(result: ContentErasureResult): string {
 }
 
 const CONFIRM_ERRORS: Array<[string, string]> = [
+  ['CONTENT_ERASURE_TIMEOUT', '删除处理超过时间限制，本次没有删除。请稍后重试；如果仍然失败，请联系支持。'],
   ['CONTENT_NOT_FOUND', '找不到这项内容，或你没有权限删除它。'],
   ['CONTENT_ERASURE_BUSY', '这项内容正在使用中（例如回复还在生成），本次没有删除任何内容。请稍后刷新再试。'],
 ];

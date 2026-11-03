@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { researchRefreshContext, withResearchRefresh } from './researchRefresh';
-import { hostTurnContextSchema, hostTurnInput, RESEARCH_REFRESH_NOTE, type HostTurnContext } from '../runtime/hostTurn';
+import { hostTurnContextSchema, hostTurnInput, RESEARCH_REFRESH_NOTE, type HostTurnContext } from '../turn/agent/hostTurn';
 import { opcGenerate } from './answerCard';
 
 const config = vi.hoisted(() => ({ enabled: true }));

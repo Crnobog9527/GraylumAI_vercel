@@ -14,8 +14,9 @@ function createMockSupabase(data: {
   creditTransactions?: Array<Record<string, unknown>>;
   paymentOrders?: Array<Record<string, unknown>>;
   launchBaselineAt?: unknown;
-  researchTotals?: {count:number;credits:number};
+  researchTotals?: {count:number;credits:number;turnOtherCredits?:number};
   calls?: { settledCalls: number; mismatched: number; sample: string[] };
+  turns?: { settledTurns: number; mismatched: number; sample: Array<{ actorId: string; turnId: string }> };
   sources?: { mismatched: number; sample: Array<{ kind: string; id: string }> };
 }) {
   const tables: Record<string, Array<Record<string, unknown>>> = {
@@ -53,6 +54,7 @@ function createMockSupabase(data: {
         completedPaymentOrders: completed.length,
         completedPaymentAmount: sum(completed, 'amount_total'),
         calls: data.calls ?? { settledCalls: 0, mismatched: 0, sample: [] },
+        turns: data.turns ?? { settledTurns: 0, mismatched: 0, sample: [] },
         sources: data.sources ?? { mismatched: 0, sample: [] },
         entries: { unattributed: 0, notApplied: 0 },
       }, error: null };
@@ -86,6 +88,67 @@ describe('runDailyBillingReconciliation', () => {
     expect(result.success).toBe(false);
     expect(result.summary.settledCalls).toBe(1500);
     expect(result.mismatches).toEqual(['Call ledger rows do not match the charge for 1 of 1500 settled calls (call-1)']);
+  });
+
+  it('alarms on a settled turn whose ledger rows do not match its charge (V2-12 R7)', async () => {
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      turns: { settledTurns: 40, mismatched: 1, sample: [{ actorId: 'user-1', turnId: '77' }] },
+    }), new Date('2026-03-10T00:00:00Z'));
+    expect(result.success).toBe(false);
+    expect(result.summary.settledTurns).toBe(40);
+    expect(result.summary.turnLedgerMismatches).toBe(1);
+    expect(result.mismatches).toEqual(['Turn ledger rows do not match the charge for 1 of 40 settled turns (user-1:77)']);
+  });
+
+  it('passes when every settled turn balances against the ledger (V2-12 R7)', async () => {
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      turns: { settledTurns: 40, mismatched: 0, sample: [] },
+    }), new Date('2026-03-10T00:00:00Z'));
+    expect(result.summary.settledTurns).toBe(40);
+    expect(result.summary.turnLedgerMismatches).toBe(0);
+    expect(result.mismatches).toEqual([]);
+  });
+
+  it('reads a database that has no turns block yet as zero turns', async () => {
+    const supabase = createMockSupabase({});
+    const rpc = supabase.rpc;
+    supabase.rpc = async (name: string) => {
+      const out = await rpc(name);
+      if (out.data && typeof out.data === 'object') delete (out.data as Record<string, unknown>).turns;
+      return out;
+    };
+    const result = await runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z'));
+    expect(result.summary.settledTurns).toBe(0);
+  });
+
+  it('reads a database without the old call ledger block as zero calls and no call mismatch', async () => {
+    const supabase = createMockSupabase({});
+    const rpc = supabase.rpc;
+    supabase.rpc = async (name: string) => {
+      const out = await rpc(name);
+      if (out.data && typeof out.data === 'object') delete (out.data as Record<string, unknown>).calls;
+      return out;
+    };
+    const result = await runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z'));
+    expect(result.summary.settledCalls).toBe(0);
+    expect(result.summary.callLedgerMismatches).toBe(0);
+    expect(result.mismatches).toEqual([]);
+  });
+
+  it('a call ledger block that is present is still checked: a malformed one fails closed and a mismatch alarms', async () => {
+    const malformed = createMockSupabase({});
+    const rpc = malformed.rpc;
+    malformed.rpc = async (name: string) => {
+      const out = await rpc(name);
+      if (name === 'billing_reconcile_day' && out.data) (out.data as Record<string, unknown>).calls = { settledCalls: 'x' };
+      return out;
+    };
+    await expect(runDailyBillingReconciliation(malformed, new Date('2026-03-10T00:00:00Z')))
+      .rejects.toThrow('Invalid daily billing reconciliation totals');
+    const result = await runDailyBillingReconciliation(createMockSupabase({ calls: { settledCalls: 5, mismatched: 1, sample: ['call-1'] } }),
+      new Date('2026-03-10T00:00:00Z'));
+    expect(result.success).toBe(false);
+    expect(result.mismatches).toEqual(['Call ledger rows do not match the charge for 1 of 5 settled calls (call-1)']);
   });
 
   it('alarms when a credit source disagrees with the source ledger (ARCH-FIX E2)', async () => {
@@ -207,6 +270,17 @@ describe('runDailyBillingReconciliation', () => {
     expect(result.success).toBe(true);
     expect(result.summary).toMatchObject({ tokenStatsCredits: 1000, researchSettledCredits: 359,
       reportFixedPriceCredits: 1000, fusionReviewFixedPriceCredits: 7500, settledCredits: 9859 });
+  });
+
+  it('adds up turn settlements through the research summary', async () => {
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      researchTotals: { count: 1, credits: 6, turnOtherCredits: 24 },
+      billingHistory: [{ operation_type: 'settle', amount: -30 }],
+      creditTransactions: [{ type: 'consumption', ledger_type: 'spend', reason_code: 'turn_spend', counts_as_spend: true,
+        source_type: 'ai_task', idempotency_key: 'turn:1:spend', amount: -30 }],
+    }), new Date('2026-03-10T00:00:00Z'));
+    expect(result.mismatches).toEqual([]);
+    expect(result.summary).toMatchObject({ researchSettledCredits: 6, turnOtherCredits: 24, settledCredits: 30 });
   });
 
   it('fails closed when a fixed-price spend key has inconsistent ledger facts', async () => {

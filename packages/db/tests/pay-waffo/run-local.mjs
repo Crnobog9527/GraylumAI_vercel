@@ -160,7 +160,4 @@ try {
   try {docker(['rm','-f',name]);} catch { /* preserve original failure */ }
 }
 
-// PAY-FAILOVER has its own fresh fixtures; run sequentially after the existing container is removed.
-const failover=spawnSync(process.execPath,[resolve(root,'packages/db/tests/pay-failover/run-local.mjs'),
-  ...(process.argv.includes('--quick')?['--quick']:[])],{cwd:root,stdio:'inherit',timeout:600000});
-if(failover.status!==0||failover.error)throw new Error(failover.error?.message??'PAY_FAILOVER_DATABASE_TEST_FAILED');
+// PAY-FAILOVER has its own fresh fixtures and now runs as its own suite (pay-failover/run-local.mjs), in parallel (Owner 2026-11-03 CI-SHARD-BALANCE).

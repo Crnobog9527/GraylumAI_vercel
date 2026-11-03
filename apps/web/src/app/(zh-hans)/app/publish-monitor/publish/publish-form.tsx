@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -161,7 +162,8 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
                 </label>
                 {!target.ready && (authorizeHere(target.platform) && target.accountProjectId
                   ? <Button size="sm" variant="outline" disabled={busy} onClick={() => authorize(target)}>授权发布</Button>
-                  : <span className="text-[var(--text-secondary)]">还没授权发布：请在账号连接页重新连接这个账号，并选择允许发布。</span>)}
+                  : <span className="text-[var(--text-secondary)]">还没授权发布：到<Link className="underline"
+                    href="/app/publish-monitor">数据复盘</Link>的“我的账号”里，在这个账号旁点“允许一键发布”。</span>)}
               </li>
             ))}
           </ul>

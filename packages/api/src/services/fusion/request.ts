@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { z } from 'zod';
-import type { frozenCallPolicy } from '../bill2/service';
-import { openRouterBound } from '../bill2/openRouterPolicy';
+import type { frozenCallPolicy } from '../turn/provider/frozenRun';
+import { openRouterBound } from '../turn/provider/openRouterPolicy';
 import { openRouterSearchParameters } from '../openRouterSearch';
-import { PURPOSE_INPUT_CAPS } from '../runtime/purposeBudgets';
-import { frozenReasoningFields, type ReasoningPolicy } from '../runtime/reasoningPolicy';
+import { PURPOSE_INPUT_CAPS } from '../turn/settings/purposeBudgets';
+import { frozenReasoningFields, type ReasoningPolicy } from '../turn/admission/reasoningPolicy';
 
 /** The input snapshot (report + collected material) reuses the interactive 90000-byte cap; the whole
  * request (with instructions and, for the summary, the opinions) stays within the per-call profile bound. */
@@ -17,8 +17,17 @@ export function assertSnapshotSize(report: string, materials: unknown) {
 /** `history`: earlier turns of the conversation as plain messages (compare columns, FUSION-COMPARE §3.2); reviews send none. */
 export type FusionRequest = { instructions: string; input: string; history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   responseFormat?: Record<string, unknown> };
-const messagesOf = (request: FusionRequest) => [{ role: 'system', content: request.instructions },
-  ...(request.history ?? []), { role: 'user', content: request.input }];
+const cached = (text: string) => [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
+/** PROMPT-CACHE-ALL: on an Anthropic route with a frozen write price, the host-written system message (shared by every
+ * review or compare of the same kind) and the last earlier turn of a compare are cache breakpoints; the text is unchanged. */
+const messagesOf = (request: FusionRequest, cache = false) => {
+  const history = request.history ?? [];
+  return [{ role: 'system', content: cache ? cached(request.instructions) : request.instructions },
+    ...history.map((turn, index) => cache && index === history.length - 1 && turn.content ? { ...turn, content: cached(turn.content) } : turn),
+    { role: 'user', content: request.input }];
+};
+export const cacheMarkersFor = (policy: Pick<z.infer<typeof frozenCallPolicy>, 'model' | 'providerLimits'>) =>
+  policy.model.startsWith('anthropic/') && policy.providerLimits?.cacheWriteUsdPerMillion !== undefined;
 
 /** Exact provider bytes for one Fusion call. The host writes every message: no brand identity
  * statement is added (Fusion shows the real model name), no history, no tools and no tool_choice;
@@ -38,7 +47,7 @@ export function fusionRequestBody(policy: z.infer<typeof frozenCallPolicy>, requ
   const { plugins } = openRouterSearchParameters(policy.model, false);
   return JSON.stringify({
     model: policy.model, stream: true, stream_options: { include_usage: true }, store: false,
-    messages: messagesOf(request),
+    messages: messagesOf(request, cacheMarkersFor(policy)),
     provider: openRouterBound(policy.providerLimits, policy.outputLimit).routing, max_tokens: outputLimit,
     ...frozenReasoningFields(reasoning),
     ...(request.responseFormat ? { response_format: request.responseFormat } : {}),

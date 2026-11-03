@@ -1,9 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
-import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
-import { ENDED_NOTICE, USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/(zh-hans)/app/runtime/runtime-notices';
-import { definiteRefusal, definiteRefusalNotice, showsReply } from '@/app/(zh-hans)/app/runtime/gate-notices';
-import { hostNotice, isOrganizerPendingError, isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
+import { gateAdmissionNotice } from '@/lib/runtime-gate-notice';
+import { definiteRefusalNotice, showsReply } from '@/app/(zh-hans)/app/runtime/gate-notices';
 
 /** This tab's sessionStorage, where the page remembers the stops its user asked for (display only). */
 export function tabSession() {
@@ -29,82 +26,45 @@ export function topicFailureMessage(cause: unknown) {
 }
 
 /**
- * A topic turn the server definitely refused before admitting it (an HTTP 4xx such as a missing billing
- * profile): nothing exists to recover, so the caller releases it instead of holding it as unknown.
- * A request-identity conflict and a pending earlier organizer keep their own handling.
+ * The workspace is frozen to the positioning version it was bound to (Owner 2026-11-02: after the positioning is updated,
+ * the old topic workspace is read-only and the user is told). It is behind when the project's current formal version is
+ * another one; the server then refuses every adoption with OPC_VERSION_CONFLICT.
  */
-export function topicTurnRefused(cause: unknown) {
-  return definiteRefusal(cause)?.path === 'opc.topicTurn' && !(cause as Error).message.includes('OPC_REQUEST_CONFLICT')
-    && !isOrganizerPendingError(cause); // waits for the earlier organizer (payg-wait), never a release
+export function topicWorkspaceStale(boundVersionId: unknown, currentVersionId: unknown) {
+  return typeof boundVersionId === 'string' && boundVersionId !== '' &&
+    typeof currentVersionId === 'string' && currentVersionId !== '' && boundVersionId !== currentVersionId;
+}
+
+export const STALE_WORKSPACE_NOTICE =
+  '你已更新过正式定位，这个选题工作区基于旧版本，不能再采用或继续对话；原对话和计划保留，只能查看。';
+
+/** The first message after the user starts the topic work again on the updated positioning (the old conversation is not sent to the model). */
+export const REBIND_OPENING_INPUT = '定位已更新。请只根据最新的已确认定位和选题方法，提出第一周选题候选；区分已确认事实与建议，缺少必要信息时先问我。';
+
+/** The server refused to start again on the latest positioning (e.g. the topic method was updated since): say so, never a vague error. */
+export const REBIND_REFUSED_NOTICE = '暂时不能用最新定位重新开始选题（选题方法已有更新）。原对话和计划仍可查看，没有任何改动；请联系我们处理。';
+
+/** Another tab still has a topic turn running in the old conversation. */
+export const REBIND_BUSY_NOTICE = '这个选题对话在别处还有一轮没结束，请等它结束后再点“用最新定位开始选题”。';
+
+/** What the page shows when starting again on the latest positioning failed. */
+export function rebindFailureMessage(cause: unknown) {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (/\bOPC_TOPIC_TURN_ACTIVE\b/.test(message)) return REBIND_BUSY_NOTICE;
+  return /OPC_TOPIC_SOURCE_CHANGED|OPC_TOPIC_SKILL_MISSING|OPC_TOPIC_SOURCE_DENIED/.test(message) ? REBIND_REFUSED_NOTICE : topicFailureMessage(cause);
 }
 
 /**
- * Notice for an admitted topic turn the gate stopped before its first call.
- * The execution is cancelled with no charge, so the operation is finished,
- * but the typed input stays in the box for an explicit new send.
+ * The opening's request id is a pure function of the draft and the new positioning version, so every browser and tab that restarts the
+ * same workspace sends the same id: the second one is a replay of the first turn, never a second charge.
  */
-export function topicGateNotice(result: unknown): string | null {
-  if (!result || typeof result !== 'object' || !('unavailable' in result)) return null;
-  return gateResultNotice(result.unavailable);
-}
-
-/** What a finished topic turn shows: the host's notice first (#698), else the gate's. Display only. */
-export function topicExecutionNotice(result: unknown): string | null {
-  return hostNotice(result) ?? topicGateNotice(result);
-}
-
-/** True while the page still shows the notice this turn's execute result gave (topicTurnOutcome). Display only. */
-export function topicExplained(explained: { id: string; text: string } | null, executionId: string, error: string) {
-  return Boolean(explained && explained.id === executionId && explained.text === error);
-}
-
-/** A finished topic turn: its notice, and whether the typed input stays (only after a gate stop; a notice is display only). */
-export function topicTurnOutcome(result: unknown) {
-  return { notice: topicExecutionNotice(result), keepInput: Boolean(topicGateNotice(result)) };
-}
-
-/** A cancelled turn the provider refused before any charge: the live notice, kept after a reload. */
-export function topicRejectedTurn(e: { state: string; unavailableReason?: string | null }) {
-  return e.state === 'cancelled' && e.unavailableReason === 'provider_rejected';
-}
-
-/** Once the view names the refusal, the last turn shows it; the live error is not repeated below it. */
-export function topicTurnShows(last: { state: string; unavailableReason?: string | null } | undefined, error: string) {
-  return Boolean(last && topicRejectedTurn(last) && error === PROVIDER_REJECTED_NOTICE);
-}
-
-/**
- * The notice under a topic turn. An open turn carries its "重试" and "停止"; a provider-refused
- * turn only its fixed notice, like any other finished turn. `finished` is the execution
- * whose execute call already returned a final state (finishedExecution): until the view catches
- * up it still reads as running, never as 回复尚未完成. A BILL-PAYG pause has its own notice (payg-wait.ts).
- * A turn the user stopped (`userStopped` is this tab's record; stoppedByUser also reads the view) says
- * 已停止 from the click on, whether it ends cancelled or completed, and is never 回复尚未完成.
- * Any other cancelled turn the server ended says so (ENDED_NOTICE), like free conversation, unless only its organizer was skipped.
- */
-export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null } & StopSignals & PaygViewFields, ctx: {
-  busy: boolean; finished: string | null; stopping: boolean; userStopped?: boolean; explained?: boolean; onRetry: () => void; onStop: () => void;
-}): ChatNotice | null {
-  if (topicRejectedTurn(e)) return { id: e.executionId, tone: 'warning', text: PROVIDER_REJECTED_NOTICE };
-  const stopped = stoppedByUser(e, ctx.userStopped);
-  const userStop: ChatNotice = { id: e.executionId, tone: 'status', text: USER_STOP_NOTICE };
-  // A saved reply whose organizer was skipped keeps only its own notice (payg-wait.ts), like runtimeTurnNotices;
-  // a reason this tab already shows (`explained`, topicExplained) is not repeated as 已结束.
-  if (e.state === 'cancelled')
-    return stopped ? userStop : organizerSkipped(e) || ctx.explained ? null : { id: e.executionId, tone: 'warning', text: ENDED_NOTICE };
-  if (e.state === 'completed') return stopped ? userStop : null;
-  if (isPaygWaiting(e.state)) return null;
-  // Still being saved: no 重试 or 停止; a server-confirmed `interrupted` save offers 重试 (stopRecovery).
-  if (stopped && e.state !== 'cost_pending')
-    return stopRecovery(e) && !ctx.busy ? { ...userStop, actions: [{ label: CHAT_ACTION.retry, onClick: ctx.onRetry }] } : userStop;
-  // A finished call matters only while the view still shows the turn in flight (inFlight).
-  const settling = ctx.finished === e.executionId && inFlight(e.state);
-  const running = (ctx.busy || settling) && e.state !== 'cost_pending';
-  return { id: e.executionId, tone: running ? 'status' : 'warning', busy: running,
-    text: e.state === 'cost_pending' ? '费用待核实；重试只核对原调用。'
-      : running ? '正在回复…' : '回复尚未完成，原请求已保留。',
-    actions: [{ label: CHAT_ACTION.retry, disabled: ctx.busy || settling, onClick: ctx.onRetry },
-      { label: CHAT_ACTION.stop, disabled: ctx.stopping, onClick: ctx.onStop }] };
+export async function rebindOpeningRequestId(draftId: string, versionId: string) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('topic-rebind-opening:' + draftId + ':' + versionId)));
+  const bytes = digest.slice(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40; // a version 4 shaped id, as every request id the server accepts
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** The user-facing text of a reply without the machine-readable plan or adoption block. */

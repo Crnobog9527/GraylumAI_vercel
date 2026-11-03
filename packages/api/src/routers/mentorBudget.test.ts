@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest';
 import { mentorBudgetRouter } from './mentorBudget';
 import { settingsRouter } from './settings';
-import { PURPOSE_BUDGET_KEY, PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP } from '../services/runtime/purposeBudgets';
+import { PURPOSE_BUDGET_KEY, PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP } from '../services/turn/settings/purposeBudgets';
 const config = { version: 1 as const,
   interactive: { inputBytes: 80000, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: 100 },
   organize: { inputBytes: 64000, historyItems: 0 },

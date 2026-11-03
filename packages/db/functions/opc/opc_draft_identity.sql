@@ -11,5 +11,5 @@ BEGIN
   IF TG_OP='DELETE' AND public.erasure_business_delete_allowed('opc_drafts',to_jsonb(OLD)) THEN
     RETURN OLD;
   END IF;
- IF TG_OP='DELETE' OR to_jsonb(OLD)-'round_id' IS DISTINCT FROM to_jsonb(NEW)-'round_id' THEN RAISE EXCEPTION 'OPC_IMMUTABLE_DRAFT';END IF;RETURN NEW;
+ IF TG_OP='DELETE' OR to_jsonb(OLD)-ARRAY['round_id','research_rounds','research_qualified'] IS DISTINCT FROM to_jsonb(NEW)-ARRAY['round_id','research_rounds','research_qualified'] THEN RAISE EXCEPTION 'OPC_IMMUTABLE_DRAFT';END IF;RETURN NEW;
 END $function$;

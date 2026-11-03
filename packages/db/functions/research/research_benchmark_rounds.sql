@@ -8,7 +8,15 @@ CREATE OR REPLACE FUNCTION public.research_benchmark_rounds(a uuid, s uuid)
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  SELECT count(*)::integer FROM research_discoveries d
-  JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
-  WHERE d.actor_id=a AND d.session_id=s AND d.state='completed' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+  SELECT (
+    SELECT count(*) FROM research_discoveries d
+    WHERE d.actor_id=a AND d.session_id=s AND d.state='completed' AND d.turn_id IS NOT NULL
+      AND coalesce(d.cursor->>'supplierDown','')<>'true'
+  )::integer + (
+    -- A turn's pasted-link check, unless that turn also completed a counted discovery (one turn, one round, as above).
+    SELECT count(DISTINCT p)::integer FROM research_account_fetches f CROSS JOIN LATERAL unnest(f.pasted_turns) p
+    WHERE f.actor_id=a AND f.session_id=s AND NOT EXISTS (SELECT 1 FROM research_discoveries d
+      WHERE d.turn_id=p AND d.actor_id=a AND d.session_id=s AND d.state='completed'
+        AND coalesce(d.cursor->>'supplierDown','')<>'true')
+  )
 $function$;

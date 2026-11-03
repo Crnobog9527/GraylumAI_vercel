@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { router, adminProcedure } from '../trpc';
 import { createSafeInternalError } from '../lib/publicError';
-import { purposeBudgetsSchema, readPurposeBudgetView, savePurposeBudgets } from '../services/runtime/purposeBudgets';
+import { purposeBudgetsSchema, readPurposeBudgetView, savePurposeBudgets } from '../services/turn/settings/purposeBudgets';
 export const mentorBudgetRouter = router({
   get: adminProcedure.query(async ({ ctx }) => {
     try { return await readPurposeBudgetView(ctx.supabase); }

@@ -23,6 +23,10 @@ export default defineConfig({
   // Test directory
   testDir: './tests/e2e',
 
+  // The staging core-path journeys (playwright.core-path.config.ts, paid) and the simulated-model ones (playwright.sim.config.ts,
+  // started by scripts/e2e-sim/run.mjs) have their own configs.
+  testIgnore: ['**/core-path/**', '**/sim/**'],
+
   // Keep structured reports and per-test evidence under a stable directory
   outputDir: 'test-results/artifacts',
 

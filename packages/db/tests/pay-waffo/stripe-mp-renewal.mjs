@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {addUtcMonths,latestMonthEnd} from '../utc-months.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
@@ -9,7 +10,7 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   const version=current.version+1;
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:true},card_cn:{enabled:true},version}]);
-  const month=(date,n=1)=>{const d=new Date(date);d.setUTCMonth(d.getUTCMonth()+n);return d;};
+  const month=(date,n=1)=>addUtcMonths(date,n);
   const year=date=>{const d=new Date(date);d.setUTCFullYear(d.getUTCFullYear()+1);return d;};
   // First period ended two hours ago, so the renewal and the 24-hour grace are both "now".
   const paidFirst=async(method,offer,cycle,digest)=>{
@@ -20,7 +21,7 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
     await service.query('SELECT pay_waffo_claim_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',
       {orderId:o.id,userId:user,method,merchant:'fixture',mode:'test',providerRequest:{fixture:true}},expiry]);
     await service.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',checkout,expiry]);
-    const end=new Date(Math.floor(Date.now()/1000)*1000-2*3600000);
+    const end=latestMonthEnd(new Date(Math.floor(Date.now()/1000)*1000-2*3600000));
     const start=cycle==='yearly'?new Date(new Date(end).setUTCFullYear(end.getUTCFullYear()-1)):month(end,-1);
     await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,new Date(start.getTime()-60000)]);
     const fulfilled=(await service.query('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[o.id,'fixture',checkout,

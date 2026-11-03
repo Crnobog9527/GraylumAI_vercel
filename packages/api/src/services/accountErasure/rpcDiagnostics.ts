@@ -5,6 +5,7 @@ const operations: Readonly<Record<string, string>> = {
   account_erasure_work_batch: 'WORK_BATCH',
   account_erasure_scrub_content: 'SCRUB_CONTENT',
   account_erasure_scrub_runtime: 'SCRUB_RUNTIME',
+  account_erasure_scrub_turns: 'SCRUB_TURNS',
   account_erasure_scrub_receipts: 'SCRUB_RECEIPTS',
   account_erasure_scrub_run: 'SCRUB_RUN',
   account_erasure_scrub_calls: 'SCRUB_CALLS',
@@ -15,8 +16,6 @@ const operations: Readonly<Record<string, string>> = {
   account_erasure_local_cleanup: 'LOCAL_CLEANUP',
   account_erasure_auth_begin: 'AUTH_BEGIN',
   account_erasure_auth_result: 'AUTH_RESULT',
-  bill2_cancel: 'BILL2_CANCEL', bill2_finalize: 'BILL2_FINALIZE', bill2_read: 'BILL2_READ',
-  runtime_financial_recovery: 'FINANCIAL_RECOVERY',
 };
 const databaseCodes = new Set([
   '21000', '22001', '22003', '22007', '22023', '22P02', '23502', '23503', '23505', '23514',

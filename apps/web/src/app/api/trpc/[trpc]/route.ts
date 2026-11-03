@@ -4,6 +4,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { appRouter } from '@repo/api/src/root';
 import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
+import { withCatalogRequest } from '@repo/api/src/services/turn/settings/catalogCache';
 import { createTRPCContext,createRuntimeBudget,withRuntimeBudget } from '@repo/api/src/trpc';
 
 export const maxDuration = 300;
@@ -63,22 +64,17 @@ async function readMaintenanceMode(budgetFetch:typeof fetch): Promise<{ value: b
   return { value: data?.value === true || data?.value === 'true', read: true };
 }
 
-// Streamed procedures keep running after the Response is returned; each one
-// releases its own timing reference when its execution settles.
-const STREAMED_PROCEDURES = new Set(['runtime.executeStream', 'runtime.resumeStream', 'opc.mentorTurnStream']);
-
 const handler = async (req: NextRequest) => {
   // Before authentication/maintenance: batched procedures share this deadline.
   const runtimeBudget=createRuntimeBudget();
   try {
     const procedurePaths = parseTrpcProcedurePaths(req.nextUrl.pathname);
     runtimeBudget.timing.setProcedures(procedurePaths);
-    runtimeBudget.timing.retain(procedurePaths.filter((path) => STREAMED_PROCEDURES.has(path)).length);
   } catch {
     // Timing is measurement only; the maintenance check parses paths again.
   }
   try {
-    return await withPlatformSecretRequest(() => runtimeBudget.timing.run(() => handleTrpc(req, runtimeBudget)));
+    return await withPlatformSecretRequest(() => withCatalogRequest(() => runtimeBudget.timing.run(() => handleTrpc(req, runtimeBudget))));
   } finally {
     runtimeBudget.timing.release();
   }
@@ -124,6 +120,7 @@ async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof cre
       const procedurePaths = parseTrpcProcedurePaths(req.nextUrl.pathname);
 
       if (!isTrpcRequestAllowedDuringMaintenance(procedurePaths)) {
+        logServerError('api', 'trpc_service_unavailable', { reasonCode: 'MAINTENANCE' });
         return new Response(
           JSON.stringify({
             error: {
@@ -146,6 +143,15 @@ async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof cre
     endpoint: '/api/trpc',
     req,
     router: appRouter,
+    onError: ({ error, path }) => {
+      if (error.code !== 'SERVICE_UNAVAILABLE') return;
+      const procedure = path && /^[a-zA-Z][a-zA-Z0-9.]{0,160}$/.test(path) ? path : 'unknown';
+      logServerError('api', 'trpc_service_unavailable', {
+        procedure,
+        reasonCode: 'retryAfter' in error ? 'RATE_LIMIT_BACKEND_UNAVAILABLE'
+          : error.message === 'CONTENT_ERASURE_UNAVAILABLE' ? 'CONTENT_ERASURE_UNAVAILABLE' : 'PROCEDURE_UNAVAILABLE',
+      });
+    },
     createContext: () => createTRPCContext({
       headers: req.headers,
       runtimeBudget,

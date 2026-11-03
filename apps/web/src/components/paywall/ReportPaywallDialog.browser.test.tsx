@@ -25,7 +25,20 @@ beforeAll(async () => {
     export const trpc = {
       fusionReview: {versionMarks: {useQuery: () => q({})}},
       publishMonitor: {features: {useQuery: () => q(window.publishMonitorFeatures)}},
-      runtime: {reportAvailable: {useQuery: () => q({enabled: true, priceCredits: 500})}},
+      runtime: {reportAvailable: {useQuery: () => q({enabled: true, priceCredits: 500})},
+        reportPreflight: {useQuery: () => {
+          const [data,setData]=useState(window.preflight ?? {canGenerate:true,qualified:3,required:3,rounds:2,card:null});
+          const [isFetching,setFetching]=useState(false);
+          window.setPreflightFetching=setFetching;window.setPreflightData=setData;
+          return {...q(data),isFetching,refetch:async()=>{setData(window.preflight);return {data:window.preflight};}};
+        }}},
+      research: {chooseShortfall: {useMutation: () => ({isPending:false,mutateAsync:async input=>{
+        window.shortfallChoices=(window.shortfallChoices ?? []).concat([input]);
+        window.preflight={...window.preflight,canGenerate:input.choice==='generate',
+          card:{...window.preflight.card,choice:input.choice}};
+        return window.preflight.card;
+      }})}},
+      useUtils: () => ({research:{shortfall:{invalidate:async()=>{}}}}),
       user: {getEntitlements: {useQuery: (_input, options) => {
         if (options?.enabled) window.entitlementReads = (window.entitlementReads ?? 0) + 1;
         const fresh = window.entitlementsFresh !== false;
@@ -103,7 +116,7 @@ const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion:
 const WITH_SEATS = { ...ENTRY, founder: { total: 50, sold: 37, reserved: 0, available: 13 } };
 const MEMBERSHIP = { executionId: null, refusal: { text: '生成完整报告需要开通会员。', membership: true } };
 
-async function open(setup: Record<string, unknown>, width = 1280) {
+async function open(setup: Record<string, unknown>, width = 1280, openReport = true) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -122,12 +135,64 @@ async function open(setup: Record<string, unknown>, width = 1280) {
   await page.evaluate(value => { Object.assign(window, value); }, { plans: PLANS, membership: ENTRY, report: MEMBERSHIP, ...setup });
   if (setup.sessionFlag) await page.evaluate(() => sessionStorage.setItem('opc-report-paywall:d:r', 'membership'));
   await page.addScriptTag({ content: code });
-  await page.getByRole('button', { name: '生成完整报告' }).click();
+  if (openReport) await page.getByRole('button', { name: '生成完整报告' }).click();
   return { page, errors };
 }
 // Recorded on the test side too: a hand-off to checkout.stripe.com replaces the page and its window.
 const sentByPage = new WeakMap<Page, unknown[]>();
 const checkouts = async (page: Page) => sentByPage.get(page) ?? [];
+
+for (const width of [1280, 390]) it(`resolves a two-benchmark shortfall before offering or confirming any report charge at ${width}px`, async () => {
+  const card = { cardId: 'shortfall-1', required: 3, offeredQualified: 2, offeredRounds: 2,
+    choice: null, chosenQualified: null };
+  const { page, errors } = await open({ report: { executionId: null, offer: 'start' },
+    preflight: { canGenerate: false, qualified: 2, required: 3, rounds: 2, card } }, width, false);
+  try {
+    await browserExpect(page.getByRole('region', { name: '报告生成条件' })).toContainText('目前有 2 个合格对标');
+    await browserExpect(page.getByRole('button', { name: /500/ })).toHaveCount(0);
+    await browserExpect(page.getByRole('group', { name: '确认扣费' })).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { starts?: number }).starts ?? 0)).toBe(0);
+    if (process.env.REPORT_PREFLIGHT_SHOTS) await page.screenshot({
+      path: `${process.env.REPORT_PREFLIGHT_SHOTS}/report-shortfall-${width}.png`, fullPage: true });
+    await page.getByRole('radio', { name: /用现有 2 个对标先生成报告/ }).check();
+    await page.getByRole('button', { name: '确认选择' }).click();
+    await browserExpect(page.getByRole('button', { name: '生成完整报告（500 积分）' })).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { starts?: number }).starts ?? 0)).toBe(0);
+    await page.getByRole('button', { name: '生成完整报告（500 积分）' }).click();
+    await page.getByRole('dialog', { name: '完整运营策略报告' })
+      .getByRole('button', { name: '生成完整报告（500 积分）' }).click();
+    await browserExpect(page.getByRole('group', { name: '确认扣费' })).toContainText('确认后将扣除 500 积分');
+    expect(await page.evaluate(() => (window as unknown as { starts?: number }).starts ?? 0)).toBe(0);
+    await page.getByRole('button', { name: '确认并扣 500 积分' }).click();
+    expect(await page.evaluate(() => (window as unknown as { starts?: number }).starts)).toBe(1);
+    expect(await page.evaluate(() => (window as unknown as { shortfallChoices: unknown[] }).shortfallChoices))
+      .toEqual([{ cardId: 'shortfall-1', choice: 'generate' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('removes an old charge confirmation while benchmark eligibility is being refreshed', async () => {
+  const { page, errors } = await open({ report: { executionId: null, offer: 'start' } }, 1280, false);
+  try {
+    await page.getByRole('button', { name: '生成完整报告（500 积分）' }).click();
+    await page.getByRole('dialog', { name: '完整运营策略报告' })
+      .getByRole('button', { name: '生成完整报告（500 积分）' }).click();
+    await browserExpect(page.getByRole('group', { name: '确认扣费' })).toBeVisible();
+    await page.evaluate(() => (window as unknown as { setPreflightFetching: (value: boolean) => void }).setPreflightFetching(true));
+    await browserExpect(page.getByText('正在确认对标条件…')).toBeVisible();
+    await browserExpect(page.getByRole('group', { name: '确认扣费' })).toHaveCount(0);
+    await browserExpect(page.getByRole('button', { name: /500/ })).toHaveCount(0);
+    await page.evaluate(() => {
+      const target = window as unknown as { setPreflightFetching: (value: boolean) => void; setPreflightData: (value: unknown) => void };
+      target.setPreflightData({ canGenerate: false, qualified: 2, required: 3, rounds: 1, card: null });
+      target.setPreflightFetching(false);
+    });
+    await browserExpect(page.getByRole('region', { name: '报告生成条件' })).toContainText('目前有 2 个合格对标');
+    await browserExpect(page.getByRole('button', { name: /500/ })).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { starts?: number }).starts ?? 0)).toBe(0);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
 
 it('a membership refusal opens the paywall with server prices, monthly by default, and pays the chosen plan by card', async () => {
   const { page, errors } = await open({});

@@ -2,7 +2,7 @@
 import { writeFile } from 'node:fs/promises';
 import { it } from 'vitest';
 import { checkRuntimeRateLimit } from './redisRateLimiter';
-import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './runtime/rateLimitSettings';
+import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './turn/settings/rateLimitSettings';
 it.skipIf(process.env.RUNTIME_RATE_LIMIT_WORKER !== 'true')('counts through an independent Node process', async () => {
   if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.UPSTASH_REDIS_REST_URL ?? '')) {
     throw new Error('LOCAL_REDIS_REQUIRED');

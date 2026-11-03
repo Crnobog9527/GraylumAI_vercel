@@ -239,6 +239,32 @@ add_case.call(
   'ci.yml: required pull_request trigger must not use types'
 )
 add_case.call(
+  'required-pr-types-default-plus-ready-for-review',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'branches' => %w[main staging], 'types' => %w[opened synchronize reopened ready_for_review] }, 'push' => nil })
+  ),
+  true
+)
+add_case.call(
+  'required-pr-types-without-synchronize',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'branches' => %w[main staging], 'types' => %w[opened reopened ready_for_review] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use types'
+)
+add_case.call(
+  'required-pr-types-with-extra-type',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'branches' => %w[main staging], 'types' => %w[opened synchronize reopened ready_for_review closed] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use types'
+)
+add_case.call(
   'required-push-tags-only',
   required_files.call(
     'ci.yml',

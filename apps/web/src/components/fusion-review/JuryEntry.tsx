@@ -1,17 +1,35 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 import { trpc } from '@/trpc/client';
+import { estimateFusion, startJury } from '@/lib/turn-fusion';
 import { resolveSeatNames, SEATS } from '@/components/landing/preview-jury/jury-events';
 import { ACTIVE, reviewHref, startErrorText, toPanel } from './review-adapter';
 import styles from './jury-entry.module.css';
 
 const codeOf = (error: unknown) => (error instanceof Error ? error.message : '');
+type Estimate = { estimateCredits?: number; requiredCredits?: number };
+
+/** The price (POST /api/turn/estimate), read when the card opens. */
+function useTurnEstimate(on: boolean, draftId: string, sourceVersionId: string) {
+  const [state, setState] = useState<{ data?: Estimate; error?: unknown; fetching: boolean; tick: number }>({ fetching: false, tick: 0 });
+  useEffect(() => {
+    if (!on) return;
+    let current = true;
+    setState(old => ({ ...old, fetching: true, error: undefined }));
+    estimateFusion<Estimate>({ kind: 'jury', draftId, sourceVersionId })
+      .then(data => { if (current) setState(old => ({ ...old, data, fetching: false })); },
+        error => { if (current) setState(old => ({ ...old, error, fetching: false })); });
+    return () => { current = false; };
+  }, [on, draftId, sourceVersionId, state.tick]);
+  return { data: state.data, error: state.error, isFetching: state.fetching,
+    refetch: () => setState(old => ({ ...old, tick: old.tick + 1 })) };
+}
 
 /**
  * The 评审团 entry of a positioning analysis whose formal version has a report. Switched off: nothing renders, no
@@ -39,13 +57,13 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   const goldOnly = entitlements.data?.allowFusionReview === false;
   const mine = trpc.fusionReview.mine.useQuery({ draftId, limit: 1 }, { enabled, retry: false, staleTime: 15_000 });
   const panel = trpc.fusionReview.panel.useQuery(undefined, { enabled, staleTime: Infinity, retry: false });
-  const start = trpc.fusionReview.start.useMutation();
+  const [starting, setStarting] = useState(false);
+  const start = { isPending: starting };
   const [open, setOpen] = useState(false);
   // The Gold paywall opens on this page (Owner 2026-10-25).
   const [paywall, setPaywall] = useState(false);
   // The fixed price of a review and the balance a start needs (0294), shown before the user agrees.
-  const estimate = trpc.fusionReview.estimate.useQuery({ draftId, sourceVersionId }, { enabled: enabled && open, retry: false,
-    staleTime: 0, refetchOnWindowFocus: false });
+  const estimate = useTurnEstimate(enabled && open, draftId, sourceVersionId);
   const cap = estimate.data?.estimateCredits;
   const required = estimate.data?.requiredCredits;
   const [error, setError] = useState('');
@@ -76,7 +94,8 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
     requestId.current ||= crypto.randomUUID();
     if (!cap) return;
     try {
-      const review = await start.mutateAsync({ requestId: requestId.current, draftId, sourceVersionId, acceptedCredits: cap });
+      setStarting(true);
+      const review = await startJury({ requestId: requestId.current, draftId, sourceVersionId, acceptedCredits: cap }).finally(() => setStarting(false));
       router.push(reviewHref(draftId, review.reviewId));
     } catch (cause) {
       const code = codeOf(cause);

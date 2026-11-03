@@ -1,0 +1,285 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// RESEARCH-TOOLS RT-3b PR-3 (plan §1.2, §2.1, §2.5, §3.1, §5): which research tools a positioning mentor turn gets,
+// decided once at admission and frozen with the run. With the admin switch off, or nothing priced, the request
+// carries no research tool at all. Every offered route has a current price frozen into the run (0255 checks each
+// claim against it), a start threshold for this phase, and on staging the same entry in the test window.
+// The run's call ceiling counts the extra model call that reads a tool result plus every supplier subcall.
+import { z } from 'zod';
+import { rowFor, type ConfigurationRows } from '../settings/settingsRows';
+import type {ResearchCapacity} from './researchCapacity';
+import type {ResearchAdmissionRejection, ResearchRejectionObserver, ResearchRouteRejection} from './researchAdmissionDiagnostics';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { readProviderPrices, resolveProviderPrice } from '../../billingProviderPrices';
+import { decimal } from '../provider/decimal';
+import { toolCallPolicy, type ToolCallPolicy } from '../provider/toolBilling';
+import { BENCHMARK_ROUTE_KINDS, readResearchToolsConfig, RUN_MAX_CALLS, type ResearchToolsConfig } from '../../research/vendors/config';
+import { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../../research/tools/schemas';
+import { RESEARCH_VENDORS, type SocialPlatform } from '../../research/vendors/types';
+import type { FrozenPaygRun } from '../provider/frozenRun';
+import { freezePaygMessageBudget } from '../admission/paygMessageBudget';
+import { RESEARCH_TURN_INPUT_CAP } from '../settings/purposeBudgets';
+import { fastSearchOnly, researchToolDescription, researchToolParameters } from './researchRuntimeTool';
+import type { StagingPolicy } from '../settings/stagingPolicy';
+import type { SettingsRead } from '../admission/newWorkGate';
+import type { HostTurnContext } from '../agent/hostTurn';
+import { researchHost } from './researchHostContext';
+import { FREE_CHAT_RESEARCH, frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE,
+  RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TOOL_LIMITS, RESEARCH_TURN_VERSION,
+  type FrozenResearchTurn } from './researchTurn';
+
+/** Serialized tool definitions as the SDK sends them; the full request is checked again before dispatch. */
+export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false, freeChat = false, declaredLimits = true): number {
+  return Buffer.byteLength(JSON.stringify(names.map(name => ({ type: 'function', function: { name,
+    description: researchToolDescription(name, freeChat), strict: true,
+    parameters: z.toJSONSchema(researchToolParameters(name, fastOnly, declaredLimits)) } }))));
+}
+
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+  ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) : item);
+
+export interface ResearchAdmissionInput {
+  admin: SupabaseClient;
+  real?: StagingPolicy;
+  /** Model calls the run already allows, before the one that reads a tool result. */
+  modelCalls: number;
+  /** Tool definitions already offered and the profile's ceiling per request. */
+  offeredTools: number;
+  maxTools: number;
+  defaultMultiplier: string;
+  runMultiplier: string;
+  /** Frozen prices must outlive the run. */
+  deadline: string;
+  /** Whether the required context still fits with these extra tool bytes plus the result reserve (within `inputBytes` if given). */
+  fits: (extraBytes: number, inputBytes?: number) => boolean;
+  now?: () => Date;
+  onRejected?: ResearchRejectionObserver;
+  /** DB-PERF PR-3: a new admission's settings rows (settingsRows.ts); absent, each setting is read now. */
+  configuration?: Promise<ConfigurationRows>;
+  requiredTools?: readonly ResearchToolName[];
+  capacity?: (toolBytes: number) => ResearchCapacity;
+  /** CHAT-AUTO-CONTEXT C: offer the general lookups of a free chat instead of the positioning benchmark flow. */
+  general?: boolean;
+  /** Model calls that read research results (one for a mentor turn's single slot). */
+  extraModelCalls?: number;
+}
+
+export interface ResearchAdmission { research: FrozenResearchTurn; tools: ResearchToolName[]; policies: ToolCallPolicy[] }
+
+export const RESEARCH_THRESHOLDS_KEY = 'billing_payg_start_thresholds';
+async function thresholdKeys(admin: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<Set<string> | null> {
+  const row = configuration ? rowFor(await configuration, RESEARCH_THRESHOLDS_KEY)
+    : await admin.from('system_settings').select('value').eq('key', RESEARCH_THRESHOLDS_KEY).maybeSingle();
+  if (row.error || !row.data) return null;
+  const parsed = z.object({ thresholds: z.array(z.object({ model: z.string(), purpose: z.string() }).passthrough()) }).passthrough()
+    .safeParse(typeof row.data.value === 'string' ? JSON.parse(row.data.value) : row.data.value);
+  if (!parsed.success) return null;
+  const counts = new Map<string, number>();
+  for (const entry of parsed.data.thresholds) counts.set(`${entry.model}\n${entry.purpose}`, (counts.get(`${entry.model}\n${entry.purpose}`) ?? 0) + 1);
+  // The claim needs exactly one entry per route and purpose (0180).
+  return new Set([...counts].filter(([, count]) => count === 1).map(([key]) => key));
+}
+
+/** null = fail closed; the observer records which gate refused without exposing its input. */
+export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<ResearchAdmission | null> {
+  const state = await readResearchToolsConfig(input.admin, input.configuration);
+  const config = state.config;
+  const routes: NonNullable<ResearchAdmissionRejection['routes']> = [];
+  const reject = (reason: ResearchAdmissionRejection['reason'], details: Partial<ResearchAdmissionRejection> = {}) => {
+    input.onRejected?.({reason, configRevision: state.revision, modelCalls: input.modelCalls,
+      offeredTools: input.offeredTools, maxTools: input.maxTools, configuredRoutes: config.routes.length, routes, ...details});
+    return null;
+  };
+  if (!config.enabled) return reject(state.source === 'invalid' ? 'CONFIG_UNAVAILABLE'
+    : state.source === 'default' ? 'CONFIG_MISSING' : 'CONFIG_DISABLED');
+  const subcalls = Math.min(config.limits.maxSubcallsPerRound, RUN_MAX_CALLS - input.modelCalls - (input.extraModelCalls ?? 1));
+  const room = input.maxTools - input.offeredTools;
+  if (subcalls < 1) return reject('CALL_LIMIT', {subcalls});
+  if (room < 1) return reject('TOOL_LIMIT');
+  const now = input.now?.() ?? new Date();
+  const [priceRead, thresholdRead] = await Promise.allSettled([readProviderPrices(input.admin, input.configuration),
+    thresholdKeys(input.admin, input.configuration)]);
+  if (priceRead.status === 'rejected') return reject('PRICE_CONFIG_UNAVAILABLE');
+  if (thresholdRead.status === 'rejected' || !thresholdRead.value) return reject('THRESHOLD_CONFIG_UNAVAILABLE');
+  const prices = priceRead.value, thresholds = thresholdRead.value;
+  const priced = new Map<string, { entry: ResearchToolsConfig['routes'][number]; policy: ToolCallPolicy }>();
+  for (const entry of config.routes) {
+    const skipped = (reason: ResearchRouteRejection) => {
+      routes.push({vendor: entry.vendor, platform: entry.platform, kind: entry.kind, reason});
+    };
+    if (!config.vendors[entry.vendor].enabled) { skipped('VENDOR_DISABLED'); continue; }
+    if (entry.platform !== 'web' && !config.verifiedPlatforms.includes(entry.platform)) { skipped('PLATFORM_UNVERIFIED'); continue; }
+    const model = `${entry.vendor}:${entry.route}`;
+    // RUNTIME-PROD: production has no window; the research switch, vendor hard caps and price entries approve a route.
+    const production = input.real?.mode === 'production';
+    const windowEntry = production ? undefined : input.real?.toolPolicies?.find(policy => policy.model === model);
+    if (input.real && !production && !windowEntry) { skipped('WINDOW_POLICY_MISSING'); continue; }
+    let policy: ToolCallPolicy;
+    try {
+      const account = windowEntry?.account ?? (production ? PRODUCTION_RESEARCH_ACCOUNT : LOCAL_RESEARCH_ACCOUNT);
+      policy = toolCallPolicy({ vendor: entry.vendor, account, route: entry.route,
+        purposes: [RESEARCH_PHASE], maxUnitsPerCall: entry.maxUnitsPerCall,
+        price: resolveProviderPrice(prices.config, { provider: entry.vendor, route: entry.route }, input.defaultMultiplier, now) });
+    } catch { skipped('PRICE_UNAVAILABLE'); continue; }
+    // Staging: the window must approve exactly this frozen price (runtime_test_window_allowed compares entries).
+    if (windowEntry && canonical(windowEntry) !== canonical(policy)) { skipped('WINDOW_PRICE_MISMATCH'); continue; }
+    if (Date.parse(policy.toolPricing.validUntil) <= Date.parse(input.deadline)) { skipped('PRICE_EXPIRES_BEFORE_DEADLINE'); continue; }
+    // A window reserves for its highest m; production has none, so the run multiplier follows the route (attachResearchTurn).
+    if (!production && decimal(policy.multiplier) > decimal(input.runMultiplier)) { skipped('MULTIPLIER_EXCEEDS_WINDOW'); continue; }
+    if (!thresholds.has(`${model}\n${RESEARCH_PHASE}`)) { skipped('START_THRESHOLD_MISSING_OR_DUPLICATE'); continue; }
+    priced.set(`${entry.platform}:${entry.kind}`, { entry, policy });
+  }
+  const has = (platform: SocialPlatform | 'web', kind: string) => priced.has(`${platform}:${kind}`);
+  const fetchable = config.benchmarkPlatforms.filter(platform =>
+    BENCHMARK_ROUTE_KINDS[platform]?.verified && BENCHMARK_ROUTE_KINDS[platform]!.kinds.every(kind => has(platform, kind)));
+  const discoverable = fetchable.filter(platform => has(platform, 'keyword_posts'));
+  if (input.general) return admitGeneral(input, state.revision, config, priced, subcalls, reject);
+  const offered = new Set<ResearchToolName>([
+    ...(discoverable.length ? ['propose_keywords', 'benchmark_discover', 'propose_more_candidates'] as const : []),
+    ...(fetchable.length ? ['benchmark_fetch'] as const : []),
+    ...(has('web', 'web_search') ? ['web_search'] as const : []),
+    ...(has('web', 'web_fetch') ? ['web_fetch'] as const : []),
+  ]);
+  const tools = POSITIONING_RESEARCH_TOOLS.filter(name => offered.has(name));
+  const missingBenchmarkRoutes = config.benchmarkPlatforms.flatMap(platform =>
+    [...(BENCHMARK_ROUTE_KINDS[platform]?.kinds ?? []), 'keyword_posts' as const]
+      .filter(kind => !has(platform, kind)).map(kind => ({platform, kind})));
+  const routeDetails = {pricedRoutes: priced.size, missingBenchmarkRoutes};
+  // The benchmark step cannot silently proceed with only unrelated web tools.
+  if (!tools.length) return reject('NO_ELIGIBLE_TOOLS', {...routeDetails, eligibleTools: 0});
+  if (input.requiredTools?.some(name => !tools.includes(name)))
+    return reject('REQUIRED_TOOLS_UNAVAILABLE', {...routeDetails, requiredTools: input.requiredTools.length, eligibleTools: tools.length});
+  if (tools.length > room) return reject('TOOL_LIMIT', {eligibleTools: tools.length});
+  const fastOnly = fastSearchOnly({ routes: [...priced.values()].map(({ entry }) => entry) });
+  const toolBytes = researchToolBytes(tools, fastOnly);
+  if (!input.fits(toolBytes + RESEARCH_RESULT_RESERVE_BYTES))
+    return reject('CONTEXT_CAPACITY', {capacity: input.capacity?.(toolBytes)});
+  const used = [...priced.values()].filter(({ entry }) => entry.platform === 'web'
+    ? (entry.kind === 'web_fetch' ? offered.has('web_fetch') : offered.has('web_search'))
+    : fetchable.includes(entry.platform) && (BENCHMARK_ROUTE_KINDS[entry.platform]!.kinds.includes(entry.kind as never)
+      || (entry.kind === 'keyword_posts' || entry.kind === 'account_search') && discoverable.includes(entry.platform)));
+  const research = frozenResearchTurn.parse({
+    version: RESEARCH_TURN_VERSION, configRevision: state.revision, phase: RESEARCH_PHASE, subcalls,
+    reserve: RESEARCH_RESULT_RESERVE_BYTES,
+    vendors: RESEARCH_VENDORS.filter(name => used.some(({ entry }) => entry.vendor === name)),
+    verifiedPlatforms: config.verifiedPlatforms.filter(platform => used.some(({ entry }) => entry.platform === platform)),
+    benchmarkPlatforms: fetchable, routes: used.map(({ entry }) => entry),
+    discoverSubcalls: Math.min(config.limits.discoverSubcalls, subcalls), recentGrowth: config.recentGrowth,
+    toolLimits: RESEARCH_TOOL_LIMITS,
+  });
+  return { research, tools, policies: used.map(({ policy }) => policy) };
+}
+
+type Priced = Map<string, { entry: ResearchToolsConfig['routes'][number]; policy: ToolCallPolicy }>;
+/**
+ * CHAT-AUTO-CONTEXT C (plan §2.3.1): a free chat gets the general lookups whose routes are priced: social_search where a
+ * verified platform has keyword_posts, social_account where it has its whole account route set, and the web tools.
+ * Nothing here writes a benchmark table, so no benchmark platform is frozen.
+ */
+function admitGeneral(input: ResearchAdmissionInput, revision: number, config: ResearchToolsConfig, priced: Priced,
+  subcalls: number, reject: (reason: ResearchAdmissionRejection['reason'], details?: Partial<ResearchAdmissionRejection>) => null,
+): ResearchAdmission | null {
+  const has = (platform: SocialPlatform | 'web', kind: string) => priced.has(`${platform}:${kind}`);
+  const social = config.verifiedPlatforms;
+  const searchable = social.filter(platform => has(platform, 'keyword_posts'));
+  const accountable = social.filter(platform => BENCHMARK_ROUTE_KINDS[platform]?.kinds.every(kind => has(platform, kind)));
+  const offered = new Set<ResearchToolName>([
+    ...(searchable.length ? ['social_search'] as const : []), ...(accountable.length ? ['social_account'] as const : []),
+    ...(has('web', 'web_search') ? ['web_search'] as const : []), ...(has('web', 'web_fetch') ? ['web_fetch'] as const : []),
+  ]);
+  const tools = GENERAL_RESEARCH_TOOLS.filter(name => offered.has(name));
+  if (!tools.length) return reject('NO_ELIGIBLE_TOOLS', {pricedRoutes: priced.size, eligibleTools: 0});
+  if (tools.length > input.maxTools - input.offeredTools) return reject('TOOL_LIMIT', {eligibleTools: tools.length});
+  const fastOnly = fastSearchOnly({ routes: [...priced.values()].map(({ entry }) => entry) });
+  const toolBytes = researchToolBytes(tools, fastOnly, true);
+  if (!input.fits(toolBytes + RESEARCH_RESULT_RESERVE_BYTES)) return reject('CONTEXT_CAPACITY', {capacity: input.capacity?.(toolBytes)});
+  const used = [...priced.values()].filter(({ entry }) => entry.platform === 'web'
+    ? offered.has(entry.kind === 'web_fetch' ? 'web_fetch' : 'web_search')
+    : entry.kind === 'keyword_posts' ? searchable.includes(entry.platform)
+      : accountable.includes(entry.platform) && BENCHMARK_ROUTE_KINDS[entry.platform]!.kinds.includes(entry.kind as never));
+  const research = frozenResearchTurn.parse({
+    version: RESEARCH_TURN_VERSION, configRevision: revision, phase: RESEARCH_PHASE, subcalls, reserve: RESEARCH_RESULT_RESERVE_BYTES,
+    vendors: RESEARCH_VENDORS.filter(name => used.some(({ entry }) => entry.vendor === name)),
+    verifiedPlatforms: social.filter(platform => used.some(({ entry }) => entry.platform === platform)),
+    benchmarkPlatforms: [], routes: used.map(({ entry }) => entry), discoverSubcalls: 1, freeChat: FREE_CHAT_RESEARCH,
+    recentGrowth: config.recentGrowth, toolLimits: RESEARCH_TOOL_LIMITS,
+  });
+  return { research, tools, policies: used.map(({ policy }) => policy) };
+}
+
+/** true when the check passes, false when only the required context does not fit; other errors propagate. */
+export function fitsCapacity(check: () => void): boolean {
+  try { check(); return true; }
+  catch (error) {
+    if (error instanceof Error && error.message === 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY') return false;
+    throw error;
+  }
+}
+
+const SCALE = 1_000_000_000_000n;
+const usd = (value: bigint) => `${value / SCALE}.${(value % SCALE).toString().padStart(12, '0')}`;
+
+type MentorContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: string[]; research?: FrozenResearchTurn;
+  purposeBudget?: { purpose: string; inputBytes: number; historyItems: number }; hostTurnContext?: HostTurnContext };
+/**
+ * Owner 2026-10-17 ("同意 RT-6 输入上限选 A"): only a mentor turn that offers the research tools may use this input
+ * ceiling; every other turn keeps its interactive budget. Raised from 112000 on 2026-10-27 (Owner: "把上限从 112,000 提到
+ * 150,000"): the 112000 ceiling refused the tools on about 8% of step-1 turns (CONTEXT_CAPACITY).
+ * Organize stays 112000. Billing still follows the bytes actually sent.
+ */
+export const RESEARCH_TURN_INPUT_BYTES = RESEARCH_TURN_INPUT_CAP;
+/**
+ * The host context's bytes as sent: hostTurnInput serializes it into the message content, and the request serializes that
+ * string again (every quote and backslash escaped). The block's cost is the difference of this measure (#1070 review).
+ */
+export const sentHostBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(JSON.stringify(value)));
+
+/**
+ * Adds the admitted research tools to a positioning mentor turn's frozen context and v2 run: one more model call
+ * to read a tool result, the subcall allowance, and the frozen tool prices. false = nothing changes.
+ */
+export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'modelCalls' | 'offeredTools' | 'maxTools'
+  | 'defaultMultiplier' | 'runMultiplier' | 'deadline' | 'capacity'> & { context: MentorContext; billing: FrozenPaygRun;
+  capacity?: (toolBytes: number, hostDeltaBytes: number, inputBytes?: number) => ResearchCapacity;
+  /** RT-6: the research host block (cards, benchmark table) joins the turn only with the tools, sized with them. */
+  settings?: Promise<SettingsRead>; actorId?: string; sessionId?: string }): Promise<boolean> {
+  const { context, billing } = input;
+  const primary = billing.callPolicy.find(policy => policy.modelId === context.modelId);
+  if (!primary?.payg || !billing.rules.billingUnit) {
+    input.onRejected?.({reason: 'BILLING_PROFILE_UNAVAILABLE'});
+    return false;
+  }
+  // One more serial tool round must still fit the profile's message budget (freezePaygMessageBudget).
+  const requiredMessages = 2 + 4 * Math.min(context.maxToolCalls + 1, context.maxTurns);
+  if (requiredMessages > primary.payg.maxMessages) {
+    input.onRejected?.({reason: 'MESSAGE_LIMIT', requiredMessages, maxMessages: primary.payg.maxMessages});
+    return false;
+  }
+  const budget = context.purposeBudget;
+  const raised = budget?.purpose === 'interactive' && budget.inputBytes < RESEARCH_TURN_INPUT_BYTES ? RESEARCH_TURN_INPUT_BYTES : undefined;
+  const host = context.hostTurnContext && input.settings && input.actorId && input.sessionId
+    ? await researchHost(context.hostTurnContext, input.admin, input.actorId, input.sessionId, input.settings) : context.hostTurnContext;
+  const hostBytes = host && host !== context.hostTurnContext ? sentHostBytes(host) - sentHostBytes(context.hostTurnContext) : 0;
+  const admitted = await admitResearchTurn({ ...input, fits: extra => input.fits(extra + hostBytes, raised),
+    capacity: input.capacity ? tools => input.capacity!(tools, hostBytes, raised) : undefined,
+    modelCalls: billing.limits.maxCalls, offeredTools: context.tools.length,
+    maxTools: primary.payg.maxTools, defaultMultiplier: billing.rules.billingUnit.defaultMultiplier,
+    runMultiplier: billing.rules.multiplier, deadline: billing.limits.deadline });
+  if (!admitted) return false;
+  context.tools.push(...admitted.tools);
+  context.maxTurns += 1;
+  context.maxToolCalls += 1;
+  context.research = admitted.research;
+  // Execution sizes every call of this turn with the frozen budget, so the raised ceiling is frozen with the tools.
+  if (raised) budget!.inputBytes = raised;
+  if (host) context.hostTurnContext = host;
+  freezePaygMessageBudget(context, billing.callPolicy);
+  const toolUpper = admitted.policies.reduce((upper, policy) => decimal(policy.upperUsd) > upper ? decimal(policy.upperUsd) : upper, 0n);
+  billing.limits.costUsd = usd(decimal(billing.limits.costUsd) + decimal(primary.upperUsd) + toolUpper * BigInt(admitted.research.subcalls));
+  billing.limits.maxCalls += 1 + admitted.research.subcalls;
+  // The run stores tool prices beside its models (0255); TS readers split them with modelCallPolicies/toolCallPolicies.
+  (billing.callPolicy as unknown[]).push(...admitted.policies);
+  // Production: rules.multiplier stays the run's highest m_i (each call still bills its own frozen m_i).
+  billing.rules.multiplier = admitted.policies.reduce((max, policy) =>
+    decimal(policy.multiplier) > decimal(max) ? policy.multiplier : max, billing.rules.multiplier);
+  return true;
+}

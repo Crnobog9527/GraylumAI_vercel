@@ -116,6 +116,12 @@ describe('accounts', () => {
     const t = render([own({ id: 'i', platform: 'instagram', status: 'reauth_required' })]);
     expect(t).toContain('重新授权');
   });
+  it('offers publishing consent on a live Post for Me connection that has none, through the connect form', () => {
+    expect(render([own({ platform: 'instagram' })])).toContain('允许一键发布');
+    expect(render([own({ platform: 'bluesky', consentPublish: true })])).not.toContain('允许一键发布');
+    expect(render([own({ source: 'tikhub', platform: 'douyin' })])).not.toContain('允许一键发布');
+    expect(render([own({ status: 'reauth_required' })])).not.toContain('允许一键发布');
+  });
   it('shows benchmark accounts only to Gold', () => {
     expect(render([])).not.toContain('对标账号（Gold）');
     expect(render([], true)).toContain('对标账号（Gold）');
@@ -130,6 +136,15 @@ describe('reviews', () => {
     expect(pro).not.toContain('每周自动复盘');
     expect(pro).toContain('余额不足，未复盘');
     expect(text(renderToStaticMarkup(<ReviewPanel gold />))).toContain('每周自动复盘');
+  });
+  it('prefers the server notice over the generating label while a claimed review is being settled', () => {
+    state.reviews = ok([{ id: 'r2', periodStart: '2026-10-20T00:00:00Z', status: 'claimed', body: null, tables: null,
+      notice: '本周复盘已生成，费用正在核对。' }]);
+    const settling = text(renderToStaticMarkup(<ReviewPanel gold />));
+    expect(settling).toContain('本周复盘已生成，费用正在核对。');
+    expect(settling).not.toContain('正在生成…');
+    state.reviews = ok([{ id: 'r3', periodStart: '2026-10-20T00:00:00Z', status: 'claimed', body: null, tables: null, notice: null }]);
+    expect(text(renderToStaticMarkup(<ReviewPanel gold />))).toContain('正在生成…');
   });
   it('says the weekly review is not open when the review switch is off', () => {
     state.reviews = failed('PUBLISH_MONITOR_REVIEW_DISABLED');

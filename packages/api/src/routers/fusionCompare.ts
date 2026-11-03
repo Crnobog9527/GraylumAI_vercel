@@ -2,13 +2,10 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
-import { StagingAccessError, stagingProcedureError } from '../services/runtime/stagingErrors';
+import { StagingAccessError, stagingProcedureError } from '../services/turn/settings/stagingErrors';
 import { compareModelNames, compareOptions } from '../services/fusion/compareOptions';
-import { compareRpc } from '../services/fusion/compareAdmission';
-import { adoptCompare } from '../services/fusion/compareAdopt';
-import { compareSkillInput } from '../services/fusion/compareLoad';
-import { liveCompare, readCompare, stopCompare, type CompareCtx } from '../services/fusion/compareLive';
-import type { ColumnEvent } from '../services/fusion/compareColumn';
+import { swallow } from '../lib/swallow';
+import { adoptTurnCompare, listTurnCompares, readTurnCompare } from '../services/turn/compareCards';
 
 const uuid = z.string().uuid();
 const forbidden = new Set(['FUSION_COMPARE_DISABLED', 'FUSION_COMPARE_FORBIDDEN', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',
@@ -28,7 +25,7 @@ function compareError(thrown: unknown, path: string): TRPCError {
   return stagingProcedureError(cause, path);
 }
 
-/** Reads (options, list, read): the admin client only. */
+/** Reads (options, turnList, turnRead) and the free adoption: the admin client only. */
 const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
   try {
     if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
@@ -37,19 +34,6 @@ const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
     return result;
   } catch (cause) { throw compareError(cause, path); }
 });
-/** Work (estimate, start, stream, stop, adopt): the staging test window, billing and executor, as for a review call. */
-const worker = protectedProcedure.use(async ({ ctx, next, path }) => {
-  try {
-    const result = await next({ ctx: { ...ctx, compare: await liveCompare(ctx as CompareCtx) } });
-    if (!result.ok) throw result.error;
-    return result;
-  } catch (cause) { throw compareError(cause, path); }
-});
-
-const request = z.object({ sessionId: uuid, question: z.string().trim().min(1).max(20000), modelIds: z.array(uuid).min(1).max(8),
-  skill: compareSkillInput.optional() }).strict();
-const quote = z.object({ credits: z.number().int().nonnegative(), columns: z.array(z.object({ modelId: uuid,
-  credits: z.number().int().nonnegative(), usd: z.string().regex(/^\d+(\.\d+)?$/) }).strict()).min(1).max(8) }).strict();
 const compare = z.object({ compareId: uuid }).strict();
 
 /** FUSION-COMPARE (§4). Everything is checked on the server again at start: the picker only shows what is allowed.
@@ -57,31 +41,16 @@ const compare = z.object({ compareId: uuid }).strict();
 export const fusionCompareRouter = router({
   /** The picker's contents. A failed settings read reads as "off" to the page rather than leaking a database error. */
   options: reader.query(({ ctx }) => compareOptions(ctx.admin, ctx.user.id)),
-  /** This conversation's compare cards, oldest first, with the server-written adoption (the adopted answer's execution). */
-  list: reader.input(z.object({ sessionId: uuid }).strict()).query(async ({ ctx, input }) => {
-    const cards = await compareRpc<Array<{ config?: { models?: string[] } }>>(ctx.admin, 'fusion_compare_list',
-      { p_actor_id: ctx.user.id, p_session_id: input.sessionId });
-    // Real model names for exactly the models these cards used, independent of the current allowlist or the switch. A failed
-    // name lookup never hides the cards (their dispatch and stop controls must stay): the page then shows a generic label.
-    const names = await compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])).catch(() => ({}));
+  /** The compares of a conversation (started on POST /api/turn/compare), listed, read and adopted from turns (CORE-PATH-V2 V2-10).
+   * A compare is started and priced only on the turn routes; the old BILL2 routes are gone (V2-12 B4). */
+  turnList: reader.input(z.object({ sessionId: uuid }).strict()).query(async ({ ctx, input }) => {
+    const cards = await listTurnCompares(ctx.admin, ctx.user.id, input.sessionId);
+    // As the old list: a failed name lookup never hides the cards.
+    const names = await swallow('fusion_compare_names_failed', compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])), {},
+      { category: 'api' });
     return { cards, names };
   }),
-  /** "At most X credits": priced per chosen model, nothing recorded, no paid judgement; repeatable. */
-  estimate: worker.input(request).mutation(({ ctx, input }) => ctx.compare.estimate(input)),
-  /** Records, judges positioning once, admits and claims the whole group (or answers waiting_credits, holding nothing). */
-  start: worker.input(request.extend({ requestId: uuid, shown: quote }).strict()).mutation(({ ctx, input }) => ctx.compare.start(input)),
-  /** One column, one streamed request: dispatches at most once; a repeat answers `already` and the page reads instead. */
-  stream: worker.input(compare.extend({ column: z.number().int().min(0).max(7) }).strict())
-    .mutation(async function* ({ ctx, input }): AsyncGenerator<ColumnEvent> { yield* ctx.compare.stream(input); }),
-  /** Every column's state, body, charged credits and the total; finishes a compare whose runs are all closed. */
-  // Read and stop need no provider call: they stay available when the staging call window has closed.
-  read: reader.input(compare).query(({ ctx, input }) => readCompare(ctx.admin, ctx.user.id, input.compareId,
-    async () => (await liveCompare(ctx as CompareCtx)).settle)),
-  /** Stop the whole compare, or one column (after the claim). Undispatched calls are released free. */
-  stop: reader.input(compare.extend({ column: z.number().int().min(0).max(7).optional() }).strict())
-    .mutation(({ ctx, input }) => stopCompare(ctx.admin, ctx.user.id, input)),
-  /** "Use this answer": writes the pair into the main conversation, or returns a quote when it moved on. Free. */
-  // Adoption makes no provider call and holds nothing: it needs only the admin client (a replay works after the window closes).
-  adopt: reader.input(compare.extend({ column: z.number().int().min(0).max(7), requestId: uuid }).strict())
-    .mutation(({ ctx, input }) => adoptCompare({ admin: ctx.admin, actorId: ctx.user.id }, input)),
+  turnRead: reader.input(compare).query(({ ctx, input }) => readTurnCompare(ctx.admin, ctx.user.id, input.compareId)),
+  turnAdopt: reader.input(compare.extend({ column: z.number().int().min(0).max(7) }).strict())
+    .mutation(({ ctx, input }) => adoptTurnCompare(ctx.admin, ctx.user.id, input)),
 });

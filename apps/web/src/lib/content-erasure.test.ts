@@ -176,3 +176,11 @@ describe('confirmContentErasure', () => {
     }
   });
 });
+
+it('shows a confirmed SQL rollback as an actionable timeout, not a pending deletion',async()=>{
+ const {outcomeUnknown}=await import('./request-outcome');
+ const error={message:'CONTENT_ERASURE_TIMEOUT',data:{code:'PRECONDITION_FAILED'}};
+ expect(outcomeUnknown(error)).toBe(false);
+ expect(classifyErasureError(error,'confirm')).toEqual({type:'message',
+  message:'删除处理超过时间限制，本次没有删除。请稍后重试；如果仍然失败，请联系支持。'});
+});

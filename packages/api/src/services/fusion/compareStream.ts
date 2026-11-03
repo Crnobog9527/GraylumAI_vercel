@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { POSITIONING_MARKER } from '../runtime/positioningFallback';
+import { POSITIONING_MARKER } from '../turn/admission/positioningFallback';
 
 /** What a compare column shows while it streams (FUSION-COMPARE §3.5). The provider stream reaches the executor as one raw
  * JSON frame per call to `onChunk`; this module turns those frames into the visible answer text and nothing else: reasoning,

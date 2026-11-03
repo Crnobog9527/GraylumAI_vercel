@@ -194,7 +194,11 @@ function shouldFailClosedMaintenance(): boolean {
   return process.env.NODE_ENV === 'production';
 }
 
-function createRateLimitUnavailableResponse(): NextResponse {
+function createRateLimitUnavailableResponse(pathname: string): NextResponse {
+  logServerError('api', 'proxy_service_unavailable', {
+    reasonCode: 'RATE_LIMIT_BACKEND_UNAVAILABLE',
+    operation: pathname.includes('account.conversationErasure') ? 'conversation_erasure' : 'api_admission',
+  });
   return new NextResponse(
     JSON.stringify({
       error: 'Service Unavailable',
@@ -270,7 +274,7 @@ export async function proxy(request: NextRequest) {
   }
   if (needsRateLimit(pathname)) {
     const result = await checkRateLimit(getClientIP(request), carriesLogin(request) ? 'ip_session' : 'ip');
-    if (result.reason === 'unavailable') return createRateLimitUnavailableResponse();
+    if (result.reason === 'unavailable') return createRateLimitUnavailableResponse(pathname);
     if (!result.success) {
       const retryAfter = result.retryAfter ?? 60;
       return NextResponse.json({

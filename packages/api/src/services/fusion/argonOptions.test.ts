@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { openRouterAccount } from '../models/openRouterKey';
 import { fusionModelOptions } from './settingsAdmin';
-import type { StagingPolicy } from '../runtime/stagingPolicy';
+import type { StagingPolicy } from '../turn/settings/stagingPolicy';
 
 vi.mock('../models/openRouterKey', async original => ({
   ...(await original<typeof import('../models/openRouterKey')>()), readOpenRouterKey: async () => 'SYNTHETIC_ARGON_KEY',

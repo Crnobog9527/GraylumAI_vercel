@@ -123,8 +123,10 @@ export async function runCases({admin:db,connect,report,read}) {
  const business=(await db.query('SELECT id FROM opc_businesses WHERE actor_id=$1 AND current_source_version_id=$2',
   [rf.actor,rf.version])).rows[0].id;
  await db.query('INSERT INTO opc_draft_businesses(draft_id,business_id) VALUES($1,$2)',[rf.draft,business]);
- const payload=(await db.query(`SELECT r.payload FROM bill2_runs r JOIN runtime_executions e ON e.billing_run_id=r.id
-  WHERE e.id=$1`,[rf.execution])).rows[0].payload;
+ // A BILL2 run for the archive-vs-dispatch cases below (the report itself is a turn now; this run only needs the draft's scope).
+ const payload={...rf.base.payload,scope:{kind:'positioning_draft',draftId:rf.draft},
+  input:{reportGeneration:{version:1,projectId:rf.project,roundId:rf.round},request:{sessionId:rf.session},sources:[],network:'deny',role:'skill',moduleId:rf.module,skillId:rf.skill,revisionId:rf.revision,
+   packageHash:'b'.repeat(64)},moduleId:rf.module,skillId:rf.skill,revisionId:rf.revision};
  const document=await rpc(db,'report_document',rf.actor,rf.execution,'read',null,null,null,null);
  assert.ok(document.body);
  const info=(await db.query('SELECT steps FROM artifact_rounds WHERE id=$1',[rf.round])).rows[0].steps;

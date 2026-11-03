@@ -35,6 +35,7 @@ describe('runConversationErasure', () => {
 
   it.each([
     ['CONTENT_ERASURE_BUSY', 'CONFLICT', '正在使用中'],
+    ['CONTENT_ERASURE_TIMEOUT', 'PRECONDITION_FAILED', '本次没有删除'],
     ['CONTENT_NOT_FOUND', 'NOT_FOUND', '没有权限'],
     ['CONTENT_ERASURE_PREVIEW_CHANGED', 'CONFLICT', '新内容写入'],
     ['too many', 'TOO_MANY_REQUESTS', '操作太频繁'],
