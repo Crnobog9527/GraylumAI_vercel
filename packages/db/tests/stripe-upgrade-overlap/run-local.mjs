@@ -175,62 +175,9 @@ try {
   cases.push(...await walletMembershipCases({admin,service,connect}));
   cases.push(...await stripeTestClockCases({admin,service,connect}));
   cases.push(...await stripeTestClockCases({admin,service,connect},'card_cn'));
-  const data=()=>admin.query(`SELECT jsonb_build_object(
-    'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM profiles p),
-    'grants',(SELECT jsonb_agg(to_jsonb(g) ORDER BY id) FROM subscription_credit_grants g),
-    'sources',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM credit_source_entries e)) v`);
-  const preserved=(await data()).rows[0].v;
-  assert.ok(walletOriginals&&walletBefore&&walletChangedKeys,'wallet migration tested at its historical position');
-  sql('BEGIN;\n'+walletOriginals.map(src=>src+';').join('\n')+'\nCOMMIT;');
-  const walletRestored=objects();
-  for(const key of walletChangedKeys.filter(key=>key.startsWith('fn:'))) {
-    assert.equal(walletRestored[key],walletBefore[key],'wallet old body restored');
-  }
-  assert.equal(walletRestored['con:payment_orders'],
-    finalCatalog['con:payment_orders'],'recovery retains the constraint for paid renewal rows');
-  assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
-  sql(read(walletMigration));
-  // Forward-fix every later extension too; 0335 intentionally extends the same wallet functions.
-  for(const file of laterMigrations(330)) {
-    if(file.startsWith('0391_'))restoreClaimThresholdLock();
-    sql(replayable(file));
-  }
-  assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');
-  cases.push('wallet-migration-interruption-atomic','wallet-migration-repeat-acl-unchanged','wallet-recovery-preserves-paid-data');
-  sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
-  const restoredCatalog=objects();
-  assert.deepEqual(Object.fromEntries(originalFunctionKeys.map(key=>[key,restoredCatalog[key]])),
-    originalFunctionEntries,'original function definitions and ACL restore exactly');
-  const withoutTargetFunctions=catalog=>Object.fromEntries(Object.entries(catalog)
-    .filter(([key])=>!originalFunctionKeys.includes(key)));
-  assert.deepEqual(withoutTargetFunctions(restoredCatalog),withoutTargetFunctions(finalCatalog),
-    'rollback preserves later migrations and every non-target catalog object');
-  assert.deepEqual((await data()).rows[0].v,preserved,'code rollback preserves balances, grants and source attribution');
-  sql(read('packages/db/migrations/0322_pay_stripe_mp_upgrade_overlap.sql'));
-  // Only these later migrations extend the three runtime functions restored above; payment bodies stay current.
-  sql(read('packages/db/migrations/0324_paywall_profile_archive.sql'));
-  sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
-  sql(read('packages/db/migrations/0383_credit_grant_quarantine.sql')); // ARCH-FIX E1 patches atomic_pre_deduct
-  sql(replayable('0385_billing_ledger_constraints.sql')); // ARCH-FIX E3 patches atomic_pre_deduct
-  restoreClaimThresholdLock();
-  sql(read('packages/db/migrations/0391_credit_available.sql')); // MAINT-P4 replaces atomic_pre_deduct's hold formula
-  sql(read('packages/db/migrations/0416_db_rw_a_shared_row_locks.sql')); // DB-RW-A removes shared row locks from claim, admit and the permission chain
-  sql(read('packages/db/migrations/0449_core_path_v2_topic_turn.sql')); // V2-10b runtime_admit refuses a request the turn path holds
-  sql(read('packages/db/migrations/0450_core_path_v2_work_item_content.sql')); // V2-10b C2 rewrites what 0449 replays (content_erasure_*)
-  sql(read('packages/db/migrations/0451_core_path_v2_hold_top_up.sql')); // the hold top-up rewrites turn_open, which 0449 replays
-  sql(read('packages/db/migrations/0452_core_path_v2_work_check_no_claim_hold.sql')); // 0450 rewrites opc_work_check, which 0452 changed
-  sql(read('packages/db/migrations/0453_core_path_v2_stop_loss_top_up.sql')); // the stop-loss top-up rewrites turn_open, which 0449 replays
-  sql(read('packages/db/migrations/0454_core_path_v2_stale_claim.sql')); // 0450 rewrites opc_video_material_prepare, which 0454 changed
-  sql(read('packages/db/migrations/0459_core_path_v2_voice.sql')); // V2-12 B7 rewrites turn_open, which 0449 replays (and turn_close, turn_tombstones, turn_user_charge, turn_call_record)
-  sql(read('packages/db/migrations/0476_core_path_v2_topic_rebind.sql')); // the topic re-bind rewrites topic_turn_source, opc_topic_consent and opc_topic_original, which 0449 replays (and artifact_immutable)
-  sql(read('packages/db/migrations/0480_core_path_v2_content_erasure_no_old_settle.sql')); // V2-12 R2b rewrites content_erasure_confirm, which 0450 replays
-  sql(read('packages/db/migrations/0483_core_path_v2_turn_functions_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
-  sql(read('packages/db/migrations/0484_core_path_v2_report_research_topic_no_old_path.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
-  sql(read('packages/db/migrations/0485_core_path_v2_opc_functions_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
-  sql(read('packages/db/migrations/0486_core_path_v2_opc_work_capture_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
-  sql(read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql')); // V2-12 B-rewrites: rewrites fusion_review_archive_reconcile, which 0326 replays
-  assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
-  cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
+  // (V2-12 F: the rollback and forward-fix drills of the 0322 and wallet migrations restored and replayed the old function texts of
+  // atomic_pre_deduct, bill2_payg_compensate and opc_start_b1 and of every later migration over them; bill2_payg_compensate and the
+  // old admission are gone with batch F, so the drills have nothing left to restore. The behaviour cases above run on the finished database.)
   console.log(JSON.stringify({result:'PASS',build,cases}));
 } finally {
   await Promise.all(clients.map(db=>db.query('ROLLBACK').catch(()=>{})));
