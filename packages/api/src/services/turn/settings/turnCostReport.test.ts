@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { turnModelReport, unsettledTurns } from './turnCostReport';
+import { absentRefundCalls, turnModelReport, unsettledTurns } from './turnCostReport';
 
 const from = new Date('2026-10-01T00:00:00Z');
 const to = new Date('2026-10-31T00:00:00Z');
@@ -31,5 +31,16 @@ describe('turn cost report', () => {
     expect(await unsettledTurns(db({ total: 1, turns: [turn] }))).toMatchObject({ available: true, total: 1 });
     expect(await unsettledTurns(db({ total: 1, turns: [{ ...turn, body: 'PRIVATE' }] }))).toMatchObject({ available: false });
     expect(await unsettledTurns(db(null, { code: 'XX000' }))).toMatchObject({ available: false });
+  });
+  it('lists refunded calls, reads a row from the pre-0494 function (no source) as lookup_absent, and refuses a malformed row', async () => {
+    const old = { turnId: 2024, seq: 1, actorId: '00000000-0000-4000-8000-000000000001', kind: 'mentor', providerId: 'gen-1', httpStatus: 404,
+      settledAt: '2026-11-04T04:00:00Z', openedAt: '2026-11-03T03:50:33Z', reservedCredits: 864, chargedCredits: 0, settlement: 'done', state: 'closed' };
+    const none = { ...old, seq: 2, source: 'no_identity_24h', providerId: null, httpStatus: null };
+    const before = await absentRefundCalls(db({ total: 1, calls: [old] }));
+    expect(before).toMatchObject({ available: true, total: 1, calls: [{ source: 'lookup_absent', providerId: 'gen-1', httpStatus: 404 }] });
+    expect(await absentRefundCalls(db({ total: 2, calls: [old, none] }))).toMatchObject({ available: true,
+      calls: [{ source: 'lookup_absent' }, { source: 'no_identity_24h', providerId: null, httpStatus: null }] });
+    expect(await absentRefundCalls(db({ total: 1, calls: [{ ...old, source: 'other' }] }))).toMatchObject({ available: false });
+    expect(await absentRefundCalls(db({ total: 1, calls: [{ ...old, body: 'PRIVATE' }] }))).toMatchObject({ available: false });
   });
 });
