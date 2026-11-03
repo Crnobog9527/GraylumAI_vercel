@@ -214,3 +214,8 @@
 | `readFrozenSkillFile`、`frozenFile`、`FrozenSkillFile`（`turn/skills/skillFile.ts`，删上面两项后新出现的死代码） | `skillFile.test.ts` 删 8 个用例（读取精确的已发布字节、路径穿越被拒、额外参数被拒、另一版本被拒、回放时撤销、损坏的已保存字节、超大资源、源字节损坏），保留 `skillFileContinuationBytes` 的用例 | 被测代码在生产中已无调用方，随之删除，不需要等价测试 |
 
 删完后我用同样方法再查了一轮（以本次删除涉及的文件和被删代码引用过的名字为范围）：没有再冒出只剩测试引用的导出。**未碰**：`report/fees.ts`、`cron/billing-reconcile`、`opc/sessionResults.ts`、`routers/opc.ts`、`session-results.tsx`（V2-9）。
+
+## scripts/tests 两处失败的处理（总控 11-03 指出）
+- `scripts/tests/integration-without-app.test.mjs`：`without-app.mjs` 的 runtime 排除清单现在是空的（新路径的 4 个测试文件没有需要本机应用或浏览器的用例；旧的 3 项浏览器/HTTP 用例都在已删除的旧文件里）。测试改成适配空清单，约束不变且更严：每个排除项必须以套件前缀开头、有正整数用例数、有非空原因；清单为空时任何跳过的用例都算意外；用临时加入一项的办法继续检验“列出的跳过可通过、数量对不上算过期排除、未列出的跳过和失败都不通过”。
+- `scripts/tests/cdc-writeback-v3.test.mjs`：CDC-WRITEBACK-V3 评测工具**没有退役**（`AGENT_CORE_CLOSEOUT.md` 把它在最终代码上的付费复测列为完成标准）。它断言“提示词由哪几行拼出”，这些行原来在 `opc/service.ts` 的 `prepareStep`，F 之后拼装搬到了 `turn/mentorPrompt.ts` 的 `organizerInstructions`。冻结的提示词文本一字未改；`composition` 检查现在认两种拼装：F 之前的检出（旧 `service.ts` 两行）和 F 之后的新拼装行（`mentorPrompt.ts`），都对不上仍然抛 `V3_PROMPT_COMPOSITION_CHANGED`；测试补了新拼装通过、拼装被改动抛错、缺少拼装来源抛错、旧检出仍通过四种情况。
+- 本机 `node --test scripts/tests/*.test.mjs`：417 个用例 416 通过。唯一失败的 `agent-core-r3-package.test.mjs`「a forged v11 export …」是本机路径含中文，测试把 `import.meta.url` 当文件路径用，路径被百分号编码后找不到 `prepare-r3-package.mjs`，与本 PR 无关（CI 路径是 ASCII），以 CI 为准。
