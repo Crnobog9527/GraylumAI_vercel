@@ -2,7 +2,7 @@
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
-import React, { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { isUnauthorizedError } from '@/lib/auth-recovery';
@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { isProfileArchivedError, PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { PROFILE_BUSINESSES_KEY } from '@/components/opc/profile-archive/profile-archive-api';
 import { mutationAffectsRuntimeChoices } from '@/lib/runtime-choices';
-import { clearPersistedCache, persistQueryCache, restoreQueryCache } from '@/lib/persisted-cache';
+import { clearPersistedCache, forgetPending, persistQueryCache, restoreQueryCache } from '@/lib/persisted-cache';
 import { readSessionUserIdSync } from '@/lib/session-user';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
@@ -52,18 +52,25 @@ export default function Provider({ children }: { children: React.ReactNode }) {
         },
       },
     });
+    // Saved page data goes in before the first child renders, so the first frame already has it (the reads run again behind it).
+    if (typeof window !== 'undefined') {
+      restoreQueryCache(client, readSessionUserIdSync());
+      // From here on, any invalidation (a deleted conversation, say) ends "not confirmed yet" for the reads it names. Done on the call, not
+      // on the cache's event: a read that is already marked invalid raises no event when it is invalidated again.
+      const invalidate = client.invalidateQueries.bind(client);
+      client.invalidateQueries = ((filters, options) => {
+        for (const query of client.getQueryCache().findAll(filters)) forgetPending(query.queryHash);
+        return invalidate(filters, options);
+      }) as typeof client.invalidateQueries;
+    }
     return client;
   });
   const [supabase] = useState(() => createClient());
-  // Saved page data (lib/persisted-cache.ts): put back before the first paint, so a reload shows the last content at once while the same
-  // reads run again behind it and replace it. Saved again, a moment after any read changes, and when the page is hidden.
-  const knownUser = useRef<string | null>(null);
+  // Saved page data (lib/persisted-cache.ts), put back above: a reload shows the last content at once while the same reads run again
+  // behind it and replace it. Saved again a moment after any read changes, and when the page is hidden.
+  const knownUser = useRef<string | null>(typeof window === 'undefined' ? null : readSessionUserIdSync());
   // Bumped when the user changes: the pages (and what they hold in state) mount again, so nothing of the last user stays on screen.
   const [epoch, setEpoch] = useState(0);
-  useLayoutEffect(() => {
-    knownUser.current = readSessionUserIdSync();
-    restoreQueryCache(queryClient, knownUser.current);
-  }, [queryClient]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const save = () => {

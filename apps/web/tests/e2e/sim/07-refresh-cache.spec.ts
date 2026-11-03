@@ -21,6 +21,16 @@ test('a reload shows the last conversation and the list at once, and another use
 
   // Hold every read to the server: whatever shows up in the first frames can only come from the saved copy.
   await page.route(HOLD, () => new Promise(() => undefined));
+  // Any frame in which the page's own scripts have drawn a placeholder counts, however short: the saved copy must be there from the first
+  // render. (The server's HTML, before any script ran, cannot know what this browser saved; that is the server-side prefetch left for later.)
+  await page.addInitScript(() => {
+    const seen = window as unknown as { __placeholderSeen: boolean };
+    seen.__placeholderSeen = false;
+    new MutationObserver(() => {
+      for (const node of document.querySelectorAll('[aria-busy="true"]'))
+        if (Object.keys(node).some(key => key.startsWith('__reactFiber$'))) seen.__placeholderSeen = true;
+    }).observe(document, { childList: true, subtree: true });
+  });
   await page.reload({ waitUntil: 'commit' });
   await expect(page.getByText(/测试测试/).first()).toBeVisible({ timeout: 15_000 }).catch(async error => { await evidence('held reload'); throw error; });
   await expect(replies(page).first()).toBeVisible();
@@ -28,6 +38,7 @@ test('a reload shows the last conversation and the list at once, and another use
   await page.getByRole('textbox').first().click();
   await page.keyboard.insertText('草稿');
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { __placeholderSeen: boolean }).__placeholderSeen), 'no placeholder in any frame').toBe(false);
   await expect(page.locator('body')).not.toContainText(WAITING_WORDS);
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('graylum:')).length)).toBeGreaterThan(0);
 

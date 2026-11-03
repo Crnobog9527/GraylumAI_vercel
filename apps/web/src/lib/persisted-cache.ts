@@ -25,6 +25,15 @@ const PER_CONVERSATION = new Set(['runtime.view', 'opc.sessionResults']);
 export const MAX_CONVERSATIONS = 20;
 export const MAX_BYTES = 1_500_000;
 
+/**
+ * Reads put back from storage and not read again yet. They are marked invalid so the first mount reads them again whatever staleTime
+ * says (the copy is shown meanwhile), and they are still saved: invalid here means "not confirmed yet", not "gone". An invalidation that
+ * comes later (a deleted conversation or result; the provider wraps invalidateQueries) takes the hash out (forgetPending), and the read is no longer saved.
+ */
+const restoredPending = new Set<string>();
+export const forgetPending = (hash: string) => { restoredPending.delete(hash); };
+const worthSaving = (query: { queryHash: string; state: { isInvalidated: boolean } }) => !query.state.isInvalidated || restoredPending.has(query.queryHash);
+
 type Saved = { v: 1; build: string; userId: string; savedAt: number; queries: DehydratedState['queries'] };
 export type Options = { storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>; now?: number; build?: string };
 
@@ -64,7 +73,7 @@ export function limitQueries(queries: Queries, now: number): Queries {
  * invalidates the reads that showed it) is not saved, even when nothing has read it again yet.
  */
 export function selectQueries(client: QueryClient, now: number = Date.now()): Queries {
-  return limitQueries(dehydrate(client, { shouldDehydrateQuery: query => query.state.status === 'success' && !query.state.isInvalidated }).queries, now);
+  return limitQueries(dehydrate(client, { shouldDehydrateQuery: query => query.state.status === 'success' && worthSaving(query) }).queries, now);
 }
 
 function savedQueries(storage: NonNullable<ReturnType<typeof storageOf>>, userId: string, now: number, build: string): Queries {
@@ -83,7 +92,7 @@ export function persistQueryCache(client: QueryClient, userId: string | null, op
     const now = options?.now ?? Date.now(), build = options?.build ?? buildOf();
     const merged = new Map(savedQueries(storage, userId, now, build).map(query => [query.queryHash, query]));
     // What was saved for a read that is invalid now goes too, not only what would be written.
-    for (const query of client.getQueryCache().getAll()) if (query.state.isInvalidated) merged.delete(query.queryHash);
+    for (const query of client.getQueryCache().getAll()) if (!worthSaving(query)) merged.delete(query.queryHash);
     for (const query of selectQueries(client, now)) merged.set(query.queryHash, query);
     let queries = limitQueries([...merged.values()], now);
     const write = () => JSON.stringify({ v: 1, build, userId, savedAt: now, queries } satisfies Saved);
@@ -115,6 +124,10 @@ export function restoreQueryCache(client: QueryClient, userId: string | null, op
     if (!usable) { clearPersistedCache(options); return false; }
     const queries = limitQueries(saved.queries as Queries, options?.now ?? Date.now());
     hydrate(client, { mutations: [], queries });
+    const hashes = new Set(queries.map(query => query.queryHash));
+    // Only the reads this call put in (a read that was already there is newer).
+    client.invalidateQueries({ refetchType: 'none', predicate: query => hashes.has(query.queryHash) && query.state.dataUpdatedAt > 0 });
+    for (const hash of hashes) restoredPending.add(hash);
     return queries.length > 0;
   } catch {
     clearPersistedCache(options);

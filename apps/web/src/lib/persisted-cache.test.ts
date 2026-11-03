@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
-import { CACHE_KEY, CACHE_MAX_AGE_MS, CHAT_KEY, MAX_CONVERSATIONS, clearPersistedCache, persistQueryCache, restoreQueryCache } from './persisted-cache';
+import { CACHE_KEY, CACHE_MAX_AGE_MS, CHAT_KEY, MAX_CONVERSATIONS, clearPersistedCache, forgetPending, persistQueryCache, restoreQueryCache } from './persisted-cache';
 import { readCachedChatView, writeCachedChatView } from './persisted-chat';
 
 const USER = '11111111-1111-4111-8111-111111111111';
@@ -82,6 +82,21 @@ describe('persisted query cache', () => {
     void qc.invalidateQueries({ refetchType: 'none' });
     persistQueryCache(qc, USER, { storage: s, now: NOW, build: 'b1' });
     expect(s.data.get(CACHE_KEY) ?? '').not.toContain('gone');
+    expect(s.data.get(CACHE_KEY) ?? '').not.toContain('"a"');
+  });
+
+  it('marks what it puts back as needing a read (shown meanwhile, still saved), until something invalidates it', () => {
+    const s = storage();
+    persistQueryCache(client([[key(['opc', 'list']), ['a']]]), USER, { storage: s, now: NOW, build: 'b1' });
+    const fresh = new QueryClient();
+    restoreQueryCache(fresh, USER, { storage: s, now: NOW, build: 'b1' });
+    const query = fresh.getQueryCache().getAll()[0]!;
+    expect(fresh.getQueryData(key(['opc', 'list']))).toEqual(['a']);
+    expect(query.isStale(), 'the first mount reads it again whatever staleTime says').toBe(true);
+    persistQueryCache(fresh, USER, { storage: s, now: NOW, build: 'b1' });
+    expect(s.data.get(CACHE_KEY) ?? '').toContain('"a"');
+    forgetPending(query.queryHash); // what the provider does when something invalidates it later (a deletion)
+    persistQueryCache(fresh, USER, { storage: s, now: NOW, build: 'b1' });
     expect(s.data.get(CACHE_KEY) ?? '').not.toContain('"a"');
   });
 
