@@ -49,6 +49,14 @@ it('a monthly review proposes for the next 28 days; a rate experiment keeps its 
   expect(none.rpc.mock.calls.map(c => c[0])).toEqual(['publish_monitor_review_save_coach']);
 });
 
+it('stores only the target that fits the kind, whatever else the experiment carried', async () => {
+  const d = database();
+  const base = { layer: null, hypothesis: 'h', action: 'a', metric: 'views', match: { pillar_key: pillar, platform }, evidence: { post_ids: [], metrics: [] } };
+  await saveCoachLedger(d.db, claim, simId('B'), pack, checked({ experiments: [{ ...base, kind: 'tactic', target: { mult: 1.5, min: 1000 } },
+    { ...base, kind: 'basics', layer: 'hook', metric: 'bounce_2s', target: { mult: 2, max: 0.5 } }] }));
+  expect(payloadOf(d.rpc).p_payload.experiments.map(e => [e.target_mult, e.target_line])).toEqual([[1.5, null], [null, { max: 0.5 }]]);
+});
+
 it('saves nothing for an unparsed block, reports a refused lease, and fails loudly on a database error', async () => {
   const d = database();
   expect(await saveCoachLedger(d.db, claim, simId('B'), pack, checked({ parsed: false }))).toBe(false);

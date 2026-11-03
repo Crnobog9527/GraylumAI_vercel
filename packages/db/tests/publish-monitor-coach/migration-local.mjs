@@ -235,7 +235,7 @@ try {
   await assert.rejects(svc('SELECT publish_monitor_review_pack_rows($1,$2,0) v', [sim, businesses.A]), /INPUT_INVALID/);
   report.checks.push('pack rows return facts beyond 100 days, experiments and diagnostics for the owner brand only');
 
-  // RC-3b (migration 0490): a delivered brand review writes its checked output into the ledger and the facts, once, under its lease.
+  // RC-3b (migration 0491): a delivered brand review writes its checked output into the ledger and the facts, once, under its lease.
   await c.query(`INSERT INTO social_coach_profiles(actor_id,business_id,pillars,pillars_source) VALUES($1,$2,$3,'user')
    ON CONFLICT(actor_id,business_id) DO UPDATE SET pillars=EXCLUDED.pillars`,
   [sim, businesses.A, JSON.stringify([{ key: 'p1', name: 'a', definition: 'a' }, { key: 'p2', name: 'b', definition: 'b' }])]);

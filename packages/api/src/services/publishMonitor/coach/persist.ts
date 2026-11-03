@@ -23,7 +23,9 @@ export async function saveCoachLedger(db: Pick<SupabaseClient, 'rpc'>, claim: { 
   const facts = checked.experiments.length ? (await readPackRows(db, claim.actorId, businessId, COACH_READ_WEEKS)).facts : [];
   const experiments = checked.experiments.map(e => ({
     kind: e.kind, layer: e.layer, hypothesis: e.hypothesis, action: e.action, metric: e.metric,
-    target_mult: e.target.mult ?? null, target_line: e.target.max !== undefined || e.target.min !== undefined
+    // Only the target that fits the kind is stored: a line settles basics, a multiple settles the rest.
+    target_mult: e.kind === 'basics' ? null : e.target.mult ?? null,
+    target_line: e.kind === 'basics' && (e.target.max !== undefined || e.target.min !== undefined)
       ? { ...(e.target.max !== undefined ? { max: e.target.max } : {}), ...(e.target.min !== undefined ? { min: e.target.min } : {}) } : null,
     match: e.match, baseline: freezeBaseline(e.match, e.metric, facts, review.as_of), evidence: e.evidence,
     period_start: isoDay(start), period_end: isoDay(start + length - 1),

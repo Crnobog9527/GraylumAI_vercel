@@ -110,8 +110,10 @@ export function checkOutput(text: string, pack: PackView): CheckedOutput {
     if (x.kind !== 'basics' && usedPillars.has(x.match.pillar_key)) return reject(path, 'pillar_repeated');
     if (!cited(x.evidence)) return reject(path, 'no_evidence');
     // A long-run experiment has no funnel layer: a layer would send it to the rate settlement path, which has no such metric.
-    if (x.kind === 'basics' ? !rate || !x.layer || (x.target.max === undefined && x.target.min === undefined)
-      : rate || x.layer || !DAY7_METRICS.includes(x.metric) || x.target.mult === undefined || x.target.mult < 1.1 || x.target.mult > 5)
+    // One kind of target per experiment: a line (basics) or a multiple (long-run); both would let the line silently replace the multiple.
+    if (x.kind === 'basics' ? !rate || !x.layer || (x.target.max === undefined && x.target.min === undefined) || x.target.mult !== undefined
+      : rate || x.layer || !DAY7_METRICS.includes(x.metric) || x.target.mult === undefined || x.target.mult < 1.1 || x.target.mult > 5
+        || x.target.max !== undefined || x.target.min !== undefined)
       return reject(path, 'metric_or_target');
     usedPillars.add(x.match.pillar_key);
     out.experiments.push(x);

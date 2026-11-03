@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- PUBLISH-MONITOR RC-3b (placeholder number, the controller assigns the real one before upload): a delivered brand review writes its
+-- PUBLISH-MONITOR RC-3b (0491): a delivered brand review writes its
 -- checked coach output into the experiment ledger and the post facts, in one transaction, under the review's lease.
 --   * publish_monitor_review_save_coach(run, token, payload): the verdicts come from the pack saved before the model ran
 --     (pack.review.ledger.to_review[].result, computed by code), never from the payload; the payload only adds the model's short note
