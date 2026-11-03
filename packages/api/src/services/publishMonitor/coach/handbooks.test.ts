@@ -10,9 +10,8 @@ import { packRowsFor, simId } from './testRows';
 
 const AS_OF = '2026-10-27';
 const NOW = Date.parse(AS_OF + 'T00:00:00Z');
-const PACKAGE = { moduleId: 'm1', skillId: 'coach', revisionId: 'r1', packageHash: 'a'.repeat(64) };
+const PACKAGE = { skillId: '11111111-1111-4111-8111-111111111111', revisionId: '33333333-3333-4333-8333-333333333333', packageHash: 'a'.repeat(64) };
 const ENV = { [HANDBOOK_PACKAGE_ENV]: JSON.stringify(PACKAGE) };
-const ACTOR = '22222222-2222-4222-8222-222222222222';
 
 /** Placeholder numbers for tests only; the real handbooks live in the private Skill package. */
 const handbookOf = (platform: string, calibration: 'owner_confirmed' | 'draft' = 'owner_confirmed'): Handbook => handbookSchema.parse({
@@ -24,7 +23,7 @@ const handbookOf = (platform: string, calibration: 'owner_confirmed' | 'draft' =
   ],
 });
 const base64 = (value: unknown) => Buffer.from(typeof value === 'string' ? value : JSON.stringify(value), 'utf8').toString('base64');
-/** A database whose read_skill_package serves `files` (path -> text); a path that is not there answers null. */
+/** A database whose fusion_review_skill_file serves `files` (path -> text); a path that is not there answers null. */
 function database(files: Record<string, string | Error>) {
   const rpc = vi.fn(async (_name: string, args: Record<string, unknown>) => {
     const file = files[String(args.p_path)];
@@ -67,38 +66,38 @@ describe('loading the handbooks of a package', () => {
     expect(failing.size).toBe(0);
   });
 
-  it('reads handbook/<platform>.json of the pinned package for the actor, through read_skill_package', async () => {
+  it('reads handbook/<platform>.json of the pinned package through fusion_review_skill_file', async () => {
     const d = database({ 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.json': JSON.stringify(handbookOf('tiktok', 'draft')) });
-    const map = await loadHandbooks(packageReader(d.db, ACTOR, PACKAGE));
+    const map = await loadHandbooks(packageReader(d.db, PACKAGE));
     expect([...map.keys()].sort()).toEqual(['douyin', 'tiktok']);
     expect(map.get('tiktok')?.calibration).toBe('draft');
-    expect(d.rpc).toHaveBeenCalledWith('read_skill_package', expect.objectContaining({ p_actor_id: ACTOR, p_module_id: 'm1', p_skill_id: 'coach',
-      p_revision_id: 'r1', p_package_hash: PACKAGE.packageHash, p_path: 'handbook/douyin.json' }));
+    expect(d.rpc).toHaveBeenCalledWith('fusion_review_skill_file', expect.objectContaining({ p_skill_id: PACKAGE.skillId,
+      p_revision_id: PACKAGE.revisionId, p_package_hash: PACKAGE.packageHash, p_path: 'handbook/douyin.json' }));
   });
 
   it('an error from the package read is a thrown read failure, not an empty handbook', async () => {
     const d = database({ 'handbook/douyin.json': new Error('boom') });
-    await expect(packageReader(d.db, ACTOR, PACKAGE)('handbook/douyin.json')).rejects.toThrow('COACH_HANDBOOK_READ_FAILED');
+    await expect(packageReader(d.db, PACKAGE)('handbook/douyin.json')).rejects.toThrow('COACH_HANDBOOK_READ_FAILED');
   });
 });
 
 describe('the handbooks of this deployment', () => {
   it('without a pinned package nothing is read and the Map is empty', async () => {
     const d = database({});
-    expect((await loadCoachHandbooks(d.db, ACTOR, {})).size).toBe(0);
+    expect((await loadCoachHandbooks(d.db, {})).size).toBe(0);
     expect(d.rpc).not.toHaveBeenCalled();
   });
 
   it('an unreadable package is an empty Map: the review still runs, on the user\'s own data', async () => {
     const d = database({ 'handbook/douyin.json': new Error('down'), 'handbook/tiktok.json': new Error('down') });
-    expect((await loadCoachHandbooks(d.db, ACTOR, { [HANDBOOK_PACKAGE_ENV]: JSON.stringify({ ...PACKAGE, revisionId: 'r-down' }) })).size).toBe(0);
+    expect((await loadCoachHandbooks(d.db, { [HANDBOOK_PACKAGE_ENV]: JSON.stringify(PACKAGE) })).size).toBe(0);
   });
 
   it('reads the package on every review, so a revoked handbook is never served from memory', async () => {
     const files = { 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.json': JSON.stringify(handbookOf('tiktok')) };
     const d = database(files);
-    await loadCoachHandbooks(d.db, ACTOR, ENV);
-    await loadCoachHandbooks(d.db, ACTOR, ENV);
+    await loadCoachHandbooks(d.db, ENV);
+    await loadCoachHandbooks(d.db, ENV);
     expect(d.rpc).toHaveBeenCalledTimes(4);
   });
 });
@@ -109,7 +108,7 @@ describe('the pack built with loaded handbooks (simulated account A)', () => {
   const diagnostics = (rates: Record<string, number>) => rows.diagnostics.slice(0, 3).map(d => ({ ...d, platform: 'douyin', rates, reviewRunId: null, capturedOn: AS_OF }));
   const pack = (handbooks: Map<string, Handbook>, rates: Record<string, number>) => JSON.parse(JSON.stringify(
     buildPack({ rows: { ...rows, diagnostics: diagnostics(rates) }, cadence: 'weekly', businessId: simId('A'), now: NOW, handbooks })));
-  const loaded = async () => loadHandbooks(packageReader(database({ 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')) }).db, ACTOR, PACKAGE));
+  const loaded = async () => loadHandbooks(packageReader(database({ 'handbook/douyin.json': JSON.stringify(handbookOf('douyin')) }).db, PACKAGE));
   const GOOD = { bounce_2s: 0.3, retain_3s: 0.6, retain_5s: 0.5, like_rate: 0.06 };
   const BAD = { bounce_2s: 0.95, retain_3s: 0.1, retain_5s: 0.05 };
 

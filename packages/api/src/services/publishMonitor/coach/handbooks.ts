@@ -15,11 +15,10 @@ import { handbookSchema, type Handbook } from './funnel';
 export const HANDBOOK_PLATFORMS = ['douyin', 'tiktok'] as const;
 /** A handbook is a few KB; anything larger is not one. */
 const HANDBOOK_MAX_BYTES = 65_536;
-/** Env name of the pinned package: JSON {moduleId, skillId, revisionId, packageHash}. Unset: no handbooks, as before this block. */
+/** Env name of the pinned package: JSON {skillId, revisionId, packageHash}. Unset: no handbooks, as before this block. */
 export const HANDBOOK_PACKAGE_ENV = 'PUBLISH_MONITOR_HANDBOOK_PACKAGE';
 
-const packageSchema = z.object({ moduleId: z.string().min(1).max(64), skillId: z.string().min(1).max(64),
-  revisionId: z.string().min(1).max(64), packageHash: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+const packageSchema = z.object({ skillId: z.string().uuid(), revisionId: z.string().uuid(), packageHash: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
 export type HandbookPackage = z.infer<typeof packageSchema>;
 export type HandbookReader = (path: string) => Promise<string | null>;
 
@@ -53,13 +52,16 @@ export async function loadHandbooks(read: HandbookReader, platforms: readonly st
   return new Map(loaded.flatMap(handbook => handbook ? [[handbook.platform, handbook] as const] : []));
 }
 
-/** The pinned package's files through read_skill_package (the same checked read the Skill loaders make, on the actor's behalf). */
-export function packageReader(db: Pick<SupabaseClient, 'rpc'>, actorId: string, pack: HandbookPackage): HandbookReader {
+/**
+ * The pinned package's files through fusion_review_skill_file (0256, service role only, no user identity): the same reader the review
+ * jury uses. Skill id, revision and hash must all match, the Skill must be published and the revision not revoked.
+ */
+export function packageReader(admin: Pick<SupabaseClient, 'rpc'>, pack: HandbookPackage): HandbookReader {
   return async path => {
-    const { data, error } = await db.rpc('read_skill_package', { p_actor_id: actorId, p_module_id: pack.moduleId, p_skill_id: pack.skillId,
-      p_revision_id: pack.revisionId, p_package_hash: pack.packageHash, p_path: path, p_max_bytes: HANDBOOK_MAX_BYTES });
+    const { data, error } = await admin.rpc('fusion_review_skill_file', { p_skill_id: pack.skillId, p_revision_id: pack.revisionId,
+      p_package_hash: pack.packageHash, p_path: path });
     if (error) throw new Error('COACH_HANDBOOK_READ_FAILED');
-    // The service answers a file as base64; null/other means the path is not in the package.
+    // The service answers a file as base64; anything else means the path is not in the package.
     return typeof data === 'string' ? Buffer.from(data, 'base64').toString('utf8') : null;
   };
 }
@@ -68,14 +70,14 @@ export function packageReader(db: Pick<SupabaseClient, 'rpc'>, actorId: string, 
  * The handbooks of this deployment's coach package. Never throws: no pinned package, or a package that cannot be read, is an empty
  * Map (every platform diagnosed on its own data, as when no handbook existed).
  */
-export async function loadCoachHandbooks(db: Pick<SupabaseClient, 'rpc'>, actorId: string, env: Record<string, string | undefined>):
+export async function loadCoachHandbooks(admin: Pick<SupabaseClient, 'rpc'>, env: Record<string, string | undefined>):
   Promise<Map<string, Handbook>> {
   const pack = readHandbookPackage(env);
   if (!pack) return new Map();
   try {
-    // Read on every review (two small files, once a week per brand): read_skill_package re-checks the module, the publication and
+    // Read on every review (two small files, once a week per brand): fusion_review_skill_file re-checks the publication and
     // revocations each time, so a revoked handbook stops being used at once and every instance gives the same answer.
-    return await loadHandbooks(packageReader(db, actorId, pack));
+    return await loadHandbooks(packageReader(admin, pack));
   } catch (error) {
     logger.warn('billing', 'coach_handbooks_failed', { code: errorCode(error) });
     return new Map();

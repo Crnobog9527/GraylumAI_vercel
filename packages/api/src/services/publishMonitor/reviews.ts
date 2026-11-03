@@ -102,7 +102,7 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:Revi
   // A brand's review (the coach switched on) reads the coach pack; a plain weekly review reads the own-posts pack.
   const coach=Boolean(state.businessId);
   const pack=coach?await readCoachPack(db,c.actorId,state.businessId!,state.cadence??'weekly',Date.now(),
-   await loadCoachHandbooks(db,c.actorId,options.env)):await readReviewPack(db,c.actorId);
+   await loadCoachHandbooks(db,options.env)):await readReviewPack(db,c.actorId);
   if(!pack){await step(db,c,'skip','CONFIGURATION_REQUIRED');return;}
   const saved=await db.rpc('publish_monitor_review_save_pack',{p_id:c.id,p_token:c.token,p_pack:pack});
   if(saved.error||saved.data!==true)return;
