@@ -10,7 +10,7 @@ import {
 } from './paymentOrderStatus';
 import { getDueAnnualGrantPeriods } from './subscriptionCreditGrants';
 import { readDailyBillingCreditSources } from './dailyBillingCreditSources';
-import { readDailyBillingTotals } from './dailyBillingTotals';
+import { ledgerMismatches, readDailyBillingTotals } from './dailyBillingTotals';
 import { grantOrderId, hasCurrentRefundRecord, isCurrentModelOrder } from './billingReadinessCurrent';
 import {
   DEFAULT_READINESS_ROW_LIMIT,
@@ -41,6 +41,8 @@ export interface BillingReconciliationSummary {
   fusionReviewFixedPriceCredits?: number;
   settledCalls?: number;
   callLedgerMismatches?: number;
+  settledTurns?: number;
+  turnLedgerMismatches?: number;
   creditSourceMismatches?: number;
   unattributedSourceEntries?: number;
   notAppliedSourceEntries?: number;
@@ -1780,6 +1782,8 @@ export async function runDailyBillingReconciliation(
     fusionReviewFixedPriceCredits,
     settledCalls: totals.calls.settledCalls,
     callLedgerMismatches: totals.calls.mismatched,
+    settledTurns: totals.turns.settledTurns,
+    turnLedgerMismatches: totals.turns.mismatched,
     creditSourceMismatches: totals.sources.mismatched,
     unattributedSourceEntries: totals.entries.unattributed,
     notAppliedSourceEntries: totals.entries.notApplied,
@@ -1798,17 +1802,7 @@ export async function runDailyBillingReconciliation(
   if (totals.completedPaymentOrders > 0 && purchaseCredits <= 0) {
     mismatches.push(`Completed payment orders (${totals.completedPaymentOrders}) have no matching purchase credits`);
   }
-  // ARCH-FIX E2: each settled call's ledger rows sum to its charge less compensation; packs and subscription grants
-  // agree with the credit-source ledger.
-  const { calls, sources } = totals;
-  if (calls.mismatched > 0) {
-    mismatches.push(`Call ledger rows do not match the charge for ${calls.mismatched} of ${calls.settledCalls} settled calls`
-      + ` (${calls.sample.join(', ')})`);
-  }
-  if (sources.mismatched > 0) {
-    const sample = sources.sample.map((row) => `${row.kind}:${row.id}`).join(', ');
-    mismatches.push(`Credit source ledgers disagree for ${sources.mismatched} sources (${sample})`);
-  }
+  mismatches.push(...ledgerMismatches(totals));
 
   return {
     periodStart: start,
