@@ -40,10 +40,23 @@ export async function simCalls(): Promise<Array<{ model: string; role: string; f
   return ((await (await fetch(`${process.env.SIM_ORIGIN}/__sim/calls`)).json()) as { calls: Array<{ model: string; role: string; fault: string | null }> }).calls;
 }
 
+/**
+ * Waits until the page's scripts have taken over the login form: React marks a DOM node it has hydrated with a `__reactProps$…` key. The
+ * form is rendered on the server and shows up long before its submit handler is attached; a click in between submits the form
+ * natively (the page goes to /login? and nothing is signed in), which is what failed a journey on CI on 2026-11-03.
+ */
+export async function waitForHydratedForm(page: Page) {
+  await page.waitForFunction(() => {
+    const form = document.querySelector('form');
+    return form !== null && Object.keys(form).some(key => key.startsWith('__reactProps$'));
+  }, undefined, { timeout: 60_000 });
+}
+
 /** Signs in through the real login page. */
 export async function signIn(page: Page, role: SimRole) {
   const user = seed().users[role];
   await page.goto('/login');
+  await waitForHydratedForm(page);
   await page.locator('#email, input[type="email"]').first().fill(user.email);
   await page.locator('#password, input[type="password"]').first().fill(user.password);
   await page.locator('button[type="submit"]').first().click();
