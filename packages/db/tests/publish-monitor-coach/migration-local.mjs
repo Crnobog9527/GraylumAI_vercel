@@ -8,7 +8,17 @@ import { generateDataset } from '../../../api/src/services/publishMonitor/coach/
 import { seedSql } from './seed-sql.mjs';
 
 const MIGRATION = 'packages/db/migrations/0457_publish_monitor_review_coach_foundation.sql';
-const OLD_KEYS = ['actorId', 'id', 'maxCostUsd', 'modelId', 'requestId', 'sessionId', 'token'];
+const SAMPLES = JSON.parse(read('packages/db/tests/publish-monitor-coach/claim-samples.json'));
+// Claims as the app's scheduler test builds them (reviews.test.ts reads the same file): same keys, same kind of value per key.
+const kind = value => (value === null ? 'null' : typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value) ? 'uuid' : typeof value);
+const NULLABLE = ['modelId', 'businessId'];
+const sameShape = (actual, sample) => {
+  assert.deepEqual(Object.keys(actual).sort(), Object.keys(sample).sort());
+  for (const key of Object.keys(sample)) {
+    const [a, b] = [kind(actual[key]), kind(sample[key])];
+    assert.ok(a === b || (NULLABLE.includes(key) && (a === 'null' || b === 'null')), `${key}: ${a} vs ${b}`);
+  }
+};
 const db = await localDb(), c = db.client, report = { build: db.build, checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const svc = async (sql, args = []) => {
@@ -64,7 +74,7 @@ try {
 
   // Coach setting absent: the old claim exactly, one per user, the old output shape the deployed app parses strictly.
   const [legacy] = await claim();
-  assert.deepEqual(Object.keys(legacy).sort(), OLD_KEYS);
+  sameShape(legacy, SAMPLES.legacy);
   assert.deepEqual(await claim(), []);
   const legacyRow = await run(legacy.id);
   assert.equal(legacyRow.business_id, null); assert.equal(legacyRow.cadence, 'weekly'); assert.equal(legacyRow.attempt, 1);
@@ -104,8 +114,7 @@ try {
   report.checks.push('turning the coach on adds no early review after a recent old-style review');
   await c.query('DELETE FROM social_review_runs WHERE actor_id=$1', [gold]);
   const [first] = await claim();
-  // The same key list the app's scheduler test builds its claims from (reviews.test.ts), so the two sides cannot drift apart.
-  assert.deepEqual(Object.keys(first).sort(), JSON.parse(read('packages/db/tests/publish-monitor-coach/claim-keys.json')));
+  sameShape(first, SAMPLES.brand);
   assert.equal(first.cadence, 'weekly'); assert.equal(first.attempt, 1);
   assert.deepEqual(await claim(), []);
   await finish(first.id, '1 minute');
@@ -276,6 +285,23 @@ try {
   await assert.rejects(save({ experiments: [newExperiment, newExperiment, newExperiment, newExperiment] }), /INPUT_INVALID/);
   assert.equal((await c.query(`SELECT has_function_privilege('authenticated','publish_monitor_review_save_coach(uuid,uuid,jsonb)','EXECUTE') ok`)).rows[0].ok, false);
   report.checks.push('RC-3b: verdicts come from the saved pack (note added, second extension refused), experiments and tags written once under the lease');
+
+  // Migration 0496: the review list names each review's cadence and brand, and its notices name the period.
+  const listed = async () => (await svc('SELECT publish_monitor_reviews($1) v', [sim])) ?? [];
+  const brandName = await v('SELECT name v FROM opc_businesses WHERE id=$1', [businesses.A]);
+  const skipped = (cadence, business, days, reason) => v(`INSERT INTO social_review_runs(actor_id,business_id,cadence,period_start,status,
+   skip_reason,runtime_request_id,finished_at) VALUES($1,$2,$3,current_date-$4::int,'skipped',$5,gen_random_uuid(),now()) RETURNING id v`,
+  [sim, business, cadence, days, reason]);
+  const monthlyEnded = await skipped('monthly', businesses.A, 500, 'RUNTIME_ENDED');
+  const quarterlyBalance = await skipped('quarterly', businesses.A, 501, 'BALANCE_LOW');
+  const weeklyPlain = await skipped('weekly', null, 502, 'RUNTIME_ENDED');
+  const byId = new Map((await listed()).map(r => [r.id, r]));
+  assert.deepEqual([byId.get(monthlyEnded).cadence, byId.get(monthlyEnded).businessName], ['monthly', brandName]);
+  assert.equal(byId.get(monthlyEnded).notice, '本月复盘生成未完成，这一期已结束，下一期会正常安排。');
+  assert.equal(byId.get(quarterlyBalance).notice, '余额不足，未复盘');
+  assert.deepEqual([byId.get(weeklyPlain).cadence, byId.get(weeklyPlain).businessName], ['weekly', null]);
+  assert.equal(byId.get(weeklyPlain).notice, '本周复盘生成未完成，这一周已结束，下周会正常安排。', 'weekly notices read as before');
+  report.checks.push('0496: the review list returns cadence and brand name; monthly notices name the month, weekly ones are unchanged');
 
   // Erasure: counted, and removed with their parents.
   const before = await v('SELECT publish_monitor_erasure_remaining($1) v', [sim]);

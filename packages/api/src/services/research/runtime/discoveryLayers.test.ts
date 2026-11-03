@@ -10,6 +10,7 @@ import { discoveryCap, webLeads } from './discoveryLayers';
 import type { DiscoveryRecord, RuntimeOperation, RuntimeResearchStore } from './store';
 import { requestIdentity, runSubcall, type SubcallContext, type SupplierRequest } from './subcall';
 import type { ResearchToolContext } from './toolContext';
+import type { CachedProfile, ProfileCachePort } from './profileCache';
 
 vi.mock('./subcall', async importOriginal => ({ ...await importOriginal<typeof import('./subcall')>(), runSubcall: vi.fn() }));
 const subcall = vi.mocked(runSubcall);
@@ -114,23 +115,26 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('deeper discovery layers', () => {
-  it('first page enough: nothing deeper is searched (cost as before)', async () => {
+  // Owner 2026-11-03: the scan stops at the eighth selectable account, also inside the first batch of authors (it used to read all
+  // twelve authors of the batch so the card could show twelve).
+  it('first page enough: nothing deeper is searched, and the scan stops at the eighth selectable account', async () => {
     const f = fixture('tiktok', { firstPage: keyword => Array.from({ length: 4 }, (_, i) => `${keyword}a${i}`), firstCursor: '20',
       leads: () => ['lead1'] }, ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
     const envelope = await f.run();
-    expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(12).fill('account_profile')]);
-    expect(envelope.candidateCard).toMatchObject({ shown: true });
+    expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(8).fill('account_profile')]);
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
   });
 
-  it('too few first-page authors: searches for accounts with each keyword and screens the leads until the card is full', async () => {
+  it('too few first-page authors: searches for accounts with each keyword and screens the leads until there are eight', async () => {
     const f = fixture('tiktok', { firstPage: keyword => [`${keyword}a`], leads: keyword => [`${keyword}l1`, `${keyword}l2`, `${keyword}l3`] },
       ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
     const envelope = await f.run();
     const profiles = Array(3).fill('account_profile');
+    // Three first-page authors, then the first account search's three leads, then the second's first two: eight, and the scan stops.
     expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...profiles, 'account_search', ...profiles,
-      'account_search', ...profiles, 'account_search', ...profiles]);
-    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 12 });
-    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 3, webSearches: 0, profiles: 12 });
+      'account_search', ...Array(2).fill('account_profile')]);
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 2, webSearches: 0, profiles: 8 });
   });
 
   it('counts only lookups that really ran, and never lets posts without an author count as new authors', async () => {
@@ -193,8 +197,8 @@ describe('deeper discovery layers', () => {
     expect(f.discoveries.get(discoveryId)?.state).toBe('running');
     f.ctx.lookupTime = () => true;
     const second = await f.run(29, { discoveryId });
-    // Nothing already paid for is sent again: the second reply only adds the remaining ten profiles.
-    expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(12).fill('account_profile')]);
+    // Nothing already paid for is sent again: the second reply only adds the remaining six profiles (eight selectable end the scan).
+    expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(8).fill('account_profile')]);
     expect(second).toMatchObject({ continue: false, candidateCard: { shown: true } });
   });
 
@@ -213,12 +217,12 @@ describe('deeper discovery layers', () => {
     expect(envelope.coverage.platforms.tiktok).toMatchObject({ spent: { webSearches: 2, profiles: 3 }, exhausted: true });
   });
 
-  it('does not pay for web searches when a card of 8–11 can already show', async () => {
+  it('does not pay for web searches when a card of 8 can already show (the scan stops at eight)', async () => {
     const web = vi.fn(() => [] as ResearchItem[]);
     const f = fixture('tiktok', { firstPage: keyword => keyword === 'one' ? Array.from({ length: 9 }, (_, i) => `a${i}`) : [], web });
     const envelope = await f.run();
     expect(web).not.toHaveBeenCalled();
-    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 9 });
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
   });
 
   it('stops before a second web search once the first one\'s leads made a card possible', async () => {
@@ -289,3 +293,172 @@ describe('deeper discovery layers', () => {
     expect(f.discoveries.get(discoveryId)?.state).toBe('completed');
   });
 });
+
+// 0493 (Owner 2026-11-03): the shared profile cache. A profile any search read in the last 24 hours is not looked up (and not paid for) again.
+describe('the shared profile cache', () => {
+  /** A cache shared by several searches (users); `clock` decides what is older than 24 hours. */
+  function sharedCache(clock: () => Date) {
+    const rows = new Map<string, CachedProfile>(), reads: string[][] = [], writes: string[][] = [];
+    const port: ProfileCachePort = {
+      read: async (platform, kind, accounts) => {
+        reads.push([...accounts]);
+        const found = new Map<string, CachedProfile>();
+        for (const account of accounts) {
+          const row = rows.get(`${platform}\n${kind}\n${account}`);
+          if (row && clock().getTime() - Date.parse(row.fetchedAt) < 24 * 60 * 60 * 1000) found.set(account, row);
+        }
+        return found;
+      },
+      write: async (platform, kind, batch) => {
+        writes.push(batch.map(row => row.account));
+        for (const row of batch) {
+          const key = `${platform}\n${kind}\n${row.account}`, old = rows.get(key);
+          if (!old || Date.parse(old.fetchedAt) < Date.parse(row.fetchedAt)) rows.set(key, { profile: row.profile, fetchedAt: row.fetchedAt });
+        }
+      },
+    };
+    return { rows, reads, writes, port };
+  }
+  const nine = { firstPage: (keyword: string) => keyword === 'one' ? Array.from({ length: 9 }, (_, i) => `a${i}`) : [] };
+  const profiles = (f: ReturnType<typeof fixture>) => f.sent.filter(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile');
+
+  it('a search writes the profiles it paid for; another user\'s search with the same authors looks none up', async () => {
+    const cache = sharedCache(() => now);
+    const first = fixture('tiktok', nine);
+    first.ctx.profileCache = cache.port;
+    expect((await first.run()).candidateCard).toMatchObject({ shown: true, selectable: 8 });
+    expect(profiles(first).length).toBe(8);
+    expect(cache.rows.size).toBe(8);
+    expect(cache.writes).toEqual([['a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7']]);
+    // A different user (a fresh store and operations) searching the same niche: the same eight accounts come from the cache.
+    vi.clearAllMocks();
+    const second = fixture('tiktok', nine);
+    second.ctx.profileCache = cache.port;
+    const envelope = await second.run();
+    expect(profiles(second).length).toBe(0);
+    expect(second.kindsSent()).toEqual(Array(3).fill('keyword_posts'));
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+    expect(envelope.coverage.platforms.tiktok.spent.profiles).toBe(0);
+    expect(cache.writes.length).toBe(1);                       // nothing was looked up, so nothing is written
+  });
+
+  it('a cached profile older than 24 hours is looked up again and the cache moves forward', async () => {
+    let clock = now;
+    const cache = sharedCache(() => clock);
+    const first = fixture('tiktok', nine);
+    first.ctx.profileCache = cache.port;
+    await first.run();
+    expect(profiles(first).length).toBe(8);
+    clock = new Date(now.getTime() + 24 * 60 * 60 * 1000 + 1000);    // the next day: every row is stale
+    vi.clearAllMocks();
+    const next = fixture('tiktok', nine);
+    next.ctx.profileCache = cache.port;
+    next.ctx.now = () => clock;
+    await next.run();
+    expect(profiles(next).length).toBe(8);
+    expect(cache.reads.length).toBeGreaterThanOrEqual(2);
+    // Just inside the 24 hours it is still a hit.
+    clock = new Date(now.getTime() + 24 * 60 * 60 * 1000 - 1000);
+    vi.clearAllMocks();
+    const inside = fixture('tiktok', nine);
+    inside.ctx.profileCache = sharedCache(() => clock).port;
+    const warm = sharedCache(() => clock);
+    for (const [key, row] of cache.rows) warm.rows.set(key, { ...row, fetchedAt: now.toISOString() });
+    inside.ctx.profileCache = warm.port;
+    await inside.run();
+    expect(profiles(inside).length).toBe(0);
+  });
+
+  it('only some accounts cached: those are skipped, the rest are paid for, and the scan still stops at eight', async () => {
+    const cache = sharedCache(() => now);
+    for (const account of ['a0', 'a1', 'a2']) cache.rows.set(`tiktok\naccount_profile\n${account}`,
+      { profile: { fields: { id: account, name: `Profile ${account}`, followers: 50000 }, missing: [] }, fetchedAt: now.toISOString() });
+    const f = fixture('tiktok', nine);
+    f.ctx.profileCache = cache.port;
+    const envelope = await f.run();
+    expect(profiles(f).map(r => r.vendor === 'tikhub' && r.call.account)).toEqual(['a3', 'a4', 'a5', 'a6', 'a7']);
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+    expect(cache.writes[cache.writes.length - 1]).toEqual(['a3', 'a4', 'a5', 'a6', 'a7']);
+  });
+
+  it('a cache that cannot answer is a miss: every profile is looked up and the search still completes', async () => {
+    for (const port of [
+      { read: async () => { throw new Error('read failed'); }, write: async () => { throw new Error('write failed'); } },
+      { read: async () => new Map<string, CachedProfile>(), write: async () => undefined },
+    ] as ProfileCachePort[]) {
+      vi.clearAllMocks();
+      const f = fixture('tiktok', nine);
+      f.ctx.profileCache = port;
+      expect((await f.run()).candidateCard).toMatchObject({ shown: true, selectable: 8 });
+      expect(profiles(f).length).toBe(8);
+    }
+  });
+
+  it('a continued round writes only what the new reply looked up, never the replayed operations', async () => {
+    const cache = sharedCache(() => now);
+    const f = fixture('tiktok', { firstPage: keyword => Array.from({ length: 4 }, (_, i) => `${keyword}a${i}`) });
+    f.ctx.profileCache = cache.port;
+    let lookups = 0;
+    f.ctx.lookupTime = () => lookups++ < 5;                          // three keyword searches and two profiles, then out of time
+    await f.run();
+    expect(cache.writes.flat().length).toBe(2);
+    f.ctx.lookupTime = () => true;
+    await f.run(29, { discoveryId });
+    expect(cache.rows.size).toBe(8);
+    expect(cache.writes.flat().length).toBe(8);                      // 2 + 6, the first two were not written again
+  });
+
+  // Review of #1679: a cached profile took an operation slot but was not saved, so a continued round that no longer found it in the cache
+  // paid at that slot instead and the later slots drifted. The profiles a round used are kept in its cursor with their slots.
+  it.each([['expired', (cache: ReturnType<typeof sharedCache>) => cache.rows.clear()],
+    ['unreadable', (cache: ReturnType<typeof sharedCache>) => { cache.port.read = async () => { throw new Error('cache down'); }; }],
+  ] as const)('paused after cache hits, continued once the cache is %s: the same result in the same order', async (_name, spoil) => {
+    const hot = ['a0', 'a1', 'a2'];
+    const warm = (cache: ReturnType<typeof sharedCache>) => hot.forEach(account => cache.rows.set(`tiktok\naccount_profile\n${account}`,
+      { profile: { fields: { id: account, name: `Profile ${account}`, followers: 50000 }, missing: [] }, fetchedAt: now.toISOString() }));
+    // The control: one uninterrupted reply with the cache warm throughout.
+    const control = sharedCache(() => now); warm(control);
+    const whole = fixture('tiktok', nine); whole.ctx.profileCache = control.port;
+    await whole.run();
+    const controlOptions = vi.mocked(whole.store.createCard).mock.calls[0]![1].options;
+    const controlAccounts = profiles(whole).map(r => r.vendor === 'tikhub' && r.call.account);
+    expect(controlAccounts).toEqual(['a3', 'a4', 'a5', 'a6', 'a7']);
+    // The round: three hits and two paid lookups, then this reply runs out of time.
+    vi.clearAllMocks();
+    const cache = sharedCache(() => now); warm(cache);
+    const f = fixture('tiktok', nine); f.ctx.profileCache = cache.port;
+    let lookups = 0;
+    f.ctx.lookupTime = () => lookups++ < 5;
+    const first = await f.run();
+    expect(first).toMatchObject({ continue: true, reason: 'ROUND_LIMIT' });
+    expect(profiles(f).map(r => r.vendor === 'tikhub' && r.call.account)).toEqual(['a3', 'a4']);
+    expect(f.discoveries.get(discoveryId)?.cursor).toMatchObject({ cachedProfiles: hot.map((account, slot) => expect.objectContaining({ slot: 3 + slot })) });
+    // The cache is gone by the next reply: the three profiles come from the saved round, not from a lookup.
+    spoil(cache);
+    f.ctx.lookupTime = () => true;
+    const second = await f.run(29, { discoveryId });
+    expect(profiles(f).map(r => r.vendor === 'tikhub' && r.call.account)).toEqual(controlAccounts);
+    expect(second).toMatchObject({ continue: false, candidateCard: { shown: true, selectable: 8 } });
+    expect(vi.mocked(f.store.createCard).mock.calls[0]![1].options).toEqual(controlOptions);
+    expect(JSON.stringify(second)).not.toContain('OPERATION_IDENTITY_MISMATCH');
+  });
+
+  // Review of #1679: the deeper layers (account search, next pages, web leads) screen accounts too; their accounts are read from the cache
+  // in one call before they are screened, so a cached lead is no paid lookup.
+  it('an account found by the deeper account search is served from the cache, not looked up', async () => {
+    const cache = sharedCache(() => now);
+    for (const lead of ['leadone', 'leadtwo']) cache.rows.set(`tiktok\naccount_profile\n${lead}`,
+      { profile: { fields: { id: lead, name: `Profile ${lead}`, followers: 50000 }, missing: [] }, fetchedAt: now.toISOString() });
+    const f = fixture('tiktok', { firstPage: () => [], leads: keyword => keyword === 'one' ? ['leadone', 'leadtwo', 'leadfresh'] : [] },
+      ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
+    f.ctx.profileCache = cache.port;
+    await f.run();
+    // The empty first page brings no author; the account search names three leads, two of them cached.
+    expect(f.kindsSent()).toContain('account_search');
+    expect(profiles(f).map(r => r.vendor === 'tikhub' && r.call.account)).toEqual(['leadfresh']);
+    expect(cache.reads.some(batch => batch.includes('leadone') && batch.includes('leadtwo') && batch.includes('leadfresh'))).toBe(true);
+    // The one that was looked up is written back for the next search.
+    expect(cache.writes[cache.writes.length - 1]).toEqual(['leadfresh']);
+  });
+});
+

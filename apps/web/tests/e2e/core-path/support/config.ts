@@ -26,15 +26,31 @@ export function credentialsFor(role: CoreRole, env: Record<string, string | unde
  * 0.01 per call) costs more than the models.
  */
 export const DEFAULT_SPEND_CAP_USD = 2;
+
+/**
+ * The daily real-model smoke check (CORE_E2E_DAILY=1, the @daily journeys) may spend at most this much per UTC day, all runs of
+ * the day together. Owner 2026-11-03: "同意改用三层验证、批准每天 0.5 美元真实模型检查".
+ */
+export const DAILY_SPEND_CAP_USD = 0.5;
+export const dailyMode = (env: Record<string, string | undefined> = process.env) => env.CORE_E2E_DAILY === '1';
+
 export function spendCapUsd(env: Record<string, string | undefined> = process.env): number {
+  const approved = dailyMode(env) ? DAILY_SPEND_CAP_USD : DEFAULT_SPEND_CAP_USD;
   const raw = env.CORE_E2E_MAX_USD;
-  if (raw === undefined || raw === '') return DEFAULT_SPEND_CAP_USD;
+  if (raw === undefined || raw === '') return approved;
   const value = Number(raw);
   // The cap can be lowered for a dry run, never raised past the approved budget.
-  if (!Number.isFinite(value) || value <= 0 || value > DEFAULT_SPEND_CAP_USD) {
-    throw new Error(`CORE_E2E_MAX_USD must be a number in (0, ${DEFAULT_SPEND_CAP_USD}].`);
+  if (!Number.isFinite(value) || value <= 0 || value > approved) {
+    throw new Error(`CORE_E2E_MAX_USD must be a number in (0, ${approved}].`);
   }
   return value;
+}
+
+/** Where the spend count starts: the run's start, or in daily mode the start of the UTC day, so every run of the day counts. */
+export function spendSince(runStartedAt: string, env: Record<string, string | undefined> = process.env): string {
+  if (!dailyMode(env)) return runStartedAt;
+  const day = new Date(runStartedAt);
+  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate())).toISOString();
 }
 
 /**

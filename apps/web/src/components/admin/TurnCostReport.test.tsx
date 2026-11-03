@@ -53,11 +53,14 @@ describe('turn cost report cards', () => {
   });
   it('lists the calls refunded because the provider said "no such generation", and says when there are none or the list is unavailable', () => {
     fixture.unsettled = { available: true, total: 0, turns: [] };
-    fixture.absent = { available: true, total: 1, calls: [{ turnId: 2024, seq: 1, actorId: 'a', kind: 'mentor', providerId: 'gen-1793677834-x', httpStatus: 404,
-      settledAt: '2026-11-04T04:00:00Z', openedAt: '2026-11-03T03:50:33Z', reservedCredits: 864, chargedCredits: 0, settlement: 'done', state: 'closed' }] };
+    fixture.absent = { available: true, total: 2, calls: [{ turnId: 2024, seq: 1, actorId: 'a', kind: 'mentor', source: 'lookup_absent', providerId: 'gen-1793677834-x', httpStatus: 404,
+      settledAt: '2026-11-04T04:00:00Z', openedAt: '2026-11-03T03:50:33Z', reservedCredits: 864, chargedCredits: 0, settlement: 'done', state: 'closed' },
+      { turnId: 2030, seq: 2, actorId: 'a', kind: 'mentor', source: 'no_identity_24h', providerId: null, httpStatus: null,
+      settledAt: '2026-11-04T05:00:00Z', openedAt: '2026-11-03T04:50:33Z', reservedCredits: 300, chargedCredits: 0, settlement: 'done', state: 'closed' }] };
     let html = renderToStaticMarkup(<UnsettledTurnsCard />);
     expect(html).toContain('供应商查无而自动退还的调用');
     expect(html).toContain('2024'); expect(html).toContain('gen-1793677834-x'); expect(html).toContain('HTTP 404（查无）');
+    expect(html).toContain('2030'); expect(html).toContain('无调用编号，满 24 小时');
     expect(html).not.toContain('<button');
     fixture.absent = { available: true, total: 0, calls: [] };
     expect(renderToStaticMarkup(<UnsettledTurnsCard />)).toContain('还没有这类调用');
@@ -78,5 +81,17 @@ describe('turn cost report cards', () => {
       closeKind: 'interrupted', openedAt: '2026-10-01T00:00:00Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 864, chargedCredits: null,
       failureCode: 'turn_call_unknown', inFlightCalls: 0, costPendingCalls: 1 }] };
     expect(renderToStaticMarkup(<UnsettledTurnsCard />)).toContain('需人工');
+  });
+  it('keeps every table inside a horizontally scrolling box so a narrow screen scrolls instead of squeezing the columns', () => {
+    fixture.unsettled = { available: true, total: 1, turns: [{ turnId: 5, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending',
+      closeKind: 'interrupted', openedAt: '2026-11-03T03:50:33Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 30, chargedCredits: null,
+      failureCode: null, inFlightCalls: 0, costPendingCalls: 1 }] };
+    fixture.absent = { available: true, total: 1, calls: [{ turnId: 2024, seq: 1, actorId: 'a', kind: 'mentor', source: 'lookup_absent',
+      providerId: 'gen-1', httpStatus: 404, settledAt: '2026-11-04T04:00:00Z', openedAt: '2026-11-03T03:50:33Z', reservedCredits: 864,
+      chargedCredits: 0, settlement: 'done', state: 'closed' }] };
+    const html = renderToStaticMarkup(<UnsettledTurnsCard />);
+    const tables = html.match(/<table/g)?.length ?? 0;
+    expect(tables).toBe(2);
+    expect(html.match(/<div class="overflow-x-auto"><table class="w-full min-w-max/g)?.length).toBe(tables);
   });
 });

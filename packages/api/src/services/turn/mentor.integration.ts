@@ -891,7 +891,10 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is conti
         usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
       if (call.kind === 'keyword_posts') return { ...base, items: Array.from({ length: 20 }, (_, i) => ({ missing: [], fields: { id: `${call.keyword}-${i}`,
         authorId: `author${call.keyword}${i}`, author: `Author ${i}`, likes: 10, comments: 1, shares: 1, views: 1000, publishedAt: new Date().toISOString() } })) };
-      return { ...base, items: [{ missing: [], fields: { followers: 50000, postsCount: 200 } }] };
+      // One author in four qualifies: the scan ends at the eighth selectable account (Owner 2026-11-03), so a round that this reply's
+      // allowance cuts short needs authors that mostly do not qualify.
+      const qualifies = Number(/(\d+)$/.exec(String(call.account))?.[1] ?? 0) % 4 === 0;
+      return { ...base, items: [{ missing: [], fields: { followers: qualifies ? 50000 : 500, postsCount: 200 } }] };
     } } as unknown as VendorCalls };
   const discover = (args: unknown) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
     : n === 1 ? toolCall('gen-reply-1', 'benchmark_discover', args) : prose('gen-reply-' + n, 'Still searching.'));

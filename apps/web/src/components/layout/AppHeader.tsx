@@ -31,6 +31,7 @@ import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
 import { trpc } from '@/trpc/client';
 import { LanguageSwitch } from './LanguageSwitch';
 import { AlertTriangle } from 'lucide-react';
+import { READ_RETRY } from '@/trpc/read-retry';
 import {
   formatCreditsBalance,
   getCreditsAvailabilityLabel,
@@ -54,7 +55,7 @@ export function isNavItemActive(pathname: string | null, href: string) {
 export function AppHeader() {
   const pathname = usePathname();
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
-    retry: false,
+    ...READ_RETRY,
     refetchOnWindowFocus: false,
   });
   const {
@@ -72,7 +73,7 @@ export function AppHeader() {
 
   // Get user profile to check for admin role
   const { data: userProfile } = trpc.user.getUserProfile.useQuery(undefined, {
-    retry: false,
+    ...READ_RETRY,
     refetchOnWindowFocus: false,
   });
   const isAdmin = userProfile?.role === 'admin';

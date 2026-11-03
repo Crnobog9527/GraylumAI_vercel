@@ -35,7 +35,7 @@ export function TurnModelReportCard() {
         : !data ? <p>读取中…</p>
         : !data.available ? <p role="alert">报表暂不可用（数据库读取函数尚未应用或读取失败）；这里不显示 0 冒充没有数据。</p>
         : <>
-          <table className="w-full text-sm"><thead><tr>
+          <div className="overflow-x-auto"><table className="w-full min-w-max text-sm"><thead><tr>
             <th className="text-left">模型</th><th className="text-right">调用</th>
             <th className="text-right">名义费用未知</th><th className="text-right">实际费用未知</th>
             <th className="text-right">名义费用（美元）</th><th className="text-right">实际费用（美元）</th><th className="text-left">冻结倍数</th>
@@ -45,19 +45,19 @@ export function TurnModelReportCard() {
             <td className="text-right">{costText(line.unknownCostCalls, line.nominalUsd)}</td>
             <td className="text-right">{costText(line.unknownActualCalls, line.actualUsd)}</td>
             <td>{line.minMultiplier === line.maxMultiplier ? `${line.minMultiplier}×` : `${line.minMultiplier}× ~ ${line.maxMultiplier}×`}</td>
-          </tr>)}</tbody></table>
+          </tr>)}</tbody></table></div>
           <p className="text-xs">合计：{data.totals.calls} 次调用 / {data.totals.turns} 个回合；
             名义费用 {costText(data.totals.unknownCostCalls, data.totals.nominalUsd)}；
             实际费用 {costText(data.totals.unknownActualCalls, data.totals.actualUsd)}；
             实扣 {data.totals.chargedCredits} 积分，平台承担 {data.totals.absorbedCredits} 积分；
             未结清回合 {data.totals.unsettledTurns} 个（关闭不等于结清）。</p>
-          <table className="w-full text-sm"><thead><tr>
+          <div className="overflow-x-auto"><table className="w-full min-w-max text-sm"><thead><tr>
             <th className="text-left">按日期（UTC）</th><th className="text-right">调用</th><th className="text-right">费用未知</th>
             <th className="text-right">名义费用（美元）</th>
           </tr></thead><tbody>{data.byDate.map((line) => <tr key={line.date}>
             <td>{line.date}</td><td className="text-right">{line.calls}</td><td className="text-right">{line.unknownCostCalls}</td>
             <td className="text-right">{costText(line.unknownCostCalls, line.nominalUsd)}</td>
-          </tr>)}</tbody></table></>
+          </tr>)}</tbody></table></div></>
         }
     </CardContent>
   </Card>;
@@ -92,7 +92,7 @@ function UnsettledTurnsList() {
         : data.total === 0 ? <p>当前没有未结清的回合。</p>
         : <>
           <p className="text-xs">共 {data.total} 个{data.total > data.turns.length ? `，只列出最早的 ${data.turns.length} 个` : ''}。</p>
-          <table className="w-full text-sm"><thead><tr>
+          <div className="overflow-x-auto"><table className="w-full min-w-max text-sm"><thead><tr>
             <th className="text-left">回合</th><th className="text-left">类型</th><th className="text-left">状态</th>
             <th className="text-left">结算</th><th className="text-right">冻结积分</th><th className="text-right">进行中调用</th>
             <th className="text-right">费用待定调用</th><th className="text-left">最后更新</th>
@@ -102,7 +102,7 @@ function UnsettledTurnsList() {
               {needsManualSettlement(turn) && <strong className="ml-1 text-red-600">需人工</strong>}</td><td className="text-right">{turn.reservedCredits}</td>
             <td className="text-right">{turn.inFlightCalls}</td><td className="text-right">{turn.costPendingCalls}</td>
             <td>{turn.updatedAt}</td>
-          </tr>)}</tbody></table></>
+          </tr>)}</tbody></table></div></>
         }
     </CardContent>
   </Card>;
@@ -115,8 +115,8 @@ function AbsentRefundsCard() {
   return <Card data-testid="absent-refunds">
     <CardHeader>
       <CardTitle>供应商查无而自动退还的调用</CardTitle>
-      <CardDescription>开轮满 24 小时后，供应商对该调用的编号明确回答“查无此次生成”，费用记 0、冻结积分全部退回。
-        如果供应商其实收了钱，由平台承担。每一笔都留在这里，只读。</CardDescription>
+      <CardDescription>开轮满 24 小时后，供应商对该调用的编号明确回答“查无此次生成”，或供应商一直没给出调用编号，
+        费用记 0、冻结积分全部退回。如果供应商其实收了钱，由平台承担。每一笔都留在这里，只读。</CardDescription>
     </CardHeader>
     <CardContent className="space-y-2">
       {view.error ? <div role="alert">无法读取，请稍后重试。</div>
@@ -125,15 +125,16 @@ function AbsentRefundsCard() {
         : data.total === 0 ? <p>还没有这类调用。</p>
         : <>
           <p className="text-xs">共 {data.total} 笔{data.total > data.calls.length ? `，只列出最近的 ${data.calls.length} 笔` : ''}。</p>
-          <table className="w-full text-sm"><thead><tr>
+          <div className="overflow-x-auto"><table className="w-full min-w-max text-sm"><thead><tr>
             <th className="text-left">回合</th><th className="text-left">调用</th><th className="text-left">供应商编号</th>
             <th className="text-left">查询结果</th><th className="text-right">冻结积分</th><th className="text-right">实扣积分</th>
             <th className="text-left">结清时间</th>
           </tr></thead><tbody>{data.calls.map((call) => <tr key={`${call.turnId}-${call.seq}`}>
-            <td>{call.turnId}</td><td>{call.seq}</td><td className="break-all">{call.providerId}</td><td>HTTP {call.httpStatus}（查无）</td>
+            <td>{call.turnId}</td><td>{call.seq}</td><td className="break-all">{call.providerId ?? '—'}</td>
+            <td>{call.source === 'no_identity_24h' ? '无调用编号，满 24 小时' : `HTTP ${call.httpStatus}（查无）`}</td>
             <td className="text-right">{call.reservedCredits}</td><td className="text-right">{call.chargedCredits ?? '—'}</td>
             <td>{call.settledAt}</td>
-          </tr>)}</tbody></table></>
+          </tr>)}</tbody></table></div></>
         }
     </CardContent>
   </Card>;

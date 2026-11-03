@@ -99,7 +99,7 @@ it('the visibility of the pack\'s sources is asked right before the turn is save
 });
 it('a brand review reads the coach pack of its brand and cadence, saves it wrapped like the plain pack, and runs the turn as a coach review',async()=>{
  const BUSINESS='88888888-8888-4888-8888-888888888888',CONN='99999999-9999-4999-8999-999999999999';
- m.rows.mockResolvedValue({followers:[{connectionId:CONN},{connectionId:CONN}]});
+ m.rows.mockResolvedValue({followers:[{connectionId:CONN},{connectionId:CONN}],profile:null,facts:[],recent:[]});
  m.build.mockReturnValue({kind:'review_pack',mode:'full'});
  const d=database({default:{businessId:BUSINESS,cadence:'monthly',attempt:2}});
  await advanceReview(d.db,c,options());
@@ -112,9 +112,23 @@ it('a brand review reads the coach pack of its brand and cadence, saves it wrapp
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,52);
 });
+it('a brand review builds its pack with the handbooks of the pinned Skill package; without the setting the Map is empty',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888';
+ m.rows.mockResolvedValue({followers:[],profile:null,facts:[],recent:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ const handbook={platform:'douyin',version:'t',calibration:'draft',labels:{},funnel:[{layer:'hook',name:'h',keys:['retain_3s'],basics:true,pass:{}}]};
+ const d=database({default:{businessId:BUSINESS,cadence:'weekly'}},{fusion_review_skill_file:Buffer.from(JSON.stringify(handbook)).toString('base64')});
+ const env={PUBLISH_MONITOR_HANDBOOK_PACKAGE:JSON.stringify({skillId:'11111111-1111-4111-8111-111111111111',revisionId:'33333333-3333-4333-8333-333333333333',packageHash:'b'.repeat(64)})};
+ await advanceReview(d.db,c,{...options(),env});
+ const given=m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>;
+ expect([...given.keys()]).toEqual(['douyin']);
+ expect(d.calls.some(x=>x[0]==='fusion_review_skill_file'&&x[1].p_path==='handbook/douyin.json')).toBe(true);
+ m.build.mockClear();
+ await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
+ expect((m.build.mock.calls.at(-1)![0].handbooks as Map<string,unknown>).size).toBe(0);
+});
 it('a delivered brand review writes its checked output to the ledger before it completes; a failed write does not undo the review',async()=>{
  const BUSINESS='88888888-8888-4888-8888-888888888888';
- m.rows.mockResolvedValue({followers:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
+ m.rows.mockResolvedValue({followers:[],profile:null,facts:[],recent:[]});m.build.mockReturnValue({kind:'review_pack',mode:'full'});
  m.save.mockResolvedValue(true);
  m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'completed',delivered:true,coach:{parsed:true}});
  const d=database({default:{businessId:BUSINESS,cadence:'weekly'}});
@@ -132,6 +146,20 @@ it('a delivered brand review writes its checked output to the ledger before it c
  m.run.mockResolvedValue({kind:'done',turnId:9,closeKind:'interrupted',delivered:false,coach:{parsed:true}});
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
  expect(m.save).not.toHaveBeenCalled();
+});
+it('a post whose title names a pillar is tagged by code before the pack is built, and the tags travel with the saved pack, not to the model',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888',pillars=[{key:'p1',name:'读书笔记',definition:'读书笔记'},{key:'p2',name:'穿搭灵感',definition:'穿搭灵感'}];
+ const fact=(postId:string,title:string,pillarKey:string|null=null)=>({postId,title,pillarKey,pillarSource:null,platform:'tiktok'});
+ m.rows.mockResolvedValue({followers:[],profile:{pillars},facts:[fact('a','【读书笔记】 x'),fact('b','没有栏目'),fact('c','【穿搭灵感】 y','p1')],
+  recent:[fact('d','今天的穿搭灵感')]});
+ m.build.mockReturnValue({kind:'review_pack'});
+ const {readCoachPack}=await import('./reviews');
+ const pack=await readCoachPack({} as never,c.actorId,BUSINESS,'weekly');
+ const built=m.build.mock.calls.at(-1)![0] as {rows:{facts:Array<{postId:string;pillarKey:string|null}>;recent:Array<{postId:string;pillarKey:string|null}>}};
+ expect(built.rows.facts.map(f=>[f.postId,f.pillarKey])).toEqual([['a','p1'],['b',null],['c','p1']]);
+ expect(built.rows.recent.map(f=>f.pillarKey)).toEqual(['p2']);
+ expect(pack.auto_tags).toEqual([{post_id:'a',pillar_key:'p1'},{post_id:'d',pillar_key:'p2'}]);
+ expect(JSON.stringify(pack.review)).not.toContain('auto_tags');
 });
 it('the 90-day window is used only for an account whose window is that long',async()=>{
  await advanceReview(database({default:{}},{publish_monitor_post_window:90}).db,c,options());
@@ -204,17 +232,17 @@ it('cron accepts the claims exactly as the database returns them, plain ones and
  expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:2,scheduled:2,failed:0});
  expect(defer).toHaveBeenCalledTimes(2);
 });
-// The key list publish_monitor_review_claim_item() returns (checked against the real function by the database suite publish-monitor-coach).
-const CLAIM_KEYS:string[]=JSON.parse(readFileSync(new URL('../../../../db/tests/publish-monitor-coach/claim-keys.json',import.meta.url),'utf8'));
-it('the scheduler takes a claim with exactly the keys the database function returns, and schedules its turn',async()=>{
- expect(Object.keys(claimSchema.shape).sort()).toEqual(CLAIM_KEYS);
- const real=Object.fromEntries(CLAIM_KEYS.map(k=>[k,(c as Record<string,unknown>)[k]??null]));
- Object.assign(real,{businessId:'88888888-8888-4888-8888-888888888888',cadence:'monthly',attempt:1});
- const d=database({observe:{},default:{}},{publish_monitor_review_claim:[real]});
+// Claims as publish_monitor_review_claim_item() returns them: the database suite publish-monitor-coach asserts the real function's output
+// has these keys and kinds of value (the old claim without the coach keys, and the brand coach's with them).
+const SAMPLES:Record<string,Record<string,unknown>>=JSON.parse(readFileSync(new URL('../../../../db/tests/publish-monitor-coach/claim-samples.json',import.meta.url),'utf8'));
+it('the scheduler takes claims as the database function returns them, plain and brand, and schedules each one\'s turn',async()=>{
+ const claims=Object.values(SAMPLES).map((claim,i)=>({...claim,id:`aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${i}`}));
+ expect(Object.keys(claimSchema.shape).sort()).toEqual([...new Set(claims.flatMap(claim=>Object.keys(claim)))].sort());
+ const d=database({observe:{},default:{}},{publish_monitor_review_claim:claims});
  const defer=vi.fn();
- expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:1,scheduled:1,failed:0});
- await defer.mock.calls[0]![0]();
- expect(m.run).toHaveBeenCalledTimes(1);
+ expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:2,scheduled:2,failed:0});
+ for(const call of defer.mock.calls)await call[0]();
+ expect(m.run).toHaveBeenCalledTimes(2);
 });
 it('a feature switched off still reaches existing claims; a missing claim function is only an off feature',async()=>{
  m.settings.mockResolvedValue({enabled:false});

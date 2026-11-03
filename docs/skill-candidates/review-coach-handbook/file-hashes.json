@@ -1,0 +1,16 @@
+[
+  {
+    "package": "review-coach",
+    "path": "handbook/douyin.json",
+    "mediaType": "application/json",
+    "bytes": 2118,
+    "sha256": "d40adc627ca342a7cc0f756a6b866b929d90199ad7361476f4c7085261d6da3a"
+  },
+  {
+    "package": "review-coach",
+    "path": "handbook/tiktok.json",
+    "mediaType": "application/json",
+    "bytes": 1690,
+    "sha256": "61a0e269a36b148cbadc72cb896e2d55d6e324a63827be415949b3ead0ab8bbc"
+  }
+]

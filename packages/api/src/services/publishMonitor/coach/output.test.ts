@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { handbookSchema } from './funnel';
-import { checkOutput } from './output';
+import { COACH_INSTRUCTIONS } from '../../turn/review';
+import { checkOutput, evidenceRefs } from './output';
 import { buildPack } from './pack';
 import { packRowsSchema } from './rows';
 import { generateDataset } from './simulatedDataset';
@@ -31,6 +32,40 @@ describe('coach_json checks (RC-2)', () => {
     expect(r.body).toBe('正文第一段。');
     expect(r).toMatchObject({ parsed: true, mode_mismatch: false, rejected: [] });
     expect(r.experiments).toHaveLength(1);
+  });
+
+  it('evidence metrics are the full references of the pack: bare metric names are refused, the documented forms are accepted (staging 2026-11-03)', () => {
+    // What the model wrote on staging, without having been told the forms: it cited posts and bare metric names, and every experiment was dropped.
+    const bare = out({ experiments: [{ ...good, evidence: { post_ids: [post], metrics: ['views', 'er'] } }] });
+    expect(bare.experiments).toHaveLength(0);
+    expect(bare.rejected).toEqual([{ path: 'experiments.0', reason: 'no_evidence' }]);
+    const refs = [...evidenceRefs(full).metrics];
+    const ok = out({ experiments: [{ ...good, evidence: { post_ids: [post], metrics: [refs.find(r => r.startsWith('scoreboard:'))!] } }] });
+    expect(ok).toMatchObject({ rejected: [] });
+    expect(ok.experiments).toHaveLength(1);
+    // Posts alone are enough, and an empty citation is not.
+    expect(out({ experiments: [{ ...good, evidence: { post_ids: [post], metrics: [] } }] }).experiments).toHaveLength(1);
+    expect(out({ experiments: [{ ...good, evidence: { post_ids: [], metrics: [] } }] }).experiments).toHaveLength(0);
+  });
+
+  it('the instructions give every kind of reference the pack can offer, so what the check accepts cannot drift from what the model is told', () => {
+    const template = (ref: string) => {
+      const [kind, a, b] = ref.split(':');
+      if (kind === 'scoreboard' || kind === 'history') return `${kind}:<支柱key>:<平台>`;
+      if (kind === 'stage') return a === 'followers' ? 'stage:followers:<平台>' : `stage:${a}`;
+      if (kind === 'ledger') return 'ledger:<实验id>';
+      if (kind === 'diagnostics') return b === undefined ? ref : 'diagnostics:<作品id>:<指标名>';
+      return ref;
+    };
+    const seen = new Set<string>();
+    for (const pack of [full, basics, loose(buildPack({ rows: rowsA, cadence: 'monthly', businessId: simId('A'), now: NOW, handbooks: new Map() }))])
+      for (const ref of evidenceRefs(pack).metrics) seen.add(template(ref));
+    expect([...seen].length).toBeGreaterThanOrEqual(4);
+    for (const form of seen) expect(COACH_INSTRUCTIONS, form).toContain(form);
+    // And the two kinds of experiment are told apart: a multiple for a tactic, a line and a funnel layer for a basics experiment.
+    expect(COACH_INSTRUCTIONS).toContain('target 写 {"mult"');
+    expect(COACH_INSTRUCTIONS).toContain('{"max":数值} 或 {"min":数值}');
+    expect(COACH_INSTRUCTIONS).toContain('没有 stuck_layer 就只提 tactic');
   });
 
   it('a missing or broken block keeps the prose and records nothing', () => {

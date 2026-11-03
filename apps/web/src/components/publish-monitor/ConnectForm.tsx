@@ -13,9 +13,11 @@ import { COMBINED_AUTH_PLATFORMS, connectRoute, dataErrorMessage, errorCode, pla
 /**
  * PUBLISH-MONITOR PR-7 (plan §4.1, §4.2): connect one of the user's brand accounts. Overseas platforms go to the
  * Post for Me consent page with read-only access requested; Xiaohongshu and Douyin are read from a public profile
- * link. Nothing here asks for publishing access (that is a separate, later consent).
+ * link. Publishing access is asked for only when the user ticks it here (plan §4.1); it is the only way to give it on
+ * platforms whose consent needs a connection type or an app password (Instagram, Facebook, LinkedIn, Bluesky), and an
+ * already connected account is upgraded in place (publish_monitor_connect_confirm updates the same provider account).
  */
-type StartBody = { accountProjectId: string; publish: false; connectionType?: 'instagram' | 'facebook';
+type StartBody = { accountProjectId: string; publish: boolean; connectionType?: 'instagram' | 'facebook';
   bluesky?: { handle: string; appPassword: string } };
 
 export async function startPostForMe(body: StartBody, assign: (url: string) => void = url => location.assign(url)) {
@@ -28,8 +30,9 @@ export async function startPostForMe(body: StartBody, assign: (url: string) => v
   assign(json.url);
 }
 
-export function ConnectForm({ brands, connected, initialProjectId = '', onConnected, onAccountAdded }: { brands: Brand[];
-  connected: Set<string>; initialProjectId?: string; onConnected: () => void; onAccountAdded?: () => void }) {
+export function ConnectForm({ brands, connected, initialProjectId = '', initialPublish = false, onConnected,
+  onAccountAdded }: { brands: Brand[]; connected: Set<string>; initialProjectId?: string; initialPublish?: boolean;
+  onConnected: () => void; onAccountAdded?: () => void }) {
   const accounts = brands.flatMap(brand => brand.accounts);
   const [projectId, setProjectId] = useState(initialProjectId);
   const [addOpen, setAddOpen] = useState(false);
@@ -57,14 +60,16 @@ export function ConnectForm({ brands, connected, initialProjectId = '', onConnec
       {(addOpen || accounts.length === 0) ? <AddAccountForm
         onAdded={id => { setAddOpen(false); setProjectId(id); onAccountAdded?.(); }} />
         : <button type="button" className="text-sm underline" onClick={() => setAddOpen(true)}>没有想要的账号？添加品牌账号</button>}
-      {account && connectRoute(account.platform) === 'postforme' && <PostForMeStart key={account.projectId} account={account} />}
+      {account && connectRoute(account.platform) === 'postforme' && <PostForMeStart key={account.projectId} account={account}
+        initialPublish={initialPublish && account.projectId === initialProjectId} />}
       {account && connectRoute(account.platform) === 'profile_link'
         && <ProfileLinkConnect key={account.projectId} account={account} onConnected={onConnected} />}
     </div>
   );
 }
 
-function PostForMeStart({ account }: { account: BrandAccount }) {
+function PostForMeStart({ account, initialPublish }: { account: BrandAccount; initialPublish: boolean }) {
+  const [publish, setPublish] = useState(initialPublish);
   const [connectionType, setConnectionType] = useState<'instagram' | 'facebook'>('instagram');
   const [handle, setHandle] = useState(''), [appPassword, setAppPassword] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -73,7 +78,7 @@ function PostForMeStart({ account }: { account: BrandAccount }) {
   async function start() {
     setBusy(true); setError('');
     try {
-      await startPostForMe({ accountProjectId: account.projectId, publish: false,
+      await startPostForMe({ accountProjectId: account.projectId, publish,
         ...(account.platform === 'instagram' ? { connectionType } : {}),
         ...(bluesky ? { bluesky: { handle: handle.trim(), appPassword: appPassword.trim() } } : {}) });
     } catch (cause) {
@@ -84,9 +89,14 @@ function PostForMeStart({ account }: { account: BrandAccount }) {
   return (
     <div className="space-y-2 text-sm">
       <p style={{ color: 'var(--text-secondary)' }}>
-        接下来会跳到授权页（页面上显示的是连接服务 Post for Me 的名字）。只请求读取作品数据，不会发布任何内容；
-        授权后回到 Graylum 确认要连接哪个账号。</p>
-      {combined && <p role="note" className="rounded-md p-2" style={{ background: 'var(--bg-secondary)' }}>
+        接下来会跳到授权页（页面上显示的是连接服务 Post for Me 的名字）。
+        {publish ? '会请求读取作品数据和发布权限；之后每次发布都要你在发布页确认，我们不会自己发。'
+          : '只请求读取作品数据，不会发布任何内容。'}授权后回到 Graylum 确认要连接哪个账号。</p>
+      <label className="flex items-center gap-2">
+        <Checkbox checked={publish} onCheckedChange={value => setPublish(value === true)} disabled={busy} />
+        同时允许一键发布（需要 Pro 或 Gold 会员；以后也可以在这里补授权）
+      </label>
+      {combined && !publish && <p role="note" className="rounded-md p-2" style={{ background: 'var(--bg-secondary)' }}>
         {platformName(account.platform)} 不能只授权读取：这一步也会授予发布能力，但在你单独同意之前，我们不会发布任何内容。</p>}
       {account.platform === 'instagram' && (
         <fieldset className="space-y-1">

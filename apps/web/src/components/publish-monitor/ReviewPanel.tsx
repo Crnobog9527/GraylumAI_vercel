@@ -6,41 +6,29 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { trpc } from '@/trpc/client';
-import { dataErrorMessage, errorCode, formatDay, formatMetric, metricLabel, platformName } from './labels';
+import { dataErrorMessage, errorCode, formatDay, formatMetric, metricLabel } from './labels';
+import { coachTable, CoachTables, EMPTY_COACH, type CoachTable } from './CoachTables';
 
 /**
  * PUBLISH-MONITOR PR-7 (plan §5): the weekly reviews and, for Gold, the automatic weekly review switch. The written
  * part is the model's; the numbers come only from the stored host table (`tables`), never parsed from the text.
  */
 export type Review = { id: string; periodStart: string; status: 'claimed' | 'completed' | 'skipped'; body: string | null;
-  tables: unknown; notice: string | null; skipReason?: string | null };
+  tables: unknown; notice: string | null; skipReason?: string | null;
+  /** Brand coach reviews: which rhythm and which brand (absent or weekly without a brand: the plain weekly review). */
+  cadence?: string; businessName?: string | null };
 
 type Row = { postId: string; title: string; ageDays: number; status: 'available' | 'too_new' | 'insufficient_samples';
   comparisons: Record<string, { value: number; median: number; samples: number; relative: 'above' | 'below' | 'same' }> };
 type Week = { start: string; end: string; published: number; matched_posts: number; status: string };
 const RELATIVE = { above: '高于', below: '低于', same: '持平' } as const;
+/** The title of a review by its rhythm; anything unknown reads as the weekly one. */
+const PERIOD_TITLE: Record<string, string> = { weekly: '这一周', monthly: '月度复盘', quarterly: '季度体检', chat: '对话里的复盘' };
+export const reviewTitle = (review: Pick<Review, 'periodStart' | 'cadence' | 'businessName'>) => {
+  const period = PERIOD_TITLE[review.cadence ?? 'weekly'] ?? PERIOD_TITLE.weekly;
+  return `${review.businessName ? `${review.businessName} · ` : ''}${formatDay(review.periodStart)} ${period}`;
+};
 const STATUS = { too_new: '太新，下周再看', insufficient_samples: '样本不足' } as const;
-
-/** The brand review's code-computed pack (`review_pack` version 2): posts whose day 7 fell in the period, and the pillar scoreboard. */
-type CoachPost = { postId: string; title: string; platform: string; views: number | null; relative: number | null };
-type CoachScore = { pillar: string; platform: string; samples: number; views: number | null; relative: number | null };
-type CoachTable = { posts: CoachPost[]; scores: CoachScore[] };
-const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-function coachTable(tables: unknown): CoachTable {
-  const t = tables && typeof tables === 'object' ? tables as Record<string, unknown> : {};
-  if (t.kind !== 'review_pack' || t.version !== 2) return { posts: [], scores: [] };
-  const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object') : []);
-  const period = t.this_period && typeof t.this_period === 'object' ? t.this_period as Record<string, unknown> : {};
-  const posts = list(period.settled_posts).flatMap(p => {
-    const day7 = p.day7 && typeof p.day7 === 'object' ? p.day7 as Record<string, unknown> : {};
-    return typeof p.post_id === 'string' && typeof p.platform === 'string'
-      ? [{ postId: p.post_id, title: typeof p.title === 'string' ? p.title : '', platform: p.platform, views: num(day7.views),
-        relative: num(day7.vs_platform_median) }] : [];
-  });
-  const scores = list(t.scoreboard).flatMap(r => typeof r.pillar === 'string' && typeof r.platform === 'string' && typeof r.samples === 'number'
-    ? [{ pillar: r.pillar, platform: r.platform, samples: r.samples, views: num(r.views_median), relative: num(r.vs_platform_median) }] : []);
-  return { posts, scores };
-}
 
 /** Only the shapes the page can show safely; anything else in the stored table is ignored, never guessed. */
 export function reviewTable(tables: unknown): { rows: Row[]; weeks: Week[]; coach: CoachTable } {
@@ -112,7 +100,7 @@ function ReviewCard({ review }: { review: Review }) {
   return (
     <article className="space-y-3 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{formatDay(review.periodStart)} 这一周</h3>
+        <h3 className="text-sm font-semibold">{reviewTitle(review)}</h3>
         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
           {review.notice ?? (review.status === 'claimed' ? '正在生成…' : review.status === 'skipped' ? '这一周没有复盘' : '')}</span>
       </header>
@@ -124,7 +112,7 @@ function ReviewCard({ review }: { review: Review }) {
         </ul>
       )}
       {rows.length > 0 && <AgeTable rows={rows} />}
-      {(coach.posts.length > 0 || coach.scores.length > 0) && <CoachTables coach={coach} />}
+      {coach !== EMPTY_COACH && <CoachTables coach={coach} />}
       {review.status === 'completed' && review.body && (
         <Button size="sm" variant="outline" disabled={busy} onClick={download}>导出</Button>
       )}
@@ -157,37 +145,6 @@ function AgeTable({ rows }: { rows: Row[] }) {
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-const relative = (v: number | null) => (v === null ? '—' : `${v.toFixed(2)} 倍`);
-const views = (v: number | null) => (v === null ? '—' : formatMetric('views', v));
-
-/** The brand review's numbers, read from the stored pack only; the written part never carries a table of its own. */
-function CoachTables({ coach }: { coach: CoachTable }) {
-  return (
-    <div className="space-y-3 overflow-x-auto">
-      {coach.posts.length > 0 && (
-        <table className="w-full min-w-[480px] text-left text-xs" aria-label="本期满 7 天的作品">
-          <thead><tr><th className="pr-3 font-medium">作品</th><th className="pr-3 font-medium">平台</th>
-            <th className="pr-3 font-medium">第 7 天浏览</th><th className="pr-3 font-medium">相对该平台中位数</th></tr></thead>
-          <tbody>{coach.posts.map(p => (
-            <tr key={p.postId} className="border-t align-top" style={{ borderColor: 'var(--border-primary)' }}>
-              <td className="max-w-[200px] py-1 pr-3">{p.title || '（没有标题）'}</td><td className="py-1 pr-3">{platformName(p.platform)}</td>
-              <td className="py-1 pr-3">{views(p.views)}</td><td className="py-1 pr-3">{relative(p.relative)}</td></tr>))}</tbody>
-        </table>
-      )}
-      {coach.scores.length > 0 && (
-        <table className="w-full min-w-[480px] text-left text-xs" aria-label="内容方向成绩单">
-          <thead><tr><th className="pr-3 font-medium">内容方向</th><th className="pr-3 font-medium">平台</th><th className="pr-3 font-medium">作品数</th>
-            <th className="pr-3 font-medium">浏览中位数</th><th className="pr-3 font-medium">相对该平台中位数</th></tr></thead>
-          <tbody>{coach.scores.map(r => (
-            <tr key={`${r.pillar}:${r.platform}`} className="border-t" style={{ borderColor: 'var(--border-primary)' }}>
-              <td className="py-1 pr-3">{r.pillar}</td><td className="py-1 pr-3">{platformName(r.platform)}</td><td className="py-1 pr-3">{r.samples}</td>
-              <td className="py-1 pr-3">{views(r.views)}</td><td className="py-1 pr-3">{relative(r.relative)}</td></tr>))}</tbody>
-        </table>
-      )}
     </div>
   );
 }

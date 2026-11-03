@@ -7,6 +7,7 @@ import { selectRoute } from '../vendors/config';
 import type { SocialKind, SocialPlatform } from '../vendors/types';
 import { runSubcall, type SubcallContext, type SubcallOutcome, type SupplierRequest } from './subcall';
 import type { RuntimeResearchStore } from './store';
+import type { ProfileCachePort } from './profileCache';
 
 export interface ResearchToolContext {
   scope: AuthorizationScope;
@@ -18,6 +19,8 @@ export interface ResearchToolContext {
   now: () => Date;
   /** false = too little of this reply's time is left for another paid lookup and the reply after it (missing: no limit). */
   lookupTime?: () => boolean;
+  /** The shared profile cache (0493); without it every candidate author's profile is looked up. */
+  profileCache?: ProfileCachePort;
 }
 /** Stable across a resumed discovery; different users/discoveries never share evidence. */
 export function stableResearchId(...parts: string[]): string {

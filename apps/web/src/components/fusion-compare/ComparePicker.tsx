@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 import { compareErrorText, initialPick, isDefiniteRefusal, isUpgradeRefusal, pickStatus, togglePick, type CompareOptions } from './compare-view';
 import styles from './compare.module.css';
+import { READ_RETRY } from '@/trpc/read-retry';
+import { QueryNotice } from '@/components/opc/query-notice';
 
 export type CompareSkill = { kind: 'skill'; moduleId: string; revisionId: string; task?: string };
 type Estimate = { credits: number; columns: Array<{ modelId: string; credits: number; usd: string }>; tooLarge: string[];
@@ -35,7 +37,7 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
   /** A start whose outcome is unknown (the response was lost): the page re-reads the conversation's compares. */
   onMaybeStarted?: () => void;
 }) {
-  const options = trpc.fusionCompare.options.useQuery(undefined, { staleTime: 60_000, retry: false });
+  const options = trpc.fusionCompare.options.useQuery(undefined, { staleTime: 60_000, ...READ_RETRY });
   const [open, setOpen] = useState(false);
   const [resolved, setResolved] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -57,6 +59,8 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
     catch { setSessionError('暂时没能开始对话，请稍后再试。输入已保留。'); }
     finally { setResolving(false); }
   }
+  // A read that still fails after its retries is said, not hidden: the entry does not just vanish from the composer.
+  if (options.isError && !data) return <QueryNotice error={options.error} label="多模型对比" retry={() => options.refetch()} />;
   if (!data || (!data.enabled && data.reason === 'disabled')) return null;
   if (!data.enabled) {
     return <>

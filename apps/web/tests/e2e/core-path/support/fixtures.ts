@@ -6,18 +6,33 @@ import { test as base, expect, type BrowserContext, type Page } from '@playwrigh
 import { gotoWithBypass } from '../../support/deploymentProtection';
 import { coreSql } from './db';
 import { requireAccounts } from './accounts';
-import { resultsDirectory, spendCapUsd, statePathFor, type CoreRole } from './config';
-import { dbSpendReader, fileSpendStore, SpendMeter } from './spend';
+import { dailyMode, resultsDirectory, spendCapUsd, spendSince, statePathFor, type CoreRole } from './config';
+import { dbSpendReader, dbStepCostReader, fileSpendStore, SpendMeter, STEP_FLOOR_USD, stepBoundUsd, type PaidStep } from './spend';
 
 let shared: SpendMeter | undefined;
 
-/** One meter per worker process; the DB total is cumulative since run.json, so a restarted worker keeps counting. */
+/**
+ * One meter per worker process; the DB total is cumulative since run.json (in daily mode since the start of that UTC day), so a
+ * restarted worker keeps counting.
+ */
 export async function spendMeter(): Promise<SpendMeter> {
   if (shared) return shared;
   const { startedAt } = JSON.parse(await readFile(path.join(resultsDirectory, 'run.json'), 'utf8')) as { startedAt: string };
   const accounts = await requireAccounts();
-  shared = new SpendMeter(spendCapUsd(), dbSpendReader(coreSql(), Object.values(accounts).map(account => account.id), startedAt), fileSpendStore());
+  const reader = dbSpendReader(coreSql(), Object.values(accounts).map(account => account.id), spendSince(startedAt));
+  shared = new SpendMeter(spendCapUsd(), reader, fileSpendStore(), dailyMode());
+  shared.history = dbStepCostReader(coreSql(), Object.values(accounts).map(account => account.id));
   return shared;
+}
+
+/**
+ * Skips (never fails) a journey whose first paid step no longer fits under the cap (the step's pre-check bound, spend.ts); the summary
+ * lists it as skipped for budget. Each later paid step is checked again before it is sent (SpendMeter.precheck).
+ */
+export async function requireBudget(meter: SpendMeter, step: PaidStep) {
+  const left = await meter.remainingUsd();
+  const bound = meter.history ? await stepBoundUsd(step, meter.history) : STEP_FLOOR_USD[step];
+  base.skip(left < bound, `budget: $${left.toFixed(4)} left, the next ${step} step may cost up to $${bound.toFixed(4)}`);
 }
 
 interface Fixtures {
