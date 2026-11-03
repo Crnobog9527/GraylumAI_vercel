@@ -2,9 +2,9 @@
 import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { defaultModelFirst, freeChatModels } from './defaultModel';
-import type { PaygHostProfile } from '../turn/admission/paygHostPolicy';
-import type { StagingPolicy } from '../turn/settings/stagingPolicy';
-import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
+import type { PaygHostProfile } from '../admission/paygHostPolicy';
+import type { StagingPolicy } from './stagingPolicy';
+import { configuredReasoning } from '../../__tests__/fixtures/runtimeReasoning';
 
 const sol = { id: 'sol', name: 'gpt-6.1-sol' }, luna = { id: 'luna', name: 'gpt-6-luna' };
 const sonnet = { id: 'sonnet', name: 'claude-sonnet-5.5' }, gemini = { id: 'gemini', name: 'Gemini 3.8 Flash' };

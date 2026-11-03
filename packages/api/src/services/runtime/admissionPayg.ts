@@ -6,9 +6,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { frozenCallPolicy, type FrozenPaygRun, type FrozenRun } from '../turn/provider/service';
 import { READ_HISTORY_TOOL } from '../turn/agent/agentTools';
 import { freezePaygMessageBudget } from '../turn/admission/paygMessageBudget';
-import { freezeStagingPaygPricing } from './paygPricing';
+import { freezeStagingPaygPricing } from '../turn/admission/paygPricing';
 import type { StagingPolicy } from '../turn/settings/stagingPolicy';
-import type { readPaygPolicies } from './realHost';
+import type { readPaygPolicies } from '../turn/settings/realHost';
 
 type PaygContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: string[]; historyRead?: unknown };
 
