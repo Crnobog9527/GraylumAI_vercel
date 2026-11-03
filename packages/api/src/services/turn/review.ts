@@ -39,7 +39,7 @@ export const REVIEW_INSTRUCTIONS = '你是 Graylum 的运营教练，正在为�
   + '对标或粉丝信息没有取到就说明来源和缺口，不编造。数字表格由宿主保存，正文不要另造数字表格。'
   + '建议只提出，不自动创建或发布内容。篇幅控制在 1200 字以内，最后一段说明任何没能完成的部分。';
 export const REVIEW_REQUEST = '请为我生成本周作品复盘。下面是我的真实作品数据和代码计算的复盘表格（JSON）：\n';
-/** The operations coach (Owner 2026-10-27). How to read the pack, what to advise and how to write comes from the coach Skill's method.md
+/** The operations coach (Owner 2026-10-27). How to read the pack, what to advise and how to write comes from the coach Skill's SKILL.md body
  * (publishMonitor/coach/method.ts); this is the contract the host checks and never changes with the method: what the pack is, who decides
  * what, and the exact block the answer ends with (checked line by line by checkOutput, so it cannot live in an editable Skill). */
 export const COACH_CONTRACT = '以上是你的工作方法。用户消息里是由代码算好的复盘包（JSON，kind=review_pack），'
@@ -90,7 +90,7 @@ export type ReviewClaimInput = { id: string; actorId: string; sessionId: string;
   cadence?: string; attempt?: number;
   /** The pack is the operations coach's (its `review` is the RC-2 review pack); absent: the own-posts pack of the plain weekly review. */
   coach?: boolean;
-  /** The coach Skill's method.md for a coach review; without it the review waits (COACH_METHOD_UNAVAILABLE), nothing opened or charged. */
+  /** The coach Skill's method (its SKILL.md body) for a coach review; without it the review waits (COACH_METHOD_UNAVAILABLE), nothing opened or charged. */
   coachMethod?: string };
 /** `budget`: the cron invocation's shared time budget; a review never starts, and no model call is sent, without the time left to write and settle it. */
 export type ReviewTurnDeps = Pick<ChatDeps, 'admin' | 'clients' | 'slots' | 'newWork' | 'transport' | 'pricing'> & { budget?: RuntimeBudget };
