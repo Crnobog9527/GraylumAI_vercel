@@ -22,7 +22,9 @@ import {readPackRows} from './coach/rows';
  * not final yet keeps the claim for the turn recovery job.
  */
 const claimSchema=z.object({id:z.string().uuid(),actorId:z.string().uuid(),token:z.string().uuid(),
- requestId:z.string().uuid(),sessionId:z.string().uuid(),modelId:z.string().uuid().nullable(),maxCostUsd:z.string()}).strict();
+ requestId:z.string().uuid(),sessionId:z.string().uuid(),modelId:z.string().uuid().nullable(),maxCostUsd:z.string(),
+ // The brand coach's claims (publish_monitor_review_claim_item) also carry the brand, the cadence and the attempt.
+ businessId:z.string().uuid().nullish(),cadence:z.string().nullish(),attempt:z.number().int().nullish()}).strict();
 export type ReviewClaim=z.infer<typeof claimSchema>;
 export type ReviewStep={env:Record<string,string|undefined>;defer:(work:()=>Promise<void>)=>void;budget:RuntimeBudget;turn?:ReviewTurnDeps};
 const stepResult=z.object({allowed:z.boolean(),actorId:z.string().uuid(),businessId:z.string().uuid().nullish(),

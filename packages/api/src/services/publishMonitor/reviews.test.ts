@@ -172,6 +172,15 @@ it('cron prepares work but defers the model call outside the cron response',asyn
  await defer.mock.calls[0]![0]();
  expect(m.run).toHaveBeenCalledTimes(1);
 });
+it('cron accepts the claims exactly as the database returns them, plain ones and the brand coach\'s',async()=>{
+ const BUSINESS='88888888-8888-4888-8888-888888888888';
+ const plain={...c,businessId:null,cadence:'weekly',attempt:1};
+ const brand={...c,id:'77777777-7777-4777-8777-777777777777',businessId:BUSINESS,cadence:'monthly',attempt:2};
+ const d=database({observe:{},default:{}},{publish_monitor_review_claim:[plain,brand]});
+ const defer=vi.fn();
+ expect(await runWeeklyReviews(d.db,options(defer),Date.now()+10_000)).toMatchObject({claimed:2,scheduled:2,failed:0});
+ expect(defer).toHaveBeenCalledTimes(2);
+});
 it('a feature switched off still reaches existing claims; a missing claim function is only an off feature',async()=>{
  m.settings.mockResolvedValue({enabled:false});
  const d={rpc:vi.fn(async()=>({data:null,error:{code:'PGRST202'}}))} as never;
