@@ -7,7 +7,7 @@ import { gotoWithBypass } from '../../support/deploymentProtection';
 import { coreSql } from './db';
 import { requireAccounts } from './accounts';
 import { dailyMode, resultsDirectory, spendCapUsd, spendSince, statePathFor, type CoreRole } from './config';
-import { dbSpendReader, fileSpendStore, SpendMeter } from './spend';
+import { dbSpendReader, dbStepCostReader, fileSpendStore, SpendMeter, STEP_FLOOR_USD, stepBoundUsd, type PaidStep } from './spend';
 
 let shared: SpendMeter | undefined;
 
@@ -21,13 +21,18 @@ export async function spendMeter(): Promise<SpendMeter> {
   const accounts = await requireAccounts();
   const reader = dbSpendReader(coreSql(), Object.values(accounts).map(account => account.id), spendSince(startedAt));
   shared = new SpendMeter(spendCapUsd(), reader, fileSpendStore(), dailyMode());
+  shared.history = dbStepCostReader(coreSql(), Object.values(accounts).map(account => account.id));
   return shared;
 }
 
-/** Skips (never fails) a journey whose usual cost no longer fits under the cap; the summary lists it as skipped for budget. */
-export async function requireBudget(meter: SpendMeter, reserveUsd: number) {
+/**
+ * Skips (never fails) a journey whose first paid step no longer fits under the cap (the step's pre-check bound, spend.ts); the summary
+ * lists it as skipped for budget. Each later paid step is checked again before it is sent (SpendMeter.precheck).
+ */
+export async function requireBudget(meter: SpendMeter, step: PaidStep) {
   const left = await meter.remainingUsd();
-  base.skip(left < reserveUsd, `budget: $${left.toFixed(4)} left, this journey needs about $${reserveUsd.toFixed(2)}`);
+  const bound = meter.history ? await stepBoundUsd(step, meter.history) : STEP_FLOOR_USD[step];
+  base.skip(left < bound, `budget: $${left.toFixed(4)} left, the next ${step} step may cost up to $${bound.toFixed(4)}`);
 }
 
 interface Fixtures {

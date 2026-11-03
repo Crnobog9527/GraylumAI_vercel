@@ -1,33 +1,27 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
 import { requireAccounts } from './support/accounts';
-import { resultsDirectory } from './support/config';
 import { expect, requireBudget, test } from './support/fixtures';
 import { startFreeChat, waitForRuntimeTurn } from './support/freeChat';
-import { completeBenchmarkStep, completeStep, PERSONA, startPositioning, stopsInLast24h } from './support/positioning';
+import { PERSONA, startPositioning, stopsInLast24h } from './support/positioning';
 import { expectBalanceBack, reportDialog, startReport, stopButton } from './support/report';
 import { lastTurnId, settledTurnsAfter, turnsAfter } from './support/turns';
-import { readCredits, sendAndWait, settleOpening, stepNav } from './support/ui';
+import { readCredits, sendAndWait, settleOpening } from './support/ui';
 
 /**
  * The daily real-model smoke check (layer 2, Owner 2026-11-03): a few short journeys on staging's own configuration, at most
  * $0.50 a UTC day for all runs together (CORE_E2E_DAILY=1). Each journey is skipped, not started, when its usual cost no longer
  * fits; the compare journey (05, also @daily) runs before these. The global teardown (support/teardown.ts) lists every turn the
- * run touched and fails the run if any is still open or unsettled, also when a journey failed or the cap stopped the run. Run with: pnpm test:e2e:core-path:daily (README, "每日真实模型检查").
+ * run touched and fails the run if any is still open or unsettled, also when a journey failed or the cap stopped the run.
+ * Run with: pnpm test:e2e:core-path:daily (README, "每日真实模型检查").
  */
 // Not a serial group: a failed or capped journey must not skip the ones after it, above all the last check for frozen credits.
-// One worker runs the tests in file order (playwright.core-path.config.ts); the benchmark journey skips without the mentor's draft.
+// One worker runs the tests in file order (playwright.core-path.config.ts).
 
-/** About what each journey costs on staging's models (2026-10 measurements, rounded up); used only to skip, never to bill. */
-const RESERVE = { chat: 0.05, mentor: 0.08, report: 0.05, benchmark: 0.3, finish: 0.15 };
-const draftFile = () => path.join(resultsDirectory, 'daily-draft.txt');
-const readyDraftFile = () => path.join(resultsDirectory, 'ready-draft.txt');
-const CANDIDATES = 'section[aria-label="对标候选账号"], section[aria-label="补选对标账号"]';
+// The benchmark confirm is not a daily journey: one supplier fetch cost $0.45 on 2026-11-03 (the run went $0.089 past the cap); round 14
+// of the manual acceptance covers it (the simulated layer 1 does not yet). Every paid step is pre-checked (spend.ts, SpendMeter.precheck).
 
 test('daily: one free-chat message is one charged turn and survives a reload @daily', async ({ openAs, meter }) => {
   test.setTimeout(6 * 60_000);
-  await requireBudget(meter, RESERVE.chat);
+  await requireBudget(meter, 'chat');
   const pro = (await requireAccounts()).pro;
   const { page } = await openAs('pro');
   await page.goto('/app/profile');
@@ -55,7 +49,7 @@ test('daily: one free-chat message is one charged turn and survives a reload @da
 
 test('daily: a new draft opens one turn, reopening it opens none, one mentor reply is one turn @daily', async ({ openAs, meter, browser }) => {
   test.setTimeout(8 * 60_000);
-  await requireBudget(meter, RESERVE.mentor);
+  await requireBudget(meter, 'mentor');
   const gold = (await requireAccounts()).gold;
   const { page } = await openAs('gold');
   const mark = await lastTurnId(gold.id);
@@ -65,8 +59,6 @@ test('daily: a new draft opens one turn, reopening it opens none, one mentor rep
   // The opening is a paid turn of its own: stop here if it took the day past the cap, before the next paid message.
   await meter.checkpoint('daily: mentor opening');
   expect(opening.map(turn => turn.kind), 'starting a draft opens at most its first step\'s opening').toEqual(opening.length ? ['mentor'] : []);
-  await mkdir(resultsDirectory, { recursive: true });
-  await writeFile(draftFile(), new URL(url).pathname);
 
   // Real-validation bug (round 9): opening a draft in a new tab must start nothing and charge nothing.
   const afterOpening = await lastTurnId(gold.id);
@@ -87,49 +79,13 @@ test('daily: a new draft opens one turn, reopening it opens none, one mentor rep
   await meter.finishJourney('daily: mentor step');
 });
 
-test('daily: the benchmark confirm opens one turn and fills the table @daily', async ({ openAs, meter }) => {
-  test.setTimeout(20 * 60_000);
-  await requireBudget(meter, RESERVE.benchmark);
-  const draft = await readFile(draftFile(), 'utf8').catch(() => '');
-  test.skip(!draft, 'needs the draft from the mentor journey');
-  const gold = (await requireAccounts()).gold;
-  const { page } = await openAs('gold');
-  await page.goto(draft);
-  await completeStep(page, meter, 'daily: step 1', PERSONA.fill);
-  const mark = await lastTurnId(gold.id);
-  try { await completeBenchmarkStep(page, meter); }
-  catch (error) {
-    // Known supplier gap (Xiaohongshu search returned no data, 2026-11-03): only the page's own "the supplier gave nothing" notice
-    // makes this a skip. No keyword card, a failed research query or any other assertion stays a failure.
-    const supplierEmpty = page.getByText(/这次没有取到数据|对标数据暂时取不到/);
-    if (await page.locator(CANDIDATES).count() || !(await supplierEmpty.count())) throw error;
-    await meter.finishJourney('daily: benchmark (no candidates)');
-    test.skip(true, 'skipped: the search supplier returned no candidates (供应商无数据)');
-  }
-  const turns = await settledTurnsAfter(gold.id, mark);
-  test.info().annotations.push({ type: 'turn', description: turns.map(turn => `${turn.kind} ${turn.id}: ${turn.charged}`).join('; ') });
-  await meter.finishJourney('daily: benchmark');
-
-  // The report-stop journey needs a draft with its three steps confirmed and a qualified benchmark: finish this one once and keep
-  // it (the runner saves ready-draft.txt and hands it back as CORE_E2E_DRAFT_URL), so the paid search is not repeated every day.
-  if (process.env.CORE_E2E_DRAFT_URL) return;
-  await requireBudget(meter, RESERVE.finish);
-  await completeStep(page, meter, 'daily: step 2', '请根据对标结果给出可行性和平台选择，我同意你的建议。');
-  await completeStep(page, meter, 'daily: step 3', '请给出定位、资料包、第一个月计划和变现方案，我同意你的建议。');
-  await expect(stepNav(page).getByRole('button').filter({ hasText: '✓' })).toHaveCount(3);
-  await writeFile(readyDraftFile(), draft);
-  await meter.finishJourney('daily: ready draft for the report');
-});
-
-
-
 test('daily: a report stopped at once is refunded in full @daily', async ({ openAs, meter }) => {
   test.setTimeout(8 * 60_000);
-  await requireBudget(meter, RESERVE.report);
-  // A draft whose three steps are confirmed with a qualified benchmark: the kept one (CORE_E2E_DRAFT_URL) or the one the benchmark
-  // journey just finished. Without either (the search had no data, or the budget ran out first) there is nothing to stop.
-  const readyDraft = process.env.CORE_E2E_DRAFT_URL || await readFile(readyDraftFile(), 'utf8').catch(() => '');
-  test.skip(!readyDraft, 'no ready draft yet (the benchmark journey makes one)');
+  await requireBudget(meter, 'report');
+  // A kept draft whose three steps are confirmed with a qualified benchmark (CORE_E2E_DRAFT_URL). The daily check never makes one: a
+  // benchmark search costs about the whole day's budget (2026-11-03: $0.45 for one fetch).
+  const readyDraft = process.env.CORE_E2E_DRAFT_URL ?? '';
+  test.skip(!readyDraft, 'no kept ready draft (CORE_E2E_DRAFT_URL)');
   const gold = (await requireAccounts()).gold;
   // Only the first two stops in 24 hours are free; a third would charge, which the daily check does not do.
   test.skip(await stopsInLast24h(gold.id) >= 2, 'two report stops in the last 24 hours: a third would charge');
@@ -141,6 +97,7 @@ test('daily: a report stopped at once is refunded in full @daily', async ({ open
   expect(ready, 'the ready draft offers a report').toBe(true);
   const before = await readCredits(page);
   const mark = await lastTurnId(gold.id);
+  await meter.precheck('report', 'daily: report start');
   await startReport(page);
   await stopButton(page).click();
   await expect(reportDialog(page).getByText(/已停止/).first()).toBeVisible({ timeout: 60_000 });
