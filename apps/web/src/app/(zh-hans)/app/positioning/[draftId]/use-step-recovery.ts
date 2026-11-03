@@ -5,7 +5,6 @@ import {
   autoRecoveryTarget,
   envelopeIdentity,
   envelopeNeedsUser,
-  historyPollInterval,
   readStepEnvelopes,
   RecoveryTimers,
   UNMATCHED_POLL_MS,
@@ -13,24 +12,6 @@ import {
   type RecoveryHistory,
 } from "./step-recovery";
 export { useOpeningGate } from "./opening-intent";
-
-/**
- * The refetch interval of the draft's Runtime history. It re-reads while the
- * server is still advancing a turn this page did not stream (for example
- * after a reload) and stops as soon as that turn is terminal. A history that
- * never loaded is re-read a bounded number of times after failed reads.
- */
-export function useHistoryPolling(draftId: string, steps: readonly { id: string }[]) {
-  const [openedAt] = useState(() => Date.now());
-  type HistoryQuery = { state: { data: unknown; status: string; errorUpdateCount: number } };
-  // The server render also evaluates the option; it never polls and has no storage.
-  return (query: HistoryQuery) => typeof window === "undefined" ? false : historyPollInterval(
-    query.state.data as RecoveryHistory | undefined,
-    readStepEnvelopes(sessionStorage, draftId, steps.map(step => step.id)),
-    Date.now() - openedAt,
-    query.state.status === "error" ? query.state.errorUpdateCount : 0,
-  );
-}
 
 /**
  * Finish retained envelopes without the user: once history proves an
