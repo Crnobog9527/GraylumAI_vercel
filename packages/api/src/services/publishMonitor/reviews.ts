@@ -12,7 +12,9 @@ import {readTurnRouteEnv} from '../../lib/envValidator';
 import type {RuntimeBudget} from '../turn/settings/budget';
 import {readReviewSettings} from './reviewSettings';
 import {buildPack,type Cadence} from './coach/pack';
-import {readPackRows} from './coach/rows';
+import {COACH_READ_WEEKS,readPackRows} from './coach/rows';
+import {saveCoachLedger} from './coach/persist';
+import type {CheckedOutput} from './coach/output';
 
 /*
  * CORE-PATH-V2 V2-12 B8b: the scheduled weekly review on the turn core. The scheduler claims a review (publish_monitor_review_claim), the
@@ -21,7 +23,7 @@ import {readPackRows} from './coach/rows';
  * turn that delivered nothing is retried as a new attempt (up to three, sharing one cost cap) or ends the week, and a turn whose cost is
  * not final yet keeps the claim for the turn recovery job.
  */
-const claimSchema=z.object({id:z.string().uuid(),actorId:z.string().uuid(),token:z.string().uuid(),
+export const claimSchema=z.object({id:z.string().uuid(),actorId:z.string().uuid(),token:z.string().uuid(),
  requestId:z.string().uuid(),sessionId:z.string().uuid(),modelId:z.string().uuid().nullable(),maxCostUsd:z.string(),
  // The brand coach's claims (publish_monitor_review_claim_item) also carry the brand, the cadence and the attempt.
  businessId:z.string().uuid().nullish(),cadence:z.string().nullish(),attempt:z.number().int().nullish()}).strict();
@@ -59,8 +61,6 @@ export async function prepareReview(db:SupabaseClient,c:ReviewClaim):Promise<boo
  }
  return true;
 }
-/** Weeks of facts read for a coach pack: the longest window any section uses, plus the 8-week baseline before its oldest post. */
-export const COACH_READ_WEEKS=52;
 const CADENCES=['weekly','monthly','quarterly','chat'];
 /**
  * The operations coach's pack of one brand (RC-3): the RC-2 review pack, all numbers computed in code, wrapped so the page's tables and the
@@ -87,6 +87,10 @@ function turnDeps(db:SupabaseClient,options:ReviewStep):ReviewTurnDeps{
  return options.turn??{admin:db,clients:turnClients(db),slots:redisCounterStore(),newWork:newWorkGate(db,readTurnRouteEnv().environment),
   budget:options.budget};
 }
+async function saveLedger(db:SupabaseClient,c:ReviewClaim,businessId:string,pack:{review?:unknown},coach:CheckedOutput){
+ try{await saveCoachLedger(db,c,businessId,pack,coach);}
+ catch(error){logger.warn('billing','coach_ledger_save_failed',{reviewId:c.id,code:error instanceof Error?error.message.slice(0,64):'UNKNOWN'});}
+}
 /** Runs outside the cron response, under the turn core's own freeze, receipts and recovery. */
 export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:ReviewStep){
  try{
@@ -109,6 +113,8 @@ export async function advanceReview(db:SupabaseClient,c:ReviewClaim,options:Revi
    // Nothing opened: the claim expires and the next batch takes it again.
    logger.warn('billing','weekly_review_deferred',{reviewId:c.id,code:result.code});return;
   }
+  // The checked coach output goes into the ledger before the review completes; a failure here never undoes the reading the user got.
+  if(result.delivered&&result.coach&&state.businessId)await saveLedger(db,c,state.businessId,pack,result.coach);
   // A turn that delivered nothing is an interruption of the week (retried as a new attempt); an erased one ends it.
   if(result.delivered)await step(db,c,'observe');
   else await step(db,c,'skip',result.closeKind==='erased'?'RUNTIME_ENDED':'RUNTIME_INTERRUPTED');
