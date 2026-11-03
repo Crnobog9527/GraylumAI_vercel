@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStub } from '../loadtest/openrouter-stub.mjs';
 import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -158,4 +159,39 @@ test('selfcheck passes only when the stub counter goes up during the one-account
   const failed = await selfcheck('exit 3');
   assert.equal(failed.status, 1);
   assert.match(failed.stderr, /turn failed/);
+});
+
+// The real driver against a stand-in app: it calls the stub (so the counter goes up) and then answers with `result` or an SSE `error`.
+const selfcheckWithApp = async answer => {
+  const stub = createStub({ prefix: 'p' });
+  await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
+  const stubBase = `http://127.0.0.1:${stub.address().port}`;
+  const app = createServer(async (req, res) => {
+    req.resume();
+    await fetch(`${stubBase}/p/api/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'x', stream: false, messages: [{ role: 'user', content: 'hi' }] }) }).then(r => r.text()).catch(() => {});
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end(answer === 'ok' ? 'event: result\ndata: {}\n\n' : 'event: error\ndata: {"code":"MODEL_FAILED"}\n\n');
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const dir = mkdtempSync(join(tmpdir(), 'selfcheck-'));
+  writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ accounts: [{ token: 't', sessionId: 's' }] }));
+  const child = spawn('bash', ['scripts/loadtest/selfcheck.sh'], { cwd: join(import.meta.dirname, '../..'), env: { PATH: process.env.PATH,
+    HOME: process.env.HOME, LOADTEST_MODEL_STUB_URL: `${stubBase}/p`, LOADTEST_BASE_URL: `http://127.0.0.1:${app.address().port}`,
+    LOADTEST_ALLOWED_APP_HOST: '127.0.0.1', LOADTEST_ACCOUNTS_FILE: join(dir, 'accounts.json'), SELFCHECK_OUT: join(dir, 'out') } });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', d => { stdout += d; }); child.stderr.on('data', d => { stderr += d; });
+  const status = await new Promise(resolve => child.on('close', resolve));
+  stub.close(); app.close();
+  return { status, stdout, stderr };
+};
+
+test('selfcheck with the real driver: a clean turn that called the stub passes, a failed SSE turn is STOP even though the stub was called', async () => {
+  const ok = await selfcheckWithApp('ok');
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /PASS/);
+  const bad = await selfcheckWithApp('error');
+  assert.equal(bad.status, 1, bad.stdout + bad.stderr);
+  assert.match(bad.stderr, /failedTurns=1/);
+  assert.doesNotMatch(bad.stdout, /PASS/);
 });
