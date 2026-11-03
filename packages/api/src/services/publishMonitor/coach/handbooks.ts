@@ -13,8 +13,6 @@ import { handbookSchema, type Handbook } from './funnel';
 
 /** Platforms that have a machine-readable handbook; the others (YouTube, Instagram, Xiaohongshu) only have a draft text for now. */
 export const HANDBOOK_PLATFORMS = ['douyin', 'tiktok'] as const;
-/** A handbook is a few KB; anything larger is not one. */
-const HANDBOOK_MAX_BYTES = 65_536;
 /** Env name of the pinned package: JSON {skillId, revisionId, packageHash}. Unset: no handbooks, as before this block. */
 export const HANDBOOK_PACKAGE_ENV = 'PUBLISH_MONITOR_HANDBOOK_PACKAGE';
 
