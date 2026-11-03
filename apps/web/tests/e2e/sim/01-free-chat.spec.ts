@@ -37,3 +37,20 @@ test('free chat: one message is one charged turn, the sidebar follows, a reload 
   await page.waitForTimeout(3_000);
   expect((await turns(alice.id, mark)).length, 'a reload opens no turn').toBe(1);
 });
+
+// Real-validation bug (round 9): opening the voice page or a conversation list started paid turns. Merely looking opens nothing.
+test('opening the start page, the library and the voice tab opens no turn and charges nothing', async ({ page }) => {
+  const bob = seed().users.bob;
+  await signIn(page, 'bob');
+  await expectNothingFrozen(bob.id);
+  const before = (await ledger(bob.id)).credits;
+  const mark = await lastTurnId(bob.id);
+  for (const path of ['/app/positioning', '/app/library', '/app/library?tab=voice']) {
+    await page.goto(path);
+    await expect(sidebarCredits(page)).toBeVisible({ timeout: 60_000 });
+  }
+  await expect(page.getByRole('tab', { name: '我的文风', selected: true })).toBeVisible();
+  await page.waitForTimeout(8_000);
+  expect(await turns(bob.id, mark), 'looking opens no turn').toEqual([]);
+  expect((await ledger(bob.id)).credits).toBe(before);
+});

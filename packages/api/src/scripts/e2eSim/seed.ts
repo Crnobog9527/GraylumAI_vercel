@@ -8,7 +8,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import pg from 'pg';
+import { ensurePositioningProfilePlans } from '../../services/__tests__/fixtures/positioningProfilePlans';
 import { pricingConfig } from '../../services/__tests__/fixtures/runtimePricing';
+import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from '../../services/fusion/settings';
 import { seedTestOpenRouterKey } from '../../services/models/openRouterKey.testing';
 import { paygProductionSettings } from '../../services/turn/admission/paygHostPolicy';
 import { CORE_PATH_SETTING, RUNTIME_PAYG_SETTING } from '../../services/turn/settingKeys';
@@ -25,11 +27,15 @@ export const SIM_MODELS = [
 ] as const;
 
 // Synthetic admission evidence for local validation only (the shape productionPolicy.test.ts and chat.integration.ts use).
+// One profile per model and route (matchedProfile), covering every use the journeys make: chat, the mentor's Skill and organizer
+// calls, reports, compare columns and the jury.
+const PURPOSES = ['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report', 'fusion_review', 'fusion_summary',
+  'fusion_compare'];
+const FORMATS = ['serial-tools-v2', 'serial-tools-v4-stream', 'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream',
+  'fusion-text-v1-stream'];
 const profile = (model: string, route: string) => ({ model, endpointTag: route, protocol: 'openrouter-chat-v1', profileVersion: 'sim-only',
   evidenceVersion: 'sim-only', admissionPath: 'empirical', templateTokens: 4096, marginTokens: 4096, maxBytes: 196608, maxMessages: 128,
-  maxTools: 9, maxSchemaBytes: 16384,
-  purposes: ['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report'],
-  requestFormats: ['serial-tools-v2', 'serial-tools-v4-stream', 'agent-turn-v5-stream', 'serial-tools-v6-reasoning'],
+  maxTools: 9, maxSchemaBytes: 16384, purposes: PURPOSES, requestFormats: FORMATS,
   reasoningVariants: [{ reasoning: { effort: 'none' }, outputLimit: 8192, testedOutputLimit: 512, evidenceReference: 'sim-only',
     manifestHash: 'b'.repeat(64), outputStressSamples: 2, includesReasoning: true }], outputLimit: 8192,
   evidence: { reference: 'sim-only', manifestHash: 'a'.repeat(64), distinctSamples: 60, messageStressSamples: 12, maxVerifiedMessages: 128,
@@ -72,6 +78,10 @@ async function main() {
     // Checked with the product's own schema first: a profile the app would refuse fails here, not as a vague turn refusal.
     await set(RUNTIME_PAYG_SETTING, paygProductionSettings.parse({ version: 1, enabled: true, policyVersion: 'sim',
       profiles: SIM_MODELS.map(m => profile(m.modelId, m.route)) }));
+    const both = SIM_MODELS.map(m => models[m.modelId]!);
+    await set(FUSION_SETTINGS_KEY, { ...DEFAULT_FUSION_SETTINGS, compare: { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true,
+      allowedModelIds: both, defaultModelIds: both, minModels: 2, answerOutputTokens: 4096, maxBudgetUsd: '5' } });
+    await ensurePositioningProfilePlans(db);
     await set('primary_model_id', models[SIM_MODELS[0].modelId]);
     await set('billing_credits_per_usd', 100);
     await set('billing_token_price_multiplier', 6);
@@ -81,14 +91,15 @@ async function main() {
     await seedTestOpenRouterKey(db, 'LOCAL_SIMULATED_OPENROUTER_KEY');
 
     // Two accounts: each journey that charges uses its own, so balances are exact. Passwords stay in the run's private directory.
+    // carol is a Gold member (compare and the jury are Gold features).
     const users: Record<string, { id: string; email: string; password: string }> = {};
-    for (const role of ['alice', 'bob']) {
+    for (const role of ['alice', 'bob', 'carol']) {
       const email = `sim-${role}-${randomUUID().slice(0, 8)}@example.test`, password = randomBytes(18).toString('base64url');
       const id = await createUser(email, password);
       await db.query('insert into profiles(id,email,credits) values($1,$2,0) on conflict(id) do nothing', [id, email]);
       await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
         values($1,$3::int,'addition','grant','opening_grant','system',$2,0,$3::int)`, [id, 'opening_grant:' + id, 5000]);
-      await db.query('update profiles set credits=5000 where id=$1', [id]);
+      await db.query('update profiles set credits=5000, membership_level=$2 where id=$1', [id, role === 'carol' ? 'gold' : 'free']);
       users[role] = { id, email, password };
     }
     writeFileSync(out, JSON.stringify({ users, models }, null, 2), { mode: 0o600 });

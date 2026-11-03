@@ -10,7 +10,7 @@ import { expect, type Page } from '@playwright/test';
 import postgres, { type Sql } from 'postgres';
 
 /** What scripts/e2e-sim/run.mjs seeded (packages/api/src/scripts/e2eSim/seed.ts). Local, disposable accounts only. */
-export interface SimSeed { users: Record<'alice' | 'bob', { id: string; email: string; password: string }>; models: Record<string, string> }
+export interface SimSeed { users: Record<'alice' | 'bob' | 'carol', { id: string; email: string; password: string }>; models: Record<string, string> }
 export type SimRole = keyof SimSeed['users'];
 
 export const seed = (): SimSeed => JSON.parse(readFileSync(process.env.SIM_SEED_FILE!, 'utf8')) as SimSeed;
