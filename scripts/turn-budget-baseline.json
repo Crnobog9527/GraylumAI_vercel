@@ -1,17 +1,4 @@
 {
- "old:free-chat": {
-  "path": "old",
-  "roundTrips": 8,
-  "dbTimeMs": 50,
-  "relationLocks": 132,
-  "lockClasses": {
-   "main": 17,
-   "mentor": 97,
-   "ledger": 40
-  },
-  "hotSeqScans": 0,
-  "enforce": false
- },
  "new:mentor-account-strategy": {
   "path": "new",
   "roundTrips": 13,

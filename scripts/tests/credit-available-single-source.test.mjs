@@ -34,8 +34,8 @@ test('no other function adds the holds itself', () => {
   }
 });
 
-test('both spend paths take the available balance from credit_available', () => {
-  for (const path of ['billing/atomic_pre_deduct.sql', 'billing/bill2_payg_claim.sql']) {
+test('the spend path takes the available balance from credit_available', () => {
+  for (const path of ['billing/atomic_pre_deduct.sql']) { // bill2_payg_claim went with the old path (V2-12 F)
     assert.ok(calls(files[path], 'credit_available'), path);
     assert.ok(!calls(files[path], 'credit_grant_quarantined'), `${path} does not sum quarantined grants itself`);
   }
