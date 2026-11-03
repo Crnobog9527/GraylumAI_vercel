@@ -45,6 +45,7 @@ export type CheckedOutput = { body: string; parsed: boolean; mode_mismatch: bool
   pillar_mix_proposal: { target: Record<string, number>; evidence: z.infer<typeof evidence> } | null;
   strategy_proposal: { summary: string; evidence: z.infer<typeof evidence> } | null; stage_suggestion: string | null };
 
+const BLOCK_START = '```coach_json';
 const BLOCK = /```coach_json\s*\n([\s\S]*?)\n```\s*$/;
 
 /** The references a model may cite: every post and every number row present in this pack. */
@@ -61,7 +62,10 @@ function refs(p: PackView) {
 
 export function checkOutput(text: string, pack: PackView): CheckedOutput {
   const match = BLOCK.exec(text);
-  const out: CheckedOutput = { body: (match ? text.slice(0, match.index) : text).trimEnd(), parsed: false, mode_mismatch: false,
+  // A block that never closed (the answer ran out of room) is still internal: only what comes before it is the body.
+  const opened = text.indexOf(BLOCK_START);
+  const cut = match ? match.index : opened >= 0 ? opened : text.length;
+  const out: CheckedOutput = { body: text.slice(0, cut).trimEnd(), parsed: false, mode_mismatch: false,
     rejected: [], diagnoses: [], verdict_notes: [], experiments: [], tags: [], pillar_mix_proposal: null,
     strategy_proposal: null, stage_suggestion: null };
   if (!match) return { ...out, rejected: [{ path: '', reason: 'no_block' }] };

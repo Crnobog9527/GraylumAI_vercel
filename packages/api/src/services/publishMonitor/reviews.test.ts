@@ -101,14 +101,14 @@ it('a brand review reads the coach pack of its brand and cadence, saves it wrapp
  m.build.mockReturnValue({kind:'review_pack',mode:'full'});
  const d=database({default:{businessId:BUSINESS,cadence:'monthly',attempt:2}});
  await advanceReview(d.db,c,options());
- expect(m.rows).toHaveBeenCalledWith(expect.anything(),c.actorId,BUSINESS,12);
+ expect(m.rows).toHaveBeenCalledWith(expect.anything(),c.actorId,BUSINESS,52);
  expect(m.build).toHaveBeenCalledWith(expect.objectContaining({cadence:'monthly',businessId:BUSINESS,handbooks:expect.any(Map)}));
  const wrapped={kind:'review_pack',status:'available',window_days:90,source_connections:[CONN],review:{kind:'review_pack',mode:'full'}};
  expect(d.calls.find(x=>x[0]==='publish_monitor_review_save_pack')![1]).toEqual({p_id:c.id,p_token:c.token,p_pack:wrapped});
  expect(m.run).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({coach:true,cadence:'monthly',attempt:2}),wrapped,expect.any(Function),expect.any(Function));
  expect(m.pack).not.toHaveBeenCalled();
  await advanceReview(database({default:{businessId:BUSINESS,cadence:'weekly'}}).db,c,options());
- expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,8);
+ expect(m.rows).toHaveBeenLastCalledWith(expect.anything(),c.actorId,BUSINESS,52);
 });
 it('the 90-day window is used only for an account whose window is that long',async()=>{
  await advanceReview(database({default:{}},{publish_monitor_post_window:90}).db,c,options());

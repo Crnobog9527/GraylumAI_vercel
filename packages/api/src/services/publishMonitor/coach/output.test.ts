@@ -34,6 +34,8 @@ describe('coach_json checks (RC-2)', () => {
   });
 
   it('a missing or broken block keeps the prose and records nothing', () => {
+    // an unclosed block (cut off at the output limit) never reaches the body
+    expect(checkOutput('正文\n```coach_json\n{"mode":"full","dia', full)).toMatchObject({ body: '正文', parsed: false });
     expect(checkOutput('只有正文', full)).toMatchObject({ body: '只有正文', parsed: false, rejected: [{ reason: 'no_block' }] });
     expect(checkOutput('正文\n```coach_json\n{oops\n```', full).rejected).toEqual([{ path: '', reason: 'json' }]);
     expect(checkOutput(block({ version: 1 }), full).rejected).toEqual([{ path: '', reason: 'shape' }]);

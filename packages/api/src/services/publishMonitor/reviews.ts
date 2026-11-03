@@ -57,6 +57,8 @@ export async function prepareReview(db:SupabaseClient,c:ReviewClaim):Promise<boo
  }
  return true;
 }
+/** Weeks of facts read for a coach pack: the longest window any section uses, plus the 8-week baseline before its oldest post. */
+export const COACH_READ_WEEKS=52;
 const CADENCES=['weekly','monthly','quarterly','chat'];
 /**
  * The operations coach's pack of one brand (RC-3): the RC-2 review pack, all numbers computed in code, wrapped so the page's tables and the
@@ -65,7 +67,9 @@ const CADENCES=['weekly','monthly','quarterly','chat'];
  */
 export async function readCoachPack(db:SupabaseClient,actor:string,businessId:string,cadence:string,now=Date.now()){
  const kind=CADENCES.includes(cadence)?cadence as Cadence:'weekly';
- const rows=await readPackRows(db,actor,businessId,kind==='weekly'?8:12);
+ // The pack's own windows (8/12 weeks, the 35-63 day stage, the 8-week baseline before each post) all sit inside what is read;
+ // open experiments need their posts too.
+ const rows=await readPackRows(db,actor,businessId,COACH_READ_WEEKS);
  const review=buildPack({rows,cadence:kind,businessId,now,handbooks:new Map()});
  return {kind:'review_pack',status:'available',window_days:90,source_connections:[...new Set(rows.followers.map(f=>f.connectionId))],review};
 }
