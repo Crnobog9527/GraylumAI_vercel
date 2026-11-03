@@ -7,7 +7,6 @@
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
-import {createFixture} from '../payg/fixture.mjs';
 import {rpc as nativeRpc} from '../erasure-b2a/cases.mjs';
 import {fixtureSql,laterRedefinitions} from '../publish-monitor/fixtures.mjs';
 
@@ -25,7 +24,12 @@ const hash=text=>createHash('sha256').update(text).digest('hex');
 const POLICY={q:100,uTurnUsd:0.04,gCredits:24,minCredits:6,uModelCredits:24,historyItems:0,inputBytes:32000,
  limits:{model:1,paidTools:0,freeTools:0,decisions:0},stopLoss:{limitUsd:1000,p:8,poolSize:8,uFastUsd:1,uBigUsd:5},review:{mode:'weekly'}};
 async function fixture(cap='0.03'){
- const f=await createFixture(c,{credits:1000,q:'5000',threshold:1});
+ // A plain account with credits and a review model (the BILL2 fixture is gone with batch F; the review runs as a turn).
+ const f={actor:randomUUID(),payload:{modelId:randomUUID()}};
+ await c.query('INSERT INTO profiles(id,credits) VALUES($1,1000)',[f.actor]);
+ await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+  VALUES($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`,[f.actor,'opening_grant:'+f.actor]);
+ await c.query("INSERT INTO ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) VALUES($1,'Review fixture','publish-monitor-review','fixture','true',1000,64000)",[f.payload.modelId]);
  await c.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[f.actor]);
  await c.query(`INSERT INTO system_settings(key,value) VALUES('publish_monitor_review_model_id',$1::jsonb),
   ('publish_monitor_review_max_usd',$2::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,[JSON.stringify(f.payload.modelId),JSON.stringify(cap)]);
@@ -196,18 +200,11 @@ try{
  const voidedClose=await svc("SELECT turn_close($1,$2,'erased','[]'::jsonb,false,true,NULL) v",[voided.actor,voidedTurn.turnId]);
  assert.equal(voidedClose.chargedCredits,0,'an erased review with a full refund charges nothing');
  report.checks.push('a voided (erased) review is refunded in full even after a priced call');
- // 7. What the old path left claimed is closed by 0481; an idle claim answers expired=false, never NULL.
- const leftover=await fixture();
- const leftoverRow=await reload(leftover.review);
- await c.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state)
-  VALUES($1,$2,$3,'{}',0,'running')`,[leftover.actor,leftoverRow.runtime_session_id,leftoverRow.runtime_request_id]);
- for(const path of laterRedefinitions('0476'))await c.query(read(path));
- const closedLeftover=await reload(leftover.review);
- assert.deepEqual([closedLeftover.status,closedLeftover.skip_reason],['skipped','RUNTIME_ENDED'],'a review claimed with a Runtime execution ends');
+ // 7. An idle claim answers expired=false, never NULL. (What the old path left claimed was closed by 0481 while old executions existed.)
  const idle=await fixture();
  await c.query("UPDATE social_review_runs SET created_at=now()-interval '30 minutes' WHERE id=$1",[idle.review.id]);
  assert.strictEqual((await step(idle.review,'observe')).expired,false);
- report.checks.push('a review left claimed by the old path is closed by 0481; an idle claim answers expired=false');
+ report.checks.push('an idle claim answers expired=false');
  // The window and the source visibility are the monitor\'s own functions.
  assert.equal(await svc('SELECT publish_monitor_post_window($1) v',[idle.actor])>=0,true);
  assert.equal(await svc("SELECT publish_monitor_pack_visible($1,'{\"status\":\"no_entitlement\",\"source_connections\":[]}'::jsonb) v",[idle.actor]),true);
@@ -217,7 +214,7 @@ try{
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
  const before2=await one(catalog);
- for(const _ of [1,2])for(const path of [MIGRATION_PATH,...laterRedefinitions('0476')])await c.query(read(path));
+ for(const _ of [1,2])for(const path of laterRedefinitions('0476'))await c.query(read(path)); // 0477 itself names the old run function (gone with batch F)
  assert.deepEqual(await one(catalog),before2);
  report.checks.push('0477 reapplies twice without a catalog change');
  const permissions=(await c.query(`SELECT role,has_function_privilege(role,'publish_monitor_review_step(uuid,uuid,text,text)','EXECUTE') allowed

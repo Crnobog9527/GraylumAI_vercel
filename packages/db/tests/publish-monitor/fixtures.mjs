@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Shared PUBLISH-MONITOR local DB fixtures: a member with a business and one brand account on a platform.
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 export const fixtureSql = `CREATE SCHEMA IF NOT EXISTS pm_test;
 CREATE OR REPLACE FUNCTION pm_test.member(a uuid,plat text) RETURNS uuid LANGUAGE plpgsql AS $$
@@ -27,6 +27,10 @@ export const REFRESH_MIGRATION = '0272_publish_monitor_refresh.sql';
 
 // Every later publish-monitor migration after `from`, in order, so a reapplication check replays the chain
 // that really redefines its functions (MAINT-P1: the hand-written list had gone stale once CI ran this suite).
+// A migration that still names an object batch F drops (the old run tables and functions) cannot be replayed on the finished database
+// (V2-12 F); the ones that only mention them in a comment still can.
+const OLD_OBJECTS = /^(?!\s*--).*\b(runtime_executions|bill2_prepare|bill2_runs|bill2_calls|bill2_claim|bill2_close|bill2_receipts|runtime_tool_calls|runtime_session_history|runtime_admit\w*|runtime_cancel|report_fees|fusion_billing_groups|fusion_review_fees)\b/m;
+const namesDroppedPrepare = file => OLD_OBJECTS.test(readFileSync(resolve(import.meta.dirname, '../../migrations', file), 'utf8'));
 export const laterRedefinitions = from => readdirSync(resolve(import.meta.dirname, '../../migrations'))
-  .filter(file => /^\d{4}_publish_monitor.*\.sql$/.test(file) && file.slice(0, 4) > from).sort()
+  .filter(file => /^\d{4}_publish_monitor.*\.sql$/.test(file) && file.slice(0, 4) > from && !namesDroppedPrepare(file)).sort()
   .map(file => `packages/db/migrations/${file}`);

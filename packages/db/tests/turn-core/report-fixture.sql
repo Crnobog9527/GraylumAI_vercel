@@ -29,8 +29,7 @@ BEGIN
   INSERT INTO opc_drafts(draft_id, actor_id, project_id, round_id, session_id, request_id, registration, mode)
     VALUES (d, a, p, r, sid, gen_random_uuid(), (SELECT id FROM artifact_workflows WHERE module_id = (f->>'module')::uuid LIMIT 1), 'mentor');
   -- RT-4b (0268): three qualified benchmark accounts of this session (the evidence-checked path is research-benchmarks' suite).
-  INSERT INTO runtime_executions(id, actor_id, session_id, request_id, payload, history_revision, state)
-    VALUES (x, a, sid, gen_random_uuid(), '{}', 0, 'completed');
+  -- (V2-12 F: the old execution row is gone; the research rows keep the id as a plain value.)
   FOREACH account IN ARRAY ARRAY['benchmark_a', 'benchmark_b', 'benchmark_c'] LOOP
     INSERT INTO research_account_fetches(actor_id, session_id, execution_id, platform, account, account_key, state)
       VALUES (a, sid, x, 'tiktok', account, encode(sha256(convert_to(sid::text || ':' || account, 'utf8')), 'hex'), 'succeeded')
