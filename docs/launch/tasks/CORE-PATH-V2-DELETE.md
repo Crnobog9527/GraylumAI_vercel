@@ -344,6 +344,8 @@ F（DROP）仍排最后，验收和复测通过、总控放行才做。
 
 **第二次重新生成（2026-11-03，基线 staging + #1661 的 0488）**：16 张表、141 个函数、24 条外键、39 个触发器；守卫点名的“留下但仍碰旧对象”的函数 56 个（C 路删 Node 后应归零）。`runtime_session_scope` 改由 #1661 的迁移 0488 新建，F 不再自带（生成时需要 0488 已在树里）。生成器修了两处：①字面 `\\n\\n` 写进 SQL，psql 报 `invalid command \\n`；②返回被删表行类型的函数（如 `opc_data_execution` 的 `RETURNS runtime_executions`）漏列，导致 `DROP TABLE` 因依赖失败，现在按“返回类型”也列入删除。本机演练（1500 个旧执行、7500 条历史、27.9 万条历史依赖）：守卫按预期拒绝；去掉守卫后迁移 113 ms 成功，旧表全部消失，保留表数据不变（`credit_transactions` 1501 行），指向被删表的外键 0 条。
 
+**第三次生成（2026-11-03，分析基线 #1662）**：保留 `runtime_test_windows`（生成参数 `--keep-table runtime_test_windows`；上一次漏带，已改正）。15 张表、180 个函数（#1662 删旧 provider 层后更多函数变成不可达）、24 条外键、39 个触发器。本机演练：守卫点名 7 个（`fusion_compare_context`、`fusion_group_claim`、`fusion_review_archive_reconcile`、`fusion_review_claim`、`fusion_review_close`、`fusion_review_start`、`opc_capture_apply`），去守卫后 165 ms 应用成功，旧表 0 张留下，指向被删表的外键 0 条。逐个分类见 `CORE-PATH-V2-DELETE-F-CLASSIFY.md`。
+
 ### 7.5 注销与内容删除（R2，V2-9 窗口）留给 F 的清单
 
 来源：V2-9 窗口的 `R2-leftovers-for-F.md`（共享笔记目录，2026-11-03）。R2a（#1649）已合并，R2b（#1651）只去掉结算；旧内容清除和 detach 按总控决定保留到 F。**F 要把下面这些函数整段改写成不碰旧表的版本（或随 F 删），和批次 F 的迁移同时上库；F 迁移的自检守卫在它们没改完时会拒绝运行。**
