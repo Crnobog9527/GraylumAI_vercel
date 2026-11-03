@@ -53,7 +53,7 @@ function authorLookup(ctx: ResearchToolContext, platform: SocialPlatform, accoun
 }
 
 /** The supplier could not serve the round (round 13: TikHub answered 402): say so, never suggest other keywords or count it as a search. */
-export const SUPPLIER_UNAVAILABLE_NEXT_STEP = '对标数据供应商暂时不可用（不是关键词的问题，也没有扣用户积分）。'
+export const SUPPLIER_UNAVAILABLE_NEXT_STEP = '对标数据供应商暂时不可用（不是关键词的问题）。'
   + '如实告诉用户“对标数据暂时取不到，请稍后再试”；'
   + '不要建议换关键词，不要说已经搜完，也不要提“用现有对标先生成”。用户贴账号主页链接核对同样会受影响，稍后再试即可。';
 
@@ -113,6 +113,9 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
     const saved = prior.result?.nextCursor;
     return { operationId, items: parsed.success ? parsed.data : [],
       complete: prior.state === 'succeeded' && parsed.success, stopped: false,
+      // A replayed operation keeps what the supplier said: a continued round must not turn an outage into "not enough candidates".
+      ...(prior.result?.outcome === 'failed' && supplierUnavailable(typeof prior.result.reason === 'string' ? prior.result.reason : null)
+        ? { supplierDown: true } : {}),
       ...(typeof saved === 'string' ? { nextCursor: saved } : {}) };
   }
   // This reply's lookups or its time ran out: the round stops before planning anything and continues on the next reply.
