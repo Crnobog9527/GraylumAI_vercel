@@ -13,6 +13,7 @@ import styles from './start-work.module.css';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { readStartEntry, retainedMatches, START_TEXT, type StartMode } from './start-entry';
+import { grantOpeningIntent } from './[draftId]/opening-intent';
 import { ProfileArchiveList } from '@/components/opc/profile-archive/ProfileArchiveList';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:StartMode;businessId:string|null;businessName?:string};
@@ -66,7 +67,7 @@ export default function PositioningHome() {
     setError("");sessionStorage.setItem(key,JSON.stringify(op));setPendingStart(op);
     try {
       const {actorId:_,...request}=op;void _;const d=await start.mutateAsync(request);
-      sessionStorage.removeItem(key);setPendingStart(null);location.href="/app/positioning/"+d.draftId;
+      sessionStorage.removeItem(key);setPendingStart(null);grantOpeningIntent(sessionStorage,d.draftId);location.href="/app/positioning/"+d.draftId;
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : '';
       if (code.includes('OPC_PROFILE_LIMIT')) {

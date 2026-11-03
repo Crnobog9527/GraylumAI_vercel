@@ -7,7 +7,8 @@ import { openRouterRejection } from './provider/openRouterRejection';
 import { nominalCost, type NominalPricing } from '../../shared/nominalPricing';
 import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, TurnDatabaseError, type TurnDatabase } from './db';
-import { logSwallowed } from '../../lib/swallow';
+import { errorCode, logSwallowed } from '../../lib/swallow';
+import { logger } from '../../lib/logger';
 
 /*
  * CORE-PATH-V2 2.5.2: one paid model call is three writes. turn_call_begin before anything is sent (no row, no request);
@@ -24,6 +25,12 @@ export class TurnStop extends Error {
     | 'RESEARCH_TOOLS_UNAVAILABLE' | 'RESEARCH_TOOLS_CONTEXT_CAPACITY' | 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY'
     | 'STOP_LOSS_REACHED') { super(code); }
 }
+/**
+ * Why a call ended without a final receipt. An unknown call keeps no response body, so without this line nobody can tell a provider
+ * stream error from a dropped connection afterwards (staging turn 2024, round 12). Only fixed codes and numbers: never body text.
+ */
+const logUnknown = (deps: CallDeps, call: ModelCall, seq: number, detail: Record<string, unknown>) =>
+  logger.warn('ai', 'turn_call_unknown', { turnId: deps.turnId, seq, modelId: call.modelId, ...detail });
 /** The stop-loss refusing a call mid-turn (turn_call_begin): a stop, so the SDK's wrapping keeps the code; nothing was written. */
 export const stopLossStop = (error: unknown) =>
   error instanceof TurnDatabaseError && error.code === 'STOP_LOSS_REACHED' ? new TurnStop('STOP_LOSS_REACHED') : error;
@@ -108,6 +115,7 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
         }
         // Started and broke (disconnect, timeout): the outcome is unknown. Keep it for recovery; never send it again.
         await identity();
+        logUnknown(deps, call, seq, { stage: 'send', code: errorCode(error), providerIdSeen: Boolean(seenId) });
         throw new TurnStop('TURN_CALL_UNKNOWN');
       }
     } finally { await release(); }
@@ -135,6 +143,9 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
       if (!seenId && evidence.providerId) onIdentity(evidence.providerId);
       await identity();
       if (completion) return JSON.stringify(completion);
+      logUnknown(deps, call, seq, { stage: 'observation', httpStatus: observation.httpStatus, complete: observation.complete,
+        transportIssue: observation.transportIssue, observedBytes: observation.observedByteLength ?? observation.rawBody.length,
+        providerIdSeen: Boolean(seenId) });
       throw new TurnStop('TURN_CALL_UNKNOWN');
     }
     const nominal = ceil12(nominalUsd);

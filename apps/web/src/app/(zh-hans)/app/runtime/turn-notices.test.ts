@@ -15,6 +15,21 @@ describe('turn notices', () => {
     // The code is shown, so the next report of a failure says which one it was.
     expect(turnCodeNotice('SOMETHING_NEW').text).toContain('代码 SOMETHING_NEW');
   });
+  // The old admission refusals -> the same refusals on the turn path (the codes the server sends before anything is stored).
+  it.each([
+    ['TURN_RATE_LIMITED', '发送太频繁'], ['TURN_NEW_CALLS_PAUSED', '暂停了新请求'], ['TURN_LIMIT_UNAVAILABLE', '暂时无法确认用量'],
+    ['TURN_INPUT_TOO_LARGE', '太长'], ['TURN_REFERENCES_UNAVAILABLE', '引用的资料'], ['POSITIONING_REQUIRED', '账号定位'],
+  ])('keeps the text of the refusal %s and says why', (code, words) => {
+    expect(turnCodeNotice(code)).toMatchObject({ kept: true, text: expect.stringContaining(words) });
+  });
+  it('says a provider failure refunded the round and does not hand the text back', () => {
+    for (const code of ['TURN_PROVIDER_402', 'TURN_PROVIDER_BUSY'])
+      expect(turnCodeNotice(code)).toMatchObject({ kept: false, text: expect.stringContaining('全额退回') });
+  });
+  it('says a round paused for credits can be continued and is refunded after 24 hours', () => {
+    expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS')).toMatchObject({ kept: false, text: expect.stringContaining('点继续') });
+    expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS').text).toContain('24 小时');
+  });
   it('names every trimmed tool, grouped by why (never a silent drop)', () => {
     expect(trimmedToolNotices({ available: ['read_source'], trimmed: [{ name: 'web_search', reason: 'capacity' },
       { name: 'web_fetch', reason: 'capacity' }, { name: 'social_search', reason: 'disabled' }] }))

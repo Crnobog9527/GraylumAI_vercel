@@ -15,6 +15,17 @@ describe("mentorTailNotices", () => {
     expect(mentorTailNotices({ ...base, replying: true, livePhase: "mentor" }).map(notice => notice.id)).toEqual(["live"]);
   });
 
+  it("offers the opening as a click, not a turn: 开始这一步 starts it", () => {
+    const onClick = vi.fn();
+    const [notice] = mentorTailNotices({ ...base, opening: { onClick } });
+    expect(notice.id).toBe("opening-offer");
+    expect(notice.actions?.map(action => action.label)).toEqual(["开始这一步"]);
+    expect(onClick).not.toHaveBeenCalled();
+    notice.actions![0].onClick();
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(mentorTailNotices({ ...base, opening: { onClick }, replying: true }).map(n => n.id)).toEqual(["replying"]);
+  });
+
   it("marks an interrupted stream as a warning without a spinner", () => {
     expect(mentorTailNotices({ ...base, livePhase: "incomplete" })[0]).toMatchObject({ tone: "warning", busy: false });
   });

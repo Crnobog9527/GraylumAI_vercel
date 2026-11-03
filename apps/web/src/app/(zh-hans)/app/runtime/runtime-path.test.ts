@@ -11,8 +11,13 @@ describe('which workspace a conversation opens in', () => {
     expect(runtimePathChoice({ viewSettled: true, scopeKind: 'positioning_draft' })).toBe('turn');
     expect(runtimePathChoice({ viewSettled: true, scopeKind: 'work_item' })).toBe('work');
   });
-  it('shows a failed or unknown read as unreadable, never as another workspace', () => {
-    expect(runtimePathChoice({ viewSettled: true })).toBe('unreadable');
-    expect(runtimePathChoice({ viewSettled: true, scopeKind: 'something_else' })).toBe('unreadable');
+  it('shows a failed read as unreadable, never as another workspace or as an old conversation', () => {
+    expect(runtimePathChoice({ viewSettled: true, viewFailed: true })).toBe('unreadable');
+    expect(runtimePathChoice({ viewSettled: true, viewFailed: true, scopeKind: 'work_item' })).toBe('unreadable');
+  });
+  it('shows a conversation without a turn-path scope, or flagged legacy, as an old conversation', () => {
+    expect(runtimePathChoice({ viewSettled: true })).toBe('legacy');
+    expect(runtimePathChoice({ viewSettled: true, scopeKind: 'something_else' })).toBe('legacy');
+    expect(runtimePathChoice({ viewSettled: true, scopeKind: 'positioning_draft', legacy: true })).toBe('legacy');
   });
 });
