@@ -41,7 +41,7 @@ curl -N -s -w '\n总耗时 %{time_total}s\n' -H 'content-type: application/json'
 mkdir -p ~/graylum-loadtest && umask 077
 # 用文本编辑器打开这个文件，两行里的 <…> 换成真实值，保存：
 #   export LOADTEST_DATABASE_URL='<只读连接串>'
-#   export LOADTEST_ALLOWED_HOST='<连接串里的主机名>'
+#   export LOADTEST_ALLOWED_DB_HOST='<连接串里的主机名>'
 open -e ~/graylum-loadtest/env.private
 ```
 

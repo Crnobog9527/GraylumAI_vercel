@@ -28,9 +28,9 @@
 ## 2. 步骤（总控给时段后，约 1 小时 45 分）
 
 ```bash
-# 环境（值由总控给，全部在仓库外）：LOADTEST_BASE_URL / LOADTEST_ALLOWED_HOST（应用）、LOADTEST_ACCOUNTS_FILE、
-# LOADTEST_DATABASE_URL + 采样用的 LOADTEST_ALLOWED_HOST（库）、可选 SUPABASE_MANAGEMENT_TOKEN / SUPABASE_PROJECT_REF
-OUT=$HOME/graylum-loadtest/vercel-final   # 仓库外
+# 环境（值由总控给，全部在仓库外）：LOADTEST_BASE_URL、LOADTEST_ALLOWED_APP_HOST（应用主机，只给驱动）、LOADTEST_ACCOUNTS_FILE、
+# LOADTEST_DATABASE_URL、LOADTEST_ALLOWED_DB_HOST（库主机，只给两个采样器）、可选 SUPABASE_MANAGEMENT_TOKEN / SUPABASE_PROJECT_REF
+# run-all.sh 给每个进程只传它自己的那个主机；每次运行写进新目录 <RUN_ROOT>/run-<时间戳>，目录里已有文件则拒绝运行
 # 1. 桩：LOAD_STUB_HOST=… LOAD_STUB_PORT=… LOAD_STUB_PREFIX=<随机串> node scripts/loadtest/openrouter-stub.mjs
 # 2. 自检：curl <桩地址>/healthz 返回 ok；先只跑 1 个账号 1 轮（--calibrate --turns 1 --go），再看 <桩地址>/__stats 的 calls > 0（证明钩子生效；为 0 立即停，别往下跑）
 # 3–6. 一条命令：先跑 5 分钟无争用基线（不开采样器）；再把两个采样器放到后台（打印 PID 和日志路径）；

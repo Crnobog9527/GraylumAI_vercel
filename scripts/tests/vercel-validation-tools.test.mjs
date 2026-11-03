@@ -2,6 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStub } from '../loadtest/openrouter-stub.mjs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { coverage } from '../loadtest/lib/coverage.mjs';
 import { summarizeConnections, judgeConnections, classifyFixedOverhead } from '../loadtest/lib/connections.mjs';
 import { readManagedLimits } from '../loadtest/sample-connections.mjs';
@@ -98,4 +102,31 @@ test('sampler coverage fails when samples start after, or stop before, the drive
   assert.equal(coverage([4000, 6000, 11500], window, 2000).ok, false); // started late
   assert.equal(coverage([500, 6000, 8000], window, 2000).ok, false); // stopped early
   assert.equal(coverage([], window, 2000).ok, false);
+});
+
+const runAll = (extra = {}) => spawnSync('bash', ['scripts/loadtest/run-all.sh', '--dry-run'], {
+  cwd: join(import.meta.dirname, '../..'), encoding: 'utf8', env: { ...process.env, DRY_DRIVER_SECONDS: '2', ...extra } });
+
+test('run-all dry run starts the driver and both samplers with their own hosts and covers the driver window', () => {
+  const root = mkdtempSync(join(tmpdir(), 'runall-'));
+  const result = runAll({ RUN_ROOT: root, LOADTEST_ALLOWED_APP_HOST: 'app.example.test', LOADTEST_ALLOWED_DB_HOST: 'db.other.test' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /COVERED .*connections\.jsonl/);
+  assert.match(result.stdout, /COVERED .*waits\.jsonl/);
+  assert.match(result.stdout, /driver app\.example\.test/);
+  assert.match(result.stdout, /connections db\.other\.test/);
+});
+
+test('run-all refuses a directory holding an earlier run and a second run reads only its own files', () => {
+  const root = mkdtempSync(join(tmpdir(), 'runall-'));
+  const stale = join(root, 'run-old');
+  mkdirSync(stale);
+  writeFileSync(join(stale, 'connections.jsonl'), JSON.stringify({ t: 1, rows: [] }) + '\n'); // far outside any window
+  const refused = runAll({ RUN_DIR: stale });
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /already holds files/);
+  assert.equal(readFileSync(join(stale, 'connections.jsonl'), 'utf8').split('\n').filter(Boolean).length, 1);
+  const fresh = runAll({ RUN_ROOT: root });
+  assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
+  assert.doesNotMatch(fresh.stdout, /run-old/);
 });
