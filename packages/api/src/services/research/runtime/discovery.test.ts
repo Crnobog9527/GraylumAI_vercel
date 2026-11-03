@@ -18,3 +18,16 @@ describe('benchmark discovery candidate shortage', () => {
     expect(ROUND_UNFINISHED_NEXT_STEP).not.toMatch(/\d+\s*积分/);
   });
 });
+
+// Round 13 (staging): TikHub answered HTTP 402 to every Xiaohongshu call; the coach said "only one round" and suggested other keywords.
+describe('a round the supplier could not serve', () => {
+  it('is told apart from a round that searched to the end and found nothing', async () => {
+    const { supplierDownRound, SUPPLIER_UNAVAILABLE_NEXT_STEP } = await import('./discovery');
+    expect(supplierDownRound({ supplierDown: true, stopped: false, shown: false, found: 0 })).toBe(true);
+    expect(supplierDownRound({ supplierDown: false, stopped: false, shown: false, found: 0 })).toBe(false); // searched, nothing found
+    expect(supplierDownRound({ supplierDown: true, stopped: true, shown: false, found: 0 })).toBe(false);  // unfinished round
+    expect(supplierDownRound({ supplierDown: true, stopped: false, shown: true, found: 3 })).toBe(false);  // part of it worked
+    expect(SUPPLIER_UNAVAILABLE_NEXT_STEP).toContain('不是关键词的问题');
+    expect(SUPPLIER_UNAVAILABLE_NEXT_STEP).toContain('不要建议换关键词');
+  });
+});

@@ -47,6 +47,7 @@ describe('coach_json checks (RC-2)', () => {
     ['a metric reference that is not in the pack', { ...good, evidence: { post_ids: [], metrics: ['scoreboard:p9:x'] } }, 'no_evidence'],
     ['an unknown pillar', { ...good, match: { pillar_key: 'p9' } }, 'unknown_pillar'],
     ['a target that cannot be measured', { ...good, target: {} }, 'metric_or_target'],
+    ['both a multiple and a line as the target', { ...good, target: { mult: 1.5, min: 1000 } }, 'metric_or_target'],
     ['a rate metric in a day-7 experiment', { ...good, metric: 'bounce_2s' }, 'metric_or_target'],
     ['a kind this cadence may not propose', { ...good, kind: 'pillar_mix' }, 'kind_not_allowed'],
   ])('rejects an experiment with %s', (_name, experiment, reason) => {

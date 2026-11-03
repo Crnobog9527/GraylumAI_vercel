@@ -125,8 +125,8 @@ def required_event_configuration_failures(file, event_name, configuration)
   failures
 end
 
-# The default pull_request activity types plus ready_for_review (Owner 2026-11-01: a draft pull request skips the slow database jobs and
-# runs them when it is marked ready). Listing types is otherwise forbidden because a narrower list would stop a required check running.
+# The default pull_request activity types plus ready_for_review (still accepted; CI itself lists no types since Owner 2026-11-03, when a
+# draft pull request began running the slow database jobs like a ready one). Listing types is otherwise forbidden because a narrower list would stop a required check running.
 REQUIRED_PULL_REQUEST_TYPES = %w[opened ready_for_review reopened synchronize].freeze
 
 def required_pull_request_types?(types)

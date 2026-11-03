@@ -2,6 +2,7 @@
 // The one JSON shape every research tool returns to the model (plan §2.2, §2.3). Supplier text is data
 // inside fields, never instructions; failures are explicit states, never an empty list posing as "no results".
 import type { ResearchCallResult, ResearchItem } from '../vendors/types';
+import { SUPPLIER_UNAVAILABLE_REASON, supplierUnavailable } from '../../../shared/researchTurn';
 import type { ShortfallNotice } from '../runtime/shortfall';
 import type { DiscoveryCoverage } from '../runtime/discoveryLayers';
 
@@ -52,7 +53,7 @@ export function statusForOutcome(result: Pick<ResearchCallResult, 'outcome' | 'r
     // `NO_RESULTS` stays visible so an empty list is never mistaken for missing data.
     case 'ok': return { status: 'ok', reason: result.reason };
     case 'partial': return { status: 'partial', reason: result.reason };
-    case 'failed': return { status: 'unavailable', reason: 'PROVIDER_FAILED' };
+    case 'failed': return { status: 'unavailable', reason: supplierUnavailable(result.reason) ? SUPPLIER_UNAVAILABLE_REASON : 'PROVIDER_FAILED' };
     case 'unknown': return { status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN' };
     case 'not_sent':
       return result.reason === 'ROUTE_NOT_SUPPORTED' || result.reason === 'PDF_NOT_SUPPORTED'

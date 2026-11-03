@@ -248,9 +248,8 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
   （`.tsx`、`.css`）和它们的测试（`.test.ts`、`.test.tsx`）。`apps/web/src/app/api/**`、`route`/`middleware`/`proxy` 文件、
   `apps/web/src` 下的其他目录、`packages/**`、`supabase/**`、`scripts/**`、`.github/**`、依赖和锁文件都不在白名单里，
   混进一个就跑全套。push 到 `staging`/`main`、定时任务、目标是 `main` 的可审查 PR，以及拿不到改动列表、列表为空时，一律全套。
-  另一种跳过（Owner 2026-11-01 批准）：草稿 PR 只跑快速检查（lint、类型、单元、构建与安全 E2E、全部安全检查），
-  同样跳过这两项数据库和计费测试；草稿转为可审查时 CI 会重新触发（`pull_request` 带 `ready_for_review`），
-  这一次按上面的规则判定，改了白名单外文件的 PR 一定跑全套。只有 `draft` 明确为 `true` 才算草稿，读不到按可审查处理。
+  草稿 PR 与可审查 PR 一样按上面的规则判定（Owner 2026-11-03 取代 2026-11-01 的“草稿只跑快速检查”）：改了白名单外文件的草稿 PR
+  也跑数据库和计费测试；`pull_request` 不再单列 `ready_for_review`，草稿转可审查不会多触发一次。
   判定写在 `scripts/ci-test-scope.mjs`（测试在 `scripts/tests/ci-test-scope.test.mjs`）；改白名单等于改规则，要 Owner 批准。
   lint、类型检查、单元测试、构建与安全 E2E、全部安全检查在任何情况下都照跑。必需检查名字不变："Unit Tests" 只接受
   判定任务成功且判定为"不用全套"时的跳过，失败、取消和其他原因的跳过仍然是红的
