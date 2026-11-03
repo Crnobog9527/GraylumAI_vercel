@@ -7,7 +7,8 @@ import { DataError } from './data';
 /**
  * PUBLISH-MONITOR block A (Owner 2026-10-27): the weekly trend behind the "数据复盘" charts, per own connection (platforms are never
  * mixed). Weeks are the 7-day periods ending yesterday (UTC), as in the review pack. Views and engagement are the medians of the
- * posts' settled day-7 numbers by publish week; followers are the week's last account-level point; frequency counts posts.
+ * posts' settled day-7 numbers by publish week; followers are the week's last account-level point; frequency counts posts
+ * (missing for an empty week before the connection, which was not recorded).
  * Missing is null with a reason, never zero.
  */
 type Rpc = Pick<SupabaseClient, 'rpc'>;
@@ -24,7 +25,7 @@ type Rows = z.infer<typeof rowsSchema>;
 
 /** Why a week has no number: before the connection (data is recorded from that day), or its posts are not 7 days old yet. */
 export type WeekNote = 'before_connected' | 'too_new' | null;
-export type TrendWeek = { start: string; end: string; posts: number; viewsMedian: number | null; viewsSamples: number;
+export type TrendWeek = { start: string; end: string; posts: number | null; viewsMedian: number | null; viewsSamples: number;
   engagementMedian: number | null; followers: number | null; note: WeekNote };
 /** not_provided: the platform does not give it; accumulating: nothing recorded yet. */
 export type Gap = 'not_provided' | 'accumulating';
@@ -51,7 +52,8 @@ export function trendSeries(rows: Rows, now: number): TrendSeries[] {
       const viewsMid = median(views), rateMid = median(rates);
       const followers = c.followers.filter(f => utcDay(f.date) >= start && utcDay(f.date) <= end).at(-1)?.value ?? null;
       const note: WeekNote = end < connected ? 'before_connected' : end > today - 8 && inWeek.length > 0 && views.length === 0 ? 'too_new' : null;
-      weeks.push({ start: isoDay(start), end: isoDay(end), posts: inWeek.length,
+      // Before the connection an empty week is "not recorded", not "nothing posted": left missing, never drawn as 0.
+      weeks.push({ start: isoDay(start), end: isoDay(end), posts: note === 'before_connected' && inWeek.length === 0 ? null : inWeek.length,
         viewsMedian: viewsMid === null ? null : Math.round(viewsMid), viewsSamples: views.length,
         engagementMedian: rateMid === null ? null : round(rateMid, 4), followers, note });
     }

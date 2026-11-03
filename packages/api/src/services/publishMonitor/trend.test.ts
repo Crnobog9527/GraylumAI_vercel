@@ -30,6 +30,8 @@ describe('trendSeries', () => {
       posts: [{ postedAt: '2026-10-16T00:00:00Z', day7: { views: 50 } }] })] }, now);
     expect(s!.weeks).toHaveLength(12);
     expect(s!.weeks.filter(w => w.note === 'before_connected').map(w => w.end).at(-1)).toBe('2026-10-12');
+    // An empty week before the connection was not recorded: missing, not "0 posts".
+    expect(s!.weeks.filter(w => w.note === 'before_connected').every(w => w.posts === null)).toBe(true);
     expect(s!.connectedOn).toBe('2026-10-15');
     // Post for Me gives no follower history; views without likes/comments/shares give no engagement rate.
     expect(s!.gaps).toEqual({ followers: 'not_provided', engagement: 'not_provided' });

@@ -9,7 +9,7 @@ import { dataErrorMessage, errorCode, formatDay, formatMetric, platformName } fr
  * (platforms are never mixed). Every number comes from the server's trend query; a week without data is a gap in the line,
  * and a metric the platform does not give is named in words instead of drawn.
  */
-export type TrendWeek = { start: string; end: string; posts: number; viewsMedian: number | null; viewsSamples: number;
+export type TrendWeek = { start: string; end: string; posts: number | null; viewsMedian: number | null; viewsSamples: number;
   engagementMedian: number | null; followers: number | null; note: 'before_connected' | 'too_new' | null };
 type Gap = 'not_provided' | 'accumulating';
 export type TrendSeries = { connectionId: string; platform: string; businessName: string | null; connectedOn: string;
@@ -71,7 +71,7 @@ function SeriesCard({ series, gold }: { series: TrendSeries; gold: boolean }) {
       </div>
       <ul className="space-y-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
         {latest?.note === 'too_new' && <li>最近一周的作品还没满 7 天，播放和互动率下周再算。</li>}
-        {series.weeks.some(w => w.note === 'before_connected') && <li>连接之前的周没有播放、互动和粉丝记录，图上留空。</li>}
+        {series.weeks.some(w => w.note === 'before_connected') && <li>连接之前的周没有播放、互动和粉丝记录，没有记录的发布频率也留空，不算 0 条。</li>}
         <li>互动率 = (点赞 + 评论 + 分享) ÷ 播放；缺任何一项的作品不算。</li>
       </ul>
     </article>
@@ -96,7 +96,7 @@ function Chart({ title, rows, dataKey, gap, format, bar = false }: { title: stri
                 <XAxis dataKey="label" tick={AXIS} tickLine={false} interval="preserveStartEnd" minTickGap={12} />
                 <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} width={44} />
                 <Tooltip formatter={v => format(Number(v))} labelFormatter={(_, p) => weekRange(p)} />
-                <Bar dataKey={dataKey} fill="var(--chart-1)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey={dataKey} fill="var(--color-chart-1)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
               </BarChart>
             ) : (
               <LineChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: -16 }}>
@@ -105,7 +105,7 @@ function Chart({ title, rows, dataKey, gap, format, bar = false }: { title: stri
                 <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} />
                 <Tooltip formatter={v => format(Number(v))} labelFormatter={(_, p) => weekRange(p)} />
                 {/* A week without data is a break in the line, never a drop to zero. */}
-                <Line dataKey={dataKey} stroke="var(--chart-1)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false}
+                <Line dataKey={dataKey} stroke="var(--color-chart-1)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false}
                   isAnimationActive={false} />
               </LineChart>
             )}

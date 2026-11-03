@@ -25,6 +25,7 @@ describe('trend charts', () => {
     expect(html).toContain('90 天趋势从连接日起记录');
     expect(html).toContain('最近一周的作品还没满 7 天');
     expect(html).toContain('连接之前的周没有播放、互动和粉丝记录');
+    expect(renderToStaticMarkup(<TrendCharts gold />)).not.toContain('var(--chart-1)');
   });
 
   it('names a metric the platform does not give instead of drawing it, and Pro does not claim a 90-day record', () => {
