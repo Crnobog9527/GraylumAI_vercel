@@ -54,12 +54,20 @@ const REVIEWER_FORMAT = [
   '只依据给出的报告和资料，不要联网，需要外部核实的说法标为"待核实"。',
   NO_SELF_IDENTITY,
 ].join('\n');
+/**
+ * The benchmark accounts the report actually adopted, with the numbers the host attached from its own fetched table and the time they
+ * were fetched (`metrics` null: not fetched). The report text carries only the names; this is the only place a reviewer may check
+ * a benchmark number or call an account unverified. What the user wrote in `materials` earlier (links that failed to load, accounts
+ * dropped later) is the user's note, never a record of this report's benchmarks.
+ */
+export const BENCHMARK_RULE = '对标账号以输入里的 adoptedBenchmarks 为准：只有它列出的账号才是这份报告采用的对标，metrics 是宿主取到的数据和取数时间，'
+  + 'metrics 为 null 才算没取到。materials 里用户以前写过的链接或没取到资料的账号，不是这份报告的对标，不要拿它们去判断 adoptedBenchmarks 里的账号是否核实。';
 /** The fixed angle of a reviewer seat (Owner 2026-10-20), written by the host so it follows the model it is bound to. */
 export const ROLE_BLOCKS: Record<ReviewerRole, string> = {
   finance: '你这一席的专门任务是算账：把报告自己给出的数字（转化率、客单价、佣金、成本、每周投入时间、粉丝数、发布频率等）逐项算一遍，'
     + '算不通的必须在 problem 里写出算式，并指出错在哪一步（哪个数字没有来源、哪两个数字互相矛盾、哪一步放大了多少倍）。算得通的不用写。',
   evidence: '你这一席的专门任务是证据和对标：报告里的每个事实性说法有没有来源、对标账号的数据和结论对不对得上、"一般来说/大家都"这类断言有没有依据、'
-    + '引用的资料和报告结论是否一致。',
+    + '引用的资料和报告结论是否一致。' + BENCHMARK_RULE,
   execution: '你这一席的专门任务是用户的执行能力和限制：用户每周的时间、是否出镜、预算、资质、已有素材和设备，报告里的计划和建议用户真的做得到吗？'
     + '哪一步会让这个用户做不下去，或者违反他自己说过的限制。',
 };
@@ -79,6 +87,7 @@ const DEBATE_FORMAT = [
 ].join('\n');
 const SUMMARY_FORMAT = [
   NO_SELF_IDENTITY,
+  BENCHMARK_RULE,
   '输出要求：只输出一个 JSON 对象 {"adjudication","body","steps","changeNotes"}。',
   'adjudication 是裁决记录：去重后的每个问题一条，section 写它属于哪个章节（给出的章节标题原样照抄；涉及全文的写"全文"），issue 写问题概要，'
     + 'reviewers 写哪些评审提出（代号 A/B/C），single 标是否只有一位评审提出，disputed 标评审之间对它是否有分歧，'
@@ -115,7 +124,7 @@ export const reviewLocale = (config: unknown) => {
   return parsed.success ? { replyLocale: parsed.data } : {};
 };
 
-export type ReviewContext = { report: string; materials: unknown; sections: string[];
+export type ReviewContext = { report: string; materials: unknown; sections: string[]; adoptedBenchmarks?: unknown;
   /** The review was started with the evidence check: reviewers are asked for quotes/anchors, the summary gets merged issues. */
   evidence?: boolean;
   /** The template's length limit in characters; the host check refuses a longer body, so the model is told the number. */
@@ -131,7 +140,8 @@ export function reviewerRequest(skill: ReviewSkillText, context: ReviewContext, 
   const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : [])].join('\n');
   return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}`
       + reviewLanguageRule(context.replyLocale, 'reviewer'),
-    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections }),
+    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? [] }),
     responseFormat: OPINION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
 
@@ -143,6 +153,7 @@ export function debateRequest(skill: ReviewSkillText, context: ReviewContext, mi
   return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}\n${DEBATE_FORMAT}`
       + reviewLanguageRule(context.replyLocale, 'reviewer'),
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? [],
       mine: mine ? shown(mine) : null, others: others.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })),
       // Exactly these pairs must be answered, each once: every other reviewer on every disputed decision.
       respondTo: others.flatMap(item => disputed.map(decision => ({ reviewer: item.reviewer, decision }))) }),
@@ -157,7 +168,8 @@ export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, o
   // the original block (0300), and a model that edited it wrote change notes for sections whose text never changed.
   return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`
       + reviewLanguageRule(context.replyLocale, 'summary'),
-    input: JSON.stringify({ report: reportBodyText(context.report), materials: context.materials, sections: context.sections, steps,
+    input: JSON.stringify({ report: reportBodyText(context.report), materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? [], steps,
       opinions: opinions.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
@@ -196,7 +208,8 @@ export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewCont
       ...(level >= 1 ? {} : { strongestCase: d.strongestCase, strongestAlternative: d.strongestAlternative, basis: d.basis }) }))) }));
   return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`
       + reviewLanguageRule(context.replyLocale, 'summary'),
-    input: JSON.stringify({ report, materials: context.materials, sections: context.sections, steps, decisions,
+    input: JSON.stringify({ report, materials: context.materials, sections: context.sections,
+      adoptedBenchmarks: context.adoptedBenchmarks ?? [], steps, decisions,
       // Already merged by code: one entry per issue, with the seats that raised it. Quotes were checked against the report.
       issues: kept.map(issue => ({ section: issue.section, severity: issue.severity, kind: issue.kind, raisedBy: issue.reviewers,
         quotes: issue.quotes, anchor: issue.anchor, views: issue.views })),

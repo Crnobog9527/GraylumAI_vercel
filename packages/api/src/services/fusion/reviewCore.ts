@@ -46,7 +46,11 @@ export const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().
   requestBytes: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
   summary: z.string().uuid(), skill: z.object({ skillId: z.string().uuid(), revisionId: z.string().uuid(),
     packageHash: z.string() }) }).passthrough();
-export const source = z.object({ body: z.string().min(1), sections: z.array(z.string()).min(1), maxCharacters: z.number().int().positive(),
+const adoptedBenchmark = z.object({ platform: z.string(), account: z.string(),
+  metrics: z.object({ followers: z.number().nullable(), medianViews: z.number().nullable(), engagementRate: z.number().nullable(),
+    weeklyPosts: z.number().nullable(), capturedAt: z.string().nullable() }).passthrough().nullable().catch(null) }).passthrough();
+export const source = z.object({ adoptedBenchmarks: z.array(adoptedBenchmark).max(30).catch([]),
+  body: z.string().min(1), sections: z.array(z.string()).min(1), maxCharacters: z.number().int().positive(),
   declared: z.array(z.object({ stepId: z.string(), fieldIds: z.array(z.string()) })) });
 export type Source = z.infer<typeof source>;
 /** The summary's revision that passed the host check: what R14 proposes. */
@@ -116,6 +120,7 @@ export function reviewCore(admin: SupabaseClient, actorId: string) {
     return indexes.map(index => ({ reviewer: reviewerLabel(index), opinion: (second.get(index) ?? first.get(index))! }));
   }
   const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
+    adoptedBenchmarks: src.adoptedBenchmarks,
     sections: src.sections, maxCharacters: src.maxCharacters, evidence: Boolean(config.parse(view.config).evidence), ...reviewLocale(view.config) });
   /** Round 1 as sent, and the summary at its deepest trimming (verdicts only, which claimStep can always fall back to). */
   function fitsWhenSent(view: ReviewView, src: Source, skill: Awaited<ReturnType<typeof readReviewSkill>>) {
