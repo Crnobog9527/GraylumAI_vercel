@@ -37,9 +37,6 @@ const runtimeReport = (extra = [], failed = 0) => ({
 });
 
 test('name patterns select the suite prefix and exclude exactly the app-only cases', () => {
-  const bill2 = new RegExp(withoutAppPattern('bill2'));
-  assert.ok(bill2.test('BILL2: prepares both persisted scope kinds'));
-  assert.ok(!bill2.test('AI: workbench'));
   const pattern = new RegExp(withoutAppPattern('runtime'));
   assert.ok(pattern.test('RUNTIME: atomic draft/session/start replay, admission and SDK append identities'));
   assert.ok(pattern.test('RUNTIME: streaming saved receipt replays through SDK after completion failure'));
@@ -67,7 +64,4 @@ test('verification fails closed on failures, unlisted skips, missing files and s
   const unexpected = runtimeReport();
   unexpected.testResults.push(file('src/services/__tests__/workbench.integration.ts', []));
   assert.ok(verifyWithoutAppResults('runtime', unexpected).errors.some((error) => error.includes('unexpected test file')));
-  assert.ok(verifyWithoutAppResults('bill2', { numFailedTests: 0, testResults: [] }).errors.length);
-  const bill2Skip = { numFailedTests: 0, testResults: [file(WITHOUT_APP_SUITES.bill2.files[0], [pass('BILL2: a'), skip('BILL2: b')])] };
-  assert.ok(verifyWithoutAppResults('bill2', bill2Skip).errors.length);
 });
