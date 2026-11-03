@@ -75,7 +75,7 @@ it('the call is quoted on the request it will send: the bound is made on its byt
 });
 it('a coach review asks for the larger output cap in its quote and in the request, a plain one for the small one',async()=>{
  const {COACH_OUTPUT_TOKENS,REVIEW_OUTPUT_TOKENS}=await import('./review');
- await runReviewTurn(deps().deps,{...claim,coach:true},{review:{kind:'review_pack'}},async()=>true);
+ await runReviewTurn(deps().deps,{...claim,coach:true,coachMethod:'方法'},{review:{kind:'review_pack'}},async()=>true);
  expect(m.quote).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({bound:expect.objectContaining({outputTokens:COACH_OUTPUT_TOKENS})}));
  expect(m.run).toHaveBeenLastCalledWith(expect.objectContaining({maxOutputTokens:COACH_OUTPUT_TOKENS}));
  await runReviewTurn(deps().deps,claim,{kind:'my_posts'},async()=>true);
@@ -94,7 +94,7 @@ it('what the coach check drops is logged by path and reason, never as text',asyn
  const {logger}=await import('../../lib/logger');
  const info=vi.spyOn(logger,'info').mockImplementation(()=>undefined);
  // The model answered without the structured block: the reading is kept and the dropped part is on record.
- await runReviewTurn(deps().deps,{...claim,coach:true},{review:{mode:'full',cadence:'weekly',limits:{experiments_max:3,experiment_kinds:['tactic'],
+ await runReviewTurn(deps().deps,{...claim,coach:true,coachMethod:'方法'},{review:{mode:'full',cadence:'weekly',limits:{experiments_max:3,experiment_kinds:['tactic'],
   strategy_proposal:false,pillar_mix_proposal:false},strategy:{pillars:[]},diagnostics:{posts:[]},ledger:{to_review:[]},stage:{followers:[]}}},async()=>true);
  expect(info).toHaveBeenCalledWith('billing','coach_output_rejected',{reviewId:claim.id,parsed:false,rejected:[':no_block']});
  info.mockRestore();
@@ -197,7 +197,7 @@ const coachPack = { kind: 'review_pack', status: 'available', window_days: 90, s
 it('a coach review sends the review pack, saves only the prose and returns the checked block', async () => {
   m.run.mockResolvedValueOnce('本期表现：……\n\n' + BLOCK);
   const d = deps();
-  const result = await runReviewTurn(d.deps, { ...claim, coach: true }, coachPack, async () => true);
+  const result = await runReviewTurn(d.deps, { ...claim, coach: true, coachMethod: '方法' }, coachPack, async () => true);
   const sent = m.run.mock.calls.at(-1)![0] as { input: string; instructions: string };
   expect(sent.input).toContain('"mode":"full"');
   expect(sent.input).not.toContain('source_connections');
@@ -209,10 +209,10 @@ it('a coach review sends the review pack, saves only the prose and returns the c
 it('a coach review without a block still saves its prose; an empty reading is a failed turn', async () => {
   m.run.mockResolvedValueOnce('只有正文');
   const d = deps();
-  const result = await runReviewTurn(d.deps, { ...claim, coach: true }, coachPack, async () => true);
+  const result = await runReviewTurn(d.deps, { ...claim, coach: true, coachMethod: '方法' }, coachPack, async () => true);
   expect(result).toMatchObject({ kind: 'done', delivered: true, coach: { parsed: false, rejected: [{ path: '', reason: 'no_block' }] } });
   expect(of(d.calls, 'turn_close')[0]!.p_messages).toEqual([expect.anything(), { role: 'assistant', content: '只有正文' }]);
   m.run.mockResolvedValueOnce(BLOCK);
   const e = deps();
-  expect(await runReviewTurn(e.deps, { ...claim, coach: true }, coachPack, async () => true)).toMatchObject({ closeKind: 'failed', delivered: false });
+  expect(await runReviewTurn(e.deps, { ...claim, coach: true, coachMethod: '方法' }, coachPack, async () => true)).toMatchObject({ closeKind: 'failed', delivered: false });
 });

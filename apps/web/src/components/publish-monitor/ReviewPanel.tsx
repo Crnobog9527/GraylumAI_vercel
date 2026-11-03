@@ -51,9 +51,9 @@ export function ReviewPanel({ gold }: { gold: boolean }) {
       <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
         想现在就复盘，可以在<Link className="underline" href="/app/positioning">对话</Link>里说“帮我复盘最近的作品”，按对话正常扣积分。</p>
       {gold && <AutoReviewSwitch />}
-      {features.isPending ? <p className="text-sm">正在读取…</p>
+      {features.isPending ? <ReviewSkeleton />
         : !open ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>每周复盘还没有开放。</p>
-        : reviews.isPending ? <p className="text-sm">正在读取…</p>
+        : reviews.isPending ? <ReviewSkeleton />
         : reviews.error ? <p role="alert" className="text-sm">{dataErrorMessage(errorCode(reviews.error))}</p>
           : (reviews.data as Review[]).length === 0 ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             还没有复盘。{gold ? '自动复盘在打开满 7 天后生成第一份。' : ''}</p>
@@ -145,6 +145,16 @@ function AgeTable({ rows }: { rows: Row[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** While the reviews are read: the card's shape, with no words or spinner (Owner: no "loading" text on pages). */
+function ReviewSkeleton() {
+  return (
+    <div aria-busy="true" data-testid="review-skeleton" className="space-y-2 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>
+      {['w-40', 'w-full', 'w-5/6', 'w-2/3'].map(w => (
+        <div key={w} className={`h-3 ${w} animate-pulse rounded`} style={{ background: 'var(--border-primary)' }} />))}
     </div>
   );
 }
