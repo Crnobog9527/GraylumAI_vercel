@@ -8,7 +8,7 @@ Owner 2026-11-03（总控转述）：每日真实模型检查只做到上线；�
 
 原则：
 - **不新增服务、表、队列**（AGENTS 第 5 节）。沿用现有做法：定时任务算出数量 → `captureMessage(固定代码, 只含整数)` → Sentry 规则 → Owner 邮箱（`erasure-backlog-alert.ts`、`publish-monitor-alert.ts` 就是这么做的）；钱相关的用止损邮件（Resend，发到 `support_email`）。
-- **告警里不带用户内容**：`sentry-scrub.ts` 只放行已登记前缀的固定代码和整数附加数据；新代码都用已登记前缀（`RUNTIME_`、`REPORT_`、`PUBLISH_MONITOR_`、`BILLING_`）。
+- **告警里不带用户内容**：新代码都用已登记前缀（`RUNTIME_`、`REPORT_`、`PUBLISH_MONITOR_`、`BILLING_`），消息文字才会保留；**整数附加数据（失败数、冻结数等）要把完整代码和允许的整数键逐个登记进 `sentry-scrub.ts` 的 `ALERT_COUNTS`，没登记的会被全部清掉**（见 M4）。
 - 阈值先宽后紧：上线第一周按真实数据校准一次，之后每月看一次误报和漏报。
 - 花钱或改正式环境设置的步骤标“**需 Owner 批准**”。
 
@@ -29,10 +29,10 @@ Owner 2026-11-03（总控转述）：每日真实模型检查只做到上线；�
 | S3 | **没有供应商编号的未知调用**（已知缺口：供应商连响应头都没给时，调用是 `unknown`、`provider_id` 为空，恢复任务和 0489“查无即退”都管不到它，冻结没有自动出口） | `turn_calls`：`unknown/cost_pending` 且 `provider_id is null`，所属回合已结束超过 24 小时 | ≥ 1 → error，每天一次 | Sentry `RUNTIME_UNKNOWN_CALL_NO_ID` | 当天；**要不要自动退是计费规则，需 Owner 决定** | M2 |
 | S4 | **供应商 402 / 被拒** | `turn_calls.status in (no_charge_402, rejected)`。**402 现在只写数据库、不写日志，不会进 Sentry**，用户只看到“服务暂时不可用” | 10 分钟内 ≥ 3 次 402 → fatal（多半是 OpenRouter 余额或密钥上限用尽，所有付费回合都被拒）；`rejected` 10 分钟 ≥ 10 次 → error | Sentry `RUNTIME_PROVIDER_REFUSED` | **30 分钟**（全站付费功能停摆） | M2 |
 | S5 | **429** | 用户限流是预期行为，**不告警**；只在每周看一次 Vercel 日志里 429 的量。限流后端不可用（503）已有告警 | — | — | — | — |
-| S6 | **扣费异常** | ① 回合 `charged_credits > reserved_credits`（数据库不应出现）；② 用户余额 < 0；③ “平台承担”积分（`turn_admin_model_report` 的 `absorbedCredits`）当天合计；④ 当天平台实际成本折算成积分后高于用户被扣积分 | ① ≥ 1 → fatal；② ≥ 1 → error；③ 当天 > 500 积分（q=100 时约 5 美元，对应 AGENTS 第 5 节损失线）→ warning；④ 超 5% → warning（**阈值需 Owner 定**） | ①② Sentry `BILLING_CHARGE_ANOMALY`；③④ 并入每日对账的 `mismatches` | ① 30 分钟；其余当天 | M2、M3 |
-| S7 | **复盘失败** | 复盘回合失败率并入 S1（`kind=review`）；`social_monitor` 任务连续 3 次运行记录为失败（沿用资料库 `failingRuns` 的做法） | 连续 3 次失败 → error | Sentry `PUBLISH_MONITOR_REVIEW_FAILING` | 当天 | M2、M3 |
-| S8 | **发布失败** | `social_publish_jobs` 最近 1 小时进入失败终态的个数和占比（已有的只有配额和清理卡住） | 样本 ≥ 10 且失败 ≥ 30%，或失败 ≥ 5 个 → error | Sentry `PUBLISH_MONITOR_PUBLISH_FAILURES` | 4 小时 | M3 |
-| S9 | **分钟恢复任务整体失败或停跑** | 失败：`runtime-recovery` 返回 500（`turns.failed > 0`）连续 3 次；停跑：每日对账里查 `scheduled_job_runs` 里 `runtime_recovery` 最近 24 小时最大间隔 | 连续 3 次失败 → error；间隔 > 10 分钟 → error | Sentry `RUNTIME_RECOVERY_RUN_FAILING`、`RUNTIME_RECOVERY_RUN_GAP` | 30 分钟（该退的钱可能没退） | M1、M3 |
+| S6 | **扣费异常** | ① 回合 `charged_credits > reserved_credits`（数据库不应出现）；② 用户余额 < 0；③ “平台承担”积分（`turn_admin_model_report` 的 `absorbedCredits`）当天合计；④ 当天平台实际成本折算成积分后高于用户被扣积分 | ① ≥ 1 → fatal；② ≥ 1 → error；③ 当天 > 500 积分（q=100 时约 5 美元，对应 AGENTS 第 5 节损失线）→ warning；④ 超 5% → warning（**阈值需 Owner 定**） | ①② Sentry `BILLING_CHARGE_ANOMALY`；③④ 并入每日对账的 `mismatches` | ① 30 分钟；其余当天 | M2、M3a |
+| S7 | **复盘失败** | 复盘回合失败率并入 S1（`kind=review`）；`social_monitor` 任务连续 3 次运行记录为失败（沿用资料库 `failingRuns` 的做法），由每 5 分钟的 `library-cleanup` 任务检查 | 连续 3 次失败 → error | Sentry `PUBLISH_MONITOR_REVIEW_FAILING` | 当天 | M2、M3b |
+| S8 | **发布失败** | `social_publish_jobs` 最近 1 小时进入失败终态的个数和占比（已有的只有配额和清理卡住）；放在每 10 分钟的 `social-monitor` 任务里算（它已经在发 `PUBLISH_MONITOR_*` 告警），不放每日对账 | 样本 ≥ 10 且失败 ≥ 30%，或失败 ≥ 5 个 → error | Sentry `PUBLISH_MONITOR_PUBLISH_FAILURES` | 4 小时 | M3b |
+| S9 | **分钟恢复任务整体失败或停跑** | 失败：`runtime-recovery` 自己返回 500（`turns.failed > 0`）连续 3 次时发码；停跑：**由另一个每 5 分钟的任务（`library-cleanup`）**查 `scheduled_job_runs` 里 `runtime_recovery` 最后一次运行的时间，心跳检查不能放在被监控的任务里，也不能放每日对账（最晚近 24 小时才发现） | 连续 3 次失败 → error；最后一次运行距今 > 10 分钟 → error | Sentry `RUNTIME_RECOVERY_RUN_FAILING`、`RUNTIME_RECOVERY_RUN_STALE` | 30 分钟（该退的钱可能没退） | M1、M3b |
 | S10 | **页面和接口报错突增** | 已有：其余 `API_*` error 和未捕获异常；Sentry 的“错误突增”规则（`docs/SENTRY_ALERTS.md`） | 1 小时内是平时的 10 倍 → error | Sentry 规则 | 4 小时 | M5（只配规则） |
 
 ## 3. 通道、谁收
@@ -48,12 +48,13 @@ Owner 2026-11-03（总控转述）：每日真实模型检查只做到上线；�
 | --- | --- | --- | --- | --- |
 | M1 | `runtime-recovery` 任务连续失败时发 `RUNTIME_RECOVERY_RUN_FAILING`（S9 的失败部分） | `apps/web/src/app/api/cron/runtime-recovery/route.ts`，新增一个小告警模块 | `erasure-backlog-alert.ts` 的写法；`scheduled_job_runs` 连续失败读法 | 无 |
 | M2 | 新增一个只读函数 `turn_health_counts(窗口)`，只返回整数（失败数/总数、冻结数、无编号未知调用数、402 数、`charged>reserved` 数、负余额数）；在每分钟任务里调用并按阈值发码（S1–S4、S6①②、S7 的失败率部分）。读取预算 ≤ 1.5 秒，读不到只记日志，不影响恢复本身 | 同上 + `packages/db/migrations/` | `turn_admin_unsettled_turns`（0471）的写法和授权（只给 `service_role`） | **有迁移，只能由主窗口上库** |
-| M3 | 每日对账里加：平台承担和成本/扣费比（S6③④）、`runtime_recovery` 心跳缺口（S9）、`social_monitor` 连续失败（S7）、发布失败（S8）；写进现有的 `mismatches`，已经会触发 `API_SYSTEM_CRON_JOB` | `apps/web/src/app/api/cron/billing-reconcile/route.ts` | 现有 `mismatches` 机制、`turn_admin_model_report` | 无（S8 如需新读函数则有） |
-| M4 | 把新代码登记进清洗规则的测试，保证只带整数、不带用户内容 | `sentry-scrub.ts` 的测试 | 前缀 `RUNTIME`、`REPORT`、`PUBLISH_MONITOR`、`BILLING` 已登记，不需要加前缀 | 无 |
+| M3a | 每日对账（04:00）里只放**日级**的和**汇总兜底**：平台承担和成本/扣费比（S6③④）；再把 S7、S8、S9 过去 24 小时的数量汇总写进 `mismatches` 当兜底（高频任务没发出来时，第二天还能看到） | `apps/web/src/app/api/cron/billing-reconcile/route.ts` | 现有 `mismatches` 机制（已会触发 `API_SYSTEM_CRON_JOB`）、`turn_admin_model_report` | 无 |
+| M3b | **高频任务里放短窗口检查**：`social-monitor`（每 10 分钟）加发布失败（S8）；`library-cleanup`（每 5 分钟）加 `runtime_recovery` 心跳（S9 停跑）和 `social_monitor` 连续失败（S7）。S8 如需新读函数则有迁移 | `apps/web/src/app/api/cron/social-monitor/route.ts`、`library-cleanup/route.ts`，`apps/web/src/lib/` 里小告警模块 | `publish-monitor-alert.ts` 和 `erasure-backlog-alert.ts` 的写法；`readFailingRuns` 的读法 | 无（S8 可能有） |
+| M4 | **把每个新代码和它允许的整数键登记进 `sentry-scrub.ts` 的 `ALERT_COUNTS`**（例如 `RUNTIME_TURN_FAILURE_RATE: ['failed','total','windowMinutes']`、`RUNTIME_UNSETTLED_TURNS: ['open','pending','reservedCredits','oldestMinutes']`、`RUNTIME_PROVIDER_REFUSED: ['refused402','rejected','windowMinutes']` 等；前缀本身只保留消息文字，不保留整数）；测试确认这些整数被保留、其他数据（任何多余的键、字符串、id）被清除 | `apps/web/src/lib/sentry-scrub.ts` 及其测试 | `LIBRARY_CLEANUP_BACKLOG`、`PUBLISH_MONITOR_QUOTA_*` 的现有登记写法 | 无 |
 | M5 | 在 Sentry 正式项目为每个新代码建一条规则；加“错误突增”规则 | Sentry 后台（不在仓库） | `docs/SENTRY_ALERTS.md` | **需 Owner 批准**（改正式环境的平台设置） |
 | M6 | 文档同步：`REL-1-BUILD-PREP.md` 第 3.3 节表加新行；`docs/SENTRY_ALERTS.md` 里按消息文字匹配的规则（“积分不足”等）和现在的固定代码对不上，改成按代码 | `docs/` | — | 无 |
 
-做完 M1–M4 后，在上线前的冒烟日做一次**合成告警演练**：对每个新代码手动触发一次（或在 staging 造一条满足阈值的数据），确认 Owner 邮箱收到；结果记在上线 PR。
+做完 M1–M4（含 M3a、M3b）后，在上线前的冒烟日做一次**合成告警演练**：对每个新代码手动触发一次（或在 staging 造一条满足阈值的数据），确认 Owner 邮箱收到；结果记在上线 PR。
 
 ## 5. 需要 Owner 批准或决定的事
 
