@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | `fusion_compare_context` | `runtime_executions`、`runtime_session_history`、`runtime_history_dependencies`、`runtime_library_references`、`bill2_runs`；调 `runtime_history_availability`、`runtime_session_context` | 旧对比流 `fusion/compare*.ts` | **C** | 新路径对比走 `turn/compare.ts`；这个函数给旧对比拼上下文。要确认 `fusion/compare*.ts` 是否整个在 C 路删除范围。若是，则 D |
 | `fusion_group_claim` | `bill2_runs/calls`、`fusion_billing_groups(+steps)`、调 `bill2_claim` | `fusion/executor.ts` | **D** | 旧评审团执行器的分步认领；新路径是 `fusion_turn_*`。随 `fusion/executor.ts` 删 |
-| `fusion_review_archive_reconcile` | `bill2_runs/calls`、`fusion_billing_groups`、`fusion_review_fees`、调 `bill2_cancel/finalize`、`fusion_review_fee_settle` | OPC 归档流程 | **B** | 归档业务时对账评审团旧费用。新路径按 `turns` 看（`opc_business_archive` 已有回合忙检查）。改写成只做“评审状态收尾”，不再碰费用表 |
+| `fusion_review_archive_reconcile` | `bill2_runs/calls`、`fusion_billing_groups`、`fusion_review_fees`、调 `bill2_cancel/finalize`、`fusion_review_fee_settle` | OPC 归档流程（SQL 内调用） | **B** | 归档业务时对账评审团旧费用。新路径按 `turns` 看（`opc_business_archive` 已有回合忙检查）。改写成只做“评审状态收尾”，不再碰费用表 |
 | `fusion_review_claim` | `fusion_billing_groups`、`fusion_review_fees` | `fusion/reviewCore.ts` | **D/C** | 旧评审团认领。若 `reviewCore.ts` 仍是新评审入口（`turn/jury.ts → reviewCore`）则要 B：改成只写 `fusion_reviews` 状态；需要先确认 |
 | `fusion_review_close` | `bill2_runs`、调 `bill2_cancel/finalize`、`fusion_review_fee_settle_internal` | `fusion/reviewRecord.ts` | **B** | 评审收尾：保留状态更新，去掉旧费用结算（新费用在 `turn_close`） |
 | `fusion_review_start` | `bill2_runs/calls`、调 `fusion_call_in_flight`、`fusion_review_fee_hold` | `fusion/reviewPlan.ts` | **C** | 旧评审开始时预占费用。新路径预占在 `turn_open`。语义上要改成不预占，但评审开始的幂等/请求 id 约束是否还要，需要总控确认 |
@@ -75,7 +75,7 @@
 **A（保留，不改）**：`runtime_test_policy`、`runtime_production_access`（含小助手 `runtime_production_database`、`bill2_actor` 进 KEEP）。
 
 **B（前置改写，函数名不变，Node 不改）**：
-`runtime_session_results_list_turns`、`runtime_session_result_save_turn`、`runtime_session_result_edit`、`runtime_session_result_versions`（连同助手 `runtime_session_result_view`）、`runtime_positioning_gate`、`runtime_test_actor_access`、`opc_capture_apply`（去掉执行 id 分支）、`fusion_review_start`（只保留按请求 id 回放）、`fusion_review_fee_settle`（无费用行返回 NULL）、`fusion_review_close`→**改归 D**（见下）、`fusion_review_archive_reconcile`。
+`runtime_session_results_list_turns`、`runtime_session_result_save_turn`、`runtime_session_result_edit`、`runtime_session_result_versions`（连同助手 `runtime_session_result_view`）、`runtime_positioning_gate`、`runtime_test_actor_access`、`opc_capture_apply`（去掉执行 id 分支）、`fusion_review_start`（只保留按请求 id 回放）、`fusion_review_fee_settle`（无费用行返回 NULL）、`fusion_review_archive_reconcile`。
 
 **D（随 F 删除，调用方已无生产代码调用）**：
 `runtime_tool`、`runtime_mentor_history`、`runtime_session_items`、`runtime_library_visible`、`runtime_library_read`、`runtime_cancel`、`runtime_execution`、`runtime_execution_visibility`、`fusion_compare_context`、`fusion_review_claim`、`fusion_review_advance`、`fusion_review_close`、`fusion_group_claim`、`runtime_production_recovery_policy`、`runtime_test_recovery_policy`、`runtime_session_result_save`、`report_fee_settle_due`、`opc_work_result`（已在原清单）。
