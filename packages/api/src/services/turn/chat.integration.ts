@@ -121,12 +121,12 @@ const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.0000
 const admit = async () => ({ ok: true as const });
 type NewWork = ChatDeps['newWork'];
 async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier;
-  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; image?: string; requestId?: string }) {
+  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; images?: string[]; requestId?: string }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
     gate: { classify: input.gate ?? allowGate }, newWork: input.newWork ?? { message: admit, calls: admit } },
   { actorId: input.actor, sessionId: input.session, requestId: input.requestId ?? randomUUID(), text: input.text,
-    ...(input.image ? { image: input.image } : {}) }, e => { events.push(e); input.onEvent?.(e); }));
+    ...(input.images ? { images: input.images } : {}) }, e => { events.push(e); input.onEvent?.(e); }));
   return { events, calls };
 }
 
@@ -474,18 +474,19 @@ const logged = () => {
   return { text: () => JSON.stringify(spies.flatMap(spy => spy.mock.calls)), restore: () => spies.forEach(spy => spy.mockRestore()) };
 };
 
-it('RUNTIME: PUBLISH-MONITOR B2: a screenshot goes to the model with its message, is charged as the turn, and is kept nowhere', async () => {
-  const f = await setup(1000, { image: true }), url = screenshot(), logs = logged();
+it('RUNTIME: PUBLISH-MONITOR B2: screenshots go to the model with their message, are charged as the turn, and are kept nowhere', async () => {
+  const f = await setup(1000, { image: true }), url = screenshot(), second = screenshot(), logs = logged();
   const bodies: string[] = [];
   const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); return sse('gen-image-1', ['看到了', '完播率 42%']); };
   const requestId = randomUUID();
-  const sent = await turn({ actor: f.actor, session: f.session, text: '帮我看看这条作品的后台数据', transport, image: url, requestId });
+  const sent = await turn({ actor: f.actor, session: f.session, text: '帮我看看这条作品的后台数据', transport, images: [url, second], requestId });
   expect(sent.events.map(e => e.type), JSON.stringify(sent.events)).toEqual(['opened', 'text', 'text', 'result']);
-  // The model got the text (marked) and the image in one user message, with OpenRouter told not to charge for the image itself.
+  // The model got the text (marked) and both images in one user message, with OpenRouter told not to charge for an image itself.
   const body = JSON.parse(bodies[0]!);
   const user = body.messages.at(-1);
   expect(user.role).toBe('user');
-  expect(user.content).toEqual([{ type: 'text', text: '[截图] 帮我看看这条作品的后台数据' }, { type: 'image_url', image_url: { url } }]);
+  expect(user.content).toEqual([{ type: 'text', text: '[截图×2] 帮我看看这条作品的后台数据' }, { type: 'image_url', image_url: { url } },
+    { type: 'image_url', image_url: { url: second } }]);
   expect(body.provider.max_price.image).toBe(0);
   // Charged by usage as any turn: N = ceil(q x n x m) of the one receipt, once.
   const result = sent.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
@@ -497,27 +498,28 @@ it('RUNTIME: PUBLISH-MONITOR B2: a screenshot goes to the model with its message
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - result.chargedCredits!);
   // The conversation keeps the marked text, never the image.
   expect((await db.query("select content from session_messages where session_id=$1 and role='user'", [f.session])).rows)
-    .toEqual([{ content: '[截图] 帮我看看这条作品的后台数据' }]);
+    .toEqual([{ content: '[截图×2] 帮我看看这条作品的后台数据' }]);
   // The same request again opens nothing, sends nothing and charges nothing more.
-  const again = await turn({ actor: f.actor, session: f.session, text: '帮我看看这条作品的后台数据', transport, image: url, requestId });
+  const again = await turn({ actor: f.actor, session: f.session, text: '帮我看看这条作品的后台数据', transport, images: [url, second], requestId });
   expect(again.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REQUEST_REPLAYED' });
   expect(bodies).toHaveLength(1);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - result.chargedCredits!);
   // Owner 10-27 "截图不长期保留": no table holds any piece of it, and no log line does.
   expect(await imageTraces(url)).toEqual([]);
+  expect(await imageTraces(second)).toEqual([]);
   expect(logs.text()).not.toContain(url.slice(JPEG_DATA_URL_PREFIX.length + 1000, JPEG_DATA_URL_PREFIX.length + 1048));
   logs.restore();
 });
 
 it('RUNTIME: PUBLISH-MONITOR B2: a model that does not read images, and an image that is not one checked JPEG, are refused before anything opens', async () => {
   const f = await setup(1000), transport = vi.fn<typeof fetch>(async () => sse('never', ['x']));
-  const plain = await turn({ actor: f.actor, session: f.session, text: '看图', transport, image: screenshot() });
+  const plain = await turn({ actor: f.actor, session: f.session, text: '看图', transport, images: [screenshot()] });
   expect(plain.events).toEqual([{ type: 'error', code: 'TURN_IMAGE_UNSUPPORTED' }]);
   const g = await setup(1000, { image: true });
   const png = 'data:image/png;base64,' + randomBytes(600).toString('base64');
   const huge = JPEG_DATA_URL_PREFIX + Buffer.concat([syntheticJpeg(4000, 3000).subarray(0, -2), Buffer.from([0xff, 0xd9])]).toString('base64');
-  for (const image of [png, huge, JPEG_DATA_URL_PREFIX + 'not-base64!'])
-    expect((await turn({ actor: g.actor, session: g.session, text: '看图', transport, image })).events)
+  for (const images of [[png], [huge], [JPEG_DATA_URL_PREFIX + 'not-base64!'], Array(5).fill(screenshot()), [screenshot(), png]])
+    expect((await turn({ actor: g.actor, session: g.session, text: '看图', transport, images })).events)
       .toEqual([{ type: 'error', code: 'TURN_IMAGE_INVALID' }]);
   expect(transport).not.toHaveBeenCalled();
   for (const actor of [f.actor, g.actor]) {
@@ -534,7 +536,7 @@ it('RUNTIME: PUBLISH-MONITOR B2: a failed screenshot turn charges nothing and ke
     + frame('gen-image-cut', { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] })
     + frame('gen-image-cut', { choices: [], usage: { prompt_tokens: 1000, completion_tokens: 8192, total_tokens: 9192, cost: 0.13 } })
     + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-image-cut' } });
-  const failed = await turn({ actor: f.actor, session: f.session, text: '看图', transport, image: url });
+  const failed = await turn({ actor: f.actor, session: f.session, text: '看图', transport, images: [url] });
   expect(failed.events.at(-1)).toMatchObject({ type: 'error' });
   expect((await db.query('select close_kind,charged_credits from turns where actor_id=$1', [f.actor])).rows)
     .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);

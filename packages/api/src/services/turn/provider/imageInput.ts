@@ -15,6 +15,9 @@ export const IMAGE_MAX_DATA_URL_BYTES = 819_223;
 export const IMAGE_MAX_EDGE = 2048;
 export const IMAGE_TOKEN_OVERHEAD = 2048;
 export const IMAGE_MIN_EDGE = 64;
+/** PUBLISH-MONITOR B2: images one free chat message may carry. 4 x 819,223 bytes of data URL plus the largest text (200,000 characters,
+ * up to 600,000 bytes) stays under Vercel's 4.5 MB request body; a fifth image would not with a long message. */
+export const CHAT_MAX_IMAGES = 4;
 export const IMAGE_MAX_ASPECT = 4;
 /** Conservative input-token ceiling for one image of w×h pixels, independent of vendor:
  * twice the number of 14-pixel patches (the smallest common ViT patch, and tile padding at most
@@ -88,7 +91,18 @@ export function measureImage(parsed: { messages?: unknown }, policy: ImageInputP
   const parts = imageParts(parsed.messages);
   if (!parts.length) return null;
   if (!policy || parts.length !== 1) throw new Error('BILL2_IMAGE_DENIED');
-  const checked = imagePart.safeParse(parts[0]);
+  return measurePart(parts[0]!, policy);
+}
+
+/** PUBLISH-MONITOR B2: every inline JPEG of a turn-core chat request, each within `policy`, at most `max` of them ([] for none). */
+export function measureImages(parsed: { messages?: unknown }, policy: ImageInputPolicy, max: number): ImageQuote[] {
+  const parts = imageParts(parsed.messages);
+  if (parts.length > max) throw new Error('BILL2_IMAGE_DENIED');
+  return parts.map(part => measurePart(part, policy));
+}
+
+function measurePart(part: Part, policy: ImageInputPolicy): ImageQuote {
+  const checked = imagePart.safeParse(part);
   if (!checked.success) throw new Error('BILL2_IMAGE_DENIED');
   const url = checked.data.image_url.url;
   const dataUrlBytes = Buffer.byteLength(url);

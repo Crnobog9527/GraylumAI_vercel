@@ -10,19 +10,23 @@ import { COMPOSER_REFERENCES_ENABLED, parseReferences, referencesNamedIn, type L
 import { useComposerReferences } from './reference-menu';
 import { ComposerView, SkillMenuView } from './composer-view';
 import { attachmentAccept, attachmentFormatsText, useComposerAttachments } from './composer-attachments';
+import { ComposerImages, type ChatImages } from './composer-image';
+import { CHAT_MAX_IMAGES, imageFiles } from '@/lib/chat-image';
 
 /**
  * One input surface for free conversation, positioning and topic work.
  * `attachment` is shown inside the same frame, above the text box (the mentor's open question card).
  */
 export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment,
- references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange}: {
+ references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange,images}: {
  value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;
  sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;attachment?:ReactNode;
  /** UI-B (default off): `@` picks library documents. Pages whose send cannot carry them pass false. */
  references?:boolean;
  /** The references of `value`, kept by the page with its draft and sent with the message (UI-B). */
  referenceList?:readonly LibraryReference[];onReferencesChange?:(references:LibraryReference[])=>void;
+ /** PUBLISH-MONITOR B2 (free chat only): screenshots for this message. The "+" picker and a paste into the box add image files here. */
+ images?:ChatImages;
 }) {
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
@@ -31,19 +35,31 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const referencePicker=useComposerReferences(references,box,onReferencesChange);
  // UI-C: with references on, a file goes into the library and joins the message as a reference (else UI-A's inline text).
  const attachments=useComposerAttachments(box);
- function chooseFiles(files:FileList|null){
-  if(!references){void addFiles(files);return;}
+ function chooseFiles(picked:FileList|null){
+  // Images go with the message to the model (when this page sends them); every other file keeps its usual path.
+  const found=images?imageFiles(picked):[];
+  if(found.length)void images!.add(found);
+  const files=found.length?Array.from(picked??[]).filter(file=>!found.includes(file)):picked;
+  if(found.length&&!files?.length){setMenu(null);if(fileInput.current)fileInput.current.value='';return;}
+  if(!references){void addFiles(files as FileList);return;}
   if(files?.length)attachments.add(Array.from(files));setMenu(null);if(fileInput.current)fileInput.current.value='';
  }
  // The box stays enabled while a turn runs, so focus is kept after Enter; a click on send returns it.
  const sendAndFocus=()=>sendKeepingFocus(()=>onSend(selected),box.current);
+ // A pasted screenshot (Ctrl/⌘+V) joins the message's images instead of the text.
+ useEffect(()=>{
+  const node=root.current;if(!node||!images)return;
+  const paste=(event:ClipboardEvent)=>{const found=imageFiles(event.clipboardData?.files);if(!found.length)return;
+   event.preventDefault();event.stopPropagation();void images.add(found);};
+  node.addEventListener('paste',paste,true);return()=>node.removeEventListener('paste',paste,true);
+ },[images]);
  useEffect(()=>{if(!menu)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenu(null);};const outside=(event:PointerEvent)=>{if(!root.current?.contains(event.target as Node))setMenu(null);};document.addEventListener('keydown',key);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',key);document.removeEventListener('pointerdown',outside);};},[menu]);
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined,{enabled:menu==='skills',staleTime:RUNTIME_CHOICES_STALE_MS});
  const selected=onSkillChange?skillId:localSkill;
  const skills=(choices.data?.skills??[]).filter(skill=>skill.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
  const toggleSkills=()=>{if(menu!=='skills'){if(onSkillChange)onSkillChange('');else setLocalSkill('');}setMenu(menu==='skills'?null:'skills');};
  const changeSkill=(id:string)=>{if(onSkillChange)onSkillChange(id);else setLocalSkill(id);setMenu(null);};
- async function addFiles(files:FileList|null){
+ async function addFiles(files:FileList|File[]|null){
   if(!files?.length)return;setError('');setReading(true);
   try {
    const entries=[];
@@ -59,18 +75,20 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
   }catch(cause){setError(cause instanceof Error?cause.message:'附件读取失败，请重试。');}
   finally{setReading(false);if(fileInput.current)fileInput.current.value='';}
  }
- const cannotSend=disabled||sendDisabled||reading||attachments.busy||!value.trim();
+ const cannotSend=disabled||sendDisabled||reading||attachments.busy||Boolean(images?.busy)||!value.trim();
  // Counter only near the limit, so ordinary messages stay uncluttered.
  const nearLimit=value.length>=maxLength*0.9;
- return <ComposerView rootRef={root} attachment={attachment} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
+ const imageHint=images?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）只随这条消息发给模型，不会保存；也可以直接拖进对话或粘贴。`:'';
+ return <ComposerView rootRef={root} attachment={images?<>{attachment}<ComposerImages state={images} disabled={disabled}/></>:attachment} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
   editor={<ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
    onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks} knownReferences={referenceList}/>}
   onToggleFiles={()=>setMenu(menu==='files'?null:'files')} onPickFile={()=>fileInput.current?.click()}
-  fileHint={references
+  fileHint={imageHint+(references
    ?'支持 '+attachmentFormatsText()+'。文件会存进你的资料库，并作为引用加入本条消息。'
-   :'支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。'}
-  fileInput={<input ref={fileInput} type="file" aria-label="选择附件" accept={references?attachmentAccept():'.txt,.md,.csv,.json,.log'} multiple hidden
+   :'支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。')}
+  fileInput={<input ref={fileInput} type="file" aria-label="选择附件" multiple hidden
+   accept={(references?attachmentAccept():'.txt,.md,.csv,.json,.log')+(images?',image/*':'')}
    onChange={event=>chooseFiles(event.target.files)}/>}
   onToggleSkills={toggleSkills}
   skillMenu={<SkillMenuView query={query} onQuery={setQuery} onClose={()=>setMenu(null)} skills={skills} onPick={changeSkill}

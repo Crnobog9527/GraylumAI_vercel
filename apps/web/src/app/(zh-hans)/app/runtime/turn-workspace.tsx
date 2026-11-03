@@ -8,8 +8,7 @@ import {
 } from '@/components/chat-display/runtime-messages';
 import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
 import { WorkComposer } from '@/components/opc/work-composer';
-import { ComposerImage } from '@/components/opc/composer-image';
-import type { ChatImage } from '@/lib/chat-image';
+import { useChatImages } from '@/components/opc/composer-image';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
@@ -52,7 +51,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
   const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
   const [skillId, setSkillId] = useState(''), [references, setReferences] = useState<LibraryReference[]>([]);
-  const [image, setImage] = useState<ChatImage | null>(null);
+  const images = useChatImages();
   useEffect(() => {
     const draft = openingDraftWithReferences(localStorage, sessionId);
     setInput(draft.text); setSkillId(localStorage.getItem('opc-runtime-skill:' + sessionId) ?? '');
@@ -73,7 +72,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   });
 
   async function send(text = input) {
-    if (!text.trim() || chat.busy) return;
+    if (!text.trim() || chat.busy || images.busy) return;
     // An unconfirmed earlier send of the same text keeps its request id, so the server replays instead of charging twice.
     const url = new URL(location.href);
     const sent = COMPOSER_REFERENCES_ENABLED ? referencesNamedIn(text, references) : [];
@@ -81,16 +80,16 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     url.searchParams.set('request', requestId); history.replaceState(null, '', url);
     rememberPending(localStorage, sessionId, { requestId, text, input: text, references: sent });
     setReferences([]);
-    // The screenshot goes with this message only; it comes back to the box with the text when the message was not sent.
-    const sentImage = image; setImage(null);
+    // The screenshots go with this message only; they come back to the box with the text when the message was not sent.
+    const sentImages = images.images; images.set([]);
     const restore = clearForSend(setInput, text, saved => {
       localStorage.setItem('opc-runtime-input:' + sessionId, saved); markPendingRestored(localStorage, sessionId);
     });
     setOutgoing(text);
     const answer = await chat.send(text, requestId, { ...(skillId ? { moduleId: skillId } : {}),
-      ...(sent.length ? { references: referenceRequest(sent) } : {}), ...(sentImage ? { image: sentImage.url } : {}) });
+      ...(sent.length ? { references: referenceRequest(sent) } : {}), ...(sentImages.length ? { images: sentImages.map(image => image.url) } : {}) });
     setOutgoing(null);
-    if (answer === 'kept') { restore(); updateReferences(sent); setImage(sentImage); }
+    if (answer === 'kept') { restore(); updateReferences(sent); images.set(sentImages); }
     if (answer !== 'unknown') {
       forgetPending(localStorage, sessionId);
       const done = new URL(location.href); done.searchParams.delete('request'); history.replaceState(null, '', done);
@@ -131,7 +130,10 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     turnBusy={chat.creditsBusy}
     onToggleRight={() => setPanelOpen(open => !open)}
     right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
-    <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
+    <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}
+      // PUBLISH-MONITOR B2: screenshots dropped anywhere on the conversation join the next message.
+      onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+      onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void images.add(event.dataTransfer.files); }}>
       <RuntimeHeader title="工作对话"/>
       <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
         {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
@@ -166,7 +168,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
           onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
           skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}
-          attachment={<ComposerImage image={image} onChange={setImage} disabled={chat.busy}/>}/>
+          images={images}/>
       </div></footer>
     </main>
   </WorkspaceFrame>;
