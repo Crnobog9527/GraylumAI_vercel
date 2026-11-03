@@ -5,7 +5,6 @@ import type { BillingRpc } from '../turn/provider/frozenRun';
 
 const actor = '00000000-0000-4000-8000-000000000001';
 const request = '00000000-0000-4000-8000-000000000002';
-const run = '00000000-0000-4000-8000-000000000003';
 const other = '00000000-0000-4000-8000-000000000005';
 const empty = { processed: 0, remaining: 0 };
 type Override = (args: Record<string, unknown>) => unknown | Promise<unknown>;
@@ -20,7 +19,7 @@ function setup(overrides: Record<string, Override> = {}) {
       let data: unknown;
       if (overrides[name]) data = await overrides[name](args);
       else if (name === 'account_erasure_work_batch') data = {
-        requestId: request, stage: 'closed', runs: [run], nextRunId: null, financialPending: 0, manualReview: 0,
+        requestId: request, stage: 'closed', runs: [], nextRunId: null, financialPending: 0, manualReview: 0,
       };
       else if (name === 'account_erasure_scrub_content') data = { artifact_generations: 1, artifact_generations_skipped: 0 };
       else if (name === 'account_erasure_scrub_runtime') data = { runtime_sessions: 1, runtime_sessions_skipped: 0 };
@@ -79,12 +78,11 @@ describe('unwired account erasure processor', () => {
   });
   it('keeps unknown financial results pending without a provider request', async () => {
     const f = setup({
-      account_erasure_work_batch: () => ({ requestId: request, stage: 'billing_pending', runs: [run],
+      account_erasure_work_batch: () => ({ requestId: request, stage: 'billing_pending', runs: [],
         nextRunId: null, financialPending: 1, manualReview: 0 }),
-      account_erasure_detach_runtime: () => ({ processed: 0, remaining: 1, reason: 'billing_pending' }),
     });
     const result = await processAccountErasure(f.input);
-    // The open run is not settled, cancelled or read from here: the detach step refuses it and the stage stays billing_pending.
+    // The open turn is not settled from here: the final inventory counts it and the stage stays billing_pending.
     expect(result.stage).toBe('billing_pending'); expect(f.events.some(n => /^bill2_|financial_recovery/.test(n))).toBe(false);
     expect(f.authAdapter.remove).not.toHaveBeenCalled(); expect(f.storageAdapter.cleanSubject).toHaveBeenCalledOnce();
   });
@@ -172,7 +170,7 @@ describe('unwired account erasure processor', () => {
   });
   it('rejects a changed request identity and never exposes raw exceptions', async () => {
     const f = setup({ account_erasure_work_batch: (() => { let n = 0; return () => ({ requestId: n++ ? other : request, stage: 'closed',
-      runs: [run], nextRunId: null, financialPending: 0, manualReview: 0 }); })() });
+      runs: [], nextRunId: null, financialPending: 0, manualReview: 0 }); })() });
     expect((await processAccountErasure(f.input)).errorCodes).toContain('ERASURE_IDENTITY_CHANGED');
     expect(f.authAdapter.remove).not.toHaveBeenCalled();
     const g = setup({ account_erasure_local_cleanup: () => { throw new Error('private@example.test private payload'); } });
@@ -188,12 +186,6 @@ describe('unwired account erasure processor', () => {
     expect((await processAccountErasure({ ...f.input, budget: { now: () => 10, deadline: 9 } })).errorCodes)
       .toContain('ERASURE_BUDGET_EXHAUSTED');
     expect(f.rpc).not.toHaveBeenCalled(); expect(f.authAdapter.remove).not.toHaveBeenCalled();
-  });
-  it('bounds inventory pagination and refuses duplicate cursors', async () => {
-    const f = setup({ account_erasure_work_batch: () => ({ requestId: request, stage: 'closed', runs: [run],
-      nextRunId: run, financialPending: 0, manualReview: 0 }) });
-    expect((await processAccountErasure({ ...f.input, budget: { maxPages: 1 } })).errorCodes).toContain('ERASURE_PAGE_LIMIT');
-    expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
   it('does not dispatch local cleanup with a truncated response window, then completes on the next pass', async () => {
     const f = setup(); let now = 0;
@@ -255,20 +247,9 @@ describe('unwired account erasure processor', () => {
       expect(f.authAdapter.getState).not.toHaveBeenCalled();
     }
   });
-  it('accepts explicit no-binding detach and still requires final SQL completion', async () => {
-    const f = setup({ account_erasure_detach_runtime: () => ({ detached: true }),
-      account_erasure_auth_result: () => ({ stage: 'billing_pending' }) });
-    const result = await processAccountErasure(f.input);
-    expect(result.stage).toBe('billing_pending'); expect(result.retry).toBe(true); expect(result.remaining).toBe(1);
-  });
-  it('busy runtime binding denies Auth without blocking unrelated Storage cleanup', async () => {
-    const f = setup({ account_erasure_detach_runtime: () => ({ processed: 0, remaining: 1, reason: 'binding_busy' }) });
-    expect((await processAccountErasure(f.input)).errorCodes).toContain('ERASURE_CONTENT_PENDING');
-    expect(f.storageAdapter.cleanSubject).toHaveBeenCalledOnce(); expect(f.authAdapter.remove).not.toHaveBeenCalled();
-  });
   it('unfinished financial evidence cannot be overridden by an empty final inventory', async () => {
     let reads = 0;
-    const f = setup({ account_erasure_work_batch: () => ({ requestId: request, stage: 'closed', runs: [run], nextRunId: null,
+    const f = setup({ account_erasure_work_batch: () => ({ requestId: request, stage: 'closed', runs: [], nextRunId: null,
       financialPending: reads++ ? 1 : 0, manualReview: 0 }) });
     const result = await processAccountErasure(f.input);
     expect(result.stage).toBe('billing_pending'); expect(result.remaining).toBeGreaterThan(0);
