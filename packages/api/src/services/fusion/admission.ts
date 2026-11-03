@@ -8,9 +8,9 @@ import { assertFusionEntitlement, readMembershipEntitlements } from '../membersh
 import { admissionDeadline } from '../turn/admission/admissionLimits';
 import { freezeWindowBillingUnit } from '../turn/admission/billingUnitAdmission';
 import { fitNativeRequestOutput, runtimePaygCall } from '../runtime/paygRuntime';
-import { freezeStagingPaygPricing } from '../runtime/paygPricing';
+import { freezeStagingPaygPricing } from '../turn/admission/paygPricing';
 import { loadStagingPolicy } from '../turn/settings/stagingPolicy';
-import { realContract } from '../runtime/realHost';
+import { realContract } from '../turn/settings/realHost';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type FusionPhase } from './models';
 import { fusionRequestBody, type FusionRequest } from './request';
 import { readFusionSettings } from './settings';

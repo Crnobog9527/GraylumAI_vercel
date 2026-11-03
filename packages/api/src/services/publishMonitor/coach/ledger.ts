@@ -45,6 +45,8 @@ function weeklyRate(e: Experiment, facts: Fact[]) {
 
 function decide(e: Experiment, matched: string[], values: number[], extra: { shift: boolean; lowVolume: boolean;
   meets: (value: number) => boolean | null; ratio: number | null;
+  /** The experiment's posts were published even if no usable number exists for them: that is thin data, not "not run". */
+  executed?: boolean;
   /** A rate without a handbook line: the ratio is shown and gives a direction-aware lean, but never a verdict. */
   trend?: { ratio: number | null; lean: Conclusion['lean'] } }): Conclusion {
   const mid = median(values);
@@ -52,9 +54,9 @@ function decide(e: Experiment, matched: string[], values: number[], extra: { shi
   const base = { matched_posts: matched, samples: values.length, median: mid === null ? null : round(mid, 4),
     vs_baseline: shown === null ? null : round(shown, 2), lean: null as Conclusion['lean'] };
   const finish = (verdict: Verdict, reason: string | null, lean: Conclusion['lean'] = null): Conclusion => ({ ...base, verdict,
-    reason, lean, next_status: verdict === 'inconclusive' && !e.extended_once && matched.length > 0 ? 'extended' : 'concluded' });
+    reason, lean, next_status: verdict === 'inconclusive' && !e.extended_once && (matched.length > 0 || extra.executed === true) ? 'extended' : 'concluded' });
   if (extra.shift) return finish('inconclusive', 'platform_shift');
-  if (!matched.length) return finish('not_run', null);
+  if (!matched.length && !extra.executed) return finish('not_run', null);
   const meets = mid === null ? null : extra.meets(mid);
   const lean = meets === true ? 'positive' : extra.trend ? extra.trend.lean
     : extra.ratio !== null && extra.ratio <= FAILED_AT_OR_BELOW ? 'negative' : null;
@@ -111,7 +113,7 @@ export function conclude(e: Experiment, facts: Fact[], diagnostics: Diagnostic[]
     const up = ratio === null ? null : lowerIsBetter(e.metric) ? 1 / ratio : ratio;
     const lean = up === null ? null : up >= 1 / FAILED_AT_OR_BELOW ? 'positive' : up <= FAILED_AT_OR_BELOW ? 'negative' : null;
     return decide(e, rows.map(d => d.postId), values, { shift: false, lowVolume, meets: v => meetsLine(v) ?? false, ratio: null,
-      ...(line ? {} : { trend: { ratio, lean } }) });
+      executed: matchedFacts.length > 0, ...(line ? {} : { trend: { ratio, lean } }) });
   }
   const values = matchedFacts.map(f => day7Metric(f, e.metric)).filter((v): v is number => v !== null);
   const mid = median(values);

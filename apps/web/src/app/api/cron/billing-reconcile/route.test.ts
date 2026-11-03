@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   reportStripeCard: vi.fn(),
   fusionKick: vi.fn(),
   voice: vi.fn(),
-  reportFees: vi.fn(),
   researchPrices: vi.fn(),
 }));
 
@@ -33,7 +32,6 @@ vi.mock('@repo/api/src/services/voice/recovery', () => ({ recoverVoiceGeneration
 vi.mock('@repo/api/src/services/research/priceRefresh', () => ({ refreshResearchPrices: mocks.researchPrices }));
 vi.mock('@repo/api/src/services/research/runtime/secrets', () => ({ platformSecretReader: () => async () => 'key' }));
 vi.mock('@repo/api/src/services/fusion/background', () => ({ kickStalledReviews: mocks.fusionKick }));
-vi.mock('@repo/api/src/services/report/fees', () => ({ settleDueReportFees: mocks.reportFees }));
 vi.mock('@repo/api/src/services/payments/waffoCardCheckout', () => ({ closeExpiredWaffoCheckouts: mocks.closeExpired }));
 
 vi.mock('@repo/api/src/services/payments/waffoOneTimeRecovery', () => ({ recoverWaffoOneTimeCheckouts: mocks.waffoRecovery }));
@@ -106,7 +104,6 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.stripeClient.mockReturnValue({ client: 'stripe' });
     mocks.stripeCard.mockResolvedValue({ success: true, skipped: true, findings: [] });
     mocks.fusionKick.mockResolvedValue({ success: true, kicked: 0, listed: 0 });
-    mocks.reportFees.mockResolvedValue({ success: true, settled: 0 });
     mocks.voice.mockResolvedValue({ success: true, settled: 0, scrubbed: 0, waiting: 0, failed: 0 });
     mocks.researchPrices.mockResolvedValue({ success: true, refreshed: [], changed: [], failed: [], expiring: [], window: 'skipped' });
   });
@@ -154,14 +151,12 @@ describe('/api/cron/billing-reconcile', () => {
     expect(await response.json()).toMatchObject({ fusionKick: { success: false } });
   });
 
-  it('settles held report prices (0295) and fails the job when that step fails', async () => {
-    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
-    expect(mocks.reportFees).toHaveBeenCalledWith({ client: 'service-role' });
-    mocks.reportFees.mockResolvedValue({ success: false, settled: 0 });
-    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
-    mocks.reportFees.mockRejectedValue(new Error('unexpected'));
+  it('no longer settles report prices: a report turn settles in turn_close, so the reconciliation has no report fee step (round 12 sweep)', async () => {
     const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
-    expect(await response.json()).toMatchObject({ reportFees: { success: false } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty('reportFees');
+    const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/report_fee|settleDueReportFees|reportFees/);
   });
 
   it('rejects unauthorized invocation before creating a privileged client', async () => {

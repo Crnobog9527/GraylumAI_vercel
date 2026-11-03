@@ -19,7 +19,6 @@ import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/str
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
 import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
-import { settleDueReportFees } from '@repo/api/src/services/report/fees';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
 import { pruneGaCheckoutIds } from '@repo/api/src/services/analytics/gaPurchase';
@@ -37,12 +36,6 @@ const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 async function runVoiceRecovery(supabase: SupabaseClient) {
   try { return await recoverVoiceGenerations(supabase); }
   catch { return { success: false, settled: 0, scrubbed: 0, waiting: 0, failed: 1 }; }
-}
-
-/** REPORT fixed price (0295): settle held prices of report executions that have ended. */
-async function runReportFeeSettlement(supabase: SupabaseClient) {
-  try { return await settleDueReportFees(supabase); }
-  catch { return { success: false, settled: 0 }; }
 }
 
 /** FUSION-BACKGROUND daily backstop: reviews that stopped moving get one fresh step each (each at most once a day).
@@ -152,7 +145,7 @@ export async function GET(request: Request) {
     const analyticsIds = pruneGaCheckoutIds(supabase);
     // CORE-PATH-V2 V2-12 B10: the stale charged rounds scan, the stuck PAYG calls scan and the receipt retention are gone (old BILL2
     // tools; the old rows go with their tables in batch F).
-    const [result, readinessAudit, erasureFinancial, waffo, stripeCard, fusionKick, reportFees,
+    const [result, readinessAudit, erasureFinancial, waffo, stripeCard, fusionKick,
       voice, researchPrices] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
@@ -160,13 +153,12 @@ export async function GET(request: Request) {
       runWaffoReconciliation(supabase),
       runStripeCardReconciliation(supabase),
       runFusionKick(supabase, new URL(request.url).origin),
-      runReportFeeSettlement(supabase),
       runVoiceRecovery(supabase),
       runResearchPriceRefresh(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
       && stripeCard.success && fusionKick.success
-      && reportFees.success && voice.success && researchPrices.success;
+      && voice.success && researchPrices.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -179,7 +171,6 @@ export async function GET(request: Request) {
           ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`]),
 
           ...(fusionKick.success ? [] : ['Fusion review kick failed']),
-          ...(reportFees.success ? [] : ['Report price settlement failed']),
           ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`]),
           ...(researchPrices.success ? [] : [`Research prices: ${researchPrices.failed.length} refresh failures, `
             + `${researchPrices.expiring.length} expiring within a day, window ${researchPrices.window}`])].join(' | '),
@@ -188,7 +179,6 @@ export async function GET(request: Request) {
           waffo,
           stripeCard,
           fusionKick,
-          reportFees,
           voice,
           researchPrices,
           mismatches: result.mismatches,
@@ -229,7 +219,6 @@ export async function GET(request: Request) {
       waffo,
       stripeCard,
       fusionKick,
-      reportFees,
       voice,
       researchPrices,
       timestamp: new Date().toISOString(),

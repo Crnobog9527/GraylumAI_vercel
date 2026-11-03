@@ -7,7 +7,7 @@ import type { frozenCallPolicy } from '../turn/provider/service';
 import { PURPOSE_OUTPUT_CAP } from '../turn/provider/responseCapacity';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
 import { readPaygHostPolicies } from '../turn/admission/paygHostPolicy';
-import { readPaygPolicies } from '../runtime/realHost';
+import { readPaygPolicies } from '../turn/settings/realHost';
 import { admitReasoning } from '../turn/admission/reasoningAdmission';
 import type { ReasoningPolicy } from '../turn/admission/reasoningPolicy';
 import type { StagingPolicy } from '../turn/settings/stagingPolicy';

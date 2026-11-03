@@ -7,7 +7,7 @@ import { buildPack, packBytes, type Cadence } from './pack';
 import { packRowsSchema } from './rows';
 import { historyScoreboard, platformShift, scoreboard } from './scoreboard';
 import { generateDataset } from './simulatedDataset';
-import { REVIEW_PACK_RESERVE, utcDay } from './stats';
+import { REVIEW_PACK_RESERVE, day7Metric, utcDay } from './stats';
 import { packRowsFor, simId } from './testRows';
 
 const AS_OF = '2026-10-27';
@@ -57,6 +57,35 @@ describe('scorecards (RC-2, simulated accounts)', () => {
     expect(youtube.toSorted((a, b) => b.views_median! - a.views_median!)[0]!.pillar).toBe('p3');
     const day7Posts = new Set(r.facts.filter(f => f.day7).map(f => f.postId));
     expect(r.facts.filter(f => f.basis === 'cumulative_at_import').some(f => day7Posts.has(f.postId))).toBe(false);
+  });
+
+  it('B: an imported post that later gets its day-30 snapshot stays in the history scorecard', () => {
+    const r = rows('B');
+    const before = historyScoreboard(r.facts);
+    const settled = r.facts.map(f => f.basis === 'cumulative_at_import' && !f.day7
+      ? { ...f, basis: 'day30' as const, day30: { views: 999999 }, day30On: '2026-10-20' } : f);
+    expect(settled.some(f => f.basis === 'day30' && f.importCumulative)).toBe(true);
+    expect(historyScoreboard(settled)).toEqual(before);
+  });
+
+  it('B: a day-30 snapshot without views does not void an import snapshot that has them', () => {
+    const r = rows('B');
+    const before = historyScoreboard(r.facts);
+    const gapped = r.facts.map(f => f.basis === 'cumulative_at_import' && !f.day7
+      ? { ...f, basis: 'day30' as const, day30: { likes: 1 }, day30On: '2026-10-20', missing: [...f.missing, 'views'] } : f);
+    expect(historyScoreboard(gapped)).toEqual(before);
+  });
+
+  it('A: samples count every settled post, views_samples only those with a view count', () => {
+    const r = rows('A');
+    const pick = r.facts.filter(f => f.day7 && f.platform === 'douyin' && (f.pillarKey ?? 'untagged') === 'p1'
+      && utcDay(f.postedAt) >= Math.floor(NOW / 86_400_000) - 26 * 7).slice(0, 3);
+    expect(pick).toHaveLength(3);
+    const only = new Set(pick.map(f => f.postId));
+    const facts = r.facts.filter(f => !f.day7 || f.platform !== 'douyin' || (f.pillarKey ?? 'untagged') !== 'p1' || only.has(f.postId))
+      .map((f, i) => only.has(f.postId) && f.postId !== pick[0]!.postId ? { ...f, day7: { likes: 5 + i } } : f);
+    const row = scoreboard(facts, NOW, 26).find(x => x.pillar === 'p1' && x.platform === 'douyin')!;
+    expect(row).toMatchObject({ samples: 3, views_samples: 1 });
   });
 
   it('C: a pillar strong on one platform and weak on another stays per platform; the TikTok shift is detected', () => {
@@ -135,6 +164,21 @@ describe('experiment ledger (RC-2): verdicts by code match the designed outcomes
     // Numbers uploaded after the period for posts inside it still count.
     const late = fresh.map(d => ({ ...d, capturedOn: '2099-01-01' }));
     expect(conclude(e, inside, late).samples).toBe(3);
+  });
+
+  it('published posts without a captured rate are thin data (extended), not "not run"', () => {
+    const { e, fresh, facts } = basics();
+    const result = conclude(e, facts, []);
+    expect(fresh.length).toBeGreaterThan(0);
+    expect(result).toMatchObject({ samples: 0, verdict: 'inconclusive', reason: 'samples_lt_3', next_status: 'extended' });
+    expect(conclude({ ...e, extended_once: true }, facts, [])).toMatchObject({ verdict: 'inconclusive', next_status: 'concluded' });
+  });
+
+  it('a real day-7 value is not hidden by a missing field of another observation', () => {
+    const { facts } = basics();
+    const fact = { ...facts[0]!, day7: { views: 1000 }, missing: ['views'] };
+    expect(day7Metric(fact, 'views')).toBe(1000);
+    expect(day7Metric({ ...fact, day7: {} }, 'views')).toBeNull();
   });
 
   it('a derived rate (watch percentage from seconds and video length) settles like a confirmed one', () => {
@@ -222,6 +266,15 @@ describe('review pack (RC-2)', () => {
     }
   });
 
+  it.each(data.accounts.map(a => a.key))('account %s: best and worst only point at settled posts the pack still lists', key => {
+    for (const cadence of cadences) {
+      const period = loose(buildPack({ rows: rows(key), cadence, businessId: simId(key), now: NOW, handbooks })).this_period;
+      if (!period) continue;
+      const listed = new Set(period.settled_posts.map((p: { post_id: string }) => p.post_id));
+      for (const id of [...period.best, ...period.worst]) expect(listed.has(id)).toBe(true);
+    }
+  });
+
   it('A with two of three posts stuck at the hook is basics only: no long-run sections, basics experiments only', () => {
     const pack = loose(buildPack({ rows: rows('A'), cadence: 'weekly', businessId: simId('A'), now: NOW, handbooks }));
     expect(pack.mode).toBe('basics_only');
@@ -276,6 +329,19 @@ describe('funnel diagnoses (RC-2 picks)', () => {
     const ds = [mk(1, 'p-bad', '2026-10-26'), mk(2, 'p-bad', '2026-10-25'), mk(3, 'p-bad', '2026-10-24'), mk(4, 'p-ok1', '2026-10-23'), mk(5, 'p-ok2', '2026-10-22')];
     const pack = loose(buildPack({ rows: { ...r, diagnostics: ds }, cadence: 'weekly', businessId: simId('A'), now: NOW, handbooks }));
     expect(pack.diagnostics.posts.map((p: { post_id: string }) => p.post_id)).toEqual([simId('p-bad'), simId('p-ok1'), simId('p-ok2')]);
+  });
+});
+
+describe('strategy proposals (RC-2)', () => {
+  it('a quarterly pack that only covers the basics does not open the strategy proposal', () => {
+    const r = rows('A');
+    const full = loose(buildPack({ rows: { ...r, diagnostics: [] }, cadence: 'quarterly', businessId: simId('A'), now: NOW, handbooks }));
+    expect(full.limits.strategy_proposal).toBe(true);
+    const failing = r.diagnostics.slice(0, 3).map(d => ({ ...d, platform: 'douyin', rates: { bounce_2s: 0.95, retain_3s: 0.1 }, reviewRunId: null,
+      capturedOn: AS_OF }));
+    const basicsOnly = loose(buildPack({ rows: { ...r, diagnostics: failing }, cadence: 'quarterly', businessId: simId('A'), now: NOW, handbooks }));
+    expect(basicsOnly.mode).toBe('basics_only');
+    expect(basicsOnly.limits.strategy_proposal).toBe(false);
   });
 });
 

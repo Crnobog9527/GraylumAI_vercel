@@ -66,7 +66,7 @@ export function buildPack(input: PackInput) {
     cold_start: settled8.length === 0,
     limits: { experiments_max: longRun ? 3 : COACH_PENDING.basicsFailExperiments, experiment_kinds: longRun
       ? ['tactic', 'basics'].concat(cadence === 'chat' || cadence === 'weekly' ? [] : ['pillar_mix']) : ['basics'],
-    strategy_proposal: cadence === 'quarterly', pillar_mix_proposal: longRun && (cadence === 'monthly' || cadence === 'quarterly') },
+    strategy_proposal: longRun && cadence === 'quarterly', pillar_mix_proposal: longRun && (cadence === 'monthly' || cadence === 'quarterly') },
     strategy: { version_id: rows.profile?.strategyVersionId ?? null, missing: !rows.strategy,
       pillars: rows.profile?.pillars ?? [], pillars_source: rows.profile?.pillarsSource ?? null,
       pillar_mix_target: rows.profile?.pillarMixTarget ?? null, fields: rows.strategy ? clip(rows.strategy, 200) : null },
@@ -93,7 +93,7 @@ export function buildPack(input: PackInput) {
       const keys = (rows.profile?.pillars ?? []).map(p => p.key);
       pack.quarterly = { strategy_fit: { pillars_never_posted: keys.filter(k => !sb.some(r => r.pillar === k)),
         pillars_consistently_below: keys.filter(k => {
-          const own = sb.filter(r => r.pillar === k && r.samples >= 3);
+          const own = sb.filter(r => r.pillar === k && r.views_samples >= 3);
           return own.length > 0 && own.every(r => r.vs_platform_median !== null && r.vs_platform_median < 0.8);
         }) } };
     }
@@ -107,7 +107,7 @@ export const packBytes = (pack: unknown) => Buffer.byteLength(JSON.stringify(pac
 function trim(pack: Record<string, unknown>) {
   const steps: Array<() => boolean> = [
     () => pop(pack, ['untagged_posts']),
-    () => pop(pack, ['this_period', 'settled_posts']),
+    () => popSettled(pack),
     () => pop(pack, ['this_period', 'too_new']),
     () => pop(pack, ['ledger', 'recent_concluded']),
     () => pop(pack, ['history_scoreboard']),
@@ -131,6 +131,15 @@ function pop(pack: Record<string, unknown>, path: string[]) {
   for (const key of path) at = (at as Record<string, unknown> | undefined)?.[key];
   if (!Array.isArray(at) || !at.length) return false;
   at.pop();
+  return true;
+}
+/** Drops the oldest listed settled post, and with it any best / worst reference to it: the model may only cite what it can still see. */
+function popSettled(pack: Record<string, unknown>) {
+  if (!pop(pack, ['this_period', 'settled_posts'])) return false;
+  const period = pack.this_period as { settled_posts: Array<{ post_id: string }>; best?: string[]; worst?: string[] };
+  const kept = new Set(period.settled_posts.map(p => p.post_id));
+  if (period.best) period.best = period.best.filter(id => kept.has(id));
+  if (period.worst) period.worst = period.worst.filter(id => kept.has(id));
   return true;
 }
 function popFewest(pack: Record<string, unknown>, key: string) {

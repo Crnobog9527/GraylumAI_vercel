@@ -278,18 +278,7 @@ describe("openingRequest", () => {
 });
 
 describe("turnResultNotice", () => {
-  it("shows the host's fixed notice first, without changing what the turn does (#698)", () => {
-    const notice = "当前任务状态已变化，暂时无法继续，请刷新后查看原任务。";
-    const result = { state: "cancelled" as const, unavailable: "paused" as const, notice };
-    expect(turnResultNotice(result)).toBe(notice);
-    expect(turnResultNotice({ state: "completed", unavailable: "output_truncated", notice })).toBe(notice);
-    expect(envelopeAfterTurn(JSON.stringify({ request }), request.requestId, executionId, result)).toEqual({ release: true });
-    expect(envelopeAfterTurn(JSON.stringify({ request }), request.requestId, executionId, { state: "pending", notice }))
-      .toEqual(envelopeAfterTurn(JSON.stringify({ request }), request.requestId, executionId, { state: "pending" }));
-    // A pause keeps its own notice with 继续; a refused new message is shown by the pause notices.
-    expect(turnResultNotice({ state: "waiting_credits", notice: "余额不足，任务已暂停，请补充积分后继续。" })).toBeNull();
-    expect(turnResultNotice({ state: "completed", admitted: false, executionId, notice })).toBeNull();
-  });
+
   it("maps each unavailable reason that has a notice, and nothing else", () => {
     expect(turnResultNotice({ state: "completed", unavailable: "output_truncated" })).toBeNull(); // Shown once under the turn.
     expect(turnResultNotice({ state: "cancelled", unavailable: "provider_history" })).toContain("请新开一个对话");
@@ -309,7 +298,7 @@ describe("turnResultNotice", () => {
   });
 });
 
-import {sameRequest,releaseRejectedAnswer,isInputTooLong,isRefusedBeforeAdmission,isReleasedRefusal} from './mentor-turn';
+import {sameRequest,releaseRejectedAnswer,isInputTooLong} from './mentor-turn';
 import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../../../packages/api/src/shared/runtimeInputMessages';
 it('matches a stopped request structurally including nested answerSource, retaining all identity differences',()=>{
  const request={requestId:'a',input:'乙',answerSource:{executionId:'source',optionIndex:1}};
@@ -349,33 +338,7 @@ it('a too-long refusal releases its own envelope so the user can split the text;
  expect(releaseRejectedAnswer(storage,'key','a',new Error('OPC_ANSWER_SOURCE_DENIED'),text=>restored.push(text))).toBe(true);
  expect(restored).toEqual(['很长的粘贴']);
 });
-it('a refusal before admission releases its envelope and gives the text back; after admission or unknown it is kept',()=>{
- const values=new Map<string,string>();
- const storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);},removeItem:(key:string)=>{values.delete(key);}};
- const raw=JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'我的回答'}});
- const refusal=(httpStatus:number,path='opc.mentorTurnStream')=>Object.assign(new Error('当前模型用途尚未完成逐次计费验证，请管理员核对配置；未发起模型调用。'),
-  {data:{httpStatus,code:httpStatus===412?'PRECONDITION_FAILED':'SERVICE_UNAVAILABLE',path}});
- const restored:string[]=[];
- values.set('key',raw);
- // Already admitted (the stream named its execution), unknown (5xx) or another procedure: the request stays.
- for(const [cause,admitted] of [[refusal(412),true],[refusal(503),false],[refusal(412,'runtime.executeStream'),false]] as const){
-  expect(releaseRejectedAnswer(storage,'key','a',cause,text=>restored.push(text),admitted)).toBe(false);
-  expect(storage.getItem('key')).toBe(raw);expect(isReleasedRefusal(cause)).toBe(false);
- }
- expect(releaseRejectedAnswer(storage,'key','a',refusal(412),text=>restored.push(text))).toBe(false); // callers that do not say: kept
- const pending=Object.assign(new Error('RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。'),
-  {data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.mentorTurnStream'}});
- expect(releaseRejectedAnswer(storage,'key','a',pending,text=>restored.push(text),false)).toBe(false); // waits for the organizer
- expect(storage.getItem('key')).toBe(raw);
- const cause=refusal(412);
- expect(isRefusedBeforeAdmission(cause,false)).toBe(true);
- expect(releaseRejectedAnswer(storage,'key','a',cause,text=>restored.push(text),false)).toBe(true);
- expect(storage.getItem('key')).toBeNull();expect(restored).toEqual(['我的回答']);expect(isReleasedRefusal(cause)).toBe(true);
- // A refused summary click is released too, but its host marker never goes into the box.
- values.set('key',JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'b',input:'HOST_STEP_SUMMARY:v1'}}));
- expect(releaseRejectedAnswer(storage,'key','b',refusal(412,'opc.prepareStep'),text=>restored.push(text),false)).toBe(true);
- expect(storage.getItem('key')).toBeNull();expect(restored).toEqual(['我的回答']);
-});
+
 
 describe("a retained mentor request with a research refresh grant", () => {
   it("keeps the grant through the stored envelope, so a resend replays the same request", () => {

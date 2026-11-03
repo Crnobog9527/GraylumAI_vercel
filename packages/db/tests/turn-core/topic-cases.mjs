@@ -37,6 +37,9 @@ export async function topicCases(t){
  {
   const a=await account(1000),src=await source(a),got=await read(a,src);
   assert.equal(got.sessionId,src.topicSession);
+  // V2-12: the narrowed runtime.view reads the session's scope only; a turn-path conversation is not legacy.
+  const sc=await one('select runtime_session_scope($1,$2) v',[a.actor,src.topicSession]);
+  assert.equal(sc.sessionId,src.topicSession);assert.equal(sc.legacy,false);assert.ok(sc.scope);
   assert.deepEqual(got.resources,['report.md']);
   assert.equal(got.material.content.material,'CONFIRMED');
   assert.equal(got.sourceVersionId,src.version);
