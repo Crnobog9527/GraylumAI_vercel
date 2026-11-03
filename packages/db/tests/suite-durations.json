@@ -34,6 +34,7 @@
     "stripe-upgrade-overlap/run-local.mjs": 116,
     "turn-admin-report/run-local.mjs": 2,
     "turn-core/absent-local.mjs": 3,
+    "turn-core/no-identity-local.mjs": 3,
     "turn-core/recovery-local.mjs": 5,
     "turn-core/run-local.mjs": 14,
     "turn-core/tables-local.mjs": 2,

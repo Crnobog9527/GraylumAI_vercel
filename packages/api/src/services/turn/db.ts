@@ -47,8 +47,9 @@ export type ClaimAction = RecoveryAction | 'lookup';
 const recoveryClaim = z.array(z.object({ actorId: z.string().uuid(), turnId: z.number().int().positive(),
   action: z.enum(['interrupt', 'expire', 'settle', 'lookup']),
   /** settle, lookup: the model costs not final yet, to look up by provider id (lookup: of a turn paused for credits). */
+  /** providerId null (0494): a call that never got an id, settled at zero once its turn is 24 hours old. */
   /** model and pricing are the ones the turn froze at open (policy), never the catalog's current values. */
-  calls: z.array(z.object({ seq: z.number().int().positive(), providerId: z.string().min(1), model: z.string().nullable(),
+  calls: z.array(z.object({ seq: z.number().int().positive(), providerId: z.string().min(1).nullable(), model: z.string().nullable(),
     pricing: z.unknown().nullable().optional(), upperUsd: z.coerce.string() })) })).max(50);
 export type RecoveryItem = z.infer<typeof recoveryClaim>[number];
 const recovered = z.object({ action: z.enum(['interrupt', 'expire', 'settle']), skipped: z.boolean().optional(),
@@ -140,6 +141,12 @@ export function turnDatabase(clients: TurnClients) {
     settleAbsent: (a: { actorId: string; turnId: number; seq: number; providerId: string; httpStatus: number; payloadHash: string }) =>
       call(w, 'turn_call_settle_absent', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq, p_provider_id: a.providerId,
         p_http_status: a.httpStatus, p_payload_hash: a.payloadHash }, absentSettled),
+    /**
+     * An unknown model call that never got a provider id, on a turn at least 24 hours old (Owner 2026-11-03, 同意满24小时退还): settled at
+     * zero in the database, which re-checks every condition under lock; repeating it is harmless.
+     */
+    settleNoIdentity: (a: { actorId: string; turnId: number; seq: number }) =>
+      call(w, 'turn_call_settle_no_identity', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_seq: a.seq }, absentSettled),
     /** The user's stop of a running report (V2-7a); not part of a turn's own writes. */
     stop: (a: { actorId: string; turnId: number; confirmed: boolean; stopAt: number | null }) =>
       call(w, 'turn_stop', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_confirmed: a.confirmed, p_stop_at: a.stopAt }, stopped),

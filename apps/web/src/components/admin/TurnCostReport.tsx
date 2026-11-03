@@ -115,8 +115,8 @@ function AbsentRefundsCard() {
   return <Card data-testid="absent-refunds">
     <CardHeader>
       <CardTitle>供应商查无而自动退还的调用</CardTitle>
-      <CardDescription>开轮满 24 小时后，供应商对该调用的编号明确回答“查无此次生成”，费用记 0、冻结积分全部退回。
-        如果供应商其实收了钱，由平台承担。每一笔都留在这里，只读。</CardDescription>
+      <CardDescription>开轮满 24 小时后，供应商对该调用的编号明确回答“查无此次生成”，或供应商一直没给出调用编号，
+        费用记 0、冻结积分全部退回。如果供应商其实收了钱，由平台承担。每一笔都留在这里，只读。</CardDescription>
     </CardHeader>
     <CardContent className="space-y-2">
       {view.error ? <div role="alert">无法读取，请稍后重试。</div>
@@ -130,7 +130,8 @@ function AbsentRefundsCard() {
             <th className="text-left">查询结果</th><th className="text-right">冻结积分</th><th className="text-right">实扣积分</th>
             <th className="text-left">结清时间</th>
           </tr></thead><tbody>{data.calls.map((call) => <tr key={`${call.turnId}-${call.seq}`}>
-            <td>{call.turnId}</td><td>{call.seq}</td><td className="break-all">{call.providerId}</td><td>HTTP {call.httpStatus}（查无）</td>
+            <td>{call.turnId}</td><td>{call.seq}</td><td className="break-all">{call.providerId ?? '—'}</td>
+            <td>{call.source === 'no_identity_24h' ? '无调用编号，满 24 小时' : `HTTP ${call.httpStatus}（查无）`}</td>
             <td className="text-right">{call.reservedCredits}</td><td className="text-right">{call.chargedCredits ?? '—'}</td>
             <td>{call.settledAt}</td>
           </tr>)}</tbody></table></>

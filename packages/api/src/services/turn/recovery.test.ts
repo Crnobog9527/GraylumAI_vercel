@@ -28,6 +28,7 @@ function harness(batches: RecoveryItem[][], lookup: TurnRecoveryDeps['lookup'], 
     recover: vi.fn(async (a: { action: string }) => ({ action: a.action, settlement: 'done' as const, closeKind: 'interrupted' })),
     record: vi.fn(async () => ({ status: 'ok', creditsLow: false, sessionTombstoned: false, accountErasing: false, voiceSourceRevoked: false })),
     settleAbsent: vi.fn(async () => ({ settled: true })),
+    settleNoIdentity: vi.fn(async () => ({ settled: true })),
   };
   const deps = { db: db as unknown as TurnRecoveryDeps['db'], lookup, account: 'openrouter-key:synthetic', deadline: 60_000,
     now: () => clock.t };
@@ -183,6 +184,41 @@ describe('recoverTurns', () => {
       await recoverTurns(deps);
       expect(db.settleAbsent).not.toHaveBeenCalled();
       expect(db.recover).not.toHaveBeenCalled();
+    });
+  });
+  describe('a call that never got a provider id (0494, Owner 2026-11-03, 同意满24小时退还)', () => {
+    const noId = { seq: 2, providerId: null, model: null, pricing: null, upperUsd: '0.020000000000' };
+
+    it('is settled through the database without any lookup, then the turn through the usual settle pass', async () => {
+      const lookup = vi.fn(async () => observed({}, 404));
+      const { db, deps } = harness([[settle(11, [noId])]], lookup);
+      const summary = await recoverTurns(deps);
+      expect(lookup).not.toHaveBeenCalled();
+      expect(db.settleNoIdentity).toHaveBeenCalledWith({ actorId, turnId: 11, seq: 2 });
+      expect(db.settleNoIdentity.mock.invocationCallOrder[0]).toBeLessThan(db.recover.mock.invocationCallOrder[0]!);
+      expect(db.settleAbsent).not.toHaveBeenCalled(); expect(db.record).not.toHaveBeenCalled();
+      expect(summary).toMatchObject({ lookups: 1, absentSettled: 1, lateReceipts: 0, failed: 0 });
+    });
+
+    it('works without a platform key, and a call with an id still takes the lookup path', async () => {
+      const { db, deps } = harness([[settle(12, [noId, { seq: 1, providerId: 'gen-1', model: 'test/model', pricing, upperUsd: '0.02' }])]],
+        vi.fn(async () => observed({ error: 'x' }, 404)));
+      await recoverTurns({ ...deps, account: null, lookup: null });
+      expect(db.settleNoIdentity).toHaveBeenCalledTimes(1);
+      expect(db.settleAbsent).not.toHaveBeenCalled();
+    });
+
+    it('before 24 hours the database answers too_early: nothing is counted; a failure is carried on from', async () => {
+      const { db, deps } = harness([[settle(13, [noId])], [settle(14, [noId])]], null);
+      db.settleNoIdentity.mockResolvedValueOnce({ settled: false, reason: 'too_early' } as never);
+      db.settleNoIdentity.mockRejectedValueOnce(new Error('boom'));
+      expect((await recoverTurns(deps)).absentSettled).toBe(0);
+    });
+
+    it('a turn paused for credits (action lookup) never settles it', async () => {
+      const { db, deps } = harness([[{ actorId, turnId: 15, action: 'lookup', calls: [noId] }]], null);
+      await recoverTurns(deps);
+      expect(db.settleNoIdentity).not.toHaveBeenCalled();
     });
   });
 });
