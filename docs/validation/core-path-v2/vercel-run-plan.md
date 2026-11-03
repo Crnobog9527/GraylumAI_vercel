@@ -31,7 +31,7 @@
 # 环境（值由总控给，全部在仓库外）：LOADTEST_BASE_URL、LOADTEST_ALLOWED_APP_HOST（应用主机，只给驱动）、LOADTEST_ACCOUNTS_FILE、
 # LOADTEST_DATABASE_URL、LOADTEST_ALLOWED_DB_HOST（库主机，只给两个采样器）、可选 SUPABASE_MANAGEMENT_TOKEN / SUPABASE_PROJECT_REF
 # run-all.sh 给每个进程只传它自己的那个主机；每次运行写进新目录 <RUN_ROOT>/run-<时间戳>，目录里已有文件则拒绝运行
-# 1. 桩：LOAD_STUB_HOST=… LOAD_STUB_PORT=… LOAD_STUB_PREFIX=<随机串> node scripts/loadtest/openrouter-stub.mjs
+# 1. 桩和隧道：scripts/loadtest/start-stub-tunnel.sh（备选 --ngrok），它会打印要填的 LOADTEST_MODEL_STUB_URL；Owner 逐步照做见 owner-tunnel-steps.md
 # 2. 自检：curl <桩地址>/healthz 返回 ok；先只跑 1 个账号 1 轮（--calibrate --turns 1 --go），再看 <桩地址>/__stats 的 calls > 0（证明钩子生效；为 0 立即停，别往下跑）
 # 3–6. 一条命令：先跑 5 分钟无争用基线（不开采样器）；再把两个采样器放到后台（打印 PID 和日志路径）；
 #      再启动整套 30→50→75→100→50→100（档间冷却 10 分钟）；驱动结束后等采样器退出（宽限 30 秒，超时停掉）；
