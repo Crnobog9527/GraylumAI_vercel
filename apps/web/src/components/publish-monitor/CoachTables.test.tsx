@@ -16,7 +16,8 @@ const pack = {
     day7_views_median_vs_prev: { tiktok: { current: 1216.5, previous: 1352.5, samples: [2, 4] }, x: { current: 633, previous: null, samples: [3, 0] } } },
   stage: { day7_views_trend: { tiktok: { change: 0.03, previous_4w_median: 1335, recent_4w_median: 1369, samples: [11, 16] }, x: { change: -0.17,
     previous_4w_median: 795, recent_4w_median: 663, samples: [10, 11] } },
-    followers: [{ platform: 'tiktok', now: 5200, weeks4_ago: 5000, weeks8_ago: null }] },
+    // The shape stageSection() makes: `{ date, value }` or null.
+    followers: [{ platform: 'tiktok', now: { date: '2026-11-03', value: 5200 }, weeks4_ago: { date: '2026-10-06', value: 5000 }, weeks8_ago: null }] },
 };
 
 describe('the brand review tables', () => {

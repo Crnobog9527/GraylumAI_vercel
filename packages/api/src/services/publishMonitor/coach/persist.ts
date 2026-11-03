@@ -5,6 +5,7 @@
  * experiments (baseline frozen by code from the facts, period = the next period after the review's) and the pillar tags of untagged posts.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { tagFromTitles } from './autotag';
 import { freezeBaseline } from './ledger';
 import type { CheckedOutput } from './output';
 import { COACH_READ_WEEKS, readPackRows } from './rows';
@@ -24,7 +25,10 @@ export async function saveCoachLedger(db: Pick<SupabaseClient, 'rpc'>, claim: { 
   // The next period has the length of this one (28 days for a monthly or quarterly review, 7 otherwise).
   const length = review.cadence === 'monthly' || review.cadence === 'quarterly' ? 28 : 7;
   const start = utcDay(review.period.end) + 1;
-  const facts = checked.experiments.length ? (await readPackRows(db, claim.actorId, businessId, COACH_READ_WEEKS)).facts : [];
+  // The baseline is frozen on the same facts the pack was made from: the pillars the code took from titles count here too, or an
+  // experiment proposed on them would freeze an empty baseline (the tags are only written after the experiments).
+  const read = checked.experiments.length ? await readPackRows(db, claim.actorId, businessId, COACH_READ_WEEKS) : null;
+  const facts = read ? tagFromTitles(read.facts, read.profile?.pillars ?? []).items : [];
   const experiments = checked.experiments.map(e => ({
     kind: e.kind, layer: e.layer, hypothesis: e.hypothesis, action: e.action, metric: e.metric,
     // Only the target that fits the kind is stored: a line settles basics, a multiple settles the rest.

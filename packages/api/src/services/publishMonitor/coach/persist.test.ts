@@ -57,6 +57,24 @@ it('stores only the target that fits the kind, whatever else the experiment carr
   expect(payloadOf(d.rpc).p_payload.experiments.map(e => [e.target_mult, e.target_line])).toEqual([[1.5, null], [null, { max: 0.5 }]]);
 });
 
+it('the baseline is frozen on the posts the code tagged from their titles too, not on the untagged rows the database still holds', async () => {
+  const pillarName = rows.profile!.pillars.find(p => rows.facts.some(f => f.pillarKey === p.key && f.platform === platform))!;
+  const stripped = { ...rows, facts: rows.facts.map(f => (f.pillarKey === pillarName.key
+    ? { ...f, pillarKey: null, pillarSource: null, title: `【${pillarName.name}】 ${f.title ?? ''}` } : f)) };
+  const rpc = vi.fn(async (name: string) => (name === 'publish_monitor_review_pack_rows' ? { data: stripped, error: null } : { data: { saved: true }, error: null }));
+  const experiment = { kind: 'tactic' as const, layer: null, hypothesis: 'h', action: 'a', metric: 'views', target: { mult: 1.5 },
+    match: { pillar_key: pillarName.key, platform }, evidence: { post_ids: [], metrics: [] } };
+  await saveCoachLedger({ rpc } as never, claim, simId('B'), pack, checked({ experiments: [experiment] }));
+  const baseline = (payloadOf({ mock: { calls: rpc.mock.calls } } as never).p_payload.experiments[0]!.baseline) as { samples: number } | null;
+  expect(baseline).not.toBeNull();
+  expect(baseline!.samples).toBeGreaterThanOrEqual(3);
+  // The same posts with titles that name no pillar stay untagged, and the baseline is honestly empty.
+  const unnamed = { ...stripped, facts: stripped.facts.map(f => (f.pillarKey === null ? { ...f, title: '没有栏目' } : f)) };
+  const rpc2 = vi.fn(async (name: string) => (name === 'publish_monitor_review_pack_rows' ? { data: unnamed, error: null } : { data: { saved: true }, error: null }));
+  await saveCoachLedger({ rpc: rpc2 } as never, claim, simId('B'), pack, checked({ experiments: [experiment] }));
+  expect(payloadOf({ mock: { calls: rpc2.mock.calls } } as never).p_payload.experiments[0]!.baseline).toBeNull();
+});
+
 it('an unusable block drops only what the model proposed: the verdicts of the pack and the code\'s title tags are still saved', async () => {
   const d = database();
   const auto = [{ post_id: simId('P2'), pillar_key: 'p2' }];

@@ -14,6 +14,8 @@ export type CoachTable = { posts: CoachPost[]; scores: CoachScore[]; trends: Coa
 
 export const EMPTY_COACH: CoachTable = { posts: [], scores: [], trends: [] };
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+/** A follower snapshot is `{ date, value }` (or null: the platform does not provide it); only the value is shown. */
+const snapshot = (v: unknown) => num(rec(v).value);
 const rec = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
 const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object') : []);
 
@@ -42,7 +44,7 @@ export function coachTable(tables: unknown): CoachTable {
   const trends = platforms.map(platform => {
     const [a, b, f] = [rec(vsPrev[platform]), rec(trend[platform]), rec(followers.get(platform))];
     return { platform, current: num(a.current), previous: num(a.previous), recent4w: num(b.recent_4w_median), previous4w: num(b.previous_4w_median),
-      change: num(b.change), followersNow: num(f.now), followers4w: num(f.weeks4_ago), followers8w: num(f.weeks8_ago) };
+      change: num(b.change), followersNow: snapshot(f.now), followers4w: snapshot(f.weeks4_ago), followers8w: snapshot(f.weeks8_ago) };
   });
   return { posts, scores, trends };
 }
