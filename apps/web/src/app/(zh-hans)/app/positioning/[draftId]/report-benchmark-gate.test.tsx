@@ -11,6 +11,7 @@ describe("the report's benchmark gate says the fallback rule as it is (round 13)
   it("states both conditions: one qualified benchmark and two rounds that returned data", () => {
     expect(FALLBACK_RULE_TEXT).toContain("至少有 1 个合格对标");
     expect(FALLBACK_RULE_TEXT).toContain("两轮");
+    expect(FALLBACK_RULE_TEXT).toContain("对标数据暂时取不到的那次不算");
   });
   it("round 13: one round and no qualified benchmark shows the rule and the real counts, not a choice card", () => {
     const html = gate({ canGenerate: false, qualified: 0, required: 3, rounds: 1, card });
