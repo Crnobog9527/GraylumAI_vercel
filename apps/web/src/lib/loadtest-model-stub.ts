@@ -35,6 +35,13 @@ export function installModelStub(env: Env = process.env, scope: { fetch: typeof 
   const base = modelStubBase(env);
   if (!base) return false;
   const original = scope.fetch.bind(scope);
-  scope.fetch = ((input: RequestInfo | URL, init?: RequestInit) => original(rewriteToStub(input, base) ?? input, init)) as typeof fetch;
+  scope.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const target = rewriteToStub(input, base);
+    if (!target) return original(input, init);
+    // The stub needs no credential and sits behind a third-party tunnel: the provider key must never leave with the request.
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    headers.delete('authorization');
+    return original(target, { ...init, headers });
+  }) as typeof fetch;
   return true;
 }

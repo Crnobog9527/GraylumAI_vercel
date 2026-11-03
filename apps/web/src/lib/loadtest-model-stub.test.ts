@@ -35,6 +35,21 @@ describe('load-test model stub rewrite', () => {
     expect(String(original.mock.calls[1]![0])).toBe('https://other.example.test/x');
   });
 
+  it('drops the provider key from rerouted requests but leaves other hosts untouched', async () => {
+    const original = vi.fn<typeof fetch>(async () => new Response('ok'));
+    const scope = { fetch: original };
+    installModelStub(env, scope);
+    const headers = { authorization: 'Bearer sk-secret', 'content-type': 'application/json' };
+    await scope.fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', headers });
+    await scope.fetch(new Request('https://openrouter.ai/api/v1/generation?id=g', { headers }));
+    await scope.fetch('https://other.example.test/x', { headers });
+    const sent = (i: number) => new Headers(original.mock.calls[i]![1]?.headers);
+    expect(sent(0).get('authorization')).toBeNull();
+    expect(sent(0).get('content-type')).toBe('application/json');
+    expect(sent(1).get('authorization')).toBeNull();
+    expect(sent(2).get('authorization')).toBe('Bearer sk-secret');
+  });
+
   it('never reroutes a deployment that lacks either variable or whose database host differs (production shape)', async () => {
     const cases: Record<string, string | undefined>[] = [
       { ...env, LOADTEST_MODEL_STUB_URL: undefined },
