@@ -14,6 +14,21 @@ export async function userVisibleModules(userClient: SupabaseClient, options: { 
   if (result.error) return { data: null, error: result.error };
   return { data: result.data.filter(row => typeof row.id === 'string' && row.active === true) as unknown as UserVisibleModule[], error: null };
 }
+export type Authentication = () => ReturnType<SupabaseClient['auth']['getUser']>;
+/**
+ * One identity check for a whole request: every Skill read of a request asks the sign-in service who the caller is, so a
+ * request that reads several Skills would ask it that many times. This answers all of them from the first answer. Request-local
+ * like the sources that use it (a new one per request, built from that request's client); a failed check is never kept.
+ */
+export function requestAuthentication(userClient: SupabaseClient): Authentication {
+  let pending: ReturnType<Authentication> | undefined;
+  return () => {
+    pending ??= userClient.auth.getUser().then(result => { if (result.error || !result.data.user) pending = undefined; return result; },
+      error => { pending = undefined; throw error; });
+    return pending;
+  };
+}
+
 /** Request-local only. The authenticated client verifies identity and public module
  * admission before the narrowly scoped service RPC can return private content.
  * No browser route exports this source or accepts a caller-supplied actor ID.
@@ -28,6 +43,8 @@ export function databaseSkillSource(options: {
   userClient: SupabaseClient; privateClient: SupabaseClient | null;
   moduleId: string; skillId: string; revisionId?: string;
   userVisibleModule?: UserVisibleModule;
+  /** The request's one identity check (requestAuthentication); without it every read asks for itself. */
+  authentication?: Authentication;
 }): SkillSource {
   options = { ...options };
   if (typeof window !== 'undefined') fail('UNAVAILABLE');
@@ -54,7 +71,7 @@ export function databaseSkillSource(options: {
   };
   const read = async (identity?: PackageIdentity, path: string | null = null, maxBytes = 2097152, paths?: readonly string[]) => {
     if (!options.privateClient) fail('UNAVAILABLE');
-    const auth = await options.userClient.auth.getUser();
+    const auth = await (options.authentication ?? (() => options.userClient.auth.getUser()))();
     const user = auth.data.user;
     if (auth.error || !user || !isEmailVerified(user)) fail('UNAVAILABLE');
     await moduleAdmission();

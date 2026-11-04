@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
-import {databaseSkillSource,userVisibleModules,type UserVisibleModule} from './databaseSource';
+import {databaseSkillSource,requestAuthentication,userVisibleModules,type UserVisibleModule} from './databaseSource';
 import {activateSkill,clearSkillResourceCache,discoverSkills,identityOf,packageHash,sha256} from './loader';
 
 const moduleId='00000000-0000-4000-8000-0000000000a1',skillId='00000000-0000-4000-8000-0000000000b1',revisionId='00000000-0000-4000-8000-0000000000c1';
@@ -87,4 +87,30 @@ it('reuses a listing only where the loader checks state immediately after it',as
   else expect(await discoverSkills(source)).toEqual([]);
   expect(c.rpc).toHaveBeenCalledTimes(2);
  }
+});
+
+it('one identity check serves every read of a request; a failed check is asked again; without it each read asks for itself',async()=>{
+ const c=clients(),getUser=vi.spyOn(c.user.auth,'getUser'),authentication=requestAuthentication(c.user);
+ const make=()=>databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,authentication});
+ const [first,second]=[make(),make()];
+ const [descriptor]=await first.list();await second.list();
+ expect(await first.state(descriptor)).toBe('enabled');
+ expect(getUser).toHaveBeenCalledTimes(1);
+ // Without the shared check each read asks (the default, as before).
+ getUser.mockClear();
+ const own=databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId});
+ const [listed]=await own.list();await own.state(listed);
+ expect(getUser).toHaveBeenCalledTimes(2);
+ // A refused check is not kept: the next read asks again and can pass.
+ let signedIn=false;
+ const flaky={auth:{getUser:async()=>signedIn?{data:{user:{id:'actor',email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null}
+  :{data:{user:null},error:{message:'expired'}}}} as unknown as SupabaseClient;
+ const ask=requestAuthentication(flaky);
+ expect((await ask()).data.user).toBeNull();signedIn=true;expect((await ask()).data.user?.id).toBe('actor');
+});
+
+it('a source that is refused the identity check reads nothing',async()=>{
+ const c=clients(),authentication=async()=>({data:{user:null},error:{message:'expired'}}) as never;
+ const source=databaseSkillSource({userClient:c.user,privateClient:c.admin,moduleId,skillId,revisionId,authentication});
+ await expect(source.list()).rejects.toMatchObject({code:'UNAVAILABLE'});expect(c.rpc).not.toHaveBeenCalled();
 });

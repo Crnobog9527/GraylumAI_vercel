@@ -16,16 +16,27 @@ import type { RuntimeTool } from '../agent/runner';
 /** The loadable Skills of this turn: name → the exact tool result, built before turn_open. */
 export type PreparedSkills = ReadonlyMap<string, string>;
 
-/** Reads each entry's instructions now (catalog reads are cached by package hash); an entry that cannot load is left out. */
+/** At most this many entries are read at once: each read is a few database requests, and a busy site answers many turns together. */
+const PREPARE_CONCURRENCY = 3;
+
+/** Reads each entry's instructions now (catalog reads are cached by package hash); an entry that cannot load is left out. The
+ * entries are read a few at a time and put in the map in catalog order, whichever finishes first. */
 export async function prepareSkills(entries: readonly SkillCatalogEntry[], sourceOf: (entry: SkillCatalogEntry) => SkillSource,
   maxResultBytes: number): Promise<PreparedSkills> {
+  const results: Array<string | undefined> = new Array(entries.length).fill(undefined);
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) {
+      const index = next++, entry = entries[index]!;
+      try {
+        const instructions = await entryInstructions(sourceOf(entry), entry, maxResultBytes);
+        results[index] = JSON.stringify(loadSkillResult(entry, instructions));
+      } catch { /* not loadable this turn: the model is told so if it asks */ }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PREPARE_CONCURRENCY, entries.length) }, worker));
   const prepared = new Map<string, string>();
-  for (const entry of entries) {
-    try {
-      const instructions = await entryInstructions(sourceOf(entry), entry, maxResultBytes);
-      prepared.set(entry.name, JSON.stringify(loadSkillResult(entry, instructions)));
-    } catch { /* not loadable this turn: the model is told so if it asks */ }
-  }
+  entries.forEach((entry, index) => { const result = results[index]; if (result !== undefined) prepared.set(entry.name, result); });
   return prepared;
 }
 

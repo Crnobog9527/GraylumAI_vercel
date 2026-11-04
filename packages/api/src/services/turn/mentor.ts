@@ -36,6 +36,7 @@ import type { TurnEvent } from './sse';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
+import { markStage, noteStageTurn } from './stageTiming';
 
 /*
  * CORE-PATH-V2 kind=mentor (plan 2.7, 6.1 V2-5): one turn of the positioning mentor. Database work is turn_open (which also
@@ -78,9 +79,11 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   let catalog;
   try { catalog = await mentorCatalog(admin, { moduleId: input.moduleId, organize, research: !opening && !summary, pricing: deps.pricing }); }
   catch (error) { return emit({ type: 'error', code: error instanceof MentorCatalogError ? error.code : 'TURN_QUOTE_UNAVAILABLE' }); }
+  markStage('catalog');
   const { mentor, organizer, research } = catalog;
   // The administrator's pause and the message limit, before anything is frozen (as chat.ts).
   const admitted = await deps.newWork.message(input.actorId, Promise.resolve(catalog.settings));
+  markStage('gate');
   if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
   // The product limit is 8000 characters (as the old mentor request); the model's input budget is in bytes, checked apart.
   if (input.text.length > 8000 || Buffer.byteLength(input.text) > mentor.inputLimit)
@@ -145,6 +148,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       }
     }
   } catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
+  markStage('open');
+  noteStageTurn(opened.turnId);
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
     ...((opened.kindContext as { fallbackEligible?: boolean } | null)?.fallbackEligible ? { fallbackEligible: true } : {}) });
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
@@ -281,11 +286,13 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       ? await swallow('turn_mentor_source_check_failed', sourceCheck(), { allowed: false, sourceDrafts: [] }, { category: 'ai' }) : null;
     const scopeDenied = rechecked !== null && !rechecked.allowed;
     const researchMade = benchmark?.journal();
+    markStage('model');
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId, ctx.roundId) }],
       ...(organizer || researchMade ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
         versions: state.versions, organizerInput: captureInput, output: organized, ...(scopeDenied ? { scopeDenied } : {}) } : {}),
         ...(researchMade ? { research: researchMade } : {}) } } : {}) });
+    markStage('close');
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
     emit({ type: 'result', turnId: opened.turnId, body: turn.body, chargedCredits: closed.chargedCredits, settlement: closed.settlement,
       ...(closed.kindResult ? { kindResult: closed.kindResult } : {}) });

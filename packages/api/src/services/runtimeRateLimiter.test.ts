@@ -79,16 +79,13 @@ it('reuses a pair but rebuilds on config change without changing keys; separates
   expect(mock.construct.mock.calls[4][0].limiter.count).toBe(30);
   expect(mock.construct.mock.calls[5][0].limiter.count).toBe(600);
 });
-it.each(['day', 'minute'])('returns %s denial and never calls later windows', async window => {
+it.each(['day', 'minute'])('returns %s denial; both windows were asked together (the other counts the refused request too)', async window => {
   mock.limit.mockImplementation(async options => ({ success: !options.prefix.includes(`:${window}:`), reset: Date.now() + 60000 }));
   const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
   expect(await check('a', 'admission', defaults, 'staging')).toEqual({
     success: false, reason: 'rate_limited', window, retryAfter: 60,
   });
-  expect(mock.limit).toHaveBeenCalledTimes(window === 'minute' ? 1 : 2);
-  if (window === 'minute') {
-    expect(mock.limit.mock.calls.some(([options]) => options.prefix.includes(':day:'))).toBe(false);
-  }
+  expect(mock.limit).toHaveBeenCalledTimes(2);
   expect(mock.log).not.toHaveBeenCalled();
 });
 it.each(['error', 'sdk-timeout', 'missing-config'])('fails closed for %s without raw details in logs', async mode => {
@@ -102,13 +99,13 @@ it.each(['error', 'sdk-timeout', 'missing-config'])('fails closed for %s without
   expect(mock.log).toHaveBeenCalledWith('security', 'runtime_rate_limit_backend_unavailable_denying_request');
   expect(JSON.stringify(mock.log.mock.calls)).not.toContain('PRIVATE_SYNTHETIC_DETAIL');
 });
-it('bounds a hanging backend, without retry or a second window', async () => {
+it('bounds a hanging backend, without retry (one request per window, asked together)', async () => {
   vi.useFakeTimers(); mock.limit.mockImplementation(() => new Promise(() => {}));
   const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
   const pending = check('a', 'admission', defaults, 'staging');
   await vi.advanceTimersByTimeAsync(500);
   expect(await pending).toMatchObject({ success: false, reason: 'unavailable' });
-  expect(mock.limit).toHaveBeenCalledTimes(1);
+  expect(mock.limit).toHaveBeenCalledTimes(2);
   expect(vi.getTimerCount()).toBe(0);
 });
 it('rejects invalid thresholds and namespaces before Redis', async () => {
@@ -171,4 +168,25 @@ it('counts supplier calls per endpoint and fails closed', async () => {
   expect(await check('tikhub:/a', 10, '1 s')).toBe(false);
   expect(await check('', 10, '1 s')).toBe(false);
   expect(await check('tikhub:/a', 0, '1 s')).toBe(false);
+});
+it('asks the minute and the day window together, and names the window that refuses', async () => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  const open: Array<() => void> = [];
+  mock.limit.mockImplementation(() => new Promise(resolve => open.push(() => resolve({ success: true, reset: Date.now() + 60000 }))));
+  const pending = check('actor', 'admission', defaults, 'local', 1);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  // Both requests are on the wire before either answered.
+  expect(mock.limit).toHaveBeenCalledTimes(2);
+  open.forEach(answer => answer());
+  expect(await pending).toEqual({ success: true });
+  mock.limit.mockReset();
+  mock.limit.mockImplementation(async options => ({ success: !options.prefix.includes(':day:'), reset: Date.now() + 60000 }));
+  expect(await check('actor', 'admission', defaults, 'local', 1)).toMatchObject({ success: false, reason: 'rate_limited', window: 'day' });
+  mock.limit.mockImplementation(async () => ({ success: false, reset: Date.now() + 60000 }));
+  expect(await check('actor', 'admission', defaults, 'local', 1)).toMatchObject({ success: false, window: 'minute' });
+});
+it('a limiter that cannot answer on one of the two windows still refuses (fails closed)', async () => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  mock.limit.mockImplementation(async options => { if (options.prefix.includes(':day:')) throw new Error('private'); return { success: true, reset: Date.now() + 60000 }; });
+  expect(await check('actor', 'admission', defaults, 'local', 1)).toMatchObject({ success: false, reason: 'unavailable' });
 });
