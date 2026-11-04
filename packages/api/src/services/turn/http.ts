@@ -13,6 +13,7 @@ import { runResumedTurn } from './resumeTurn';
 import { mentorAnswer } from './mentorInput';
 import { planTurnRequest, runPlanTurn } from './plan';
 import { eventStream, type StreamEvent } from './sse';
+import { markStage, reportStages, withStageTimer } from './stageTiming';
 import { swallow } from '../../lib/swallow';
 
 /*
@@ -79,36 +80,58 @@ async function runJuryStart(deps: TurnHttpDeps, actorId: string, input: Extract<
     reservedCredits: frozen.success ? frozen.data.fixedPrice.credits + frozen.data.fixedPrice.holdCredits : 0 });
 }
 
+/** The stream of one turn; its stage timing line (stageTiming.ts) is written when the stream ends, with how it ended. */
+function stream(run: (emit: (event: StreamEvent) => void) => Promise<void>, onCancel?: () => void): Response {
+  return eventStream(async emit => {
+    let outcome = 'ended';
+    try {
+      await run(event => {
+        if (event.type === 'error') outcome = event.code;
+        else if (event.type === 'result' || event.type === 'review') outcome = event.type;
+        emit(event);
+      });
+    } finally { reportStages(outcome); }
+  }, onCancel);
+}
+
 export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): Promise<Response> {
   let input;
   try { input = turnRequest.parse(await request.json()); } catch { return json(400, 'TURN_REQUEST_INVALID'); }
+  return withStageTimer(input.kind, () => answerTurn(request, deps, input));
+}
+
+async function answerTurn(request: Request, deps: TurnHttpDeps, input: z.infer<typeof turnRequest>): Promise<Response> {
+  markStage('parse');
   if (!deps.databaseHost.declared || deps.databaseHost.declared !== deps.databaseHost.actual) return json(503, 'TURN_DATABASE_MISMATCH');
   const actorId = await swallow('turn_authenticate_failed', deps.authenticate(request), null, { category: 'auth' });
+  markStage('auth');
   if (!actorId) return json(401, 'TURN_UNAUTHENTICATED');
   // A limiter that cannot answer refuses (fails closed).
-  if (await swallow('turn_rate_limit_unavailable', deps.rateLimited(actorId), true, { category: 'api' })) return json(429, 'TURN_RATE_LIMITED');
-  if (input.kind === 'resume') return eventStream(emit => runResumedTurn(deps.chat, { actorId, sessionId: input.sessionId,
+  const limited = await swallow('turn_rate_limit_unavailable', deps.rateLimited(actorId), true, { category: 'api' });
+  markStage('rateLimit');
+  if (limited) return json(429, 'TURN_RATE_LIMITED');
+  if (input.kind === 'resume') return stream(emit => runResumedTurn(deps.chat, { actorId, sessionId: input.sessionId,
     requestId: input.requestId, resumeOf: input.resumeOf }, emit));
   if (input.kind === 'report') {
     // A report hears when its page drops the stream (the user's stop, V2-7a); a chat runs to its end regardless.
     const gone = new AbortController();
     const report = { actorId, sessionId: input.sessionId, requestId: input.requestId, moduleId: input.moduleId,
       projectId: input.projectId, roundId: input.roundId, acceptedCredits: input.acceptedCredits };
-    return eventStream(emit => runReportTurn(deps.chat, report, emit, gone.signal), () => gone.abort());
+    return stream(emit => runReportTurn(deps.chat, report, emit, gone.signal), () => gone.abort());
   }
-  if (input.kind === 'plan') return eventStream(emit => runPlanTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId,
+  if (input.kind === 'plan') return stream(emit => runPlanTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId,
     moduleId: input.moduleId, stepId: input.stepId, text: input.text }, emit));
   if (input.kind === 'compare') {
     const { sessionId, question, skill } = input;
-    return eventStream(emit => runCompareTurn(deps.chat, { actorId, sessionId, requestId: input.requestId, modelIds: input.modelIds,
+    return stream(emit => runCompareTurn(deps.chat, { actorId, sessionId, requestId: input.requestId, modelIds: input.modelIds,
       parts: () => loadCompareTurnParts({ admin: deps.chat.admin, user: deps.userClient(request), actorId }, { sessionId, question, skill }) }, emit));
   }
-  if (input.kind === 'jury') return eventStream(emit => runJuryStart(deps, actorId, input, emit));
-  if (input.kind === 'mentor') return eventStream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
+  if (input.kind === 'jury') return stream(emit => runJuryStart(deps, actorId, input, emit));
+  if (input.kind === 'mentor') return stream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
     requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
     ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) }, emit));
   const chosen = { ...(input.moduleId ? { moduleId: input.moduleId } : {}), ...(input.references ? { references: input.references } : {}) };
-  return eventStream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text,
+  return stream(emit => runChatTurn(deps.chat, { actorId, sessionId: input.sessionId, requestId: input.requestId, text: input.text,
     ...(input.workItem ? { workItem: true } : {}), ...(Object.keys(chosen).length ? { chosen } : {}),
     ...(input.images ? { images: input.images } : {}) }, emit));
 }

@@ -31,6 +31,7 @@ import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
+import { markStage, noteStageTurn } from './stageTiming';
 import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
 import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
@@ -101,6 +102,28 @@ export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
 export const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
   usage_configuration_required: 'TURN_USAGE_CONFIGURATION_REQUIRED' } as const;
 
+/** The purpose budgets and the quote of one call (see runChatTurn). A budget that cannot be read is `failed` (thrown there, as it
+ * always was); a refusal of the quote is the code to send. It never rejects, so a request that stopped earlier leaves nothing behind. */
+async function quoteTurn(deps: ChatDeps, from: { admin: SupabaseClient; configuration: Promise<ConfigurationRows>; settings: SettingsRead;
+  images: unknown }): Promise<{ failed: unknown } | { refused: string } | { interactiveBytes: number; quote: Awaited<ReturnType<typeof chatQuote>> }> {
+  try {
+    const budgets = await readPurposeBudgets(from.admin, from.configuration);
+    const interactiveBytes = budgets?.interactive.inputBytes ?? 90000;
+    try {
+      // With tools the quote allows the research ceiling; the turn narrows it again unless research is usable (V2-6).
+      const quote = await chatQuote(from.admin, { configuration: await from.configuration, modelId: serverChatModel(from.settings),
+        inputBytes: deps.tools ? Math.max(interactiveBytes, RESEARCH_INPUT_BYTES) : interactiveBytes, deps: deps.pricing,
+        ...(from.images ? { image: true } : {}) });
+      return { interactiveBytes, quote };
+    } catch (error) {
+      // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.
+      const message = error instanceof Error ? error.message : '';
+      return { refused: error instanceof QuoteError ? error.code : /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message
+        : 'TURN_QUOTE_UNAVAILABLE' };
+    }
+  } catch (failed) { return { failed }; }
+}
+
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients), started = Date.now();
   // The images are checked before anything is read or frozen: JPEGs within LIB-2d's limits (the route's own allowance is checked again
@@ -111,10 +134,15 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // 1. The catalog (cached): switch and stop-loss, model, input budget, identity guard, the quote of one call.
   const configuration = readAdmissionConfiguration(admin);
   const config = readCoreConfig(await configuration);
+  markStage('config');
   if (!config) return emit({ type: 'error', code: 'TURN_CORE_DISABLED' });
   const settings = await readAdmissionSettings(admin, configuration);
+  // The quote (budgets, model, price, billing unit, key) needs only the settings, so it is read while the limits below answer; its
+  // result is looked at where it always was, after the gate and the work check, so the refusal a request gets does not change.
+  const quoting = quoteTurn(deps, { admin, configuration, settings, images });
   // The one-switch pause and the message limits, before anything is frozen (the old path's admission check).
   const admitted = await deps.newWork.message(input.actorId, Promise.resolve(settings));
+  markStage('gate');
   if (!admitted.ok) return emit({ type: 'error', code: GATE_CODES[admitted.reason] });
   // Before each paid call (model, or a research tool for its subcalls): the one-switch pause and the call limits; a refusal
   // stops the turn before anything is written or sent.
@@ -133,20 +161,12 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_DATABASE_UNAVAILABLE' }); }
   if (work && VIDEO_PACKAGE.test(input.text) && !work.videoPackage) return emit({ type: 'error', code: 'OPC_CONTENT_BINDING' });
   let material = workMaterial(work);
-  const budgets = await readPurposeBudgets(admin, configuration);
-  const interactiveBytes = budgets?.interactive.inputBytes ?? 90000;
-  let quote;
-  try {
-    // With tools the quote allows the research ceiling; the turn narrows it again unless research is usable (V2-6).
-    quote = await chatQuote(admin, { configuration: await configuration, modelId: serverChatModel(settings),
-      inputBytes: deps.tools ? Math.max(interactiveBytes, RESEARCH_INPUT_BYTES) : interactiveBytes, deps: deps.pricing,
-      ...(images ? { image: true } : {}) });
-  } catch (error) {
-    // A known refusal code (quote, reasoning, price snapshot) is passed on; anything else stays generic.
-    const message = error instanceof Error ? error.message : '';
-    return emit({ type: 'error', code: error instanceof QuoteError ? error.code : /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message
-      : 'TURN_QUOTE_UNAVAILABLE' });
-  }
+  markStage('work');
+  const quoted = await quoting;
+  if ('failed' in quoted) throw quoted.failed;
+  if ('refused' in quoted) return emit({ type: 'error', code: quoted.refused });
+  const { interactiveBytes, quote } = quoted;
+  markStage('quote');
   const allowance = quote.imageInput;
   if (images && (!allowance || images.some(image => image.dataUrlBytes > allowance.maxDataUrlBytes || image.width > allowance.maxEdge
     || image.height > allowance.maxEdge))) return emit({ type: 'error', code: 'TURN_IMAGE_INVALID' });
@@ -171,6 +191,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         defaultMultiplier: quote.defaultMultiplier, maxTools: quote.maxTools });
     } catch { return emit({ type: 'error', code: 'TURN_TOOLS_UNAVAILABLE' }); }
   }
+  markStage('tools');
   // What the user chose for this message (V2-10): refused before anything opens, never dropped silently.
   const chosen = input.chosen ? tools?.selection(input.chosen) ?? { refused: 'TURN_SKILL_UNAVAILABLE' } : { note: '' };
   if ('refused' in chosen) return emit({ type: 'error', code: chosen.refused });
@@ -222,6 +243,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       ...(work && work.materialRevision !== null ? { workMaterial: { revision: work.materialRevision, hash: work.materialHash } } : {}) },
     ...(input.resume ? { resumeOf: input.resume.of } : {}) }); }
   catch (error) { return emit({ type: 'error', code: error instanceof TurnDatabaseError ? error.code : 'TURN_OPEN_FAILED' }); }
+  markStage('open');
+  noteStageTurn(opened.turnId);
   emit({ type: 'opened', turnId: opened.turnId, reservedCredits: opened.reservedCredits, replay: opened.replay,
     ...(tools ? { tools: { available: tools.plan.available, trimmed: tools.plan.trimmed } } : {}) });
   // A repeated request never runs the model again; the first request owns the turn.
@@ -277,6 +300,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       }
     }
 
+    markStage('positioning');
     // 4. The prompt: site-wide segment (brand, free-chat rules) then the per-user segment (reply language and, for an account
     // without a confirmed positioning, the primary model's fallback rule: "Decisions 先判断，主模型兜底"), both cached. The
     // positioning-page redirect is only for an account that has a positioning (as admission.ts).
@@ -337,6 +361,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
           .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       },
     });
+    markStage('model');
     const answer = output || reply;
     // The fallback refusal: never shown or saved; Graylum bears the model cost (the stop-loss still counts it).
     if (fallback && isPositioningRefusal(answer)) {
@@ -346,6 +371,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }] });
+    markStage('close');
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
     emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
   } catch (error) {
