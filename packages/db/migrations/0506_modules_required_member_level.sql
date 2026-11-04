@@ -1,4 +1,5 @@
 BEGIN;
+SET LOCAL lock_timeout='5s';
 
 -- MEMBER-ONLY-MODULES (Owner 2026-11-04): a Skill limited to members is shown in the marketplace with a note, and a free user who
 -- tries to use it meets the paywall (the dialog's `coach` scene). `modules.required_member_level` is the lowest membership level that
