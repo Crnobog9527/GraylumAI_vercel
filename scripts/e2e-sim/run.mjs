@@ -74,6 +74,9 @@ try {
   app = spawn('pnpm', ['--filter', 'web', 'exec', 'next', 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(appPort)],
     { cwd: root, env: appEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const appLog = [];
+  // The server's lines about the turn endpoints for the whole run (the tail above is only the last minutes): whether a page's turn
+  // request reached the server is the first question when a journey opened no turn.
+  const turnLog = [];
   // The web proxy refuses a request (503) when its rate-limit backend does not answer within its fixed 1 s deadline: count those and
   // their kind, so a run that failed on a 503 says so even when the log tail no longer shows it.
   const denials = {};
@@ -84,6 +87,8 @@ try {
       const kind = /"failureKind":"(\w+)"/.exec(line)?.[1] ?? 'unknown';
       denials[kind] = (denials[kind] ?? 0) + 1;
     }
+    for (const line of text.split('\n')) if (/\/api\/turn|"turn_|turn_[a-z_]+"/.test(line)) turnLog.push(line.slice(0, 300));
+    if (turnLog.length > 600) turnLog.splice(0, turnLog.length - 600);
     appLog.push(text);
     if (appLog.length > 400) appLog.shift();
   });
@@ -99,11 +104,14 @@ try {
   const tests = spawn('pnpm', ['--filter', 'web', 'exec', 'playwright', 'test', '-c', 'playwright.sim.config.ts', ...process.argv.slice(2)], {
     cwd: root, stdio: 'inherit',
     env: { ...baseEnv, SIM_BASE_URL: appUrl, SIM_ORIGIN: simOrigin, SIM_SEED_FILE: seedFile, SIM_CRON_SECRET: cronSecret,
-      SIM_DB_URL: stack.dbUrl, SIM_API_URL: stack.apiUrl },
+      SIM_DB_URL: stack.dbUrl, SIM_API_URL: stack.apiUrl,
+      // A slower browser, as on a small CI runner, to look for timing faults locally (e.g. SIM_CPU_THROTTLE=6).
+      ...(process.env.SIM_CPU_THROTTLE ? { SIM_CPU_THROTTLE: process.env.SIM_CPU_THROTTLE } : {}) },
   });
   code = await exit(tests);
   console.log(`rate-limit refusals by the web proxy (503): ${JSON.stringify(denials)}`);
-  if (code !== 0) console.log('--- local app log (last lines) ---\n' + appLog.slice(-80).join(''));
+  if (code !== 0) console.log('--- local app log (last lines) ---\n' + appLog.slice(-80).join('')
+    + '\n--- turn endpoint lines (whole run, last 600) ---\n' + turnLog.join('\n'));
 } catch (error) {
   console.error(stack ? stack.redact(error.message) : error.message);
 } finally {

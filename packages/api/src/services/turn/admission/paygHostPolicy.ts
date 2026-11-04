@@ -140,6 +140,9 @@ export const PAYG_PRODUCTION_SETTING = 'runtime_payg_production';
 export const paygProductionSettings = z.object({
   version: z.literal(1), enabled: z.boolean(), policyVersion: reference,
   profiles: z.array(paygProductionProfile).min(1).max(16),
+  /** CORE-PATH-V2 3.3.2 item 10: in-flight calls per OpenRouter model id. Each value is checked where it is read (quote.ts
+   * modelConcurrency), so one bad value falls back to the default for that model and never disables the whole setting. */
+  modelConcurrency: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 export const paygProductionSettingWrite = z.union([z.object({ enabled: z.literal(false) }).strict(), paygProductionSettings]);
 /** Production database marker (SQL runtime_production_database). Written only by the approved release SQL. */

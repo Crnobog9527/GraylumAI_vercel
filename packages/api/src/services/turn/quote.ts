@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { logger } from '../../lib/logger';
 import { deriveFrozenPrices, deriveListPrices } from '../../shared/modelPriceBound';
 import { validateNominalBound, type NominalPricing } from '../../shared/nominalPricing';
 import { openRouterBound, openRouterCallBound, type OpenRouterLimits } from './provider/openRouterPolicy';
@@ -26,8 +27,21 @@ import { imageTokensUpper, type ImageInputPolicy } from './provider/imageInput';
  * Settings, model rows and snapshots are catalog reads (catalogCache); the platform key is read fresh every time (OR-1).
  */
 export { RUNTIME_PAYG_SETTING } from './settingKeys';
-/** In-flight calls per model across instances until the catalog carries a per-model value (3.3.2 item 10). */
-export const DEFAULT_MODEL_CONCURRENCY = 20;
+/** In-flight calls per model across instances (3.3.2 item 10) when runtime_payg.modelConcurrency does not name the model: about
+ * 100 users on real models peak near 100 calls, plus room for the burst when many turns open together. */
+export const DEFAULT_MODEL_CONCURRENCY = 150;
+/** The largest per-model value accepted; anything above would no longer limit anything. */
+export const MAX_MODEL_CONCURRENCY = 1000;
+
+/** The in-flight limit of `model` (an OpenRouter model id, as in the profiles). A value that is not an integer from 1 to
+ * MAX_MODEL_CONCURRENCY is logged and replaced by the default, so a typo never stops every turn. */
+export function modelConcurrency(settings: { modelConcurrency?: Record<string, unknown> }, model: string): number {
+  if (!settings.modelConcurrency || !Object.hasOwn(settings.modelConcurrency, model)) return DEFAULT_MODEL_CONCURRENCY;
+  const value = settings.modelConcurrency[model];
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= MAX_MODEL_CONCURRENCY) return value;
+  logger.warn('ai', 'turn_model_concurrency_invalid', { model });
+  return DEFAULT_MODEL_CONCURRENCY;
+}
 
 export class QuoteError extends Error {
   constructor(readonly code: 'TURN_PAYG_DISABLED' | 'TURN_MODEL_NOT_ADMITTED' | 'TURN_PRICE_UNAVAILABLE' | 'TURN_PROVIDER_KEY_UNAVAILABLE'
@@ -102,6 +116,12 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
   const model = row.data.model_id as string;
   const candidate = parsed.data.profiles.find(p => p.model === model && isAdmittedRoute(p.model, p.endpointTag));
   if (!candidate) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
+  // Two reads that need nothing from the pricing below start now, so their waits overlap it: the billing unit (from the same
+  // settings rows and model row) and the platform key, still read fresh once per request. Each is awaited, and its refusal raised,
+  // where it was before, so the refusal a request gets does not change. A read that fails is only awaited later.
+  const unitRead = readMultiplierSnapshot(admin, [input.modelId], undefined, { configuration: Promise.resolve(input.configuration),
+    models: [row.data] }).then(value => ({ value }), () => ({ value: undefined }));
+  const keyRead = input.key === undefined ? readOpenRouterKeyOrUnset(admin, { fresh: true }) : Promise.resolve(input.key);
 
   let states;
   try { states = await readPricingStates(admin, [{ modelId: input.modelId, model }], input.deps, false, [row.data]); }
@@ -135,13 +155,12 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     catch { throw new QuoteError('TURN_INPUT_TOO_LARGE'); }
   } else upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
-  let unit;
-  try { unit = await readMultiplierSnapshot(admin, [input.modelId], undefined, { models: [row.data] }); }
-  catch { throw new QuoteError('TURN_BILLING_UNIT_UNAVAILABLE'); }
+  const unit = (await unitRead).value;
+  if (!unit) throw new QuoteError('TURN_BILLING_UNIT_UNAVAILABLE');
   const multiplier = unit.models[input.modelId]?.multiplier;
   if (!multiplier) throw new QuoteError('TURN_BILLING_UNIT_UNAVAILABLE');
 
-  const key = input.key ?? await readOpenRouterKeyOrUnset(admin, { fresh: true });
+  const key = await keyRead;
   if (!key) throw new QuoteError('TURN_PROVIDER_KEY_UNAVAILABLE');
   return {
     modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, providerLimits: limits,
@@ -150,7 +169,7 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
       providerLimits: limits, outputLimit, upperUsd, ...(imageInput ? { imageInput } : {}) },
     reasoning,
     outputLimit, inputLimit: Math.min(input.inputBytes, PAYG_PROFILE_MAX_BYTES),
-    concurrency: DEFAULT_MODEL_CONCURRENCY, credential: async () => key,
+    concurrency: modelConcurrency(parsed.data, model), credential: async () => key,
     profile: { policyId: RUNTIME_PAYG_SETTING, policyVersion: parsed.data.policyVersion, profileVersion: profile.profileVersion,
       evidenceVersion: profile.evidenceVersion, pricingHash: state.snapshot.pricingHash, endpointTag: profile.endpointTag,
       nominalPricing: nominal, templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,

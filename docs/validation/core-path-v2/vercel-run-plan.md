@@ -31,6 +31,8 @@
 # 环境（值由总控给，全部在仓库外）：LOADTEST_BASE_URL、LOADTEST_ALLOWED_APP_HOST（应用主机，只给驱动）、LOADTEST_ACCOUNTS_FILE、
 # LOADTEST_DATABASE_URL、LOADTEST_ALLOWED_DB_HOST（库主机，只给两个采样器）、可选 SUPABASE_MANAGEMENT_TOKEN / SUPABASE_PROJECT_REF
 # run-all.sh 给每个进程只传它自己的那个主机；每次运行写进新目录 <RUN_ROOT>/run-<时间戳>，目录里已有文件则拒绝运行
+# 令牌续期（11-04 补）：LOADTEST_AUTH_URL、LOADTEST_ALLOWED_AUTH_HOST、LOADTEST_ANON_KEY（公开值），可选 LOADTEST_CREDENTIALS_FILE。
+#   驱动每档开始前用账号自己的刷新令牌续期，新令牌立即写回账号文件；有账号续期失败就不开这一档。--series 没有这几项会拒绝运行
 # 1. 桩和隧道：scripts/loadtest/start-stub-tunnel.sh（备选 --ngrok），它会打印要填的 LOADTEST_MODEL_STUB_URL；Owner 逐步照做见 owner-tunnel-steps.md
 # 2. 自检：scripts/loadtest/selfcheck.sh（读桩的调用计数，跑 1 账号 1 轮，计数增加才 PASS；STOP 则不要往下跑）
 # 3–6. 一条命令：先跑 5 分钟无争用基线（不开采样器）；再把两个采样器放到后台（打印 PID 和日志路径）；

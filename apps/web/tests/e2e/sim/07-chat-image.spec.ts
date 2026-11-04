@@ -1,6 +1,8 @@
 import { deflateSync } from 'node:zlib';
 
-import { expect, test, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+
+import { expect, test } from './fixtures';
 
 import { db, expectNothingFrozen, lastTurnId, ledger, replies, resetSim, seed, signIn, startFreeChat, turns, watchPage } from './support';
 
