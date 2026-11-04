@@ -138,3 +138,48 @@ describe('coach_json checks (RC-2)', () => {
     expect(checkOutput(block({ version: 2, mode: 'full' }), basics).mode_mismatch).toBe(true);
   });
 });
+
+describe('platform names in the prose (staging 2026-11-04: TikTok data written up as Douyin)', () => {
+  const withPlatforms = (platforms: Record<string, string>) => ({ ...full, platforms }) as typeof full;
+  const prose = (text: string, platforms: Record<string, string>) => checkOutput(`${text}\n\n\`\`\`coach_json\n${JSON.stringify({ version: 2, mode: full.mode })}\n\`\`\``,
+    withPlatforms(platforms));
+  const reasons = (r: ReturnType<typeof checkOutput>) => r.rejected.map(x => `${x.path}:${x.reason}`);
+
+  it('the pack lists the display name of every platform it has data for', () => {
+    expect(full.platforms).toEqual(Object.fromEntries(Object.keys(full.platforms).map(code => [code, expect.any(String)])));
+    expect(Object.keys(full.platforms).length).toBeGreaterThan(0);
+    expect(buildPack({ rows: { ...rowsC, facts: [], recent: [], diagnostics: [], accounts: [], followers: [], experiments: [] }, cadence: 'weekly',
+      businessId: simId('C'), now: NOW, handbooks: new Map() }).platforms).toEqual({});
+  });
+
+  it('naming Douyin when the pack only has TikTok is reported, the prose is kept', () => {
+    const r = prose('《我花三个月才想明白的事》（抖音）表现最好。', { tiktok: 'TikTok' });
+    expect(reasons(r)).toEqual(['body:platform_not_in_pack:douyin']);
+    expect(r.body).toContain('抖音');
+  });
+
+  it('the names the pack gives pass, and so does a TikTok business account for TikTok', () => {
+    expect(reasons(prose('TikTok 和小红书都发了。', { tiktok: 'TikTok', xiaohongshu: '小红书' }))).toEqual([]);
+    expect(reasons(prose('TikTok 上的作品更好。', { tiktok_business: 'TikTok 商业号' }))).toEqual([]);
+    expect(reasons(prose('tiktok 上的作品', { douyin: '抖音' }))).toEqual(['body:platform_not_in_pack:tiktok']);
+  });
+
+  it('the one-letter name X is not searched for, and a pack without the field is not checked', () => {
+    expect(reasons(prose('Next 周继续，extra 数据。', { tiktok: 'TikTok' }))).toEqual([]);
+    expect(reasons(checkOutput(block({ version: 2, mode: full.mode }).replace('正文第一段', '抖音第一段'), { ...full, platforms: undefined } as typeof full))).toEqual([]);
+  });
+
+  it('a platform named only by an experiment of the ledger is allowed, and a broken block still gets the check', () => {
+    const rowsX = packRowsSchema.parse({ ...rowsC, facts: [], recent: [], diagnostics: [], accounts: [], followers: [],
+      experiments: [{ ...rowsC.experiments[0], match: { pillar_key: 'p1', platform: 'bluesky' } }] });
+    expect(rowsC.experiments.length).toBeGreaterThan(0);
+    expect(buildPack({ rows: rowsX, cadence: 'weekly', businessId: simId('C'), now: NOW, handbooks: new Map() }).platforms).toHaveProperty('bluesky');
+    const broken = checkOutput('抖音表现好。\n\n```coach_json\n{oops\n```', withPlatforms({ tiktok: 'TikTok' }));
+    expect(reasons(broken)).toEqual(['body:platform_not_in_pack:douyin', ':json']);
+  });
+
+  it('the instructions tell the model the same: names from the pack, no unused reference lines', () => {
+    expect(COACH_CONTRACT).toContain('不同平台的名字不得互换');
+    expect(COACH_CONTRACT).toContain('没有用到的参考线');
+  });
+});
