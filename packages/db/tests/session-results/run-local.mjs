@@ -46,6 +46,7 @@ try {
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
  ok(sql(migration));
+ ok(sql(read('packages/db/migrations/0504_refusals_no_postgrest_retry.sql'))); // the version conflict answers PT409 (0338 replays it with 40001)
  assert.deepEqual(snapshot(),finalCatalog,'repeat 0338 preserves complete catalog');
  const interrupted=sql(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'C1_TEST_ROLLBACK'; END $$; COMMIT;"));
  assert.notEqual(interrupted.status,0);assert.match(interrupted.stderr,/C1_TEST_ROLLBACK/);

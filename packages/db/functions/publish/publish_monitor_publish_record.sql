@@ -15,9 +15,9 @@ BEGIN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023';
  END IF;
  j:=publish_monitor_publish_lock(p_job);
- IF j.state IN ('claimed','released') THEN RAISE EXCEPTION 'PUBLISH_MONITOR_STATE_CONFLICT' USING ERRCODE='40001'; END IF;
+ IF j.state IN ('claimed','released') THEN RAISE EXCEPTION 'PUBLISH_MONITOR_STATE_CONFLICT' USING ERRCODE='PT409'; END IF;
  IF p_provider_post_id IS NOT NULL AND j.provider_post_id IS NOT NULL AND j.provider_post_id<>p_provider_post_id THEN
-  RAISE EXCEPTION 'PUBLISH_MONITOR_RESULT_CONFLICT' USING ERRCODE='40001';
+  RAISE EXCEPTION 'PUBLISH_MONITOR_RESULT_CONFLICT' USING ERRCODE='PT409';
  END IF;
  merged:=j.results;
  FOR k,r IN SELECT * FROM jsonb_each(p_results) LOOP
@@ -29,11 +29,11 @@ BEGIN
    RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023';
   END IF;
   old:=merged->k;
-  IF old IS NOT NULL AND old->>'status'<>r->>'status' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_RESULT_CONFLICT' USING ERRCODE='40001'; END IF;
+  IF old IS NOT NULL AND old->>'status'<>r->>'status' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_RESULT_CONFLICT' USING ERRCODE='PT409'; END IF;
   IF old IS NULL THEN merged:=merged||jsonb_build_object(k,r); END IF;
  END LOOP;
  IF j.state IN ('completed','failed') THEN
-  IF merged<>j.results THEN RAISE EXCEPTION 'PUBLISH_MONITOR_RESULT_CONFLICT' USING ERRCODE='40001'; END IF;
+  IF merged<>j.results THEN RAISE EXCEPTION 'PUBLISH_MONITOR_RESULT_CONFLICT' USING ERRCODE='PT409'; END IF;
   RETURN publish_monitor_publish_view(j);
  END IF;
  UPDATE social_publish_jobs SET results=merged,provider_post_id=coalesce(provider_post_id,p_provider_post_id),

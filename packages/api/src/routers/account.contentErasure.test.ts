@@ -102,7 +102,7 @@ describe('one-click conversation deletion (Owner 2026-10-13: no impact list, 023
   });
 
   it('never lets cleanup erase an unmarked conversation', async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: '40001', message: 'CONTENT_ERASURE_PREVIEW_CHANGED' } });
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: 'PT409', message: 'CONTENT_ERASURE_PREVIEW_CHANGED' } });
     await expect(caller(rpc).conversationErasureCleanup({ sessionId: id }))
       .rejects.toMatchObject({ code: 'CONFLICT', message: 'CONTENT_ERASURE_PREVIEW_CHANGED' });
   });
