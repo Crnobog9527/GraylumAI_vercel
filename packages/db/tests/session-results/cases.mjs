@@ -30,7 +30,7 @@ async function turnReply(db,f,closeKind='completed') {
 const saveTurn = (db,actor,session,turn,extra={}) => rpc(db,'runtime_session_result_save_turn',actor,session,turn,
   extra.request??randomUUID(),extra.type??'script',extra.title??null,extra.excerpt===undefined?null:extra.excerpt);
 
-export async function runCases({db,Client,connectionString,report}) {
+export async function runCases({db,report}) {
   const failures = [];
   const check = async (name,run) => {try {await run();report.checks.push(name);} catch (error) {failures.push(name+': '+(error.stack??error));}};
 
