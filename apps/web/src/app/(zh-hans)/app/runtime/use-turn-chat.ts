@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import type { ToolActivity } from './tool-activity';
+import { mergeStep, type ReplyStep } from '@/components/chat-display/turn-step-list-model';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ToolAvailability } from '@repo/api/src/services/turn/tools/types';
 import type { TurnView } from '@repo/api/src/services/turn/view';
@@ -22,14 +22,13 @@ import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
 const READ_MS = 3000;
 /** Another conversation's turn may still hold its freeze when this one closes: the balance is read once more after this, and on return to the window. */
 const REREAD_MS = 8000;
-export type LiveTurn = { text: string; trimmed: string[]; rows: WorkItem[]; activity?: ToolActivity };
+export type LiveTurn = { text: string; trimmed: string[]; rows: WorkItem[]; steps: ReplyStep[] };
 
-/** The live reply after a tool or text event: a tool sets the line of what it is doing; once the text starts that line is over (the
- *  reply shows the text), and a later tool call sets a new one. */
-export function liveAfter(old: LiveTurn | null, event: { type: 'tool'; tool: ToolActivity['tool']; label?: string } | { type: 'text'; delta: string }): LiveTurn {
-  const base = { text: old?.text ?? '', trimmed: old?.trimmed ?? [], rows: old?.rows ?? [] };
-  return event.type === 'text' ? { ...base, text: base.text + event.delta }
-    : { ...base, activity: { tool: event.tool, ...(event.label ? { label: event.label } : {}) } };
+/** The live reply after a step or text event: a step event adds or updates that step (a running step becomes its end). The steps stay
+ *  when the text starts: the list folds itself then, and a later tool call adds its step again. */
+export function liveAfter(old: LiveTurn | null, event: { type: 'text'; delta: string } | ({ type: 'step' } & Parameters<typeof mergeStep>[1])): LiveTurn {
+  const base = { text: old?.text ?? '', trimmed: old?.trimmed ?? [], rows: old?.rows ?? [], steps: old?.steps ?? [] };
+  return event.type === 'text' ? { ...base, text: base.text + event.delta } : { ...base, steps: mergeStep(base.steps, event) };
 }
 
 /** A research call's row, replacing the row of the same call (running, then its end state). */
@@ -65,6 +64,9 @@ const browserFetch: typeof fetch = (...args) => globalThis.fetch(...args);
 export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: typeof fetch = browserFetch) {
   const [view, setView] = useState<TurnView | null>(null), [viewFailed, setViewFailed] = useState(false);
   const [live, setLive] = useState<LiveTurn | null>(null), [sending, setSending] = useState(false);
+  // The steps of replies this page watched being written, by turn: they stay above the reply (folded) until a reload, which reads them back
+  // from the server once it keeps them.
+  const [stepsByTurn, setStepsByTurn] = useState<ReadonlyMap<number, ReplyStep[]>>(() => new Map());
   const [notice, setNotice] = useState<{ code: string; text: string } | null>(null);
   // The last read of this conversation, kept in this browser: shown before the first paint, replaced by the read below.
   useLayoutEffect(() => {
@@ -130,19 +132,23 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   }, [active, read, settle]);
 
   const run = useCallback(async (body: Record<string, unknown>): Promise<SendAnswer> => {
-    setSending(true); setNotice(null); setLive({ text: '', trimmed: [], rows: [] });
-    let tools: ToolAvailability | undefined, made: WorkItem[] = [];
+    setSending(true); setNotice(null); setLive({ text: '', trimmed: [], rows: [], steps: [] });
+    let tools: ToolAvailability | undefined, made: WorkItem[] = [], seen: ReplyStep[] = [];
     const outcome = await runTurn({ sessionId, ...body }, event => {
       if (!alive.current) return;
       if (event.type === 'opened') { tools = event.tools;
-        setLive(old => ({ ...old, text: old?.text ?? '', trimmed: trimmedToolNotices(tools), rows: old?.rows ?? [] })); }
+        setLive(old => ({ text: old?.text ?? '', trimmed: trimmedToolNotices(tools), rows: old?.rows ?? [], steps: old?.steps ?? [] })); }
       if (event.type === 'research_call') {
         made = withResearchRow(made, event);
-        setLive(old => ({ ...old, text: old?.text ?? '', trimmed: old?.trimmed ?? [], rows: made }));
+        setLive(old => ({ text: old?.text ?? '', trimmed: old?.trimmed ?? [], rows: made, steps: old?.steps ?? [] }));
       }
-      if (event.type === 'tool') setLive(old => liveAfter(old, event));
+      if (event.type === 'step') { seen = mergeStep(seen, event); setLive(old => liveAfter(old, event)); }
       if (event.type === 'text') setLive(old => liveAfter(old, event));
     }, { fetch: fetcher });
+    if (outcome.state === 'finished' && outcome.last.type === 'result' && seen.length) {
+      const turnId = outcome.last.turnId;
+      setStepsByTurn(old => new Map(old).set(turnId, seen));
+    }
     await read();
     if (!alive.current) return 'unknown';
     setSending(false); setLive(null); settle();
@@ -164,6 +170,6 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   const busy = sending || Boolean(view?.activeTurn), paused = view?.activeTurn?.pauseReason === 'waiting_credits';
   // What the sidebar balance is told: the conversation's own state, so every page on this hook keeps the turn's freeze out of the balance.
   const creditsBusy = turnBusyForCredits({ viewRead: view !== null, viewFailed, busy, paused });
-  return { view, viewFailed, live, sending, notice, send, resume, paused, reload: read,
+  return { view, viewFailed, live, stepsByTurn, sending, notice, send, resume, paused, reload: read,
     busy, creditsBusy, clearNotice: () => setNotice(null) };
 }

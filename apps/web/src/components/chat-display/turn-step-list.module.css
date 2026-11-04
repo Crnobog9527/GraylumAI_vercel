@@ -1,0 +1,20 @@
+/* Steps of one reply: a quiet list that folds into one line once the text flows. Same palette as the work rows. */
+.wrap{margin:0 0 8px;font-family:var(--font-primary)}
+.list{display:grid;gap:2px;margin:0;padding:0;list-style:none}
+.row{display:flex;align-items:flex-start;gap:8px;min-width:0;padding:4px 10px;border-radius:8px;background:#fafafa;font-size:13px;line-height:1.6;color:#555}
+.row[data-step-state="running"]{color:#262626}
+.row[data-step-state="failed"],.row[data-step-state="skipped"]{color:#6b6b6b}
+.icon{flex:none;margin-top:3px;color:#6b6b6b}
+.done{color:#3f7d4f}
+.spin{animation:spin 1s linear infinite}
+.pulse{animation:pulse 1.4s ease-in-out infinite}
+.text{min-width:0;overflow-wrap:anywhere}
+.wrap button.fold{display:inline-flex;align-items:center;gap:6px;max-width:100%;margin:0;padding:4px 10px;border:0;border-radius:8px;background:#fafafa;box-shadow:none;opacity:1;font:inherit;font-size:13px;line-height:1.6;color:#555;cursor:pointer;text-align:left}
+.wrap button.fold:hover{background:#f3f3f3;color:#262626}
+.wrap button.fold:focus-visible{outline:2px solid #6b6b6b;outline-offset:2px}
+.chevron{flex:none;transition:transform .15s}
+.fold[aria-expanded="true"] .chevron{transform:rotate(180deg)}
+.opened{margin-top:2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+@media(prefers-reduced-motion:reduce){.spin,.pulse{animation:none}.chevron{transition:none}}

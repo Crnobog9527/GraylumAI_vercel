@@ -129,7 +129,8 @@ export function createSim({ timings = { firstByteMs: 200, intervalMs: 15, chunks
       receipts.set(id, { id, model: body.model, total_cost: 0, finish_reason: 'tool_calls', native_tokens_prompt: usage.prompt_tokens,
         native_tokens_completion: 20, native_tokens_reasoning: 0, native_tokens_cached: 0 });
       if (!body.stream) {
-        const choices = [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: tool.id, type: 'function', function: tool.function }] } }];
+        const message = { role: 'assistant', content: null, tool_calls: [{ id: tool.id, type: 'function', function: tool.function }] };
+        const choices = [{ index: 0, finish_reason: 'tool_calls', message }];
         return json(res, 200, { id, model: body.model, object: 'chat.completion', choices, usage }, { 'x-generation-id': id });
       }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'x-generation-id': id });

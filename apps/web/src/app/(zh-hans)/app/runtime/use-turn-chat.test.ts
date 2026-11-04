@@ -47,14 +47,17 @@ describe('the balance after a turn that closed while the page was away', () => {
   });
 });
 
-describe('the live reply while a tool runs', () => {
-  it('a tool event sets what it is doing, keeping the text and notices; the first text drops the line', () => {
-    const start = { text: '', trimmed: ['x'], rows: [] };
-    const reading = liveAfter(start, { type: 'tool', tool: 'load_skill', label: '分镜' });
-    expect(reading).toEqual({ text: '', trimmed: ['x'], rows: [], activity: { tool: 'load_skill', label: '分镜' } });
-    expect(liveAfter(reading, { type: 'tool', tool: 'research' }).activity).toEqual({ tool: 'research' });
-    const writing = liveAfter(reading, { type: 'text', delta: '第一镜' });
-    expect(writing).toEqual({ text: '第一镜', trimmed: ['x'], rows: [] });
-    expect(writing.activity).toBeUndefined();
+describe('the live reply while its steps run', () => {
+  it('a step event adds a step, the same id turns it into its end, the first text leaves the steps for the list to fold', () => {
+    const start = { text: '', trimmed: ['x'], rows: [], steps: [] };
+    const reading = liveAfter(start, { type: 'step', id: '1', tool: 'load_skill', label: '分镜', state: 'running' });
+    expect(reading.steps).toEqual([{ id: '1', tool: 'load_skill', state: 'running', label: '分镜' }]);
+    const done = liveAfter(reading, { type: 'step', id: '1', tool: 'load_skill', label: '分镜', state: 'done' });
+    expect(done.steps).toEqual([{ id: '1', tool: 'load_skill', state: 'done', label: '分镜' }]);
+    const two = liveAfter(done, { type: 'step', id: '2', tool: 'research', state: 'running', detail: '早起' });
+    expect(two.steps.map(step => step.id)).toEqual(['1', '2']);
+    const writing = liveAfter(two, { type: 'text', delta: '第一镜' });
+    expect(writing).toMatchObject({ text: '第一镜', trimmed: ['x'] });
+    expect(writing.steps).toHaveLength(2);
   });
 });

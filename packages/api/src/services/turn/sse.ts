@@ -10,17 +10,22 @@ import type { ToolAvailability } from './tools/types';
  * a fixed code only; database and provider text never reach the client. A compare streams its columns; a jury answers once
  * (`review`, or `error`), because its groups run on the server after the response.
  */
-export type ToolStageKind = 'load_skill' | 'research' | 'read_source' | 'coach_review' | 'other';
-export type ToolStageEvent = { type: 'tool'; tool: ToolStageKind; label?: string };
+export type StepKind = 'load_skill' | 'research' | 'read_source' | 'coach_review' | 'other';
+/** running → done; or failed (the tool did not work) / skipped (it was not available this reply, which is not an error). */
+export type StepState = 'running' | 'done' | 'failed' | 'skipped';
+export type StepEvent = { type: 'step'; id: string; tool: StepKind; state: StepState;
+  /** A Skill's public name. */ label?: string;
+  /** A search's first words (about 20 characters), or a page's host; never the whole question. */ detail?: string;
+  /** How many results came back, when the result says. */ count?: number };
 export type TurnEvent =
   // tools: what this turn can use and what was trimmed and why (2.7, V2-6); absent for a turn without tools.
   | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean; tools?: ToolAvailability;
     /** Fallback B (Owner 10-20): the user may generate with what exists; the counts are the draft's (V2-5c). */
     fallbackEligible?: boolean }
   | { type: 'text'; delta: string }
-  // A tool the model asked for is about to run (the reply has no text yet while it does): which kind only, so the page can say what is
-  // happening. `label` is a Skill's public catalog name, never an argument, a query or a Skill's text.
-  | ToolStageEvent
+  // One step of the reply (a tool the model asked for) as it runs and ends: the same `id` again replaces the step. Only the kind, a
+  // Skill's public catalog name, a search's first words and a count: never an argument, a result or a Skill's text.
+  | StepEvent
   // V2-5c: the mentor's benchmark flow (a lookup's progress, a selection card, a round to continue), as the old stream sent them.
   | ResearchTurnEvent
   | { type: 'result'; turnId: number; body: string; chargedCredits: number | null; settlement: 'pending' | 'done' | null;
