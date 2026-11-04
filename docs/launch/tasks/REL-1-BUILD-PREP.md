@@ -87,12 +87,12 @@
 
 | # | 谁 | 做什么 | 怎么确认 | 详见 |
 | --- | --- | --- | --- | --- |
-| 37 | 总控 | 开放前核对：核心项"（正式）"部分已过；资料库清理积压演练、备份恢复演练（Owner 11-03：在 staging 原地恢复）有 PASS 记录；正式库没有测试数据（见第 4 部分问题 18：迁移 0005 自带的诊断账户）；告警值守表有人接 | 记录交 Owner | O-1 |
+| 37 | 总控 | 开放前核对：核心项"（正式）"部分已过；资料库清理积压演练、备份恢复演练（Owner 11-03：在 staging 原地恢复）有 PASS 记录；正式库没有测试数据（见第 4 部分问题 18：迁移 0005 自带的诊断账户，Owner 11-04 选 A：开放前删掉）；告警值守表有人接 | 记录交 Owner | O-1 |
 | 38 | ★ 批准 → 总控 | **`SITE_INDEXING=public` 并重新部署**（构建时读，不重新部署不生效） | `/robots.txt` 放行搜索爬虫、拒绝训练爬虫；首页和公开页响应头没有 `X-Robots-Tag: noindex`，`/app`、登录页仍有；**canonical 检查**：首页和任意一个公开页的 `<link rel="canonical">`、`og:url` 都是 `https://www.graylum.com/...`（代码里写死 `SITE_ORIGIN`），不出现 `app.graylum.com` 或 vercel.app；`/sitemap.xml` 只有 www 地址 | O-2 |
 | 39 | ★ Owner 做 | 撤掉部署访问保护；作废回调绕过口令并从回调地址上去掉 | 公众能打开首页；Stripe 回调仍成功 | O-3 |
 | 40 | ★ 批准 → 总控 | 关 `stopNewCalls`，其他限流保持初始值 | 一个公开测试身份完成一次对话 | O-4 |
 | 41 | ★ Owner 做 | Google Search Console、Bing 提交站点和 sitemap；删 Vercel 正式里的过渡期旧变量 | 后台显示已验证 | O-5、V4 |
-| 41a | ★ Owner 做 + 总控 | **E2E 测试账号和凭证清理**（`docs/RELEASE_PREP_CHECKLIST.md`）：在 Vercel 正式环境移除 `E2E_*` 凭证（`E2E_TEST_PASSWORD`、`E2E_ADMIN_PASSWORD` 等，名字清单里不应再出现）；正式库里若有 E2E 测试账号（包括迁移 0005 自带的诊断账户，第 4 部分问题 18），由总控列出后经 Owner 批准删除或停用 | 变量名清单没有 `E2E_*`；账号清单读回 | V4 |
+| 41a | ★ Owner 做 + 总控 | **E2E 测试账号和凭证清理**（`docs/RELEASE_PREP_CHECKLIST.md`）：在 Vercel 正式环境移除 `E2E_*` 凭证（`E2E_TEST_PASSWORD`、`E2E_ADMIN_PASSWORD` 等，名字清单里不应再出现）；正式库里若有 E2E 测试账号（包括迁移 0005 自带的诊断账户，第 4 部分问题 18），由总控列出后删除（Owner 2026-11-04 选 A：开放前删掉 0005 自带的诊断账户；删除是写正式库，建库日当次仍取得批准） | 变量名清单没有 `E2E_*`；账号清单读回 | V4 |
 | 42 | 总控 | 记录正式部署地址、Stripe 模式、冒烟结果；Waffo 正式审核和映射（S-8）可以在上线后 | 贴上线 PR | O-6、S-8 |
 
 **三道刹车**（随时可用，见 REL-1 第 4.2 节）：模型出问题 → 打开 `stopNewCalls`（或 `runtime_payg` 写 `{"enabled":false}`）；付款出问题 → 关对应付款路由；整站出问题 → Owner 在 Vercel 重新暂停或开部署访问保护。
@@ -317,7 +317,9 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 积压查询本身失败只写日志；Stripe 回调的一般失败只写日志；后台"平台承担"提醒只在页面上显示。
 所以第一周每天固定看一次：Vercel 定时任务调用记录（有没有连续 500/503）、后台"成本止损"、后台"平台承担"、Sentry 当天新 issue。
 
-### 3.4 第一周要 Owner 先定的两句话（草稿）
+### 3.4 第一周要 Owner 先定的两句话（**已定，Owner 2026-11-04，Master Plan 第 2.1 节**）
+
+告警邮箱是 Owner 指定的告警邮箱（不入库，地址只在总控本机清单和共享笔记里）。下面两句是当时的草稿，Owner 的原话以 Master Plan 第 2.1 节为准；规则按第 3.3 节建，第一周按公开开放当天起算。
 
 - 「上线第一周，Sentry 告警和止损邮件发到 `<Owner 的邮箱/手机>`，规则按 REL-1-BUILD-PREP 第 3.3 节设成持续出现时每小时再提醒。」
 - 「上线第一周，同意总控为处理第 3.3 节的告警只读查看正式 Sentry、Vercel 日志和正式库（不输出密钥和用户正文）；任何写入、改配置、退款仍逐次问我。」
@@ -331,7 +333,7 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 3. **`support_email` 会公开显示**：REL-1 B11 说它和页面显示的客服邮箱"是两回事"，但代码里关于我们、无障碍、博客、维护页、登录页都读这个值。填一个只收告警的私人邮箱会被公开。建议 B11 改写，邮箱由 Owner 选。
 4. **套餐和积分包怎么写入正式库没说清**：空库没有这几行；Owner 10-25 定了"会员价格后台改只读、改价走迁移"。B3 要写明用哪份 SQL（建议照 staging 种子文件结构另出正式版，总控审核）。
    已定：用 [production_non_secret_baseline.sql](../../../packages/db/seeds/production_non_secret_baseline.sql) 写入 B3/B7 非密钥配置；建库日替换占位、Owner 批准后由总控执行。
-5. **4 个写作 Skill 只有 2 个在 staging 发布过**：分镜、剪辑建议从没在 staging 发布和验收，B7 却要在正式勾"使用用户文风"。要么先在 staging 发布验收，要么 Owner 确认这两个上线时不发。
+5. **4 个写作 Skill 只有 2 个在 staging 发布过**：分镜、剪辑建议从没在 staging 发布和验收，B7 却要在正式勾"使用用户文风"。**已定（Owner 2026-11-04：“分镜、剪辑建议这两个写作 Skill 上线要带。”）：上线要带**；所以先在 staging 发布并验收（最小方案：导入、各跑一轮、对照开关“我的文风”看字幕和口播原句是否带文风、未确认定位被拦截且不扣积分），验收通过后再在建库日第 30e 步由 Owner 看样例单独确认正式版本。
 6. **`chat_my_posts_enabled`**：~~staging 是关的，REL-1 B7 列了但没写取值。~~ 已定（10-26）：正式 `true`，见第 1 部分。
 7. **`v3_summary_max_tokens`**：staging 4096、缺省 2048，正式取哪个没有记录。
 8. **`Qwen3.8 Max`** 在 staging 启用但没有任何引用，名字前多一个空格；正式建议不导入。
@@ -344,7 +346,7 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 15. **Vercel 网站统计和速度统计要在正式项目打开**（10-26 第十一批发现）：代码已接 `@vercel/analytics` 和 `@vercel/speed-insights`，但项目没在 Vercel 后台开 Web Analytics 时 `/_vercel/insights/script.js` 返回 404、控制台报错，统计不上报（Owner 10-13 决定用 Vercel Web Analytics 看总量和中国大陆）。staging 10-26 已由 Owner 开启 Web Analytics（Speed Insights 早已开）。正式：Owner 在正式项目的 Analytics、Speed Insights 两页点开启，之后的第一次部署才生效；冒烟日确认两个脚本都返回 200。
 16. **钱包到期提醒的真实发信没在 staging 验过**（PAY-NOTIFY，10-26）：提醒只发到账户本人登录邮箱，且必须在 `PAYMENT_NOTICE_TEST_RECIPIENTS` 名单里；只有每天 03:00 UTC 的定时任务发信；staging 没有 7 天内到期的微信/支付宝年付单。10-26 只核对现有一条 founder_ended 提醒的去向。上线前演练：用一个登录邮箱在名单里的测试账号、一张 7 天内到期的钱包年付单，等定时任务发出并读回 `payment_notices`（state=sent）。
 17. **一键发布的平台名单 staging 是空的**（`publish_monitor_publish_platforms`）：只有名单里的平台在页面上开放发布。Owner 在场授权 X/YouTube 那次验收前，总控先在 staging 写 `["x","youtube"]`；正式按第 7 节 E1 的平台写。
-18. **历史迁移 0005 会在空库里建诊断测试账户**：逐个迁移建库会把它带进正式库。种子不新增、不改账户（测试比较执行前后账户完全一致）。建库后、开放前由总控决定怎么处理（第 1 部分第 37 步）。
+18. **历史迁移 0005 会在空库里建诊断测试账户**：逐个迁移建库会把它带进正式库。种子不新增、不改账户（测试比较执行前后账户完全一致）。**已定（Owner 2026-11-04“诊断账户选 A”）：开放前删掉**，由总控在第 37、41a 步列出并删除。
 19. ~~**存储容量**~~ 已定（总控 11-03）：上线保持 Pro 500 MB / Gold 2 GB；IMAGE-GEN 第 13.1 节批的 Pro 2 GB / Gold 10 GB 随图片版本（约 11-25）作为那个版本的配置变更一起改。种子已加注释。
 20. ~~**`LANDING_PROMO_OFFERS`**~~ 已定（总控 11-03，见上线撤回清单）：上线时设 `on`；前提是先在 staging 做 #987 的开/关 A/B 验收（第 1 部分第 25a 步），正式设置要 Owner 批准。
 21. ~~**"七个平台"和名单里的 9 个**~~ 已定（总控 11-03）：以 Master Plan 10-24 E1 为准，9 个平台都开放；正式发帖只验证 X 和 YouTube。
