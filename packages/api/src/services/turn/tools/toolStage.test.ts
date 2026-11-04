@@ -2,6 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import { SKILL_LOAD_REFUSED } from '../skills/loadSkillTool';
 import { TOOL_UNAVAILABLE } from './index';
+import { TOOL_STATUSES } from '../../research/tools/envelope';
+import type { StepKind } from '../sse';
+import { SKILL_FILE_UNAVAILABLE } from './skills';
 import { stepEnd, stepStart } from './toolStage';
 
 const skills = new Set(['分镜', 'Hooks']);
@@ -50,25 +53,64 @@ describe('how a tool\'s result ends its step', () => {
     expect(stepEnd('research', JSON.stringify({ status: 'ok', items: [{}, {}, {}] }))).toEqual({ state: 'done', count: 3 });
     expect(stepEnd('research', JSON.stringify({ status: 'partial', items: [{}] }))).toEqual({ state: 'done', count: 1 });
     expect(stepEnd('research', JSON.stringify({ status: 'ok', items: [] }))).toEqual({ state: 'done', count: 0 });
-    expect(stepEnd('read_source', JSON.stringify({ hits: [{}, {}] }))).toEqual({ state: 'done', count: 2 });
+    expect(stepEnd('read_source', JSON.stringify({ kind: 'library_search', hits: [{}, {}] }))).toEqual({ state: 'done', count: 2 });
     expect(stepEnd('load_skill', JSON.stringify({ name: '分镜', instructions: 'x' }))).toEqual({ state: 'done' });
-    expect(stepEnd('coach_review', JSON.stringify({ kind: 'review_pack' }))).toEqual({ state: 'done' });
   });
-  it('a tool that did not work is failed; one that was not available this reply is skipped, which is not an error', () => {
-    expect(stepEnd('research', JSON.stringify({ status: 'unavailable', reason: 'PROVIDER_FAILED', items: [] }))).toEqual({ state: 'failed' });
-    expect(stepEnd('read_source', JSON.stringify({ kind: 'unavailable', reason: 'read_failed' }))).toEqual({ state: 'failed' });
-    // The workspace reader's own answer when nothing could be read has no reason at all (tools/workspace.ts UNAVAILABLE).
-    expect(stepEnd('read_source', JSON.stringify({ kind: 'unavailable' }))).toEqual({ state: 'failed' });
-    expect(stepEnd('coach_review', JSON.stringify({ kind: 'unavailable' }))).toEqual({ state: 'failed' });
-    expect(stepEnd('research', JSON.stringify({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' }))).toEqual({ state: 'skipped' });
-    expect(stepEnd('research', JSON.stringify({ status: 'not_supported' }))).toEqual({ state: 'skipped' });
-    expect(stepEnd('read_source', TOOL_UNAVAILABLE)).toEqual({ state: 'skipped' });
+
+  // Every answer a tool can give: where each is defined, and the end the page shows. A new status of the research envelope fails the
+  // typecheck of ENVELOPE_END first; a new answer of the workspace, the coach review or the library is added here.
+  const answers: Array<[string, StepKind, unknown, ReturnType<typeof stepEnd>]> = [
+    // research and benchmark envelopes (research/tools/envelope.ts)
+    ['research ok', 'research', { status: 'ok', items: [{}] }, { state: 'done', count: 1 }],
+    ['research partial', 'research', { status: 'partial', items: [{}] }, { state: 'done', count: 1 }],
+    ['research unavailable (supplier failed)', 'research', { status: 'unavailable', reason: 'PROVIDER_FAILED', items: [] }, { state: 'failed' }],
+    ['research unavailable (route not frozen)', 'research', { status: 'unavailable', reason: 'ROUTE_NOT_FROZEN', items: [] }, { state: 'failed' }],
+    ['research unavailable (trimmed this reply)', 'research', { status: 'unavailable', reason: 'TOOL_UNAVAILABLE_THIS_TURN', items: [] }, { state: 'skipped' }],
+    ['research not_supported', 'research', { status: 'not_supported', items: [] }, { state: 'skipped' }],
+    ['research not_confirmed', 'research', { status: 'not_confirmed', items: [] }, { state: 'skipped' }],
+    ['research budget_exhausted', 'research', { status: 'budget_exhausted', items: [] }, { state: 'skipped' }],
+    // own post data (tools/workspace.ts, agent/workspacePosts.ts)
+    ['my_posts available', 'coach_review', { kind: 'my_posts', status: 'available', posts: [] }, { state: 'done' }],
+    ['my_posts stale', 'coach_review', { kind: 'my_posts', status: 'stale', posts: [] }, { state: 'done' }],
+    ['my_posts no_recent_posts', 'coach_review', { kind: 'my_posts', status: 'no_recent_posts', posts: [] }, { state: 'done' }],
+    ['my_posts not_connected', 'coach_review', { kind: 'my_posts', status: 'not_connected', note: 'x' }, { state: 'skipped', reason: 'no_brand' }],
+    ['my_posts no_entitlement', 'coach_review', { kind: 'my_posts', status: 'no_entitlement' }, { state: 'skipped' }],
+    // the coach review (tools/coachReview.ts)
+    ['coach_review available', 'coach_review', { kind: 'coach_review', status: 'available', review: {} }, { state: 'done' }],
+    ['coach_review no_brand', 'coach_review', { kind: 'coach_review', status: 'no_brand', note: 'x' }, { state: 'skipped', reason: 'no_brand' }],
+    ['coach_review no_entitlement', 'coach_review', { kind: 'coach_review', status: 'no_entitlement' }, { state: 'skipped' }],
+    ['coach_brands (which brand?)', 'coach_review', { kind: 'coach_brands', brands: [] }, { state: 'done' }],
+    // the library and the workspace's own sources (tools/source.ts, library_turn_read, workspace.ts)
+    ['library_index', 'read_source', { kind: 'library_index', documents: [{}, {}, {}] }, { state: 'done', count: 3 }],
+    ['library_directory', 'read_source', { kind: 'library_directory', documents: [] }, { state: 'done', count: 0 }],
+    ['library_segment', 'read_source', { kind: 'library_segment', text: 'x' }, { state: 'done' }],
+    ['unavailable, no reason (no access)', 'read_source', { kind: 'unavailable' }, { state: 'failed' }],
+    ['unavailable, read_failed', 'read_source', { kind: 'unavailable', reason: 'read_failed' }, { state: 'failed' }],
+    ['unavailable, unknown_query', 'read_source', { kind: 'unavailable', reason: 'unknown_query' }, { state: 'failed' }],
+    ['unavailable, source_deleted', 'read_source', { kind: 'unavailable', reason: 'source_deleted' }, { state: 'failed' }],
+    ['unavailable, source_changed', 'read_source', { kind: 'unavailable', reason: 'source_changed' }, { state: 'failed' }],
+    ['unavailable, read_limit', 'read_source', { kind: 'unavailable', reason: 'read_limit' }, { state: 'skipped' }],
+    ['unavailable, read_room', 'coach_review', { kind: 'unavailable', reason: 'read_room' }, { state: 'skipped' }],
+    // the tool layer itself (tools/index.ts, skills)
+    ['a trimmed tool', 'read_source', JSON.parse(TOOL_UNAVAILABLE), { state: 'skipped' }],
+    ['a Skill file not declared', 'other', JSON.parse(SKILL_FILE_UNAVAILABLE), { state: 'skipped' }],
+  ];
+  it.each(answers)('%s', (_name, tool, body, expected) => {
+    expect(stepEnd(tool, JSON.stringify(body))).toEqual(expected);
+  });
+
+  it('plain-text answers: a Skill that cannot be loaded is skipped; a loaded Skill\'s text is done', () => {
     expect(stepEnd('load_skill', SKILL_LOAD_REFUSED)).toEqual({ state: 'skipped' });
-    expect(stepEnd('coach_review', JSON.stringify({ kind: 'coach_review', status: 'no_entitlement' }))).toEqual({ state: 'skipped' });
-    // No brand connected yet: nothing was read, so it is not a green tick; the page says so in its own words.
-    expect(stepEnd('coach_review', JSON.stringify({ kind: 'coach_review', status: 'no_brand', note: 'x' }))).toEqual({ state: 'skipped', reason: 'no_brand' });
+    expect(stepEnd('load_skill', 'just text')).toEqual({ state: 'done' });
+    // An answer that names an unknown status, or a word of the object prototype, is a read that happened.
+    expect(stepEnd('research', JSON.stringify({ status: 'constructor' }))).toEqual({ state: 'done' });
   });
-  it('the result text itself never leaves: only a state and a count', () => {
+
+  it('every status of the research envelope has an end (a new one must be put in the table)', () => {
+    for (const status of TOOL_STATUSES) expect(['done', 'failed', 'skipped']).toContain(stepEnd('research', JSON.stringify({ status, items: [] })).state);
+  });
+
+  it('the result text itself never leaves: only a state, a count and a fixed reason', () => {
     expect(Object.keys(stepEnd('research', JSON.stringify({ status: 'ok', items: [{ fields: { text: 'SECRET' } }] }))).sort()).toEqual(['count', 'state']);
   });
 });

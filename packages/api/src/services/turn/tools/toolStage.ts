@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
 import { COACH_REVIEW_ID } from './coachReview';
-import type { StepEvent, StepKind } from '../sse';
+import type { StepEvent, StepKind, StepState } from '../sse';
+import type { ToolStatus } from '../../research/tools/envelope';
 
 /*
  * What the page is told about the tools of a reply (the reply has no text until a tool answers and the next model call starts).
@@ -38,11 +39,24 @@ export function stepStart(name: string, args: Record<string, unknown>, skillName
   return { tool: 'other' };
 }
 
-/** Results that mean "not available this reply" rather than "it broke": a trimmed tool, a refused Skill, a spent limit. */
-const SKIPPED = new Set(['unavailable_this_turn', 'budget_exhausted', 'not_supported', 'not_confirmed', 'no_entitlement']);
-const BROKEN = new Set(['unavailable', 'failed', 'error']);
+/*
+ * Every answer a tool can give, put into one of three ends (the table in toolStage.test.ts holds each of them):
+ *  done     the read happened (nothing new to read is still a read; an old snapshot is still a read);
+ *  failed   the read did not work (the source could not answer);
+ *  skipped  it was not used this reply: not available, a limit spent, no right to it, or no account connected yet.
+ * Research and benchmark envelopes answer by `status`; the library and the workspace answer by `kind` (+ `status` for own posts and
+ * the coach review, + `reason` for an unavailable one).
+ */
+const ENVELOPE_END: Record<ToolStatus, StepState> = { ok: 'done', partial: 'done', unavailable: 'failed', not_supported: 'skipped',
+  not_confirmed: 'skipped', budget_exhausted: 'skipped' };
+/** The own-post and coach reads' statuses: a connected account with nothing new, or only an old snapshot, still read what there is. */
+const DATA_END: Record<string, StepState> = { available: 'done', stale: 'done', no_recent_posts: 'done', no_entitlement: 'skipped' };
+/** An account with no brand / no connected account: nothing to read yet (the page says so in its own words). */
+const NO_ACCOUNT = new Set(['no_brand', 'not_connected']);
+/** An unavailable read whose reason is a limit of this reply, not a broken source. */
+const LIMIT_REASONS = new Set(['read_limit', 'read_room', 'TOOL_UNAVAILABLE_THIS_TURN', 'SKILL_FILE_NOT_DECLARED']);
 
-/** How a tool's result ended the step. A thrown error is the caller's `failed`. */
+/** How a tool's result ended its step. A thrown error is the caller's `failed`. */
 export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state' | 'count' | 'reason'> {
   let parsed: unknown;
   try { parsed = JSON.parse(result); } catch { parsed = null; }
@@ -51,12 +65,14 @@ export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state'
     return /cannot be loaded|cannot be used in this reply/.test(result) ? { state: 'skipped' } : { state: 'done' };
   }
   const body = parsed as Record<string, unknown>;
-  // The reads of the library and the workspace answer {kind:'unavailable'} (with or without a reason) when nothing could be read.
-  const status = typeof body.status === 'string' ? body.status : body.kind === 'unavailable' ? 'unavailable' : '';
-  // The coach review of an account with no brand connected: nothing was read, and the reply goes on with the positioning and the library.
-  if (status === 'no_brand') return { state: 'skipped', reason: 'no_brand' };
-  if (body.reason === 'TOOL_UNAVAILABLE_THIS_TURN' || SKIPPED.has(status)) return { state: 'skipped' };
-  if (BROKEN.has(status)) return { state: 'failed' };
+  const status = typeof body.status === 'string' ? body.status : '';
+  const reason = typeof body.reason === 'string' ? body.reason : '';
+  if (NO_ACCOUNT.has(status)) return { state: 'skipped', reason: 'no_brand' };
+  if (LIMIT_REASONS.has(reason)) return { state: 'skipped' };
+  // The library and the workspace say {kind:'unavailable'} (with or without a reason) when nothing could be read.
+  const state: StepState = body.kind === 'unavailable' ? 'failed'
+    : Object.hasOwn(ENVELOPE_END, status) ? ENVELOPE_END[status as ToolStatus] : Object.hasOwn(DATA_END, status) ? DATA_END[status]! : 'done';
+  if (state !== 'done') return { state };
   const list = [body.items, body.hits, body.documents].find(Array.isArray) as unknown[] | undefined;
-  return tool === 'research' || tool === 'read_source' ? { state: 'done', ...(list ? { count: list.length } : {}) } : { state: 'done' };
+  return tool === 'research' || tool === 'read_source' ? { state, ...(list ? { count: list.length } : {}) } : { state };
 }
