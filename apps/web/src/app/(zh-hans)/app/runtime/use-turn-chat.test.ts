@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { ResearchCall } from '@/components/research/research-model';
-import { closedTurnSeen, neverOpened, withResearchRow } from './use-turn-chat';
+import { closedTurnSeen, liveAfter, neverOpened, withResearchRow } from './use-turn-chat';
 
 const call = (state: ResearchCall['state'], credits: string | null = null): ResearchCall => ({ callId: 'c1', toolName: 'social_search', args: {},
   query: '早起', platform: 'douyin' as never, dataKind: 'keyword_posts', state, credits });
@@ -44,5 +44,20 @@ describe('the balance after a turn that closed while the page was away', () => {
   });
   it('does nothing before the first read', () => {
     expect(closedTurnSeen(undefined, null)).toEqual({ changed: false, id: undefined });
+  });
+});
+
+describe('the live reply while its steps run', () => {
+  it('a step event adds a step, the same id turns it into its end, the first text leaves the steps for the list to fold', () => {
+    const start = { text: '', trimmed: ['x'], rows: [], steps: [] };
+    const reading = liveAfter(start, { type: 'step', id: '1', tool: 'load_skill', label: '分镜', state: 'running' });
+    expect(reading.steps).toEqual([{ id: '1', tool: 'load_skill', state: 'running', label: '分镜' }]);
+    const done = liveAfter(reading, { type: 'step', id: '1', tool: 'load_skill', label: '分镜', state: 'done' });
+    expect(done.steps).toEqual([{ id: '1', tool: 'load_skill', state: 'done', label: '分镜' }]);
+    const two = liveAfter(done, { type: 'step', id: '2', tool: 'research', state: 'running', detail: '早起' });
+    expect(two.steps.map(step => step.id)).toEqual(['1', '2']);
+    const writing = liveAfter(two, { type: 'text', delta: '第一镜' });
+    expect(writing).toMatchObject({ text: '第一镜', trimmed: ['x'] });
+    expect(writing.steps).toHaveLength(2);
   });
 });

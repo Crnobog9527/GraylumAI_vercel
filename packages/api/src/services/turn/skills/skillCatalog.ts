@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { asRequiredLevel } from '../../skills/memberOnly';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules, type Authentication } from '../../skills/databaseSource';
@@ -28,6 +29,8 @@ export const catalogEntry = z.object({
   usesVoice: z.literal(true).optional(),
   // POSITIONING-GATE: a social-media Skill, for the core path, which learns at turn_open whether the account may see it.
   social: z.literal(true).optional(),
+  // MEMBER-ONLY-MODULES: the lowest plan that may load this Skill (the chat's member gate drops the entry for a plan below it).
+  requiredMemberLevel: z.enum(['pro', 'gold']).optional(),
 }).strict();
 export const skillCatalog = z.array(catalogEntry).max(MAX_CATALOG_ENTRIES);
 export type SkillCatalogEntry = z.infer<typeof catalogEntry>;
@@ -112,7 +115,9 @@ export async function discoverSkillCatalog(user: SupabaseClient, admin: Supabase
   const catalogVersionBefore = key ? await catalogVersion(admin, 'skills') : undefined;
   if (cached && now - cached.at < CATALOG_TTL_MS) {
     if (catalogVersionBefore !== undefined && cached.catalogVersion === catalogVersionBefore) return structuredClone(cached.entries);
-    if (sameVersions(cached.versions, await publishedVersions(admin, cached.entries.map(e => e.skillId)))) {
+    // MEMBER-ONLY-MODULES: a changed catalog version includes a module edit (a plan requirement, the voice or social flag) that the
+    // published versions below cannot see, so only a catalog version that could not be read falls back to comparing them.
+    if (catalogVersionBefore === undefined && sameVersions(cached.versions, await publishedVersions(admin, cached.entries.map(e => e.skillId)))) {
       cached.catalogVersion = catalogVersionBefore;
       return structuredClone(cached.entries);
     }
@@ -125,6 +130,13 @@ export async function discoverSkillCatalog(user: SupabaseClient, admin: Supabase
     for (const oldest of catalogCache.keys()) { if (catalogCache.size <= CATALOG_CACHE_ENTRIES) break; catalogCache.delete(oldest); }
   }
   return entries;
+}
+
+/** The plan a module requires (from the module, for a pinned one that the catalog may not list); unreadable throws. */
+export async function moduleRequiredLevel(admin: SupabaseClient, moduleId: string): Promise<'pro' | 'gold' | null> {
+  const row = await admin.from('modules').select('required_member_level').eq('id', moduleId).single();
+  if (row.error) throw new Error('RUNTIME_CATALOG_UNAVAILABLE');
+  return asRequiredLevel(row.data.required_member_level);
 }
 
 /** From the module, not the catalog: a pinned module may not be listed. Unreadable throws: no turn loses the voice silently. */
@@ -140,7 +152,7 @@ export async function moduleUsesVoice(admin: SupabaseClient, moduleId: string): 
  * revision is not readable or too large: the caller refuses, never falling back to another revision.
  */
 export async function pinnedCatalogEntry(source: SkillSource, pin: { moduleId: string; skillId: string; revisionId: string },
-  maxResultBytes: number, usesVoice = false): Promise<SkillCatalogEntry | null> {
+  maxResultBytes: number, usesVoice = false, requiredLevel: 'pro' | 'gold' | null = null): Promise<SkillCatalogEntry | null> {
   try {
     const item = (await discoverSkills(source)).find(found => found.selection.revisionId === pin.revisionId);
     if (!item) return null;
@@ -149,7 +161,8 @@ export async function pinnedCatalogEntry(source: SkillSource, pin: { moduleId: s
       packageHash: item.selection.packageHash };
     const resultBytes = serializedResultBytes(loadSkillResult(entry, await entryInstructions(source, entry, maxResultBytes)));
     if (resultBytes > maxResultBytes) return null;
-    return catalogEntry.parse({ ...entry, resultBytes, ...(usesVoice ? { usesVoice: true } : {}) });
+    return catalogEntry.parse({ ...entry, resultBytes, ...(usesVoice ? { usesVoice: true } : {}),
+      ...(requiredLevel ? { requiredMemberLevel: requiredLevel } : {}) });
   } catch { return null; }
 }
 
@@ -158,8 +171,8 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
   const visible = await (limits.request?.visible ?? userVisibleModules(user, { limit: 65, orderById: true }));
   if (visible.error || visible.data.length > 64) throw new Error('RUNTIME_CATALOG_CAPACITY');
   if (!visible.data.length) return [];
-  const rows = await admin.from('modules').select('id,skill_id,social_media_related,uses_user_voice').in('id', visible.data.map(m => m.id))
-    .eq('active', true).order('id');
+  const rows = await admin.from('modules').select('id,skill_id,social_media_related,uses_user_voice,required_member_level')
+    .in('id', visible.data.map(m => m.id)).eq('active', true).order('id');
   if (rows.error) throw new Error('RUNTIME_CATALOG_UNAVAILABLE');
   const catalog: SkillCatalogEntry[] = [];
   for (const row of rows.data) {
@@ -186,8 +199,10 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
       if (resultBytes > limits.maxResultBytes) continue;
       // Names are what the model calls; a duplicate name would be ambiguous, so the first (lowest module id) wins.
       if (catalog.some(other => other.name === entry.name)) continue;
+      const requiredLevel = asRequiredLevel(row.required_member_level);
       catalog.push(catalogEntry.parse({ ...entry, resultBytes, ...(row.uses_user_voice === true ? { usesVoice: true } : {}),
-        ...(row.social_media_related !== false ? { social: true } : {}) }));
+        ...(row.social_media_related !== false ? { social: true } : {}),
+        ...(requiredLevel ? { requiredMemberLevel: requiredLevel } : {}) }));
       if (catalog.length >= MAX_CATALOG_ENTRIES) return catalog;
     }
   }

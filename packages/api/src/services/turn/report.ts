@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { memberLevelDenied } from '../skills/memberOnly';
 import { z } from 'zod';
 import { openRouterAdapter } from './provider/openRouterAdapter';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
@@ -76,7 +77,8 @@ export async function runReportTurn(deps: ChatDeps, input: ReportInput, emit: (e
     price = reportPrice(await configuration);
     if (input.acceptedCredits !== price) return emit({ type: 'error', code: 'REPORT_PRICE_CHANGED' });
     const module = await readAdmissionModule(admin, input.moduleId);
-    if (module.error || module.data?.active !== true) return emit({ type: 'error', code: 'REPORT_SOURCE_CONFLICT' });
+    if (module.error || module.data?.active !== true || await memberLevelDenied(admin, input.actorId, module.data.required_member_level))
+      return emit({ type: 'error', code: 'REPORT_SOURCE_CONFLICT' });
     // Back-office report model (10-10), else the module's model, as the old report admission chose it.
     const modelId = z.string().uuid().parse(module.data.report_model_id ?? module.data.model_id);
     const budgets = await readPurposeBudgets(admin, configuration);

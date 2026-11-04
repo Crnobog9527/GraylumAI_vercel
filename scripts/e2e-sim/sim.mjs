@@ -9,6 +9,8 @@
 //     silent     not even headers until the caller gives up (no generation id reaches the app)
 //     malformed  the organizer's JSON (target 'organizer') or the card tool arguments come back broken
 //     402        the official 402 refusal (OpenRouter credits), before any generation
+//     tool       the call answers with one tool call {name, arguments} and no text (a reply that is only a load_skill, say)
+//     slow       the call is answered normally, {delayMs} late (arm it after a tool fault to hold the call that follows the tool)
 //   target: 'primary' (default: any call that is not the organizer), 'organizer', 'any'
 //   GET  /__sim/calls   what was called, in order: [{model, role, stream, fault}]
 //   POST /__sim/reset   clears armed faults and the journal
@@ -53,7 +55,7 @@ export function createSim({ timings = { firstByteMs: 200, intervalMs: 15, chunks
     if (url.pathname === '/__sim/fault' && req.method === 'POST') {
       let raw = ''; for await (const part of req) raw += part;
       const fault = JSON.parse(raw || '{}');
-      if (!['cut', 'timeout', 'silent', 'malformed', '402'].includes(fault.mode)) return json(res, 400, { error: 'unknown mode' });
+      if (!['cut', 'timeout', 'silent', 'malformed', '402', 'tool', 'slow'].includes(fault.mode)) return json(res, 400, { error: 'unknown mode' });
       faults.push({ target: 'primary', times: 1, receipt: true, ...fault });
       return json(res, 200, { armed: faults.length });
     }
@@ -121,6 +123,24 @@ export function createSim({ timings = { firstByteMs: 200, intervalMs: 15, chunks
         native_tokens_completion: 20, native_tokens_reasoning: 0, native_tokens_cached: 0 });
       return;
     }
+    if (fault?.mode === 'tool') {
+      const tool = { index: 0, id: 'call_sim_tool', type: 'function', function: { name: fault.name, arguments: JSON.stringify(fault.arguments ?? {}) } };
+      const usage = { prompt_tokens: Math.floor(raw.length / 8), completion_tokens: 20, total_tokens: Math.floor(raw.length / 8) + 20, cost: 0 };
+      receipts.set(id, { id, model: body.model, total_cost: 0, finish_reason: 'tool_calls', native_tokens_prompt: usage.prompt_tokens,
+        native_tokens_completion: 20, native_tokens_reasoning: 0, native_tokens_cached: 0 });
+      if (!body.stream) {
+        const message = { role: 'assistant', content: null, tool_calls: [{ id: tool.id, type: 'function', function: tool.function }] };
+        const choices = [{ index: 0, finish_reason: 'tool_calls', message }];
+        return json(res, 200, { id, model: body.model, object: 'chat.completion', choices, usage }, { 'x-generation-id': id });
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'x-generation-id': id });
+      res.write(frame([{ index: 0, delta: { role: 'assistant', tool_calls: [tool] }, finish_reason: null }]));
+      res.write(frame([{ index: 0, delta: {}, finish_reason: 'tool_calls' }]));
+      res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', model: body.model, choices: [], usage })}\n\n`);
+      res.end('data: [DONE]\n\n');
+      return;
+    }
+    if (fault?.mode === 'slow') await sleep(Number(fault.delayMs) || 2000);
     const patched = role === 'organizer' && !fault ? organizerPatches(body) : null;
     if (patched) {
       const prompt = Math.floor(raw.length / 8);

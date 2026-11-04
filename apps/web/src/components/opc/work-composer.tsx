@@ -13,6 +13,7 @@ import { attachmentAccept, attachmentFormatsText, useComposerAttachments } from 
 import { ComposerImages, type ChatImages } from './composer-image';
 import { CHAT_MAX_IMAGES, imageFiles } from '@/lib/chat-image';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 
 /**
  * One input surface for free conversation, positioning and topic work.
@@ -59,7 +60,12 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const selected=onSkillChange?skillId:localSkill;
  const skills=(choices.data?.skills??[]).filter(skill=>skill.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
  const toggleSkills=()=>{if(menu!=='skills'){if(onSkillChange)onSkillChange('');else setLocalSkill('');}setMenu(menu==='skills'?null:'skills');};
- const changeSkill=(id:string)=>{if(onSkillChange)onSkillChange(id);else setLocalSkill(id);setMenu(null);};
+ const [paywall,setPaywall]=useState<'pro'|'gold'|null>(null);
+ // A member-only Skill the plan is below is not chosen: the paywall opens instead (nothing is loaded).
+ const changeSkill=(id:string)=>{
+  const picked=choices.data?.skills.find(skill=>skill.moduleId===id);
+  if(picked?.locked){setMenu(null);setPaywall(picked.requiredMemberLevel??'pro');return;}
+  if(onSkillChange)onSkillChange(id);else setLocalSkill(id);setMenu(null);};
  async function addFiles(files:FileList|File[]|null){
   if(!files?.length)return;setError('');setReading(true);
   try {
@@ -82,7 +88,8 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const imageHint=images
   ?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）只随这条消息发给模型，不会保存；也可以直接拖进对话或粘贴。`:'';
  const attached=images?<>{attachment}<ComposerImages state={images} disabled={disabled}/></>:attachment;
- return <ComposerView rootRef={root} attachment={attached} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
+ return <>{paywall&&<ReportPaywallDialog scene="coach" minLevel={paywall} onClose={()=>setPaywall(null)}/>}
+ <ComposerView rootRef={root} attachment={attached} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
   editor={<ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
    onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks} knownReferences={referenceList}/>}
@@ -99,7 +106,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
    status={choices.isLoading?<PageSkeleton compact rows={2} label="技能读取中"/>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:undefined}/>}
   counter={nearLimit?{length:value.length,max:maxLength}:null}
   skillName={selected?choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能':undefined}
-  sendDisabled={cannotSend} onSend={sendAndFocus} status={attachments.status} error={error} note={note}/>;
+  sendDisabled={cannotSend} onSend={sendAndFocus} status={attachments.status} error={error} note={note}/></>;
 }
 
 export { ModelSlot, MODEL_SLOT_HINT } from './composer-view';

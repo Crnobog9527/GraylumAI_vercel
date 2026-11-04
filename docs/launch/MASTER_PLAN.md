@@ -82,7 +82,85 @@
 <a id="changes"></a><a id="conflicts"></a>
 ## 2. 本版的新决定和被取代的旧规则
 
-### 2.1 Owner 的新决定（2026-09-27 起，2026-11-04 更新）
+### 2.1 Owner 的新决定（2026-09-27 起，2026-11-05 更新）
+
+**2026-11-05：图片生成交给 Shotviva，作为 Graylum 的连接器接入，不在 Graylum 内结算（IMAGE-GEN 方向变更，产品决定）**
+
+总控-15 此前的建议是“Graylum 在后台调用 Shotviva、用户只扣 Graylum 积分、两边内部结算”，Owner 否掉了这个做法。
+
+Owner 原话（2026-11-05，总控-15 转达，在总控窗口里回复）：
+
+> 共用 graylum 的积分这样出图太慢了，内部记账也不好记，graylum 本来也要做连接器功能，shotviva 作为一个连接器嵌入 graylum 使用，免费生图额度用完了就提醒用户跳转 shotviva 充值就好了，不要搞内部结算。
+
+同日补充（2026-11-05，总控-15 转达，同一决定的补充，Owner 对总控两个问题的回答）：
+
+> Shotviva 和 Graylum 是不是同一家公司运营？是的。
+
+> 免费额度规则和 shotviva 保持一致，graylum 只负责调用，现阶段不牵扯复杂的权限分级。
+
+以下是落实范围，不是原话：
+
+- 决定本身（只复述原话里有的）：图片生成交给 Shotviva，作为嵌入 Graylum 的连接器使用；免费生图额度用完后，Graylum 提醒用户跳转到 Shotviva 充值；不做内部结算（Graylum 与 Shotviva 之间不做积分或账务的内部结算）。
+- 取代：2026-11-03“图片生成方案的逐条决定”中第 1 项“每张图按供应商成本 5 倍收 Graylum 积分、图片倍数与对话倍数分开单独设置、多模型各自配置”，也就是 IMAGE-GEN 原方案里“由 Graylum 自己调图片模型并扣 Graylum 积分”的做法；与之绑定的“图片落盘发生在回执之间、`turn_close` 写一行登记、新增回合种类 `image`”的主路径规则例外（同日第 7 项），在新方向下是否还需要，由开工时重新确认，本条不替它作废也不确认。（2026-11-03 条目的第 1 项已被本条取代，见上。）
+- 2026-11-03 其余细节（“会员专享”弹窗的展示方式、首批 8 个模板与“固定提示词或 Skill”二选一、封面多图轮播或 GIF、Lovart 式系列弹窗、用哪个图片模型（现在由 Shotviva 一侧决定，用户不选）、不用字节的模型、不做盲测、存储 Pro 2 GB / Gold 10 GB）：**待上线后开工时按连接器方案重新确认**，现在既不算作废，也不算仍然有效；这些细节里哪些在 Shotviva 一侧本来就有、哪些还要 Graylum 自己做，也留到那时判断。
+- 以下是 AI（总控-15 与本条起草者）的理解，Owner 没有逐项确认：⓪该连接器归入 INTEGRATION-BASE 连接器框架；这件事属上线后的范围、不影响 11-15（总控转达，Owner 原话没提时间）；①额度和计费由 Shotviva 管，Graylum 不记图片账、不扣图片积分；②用户需要有 Shotviva 账号并完成连接，连接方式（账号绑定、授权、从 Graylum 内打开还是跳转）随连接器框架设计；③“免费生图额度”指 Shotviva 给用户的免费额度，不是 Graylum 的；④Graylum 如何得知额度已用完（Shotviva 返回状态，或用户在 Shotviva 页面看到）未定；⑤2026-11-03 的 IMAGE-GEN-PLAN（#1687）里与 Graylum 内计费有关的章节不再作为开工依据。
+- 补充一的落实：Shotviva 与 Graylum 是同一家公司运营（Owner 原话）；这只是事实陈述，不等于已有技术上的账号互通、共用密钥或接口，那些仍待连接器方案。
+- 补充二的落实：免费额度规则以 Shotviva 为准、Graylum 只负责调用；“现阶段不牵扯复杂的权限分级”按字面记，不展开。其中“Shotviva 不为从 Graylum 来的用户单独设额度”是总控理解，Owner 未逐项确认。
+- 同日再补充（2026-11-05，总控-15 转达，Owner 对“Graylum 的免费用户能不能用这个连接器”的回答），原话：
+
+> graylum 的免费会员不能使用 shotviva 连接器
+
+  落实范围：Graylum 的免费会员不能使用这个连接器（Owner 原话）。以下是总控据此的理解，Owner 未逐项确认：在 Graylum 这边按付费墙处理，只有付费会员 Pro / Gold 能用，免费用户被付费墙拦下；具体拦截位置和弹窗样式开工时再定。这与 2026-11-03 第 2 项（免费用户不能用图片功能，只有付费会员 Pro / Gold 能用）一致，不是冲突；11-03 同日补充②里“免费用户能看到模板、点‘生成’时弹出‘会员专享’”的展示细节仍待开工时按连接器方案重新确认。
+- 同日再补充（2026-11-05，总控-15 转达，Owner 对连接器细节的四句话（前三句是回答，最后一句是反问）），原话：
+
+> 展示模板，没有模型选择。
+
+> 以 shotviva 的标准，连接器连接的应用自己负责。
+
+> 不允许
+
+> 我们现在做的连接器不就是 mcp 吗？
+
+  其中第三句是 Owner 对“是否允许用用户的提示词或图片改进模型”的回答；第二句回答的是图片内容审核的标准和归属。落实范围：
+  - 展示模板、没有模型选择：用户在 Graylum 里看到的是模板，不能选图片模型。对 2026-11-03 第 1 项里多个图片模型各自配置的部分，这句话在用户可见层面明确：用户不选图片模型；模板展示保留。上面已写明的对第 1 项的取代范围不变，本句不收窄它。
+  - 审核（**总控理解，Owner 未逐项确认**）：由 Shotviva 按自己的标准负责图片内容审核，Graylum 不再另做图片审核。总控据此认为它取代 2026-11-03 第 4 项的“审核按方案的 B 档”（Owner 的原话没有提到 B 档）。
+  - 不允许用用户的提示词或图片改进模型：按字面记；按字面记。它约束谁、怎么落实（约束 Shotviva 对从 Graylum 传过去的提示词和图片的使用，是总控的解读，Owner 未逐项确认；按字面也可能同样约束 Graylum 自己），随连接器规范，本条不展开。
+  - MCP（**总控据 Owner 的话定的技术方案**，Owner 原话是一句反问，不是技术方案的逐项批准）：连接器按 MCP 来做，Shotviva 提供远程 MCP 服务作为主入口，Graylum 作为 MCP 客户端去调用它。对接规范见 Owner 交给 Shotviva 的开发文档（不在仓库里复制全文）。
+- 不授权：对正式环境开启、合并 main、花钱、新增密钥、与 Shotviva 签约或开通接口；连接器的具体方案先出给 Owner 定。
+- 时间：属上线后；2026-11-03 写的“上线后第一个大版本、目标 11-25 左右”是否仍然适用，等连接器方案出来再定。
+
+**2026-11-04：限定会员使用的 Skill 在功能广场照常显示，加“会员专享”说明，免费用户点使用弹付费墙（产品决定，总控-15 转达）**
+
+Owner 原话（2026-11-04，总控-15 转达）：
+
+> 这些限定会员使用的 skill 可以显示在功能广场上，只是这个地方加一个说明，免费用户没有办法调用会员才能使用的 skill。这样子也是一种变相的付费墙。你让免费用户看到我们完整的功能，他才会产生期待，才有付费的欲望。
+
+以下是落实范围，不是原话：
+
+- 限定会员的 Skill（目前只有运营复盘教练）在功能广场、搜索、详情页对所有人可见，标题和描述写成面向用户的说法，加“会员专享”说明，写明哪些套餐可用（教练：Pro 和 Gold）。
+- 免费用户点“使用”或在对话里选它时，弹出现有的付费墙弹窗（新场景 coach，同时卖 Pro 和 Gold），不报错、不加载；Pro 和 Gold 照常使用。付费墙文案按“不写预计消耗多少积分”的规则。
+- 对话里的权限不变：教练仍只让有自有数据窗口的套餐（Pro、Gold）加载。
+- 实现细节（总控定，不是 Owner 的决定）：`modules` 加 `required_member_level`（空 = 所有人，`pro` = Pro 和 Gold，`gold` = Gold）；“使用”对 Pro 和 Gold 是打开对话并预填“帮我复盘”。
+- 评审团模块不动。
+- 只记决定，不授权对正式环境开启、合并 main、花钱或新增密钥。
+
+**2026-11-04：真人专家诊断的预约入口（EXPERT-CONSULT）推到上线后再做（产品决定，取代第 7.1 节原排在上线前“收费和上线”组的安排）**
+
+总控向 Owner 提出的 A 选项原文：
+
+> 上线后再做。先把精力放在必做项上；上线初期想接咨询，可以在价格页的“联系我们”里一并处理。
+
+Owner 原话（2026-11-04，总控-15 转达，在总控窗口里回复）：
+
+> A
+
+以下是落实范围，不是原话：
+
+- 取代：第 7.1 节任务表里 EXPERT-CONSULT 一行原属“4 收费和上线”，依赖 PAYWALL、DATA-ERASURE，并写明须在 REL-1 之前完成；现改列“5 上线后”，不再挡上线。第 7.2 节依赖简图和第 7.4 节的相应写法同步。
+- 该行的产品内容（第 2.1 节第 51 项及记录 L、Q、R）不变，只改时间；#1060（迁移 0278）已合并的代码和页面保留不动。已合并的预约页在冻结版本里是否对用户可见，本条没有决定，由总控另行确认。
+- 入口隐藏由单独的前端 PR 落实：报告末尾、价格页、工作室联系页的预约卡不显示，直接访问 `/app/expert-consult` 显示“即将开放”；页面、路由和后端代码保留，上线后一个开关即可打开。
+- 设计稿（`docs/launch/design/paywall/`）里价格页的“专家诊断卡”这次不做，PAYWALL 实施时不要加这张卡。
+- 上线初期的咨询需求在价格页的“联系我们”里处理，这一句来自总控向 Owner 提出的选项原文，Owner 回复的是“A”。
 
 **2026-11-04：上线第一周告警值守与总控只读范围；分镜、剪辑建议两个写作 Skill 上线要带；正式库开放前删掉迁移 0005 自带的诊断测试账户（三条，产品与运营决定）**
 
@@ -242,7 +320,7 @@ Owner 原话（2026-11-03，总控-15 转达）：
 
 **2026-11-03：图片生成方案的逐条决定（IMAGE-GEN，产品决定 + 规则变更批准，总控转述）**
 
-Owner 对 [IMAGE-GEN 方案](tasks/IMAGE-GEN-PLAN.md) 逐条作了决定，**以下由总控-15 转述，不是 Owner 的逐字原话**（"批准"是 Owner 对第 7 项的原话）。要点：
+**（第 1 项“按成本 5 倍收 Graylum 积分、图片倍数分开”已被 2026-11-05 条取代：图片生成改为 Shotviva 连接器，不在 Graylum 内结算；第 4 项“审核按方案的 B 档”按总控的看法也已被 2026-11-05 条取代（Owner 未逐项确认）；其余各项待开工时按连接器方案重新确认。）** Owner 对 [IMAGE-GEN 方案](tasks/IMAGE-GEN-PLAN.md) 逐条作了决定，**以下由总控-15 转述，不是 Owner 的逐字原话**（"批准"是 Owner 对第 7 项的原话）。要点：
 
 1. **定价**：每张图按供应商成本的 5 倍收积分；图片倍数与对话倍数分开单独设置；能同时接多个图片模型，每个模型在后台模型目录里各自配置成本和倍数。
 2. **谁能用**：免费用户不能用图片功能（积分留给定位分析）；只有付费会员 Pro / Gold 能用。
@@ -3107,7 +3185,7 @@ Bright Data 等）各自在其平台设置硬上限（预付余额或平台限�
     - **模型**：不变。模型按用途在后台配置，不按会员档位区分，输入框模型位置只显示 Auto（第 50 项）。
     - **定位档案数量**（记录 B、K）：免费 1 个、Pro 3 个、Gold 6 个；取代记录 B 的"会员不限、只留系统防滥用上限"。一个档案对应一个品牌，即现有的 `opc_businesses`；同一品牌下的定位版本、历史和报告不另算。每个档案在每个平台最多挂 1 个账号，平台数不限；实施时在 `opc_accounts` 现有的 `UNIQUE(actor_id, platform, account_key)` 之外，加"每个业务每个平台 1 个"的约束，新建档案时可以先不挂账号，挂上后锁定在这个档案。只计正在用的档案，删除后释放名额；现在没有业务级的删除或归档功能，由 PAYWALL 补上"删除或归档定位档案并释放名额"（删除遵守 DATA-ERASURE 的保留规则；技术建议用归档：归档后只读、可导出、不占名额，具体由 PAYWALL 方案定）。服务端在新建业务时检查（现在 `opc.start` 每次都新建业务，没有任何上限）；数量检查和插入 `opc_businesses` 要在同一个按用户加锁的数据库事务里完成（现有 `opc_start_b1` 插入不按用户串行，只先查数量会被并发请求同时越过），属于高风险迁移。会员到期或降级后，超出额度的档案改为只读（可看、可导出），由用户自己选哪几个继续可用。接受"在同一档案里反复改写"这个残余漏洞，不做内容检测。
     - **工作室版**（记录 K、L）：方向同意。上线时价格页只放"联系我们"入口，由 Owner 手动接单，超出额度的客户在后台单独调高上限；团队功能上线后再开发。方向是：10 个品牌起、5 位成员起，可以按需增加席位（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)，取代"20 个档案起"）；团队共享积分池，按成员和客户统计用量；按客户隔离资料库、文风和报告；报告可换成工作室品牌导出；客户不用注册就能看的只读分享链接；含多模型专家评审团；优先支持；按量计价，单价更低。不定公开价格，按 B 端用户的用量灵活报价（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)；记录 L 的 $199/月、每美元 140 积分作废）。
-    - **真人专家诊断**（记录 K、L、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：专家由 Owner 本人担任，线上远程会议。只接待已经有数据基础的用户，卡片写"预约咨询，免费询价"；内部起步价每小时 $300，会员不打折。上线时只做预约入口，放在报告末尾、价格页和工作室版联系入口；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。**不做"同意专家查看报告"的授权开关**：后端没有这个开关，用户的资料只能由用户自己导出后发给我们（记录 Q）；"用户授权专家直接查看"上线时不做，以后有需要再立项（记录 R）。咨询费不走 Waffo、不进产品结账流程，用 Stripe 或线下收款；用 Stripe 直接收款时 Graylum 是卖方，咨询收入的税务和发票由 Owner 自己处理。用户填写的联系方式按个人数据处理，纳入注销和数据保留规则，属于 high。
+    - **真人专家诊断**（记录 K、L、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：专家由 Owner 本人担任，线上远程会议。只接待已经有数据基础的用户，卡片写"预约咨询，免费询价"；内部起步价每小时 $300，会员不打折。上线时只做预约入口（2026-11-04 起推迟到上线后，见本节 2026-11-04 EXPERT-CONSULT 条），放在报告末尾、价格页和工作室版联系入口；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。**不做"同意专家查看报告"的授权开关**：后端没有这个开关，用户的资料只能由用户自己导出后发给我们（记录 Q）；"用户授权专家直接查看"上线时不做，以后有需要再立项（记录 R）。咨询费不走 Waffo、不进产品结账流程，用 Stripe 或线下收款；用 Stripe 直接收款时 Graylum 是卖方，咨询收入的税务和发票由 Owner 自己处理。用户填写的联系方式按个人数据处理，纳入注销和数据保留规则，属于 high。
     - **对比文案定稿**（记录 N）："雇佣一位社交媒体顾问：$2,000–10,000/月（来源：HawkSEM, 2026-07-27）"对比"雇佣 Graylum AI 社交媒体策略师：$29/月起"。出处是 HawkSEM《Social Media Consultants: What They Do, Costs + How to Hire One》（2026-07-27），原文指按月聘请做策略的顾问（不负责日常发帖）。这是营销公司的价格指南，不是调查数据。取代记录 E、F、J 里的所有对比文案草稿。
     - **付费墙视觉**（记录 N）：Owner 认为原来 8 个界面的视觉风格要改；Owner 已调整并定稿（v25，2026-10-04 入库），记录 N 的前提已满足；代码实施仍须 Owner 选定批次。
     - **Waffo 实施做法**（记录 I，定价窗口的旧建议；产品建置与渠道以本节 2026-10-09 决定及 PAY-WAFFO 方案第 4 节为准（2026-10-12 起再由 Stripe Managed Payments 决定和 PAY-STRIPE-MP 取代），以下 Waffo 微信产品不再建置）：Waffo 后台没有优惠券功能，按价格分别建 Waffo 产品：Gold 月付新用户（首期 $49、之后 $69）、Gold 月付正价 $69、微信一次性 1 个月 Gold 新用户 $49 和正价 $69、Gold 创始会员年付（首年 $496，续费按续费时 Gold 月付 12 个月价格的 6 折，不写死，记录 P），其余按原计划。Waffo 订阅文档写明支持"前 N 期特价、之后自动恢复原价"，具体配置位置和创始会员的长期折扣价能否设置，在 PAY-WAFFO 中核实（Owner 在后台找或问 Waffo）。**2026-10-10 更新（[Owner 2026-10-10 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6096167484)、[Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)）：首期改为首 30 天 $49（Waffo 按天首期）；创始续费固定 $496/年，取代上文“6 折、不写死”；能力已核实，产品清单以 PAY-WAFFO 第 4 节为准。**由服务端选择产品，前端只显示服务端返回的价格；为防止注销后重新注册或并发结账重复领 $49：0151 的身份摘要（`opening_grant_identity_digests`，`purpose` 只允许 `opening_grant`）只记录开户赠送的判定，不能用来判断是否买过 Gold，不直接复用；PAY-WAFFO 扩展同一套身份摘要机制（2026-10-12 起 PAY-STRIPE-MP 沿用这套首购判断），新增 Gold 专属的权威事实（例如 `purpose=gold_first_purchase`），具备原子的预留和认领语义，属于 high 迁移。首月优惠的预留同样按结账会话幂等记录；只有 订单原收款方（Waffo 或 Stripe）权威确认该会话已关闭或已过期才释放（[PAY-COMMON 实施说明](tasks/PAY-COMMON.md)第 7 节"幂等"行）；预留有效期内到达的成功付款兑现 $49；释放之后才到达的成功付款不自动给首月价，按 PAY-COMMON 冲突回执的口径进入人工复核；同一用户在预留有效期内重新打开结账，复用同一预留，不因为自己放弃结账而失去资格。在 Waffo 后台建产品由 Owner 自己操作，实际配置前需要单独批准。
@@ -3924,7 +4002,6 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11）。字体证据见 [MiSans 清单、许可用途核对及线上浏览器验收限制](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6039781633)；资源/许可核对不替代线上实际字体请求与计算样式验收。 | UI-B、UI-C | 普通 | 中 / 2–3 | — |
 | **4 收费和上线** | PAY-COMMON → PAY-WAFFO | **2026-10-12 起冻结，不再按本行实施新收款**：银行卡订阅（含 Gold 首月 49 美元自然月、创始年付）和钱包单笔的新购买改由 PAY-STRIPE-MP 实施（第 2.1 节 2026-10-12 决定）；本行只剩 PAY-COMMON 公共部分和已有 Waffo 测试订单按原渠道收尾，Waffo 代码保留、停用新购。以下为冻结前的历史方案，仅供追溯：按第 2.1 节 2026-10-09 决定和 [PAY-WAFFO 方案](tasks/PAY-WAFFO.md)：银行卡订阅（月/年、Gold 首 30 天、创始年付）走 Waffo；微信/支付宝一次性会员与积分包走 Stripe，复用 PAY-COMMON 订单、回调、积分、人工退款及原渠道凭证。钱包会员 1 月或 1 年（Gold 首购为 30 天，[Owner 2026-10-10 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6096167484)）、不自动续费；年期积分按月分 12 期；大额年期须另获批准后真实付款/退款验证，失败或未验证则仅月期和积分包、年付用卡。D17 按付款方式控制新销售，旧订单/续费/退款/凭证保持原渠道。价格、首购/创始资格、升级、退款及条款同意沿第 50/51 项有效决定；创始社群/展示墙/徽章、事务邮件、付款 IP/设备证据和拒付扩展拆成独立后续任务，不并入收款 PR，也不自动豁免原上线承诺。Waffo 能力及最小核心待定事项见方案第 3/9 节；只完成方案不代表可以收款或上线。2026-10-12 补充（#823）：未停止续费的银行卡订阅到期后 24 小时内保留会员权益、不发积分；不发放的付款在回调时立即停止 Waffo 续费并核实，每日对账兜底（第 2.1 节）。 | ENTITLEMENTS 之后，同一条钱路线；与 Runtime 主线并行（第 46 项）；Pro 升 Gold 规则已由 Owner 定（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)） | 高 | 大 / 7–10 | PAY-COMMON：完成：新收款由 PAY-STRIPE-MP 取代，不含 package-refund 套件进 CI（MAINT-P1b）和上线当天真钱退款（REL-1 K8）（[2026-10-26 定性](tasks/REL-1-TASK-AUDIT-2026-10-26.md)）；PAY-WAFFO：关闭：2026-10-12 冻结，新收款改由 PAY-STRIPE-MP 实施 |
 | | PAYWALL | 第 2.1 节第 50 项的付费墙和积分产品：会员检查只在服务端的报告生成入口和报告调用准入两处；免费用户可以开始带步骤的 Skill，并做完报告前的全部步骤。入口路由（不是付费限制）：带步骤的 Skill 只从自己的入口开始，新对话入口和以后的按意图选 Skill 不加载带步骤的 Skill，参照旧入口的 409；报告模板和写作规则只在报告用途加载，不放进 SKILL.md 和前置步骤资源；积分包只允许会员购买；订阅会员和微信一次性会员都算付费会员（报告门槛和积分包购买一致对待）；开户赠送改为 500 积分（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)，迁移修改 0151 的固定 100，high，合并前 Owner 批准）；记录付费墙曝光；按第 50、51 项设定套餐和积分包数值；价格页只写积分和会员权益；（原"Pro 一个月买 2 次以上积分包时提示 Gold"已于 2026-10-04 取消，第 51 项）；会员到期后已生成的报告仍可看、可导出；免费用户的报告前信息导出（已确认、已整理的内容，可以看、可以导出，不收回，不检查会员）——旧的报告导出接口 `workbench.export` 依赖"确认正式定位"发布（未发布时返回 NOT_PUBLISHED），不能覆盖部分步骤已确认的情况，也不能代表 REPORT-GEN 之后免费可得的内容。独立的"导出已确认资料"入口读取当前已确认的前置信息，不依赖报告、不检查会员，并在 REPORT-GEN 之后保留。**2026-10-04 补充（第 51 项）**：设计以仓库里导出的 v25 为唯一依据（[`docs/launch/design/paywall/`](design/paywall/README.md)，2026-10-04 入库；文案规则和待定事项见其 README）；报告对外叫"运营策略报告"；年付标签"最高省 40% / 25%"只按创始名额是否卖完切换（记录 V）；只用美元显示，年付写明比月付 × 12 省多少；付款按钮旁写首期价、续费价、周期和取消方式；付费墙用弹窗、默认选中月付；Gold 新用户首月 $49（自然月，2026-10-12 前写作首 30 天）和创始会员按服务端返回的价格和真实剩余名额展示；不做假原价、会重置的倒计时和 7 天退款保证；买积分包不提示升级会员；余额不足充值后由用户点"继续"、不显示还差多少积分；只显示已上线的功能，"报告评审"跟随 D12 开关；多模型专家评审团标"Gold 专属"并突出优势，Fusion 默认权限改为只给 Gold（实际修改配置前单独批准）；对比文案用 HawkSEM 定稿版；定位档案上限（免费 1 / Pro 3 / Gold 6；会员权益加"定位档案上限"字段，高风险迁移；服务端在新建业务时检查，数量检查和插入在同一个按用户加锁的数据库事务里完成（高风险迁移），验收包括同一用户用不同请求 id 并发新建时不超过上限；每个业务每个平台 1 个账号的约束；降级后超出额度的档案只读、由用户选哪几个继续可用；新增删除或归档定位档案并释放名额的功能，删除遵守 DATA-ERASURE 的保留规则，建议用归档（只读、可导出、不占名额），验收包括删除或归档后能再新建）；价格页放工作室版"联系我们"入口；付款前的条款同意勾选框（默认不勾，不勾不能付款，链接《服务条款》《退款政策》，按钮旁写价格、周期、是否自动续费、怎么取消和简短退款说明，订阅、积分包、微信/支付宝一次性都要有；[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)，上线前，设计稿 v25 没有，按第 51 项做）。积分包会员折扣 Pro 9.5 折、Gold 9 折，客服时效免费 48 / Pro 24 / Gold 工作时间内 2 小时，Gold 优先内测（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）；积分包三档和会员价按第 51 项的表（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)、[记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)），注册赠送 500 积分；创始人寄语仍待定。设计定稿 v25 于 2026-10-04 入库（[记录 N](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972956845) 的前提）；代码实施须 Owner 选定批次。**方案必须先解决**（[#626 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/626#issuecomment-5976838440)，解决前实施 PR 不得合并）：工作室版按客户单独覆盖档案上限（有上限范围）和后台入口，或者"联系我们"只收集意向、不承诺额度（第 51 项第 3 条）。验收与交接：[免费前置信息导出切片范围](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6039617108)、[#730 页面接入、验证与真实 staging 浏览器限制](https://github.com/Crnobog9527/GraylumAI_vercel/pull/730#issuecomment-6040300455)。 2026-10-14 追加：免费套餐每月、每年积分改为 0（staging 配置修改和正式环境套餐目录核对，第 2.1 节同日决定）。 | REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP（服务端选出的首月价、首购资格和创始名额计数由它提供；2026-10-12 前为 PAY-WAFFO）、ENTITLEMENTS；付费墙设计定稿 v25（`docs/launch/design/paywall/`） | 高 | 中 / 2–3 | — |
-| | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 | | PUBLISH-MONITOR | 方向（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线。2026-10-13 补充（第 2.1 节）：负责首页"复盘数据"说法；小红书、抖音用 TikHub 公开数据，另加手动导入兜底和 AI 每周复盘；SOCIAL-SYNC 并入本任务。验收与交接：[Post for Me 平台、费用、数据窗口与许可待核对项](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038093010)。 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待实施方案细化 | — |
 | | CHAT-AUTO-CONTEXT | 自由对话里 AI 教练自己决定查资料库（Postgres 自带检索，不用向量）、读已确认定位和对标表、读最近发布数据、调用通用研究工具（每条回答最多 3 次研究调用、12 次子调用，逐条扣积分），对话里显示工作状态（Owner 2026-10-17，第 2.1 节；见[实施方案](tasks/CHAT-AUTO-CONTEXT.md)）。上线前完成，和落地页演示一致；冻结时没验收的部分开关关闭。（2026-10-23 晚起：核心 12 项之一，资料库和研究工具都必须验收通过才上线，不再用关开关降级上线，见第 2.1 节） | LIB-DOCS（LIB-4b）；发布数据部分依赖 PUBLISH-MONITOR；研究工具部分依赖 RESEARCH-TOOLS | 高 | 中 / 6 | — |
 | | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据）；旧链接原先直接跳到 `/positioning`，2026-10-21 起不再跳转、访问时 404（见第 2.1 节 2026-10-21 记录）；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | 完成：单条回答复制、编辑和整段对话导出放到上线后，模型下拉不恢复（第 2.1 节 2026-10-26） |
@@ -3951,7 +4028,8 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | VOICE-2 | **上线后**文风 2.0（Owner 2026-10-25）：按需检索 2–3 篇同类型不同话题旧稿做范例、导入自己账号的历史帖子、代码统计句长/开头/结构、生成后代码查雷同并只改雷同句、学习用户对稿子的修改、网盘连接用 Google Picker 方式；开工前先出方案由 Owner 定稿（第 2.1 节 2026-10-25） | VOICE、REL-1 | 中 | 上线后，待出方案 | 阻塞：上线后再做，开工前先出方案（第 2.1 节 2026-10-25） |
 | | CONTENT-CONVERSATION-2 | 从 CONTENT-CONVERSATION-DRIVEN 拆出的上线后部分（Owner 2026-10-26）：内容对话剩余 7 个 PR、"一窗口一选题"提醒、整理纪要（REL-1 第 1.3 节） | CONTENT-CONVERSATION-DRIVEN | 高 | 中 / 7 | 阻塞：上线后再做（第 2.1 节 2026-10-26） |
 | | ANALYTICS-GA4 | 从 ANALYTICS 拆出的 GA4 部分（Owner 2026-10-26，沿用 2026-10-13 决定：上线后第一周再定）：GA4 编号和密钥、付款与首次来源上报接 GA4、`paywall_view` 结果 | ANALYTICS | 普通 | 小 / 1 | 阻塞：上线后再做（第 2.1 节 2026-10-26） |
-| | IMAGE-GEN | 图片生成（Owner 2026-10-27 列为上线后立即开发的核心功能；2026-11-03 选 A：11-15 照常上线，上线后第一个大版本，目标 11-25 左右）：Agent 对话生图、教练环节封面生成、左侧导航"图片创作"模板模块、一键做同款。方案与模型对比见 [IMAGE-GEN-PLAN](tasks/IMAGE-GEN-PLAN.md)（[#1687](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1687)）及 Master Plan 第 2.1 节 2026-11-03 逐条决定。上线前只出方案，不占开发人力；方案不授权对正式环境开启、合并 main、花钱或新增密钥 | CORE-PATH-V2、REL-1 | 高 | 大 / 多个 | 阻塞：上线后再做（第 2.1 节 2026-11-03） |
+| | IMAGE-GEN | 图片生成（Owner 2026-10-27 列为上线后立即开发的核心功能；2026-11-03 选 A：11-15 照常上线，上线后第一个大版本，目标 11-25 左右）：Agent 对话生图、教练环节封面生成、左侧导航"图片创作"模板模块、一键做同款。方案与模型对比见 [IMAGE-GEN-PLAN](tasks/IMAGE-GEN-PLAN.md)（[#1687](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1687)）及 Master Plan 第 2.1 节 2026-11-03 逐条决定。**2026-11-05 Owner 改方向：图片生成交给 Shotviva，作为连接器嵌入 Graylum、不做内部结算（第 2.1 节 2026-11-05）；拟归入 INTEGRATION-BASE 连接器框架，这一点是总控的理解、Owner 未确认，所以下面“依赖”列暂不改；** 上线前只出方案，不占开发人力；方案不授权对正式环境开启、合并 main、花钱或新增密钥 | CORE-PATH-V2、REL-1 | 高 | 大 / 多个 | 阻塞：上线后再做（第 2.1 节 2026-11-03、2026-11-05） |
+| | EXPERT-CONSULT | 真人专家诊断的预约入口（**2026-11-04 Owner 选 A：推迟到上线后**，第 2.1 节 2026-11-04；#1060 已合并的代码保留；第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 
 **已应用到 staging 的迁移**（总控记录，2026-10-16）：0263（version 20261016094713）、0264（20261016110732）、0265（20261016141209）、0266（20261016145300，邀请码下线，按"先部署代码、再应用迁移"的顺序做，记录在 [#988](https://github.com/Crnobog9527/GraylumAI_vercel/pull/988) 评论里）、0267（20261016153437）。正式环境一律另获批准。
 
@@ -4002,10 +4080,10 @@ DATA-ERASURE 删除规则设计 ─→ AC-2
 AGENT-CORE 稳定 ─→ RUNTIME-PROD 其余项（④ 的 BILL-PAYG 按下方主线提前；MODEL-REASONING、BILL-UNIT、MODEL-PRICING-SYNC 先行）
 RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS（原先接封闭内测，已取消，第 50 项）
 REPORT-GEN + BILL-PAYG + PAY-COMMON → PAY-STRIPE-MP + ENTITLEMENTS + 付费墙设计定稿 v25 ─→ PAYWALL（第 7.4 节 N3 批次，排在 PAY-STRIPE-MP 之后；PAY-WAFFO 已于 2026-10-12 冻结）
-PAYWALL + DATA-ERASURE ─→ EXPERT-CONSULT（第 7.4 节 N3 批次）
+PAYWALL + DATA-ERASURE ─→ EXPERT-CONSULT（上线后，2026-11-04）
 RESEARCH-TOOLS + Post for Me 实测和条款核对 ─→ PUBLISH-MONITOR（第 7.4 节 N3 批次）
 PAY-STRIPE-MP（含付款同意记录）+ PAY-DISPUTE-GUARD ─→ CHARGEBACK（上线后；旧 Waffo 订单另按 Waffo 核实结果处理）
-D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS、RUNTIME-FAILURE-RECONCILE；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-STRIPE-MP（PAY-WAFFO 2026-10-12 冻结）、PAYWALL、EXPERT-CONSULT、PUBLISH-MONITOR、POSITIONING-GATE、MODEL-IDENTITY-GUARD、SKILL-I18N-HOOK、PUBLIC-SITE、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准；2026-10-23 晚起放行条件是核心 12 项全部验收通过，见 REL-1 第 1 节）
+D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS、RUNTIME-FAILURE-RECONCILE；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-STRIPE-MP（PAY-WAFFO 2026-10-12 冻结）、PAYWALL、PUBLISH-MONITOR、POSITIONING-GATE、MODEL-IDENTITY-GUARD、SKILL-I18N-HOOK、PUBLIC-SITE、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准；2026-10-23 晚起放行条件是核心 12 项全部验收通过，见 REL-1 第 1 节）
 上线后 ─→ Owner 决定 MODERATION 正式实现时间（2026-10-17 定：上线时继续暂缓；默认放行的检查点随 #594 接线）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 RUNTIME-PROD ─→ MODEL-IDENTITY-GUARD ─→ POSITIONING-GATE（同一块 runtime，排队写）─→ V3-M3
@@ -4056,7 +4134,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2（含 CONVERSATION-DRIVEN-CAPTURE B1/B2）、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条）；CHAT-NATIVE-OUTPUT、REPORT-GEN（暂列，待 Owner 选定批次） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG、RUNTIME-FAILURE-RECONCILE）、DEP-BATCH-A（Owner 2026-10-12 已选中）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
-| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；收款按第 2.1 节 2026-10-12 决定：#847 迁移方案合并后做 PAY-STRIPE-MP（PR-1 起；国际银行卡、Apple Pay、Google Pay 走 Stripe Managed Payments，中国大陆用户自选微信/支付宝单笔或普通 Stripe 银行卡订阅；正式平台操作逐项另获批准），再 PAYWALL 接线，再 PAY-FOUNDER、PAY-NOTIFY、PAY-DISPUTE-GUARD（独立售前任务）；PAY-WAFFO 已于 2026-10-12 冻结（停用新购、代码保留，旧 Waffo 订单沿原渠道），不再排期；MODEL-IDENTITY-GUARD → POSITIONING-GATE（上线前完成，排在在途 runtime 改动之后）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
+| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；收款按第 2.1 节 2026-10-12 决定：#847 迁移方案合并后做 PAY-STRIPE-MP（PR-1 起；国际银行卡、Apple Pay、Google Pay 走 Stripe Managed Payments，中国大陆用户自选微信/支付宝单笔或普通 Stripe 银行卡订阅；正式平台操作逐项另获批准），再 PAYWALL 接线，再 PAY-FOUNDER、PAY-NOTIFY、PAY-DISPUTE-GUARD（独立售前任务）；PAY-WAFFO 已于 2026-10-12 冻结（停用新购、代码保留，旧 Waffo 订单沿原渠道），不再排期；MODEL-IDENTITY-GUARD → POSITIONING-GATE（上线前完成，排在在途 runtime 改动之后）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE；2026-11-04 起推迟到上线后，不再挡 REL-1）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | PUBLIC-SITE（域名合并、公开页面风格、新落地页；正式环境设置另行批准）、LEGACY-CLOSE、V3-M3；MODERATION 上线时继续暂缓（Owner 2026-10-17，第 2.1 节） | 完整验收；REL-1 和生产另行批准 |
 | **当前批次：8 条线并行（Owner 2026-10-12 选定，第 2.1 节）** | 同一条线内排队，不同线并行：① AI 核心：#829 → #845 → POSITIONING-GATE PR2 → SKILL-I18N-HOOK（⑦ 改为上线前核对 OpenRouter 账号和各 workspace 已关闭训练，代码不强制，第 2.1 节）；② 读资料：#830 → AGENT-CORE R4 → LIB-4（R4 和 LIB-4 都改 `read_source`）；③ 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-DISPUTE-GUARD；④ 输入框：UI-A 编辑器依赖 PR → 新输入框（与 R8a/R8b 工作区页面排队）→ UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；⑤ 定位流程：#818（已合并）→ R14（R8b 已取消，2026-10-13）；⑥ 官网：PUBLIC-SITE 第一段 + 台湾 6 页，`/app` 路由搬迁放在冻结窗口最后做，正式域名切换上线前逐项批准；⑦ 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；⑧ 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测（已完成，见 [#852](https://github.com/Crnobog9527/GraylumAI_vercel/pull/852)；之后按 Owner 2026-10-12 决定，FUSION-REVIEW 开工前先做 GitHub 开源项目和 flowith.io 调研，排期由总控安排）、R11。Codex 浏览器验收同一测试账号一次一个，按顺序排。跨线的真实依赖仍按第 7.1 节（例如 UI-B/UI-C 还要等 LIB-DOCS 和 RUNTIME-PROD） | 每条线做完自己的最后一项就停；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准 |
 

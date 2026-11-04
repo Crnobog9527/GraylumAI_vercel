@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { memberLevelDenied } from '../skills/memberOnly';
 import { z } from 'zod';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from './provider/openRouterAdapter';
@@ -63,7 +64,8 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
   let quote;
   try {
     const module = await readAdmissionModule(admin, moduleId);
-    if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string')
+    if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string'
+      || await memberLevelDenied(admin, input.actorId, module.data.required_member_level))
       return emit({ type: 'error', code: 'OPC_TOPIC_SKILL_MISSING' });
     const budgets = await readPurposeBudgets(admin, configuration);
     quote = await chatQuote(admin, { configuration: rows, modelId: module.data.model_id, deps: deps.pricing,

@@ -28,6 +28,9 @@ const PUBLIC_DISPLAY_MODULE_FIELDS = [
   'link_module_id',
 ];
 
+// The columns added after those migrations (MEMBER-ONLY-MODULES, its own grant migration below).
+const PUBLIC_SELECT_FIELDS = [...PUBLIC_DISPLAY_MODULE_FIELDS, 'required_member_level'];
+
 const INTERNAL_MODULE_FIELDS = [
   'prompt_content',
   'system_prompt',
@@ -93,6 +96,7 @@ describe('toPublicModule', () => {
       credits_display: '10 credits',
       link_url: '/marketplace?module=module-1',
       link_module_id: '00000000-0000-4000-8000-000000000001',
+      required_member_level: null,
     });
 
     for (const field of INTERNAL_MODULE_FIELDS) {
@@ -122,9 +126,25 @@ describe('PUBLIC_MODULE_SELECT', () => {
     const selectedColumns = PUBLIC_MODULE_SELECT.split(',');
 
     expect(PUBLIC_MODULE_SELECT).not.toBe('*');
-    expect(selectedColumns).toEqual(PUBLIC_DISPLAY_MODULE_FIELDS);
+    expect(selectedColumns).toEqual(PUBLIC_SELECT_FIELDS);
     for (const field of INTERNAL_MODULE_FIELDS) {
       expect(selectedColumns).not.toContain(field);
+    }
+  });
+});
+
+describe('member-only module level migration', () => {
+  it('adds the nullable level column, checks its values and grants only that column for public reads', () => {
+    const migrationSql = readFileSync(
+      new URL('../../../db/migrations/0506_modules_required_member_level.sql', import.meta.url),
+      'utf8',
+    );
+    expect(migrationSql).toContain('ADD COLUMN IF NOT EXISTS required_member_level text;');
+    expect(migrationSql).toContain("required_member_level IS NULL OR required_member_level IN ('pro', 'gold')");
+    expect(migrationSql).toContain('GRANT SELECT (required_member_level) ON TABLE public.modules TO anon, authenticated;');
+    expect(migrationSql).not.toMatch(/DEFAULT\s+'/);
+    for (const field of INTERNAL_MODULE_FIELDS) {
+      expect(migrationSql).not.toContain(`GRANT SELECT (${field}`);
     }
   });
 });

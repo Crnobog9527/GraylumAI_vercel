@@ -15,8 +15,9 @@ const progress = (page: Page) => page.locator('ul[aria-label="这一轮的进度
 /** A free-chat turn is done when the progress list is gone, the composer is usable again and the reply is saved. */
 export async function waitForRuntimeTurn(page: Page, timeoutMs = 150_000) {
   await expect(progress(page)).toHaveCount(0, { timeout: timeoutMs });
-  // On the turn path (CORE-PATH-V2 V2-10) the streaming reply is a placeholder "正在回复…" and there is no progress list.
-  await expect(page.getByText('正在回复…')).toHaveCount(0, { timeout: timeoutMs });
+  // On the turn path (CORE-PATH-V2 V2-10) a reply being written shows its steps list ("正在思考…" or a running step) and no progress list.
+  await expect(page.getByText('正在思考…')).toHaveCount(0, { timeout: timeoutMs });
+  await expect(page.getByRole('status', { name: '这条回复的步骤' }).locator('[data-step-state="running"]')).toHaveCount(0, { timeout: timeoutMs });
   await expect(page.getByRole('button', { name: '保存到成果夹' }).last()).toBeVisible({ timeout: 60_000 });
 }
 

@@ -10,6 +10,8 @@ vi.mock('./compareAdmission', () => ({
     throw new Error('unexpected ' + name);
   },
 }));
+const gate = vi.hoisted(() => ({ denied: false, seen: [] as unknown[] }));
+vi.mock('../skills/memberOnly', () => ({ memberLevelDenied: async (_a: unknown, _id: string, level: unknown) => { gate.seen.push(level); return gate.denied; } }));
 vi.mock('../turn/agent/workspacePosts', () => ({ readWorkspaceCapability: async () => s.workspace }));
 import { loadCompareTurnParts } from './compareLoad';
 
@@ -49,3 +51,17 @@ describe('compare loading on the turn path (FUSION-COMPARE §3.2)', () => {
     expect(s.rpcs.map(([name, args]) => name === 'runtime_workspace_source' ? args.p_query : name)).toEqual(['', 'p1', 'a1', 'gone']);
   });
 });
+
+describe('a compare column never carries a member-only Skill to a plan below it (MEMBER-ONLY-MODULES)', () => {
+  const moduleRead = { select: () => moduleRead, eq: () => moduleRead,
+    single: async () => ({ data: { id: id(5), active: true, skill_id: id(6), social_media_related: false, required_member_level: 'pro' }, error: null }) };
+  const gated = { from: (table: string) => (table === 'modules' ? moduleRead : profileRead) } as unknown as SupabaseClient;
+  const skill = { kind: 'skill' as const, moduleId: id(5), revisionId: id(7) };
+  it('refuses the Skill when the account is below the module\'s requirement, asking the gate with that requirement', async () => {
+    gate.denied = true; gate.seen = [];
+    await expect(loadCompareTurnParts({ admin: gated, user: {} as SupabaseClient, actorId: id(1) },
+      { sessionId: id(2), question: '哪个好？', skill })).rejects.toThrow('FUSION_COMPARE_SKILL_INVALID');
+    expect(gate.seen).toEqual(['pro']);
+  });
+});
+
