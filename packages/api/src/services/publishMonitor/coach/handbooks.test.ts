@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../../../lib/logger';
-import { HANDBOOK_PACKAGE_ENV, loadCoachHandbooks, loadHandbooks, packageReader, parseHandbook, readHandbookPackage } from './handbooks';
+import { clearChatHandbookCache, HANDBOOK_PACKAGE_ENV, loadChatHandbooks, loadCoachHandbooks, loadHandbooks, packageReader, parseHandbook, readHandbookPackage } from './handbooks';
 import { handbookSchema, type Handbook } from './funnel';
 import { buildPack } from './pack';
 import { packRowsSchema } from './rows';
@@ -137,5 +137,69 @@ describe('the pack built with loaded handbooks (simulated account A)', () => {
     const p = pack(draft, BAD);
     expect(p.mode).toBe('full');
     expect(p.diagnostics.basics_pass).toBeNull();
+  });
+});
+
+describe('handbooks and reference lines for a chat review', () => {
+  const files = () => ({ 'handbook/douyin.yaml': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.yaml': JSON.stringify(handbookOf('tiktok')) });
+  beforeEach(() => clearChatHandbookCache());
+
+  it('a chat turn reads the package once per ten minutes, and a failed or empty read is tried again at once', async () => {
+    const d = database(files());
+    const t0 = 1_000_000;
+    expect((await loadChatHandbooks(d.db, ENV, t0)).size).toBe(2);
+    expect((await loadChatHandbooks(d.db, ENV, t0 + 9 * 60_000)).size).toBe(2);
+    expect(d.rpc).toHaveBeenCalledTimes(2);
+    await loadChatHandbooks(d.db, ENV, t0 + 11 * 60_000);
+    expect(d.rpc).toHaveBeenCalledTimes(4);
+    clearChatHandbookCache();
+    const down = database({ 'handbook/douyin.yaml': new Error('down'), 'handbook/tiktok.yaml': new Error('down') });
+    expect((await loadChatHandbooks(down.db, ENV, t0)).size).toBe(0);
+    await loadChatHandbooks(down.db, ENV, t0 + 1000);
+    expect(down.rpc).toHaveBeenCalledTimes(2);
+    await loadChatHandbooks(down.db, ENV, t0 + 61_000);
+    expect(down.rpc).toHaveBeenCalledTimes(4);
+    expect((await loadChatHandbooks(down.db, {}, t0)).size).toBe(0);
+  });
+
+  it('turns that start together share one read, and a hung read does not hold a turn back', async () => {
+    const d = database(files());
+    const [a, b] = await Promise.all([loadChatHandbooks(d.db, ENV, 5), loadChatHandbooks(d.db, ENV, 5)]);
+    expect([a.size, b.size]).toEqual([2, 2]);
+    expect(d.rpc).toHaveBeenCalledTimes(2);
+    clearChatHandbookCache();
+    vi.useFakeTimers();
+    try {
+      const rpc = vi.fn(() => new Promise(() => {})), hung = { rpc } as never;
+      const pending = loadChatHandbooks(hung, ENV, 5);
+      await vi.advanceTimersByTimeAsync(2_100);
+      expect((await pending).size).toBe(0);
+      // The next turn inside the minute does not wait or start another read; after it, a new read starts and sees the recovered service.
+      expect((await loadChatHandbooks(hung, ENV, 6)).size).toBe(0);
+      expect(rpc).toHaveBeenCalledTimes(2);
+      const healthy = database(files());
+      expect((await loadChatHandbooks(healthy.db, ENV, 70_000)).size).toBe(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  const data = generateDataset({ asOf: AS_OF });
+  const rows = packRowsSchema.parse(packRowsFor(data, data.accounts.find(a => a.key === 'A')!));
+  const books = new Map([['douyin', parseHandbook(JSON.stringify(handbookOf('douyin')), 'douyin')!],
+    ['tiktok', parseHandbook(JSON.stringify(handbookOf('tiktok')), 'tiktok')!]]);
+  const chat = (cadence: 'chat' | 'weekly', handbooks = books) =>
+    JSON.parse(JSON.stringify(buildPack({ rows, cadence, businessId: simId('A'), now: NOW, handbooks })));
+
+  it('the chat pack carries the lines of the platforms the brand posts on, so a screenshot\'s rates have something to be compared with', () => {
+    const platforms = new Set([...rows.facts, ...rows.recent, ...rows.accounts].map(x => x.platform));
+    const lines = chat('chat').reference_lines as Array<{ platform: string; calibration: string; funnel: unknown[] }>;
+    expect(lines.map(l => l.platform)).toEqual([...platforms].filter(p => books.has(p)).sort());
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toMatchObject({ calibration: 'owner_confirmed' });
+    expect(JSON.stringify(lines)).not.toContain('"labels"');
+  });
+
+  it('no handbook, no lines; and a weekly pack never carries them (its diagnoses hold the lines)', () => {
+    expect(chat('chat', new Map()).reference_lines).toEqual([]);
+    expect(chat('weekly').reference_lines).toBeUndefined();
   });
 });

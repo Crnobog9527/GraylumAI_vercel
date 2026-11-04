@@ -29,6 +29,7 @@ import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from './turn-notices';
 import { workRowsOf } from './turn-work-rows';
 import { useStoredSendCleanup } from './use-stored-send-cleanup';
 import { useTurnChat } from './use-turn-chat';
+import { firstSendDone, useFirstSendWatch } from './first-send-watch';
 import workStyles from './runtime-work.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
 import { QueryNotice } from '@/components/opc/query-notice';
@@ -52,6 +53,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
   const [skillId, setSkillId] = useState(''), [references, setReferences] = useState<LibraryReference[]>([]);
   const images = useChatImages();
+  const firstSent = useRef(false);
   useEffect(() => {
     const draft = openingDraftWithReferences(localStorage, sessionId);
     setInput(draft.text); setSkillId(localStorage.getItem('opc-runtime-skill:' + sessionId) ?? '');
@@ -86,6 +88,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
       localStorage.setItem('opc-runtime-input:' + sessionId, saved); markPendingRestored(localStorage, sessionId);
     });
     setOutgoing(text);
+    firstSent.current = true; firstSendDone(sessionStorage, sessionId);
     const answer = await chat.send(text, requestId, { ...(skillId ? { moduleId: skillId } : {}),
       ...(sent.length ? { references: referenceRequest(sent) } : {}), ...(sentImages.length ? { images: sentImages.map(image => image.url) } : {}) });
     setOutgoing(null);
@@ -97,6 +100,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   }
   // The marker records one explicit send on the start page, never mere navigation; consumed on this attempt.
   const initial = useRef(false);
+  // Watch only: says in Sentry when a send from the start page was not asked for in time, and which conditions held (first-send-watch.ts).
+  useFirstSendWatch(sessionId, firstSent, { hasInput: Boolean(input.trim()), hasView: Boolean(chat.view), notBusy: !chat.busy });
   useEffect(() => {
     if (initial.current || !input.trim() || !chat.view || chat.busy) return;
     const marker = sessionStorage.getItem('opc-runtime-send:' + sessionId);

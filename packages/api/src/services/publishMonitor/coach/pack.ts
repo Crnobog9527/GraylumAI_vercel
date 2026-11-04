@@ -102,7 +102,21 @@ export function buildPack(input: PackInput) {
         }) } };
     }
   }
+  // A chat review has no saved diagnosis to hold the lines against, but a screenshot read in the chat does: the lines of every platform
+  // the brand posts on, so the rates the user shows can be compared with the owner-confirmed ones (same platform only).
+  if (cadence === 'chat') pack.reference_lines = referenceLines(input);
   return trim(pack);
+}
+
+function referenceLines(input: PackInput) {
+  const { rows, handbooks } = input;
+  const platforms = new Set([...rows.facts, ...rows.recent, ...rows.accounts].map(x => x.platform));
+  return [...platforms].sort().flatMap(platform => {
+    const h = handbooks.get(platform);
+    return h ? [{ platform, calibration: h.calibration, version: h.version, source: h.source ?? null, min_views: h.min_views ?? null,
+      funnel: h.funnel.map(({ layer, name, keys, basics, pass, by_duration, low }) => ({ layer, name, keys, basics, pass,
+        ...(by_duration ? { by_duration } : {}), ...(low ? { low } : {}) })) }] : [];
+  });
 }
 
 export const packBytes = (pack: unknown) => Buffer.byteLength(JSON.stringify(pack));
@@ -121,6 +135,7 @@ function trim(pack: Record<string, unknown>) {
     () => pop(pack, ['monthly', 'scoreboard_12w']),
     () => popFewest(pack, 'scoreboard'),
     () => pop(pack, ['ledger', 'running']),
+    () => pop(pack, ['reference_lines']),
   ];
   let trimmed = 0;
   // The `trimmed_rows` note is added after the loop: its bytes are kept free in the loop, or a pack trimmed to just under the reserve

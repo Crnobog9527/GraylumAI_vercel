@@ -116,6 +116,12 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
   const model = row.data.model_id as string;
   const candidate = parsed.data.profiles.find(p => p.model === model && isAdmittedRoute(p.model, p.endpointTag));
   if (!candidate) throw new QuoteError('TURN_MODEL_NOT_ADMITTED');
+  // Two reads that need nothing from the pricing below start now, so their waits overlap it: the billing unit (from the same
+  // settings rows and model row) and the platform key, still read fresh once per request. Each is awaited, and its refusal raised,
+  // where it was before, so the refusal a request gets does not change. A read that fails is only awaited later.
+  const unitRead = readMultiplierSnapshot(admin, [input.modelId], undefined, { configuration: Promise.resolve(input.configuration),
+    models: [row.data] }).then(value => ({ value }), () => ({ value: undefined }));
+  const keyRead = input.key === undefined ? readOpenRouterKeyOrUnset(admin, { fresh: true }) : Promise.resolve(input.key);
 
   let states;
   try { states = await readPricingStates(admin, [{ modelId: input.modelId, model }], input.deps, false, [row.data]); }
@@ -149,13 +155,12 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
     catch { throw new QuoteError('TURN_INPUT_TOO_LARGE'); }
   } else upperUsd = openRouterBound(limits, outputLimit).upperUsd;
 
-  let unit;
-  try { unit = await readMultiplierSnapshot(admin, [input.modelId], undefined, { models: [row.data] }); }
-  catch { throw new QuoteError('TURN_BILLING_UNIT_UNAVAILABLE'); }
+  const unit = (await unitRead).value;
+  if (!unit) throw new QuoteError('TURN_BILLING_UNIT_UNAVAILABLE');
   const multiplier = unit.models[input.modelId]?.multiplier;
   if (!multiplier) throw new QuoteError('TURN_BILLING_UNIT_UNAVAILABLE');
 
-  const key = input.key ?? await readOpenRouterKeyOrUnset(admin, { fresh: true });
+  const key = await keyRead;
   if (!key) throw new QuoteError('TURN_PROVIDER_KEY_UNAVAILABLE');
   return {
     modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, providerLimits: limits,

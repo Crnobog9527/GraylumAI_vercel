@@ -1,4 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+
+import { expect, test } from './fixtures';
 
 import { armFault, db, expectNothingFrozen, lastTurnId, ledger, resetSim, runRecovery, seed, signIn, simCalls, startFreeChat, turns, type SimFault, type Turn } from './support';
 

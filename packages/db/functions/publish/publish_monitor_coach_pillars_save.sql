@@ -40,7 +40,7 @@ BEGIN
  IF coalesce((SELECT jsonb_agg(jsonb_build_object('key',e->>'key','name',e->>'name') ORDER BY n) FROM jsonb_array_elements(current)
    WITH ORDINALITY q(e,n)),'[]') IS DISTINCT FROM coalesce((SELECT jsonb_agg(jsonb_build_object('key',e->>'key','name',e->>'name')
    ORDER BY n) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_base)='array' THEN p_base ELSE '[]' END) WITH ORDINALITY q(e,n)),'[]') THEN
-  RAISE EXCEPTION 'PUBLISH_MONITOR_PILLARS_CHANGED' USING ERRCODE='40001'; END IF;
+  RAISE EXCEPTION 'PUBLISH_MONITOR_PILLARS_CHANGED' USING ERRCODE='PT409'; END IF;
  FOR x IN SELECT value FROM jsonb_array_elements(p_pillars) LOOP
   IF jsonb_typeof(x)<>'object' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
   nm:=btrim(coalesce(x->>'name',''));

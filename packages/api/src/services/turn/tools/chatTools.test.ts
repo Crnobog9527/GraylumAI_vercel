@@ -112,4 +112,21 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
     const off = await prepare({});
     expect(off.selection({ moduleId: actorId })).toEqual({ refused: 'TURN_SKILL_UNAVAILABLE' });
   });
+
+  it('the Skill list and the workspace access are read together, and a failed workspace read leaves the Skills', async () => {
+    const started: string[] = [];
+    let releaseSkills!: () => void;
+    const slowSkills = () => new Promise<Awaited<ReturnType<typeof skills>>>(resolve => {
+      started.push('skills'); releaseSkills = () => resolve({ catalog, prepared: new Map([['Hooks', 'hooks text']]) });
+    });
+    const pending = prepare({ skills: slowSkills, workspace: async () => { started.push('workspace'); return { sources: ['v1'], strategy: true, posts: null }; } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // The workspace was asked while the Skill list was still being read.
+    expect(started).toEqual(['skills', 'workspace']);
+    releaseSkills();
+    const setup = await pending;
+    expect(setup.plan.available).toEqual(expect.arrayContaining(['load_skill', 'read_source']));
+    const broken = await prepare({ skills, workspace: async () => { throw new Error('TURN_WORKSPACE_UNAVAILABLE'); } });
+    expect(broken.plan.available).toContain('load_skill');
+  });
 });

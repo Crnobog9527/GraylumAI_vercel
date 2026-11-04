@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import type { Handbook } from '../../publishMonitor/coach/funnel';
 import { buildPack } from '../../publishMonitor/coach/pack';
 import { packRowsSchema } from '../../publishMonitor/coach/rows';
 import type { TurnClients } from '../db';
@@ -23,7 +24,9 @@ export const COACH_REVIEW_INSTRUCTIONS = '\nWhen the user asks for a review of t
   + 'correct them. The pack is saved data computed by code: never claim a refresh, never call research tools for it. Compare only the '
   + 'same platform and basis; too_new posts are not judged; missing is not zero; verdicts and basics_pass are code\'s, explain them '
   + 'without changing them. When mode is basics_only, talk only about the basics. Write the current performance, what worked (cite '
-  + 'posts), the experiments, and next steps; suggestions are proposals only, nothing is created, published or saved. No coach_json block.';
+  + 'posts), the experiments, and next steps; compare the rates you read from a screenshot with the reference_lines of the pack for the same platform '
+  + '(say the line\'s source as given; a platform or layer without a line is not judged, only compared with the user\'s own posts); '
+  + 'suggestions are proposals only, nothing is created, published or saved. No coach_json block.';
 
 const turnRead = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('coach_rows'), businessId: z.string().uuid(), rows: packRowsSchema }),
@@ -34,7 +37,7 @@ const turnRead = z.discriminatedUnion('kind', [
 const NO_BRAND = '还没有已连接作品账号的品牌，复盘需要先在『作品数据』里给品牌连接账号或导入数据。这次先按定位和资料回答。';
 
 export async function readCoachReview(read: TurnClients['read'], actorId: string, sessionId: string, businessId: string | null,
-  now = Date.now()): Promise<SourceRead> {
+  handbooks: Map<string, Handbook> = new Map(), now = Date.now()): Promise<SourceRead> {
   const { data, error } = await read.rpc('coach_pack_turn_read', { p_actor_id: actorId, p_session_id: sessionId, p_business_id: businessId });
   if (error) throw new Error('TURN_SOURCE_UNAVAILABLE');
   const result = turnRead.parse(data);
@@ -42,6 +45,6 @@ export async function readCoachReview(read: TurnClients['read'], actorId: string
     brands: result.brands.map(brand => ({ id: `coach_review:${brand.id}`, name: brand.name })) }) };
   if (result.kind === 'coach_review') return { text: JSON.stringify({ kind: 'coach_review', status: 'no_brand', note: NO_BRAND }) };
   if (result.kind === 'unavailable') return { text: JSON.stringify(result) };
-  const review = buildPack({ rows: result.rows, cadence: 'chat', businessId: result.businessId, now, handbooks: new Map() });
+  const review = buildPack({ rows: result.rows, cadence: 'chat', businessId: result.businessId, now, handbooks });
   return { text: JSON.stringify({ kind: 'coach_review', status: 'available', review }) };
 }
