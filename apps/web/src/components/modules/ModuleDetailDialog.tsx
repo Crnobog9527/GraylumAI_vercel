@@ -22,6 +22,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { MemberOnlyUse } from './MemberOnlyUse';
+import { asRequiredLevel, memberOnlyNote } from '@/lib/member-only';
 
 interface Module {
   id: string;
@@ -35,6 +37,7 @@ interface Module {
   full_description?: string;
   features?: string[];
   examples?: string[];
+  required_member_level?: 'pro' | 'gold' | null;
 }
 
 interface ModuleDetailDialogProps {
@@ -64,6 +67,7 @@ export default function ModuleDetailDialog({
 }: ModuleDetailDialogProps) {
   const router = useRouter();
   const positioning = trpc.opc.catalog.useQuery(undefined, { enabled: open && !!module, retry: false });
+  const memberOnly = asRequiredLevel(module?.required_member_level);
   const canUse = !!module && !positioning.isError &&
     !!positioning.data?.some(entry => entry.moduleId === module.id);
   const incrementUsage = trpc.modules.incrementUsage.useMutation();
@@ -120,6 +124,11 @@ export default function ModuleDetailDialog({
               >
                 {module.title}
               </DialogTitle>
+              {memberOnly && (
+                <p className="text-sm mb-2" data-testid="member-only-note" style={{ color: 'var(--color-primary)' }}>
+                  {memberOnlyNote(memberOnly)}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <Badge
                   className="text-xs"
@@ -330,6 +339,10 @@ export default function ModuleDetailDialog({
           >
             关闭
           </Button>
+          {memberOnly ? (
+            <MemberOnlyUse level={memberOnly} onClose={() => onOpenChange(false)}
+              onUsed={() => incrementUsage.mutate({ moduleId: module.id })} />
+          ) : (
           <Button
             onClick={handleUse}
             disabled={!canUse}
@@ -344,8 +357,9 @@ export default function ModuleDetailDialog({
             <Sparkles className="h-4 w-4 mr-2" />
             立即使用
           </Button>
+          )}
         </div>
-        {!canUse && <p id="legacy-skill-disabled" className="mt-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+        {!memberOnly && !canUse && <p id="legacy-skill-disabled" className="mt-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
           该技能将在新工作区上线后开放
         </p>}
       </DialogContent>

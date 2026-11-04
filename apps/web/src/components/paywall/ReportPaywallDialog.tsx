@@ -15,6 +15,7 @@ import { trpc } from '@/trpc/client';
 import { profileTabHref } from '@/lib/profile-tabs';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as REPORT_COPY } from './reportPaywallCopy';
 import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, type GoldScene } from './goldScenePaywallCopy';
+import { COACH_SCENE_COPY, COACH_SCENE_DELIVERABLES } from './coachScenePaywallCopy';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
@@ -23,7 +24,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
  * and the card checkout (`payments.methodCheckout`). No credit-cost estimate, no model names, no consent switch the
  * backend lacks (design README "文案规则").
  */
-export type PaywallScene = 'report' | GoldScene;
+export type PaywallScene = 'report' | 'coach' | GoldScene;
 
 export function ReportPaywallDialog({ onClose, scene = 'report' }: { onClose: () => void; scene?: PaywallScene }) {
   // One paywall_view per display (GA4 only, consent-gated; the funnel continues with begin_checkout / purchase).
@@ -48,11 +49,12 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
 }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   // A Gold-only feature offers only the Gold plans (Gold first month and the founder price still come from the server).
-  const goldOnly = scene !== 'report';
+  // The coach scene sells Pro and Gold both (a member-only Skill for the two plans), so it is not Gold-only.
+  const goldOnly = scene !== 'report' && scene !== 'coach';
   const inlinePurchase = !goldOnly || memberLevel === 'free';
   const checkout = goldOnly ? { ...fullCheckout, plans: fullCheckout.plans.filter(item => item.level === 'gold') } : fullCheckout;
-  const COPY = goldOnly ? { ...REPORT_COPY, ...GOLD_SCENE_COPY[scene] } : REPORT_COPY;
-  const deliverables = goldOnly ? GOLD_SCENE_DELIVERABLES[scene] : REPORT_DELIVERABLES;
+  const COPY = scene === 'coach' ? { ...REPORT_COPY, ...COACH_SCENE_COPY } : goldOnly ? { ...REPORT_COPY, ...GOLD_SCENE_COPY[scene] } : REPORT_COPY;
+  const deliverables = scene === 'coach' ? COACH_SCENE_DELIVERABLES : goldOnly ? GOLD_SCENE_DELIVERABLES[scene] : REPORT_DELIVERABLES;
   const [selected, setSelected] = useState<PaywallLevel>(goldOnly ? 'gold' : 'pro');
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => { dialog.current?.focus(); }, []);

@@ -17,6 +17,8 @@ import {realContract} from '../services/turn/settings/realHost';
 import {realHostMode} from '../services/turn/settings/productionEnvironment';
 import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
+import { asRequiredLevel, meetsMemberLevel, type RequiredMemberLevel } from '../services/skills/memberOnly';
+import { readOwnDataTier } from '../services/membershipEntitlements';
 import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/turn/settings/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
 import {runtimeLocalEndpoint} from '../services/turn/settings/stagingEnvironment';
@@ -82,9 +84,13 @@ export const runtimeRouter=router({
   if(visible.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   // Respect the narrow public column grant; private metadata is fetched only
   // for visible modules and the loader independently rechecks current access.
-  const modules=visible.data.length?await ctx.supabaseAdmin!.from('modules').select('id,skill_id,title,model_id').in('id',visible.data.map(m=>m.id)).eq('active',true):{data:[],error:null};
+  const modules=visible.data.length?await ctx.supabaseAdmin!.from('modules').select('id,skill_id,title,model_id,required_member_level').in('id',visible.data.map(m=>m.id)).eq('active',true):{data:[],error:null};
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
-  const skills:Array<{moduleId:string;revisionId:string;name:string}>=[];
+  const skills:Array<{moduleId:string;revisionId:string;name:string;requiredMemberLevel:RequiredMemberLevel|null;locked:boolean}>=[];
+  // MEMBER-ONLY-MODULES: a Skill limited to members is listed to everyone and marked locked for a plan below it (the page then shows the
+  // paywall instead of choosing it); the plan is read only when some listed module has a requirement, and an unreadable plan locks.
+  const tierNeeded=modules.data.some(m=>asRequiredLevel(m.required_member_level));
+  const tierLevel=tierNeeded?(await swallow('runtime_choices_tier_unavailable',readOwnDataTier(ctx.supabaseAdmin!,ctx.user.id),null))?.level??null:null;
   for(const m of modules.data){if(!m.skill_id||(ctx.real&&!ctx.real.callPolicies.some(q=>q.modelId===m.model_id)))continue;try{
    // AC-0c: reuse this request's user-scoped (RLS) read above, never the service-role row.
    const userVisibleModule=visible.data.find(v=>v.id===m.id);
@@ -94,7 +100,8 @@ export const runtimeRouter=router({
    for(const s of list.filter(()=>ctx.real||work||models.data.some(model=>model.id===m.model_id))){
     const descriptor=descriptors.find(d=>d.revisionId===s.public.revisionId);
     if(!descriptor||Object.keys(descriptor.tasks).length)continue;
-    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:m.title});
+    const requiredMemberLevel=asRequiredLevel(m.required_member_level);
+    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:m.title,requiredMemberLevel,locked:!meetsMemberLevel(tierLevel,requiredMemberLevel)});
    }
   }catch{/* unavailable packages are not advertised as runnable */}}
   // Staging hides models a free-chat turn is certain to be refused with; the administrator's default comes first.
