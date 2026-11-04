@@ -79,3 +79,11 @@ export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state'
   const list = [body.items, body.hits, body.documents].find(Array.isArray) as unknown[] | undefined;
   return tool === 'research' || tool === 'read_source' ? { state, ...(list ? { count: list.length } : {}) } : { state };
 }
+
+/** The steps of a closed reply as they are kept (turn_chat_steps_apply): only what the page needs to show them again. A step still running when
+ *  the reply ended did not finish, so it is kept as failed; the search words (`detail`) are not kept. */
+export function savedSteps(events: Iterable<StepEvent>) {
+  return [...events].slice(0, 16).map(event => ({ id: event.id, tool: event.tool, state: event.state === 'running' ? 'failed' : event.state,
+    ...(event.label ? { label: event.label } : {}), ...(event.count !== undefined ? { count: event.count } : {}),
+    ...(event.reason ? { reason: event.reason } : {}) }));
+}

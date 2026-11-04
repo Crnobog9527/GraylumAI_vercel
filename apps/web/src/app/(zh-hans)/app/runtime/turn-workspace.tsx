@@ -145,7 +145,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
         {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
         <section className={workStyles.transcript}>
           {turns.map(reply => <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
-            {reply.turnId !== null && <TurnStepList steps={chat.stepsByTurn.get(reply.turnId) ?? []}/>}
+            {reply.turnId !== null && <TurnStepList steps={chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? []}/>}
             {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []}/>}
             <RuntimeReply text={reply.content}/>
             {results.data && reply.turnId !== null && <SaveReplyButton sessionId={sessionId} turnId={reply.turnId} reply={reply.content}

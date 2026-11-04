@@ -537,3 +537,49 @@ it('RUNTIME: CORE-PATH-V2 V2-6: a mixed search charges the user for the data onl
     .toBe(await expectedCredits(f.actor));
   expect(await spent() - before).toBeCloseTo(others + 0.02, 9);
 });
+
+it('RUNTIME: TURN-STEPS: a search shows its steps, and after the close the steps are kept (no search words) and a reload reads them', async () => {
+  const f = await setup(), bodies: string[] = [];
+  const parallel = vi.fn(async () => searchResult());
+  const out = await turn(f, searchingModel(bodies), suppliers(parallel));
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result).toMatchObject({ type: 'result', body: 'Answer from the search.' });
+  // The stream: the step starts (with the search's first 20 characters, cut with a dot: the whole question never goes out) and ends (with how many results), before the text and the result.
+  const steps = out.events.filter(e => e.type === 'step');
+  expect(steps).toEqual([
+    { type: 'step', id: '1', tool: 'research', detail: 'coffee shop position…', state: 'running' },
+    { type: 'step', id: '1', tool: 'research', detail: 'coffee shop position…', state: 'done', count: 1 }]);
+  expect(out.events.findIndex(e => e.type === 'step')).toBeLessThan(out.events.findIndex(e => e.type === 'text'));
+  // Kept by the close itself (turn_close, the same transaction): the end state and the count, never the search words. The turn still has
+  // its three writes: open, the receipts, the close.
+  const kept = (await db.query('select steps from turns where actor_id=$1 and id=$2', [f.actor, result.turnId])).rows[0].steps;
+  expect(kept).toEqual([{ id: '1', tool: 'research', state: 'done', count: 1 }]);
+  // What a reload reads: the assistant's message carries its turn's steps, the user's message none.
+  // (The fixture's session is a draft-scoped probe whose draft does not exist, which the view refuses: read it as a plain free-chat conversation.)
+  await db.query("update runtime_sessions set scope='{\"kind\":\"free_chat\"}' where id=$1", [f.session]);
+  const view = (await db.query('select turn_session_view($1,$2,0) v', [f.actor, f.session])).rows[0].v;
+  expect(view.messages.map((m: { role: string; steps?: unknown }) => [m.role, m.steps ?? null])).toEqual([
+    ['user', null], ['assistant', [{ id: '1', tool: 'research', state: 'done', count: 1 }]]]);
+  // The shape check of turn_chat_steps_apply (the close's own helper, called here as the database owner): set once; a step that has not
+  // ended, an unknown key, search words, another actor's turn: nothing saved, and never an error.
+  const save = async (actor: string, steps: unknown) => (await db.query('select turn_chat_steps_apply($1,$2,$3) v', [actor, result.turnId, JSON.stringify(steps)])).rows[0].v;
+  expect(await save(f.actor, [{ id: '1', tool: 'other', state: 'done' }])).toBe(false);
+  const second = await setup();
+  const fresh = await turn(second, async () => respond('gen-steps-2', frame('gen-steps-2', { choices: [{ index: 0, delta: { role: 'assistant', content: 'Plain.' }, finish_reason: null }] })
+    + frame('gen-steps-2', { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + usage('gen-steps-2')), suppliers(vi.fn()));
+  const plain = fresh.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  // A reply with no tool keeps no steps, and a reload reads none.
+  expect((await db.query('select steps from turns where actor_id=$1 and id=$2', [second.actor, plain.turnId])).rows[0].steps).toBeNull();
+  const own = async (steps: unknown) => (await db.query('select turn_chat_steps_apply($1,$2,$3) v', [second.actor, plain.turnId, JSON.stringify(steps)])).rows[0].v;
+  for (const bad of [[{ id: '1', tool: 'research', state: 'running' }], [{ id: '1', tool: 'research', state: 'done', detail: 'coffee' }],
+    [{ id: '1', tool: 'research', state: 'done', query: 'x' }], [{ id: '1', tool: 'web_search', state: 'done' }], [], 'x',
+    [{ id: '1', tool: 'research', state: 'done', count: -1 }], [{ id: '1', tool: 'research', state: 'done', reason: 'other' }],
+    Array.from({ length: 17 }, (_, n) => ({ id: String(n), tool: 'other', state: 'done' }))])
+    expect(await own(bad), JSON.stringify(bad)).toBe(false);
+  // Another actor's turn is not theirs to write; then the owner's save works once.
+  expect(await save(second.actor, [{ id: '1', tool: 'other', state: 'done' }])).toBe(false);
+  expect(await own([{ id: '1', tool: 'load_skill', state: 'skipped', label: 'Hooks' }])).toBe(true);
+  expect(await own([{ id: '1', tool: 'other', state: 'done' }])).toBe(false);
+  expect((await db.query('select steps from turns where actor_id=$1 and id=$2', [second.actor, plain.turnId])).rows[0].steps)
+    .toEqual([{ id: '1', tool: 'load_skill', state: 'skipped', label: 'Hooks' }]);
+});

@@ -30,11 +30,12 @@ import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
-import type { TurnEvent } from './sse';
+import type { StepEvent, TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
 import { markStage, noteStageTurn } from './stageTiming';
 import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
 import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
+import { savedSteps } from './tools/toolStage';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 import { chatImages, imageMark, withImages } from './chatImage';
@@ -326,9 +327,12 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // The reply streams. Under the fallback rule nothing is sent while the text so far could still be the refusal marker, which
     // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
     let reply = '', sentChars = 0, holding = fallback;
+    // The steps the reply showed (one per tool call, the latest state of each), kept after the close so a reload shows them again.
+    const stepLog = new Map<string, StepEvent>();
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
-        callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q }, announce: emit, ...(replay ? { replay } : {}) }) : null;
+        callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q },
+        announce: event => { stepLog.set(event.id, event); emit(event); }, ...(replay ? { replay } : {}) }) : null;
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),
       maxOutputTokens: quote.outputLimit, maxTurns: 1 + (built?.maxToolCalls ?? 0), reasoning: quote.reasoning,
@@ -377,7 +381,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }],
-      ...(captured?.items.length ? { kindResult: { coachScreenshots: captured.items } } : {}) });
+      ...(captured?.items.length || stepLog.size ? { kindResult: { ...(captured?.items.length ? { coachScreenshots: captured.items } : {}),
+        // The steps the reply showed: written in the close's own transaction, in a savepoint of their own (turn_close, 0507).
+        ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) });
     markStage('close');
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
     // The held-back tail of a reply that has a hidden block (a lone backtick the stream could not yet tell from its start) goes out now.

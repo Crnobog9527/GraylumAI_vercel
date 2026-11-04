@@ -5,7 +5,7 @@ import { TOOL_UNAVAILABLE } from './index';
 import { TOOL_STATUSES } from '../../research/tools/envelope';
 import type { StepKind } from '../sse';
 import { SKILL_FILE_UNAVAILABLE } from './skills';
-import { stepEnd, stepStart } from './toolStage';
+import { savedSteps, stepEnd, stepStart } from './toolStage';
 
 const skills = new Set(['分镜', 'Hooks']);
 const COACH = 'coach_review:00000000-0000-4000-8000-000000000001';
@@ -116,5 +116,22 @@ describe('how a tool\'s result ends its step', () => {
 
   it('the result text itself never leaves: only a state, a count and a fixed reason', () => {
     expect(Object.keys(stepEnd('research', JSON.stringify({ status: 'ok', items: [{ fields: { text: 'SECRET' } }] }))).sort()).toEqual(['count', 'state']);
+  });
+});
+
+describe('the steps kept after a reply closed', () => {
+  it('only the kind, the end state, a Skill name, a count and a fixed reason; never the search words; a step still running is failed', () => {
+    const kept = savedSteps([
+      { type: 'step', id: '1', tool: 'load_skill', label: '分镜', state: 'done' },
+      { type: 'step', id: '2', tool: 'research', detail: 'SECRET words', state: 'done', count: 6 },
+      { type: 'step', id: '3', tool: 'coach_review', state: 'skipped', reason: 'no_brand' },
+      { type: 'step', id: '4', tool: 'read_source', state: 'running' }]);
+    expect(kept).toEqual([{ id: '1', tool: 'load_skill', state: 'done', label: '分镜' }, { id: '2', tool: 'research', state: 'done', count: 6 },
+      { id: '3', tool: 'coach_review', state: 'skipped', reason: 'no_brand' }, { id: '4', tool: 'read_source', state: 'failed' }]);
+    expect(JSON.stringify(kept)).not.toContain('SECRET');
+  });
+  it('keeps at most 16 steps', () => {
+    const many = Array.from({ length: 20 }, (_, n) => ({ type: 'step' as const, id: String(n), tool: 'other' as const, state: 'done' as const }));
+    expect(savedSteps(many)).toHaveLength(16);
   });
 });
