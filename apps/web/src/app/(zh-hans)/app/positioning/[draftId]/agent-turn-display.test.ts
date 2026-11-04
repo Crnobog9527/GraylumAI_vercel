@@ -176,6 +176,13 @@ describe("liveReplyAfter", () => {
   const apply = (events: AgentTurnEvent[], executionId = id) =>
     events.reduce((old, event) => liveReplyAfter(old, executionId, event), startLiveReply(id) as ReturnType<typeof liveReplyAfter>);
 
+  it("collects the tool steps of the reply, a later event of the same step replacing the earlier one", () => {
+    const live = apply([{ type: "step", id: "1", tool: "load_skill", state: "running" }, { type: "step", id: "1", tool: "load_skill", state: "done" },
+      { type: "step", id: "2", tool: "research", state: "running", detail: "早起" }]);
+    expect(live?.steps).toEqual([{ id: "1", tool: "load_skill", state: "done" }, { id: "2", tool: "research", state: "running", detail: "早起" }]);
+    expect(live?.text).toBe("");
+  });
+
   it("replaces the text with each event instead of appending", () => {
     const live = apply([{ type: "text", text: "你" }, { type: "text", text: "你好" }, { type: "text", text: "你好，先说说" }]);
     expect(live?.text).toBe("你好，先说说");

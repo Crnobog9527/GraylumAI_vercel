@@ -92,7 +92,7 @@ export async function* mentorTurnEvents(body: unknown, opener: typeof runTurn = 
     if (event.type === "opened") { turnId = event.turnId; push({ type: "admitted", executionId: turnExecutionId(event.turnId) }); }
     else if (event.type === "text") { push({ type: "textDelta", text: event.delta, offset, rev: 1 }); offset += Array.from(event.delta).length; }
     else if (event.type === "result") push({ type: "result", result: { state: "completed", executionId: turnExecutionId(event.turnId) } as AgentTurnOutcome });
-    else if (event.type === "research_card" || event.type === "research_continue" || event.type === "research_call") push(event);
+    else if (event.type === "research_card" || event.type === "research_continue" || event.type === "research_call" || event.type === "step") push(event);
   };
   void opener(body, onEvent).then(outcome => {
     if (outcome.state === "lost") failure = new Error(STREAM_INTERRUPTED);

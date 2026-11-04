@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeStep, stepLine, stepsOpen, stepsSummary, visibleSteps, type ReplyStep } from './turn-step-list-model';
+import { mergeStep, stepLine, stepsOpen, stepsSummary, THINKING_STEP, visibleSteps, type ReplyStep } from './turn-step-list-model';
 
 const step = (tool: ReplyStep['tool'], state: ReplyStep['state'], extra: Partial<ReplyStep> = {}): ReplyStep => ({ id: `${tool}-${state}`, tool, state, ...extra });
 
@@ -60,5 +60,12 @@ describe('the list of a reply', () => {
   it('the folded row counts the ended steps and names the ones that did not work', () => {
     expect(stepsSummary([step('load_skill', 'done'), step('research', 'done')])).toBe('已完成 2 个步骤');
     expect(stepsSummary([step('load_skill', 'done'), step('research', 'failed')])).toBe('已完成 2 个步骤，其中 1 个没成功');
+  });
+});
+
+describe('a line before the first step', () => {
+  it('says 正在思考… unless the page names what is being written', () => {
+    expect(stepLine(THINKING_STEP)).toBe('正在思考…');
+    expect(stepLine({ ...THINKING_STEP, label: '正在写报告…' })).toBe('正在写报告…');
   });
 });

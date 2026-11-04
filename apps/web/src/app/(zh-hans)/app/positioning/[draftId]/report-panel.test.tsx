@@ -222,6 +222,21 @@ it("says the report is being written, and offers no export while it runs", async
   expect(render({ status: running, live, streaming: true })).toContain(REPORT_WRITING_NOTICE);
   expect(render({ status: running })).not.toContain("导出报告");
 });
+it("before the first words the one line is 正在写报告…, once text flows there is no step list and the notice keeps 停止", async () => {
+  const { ReportDialog } = await import("./report-panel");
+  const { REPORT_WRITING_NOTICE, REPORT_RUNNING_NOTICE } = await import("./report-gen");
+  const running = { executionId: saved, state: "running", body: null, completeness: null, candidate: false };
+  const render = (text: string) => renderToStaticMarkup(<ReportDialog report={dialogReport({ status: running, streaming: true,
+    live: { executionId: saved, text, stopped: false } }) as never} busy={false} onClose={() => {}} onTopics={() => {}} />);
+  const before = render("");
+  expect(before).toContain('data-turn-step-list="open"');
+  expect(before).toContain(REPORT_WRITING_NOTICE);
+  expect(before).toContain(REPORT_RUNNING_NOTICE);
+  expect(before).not.toContain("正在思考");
+  const after = render("## 报告\n正文");
+  expect(after).not.toContain("data-turn-step-list");
+  expect(after).toContain(REPORT_WRITING_NOTICE);
+});
 it("offers 导出报告 for a finished report and for a saved formal version", async () => {
   const { ReportDialog } = await import("./report-panel");
   const done = { executionId: saved, state: "completed", body: "## A\nx", completeness: "complete", candidate: true };

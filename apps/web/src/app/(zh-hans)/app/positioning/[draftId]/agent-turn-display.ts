@@ -8,6 +8,7 @@ import {
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
 import { REOPENED_HINT } from "@/components/chat-display/turn-steps-model";
+import { mergeStep, type ReplyStep } from "@/components/chat-display/turn-step-list-model";
 import { isPaused } from "./turn-pause";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving } from "./stop-reply";
 
@@ -43,6 +44,8 @@ export type LiveReply = {
   call?: number;
   /** The stream already delivered the final result; the saved reply replaces this copy next. */
   finished?: boolean;
+  /** The tools this reply has used so far (shown by TurnStepList); display only. */
+  steps?: ReplyStep[];
 };
 
 const knownPhases = new Set(["mentor", "reading", "organizer", "saving"]);
@@ -117,6 +120,7 @@ export function liveReplyAfter(old: LiveReply | null, executionId: string, event
   if (event.type === "text") return { ...old, text: event.text, points: codePoints(event.text), stalled: false };
   if (event.type === "textDelta") return afterDelta(old, event);
   if (event.type === "phase") return knownPhases.has(event.phase) ? { ...old, phase: event.phase } : old;
+  if (event.type === "step") return { ...old, steps: mergeStep(old.steps ?? [], event) };
   if (event.type === "card") return { ...old, card: parseQuestionCard(event.card) ?? old.card };
   return old;
 }

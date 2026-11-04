@@ -22,6 +22,7 @@ import type { CONTENT_SOURCE_MESSAGES } from './contentSourceMessages';
 import { z } from "zod";
 import type { AgentToolEvent } from './agentWork';
 import type { ResearchTurnEvent } from "./researchTurn";
+import type { StepEvent } from "../services/turn/sse";
 
 // ---------------------------------------------------------------------------
 // Question card
@@ -180,6 +181,8 @@ export type AgentTurnEvent =
   // RT-3b PR-3: each research call (running, then its end state) and each selection card, in order (RT-5 renders them).
   | ResearchTurnEvent
   | AgentToolEvent
+  // One tool's start or end on the turn path (usage: docs/launch/tasks/TURN-STEP-LIST.md); the page lists them with TurnStepList.
+  | StepEvent
   | { type: "result"; result: AgentTurnOutcome };
 
 // ---------------------------------------------------------------------------

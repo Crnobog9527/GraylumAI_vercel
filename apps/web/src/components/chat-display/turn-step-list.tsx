@@ -13,10 +13,12 @@ import styles from './turn-step-list.module.css';
  *  - `steps`: the steps so far, in order.
  *  - `live`: this reply is being written now (false for a reply read back from history).
  *  - `hasText`: some of its text has arrived.
+ *  - `thinkLabel`: what the line before the first step or text says instead of "正在思考…" (a reply that has no tools, such as the report).
  */
-export function TurnStepList({ steps, live = false, hasText = false }: { steps: readonly ReplyStep[]; live?: boolean; hasText?: boolean }) {
+export function TurnStepList({ steps, live = false, hasText = false, thinkLabel }:
+  { steps: readonly ReplyStep[]; live?: boolean; hasText?: boolean; thinkLabel?: string }) {
   const [chosen, setChosen] = useState<boolean | null>(null);
-  const shown = visibleSteps(steps, live, hasText);
+  const shown = visibleSteps(steps, live, hasText).map(step => step.tool === 'think' && thinkLabel ? { ...step, label: thinkLabel } : step);
   if (!shown.length) return null;
   const open = stepsOpen(steps, live, hasText, chosen);
   if (!open) {

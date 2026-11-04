@@ -21,7 +21,7 @@ beforeAll(async () => {
   const directory = fileURLToPath(new URL('./', import.meta.url));
   // Only the transport is synthetic: the real hook, controller and report dialog handle the answer.
   const transport = `
-    const id=${JSON.stringify(id)}, queue=[]; let wake, release, offset=4;
+    const id=${JSON.stringify(id)}, queue=[], hold=new URL(location.href).searchParams.has('hold'); let wake, release, offset=hold?0:4;
     window.fixture={requests:[],defer:false,release(){release?.();release=null;},append(text){queue.push({type:'textDelta',text,offset,rev:1,source:'final'});
       offset+=Array.from(text).length;wake?.();wake=null;}};
     const mutation={isPending:false,mutateAsync:async()=>{}};
@@ -33,7 +33,7 @@ beforeAll(async () => {
       reportPreflight:{useQuery:()=>({data:{canGenerate:true},isFetching:false,isError:false})},
       resume:{useMutation:()=>mutation}},
       research:{chooseShortfall:{useMutation:()=>mutation}},user:{getEntitlements:{useQuery:()=>({})}}};
-    async function* events(){yield {type:'textDelta',text:'起始正文',offset:0,rev:1,source:'final'};
+    async function* events(){if(!hold)yield {type:'textDelta',text:'起始正文',offset:0,rev:1,source:'final'};
       while(true){if(!queue.length)await new Promise(resolve=>wake=resolve);yield queue.shift();}}
     const none={data:null};
     // The turn hook is synthetic too: the report's open stream and its stop request are what this test drives (use-turn-report.ts).
@@ -78,12 +78,12 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); }, 30000);
 
-async function open() {
+async function open(hold = false) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.stack ?? error.message));
   await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
-  await page.goto('http://report-stop.test/');
+  await page.goto('http://report-stop.test/' + (hold ? '?hold' : ''));
   await page.addScriptTag({ content: 'window.process={env:{NODE_ENV:"development"},browser:true};' });
   await page.addScriptTag({ content: `Object.defineProperty(crypto,'randomUUID',{value:()=>${JSON.stringify(id)}});` });
   await page.addScriptTag({ content: code });
@@ -93,7 +93,7 @@ async function open() {
     const report = page.getByRole('dialog', { name: '完整运营策略报告', exact: true });
     await report.getByRole('button', { name: '生成完整报告（500 积分）', exact: true }).click();
     await report.getByRole('button', { name: '确认并扣 500 积分', exact: true }).click();
-    await ui(page.getByText('起始正文', { exact: true })).toBeVisible();
+    if (!hold) await ui(page.getByText('起始正文', { exact: true })).toBeVisible();
   }
   catch (error) {
     const body = await page.locator('body').innerText();
@@ -170,3 +170,18 @@ for (const close of ['button', 'Escape'] as const) {
     } finally { await page.close(); }
   }, 20000);
 }
+
+it('before the first words the report shows one line, 正在写报告…, with 停止 beside it; once words flow there is no step list', async () => {
+  const page = await open(true);
+  try {
+    const list = page.locator('[data-turn-step-list]');
+    await ui(list).toHaveAttribute('data-turn-step-list', 'open');
+    await ui(list.getByText('正在写报告…', { exact: true })).toBeVisible();
+    await ui(page.getByText('正在思考…')).toHaveCount(0);
+    await ui(page.getByRole('button', { name: '停止', exact: true })).toBeVisible();
+    await append(page, '起始正文');
+    await ui(page.getByText('起始正文', { exact: true })).toBeVisible();
+    await ui(list).toHaveCount(0);
+    await ui(page.getByText('正在写报告…', { exact: true })).toBeVisible();
+  } finally { await page.close(); }
+}, 20000);

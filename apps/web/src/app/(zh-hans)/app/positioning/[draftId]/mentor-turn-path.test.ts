@@ -45,6 +45,16 @@ describe("mentor on the turn path", () => {
     expect(seen).toEqual([{ type: "admitted", executionId: "turn:7" }, { type: "textDelta", text: "好😀", offset: 0, rev: 1 },
       { type: "textDelta", text: "的", offset: 2, rev: 1 }, { type: "result", result: { state: "completed", executionId: "turn:7" } }]);
   });
+  it("passes the tool steps of the turn on to the page", async () => {
+    const seen = [];
+    const step = { type: "step", id: "1", tool: "research", state: "running", detail: "早起" } as const;
+    for await (const event of mentorTurnEvents({}, async (_body, onEvent) => {
+      onEvent({ type: "opened", turnId: 7, reservedCredits: 1, replay: false }); onEvent(step);
+      const last = { type: "result", turnId: 7, body: "x", chargedCredits: 1, settlement: "done" } as const;
+      onEvent(last); return { state: "finished", last };
+    })) seen.push(event);
+    expect(seen).toContainEqual(step);
+  });
   it("a refusal carries its notice; a dropped stream is the page's interrupted case", async () => {
     const drain = async (opener: Parameters<typeof mentorTurnEvents>[1]) => { for await (const _ of mentorTurnEvents({}, opener)) void _; };
     await expect(drain(async () => ({ state: "refused", code: "TURN_INSUFFICIENT_CREDITS", status: 200 }))).rejects.toBeInstanceOf(TurnRefused);
