@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceSkeleton } from './workspace-skeleton';
 
-vi.mock('./workspace-frame', () => ({ WorkspaceFrame: ({ area, children }: { area: string; children: unknown }) =>
+vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: ({ area, children }: { area: string; children: unknown }) =>
   <div data-frame={area}>{children as never}</div> }));
 
 describe('WorkspaceSkeleton', () => {

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { PageSkeleton } from '@/components/ui/page-skeleton';
-import { WorkspaceFrame } from './workspace-frame';
+import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 
 /**
  * A page still reading its data, drawn inside the same frame as the finished page (light background, sidebar, header). A bare
