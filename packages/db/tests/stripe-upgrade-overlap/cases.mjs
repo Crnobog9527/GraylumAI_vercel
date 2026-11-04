@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {createFixture,claim,receipt} from '../payg/fixture.mjs';
 import {rpc} from '../erasure-b2a/cases.mjs';
 import {safetyCases} from './safety.mjs';
 
@@ -35,26 +34,9 @@ export async function overlapCases({admin,service,connect,user,proSub,goldSub,go
   assert.equal(await credits(),before);
   assert.ok((await grants()).every(g=>g.consumed_amount===0),'failure restores each source once');
 
-  // Real BILL2 PAYG entry point, not just the primitive that used to throw.
-  const f=await createFixture(admin,{actor:user});
-  const one=await connect(),two=await connect();
-  for(const db of [admin,one,two]) await db.query('SELECT set_config($1,$2,false)',[
-    'request.jwt.claim.sub',user,
-  ]);
-  const claims=await Promise.all([claim(one,f,1,false),claim(two,f,1,false)]);
-  assert.equal(claims[0].id,claims[1].id,'concurrent retries reserve once');
-  assert.equal(claims.filter(c=>c.dispatchToken).length,1);
-  const call=(await admin.query('SELECT reserved_credits,pre_deduct_id FROM bill2_calls WHERE id=$1',[claims[0].id])).rows[0];
-  assert.equal(await credits(),before-call.reserved_credits);
-  await rpc(admin,'bill2_dispatch',user,f.run,claims[0].id,claims.find(c=>c.dispatchToken).dispatchToken);
-  await receipt(admin,f,claims[0],'0.003',{inputTokens:3000,outputTokens:0});
-  await rpc(admin,'bill2_close',user,f.run,'confirmed_failure',{
-    kind:'confirmed_delivery_failure',evidenceRef:'local-proof',evidenceHash:'d'.repeat(64),body:'fixture failure',
-  });
-  await rpc(admin,'bill2_finalize',user,f.run);
-  await rpc(admin,'bill2_finalize',user,f.run);
-  assert.equal(await credits(),before);
-  assert.ok((await grants()).every(g=>g.consumed_amount===0));
+  // (V2-12 F: the old PAYG entry point, bill2_payg_claim and its finalize, is gone; atomic_pre_deduct and its restore above are the ledger path the turn uses.)
+  // The cases below read membership facts as this user (the removed PAYG block used to set the session's JWT subject).
+  await admin.query('SELECT set_config($1,$2,false)',['request.jwt.claim.sub',user]);
 
   // Exercise the actual profile-cap gate. The intentionally absent registration is reached only
   // below the cap; no workflow fixture or unrelated positioning content is needed.
@@ -95,6 +77,6 @@ export async function overlapCases({admin,service,connect,user,proSub,goldSub,go
   await restore(downgraded.pre_deduct_id);
   assert.equal(await credits(),3480);
   return ['overlap-gold-primary','overlap-retains-pro-credits','overlap-failure-restores-both-sources',
-    'overlap-concurrent-bill2-claim-once','overlap-bill2-failure-compensation','overlap-gold-profile-cap-six',
+    'overlap-gold-profile-cap-six',
     'overlap-ended-pro-keeps-gold','overlap-gold-refund-restores-pro-cap-three',...safety];
 }

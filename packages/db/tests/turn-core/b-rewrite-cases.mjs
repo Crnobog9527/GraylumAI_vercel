@@ -1,13 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// CORE-PATH-V2 V2-12 B-rewrites (migration 0490): the functions that stay after batch F but named an old-path object. Each case runs the
-// function as it was before 0490 (b-rewrite-old.sql, turn_test.old_*) and the new one on the same rows and compares what the live
-// callers see, then checks the documented differences.
+// CORE-PATH-V2 V2-12 B-rewrites (migration 0490): the functions that stay after batch F but named an old-path object. Each case checks what
+// the live callers see and the documented differences. (The before/after comparison against the pre-0490 text ran in #1669, while the old
+// tables existed; the old text is gone with them.)
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {read} from '../runtime-view-perf/local-db.mjs';
 
 export async function bRewriteCases({c,db,one,account,open,refusal,peer,report}){
- db.sql(read('packages/db/tests/turn-core/b-rewrite-old.sql'));
  const source=a=>one('select turn_test.topic_source($1) v',[a.actor]);
  const resultRow=async(a,session,over={})=>{
   const id=randomUUID();
@@ -25,10 +23,8 @@ export async function bRewriteCases({c,db,one,account,open,refusal,peer,report})
   const plain=await resultRow(a,sid);
   const fromTurn=await resultRow(a,sid,{turn:987654321});
   for(const id of [plain,fromTurn]){
-   const both=(await c.query(`select runtime_session_result_view(r,1) n,turn_test.old_runtime_session_result_view(r,1) o
-    from runtime_session_results r where r.id=$1`,[id])).rows[0];
-   assert.deepEqual(both.n,both.o);
-   assert.equal(both.n.sourceAvailable,true);
+   const view=(await c.query(`select runtime_session_result_view(r,1) n from runtime_session_results r where r.id=$1`,[id])).rows[0];
+   assert.equal(view.n.sourceAvailable,true);
   }
   const turnView=(await c.query(`select runtime_session_result_turn_view(r,1) v from runtime_session_results r where r.id=$1`,[fromTurn])).rows[0].v;
   assert.equal(turnView.sourceTurnId,987654321);
@@ -44,7 +40,6 @@ export async function bRewriteCases({c,db,one,account,open,refusal,peer,report})
  {
   const a=await account(1000);
   const before=await one('select runtime_positioning_gate($1) v',[a.actor]);
-  assert.deepEqual(before,await one('select turn_test.old_runtime_positioning_gate($1) v',[a.actor]),'no refusal yet: as before');
   const first=await open(a);
   assert.deepEqual(first.positioning,{positioned:false,refusals24h:0});
   await c.query("select turn_close($1,$2,'failed','[]',false,true,'positioning_required')",[a.actor,first.turnId]);
@@ -57,11 +52,9 @@ export async function bRewriteCases({c,db,one,account,open,refusal,peer,report})
  {
   const a=await account(1000),b=await account(1000);
   assert.match(await refusal(c.query('select runtime_test_actor_access($1)',[a.actor])),/RUNTIME_TEST_ACTOR_DENIED/);
-  assert.match(await refusal(c.query('select turn_test.old_runtime_test_actor_access($1)',[a.actor])),/RUNTIME_TEST_ACTOR_DENIED/);
   await c.query(`insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at)
    values($1,true,$2,'[{"model":"fixture"}]',1000,1,10,10,now()+interval '1 hour')`,[randomUUID(),[a.actor]]);
   assert.equal(await one('select runtime_test_actor_access($1) v',[a.actor]),true);
-  assert.equal(await one('select turn_test.old_runtime_test_actor_access($1) v',[a.actor]),true);
   assert.match(await refusal(c.query('select runtime_test_actor_access($1)',[b.actor])),/RUNTIME_TEST_ACTOR_DENIED/);
   report.checks.push('B-rewrite runtime_test_actor_access: listed in a window is allowed, anyone else refused, as before (the old-run branch is gone)');
  }
@@ -71,7 +64,6 @@ export async function bRewriteCases({c,db,one,account,open,refusal,peer,report})
   const review=randomUUID();
   const neu=await one('select fusion_review_fee_settle($1,$2) v',[a.actor,review]);
   assert.equal(neu,null);
-  assert.equal(neu,await one('select turn_test.old_fusion_review_fee_settle($1,$2) v',[a.actor,review]));
   report.checks.push('B-rewrite fusion_review_fee_settle: NULL for a review without a fee row, as before');
  }
  // 5. opc_capture_apply: an empty batch for a draft with nothing to capture; the refusals are unchanged.
@@ -79,9 +71,7 @@ export async function bRewriteCases({c,db,one,account,open,refusal,peer,report})
   const a=await account(1000),src=await source(a),stranger=await account(1000);
   const neu=await one('select opc_capture_apply($1,$2,null) v',[a.actor,src.draft]);
   assert.deepEqual(neu,{processed:[],remaining:0,hasMore:false});
-  assert.deepEqual(neu,await one('select turn_test.old_opc_capture_apply($1,$2,null) v',[a.actor,src.draft]),'the same empty batch as before');
   assert.match(await refusal(c.query('select opc_capture_apply($1,$2,null)',[stranger.actor,src.draft])),/OPC_CAPTURE_DENIED/);
-  assert.match(await refusal(c.query('select turn_test.old_opc_capture_apply($1,$2,null)',[stranger.actor,src.draft])),/OPC_CAPTURE_DENIED/);
   assert.match(await refusal(c.query('select opc_capture_apply($1,$2,$3)',[a.actor,src.draft,randomUUID()])),/OPC_CAPTURE_DENIED/);
   await c.query('update opc_businesses set archived_at=now() where id=$1',[src.business]);
   assert.match(await refusal(c.query('select opc_capture_apply($1,$2,null)',[a.actor,src.draft])),/OPC_BUSINESS_ARCHIVED/);
@@ -134,20 +124,5 @@ export async function bRewriteCases({c,db,one,account,open,refusal,peer,report})
    assert.deepEqual(await pending,{processed:[],remaining:0,hasMore:false});
   }finally{await writer.end();}
   report.checks.push('B-rewrite opc_capture_apply: still takes the draft session row, then the project row, and waits for a writer that holds the project');
- }
- // 8. The migration refuses to run while an old review fee is still held (batch F drops the table; a freeze must not vanish with it).
- {
-  const a=await account(1000);
-  const migration=read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql');
-  const review=randomUUID();
-  await c.query("insert into fusion_review_fees(review_id,actor_id,credits,pre_deduct_id,state) values($1,$2,100,$3,'held')",[review,a.actor,randomUUID()]);
-  try{
-   assert.match(await refusal(c.query(migration)),/V2_12_B_HELD_REVIEW_FEES/);
-  }finally{
-   await c.query('rollback').catch(()=>{});
-   await c.query('delete from fusion_review_fees where review_id=$1',[review]);
-  }
-  await c.query(migration);   // no held fee left: applies again (repeatable)
-  report.checks.push('B-rewrite migration 0490 refuses to run while a review fee is held, and applies again once none is');
  }
 }

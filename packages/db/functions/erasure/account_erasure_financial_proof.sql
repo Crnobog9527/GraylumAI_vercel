@@ -10,11 +10,8 @@ CREATE OR REPLACE FUNCTION public.account_erasure_financial_proof(p_profile_id u
 AS $function$
 DECLARE pending bigint:=0; manual bigint:=0; n bigint; entry record;
 BEGIN
- SELECT count(*) INTO pending FROM bill2_runs WHERE actor_id=p_profile_id
-  AND (NOT closed OR state NOT IN ('settled','refunded') OR conflict);
- -- CORE-PATH-V2 V2-12: plus the account's core-path turns still open or settling (a frozen hold, an unsettled close).
- SELECT count(*) INTO n FROM turns WHERE actor_id=p_profile_id AND (state<>'closed' OR settlement='pending');
- pending:=pending+n;
+ -- CORE-PATH-V2 V2-12 F: the account's core-path turns still open or settling (a frozen hold, an unsettled close).
+ SELECT count(*) INTO pending FROM turns WHERE actor_id=p_profile_id AND (state<>'closed' OR settlement='pending');
  SELECT count(*) INTO n FROM payment_orders WHERE user_id=p_profile_id
   AND (NOT erasure_payment_terminal(to_jsonb(payment_orders))
     OR (refund_approval IS NOT NULL AND coalesce(refund_approval->>'status','') NOT IN ('rejected','succeeded','failed')));
@@ -27,11 +24,6 @@ BEGIN
  manual:=manual+n;
  SELECT count(*) INTO n FROM subscription_credit_grants WHERE user_id=p_profile_id
   AND accounting_state IS DISTINCT FROM 'trusted';
- manual:=manual+n;
- SELECT count(*) INTO n FROM bill2_runs b WHERE b.actor_id=p_profile_id AND
-  (b.content_erased_at IS NULL OR EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id AND
-    (c.content_erased_at IS NULL OR EXISTS(SELECT 1 FROM bill2_receipts r WHERE r.call_id=c.id
-      AND r.financial_projected_at IS NULL))));
  manual:=manual+n;
  FOR entry IN SELECT * FROM (VALUES
   ('credit_transactions','user_id'),('billing_history','user_id'),('token_stats','user_id'),('ai_usage_logs','user_id')
@@ -49,7 +41,7 @@ BEGIN
  SELECT count(*) INTO n FROM payment_orders WHERE user_id=p_profile_id AND
   ((request_erased_at IS NULL AND (checkout_request IS NOT NULL OR purchase_change_request IS NOT NULL)) OR (refund_approval IS NOT NULL AND NOT monthly_refund_erasure_safe(refund_approval)));
  manual:=manual+n;
- -- Older generations/slices have original provider evidence not covered by BILL2 projections.
+ -- Older generations/slices have original provider evidence not covered by a projection.
  -- Do not infer that a terminal state proves those arbitrary objects contain no private body.
  SELECT count(*) INTO n FROM artifact_generations g JOIN artifact_projects p ON p.id=g.project_id WHERE p.actor_id=p_profile_id;
  manual:=manual+n;
@@ -59,11 +51,6 @@ BEGIN
  SELECT count(*) INTO n FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
   -- 0263 runtime research: a settled runtime search is finished money.
   WHERE p.actor_id=p_profile_id AND (o.erased_at IS NULL OR NOT research_operation_settled(o));
- pending:=pending+n;
- -- 0271 legacy chat tables
- SELECT count(*) INTO n FROM fusion_review_fees WHERE actor_id=p_profile_id AND state='held';
- pending:=pending+n;
- SELECT count(*) INTO n FROM report_fees WHERE actor_id=p_profile_id AND state='held';
  pending:=pending+n;
  RETURN jsonb_build_object('financialPending',pending,'manualReview',manual);
 END $function$;

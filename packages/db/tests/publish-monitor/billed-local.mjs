@@ -1,13 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only PUBLISH-MONITOR PR-4b (0289) verification: the Owner-approved tool-only BILL2 run (and that every other run
-// shape is still refused; the run stays until V2-12 batch F), then the billed-read ledger on kind='review' turns (0463, B8a):
+// Local-only PUBLISH-MONITOR verification of the billed-read ledger on kind='review' turns (0463, B8a; the tool-only BILL2 run of 0289 left with batch F):
 // the hidden read session, binding a turn, live-attempt recovery, orphaned-run discovery, disconnect and pruning.
 // Run: node packages/db/tests/publish-monitor/billed-local.mjs --local-only
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { rpc } from '../erasure-b2a/cases.mjs';
-import { fixtureSql, laterRedefinitions } from './fixtures.mjs';
+import { fixtureSql, laterRedefinitions, replaySql } from './fixtures.mjs';
 
 const MIGRATION = 'packages/db/migrations/0289_publish_monitor_billed_reads.sql';
 const db = await localDb(), c = db.client;
@@ -54,52 +53,12 @@ try {
   [{ version: 'local-v1', thresholds: [{ model: ROUTE, purpose: 'publish_monitor', credits: 1 }] }]);
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
-  const before = await v(catalogSql);
-  // 0289 first, then the later publish-monitor migrations (0463, 0477, 0481 redefine its functions): the pair replays to the same catalog (patches are marker-guarded).
-  await c.query(read(MIGRATION));
-  for (const path of laterRedefinitions('0462')) await c.query(read(path));
-  assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('reapplication of 0289 and 0463 preserves the complete catalog (patches are marker-guarded)');
-
-  // The exception is narrow: every other shape is still refused exactly as before.
   const m = await member();
-  await refused(m.a, await payload(m.a, { input: { text: 'no marker' } }), /BILL2_MODEL_DENIED/);
-  await refused(m.a, await payload(m.a, { modelId: randomUUID() }), /BILL2_MODEL_DENIED/);
-  await refused(m.a, await payload(m.a, { contractVersion: 'bill2.v1', limits: { costUsd: '0.02', credits: 6, maxPreDeduct: 6,
-    maxCalls: 2, deadline: new Date(Date.now() + 3600000).toISOString() } }), /BILL2_/);
-  const modelRow = randomUUID();
-  await c.query("INSERT INTO ai_models(id,model_id,name,provider,is_active) VALUES($1,'pm-local','x','fixture',true)", [modelRow]);
-  await refused(m.a, await payload(m.a, { callPolicy: [toolPolicy, { ...toolPolicy, protocol: 'fixture-cost-v1', modelId: modelRow,
-    provider: 'fixture', model: 'pm-local' }] }), /BILL2_/);
-  await refused(m.a, await payload(m.a, { input: { publishMonitor: 'x' } }), /BILL2_MODEL_DENIED/);
-  // Clients cannot create runs at all (no execute right on bill2_prepare), so a marker can only come from the server.
-  for (const role of ['anon', 'authenticated']) {
-    assert.equal(await v("SELECT has_function_privilege($1,'public.bill2_prepare(uuid,uuid,jsonb)','execute') v", [role]), false);
-    assert.equal(await v("SELECT has_function_privilege($1,'public.publish_monitor_tool_only_run(jsonb)','execute') v", [role]), false);
-  }
-  report.checks.push('refused as before: no marker, a real model id, v1 contract, any model route, a malformed marker; clients cannot prepare runs');
-
-  // The approved shape prepares, claims, dispatches, records and finalizes like any tool call.
-  const ok = await payload(m.a);
-  const run = await rpc(c, 'bill2_prepare', m.a, randomUUID(), ok);
-  const call = await rpc(c, 'bill2_claim', m.a, run.id, 1, { provider: 'tikhub', account: 'tikhub-main', model: ROUTE,
-    protocol: 'research-tool-v1', phase: 'publish_monitor', requestHash: 'd'.repeat(64), automaticRetry: false, hiddenTools: false,
-    lookupSupported: false, upperUsd: '0.01', billingUnit: { modelId: toolPolicy.modelId, multiplier: '6' }, toolPricing: pricing });
-  assert.equal((await rpc(c, 'bill2_dispatch', m.a, run.id, call.id, call.dispatchToken)).dispatch, true);
-  await rpc(c, 'bill2_record', m.a, run.id, call.id, { provider: 'tikhub', account: 'tikhub-main', protocol: 'research-tool-v1',
-    model: ROUTE, providerId: call.id, source: 'response', sourceHash: 'c'.repeat(64), observedAt: new Date().toISOString(),
-    coverage: 'request_total', final: true, currency: 'USD', cost: '0.01', usage: { unit: 'call', units: '1' },
-    evidenceKind: 'tool_result', toolOutcome: 'delivered' });
-  await rpc(c, 'bill2_close', m.a, run.id, 'delivered', { kind: 'usable_result', evidenceRef: 'publish-monitor:test', evidenceHash: 'd'.repeat(64) });
-  const fin = await rpc(c, 'bill2_finalize', m.a, run.id);
-  assert.equal(fin.chargedCredits, 6, '0.01 USD × 100 × 6');
-  assert.equal(await v('SELECT credits::int v FROM profiles WHERE id=$1', [m.a]), 94);
-  report.checks.push('the approved tool-only run bills one TikHub call at the frozen price (6 credits) and finalizes');
-
+  // (V2-12 F: the tool-only BILL2 run of 0289 and its replay went with bill2_prepare; the review-turn ledger below is the monitor's billing.)
   // B8a (0463): the refresh runs as a kind='review' turn in the connection's hidden conversation; the ledger's run id is the
   // turn's request id. Nothing below touches BILL2.
   const beforeReapply = await v(catalogSql);
-  for (const path of laterRedefinitions('0462')) await c.query(read(path));
+  for (const path of laterRedefinitions('0462')) await c.query(replaySql(path));
   assert.deepEqual(await v(catalogSql), beforeReapply);
   report.checks.push('0463, 0477 and 0481 re-apply without changing the catalog');
   for (const role of ['anon', 'authenticated']) {
@@ -190,32 +149,12 @@ try {
   assert.ok(!(await svc('SELECT publish_monitor_billed_orphans(50) v')).some(o => o.runId === turn2.request));
   report.checks.push('a settled refresh opens nothing new; its still-open run is listed for closing once the turn is closed, until marked closed');
 
-  // Nothing of BILL2 is left in the monitor (0481): a BILL2 run id no longer binds, recovery lists only live ledger attempts, and what the old
-  // path left open is closed by the migration itself.
-  const lg = await member();
-  const lrun0 = await rpc(c, 'bill2_prepare', lg.a, randomUUID(), await payload(lg.a));
-  const oclaimed = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === lg.conn);
-  await assert.rejects(svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v',
-    [lg.conn, oclaimed.lease, oclaimed.refreshId, lrun0.id, JSON.stringify([toolPolicy])]), /PUBLISH_MONITOR_INPUT_INVALID/);
-  const lop0 = randomUUID();
-  await c.query('INSERT INTO social_billed_runs(run_id,connection_id,refresh_id,actor_id,policies) VALUES($1,$2,$3,$4,$5)',
-    [lrun0.id, lg.conn, randomUUID(), lg.a, JSON.stringify([toolPolicy])]);
-  await c.query(`INSERT INTO social_billed_reads(id,actor_id,connection_id,refresh_id,request_key,model,run_id,call_id,state,token)
-    SELECT $1,actor_id,connection_id,refresh_id,$2,$3,run_id,$4,'dispatched',$5 FROM social_billed_runs WHERE run_id=$6`,
-  [lop0, 'c'.repeat(64), ROUTE, randomUUID(), randomUUID(), lrun0.id]);
-  const rows = await svc('SELECT publish_monitor_billed_recovery($1) v', [lrun0.id]);
-  assert.deepEqual(rows, [{ operationId: lop0, live: true }], 'only live ledger attempts, no BILL2 call or receipt');
-  const orphan = (await svc('SELECT publish_monitor_billed_orphans(50) v')).find(o => o.runId === lrun0.id);
-  assert.deepEqual(Object.keys(orphan).sort(), ['actorId', 'connectionId', 'policies', 'runId']);
-  // The migration closes such a leftover: its live attempt is abandoned and the run is closed.
-  for (const path of laterRedefinitions('0462')) await c.query(read(path));
-  assert.equal(await v('SELECT state v FROM social_billed_reads WHERE id=$1', [lop0]), 'abandoned');
-  assert.notEqual(await v('SELECT closed_at v FROM social_billed_runs WHERE run_id=$1', [lrun0.id]), null);
+  // Nothing of BILL2 is left in the monitor (0481): the guard triggers are gone and no monitor function names an old object.
   assert.equal(await v("SELECT count(*)::int v FROM pg_trigger WHERE tgname IN ('publish_monitor_review_admit_guard','publish_monitor_review_result_guard','publish_monitor_review_call_guard')"), 0,
     'the three guard triggers are gone');
   assert.equal(await v("SELECT count(*)::int v FROM pg_proc p WHERE p.proname LIKE 'publish_monitor\\_%' AND (pg_get_functiondef(p.oid) ~ 'runtime_executions|bill2_runs|bill2_calls|runtime_tool_calls|runtime_cancel|runtime_workspace_' AND p.proname<>'publish_monitor_tool_only_run')"), 0,
     'no publish-monitor function reads the old Runtime or BILL2 objects');
-  report.checks.push('0481: a BILL2 run no longer binds, recovery lists live attempts only, leftovers are closed, the guard triggers are gone and no monitor function names an old object');
+  report.checks.push('0481: the guard triggers are gone and no monitor function names an old object (the old run leftovers were closed by the migration while they existed)');
 
   // Insufficient credits: settled for today without any hold.
   const claim2 = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v'));

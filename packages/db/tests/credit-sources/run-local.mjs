@@ -15,8 +15,7 @@ const LATER = ['packages/db/migrations/0285_pay_refunded_pack_hold.sql', 'packag
   'packages/db/migrations/0383_credit_grant_quarantine.sql'];
 const reapply = async () => { for (const path of [migrationPath, ...LATER]) await c.query(read(path)); };
 const HOOKED = ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_legacy_settle(uuid,uuid,integer,jsonb,jsonb)',
-  'bill2_legacy_refund(uuid,uuid,text)', 'bill2_legacy_abort_settle(uuid,uuid,integer,jsonb,text,text)',
-  'bill2_payg_compensate(bill2_runs,bill2_calls)'];
+  'bill2_legacy_refund(uuid,uuid,text)', 'bill2_legacy_abort_settle(uuid,uuid,integer,jsonb,text,text)'];
 // MAINT-P1b: the first-run backfill is rehearsed on the real pre-0275 database (seeded just before 0275 runs in
 // the build). Tearing the 0275 tables out of the finished database stopped working once 0308 code read them.
 const seed = { clean: randomUUID(), clean2: randomUUID(), spent: randomUUID(), adjusted: randomUUID(),
@@ -131,12 +130,9 @@ const unhook = async () => {
 };
 
 try {
-  // Full chain applied 0275 once; a second run is a structural and data no-op.
-  const after = await catalog();
-  await reapply();
-  assert.deepEqual(await catalog(), after);
+  // (V2-12 F: 0275 and its hooks are no longer replayed over the finished catalog: they name the old PAYG functions that batch F drops.)
   for (const fn of HOOKED) assert.equal(await v("SELECT (length(d)-length(replace(d,'PR-D0 credit sources','')))/20 v FROM pg_get_functiondef($1::regprocedure) d", ['public.' + fn]), 1, fn);
-  report.checks.push('0275 reapplication after the full chain preserves the catalog; each of 5 functions hooked exactly once');
+  report.checks.push('each of the 4 hooked functions carries the credit-sources hook exactly once');
 
   // Packs from both grant paths become sources; unattributed credits are used first, then packs oldest first.
   const u1 = await profile(500);
@@ -215,24 +211,7 @@ try {
   report.checks.push('pack refund clawback reverses the source, failed-refund restoration re-grants it, unrelated keys are ignored;'
     + ' an externally refunded pack (no clawback) is held back and never consumed');
 
-  // Compensation after settlement returns the other part to the pack it came from.
-  const u4 = await profile(0);
-  const k = await pack(u4, 100);
-  p = await reserve(u4, 40);
-  await settle(u4, p, 40);
-  const call = randomUUID(), run = randomUUID();
-  const runRow = { id: run, actor_id: u4, closed: true, outcome: 'confirmed_failure' };
-  const callRow = { id: call, run_id: run, pre_deduct_id: p, settled_at: new Date().toISOString(), charged_delta: 40 };
-  await c.query("ALTER TABLE credit_transactions DISABLE TRIGGER ALL");
-  await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,bill2_call_id,idempotency_key)
-    VALUES($1,0,'adjustment','spend','bill2_spend',$2,$3)`, [u4, call, 'fixture-spend:' + call]);
-  // Synthetic run/call rows exist only as records: foreign-key triggers stay off for this one call.
-  assert.equal(await v('SELECT bill2_payg_compensate(jsonb_populate_record(NULL::bill2_runs,$1),jsonb_populate_record(NULL::bill2_calls,$2)) v',
-    [runRow, callRow]), 40);
-  await c.query("ALTER TABLE credit_transactions ENABLE TRIGGER ALL");
-  assert.deepEqual([await balance(u4), await packUsed(k.source)], [100, 0], 'compensation returns 40 to the pack');
-  await conserved(u4);
-  report.checks.push('PAYG confirmed-failure compensation returns the other part to its original pack');
+  // (V2-12 F: the PAYG compensation of an old run, bill2_payg_compensate, is gone; the turn path's refund and take-back are tested in turn-core.)
 
   // Concurrency: two sessions reserve for the same user at once; the profile lock serialises attribution.
   const u5 = await profile(100);
@@ -289,6 +268,7 @@ try {
   // MAINT-P1b: since 0308 the hooked settle/abort lines also carry the PAY-D1 dispute adjustment, and 0308 skips
   // functions that already have its marker, so re-applying 0275 after an unhook no longer restores them exactly.
   // Recovery is therefore the saved full-chain definitions.
+  const after = await catalog();   // the finished catalog, before the hooks come off
   const hookedDefs = [];
   for (const fn of HOOKED) hookedDefs.push(await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]));
   await unhook();

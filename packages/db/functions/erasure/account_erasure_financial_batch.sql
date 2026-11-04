@@ -18,73 +18,21 @@ BEGIN
   AND p.status='deleted' AND p.is_deleted='true') THEN
   RAISE EXCEPTION 'ERASURE_BATCH_ACTOR_DENIED' USING ERRCODE='42501';
  END IF;
- WITH candidates AS MATERIALIZED (
-  SELECT r.*, e.id execution_id,e.state execution_state,s.active_execution,
-   a.confirmed_at,a.stage_updated_at,
-   CASE
-    WHEN r.conflict THEN 'BILLING_CONFLICT'
-    WHEN EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND c.dispatched_at IS NOT NULL
-     AND c.selected_cost_usd IS NULL AND c.provider_id IS NULL) THEN 'BILLING_NO_PROVIDER_ID'
-    WHEN r.deadline+interval '24 hours'<clock_timestamp() THEN 'BILLING_EXPIRED'
-    WHEN EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND c.dispatched_at IS NOT NULL
-     AND c.selected_cost_usd IS NULL AND c.recovery_attempts>=3) THEN 'BILLING_ATTEMPTS_EXHAUSTED'
-    WHEN EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND c.dispatched_at IS NOT NULL
-     AND c.selected_cost_usd IS NULL AND c.payload->>'lookupSupported' IS DISTINCT FROM 'true')
-     THEN 'BILLING_LOOKUP_UNSUPPORTED'
-    ELSE 'BILLING_PENDING' END reason,
-   (NOT r.closed OR e.state NOT IN ('completed','cancelled','cost_pending') OR s.active_execution=e.id
-    OR (r.state IN ('settled','refunded') AND e.state NOT IN ('completed','cancelled'))
-    OR (r.state NOT IN ('settled','refunded') AND NOT r.conflict AND
-     (NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id
-       AND c.dispatched_at IS NOT NULL AND c.selected_cost_usd IS NULL)
-      OR (r.deadline+interval '24 hours'>=clock_timestamp() AND EXISTS(
-       SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND c.dispatched_at IS NOT NULL
-       AND c.selected_cost_usd IS NULL AND c.provider_id IS NOT NULL AND c.recovery_attempts<3
-       AND c.payload->>'lookupSupported'='true'))))) needs_work
-  FROM account_erasure_requests a JOIN profiles p ON p.id=a.profile_id
-  JOIN bill2_runs r ON r.actor_id=p.id
-  JOIN runtime_executions e ON e.billing_run_id=r.id AND e.actor_id=p.id
-  JOIN runtime_sessions s ON s.id=e.session_id AND s.actor_id=p.id AND r.session_ref=s.id
-  WHERE p.status='deleted' AND p.is_deleted='true'
-   AND bill2_erasure_closed(p.id,coalesce(r.pre_deduct_id,r.id))
-   AND (p_profile_id IS NULL OR p.id=p_profile_id)
-   AND (r.state NOT IN ('settled','refunded') OR NOT r.closed
-    OR e.state NOT IN ('completed','cancelled') OR s.active_execution=e.id)
- ), open_turns AS (
-  -- CORE-PATH-V2 V2-12: a deleted account's core-path turns still open or settling are pending too; turn recovery settles them
+ WITH open_turns AS (
+  -- CORE-PATH-V2 V2-12 F: a deleted account's core-path turns still open or settling are the pending money; turn recovery settles them
   -- (it does not look at the account's status), so they are reported here and never listed as work.
   SELECT count(*) n,min(a.confirmed_at) oldest FROM account_erasure_requests a JOIN profiles p ON p.id=a.profile_id
   JOIN turns t ON t.actor_id=p.id
   WHERE p.status='deleted' AND p.is_deleted='true' AND (p_profile_id IS NULL OR p.id=p_profile_id)
    AND (t.state<>'closed' OR t.settlement='pending')
- ), chosen AS (
-  SELECT actor_id FROM candidates WHERE needs_work
-  ORDER BY stage_updated_at,actor_id,id LIMIT 1
- ), page AS MATERIALIZED (
-  SELECT c.* FROM candidates c JOIN chosen a USING(actor_id)
-  WHERE c.needs_work AND (p_after_run_id IS NULL OR c.id>p_after_run_id)
-  ORDER BY c.id LIMIT p_limit
  )
  SELECT jsonb_build_object(
-  'selectedActorId',(SELECT actor_id FROM chosen),
-  'items',coalesce((SELECT jsonb_agg(jsonb_build_object(
-   'actorId',actor_id,'executionId',execution_id,'runId',id,'sessionId',session_ref,
-   'state',state,'executionState',execution_state,'closed',closed,'reason',reason,
-   'confirmedAt',confirmed_at,
-   'recoveryPolicy',jsonb_build_object('id',test_window_id,'expiresAt',deadline,
-    'creditsPerUsd',credits_per_usd::text,'multiplier',multiplier::text,
-    'callPolicies',(SELECT jsonb_agg(jsonb_build_object(
-     'modelId',v->>'modelId','provider',v->>'provider','account',v->>'account','model',v->>'model',
-     'protocol',v->>'protocol','upperUsd',v->>'upperUsd','inputLimit',v->'inputLimit',
-     'outputLimit',v->'outputLimit','automaticRetry',v->'automaticRetry',
-     'hiddenTools',v->'hiddenTools','lookupSupported',v->'lookupSupported'))
-     FROM jsonb_array_elements(payload->'callPolicy') v))) ORDER BY id) FROM page),'[]'::jsonb),
-  'nextRunId',CASE WHEN (SELECT count(*) FROM page)=p_limit
-   THEN (SELECT id FROM page ORDER BY id DESC LIMIT 1) END,
-  'totalPending',(SELECT count(*) FROM candidates)+(SELECT n FROM open_turns),
-  'oldestPendingAt',(SELECT min(m) FROM (SELECT min(confirmed_at) m FROM candidates UNION ALL SELECT oldest FROM open_turns) u),
-  'reasons',coalesce((SELECT jsonb_object_agg(reason,n) FROM
-    (SELECT reason,sum(n)::bigint n FROM (SELECT reason,count(*) n FROM candidates GROUP BY reason
-      UNION ALL SELECT 'BILLING_PENDING',n FROM open_turns WHERE n>0) r GROUP BY reason) counts),'{}'::jsonb)) INTO result;
+  'selectedActorId',NULL,
+  'items','[]'::jsonb,
+  'nextRunId',NULL,
+  'totalPending',(SELECT n FROM open_turns),
+  'oldestPendingAt',(SELECT oldest FROM open_turns),
+  'reasons',CASE WHEN (SELECT n FROM open_turns)>0
+   THEN jsonb_build_object('BILLING_PENDING',(SELECT n FROM open_turns)) ELSE '{}'::jsonb END) INTO result;
  RETURN result;
 END $function$;

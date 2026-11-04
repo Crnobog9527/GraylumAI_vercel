@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { readdirSync, readFileSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -503,10 +503,6 @@ it('RUNTIME: CORE-PATH-V2 V2-10: a resume at the organizer keeps the reply: it i
 
 it('RUNTIME: CORE-PATH-V2 V2-5b: a suggestion of a new-path mentor turn is shown by opc_query and can be accepted', async () => {
   const f = await setup();
-  // capture.integration.ts reloads the 0159/0182 definitions of the checklist functions and restores only 0199's patches, so a
-  // later file in the same database can see an old opc_query; this migration (idempotent) restores the current definitions.
-  const migrations = resolve(import.meta.dirname, '../../../../db/migrations');
-  await db.query(readFileSync(resolve(migrations, readdirSync(migrations).find(name => name.endsWith('_core_path_v2_mentor_b.sql'))!), 'utf8'));
   // A draft whose fields were initialised (as agentCorePlanB's fixture does): opc_capture_resolve merges into st.information.
   await db.query(`update artifact_rounds r set steps=(select jsonb_object_agg(s.key, s.value || jsonb_build_object('information',
       (select jsonb_object_agg(f->>'id', jsonb_build_object('value','','status','unknown','nature','unknown'))
@@ -685,7 +681,6 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a mentor web search is one receipt mid-turn, an
   expect(out.events.filter(e => e.type === 'research_call').map(e => (e as { state: string }).state)).toEqual(['running', 'succeeded']);
   expect((await db.query(`select c.tool_name,c.status from turn_calls c join turns t on t.id=c.turn_id
     where t.actor_id=$1 and c.call_kind='tool'`, [f.actor])).rows).toEqual([{ tool_name: 'web_search', status: 'ok' }]);
-  expect((await db.query('select 1 from runtime_executions where session_id=$1', [f.session])).rows).toEqual([]);
   expect((await db.query(`select o.state,p.execution_id,p.turn_id is not null turn from research_operations o join research_plans p on p.id=o.plan_id
     where p.session_id=$1`, [f.session])).rows).toEqual([{ state: 'succeeded', execution_id: null, turn: true }]);
   expect(JSON.stringify(t.bodies.filter(b => b.model === MENTOR)[1]!.messages)).toContain('a result');

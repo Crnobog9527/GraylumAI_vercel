@@ -25,7 +25,6 @@ DECLARE entry record; n bigint; total bigint:=(SELECT count(*) FROM opc_data_eve
 BEGIN
  FOR entry IN SELECT * FROM (VALUES
   ('runtime_sessions','t.actor_id=$1'),
-  ('runtime_executions','t.actor_id=$1'),
   ('artifact_projects','t.actor_id=$1'),
   ('opc_accounts','t.actor_id=$1'),
   ('opc_businesses','t.actor_id=$1'),
@@ -40,10 +39,6 @@ BEGIN
   ('messages','EXISTS(SELECT 1 FROM conversations p WHERE p.id=t.conversation_id AND p.user_id=$1)'),
   ('conversation_context_snapshots','EXISTS(SELECT 1 FROM conversations p WHERE p.id=t.conversation_id AND p.user_id=$1)'),
   ('runtime_scope_material','EXISTS(SELECT 1 FROM runtime_sessions p WHERE p.id=t.session_id AND p.actor_id=$1)'),
-  ('runtime_session_history','EXISTS(SELECT 1 FROM runtime_sessions p WHERE p.id=t.session_id AND p.actor_id=$1)'),
-  ('runtime_session_batches','EXISTS(SELECT 1 FROM runtime_sessions p WHERE p.id=t.session_id AND p.actor_id=$1)'),
-  ('runtime_tool_calls','EXISTS(SELECT 1 FROM runtime_executions p WHERE p.id=t.execution_id AND p.actor_id=$1)'),
-  ('runtime_history_dependencies','EXISTS(SELECT 1 FROM runtime_executions p WHERE p.id=t.execution_id AND p.actor_id=$1)'),
   ('artifact_rounds','EXISTS(SELECT 1 FROM artifact_projects p WHERE p.id=t.project_id AND p.actor_id=$1)'),
   ('artifact_evidence','EXISTS(SELECT 1 FROM artifact_projects p WHERE p.id=t.project_id AND p.actor_id=$1)'),
   ('artifact_versions','EXISTS(SELECT 1 FROM artifact_projects p WHERE p.id=t.project_id AND p.actor_id=$1)'),

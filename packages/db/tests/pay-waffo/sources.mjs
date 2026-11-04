@@ -35,31 +35,17 @@ export async function sourceCases({admin}) {
     [grant,user,plan,cycle,cycle==='yearly'?'annual_monthly_release':'monthly_invoice',`payment:${order}:01`,tx,sub,order,snap,start,monthEnd,cycle==='yearly'?1:null,cycle==='yearly'?12:1]);
     await assert.rejects(()=>admin.query('UPDATE subscription_credit_grants SET credits_granted=101 WHERE id=$1',[grant]),
       /INTERNAL_SOURCE_MISMATCH/);
-    const draft=await rpc('bill2_create_draft',[user]);
-    const payload={contractVersion:'bill2.v1',mode:'isolated',scope:{kind:'positioning_draft',draftId:draft},
-      operation:'question',modelId:model,sourceHash:hash('source'),input:{text:'synthetic'},
-      callPolicy:[{modelId:model,provider:'fixture',account:'sandbox',model:'m',protocol:'fixture-cost-v1',upperUsd:'0.08',
-        inputLimit:1000,outputLimit:1000,automaticRetry:false,hiddenTools:false,lookupSupported:true}],
-      rules:{version:'v1',quoteVersion:'fixture-v1',creditsPerUsd:'1000',multiplier:'1',fx:{}},
-      limits:{costUsd:'0.02',credits:20,maxPreDeduct:20,maxCalls:4,deadline:new Date(Date.now()+3600000).toISOString()}};
-    const run=await rpc('bill2_prepare',[user,randomUUID(),payload]);
+    // The wallet grant is reserved, settled and released through the ledger functions the turn uses (atomic_pre_deduct,
+    // bill2_legacy_settle, bill2_legacy_refund); the old BILL2 run (bill2_prepare / claim / finalize) went with batch F.
     const consumed=async()=>(await admin.query('SELECT consumed_amount FROM subscription_credit_grants WHERE id=$1',[grant])).rows[0].consumed_amount;
+    const reserve=async n=>(await admin.query("SELECT pre_deduct_id v FROM atomic_pre_deduct($1,$2,'fixture',gen_random_uuid())",[user,n])).rows[0].v;
+    const pre=await reserve(20);
     assert.equal(await consumed(),20);
-    const call=await rpc('bill2_claim',[user,run.id,1,{provider:'fixture',account:'sandbox',model:'m',protocol:'fixture-cost-v1',
-      phase:'reply1',requestHash:hash('hello'),upperUsd:'0.01',inputLimit:1000,outputLimit:1000,
-      automaticRetry:false,hiddenTools:false,lookupSupported:true}]);
-    await rpc('bill2_dispatch',[user,run.id,call.id,call.dispatchToken]);
-    await rpc('bill2_record',[user,run.id,call.id,{provider:'fixture',account:'sandbox',model:'m',protocol:'fixture-cost-v1',
-      providerId:`generation-${call.id}`,source:'response',sourceHash:hash(call.id),observedAt:new Date().toISOString(),
-      coverage:'request_total',final:true,cost:'0.007',currency:'USD'}]);
-    await rpc('bill2_close',[user,run.id,'delivered',{kind:'usable_result',evidenceRef:'fixture',evidenceHash:hash('result'),body:'Synthetic'}]);
-    assert.equal((await rpc('bill2_finalize',[user,run.id])).chargedCredits,7);
+    await admin.query('SELECT * FROM bill2_legacy_settle($1,$2,7)',[user,pre]);
     assert.equal(await consumed(),7);
-    const released=await rpc('bill2_prepare',[user,randomUUID(),payload]);
+    const released=await reserve(20);
     assert.equal(await consumed(),27);
-    await rpc('bill2_close',[user,released.id,'confirmed_failure',
-      {kind:'confirmed_delivery_failure',evidenceRef:'fixture-failure',evidenceHash:hash('failure'),body:null}]);
-    await rpc('bill2_finalize',[user,released.id]);
+    await admin.query('SELECT * FROM bill2_legacy_refund($1,$2)',[user,released]);
     assert.equal(await consumed(),7);
     assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,93);
     await admin.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[user]);
@@ -124,10 +110,10 @@ export async function sourceCases({admin}) {
         "SELECT pay_common_assert_purchase_facts($1,'membership_plan','gold')",[returning]),/MEMBERSHIP_FACTS_UNKNOWN/);
     }
     await admin.query("UPDATE subscription_credit_grants SET accounting_state='review_required',accounting_review_reason='refund review' WHERE id=$1",[grant]);
-    await assert.rejects(()=>rpc('bill2_prepare',[user,randomUUID(),payload]));
+    await assert.rejects(()=>admin.query("SELECT pre_deduct_id FROM atomic_pre_deduct($1,20,'fixture',gen_random_uuid())",[user]));
   }
   return ['stripe-mp-card-pack-one-time','stripe-mp-card-pack-granted-once','stripe-mp-card-pack-pre-tax-only','stripe-mp-card-cn-pack-denied','stripe-mp-card-pack-repeat-same-order','waffo-month-bill2-reserve-settle-release','waffo-year-bill2-reserve-settle-release',
-    'wallet-year-bill2-reserve-settle-release','source-refund-review-isolation','internal-member-wallet-pack-eligibility','frozen-source-amount-guard',
+    'wallet-year-reserve-settle-release','source-refund-review-isolation','internal-member-wallet-pack-eligibility','frozen-source-amount-guard',
     'external-member-after-internal-expiry','stale-internal-only-denied','cross-mode-membership-denied','expired-active-internal-history','expired-trialing-internal-history',
     'effective-membership-ambiguity-still-denied','legacy-duplicate-renewal-guard-preserved'];
 }

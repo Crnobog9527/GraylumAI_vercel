@@ -7,20 +7,11 @@ CREATE OR REPLACE FUNCTION public.content_erasure_parent_guard()
  LANGUAGE plpgsql
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE j jsonb:=to_jsonb(NEW);sid uuid;eid uuid;pid uuid;deleted boolean;
+DECLARE j jsonb:=to_jsonb(NEW);sid uuid;pid uuid;deleted boolean;
 BEGIN
- IF TG_TABLE_NAME IN ('runtime_executions','runtime_scope_material','runtime_session_history','runtime_session_batches') THEN
+ IF TG_TABLE_NAME='runtime_scope_material' THEN
   sid:=(j->>'session_id')::uuid;
   SELECT erased_at IS NOT NULL OR content_deleted_at IS NOT NULL INTO deleted FROM runtime_sessions WHERE id=sid FOR SHARE;
-  IF deleted THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
- END IF;
- IF TG_TABLE_NAME IN ('runtime_session_history','runtime_session_batches','runtime_tool_calls','runtime_history_dependencies','opc_content_versions') THEN
-  eid:=(j->>'execution_id')::uuid;
-  SELECT erased_at IS NOT NULL OR content_deleted_at IS NOT NULL INTO deleted FROM runtime_executions WHERE id=eid FOR SHARE;
-  IF deleted THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
- END IF;
- IF TG_TABLE_NAME='runtime_history_dependencies' THEN
-  SELECT erased_at IS NOT NULL OR content_deleted_at IS NOT NULL INTO deleted FROM runtime_executions WHERE id=(j->>'dependency_id')::uuid FOR SHARE;
   IF deleted THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
  END IF;
  IF TG_TABLE_NAME IN ('artifact_rounds','artifact_versions','artifact_requests','artifact_evidence','artifact_generations','artifact_chats') THEN

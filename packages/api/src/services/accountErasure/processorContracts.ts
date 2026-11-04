@@ -11,7 +11,6 @@ export const batchSchema = z.object({
   processed: count, remaining: count, manualReview: count.optional(), nextRowId: z.string().uuid().nullable().optional(),
   reason: z.enum(['call_set_open', 'billing_pending', 'content_pending', 'binding_busy', 'no_runtime_binding']).optional(),
 }).strict();
-export const detachSchema = z.union([batchSchema, z.object({ detached: z.literal(true) }).strict()]);
 export const localSchema = z.object({
   remaining: count, manualReview: count, errors: z.array(z.string().regex(/^[A-Z0-9_]{1,64}$/)).max(100),
 }).strict();

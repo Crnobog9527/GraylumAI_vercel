@@ -10,14 +10,25 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 const migrationPath = 'packages/db/migrations/0285_pay_refunded_pack_hold.sql';
 const MARK = 'PAY-REFUND-HOLD';
 // Function -> marked lines 0285 adds to it.
-const HOOKED = { 'atomic_pre_deduct(uuid,integer,text,uuid)': 1, 'bill2_payg_claim(uuid,uuid,integer,jsonb)': 1,
-  'credit_source_apply(uuid,uuid,integer,text)': 2 };
+const HOOKED = { 'atomic_pre_deduct(uuid,integer,text,uuid)': 1, 'credit_source_apply(uuid,uuid,integer,text)': 2 };
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0285', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
 const catalog = () => v(fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;');
 const hour = 3600000, iso = ms => new Date(Date.now() + ms).toISOString();
+// 0285 and 0383 patch functions by their old text; batch F dropped some of them (bill2_payg_claim, report_fee_hold(runtime_executions,..)), and a
+// patch of a missing function cannot run. A replay on the finished database leaves those patches out and applies the rest.
+const liveText = async path => {
+  let text = read(path);
+  for (const m of [...text.matchAll(/SELECT pg_temp\.e1_patch\('([^']+)',[\s\S]*?\$r\$\);\n/g)]) {
+    if (!(await v('SELECT to_regprocedure($1) v', [m[1]]))) text = text.replace(m[0], '');
+  }
+  for (const m of [...text.matchAll(/  \('(public\.[^']+)',\n(?:   .*\n){2}/g)]) {
+    if (!(await v('SELECT to_regprocedure($1) v', [m[1]]))) text = text.replace(m[0], '');
+  }
+  return text;
+};
 
 const profile = async credits => {
   const id = randomUUID();
@@ -152,33 +163,7 @@ try {
   assert.equal(await balance(u6), 0, 'credits returned after the clawback are taken back too');
   assert.deepEqual(await v(`SELECT jsonb_agg(amount ORDER BY created_at) v FROM credit_transactions WHERE source_order_id=$1
     AND ledger_type='refund_clawback'`, [late.order]), [-70, -30]);
-  // The take-back is written after the caller's own ledger row: a PAYG confirmed-failure compensation records the
-  // credits it restores, then the clawback takes them back, and the last row matches the balance.
-  const u7 = await profile(0);
-  const comp = await pack(u7, 100);
-  p = await reserve(u7, 30);
-  await c.query('SELECT * FROM bill2_legacy_settle($1,$2,$3)', [u7, p, 30]);
-  await externalRefund(comp, 're_comp');
-  assert.equal((await settle(ops, comp.order, 'clawback')).creditsTakenBack, 70);
-  const call = randomUUID(), run = randomUUID();
-  const runRow = { id: run, actor_id: u7, closed: true, outcome: 'confirmed_failure' };
-  const callRow = { id: call, run_id: run, pre_deduct_id: p, settled_at: new Date().toISOString(), charged_delta: 30 };
-  // Synthetic run/call rows exist only as records: credit_transactions triggers stay off for this one call (as in run-local.mjs).
-  await c.query('ALTER TABLE credit_transactions DISABLE TRIGGER ALL');
-  await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,bill2_call_id,idempotency_key)
-    VALUES($1,0,'adjustment','spend','bill2_spend',$2,$3)`, [u7, call, 'fixture-spend:' + call]);
-  assert.equal(await v('SELECT bill2_payg_compensate(jsonb_populate_record(NULL::bill2_runs,$1),jsonb_populate_record(NULL::bill2_calls,$2)) v',
-    [runRow, callRow]), 30);
-  await c.query('ALTER TABLE credit_transactions ENABLE TRIGGER ALL');
-  // The take-back row is written last and stamped later than the caller's rows (which share now()).
-  const tx = (await c.query(`SELECT amount,ledger_type,balance_before,balance_after,created_at FROM credit_transactions WHERE user_id=$1
-    AND amount<>0 AND (bill2_call_id=$2 OR ledger_type='refund_clawback' AND metadata ? 'creditsReturned')`, [u7, call])).rows;
-  const restored = tx.find(r => r.amount === 30), takeBack = tx.find(r => r.amount === -30);
-  assert.ok(restored && takeBack, JSON.stringify(tx));
-  assert.deepEqual([restored.balance_after, takeBack.balance_before, takeBack.balance_after, await balance(u7)].map(Number), [30, 30, 0, 0],
-    'compensation restores 0 -> 30, then the take-back 30 -> 0: the ledger chain ends at the balance');
-  assert.ok(takeBack.created_at > restored.created_at, 'the take-back comes after the compensation row');
-  report.checks.push('reservations returned after the refund stay in the hold; after a clawback they are taken back at commit, after the caller\'s own ledger row (PAYG compensation)');
+  report.checks.push('reservations returned after the refund stay in the hold; after a clawback they are taken back at commit');
 
   // The legacy Stripe refund (0041 via 0185) already claws the whole pack back without an order-linked ledger row:
   // such a pack is not held again and cannot be clawed back a second time; other credits stay spendable.
@@ -190,8 +175,8 @@ try {
   assert.equal(await spendable(u8), 40, 'an already clawed-back pack is not held again');
   await assert.rejects(() => settle(ops, legacy.order, 'clawback'), /PAY_PACK_REVIEW_NOT_HELD/);
   assert.equal(await balance(u8), 40);
-  await c.query(read(migrationPath));
-  await c.query(read('packages/db/migrations/0383_credit_grant_quarantine.sql')); // keep the current source rows (E1)
+  await c.query(await liveText(migrationPath));
+  await c.query(await liveText('packages/db/migrations/0383_credit_grant_quarantine.sql')); // keep the current source rows (E1)
   assert.equal(await v('SELECT status v FROM credit_package_sources WHERE id=$1', [legacy.source]), 'reversed',
     'rerunning 0285 marks such a source reversed');
   report.checks.push('a pack already clawed back by the legacy Stripe refund is not held, cannot be clawed back twice, and its source is marked reversed');
@@ -303,8 +288,8 @@ try {
   // Reapplying 0285 after the full chain is a structural no-op; each hooked function carries the marker once.
   // 0383 (ARCH-FIX E1) patches 0285's credit_source_rows, so it is reapplied after it.
   const after = await catalog();
-  await c.query(read(migrationPath));
-  await c.query(read('packages/db/migrations/0383_credit_grant_quarantine.sql'));
+  await c.query(await liveText(migrationPath));
+  await c.query(await liveText('packages/db/migrations/0383_credit_grant_quarantine.sql'));
   assert.deepEqual(await catalog(), after);
   for (const [fn, lines] of Object.entries(HOOKED)) {
     const src = await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]);

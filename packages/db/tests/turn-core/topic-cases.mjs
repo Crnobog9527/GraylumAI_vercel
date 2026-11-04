@@ -112,27 +112,11 @@ export async function topicCases(t){
   await c.query('update opc_businesses set archived_at=null where id=$1',[src.business]);
   report.checks.push('topic: a failed turn, a reply with no topics, another conversation, another account or an archived business is no source');
  }
- // 3c. A request id a topic turn holds is refused by the old admission (that function goes with the old path in V2-12 F); the old-path refusals in turn_open are gone.
+ // 3b. A handle that is no turn is never read as one.
  {
-  const a=await account(1000),src=await source(a);
-  assert.equal(await balance(a),1000,'nothing frozen');
-  const {request}=await topicTurn(a,src,'words');
-  for(const name of ['runtime_admit_commit','runtime_admit']){
-   const args=name==='runtime_admit'?'$1,$2,$3,$4,$5':'$1,$2,$3,$4,$5,null';
-   assert.match(await refusal(one(`select ${name}(${args}) v`,[a.actor,src.topicSession,request,'{}','{}'])),/OPC_REQUEST_CONFLICT/,name);
-  }
-  // A chat that is no topic turn is unchanged.
-  const free=await account(1000),o=await open(free,{pol:pol()});
-  assert.equal(o.state,'running');
-  report.checks.push('topic: a request id held by one path is refused by the other, both ways, before any charge');
- }
- // 3b. An old execution in the same workspace stays what it was: its event names the execution, no turn.
- {
-  const a=await account(1000),src=await source(a),proposal=item(src),eid=randomUUID();
-  await c.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result)
-   values($1,$2,$3,$4,'{}',0,'completed',$5)`,[eid,a.actor,src.topicSession,randomUUID(),{kind:'usable_result',body:JSON.stringify([proposal])}]);
+  const a=await account(1000),eid=randomUUID();
   assert.equal(await one('select opc_data_source_turn($1,$2) v',[a.actor,eid]),null);
-  report.checks.push('topic: a handle that is an old execution is never read as a turn');
+  report.checks.push('topic: a handle that is no turn (an old execution id) is never read as a turn');
  }
  // 4. The opening's handle; deleting the conversation erases its events and draft text like an execution's.
  {

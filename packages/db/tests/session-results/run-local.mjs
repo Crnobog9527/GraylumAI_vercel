@@ -9,6 +9,7 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+import {refusalsMigration} from '../refusal-codes/migration.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -46,7 +47,7 @@ try {
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
  ok(sql(migration));
- ok(sql(read('packages/db/migrations/0504_refusals_no_postgrest_retry.sql'))); // the version conflict answers PT409 (0338 replays it with 40001)
+ ok(sql(refusalsMigration())); // the version conflict answers PT409 (0338 replays it with 40001)
  assert.deepEqual(snapshot(),finalCatalog,'repeat 0338 preserves complete catalog');
  const interrupted=sql(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'C1_TEST_ROLLBACK'; END $$; COMMIT;"));
  assert.notEqual(interrupted.status,0);assert.match(interrupted.stderr,/C1_TEST_ROLLBACK/);

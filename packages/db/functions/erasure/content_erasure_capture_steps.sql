@@ -10,9 +10,9 @@ CREATE OR REPLACE FUNCTION public.content_erasure_capture_steps(steps jsonb)
 AS $function$
 -- R9 erase provenance
 
-DECLARE st record;f record;v jsonb;meta jsonb;result jsonb:=steps;changed boolean;information_changed boolean;ids uuid[];
+DECLARE st record;f record;v jsonb;meta jsonb;result jsonb:=steps;changed boolean;information_changed boolean;ids uuid[]:='{}';
 BEGIN
- ids:=ARRAY(SELECT id FROM runtime_executions WHERE content_deleted_at IS NOT NULL OR erased_at IS NOT NULL);
+ -- CORE-PATH-V2 V2-12 F: the old executions that provenance could name are gone, so no capture field names a deleted one.
  IF jsonb_typeof(steps) IS DISTINCT FROM 'object' THEN RETURN steps; END IF;
  FOR st IN SELECT * FROM jsonb_each(steps) LOOP
   v:=st.value;changed:=false;information_changed:=false;
