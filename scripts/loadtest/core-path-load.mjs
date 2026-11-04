@@ -6,6 +6,11 @@
 //   LOADTEST_ACCOUNTS_FILE    a JSON file OUTSIDE the repository: { "accounts": [{ "token", "sessionId", "moduleId"?, "stepId"? }] },
 //                             one account per user (100 for the full run); tokens are read here and never printed or logged.
 //                             `cookie` (optional): the session cookie header; tRPC reads (library) need it, POST /api/turn uses the token
+//   LOADTEST_AUTH_URL, LOADTEST_ALLOWED_AUTH_HOST, LOADTEST_ANON_KEY: the staging Supabase URL, its exact host and its public anon key.
+//                             With them, every account's session is refreshed before each stage (lib/auth.mjs) and the rotated tokens
+//                             are written back to the accounts file; a --series run (over an hour, tokens live one hour) needs them.
+//   LOADTEST_CREDENTIALS_FILE (optional, OUTSIDE the repository): { "accounts": [{ "id", "email", "password" }] }, used only for an
+//                             account whose refresh token no longer works.
 // Without --go it only prints the plan (a dry run); a run needs --go, which the controller gives after the switch to the new path.
 // Usage: node scripts/loadtest/core-path-load.mjs --out <dir outside the repository> [--series | --stage 30] [--go] [--cooldown-ms 600000]
 //   [--mix chat:5,coach:3,library:2]
@@ -17,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { STAGES, STAGE_MS, RAMP_MS, COOLDOWN_MS, MIX, kindsOf, thinkMs, parseSse, outcomeOf, summarizeStage } from './lib/core.mjs';
 import { classifyFixedOverhead } from './lib/connections.mjs';
 import { assertOutsideRepo } from './reset-accounts.mjs';
+import { assertAuthHost, refreshAccounts } from './lib/auth.mjs';
 
 const flag = (name, dflt) => { const i = process.argv.indexOf('--' + name); return i > 0 ? process.argv[i + 1] : dflt; };
 const has = name => process.argv.includes('--' + name);
@@ -104,6 +110,17 @@ export async function runStage({ base, accounts, kinds, record, deadline, stoppe
   }));
 }
 
+/** The per-stage refresh, or null when the auth settings are not given. Reads nothing secret into output. */
+function signIns(accounts, count, file) {
+  const authUrl = process.env.LOADTEST_AUTH_URL, anonKey = process.env.LOADTEST_ANON_KEY;
+  if (!authUrl || !anonKey) return null;
+  assertAuthHost(authUrl, process.env.LOADTEST_ALLOWED_AUTH_HOST);
+  const credentialsFile = process.env.LOADTEST_CREDENTIALS_FILE;
+  if (credentialsFile) assertOutsideRepo(credentialsFile);
+  const credentials = credentialsFile ? JSON.parse(readFileSync(credentialsFile, 'utf8')).accounts ?? [] : [];
+  return () => refreshAccounts({ accounts, count, file, authUrl, anonKey, credentials });
+}
+
 async function main() {
   const out = flag('out', null);
   if (!out) throw new Error('--out <dir outside the repository> is required');
@@ -115,9 +132,16 @@ async function main() {
     : `plan: ${stages.map(s => s.vus).join(' -> ')} users, ${STAGE_MS / 60000} min each, cooling ${COOLDOWN_MS / 60000} min between`);
   if (!has('go')) { console.log('dry run (no --go): nothing was sent'); return; }
   const base = assertStaging(process.env.LOADTEST_BASE_URL ?? '', process.env.LOADTEST_ALLOWED_HOST);
-  const accounts = JSON.parse(readFileSync(process.env.LOADTEST_ACCOUNTS_FILE ?? '', 'utf8')).accounts ?? [];
+  const accountsFile = process.env.LOADTEST_ACCOUNTS_FILE ?? '';
+  // The refresh writes rotated tokens back into this file: it must live outside the repository, as the results do.
+  assertOutsideRepo(accountsFile);
+  const accounts = JSON.parse(readFileSync(accountsFile, 'utf8')).accounts ?? [];
   const most = Math.max(...stages.map(s => s.vus));
   if (accounts.length < most) throw new Error(`need ${most} accounts, the file has ${accounts.length}`);
+  // The whole list goes in (the file is written back whole); only the accounts this run uses are refreshed.
+  const freshen = signIns(accounts, most, accountsFile);
+  if (!freshen && has('series'))
+    throw new Error('a --series run outlasts the one-hour tokens: set LOADTEST_AUTH_URL, LOADTEST_ALLOWED_AUTH_HOST and LOADTEST_ANON_KEY');
   mkdirSync(out, { recursive: true });
   // One driver at a time against staging: the same accounts in two runs mix their input (and it is the single-lane rule).
   const lock = openSync(join(out, 'RUNNING.lock'), 'wx');
@@ -129,6 +153,13 @@ async function main() {
       const records = [];
       const record = r => { records.push(r); appendFileSync(file, JSON.stringify({ t: Date.now(), ...r }) + '\n'); };
       const turnsWanted = Number(flag('turns', 12));
+      // Fresh tokens for every account before the stage, ahead of its clock; a stage never runs on a token that could expire in it.
+      if (freshen) {
+        const signed = await freshen();
+        console.log(`stage ${stage.index}: sessions refreshed ${signed.refreshed}, signed in again ${signed.signedIn}, failed ${signed.failed}`);
+        if (signed.failed)
+          throw new Error(`stage ${stage.index}: ${signed.failed} accounts could not sign in ${JSON.stringify(signed.codes)}; nothing was sent`);
+      }
       const deadline = Date.now() + (calibrate ? 600_000 : STAGE_MS);
       let abort = false;
       const watch = setInterval(() => {

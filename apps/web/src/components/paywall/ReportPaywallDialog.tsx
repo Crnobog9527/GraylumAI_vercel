@@ -15,6 +15,7 @@ import { trpc } from '@/trpc/client';
 import { profileTabHref } from '@/lib/profile-tabs';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as REPORT_COPY } from './reportPaywallCopy';
 import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, type GoldScene } from './goldScenePaywallCopy';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
  * Scene 1 of the paywall design v25: a free user who confirmed every step asks for the report.
@@ -121,13 +122,13 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
           {!inlinePurchase ? (
             <div className="grid gap-2 rounded-xl border p-3 text-sm" data-testid="paywall-upgrade-via-subscription"
               style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
-              {memberLevel === 'loading' ? <p>正在确认你的会员状态…</p> : <>
+              {memberLevel === 'loading' ? <PageSkeleton compact rows={2} label="会员状态读取中"/> : <>
                 <p>{memberLevel === 'pro' ? '你现在是 Pro 会员，升级到 Gold 在订阅页完成：原 Pro 到本期结束，已有积分保留。'
                   : '请到订阅页开通或升级到 Gold。'}</p>
                 <Button asChild><a href={profileTabHref('subscription')} target="_blank" rel="noopener">去订阅页升级到 Gold</a></Button>
               </>}
             </div>
-          ) : checkout.loading ? <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>正在读取会员方案…</p>
+          ) : checkout.loading ? <PageSkeleton compact rows={3} label="会员方案读取中"/>
             : checkout.catalogFailed ? <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>{COPY.catalogFailed}</p>
               : (
                 <>

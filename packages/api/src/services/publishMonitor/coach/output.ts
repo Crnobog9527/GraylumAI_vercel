@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { isRateMetric } from './funnel';
+import { foreignPlatforms } from './platformNames';
 
 const DAY7_METRICS = ['views', 'likes', 'comments', 'shares', 'saves', 'followers_gained', 'engagement_rate'];
 const STAGES = ['starting', 'growing', 'mature'];
@@ -34,6 +35,8 @@ export type PackView = { mode: string; cadence: string; limits: { experiments_ma
   ledger: { to_review: Array<{ id: string; result?: { matched_posts: string[] } }> };
   scoreboard?: Array<{ pillar: string; platform: string }>; history_scoreboard?: Array<{ pillar: string; platform: string }>;
   stage: { followers: Array<{ platform: string }> };
+  /** Platform code -> the only name the prose may use (absent in a pack built before this field: no name check). */
+  platforms?: Record<string, string>;
   this_period?: { settled_posts: Array<{ post_id: string }>; too_new: Array<{ post_id: string }> };
   untagged_posts?: Array<{ post_id: string }> };
 
@@ -68,11 +71,14 @@ export function checkOutput(text: string, pack: PackView): CheckedOutput {
   const out: CheckedOutput = { body: text.slice(0, cut).trimEnd(), parsed: false, mode_mismatch: false,
     rejected: [], diagnoses: [], verdict_notes: [], experiments: [], tags: [], pillar_mix_proposal: null,
     strategy_proposal: null, stage_suggestion: null };
-  if (!match) return { ...out, rejected: [{ path: '', reason: 'no_block' }] };
+  // The prose must not name a platform the pack does not have; the body is kept, the slip is only reported (advisory: a quoted title can trip it).
+  if (pack.platforms) out.rejected = foreignPlatforms(out.body, pack.platforms).map(code => ({ path: 'body', reason: `platform_not_in_pack:${code}` }));
+  const stop = (reason: string) => ({ ...out, rejected: [...out.rejected, { path: '', reason }] });
+  if (!match) return stop('no_block');
   let raw: unknown;
-  try { raw = JSON.parse(match[1]!); } catch { return { ...out, rejected: [{ path: '', reason: 'json' }] }; }
+  try { raw = JSON.parse(match[1]!); } catch { return stop('json'); }
   const top = outputSchema.safeParse(raw);
-  if (!top.success) return { ...out, rejected: [{ path: '', reason: 'shape' }] };
+  if (!top.success) return stop('shape');
   const o = top.data, reject = (path: string, reason: string) => { out.rejected.push({ path, reason }); };
   out.parsed = true;
   out.mode_mismatch = o.mode !== pack.mode;

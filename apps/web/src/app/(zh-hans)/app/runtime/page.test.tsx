@@ -10,6 +10,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/trpc/client', () => ({ trpc: { runtime: { view: { useQuery: () => h.view } } } }));
 vi.mock('./turn-workspace', () => ({ TurnWorkspace: ({ sessionId }: { sessionId: string }) => <p>turn:{sessionId}</p> }));
 vi.mock('./work-item-workspace', () => ({ WorkItemWorkspace: ({ workItemId }: { workItemId: string }) => <p>work:{workItemId}</p> }));
+vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: ({ children }: { children: React.ReactNode }) => <div data-frame>{children}</div> }));
 import RuntimePage from './page';
 
 beforeEach(() => { h.session = 's1'; h.view = { data: undefined, error: undefined, refetch: () => Promise.resolve() }; });
@@ -22,7 +23,10 @@ it('opens a free conversation and a work item in the turn workspaces once the sc
 });
 
 it('renders no workspace before the scope has been read', () => {
-  expect(renderToStaticMarkup(<RuntimePage />)).toBe('<p>正在读取工作…</p>');
+  const html = renderToStaticMarkup(<RuntimePage />);
+  expect(html).toContain('data-frame');
+  expect(html).toContain('aria-busy="true"');
+  expect(html).not.toMatch(/正在读取|加载中/);
 });
 
 it('shows a failed read with a way to read again, never another workspace', () => {
@@ -44,5 +48,5 @@ it('tells an old conversation it is no longer shown, with a way to a new one, an
 
 it('sends a link without a conversation to the start page', () => {
   h.session = '';
-  expect(renderToStaticMarkup(<RuntimePage />)).toBe('<p>正在进入新任务…</p>');
+  expect(renderToStaticMarkup(<RuntimePage />)).toContain('aria-busy="true"');
 });

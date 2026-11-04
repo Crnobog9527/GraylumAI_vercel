@@ -65,7 +65,7 @@ async function fixture(run: (page: Page) => Promise<void>) {
 it('A5a: delayed fresh read replaces the cached dialog baseline before claiming freshness or allowing confirmation', async () => {
   await fixture(async page => {
     expect(await page.getByText(/已刷新为最新/).count()).toBe(0);
-    await ui(page.getByText(/正在读取/)).toBeVisible();
+    await ui(page.locator('[aria-busy="true"]').first()).toBeAttached(); // grey bars, no words
     await ui(page.getByText(/已刷新为最新/)).toHaveCount(0);
     await ui(page.getByRole('button', { name: '确认这一步', exact: true })).toBeDisabled();
     // The background query returns after the click; it must not be mistaken for a bound review read.

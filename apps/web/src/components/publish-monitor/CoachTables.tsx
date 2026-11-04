@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { CoachExtras, CoachSummaryLine, coachExtras, EMPTY_EXTRAS, erText, type CoachExtrasData } from './CoachExtras';
+import { CoachExtras, CoachSummaryLine, TableBlock, coachExtras, EMPTY_EXTRAS, erText, type CoachExtrasData } from './CoachExtras';
 import { formatMetric, platformName } from './labels';
 
 /**
@@ -65,11 +65,10 @@ const row = { borderColor: 'var(--border-primary)' };
 
 export function CoachTables({ coach }: { coach: CoachTable }) {
   return (
-    <div className="space-y-3 overflow-x-auto">
+    <div className="min-w-0 space-y-3">
       {coach.extras.summary && <CoachSummaryLine summary={coach.extras.summary} />}
       {coach.posts.length > 0 && (
-        <table className="w-full min-w-[540px] text-left text-xs" aria-label="本期满 7 天的作品">
-          <caption className="pb-1 text-left font-medium">本期满 7 天的作品</caption>
+        <TableBlock title="本期满 7 天的作品" label="本期满 7 天的作品" min="min-w-[540px]">
           <thead><tr><th className={th}>作品</th><th className={th}>平台</th><th className={th}>第 7 天浏览</th><th className={th}>相对该平台中位数</th>
             <th className={th}>互动率</th></tr></thead>
           <tbody>{coach.posts.map(p => (
@@ -77,11 +76,11 @@ export function CoachTables({ coach }: { coach: CoachTable }) {
               <td className="max-w-[200px] py-1 pr-3">{p.title || '（没有标题）'}</td><td className="py-1 pr-3">{platformName(p.platform)}</td>
               <td className="py-1 pr-3">{views(p.views)}</td><td className="py-1 pr-3">{relative(p.relative)}</td>
               <td className="py-1 pr-3">{erText(p.er)}</td></tr>))}</tbody>
-        </table>
+        </TableBlock>
       )}
       {coach.scores.length > 0 && (
-        <table className="w-full min-w-[540px] text-left text-xs" aria-label="内容方向成绩单">
-          <caption className="pb-1 text-left font-medium">内容方向成绩单{coach.scoreWeeks ? `（近 ${coach.scoreWeeks} 周，满 7 天的作品）` : ''}</caption>
+        <TableBlock title={`内容方向成绩单${coach.scoreWeeks ? `（近 ${coach.scoreWeeks} 周，满 7 天的作品）` : ''}`} label="内容方向成绩单"
+          min="min-w-[540px]">
           <thead><tr><th className={th}>内容方向</th><th className={th}>平台</th><th className={th}>作品数</th><th className={th}>浏览中位数</th>
             <th className={th}>相对该平台中位数</th><th className={th}>互动率中位数</th></tr></thead>
           <tbody>{coach.scores.map(r => (
@@ -89,11 +88,10 @@ export function CoachTables({ coach }: { coach: CoachTable }) {
               <td className="py-1 pr-3">{r.pillar}</td><td className="py-1 pr-3">{platformName(r.platform)}</td><td className="py-1 pr-3">{r.samples}</td>
               <td className="py-1 pr-3">{views(r.views)}</td><td className="py-1 pr-3">{relative(r.relative)}</td>
               <td className="py-1 pr-3">{erText(r.er)}</td></tr>))}</tbody>
-        </table>
+        </TableBlock>
       )}
       {coach.trends.length > 0 && (
-        <table className="w-full min-w-[720px] text-left text-xs" aria-label="按平台的趋势">
-          <caption className="pb-1 text-left font-medium">按平台的趋势</caption>
+        <TableBlock title="按平台的趋势" label="按平台的趋势" min="min-w-[720px]">
           <thead><tr><th className={th}>平台</th><th className={th}>本期第 7 天浏览中位数</th><th className={th}>上期</th>
             <th className={th}>样本（本期 / 上期）</th><th className={th}>近 4 周</th>
             <th className={th}>前 4 周</th><th className={th}>变化</th><th className={th}>粉丝（现在 / 4 周前 / 8 周前）</th></tr></thead>
@@ -105,7 +103,7 @@ export function CoachTables({ coach }: { coach: CoachTable }) {
               <td className="py-1 pr-3">{views(r.recent4w)}</td><td className="py-1 pr-3">{views(r.previous4w)}</td>
               <td className="py-1 pr-3">{percent(r.change)}</td>
               <td className="py-1 pr-3">{count(r.followersNow)} / {count(r.followers4w)} / {count(r.followers8w)}</td></tr>))}</tbody>
-        </table>
+        </TableBlock>
       )}
       <CoachExtras extras={coach.extras} />
     </div>

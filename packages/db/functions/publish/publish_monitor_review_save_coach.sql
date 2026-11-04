@@ -50,7 +50,13 @@ BEGIN
    proposed:=proposed+1;
   END LOOP;
  END IF;
- -- Pillar tags: a post of this brand without a pillar, a pillar the brand's profile has.
+ -- Pillar tags: a post of this brand without a pillar, a pillar the brand's profile has. The pillars are locked (shared) first, so
+ -- a user's pillar save that deletes a key (FOR UPDATE, block D) and these tags run one after the other: a tag never lands on a
+ -- key deleted meanwhile, and a delete that comes second untags what was tagged here.
+ -- Only this user's row for this brand; a pillar save holds it for milliseconds. The wait is capped (transaction-local): past it
+ -- the save fails as any coach save failure does (the host logs it, the review itself is already delivered), never a stuck turn.
+ PERFORM set_config('lock_timeout','2000',true);
+ PERFORM 1 FROM social_coach_profiles WHERE actor_id=r.actor_id AND business_id=r.business_id FOR SHARE;
  FOR x IN SELECT value FROM jsonb_array_elements(coalesce(p_payload->'tags','[]')) LOOP
   CONTINUE WHEN coalesce(x->>'post_id','') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
   UPDATE social_post_facts f SET pillar_key=x->>'pillar_key', pillar_source='model', updated_at=clock_timestamp()

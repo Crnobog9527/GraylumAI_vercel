@@ -11,6 +11,7 @@ import { isSignedStorageUrl, startDownload } from '@/lib/library-documents/signe
 import { DocumentList, SpacePanel, UploadPanel } from './my-documents-view';
 import { DeleteConfirmDialog, DocumentDetailDialog } from './document-dialogs';
 import styles from './my-documents.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /** 资料库「我的文档」(LIB-3). Upload stays hidden until the server's upload switch is on. */
 export function MyDocuments({ scan }: { scan: ScanRecognition }) {
@@ -84,7 +85,7 @@ export function MyDocuments({ scan }: { scan: ScanRecognition }) {
       我的文档读取失败：{libraryErrorMessage(library.error)}{' '}
       <button type="button" className={styles.linkButton} onClick={() => { void library.reload(); }}>重试</button>
     </p>}
-    {library.pending && <p role="status" className={styles.hint}>正在读取我的文档…</p>}
+    {library.pending && <PageSkeleton compact rows={3} label="我的文档读取中"/>}
     <DocumentList documents={library.documents} ready={ready} busyId={busyId} scan={scan.progress}
       onOpen={setOpened} onDownload={onDownload} onPurpose={onPurpose}
       onDelete={(doc) => { setDeleteState({ pending: false, error: '' }); setConfirming(doc); }}/>

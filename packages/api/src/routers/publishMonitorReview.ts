@@ -2,9 +2,11 @@
 import {TRPCError} from '@trpc/server';
 import {z} from 'zod';
 import {adminProcedure,protectedProcedure,router} from '../trpc';
+import {checkRateLimitOrThrow} from '../services/redisRateLimiter';
 import {createSafeInternalError} from '../lib/publicError';
 import {readMembershipEntitlements} from '../services/membershipEntitlements';
 import {assertPublishMonitorEnabled} from '../services/publishMonitor/foundation';
+import {pillarsSaveInput,readPillars,savePillars} from '../services/publishMonitor/pillars';
 import {readReviewData} from '../services/publishMonitor/reviewData';
 import {readReviews,exportReview} from '../services/publishMonitor/reviewOutput';
 import {readReviewSettings,REVIEW_SWITCH,REVIEW_CAP,REVIEW_MODEL} from '../services/publishMonitor/reviewSettings';
@@ -35,6 +37,16 @@ export const publishMonitorReviewRouter=router({
  export:protectedProcedure.input(z.object({id:z.string().uuid()}).strict()).query(({ctx,input})=>safe(async()=>{
   await days(ctx.supabaseAdmin,ctx.profileId);
   return exportReview(ctx.supabaseAdmin,ctx.profileId,input.id);
+ })),
+ // Block D: the brand's content pillars, a simple setting for anyone who has the review (same gate as the list).
+ pillars:protectedProcedure.query(({ctx})=>safe(async()=>{
+  await days(ctx.supabaseAdmin,ctx.profileId);
+  return readPillars(ctx.supabaseAdmin,ctx.profileId);
+ })),
+ savePillars:protectedProcedure.input(pillarsSaveInput).mutation(({ctx,input})=>safe(async()=>{
+  await days(ctx.supabaseAdmin,ctx.profileId);
+  await checkRateLimitOrThrow(`publish-monitor-pillars:${ctx.profileId}`,'api');
+  return savePillars(ctx.supabaseAdmin,ctx.profileId,input);
  })),
  // Backend contract for PR-7's model picker; no provider request or credential read on settings access.
  adminSettings:adminProcedure.query(({ctx})=>safe(()=>readReviewSettings(ctx.supabaseAdmin))),

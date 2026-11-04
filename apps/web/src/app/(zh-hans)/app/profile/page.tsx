@@ -3,7 +3,7 @@
 import { PaymentDisputeNotice } from '@/components/profile/PaymentDisputeNotice';
 import { useState, Suspense, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { AlertTriangle, Loader2, Menu, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Menu, RefreshCw } from 'lucide-react';
 import { logClientDevError } from '@/lib/client-log';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,6 +38,7 @@ import { useBanner } from '@/hooks/use-banner';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import { isProfileTab, withProfileTab, type ProfileTab } from '@/lib/profile-tabs';
 import { ProfileLoadError } from '@/components/profile/ProfileLoadError';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -118,9 +119,7 @@ function ProfilePageContent() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
-        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-      </div>
+      <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}><PageSkeleton rows={6} label="个人中心读取中" /></div>
     );
   }
 
@@ -285,9 +284,7 @@ function ProfilePageContent() {
 export default function ProfilePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
-        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-      </div>
+      <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}><PageSkeleton rows={6} label="个人中心读取中" /></div>
     }>
       <ProfilePageContent />
     </Suspense>

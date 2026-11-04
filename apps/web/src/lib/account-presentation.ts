@@ -3,10 +3,10 @@ interface ProfileQueryLike {
   isError?: boolean;
 }
 
-// 会员等级只在真正读到资料后显示；读取中或失败时显示中性状态，不用默认等级冒充。
+// 会员等级只在真正读到资料后显示；读取中不显示文字（页面不出现“读取中”），失败时显示中性提示，不用默认等级冒充。
 export function membershipText(profile: ProfileQueryLike, freeLabel = '普通会员', paidLabel = '会员账户'): string {
   if (profile.data) return profile.data.membership_level === 'free' ? freeLabel : paidLabel;
-  return profile.isError ? '账户信息读取失败' : '正在读取账户…';
+  return profile.isError ? '账户信息读取失败' : '';
 }
 
 // 没读到资料时返回 null，由页面决定不显示名字，而不是显示"用户"。

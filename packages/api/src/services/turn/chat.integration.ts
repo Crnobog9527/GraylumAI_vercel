@@ -121,9 +121,9 @@ const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.0000
 const admit = async () => ({ ok: true as const });
 type NewWork = ChatDeps['newWork'];
 async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier;
-  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; images?: string[]; requestId?: string }) {
+  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; images?: string[]; requestId?: string; slots?: CounterStore }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport: input.transport,
+  await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots: input.slots ?? slots, transport: input.transport,
     gate: { classify: input.gate ?? allowGate }, newWork: input.newWork ?? { message: admit, calls: admit } },
   { actorId: input.actor, sessionId: input.session, requestId: input.requestId ?? randomUUID(), text: input.text,
     ...(input.images ? { images: input.images } : {}) }, e => { events.push(e); input.onEvent?.(e); }));
@@ -277,6 +277,32 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a payg profile approved for another use does no
   const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
   expect(out.events).toEqual([{ type: 'error', code: 'TURN_MODEL_NOT_ADMITTED' }]);
   expect(transport).not.toHaveBeenCalled();
+});
+
+it('RUNTIME: CORE-PATH-V2 3.3.2 item 10: the model call takes its in-flight limit from runtime_payg.modelConcurrency, 150 without one', async () => {
+  // A counter that reports `first` live calls on its first take and one after: a call within the limit takes once; a call over it
+  // gives the slot back, waits 100 ms and takes again.
+  const takesWith = async (first: number, configured?: number) => {
+    const f = await setup();
+    if (configured !== undefined) await db.query("update system_settings set value=jsonb_set(value,'{modelConcurrency}',$2) where key=$1",
+      [RUNTIME_PAYG_SETTING, JSON.stringify({ [MODEL]: configured })]);
+    clearCatalogCache();
+    let takes = 0;
+    const counter: CounterStore = { take: async () => takes++ === 0 ? first : 1, drop: async () => undefined };
+    const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', slots: counter,
+      transport: async () => sse('gen-limit-' + randomUUID(), ['Synthetic answer']) });
+    expect(out.events.at(-1), JSON.stringify(out.events)).toMatchObject({ type: 'result' });
+    return takes;
+  };
+  // No value: 150 in flight is within the limit (the old fixed 20 would have waited), 151 is over it.
+  expect(await takesWith(150)).toBe(1);
+  expect(await takesWith(151)).toBe(2);
+  // The configured value of the model.
+  expect(await takesWith(2, 2)).toBe(1);
+  expect(await takesWith(3, 2)).toBe(2);
+  // A value that is not a usable limit falls back to 150; the turn is still admitted.
+  expect(await takesWith(150, 0)).toBe(1);
+  expect(await takesWith(151, 0)).toBe(2);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-4a: the balance is held against the start threshold L and the freeze is min(G, balance)', async () => {

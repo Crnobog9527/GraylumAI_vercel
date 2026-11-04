@@ -15,7 +15,7 @@ import { readPricingStates, type PricingDeps } from './admission/pricingAdmissio
 import { admitReasoning } from './admission/reasoningAdmission';
 import type { ReasoningPolicy } from './admission/reasoningPolicy';
 import { TurnStop, type ModelCall } from './call';
-import { DEFAULT_MODEL_CONCURRENCY, QuoteError, routeLimits, RUNTIME_PAYG_SETTING, type Row } from './quote';
+import { modelConcurrency, QuoteError, routeLimits, RUNTIME_PAYG_SETTING, type Row } from './quote';
 
 /*
  * CORE-PATH-V2 V2-7b: the quote of one compare column, review seat or summary on the turn path, as chatQuote (2.8): the
@@ -87,7 +87,7 @@ export async function fusionQuote(admin: SupabaseClient, input: { configuration:
     modelId: input.modelId, model, q: unit.creditsPerUsd, multiplier, upperUsd, pricing: nominal, phase: input.phase,
     identity: { provider: 'openrouter', account: openRouterAccount(input.key), model, protocol: 'openrouter-chat-v1',
       providerLimits: limits, outputLimit, upperUsd },
-    policy: { model, providerLimits: limits, outputLimit }, outputLimit, reasoning, concurrency: DEFAULT_MODEL_CONCURRENCY,
+    policy: { model, providerLimits: limits, outputLimit }, outputLimit, reasoning, concurrency: modelConcurrency(parsed.data, model),
     profile: { policyId: RUNTIME_PAYG_SETTING, policyVersion: parsed.data.policyVersion, profileVersion: profile.profileVersion,
       evidenceVersion: profile.evidenceVersion, pricingHash: state.snapshot.pricingHash, endpointTag: profile.endpointTag,
       nominalPricing: nominal, templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,

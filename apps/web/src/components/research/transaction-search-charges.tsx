@@ -6,6 +6,7 @@ import { trpc } from "@/trpc/client";
 import { toSearchCharges } from "./research-api";
 import { SearchCharges } from "./search-charges";
 import styles from "./research.module.css";
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
  * Under one AI spend entry of the credit record: a "搜索明细" toggle that loads that entry's search calls only
@@ -20,7 +21,7 @@ export function TransactionSearchCharges({ transactionId }: { transactionId: str
       <button type="button" className={styles.linkButton} aria-expanded={open} onClick={() => setOpen(value => !value)}>
         {open ? "收起搜索明细" : "搜索明细"}
       </button>
-      {open && (charges.isPending ? <p className={styles.hint}>正在读取…</p>
+      {open && (charges.isPending ? <PageSkeleton compact rows={2} label="搜索明细读取中" />
         : charges.error ? <p role="alert" className={styles.problem}>搜索明细没有读到，请稍后再试。</p>
           : items.length === 0 ? <p className={styles.hint}>这条记录里没有搜索。</p>
             : <SearchCharges charges={items} />)}

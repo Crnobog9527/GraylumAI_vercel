@@ -8,6 +8,7 @@ import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { trpc } from '@/trpc/client';
 import { dataErrorMessage, errorCode, formatDay, formatMetric, metricLabel } from './labels';
 import { coachTable, CoachTables, EMPTY_COACH, type CoachTable } from './CoachTables';
+import { PillarSettings } from './PillarSettings';
 
 /**
  * PUBLISH-MONITOR PR-7 (plan §5): the weekly reviews and, for Gold, the automatic weekly review switch. The written
@@ -51,6 +52,7 @@ export function ReviewPanel({ gold }: { gold: boolean }) {
       <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
         想现在就复盘，可以在<Link className="underline" href="/app/positioning">对话</Link>里说“帮我复盘最近的作品”，按对话正常扣积分。</p>
       {gold && <AutoReviewSwitch />}
+      {open && <PillarSettings />}
       {features.isPending ? <ReviewSkeleton />
         : !open ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>每周复盘还没有开放。</p>
         : reviews.isPending ? <ReviewSkeleton />

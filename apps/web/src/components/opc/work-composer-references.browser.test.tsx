@@ -222,7 +222,7 @@ it('says so and lets Enter send when a reference does not fit the length limit',
 it('does not send while the document list is still loading', () => open(true, async page => {
   await page.evaluate(() => { (window as unknown as { listLoading: boolean }).listLoading = true; });
   await page.keyboard.type('参考@周');
-  await ui(menu(page)).toContainText('正在读取资料库');
+  await ui(menu(page).locator('[aria-busy="true"]')).toBeAttached(); // grey bars, no words
   await page.keyboard.press('Enter');
   expect(await read<string[]>(page, 'sent')).toEqual([]);
   expect(await read<string>(page, 'value')).toBe('参考@周');

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { trpc } from '@/trpc/client';
 import { dataErrorMessage, errorCode, platformName } from './labels';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
  * PUBLISH-MONITOR: add a brand account without adopting a topic first (Owner 2026-10-23). It hangs on one of the user's
@@ -49,7 +50,7 @@ export function AddAccountForm({ onAdded }: { onAdded: (projectId: string) => vo
   const [businessId, setBusinessId] = useState('');
   const [platform, setPlatform] = useState<string>(''), [account, setAccount] = useState('');
   const add = trpc.publishMonitor.addAccount.useMutation();
-  if (profiles.isLoading) return <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>正在读取定位档案…</p>;
+  if (profiles.isLoading) return <PageSkeleton compact rows={2} label="定位档案读取中" />;
   if (profiles.error) return <p role="alert" className="text-sm" style={{ color: 'var(--color-error)' }}>
     暂时读不到你的定位档案，请稍后重试。</p>;
   if (brands.length === 0) return <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>

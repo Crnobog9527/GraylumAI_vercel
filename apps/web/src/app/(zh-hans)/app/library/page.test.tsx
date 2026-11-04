@@ -22,7 +22,7 @@ function expectUnknownCounts(html:string,text:string){
 }
 it('shows unknown counts while loading, without claiming an empty library',()=>{
  state.library={...state.library,isSuccess:false,isPending:true,data:undefined};
- const {html,text}=render();expectUnknownCounts(html,text);expect(text).toContain('正在读取资料库');
+ const {html,text}=render();expectUnknownCounts(html,text);expect(html).toContain('aria-busy="true"');expect(text).not.toContain('正在读取');
 });
 it.each(['FORBIDDEN','PRECONDITION_FAILED','INTERNAL_SERVER_ERROR'])('keeps %s separate from true zero counts',code=>{
  state.library={...state.library,isSuccess:false,data:undefined,error:{data:{code},message:'当前资料暂不可用。'}};

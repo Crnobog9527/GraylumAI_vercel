@@ -32,10 +32,12 @@ it("points at 生成完整报告 only while the server switch shows that entry",
 
 it("says 暂未开放 only when the switch is read and off: loading and failed reads get their own wording", () => {
   state.available = undefined;
-  expect(renderToStaticMarkup(<ReportFlowNotice kind="next" />)).toBe(REPORT_FLOW_TEXT.loading);
+  const loading = renderToStaticMarkup(<ReportFlowNotice kind="next" />);
+  expect(loading).toContain('aria-busy="true"'); // grey bar, no words
+  expect(loading).not.toContain("暂未开放");
   state.error = true;
   expect(renderToStaticMarkup(<ReportFlowNotice kind="next" />)).toBe(REPORT_FLOW_TEXT.failed);
-  expect(REPORT_FLOW_TEXT.loading + REPORT_FLOW_TEXT.failed).not.toContain("暂未开放");
+  expect(REPORT_FLOW_TEXT.failed).not.toContain("暂未开放");
 });
 
 it("keeps the old footer wording for a flow without a report", () => {

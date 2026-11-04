@@ -159,7 +159,8 @@ describe('data-use consent card', () => {
   it('shows reading, not "off", while loading', () => {
     state.query = { data: undefined, isLoading: true, isError: false, isFetching: true, refetch };
     const html = render();
-    expect(html).toContain('正在读取');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).not.toContain('正在读取');
     expect(html).not.toContain('role="switch"');
   });
 

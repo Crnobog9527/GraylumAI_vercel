@@ -7,6 +7,7 @@ import { libraryErrorMessage } from '@/lib/library-documents/format';
 import { isSignedStorageUrl } from '@/lib/library-documents/signed-url';
 import { DocumentReader } from './document-reader';
 import styles from './my-documents.module.css';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 function Dialog({ label, title, onClose, closable = true, children }: {
   label: string; title: string; onClose: () => void; closable?: boolean; children: ReactNode;
@@ -71,7 +72,7 @@ function ImagePreview({ doc }: { doc: LibraryDocument }) {
     return () => { live = false; };
   }, [doc.id, mutateAsync]);
   if (error) return <p role="alert" className={styles.error}>{error}</p>;
-  if (!url) return <p className={styles.hint}>正在加载预览…</p>;
+  if (!url) return <PageSkeleton compact rows={3} label="预览读取中"/>;
   // Private signed URL on the storage origin; plain <img>, no image optimizer or server decoding.
   return <img className={styles.image} src={url} alt={doc.filename ?? '图片预览'} referrerPolicy="no-referrer"/>;
 }

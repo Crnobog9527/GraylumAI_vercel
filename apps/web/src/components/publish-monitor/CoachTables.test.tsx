@@ -81,10 +81,92 @@ describe('the brand review tables', () => {
     expect(coach.extras.worst.map(p => p.postId)).toEqual(['a']);
     const html = renderToStaticMarkup(<CoachTables coach={coach} />);
     const text = html.replace(/<[^>]*>/g, '');
-    for (const words of ['本周最好的作品', '本周最差的作品', '单条诊断', '五分钟上手', '6 秒', '28 秒', '21.4%', '11%', '第 4 秒', '开头留人', '2 秒跳出率 62%（参考线 ≤50%）', '3 秒留存 31%（参考线 ≥45%，自己中位数的 0.80 倍）', '点赞 12', '平均观看 6 秒（参考线 ≥5 秒）', '完播率 11%（自己中位数的 0.50 倍）', '开头：你可能一直做错了这一步', '11/01', '诊断参考线来源：行业经验值（第三方），非平台官方',
+    for (const words of ['本周最好的作品', '本周最差的作品', '单条诊断', '五分钟上手', '6 秒', '28 秒', '21.4%', '11%', '第 4 秒', '开头留人', '2 秒跳出率 62%（参考线 ≤50%）', '3 秒留存 31%（参考线 ≥45%，自己中位数的 0.80 倍）', '点赞 12', '平均观看 6 秒（参考线 ≥5 秒）', '完播率 11%（无参考线，自己中位数的 0.50 倍）', '开头：你可能一直做错了这一步', '11/01', '诊断参考线来源：行业经验值（第三方），非平台官方',
       '上周实验完成情况', '开头先给结论', '还看不出', '符合条件的作品不到 3 条', '2 条', '1.12 倍', '再观察一期',
       '进行中：每周多发一条（10/27–11/09）', '10/26 结论：标题带数字 · 有效']) expect(text).toContain(words);
     for (const code of ['samples_lt_3', 'inconclusive', 'extended', 'worked', 'hook<', 'made_up', 'bounce_2s']) expect(html).not.toContain(code);
+  });
+
+  it('says the source of the diagnosis lines, or that there is none; every judged layer\'s line is shown, not only the stuck one', () => {
+    const noHandbook = { ...pack, diagnostics: { posts: [{ post_id: 'n1', platform: 'tiktok', captured_on: '2026-11-02', video_seconds: 28,
+      rates: { like_rate: 0.04, share_rate: 0.002, complete_rate: 0.1 }, vs_own_median: { like_rate: 1.2 }, stuck_layer: 'complete',
+      layer_results: [{ layer: 'hook', name: '开头留人', status: 'pass', line: { like_rate: { min: 0.03 } } },
+        { layer: 'complete', name: '完播', status: 'fail', line: { complete_rate: { min: 0.25 } } }] }], handbook: [] } };
+    const text = renderToStaticMarkup(<CoachTables coach={coachTable(noHandbook)} />).replace(/<[^>]*>/g, '');
+    // Lines were used but the pack names no handbook: the source is not recorded.
+    expect(text).toContain('诊断参考线来源：手册参考线（来源未记录）');
+    // The stuck layer's line, another layer's line, a metric without one, and the own-median comparison.
+    for (const words of ['完播率 10%（参考线 ≥25%）', '点赞率 4%（参考线 ≥3%，自己中位数的 1.20 倍）', '分享率 0.2%（无参考线）']) expect(text).toContain(words);
+    expect(renderToStaticMarkup(<CoachTables coach={coachTable(pack)} />).replace(/<[^>]*>/g, ''))
+      .toContain('诊断参考线来源：行业经验值（第三方），非平台官方');
+    // A draft handbook (or too few views) judges nothing: its source is not claimed, and a count never says 无参考线.
+    const draft = { ...pack, diagnostics: { posts: [{ post_id: 'n1', platform: 'tiktok', rates: { likes: 12, like_rate: 0.04 }, stuck_layer: null,
+      layer_results: [{ layer: 'hook', name: '开头留人', status: 'unknown', line: null }] }],
+    handbook: [{ platform: 'tiktok', calibration: 'draft', source: '行业经验值（第三方），非平台官方' }] } };
+    const draftText = renderToStaticMarkup(<CoachTables coach={coachTable(draft)} />).replace(/<[^>]*>/g, '');
+    expect(draftText).toContain('本期没有手册参考线');
+    expect(draftText).not.toContain('行业经验值');
+    expect(draftText).toContain('点赞 12；');
+    expect(draftText).toContain('点赞率 4%（无参考线）');
+    // A confirmed handbook without a source: its lines are used, the page says the source is not recorded (and never "no handbook line").
+    const unsourced = { ...pack, diagnostics: { posts: [{ post_id: 'n1', platform: 'tiktok', rates: { like_rate: 0.04 }, stuck_layer: null,
+      layer_results: [{ layer: 'hook', name: '开头留人', status: 'pass', line: { like_rate: { min: 0.03 } } }] }],
+    handbook: [{ platform: 'tiktok', calibration: 'owner_confirmed', source: null }] } };
+    const unsourcedText = renderToStaticMarkup(<CoachTables coach={coachTable(unsourced)} />).replace(/<[^>]*>/g, '');
+    expect(unsourcedText).toContain('诊断参考线来源：手册参考线（来源未记录）');
+    expect(unsourcedText).not.toContain('本期没有手册参考线');
+    expect(unsourcedText).toContain('点赞率 4%（参考线 ≥3%）');
+    // Two platforms: only the one whose lines were used speaks; a draft handbook that judged nothing does not name its source.
+    const mixed = { ...pack, diagnostics: { posts: [
+      { post_id: 'n1', platform: 'tiktok', rates: { like_rate: 0.04 }, stuck_layer: null,
+        layer_results: [{ layer: 'hook', name: 'A', line: { like_rate: { min: 0.03 } } }] },
+      { post_id: 'n2', platform: 'instagram', rates: { like_rate: 0.04 }, stuck_layer: null, layer_results: [{ layer: 'hook', name: 'A', line: null }] }],
+    handbook: [{ platform: 'tiktok', calibration: 'owner_confirmed', source: null },
+      { platform: 'instagram', calibration: 'draft', source: '草稿手册来源' }] } };
+    const mixedText = renderToStaticMarkup(<CoachTables coach={coachTable(mixed)} />).replace(/<[^>]*>/g, '');
+    expect(mixedText).toContain('诊断参考线来源：手册参考线（来源未记录）');
+    expect(mixedText).not.toContain('草稿手册来源');
+    // One platform with a source and one without: both are said.
+    const both2 = { ...mixed, diagnostics: { ...mixed.diagnostics, handbook: [{ platform: 'tiktok', source: '甲来源' }, { platform: 'instagram', source: null }],
+      posts: mixed.diagnostics.posts.map(p => ({ ...p, layer_results: [{ layer: 'hook', name: 'A', line: { like_rate: { min: 0.03 } } }] })) } };
+    expect(renderToStaticMarkup(<CoachTables coach={coachTable(both2)} />).replace(/<[^>]*>/g, '')).toContain('诊断参考线来源：甲来源；另有手册参考线（来源未记录）');
+    // Two layers with the same metric: the stuck layer's line is shown.
+    const both = { ...pack, diagnostics: { posts: [{ post_id: 'n1', platform: 'tiktok', rates: { like_rate: 0.04 }, stuck_layer: 'b',
+      layer_results: [{ layer: 'a', name: 'A', line: { like_rate: { min: 0.03 } } }, { layer: 'b', name: 'B', line: { like_rate: { min: 0.05 } } }] }],
+    handbook: [] } };
+    expect(renderToStaticMarkup(<CoachTables coach={coachTable(both)} />).replace(/<[^>]*>/g, '')).toContain('点赞率 4%（参考线 ≥5%）');
+  });
+
+  it('each table slides sideways in its own box, and the title and summary line do not scroll with it', () => {
+    const html = renderToStaticMarkup(<CoachTables coach={coachTable(pack)} />);
+    const tables = html.match(/<table /g)?.length ?? 0;
+    expect(tables).toBeGreaterThanOrEqual(6);
+    // One scroll box per table, wrapped directly around it; nothing above them scrolls.
+    expect(html.match(/<div class="overflow-x-auto"><table /g)?.length).toBe(tables);
+    expect(html.match(/overflow-x-auto/g)?.length).toBe(tables);
+    expect(html).not.toMatch(/<caption/);
+    expect(html).toMatch(/<p class="text-xs font-medium">按平台的趋势<\/p><div class="overflow-x-auto"><table /);
+  });
+
+  it('experiments with data are said in words: result, reason, sample, ratio, next step; running and concluded too, no state codes', () => {
+    const experiments = { ...pack, ledger: {
+      to_review: [
+        { id: 'a', hypothesis: '甲', result: { verdict: 'worked', reason: null, samples: 5, vs_baseline: 1.6, next_status: 'concluded' } },
+        { id: 'b', hypothesis: '乙', result: { verdict: 'failed', reason: null, samples: 4, vs_baseline: 0.5, next_status: 'concluded' } },
+        { id: 'c', hypothesis: '丙', result: { verdict: 'inconclusive', reason: 'within_noise', samples: 3, vs_baseline: 1.05, next_status: 'extended' } },
+        { id: 'd', hypothesis: '丁', result: { verdict: 'inconclusive', reason: 'platform_shift', samples: 6, vs_baseline: null, next_status: 'extended' } },
+        { id: 'e', hypothesis: '戊', result: { verdict: 'not_run', reason: null, samples: 0, vs_baseline: null, next_status: 'concluded' } },
+        { id: 'f', hypothesis: '己', result: { verdict: 'inconclusive', reason: 'low_volume', samples: 2, vs_baseline: 0.9, next_status: 'extended' } },
+        { id: 'g', hypothesis: '庚', result: { verdict: 'inconclusive', reason: 'mixed_platforms', samples: 7, vs_baseline: null, next_status: 'concluded' } }],
+      running: [{ id: 'r', hypothesis: '辛', period: { start: '2026-11-03', end: '2026-11-09' }, settling: true }],
+      recent_concluded: [{ id: 'x', hypothesis: '壬', verdict: 'failed', concluded_on: '2026-10-26' }] } };
+    const html = renderToStaticMarkup(<CoachTables coach={coachTable(experiments)} />);
+    const text = html.replace(/<[^>]*>/g, '');
+    for (const words of ['有效', '没有效果', '还看不出', '没有执行', '差别在正常波动之内', '这段时间平台整体流量变了', '这段时间发得太少', '混了几个平台的作品',
+      '5 条', '0 条', '1.60 倍', '0.50 倍', '再观察一期', '结束', '进行中：辛（11/03–11/09，等最后几条作品满 7 天）', '10/26 结论：壬 · 没有效果'])
+      expect(text).toContain(words);
+    for (const code of ['worked', 'failed', 'inconclusive', 'not_run', 'within_noise', 'platform_shift', 'low_volume', 'mixed_platforms', 'extended', 'concluded',
+      'null', 'NaN', 'undefined']) expect(html).not.toContain(code);
   });
 
   it('a basics-only pack (period but no this_period) shows no post counts at all, never counts of 0', () => {

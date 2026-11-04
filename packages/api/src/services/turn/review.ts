@@ -39,7 +39,7 @@ export const REVIEW_INSTRUCTIONS = '你是 Graylum 的运营教练，正在为�
   + '对标或粉丝信息没有取到就说明来源和缺口，不编造。数字表格由宿主保存，正文不要另造数字表格。'
   + '建议只提出，不自动创建或发布内容。篇幅控制在 1200 字以内，最后一段说明任何没能完成的部分。';
 export const REVIEW_REQUEST = '请为我生成本周作品复盘。下面是我的真实作品数据和代码计算的复盘表格（JSON）：\n';
-/** The operations coach (Owner 2026-10-27). How to read the pack, what to advise and how to write comes from the coach Skill's method.md
+/** The operations coach (Owner 2026-10-27). How to read the pack, what to advise and how to write comes from the coach Skill's SKILL.md body
  * (publishMonitor/coach/method.ts); this is the contract the host checks and never changes with the method: what the pack is, who decides
  * what, and the exact block the answer ends with (checked line by line by checkOutput, so it cannot live in an editable Skill). */
 export const COACH_CONTRACT = '以上是你的工作方法。用户消息里是由代码算好的复盘包（JSON，kind=review_pack），'
@@ -58,6 +58,8 @@ export const COACH_CONTRACT = '以上是你的工作方法。用户消息里是�
   + 'evidence 里 post_ids 只能抄包里出现过的作品 id；metrics 只能是下面的完整写法之一，写成别的会被丢弃，拿不准就留空数组、只写 post_ids：'
   + 'scoreboard:<支柱key>:<平台>、history:<支柱key>:<平台>、stage:followers:<平台>、stage:posts_8w、stage:day7_views_trend、'
   + 'ledger:<实验id>、diagnostics:<作品id>:<指标名>。'
+  + '平台名只能用包里 platforms 给的名字，不同平台的名字不得互换；包里没有的平台不要提。'
+  + '手册参考线只在 diagnostics.posts 里 line_status 不是 none 的环节真正用到时才提；没有用到的参考线（没数据、没算出来）正文里不要提。'
   + '正文里不要出现内部代码（untagged、p1/p2/p3、字段名）：内容方向用 strategy.pillars 里的名字，没有方向的作品写“未分类”。'
   + '正文里引用的数字必须能在页面表格里找到，页面上有这些：小结行（period 起止、this_period.published / published_previous、'
   + 'settled_posts 的篇数、too_new 的篇数）；本期满 7 天的作品（this_period.settled_posts 的第 7 天浏览、相对该平台中位数、互动率）；'
@@ -90,7 +92,7 @@ export type ReviewClaimInput = { id: string; actorId: string; sessionId: string;
   cadence?: string; attempt?: number;
   /** The pack is the operations coach's (its `review` is the RC-2 review pack); absent: the own-posts pack of the plain weekly review. */
   coach?: boolean;
-  /** The coach Skill's method.md for a coach review; without it the review waits (COACH_METHOD_UNAVAILABLE), nothing opened or charged. */
+  /** The coach Skill's method (its SKILL.md body) for a coach review; without it the review waits (COACH_METHOD_UNAVAILABLE), nothing opened or charged. */
   coachMethod?: string };
 /** `budget`: the cron invocation's shared time budget; a review never starts, and no model call is sent, without the time left to write and settle it. */
 export type ReviewTurnDeps = Pick<ChatDeps, 'admin' | 'clients' | 'slots' | 'newWork' | 'transport' | 'pricing'> & { budget?: RuntimeBudget };

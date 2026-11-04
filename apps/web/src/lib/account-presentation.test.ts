@@ -11,7 +11,7 @@ describe('account presentation', () => {
 
   it('never claims a membership level when the profile is missing', () => {
     expect(membershipText({ isError: true })).toBe('账户信息读取失败');
-    expect(membershipText({})).toBe('正在读取账户…');
+    expect(membershipText({})).toBe('');
   });
 
   it('returns no display name instead of a generic placeholder', () => {

@@ -158,6 +158,8 @@ const envSchema = z.object({
   VERCEL_ENV: optionalString,
   VERCEL_TARGET_ENV: optionalString,
   VERCEL_URL: optionalString,
+  VERCEL_GIT_COMMIT_SHA: optionalString,
+  NEXT_PUBLIC_CACHE_BUILD: optionalString,
   SECURITY_E2E_LOCAL_ONLY: optionalString,
   V3_RUNTIME_LOCAL_ENDPOINT: optionalString,
   // CORE-PATH-V2 2.8: the database host this deployment declares; POST /api/turn refuses when it is not the one it connects to.

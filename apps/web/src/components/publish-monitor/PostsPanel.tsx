@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
 import type { BrandAccount } from './brands';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   POSTED_AT_SOURCE, SOURCE_LABEL, dataErrorMessage, errorCode, formatDay, metricCell, metricColumns, metricLabel,
   platformName,
@@ -89,7 +90,7 @@ export function PostsPanel({ windowDays, posts, connections, accountOf, onLinked
 
 function PostHistory({ postId }: { postId: string }) {
   const history = trpc.publishMonitor.postHistory.useQuery({ postId }, { retry: false });
-  if (history.isPending) return <p className="text-sm">正在读取…</p>;
+  if (history.isPending) return <PageSkeleton compact rows={2} label="发布记录读取中" />;
   if (history.error || !history.data) {
     return <p role="alert" className="text-sm" style={{ color: 'var(--color-error)' }}>{dataErrorMessage(errorCode(history.error))}</p>;
   }
