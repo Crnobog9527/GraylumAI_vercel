@@ -4172,7 +4172,7 @@
   "fn:publish_monitor_cleanup_finish(uuid,uuid,boolean,text)": "fd92c35a6582",
   "fn:publish_monitor_coach_extracted_pillars(uuid)": "9b3a5921bfbb",
   "fn:publish_monitor_coach_pillars(uuid)": "9e431a3ae13d",
-  "fn:publish_monitor_coach_pillars_save(uuid,uuid,jsonb,jsonb)": "d392d988d6f5",
+  "fn:publish_monitor_coach_pillars_save(uuid,uuid,jsonb,jsonb)": "771743694470",
   "fn:publish_monitor_connect_callback(uuid,uuid,jsonb)": "1e9f1b7eadfa",
   "fn:publish_monitor_connect_cancel(uuid,uuid)": "067feaf2162d",
   "fn:publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)": "55d56d16dab7",

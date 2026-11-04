@@ -53,6 +53,9 @@ jobs:
       - name: Check new migrations rewrite functions whole
         run: node scripts/check-function-patches.mjs
 
+      - name: Check refusals in database functions are answered, not re-run
+        run: node scripts/check-function-retry-codes.mjs
+
       - name: Check no Skill source in public repository
         run: node scripts/check-no-skill-source.mjs
 
