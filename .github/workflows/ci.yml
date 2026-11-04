@@ -418,8 +418,8 @@ jobs:
         run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium
 
       - name: Simulated-model browser tests
-        # TEMPORARY PROBE (to be reverted before review): the chat journeys ten times each, to catch the first-send fault on CI.
-        run: node scripts/e2e-sim/run.mjs tests/e2e/sim/00-warmup.spec.ts tests/e2e/sim/01-free-chat.spec.ts tests/e2e/sim/02-failures.spec.ts tests/e2e/sim/03-compare-and-tabs.spec.ts --grep "warm-up|one message is one charged turn|402|stream cut after|two tabs at once" --repeat-each 10
+        # TEMPORARY PROBE (to be reverted before review): the whole suite twice, in its usual order, to catch the first-send fault on CI.
+        run: node scripts/e2e-sim/run.mjs --repeat-each 2
 
       # A failed journey's screenshots only (simulated accounts and data on a disposable local stack; no trace, storage state or
       # report, which could hold a local session token). The page text, failed requests and turn calls are in the job log.
