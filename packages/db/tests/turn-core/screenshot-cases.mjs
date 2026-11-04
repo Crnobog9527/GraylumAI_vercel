@@ -71,6 +71,24 @@ export async function screenshotCases(t){
   assert.equal(after[0].id,first.id);
   report.checks.push('a same-day correction merges by metric with the newest value, keeps the row and moves confirmed_at');
  }
+ // 2b. A correction on a later day carries the earlier screenshot's other numbers forward instead of leaving a row with one number;
+ // an older screenshot (over 7 days) is not carried.
+ {
+  const a=await account(),pid=await post(a);
+  await closeChat(a,(await oneCall(a)).turnId,{result:{coachScreenshots:[item(pid,{complete_rate:0.12,retain_3s:0.5},{videoSeconds:30})]}});
+  await c.query("update social_post_diagnostics set captured_on=captured_on-1 where post_id=$1",[pid]);
+  await closeChat(a,(await oneCall(a)).turnId,{result:{coachScreenshots:[item(pid,{complete_rate:0.15},{raw:{'完播率':{value:'15%',image:2}}})]}});
+  const two=await rows(pid);
+  assert.equal(two.length,2);
+  assert.deepEqual(two[1].rates,{complete_rate:0.15,retain_3s:0.5},'the new row keeps the other numbers');
+  assert.equal(two[1].video_seconds,30);assert.deepEqual(two[0].rates,{complete_rate:0.12,retain_3s:0.5},'the earlier row is untouched');
+  const b=await account(),old=await post(b);
+  await closeChat(b,(await oneCall(b)).turnId,{result:{coachScreenshots:[item(old,{complete_rate:0.12,retain_3s:0.5})]}});
+  await c.query("update social_post_diagnostics set captured_on=captured_on-8 where post_id=$1",[old]);
+  await closeChat(b,(await oneCall(b)).turnId,{result:{coachScreenshots:[item(old,{complete_rate:0.15})]}});
+  assert.deepEqual((await rows(old))[1].rates,{complete_rate:0.15},'a screenshot older than 7 days is not carried');
+  report.checks.push('a correction on a later day carries the earlier screenshot numbers forward (within 7 days) and leaves the earlier row untouched');
+ }
  // 3. Nothing is saved for a close that is not a delivered completion; a post that is not the account\'s, or a bad item, is skipped alone.
  {
   const a=await account(),other=await account(),mine=await post(a),theirs=await post(other);

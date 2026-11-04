@@ -2,7 +2,7 @@
 -- PUBLISH-MONITOR (the file carries the placeholder number 9999 until the controller assigns the real one): the numbers a coach reads from
 -- the user's back-office screenshots in a free chat are saved as per-post diagnoses for the weekly review (Owner 2026-11-04,
 -- "B 存下截图里的数字"). The image is never kept; only the numbers, the label as read, and which screenshot of the message.
---   * turn_chat_screenshots_apply(actor, items): one diagnosis row per post and UTC day in social_post_diagnostics (source
+--   * turn_chat_screenshots_apply(actor, items): one diagnosis row per post and UTC day (a correction on a later day carries the earlier screenshot's other numbers forward) in social_post_diagnostics (source
 --     'screenshot'). A second save of the same post on the same day merges by metric, the newest value wins, and confirmed_at is
 --     the correction time (created_at stays the first save). An item whose post is not the actor's, or that fails a column CHECK, is
 --     skipped on its own; it never raises.
@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION public.turn_chat_screenshots_apply(p_actor_id uuid, p
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  it jsonb; v_post uuid; v_biz uuid; v_platform text; v_rates jsonb; v_raw jsonb; v_text text; v_video integer; v_drop integer;
+  it jsonb; v_post uuid; v_biz uuid; v_platform text; v_rates jsonb; v_raw jsonb; v_text text; v_video integer; v_drop integer; prev social_post_diagnostics;
   v_day date := (now() AT TIME ZONE 'UTC')::date;
 BEGIN
   IF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items) > 6 THEN RETURN; END IF;
@@ -41,6 +41,16 @@ BEGIN
       SELECT c.business_id, c.platform INTO v_biz, v_platform FROM social_posts sp JOIN social_connections c ON c.id = sp.connection_id
        WHERE sp.id = v_post AND sp.actor_id = p_actor_id AND c.role = 'own';
       IF NOT FOUND OR v_biz IS NULL THEN CONTINUE; END IF;
+      -- A correction a day or more after the screenshot carries the other numbers of that screenshot forward (the newest pack row of
+      -- a post is the one the review reads, so a row holding only the corrected number would hide the rest). Only a screenshot
+      -- diagnosis from the last 7 days is carried; the same UTC day is merged by the conflict clause below.
+      SELECT * INTO prev FROM social_post_diagnostics d WHERE d.post_id = v_post AND d.source = 'screenshot'
+         AND d.captured_on < v_day AND d.captured_on >= v_day - 7 ORDER BY d.captured_on DESC LIMIT 1;
+      IF FOUND THEN
+        v_rates := coalesce(prev.rates, '{}'::jsonb) || v_rates;
+        v_raw := CASE WHEN prev.rates_raw IS NULL AND v_raw IS NULL THEN NULL ELSE coalesce(prev.rates_raw, '{}'::jsonb) || coalesce(v_raw, '{}'::jsonb) END;
+        v_text := coalesce(v_text, prev.opening_text); v_video := coalesce(v_video, prev.video_seconds); v_drop := coalesce(v_drop, prev.drop_second);
+      END IF;
       INSERT INTO social_post_diagnostics(actor_id, business_id, post_id, platform, source, rates, rates_raw, opening_text,
           video_seconds, drop_second, captured_on, confirmed_at)
         VALUES (p_actor_id, v_biz, v_post, v_platform, 'screenshot', v_rates, v_raw, v_text, v_video, v_drop, v_day, clock_timestamp())
