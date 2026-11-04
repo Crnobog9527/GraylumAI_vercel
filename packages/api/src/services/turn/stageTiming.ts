@@ -8,14 +8,16 @@ import { logger } from '../../lib/logger';
  * turn number, the fixed outcome code and millisecond numbers: no text, no user or session id. Each stage value is the time since
  * the previous mark, so the values add up to totalMs (a stage that did not run is absent). Nothing here changes what a turn does.
  */
-type Timer = { kind: string; started: number; last: number; stages: Record<string, number>; turnId?: number; reported: boolean };
+type Timer = { seq: number; kind: string; started: number; last: number; stages: Record<string, number>; turnId?: number; reported: boolean };
 const timers = new AsyncLocalStorage<Timer>();
 const clock = () => performance.now();
+/** Turn requests this server instance has started: 1 means the first, a cold instance with every cache empty. */
+let served = 0;
 
 /** Runs `work` (and every async continuation, a streamed reply included) under a new timer. */
 export function withStageTimer<T>(kind: string, work: () => T): T {
   const now = clock();
-  return timers.run({ kind, started: now, last: now, stages: {}, reported: false }, work);
+  return timers.run({ seq: ++served, kind, started: now, last: now, stages: {}, reported: false }, work);
 }
 
 /** Closes the stage that just ran; the same name twice adds up. Outside a timer it does nothing. */
@@ -41,5 +43,6 @@ export function reportStages(outcome: string): void {
   markStage('end');
   const stages = Object.fromEntries(Object.entries(timer.stages).map(([name, ms]) => [`${name}Ms`, Math.round(ms)]));
   logger.info('api', 'turn_stage_timing', { kind: timer.kind, outcome, ...(timer.turnId === undefined ? {} : { turnId: timer.turnId }),
-    totalMs: Math.round(clock() - timer.started), uptimeS: Math.round(process.uptime()), ...stages });
+    totalMs: Math.round(clock() - timer.started), uptimeS: Math.round(process.uptime()),
+    instanceSeq: timer.seq, ...stages });
 }

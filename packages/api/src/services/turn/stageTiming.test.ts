@@ -20,6 +20,7 @@ describe('the turn stage timing', () => {
     expect(logged.info).toHaveBeenCalledTimes(1);
     const [category, message, context] = logged.info.mock.calls[0]!;
     expect([category, message]).toEqual(['api', 'turn_stage_timing']);
+    expect(context).toHaveProperty('instanceSeq');
     expect(context).toMatchObject({ kind: 'chat', outcome: 'result', turnId: 77, authMs: 120, gateMs: 50, endMs: 400, totalMs: 570 });
     // Only numbers and fixed words: no text, no account or session id.
     for (const [key, value] of Object.entries(context as Record<string, unknown>))
