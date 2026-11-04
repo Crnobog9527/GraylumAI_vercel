@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
+import { activityText } from './tool-activity';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
@@ -436,7 +437,7 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
                       {line}
                     </ChatInlineNotice>
                   ))}
-                  <RuntimeReply text={chat.live?.text && !chat.live.text.trimStart().startsWith('{') ? chat.live.text : '正在回复…'} streaming />
+                  <RuntimeReply text={chat.live?.text && !chat.live.text.trimStart().startsWith('{') ? chat.live.text : activityText(chat.live?.activity)} streaming />
                 </RuntimeTurnView>
               </>
             )}

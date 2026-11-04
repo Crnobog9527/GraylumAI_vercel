@@ -26,6 +26,18 @@ const load = async (setup: Awaited<ReturnType<typeof prepare>>, gated: boolean, 
   (await build(setup, gated)).tools.find(tool => tool.name === 'load_skill')!.execute({ name }, 'c1');
 
 describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6)', () => {
+  it('each tool announces its kind before it runs, and a refused Skill is not named', async () => {
+    const setup = await prepare({ skills });
+    const events: unknown[] = [];
+    const built = await setup.build({} as never, { slots: freeSlots, currentMessage: 'x', deadline: Date.now() + 1000, callGate: async () => {},
+      onStop: () => {}, gated: true, onCall: { emit: () => {}, q: '100' }, announce: event => events.push(event) });
+    const run = (name: string, args: Record<string, unknown>) => built.tools.find(tool => tool.name === name)!.execute(args, 'c1');
+    await run('load_skill', { name: 'Pricing' });
+    // Hooks is a social-media Skill: this account may not load it, so the page is not told its name.
+    await run('load_skill', { name: 'Hooks' });
+    expect(events).toEqual([{ type: 'tool', tool: 'load_skill', label: 'Pricing' }, { type: 'tool', tool: 'load_skill' }]);
+  });
+
   it('an account with a confirmed positioning sees and loads every Skill', async () => {
     const setup = await prepare({ skills });
     expect(setup.plan.available).toContain('load_skill');

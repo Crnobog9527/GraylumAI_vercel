@@ -22,6 +22,8 @@ import type { CounterStore } from '../limiter';
 import type { TurnClients } from '../db';
 import { libraryTurnReader } from './source';
 import { COACH_REVIEW_INSTRUCTIONS } from './coachReview';
+import { toolStage } from './toolStage';
+import type { ToolStageEvent } from '../sse';
 import { COACH_CAPTURE_INSTRUCTIONS } from '../../publishMonitor/coach/screenshots';
 import { NO_ACCESS, sourceDescription, workspaceTurnReader, type WorkspaceAccess } from './workspace';
 import { planTurnTools, READ_SOURCE_CALLS, RESEARCH_INPUT_BYTES, type ResearchSetup } from './plan';
@@ -69,6 +71,8 @@ export type ChatToolsSetup = {
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean; workspaceContext?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
     onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']>;
+    /** Told before each tool runs which kind it is (toolStage.ts), so the page can say what the wait is. */
+    announce?: (event: ToolStageEvent) => void;
     replay?: TurnReplay }): Promise<ReturnType<typeof turnTools>>;
 };
 
@@ -180,7 +184,9 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
         })) } : {}),
         ...(sourceOffered ? { sourceDescription: description, readSource: chatReader() } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
+      const skillNames: ReadonlySet<string> = new Set(allowedSkills(catalog, extra.gated).map(entry => entry.name));
       const tools: RuntimeTool[] = built.tools.map(tool => ({ ...tool, async execute(args, callId) {
+        extra.announce?.(toolStage(tool.name, args, skillNames));
         try { return await tool.execute(args, callId); }
         catch (error) { if (error instanceof TurnStop) extra.onStop(error); throw error; }
       } }));

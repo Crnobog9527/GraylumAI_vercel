@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
+import type { ToolActivity } from './tool-activity';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ToolAvailability } from '@repo/api/src/services/turn/tools/types';
 import type { TurnView } from '@repo/api/src/services/turn/view';
@@ -21,7 +22,15 @@ import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
 const READ_MS = 3000;
 /** Another conversation's turn may still hold its freeze when this one closes: the balance is read once more after this, and on return to the window. */
 const REREAD_MS = 8000;
-export type LiveTurn = { text: string; trimmed: string[]; rows: WorkItem[] };
+export type LiveTurn = { text: string; trimmed: string[]; rows: WorkItem[]; activity?: ToolActivity };
+
+/** The live reply after a tool or text event: a tool sets the line of what it is doing; once the text starts that line is over (the
+ *  reply shows the text), and a later tool call sets a new one. */
+export function liveAfter(old: LiveTurn | null, event: { type: 'tool'; tool: ToolActivity['tool']; label?: string } | { type: 'text'; delta: string }): LiveTurn {
+  const base = { text: old?.text ?? '', trimmed: old?.trimmed ?? [], rows: old?.rows ?? [] };
+  return event.type === 'text' ? { ...base, text: base.text + event.delta }
+    : { ...base, activity: { tool: event.tool, ...(event.label ? { label: event.label } : {}) } };
+}
 
 /** A research call's row, replacing the row of the same call (running, then its end state). */
 export function withResearchRow(rows: readonly WorkItem[], call: ResearchCall): WorkItem[] {
@@ -126,12 +135,13 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     const outcome = await runTurn({ sessionId, ...body }, event => {
       if (!alive.current) return;
       if (event.type === 'opened') { tools = event.tools;
-        setLive(old => ({ text: old?.text ?? '', trimmed: trimmedToolNotices(tools), rows: old?.rows ?? [] })); }
+        setLive(old => ({ ...old, text: old?.text ?? '', trimmed: trimmedToolNotices(tools), rows: old?.rows ?? [] })); }
       if (event.type === 'research_call') {
         made = withResearchRow(made, event);
-        setLive(old => ({ text: old?.text ?? '', trimmed: old?.trimmed ?? [], rows: made }));
+        setLive(old => ({ ...old, text: old?.text ?? '', trimmed: old?.trimmed ?? [], rows: made }));
       }
-      if (event.type === 'text') setLive(old => ({ text: (old?.text ?? '') + event.delta, trimmed: old?.trimmed ?? [], rows: old?.rows ?? [] }));
+      if (event.type === 'tool') setLive(old => liveAfter(old, event));
+      if (event.type === 'text') setLive(old => liveAfter(old, event));
     }, { fetch: fetcher });
     await read();
     if (!alive.current) return 'unknown';
