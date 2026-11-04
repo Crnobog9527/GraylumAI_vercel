@@ -39,7 +39,8 @@ export default function PositioningHome() {
   useEffect(()=>{
     if(wantedModule.current===null)wantedModule.current=new URL(location.href).searchParams.get('module')??'';
     const wanted=wantedModule.current;
-    if(wanted&&composerChoices.data?.skills.some(x=>x.moduleId===wanted)){setSkillId(wanted);wantedModule.current='';}
+    // A member-only Skill the plan is below is never chosen from the address (the paywall is the composer's and the marketplace's job).
+    if(wanted&&composerChoices.data?.skills.some(x=>x.moduleId===wanted&&!x.locked)){setSkillId(wanted);wantedModule.current='';}
   },[composerChoices.data]);
   const catalog = trpc.opc.catalog.useQuery(undefined,READ_RETRY),
     list = trpc.opc.list.useQuery(undefined,READ_RETRY),

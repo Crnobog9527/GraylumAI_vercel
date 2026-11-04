@@ -27,7 +27,7 @@ interface ModuleData {
   icon?: string;
   category?: string;
   platform?: string;
-  usage_count?: number;
+  usage_count?: number; required_member_level?: 'pro' | 'gold' | null;
 }
 
 const categories = [
@@ -92,7 +92,7 @@ function MarketplacePageContent() {
       icon: requestedModule.icon ?? 'Sparkles',
       category: requestedModule.category,
       platform: requestedModule.platform ?? '',
-      usage_count: requestedModule.usage_count ?? 0,
+      usage_count: requestedModule.usage_count ?? 0, required_member_level: requestedModule.required_member_level ?? null,
     });
     setDialogOpen(true);
   }, [featuredModules, modules, requestedModuleId]);
@@ -279,7 +279,7 @@ function MarketplacePageContent() {
               title: featured.title,
               description: featured.description,
               icon: featured.icon ?? 'Sparkles',
-              usage_count: featured.usage_count ?? 0,
+              usage_count: featured.usage_count ?? 0, required_member_level: featuredModules.find((m) => m.id === featured.id)?.required_member_level ?? null,
             });
             setDialogOpen(true);
           }}
@@ -384,7 +384,7 @@ function MarketplacePageContent() {
                     icon: module.icon ?? 'Sparkles',
                     category: module.category,
                     platform: module.platform ?? '',
-                    usage_count: module.usage_count ?? 0,
+                    usage_count: module.usage_count ?? 0, required_member_level: module.required_member_level ?? null,
                   }}
                   onShowDetail={() => {
                     setSelectedModule({
@@ -394,7 +394,7 @@ function MarketplacePageContent() {
                       icon: module.icon ?? 'Sparkles',
                       category: module.category,
                       platform: module.platform ?? '',
-                      usage_count: module.usage_count ?? 0,
+                      usage_count: module.usage_count ?? 0, required_member_level: module.required_member_level ?? null,
                     });
                     setDialogOpen(true);
                   }}

@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { canonicalAccount, type CanonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
-import { discoverSkillCatalog, entryContentSource, moduleUsesVoice, pinnedCatalogEntry } from './skills/skillCatalog';
+import { discoverSkillCatalog, entryContentSource, moduleRequiredLevel, moduleUsesVoice, pinnedCatalogEntry } from './skills/skillCatalog';
 import { admitCatalogVoice } from './admission/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
@@ -41,7 +41,8 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
           revisionId: entry.revisionId, authentication: request.authentication, ...(row ? { userVisibleModule: row } : {}) });
       };
       // A work item's method is the revision it is bound to, in place of what the catalog lists for its module.
-      const pinned = pin ? await pinnedCatalogEntry(sourceOf(pin), pin, FREE_RESULT_RESERVE_BYTES, await moduleUsesVoice(admin, pin.moduleId)) : null;
+      const pinned = pin ? await pinnedCatalogEntry(sourceOf(pin), pin, FREE_RESULT_RESERVE_BYTES, await moduleUsesVoice(admin, pin.moduleId),
+        await moduleRequiredLevel(admin, pin.moduleId)) : null;
       // After the pin is put in: a work item pinned to the coach Skill before a downgrade must not bring the member method back.
       const catalog = await memberCatalog(admin, actorId, pin ? withPinnedSkill(listed, pin, pinned) : listed, tierOf);
       const prepared = await prepareSkills(catalog, sourceOf, FREE_RESULT_RESERVE_BYTES);

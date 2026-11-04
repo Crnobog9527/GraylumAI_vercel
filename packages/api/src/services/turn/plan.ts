@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { memberLevelDenied } from '../skills/memberOnly';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
@@ -62,7 +63,8 @@ export async function runPlanTurn(deps: ChatDeps, input: PlanInput, emit: (event
   let quote;
   try {
     const module = await readAdmissionModule(admin, input.moduleId);
-    if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string')
+    if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string'
+      || await memberLevelDenied(admin, input.actorId, module.data.required_member_level))
       return emit({ type: 'error', code: 'TURN_PLAN_DENIED' });
     const budgets = await readPurposeBudgets(admin, configuration);
     quote = await chatQuote(admin, { configuration: rows, modelId: module.data.model_id, deps: deps.pricing,

@@ -77,7 +77,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   try { kind = mentorTurnInput(input); } catch { return emit({ type: 'error', code: 'TURN_REQUEST_INVALID' }); }
   const { opening, summary, organize } = kind;
   let catalog;
-  try { catalog = await mentorCatalog(admin, { moduleId: input.moduleId, organize, research: !opening && !summary, pricing: deps.pricing }); }
+  try { catalog = await mentorCatalog(admin, { actorId: input.actorId, moduleId: input.moduleId, organize,
+    research: !opening && !summary, pricing: deps.pricing }); }
   catch (error) { return emit({ type: 'error', code: error instanceof MentorCatalogError ? error.code : 'TURN_QUOTE_UNAVAILABLE' }); }
   markStage('catalog');
   const { mentor, organizer, research } = catalog;

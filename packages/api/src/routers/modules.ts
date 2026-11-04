@@ -35,6 +35,7 @@ export const PUBLIC_MODULE_SELECT = [
   'credits_display',
   'link_url',
   'link_module_id',
+  'required_member_level',
 ].join(',');
 
 export type PublicModule = {
@@ -61,6 +62,8 @@ export type PublicModule = {
   credits_display?: any;
   link_url?: any;
   link_module_id?: any;
+  /** 'pro' (Pro and Gold) or 'gold': the lowest level that may use the module; null for everyone. */
+  required_member_level?: 'pro' | 'gold' | null;
 };
 
 export function toPublicModule(module: any): PublicModule {
@@ -88,6 +91,7 @@ export function toPublicModule(module: any): PublicModule {
     credits_display: module.credits_display,
     link_url: module.link_url,
     link_module_id: module.link_module_id,
+    required_member_level: module.required_member_level ?? null,
   };
 }
 

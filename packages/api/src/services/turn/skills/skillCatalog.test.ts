@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {it,expect,beforeEach,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
+const version=vi.hoisted(()=>({value:undefined as number|undefined,level:null as string|null}));
+vi.mock('../settings/catalogCache',async importOriginal=>({...await importOriginal<typeof import('../settings/catalogCache')>(),catalogVersion:async()=>version.value}));
 import {clearSkillCatalogCache,discoverSkillCatalog,moduleUsesVoice,pinnedCatalogEntry,serializedResultBytes} from './skillCatalog';
 import {databaseSkillSource} from '../../skills/databaseSource';
 import {withPinnedSkill} from '../tools/skills';
@@ -54,7 +56,7 @@ function clients(social:Record<string,boolean|undefined>={}){
  const admin={
   from:tables((table,f)=>{
    if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model,
-    social_media_related:c.module in social?social[c.module]:false})),error:null};
+    social_media_related:c.module in social?social[c.module]:false,required_member_level:version.level})),error:null};
    // CONTENT-CONVERSATION-DRIVEN: the published version of each Skill, which a cached catalog is checked against.
    if(table==='skills')return {data:(f.id as string[]).map(skill=>({id:skill,status:skillState.status,published_version:skillState.version})),error:null};
    const c=catalog.find(x=>x.model===f.id)!;
@@ -186,4 +188,22 @@ it('CORE-PATH-V2 V2-10b: a pinned Skill keeps the voice its module asks for, rea
  const pin={moduleId:positioning.module,skillId:positioning.skill,revisionId:positioning.revision};
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:pin.moduleId,skillId:pin.skillId,revisionId:pin.revisionId});
  expect(await pinnedCatalogEntry(source,pin,8192,true)).toMatchObject({usesVoice:true});
+});
+
+
+// MEMBER-ONLY-MODULES: a plan requirement is a module edit; the cached catalog must not keep serving the old one after the catalog
+// version moved, even though no Skill was republished.
+it('rebuilds a cached catalog when the catalog version moved, so a changed plan requirement takes effect',async()=>{
+ const {user,admin}=clients(),limits={maxResultBytes:20000,excludeSocial:false,actorId:'req'};
+ try {
+  version.value=1;version.level=null;
+  const before=await discoverSkillCatalog(user,admin,{...limits,now:1000});
+  expect(before.every(entry=>entry.requiredMemberLevel===undefined)).toBe(true);
+  version.level='gold';
+  expect((await discoverSkillCatalog(user,admin,{...limits,now:2000})).every(entry=>entry.requiredMemberLevel===undefined)).toBe(true);
+  version.value=2;
+  const after=await discoverSkillCatalog(user,admin,{...limits,now:3000});
+  expect(after.length).toBeGreaterThan(0);
+  expect(after.every(entry=>entry.requiredMemberLevel==='gold')).toBe(true);
+ } finally { version.value=undefined;version.level=null; }
 });

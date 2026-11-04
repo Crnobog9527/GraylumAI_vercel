@@ -177,7 +177,7 @@ const promptBatchPatchSchema = z.object({
   creditsDisplay: z.string().max(80).nullable().optional(),
   category: promptCategorySchema.optional(),
   sortOrder: z.number().int().min(0).max(1000).optional(),
-  isFeatured: moduleBooleanSchema.optional(),
+  isFeatured: moduleBooleanSchema.optional(), requiredMemberLevel: z.enum(['pro', 'gold']).nullable().optional(),
 }).refine(
   (patch) => Object.values(patch).some((value) => value !== undefined),
   { message: 'At least one patch field is required' },
@@ -1947,7 +1947,7 @@ export const adminRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const updateData: Record<string, unknown> = {
-        updated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(), ...(input.patch.requiredMemberLevel !== undefined && { required_member_level: input.patch.requiredMemberLevel }),
       };
 
       if (input.patch.description !== undefined) updateData.description = input.patch.description;

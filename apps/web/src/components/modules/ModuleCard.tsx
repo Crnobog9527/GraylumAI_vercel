@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { iconMap, getIconColor } from './iconConfig';
 import { Bot } from 'lucide-react';
+import { asRequiredLevel, memberOnlyNote } from '@/lib/member-only';
 
 interface Module {
   id: string;
@@ -13,6 +14,7 @@ interface Module {
   category?: string;
   platform?: string;
   usage_count?: number;
+  required_member_level?: 'pro' | 'gold' | null;
 }
 
 interface ModuleCardProps {
@@ -24,6 +26,7 @@ interface ModuleCardProps {
 export default function ModuleCard({ module, className, onShowDetail }: ModuleCardProps) {
   const Icon = module.icon ? iconMap[module.icon] || Bot : Bot;
   const iconColor = module.icon ? getIconColor(module.icon) : '#FFD700';
+  const memberOnly = asRequiredLevel(module.required_member_level);
 
   return (
     <div
@@ -59,6 +62,12 @@ export default function ModuleCard({ module, className, onShowDetail }: ModuleCa
           >
             <Icon className="h-6 w-6" style={{ color: iconColor }} />
           </div>
+          {memberOnly && (
+            <span className="text-xs font-medium px-2.5 py-1 rounded-md" data-testid="member-only-note"
+              style={{ background: 'rgba(255,215,0,0.12)', color: 'var(--color-primary)', border: '1px solid rgba(255,215,0,0.25)' }}>
+              {memberOnlyNote(memberOnly)}
+            </span>
+          )}
         </div>
 
         <h3

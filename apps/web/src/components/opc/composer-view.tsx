@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { memberOnlyNote } from '@/lib/member-only';
 import { useRef, type ReactNode, type Ref } from 'react';
 import { ArrowUp, Box, FileText, Plus, Search, X } from 'lucide-react';
 import Link from 'next/link';
@@ -61,7 +62,8 @@ export function ComposerView({
  {note&&<p className={styles.note}>{note}</p>}</div>;
 }
 
-export type SkillChoice={moduleId:string;name:string};
+/** `requiredMemberLevel` marks a member-only Skill (shown with its note; choosing it while `locked` opens the paywall instead). */
+export type SkillChoice={moduleId:string;name:string;requiredMemberLevel?:'pro'|'gold'|null;locked?:boolean};
 
 /** The "使用技能" panel. `status` replaces the list while it loads or fails. */
 export function SkillMenuView({query,onQuery,onClose,status,skills,hint,onPick}:{
@@ -80,7 +82,8 @@ export function SkillMenuView({query,onQuery,onClose,status,skills,hint,onPick}:
    onChange={event=>onQuery?.(event.target.value)}/></label>
   <div ref={listRef} className={styles.skillList}>
    {status??<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>onPick?.(skill.moduleId)}>
-   <span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong><small>{hint}</small></span></button>)}
+   <span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong>
+   <small>{skill.requiredMemberLevel?memberOnlyNote(skill.requiredMemberLevel):hint}</small></span></button>)}
    {!skills.length&&<p>没有匹配的可用技能</p>}</>}</div>
   <div className={styles.skillFoot}><Link href="/app/workbench/marketplace">浏览功能广场</Link></div></div>;
 }

@@ -15,6 +15,7 @@ import { trpc } from '@/trpc/client';
 import { profileTabHref } from '@/lib/profile-tabs';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as REPORT_COPY } from './reportPaywallCopy';
 import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, type GoldScene } from './goldScenePaywallCopy';
+import { COACH_SCENE_DELIVERABLES, coachSceneCopy } from './coachScenePaywallCopy';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 /**
@@ -23,9 +24,9 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
  * and the card checkout (`payments.methodCheckout`). No credit-cost estimate, no model names, no consent switch the
  * backend lacks (design README "文案规则").
  */
-export type PaywallScene = 'report' | GoldScene;
+export type PaywallScene = 'report' | 'coach' | GoldScene;
 
-export function ReportPaywallDialog({ onClose, scene = 'report' }: { onClose: () => void; scene?: PaywallScene }) {
+export function ReportPaywallDialog({ onClose, scene = 'report', minLevel = 'pro' }: { onClose: () => void; scene?: PaywallScene; minLevel?: 'pro' | 'gold' }) {
   // One paywall_view per display (GA4 only, consent-gated; the funnel continues with begin_checkout / purchase).
   const reported = useRef(false);
   useEffect(() => {
@@ -37,22 +38,24 @@ export function ReportPaywallDialog({ onClose, scene = 'report' }: { onClose: ()
   // lives on the subscription page. Only a free account buys inline here.
   const entitlements = trpc.user.getEntitlements.useQuery(undefined, { enabled: scene !== 'report', staleTime: 30_000, retry: false });
   const memberLevel = scene === 'report' ? 'free' : entitlements.isError ? 'unknown' : entitlements.data ? (entitlements.data.level ?? 'free') : 'loading';
-  return <ReportPaywallView checkout={usePaywallCheckout()} onClose={onClose} scene={scene} memberLevel={memberLevel} />;
+  return <ReportPaywallView checkout={usePaywallCheckout()} onClose={onClose} scene={scene} memberLevel={memberLevel} minLevel={minLevel} />;
 }
 
 export type PaywallCheckout = ReturnType<typeof usePaywallCheckout>;
 
 /** The paywall itself, given the plans and purchase action; kept apart so it renders without a server. */
-export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 'report', memberLevel = 'free' }: {
-  checkout: PaywallCheckout; onClose: () => void; scene?: PaywallScene; memberLevel?: string;
+export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 'report', memberLevel = 'free', minLevel = 'pro' }: {
+  checkout: PaywallCheckout; onClose: () => void; scene?: PaywallScene; memberLevel?: string; minLevel?: 'pro' | 'gold';
 }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   // A Gold-only feature offers only the Gold plans (Gold first month and the founder price still come from the server).
-  const goldOnly = scene !== 'report';
+  // The coach scene sells Pro and Gold both (a member-only Skill for the two plans), so it is not Gold-only.
+  // (A Skill that needs Gold sells only the Gold plans, like the Gold-only scenes, so nobody buys Pro for it.)
+  const goldOnly = scene !== 'report' && (scene !== 'coach' || minLevel === 'gold');
   const inlinePurchase = !goldOnly || memberLevel === 'free';
   const checkout = goldOnly ? { ...fullCheckout, plans: fullCheckout.plans.filter(item => item.level === 'gold') } : fullCheckout;
-  const COPY = goldOnly ? { ...REPORT_COPY, ...GOLD_SCENE_COPY[scene] } : REPORT_COPY;
-  const deliverables = goldOnly ? GOLD_SCENE_DELIVERABLES[scene] : REPORT_DELIVERABLES;
+  const COPY = scene === 'coach' ? { ...REPORT_COPY, ...coachSceneCopy(minLevel) } : goldOnly ? { ...REPORT_COPY, ...GOLD_SCENE_COPY[scene] } : REPORT_COPY;
+  const deliverables = scene === 'coach' ? COACH_SCENE_DELIVERABLES : goldOnly ? GOLD_SCENE_DELIVERABLES[scene] : REPORT_DELIVERABLES;
   const [selected, setSelected] = useState<PaywallLevel>(goldOnly ? 'gold' : 'pro');
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => { dialog.current?.focus(); }, []);

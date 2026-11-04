@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource } from '../skills/databaseSource';
+import { memberLevelDenied } from '../skills/memberOnly';
 import { activateFreeChatSkill } from '../skills/stepGuide';
 import { readWorkspaceCapability } from '../turn/agent/workspacePosts';
 import { compareRpc } from './compareAdmission';
@@ -22,9 +23,12 @@ const WORKSPACE_KINDS = new Set(['positioning', 'strategy']);
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
-async function loadSkill(admin: SupabaseClient, user: SupabaseClient, skill: NonNullable<CompareRequestInput['skill']>) {
-  const module = await admin.from('modules').select('id,active,skill_id,social_media_related').eq('id', skill.moduleId).single();
-  if (module.error || module.data?.active !== true) throw new Error('FUSION_COMPARE_SKILL_INVALID');
+async function loadSkill(admin: SupabaseClient, user: SupabaseClient, actorId: string, skill: NonNullable<CompareRequestInput['skill']>) {
+  const module = await admin.from('modules').select('id,active,skill_id,social_media_related,required_member_level')
+    .eq('id', skill.moduleId).single();
+  // MEMBER-ONLY-MODULES: a compare column would put a member-only Skill's method in front of a plan below it.
+  if (module.error || module.data?.active !== true || await memberLevelDenied(admin, actorId, module.data.required_member_level))
+    throw new Error('FUSION_COMPARE_SKILL_INVALID');
   try {
     // The user-scoped check of an ordinary turn: the module is visible to this user, the revision exists for it.
     const source = databaseSkillSource({ userClient: user, privateClient: admin, moduleId: skill.moduleId,
@@ -60,7 +64,7 @@ async function loadWorkspace(admin: SupabaseClient, actorId: string, sessionId: 
  * (session_messages), and an ordinary turn on this path sends no work material, so a column gets none either. */
 export async function loadCompareTurnParts(deps: { admin: SupabaseClient; user: SupabaseClient; actorId: string },
   input: Pick<CompareRequestInput, 'sessionId' | 'question' | 'skill'>) {
-  const [skill, workspace, replyLocale] = await Promise.all([input.skill ? loadSkill(deps.admin, deps.user, input.skill) : null,
+  const [skill, workspace, replyLocale] = await Promise.all([input.skill ? loadSkill(deps.admin, deps.user, deps.actorId, input.skill) : null,
     loadWorkspace(deps.admin, deps.actorId, input.sessionId), readReplyLocale(deps.admin, deps.actorId)]);
   return { skill, workspace, references: [], question: input.question, replyLocale };
 }
