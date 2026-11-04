@@ -22,7 +22,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
-import { MemberOnlyUse } from './MemberOnlyUse';
+import { MemberOnlyPaywallHost, MemberOnlyUse } from './MemberOnlyUse';
 import { asRequiredLevel, memberOnlyNote } from '@/lib/member-only';
 
 interface Module {
@@ -93,6 +93,7 @@ export default function ModuleDetailDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-2xl max-h-[85vh] overflow-y-auto"
@@ -364,5 +365,7 @@ export default function ModuleDetailDialog({
         </p>}
       </DialogContent>
     </Dialog>
+    {memberOnly && <MemberOnlyPaywallHost />}
+    </>
   );
 }

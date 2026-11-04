@@ -25,3 +25,8 @@ export const NEW_TASK_INPUT_KEY = 'opc-new-task-input';
 export function prefillNewTask(text: string): void {
   try { sessionStorage.setItem(NEW_TASK_INPUT_KEY, text); } catch { /* storage unavailable: the chat just opens empty */ }
 }
+
+/** The detail dialog closes before the paywall opens: the paywall lives outside it (a dialog's positioned, clipped container would
+ *  mis-place it), so the button asks for it by this window event and `MemberOnlyPaywallHost` shows it. */
+export const MEMBER_PAYWALL_EVENT = 'member-only-paywall';
+export const requestMemberPaywall = (level: RequiredMemberLevel): void => { window.dispatchEvent(new CustomEvent(MEMBER_PAYWALL_EVENT, { detail: level })); };
