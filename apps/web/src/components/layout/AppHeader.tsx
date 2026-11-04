@@ -12,7 +12,6 @@ import {
   LogOut,
   Settings,
   CreditCard,
-  Loader2,
   Shield
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -61,7 +60,6 @@ export function AppHeader() {
   const {
     credits,
     status: creditsStatus,
-    isLoading: isCreditsLoading,
     warningLevel,
     warningColor,
     warningBgColor,
