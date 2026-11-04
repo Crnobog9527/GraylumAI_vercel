@@ -48,7 +48,8 @@ export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state'
     return /cannot be loaded|cannot be used in this reply/.test(result) ? { state: 'skipped' } : { state: 'done' };
   }
   const body = parsed as Record<string, unknown>;
-  const status = typeof body.status === 'string' ? body.status : typeof body.kind === 'string' && typeof body.reason === 'string' ? 'unavailable' : '';
+  // The reads of the library and the workspace answer {kind:'unavailable'} (with or without a reason) when nothing could be read.
+  const status = typeof body.status === 'string' ? body.status : body.kind === 'unavailable' ? 'unavailable' : '';
   if (body.reason === 'TOOL_UNAVAILABLE_THIS_TURN' || SKIPPED.has(status)) return { state: 'skipped' };
   if (BROKEN.has(status)) return { state: 'failed' };
   const list = [body.items, body.hits, body.documents].find(Array.isArray) as unknown[] | undefined;

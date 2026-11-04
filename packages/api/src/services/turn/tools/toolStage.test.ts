@@ -53,6 +53,9 @@ describe('how a tool\'s result ends its step', () => {
   it('a tool that did not work is failed; one that was not available this reply is skipped, which is not an error', () => {
     expect(stepEnd('research', JSON.stringify({ status: 'unavailable', reason: 'PROVIDER_FAILED', items: [] }))).toEqual({ state: 'failed' });
     expect(stepEnd('read_source', JSON.stringify({ kind: 'unavailable', reason: 'read_failed' }))).toEqual({ state: 'failed' });
+    // The workspace reader's own answer when nothing could be read has no reason at all (tools/workspace.ts UNAVAILABLE).
+    expect(stepEnd('read_source', JSON.stringify({ kind: 'unavailable' }))).toEqual({ state: 'failed' });
+    expect(stepEnd('coach_review', JSON.stringify({ kind: 'unavailable' }))).toEqual({ state: 'failed' });
     expect(stepEnd('research', JSON.stringify({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' }))).toEqual({ state: 'skipped' });
     expect(stepEnd('research', JSON.stringify({ status: 'not_supported' }))).toEqual({ state: 'skipped' });
     expect(stepEnd('read_source', TOOL_UNAVAILABLE)).toEqual({ state: 'skipped' });
