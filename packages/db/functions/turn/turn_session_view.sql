@@ -38,7 +38,7 @@ BEGIN
           'workSkill', (SELECT r.policy ? 'workSkill' FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id),
           -- The request a resumed turn continues: what a video package is named by.
           'rootRequestId', opc_turn_root_request(p_actor_id, m.turn_id),
-          -- The steps the reply showed while it was written (turn_steps_save): only a tool kind, an end state, a Skill's public name
+          -- The steps the reply showed while it was written (turn_chat_steps_apply, called by turn_close): only a tool kind, an end state, a Skill's public name
           -- and a count. Of the assistant's message only; NULL for a reply written before steps were kept.
           'steps', CASE WHEN m.role = 'assistant' THEN (SELECT r.steps FROM turns r WHERE r.actor_id = p_actor_id AND r.id = m.turn_id) END)
         ORDER BY m.seq), '[]'::jsonb)

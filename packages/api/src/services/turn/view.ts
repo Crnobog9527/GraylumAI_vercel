@@ -18,7 +18,7 @@ const turnView = z.object({
     content: z.string(), /** The turn's request id, a topic reply's handle (V2-10b). */ requestId: z.string().uuid().nullable().optional(),
     /** A Skill reply of a work item (V2-10b C2). */ workSkill: z.boolean().nullable().optional(),
     /** The request a resumed turn continues. */ rootRequestId: z.string().uuid().nullable().optional(),
-    /** The steps the reply showed while it was written (turn_steps_save); absent for a reply written before they were kept. Steps of
+    /** The steps the reply showed while it was written (turn_chat_steps_apply); absent for a reply written before they were kept. Steps of
      *  another shape are left out, never the whole conversation. */
     steps: z.array(z.object({ id: z.string().max(8), tool: z.enum(['load_skill', 'research', 'read_source', 'coach_review', 'other']),
       state: z.enum(['done', 'failed', 'skipped']), label: z.string().max(80).optional(), count: z.number().int().min(0).optional(),

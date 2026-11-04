@@ -550,15 +550,17 @@ it('RUNTIME: TURN-STEPS: a search shows its steps, and after the close the steps
     { type: 'step', id: '1', tool: 'research', detail: 'coffee shop positioning', state: 'running' },
     { type: 'step', id: '1', tool: 'research', detail: 'coffee shop positioning', state: 'done', count: 1 }]);
   expect(out.events.findIndex(e => e.type === 'step')).toBeLessThan(out.events.findIndex(e => e.type === 'text'));
-  // Kept on the closed turn before the result was sent: the end state and the count, never the search words.
+  // Kept by the close itself (turn_close, the same transaction): the end state and the count, never the search words. The turn still has
+  // its three writes: open, the receipts, the close.
   const kept = (await db.query('select steps from turns where actor_id=$1 and id=$2', [f.actor, result.turnId])).rows[0].steps;
   expect(kept).toEqual([{ id: '1', tool: 'research', state: 'done', count: 1 }]);
   // What a reload reads: the assistant's message carries its turn's steps, the user's message none.
   const view = (await db.query('select turn_session_view($1,$2,0) v', [f.actor, f.session])).rows[0].v;
   expect(view.messages.map((m: { role: string; steps?: unknown }) => [m.role, m.steps ?? null])).toEqual([
     ['user', null], ['assistant', [{ id: '1', tool: 'research', state: 'done', count: 1 }]]]);
-  // Set once: a second save changes nothing. A step that has not ended, an unknown key, search words, another actor's turn: nothing saved.
-  const save = async (actor: string, steps: unknown) => (await db.query('select turn_steps_save($1,$2,$3) v', [actor, result.turnId, JSON.stringify(steps)])).rows[0].v;
+  // The shape check of turn_chat_steps_apply (the close's own helper, called here as the database owner): set once; a step that has not
+  // ended, an unknown key, search words, another actor's turn: nothing saved, and never an error.
+  const save = async (actor: string, steps: unknown) => (await db.query('select turn_chat_steps_apply($1,$2,$3) v', [actor, result.turnId, JSON.stringify(steps)])).rows[0].v;
   expect(await save(f.actor, [{ id: '1', tool: 'other', state: 'done' }])).toBe(false);
   const second = await setup();
   const fresh = await turn(second, async (_url, init) => respond('gen-steps-2', frame('gen-steps-2', { choices: [{ index: 0, delta: { role: 'assistant', content: 'Plain.' }, finish_reason: null }] })
@@ -566,7 +568,7 @@ it('RUNTIME: TURN-STEPS: a search shows its steps, and after the close the steps
   const plain = fresh.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   // A reply with no tool keeps no steps, and a reload reads none.
   expect((await db.query('select steps from turns where actor_id=$1 and id=$2', [second.actor, plain.turnId])).rows[0].steps).toBeNull();
-  const own = async (steps: unknown) => (await db.query('select turn_steps_save($1,$2,$3) v', [second.actor, plain.turnId, JSON.stringify(steps)])).rows[0].v;
+  const own = async (steps: unknown) => (await db.query('select turn_chat_steps_apply($1,$2,$3) v', [second.actor, plain.turnId, JSON.stringify(steps)])).rows[0].v;
   for (const bad of [[{ id: '1', tool: 'research', state: 'running' }], [{ id: '1', tool: 'research', state: 'done', detail: 'coffee' }],
     [{ id: '1', tool: 'research', state: 'done', query: 'x' }], [{ id: '1', tool: 'web_search', state: 'done' }], [], 'x',
     [{ id: '1', tool: 'research', state: 'done', count: -1 }], [{ id: '1', tool: 'research', state: 'done', reason: 'other' }],

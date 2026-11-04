@@ -381,14 +381,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }],
-      ...(captured?.items.length ? { kindResult: { coachScreenshots: captured.items } } : {}) });
+      ...(captured?.items.length || stepLog.size ? { kindResult: { ...(captured?.items.length ? { coachScreenshots: captured.items } : {}),
+        // The steps the reply showed: written in the close's own transaction, in a savepoint of their own (turn_close, 0507).
+        ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) });
     markStage('close');
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
     // The held-back tail of a reply that has a hidden block (a lone backtick the stream could not yet tell from its start) goes out now.
     if (captured && answer.length > sentChars && answer.startsWith(reply.slice(0, sentChars))) emit({ type: 'text', delta: answer.slice(sentChars) });
-    // Before the result: the page reads the conversation right after it. Display only; a failed save loses the list, not the reply.
-    if (stepLog.size) await swallow('turn_steps_save_failed', db.stepsSave({ actorId: input.actorId, turnId: opened.turnId,
-      steps: savedSteps(stepLog.values()) }), false, { category: 'ai' });
     emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
   } catch (error) {
     const thrown = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';

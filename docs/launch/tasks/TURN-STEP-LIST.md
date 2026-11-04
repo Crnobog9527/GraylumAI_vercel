@@ -33,9 +33,9 @@ Owner 2026-11-04：所有对话里，一轮回复的加载过程（读取 Skill 
 
 ## 刷新后的历史（TURN-STEPS，迁移 0507）
 
-回复写完、扣费收尾后，服务端把这条回复的步骤存在回合行的 `turns.steps`（迁移 `0507_turn_steps_history.sql`；`turn_steps_save` 只在回合已关闭后写一次，不改 `turn_close`）。只存：工具类型、结束状态、Skill 的目录显示名、结果条数、固定原因（`no_brand`）；**不存搜索词**、参数、结果和 Skill 原文，所以注销不用额外清理。`turn_session_view` 把它放进每条助手消息的 `steps`（旧回复没有，读到 `null`）。
+回复写完时，服务端把这条回复的步骤放进收轮的 `kindResult.steps`，在**收轮的同一个事务里**存到回合行的 `turns.steps`（迁移 `0507_turn_steps_history.sql`；`turn_close` 的 chat 分支多收一个 `steps` 键，用自己的 savepoint 调 `turn_chat_steps_apply`，失败只丢步骤，不影响收轮和结算；不新增写入次数）。只存：工具类型、结束状态、Skill 的目录显示名、结果条数、固定原因（`no_brand`）；**不存搜索词**、参数、结果和 Skill 原文，所以注销不用额外清理。`turn_session_view` 把它放进每条助手消息的 `steps`（旧回复没有，读到 `null`）。
 页面：`chat.stepsByTurn.get(turnId) ?? reply.steps ?? []`（本页刚看着写完的回复优先，带着搜索词；刷新后读回来的没有搜索词，写完的行本来也不显示搜索词），`live` 不传，折叠成“已完成 N 个步骤”。
-别的回合种类要存步骤：在它的收尾处调用 `savedSteps(...)` 和 `db.stepsSave(...)`，放在发 `result` 之前。
+别的回合种类要存步骤：先让该种类在 `turn_close` 里有接收 `steps` 的分支（现在只有 chat），再把 `savedSteps(...)` 放进它收轮的 `kindResult`。
 
 ## 已知的重复
 
