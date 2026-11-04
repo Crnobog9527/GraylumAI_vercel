@@ -122,14 +122,28 @@ export async function runRecovery() {
  * the browser logged and which requests failed must reach the job log. Local simulated data only.
  */
 export function watchPage(page: Page) {
-  const failed: string[] = [], errors: string[] = [];
-  page.on('response', response => { if (response.status() >= 400) failed.push(`${response.status()} ${response.request().method()} ${response.url().replace(/^https?:\/\/[^/]+/, '').slice(0, 120)}`); });
+  const failed: string[] = [], errors: string[] = [], turnCalls: string[] = [];
+  const path = (url: string) => url.replace(/^https?:\/\/[^/]+/, '').replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, '…').slice(0, 120);
+  const at = () => new Date().toISOString().slice(11, 23);
+  page.on('response', response => { if (response.status() >= 400) failed.push(`${response.status()} ${response.request().method()} ${path(response.url())}`); });
+  // Every call to the turn endpoints, answered or not: whether the page asked for a turn at all is the first question when none opened.
+  page.on('request', request => { if (request.url().includes('/api/turn')) turnCalls.push(`${at()} ${request.method()} ${path(request.url())} sent`); });
+  page.on('requestfinished', async request => {
+    if (request.url().includes('/api/turn')) turnCalls.push(`${at()} ${path(request.url())} ${(await request.response())?.status() ?? '?'}`);
+  });
+  page.on('requestfailed', request => {
+    if (request.url().includes('/api/turn')) turnCalls.push(`${at()} ${path(request.url())} failed ${request.failure()?.errorText ?? ''}`);
+  });
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text().slice(0, 200)); });
   page.on('pageerror', error => errors.push(String(error.message).slice(0, 200)));
   return async function report(label: string) {
     const text = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '(no page text)');
+    // The runtime page's first send needs the start page's marker and a matching ?request=: say whether either is still there.
+    const send = await page.evaluate(() => ({ markers: Object.keys(sessionStorage).filter(k => k.startsWith('opc-runtime-send:')).length,
+      request: new URL(location.href).searchParams.has('request') })).catch(() => null);
     console.log(`[page evidence] ${label} url=${page.url().replace(/session=[0-9a-f-]+/, 'session=…')}\n`
       + `failed requests: ${JSON.stringify(failed.slice(-15))}\nbrowser errors: ${JSON.stringify(errors.slice(-10))}\n`
+      + `turn calls: ${JSON.stringify(turnCalls.slice(-15))}\nfirst-send marker: ${JSON.stringify(send)}\n`
       + `page text: ${text.replace(/\s+/g, ' ').slice(0, 600)}`);
   };
 }

@@ -99,7 +99,9 @@ try {
   const tests = spawn('pnpm', ['--filter', 'web', 'exec', 'playwright', 'test', '-c', 'playwright.sim.config.ts', ...process.argv.slice(2)], {
     cwd: root, stdio: 'inherit',
     env: { ...baseEnv, SIM_BASE_URL: appUrl, SIM_ORIGIN: simOrigin, SIM_SEED_FILE: seedFile, SIM_CRON_SECRET: cronSecret,
-      SIM_DB_URL: stack.dbUrl, SIM_API_URL: stack.apiUrl },
+      SIM_DB_URL: stack.dbUrl, SIM_API_URL: stack.apiUrl,
+      // A slower browser, as on a small CI runner, to look for timing faults locally (e.g. SIM_CPU_THROTTLE=6).
+      ...(process.env.SIM_CPU_THROTTLE ? { SIM_CPU_THROTTLE: process.env.SIM_CPU_THROTTLE } : {}) },
   });
   code = await exit(tests);
   console.log(`rate-limit refusals by the web proxy (503): ${JSON.stringify(denials)}`);

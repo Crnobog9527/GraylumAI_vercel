@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { type Browser, type Page } from '@playwright/test';
+
+import { expect, test } from './fixtures';
 
 import { armFault, expectNothingFrozen, lastTurnId, ledger, resetSim, seed, signIn, simCalls, turns } from './support';
 
