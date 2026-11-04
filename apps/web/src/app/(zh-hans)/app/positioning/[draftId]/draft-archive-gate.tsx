@@ -6,7 +6,7 @@ import { trpc } from '@/trpc/client';
 import { retryUnlessMissing } from '@/lib/read-retry';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { useDraftArchiveState } from '@/components/opc/profile-archive/profile-archive-api';
-import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { WorkspaceSkeleton } from '@/components/opc/workspace-skeleton';
 import { ReadonlyDraftView } from './readonly-draft-view';
 
 /**
@@ -14,7 +14,7 @@ import { ReadonlyDraftView } from './readonly-draft-view';
  * read-only (PAYWALL, Owner 2026-10-20), and the editable page, with its queries, polling, autosave and automatic
  * adoption, only mounts once the profile is confirmed active. A deleted conversation keeps its own read-only page.
  */
-export function DraftArchiveGate({ draftId, children }: { draftId: string; children: ReactNode }) {
+export function DraftArchiveGate({ draftId, children, area = 'chat' }: { draftId: string; children: ReactNode; area?: 'chat' | 'topics' }) {
   const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId), retry: retryUnlessMissing });
   const deleted = (read.data as { conversationDeleted?: unknown } | undefined)?.conversationDeleted === true;
   const archive = useDraftArchiveState(draftId, Boolean(draftId) && read.isSuccess && !deleted);
@@ -25,7 +25,7 @@ export function DraftArchiveGate({ draftId, children }: { draftId: string; child
   // archive check, so an archived draft never opens its editor.
   const failed = read.data === undefined && (read.isError || (read.errorUpdatedAt ?? 0) > (read.dataUpdatedAt ?? 0));
   if (!draftId || failed || deleted) return children;
-  if (read.isPending || archive.state === 'pending') return <main><PageSkeleton rows={6} label="定位档案读取中" /></main>;
+  if (read.isPending || archive.state === 'pending') return <WorkspaceSkeleton area={area} label="定位档案读取中" />;
   if (archive.state === 'error') return <main className="p-6"><p role="alert">{PROFILE_ARCHIVE_TEXT.loadFailed}{' '}
     <button type="button" className="underline" onClick={archive.retry}>重试</button></p></main>;
   if (archive.state === 'archived') return <ReadonlyDraftView draftId={draftId} draft={read.data} archived/>;
@@ -35,5 +35,5 @@ export function DraftArchiveGate({ draftId, children }: { draftId: string; child
 /** The gate for a page that reads its draft id from the route (the topics page). */
 export function RouteDraftArchiveGate({ children }: { children: ReactNode }) {
   const draftId = useParams<{ draftId: string }>()?.draftId ?? '';
-  return <DraftArchiveGate draftId={draftId}>{children}</DraftArchiveGate>;
+  return <DraftArchiveGate draftId={draftId} area="topics">{children}</DraftArchiveGate>;
 }

@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Button } from '@/components/ui/button'; import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { Button } from '@/components/ui/button'; import { WorkspaceSkeleton } from '@/components/opc/workspace-skeleton';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { CHAT_ACTION, ChatNoticeList, ChatPendingStatus, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { followTranscript, transcriptSignature } from '@/components/chat/chat-scroll';
@@ -353,7 +353,7 @@ function TopicWorkspaceContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executions, candidate, pending, busy, read.data?.handoffs, accountList.data, accountList.isFetching, accountList.error]);
 
-  if (read.isLoading || workspace.isLoading) return <main><PageSkeleton label="选题工作空间读取中"/></main>;
+  if (read.isLoading || workspace.isLoading) return <WorkspaceSkeleton area="topics" label="选题工作空间读取中"/>;
   if (read.data?.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={read.data}/>;
   if (read.error || workspace.error)
     return (
