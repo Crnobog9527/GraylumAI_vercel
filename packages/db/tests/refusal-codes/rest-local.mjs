@@ -8,8 +8,9 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 import { POSTGREST_IMAGE } from '../v3/images.mjs';
+import { refusalsMigration } from './migration.mjs';
 
-const migration = read('packages/db/migrations/0504_refusals_no_postgrest_retry.sql');
+const migration = refusalsMigration();
 const run = (args, input) => spawnSync('docker', args, { input, encoding: 'utf8', cwd: root,
   env: { PATH: process.env.PATH, HOME: process.env.HOME }, maxBuffer: 8 * 1024 * 1024, timeout: 60000 });
 const ok = r => { if (r.status !== 0 || r.error) throw new Error((r.stderr || String(r.error)).slice(-3000)); return r.stdout.trim(); };
@@ -176,6 +177,8 @@ try {
   const grants = async () => v(`SELECT jsonb_object_agg(p.proname,coalesce(p.proacl::text,'')) v FROM pg_proc p
     JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=ANY($1)`, [cases.map(x => x.fn)]);
   const before = await grants();
+  // The replayed migration leaves content_erasure_confirm out (batch F owns it), so put the live definition back from before the test copies.
+  await c.query(definitions.get('content_erasure_confirm'));
   await c.query(migration); await c.query(migration);
   assert.deepEqual(await grants(), before);
   for (const [fn, text] of definitions) assert.equal(await v(`SELECT pg_get_functiondef(p.oid) v FROM pg_proc p
