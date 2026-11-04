@@ -3,11 +3,8 @@
  * EXPERT-CONSULT copy (Master Plan 2.1 item 51, records L/Q/R). The card says "预约咨询，免费询价" and never
  * a price; there is no "let the expert see my report" switch — materials are exported by the user later.
  */
-/**
- * Owner 2026-11-04 (option A): the booking entry opens after launch. While false no card is shown and the booking page says
- * "即将开放"; the page, the router and the database stay as merged (#1060), so opening it later is this one switch.
- */
-export const EXPERT_CONSULT_ENTRY_OPEN = false;
+// The one switch for cards, booking page and the server's request mutation (Owner 2026-11-04, option A).
+export { EXPERT_CONSULT_ENTRY_OPEN } from '@repo/api/src/shared/expertConsultOpen';
 export const EXPERT_CONSULT_SOURCES = ['report', 'pricing', 'studio'] as const;
 export type ExpertConsultSource = (typeof EXPERT_CONSULT_SOURCES)[number];
 export const isExpertConsultSource = (value: string | null | undefined): value is ExpertConsultSource =>
@@ -46,6 +43,7 @@ export const EXPERT_CONSULT_COPY = {
 
 const ERRORS: Record<string, string> = {
   EXPERT_CONSULT_NOT_ELIGIBLE: EXPERT_CONSULT_COPY.notEligibleTitle,
+  EXPERT_CONSULT_NOT_OPEN: EXPERT_CONSULT_COPY.comingSoonTitle,
   EXPERT_CONSULT_INVALID: `请把问题写得具体一些（${NEED_MIN}–${NEED_MAX} 字），并留下联系方式（${CONTACT_MIN}–${CONTACT_MAX} 字）。`,
   EXPERT_CONSULT_ACCOUNT_CLOSED: '这个账号当前不能提交预约。',
 };
