@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import type { Handbook } from '../../publishMonitor/coach/funnel';
 import { dataSchema } from '../../publishMonitor/data';
 import { historiesSchema, reviewFrom, reviewPosts, supplementSchema, type History } from '../../publishMonitor/reviewData';
 import { fitReview, NO_ENTITLEMENT, OWN_POSTS_RESERVE, ownPostsResult, postResultBytes } from '../agent/workspacePosts';
@@ -14,7 +15,9 @@ import { READ_SOURCE_GUIDE, type SourceRead } from './source';
  * and the database only reads versions in the list. Library queries pass through to the library reader.
  */
 /** `coach`: the coach switch is on, so the index lists the chat review (block E); it shares the post reads and their room. */
-export type PostsAccess = { windowDays: number; benchmarks: boolean; review: boolean; coach?: boolean };
+export type PostsAccess = { windowDays: number; benchmarks: boolean; review: boolean; coach?: boolean;
+  /** The coach Skill package's platform handbooks, read before turn_open (empty: no reference lines). */
+  handbooks?: Map<string, Handbook> };
 export type WorkspaceAccess = { sources: string[]; strategy: boolean; posts: PostsAccess | null };
 export const NO_ACCESS: WorkspaceAccess = { sources: [], strategy: false, posts: null };
 const MAX_POST_READS = 2;
@@ -85,7 +88,7 @@ export function workspaceTurnReader(read: TurnClients['read'], actorId: string, 
       if (!access.posts?.coach) return UNAVAILABLE;
       if (++postReads > MAX_POST_READS) return READ_LIMIT;
       if (access.posts.windowDays <= 0) return { text: JSON.stringify({ kind: 'coach_review', status: 'no_entitlement', note: NO_COACH_ENTITLEMENT }) };
-      return fitRoom(await readCoachReview(read, actorId, sessionId, coach[1] ?? null));
+      return fitRoom(await readCoachReview(read, actorId, sessionId, coach[1] ?? null, access.posts.handbooks));
     }
     if (WORKSPACE_ID.test(query)) {
       // Room was kept for one strategy result (up to 52000 bytes), whatever the read limit is.

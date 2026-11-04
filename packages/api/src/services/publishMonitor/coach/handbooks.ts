@@ -82,3 +82,39 @@ export async function loadCoachHandbooks(admin: Pick<SupabaseClient, 'rpc'>, env
     return new Map();
   }
 }
+
+/** Handbooks per package hash, for a chat turn: the files of a published revision never change, so one read serves every turn of a few minutes. */
+const CHAT_CACHE_MS = 10 * 60_000;
+/** An empty or failed read is remembered briefly, so a down or unpublished package costs one attempt a minute, not two RPCs per chat turn. */
+const CHAT_EMPTY_MS = 60_000;
+/** A hung read must not hold a chat turn back: past this the turn goes on without lines (the read still finishes and fills the cache). */
+const CHAT_READ_TIMEOUT_MS = 2_000;
+type ChatEntry = { at: number; handbooks: Map<string, Handbook> };
+const chatCache = new Map<string, ChatEntry>();
+const chatReads = new Map<string, Promise<ChatEntry>>();
+/**
+ * loadCoachHandbooks for a chat turn (read before turn_open, never inside it). Unlike the weekly review, which reads every time, a revoked
+ * or unpublished package keeps being used for up to CHAT_CACHE_MS here. Never throws; concurrent turns share one read.
+ */
+export async function loadChatHandbooks(admin: Pick<SupabaseClient, 'rpc'>, env: Record<string, string | undefined>, now = Date.now()) {
+  const pack = readHandbookPackage(env);
+  if (!pack) return new Map<string, Handbook>();
+  const hit = chatCache.get(pack.packageHash);
+  if (hit && now - hit.at < (hit.handbooks.size ? CHAT_CACHE_MS : CHAT_EMPTY_MS)) return hit.handbooks;
+  let read = chatReads.get(pack.packageHash);
+  if (!read) {
+    read = loadCoachHandbooks(admin, env).then(handbooks => {
+      const entry = { at: now, handbooks };
+      chatCache.set(pack.packageHash, entry);
+      return entry;
+    }).finally(() => chatReads.delete(pack.packageHash));
+    chatReads.set(pack.packageHash, read);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), CHAT_READ_TIMEOUT_MS); });
+  const done = await Promise.race([read, late]);
+  clearTimeout(timer);
+  if (!done) logger.warn('billing', 'coach_chat_handbooks_slow', {});
+  return done?.handbooks ?? new Map<string, Handbook>();
+}
+export const clearChatHandbookCache = () => { chatCache.clear(); chatReads.clear(); };
