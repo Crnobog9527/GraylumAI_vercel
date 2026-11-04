@@ -5,7 +5,7 @@ import type { RuntimeTool } from '../agent/runner';
 import type { StepEvent } from '../sse';
 import { withStepEvents } from './announce';
 
-const tool = (name: string, execute: RuntimeTool['execute']): RuntimeTool => ({ name, description: name, parameters: { type: 'object', properties: {} }, execute } as RuntimeTool);
+const tool = (name: string, execute: RuntimeTool['execute']): RuntimeTool => ({ name, description: name, parameters: {}, execute } as unknown as RuntimeTool);
 
 describe('withStepEvents', () => {
   it('announces start and end of each tool under one id and keeps the result', async () => {
