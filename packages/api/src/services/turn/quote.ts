@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { logger } from '../../lib/logger';
 import { deriveFrozenPrices, deriveListPrices } from '../../shared/modelPriceBound';
 import { validateNominalBound, type NominalPricing } from '../../shared/nominalPricing';
 import { openRouterBound, openRouterCallBound, type OpenRouterLimits } from './provider/openRouterPolicy';
@@ -26,8 +27,21 @@ import { imageTokensUpper, type ImageInputPolicy } from './provider/imageInput';
  * Settings, model rows and snapshots are catalog reads (catalogCache); the platform key is read fresh every time (OR-1).
  */
 export { RUNTIME_PAYG_SETTING } from './settingKeys';
-/** In-flight calls per model across instances until the catalog carries a per-model value (3.3.2 item 10). */
-export const DEFAULT_MODEL_CONCURRENCY = 20;
+/** In-flight calls per model across instances (3.3.2 item 10) when runtime_payg.modelConcurrency does not name the model: about
+ * 100 users on real models peak near 100 calls, plus room for the burst when many turns open together. */
+export const DEFAULT_MODEL_CONCURRENCY = 150;
+/** The largest per-model value accepted; anything above would no longer limit anything. */
+export const MAX_MODEL_CONCURRENCY = 1000;
+
+/** The in-flight limit of `model` (an OpenRouter model id, as in the profiles). A value that is not an integer from 1 to
+ * MAX_MODEL_CONCURRENCY is logged and replaced by the default, so a typo never stops every turn. */
+export function modelConcurrency(settings: { modelConcurrency?: Record<string, unknown> }, model: string): number {
+  if (!settings.modelConcurrency || !Object.hasOwn(settings.modelConcurrency, model)) return DEFAULT_MODEL_CONCURRENCY;
+  const value = settings.modelConcurrency[model];
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= MAX_MODEL_CONCURRENCY) return value;
+  logger.warn('ai', 'turn_model_concurrency_invalid', { model });
+  return DEFAULT_MODEL_CONCURRENCY;
+}
 
 export class QuoteError extends Error {
   constructor(readonly code: 'TURN_PAYG_DISABLED' | 'TURN_MODEL_NOT_ADMITTED' | 'TURN_PRICE_UNAVAILABLE' | 'TURN_PROVIDER_KEY_UNAVAILABLE'
@@ -150,7 +164,7 @@ export async function chatQuote(admin: SupabaseClient, input: { configuration: C
       providerLimits: limits, outputLimit, upperUsd, ...(imageInput ? { imageInput } : {}) },
     reasoning,
     outputLimit, inputLimit: Math.min(input.inputBytes, PAYG_PROFILE_MAX_BYTES),
-    concurrency: DEFAULT_MODEL_CONCURRENCY, credential: async () => key,
+    concurrency: modelConcurrency(parsed.data, model), credential: async () => key,
     profile: { policyId: RUNTIME_PAYG_SETTING, policyVersion: parsed.data.policyVersion, profileVersion: profile.profileVersion,
       evidenceVersion: profile.evidenceVersion, pricingHash: state.snapshot.pricingHash, endpointTag: profile.endpointTag,
       nominalPricing: nominal, templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,
