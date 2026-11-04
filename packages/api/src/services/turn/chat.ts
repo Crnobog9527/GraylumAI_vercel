@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { extractScreenshots, visibleLength } from '../publishMonitor/coach/screenshots';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -235,9 +236,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // allowWorkspaceRead: the free-chat request shape, which may carry a history cache marker (PROMPT-CACHE-ALL).
     adapter: openRouterAdapter({ allowWorkspaceRead: true, credential: quote.credential, transport: deps.transport }) };
   const close = (kind: CloseKind, extra: { messages?: Array<{ role: 'user' | 'assistant'; content: string }>; delivered?: boolean;
-    refundAll?: boolean; failureCode?: string } = {}) =>
+    refundAll?: boolean; failureCode?: string; kindResult?: unknown } = {}) =>
     db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
-      refundAll: extra.refundAll, failureCode: extra.failureCode ?? null });
+      refundAll: extra.refundAll, failureCode: extra.failureCode ?? null, ...(extra.kindResult ? { kindResult: extra.kindResult } : {}) });
   // The model SDK wraps what the exchange throws; the stop that ended the call is kept here and wins over the wrapper.
   let stopped: TurnStop | undefined;
   try {
@@ -323,7 +324,9 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
           if (POSITIONING_MARKER.startsWith(start) || start.startsWith(POSITIONING_MARKER)) return;
           holding = false;
         }
-        if (reply.length > sentChars) { emit({ type: 'text', delta: reply.slice(sentChars) }); sentChars = reply.length; }
+        // A coach reply may end with the hidden coach_diag block: nothing from its start on is shown.
+        const shown = tools?.coachCapture ? visibleLength(reply) : reply.length;
+        if (shown > sentChars) { emit({ type: 'text', delta: reply.slice(sentChars, shown) }); sentChars = shown; }
       },
       exchange: async (_sequence, body, onChunk) => {
         const request = openRouterRequestBody(body, { context, policy: callPolicy as never, phase: 'ordinary', primaryDialogue: true });
@@ -337,7 +340,10 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
           .catch(error => { if (error instanceof TurnStop) stopped = error; throw error; });
       },
     });
-    const answer = output || reply;
+    const full = output || reply;
+    // The numbers the coach read from screenshots: the block is cut from what is saved and shown, its checked items go to the close.
+    const captured = tools?.coachCapture ? extractScreenshots(full) : null;
+    const answer = captured ? captured.body : full;
     // The fallback refusal: never shown or saved; Graylum bears the model cost (the stop-loss still counts it).
     if (fallback && isPositioningRefusal(answer)) {
       await close('failed', { refundAll: true, failureCode: 'positioning_required' });
@@ -345,8 +351,11 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     }
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
     const closed = await close('completed', { delivered: true,
-      messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }] });
+      messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }],
+      ...(captured?.items.length ? { kindResult: { coachScreenshots: captured.items } } : {}) });
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
+    // The held-back tail of a reply that has a hidden block (a lone backtick the stream could not yet tell from its start) goes out now.
+    if (captured && answer.length > sentChars && answer.startsWith(reply.slice(0, sentChars))) emit({ type: 'text', delta: answer.slice(sentChars) });
     emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
   } catch (error) {
     const thrown = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
