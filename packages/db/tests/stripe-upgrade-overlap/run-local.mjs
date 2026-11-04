@@ -230,7 +230,7 @@ try {
   sql(read('packages/db/migrations/0486_core_path_v2_opc_work_capture_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
   sql(read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql')); // V2-12 B-rewrites: rewrites fusion_review_archive_reconcile, which 0326 replays
   sql(read('packages/db/migrations/0497_turn_settle_credits_review_label.sql')); // rewrites turn_settle_credits, which 0459 replays
-  sql(read('packages/db/migrations/9999_refusals_no_postgrest_retry.sql')); // content_erasure_confirm answers PT409, which 0480 replays with 40001
+  sql(read('packages/db/migrations/0504_refusals_no_postgrest_retry.sql')); // content_erasure_confirm answers PT409, which 0480 replays with 40001
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

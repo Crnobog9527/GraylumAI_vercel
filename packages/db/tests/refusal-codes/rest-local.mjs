@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only check of migration 9999 (refusals answered, not re-run): each of the seven functions refuses out-of-date input through
+// Local-only check of migration 0504 (refusals answered, not re-run): each of the seven functions refuses out-of-date input through
 // the repository's pinned PostgREST. With the old SQLSTATE 40001 one HTTP request hangs while the database re-runs the call; with
 // PT409 the same request is answered at once with 409, after a single run. Synthetic rows only; no remote host or credentials.
 // Run: node packages/db/tests/refusal-codes/rest-local.mjs --local-only
@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 import { POSTGREST_IMAGE } from '../v3/images.mjs';
 
-const migration = read('packages/db/migrations/9999_refusals_no_postgrest_retry.sql');
+const migration = read('packages/db/migrations/0504_refusals_no_postgrest_retry.sql');
 const run = (args, input) => spawnSync('docker', args, { input, encoding: 'utf8', cwd: root,
   env: { PATH: process.env.PATH, HOME: process.env.HOME }, maxBuffer: 8 * 1024 * 1024, timeout: 60000 });
 const ok = r => { if (r.status !== 0 || r.error) throw new Error((r.stderr || String(r.error)).slice(-3000)); return r.stdout.trim(); };

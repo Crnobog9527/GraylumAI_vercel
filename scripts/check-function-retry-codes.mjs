@@ -16,16 +16,9 @@ const RETRY_CODE = /ERRCODE\s*=\s*'(?:40001|serialization_failure)'|\bSQLSTATE\s
 
 /** Known before this check; each still to be checked for a refusal that a re-run cannot clear. */
 export const ALLOWED = new Set([
-  'erasure/content_erasure_confirm.sql',
-  'other/billing_provider_prices_swap.sql',
-  'pay/pay_common_save_catalog.sql',
   'pay/pay_dispute_match.sql',
   'pay/pay_dispute_receive.sql',
   'pay/pay_dispute_stop_confirm.sql',
-  'publish/publish_monitor_publish_manual_resolve.sql',
-  'publish/publish_monitor_publish_record.sql',
-  'publish/publish_monitor_publish_release.sql',
-  'runtime/runtime_session_result_edit.sql',
   'turn/turn_call_begin.sql',
 ]);
 
