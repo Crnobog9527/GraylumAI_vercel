@@ -361,23 +361,29 @@ export async function checkRuntimeRateLimit(
       pair = { perMinute, perDay, minute: make('minute', perMinute, '1 m'), day: make('day', perDay, '1 d') };
       runtimeLimiters.set(key, pair); // Exactly six possible entries; replace, never append config versions.
     }
-    // Both windows are asked together (each is one Redis request; asking one after the other doubled the wait of every turn).
-    // A reservation of several calls reads both windows first and reserves only if both have room, as before. A request refused by
-    // one window has also been counted by the other, which is only stricter; a check-only resume reserves nothing.
+    // A reservation of several calls reads both windows together first (a read counts nothing), and reserves only if both have room;
+    // that is what lets the two reservations then go out together. A single call has no such read: the minute window is reserved
+    // first and the day window only if it passed, so a request refused by the minute window never counts against the day.
+    // A check-only resume reserves nothing.
     const windows = ['minute', 'day'] as const;
+    const refused = (window: RuntimeWindow, reset: number) => ({ success: false, reason: 'rate_limited', window,
+      retryAfter: Math.max(1, Math.ceil((reset - Date.now()) / 1000)) }) as const;
     if (rate > 1 || !reserve) {
       const remaining = await Promise.all(windows.map(window => withDeadline(pair[window].getRemaining(identifier))));
       for (const [index, result] of remaining.entries()) {
         if (!Number.isFinite(result.remaining) || !Number.isFinite(result.reset)) throw new Error('INVALID_REMAINING');
-        if (reserve && result.remaining < rate) return { success: false, reason: 'rate_limited', window: windows[index]!,
-          retryAfter: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+        if (reserve && result.remaining < rate) return refused(windows[index]!, result.reset);
       }
     }
     if (!reserve) return { success: true };
-    const reserved = await Promise.all(windows.map(window => limitWithDeadline(pair[window], identifier, rate)));
-    for (const [index, result] of reserved.entries()) {
-      if (!result.success) return { success: false, reason: 'rate_limited', window: windows[index]!,
-        retryAfter: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+    if (rate === 1) {
+      for (const window of windows) {
+        const result = await limitWithDeadline(pair[window], identifier, rate);
+        if (!result.success) return refused(window, result.reset);
+      }
+    } else {
+      const reserved = await Promise.all(windows.map(window => limitWithDeadline(pair[window], identifier, rate)));
+      for (const [index, result] of reserved.entries()) if (!result.success) return refused(windows[index]!, result.reset);
     }
     return { success: true };
   } catch {
