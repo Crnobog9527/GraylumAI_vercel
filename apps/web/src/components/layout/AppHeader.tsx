@@ -12,7 +12,6 @@ import {
   LogOut,
   Settings,
   CreditCard,
-  Loader2,
   Shield
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -61,7 +60,6 @@ export function AppHeader() {
   const {
     credits,
     status: creditsStatus,
-    isLoading: isCreditsLoading,
     warningLevel,
     warningColor,
     warningBgColor,
@@ -174,9 +172,7 @@ export function AppHeader() {
               }}
               title={isLowBalance ? `积分不足，请充值` : undefined}
             >
-              {isCreditsLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
-              ) : isLowBalance ? (
+              {isLowBalance ? (
                 <AlertTriangle className="h-4 w-4" style={{ color: warningColor }} />
               ) : (
                 <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
@@ -209,11 +205,7 @@ export function AppHeader() {
               }}
               title={creditsStatus === 'unavailable' ? '积分余额暂不可用，请稍后重试' : undefined}
             >
-              {isCreditsLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--text-tertiary)' }} />
-              ) : (
-                <AlertTriangle className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
-              )}
+              <AlertTriangle className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
               <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>--</span>
               <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>积分</span>
               {getCreditsAvailabilityLabel(creditsStatus) && (
