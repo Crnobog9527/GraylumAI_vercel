@@ -27,6 +27,7 @@ export const REFRESH_MIGRATION = '0272_publish_monitor_refresh.sql';
 
 // Every later publish-monitor migration after `from`, in order, so a reapplication check replays the chain
 // that really redefines its functions (MAINT-P1: the hand-written list had gone stale once CI ran this suite).
+// Also the cross-domain migration that rewrote the publish-job refusals to PT409 (its name is not publish_monitor_*).
 export const laterRedefinitions = from => readdirSync(resolve(import.meta.dirname, '../../migrations'))
-  .filter(file => /^\d{4}_publish_monitor.*\.sql$/.test(file) && file.slice(0, 4) > from).sort()
+  .filter(file => /^\d{4}_(?:publish_monitor.*|refusals_no_postgrest_retry)\.sql$/.test(file) && file.slice(0, 4) > from).sort()
   .map(file => `packages/db/migrations/${file}`);
