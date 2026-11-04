@@ -14,7 +14,7 @@ BEGIN
  j:=publish_monitor_publish_lock(p_job);
  IF j.state IN ('released','failed') THEN RETURN publish_monitor_publish_view(j); END IF;
  IF j.state NOT IN ('claimed','dispatching') OR j.provider_post_id IS NOT NULL OR j.results<>'{}'::jsonb THEN
-  RAISE EXCEPTION 'PUBLISH_MONITOR_STATE_CONFLICT' USING ERRCODE='40001';
+  RAISE EXCEPTION 'PUBLISH_MONITOR_STATE_CONFLICT' USING ERRCODE='PT409';
  END IF;
  j:=publish_monitor_publish_close(j,0,CASE WHEN j.state='claimed' THEN 'released' ELSE 'failed' END,p_code);
  RETURN publish_monitor_publish_view(j);

@@ -232,6 +232,7 @@ try {
   sql(read('packages/db/migrations/0497_turn_settle_credits_review_label.sql')); // rewrites turn_settle_credits, which 0459 replays
   // The chat screenshot diagnoses rewrite turn_close, which 0459 replays; found by name so the number the controller assigns changes nothing here.
   sql(read('packages/db/migrations/'+readdirSync(resolve(root,'packages/db/migrations')).find(file=>file.endsWith('_publish_monitor_chat_screenshot_diagnostics.sql'))));
+  sql(read('packages/db/migrations/0504_refusals_no_postgrest_retry.sql')); // content_erasure_confirm answers PT409, which 0480 replays with 40001
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

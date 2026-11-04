@@ -24,7 +24,7 @@ BEGIN
     WHEN jsonb_typeof(current_value)='string' THEN encode(sha256(convert_to(current_value #>> '{}','UTF8')),'hex')
     ELSE encode(sha256(convert_to(current_value::text,'UTF8')),'hex') END;
   IF current_hash IS DISTINCT FROM p_expected_hash THEN
-    RAISE EXCEPTION 'BILLING_UNIT_PROVIDER_PRICES_CONFLICT' USING ERRCODE='40001';
+    RAISE EXCEPTION 'BILLING_UNIT_PROVIDER_PRICES_CONFLICT' USING ERRCODE='PT409';
   END IF;
   INSERT INTO system_settings(key,value) VALUES('billing_provider_prices',to_jsonb(p_value))
   ON CONFLICT (key) DO UPDATE SET value=excluded.value;

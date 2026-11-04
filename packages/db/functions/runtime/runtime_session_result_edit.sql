@@ -30,7 +30,7 @@ BEGIN
   IF r.family_id<>p_family_id OR r.version<>p_expected_version+1 OR r.body<>p_body OR r.title<>clean THEN
    RAISE EXCEPTION 'SESSION_RESULT_REQUEST_CONFLICT' USING ERRCODE='23505';END IF;
  ELSE
-  IF latest.version<>p_expected_version THEN RAISE EXCEPTION 'SESSION_RESULT_VERSION_CONFLICT' USING ERRCODE='40001';END IF;
+  IF latest.version<>p_expected_version THEN RAISE EXCEPTION 'SESSION_RESULT_VERSION_CONFLICT' USING ERRCODE='PT409';END IF;
   IF latest.version>=50 THEN RAISE EXCEPTION 'SESSION_RESULT_LIMIT' USING ERRCODE='54000';END IF;
   INSERT INTO runtime_session_results(id,actor_id,session_id,family_id,version,result_type,title,body,source_execution_id,
    source_result_id,request_id)
