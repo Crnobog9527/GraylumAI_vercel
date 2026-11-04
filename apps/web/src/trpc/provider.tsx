@@ -20,12 +20,15 @@ import { mutationAffectsRuntimeChoices } from '@/lib/runtime-choices';
 import { clearPersistedCache, forgetPending, persistQueryCache, restoreQueryCache } from '@/lib/persisted-cache';
 import { readSessionUserIdSync } from '@/lib/session-user';
 import { SignedInShell } from '@/components/opc/signed-in-shell';
+import { LightFirstPaint } from '@/components/layout/LightFirstPaint';
+import { isLightAppPath } from '@/lib/light-app-paths';
 
 const inSignedInArea = (pathname: string | null) => pathname === '/app' || Boolean(pathname?.startsWith('/app/'));
 const noSubscription = () => () => undefined;
 
 export default function Provider({ children }: { children: React.ReactNode }) {
-  const signedInArea = inSignedInArea(usePathname());
+  const pathname = usePathname();
+  const signedInArea = inSignedInArea(pathname);
   // False while the server's HTML is being taken over, true from the first client-only render on.
   // Until then the server's HTML for these pages is the empty frame.
   const mounted = useSyncExternalStore(noSubscription, () => true, () => false);
@@ -191,6 +194,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
+        {signedInArea && isLightAppPath(pathname) && <LightFirstPaint />}
         <Fragment key={epoch}>{signedInArea && !mounted ? <SignedInShell /> : children}</Fragment>
         {recovery.notice && (
           <UnauthorizedNotice
