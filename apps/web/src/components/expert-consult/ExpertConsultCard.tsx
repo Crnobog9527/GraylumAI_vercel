@@ -1,12 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
-import { EXPERT_CONSULT_COPY as COPY } from './expertConsultCopy';
+import { EXPERT_CONSULT_COPY as COPY, EXPERT_CONSULT_ENTRY_OPEN } from './expertConsultCopy';
 
 /**
  * The booking entry shown at the end of a finalized report, on the pricing page and on the studio
  * contact page. It only links to the signed-in booking page, which checks eligibility on the server.
  */
-export function ExpertConsultCard({ href, className }: { href: string; className?: string }) {
+export function ExpertConsultCard({ href, className, open = EXPERT_CONSULT_ENTRY_OPEN }: { href: string; className?: string; open?: boolean }) {
+  if (!open) return null;
   return (
     <section data-testid="expert-consult-card"
       className={['grid gap-3 rounded-2xl border p-5 md:grid-cols-[1fr_auto] md:items-center', className].filter(Boolean).join(' ')}
