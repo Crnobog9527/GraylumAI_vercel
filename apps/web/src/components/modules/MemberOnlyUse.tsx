@@ -18,7 +18,9 @@ export function MemberOnlyUse({ level, onClose, onUsed }: { level: RequiredMembe
   const router = useRouter();
   const [paywall, setPaywall] = useState(false);
   const entitlements = trpc.user.getEntitlements.useQuery(undefined, { staleTime: 30_000, retry: false });
-  const locked = !meetsMemberLevel(entitlements.data?.level, level);
+  // A plan still loading disables the button; one that could not be read lets a click through (the chat's own gate still holds), so a
+  // paying member is never sold a plan after a transient error.
+  const locked = entitlements.isSuccess && !meetsMemberLevel(entitlements.data?.level, level);
   const use = () => {
     if (locked) { setPaywall(true); return; }
     onUsed?.();
@@ -30,6 +32,7 @@ export function MemberOnlyUse({ level, onClose, onUsed }: { level: RequiredMembe
     <>
       <Button
         onClick={use}
+        disabled={entitlements.isLoading}
         className="flex-1 h-11 rounded-xl font-semibold transition-all duration-300 hover:scale-[1.02]"
         style={{
           background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',

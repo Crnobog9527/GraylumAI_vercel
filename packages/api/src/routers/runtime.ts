@@ -17,7 +17,7 @@ import {realContract} from '../services/turn/settings/realHost';
 import {realHostMode} from '../services/turn/settings/productionEnvironment';
 import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
-import { asRequiredLevel, meetsMemberLevel, type RequiredMemberLevel } from '../services/skills/memberOnly';
+import { asRequiredLevel, lockedForTier, type RequiredMemberLevel } from '../services/skills/memberOnly';
 import { readOwnDataTier } from '../services/membershipEntitlements';
 import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/turn/settings/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
@@ -88,9 +88,9 @@ export const runtimeRouter=router({
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   const skills:Array<{moduleId:string;revisionId:string;name:string;requiredMemberLevel:RequiredMemberLevel|null;locked:boolean}>=[];
   // MEMBER-ONLY-MODULES: a Skill limited to members is listed to everyone and marked locked for a plan below it (the page then shows the
-  // paywall instead of choosing it); the plan is read only when some listed module has a requirement, and an unreadable plan locks.
+  // paywall instead of choosing it); the plan is read only when some listed module has a requirement, and an unreadable plan locks nothing (lockedForTier).
   const tierNeeded=modules.data.some(m=>asRequiredLevel(m.required_member_level));
-  const tierLevel=tierNeeded?(await swallow('runtime_choices_tier_unavailable',readOwnDataTier(ctx.supabaseAdmin!,ctx.user.id),null))?.level??null:null;
+  const tier=tierNeeded?await swallow('runtime_choices_tier_unavailable',readOwnDataTier(ctx.supabaseAdmin!,ctx.user.id),null):null;
   for(const m of modules.data){if(!m.skill_id||(ctx.real&&!ctx.real.callPolicies.some(q=>q.modelId===m.model_id)))continue;try{
    // AC-0c: reuse this request's user-scoped (RLS) read above, never the service-role row.
    const userVisibleModule=visible.data.find(v=>v.id===m.id);
@@ -101,7 +101,7 @@ export const runtimeRouter=router({
     const descriptor=descriptors.find(d=>d.revisionId===s.public.revisionId);
     if(!descriptor||Object.keys(descriptor.tasks).length)continue;
     const requiredMemberLevel=asRequiredLevel(m.required_member_level);
-    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:m.title,requiredMemberLevel,locked:!meetsMemberLevel(tierLevel,requiredMemberLevel)});
+    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:m.title,requiredMemberLevel,locked:lockedForTier(tier,requiredMemberLevel)});
    }
   }catch{/* unavailable packages are not advertised as runnable */}}
   // Staging hides models a free-chat turn is certain to be refused with; the administrator's default comes first.

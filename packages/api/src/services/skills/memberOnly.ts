@@ -14,3 +14,8 @@ export function meetsMemberLevel(level: string | null | undefined, required: str
 }
 
 export const asRequiredLevel = (value: unknown): RequiredMemberLevel | null => (value === 'pro' || value === 'gold' ? value : null);
+
+/** Whether the Skill list marks a module locked for this plan read. A plan that could not be read locks nothing: the page must not sell
+ *  a plan to a paying member after a transient failure, and the real gate (the chat catalog's own plan check) still holds. */
+export const lockedForTier = (tier: { level: string } | null, required: RequiredMemberLevel | null): boolean =>
+  tier !== null && !meetsMemberLevel(tier.level, required);

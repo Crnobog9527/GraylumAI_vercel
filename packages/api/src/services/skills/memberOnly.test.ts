@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asRequiredLevel, meetsMemberLevel } from './memberOnly';
+import { asRequiredLevel, lockedForTier, meetsMemberLevel } from './memberOnly';
 
 describe('member-only module levels', () => {
   it('a module with no requirement is open to every plan, an unknown plan included', () => {
@@ -19,5 +19,14 @@ describe('member-only module levels', () => {
     expect(asRequiredLevel('pro')).toBe('pro');
     expect(asRequiredLevel('gold')).toBe('gold');
     for (const value of ['free', '', null, undefined, 'x', 1]) expect(asRequiredLevel(value)).toBeNull();
+  });
+
+  it('the Skill list locks a module for free only; a plan that could not be read locks nothing', () => {
+    expect(lockedForTier({ level: 'free' }, 'pro')).toBe(true);
+    expect(lockedForTier({ level: 'pro' }, 'pro')).toBe(false);
+    expect(lockedForTier({ level: 'gold' }, 'pro')).toBe(false);
+    expect(lockedForTier({ level: 'pro' }, 'gold')).toBe(true);
+    expect(lockedForTier(null, 'pro')).toBe(false);
+    expect(lockedForTier({ level: 'free' }, null)).toBe(false);
   });
 });
