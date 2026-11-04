@@ -1,5 +1,11 @@
 # 正式生产发布 Runbook
 
+> **2026-11-04 起以 [REL-1 建库日顺序清单](../launch/tasks/REL-1-BUILD-PREP.md) 和 [REL-1](../launch/tasks/REL-1.md) 为准。**
+> 本文是早期（Stripe 最后接入阶段）的参考，下面几处已经和现行决定冲突，不要照着做：
+> 套餐和积分包的 Stripe 价格编号不在后台手填，而是 `payment_provider_refs` 的绑定（REL-1-BUILD-PREP 第 18 步）；
+> 正式站**不做真钱付款冒烟**（Owner 2026-11-03：staging 付款链路全部测通即可），所以第四节 C 里的"第一笔真实支付"不做；
+> 正式环境变量的完整名单见 REL-1-BUILD-PREP 第 24–26 步，可用 `node scripts/check-prod-env-names.mjs` 对着变量名清单核对。
+
 本手册是操作参考，不授予生产权限。执行前遵循 [AGENTS.md](../../AGENTS.md) 核对当前候选、验收及 Owner 对具体生产操作的明确授权。旧签核报告不能替代当前候选证据。
 
 ## 目标
