@@ -14,8 +14,10 @@ export const COACH_SKILL_NAME = 'review-coach';
 
 const isCoach = (entry: SkillCatalogEntry) => entry.name.trim().toLowerCase() === COACH_SKILL_NAME;
 
-export async function memberCatalog(admin: SupabaseClient, actorId: string, entries: SkillCatalogEntry[]): Promise<SkillCatalogEntry[]> {
+/** `tierOf`: the request's one read of the plan, when the caller also needs it elsewhere. */
+export async function memberCatalog(admin: SupabaseClient, actorId: string, entries: SkillCatalogEntry[],
+  tierOf: (actorId: string) => ReturnType<typeof readOwnDataTier> = id => readOwnDataTier(admin, id)): Promise<SkillCatalogEntry[]> {
   if (!entries.some(isCoach)) return entries;
-  const tier = await swallow('turn_tools_coach_skill_tier_unavailable', readOwnDataTier(admin, actorId), null);
+  const tier = await swallow('turn_tools_coach_skill_tier_unavailable', tierOf(actorId), null);
   return tier && tier.ownDataWindowDays > 0 ? entries : entries.filter(entry => !isCoach(entry));
 }

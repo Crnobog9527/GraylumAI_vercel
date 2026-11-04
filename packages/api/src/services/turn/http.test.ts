@@ -2,6 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatDeps } from './chat';
 import { handleTurnRequest, type TurnHttpDeps } from './http';
+import { markStage, noteStageTurn } from './stageTiming';
+import { logger } from '../../lib/logger';
 
 const run = vi.hoisted(() => vi.fn());
 const report = vi.hoisted(() => vi.fn());
@@ -188,5 +190,26 @@ describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
     juryStart.mockResolvedValueOnce({ ...view, turnId: null });
     expect(await (await handleTurnRequest(post(reviewing), deps({ handReview }))).text()).toContain('TURN_REQUEST_CONFLICT');
     expect(handReview).not.toHaveBeenCalled();
+  });
+
+  it('writes one timing line per streamed turn, with how it ended and only numbers besides', async () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+    run.mockImplementation(async (_deps, _input, emit) => {
+      markStage('config'); noteStageTurn(9);
+      emit({ type: 'opened', turnId: 9, reservedCredits: 1, replay: false });
+      emit({ type: 'error', code: 'TURN_RATE_LIMITED', turnId: 9 });
+    });
+    await (await handleTurnRequest(post(valid), deps())).text();
+    const lines = info.mock.calls.filter(call => call[1] === 'turn_stage_timing');
+    expect(lines).toHaveLength(1);
+    const context = lines[0]![2] as Record<string, unknown>;
+    expect(context).toMatchObject({ kind: 'chat', outcome: 'TURN_RATE_LIMITED', turnId: 9 });
+    expect(Object.keys(context)).toEqual(expect.arrayContaining(['parseMs', 'authMs', 'rateLimitMs', 'configMs', 'endMs', 'totalMs']));
+    expect(JSON.stringify(context)).not.toMatch(/actor-1|Hello|00000000/);
+    // A request refused before the stream is not timed.
+    info.mockClear();
+    await handleTurnRequest(post(valid), deps({ authenticate: async () => null }));
+    expect(info.mock.calls.filter(call => call[1] === 'turn_stage_timing')).toHaveLength(0);
+    info.mockRestore();
   });
 });

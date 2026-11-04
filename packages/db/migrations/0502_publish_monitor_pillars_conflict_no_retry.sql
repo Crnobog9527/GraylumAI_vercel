@@ -1,0 +1,96 @@
+-- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
+-- PUBLISH-MONITOR block D fix (#1716 acceptance step 10): a pillars save built on an out-of-date list (another tab saved meanwhile)
+-- raised PUBLISH_MONITOR_PILLARS_CHANGED with SQLSTATE 40001. PostgREST re-runs a whole call that fails with 40001 (serialization
+-- failure) instead of answering, so the refusal never reached the page: the request hung, and a re-run that came after the list was
+-- changed back to the old one went through and overwrote the other tab's pillar. The refusal now uses PT409, which PostgREST answers
+-- at once (HTTP 409), as 0175 did for the payment channel (docs/validation/PAY_COMMON_CHANNEL_CONFLICT.md); the page reads the code
+-- from the message as before.
+-- Compatibility: same signature, input, output and writes; only the refusal's SQLSTATE differs (the API matches the message).
+-- Repeatable: CREATE OR REPLACE plus REVOKE/GRANT. Recovery: re-apply the function as 0501 defines it.
+BEGIN;
+SET LOCAL lock_timeout='5s';
+
+CREATE OR REPLACE FUNCTION public.publish_monitor_coach_pillars_save(a uuid, p_business_id uuid, p_pillars jsonb, p_base jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE prof social_coach_profiles; current jsonb; next jsonb:='[]'; x jsonb; k text; nm text; old jsonb; kept text[]:='{}';
+ removed text[]; stages jsonb;
+BEGIN
+ -- Locks only this user's row for this brand (the insert below and FOR UPDATE), waited for at most 2 s (transaction-local) while
+ -- a coach save tags (milliseconds); past it the save fails and the page says try again.
+ PERFORM set_config('lock_timeout','2000',true);
+ IF NOT publish_monitor_actor_open(a) THEN RAISE EXCEPTION 'PUBLISH_MONITOR_ACCOUNT_CLOSED' USING ERRCODE='42501'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM opc_businesses WHERE id=p_business_id AND actor_id=a AND erased_at IS NULL AND archived_at IS NULL) THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_BUSINESS_NOT_FOUND' USING ERRCODE='42501'; END IF;
+ -- The brands the setting lists (and the claim reviews): one with an own connection.
+ IF NOT EXISTS(SELECT 1 FROM social_connections c WHERE c.actor_id=a AND c.business_id=p_business_id AND c.role='own'
+  AND c.status IN ('connected','reauth_required','quarantined')) THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_BUSINESS_NOT_FOUND' USING ERRCODE='42501'; END IF;
+ IF p_pillars IS NULL OR jsonb_typeof(p_pillars)<>'array' OR jsonb_array_length(p_pillars)>6 THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+ -- The same first-sight row the review claim would make (confirmed positioning version, extracted candidates), so saving first
+ -- never leaves the brand without its positioning version; then the row is locked against a concurrent save or claim.
+ -- The account stages too, as the claim records them: a stage change is then noticed from the first review on.
+ SELECT coalesce(jsonb_object_agg(project_id::text,stage),'{}') INTO stages FROM opc_accounts
+  WHERE actor_id=a AND business_id=p_business_id AND erased_at IS NULL;
+ INSERT INTO social_coach_profiles(actor_id,business_id,strategy_version_id,pillars,pillars_source,strategy_check_stages)
+ SELECT a,b.id,b.current_source_version_id,publish_monitor_coach_extracted_pillars(b.id),
+  CASE WHEN jsonb_array_length(publish_monitor_coach_extracted_pillars(b.id))>0 THEN 'extracted' END,stages
+ FROM opc_businesses b WHERE b.id=p_business_id
+ ON CONFLICT(actor_id,business_id) DO NOTHING;
+ SELECT * INTO prof FROM social_coach_profiles WHERE actor_id=a AND business_id=p_business_id FOR UPDATE;
+ current:=prof.pillars;
+ -- The whole list replaces the saved one, so it must be built on the saved one: otherwise another window's new pillar would be read
+ -- as deleted here (its posts untagged). The page reads the list again and the user edits that.
+ IF coalesce((SELECT jsonb_agg(jsonb_build_object('key',e->>'key','name',e->>'name') ORDER BY n) FROM jsonb_array_elements(current)
+   WITH ORDINALITY q(e,n)),'[]') IS DISTINCT FROM coalesce((SELECT jsonb_agg(jsonb_build_object('key',e->>'key','name',e->>'name')
+   ORDER BY n) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_base)='array' THEN p_base ELSE '[]' END) WITH ORDINALITY q(e,n)),'[]') THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_PILLARS_CHANGED' USING ERRCODE='PT409'; END IF;
+ FOR x IN SELECT value FROM jsonb_array_elements(p_pillars) LOOP
+  IF jsonb_typeof(x)<>'object' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+  nm:=btrim(coalesce(x->>'name',''));
+  IF char_length(nm) NOT BETWEEN 1 AND 40 OR nm ~ '[[:cntrl:]]' THEN
+   RAISE EXCEPTION 'PUBLISH_MONITOR_PILLAR_NAME_INVALID' USING ERRCODE='22023'; END IF;
+  -- Same comparison as title tagging (NFKC, no spaces, lower case): two names it cannot tell apart would make it give up on both.
+  IF EXISTS(SELECT 1 FROM jsonb_array_elements(next) e
+   WHERE lower(regexp_replace(normalize(e->>'name',NFKC),'\s+','','g'))=lower(regexp_replace(normalize(nm,NFKC),'\s+','','g'))) THEN
+   RAISE EXCEPTION 'PUBLISH_MONITOR_PILLAR_NAME_DUPLICATE' USING ERRCODE='22023'; END IF;
+  k:=x->>'key';
+  IF k IS NULL THEN
+   -- A key never used by this brand: an old experiment or mix target that named a deleted pillar can never match the new one.
+   LOOP
+    k:='u'||substr(md5(gen_random_uuid()::text),1,8);
+    EXIT WHEN NOT EXISTS(SELECT 1 FROM jsonb_array_elements(current||next) e WHERE e->>'key'=k)
+     AND NOT EXISTS(SELECT 1 FROM social_post_facts WHERE actor_id=a AND business_id=p_business_id AND pillar_key=k)
+     AND NOT EXISTS(SELECT 1 FROM social_review_experiments WHERE actor_id=a AND business_id=p_business_id AND match->>'pillar_key'=k);
+   END LOOP;
+   next:=next||jsonb_build_array(jsonb_build_object('key',k,'name',nm,'definition',nm));
+  ELSE
+   -- Only a pillar the brand has now keeps its key; a deleted key cannot be brought back from an old page.
+   SELECT e INTO old FROM jsonb_array_elements(current) e WHERE e->>'key'=k;
+   IF old IS NULL OR k=ANY(kept) THEN RAISE EXCEPTION 'PUBLISH_MONITOR_PILLAR_KEY_INVALID' USING ERRCODE='22023'; END IF;
+   kept:=kept||k;
+   next:=next||jsonb_build_array(jsonb_build_object('key',k,'name',nm,
+    'definition',CASE WHEN old->>'name'=nm THEN coalesce(old->>'definition',nm) ELSE nm END));
+  END IF;
+ END LOOP;
+ SELECT coalesce(array_agg(e->>'key'),'{}') INTO removed FROM jsonb_array_elements(current) e WHERE NOT (e->>'key'=ANY(kept));
+ IF cardinality(removed)>0 THEN
+  UPDATE social_post_facts SET pillar_key=NULL,pillar_source=NULL,updated_at=clock_timestamp()
+   WHERE actor_id=a AND business_id=p_business_id AND pillar_key=ANY(removed);
+ END IF;
+ UPDATE social_coach_profiles SET pillars=next,pillars_source='user',
+  pillar_mix_target=CASE WHEN pillar_mix_target IS NULL THEN NULL
+   -- The other shares are kept as they are (no 100% rule); nothing left is no target.
+   ELSE (SELECT jsonb_object_agg(t.key,t.value) FROM jsonb_each(pillar_mix_target) t WHERE NOT (t.key=ANY(removed))) END,
+  updated_at=clock_timestamp()
+  WHERE actor_id=a AND business_id=p_business_id;
+ RETURN jsonb_build_object('businessId',p_business_id,'pillars',next,'source','user','removed',to_jsonb(removed));
+END $function$;
+
+REVOKE ALL ON FUNCTION public.publish_monitor_coach_pillars_save(uuid,uuid,jsonb,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.publish_monitor_coach_pillars_save(uuid,uuid,jsonb,jsonb) TO service_role;
+COMMIT;

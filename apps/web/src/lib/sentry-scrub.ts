@@ -161,6 +161,8 @@ const ALERT_COUNTS: Readonly<Record<string, readonly string[]>> = {
   // PUBLISH-MONITOR: the Post for Me plan's publish count (publish-monitor-alert.ts); three integers, nothing else.
   PUBLISH_MONITOR_QUOTA_NEAR: ['limit', 'used', 'reserved'],
   PUBLISH_MONITOR_QUOTA_FULL: ['limit', 'used', 'reserved'],
+  // The conversation page's first send was not asked for in time (runtime/first-send-watch.ts): four 0/1 flags and two durations.
+  RUNTIME_FIRST_SEND_STALLED: ['hasInput', 'hasView', 'notBusy', 'markerMatches', 'pageAgeMs', 'waitedMs'],
 };
 // ENV_VALIDATION_FAILED (instrumentation.ts) may keep the names of the misconfigured environment variables (never values).
 const ALERT_VARIABLE_CODE = 'ENV_VALIDATION_FAILED';
