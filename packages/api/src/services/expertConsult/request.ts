@@ -2,6 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
+import { EXPERT_CONSULT_ENTRY_OPEN } from '../../shared/expertConsultOpen';
 import { notifyOwnerOfExpertConsult } from './notify';
 
 /**
@@ -25,12 +26,12 @@ const resultSchema = pending.extend({ created: z.boolean() }).strict();
 export type ExpertConsultState = z.infer<typeof stateSchema>;
 export type ExpertConsultResult = z.infer<typeof resultSchema>;
 
-export type ExpertConsultErrorCode = 'EXPERT_CONSULT_NOT_ELIGIBLE' | 'EXPERT_CONSULT_INVALID'
+export type ExpertConsultErrorCode = 'EXPERT_CONSULT_NOT_OPEN' | 'EXPERT_CONSULT_NOT_ELIGIBLE' | 'EXPERT_CONSULT_INVALID'
   | 'EXPERT_CONSULT_ACCOUNT_CLOSED' | 'EXPERT_CONSULT_UNAVAILABLE';
 export class ExpertConsultError extends Error {
   constructor(readonly code: ExpertConsultErrorCode) { super(code); }
 }
-const known: ExpertConsultErrorCode[] = ['EXPERT_CONSULT_NOT_ELIGIBLE', 'EXPERT_CONSULT_INVALID', 'EXPERT_CONSULT_ACCOUNT_CLOSED'];
+const known: ExpertConsultErrorCode[] = ['EXPERT_CONSULT_NOT_OPEN', 'EXPERT_CONSULT_NOT_ELIGIBLE', 'EXPERT_CONSULT_INVALID', 'EXPERT_CONSULT_ACCOUNT_CLOSED'];
 function failure(error: { message?: string } | null | undefined): ExpertConsultError {
   return new ExpertConsultError(known.find(code => error?.message?.includes(code)) ?? 'EXPERT_CONSULT_UNAVAILABLE');
 }
@@ -49,6 +50,8 @@ export type ExpertConsultNotifier = (request: { ticketId: string }) => Promise<u
 export async function requestExpertConsult(db: Rpc & Pick<SupabaseClient, 'from'>, profileId: string,
   input: ExpertConsultInput, notify: ExpertConsultNotifier = ({ ticketId }) => notifyOwnerOfExpertConsult(db, ticketId),
 ): Promise<ExpertConsultResult> {
+  // Closed until after launch (Owner 2026-11-04): refuse before touching the database, so nothing is stored or sent.
+  if (!EXPERT_CONSULT_ENTRY_OPEN) throw new ExpertConsultError('EXPERT_CONSULT_NOT_OPEN');
   const { need, contact, source } = expertConsultInput.parse(input);
   const result = await db.rpc('expert_consult_request', {
     p_actor_id: uuid.parse(profileId), p_need: need, p_contact: contact, p_source: source,

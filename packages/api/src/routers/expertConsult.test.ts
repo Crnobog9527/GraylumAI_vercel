@@ -1,7 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { expertConsultRouter } from './expertConsult';
 import { requestExpertConsult } from '../services/expertConsult/request';
+
+// The switch is closed in the code until after launch (Owner 2026-11-04); the open behaviour is tested with it flipped.
+const entry = vi.hoisted(() => ({ open: true }));
+vi.mock('../shared/expertConsultOpen', () => ({ get EXPERT_CONSULT_ENTRY_OPEN() { return entry.open; } }));
+beforeEach(() => { entry.open = true; });
 
 const id = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const created = { ticketId: id(9), createdAt: '2026-10-17T00:00:00Z', created: true };
@@ -82,4 +87,27 @@ it('notifies the Owner once, with the ticket id only, and a failed notice never 
   db.rpc.mockResolvedValueOnce({ data: { ...created, created: false }, error: null });
   await requestExpertConsult(db as never, id(1), input, notify);
   expect(notify).toHaveBeenCalledTimes(1);
+});
+
+it('while the entry is closed a request is refused before any RPC, and reading the state is untouched', async () => {
+  entry.open = false;
+  const f = fixture();
+  const error = await f.caller.request(input).catch(e => e);
+  expect(error).toMatchObject({ code: 'FORBIDDEN', message: 'EXPERT_CONSULT_NOT_OPEN' });
+  expect(f.calls()).toEqual([]);
+  expect(await f.caller.state()).toEqual({ eligible: true, pending: null });
+});
+
+it('the service itself refuses while closed: nothing stored, nobody notified', async () => {
+  entry.open = false;
+  const notify = vi.fn(async () => {});
+  const db = { rpc: vi.fn(async () => ({ data: created, error: null })) };
+  await expect(requestExpertConsult(db as never, id(1), input, notify)).rejects.toMatchObject({ code: 'EXPERT_CONSULT_NOT_OPEN' });
+  expect(db.rpc).not.toHaveBeenCalled();
+  expect(notify).not.toHaveBeenCalled();
+});
+
+it('the shipped value of the switch is closed', async () => {
+  const real = await vi.importActual<typeof import('../shared/expertConsultOpen')>('../shared/expertConsultOpen');
+  expect(real.EXPERT_CONSULT_ENTRY_OPEN).toBe(false);
 });
