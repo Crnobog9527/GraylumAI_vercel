@@ -67,10 +67,9 @@ export function MemberOnlyLinkAction({ level, className, noticeClassName }:
   return (
     <>
       <p className={noticeClassName} data-testid="member-only-note">{memberOnlyNote(level)}{locked ? '，开通会员后即可使用' : ''}</p>
-      {locked
-        ? <button className={className} onClick={() => setPaywall(true)}>使用</button>
-        : <Link className={className} href="/app/positioning"
-          aria-disabled={entitlements.isLoading} onClick={() => prefillNewTask(MEMBER_ONLY_PREFILL)}>使用</Link>}
+      {locked || entitlements.isLoading
+        ? <button className={className} disabled={entitlements.isLoading} onClick={() => setPaywall(true)}>使用</button>
+        : <Link className={className} href="/app/positioning" onClick={() => prefillNewTask(MEMBER_ONLY_PREFILL)}>使用</Link>}
       {paywall && <ReportPaywallDialog scene="coach" minLevel={level} onClose={() => setPaywall(false)} />}
     </>
   );
