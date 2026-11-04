@@ -136,7 +136,7 @@ describe('PUBLIC_MODULE_SELECT', () => {
 describe('member-only module level migration', () => {
   it('adds the nullable level column, checks its values and grants only that column for public reads', () => {
     const migrationSql = readFileSync(
-      new URL('../../../db/migrations/9999_modules_required_member_level.sql', import.meta.url),
+      new URL('../../../db/migrations/0506_modules_required_member_level.sql', import.meta.url),
       'utf8',
     );
     expect(migrationSql).toContain('ADD COLUMN IF NOT EXISTS required_member_level text;');

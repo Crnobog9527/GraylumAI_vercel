@@ -32,3 +32,24 @@ it('the name is matched without case or edge spaces, and a plan lookup that thro
   m.next = () => Promise.reject(Object.assign(new Error('UNAUTHORIZED'), { code: 'UNAUTHORIZED' }));
   expect(await memberCatalog(admin, 'a', [entry(' Review-Coach '), entry('other')])).toHaveLength(1);
 });
+
+// MEMBER-ONLY-MODULES: the server drops a Skill from the catalog (so it is neither listed nor loadable) for a plan below its requirement.
+const limited = (name: string, requiredMemberLevel: 'pro' | 'gold' | null) =>
+  ({ ...entry(name), ...(requiredMemberLevel ? { requiredMemberLevel } : {}) }) as SkillCatalogEntry;
+const tier = (level: string) => () => Promise.resolve({ level, ownDataWindowDays: level === 'free' ? 0 : 30, allowBenchmarkMonitor: false });
+const names = async (level: string, list: SkillCatalogEntry[]) => (await memberCatalog(admin, 'a', list, tier(level) as never)).map(e => e.name);
+it('a Pro account loads a Pro-only Skill; a free account does not; a Skill with no requirement is for everyone', async () => {
+  const list = [limited('pro-only', 'pro'), limited('open', null)];
+  expect(await names('pro', list)).toEqual(['pro-only', 'open']);
+  expect(await names('gold', list)).toEqual(['pro-only', 'open']);
+  expect(await names('free', list)).toEqual(['open']);
+});
+it('a Pro account is refused a Gold-only Skill; a Gold account loads it', async () => {
+  const list = [limited('gold-only', 'gold'), limited('open', null)];
+  expect(await names('pro', list)).toEqual(['open']);
+  expect(await names('gold', list)).toEqual(['gold-only', 'open']);
+});
+it('an unreadable plan hides every Skill that has a requirement and keeps the open ones', async () => {
+  m.next = () => Promise.reject(new Error('down'));
+  expect((await memberCatalog(admin, 'a', [limited('pro-only', 'pro'), limited('open', null)])).map(e => e.name)).toEqual(['open']);
+});

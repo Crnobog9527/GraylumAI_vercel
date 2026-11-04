@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { memberLevelDenied } from '../skills/memberOnly';
 import { resumeLimits, type ResumeRead } from './resume';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { assertSeparateSummaryModel, summaryPolicy } from '../artifacts/summaryPolicy';
@@ -41,7 +42,8 @@ export class MentorCatalogError extends Error {
 }
 const KNOWN = /^[A-Z][A-Z0-9_]{2,63}$/;
 
-export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: string; organize: boolean; research: boolean; pricing?: PricingDeps })
+export async function mentorCatalog(admin: SupabaseClient,
+  input: { actorId: string; moduleId: string; organize: boolean; research: boolean; pricing?: PricingDeps })
   : Promise<MentorCatalog> {
   // Every setting from the admission configuration rows (one cached query), as chat.ts.
   const configuration = readAdmissionConfiguration(admin);
@@ -51,7 +53,8 @@ export async function mentorCatalog(admin: SupabaseClient, input: { moduleId: st
   if (!config.success || !config.data.enabled) throw new MentorCatalogError('TURN_CORE_DISABLED');
   const [settings, budgets, module] = await Promise.all([readAdmissionSettings(admin, configuration),
     readPurposeBudgets(admin, configuration), readAdmissionModule(admin, input.moduleId)]);
-  if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string')
+  if (module.error || module.data?.active !== true || typeof module.data.model_id !== 'string'
+    || await memberLevelDenied(admin, input.actorId, module.data.required_member_level))
     throw new MentorCatalogError('TURN_MENTOR_DENIED');
   try {
     const quoteMentor = (inputBytes: number) => chatQuote(admin, { configuration: rows, modelId: module.data.model_id, inputBytes,

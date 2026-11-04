@@ -54,5 +54,5 @@ export function readAdmissionModel(admin: SupabaseClient, modelId: string) {
  * package check that follow stay per request. */
 export function readAdmissionModule(admin: SupabaseClient, moduleId: string) {
   return catalogRead(admin, 'skills', 'admission-module:' + moduleId, () => admin.from('modules')
-    .select('id,active,skill_id,model_id,report_model_id,social_media_related,uses_user_voice').eq('id', moduleId).single());
+    .select('id,active,skill_id,model_id,report_model_id,social_media_related,uses_user_voice,required_member_level').eq('id', moduleId).single());
 }
