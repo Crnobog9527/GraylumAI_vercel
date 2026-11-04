@@ -288,6 +288,12 @@ body {
   font-family: var(--font-primary);
 }
 
+/* Light signed-in routes (lib/light-app-paths.ts): trpc/provider.tsx renders <LightFirstPaint/> in the server HTML. */
+body:has([data-first-paint='light']) {
+  background: #f7f7f7;
+  color-scheme: light;
+}
+
 code,
 pre {
   font-family: var(--font-mono);
