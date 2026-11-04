@@ -50,10 +50,14 @@ export function MentorTurnSteps({ live, reply, execution, calls, stale = false }
   // Not streamed here but still advancing on the server: a restored prefix, the reopened notice, or a saved main reply whose organizer is open.
   const noticed = !here && reply.notice?.text === REOPENED_HINT;
   const reopened = !here && !live?.stopped && (noticed || (Boolean(live) && !stale && open));
+  // The benchmark's searches are already rows of the research list below: not listed twice. A card-only reply has no text, but once
+  // the organizer or the save runs the reply is written, so the list folds instead of "thinking" on.
+  const shownSteps = (here ? live!.steps ?? [] : []).filter(step => !(step.tool === "research" && calls.length > 0));
+  const later = here && (live!.phase === "organizer" || live!.phase === "saving");
   return <>
     <ResearchCallList calls={calls}/>
     {(streaming || reopened) && <>
-      <TurnStepList steps={here ? live!.steps ?? [] : []} live hasText={Boolean(reply.text.trim())}/>
+      <TurnStepList steps={shownSteps} live hasText={Boolean(reply.text.trim()) || later}/>
       <TurnHint reopened={reopened} quiet={noticed}/>
     </>}
   </>;

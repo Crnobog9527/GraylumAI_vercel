@@ -23,6 +23,19 @@ describe("MentorTurnSteps", () => {
     expect(folded).toContain("已完成 1 个步骤");
   });
 
+  it("lists a search step once: the benchmark's research rows already show it", () => {
+    const steps = [{ id: "1", tool: "research", state: "running", detail: "早起" }, { id: "2", tool: "load_skill", state: "done" }];
+    const calls = [{ id: "c1", state: "running" }] as never;
+    const shown = html({ live: liveReply({ steps }), calls });
+    expect(shown).not.toContain("正在联网搜索");
+    expect(shown).toContain("已读取方法");
+  });
+
+  it("does not keep thinking once a card-only reply is being organized or saved", () => {
+    expect(html({ live: liveReply({ phase: "organizer" }) })).not.toContain("正在思考");
+    expect(html({ live: liveReply({ phase: "saving", steps: [{ id: "1", tool: "load_skill", state: "done" }] }) })).toContain("已完成 1 个步骤");
+  });
+
   it("stops showing an open organizer as in progress once the grace period is over", () => {
     const open = { executionId: "e1", state: "running", primaryBody: "x", organizerComplete: null } as never;
     expect(html({ reply: { text: "x" }, execution: open, stale: true })).not.toContain("data-turn-step-list");

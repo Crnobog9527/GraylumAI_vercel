@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as ui, type Browser } from '@playwright/test';
@@ -53,8 +53,17 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); }, 30000);
 
-it('lists the mentor reply\'s steps as they come, then folds them into one line when the text flows', async () => {
-  const page = await browser.newPage({ viewport: { width: 390, height: 800 } });
+// With TURN_STEP_SHOTS set to a folder, also writes pictures of the states (fixed sample text only: no account, balance or id).
+const shot = async (page: import('@playwright/test').Page, name: string) => {
+  const folder = process.env.TURN_STEP_SHOTS;
+  if (!folder) return;
+  mkdirSync(folder, { recursive: true });
+  await page.screenshot({ path: `${folder}/${name}.png`, clip: { x: 0, y: 0, width: page.viewportSize()!.width, height: 220 } });
+};
+
+for (const [label, width] of [['desktop', 1280], ['mobile-390', 390]] as const)
+it(`lists the mentor reply's steps as they come, then folds them into one line when the text flows (${label})`, async () => {
+  const page = await browser.newPage({ viewport: { width, height: 800 } });
   try {
     await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
     await page.goto('http://localhost/mentor-steps');
@@ -66,17 +75,20 @@ it('lists the mentor reply\'s steps as they come, then folds them into one line 
     await ui(list.getByText('正在思考…')).toBeVisible();
     await next.click();
     await ui(list.getByText('正在读取方法…')).toBeVisible();
+    await shot(page, `positioning-${label}-1-reading`);
     await next.click();
     await ui(list.getByText('已读取方法')).toBeVisible();
     await next.click();
     await ui(list.getByText('正在联网搜索：早起口播…')).toBeVisible();
     await next.click();
     await ui(list.getByText('已搜索，找到 6 条结果')).toBeVisible();
+    await shot(page, `positioning-${label}-2-searched`);
     await next.click();
     await ui(page.getByText('先说说你的情况。', { exact: true })).toBeVisible();
     const fold = page.getByRole('button', { name: '已完成 2 个步骤' });
     await ui(fold).toBeVisible();
     await ui(page.getByText('已搜索，找到 6 条结果')).toHaveCount(0);
+    await shot(page, `positioning-${label}-3-folded`);
     await fold.click();
     await ui(page.getByText('已搜索，找到 6 条结果')).toBeVisible();
   } finally { await page.close(); }
