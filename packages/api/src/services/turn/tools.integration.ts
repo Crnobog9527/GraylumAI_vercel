@@ -555,6 +555,8 @@ it('RUNTIME: TURN-STEPS: a search shows its steps, and after the close the steps
   const kept = (await db.query('select steps from turns where actor_id=$1 and id=$2', [f.actor, result.turnId])).rows[0].steps;
   expect(kept).toEqual([{ id: '1', tool: 'research', state: 'done', count: 1 }]);
   // What a reload reads: the assistant's message carries its turn's steps, the user's message none.
+  // (The fixture's session is a draft-scoped probe whose draft does not exist, which the view refuses: read it as a plain free-chat conversation.)
+  await db.query("update runtime_sessions set scope='{\"kind\":\"free_chat\"}' where id=$1", [f.session]);
   const view = (await db.query('select turn_session_view($1,$2,0) v', [f.actor, f.session])).rows[0].v;
   expect(view.messages.map((m: { role: string; steps?: unknown }) => [m.role, m.steps ?? null])).toEqual([
     ['user', null], ['assistant', [{ id: '1', tool: 'research', state: 'done', count: 1 }]]]);
