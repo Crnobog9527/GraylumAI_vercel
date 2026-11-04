@@ -85,3 +85,35 @@ test('a --series run refuses to start without the auth settings, before anything
   assert.notEqual(run.status, 0);
   assert.match(run.stderr, /outlasts the one-hour tokens/);
 });
+
+// Independent review before push: a calibrate or single-stage run must not cut the file down to the accounts it used.
+test('only the first `count` accounts refresh, and the file keeps every account', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'auth-')), file = join(dir, 'accounts.json');
+  const accounts = Array.from({ length: 5 }, (_, i) => ({ kind: 'chat', sessionId: `s${i}`, token: jwt(`u${i}`), refreshToken: `r${i}` }));
+  writeFileSync(file, JSON.stringify({ accounts }));
+  const { fetcher, posted } = fakeAuth((grant, body) => ({ body: session(body.refresh_token.replace('r', 'u'), `new-${body.refresh_token}`) }));
+  const result = await refreshAccounts({ accounts, count: 1, file, authUrl: AUTH, anonKey: 'anon', fetcher, wait: async () => {} });
+  assert.equal(result.refreshed, 1);
+  assert.deepEqual(posted.map(p => p.key), ['r0']);
+  const saved = JSON.parse(readFileSync(file, 'utf8')).accounts;
+  assert.equal(saved.length, 5);
+  assert.deepEqual(saved.map(a => a.refreshToken), ['new-r0', 'r1', 'r2', 'r3', 'r4']);
+});
+
+test('a network error is one failed account, not a crash, and the others still save; a refresh 5xx is never resent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'auth-')), file = join(dir, 'accounts.json');
+  const accounts = [{ token: jwt('u0'), refreshToken: 'r0' }, { token: jwt('u1'), refreshToken: 'r1' }, { token: jwt('u2'), refreshToken: 'r2' }];
+  writeFileSync(file, JSON.stringify({ accounts }));
+  const sent = [];
+  const fetcher = async (url, init) => {
+    const body = JSON.parse(init.body);
+    sent.push(body.refresh_token);
+    if (body.refresh_token === 'r0') throw new Error('ECONNRESET');
+    if (body.refresh_token === 'r1') return new Response('{}', { status: 502 });
+    return new Response(JSON.stringify(session('u2', 'new-r2')));
+  };
+  const result = await refreshAccounts({ accounts, file, authUrl: AUTH, anonKey: 'anon', fetcher, wait: async () => {} });
+  assert.deepEqual(result, { refreshed: 1, signedIn: 0, failed: 2, codes: { AUTH_NETWORK: 1, AUTH_HTTP_502: 1 } });
+  assert.deepEqual(sent.sort(), ['r0', 'r1', 'r2'], 'a refresh token that got a 5xx is sent once only');
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).accounts[2].refreshToken, 'new-r2');
+});

@@ -51,27 +51,37 @@ export function assertAuthHost(authUrl, allowedHost) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/** One token request with backoff on 429 (rate limit) and 5xx; a 400/401 (a used or revoked refresh token) is not retried. */
+/**
+ * One token request; never throws (a network error or a broken body is a fixed code). A 429 was refused before anything happened, so it
+ * is retried with backoff. A 5xx is retried only for a password sign-in: a refresh that failed after Supabase rotated the token must not
+ * send the used token again (past the reuse interval that can revoke the whole session); it falls back to the password instead.
+ */
 async function tokenRequest(fetcher, origin, anonKey, grant, body, { attempts = 5, wait = sleep } = {}) {
   for (let attempt = 1; ; attempt++) {
-    const response = await fetcher(`${origin}/auth/v1/token?grant_type=${grant}`, { method: 'POST',
-      headers: { apikey: anonKey, authorization: `Bearer ${anonKey}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    let response;
+    try {
+      response = await fetcher(`${origin}/auth/v1/token?grant_type=${grant}`, { method: 'POST',
+        headers: { apikey: anonKey, authorization: `Bearer ${anonKey}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    } catch { return { code: 'AUTH_NETWORK' }; }
     if (response.ok) {
-      const session = await response.json();
+      let session;
+      try { session = await response.json(); } catch { return { code: 'AUTH_SESSION_INVALID' }; }
       if (typeof session?.access_token === 'string' && typeof session?.refresh_token === 'string') return { session };
       return { code: 'AUTH_SESSION_INVALID' };
     }
-    if ((response.status === 429 || response.status >= 500) && attempt < attempts) { await wait(2000 * attempt); continue; }
+    const retry = response.status === 429 || (response.status >= 500 && grant === 'password');
+    if (retry && attempt < attempts) { await wait(2000 * attempt); continue; }
     return { code: `AUTH_HTTP_${response.status}` };
   }
 }
 
 /**
- * Refreshes every account in place (token, refreshToken, cookie) and writes the file after each success. Returns counts and the fixed
- * codes of the failures; the caller refuses to run a stage while any account failed (a stale token would read as a load failure).
+ * Refreshes the first `count` accounts in place (token, refreshToken, cookie) and writes the whole list back after each success: the
+ * file always keeps every account, also those this run does not use. Returns counts and the fixed codes of the failures; the caller
+ * refuses to run a stage while any account failed (a stale token would read as a load failure).
  */
-export async function refreshAccounts({ accounts, file, authUrl, anonKey, credentials = [], fetcher = fetch, concurrency = 5,
-  wait = sleep, write = defaultWrite }) {
+export async function refreshAccounts({ accounts, count = accounts.length, file, authUrl, anonKey, credentials = [], fetcher = fetch,
+  concurrency = 5, wait = sleep, write = defaultWrite }) {
   const name = cookieName(authUrl), origin = new URL(authUrl).origin;
   const byId = new Map(credentials.map(entry => [entry.id, entry]));
   const result = { refreshed: 0, signedIn: 0, failed: 0, codes: {} };
@@ -99,8 +109,9 @@ export async function refreshAccounts({ accounts, file, authUrl, anonKey, creden
     // The used refresh token is dead from here on: the rotated one reaches the disk before the next account is touched.
     save();
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, accounts.length) }, async () => {
-    while (next < accounts.length) await one(accounts[next++]);
+  const used = Math.min(count, accounts.length);
+  await Promise.all(Array.from({ length: Math.min(concurrency, used) }, async () => {
+    while (next < used) await one(accounts[next++]);
   }));
   return result;
 }

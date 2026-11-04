@@ -111,14 +111,14 @@ export async function runStage({ base, accounts, kinds, record, deadline, stoppe
 }
 
 /** The per-stage refresh, or null when the auth settings are not given. Reads nothing secret into output. */
-function signIns(accounts, file) {
+function signIns(accounts, count, file) {
   const authUrl = process.env.LOADTEST_AUTH_URL, anonKey = process.env.LOADTEST_ANON_KEY;
   if (!authUrl || !anonKey) return null;
   assertAuthHost(authUrl, process.env.LOADTEST_ALLOWED_AUTH_HOST);
   const credentialsFile = process.env.LOADTEST_CREDENTIALS_FILE;
   if (credentialsFile) assertOutsideRepo(credentialsFile);
   const credentials = credentialsFile ? JSON.parse(readFileSync(credentialsFile, 'utf8')).accounts ?? [] : [];
-  return () => refreshAccounts({ accounts, file, authUrl, anonKey, credentials });
+  return () => refreshAccounts({ accounts, count, file, authUrl, anonKey, credentials });
 }
 
 async function main() {
@@ -138,7 +138,8 @@ async function main() {
   const accounts = JSON.parse(readFileSync(accountsFile, 'utf8')).accounts ?? [];
   const most = Math.max(...stages.map(s => s.vus));
   if (accounts.length < most) throw new Error(`need ${most} accounts, the file has ${accounts.length}`);
-  const freshen = signIns(accounts.slice(0, most), accountsFile);
+  // The whole list goes in (the file is written back whole); only the accounts this run uses are refreshed.
+  const freshen = signIns(accounts, most, accountsFile);
   if (!freshen && has('series'))
     throw new Error('a --series run outlasts the one-hour tokens: set LOADTEST_AUTH_URL, LOADTEST_ALLOWED_AUTH_HOST and LOADTEST_ANON_KEY');
   mkdirSync(out, { recursive: true });
@@ -152,6 +153,13 @@ async function main() {
       const records = [];
       const record = r => { records.push(r); appendFileSync(file, JSON.stringify({ t: Date.now(), ...r }) + '\n'); };
       const turnsWanted = Number(flag('turns', 12));
+      // Fresh tokens for every account before the stage, ahead of its clock; a stage never runs on a token that could expire in it.
+      if (freshen) {
+        const signed = await freshen();
+        console.log(`stage ${stage.index}: sessions refreshed ${signed.refreshed}, signed in again ${signed.signedIn}, failed ${signed.failed}`);
+        if (signed.failed)
+          throw new Error(`stage ${stage.index}: ${signed.failed} accounts could not sign in ${JSON.stringify(signed.codes)}; nothing was sent`);
+      }
       const deadline = Date.now() + (calibrate ? 600_000 : STAGE_MS);
       let abort = false;
       const watch = setInterval(() => {
@@ -159,13 +167,6 @@ async function main() {
         console.error(`stage ${stage.index}: aborted, more than 30% of turns failed`);
         abort = true;
       }, 5000);
-      // Fresh tokens for every account before the stage; a stage never runs on a token that could expire in it.
-      if (freshen) {
-        const signed = await freshen();
-        console.log(`stage ${stage.index}: sessions refreshed ${signed.refreshed}, signed in again ${signed.signedIn}, failed ${signed.failed}`);
-        if (signed.failed)
-          throw new Error(`stage ${stage.index}: ${signed.failed} accounts could not sign in ${JSON.stringify(signed.codes)}; nothing was sent`);
-      }
       console.log(`stage ${stage.index}: ${stage.vus} users`);
       await runStage({ base, accounts, kinds: stage.kinds, record, stageNumber: stage.index, deadline,
         stopped: () => abort || (calibrate && records.filter(r => /\.turn$/.test(r.op)).length >= turnsWanted), think: calibrate ? () => 1000 : thinkMs });
