@@ -4,7 +4,8 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ExpertConsultForm } from '@/components/expert-consult/ExpertConsultForm';
-import { isExpertConsultSource } from '@/components/expert-consult/expertConsultCopy';
+import { ExpertConsultComingSoon } from '@/components/expert-consult/ExpertConsultComingSoon';
+import { EXPERT_CONSULT_ENTRY_OPEN, isExpertConsultSource } from '@/components/expert-consult/expertConsultCopy';
 
 /** EXPERT-CONSULT booking page; signed-in only (proxy), noindex like every page without public metadata. */
 function ExpertConsultPage() {
@@ -17,5 +18,6 @@ function ExpertConsultPage() {
 }
 
 export default function Page() {
+  if (!EXPERT_CONSULT_ENTRY_OPEN) return <ExpertConsultComingSoon />;
   return <Suspense><ExpertConsultPage /></Suspense>;
 }
