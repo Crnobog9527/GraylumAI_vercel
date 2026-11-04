@@ -110,6 +110,8 @@ try {
   });
   code = await exit(tests);
   console.log(`rate-limit refusals by the web proxy (503): ${JSON.stringify(denials)}`);
+  // What the app's Redis calls met at the shim (scripts/e2e-sim/redis-shim.mjs): errors and slow answers, with their times.
+  console.log(`redis bridge: ${JSON.stringify(stack.redisStats())}`);
   if (code !== 0) console.log('--- local app log (last lines) ---\n' + appLog.slice(-80).join('')
     + '\n--- turn endpoint lines (whole run, last 600) ---\n' + turnLog.join('\n'));
 } catch (error) {

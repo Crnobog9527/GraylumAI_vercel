@@ -14,6 +14,8 @@ import { GOTRUE_IMAGE, POSTGREST_IMAGE, POSTGRES_IMAGE } from '../../packages/db
 import { createLocalRateLimit } from '../../packages/db/tests/v3/local-rate-limit.mjs';
 import { signPreviewJwt } from '../../packages/db/tests/v3/preview-lifecycle.mjs';
 
+import { createRedisShim } from './redis-shim.mjs';
+
 const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -69,22 +71,8 @@ export async function startStack({ root, log = console.log }) {
     const port = (name, inner) => docker('port', name, inner).split(':').at(-1);
     const restUrl = `http://127.0.0.1:${port(names.rest, '3000')}`, authUrl = `http://127.0.0.1:${port(names.auth, '9999')}`;
     const bridge = await rateLimit.start();
-    // @upstash/ratelimit 2.x starts its Lua scripts with "#!lua flags=allow-key-locking", a flag only Upstash's hosted Redis knows;
-    // open-source Redis refuses the script. This loopback shim drops that first line before the local REST bridge sees it (the
-    // script body and the rate-limit results are unchanged), so the app's limiters run for real instead of failing closed.
-    const strip = value => (typeof value === 'string' && value.startsWith('#!lua') ? value.slice(value.indexOf('\n') + 1) : value);
-    const rewrite = command => (Array.isArray(command) ? command.map(part => (Array.isArray(part) ? rewrite(part) : strip(part))) : command);
-    redisShim = createServer(async (req, res) => {
-      const chunks = []; for await (const chunk of req) chunks.push(chunk);
-      let body = Buffer.concat(chunks).toString('utf8');
-      try { body = JSON.stringify(rewrite(JSON.parse(body))); } catch { /* not JSON: forwarded as is */ }
-      try {
-        const response = await fetch(bridge.UPSTASH_REDIS_REST_URL + req.url, { method: req.method,
-          headers: { authorization: req.headers.authorization ?? '', 'content-type': 'application/json' }, body: req.method === 'GET' ? undefined : body });
-        res.writeHead(response.status, { 'content-type': response.headers.get('content-type') ?? 'application/json' });
-        res.end(Buffer.from(await response.arrayBuffer()));
-      } catch { res.writeHead(502).end(); }
-    });
+    // Lua flag and transaction fixes between the app and the bridge: scripts/e2e-sim/redis-shim.mjs.
+    redisShim = createRedisShim(bridge.UPSTASH_REDIS_REST_URL);
     await new Promise((resolve, reject) => { redisShim.once('error', reject); redisShim.listen(0, '127.0.0.1', resolve); });
     const redis = { UPSTASH_REDIS_REST_URL: `http://127.0.0.1:${redisShim.address().port}`, UPSTASH_REDIS_REST_TOKEN: bridge.UPSTASH_REDIS_REST_TOKEN };
     gateway = createServer(async (req, res) => {
@@ -117,7 +105,7 @@ export async function startStack({ root, log = console.log }) {
     }
     log(`local backend ready on ${apiUrl}`);
     return {
-      apiUrl, secret, redis, stop, psql,
+      apiUrl, secret, redis, stop, psql, redisStats: () => redisShim.stats,
       dbUrl: `postgres://postgres@127.0.0.1:${port(names.db, '5432')}/sim`,
       jwt: role => signPreviewJwt(secret, role),
       redact: text => rateLimit.redact(String(text)).replaceAll(secret, '[SIM_SECRET]').replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[SIM_TOKEN]'),
