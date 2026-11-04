@@ -115,7 +115,9 @@ export async function discoverSkillCatalog(user: SupabaseClient, admin: Supabase
   const catalogVersionBefore = key ? await catalogVersion(admin, 'skills') : undefined;
   if (cached && now - cached.at < CATALOG_TTL_MS) {
     if (catalogVersionBefore !== undefined && cached.catalogVersion === catalogVersionBefore) return structuredClone(cached.entries);
-    if (sameVersions(cached.versions, await publishedVersions(admin, cached.entries.map(e => e.skillId)))) {
+    // MEMBER-ONLY-MODULES: a changed catalog version includes a module edit (a plan requirement, the voice or social flag) that the
+    // published versions below cannot see, so only a catalog version that could not be read falls back to comparing them.
+    if (catalogVersionBefore === undefined && sameVersions(cached.versions, await publishedVersions(admin, cached.entries.map(e => e.skillId)))) {
       cached.catalogVersion = catalogVersionBefore;
       return structuredClone(cached.entries);
     }

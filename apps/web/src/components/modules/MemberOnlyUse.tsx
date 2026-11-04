@@ -43,7 +43,7 @@ export function MemberOnlyUse({ level, onClose, onUsed }: { level: RequiredMembe
         <Sparkles className="h-4 w-4 mr-2" />
         立即使用
       </Button>
-      {paywall && <ReportPaywallDialog scene="coach" onClose={() => setPaywall(false)} />}
+      {paywall && <ReportPaywallDialog scene="coach" minLevel={level} onClose={() => setPaywall(false)} />}
     </>
   );
 }

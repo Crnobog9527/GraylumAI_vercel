@@ -40,3 +40,13 @@ it('the coach scene copy follows the paywall copy rules: no predicted credit cos
   const text = JSON.stringify([COACH_SCENE_COPY, COACH_SCENE_DELIVERABLES]);
   expect(text).not.toMatch(/预计|消耗|积分|Claude|GPT|Gemini|Opus|Sonnet|退款|内部/);
 });
+
+it('a Skill that needs Gold sells only Gold and names only Gold; one that needs Pro still sells both', () => {
+  const gold = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="coach" memberLevel="free" minLevel="gold" />);
+  expect(gold).toContain('value="gold"');
+  expect(gold).not.toContain('value="pro"');
+  expect(gold).not.toContain('Pro 和 Gold');
+  const pro = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="coach" memberLevel="free" minLevel="pro" />);
+  expect(pro).toContain('value="pro"');
+  expect(pro).toContain('value="gold"');
+});

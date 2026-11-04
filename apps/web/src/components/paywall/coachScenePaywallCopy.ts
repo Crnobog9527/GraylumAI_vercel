@@ -24,3 +24,10 @@ export const COACH_SCENE_DELIVERABLES: typeof REPORT_DELIVERABLES = [
   ['发后台截图也能读', '把数据后台的截图发给教练，它读出数字请你核对', '读到的数字会记下来，下次周复盘直接用'],
   ['每周一页复盘', '每周写一页：本期表现、有效内容、下一步建议', '建议是你这周能做的具体事，不是口号'],
 ];
+
+/** The scene's words for the plan the Skill needs: Pro and Gold, or Gold alone (the words then name only Gold). */
+export function coachSceneCopy(minLevel: 'pro' | 'gold' = 'pro'): { [K in keyof typeof COACH_SCENE_COPY]: string } {
+  if (minLevel !== 'gold') return COACH_SCENE_COPY;
+  const gold = (text: string) => text.replace('Pro 和 Gold', 'Gold').replace('Pro 或 Gold', 'Gold');
+  return Object.fromEntries(Object.entries(COACH_SCENE_COPY).map(([key, text]) => [key, gold(text)])) as { [K in keyof typeof COACH_SCENE_COPY]: string };
+}

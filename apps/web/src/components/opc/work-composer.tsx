@@ -60,10 +60,11 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const selected=onSkillChange?skillId:localSkill;
  const skills=(choices.data?.skills??[]).filter(skill=>skill.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
  const toggleSkills=()=>{if(menu!=='skills'){if(onSkillChange)onSkillChange('');else setLocalSkill('');}setMenu(menu==='skills'?null:'skills');};
- const [paywall,setPaywall]=useState(false);
+ const [paywall,setPaywall]=useState<'pro'|'gold'|null>(null);
  // A member-only Skill the plan is below is not chosen: the paywall opens instead (nothing is loaded).
  const changeSkill=(id:string)=>{
-  if(choices.data?.skills.find(skill=>skill.moduleId===id)?.locked){setMenu(null);setPaywall(true);return;}
+  const picked=choices.data?.skills.find(skill=>skill.moduleId===id);
+  if(picked?.locked){setMenu(null);setPaywall(picked.requiredMemberLevel??'pro');return;}
   if(onSkillChange)onSkillChange(id);else setLocalSkill(id);setMenu(null);};
  async function addFiles(files:FileList|File[]|null){
   if(!files?.length)return;setError('');setReading(true);
@@ -87,7 +88,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const imageHint=images
   ?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）只随这条消息发给模型，不会保存；也可以直接拖进对话或粘贴。`:'';
  const attached=images?<>{attachment}<ComposerImages state={images} disabled={disabled}/></>:attachment;
- return <>{paywall&&<ReportPaywallDialog scene="coach" onClose={()=>setPaywall(false)}/>}
+ return <>{paywall&&<ReportPaywallDialog scene="coach" minLevel={paywall} onClose={()=>setPaywall(null)}/>}
  <ComposerView rootRef={root} attachment={attached} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
   editor={<ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
