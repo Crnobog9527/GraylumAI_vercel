@@ -3,12 +3,14 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 import { trpc } from '@/trpc/client';
-import { MEMBER_ONLY_PREFILL, MEMBER_PAYWALL_EVENT, meetsMemberLevel, prefillNewTask, requestMemberPaywall, type RequiredMemberLevel } from '@/lib/member-only';
+import { MEMBER_ONLY_PREFILL, MEMBER_PAYWALL_EVENT, meetsMemberLevel, memberOnlyNote, prefillNewTask, requestMemberPaywall,
+  type RequiredMemberLevel } from '@/lib/member-only';
 
 /**
  * MEMBER-ONLY-MODULES (Owner 2026-11-04): the "use" button of a Skill limited to members. A plan at or above the requirement opens the
@@ -54,4 +56,22 @@ export function MemberOnlyPaywallHost() {
     return () => window.removeEventListener(MEMBER_PAYWALL_EVENT, open);
   }, []);
   return level ? createPortal(<ReportPaywallDialog scene="coach" minLevel={level} onClose={() => setLevel(null)} />, document.body) : null;
+}
+
+/** The workbench marketplace's detail action for a member-only Skill: the note, then "use" (the chat for a member, the paywall below the plan). */
+export function MemberOnlyLinkAction({ level, className, noticeClassName }:
+  { level: RequiredMemberLevel; className?: string; noticeClassName?: string }) {
+  const [paywall, setPaywall] = useState(false);
+  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { staleTime: 30_000, retry: false });
+  const locked = entitlements.isSuccess && !meetsMemberLevel(entitlements.data?.level, level);
+  return (
+    <>
+      <p className={noticeClassName} data-testid="member-only-note">{memberOnlyNote(level)}{locked ? '，开通会员后即可使用' : ''}</p>
+      {locked
+        ? <button className={className} onClick={() => setPaywall(true)}>使用</button>
+        : <Link className={className} href="/app/positioning"
+          aria-disabled={entitlements.isLoading} onClick={() => prefillNewTask(MEMBER_ONLY_PREFILL)}>使用</Link>}
+      {paywall && <ReportPaywallDialog scene="coach" minLevel={level} onClose={() => setPaywall(false)} />}
+    </>
+  );
 }
