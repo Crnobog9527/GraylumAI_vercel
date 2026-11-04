@@ -230,6 +230,8 @@ try {
   sql(read('packages/db/migrations/0486_core_path_v2_opc_work_capture_no_old_executions.sql')); // V2-12 rewrite batch: rewrites functions that 0449 and later replay
   sql(read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql')); // V2-12 B-rewrites: rewrites fusion_review_archive_reconcile, which 0326 replays
   sql(read('packages/db/migrations/0497_turn_settle_credits_review_label.sql')); // rewrites turn_settle_credits, which 0459 replays
+  // The chat screenshot diagnoses rewrite turn_close, which 0459 replays; found by name so the number the controller assigns changes nothing here.
+  sql(read('packages/db/migrations/'+readdirSync(resolve(root,'packages/db/migrations')).find(file=>file.endsWith('_publish_monitor_chat_screenshot_diagnostics.sql'))));
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

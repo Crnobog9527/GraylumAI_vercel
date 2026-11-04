@@ -22,6 +22,7 @@ import type { CounterStore } from '../limiter';
 import type { TurnClients } from '../db';
 import { libraryTurnReader } from './source';
 import { COACH_REVIEW_INSTRUCTIONS } from './coachReview';
+import { COACH_CAPTURE_INSTRUCTIONS } from '../../publishMonitor/coach/screenshots';
 import { NO_ACCESS, sourceDescription, workspaceTurnReader, type WorkspaceAccess } from './workspace';
 import { planTurnTools, READ_SOURCE_CALLS, RESEARCH_INPUT_BYTES, type ResearchSetup } from './plan';
 import { researchInstructions, READ_SOURCE_DESCRIPTION, turnTools, type SourceReader } from './index';
@@ -54,6 +55,8 @@ export type ChatToolsSetup = {
   plan: ToolPlan; research: ResearchSetup | null; inputLimit: number;
   /** Request bytes of the offered tool definitions (the history may not take them). */
   definitionBytes: number;
+  /** The reply may end with a hidden coach_diag block (the numbers read from screenshots): the stream holds it back, the close saves it. */
+  coachCapture: boolean;
   /** Appended to the shared (cached) instructions: fixed per session. `gated`: an account without a confirmed positioning. */
   sharedInstructions: (gated: boolean) => string;
   /** The per-user segment's part (2.9 rule 3): the catalog voice and the workspace reading rules. */
@@ -113,7 +116,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const libraryText = libraryAddendum(false, sourceOffered && Boolean(library));
   const workspaceRead = sourceOffered && workspaceOn;
   const workspaceText = workspaceRead ? WORKSPACE_CONTEXT_INSTRUCTIONS : '';
-  const postsText = workspaceRead && access.posts ? OWN_POSTS_INSTRUCTIONS + (access.posts.coach ? COACH_REVIEW_INSTRUCTIONS : '') : '';
+  const coachText = COACH_REVIEW_INSTRUCTIONS + COACH_CAPTURE_INSTRUCTIONS;
+  const postsText = workspaceRead && access.posts ? OWN_POSTS_INSTRUCTIONS + (access.posts.coach ? coachText : '') : '';
   const voice = input.tools.voice && catalog.length
     ? await swallow('turn_tools_voice_unavailable', input.tools.voice(input.actorId, catalog), undefined) : undefined;
   const { plan, research: setup } = await planTurnTools({ admin: input.admin, configuration: input.configuration, offered,
@@ -134,6 +138,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
     input.tools.benchmarkAccounts(input.actorId, input.sessionId), []) : [];
   return {
     plan, research: setup, inputLimit, definitionBytes,
+    coachCapture: Boolean(plan.sourceRoom?.posts && access.posts?.coach && access.posts.windowDays > 0),
     sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated)),
     userInstructions: (voice?.text ?? '') + workspaceText + (plan.sourceRoom?.strategy ? WORKSPACE_STRATEGY_INSTRUCTIONS : '')
       + (plan.sourceRoom?.posts ? postsText : ''), ...(voice?.versionId ? { voiceVersionId: voice.versionId } : {}),
