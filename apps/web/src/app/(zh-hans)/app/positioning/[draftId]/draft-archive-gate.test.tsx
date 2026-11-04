@@ -43,7 +43,8 @@ describe('profile-archive gate in front of the editable draft and topics pages',
 
   it('keeps the editable page closed while the archive state is unknown or unreadable', async () => {
     businesses = { isPending: true, isSuccess: false, isError: false, error: null };
-    for (const html of await render()) { expect(html).toContain('data-frame="chat"'); expect(html).toContain('page-skeleton'); expect(html).not.toContain('正在读取'); expect(html).not.toContain('EDITABLE'); }
+    // The draft page's gate frames the placeholder as "chat", the topics page's route gate as "topics" (the finished pages' areas).
+    for (const [index, html] of (await render()).entries()) { expect(html).toContain(`data-frame="${index ? 'topics' : 'chat'}"`); expect(html).toContain('page-skeleton'); expect(html).not.toContain('正在读取'); expect(html).not.toContain('EDITABLE'); }
     businesses = { isPending: false, isSuccess: false, isError: true, error: new Error('down') };
     for (const html of await render()) {
       expect(html).toContain('定位档案暂时读不出来');

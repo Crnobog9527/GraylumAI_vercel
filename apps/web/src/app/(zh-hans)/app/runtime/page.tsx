@@ -4,6 +4,7 @@ import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { WorkspaceSkeleton } from '@/components/opc/workspace-skeleton';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { classifyErasureError } from '@/lib/content-erasure';
 import { trpc } from '@/trpc/client';
@@ -11,7 +12,7 @@ import { LEGACY_CONVERSATION_NOTICE, runtimePathChoice } from './runtime-path';
 import { TurnWorkspace } from './turn-workspace';
 import { WorkItemWorkspace } from './work-item-workspace';
 
-export default function RuntimePage(){return <Suspense fallback={<PageSkeleton/>}><RuntimeRoute/></Suspense>}
+export default function RuntimePage(){return <Suspense fallback={<WorkspaceSkeleton area="chat" label="内容读取中"/>}><RuntimeRoute/></Suspense>}
 function RuntimeRoute(){
  const params=useSearchParams();
  const routeSession=params.get('session')??'';
@@ -21,7 +22,7 @@ function RuntimeRoute(){
 function NewTask(){
  const router=useRouter();
  useEffect(()=>{router.replace('/app/positioning');},[router]);
- return <PageSkeleton rows={2} label="正在进入新任务"/>;
+ return <WorkspaceSkeleton area="chat" label="正在进入新任务"/>;
 }
 /** `runtime.view` flags a conversation without turns as `legacy`; read defensively until every deployed server sends it. */
 const legacyOf=(data:unknown)=>Boolean(data&&typeof data==='object'&&(data as {legacy?:unknown}).legacy===true);
