@@ -21,6 +21,21 @@ describe('withStepEvents', () => {
     ]);
   });
 
+  it('names the method a skill file belongs to, by the given user-facing name and never by its path', async () => {
+    const events: StepEvent[] = [];
+    const [read] = withStepEvents([tool('read_skill_file', async () => '{}')], event => events.push(event), new Set(), undefined, '账号定位');
+    await read!.execute({ path: 'references/step-2.md' }, 'c1');
+    expect(events).toEqual([
+      { type: 'step', id: '1', tool: 'load_skill', label: '账号定位', state: 'running' },
+      { type: 'step', id: '1', tool: 'load_skill', label: '账号定位', state: 'done' },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('step-2');
+    // Without a name the step is still shown, unnamed (no path, no id).
+    const plain: StepEvent[] = [];
+    await withStepEvents([tool('read_skill_file', async () => '{}')], event => plain.push(event), new Set())[0]!.execute({ path: 'a/b.md' }, 'c');
+    expect(plain[0]).toEqual({ type: 'step', id: '1', tool: 'load_skill', state: 'running' });
+  });
+
   it('shows no step for the question card, and passes it through untouched', async () => {
     const events: StepEvent[] = [];
     const card = tool('ask_question', async () => 'card');

@@ -13,13 +13,18 @@ const SILENT_TOOLS: ReadonlySet<string> = new Set(['ask_question']);
  * A TurnStop raised inside a tool reaches `onStop` first (the turn, not the SDK's error wrapper, owns it).
  */
 export function withStepEvents(tools: readonly RuntimeTool[], announce: ((event: StepEvent) => void) | undefined,
-  skillNames: ReadonlySet<string>, onStop?: (stop: TurnStop) => void): RuntimeTool[] {
+  skillNames: ReadonlySet<string>, onStop?: (stop: TurnStop) => void,
+  /** The user-facing name of the method whose files `read_skill_file` reads (the mentor's current step title); never a path or id. */
+  methodName?: string): RuntimeTool[] {
   let stepNumber = 0;
   return tools.map(tool => SILENT_TOOLS.has(tool.name) ? tool : ({ ...tool, async execute(args, callId) {
     const tell = (make: () => StepEvent) => { try { announce?.(make()); } catch { /* display only */ } };
     const id = String(++stepNumber);
     let start: ReturnType<typeof stepStart> = { tool: 'other' };
-    try { start = stepStart(tool.name, args, skillNames); } catch { /* display only */ }
+    try {
+      start = stepStart(tool.name, args, skillNames);
+      if (tool.name === 'read_skill_file' && methodName) start = { ...start, label: methodName };
+    } catch { /* display only */ }
     tell(() => ({ type: 'step', id, ...start, state: 'running' }));
     let result: string;
     try { result = await tool.execute(args, callId); }
