@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 import { expectNothingFrozen, lastTurnId, ledger, readSidebarCredits, replies, resetSim, seed, signIn, simCalls, startFreeChat, turns } from './support';
 

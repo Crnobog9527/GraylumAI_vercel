@@ -420,6 +420,17 @@ jobs:
       - name: Simulated-model browser tests
         run: node scripts/e2e-sim/run.mjs
 
+      # A failed journey's screenshots only (simulated accounts and data on a disposable local stack; no trace, storage state or
+      # report, which could hold a local session token). The page text, failed requests and turn calls are in the job log.
+      - name: Upload failed-journey screenshots
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sim-e2e-failure-screenshots
+          path: apps/web/test-results/sim/artifacts/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
   integration:
     name: Run billing and recovery integration tests (${{ matrix.shard }}/2)
     needs: [scope]

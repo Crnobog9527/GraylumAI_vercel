@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 import { expectNothingFrozen, lastTurnId, ledger, readSidebarCredits, replies, resetSim, seed, sidebarCredits, signIn, startFreeChat, turns, watchPage } from './support';
 
@@ -18,6 +18,10 @@ test('free chat: one message is one charged turn, the sidebar follows, a reload 
   const session = await startFreeChat(page, '用两句话说明新账号为什么要先想清楚给谁看。');
   await expect(replies(page).first()).toBeVisible({ timeout: 120_000 }).catch(async error => { await evidence('after the reply'); throw error; });
   await expect(page.getByText(/测试测试/).first()).toBeVisible();
+  // The first-send watch (runtime/first-send-watch.ts) is cleared by the page's own send and a report would stay recorded: no key
+  // left means a page that sent as it should raised no stall.
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith('opc-runtime-send-watch:'))), 'watch cleared')
+    .toEqual([]);
   await expectNothingFrozen(alice.id);
 
   const opened = await turns(alice.id, mark);
