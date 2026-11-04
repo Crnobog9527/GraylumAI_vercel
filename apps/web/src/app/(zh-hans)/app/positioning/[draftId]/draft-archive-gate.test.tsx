@@ -17,6 +17,7 @@ vi.mock('@/trpc/client', () => ({
   } },
 }));
 vi.mock('./readonly-draft-view', () => ({ ReadonlyDraftView: ({ archived }: { archived?: boolean }) => <p>{archived ? 'ARCHIVED_VIEW' : 'X'}</p> }));
+vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: ({ area, children }: { area: string; children: unknown }) => <div data-frame={area}>{children as never}</div> }));
 vi.mock('next/navigation', () => ({ useParams: () => ({ draftId: 'draft' }) }));
 
 const profile = (isArchived: boolean) => [{ businessId: 'b', name: '账号', archivedAt: null, isArchived, drafts: [{ draftId: 'draft' }] }];
@@ -42,7 +43,7 @@ describe('profile-archive gate in front of the editable draft and topics pages',
 
   it('keeps the editable page closed while the archive state is unknown or unreadable', async () => {
     businesses = { isPending: true, isSuccess: false, isError: false, error: null };
-    for (const html of await render()) { expect(html).toContain('page-skeleton'); expect(html).not.toContain('正在读取'); expect(html).not.toContain('EDITABLE'); }
+    for (const html of await render()) { expect(html).toContain('data-frame="chat"'); expect(html).toContain('page-skeleton'); expect(html).not.toContain('正在读取'); expect(html).not.toContain('EDITABLE'); }
     businesses = { isPending: false, isSuccess: false, isError: true, error: new Error('down') };
     for (const html of await render()) {
       expect(html).toContain('定位档案暂时读不出来');
