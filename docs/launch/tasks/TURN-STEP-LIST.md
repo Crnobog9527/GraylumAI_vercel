@@ -31,9 +31,9 @@ Owner 2026-11-04：所有对话里，一轮回复的加载过程（读取 Skill 
 - 在自由对话里的接线：`app/runtime/use-turn-chat.ts` 的 `liveAfter`（事件 → `live.steps`）、`turn-workspace.tsx` 和 `work-item-workspace.tsx`（渲染）。
 - 测试：`turn-step-list-model.test.ts`、`turn-step-list.test.tsx`、`turn-step-list.browser.test.tsx`（真浏览器里点开折叠；设环境变量 `TURN_STEP_SHOTS=<目录>` 会顺带出桌面和 390px 的图，图在 `docs/launch/evidence/turn-step-list/`）、`tools/toolStage.test.ts`、模拟浏览器 `tests/e2e/sim/10-steps.spec.ts`（模拟模型可以用故障模式 `tool` 只回一个工具调用、`slow` 让下一次调用晚到）。
 
-## 刷新后的历史（TURN-STEPS，迁移 9999）
+## 刷新后的历史（TURN-STEPS，迁移 0507）
 
-回复写完、扣费收尾后，服务端把这条回复的步骤存在回合行的 `turns.steps`（迁移 `9999_turn_steps_history.sql`；`turn_steps_save` 只在回合已关闭后写一次，不改 `turn_close`）。只存：工具类型、结束状态、Skill 的目录显示名、结果条数、固定原因（`no_brand`）；**不存搜索词**、参数、结果和 Skill 原文，所以注销不用额外清理。`turn_session_view` 把它放进每条助手消息的 `steps`（旧回复没有，读到 `null`）。
+回复写完、扣费收尾后，服务端把这条回复的步骤存在回合行的 `turns.steps`（迁移 `0507_turn_steps_history.sql`；`turn_steps_save` 只在回合已关闭后写一次，不改 `turn_close`）。只存：工具类型、结束状态、Skill 的目录显示名、结果条数、固定原因（`no_brand`）；**不存搜索词**、参数、结果和 Skill 原文，所以注销不用额外清理。`turn_session_view` 把它放进每条助手消息的 `steps`（旧回复没有，读到 `null`）。
 页面：`chat.stepsByTurn.get(turnId) ?? reply.steps ?? []`（本页刚看着写完的回复优先，带着搜索词；刷新后读回来的没有搜索词，写完的行本来也不显示搜索词），`live` 不传，折叠成“已完成 N 个步骤”。
 别的回合种类要存步骤：在它的收尾处调用 `savedSteps(...)` 和 `db.stepsSave(...)`，放在发 `result` 之前。
 
