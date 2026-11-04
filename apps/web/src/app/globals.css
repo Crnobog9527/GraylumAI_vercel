@@ -288,7 +288,7 @@ body {
   font-family: var(--font-primary);
 }
 
-/* Routes whose finished page is light render <LightFirstPaint/> from a server layout (FIRST_PAINT_LIGHT_ROUTES). */
+/* Light signed-in routes (lib/light-app-paths.ts): trpc/provider.tsx renders <LightFirstPaint/> in the server HTML. */
 body:has([data-first-paint='light']) {
   background: #f7f7f7;
   color-scheme: light;
