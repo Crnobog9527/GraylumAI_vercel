@@ -24,7 +24,9 @@ export function db(): Sql {
   return client;
 }
 
-export type SimFault = { mode: 'cut' | 'timeout' | 'silent' | 'malformed' | '402'; target?: 'primary' | 'organizer' | 'any'; times?: number; receipt?: boolean };
+export type SimFault = { mode: 'cut' | 'timeout' | 'silent' | 'malformed' | '402' | 'tool' | 'slow'; target?: 'primary' | 'organizer' | 'any'; times?: number; receipt?: boolean;
+  /** tool: the one tool call the reply is made of. slow: how late the call is answered. */
+  name?: string; arguments?: Record<string, unknown>; delayMs?: number };
 
 /** Arms a failure in the simulated model for its next matching call(s). */
 export async function armFault(fault: SimFault) {

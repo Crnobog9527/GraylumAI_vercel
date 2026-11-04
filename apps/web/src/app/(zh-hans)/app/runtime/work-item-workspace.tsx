@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
+import { TurnStepList } from '@/components/chat-display/turn-step-list';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
@@ -307,6 +308,8 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
   ];
   const libraryHref = '/app/library?item=' + workItemId + '&return=' + sessionId;
   const showLive = outgoing !== null || chat.sending || Boolean(chat.view?.activeTurn && !paused);
+  // A reply that starts with "{" is a proposal still being written as data: it is not shown, the steps keep saying what is happening.
+  const liveText = chat.live?.text && !chat.live.text.trimStart().startsWith('{') ? chat.live.text : '';
 
   return (
     <WorkspaceFrame
@@ -376,6 +379,7 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
                   userText={question && !question.startsWith(WORK_CONTINUE) ? shownRuntimeInput(question) : null}
                   completed={canAdopt}
                 >
+                  {reply.turnId !== null && <TurnStepList steps={chat.stepsByTurn.get(reply.turnId) ?? []} />}
                   {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []} />}
                   {canAdopt ? <RuntimeProposal adopted={adopted} text={text} /> : <RuntimeReply text={text} />}
                   {canAdopt && contentType !== 'unknown' && reply.turnId !== null && reply.requestId && (
@@ -430,13 +434,14 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
               <>
                 {outgoing && <RuntimePendingMessage text={outgoing} sending={chat.sending} />}
                 <RuntimeTurnView>
+                  <TurnStepList steps={chat.live?.steps ?? []} live hasText={Boolean(liveText.trim())} />
                   <AgentWorkStatus items={chat.live?.rows ?? []} />
                   {chat.live?.trimmed.map(line => (
                     <ChatInlineNotice key={line} tone="status">
                       {line}
                     </ChatInlineNotice>
                   ))}
-                  <RuntimeReply text={chat.live?.text && !chat.live.text.trimStart().startsWith('{') ? chat.live.text : '正在回复…'} streaming />
+                  {liveText.trim() && <RuntimeReply text={liveText} streaming />}
                 </RuntimeTurnView>
               </>
             )}

@@ -26,7 +26,8 @@ async function failedTurn(page: Page, fault: SimFault, waitMs = 120_000): Promis
   expect(opened.map(t => t.kind), 'one message opened exactly one turn').toEqual(['chat']);
   expect((await simCalls()).filter(c => c.role === 'primary' && c.fault === fault.mode), 'the failing call was sent once').toHaveLength(1);
   // The page says the message did not finish and does not keep spinning.
-  await expect(page.getByText('正在回复…')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText('正在思考…')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.locator('[data-step-state="running"]')).toHaveCount(0, { timeout: 30_000 });
   return { turn: opened[0]!, before };
 }
 

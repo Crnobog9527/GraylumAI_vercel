@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
+import { TurnStepList } from '@/components/chat-display/turn-step-list';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { AgentWorkStatus } from '@/components/chat-display/agent-work-status';
@@ -144,6 +145,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
         {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
         <section className={workStyles.transcript}>
           {turns.map(reply => <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
+            {reply.turnId !== null && <TurnStepList steps={chat.stepsByTurn.get(reply.turnId) ?? []}/>}
             {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []}/>}
             <RuntimeReply text={reply.content}/>
             {results.data && reply.turnId !== null && <SaveReplyButton sessionId={sessionId} turnId={reply.turnId} reply={reply.content}
@@ -156,9 +158,10 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
           {pendingText !== null && <>
             {pendingText && <RuntimePendingMessage text={pendingText} sending={chat.sending}/>}
             <RuntimeTurnView>
+              <TurnStepList steps={chat.live?.steps ?? []} live hasText={Boolean(chat.live?.text.trim())}/>
               <AgentWorkStatus items={chat.live?.rows ?? []}/>
               {chat.live?.trimmed.map(line => <ChatInlineNotice key={line} tone="status">{line}</ChatInlineNotice>)}
-              <RuntimeReply text={chat.live?.text || '正在回复…'} streaming/>
+              {chat.live?.text.trim() && <RuntimeReply text={chat.live.text} streaming/>}
             </RuntimeTurnView>
           </>}
           <ChatNoticeList notices={notices}/>

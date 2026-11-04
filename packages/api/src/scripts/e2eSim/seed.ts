@@ -17,6 +17,7 @@ import { publishSkillPackage } from '../../services/skills/publication';
 import { seedTestOpenRouterKey } from '../../services/models/openRouterKey.testing';
 import { paygProductionSettings } from '../../services/turn/admission/paygHostPolicy';
 import { CORE_PATH_SETTING, RUNTIME_PAYG_SETTING } from '../../services/turn/settingKeys';
+import { LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY } from '../../services/turn/admission/libraryAdmission';
 
 const connection = JSON.parse(readFileSync(process.argv[2] ?? '', 'utf8')) as { dbUrl?: string; apiUrl?: string; serviceJwt?: string };
 const dbUrl = connection.dbUrl ?? '', apiUrl = connection.apiUrl ?? '', service = connection.serviceJwt ?? '';
@@ -112,6 +113,9 @@ async function main() {
     await set('billing_credits_per_usd', 100);
     await set('billing_token_price_multiplier', 6);
     await set('runtime_rw_v2', { catalogCache: true });
+    // The library tool is offered, so a reply may read the library (the steps tests).
+    await set(LIBRARY_AGENT_READ_KEY, true);
+    await set(LIBRARY_RETRIEVAL_KEY, true);
     await set('billing_payg_start_thresholds', { version: 'sim', thresholds: SIM_MODELS.flatMap(m =>
       ['ordinary', 'skill', 'attached_organizer', 'compare'].map(purpose => ({ model: m.modelId, purpose, typicalUsd: '0.04' }))) });
     await seedTestOpenRouterKey(db, 'LOCAL_SIMULATED_OPENROUTER_KEY');
