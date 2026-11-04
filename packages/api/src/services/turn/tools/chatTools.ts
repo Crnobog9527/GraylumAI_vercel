@@ -87,18 +87,20 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   modelMultiplier: string; defaultMultiplier: string;
   /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
   maxTools: number }): Promise<ChatToolsSetup> {
-  const skills = input.tools.skills ? await swallow('turn_tools_skills_unavailable', input.tools.skills(input.actorId, input.pin), null) : null;
+  // The Skill list, the research switch, the library switch and the workspace access need nothing from each other, so they are read
+  // together (each already answers its own failure); the rest below follows in the order it always did.
+  const [skills, researchOn, library, access] = await Promise.all([
+    input.tools.skills ? swallow('turn_tools_skills_unavailable', input.tools.skills(input.actorId, input.pin), null) : null,
+    swallow('turn_tools_research_switch_unavailable', chatResearchEnabled(input.admin, input.configuration), false),
+    input.tools.library === true ? swallow('turn_tools_library_switch_unavailable',
+      admitLibraryRetrieval(input.admin, true, 'ordinary', [], input.configuration), false) : Boolean(input.tools.library),
+    input.tools.workspace ? swallow('turn_tools_workspace_unavailable', input.tools.workspace(input.actorId, input.configuration), NO_ACCESS)
+      : NO_ACCESS,
+  ]);
   // Whole groups in this order, each only if it still fits the profile's ceiling; the result depends on configuration only,
   // so it is the same on every turn of the session (2.9 rule 2).
   const offered: TurnToolName[] = [];
-  // The research lookups are offered only while the admin's chat research switch is on (a configuration change, not a turn's).
-  const researchOn = await swallow('turn_tools_research_switch_unavailable',
-    chatResearchEnabled(input.admin, input.configuration), false);
-  const library = input.tools.library === true ? await swallow('turn_tools_library_switch_unavailable',
-    admitLibraryRetrieval(input.admin, true, 'ordinary', [], input.configuration), false) : Boolean(input.tools.library);
   const workspaceOn = Boolean(input.tools.workspace);
-  const access = input.tools.workspace ? await swallow('turn_tools_workspace_unavailable',
-    input.tools.workspace(input.actorId, input.configuration), NO_ACCESS) : NO_ACCESS;
   for (const group of [library || workspaceOn ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
     researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : []]) if (offered.length + group.length <= input.maxTools) offered.push(...group);
   const research = offered.filter(name => (GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) as typeof GENERAL_RESEARCH_TOOLS[number][];

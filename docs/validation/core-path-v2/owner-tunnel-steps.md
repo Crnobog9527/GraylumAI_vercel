@@ -37,7 +37,8 @@ touch ~/graylum-loadtest/env.private && chmod 600 ~/graylum-loadtest/env.private
 open -e ~/graylum-loadtest/env.private
 ```
 
-在打开的文本里写下面六行，`<…>` 换成真实值后保存。**网址、应用主机、账号文件路径由总控告知；只读连接串在 Supabase staging 项目的 Database 设置里按总控说明建**：
+在打开的文本里写下面十行，`<…>` 换成真实值后保存。**网址、应用主机、账号文件路径、Supabase 网址和公开 anon key 由总控告知；只读连接串在 Supabase staging 项目的 Database 设置里按总控说明建**。
+后四行是给驱动每档开始前自动续期账号令牌用的：整套跑一个多小时，令牌一小时就过期，不续期的话后面几档会全部报未登录。anon key 是网站本来就公开的值，不是密钥：
 
 ```text
 export LOADTEST_MODEL_STUB_URL='<终端 A 第 ① 块里 = 后面的整串，和填进 Vercel 的一样>'
@@ -46,6 +47,10 @@ export LOADTEST_ALLOWED_APP_HOST='<上面网址里的主机名>'
 export LOADTEST_ACCOUNTS_FILE='<账号文件的完整路径，总控给>'
 export LOADTEST_DATABASE_URL='<只读连接串>'
 export LOADTEST_ALLOWED_DB_HOST='<连接串里的主机名>'
+export LOADTEST_AUTH_URL='<staging Supabase 网址，形如 https://xxxx.supabase.co，总控给>'
+export LOADTEST_ALLOWED_AUTH_HOST='<上面网址里的主机名>'
+export LOADTEST_ANON_KEY='<staging 的公开 anon key，总控给>'
+export LOADTEST_CREDENTIALS_FILE='<压测账号的密码文件路径，总控给；只在某个账号续期失败时才用>'
 ```
 
 **6. 终端 B：1 个账号自检**（脚本自动判定，不用眼睛看；证明应用确实改道到了桩，也就是这次没有任何模型花费）：

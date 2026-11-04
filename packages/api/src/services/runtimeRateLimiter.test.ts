@@ -172,3 +172,23 @@ it('counts supplier calls per endpoint and fails closed', async () => {
   expect(await check('', 10, '1 s')).toBe(false);
   expect(await check('tikhub:/a', 0, '1 s')).toBe(false);
 });
+it('a reservation of several calls asks both windows together, twice (read, then reserve), and names the refusing window', async () => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  const open: Array<() => void> = [];
+  mock.limit.mockImplementation(() => new Promise(resolve => open.push(() => resolve({ success: true, reset: Date.now() + 60000 }))));
+  const pending = check('actor', 'calls', defaults, 'local', 2);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  // Both reservations are on the wire before either answered.
+  expect(mock.remaining).toHaveBeenCalledTimes(2);
+  expect(mock.limit).toHaveBeenCalledTimes(2);
+  open.forEach(answer => answer());
+  expect(await pending).toEqual({ success: true });
+  mock.limit.mockReset();
+  mock.limit.mockImplementation(async options => ({ success: !options.prefix.includes(':day:'), reset: Date.now() + 60000 }));
+  expect(await check('actor', 'calls', defaults, 'local', 2)).toMatchObject({ success: false, reason: 'rate_limited', window: 'day' });
+});
+it('a limiter that cannot answer on one of the two windows still refuses (fails closed)', async () => {
+  const { checkRuntimeRateLimit: check } = await import('./redisRateLimiter');
+  mock.limit.mockImplementation(async options => { if (options.prefix.includes(':day:')) throw new Error('private'); return { success: true, reset: Date.now() + 60000 }; });
+  expect(await check('actor', 'admission', defaults, 'local', 1)).toMatchObject({ success: false, reason: 'unavailable' });
+});

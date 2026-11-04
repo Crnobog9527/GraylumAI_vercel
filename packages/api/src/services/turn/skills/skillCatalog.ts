@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { databaseSkillSource, userVisibleModules } from '../../skills/databaseSource';
+import { databaseSkillSource, userVisibleModules, type Authentication } from '../../skills/databaseSource';
 import { activateFreeChatSkill, isPositioningPackage } from '../../skills/stepGuide';
 import { discoverSkills, SkillLoadError, type SkillSource } from '../../skills/loader';
 import { catalogVersion } from '../settings/catalogCache';
@@ -70,6 +70,10 @@ export function loadSkillResult(entry: Omit<SkillCatalogEntry, 'resultBytes'>, i
 // actual load re-reads the package through read_skill_package, which rechecks access (load_skill, 0342). So a short
 // per-process, per-user cache can at worst list a Skill that was just unpublished: loading it is then refused. Test isolation
 // clears it.
+/** What one request has already asked of the database for the Skill catalog, so the reads that follow do not ask again: the user's
+ * visible modules (the read of a listing, started once) and the one identity check (databaseSource.ts requestAuthentication). */
+export type RequestReads = { visible: ReturnType<typeof userVisibleModules>; authentication: Authentication };
+
 const CATALOG_TTL_MS = 5 * 60 * 1000, CATALOG_CACHE_ENTRIES = 256;
 const catalogCache = new Map<string, { at: number; entries: SkillCatalogEntry[]; versions: Record<string, number | null>;
   catalogVersion?: number }>();
@@ -98,7 +102,7 @@ const sameVersions = (a: Record<string, number | null>, b: Record<string, number
  * (POSITIONING-GATE), and small enough to load. No model binding is read: the Skill runs on the dialogue model.
  */
 export async function discoverSkillCatalog(user: SupabaseClient, admin: SupabaseClient,
-  limits: { maxResultBytes: number; excludeSocial: boolean; actorId?: string; now?: number }): Promise<SkillCatalogEntry[]> {
+  limits: { maxResultBytes: number; excludeSocial: boolean; actorId?: string; now?: number; request?: RequestReads }): Promise<SkillCatalogEntry[]> {
   const key = limits.actorId ? [limits.actorId, limits.excludeSocial, limits.maxResultBytes].join('|') : undefined;
   const now = limits.now ?? Date.now();
   const cached = key ? catalogCache.get(key) : undefined;
@@ -150,8 +154,8 @@ export async function pinnedCatalogEntry(source: SkillSource, pin: { moduleId: s
 }
 
 async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
-  limits: { maxResultBytes: number; excludeSocial: boolean }): Promise<SkillCatalogEntry[]> {
-  const visible = await userVisibleModules(user, { limit: 65, orderById: true });
+  limits: { maxResultBytes: number; excludeSocial: boolean; request?: RequestReads }): Promise<SkillCatalogEntry[]> {
+  const visible = await (limits.request?.visible ?? userVisibleModules(user, { limit: 65, orderById: true }));
   if (visible.error || visible.data.length > 64) throw new Error('RUNTIME_CATALOG_CAPACITY');
   if (!visible.data.length) return [];
   const rows = await admin.from('modules').select('id,skill_id,social_media_related,uses_user_voice').in('id', visible.data.map(m => m.id))
@@ -162,7 +166,7 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
     if (!row.skill_id || (limits.excludeSocial && row.social_media_related !== false)) continue;
     const userVisibleModule = visible.data.find(m => m.id === row.id);
     const source = databaseSkillSource({ userClient: user, privateClient: admin, moduleId: row.id, skillId: row.skill_id,
-      userVisibleModule });
+      userVisibleModule, ...(limits.request ? { authentication: limits.request.authentication } : {}) });
     let descriptors, found;
     try { descriptors = await source.list(); found = await discoverSkills(source); } catch { continue; }
     for (const item of found) {
