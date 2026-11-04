@@ -288,6 +288,12 @@ body {
   font-family: var(--font-primary);
 }
 
+/* Routes whose finished page is light render <LightFirstPaint/> from a server layout (FIRST_PAINT_LIGHT_ROUTES). */
+body:has([data-first-paint='light']) {
+  background: #f7f7f7;
+  color-scheme: light;
+}
+
 code,
 pre {
   font-family: var(--font-mono);
