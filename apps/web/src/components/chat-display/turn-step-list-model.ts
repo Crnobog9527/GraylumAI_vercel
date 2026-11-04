@@ -6,15 +6,15 @@ import type { StepEvent, StepKind, StepState } from '@repo/api/src/services/turn
  * result or Skill text ever reaches the page, so a saved step can hold nothing more.
  */
 export type ReplyStepKind = StepKind | 'think';
-export type ReplyStep = { id: string; tool: ReplyStepKind; state: StepState; label?: string; detail?: string; count?: number };
+export type ReplyStep = { id: string; tool: ReplyStepKind; state: StepState; label?: string; detail?: string; count?: number; reason?: 'no_brand' };
 
 export const THINKING_STEP: ReplyStep = { id: 'think', tool: 'think', state: 'running' };
 
 /** The step an event describes, in place of the step with the same id (a running step becomes its end), else added last. */
-export function mergeStep(steps: readonly ReplyStep[], event: Pick<StepEvent, 'id' | 'tool' | 'state' | 'label' | 'detail' | 'count'>): ReplyStep[] {
+export function mergeStep(steps: readonly ReplyStep[], event: Pick<StepEvent, 'id' | 'tool' | 'state' | 'label' | 'detail' | 'count' | 'reason'>): ReplyStep[] {
   const next: ReplyStep = { id: event.id, tool: event.tool, state: event.state,
     ...(event.label ? { label: event.label } : {}), ...(event.detail ? { detail: event.detail } : {}),
-    ...(event.count !== undefined ? { count: event.count } : {}) };
+    ...(event.count !== undefined ? { count: event.count } : {}), ...(event.reason ? { reason: event.reason } : {}) };
   return steps.some(step => step.id === event.id) ? steps.map(step => step.id === event.id ? next : step) : [...steps, next];
 }
 
@@ -51,6 +51,7 @@ export function stepLine(step: ReplyStep): string {
       default: return '这一步没有完成，改为直接回答';
     }
   }
+  if (tool === 'coach_review' && step.reason === 'no_brand') return '还没连接作品账号，这次按定位和资料回答';
   switch (tool) {
     case 'load_skill': return '这次没有使用该方法';
     case 'research': return '这次没有联网搜索';

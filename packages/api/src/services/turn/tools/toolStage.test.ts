@@ -30,6 +30,10 @@ describe('what the page is told when a tool starts', () => {
     expect(stepStart('read_source', { query: 'coach_review' }, skills)).toEqual({ tool: 'coach_review' });
     expect(stepStart('read_source', { query: COACH }, skills)).toEqual({ tool: 'coach_review' });
     expect(stepStart('read_source', { query: 'coach_review please' }, skills)).toEqual({ tool: 'read_source' });
+    // The account's own post data is "your data" too, in every window the workspace reader accepts.
+    for (const query of ['my_posts', 'my_posts:14', 'my_posts:30', 'my_posts:90']) expect(stepStart('read_source', { query }, skills)).toEqual({ tool: 'coach_review' });
+    expect(stepStart('read_source', { query: 'my_posts:7' }, skills)).toEqual({ tool: 'read_source' });
+    expect(stepStart('read_source', { query: 'my_posts:30 extra' }, skills)).toEqual({ tool: 'read_source' });
     expect(stepStart('read_skill_file', { path: 'a.md' }, skills)).toEqual({ tool: 'other' });
   });
 
@@ -61,6 +65,8 @@ describe('how a tool\'s result ends its step', () => {
     expect(stepEnd('read_source', TOOL_UNAVAILABLE)).toEqual({ state: 'skipped' });
     expect(stepEnd('load_skill', SKILL_LOAD_REFUSED)).toEqual({ state: 'skipped' });
     expect(stepEnd('coach_review', JSON.stringify({ kind: 'coach_review', status: 'no_entitlement' }))).toEqual({ state: 'skipped' });
+    // No brand connected yet: nothing was read, so it is not a green tick; the page says so in its own words.
+    expect(stepEnd('coach_review', JSON.stringify({ kind: 'coach_review', status: 'no_brand', note: 'x' }))).toEqual({ state: 'skipped', reason: 'no_brand' });
   });
   it('the result text itself never leaves: only a state and a count', () => {
     expect(Object.keys(stepEnd('research', JSON.stringify({ status: 'ok', items: [{ fields: { text: 'SECRET' } }] }))).sort()).toEqual(['count', 'state']);

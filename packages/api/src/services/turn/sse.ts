@@ -16,7 +16,8 @@ export type StepState = 'running' | 'done' | 'failed' | 'skipped';
 export type StepEvent = { type: 'step'; id: string; tool: StepKind; state: StepState;
   /** A Skill's public name. */ label?: string;
   /** A search's first words (about 20 characters), or a page's host; never the whole question. */ detail?: string;
-  /** How many results came back, when the result says. */ count?: number };
+  /** How many results came back, when the result says. */ count?: number;
+  /** Why a step was not used, when the page says it in its own words: the account has no brand connected yet. */ reason?: 'no_brand' };
 export type TurnEvent =
   // tools: what this turn can use and what was trimmed and why (2.7, V2-6); absent for a turn without tools.
   | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean; tools?: ToolAvailability;

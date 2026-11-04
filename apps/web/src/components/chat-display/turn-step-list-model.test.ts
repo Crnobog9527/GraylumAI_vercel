@@ -26,6 +26,8 @@ describe('the line of each step', () => {
     expect(stepLine(step('research', 'failed'))).toBe('联网搜索暂时没成功，改用已有信息回答');
     expect(stepLine(step('load_skill', 'failed', { label: '分镜脚本' }))).toBe('「分镜脚本」方法暂时读取不了，改为直接回答');
     expect(stepLine(step('read_source', 'skipped'))).toBe('这次没有查阅资料库');
+    expect(stepLine(step('coach_review', 'skipped'))).toBe('这次没有读取作品数据');
+    expect(stepLine(step('coach_review', 'skipped', { reason: 'no_brand' }))).toBe('还没连接作品账号，这次按定位和资料回答');
     for (const state of ['failed', 'skipped'] as const) for (const tool of ['load_skill', 'research', 'read_source', 'coach_review', 'other'] as const)
       expect(stepLine(step(tool, state))).not.toMatch(/错误|失败|异常|出错/);
   });
@@ -37,6 +39,7 @@ describe('the list of a reply', () => {
     const two = mergeStep(one, { id: '1', tool: 'research', state: 'done', detail: '早起', count: 6 });
     expect(two).toEqual([{ id: '1', tool: 'research', state: 'done', detail: '早起', count: 6 }]);
     expect(mergeStep(two, { id: '2', tool: 'other', state: 'running' }).map(item => item.id)).toEqual(['1', '2']);
+    expect(mergeStep([], { id: '3', tool: 'coach_review', state: 'skipped', reason: 'no_brand' })).toEqual([{ id: '3', tool: 'coach_review', state: 'skipped', reason: 'no_brand' }]);
   });
   it('live with no text and nothing running, the reply is thinking; with text, or with a step running, nothing is added', () => {
     expect(visibleSteps([], true, false).map(item => item.tool)).toEqual(['think']);

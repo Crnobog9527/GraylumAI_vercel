@@ -10,6 +10,8 @@ import type { StepEvent, StepKind } from '../sse';
  */
 export type StepStart = Pick<StepEvent, 'tool' | 'label' | 'detail'>;
 const BRIEF_CHARS = 20;
+/** The owned-source ids of the user's own post data (tools/workspace.ts). */
+const OWN_DATA_QUERY = /^my_posts(?::(?:14|30|90))?$/;
 const brief = (text: string) => {
   const chars = Array.from(text.replace(/\s+/g, ' ').trim());
   return chars.length > BRIEF_CHARS ? chars.slice(0, BRIEF_CHARS).join('') + '…' : chars.join('');
@@ -30,7 +32,8 @@ export function stepStart(name: string, args: Record<string, unknown>, skillName
     return { tool: 'research', ...(shown ? { detail: shown } : {}) };
   }
   if (name === 'read_source') {
-    return { tool: typeof args.query === 'string' && COACH_REVIEW_ID.test(args.query) ? 'coach_review' : 'read_source' };
+    // The coach review and the account's own post data (my_posts, my_posts:14|30|90) are "your data", not the library.
+    return { tool: typeof args.query === 'string' && (OWN_DATA_QUERY.test(args.query) || COACH_REVIEW_ID.test(args.query)) ? 'coach_review' : 'read_source' };
   }
   return { tool: 'other' };
 }
@@ -40,7 +43,7 @@ const SKIPPED = new Set(['unavailable_this_turn', 'budget_exhausted', 'not_suppo
 const BROKEN = new Set(['unavailable', 'failed', 'error']);
 
 /** How a tool's result ended the step. A thrown error is the caller's `failed`. */
-export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state' | 'count'> {
+export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state' | 'count' | 'reason'> {
   let parsed: unknown;
   try { parsed = JSON.parse(result); } catch { parsed = null; }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -50,6 +53,8 @@ export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state'
   const body = parsed as Record<string, unknown>;
   // The reads of the library and the workspace answer {kind:'unavailable'} (with or without a reason) when nothing could be read.
   const status = typeof body.status === 'string' ? body.status : body.kind === 'unavailable' ? 'unavailable' : '';
+  // The coach review of an account with no brand connected: nothing was read, and the reply goes on with the positioning and the library.
+  if (status === 'no_brand') return { state: 'skipped', reason: 'no_brand' };
   if (body.reason === 'TOOL_UNAVAILABLE_THIS_TURN' || SKIPPED.has(status)) return { state: 'skipped' };
   if (BROKEN.has(status)) return { state: 'failed' };
   const list = [body.items, body.hits, body.documents].find(Array.isArray) as unknown[] | undefined;
