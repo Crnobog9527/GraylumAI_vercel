@@ -31,11 +31,14 @@ export async function discoverRuntimeCandidates(user:SupabaseClient,admin:Supaba
  const visible=await userVisibleModules(user,{limit:65,orderById:true});
  if(visible.error||visible.data.length>64)throw new Error('RUNTIME_CATALOG_CAPACITY');
  if(!visible.data.length)return [];
- const rows=await admin.from('modules').select('id,skill_id,model_id,social_media_related').in('id',visible.data.map(m=>m.id)).eq('active',true).order('id');
+ const rows=await admin.from('modules').select('id,skill_id,model_id,social_media_related,required_member_level')
+  .in('id',visible.data.map(m=>m.id)).eq('active',true).order('id');
  if(rows.error)throw new Error('RUNTIME_CATALOG_UNAVAILABLE');
  const candidates:MatchCandidate[]=[];
  for(const row of rows.data){
   if(!row.skill_id||!row.model_id)continue;
+  // MEMBER-ONLY-MODULES: automatic matching never offers a Skill limited to members (no caller passes a plan here yet).
+  if(row.required_member_level)continue;
   // POSITIONING-GATE: a user without a confirmed positioning is never matched to a social media Skill.
   if(limits.excludeSocial&&row.social_media_related!==false)continue;
   // AC-0c: reuse this request's user-scoped (RLS) read above, never the service-role row.
