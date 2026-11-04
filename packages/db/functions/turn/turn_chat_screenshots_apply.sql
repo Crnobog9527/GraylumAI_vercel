@@ -30,9 +30,11 @@ BEGIN
       IF NOT FOUND OR v_biz IS NULL THEN CONTINUE; END IF;
       -- A correction a day or more after the screenshot carries the other numbers of that screenshot forward (the newest pack row of
       -- a post is the one the review reads, so a row holding only the corrected number would hide the rest). Only a screenshot
-      -- diagnosis from the last 7 days is carried; the same UTC day is merged by the conflict clause below.
+      -- diagnosis from the last 7 days is carried, and only while today has no row yet (a second correction today must not bring the old value back); the same UTC day is merged by the conflict clause below.
       SELECT * INTO prev FROM social_post_diagnostics d WHERE d.post_id = v_post AND d.source = 'screenshot'
-         AND d.captured_on < v_day AND d.captured_on >= v_day - 7 ORDER BY d.captured_on DESC LIMIT 1;
+         AND d.captured_on < v_day AND d.captured_on >= v_day - 7
+         AND NOT EXISTS (SELECT 1 FROM social_post_diagnostics t WHERE t.post_id = v_post AND t.captured_on = v_day)
+         ORDER BY d.captured_on DESC LIMIT 1;
       IF FOUND THEN
         v_rates := coalesce(prev.rates, '{}'::jsonb) || v_rates;
         v_raw := CASE WHEN prev.rates_raw IS NULL AND v_raw IS NULL THEN NULL ELSE coalesce(prev.rates_raw, '{}'::jsonb) || coalesce(v_raw, '{}'::jsonb) END;

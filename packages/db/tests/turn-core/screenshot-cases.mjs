@@ -81,6 +81,9 @@ export async function screenshotCases(t){
   const two=await rows(pid);
   assert.equal(two.length,2);
   assert.deepEqual(two[1].rates,{complete_rate:0.15,retain_3s:0.5},'the new row keeps the other numbers');
+  await closeChat(a,(await oneCall(a)).turnId,{result:{coachScreenshots:[item(pid,{views:700})]}});
+  const three=await rows(pid);
+  assert.equal(three.length,2);assert.deepEqual(three[1].rates,{complete_rate:0.15,retain_3s:0.5,views:700},'a second correction today keeps the first one');
   assert.equal(two[1].video_seconds,30);assert.deepEqual(two[0].rates,{complete_rate:0.12,retain_3s:0.5},'the earlier row is untouched');
   const b=await account(),old=await post(b);
   await closeChat(b,(await oneCall(b)).turnId,{result:{coachScreenshots:[item(old,{complete_rate:0.12,retain_3s:0.5})]}});
