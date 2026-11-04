@@ -42,7 +42,7 @@ describe('profile-archive gate in front of the editable draft and topics pages',
 
   it('keeps the editable page closed while the archive state is unknown or unreadable', async () => {
     businesses = { isPending: true, isSuccess: false, isError: false, error: null };
-    for (const html of await render()) { expect(html).toContain('正在读取定位档案'); expect(html).not.toContain('EDITABLE'); }
+    for (const html of await render()) { expect(html).toContain('page-skeleton'); expect(html).not.toContain('正在读取'); expect(html).not.toContain('EDITABLE'); }
     businesses = { isPending: false, isSuccess: false, isError: true, error: new Error('down') };
     for (const html of await render()) {
       expect(html).toContain('定位档案暂时读不出来');
@@ -70,7 +70,7 @@ describe('profile-archive gate in front of the editable draft and topics pages',
     // A later successful read is newer than the failure: the archive check applies again.
     read = { ...ok({ draftId: 'draft' }), errorUpdatedAt: 2000, dataUpdatedAt: 3000 };
     businesses = { isPending: true, isSuccess: false, isError: false, error: null };
-    for (const html of await render()) expect(html).toContain('正在读取定位档案');
+    for (const html of await render()) { expect(html).toContain('page-skeleton'); expect(html).not.toContain('正在读取'); }
   });
 
   it('still applies the archive check when a background refetch of a cached draft fails', async () => {

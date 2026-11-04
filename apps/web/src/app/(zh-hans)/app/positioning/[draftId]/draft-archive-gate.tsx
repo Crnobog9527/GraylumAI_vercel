@@ -6,6 +6,7 @@ import { trpc } from '@/trpc/client';
 import { retryUnlessMissing } from '@/lib/read-retry';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { useDraftArchiveState } from '@/components/opc/profile-archive/profile-archive-api';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { ReadonlyDraftView } from './readonly-draft-view';
 
 /**
@@ -24,7 +25,7 @@ export function DraftArchiveGate({ draftId, children }: { draftId: string; child
   // archive check, so an archived draft never opens its editor.
   const failed = read.data === undefined && (read.isError || (read.errorUpdatedAt ?? 0) > (read.dataUpdatedAt ?? 0));
   if (!draftId || failed || deleted) return children;
-  if (read.isPending || archive.state === 'pending') return <main className="p-6" role="status">{PROFILE_ARCHIVE_TEXT.checking}</main>;
+  if (read.isPending || archive.state === 'pending') return <main><PageSkeleton rows={6} label="定位档案读取中" /></main>;
   if (archive.state === 'error') return <main className="p-6"><p role="alert">{PROFILE_ARCHIVE_TEXT.loadFailed}{' '}
     <button type="button" className="underline" onClick={archive.retry}>重试</button></p></main>;
   if (archive.state === 'archived') return <ReadonlyDraftView draftId={draftId} draft={read.data} archived/>;
