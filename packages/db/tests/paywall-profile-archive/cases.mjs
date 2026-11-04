@@ -57,8 +57,6 @@ export async function runCases({admin:db,connect,report,read}) {
  for(const [name,args] of [
   ['opc_step_material',[actor,first.draftId,randomUUID(),'s','mentor','test']],
   ['opc_information',[actor,first.draftId,'s',randomUUID(),1,{}]],
-  ['runtime_admit',[actor,first.sessionId,randomUUID(),{},{}]],
-  ['bill2_prepare',[actor,randomUUID(),{scope:{kind:'positioning_draft',draftId:first.draftId}}]],
   ['fusion_review_start',[actor,randomUUID(),first.draftId,randomUUID(),{}]],
   ['report_revision',[actor,first.draftId,'propose',randomUUID(),null,null,'body',{},null]],
   ['artifact_transition',[actor,method.module,method.skill,'save',first.projectId,first.roundId,randomUUID(),{}]],
@@ -86,8 +84,6 @@ export async function runCases({admin:db,connect,report,read}) {
  await archiver.query('BEGIN');
  await rpc(archiver,'opc_business_archive',racing,old.businessId);
  const starts=[start(one,racing,method),start(two,racing,method)];
- const paid=assert.rejects(rpc(payer,'bill2_prepare',racing,randomUUID(),
-  {scope:{kind:'positioning_draft',draftId:old.draftId}}),archived);
  const pids=(await db.query(`SELECT pid FROM pg_stat_activity WHERE datname=current_database()
   AND query LIKE 'SELECT opc_start_b1(%' AND wait_event_type='Lock'`)).rows;
  // Queries may still be arriving; observe PostgreSQL blocking rather than assume a timer means overlap.
@@ -100,7 +96,6 @@ export async function runCases({admin:db,connect,report,read}) {
  assert.equal(blocked,2,'both new starts wait for archive user lock');
  await archiver.query('COMMIT');
  const results=await Promise.allSettled(starts);
- await paid;
  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
  assert.equal(results.filter(r=>r.status==='rejected'&&r.reason.message==='OPC_PROFILE_LIMIT').length,1);
  assert.equal((await db.query(`SELECT count(*)::int n FROM opc_businesses
@@ -113,7 +108,7 @@ export async function runCases({admin:db,connect,report,read}) {
  await one.query('COMMIT');
  assert.equal((await rpc(two,'opc_business_archive',racing,active.businessId)).isArchived,true);
  report.checks.push('two concurrent starts wait for archive then exactly one succeeds; active count remains 1',
-  'concurrent paid admission waits for archive then refuses; mutation makes archive retry without deadlock');
+  'mutation makes archive retry without deadlock');
 
  // Real BILL2 run and dispatch: unsettled dispatch cannot be archived; receipts,
  // settlement and result persistence continue. A prepared pre-archive call cannot dispatch later.
@@ -123,32 +118,11 @@ export async function runCases({admin:db,connect,report,read}) {
  const business=(await db.query('SELECT id FROM opc_businesses WHERE actor_id=$1 AND current_source_version_id=$2',
   [rf.actor,rf.version])).rows[0].id;
  await db.query('INSERT INTO opc_draft_businesses(draft_id,business_id) VALUES($1,$2)',[rf.draft,business]);
- // A BILL2 run for the archive-vs-dispatch cases below (the report itself is a turn now; this run only needs the draft's scope).
- const payload={...rf.base.payload,scope:{kind:'positioning_draft',draftId:rf.draft},
-  input:{reportGeneration:{version:1,projectId:rf.project,roundId:rf.round},request:{sessionId:rf.session},sources:[],network:'deny',role:'skill',moduleId:rf.module,skillId:rf.skill,revisionId:rf.revision,
-   packageHash:'b'.repeat(64)},moduleId:rf.module,skillId:rf.skill,revisionId:rf.revision};
  const document=await rpc(db,'report_document',rf.actor,rf.execution,'read',null,null,null,null);
  assert.ok(document.body);
  const info=(await db.query('SELECT steps FROM artifact_rounds WHERE id=$1',[rf.round])).rows[0].steps;
- const run=await rpc(db,'bill2_prepare',rf.actor,randomUUID(),payload);
- const f={...rf.base,run:run.id,payload};
- const billing={actor:rf.actor};
- const dispatched=await call(db,f);
- await assert.rejects(rpc(db,'opc_business_archive',billing.actor,business),/^error: OPC_BUSINESS_BUSY$/);
- await rpc(db,'bill2_record',billing.actor,f.run,dispatched.id,evidence(dispatched));
- await rpc(db,'bill2_close',billing.actor,f.run,'delivered',outcome);
- await rpc(db,'bill2_finalize',billing.actor,f.run);
- const queued=await rpc(db,'bill2_prepare',billing.actor,randomUUID(),payload);
- const prepared=await call(db,{...f,run:queued.id},1,false);
- await rpc(db,'opc_business_archive',billing.actor,business);
- await assert.rejects(rpc(db,'bill2_dispatch',billing.actor,queued.id,prepared.id,prepared.dispatchToken),archived);
- await assert.rejects(rpc(db,'bill2_claim',billing.actor,queued.id,2,{}),archived);
- // Cancellation/reconciliation remain available for money reserved before archive.
- await rpc(db,'bill2_close',billing.actor,queued.id,'confirmed_failure',{
-  kind:'confirmed_delivery_failure',evidenceRef:'archive-test',evidenceHash:'d'.repeat(64),body:'Not dispatched',
- });
- await rpc(db,'bill2_finalize',billing.actor,queued.id);
- report.checks.push('already dispatched call delays archive until settled','prepared call cannot dispatch/claim after archive; money cleanup allowed');
+ // (V2-12 F: the old BILL2 run, dispatch and money-cleanup cases of the archive went with bill2_prepare; a turn of the business making archive BUSY is in turn-core/topic-cases.)
+ await rpc(db,'opc_business_archive',rf.actor,business);
 
  // Generated report and linked accounts/work items remain readable with all their
  // authoritative data; archived draft edits, report saves and paid descendants refuse.
@@ -159,10 +133,8 @@ export async function runCases({admin:db,connect,report,read}) {
  await assert.rejects(rpc(db,'report_document',rf.actor,rf.execution,'save',randomUUID(),0,'cannot edit',null),archived);
  await assert.rejects(rpc(db,'opc_account_strategy_begin',rf.actor,account,randomUUID()),archived);
  await assert.rejects(rpc(db,'opc_content_manual_save',rf.actor,rf.workItem,randomUUID(),0,null,'script','draft','test','test'),archived);
- await assert.rejects(rpc(db,'bill2_prepare',rf.actor,randomUUID(),{
-  scope:{kind:'work_item',projectId:account,workItemId:rf.workItem}}),archived);
  report.checks.push('generated report read/export source and confirmed state survive archive unchanged',
-  'archived report edits, linked account strategy and work-item generation rejected');
+  'archived report edits, linked account strategy and work-item edits rejected');
  const startSource=(await db.query("SELECT pg_get_functiondef('opc_start_b1(uuid,uuid,text,text,uuid,text,text)'::regprocedure) v")).rows[0].v;
  assert.match(startSource,/PAY-STRIPE-MP authoritative cap/,'0322 paid fallback cap fix retained');
  assert.match(startSource,/business.archived_at IS NULL/);

@@ -10,19 +10,7 @@ CREATE OR REPLACE FUNCTION public.opc_target_business(a uuid, t jsonb)
 AS $function$
 DECLARE scope jsonb;bid uuid;pid uuid;did uuid;
 BEGIN
- IF t->>'runId' IS NOT NULL THEN
-  SELECT coalesce(s.scope,r.scope) INTO scope FROM bill2_runs r
-   LEFT JOIN fusion_billing_groups g ON g.id=r.fusion_group_id AND g.actor_id=a
-   LEFT JOIN runtime_sessions s ON s.id=g.source_session_id AND s.actor_id=a
-   WHERE r.id=(t->>'runId')::uuid AND r.actor_id=a;
- ELSIF t->>'groupId' IS NOT NULL THEN
-  SELECT s.scope INTO scope FROM fusion_billing_groups g
-   JOIN runtime_sessions s ON s.id=g.source_session_id AND s.actor_id=a
-   WHERE g.id=(t->>'groupId')::uuid AND g.actor_id=a;
- ELSIF t->>'executionId' IS NOT NULL THEN
-  SELECT s.scope INTO scope FROM runtime_executions e JOIN runtime_sessions s ON s.id=e.session_id
-   WHERE e.id=(t->>'executionId')::uuid AND e.actor_id=a AND s.actor_id=a;
- ELSIF t->>'sessionId' IS NOT NULL THEN
+ IF t->>'sessionId' IS NOT NULL THEN
   SELECT s.scope INTO scope FROM runtime_sessions s WHERE s.id=(t->>'sessionId')::uuid AND s.actor_id=a;
  ELSE scope:=t; END IF;
  did:=coalesce(scope->>'draftId',t->>'draftId')::uuid;

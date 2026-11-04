@@ -1,8 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {ready,detach} from '../erasure-binding/cases.mjs';
-import {rpc} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 
 // 0395 (staging 10-25): account_erasure_prune_business swallowed a foreign-key failure with NULL, so a request stayed
 // 'erasing' for 12 hours with empty executor_error_codes. A row that cannot be deleted must leave a fixed code
@@ -25,7 +24,9 @@ export async function runPruneDiagnostics(db,report) {
  const prune=async f=>{let removed=0;for(let i=0;i<3;i++)removed+=await rpc(db,'account_erasure_prune_business',f.actor,100);return removed;};
  const code='ERASURE_PRUNE_23503_CONVERSATIONS';
 
- const stuck=await ready(db,{version:'v1'});await detach(db,stuck);
+ // A closed account with no run: the pruning diagnostics do not depend on one (V2-12 F: the old-run fixture is gone).
+ const closed=async()=>{const f={actor:randomUUID()};await db.query('INSERT INTO profiles(id,credits) VALUES($1,73)',[f.actor]);await closeAccount(db,f);return f;};
+ const stuck=await closed();
  const blocked=await conversation(stuck),free=await conversation(stuck);
  await db.query('INSERT INTO prune_diagnostics_block VALUES($1)',[blocked]);
  const token=await claim(stuck);const before=await request(stuck);
@@ -49,7 +50,7 @@ export async function runPruneDiagnostics(db,report) {
  assert.deepEqual((await request(stuck)).executor_error_codes,[],'resolved block leaves no code');
 
  // Without a blocked row nothing is reported.
- const clean=await ready(db,{version:'v1'});await detach(db,clean);await conversation(clean);
+ const clean=await closed();await conversation(clean);
  await claim(clean);await prune(clean);
  assert.deepEqual((await request(clean)).executor_error_codes,['ERASURE_EXECUTOR_RUNNING'],'no failure, no prune code');
  await db.query('DROP TABLE prune_diagnostics_block');

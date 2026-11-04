@@ -201,21 +201,7 @@ try {
  assert.equal(await balance(ur),25);assert.equal(await frozen(pr),100);
  await withdraw(ops,d);assert.equal(await balance(ur),125);
  report.checks.push('actual package refund failure after an already claimed refund restores into the dispute hold');
- // PAYG's separate compensation path must also return the original source into the hold.
- const uc=await profile(0),pc=await pack(uc,100,iso(-hour));
- pre=await reserve(uc,40);await c.query('SELECT * FROM bill2_legacy_settle($1,$2,40,$3,NULL)',[uc,pre,{}]);
- d=await receive(pc);
- const call=randomUUID(),run=randomUUID();
- await c.query('ALTER TABLE credit_transactions DISABLE TRIGGER ALL');
- try {
-  await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,bill2_call_id,idempotency_key)
-   VALUES($1,0,'adjustment','spend','bill2_spend',$2,$3)`,[uc,call,'fixture-spend:'+call]);
-  assert.equal(await v('SELECT bill2_payg_compensate(jsonb_populate_record(NULL::bill2_runs,$1),jsonb_populate_record(NULL::bill2_calls,$2)) v',
-   [{id:run,actor_id:uc,closed:true,outcome:'confirmed_failure'},
-    {id:call,run_id:run,pre_deduct_id:pre,settled_at:iso(0),charged_delta:40}]),40);
- } finally {await c.query('ALTER TABLE credit_transactions ENABLE TRIGGER ALL');}
- assert.equal(await balance(uc),0);assert.equal(await frozen(pc),100);await withdraw(ops,d);assert.equal(await balance(uc),100);
- report.checks.push('PAYG compensation function with synthetic run/call records increases frozen credits, not spendable balance');
+ // (V2-12 F: PAYG's separate compensation path, bill2_payg_compensate, is gone with the old run tables.)
  // Full external refund replaces the freeze; an already refunded payment cannot freeze twice.
  const u6=await profile(50),p6=await pack(u6,100,iso(-hour));
  d=await receive(p6);await externalRefund(p6,'re_dispute_full');

@@ -12,14 +12,13 @@ AS $function$
 
 DECLARE sessions uuid[]:='{}'; executions uuid[]:='{}'; projects uuid[]:='{}'; versions uuid[]:='{}';
  content_ids uuid[]:='{}'; refs uuid[]:='{}'; turn_ids bigint[]:='{}';
- root_e runtime_executions;root_s runtime_sessions;root_p artifact_projects;root_c opc_content_versions;
+ root_s runtime_sessions;root_p artifact_projects;root_c opc_content_versions;
  deleted boolean:=false;more uuid[];n integer;preserved bigint;dependents jsonb;
 BEGIN
  IF a IS NULL OR target IS NULL THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
  IF k='answer' THEN
-  SELECT * INTO root_e FROM runtime_executions WHERE id=target AND actor_id=a;
-  IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
-  executions:=ARRAY[root_e.id];deleted:=root_e.content_deleted_at IS NOT NULL OR root_e.erased_at IS NOT NULL;
+  -- CORE-PATH-V2 V2-12 F: an answer was one old execution; none exists any more.
+  RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501';
  ELSIF k='session' THEN
   SELECT * INTO root_s FROM runtime_sessions WHERE id=target AND actor_id=a;
   IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
@@ -56,40 +55,10 @@ BEGIN
   ARRAY(SELECT conversation_id FROM artifact_chats WHERE project_id=ANY(projects))||
   ARRAY(SELECT work_item_id FROM opc_items WHERE source_version_id=ANY(versions))||
   ARRAY(SELECT session_id FROM opc_topic_workspaces WHERE actor_id=a AND source_version_id=ANY(versions))||ARRAY(SELECT id FROM artifact_rounds WHERE project_id=ANY(projects));
- executions:=ARRAY(SELECT DISTINCT ex.id FROM runtime_executions ex WHERE ex.actor_id=a AND
-  (ex.id=ANY(executions) OR ex.session_id=ANY(sessions) OR content_erasure_references(ex.payload,refs)
-   -- A2 injected source
-   OR content_erasure_references(ex.injected_source,refs)
-   OR EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=ex.session_id AND content_erasure_references(rs.scope,refs))
-   -- 0218 workspace tool copies
-   OR EXISTS(SELECT 1 FROM runtime_tool_calls tc WHERE tc.execution_id=ex.id AND tc.name IN ('read_source','read_history') AND content_erasure_references(tc.result,refs))
-   -- 0228 read_history copies
-   OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.source_script_id=ANY(refs)
-    AND b.session_id=ex.session_id AND b.request_id=ex.request_id)
-   -- ERASE-SPEED material key: read once per execution (OFFSET 0 keeps it from being re-read per material row).
-   OR EXISTS(SELECT 1 FROM (SELECT ex.payload#>>'{scopeMaterial,sessionId}' sid,ex.payload#>>'{scopeMaterial,revision}' rev
-     OFFSET 0) k
-    JOIN runtime_scope_material mat ON mat.session_id=CASE WHEN k.sid ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-     THEN k.sid::uuid END AND mat.session_id::text=k.sid AND mat.revision::text=k.rev WHERE
-    (mat.request_id=ANY(refs) OR content_erasure_references(mat.request,refs) OR content_erasure_references(mat.content,refs)
-     OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.session_id=mat.session_id
-      AND b.material_revision=mat.revision AND b.source_script_id=ANY(refs)))
-    )));
- -- Exact dependency closure; UNION bounds malformed cycles.
- LOOP
-  n:=cardinality(executions);
-  more:=ARRAY(SELECT DISTINCT ex.id FROM runtime_executions ex WHERE ex.actor_id=a AND
-   (EXISTS(SELECT 1 FROM runtime_history_dependencies d WHERE d.execution_id=ex.id AND d.dependency_id=ANY(executions))
-    OR content_erasure_references(ex.payload,executions)
-    OR EXISTS(SELECT 1 FROM runtime_executions src WHERE src.id=ANY(executions)
-     AND src.actor_id=a AND src.session_id=ex.session_id AND (src.created_at,src.id)<(ex.created_at,ex.id)
-     AND content_erasure_capture_copy(ex.payload,src.result))));
-  executions:=ARRAY(SELECT DISTINCT x FROM unnest(executions||more) x ORDER BY x);
-  EXIT WHEN cardinality(executions)=n;
- END LOOP;
+ -- CORE-PATH-V2 V2-12 F: the executions are only the ids a saved version still names (rows of other tables keep them as plain values).
  -- CORE-PATH-V2 V2-10b C2: the turns of the same dependency, by what a turn can hold: the producing turn of a selected version, a turn
- -- given a script as material (any turn that read a claimed revision) or as source, every turn of a conversation in scope; then, as
- -- runtime_history_dependencies for an execution, every later turn of those conversations, whose history held the reply.
+ -- given a script as material (any turn that read a claimed revision) or as source, every turn of a conversation in scope; then
+ -- every later turn of those conversations, whose history held the reply.
  turn_ids:=ARRAY(SELECT t.id FROM turns t WHERE t.actor_id=a AND (t.session_id=ANY(sessions)
    OR t.id IN (SELECT c.turn_id FROM opc_content_versions c WHERE c.actor_id=a AND c.id=ANY(content_ids) AND c.turn_id IS NOT NULL)
    OR t.request_id IN (SELECT b.request_id FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.source_script_id=ANY(refs))

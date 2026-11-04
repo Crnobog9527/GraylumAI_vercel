@@ -8,5 +8,5 @@ CREATE OR REPLACE FUNCTION public.atomic_refund(p_user_id uuid, p_pre_deduct_id 
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-BEGIN IF EXISTS(SELECT 1 FROM bill2_runs WHERE pre_deduct_id=p_pre_deduct_id) OR EXISTS(SELECT 1 FROM bill2_calls WHERE pre_deduct_id=p_pre_deduct_id) THEN RAISE EXCEPTION 'BILL2_LEGACY_FINALIZER_DENIED';END IF;
+BEGIN
 RETURN QUERY SELECT * FROM bill2_legacy_refund(p_user_id,p_pre_deduct_id,p_reason);END $function$;

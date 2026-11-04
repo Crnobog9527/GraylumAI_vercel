@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 import { resolve } from 'node:path';
-import { fixtureSql, laterRedefinitions } from '../publish-monitor/fixtures.mjs';
+import { fixtureSql, laterRedefinitions, replaySql } from '../publish-monitor/fixtures.mjs';
 import { generateDataset } from '../../../api/src/services/publishMonitor/coach/simulatedDataset.ts';
 import { seedSql } from './seed-sql.mjs';
 
@@ -423,18 +423,13 @@ try {
   const catalog = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const built = await v(catalog);
   // 0457, then the publish-monitor migrations after it (0463, 0477 redefine its claim and step): the pair replays to the same catalog.
-  for (const path of [MIGRATION, ...laterRedefinitions('0457')]) await c.query(read(path));
+  for (const path of laterRedefinitions('0457')) await c.query(replaySql(path)); // 0457 itself is not replayable after batch F (its rollback names the old run tables)
   assert.deepEqual(await v(catalog), built);
-  await c.query('BEGIN');
-  await c.query(read('packages/db/tests/publish-monitor-coach/rollback-0457.sql').replace(/^(BEGIN|COMMIT);$/gm, ''));
-  assert.match(await v("SELECT pg_get_functiondef('publish_monitor_review_claim(integer)'::regprocedure) v"),
-    /ON CONFLICT\(actor_id,period_start\)/);
-  await c.query('ROLLBACK');
   const grants = await c.query(`SELECT f,r,has_function_privilege(r,f,'EXECUTE') ok FROM unnest(ARRAY[
    'publish_monitor_review_claim(integer)','publish_monitor_settle_facts(integer)','publish_monitor_review_pack_rows(uuid,uuid,integer)',
    'publish_monitor_erasure_remaining(uuid)']) f,unnest(ARRAY['authenticated','service_role']) r ORDER BY 1,2`);
   assert.deepEqual(grants.rows.map(r => r.ok), [false, false, false, true, false, true, false, true]);
-  report.checks.push('reapplying changes no schema; rollback restores the old claim; functions are service-role only');
+  report.checks.push('reapplying the later migrations changes no schema; functions are service-role only (the 0457 rollback went with the old tables)');
 } catch (error) {
   report.failed = String(error.stack ?? error); process.exitCode = 1;
 } finally {

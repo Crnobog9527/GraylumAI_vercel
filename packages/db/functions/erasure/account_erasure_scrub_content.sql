@@ -164,9 +164,6 @@ BEGIN
   DELETE FROM fusion_call_outputs WHERE actor_id=p_profile_id;
   GET DIAGNOSTICS n=ROW_COUNT;counts := counts || jsonb_build_object('fusion_call_outputs', n);
   DELETE FROM fusion_reviews WHERE actor_id=p_profile_id;
-  -- 0294 fee refund
-  PERFORM fusion_review_fee_settle_internal(held_fee.review_id) FROM fusion_review_fees held_fee
-   WHERE held_fee.actor_id=p_profile_id AND held_fee.state='held';
   GET DIAGNOSTICS n=ROW_COUNT;
   counts := counts || jsonb_build_object('fusion_reviews', n);
   -- 0338 session results
@@ -190,10 +187,5 @@ BEGIN
   DELETE FROM fusion_compares WHERE actor_id=p_profile_id;
   GET DIAGNOSTICS n=ROW_COUNT;
   counts := counts || jsonb_build_object('fusion_compares', n);
-  -- 0295 report price
-  PERFORM report_fee_settle_internal(held_fee.execution_id,false) FROM report_fees held_fee
-   WHERE held_fee.actor_id=p_profile_id AND held_fee.state='held';
-  PERFORM report_fee_settle_internal(held_fee.execution_id,true) FROM report_fees held_fee
-   WHERE held_fee.actor_id=p_profile_id AND held_fee.state='held';
   RETURN counts;
 END $function$;

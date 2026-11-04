@@ -9,8 +9,8 @@ CREATE OR REPLACE FUNCTION public.fusion_review_admin_read(p_review_id uuid)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   SELECT fusion_review_view(rv)||jsonb_build_object('actorId',rv.actor_id,'createdAt',rv.created_at,'outputs',
-    coalesce((SELECT jsonb_agg(jsonb_build_object('callId',c.id,'costUsd',c.selected_cost_usd,'body',o.body) ORDER BY c.created_at,c.id)
-      FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id LEFT JOIN fusion_call_outputs o ON o.call_id=c.id
-      WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (s->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) s)),'[]'))
+    coalesce((SELECT jsonb_agg(jsonb_build_object('callId',md5(c.turn_id::text||':'||c.seq::text)::uuid,'costUsd',coalesce(c.actual_usd,c.nominal_usd),'body',o.body) ORDER BY c.seq)
+      FROM turn_calls c LEFT JOIN fusion_turn_outputs o ON o.turn_id=c.turn_id AND o.seq=c.seq
+      WHERE c.actor_id=rv.actor_id AND c.turn_id=rv.turn_id AND c.call_kind='model'),'[]'))
   FROM fusion_reviews rv WHERE rv.id=p_review_id;
 $function$;

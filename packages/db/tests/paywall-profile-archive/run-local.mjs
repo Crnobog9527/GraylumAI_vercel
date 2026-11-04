@@ -12,7 +12,6 @@ import pg from 'pg';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
-import {fusionArchiveCases} from './fusion-cases.mjs';
 assert.ok(process.argv[2]==='--local-only'&&!process.env.CI || process.argv[2]==='--ci'&&process.env.CI,
   'use --local-only locally or --ci in CI; only an isolated local database is supported');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -84,16 +83,9 @@ try {
    VALUES($1,$1,$2,$3,$4,$5,false,false,0) ON CONFLICT(level) DO NOTHING`,[level,monthly,annual,credits,credits*12]);
  }
  await runCases({admin,connect,report,read});
- await fusionArchiveCases({admin,connect,report});
- const preserved=sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b');
- sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
- // V2-12 B-rewrites (0490) rewrites fusion_review_archive_reconcile, which 0326 defines again.
- sql(read('packages/db/migrations/0490_core_path_v2_old_path_function_rewrites.sql'));
- assert.equal(sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b'),preserved,
-  'forward recovery/reapply retains every archive, source and revision');
- assert.deepEqual(objects(),finalCatalog,'archive recovery preserves the final catalog including 0325');
+ // (V2-12 F: the replay of 0326, which patches the old Fusion compare/review functions batch F drops, and its catalog comparison are gone.)
  assert.equal(sql(read('packages/db/tests/account-open-policy-audit.sql')),'');
- report.checks.push('reapply retains archived content and releases no additional slots','account-open policy audit PASS');
+ report.checks.push('account-open policy audit PASS');
  console.log(JSON.stringify({result:'PASS',...report}));
 } finally {
  await Promise.all(clients.map(db=>db.query('ROLLBACK').catch(()=>{})));

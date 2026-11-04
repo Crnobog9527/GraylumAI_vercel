@@ -10,8 +10,5 @@ CREATE OR REPLACE FUNCTION public.fusion_compare_active(a uuid)
 AS $function$
   SELECT EXISTS(SELECT 1 FROM fusion_compares fc WHERE fc.actor_id=a AND fc.state='admitting'
       AND fc.created_at>clock_timestamp()-interval '5 minutes')
-    OR EXISTS(SELECT 1 FROM fusion_compares fc JOIN bill2_runs br ON br.fusion_group_id=fc.group_id
-      WHERE fc.actor_id=a AND fc.state='running' AND NOT br.closed)
-    OR EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id WHERE br.actor_id=a
-      AND br.fusion_group_id IS NOT NULL AND fusion_call_in_flight(c));
+    OR EXISTS(SELECT 1 FROM turns t WHERE t.actor_id=a AND t.kind='compare' AND t.state IN ('opening','running','stopping'));
 $function$;

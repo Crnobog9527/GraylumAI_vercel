@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { erasureRpcDiagnostic } from './rpcDiagnostics';
 import type { BillingRpc } from '../turn/provider/frozenRun';
 import {
-  batchSchema, beginSchema, contentRemaining, detachSchema, localSchema,
+  batchSchema, beginSchema, contentRemaining, localSchema,
   resultSchema, storageReadySchema, storageSchema, workSchema,
 } from './processorContracts';
 
@@ -76,22 +76,13 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
     }
   };
   const actor = { p_profile_id: input.profileId };
-  const inventory = async (after: string | null = null) => {
+  const inventory = async () => {
     const value = workSchema.parse(await rpc('account_erasure_work_batch', {
-      ...actor, p_limit: 20, p_after_run_id: after,
+      ...actor, p_limit: 20, p_after_run_id: null,
     }));
     if (requestId && requestId !== value.requestId) throw new ProcessorFault('ERASURE_IDENTITY_CHANGED');
     requestId = value.requestId;
-    if (new Set(value.runs).size !== value.runs.length || (value.nextRunId !== null && !value.runs.includes(value.nextRunId))) {
-      throw new ProcessorFault('ERASURE_INVALID_RESULT');
-    }
     return value;
-  };
-  const batch = (value: unknown) => {
-    const parsed = batchSchema.parse(value);
-    report.remaining += parsed.remaining; report.manualReview += parsed.manualReview ?? 0;
-    if (parsed.reason && parsed.reason !== 'no_runtime_binding') error('ERASURE_CONTENT_PENDING');
-    return parsed;
   };
   const attempt = async (operation: () => Promise<void>) => {
     try { await operation(); } catch (caught) {
@@ -100,38 +91,13 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
     }
   };
   try {
-    let work = await inventory();
-    const runs: Array<{ id: string }> = [];
-    const seen = new Set<string>();
-    for (let page = 0; page < pages; page++) {
-      for (const id of work.runs) {
-        if (seen.has(id)) throw new ProcessorFault('ERASURE_INVALID_RESULT');
-        seen.add(id);
-        // No settlement here: a run still open is not touched, and the scrub/detach steps below leave it (and the stage stays
-        // billing_pending through the financial count read after them) until it is closed, so nothing is silently charged or refunded.
-        runs.push({ id });
-      }
-      if (!work.nextRunId) break;
-      if (page === pages - 1) { report.remaining++; error('ERASURE_PAGE_LIMIT'); break; }
-      work = await inventory(work.nextRunId);
-    }
+    await inventory();
     // CORE-PATH-V2 (0420): account_erasure_scrub_turns empties the new core-path content; the turn billing records stay.
     for (const name of ['account_erasure_scrub_content', 'account_erasure_scrub_runtime', 'account_erasure_scrub_turns']) {
       await attempt(async () => {
         const content = contentRemaining(await rpc(name, actor));
         report.remaining += content.remaining;
         if (content.retry) error('ERASURE_CONTENT_PENDING');
-      });
-    }
-    for (const run of runs) {
-      for (const name of ['account_erasure_scrub_receipts', 'account_erasure_scrub_run', 'account_erasure_scrub_calls']) {
-        await attempt(async () => {
-          batch(await rpc(name, { ...actor, p_run_id: run.id, ...(name.endsWith('receipts') ? { p_limit: 100 } : {}) }));
-        });
-      }
-      await attempt(async () => {
-        const detached = detachSchema.parse(await rpc('account_erasure_detach_runtime', { ...actor, p_run_id: run.id }));
-        if (!('detached' in detached)) batch(detached);
       });
     }
     for (const [name, tables] of [

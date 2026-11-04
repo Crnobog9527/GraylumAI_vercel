@@ -21,11 +21,7 @@ BEGIN
   IF EXISTS(SELECT 1 FROM artifact_evidence_restrictions WHERE evidence_id::text=eid
    AND (deleted OR expires_at<=clock_timestamp())) THEN RETURN false; END IF;
   IF NOT artifact_evidence_allowed(p.id,jsonb_build_array(eid)) AND NOT EXISTS(
-   SELECT 1 FROM opc_result_links l JOIN runtime_executions e ON e.id=l.execution_id
-    JOIN artifact_evidence ev ON ev.id=l.evidence_id
-   WHERE l.evidence_id::text=eid AND ev.project_id=p.id AND e.actor_id=a AND e.content_deleted_at IS NOT NULL
-   UNION ALL
-   -- CORE-PATH-V2 V2-7a2: a report finalized from a turn stays readable when its conversation is deleted, as above.
+   -- CORE-PATH-V2 V2-7a2: a report finalized from a turn stays readable when its conversation is deleted.
    SELECT 1 FROM opc_result_links l JOIN turns t ON t.actor_id=l.turn_actor_id AND t.id=l.turn_id JOIN runtime_sessions s ON s.id=t.session_id
     JOIN artifact_evidence ev ON ev.id=l.evidence_id
    WHERE l.evidence_id::text=eid AND ev.project_id=p.id AND t.actor_id=a AND s.content_deleted_at IS NOT NULL

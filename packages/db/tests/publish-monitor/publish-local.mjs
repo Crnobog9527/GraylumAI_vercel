@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { refusalsMigration } from '../refusal-codes/migration.mjs';
 import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 import { closeAccount } from '../erasure-b2a/cases.mjs';
 import { fixtureSql } from './fixtures.mjs';
@@ -86,7 +87,7 @@ try {
   await c.query(read(migrationPath));
   await c.query(read(priceMigrationPath));
   await c.query(read(priceMigrationPath));
-  await c.query(read('packages/db/migrations/0504_refusals_no_postgrest_retry.sql')); // the publish-job refusals answer PT409 (0274 replays them with 40001)
+  await c.query(refusalsMigration()); // the publish-job refusals answer PT409 (0274 replays them with 40001)
   assert.deepEqual(await v(catalogSql), before);
   report.checks.push('0274 and the site-wide price migration run twice with an unchanged catalog');
   // The global BILL-UNIT rows (Owner 2026-10-01: q=100, formal m=6); publishing follows them.

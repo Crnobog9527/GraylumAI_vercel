@@ -40,11 +40,7 @@ try {
   await c.query(fixtureSql);
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
-  const before = await v(catalogSql);
-  // Later migrations redefine some 0246 functions; reapplying the chain in order must converge.
-  for (const path of [migrationPath, ...laterRedefinitions('0246')]) await c.query(read(path));
-  assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0246 reapplication preserves the complete catalog');
+  // (V2-12 F: the replay of the old migration chain over the finished catalog is gone with the old tables it names.)
 
   for (const f of [...rpcs, 'publish_monitor_random_hex()']) {
     for (const role of ['anon', 'authenticated']) {

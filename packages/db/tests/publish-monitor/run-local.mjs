@@ -62,11 +62,7 @@ try {
   await c.query(fixtureSql);
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
-  const before = await v(catalogSql);
-  // Later migrations redefine some 0240 functions; reapplying the chain in order must converge.
-  for (const path of [migrationPath, ...laterRedefinitions('0240')]) await c.query(read(path));
-  assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0240 reapplication after the full chain preserves the complete catalog');
+  // (V2-12 F: the replay of the old migration chain over the finished catalog is gone with the old tables it names.)
 
   for (const t of tables) {
     assert.equal(await v("SELECT relrowsecurity v FROM pg_class WHERE oid=$1::regclass", [t]), true, t);
@@ -90,7 +86,8 @@ try {
   const cols = ['allow_publish', 'own_data_window_days', 'allow_benchmark_monitor', 'allow_weekly_auto_review'];
   await c.query(cols.map(x => `ALTER TABLE membership_plans ALTER COLUMN ${x} DROP NOT NULL;`).join('')
     + `UPDATE membership_plans SET ${cols.map(x => `${x}=NULL`).join(',')};`);
-  for (const path of [migrationPath, ...laterRedefinitions('0240')]) await c.query(read(path));
+  // The entitlement part of 0240 (the part before its function patches, which name the old run table and cannot be replayed after batch F).
+  await c.query(read(migrationPath).split('-- Admin catalog saves')[0].replace(/^(BEGIN|COMMIT);$/gm, ''));
   assert.equal(await v(`SELECT count(*)::int v FROM information_schema.columns WHERE table_name='membership_plans'
     AND column_name=ANY($1) AND is_nullable='NO'`, [cols]), 4);
   const plans = (await c.query(`SELECT level,allow_publish,own_data_window_days,allow_benchmark_monitor,
