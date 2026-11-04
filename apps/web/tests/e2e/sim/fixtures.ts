@@ -10,7 +10,7 @@ export { expect } from '@playwright/test';
  * failure). Local simulated data only.
  */
 export const test = base.extend<{ evidence: void }>({
-  evidence: [async ({ browser, context }, use, testInfo) => {
+  evidence: [async ({ browser, context }, provide, testInfo) => {
     const reports = new Map<Page, ReturnType<typeof watchPage>>();
     const throttle = Number(process.env.SIM_CPU_THROTTLE ?? 0);
     const add = (page: Page) => {
@@ -24,7 +24,7 @@ export const test = base.extend<{ evidence: void }>({
     const newContext = browser.newContext.bind(browser);
     browser.newContext = async (...args) => { const made = await newContext(...args); watch(made); return made; };
     try {
-      await use();
+      await provide();
     } finally {
       browser.newContext = newContext;
     }
