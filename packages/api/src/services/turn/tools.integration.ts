@@ -544,11 +544,11 @@ it('RUNTIME: TURN-STEPS: a search shows its steps, and after the close the steps
   const out = await turn(f, searchingModel(bodies), suppliers(parallel));
   const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   expect(result).toMatchObject({ type: 'result', body: 'Answer from the search.' });
-  // The stream: the step starts (with the search's first words) and ends (with how many results), before the text and the result.
+  // The stream: the step starts (with the search's first 20 characters, cut with a dot: the whole question never goes out) and ends (with how many results), before the text and the result.
   const steps = out.events.filter(e => e.type === 'step');
   expect(steps).toEqual([
-    { type: 'step', id: '1', tool: 'research', detail: 'coffee shop positioning', state: 'running' },
-    { type: 'step', id: '1', tool: 'research', detail: 'coffee shop positioning', state: 'done', count: 1 }]);
+    { type: 'step', id: '1', tool: 'research', detail: 'coffee shop position…', state: 'running' },
+    { type: 'step', id: '1', tool: 'research', detail: 'coffee shop position…', state: 'done', count: 1 }]);
   expect(out.events.findIndex(e => e.type === 'step')).toBeLessThan(out.events.findIndex(e => e.type === 'text'));
   // Kept by the close itself (turn_close, the same transaction): the end state and the count, never the search words. The turn still has
   // its three writes: open, the receipts, the close.
