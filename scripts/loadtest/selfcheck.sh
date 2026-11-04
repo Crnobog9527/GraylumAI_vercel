@@ -10,11 +10,14 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 
 for v in LOADTEST_MODEL_STUB_URL LOADTEST_ALLOWED_APP_HOST; do [ -n "${!v:-}" ] || { echo "STOP: $v is not set" >&2; exit 1; }; done
-ORIGIN="$(node -e 'console.log(new URL(process.argv[1]).origin)' "$LOADTEST_MODEL_STUB_URL" 2>/dev/null)" || { echo "STOP: LOADTEST_MODEL_STUB_URL is not a URL" >&2; exit 1; }
-calls() { curl -s -m 10 "$ORIGIN/__stats" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const n=JSON.parse(s).calls;console.log(Number.isInteger(n)?n:"")}catch{console.log("")}})'; }
+node -e 'new URL(process.argv[1])' "$LOADTEST_MODEL_STUB_URL" 2>/dev/null || { echo "STOP: LOADTEST_MODEL_STUB_URL is not a URL" >&2; exit 1; }
+# The counter sits behind the stub's secret prefix. On the Vercel copy (deploy-stub-vercel.sh) it counts one instance only: a STOP there
+# can be a different instance answering (run it again); a PASS is confirmed in the database (the turn's provider id starts gen-load-).
+STATS="${LOADTEST_MODEL_STUB_URL%/}/__stats"
+calls() { curl -s -m 10 "$STATS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const n=JSON.parse(s).calls;console.log(Number.isInteger(n)?n:"")}catch{console.log("")}})'; }
 
 BEFORE="$(calls)"
-[ -n "$BEFORE" ] || { echo "STOP: cannot read the stub's call counter at $ORIGIN/__stats (is the stub and tunnel up?)" >&2; exit 1; }
+[ -n "$BEFORE" ] || { echo "STOP: cannot read the stub's call counter (is the stub up?)" >&2; exit 1; }
 echo "stub calls before: $BEFORE"
 
 OUT="${SELFCHECK_OUT:-$HOME/graylum-loadtest/selfcheck-$(date +%s)}"
