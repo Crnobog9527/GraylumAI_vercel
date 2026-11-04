@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { createStub, generationId, receiptOf } from '../loadtest/openrouter-stub.mjs';
+import { stubPath } from '../loadtest/stub-vercel/api/stub.mjs';
 
 async function start(t, options) {
   const server = createStub(options);
@@ -152,7 +153,7 @@ test('the receipt travels in the id: another copy of the stub answers it, and id
 test('the Vercel function serves the stub only under its secret prefix, and nothing without one', async t => {
   const serve = async (prefix, tag) => {
     if (prefix === undefined) delete process.env.LOAD_STUB_PREFIX; else process.env.LOAD_STUB_PREFIX = prefix;
-    const { default: fn } = await import(`../loadtest/stub-vercel/api/[...path].mjs?${tag}`);
+    const { default: fn } = await import(`../loadtest/stub-vercel/api/stub.mjs?${tag}`);
     delete process.env.LOAD_STUB_PREFIX;
     const server = createServer(fn);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -168,4 +169,14 @@ test('the Vercel function serves the stub only under its secret prefix, and noth
   const bare = await serve(undefined, 'without');
   assert.equal((await fetch(`${bare}/api/healthz`)).status, 503);
   assert.equal((await serve('short', 'short').then(h => fetch(`${h}/api/short/api/alpha/decisions`, { method: 'POST', body: '{}' }))).status, 503);
+});
+
+test('the rewrite hands the function its original path in the query; an unrewritten URL keeps its own path', () => {
+  const prefix = 'b'.repeat(32), id = 'gen-load-1a2b.eyJ4IjoxfQ';
+  assert.equal(stubPath(`/api/stub?path=${prefix}/api/v1/chat/completions`), `/${prefix}/api/v1/chat/completions`);
+  assert.equal(stubPath(`/api/stub?path=${prefix}/api/v1/generation&id=${id}`), `/${prefix}/api/v1/generation?id=${id}`);
+  assert.equal(stubPath('/api/stub?path=healthz'), '/healthz');
+  assert.equal(stubPath(`/api/${prefix}/api/alpha/decisions`), `/${prefix}/api/alpha/decisions`);
+  assert.equal(stubPath('/api/stub'), '/');
+  assert.equal(stubPath('/api/stub?path=abc%2Fapi%2Fv1'), '/abc/api/v1', 'an encoded path decodes the same');
 });

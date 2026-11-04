@@ -19,10 +19,11 @@ OUT="$HOME/graylum-loadtest"; mkdir -p "$OUT"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/api"
 cp scripts/loadtest/openrouter-stub.mjs "$WORK/openrouter-stub.mjs"   # replaces the repository's re-export file
-cp "scripts/loadtest/stub-vercel/api/[...path].mjs" "$WORK/api/[...path].mjs"
+cp scripts/loadtest/stub-vercel/api/stub.mjs "$WORK/api/stub.mjs"
 printf '{"private":true,"type":"module","engines":{"node":"22.x"}}\n' >"$WORK/package.json"
-# functions keys are globs: "[...path]" would read as a character class, so the pattern names the folder instead.
-printf '{"regions":["%s"],"functions":{"api/**/*.mjs":{"maxDuration":60}}}\n' "$REGION" >"$WORK/vercel.json"
+# Every /api/... path goes to the one function, its own path in the query (a plain project gives a catch-all file one segment only).
+printf '{"regions":["%s"],"functions":{"api/stub.mjs":{"maxDuration":60}},"rewrites":[{"source":"/api/(.*)","destination":"/api/stub?path=$1"}]}\n' \
+  "$REGION" >"$WORK/vercel.json"
 
 PREFIX="$(openssl rand -hex 16)"
 vercel link --cwd "$WORK" --yes --project "$PROJECT" --scope "$TEAM" >/dev/null
