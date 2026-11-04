@@ -218,7 +218,11 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Sk
       // A file outside this step's resources: prepared before the first call, so reading it adds no round trip.
       : toolCall('gen-read-' + n, 'read_skill_file', { path: 'references/step-2.md' }));
   const second = await turn(f, { text: 'I want to sell coffee to students', transport: t.fn });
-  expect(second.events.map(e => e.type), JSON.stringify(second.events)).toEqual(['opened', 'text', 'result']);
+  // The Skill file read is one step the page lists (start and end under one id), named by the step's title, never by the file path.
+  expect(second.events.map(e => e.type), JSON.stringify(second.events)).toEqual(['opened', 'step', 'step', 'text', 'result']);
+  expect(second.events.filter(e => e.type === 'step')).toEqual([
+    { type: 'step', id: '1', tool: 'load_skill', label: 'Synthetic step 1', state: 'running' },
+    { type: 'step', id: '1', tool: 'load_skill', label: 'Synthetic step 1', state: 'done' }]);
   const result = second.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   expect(JSON.parse(result.body)).toEqual({ format: 'agent-turn.v1', message: 'Good. Who buys it?', card: null });
   expect(result.kindResult).toMatchObject({ result: 'applied', fields: { 'step-0': ['goal'] } });
