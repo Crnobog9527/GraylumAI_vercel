@@ -3,6 +3,11 @@
  * EXPERT-CONSULT copy (Master Plan 2.1 item 51, records L/Q/R). The card says "预约咨询，免费询价" and never
  * a price; there is no "let the expert see my report" switch — materials are exported by the user later.
  */
+/**
+ * Owner 2026-11-04 (option A): the booking entry opens after launch. While false no card is shown and the booking page says
+ * "即将开放"; the page, the router and the database stay as merged (#1060), so opening it later is this one switch.
+ */
+export const EXPERT_CONSULT_ENTRY_OPEN = false;
 export const EXPERT_CONSULT_SOURCES = ['report', 'pricing', 'studio'] as const;
 export type ExpertConsultSource = (typeof EXPERT_CONSULT_SOURCES)[number];
 export const isExpertConsultSource = (value: string | null | undefined): value is ExpertConsultSource =>
@@ -34,6 +39,9 @@ export const EXPERT_CONSULT_COPY = {
   notEligibleText: '专家诊断需要先有你的账号定位作为基础。完成定位后再回到这里预约。',
   startPositioning: '去做账号定位',
   loadFailed: '暂时无法打开预约，请稍后再试。',
+  comingSoonTitle: '真人专家诊断即将开放',
+  comingSoonText: '预约入口还没有开放，开放后会在这里通知你。',
+  backToApp: '回到工作台',
 } as const;
 
 const ERRORS: Record<string, string> = {

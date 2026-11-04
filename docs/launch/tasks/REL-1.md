@@ -484,7 +484,7 @@
 | 整个 7.1 表 | **没有 CORE-PATH-V2 这个任务行**（`plan-progress.mjs` 只认表里的任务名）；Owner 2026-10-28 的决定未体现在任务表 | 增加 CORE-PATH-V2 行（V2-1…V2-13） | 不能：新增任务行 |
 | ANALYTICS-POSTHOG | 依赖列“10-31 上线后第一周开工，冻结前不做” | 上线日已取消 10-31；应改为“上线后第一周（上线日由 Owner 定）” | 可以机械替换日期措辞，但我没动 |
 | LOAD-SKILL | 依赖“CHAT-AUTO-CONTEXT C”；总控核对称代码已合并，被标“阻塞”是过期依赖造成 | 看 plan-progress 实际阶段 | 不能：要看 PR |
-| EXPERT-CONSULT | 同上：#1060 已合并（0278），staging 有页面，仍显示阻塞 | 同上 | 不能 |
+| EXPERT-CONSULT | 2026-11-04 Owner 选 A，已推迟到上线后（Master Plan 第 2.1 节），7.1 表已挪到“5 上线后”，不再挡 REL-1；#1060 已合并（0278）的页面在冻结版本里是否对用户可见，待总控确认 | 已改 | 已改 |
 | RUNTIME-PROD | 依赖“④ 按 BILL-PAYG 行提前实施；其余项依赖 AGENT-CORE 稳定”，其中的旧路径部分被 CORE-PATH-V2 取代 | 标注“部分被 CORE-PATH-V2 取代” | 不能：要判断范围 |
 | DB-PERF | 依赖 BILL-PAYG、AGENT-CORE；Owner 10-27 的方案（A–F 步）已被 10-28 重做主路径取代，目前验收物是 100 人压测报告 | 依赖和标注应指向 CORE-PATH-V2 | 不能 |
 | PUBLISH-MONITOR | 依赖“RESEARCH-TOOLS；Post for Me 实测和条款核对”；内容已是“运营教练复盘”，复盘 RC-2 和 TikHub 读取接主路径的 PR 在途 | 依赖应加 CORE-PATH-V2 | 不能 |

@@ -4,7 +4,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExpertConsultCard } from './ExpertConsultCard';
 import { ExpertConsultForm } from './ExpertConsultForm';
-import { EXPERT_CONSULT_COPY as COPY, expertConsultErrorText, expertConsultPath, isExpertConsultSource } from './expertConsultCopy';
+import Page from '../../app/(zh-hans)/app/expert-consult/page';
+import { ExpertConsultComingSoon } from './ExpertConsultComingSoon';
+import { EXPERT_CONSULT_COPY as COPY, EXPERT_CONSULT_ENTRY_OPEN, expertConsultErrorText, expertConsultPath, isExpertConsultSource } from './expertConsultCopy';
 
 const hooks = vi.hoisted(() => ({
   state: { isLoading: false, error: null as null | { message: string }, data: undefined as unknown },
@@ -22,10 +24,20 @@ beforeEach(() => {
 
 describe('expert consult entry card', () => {
   it('says "预约咨询，免费询价", links to the booking page and never shows a price', () => {
-    const html = renderToStaticMarkup(createElement(ExpertConsultCard, { href: expertConsultPath('pricing') }));
+    const html = renderToStaticMarkup(createElement(ExpertConsultCard, { href: expertConsultPath('pricing'), open: true }));
     expect(html).toContain('预约咨询，免费询价');
     expect(html).toContain('href="/app/expert-consult?from=pricing"');
     expect(html).not.toMatch(/\$|美元|\d+\s*元|每小时|\/小时/);
+  });
+
+  it('is closed until after launch (Owner 2026-11-04): no card, and the booking page says it opens later', () => {
+    expect(EXPERT_CONSULT_ENTRY_OPEN).toBe(false);
+    expect(renderToStaticMarkup(createElement(ExpertConsultCard, { href: expertConsultPath('pricing') }))).toBe('');
+    const page = renderToStaticMarkup(createElement(Page));
+    expect(page).toContain(COPY.comingSoonTitle);
+    expect(page).toContain('href="/app"');
+    expect(page).not.toContain(COPY.needLabel);
+    expect(renderToStaticMarkup(createElement(ExpertConsultComingSoon))).toContain('expert-consult-coming-soon');
   });
 
   it('accepts only the three entry places', () => {
