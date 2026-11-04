@@ -158,6 +158,8 @@ export function createStubHandler({ firstByteMs = 1500, intervalMs = 50, chunks 
   return (req, res) => {
     // A write to a socket the caller already closed reports here instead of throwing at the process.
     res.on('error', () => {});
+    // A caller that hangs up mid-body ("aborted", ECONNRESET): the body loop below rejects and the catch answers; no stray event left.
+    req.on('error', () => {});
     handle(req, res).catch(() => {
       if (!res.headersSent) { res.writeHead(500).end(); return; }
       res.destroy();
