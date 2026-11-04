@@ -67,10 +67,10 @@ export const FORBIDDEN_ALWAYS = [
   'OPENROUTER_API_KEY',
   'PAYMENT_NOTICE_TEST_RECIPIENTS',
   'EXPECTED_APP_HOST',
+  'E2E_*',
 ];
 
-// Step 41a: E2E credentials go away before public opening.
-export const FORBIDDEN_PUBLIC = ['E2E_*'];
+// The four Waffo production variables (step 24) are not checked: they only exist after the S-8 review, which may be after launch.
 
 // Only a warning: step 25a needs a staging A/B acceptance first, so the variable
 // may legitimately be missing until that is signed off.
@@ -80,15 +80,23 @@ function matches(pattern, name) {
   return pattern.endsWith('*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern;
 }
 
-export function parseNames(text) {
+// Accepts "NAME", "NAME=value", "export NAME=value", quoted names, "NAME: value" and `vercel env ls` rows.
+// Everything after the name is dropped unread; lines that give no name are only counted, never echoed.
+export function parseNamesDetailed(text) {
   const names = new Set();
+  let unparsed = 0;
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
+    const line = raw.trim().replace(/^export\s+/, '').replace(/^["'`]+/, '');
     if (!line || line.startsWith('#')) continue;
-    const name = line.split(/[\s=]/)[0];
+    const name = line.split(/[\s=:,"'`]/)[0];
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.add(name);
+    else unparsed += 1;
   }
-  return names;
+  return { names, unparsed };
+}
+
+export function parseNames(text) {
+  return parseNamesDetailed(text).names;
 }
 
 export function checkNames(names, phase) {
@@ -98,8 +106,7 @@ export function checkNames(names, phase) {
   for (const name of REQUIRED_ALWAYS) {
     if (!names.has(name)) errors.push(`missing required variable ${name}`);
   }
-  const forbidden = phase === 'public' ? [...FORBIDDEN_ALWAYS, ...FORBIDDEN_PUBLIC] : FORBIDDEN_ALWAYS;
-  for (const pattern of forbidden) {
+  for (const pattern of FORBIDDEN_ALWAYS) {
     for (const name of names) {
       if (matches(pattern, name)) errors.push(`variable ${name} must not exist on production (${pattern})`);
     }
@@ -133,7 +140,13 @@ function main(argv) {
     process.stderr.write('usage: check-prod-env-names.mjs --phase build|smoke|public <names-file>\n');
     return 2;
   }
-  const { errors, warnings } = checkNames(parseNames(readFileSync(file, 'utf8')), phase);
+  if (!PHASES.includes(phase)) {
+    process.stderr.write(`phase must be one of ${PHASES.join(', ')}\n`);
+    return 2;
+  }
+  const { names, unparsed } = parseNamesDetailed(readFileSync(file, 'utf8'));
+  const { errors, warnings } = checkNames(names, phase);
+  if (unparsed > 0) warnings.push(`${unparsed} line(s) had no readable variable name and were skipped`);
   for (const w of warnings) process.stdout.write(`WARN ${w}\n`);
   for (const e of errors) process.stdout.write(`FAIL ${e}\n`);
   process.stdout.write(errors.length === 0 ? `PASS production variable names (${phase})\n` : `${errors.length} problem(s)\n`);

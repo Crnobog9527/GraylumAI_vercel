@@ -6,6 +6,10 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   FORBIDDEN_ALWAYS,
@@ -13,7 +17,16 @@ import {
   WARN_MISSING_LATER,
   checkNames,
   parseNames,
+  parseNamesDetailed,
 } from '../check-prod-env-names.mjs';
+
+const script = fileURLToPath(new URL('../check-prod-env-names.mjs', import.meta.url));
+const repoRoot = path.resolve(path.dirname(script), '..');
+function namesFile(content) {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'envnames-')), 'names.txt');
+  writeFileSync(file, content);
+  return file;
+}
 
 const base = () => new Set(REQUIRED_ALWAYS);
 
@@ -63,20 +76,32 @@ test('parseNames keeps names only and ignores values and comments', () => {
   assert.deepEqual([...names].sort(), ['CRON_SECRET', 'SENTRY_ORG']);
 });
 
+test('E2E names are forbidden from the build phase on', () => {
+  assert.ok(checkNames(base().add('E2E_TEST_PASSWORD'), 'build').errors.some((e) => e.includes('E2E_TEST_PASSWORD')));
+});
+
+test('export, quoted and colon forms still reveal forbidden names; odd lines are only counted', () => {
+  const { names, unparsed } = parseNamesDetailed('export OPENROUTER_API_KEY=sk-1\n"E2E_X": "v"\nLOADTEST_Z: abc\n=value-only\n');
+  assert.deepEqual([...names].sort(), ['E2E_X', 'LOADTEST_Z', 'OPENROUTER_API_KEY']);
+  assert.equal(unparsed, 1);
+});
+
 test('the CLI never echoes a value and exits non-zero on failure', () => {
   let out = '';
   try {
-    execFileSync('node', ['scripts/check-prod-env-names.mjs', '--phase', 'build', '/dev/stdin'], {
-      input: 'CRON_SECRET=super-secret-value\n',
-      encoding: 'utf8',
-    });
+    execFileSync('node', [script, '--phase', 'build', namesFile('CRON_SECRET=super-secret-value\n=another-secret\n')], { encoding: 'utf8' });
     assert.fail('expected a non-zero exit');
   } catch (error) {
     out = String(error.stdout);
     assert.equal(error.status, 1);
   }
-  assert.ok(!out.includes('super-secret-value'));
+  assert.ok(!out.includes('super-secret-value') && !out.includes('another-secret'));
   assert.ok(out.includes('FAIL missing required variable'));
+  assert.ok(out.includes('1 line(s) had no readable variable name'));
+});
+
+test('an unknown phase prints usage and exits 2', () => {
+  assert.throws(() => execFileSync('node', [script, '--phase', 'nope', namesFile('A=1\n')], { stdio: 'pipe' }), (error) => error.status === 2);
 });
 
 test('every listed name still appears in the code', () => {
@@ -85,11 +110,12 @@ test('every listed name still appears in the code', () => {
     try {
       execFileSync(
         'git',
-        ['grep', '-q', '-w', name, '--', 'apps', 'packages', 'scripts', ':!*.md', ':!scripts/check-prod-env-names.mjs', ':!scripts/tests/check-prod-env-names.test.mjs'],
-        { stdio: 'ignore' },
+        ['grep', '-q', '-w', name, '--', 'apps', 'packages', 'scripts', ':!*.md', ':(exclude,glob)**/tests/**', ':(exclude,glob)**/*.test.*', ':!scripts/check-prod-env-names.mjs'],
+        { stdio: 'ignore', cwd: repoRoot },
       );
       return false;
-    } catch {
+    } catch (error) {
+      assert.equal(error.status, 1, 'git grep failed to run');
       return true;
     }
   });
