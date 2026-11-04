@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createStub } from '../loadtest/openrouter-stub.mjs';
+import { createServer } from 'node:http';
+import { connect } from 'node:net';
+import { createStub, generationId, receiptOf } from '../loadtest/openrouter-stub.mjs';
 
 async function start(t, options) {
   const server = createStub(options);
@@ -109,4 +111,61 @@ test('the mentor organizer call answers a valid organization object, streamed an
   assert.deepEqual(JSON.parse(text), { inputKind: 'answer', patches: [], notes: [] });
   const ordinary = await (await post(base, { model: 'm', messages: [{ role: 'user', content: 'hi' }] })).json();
   assert.match(ordinary.choices[0].message.content, /^(测试)+$/);
+});
+
+test('a caller that drops its request while the body is still arriving ends only that request, not the stub', async t => {
+  const base = await start(t, { firstByteMs: 1, intervalMs: 1, chunks: 2 });
+  const { port } = new URL(base);
+  for (let i = 0; i < 5; i++) {
+    await new Promise(resolve => {
+      const socket = connect(Number(port), '127.0.0.1', () => {
+        socket.write('POST /api/v1/chat/completions HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: 5000\r\n\r\n{"model":');
+        setTimeout(() => { socket.destroy(); resolve(); }, 20);
+      });
+    });
+  }
+  // A dropped streaming reply too: the stub keeps writing to a closed socket for a while.
+  const cut = await post(base, { model: 'm', stream: true });
+  await cut.body.cancel();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const body = await (await post(base, { model: 'm', stream: true })).text();
+  assert.match(body, /data: \[DONE\]/, 'the stub still answers after dropped requests');
+});
+
+test('the receipt travels in the id: another copy of the stub answers it, and ids it did not issue are not found', async t => {
+  const first = await start(t, { firstByteMs: 1, intervalMs: 1, chunks: 3 });
+  const second = await start(t);
+  const response = await post(first, { model: 'anthropic/claude-sonnet-4.5', stream: true, provider: { max_price: { prompt: 3, completion: 15 } },
+    messages: [{ role: 'user', content: 'hello' }] });
+  const id = response.headers.get('x-generation-id');
+  const usage = JSON.parse((await response.text()).split('\n').filter(l => l.startsWith('data: {')).at(-1).slice(6)).usage;
+  const receipt = (await (await fetch(`${second}/generation?id=${encodeURIComponent(id)}`)).json()).data;
+  assert.deepEqual(receipt, { id, model: 'anthropic/claude-sonnet-4.5', total_cost: usage.cost, finish_reason: 'stop',
+    native_tokens_prompt: usage.prompt_tokens, native_tokens_completion: usage.completion_tokens, native_tokens_reasoning: 0, native_tokens_cached: 0 });
+  assert.ok(id.length <= 256);
+  for (const bad of ['gen-load-abc', 'gen-load-abc.!!!', 'gen-xyz.' + id.split('.')[1], `${id}${'A'.repeat(300)}`])
+    assert.equal(receiptOf(bad), null, bad.slice(0, 20));
+  assert.throws(() => generationId({ model: 'm'.repeat(300), total_cost: 0, finish_reason: 'stop', native_tokens_prompt: 1,
+    native_tokens_completion: 1 }), /too long/);
+});
+
+test('the Vercel function serves the stub only under its secret prefix, and nothing without one', async t => {
+  const serve = async (prefix, tag) => {
+    if (prefix === undefined) delete process.env.LOAD_STUB_PREFIX; else process.env.LOAD_STUB_PREFIX = prefix;
+    const { default: fn } = await import(`../loadtest/stub-vercel/api/[...path].mjs?${tag}`);
+    delete process.env.LOAD_STUB_PREFIX;
+    const server = createServer(fn);
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => server.close());
+    return `http://127.0.0.1:${server.address().port}`;
+  };
+  const prefix = 'a'.repeat(32);
+  const host = await serve(prefix, 'with');
+  assert.equal((await fetch(`${host}/api/healthz`)).status, 200);
+  const reply = await fetch(`${host}/api/${prefix}/api/alpha/decisions`, { method: 'POST', body: '{}' });
+  assert.equal(reply.status, 200);
+  assert.equal((await fetch(`${host}/api/api/alpha/decisions`, { method: 'POST', body: '{}' })).status, 404, 'no prefix, no stub');
+  const bare = await serve(undefined, 'without');
+  assert.equal((await fetch(`${bare}/api/healthz`)).status, 503);
+  assert.equal((await serve('short', 'short').then(h => fetch(`${h}/api/short/api/alpha/decisions`, { method: 'POST', body: '{}' }))).status, 503);
 });

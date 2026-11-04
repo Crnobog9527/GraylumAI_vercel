@@ -82,7 +82,7 @@ test('driver records the function region and counts 429s', () => {
   assert.deepEqual(placeOf(records), { regions: { 'sfo1>pdx1': 2 }, rateLimited: 1 });
 });
 
-test('a stub with a secret prefix answers only under it; healthz and stats are open', async t => {
+test('a stub with a secret prefix answers only under it; healthz is open, stats sit behind the prefix', async t => {
   const server = createStub({ firstByteMs: 5, intervalMs: 1, chunks: 2, prefix: 'sekret' });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
@@ -92,7 +92,8 @@ test('a stub with a secret prefix answers only under it; healthz and stats are o
   const ok = await fetch(`${origin}/sekret/api/v1/chat/completions`, { method: 'POST', body: '{"model":"m","stream":true}' });
   assert.equal(ok.status, 200);
   await ok.text();
-  const stats = await (await fetch(`${origin}/__stats`)).json();
+  assert.equal((await fetch(`${origin}/__stats`)).status, 404);
+  const stats = await (await fetch(`${origin}/sekret/__stats`)).json();
   assert.equal(stats.calls, 1);
   assert.equal(stats.peak, 1);
 });

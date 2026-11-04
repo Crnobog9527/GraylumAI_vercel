@@ -50,7 +50,7 @@ echo "   fail = silence for 6 s and then everything at once (the tunnel buffers:
 echo "curl -N -s -w '\\n total %{time_total}s\\n' -H 'content-type: application/json' -d '{\"model\":\"x\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}' '$FULL/api/v1/chat/completions'"
 echo
 echo "3) Health check and call counter (counter stays 0 until the app is rerouted):"
-echo "curl -s $URL/healthz ; curl -s $URL/__stats"
+echo "curl -s $URL/healthz ; curl -s $FULL/__stats"
 echo
 echo "Keep this terminal open until the run is over. Ctrl-C stops the stub and the tunnel."
 wait "$STUB_PID" "$TUN_PID"
