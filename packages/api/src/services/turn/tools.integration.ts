@@ -563,7 +563,7 @@ it('RUNTIME: TURN-STEPS: a search shows its steps, and after the close the steps
   const save = async (actor: string, steps: unknown) => (await db.query('select turn_chat_steps_apply($1,$2,$3) v', [actor, result.turnId, JSON.stringify(steps)])).rows[0].v;
   expect(await save(f.actor, [{ id: '1', tool: 'other', state: 'done' }])).toBe(false);
   const second = await setup();
-  const fresh = await turn(second, async (_url, init) => respond('gen-steps-2', frame('gen-steps-2', { choices: [{ index: 0, delta: { role: 'assistant', content: 'Plain.' }, finish_reason: null }] })
+  const fresh = await turn(second, async () => respond('gen-steps-2', frame('gen-steps-2', { choices: [{ index: 0, delta: { role: 'assistant', content: 'Plain.' }, finish_reason: null }] })
     + frame('gen-steps-2', { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + usage('gen-steps-2')), suppliers(vi.fn()));
   const plain = fresh.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   // A reply with no tool keeps no steps, and a reload reads none.
