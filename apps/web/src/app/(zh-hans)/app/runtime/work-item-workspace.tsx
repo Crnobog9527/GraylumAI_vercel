@@ -379,7 +379,7 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
                   userText={question && !question.startsWith(WORK_CONTINUE) ? shownRuntimeInput(question) : null}
                   completed={canAdopt}
                 >
-                  {reply.turnId !== null && <TurnStepList steps={chat.stepsByTurn.get(reply.turnId) ?? []} />}
+                  {reply.turnId !== null && <TurnStepList steps={chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? []} />}
                   {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []} />}
                   {canAdopt ? <RuntimeProposal adopted={adopted} text={text} /> : <RuntimeReply text={text} />}
                   {canAdopt && contentType !== 'unknown' && reply.turnId !== null && reply.requestId && (

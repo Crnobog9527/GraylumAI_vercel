@@ -130,6 +130,9 @@ export function turnDatabase(clients: TurnClients) {
       call(w, 'turn_close', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_close_kind: a.kind, p_messages: a.messages,
         p_delivered: a.delivered, p_refund_all: a.refundAll ?? false, p_failure_code: a.failureCode ?? null,
         p_kind_result: a.kindResult ?? null }, closed),
+    /** The steps a closed reply showed (kind, end state, a Skill's public name, a count): set once, after the close; false when nothing was saved. */
+    stepsSave: (a: { actorId: string; turnId: number; steps: unknown[] }) =>
+      call(w, 'turn_steps_save', { p_actor_id: a.actorId, p_turn_id: a.turnId, p_steps: a.steps }, z.boolean()),
     /** The recovery job (V2-8): claim up to 50 turns under a lease, then recover each one in its own transaction. */
     claimRecovery: (limit: number) => call(w, 'turn_recovery_claim', { p_limit: limit }, recoveryClaim),
     recover: (a: { actorId: string; turnId: number; action: RecoveryAction }) =>

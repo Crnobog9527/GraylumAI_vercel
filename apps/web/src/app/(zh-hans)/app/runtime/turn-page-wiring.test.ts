@@ -16,6 +16,13 @@ describe('every page on useTurnChat', () => {
       expect(page.source).toContain('turnBusy={chat.creditsBusy}');
       expect(page.source).toContain('useStoredSendCleanup(');
     });
+  // The steps list (TURN-STEPS): the live reply shows the steps it has, and every saved reply shows the steps this page saw or the
+  // server kept (so a reload still has them).
+  for (const page of pages)
+    it(`${page.name}: lists the steps of the live reply and of each saved reply`, () => {
+      expect(page.source).toContain('<TurnStepList steps={chat.live?.steps ?? []} live');
+      expect(page.source).toContain('chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? []');
+    });
 });
 
 // A turn that closes while another conversation's turn still holds its freeze reads a low balance, and nothing else asks again: every close

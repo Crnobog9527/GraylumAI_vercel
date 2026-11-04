@@ -28,6 +28,20 @@ describe('GET /api/turn: the refresh-recovery read (V2-5b, #595)', () => {
     expect((await res.json()).messages).toEqual([message]);
   });
 
+  it('carries the steps a reply showed (TURN-STEPS); a reply without them, or steps of another shape, show none', async () => {
+    const steps = [{ id: '1', tool: 'load_skill', state: 'done', label: '分镜' }, { id: '2', tool: 'research', state: 'done', count: 6 },
+      { id: '3', tool: 'coach_review', state: 'skipped', reason: 'no_brand' }];
+    const message = { seq: 2, role: 'assistant', turnId: 7, content: 'text', steps };
+    const ok = await handleTurnView(get('?sessionId=' + SESSION), deps(async () => ({ data: { ...view, messages: [message, { ...message, seq: 3, steps: null }] }, error: null })));
+    expect((await ok.json()).messages.map((m: { steps: unknown }) => m.steps)).toEqual([steps, null]);
+    // "running" is never kept, and no free text rides along: steps of another shape are left out, the conversation still reads.
+    for (const bad of [[{ id: '1', tool: 'research', state: 'running' }], [{ id: '1', tool: 'web_search', state: 'done', detail: 'words' }]]) {
+      const res = await handleTurnView(get('?sessionId=' + SESSION), deps(async () => ({ data: { ...view, messages: [{ ...message, steps: bad }] }, error: null })));
+      expect(res.status).toBe(200);
+      expect((await res.json()).messages[0].steps).toBeNull();
+    }
+  });
+
   it('refuses a bad request, the wrong database, no account; a denial and an outage are fixed codes', async () => {
     const status = async (query: string, d: TurnViewDeps) => { const r = await handleTurnView(get(query), d); return [r.status, (await r.json()).error]; };
     expect(await status('?sessionId=nope', deps())).toEqual([400, 'TURN_REQUEST_INVALID']);

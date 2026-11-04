@@ -27,6 +27,14 @@ test('a load_skill step ends as "已读取…", the reply is thinking until the 
   await expect(page.getByText('已读取「synthetic-method」方法')).toHaveCount(0);
   await fold.click();
   await expect(page.getByText('已读取「synthetic-method」方法')).toBeVisible();
+  // A reload reads the steps back from the server (they were kept at the close): the folded line is still above the reply.
+  await page.reload();
+  await expect(replies(page).first()).toBeVisible({ timeout: 60_000 });
+  const again = page.getByRole('button', { name: '已完成 1 个步骤' });
+  await expect(again).toBeVisible();
+  await expect(page.getByText('已读取「synthetic-method」方法')).toHaveCount(0);
+  await again.click();
+  await expect(page.getByText('已读取「synthetic-method」方法')).toBeVisible();
 });
 
 test('a read_source step ends in its own words (the local library cannot answer, so it may say so), the same way', async ({ page }) => {
