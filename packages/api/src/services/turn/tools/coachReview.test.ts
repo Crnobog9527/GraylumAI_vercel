@@ -77,3 +77,14 @@ describe('a review asked for in chat (PUBLISH-MONITOR block E)', () => {
       .toMatchObject({ kind: 'coach_review', status: 'no_brand' });
   });
 });
+
+describe('the handbooks of the access reach the chat pack', () => {
+  it('a member whose access holds the handbooks gets the reference lines; without them the pack has an empty list', async () => {
+    const platform = (rows.facts[0] as { platform: string }).platform;
+    const handbook = { platform, version: 't', calibration: 'owner_confirmed', labels: {},
+      funnel: [{ layer: 'hook', name: '开头', keys: ['bounce_2s'], basics: true, pass: { bounce_2s: { max: 0.4 } } }] };
+    const withBooks = await parsed(reader({ ...coach(30), handbooks: new Map([[platform, handbook as never]]) }).read('coach_review'));
+    expect(withBooks.review.reference_lines).toMatchObject([{ platform, calibration: 'owner_confirmed', funnel: [{ layer: 'hook', pass: { bounce_2s: { max: 0.4 } } }] }]);
+    expect((await parsed(reader(coach(30)).read('coach_review'))).review.reference_lines).toEqual([]);
+  });
+});

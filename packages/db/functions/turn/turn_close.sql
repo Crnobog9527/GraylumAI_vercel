@@ -84,6 +84,21 @@ BEGIN
       PERFORM public.turn_plan_apply(t, v_kind, p_kind_result);
     ELSIF t.kind = 'voice' THEN
       PERFORM public.turn_voice_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'chat' THEN
+      -- PUBLISH-MONITOR: the numbers the coach read from the user's screenshots in this reply. Best effort: a failure here never
+      -- touches the close or the settlement below (the savepoint rolls back only the diagnostics), and only a delivered completed
+      -- turn saves them (an erased or failed one saves nothing). Any other chat result is still refused, as before.
+      IF jsonb_typeof(p_kind_result) IS DISTINCT FROM 'object' OR NOT p_kind_result ? 'coachScreenshots'
+        OR (SELECT count(*) FROM jsonb_object_keys(p_kind_result)) <> 1 THEN
+        RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+      END IF;
+      IF v_kind = 'completed' AND p_delivered THEN
+        BEGIN
+          PERFORM public.turn_chat_screenshots_apply(p_actor_id, p_kind_result->'coachScreenshots');
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'turn_chat_screenshots_apply failed: %', SQLERRM;
+        END;
+      END IF;
     ELSE
       RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
     END IF;

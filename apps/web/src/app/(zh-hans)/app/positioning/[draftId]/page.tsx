@@ -48,7 +48,7 @@ import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudg
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
-import { MentorTurnSteps } from "./mentor-turn-steps"; import { PageSkeleton } from "@/components/ui/page-skeleton";
+import { MentorTurnSteps } from "./mentor-turn-steps"; import { WorkspaceSkeleton } from "@/components/opc/workspace-skeleton";
 import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
@@ -936,7 +936,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   /** The server's identity/lifecycle projection for the retained request. */
   const retainedStateData = (retainedTurn ? planTurnState(retainedTurn) : retainedTurn === null ? NO_PLAN_TURN : undefined) as
     { admitted?: boolean; state?: string | null; hasResult?: boolean; materialRevoked?: boolean } | undefined;
-  if (read.isLoading || hydratedDraft !== draftId) return <main><PageSkeleton rows={6} label="定位读取中" /></main>;
+  if (read.isLoading || hydratedDraft !== draftId) return <WorkspaceSkeleton area="chat" label="定位读取中" />;
   if (read.error || !d) return <main className="p-6" role="alert">
     {read.error?.data?.code==="NOT_FOUND"?"找不到这份定位，它可能已被删除。":"无法读取这份定位，请检查登录和访问权限。"}<Link href="/app/positioning">返回定位列表</Link></main>;
   if (d.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={d}/>; // Owner 2026-10-14: read-only after deletion.

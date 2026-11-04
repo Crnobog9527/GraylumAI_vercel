@@ -6,6 +6,7 @@ import { discoverSkillCatalog, entryContentSource, moduleUsesVoice, pinnedCatalo
 import { admitCatalogVoice } from './admission/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
+import { loadChatHandbooks } from '../publishMonitor/coach/handbooks';
 import { COACH_SWITCH, REVIEW_SWITCH } from '../publishMonitor/reviewSettings';
 import { rowFor } from './settings/settingsRows';
 import { admitOwnPosts } from './agent/workspacePosts';
@@ -60,8 +61,11 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
         postsOn ? swallow('turn_tools_posts_tier_unavailable', tierOf(actorId), null) : null]);
       if (sources.error) throw new Error('TURN_WORKSPACE_UNAVAILABLE');
       const on = async (key: string) => rowFor(await configuration, key).data?.value === true;
+      const coach = await on(COACH_SWITCH);
+      // Only for a member who can read the chat review at all; read here, before turn_open, never inside the turn.
+      const handbooks = coach && tier && tier.ownDataWindowDays > 0 ? await loadChatHandbooks(admin, process.env) : undefined;
       return { sources: sources.data as string[], strategy: true, posts: !tier ? null : { windowDays: tier.ownDataWindowDays,
-        benchmarks: tier.level === 'gold' && tier.allowBenchmarkMonitor, review: await on(REVIEW_SWITCH), coach: await on(COACH_SWITCH) } };
+        benchmarks: tier.level === 'gold' && tier.allowBenchmarkMonitor, review: await on(REVIEW_SWITCH), coach, ...(handbooks ? { handbooks } : {}) } };
     },
     async benchmarkAccounts(actorId, sessionId) {
       const { data, error } = await admin.rpc('research_chat_benchmark_accounts', { a: actorId, s: sessionId, e: null });
