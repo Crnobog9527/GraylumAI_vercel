@@ -170,10 +170,15 @@ describe('handbooks and reference lines for a chat review', () => {
     clearChatHandbookCache();
     vi.useFakeTimers();
     try {
-      const hung = { rpc: vi.fn(() => new Promise(() => {})) } as never;
+      const rpc = vi.fn(() => new Promise(() => {})), hung = { rpc } as never;
       const pending = loadChatHandbooks(hung, ENV, 5);
       await vi.advanceTimersByTimeAsync(2_100);
       expect((await pending).size).toBe(0);
+      // The next turn inside the minute does not wait or start another read; after it, a new read starts and sees the recovered service.
+      expect((await loadChatHandbooks(hung, ENV, 6)).size).toBe(0);
+      expect(rpc).toHaveBeenCalledTimes(2);
+      const healthy = database(files());
+      expect((await loadChatHandbooks(healthy.db, ENV, 70_000)).size).toBe(2);
     } finally { vi.useRealTimers(); }
   });
 

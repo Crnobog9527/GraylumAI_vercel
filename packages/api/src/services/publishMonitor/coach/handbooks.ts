@@ -101,20 +101,27 @@ export async function loadChatHandbooks(admin: Pick<SupabaseClient, 'rpc'>, env:
   if (!pack) return new Map<string, Handbook>();
   const hit = chatCache.get(pack.packageHash);
   if (hit && now - hit.at < (hit.handbooks.size ? CHAT_CACHE_MS : CHAT_EMPTY_MS)) return hit.handbooks;
-  let read = chatReads.get(pack.packageHash);
+  const key = pack.packageHash;
+  let read = chatReads.get(key);
   if (!read) {
-    read = loadCoachHandbooks(admin, env).then(handbooks => {
+    // A read that outlives the timeout is dropped from the single flight (below), so a later read can start; a late answer only
+    // fills the cache when no newer read has been started since.
+    const mine = read = loadCoachHandbooks(admin, env).then(handbooks => {
       const entry = { at: now, handbooks };
-      chatCache.set(pack.packageHash, entry);
+      if (chatReads.get(key) === mine || !chatReads.has(key)) chatCache.set(key, entry);
       return entry;
-    }).finally(() => chatReads.delete(pack.packageHash));
-    chatReads.set(pack.packageHash, read);
+    }).finally(() => { if (chatReads.get(key) === mine) chatReads.delete(key); });
+    chatReads.set(key, mine);
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), CHAT_READ_TIMEOUT_MS); });
   const done = await Promise.race([read, late]);
   clearTimeout(timer);
-  if (!done) logger.warn('billing', 'coach_chat_handbooks_slow', {});
-  return done?.handbooks ?? new Map<string, Handbook>();
+  if (done) return done.handbooks;
+  // Timed out: stop waiting for this read, and remember "no lines" for a minute so the next turns neither wait nor pile up reads.
+  if (chatReads.get(key) === read) chatReads.delete(key);
+  chatCache.set(key, { at: now, handbooks: new Map() });
+  logger.warn('billing', 'coach_chat_handbooks_slow', {});
+  return new Map<string, Handbook>();
 }
 export const clearChatHandbookCache = () => { chatCache.clear(); chatReads.clear(); };
