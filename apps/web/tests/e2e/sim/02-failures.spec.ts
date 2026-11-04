@@ -24,7 +24,10 @@ async function failedTurn(page: Page, fault: SimFault, waitMs = 120_000): Promis
     { message: 'the turn closes by itself', timeout: waitMs, intervals: [1000, 2000, 5000] }).toBe('chat:closed');
   const opened = await turns(bob.id, mark);
   expect(opened.map(t => t.kind), 'one message opened exactly one turn').toEqual(['chat']);
-  expect((await simCalls()).filter(c => c.role === 'primary' && c.fault === fault.mode), 'the failing call was sent once').toHaveLength(1);
+  // The turn's own failure code goes into the message: a turn refused before its model call (e.g. TURN_PROVIDER_LIMIT_UNAVAILABLE)
+  // sent nothing to the simulator, and the count alone does not say why.
+  expect((await simCalls()).filter(c => c.role === 'primary' && c.fault === fault.mode),
+    `the failing call was sent once (turn ${opened[0]?.id} ended ${opened[0]?.close_kind}/${opened[0]?.failure_code})`).toHaveLength(1);
   // The page says the message did not finish and does not keep spinning.
   await expect(page.getByText('正在思考…')).toHaveCount(0, { timeout: 30_000 });
   await expect(page.locator('[data-step-state="running"]')).toHaveCount(0, { timeout: 30_000 });
