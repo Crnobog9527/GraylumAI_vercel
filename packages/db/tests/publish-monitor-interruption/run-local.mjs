@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 import {rpc as nativeRpc} from '../erasure-b2a/cases.mjs';
-import {fixtureSql,laterRedefinitions} from '../publish-monitor/fixtures.mjs';
+import {fixtureSql,laterRedefinitions,replaySql} from '../publish-monitor/fixtures.mjs';
 
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 async function service(client,work){
@@ -214,7 +214,7 @@ try{
  const fingerprint=read('packages/db/tests/baseline/fingerprint.sql');
  const catalog=fingerprint.slice(0,fingerprint.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
  const before2=await one(catalog);
- for(const _ of [1,2])for(const path of laterRedefinitions('0476'))await c.query(read(path)); // 0477 itself names the old run function (gone with batch F)
+ for(const _ of [1,2])for(const path of laterRedefinitions('0476'))await c.query(replaySql(path)); // 0477 itself names the old run function (gone with batch F)
  assert.deepEqual(await one(catalog),before2);
  report.checks.push('0477 reapplies twice without a catalog change');
  const permissions=(await c.query(`SELECT role,has_function_privilege(role,'publish_monitor_review_step(uuid,uuid,text,text)','EXECUTE') allowed

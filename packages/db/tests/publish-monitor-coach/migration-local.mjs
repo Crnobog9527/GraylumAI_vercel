@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 import { resolve } from 'node:path';
-import { fixtureSql, laterRedefinitions } from '../publish-monitor/fixtures.mjs';
+import { fixtureSql, laterRedefinitions, replaySql } from '../publish-monitor/fixtures.mjs';
 import { generateDataset } from '../../../api/src/services/publishMonitor/coach/simulatedDataset.ts';
 import { seedSql } from './seed-sql.mjs';
 
@@ -423,7 +423,7 @@ try {
   const catalog = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const built = await v(catalog);
   // 0457, then the publish-monitor migrations after it (0463, 0477 redefine its claim and step): the pair replays to the same catalog.
-  for (const path of laterRedefinitions('0457')) await c.query(read(path)); // 0457 itself is not replayable after batch F (its rollback names the old run tables)
+  for (const path of laterRedefinitions('0457')) await c.query(replaySql(path)); // 0457 itself is not replayable after batch F (its rollback names the old run tables)
   assert.deepEqual(await v(catalog), built);
   const grants = await c.query(`SELECT f,r,has_function_privilege(r,f,'EXECUTE') ok FROM unnest(ARRAY[
    'publish_monitor_review_claim(integer)','publish_monitor_settle_facts(integer)','publish_monitor_review_pack_rows(uuid,uuid,integer)',

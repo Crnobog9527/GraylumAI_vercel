@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { rpc } from '../erasure-b2a/cases.mjs';
-import { fixtureSql, laterRedefinitions } from './fixtures.mjs';
+import { fixtureSql, laterRedefinitions, replaySql } from './fixtures.mjs';
 
 const MIGRATION = 'packages/db/migrations/0289_publish_monitor_billed_reads.sql';
 const db = await localDb(), c = db.client;
@@ -58,7 +58,7 @@ try {
   // B8a (0463): the refresh runs as a kind='review' turn in the connection's hidden conversation; the ledger's run id is the
   // turn's request id. Nothing below touches BILL2.
   const beforeReapply = await v(catalogSql);
-  for (const path of laterRedefinitions('0462')) await c.query(read(path));
+  for (const path of laterRedefinitions('0462')) await c.query(replaySql(path));
   assert.deepEqual(await v(catalogSql), beforeReapply);
   report.checks.push('0463, 0477 and 0481 re-apply without changing the catalog');
   for (const role of ['anon', 'authenticated']) {
