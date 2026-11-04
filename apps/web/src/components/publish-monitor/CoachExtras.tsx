@@ -13,7 +13,7 @@ export type CoachSummary = { start: string; end: string; published: number | nul
 export type CoachPick = { postId: string; title: string; platform: string; views: number | null; relative: number | null; er: number | null };
 export type CoachDiagnosis = { postId: string; title: string; platform: string; capturedOn: string | null; avgWatchSeconds: number | null;
   videoSeconds: number | null; avgWatchPct: number | null; completeRate: number | null; dropSecond: number | null; stuck: string | null;
-  /** Every other rate or count of the capture, in words, with the stuck layer's reference line and the own-median ratio when known. */
+  /** Every rate or count of the capture, in words, with its reference line (any layer the handbook judged) and the own-median ratio when known. */
   metrics: string[] };
 export type CoachReviewed = { id: string; hypothesis: string; verdict: string; reason: string | null; samples: number | null;
   vsBaseline: number | null; next: string | null };
@@ -22,9 +22,14 @@ export type CoachConcluded = { id: string; hypothesis: string; verdict: string |
 export type CoachExtrasData = { summary: CoachSummary | null; best: CoachPick[]; worst: CoachPick[]; diagnoses: CoachDiagnosis[];
   /** Where the diagnosis lines come from (handbook source), said as is: the written part quotes it. */
   sources: string[];
+  /** A handbook line was actually used for some metric; without it the source is not claimed. */
+  judged: boolean;
+  /** A platform whose handbook line was used has no recorded source. */
+  unsourced: boolean;
   reviewed: CoachReviewed[]; running: CoachRunning[]; concluded: CoachConcluded[] };
 
-export const EMPTY_EXTRAS: CoachExtrasData = { summary: null, best: [], worst: [], diagnoses: [], sources: [], reviewed: [], running: [], concluded: [] };
+export const EMPTY_EXTRAS: CoachExtrasData = { summary: null, best: [], worst: [], diagnoses: [], sources: [], judged: false, unsourced: false,
+  reviewed: [], running: [], concluded: [] };
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const str = (v: unknown) => (typeof v === 'string' ? v : null);
@@ -51,8 +56,22 @@ const COUNTS = new Set(['views', 'likes', 'comments', 'saves', 'shares', 'follow
 const OWN_COLUMNS = new Set(['avg_watch_seconds', 'avg_watch_pct', 'complete_rate']);
 const asPct = (n: number) => `${Number((n * 100).toFixed(1))}%`;
 
-function metricsOf(d: Record<string, unknown>, stuck: Record<string, unknown> | undefined): string[] {
-  const rates = rec(d.rates), lines = rec(stuck?.line), own = rec(d.vs_own_median);
+/** Three cases: lines used with a source, lines used but the handbook gave no source, no handbook line used at all. */
+const sourceText = (judged: boolean, sources: string[], unsourced: boolean) =>
+  (!judged ? NO_SOURCE_TEXT : [...sources, ...(unsourced ? ['另有手册参考线（来源未记录）'] : [])].join('；').replace(/^另有/, ''));
+/** What to say when the pack carries no handbook source: the lines are then only the user's own posts. */
+const NO_SOURCE_TEXT = '本期没有手册参考线，只和你自己的作品比较。';
+
+/** The reference lines of every layer the handbook judged (a layer without a line has none), by metric. */
+function linesOf(d: Record<string, unknown>): Record<string, unknown> {
+  const layers = list(d.layer_results);
+  // If two layers list the same metric, the stuck layer's line is the one that decided.
+  const others = layers.filter(l => l.layer !== d.stuck_layer), stuck = layers.filter(l => l.layer === d.stuck_layer);
+  return Object.assign({}, ...others.map(l => rec(l.line)), ...stuck.map(l => rec(l.line)));
+}
+
+function metricsOf(d: Record<string, unknown>): string[] {
+  const rates = rec(d.rates), lines = linesOf(d), own = rec(d.vs_own_median);
   return Object.entries(rates).flatMap(([key, value]) => {
     const label = METRIC_TEXT[key];
     if (!label || typeof value !== 'number' || !Number.isFinite(value)) return [];
@@ -60,8 +79,9 @@ function metricsOf(d: Record<string, unknown>, stuck: Record<string, unknown> | 
     const line = rec(lines[key]), min = num(line.min), max = num(line.max);
     const ref = [max !== null ? `≤${show(max)}` : null, min !== null ? `≥${show(min)}` : null].filter(Boolean).join('、');
     const ratio = num(own[key]);
-    const notes = [ref ? `参考线 ${ref}` : null, ratio !== null ? `自己中位数的 ${ratio.toFixed(2)} 倍` : null].filter(Boolean);
-    if (OWN_COLUMNS.has(key) && !notes.length) return [];
+    // A metric the handbook has no line for says so, and keeps the comparison with the user's own posts when there is one.
+    const notes = [ref ? `参考线 ${ref}` : COUNTS.has(key) ? null : '无参考线', ratio !== null ? `自己中位数的 ${ratio.toFixed(2)} 倍` : null].filter(Boolean);
+    if (OWN_COLUMNS.has(key) && !ref && ratio === null) return [];
     return [`${label} ${show(value)}${notes.length ? `（${notes.join('，')}）` : ''}`];
   });
 }
@@ -97,9 +117,16 @@ export function coachExtras(pack: Record<string, unknown>): CoachExtrasData {
     return [{ postId: d.post_id, title, platform: d.platform, capturedOn: str(d.captured_on),
       avgWatchSeconds: num(rates.avg_watch_seconds), videoSeconds: num(d.video_seconds), avgWatchPct: num(rates.avg_watch_pct),
       completeRate: num(rates.complete_rate), dropSecond: num(d.drop_second), stuck: stuck ? str(stuck.name) : null,
-      metrics: metricsOf(d, stuck) }];
+      metrics: metricsOf(d) }];
   });
-  const sources = [...new Set(list(rec(pack.diagnostics).handbook).flatMap(h => (typeof h.source === 'string' && h.source ? [h.source] : [])))];
+  // The handbook's source is said only when a line from it was actually used: a draft handbook, or a post with too few views, judges nothing.
+  // Per platform: only the handbooks of platforms whose posts had a line say their source; one of them without a source is said too.
+  const judgedPlatforms = new Set(list(rec(pack.diagnostics).posts).flatMap(d =>
+    (typeof d.platform === 'string' && list(d.layer_results).some(l => Object.keys(rec(l.line)).length > 0) ? [d.platform] : [])));
+  const judged = judgedPlatforms.size > 0;
+  const used = list(rec(pack.diagnostics).handbook).filter(h => typeof h.platform === 'string' && judgedPlatforms.has(h.platform));
+  const sources = [...new Set(used.flatMap(h => (typeof h.source === 'string' && h.source ? [h.source] : [])))];
+  const unsourced = [...judgedPlatforms].some(pl => !used.some(h => h.platform === pl && typeof h.source === 'string' && h.source));
   const ledger = rec(pack.ledger);
   const reviewed = list(ledger.to_review).flatMap(e => {
     const r = rec(e.result);
@@ -112,7 +139,7 @@ export function coachExtras(pack: Record<string, unknown>): CoachExtrasData {
     hypothesis: str(e.hypothesis) ?? '', verdict: str(e.verdict), on: str(e.concluded_on) }] : []));
   // With exactly three ranked posts the middle one is in both lists; it is shown once, among the best.
   const best = pick(tp.best), shownBest = new Set(best.map(p => p.postId));
-  return { summary, best, worst: pick(tp.worst).filter(p => !shownBest.has(p.postId)), diagnoses, sources, reviewed, running, concluded };
+  return { summary, best, worst: pick(tp.worst).filter(p => !shownBest.has(p.postId)), diagnoses, sources, judged, unsourced, reviewed, running, concluded };
 }
 
 /** "10/27" for 2026-10-27; anything else is shown as it is. */
@@ -138,10 +165,24 @@ export function CoachSummaryLine({ summary }: { summary: CoachSummary }) {
   );
 }
 
+/**
+ * A table with its title above it and its own horizontal scroll box: on a phone each table slides sideways by itself, and the title
+ * and the summary line stay where they are.
+ */
+export function TableBlock({ title, label, min, children }: { title: string; label: string; min: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 space-y-1">
+      <p className="text-xs font-medium">{title}</p>
+      <div className="overflow-x-auto">
+        <table className={`w-full ${min} text-left text-xs`} aria-label={label}>{children}</table>
+      </div>
+    </div>
+  );
+}
+
 function PickTable({ label, picks }: { label: string; picks: CoachPick[] }) {
   return (
-    <table className="w-full min-w-[520px] text-left text-xs" aria-label={label}>
-      <caption className="pb-1 text-left font-medium">{label}</caption>
+    <TableBlock title={label} label={label} min="min-w-[520px]">
       <thead><tr><th className={th}>作品</th><th className={th}>平台</th><th className={th}>第 7 天浏览</th><th className={th}>相对该平台中位数</th>
         <th className={th}>互动率</th></tr></thead>
       <tbody>{picks.map(p => (
@@ -149,20 +190,19 @@ function PickTable({ label, picks }: { label: string; picks: CoachPick[] }) {
           <td className={`max-w-[200px] ${cell}`}>{p.title || '（没有标题）'}</td><td className={cell}>{platformName(p.platform)}</td>
           <td className={cell}>{dash(p.views, v => formatMetric('views', v))}</td><td className={cell}>{times(p.relative)}</td>
           <td className={cell}>{erText(p.er)}</td></tr>))}</tbody>
-    </table>
+    </TableBlock>
   );
 }
 
 export function CoachExtras({ extras }: { extras: CoachExtrasData }) {
-  const { best, worst, diagnoses, sources, reviewed, running, concluded } = extras;
+  const { best, worst, diagnoses, sources, judged, unsourced, reviewed, running, concluded } = extras;
   const experiments = reviewed.length + running.length + concluded.length > 0;
   return (
     <>
       {best.length > 0 && <PickTable label="本周最好的作品" picks={best} />}
       {worst.length > 0 && <PickTable label="本周最差的作品" picks={worst} />}
       {diagnoses.length > 0 && (
-        <table className="w-full min-w-[960px] text-left text-xs" aria-label="单条诊断">
-          <caption className="pb-1 text-left font-medium">单条诊断</caption>
+        <TableBlock title="单条诊断" label="单条诊断" min="min-w-[960px]">
           <thead><tr><th className={th}>作品</th><th className={th}>平台</th><th className={th}>截图日期</th>
             <th className={th}>平均观看</th><th className={th}>视频时长</th>
             <th className={th}>平均观看比例</th><th className={th}>完播率</th><th className={th}>流失</th><th className={th}>卡在</th>
@@ -175,14 +215,15 @@ export function CoachExtras({ extras }: { extras: CoachExtrasData }) {
               <td className={cell}>{pct(d.avgWatchPct)}</td><td className={cell}>{pct(d.completeRate)}</td>
               <td className={cell}>{dash(d.dropSecond, v => `第 ${v} 秒`)}</td><td className={cell}>{d.stuck ?? '—'}</td>
               <td className={`max-w-[280px] ${cell}`}>{d.metrics.length ? d.metrics.join('；') : '—'}</td></tr>))}</tbody>
-        </table>
+        </TableBlock>
       )}
-      {diagnoses.length > 0 && sources.length > 0 && <p className="text-xs" style={muted}>诊断参考线来源：{sources.join('；')}</p>}
+      {diagnoses.length > 0 && (
+        <p className="break-words text-xs" style={muted}>诊断参考线来源：{sourceText(judged, sources, unsourced)}</p>)}
       {experiments && (
         <section className="space-y-2 text-xs" aria-label="上周实验完成情况">
           <h4 className="font-medium">上周实验完成情况</h4>
           {reviewed.length > 0 && (
-            <table className="w-full min-w-[600px] text-left" aria-label="这次复盘的实验">
+            <TableBlock title="这次复盘的实验" label="这次复盘的实验" min="min-w-[600px]">
               <thead><tr><th className={th}>实验</th><th className={th}>结果</th><th className={th}>原因</th><th className={th}>样本</th>
                 <th className={th}>相对基线</th><th className={th}>下一步</th></tr></thead>
               <tbody>{reviewed.map(e => (
@@ -191,17 +232,17 @@ export function CoachExtras({ extras }: { extras: CoachExtrasData }) {
                   <td className={cell}>{e.reason ? REASON_TEXT[e.reason] ?? '—' : '—'}</td>
                   <td className={cell}>{dash(e.samples, v => `${v} 条`)}</td><td className={cell}>{times(e.vsBaseline)}</td>
                   <td className={cell}>{e.next ? NEXT_TEXT[e.next] ?? '—' : '—'}</td></tr>))}</tbody>
-            </table>
+            </TableBlock>
           )}
           {running.length > 0 && (
-            <ul className="space-y-0.5" aria-label="还在进行的实验">
+            <ul className="space-y-0.5 break-words" aria-label="还在进行的实验">
               {running.map(e => (
                 <li key={e.id}>进行中：{e.hypothesis || '—'}（{shortDay(e.start)}–{shortDay(e.end)}
                   {e.settling ? '，等最后几条作品满 7 天' : ''}）</li>))}
             </ul>
           )}
           {concluded.length > 0 && (
-            <ul className="space-y-0.5" style={muted} aria-label="最近的实验结论">
+            <ul className="space-y-0.5 break-words" style={muted} aria-label="最近的实验结论">
               {concluded.map(e => (
                 <li key={e.id}>{shortDay(e.on)} 结论：{e.hypothesis || '—'} · {e.verdict ? VERDICT_TEXT[e.verdict] ?? '—' : '—'}</li>))}
             </ul>
