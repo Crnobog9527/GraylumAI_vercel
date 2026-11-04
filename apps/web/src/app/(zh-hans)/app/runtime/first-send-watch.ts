@@ -32,8 +32,9 @@ const sentryReport: Report = extra => captureMessage(FIRST_SEND_STALLED, {
  */
 const watchKey = (sessionId: string) => 'opc-runtime-send-watch:' + sessionId;
 const REPORTED = 'reported';
-export function firstSendDone(storage: Pick<Storage, 'removeItem'>, sessionId: string) {
-  try { storage.removeItem(watchKey(sessionId)); } catch { /* storage unavailable: nothing was armed */ }
+export function firstSendDone(storage: Pick<Storage, 'getItem' | 'removeItem'>, sessionId: string) {
+  // A report stays recorded: one event per conversation and tab, and a run can see that none was raised.
+  try { if (storage.getItem(watchKey(sessionId)) !== REPORTED) storage.removeItem(watchKey(sessionId)); } catch { /* nothing was armed */ }
 }
 
 export type FirstSendWatch = {
@@ -53,11 +54,13 @@ export function startFirstSendWatch(watch: FirstSendWatch): () => void {
     const kept = storage.getItem(watchKey(sessionId));
     if (kept === REPORTED) return () => undefined;
     const running = Number(kept);
-    // One left by a page closed before it fired is not this visit's: dropped, and this visit decides by its own marker.
-    if (running > 0 && watch.now() - running < 2 * delayMs) started = running;
+    const marker = markerMatches(storage, sessionId, watch.href());
+    // A page mounting again after the marker was taken (it will not send) keeps the first page's clock. With the marker still there
+    // (the user came back before it was sent) this page will send: its clock starts now. One left long ago is dropped.
+    if (running > 0 && !marker && watch.now() - running < 2 * delayMs) started = running;
     else {
       firstSendDone(storage, sessionId);
-      if (!markerMatches(storage, sessionId, watch.href())) return () => undefined;
+      if (!marker) return () => undefined;
       started = watch.now();
       storage.setItem(watchKey(sessionId), String(started));
     }

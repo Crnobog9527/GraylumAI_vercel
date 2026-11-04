@@ -73,6 +73,30 @@ describe('the first-send watch', () => {
     expect(sentry.captureMessage.mock.calls[0]![1].extra).toMatchObject({ markerMatches: 0, waitedMs: FIRST_SEND_WATCH_MS });
   });
 
+  it('coming back before the page sent (the marker still there) starts the clock again instead of reporting at once', () => {
+    const storage = memoryStorage();
+    storage.setItem(markerKey(SESSION), REQUEST);
+    const cancel = watch(storage, { current: false });
+    vi.advanceTimersByTime(5_000); cancel();
+    vi.advanceTimersByTime(15_000);
+    watch(storage, { current: false });
+    vi.advanceTimersByTime(FIRST_SEND_WATCH_MS - 1);
+    expect(sentry.captureMessage).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(sentry.captureMessage.mock.calls[0]![1].extra).toMatchObject({ markerMatches: 1, waitedMs: FIRST_SEND_WATCH_MS });
+  });
+
+  it('a send after a report leaves the report recorded; storage that throws arms nothing', () => {
+    const storage = memoryStorage();
+    storage.setItem(markerKey(SESSION), REQUEST);
+    watch(storage, { current: false });
+    vi.advanceTimersByTime(FIRST_SEND_WATCH_MS);
+    firstSendDone(storage, SESSION);
+    expect(storage.getItem('opc-runtime-send-watch:' + SESSION)).toBe('reported');
+    const broken = { getItem: () => { throw new Error('blocked'); }, setItem: () => undefined, removeItem: () => undefined, map: new Map() };
+    expect(() => watch(broken as never, { current: false })()).not.toThrow();
+  });
+
   it('a watch left by a page closed long ago is dropped, not reported on the next visit', () => {
     const storage = memoryStorage();
     storage.setItem('opc-runtime-send-watch:' + SESSION, String(Date.now() - FIRST_SEND_WATCH_MS * 5));
