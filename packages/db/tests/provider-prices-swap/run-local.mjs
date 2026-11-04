@@ -89,6 +89,7 @@ try {
   const definition = async () => (await db.query("SELECT pg_get_functiondef('public.billing_provider_prices_swap(text,text)'::regprocedure) d")).rows[0].d;
   const before = await definition();
   await db.query(migration); await db.query(migration);
+  await db.query(read('packages/db/migrations/9999_refusals_no_postgrest_retry.sql')); // the conflict answers PT409 (0346 replays it with 40001)
   assert.equal(await definition(), before);
   report.checks.push('migration repeatable without change');
 } catch (error) { report.failed = String(error) + '\n' + error.stack; process.exitCode = 1; }

@@ -32,7 +32,7 @@ BEGIN
   EXECUTE format('SELECT to_jsonb(t) FROM public.%I t WHERE id=$1 FOR UPDATE',table_name) INTO current_row USING target;
   IF p_id IS NOT NULL AND current_row IS NULL THEN RAISE EXCEPTION 'PAY_COMMON_PRODUCT_UNAVAILABLE'; END IF;
   IF p_expected_level IS NOT NULL AND current_row->>'level' IS DISTINCT FROM p_expected_level THEN
-    RAISE EXCEPTION 'PAY_COMMON_CATALOG_CONFLICT' USING ERRCODE='40001';
+    RAISE EXCEPTION 'PAY_COMMON_CATALOG_CONFLICT' USING ERRCODE='PT409';
   END IF;
   -- A catalog amount cannot leave the old current Stripe price buyable. Require an
   -- explicitly supplied, validated price (or explicit removal) for each changed cycle.
