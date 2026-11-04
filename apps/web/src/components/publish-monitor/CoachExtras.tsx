@@ -22,9 +22,14 @@ export type CoachConcluded = { id: string; hypothesis: string; verdict: string |
 export type CoachExtrasData = { summary: CoachSummary | null; best: CoachPick[]; worst: CoachPick[]; diagnoses: CoachDiagnosis[];
   /** Where the diagnosis lines come from (handbook source), said as is: the written part quotes it. */
   sources: string[];
+  /** A handbook line was actually used for some metric; without it the source is not claimed. */
+  judged: boolean;
+  /** A platform whose handbook line was used has no recorded source. */
+  unsourced: boolean;
   reviewed: CoachReviewed[]; running: CoachRunning[]; concluded: CoachConcluded[] };
 
-export const EMPTY_EXTRAS: CoachExtrasData = { summary: null, best: [], worst: [], diagnoses: [], sources: [], reviewed: [], running: [], concluded: [] };
+export const EMPTY_EXTRAS: CoachExtrasData = { summary: null, best: [], worst: [], diagnoses: [], sources: [], judged: false, unsourced: false,
+  reviewed: [], running: [], concluded: [] };
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const str = (v: unknown) => (typeof v === 'string' ? v : null);
@@ -51,6 +56,9 @@ const COUNTS = new Set(['views', 'likes', 'comments', 'saves', 'shares', 'follow
 const OWN_COLUMNS = new Set(['avg_watch_seconds', 'avg_watch_pct', 'complete_rate']);
 const asPct = (n: number) => `${Number((n * 100).toFixed(1))}%`;
 
+/** Three cases: lines used with a source, lines used but the handbook gave no source, no handbook line used at all. */
+const sourceText = (judged: boolean, sources: string[], unsourced: boolean) =>
+  (!judged ? NO_SOURCE_TEXT : [...sources, ...(unsourced ? ['另有手册参考线（来源未记录）'] : [])].join('；').replace(/^另有/, ''));
 /** What to say when the pack carries no handbook source: the lines are then only the user's own posts. */
 const NO_SOURCE_TEXT = '本期没有手册参考线，只和你自己的作品比较。';
 
@@ -112,8 +120,13 @@ export function coachExtras(pack: Record<string, unknown>): CoachExtrasData {
       metrics: metricsOf(d) }];
   });
   // The handbook's source is said only when a line from it was actually used: a draft handbook, or a post with too few views, judges nothing.
-  const judged = list(rec(pack.diagnostics).posts).some(d => list(d.layer_results).some(l => Object.keys(rec(l.line)).length > 0));
-  const sources = !judged ? [] : [...new Set(list(rec(pack.diagnostics).handbook).flatMap(h => (typeof h.source === 'string' && h.source ? [h.source] : [])))];
+  // Per platform: only the handbooks of platforms whose posts had a line say their source; one of them without a source is said too.
+  const judgedPlatforms = new Set(list(rec(pack.diagnostics).posts).flatMap(d =>
+    (typeof d.platform === 'string' && list(d.layer_results).some(l => Object.keys(rec(l.line)).length > 0) ? [d.platform] : [])));
+  const judged = judgedPlatforms.size > 0;
+  const used = list(rec(pack.diagnostics).handbook).filter(h => typeof h.platform === 'string' && judgedPlatforms.has(h.platform));
+  const sources = [...new Set(used.flatMap(h => (typeof h.source === 'string' && h.source ? [h.source] : [])))];
+  const unsourced = [...judgedPlatforms].some(pl => !used.some(h => h.platform === pl && typeof h.source === 'string' && h.source));
   const ledger = rec(pack.ledger);
   const reviewed = list(ledger.to_review).flatMap(e => {
     const r = rec(e.result);
@@ -126,7 +139,7 @@ export function coachExtras(pack: Record<string, unknown>): CoachExtrasData {
     hypothesis: str(e.hypothesis) ?? '', verdict: str(e.verdict), on: str(e.concluded_on) }] : []));
   // With exactly three ranked posts the middle one is in both lists; it is shown once, among the best.
   const best = pick(tp.best), shownBest = new Set(best.map(p => p.postId));
-  return { summary, best, worst: pick(tp.worst).filter(p => !shownBest.has(p.postId)), diagnoses, sources, reviewed, running, concluded };
+  return { summary, best, worst: pick(tp.worst).filter(p => !shownBest.has(p.postId)), diagnoses, sources, judged, unsourced, reviewed, running, concluded };
 }
 
 /** "10/27" for 2026-10-27; anything else is shown as it is. */
@@ -182,7 +195,7 @@ function PickTable({ label, picks }: { label: string; picks: CoachPick[] }) {
 }
 
 export function CoachExtras({ extras }: { extras: CoachExtrasData }) {
-  const { best, worst, diagnoses, sources, reviewed, running, concluded } = extras;
+  const { best, worst, diagnoses, sources, judged, unsourced, reviewed, running, concluded } = extras;
   const experiments = reviewed.length + running.length + concluded.length > 0;
   return (
     <>
@@ -205,7 +218,7 @@ export function CoachExtras({ extras }: { extras: CoachExtrasData }) {
         </TableBlock>
       )}
       {diagnoses.length > 0 && (
-        <p className="break-words text-xs" style={muted}>诊断参考线来源：{sources.length ? sources.join('；') : NO_SOURCE_TEXT}</p>)}
+        <p className="break-words text-xs" style={muted}>诊断参考线来源：{sourceText(judged, sources, unsourced)}</p>)}
       {experiments && (
         <section className="space-y-2 text-xs" aria-label="上周实验完成情况">
           <h4 className="font-medium">上周实验完成情况</h4>

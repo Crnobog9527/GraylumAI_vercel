@@ -93,7 +93,8 @@ describe('the brand review tables', () => {
       layer_results: [{ layer: 'hook', name: '开头留人', status: 'pass', line: { like_rate: { min: 0.03 } } },
         { layer: 'complete', name: '完播', status: 'fail', line: { complete_rate: { min: 0.25 } } }] }], handbook: [] } };
     const text = renderToStaticMarkup(<CoachTables coach={coachTable(noHandbook)} />).replace(/<[^>]*>/g, '');
-    expect(text).toContain('诊断参考线来源：本期没有手册参考线，只和你自己的作品比较。');
+    // Lines were used but the pack names no handbook: the source is not recorded.
+    expect(text).toContain('诊断参考线来源：手册参考线（来源未记录）');
     // The stuck layer's line, another layer's line, a metric without one, and the own-median comparison.
     for (const words of ['完播率 10%（参考线 ≥25%）', '点赞率 4%（参考线 ≥3%，自己中位数的 1.20 倍）', '分享率 0.2%（无参考线）']) expect(text).toContain(words);
     expect(renderToStaticMarkup(<CoachTables coach={coachTable(pack)} />).replace(/<[^>]*>/g, ''))
@@ -107,6 +108,28 @@ describe('the brand review tables', () => {
     expect(draftText).not.toContain('行业经验值');
     expect(draftText).toContain('点赞 12；');
     expect(draftText).toContain('点赞率 4%（无参考线）');
+    // A confirmed handbook without a source: its lines are used, the page says the source is not recorded (and never "no handbook line").
+    const unsourced = { ...pack, diagnostics: { posts: [{ post_id: 'n1', platform: 'tiktok', rates: { like_rate: 0.04 }, stuck_layer: null,
+      layer_results: [{ layer: 'hook', name: '开头留人', status: 'pass', line: { like_rate: { min: 0.03 } } }] }],
+    handbook: [{ platform: 'tiktok', calibration: 'owner_confirmed', source: null }] } };
+    const unsourcedText = renderToStaticMarkup(<CoachTables coach={coachTable(unsourced)} />).replace(/<[^>]*>/g, '');
+    expect(unsourcedText).toContain('诊断参考线来源：手册参考线（来源未记录）');
+    expect(unsourcedText).not.toContain('本期没有手册参考线');
+    expect(unsourcedText).toContain('点赞率 4%（参考线 ≥3%）');
+    // Two platforms: only the one whose lines were used speaks; a draft handbook that judged nothing does not name its source.
+    const mixed = { ...pack, diagnostics: { posts: [
+      { post_id: 'n1', platform: 'tiktok', rates: { like_rate: 0.04 }, stuck_layer: null,
+        layer_results: [{ layer: 'hook', name: 'A', line: { like_rate: { min: 0.03 } } }] },
+      { post_id: 'n2', platform: 'instagram', rates: { like_rate: 0.04 }, stuck_layer: null, layer_results: [{ layer: 'hook', name: 'A', line: null }] }],
+    handbook: [{ platform: 'tiktok', calibration: 'owner_confirmed', source: null },
+      { platform: 'instagram', calibration: 'draft', source: '草稿手册来源' }] } };
+    const mixedText = renderToStaticMarkup(<CoachTables coach={coachTable(mixed)} />).replace(/<[^>]*>/g, '');
+    expect(mixedText).toContain('诊断参考线来源：手册参考线（来源未记录）');
+    expect(mixedText).not.toContain('草稿手册来源');
+    // One platform with a source and one without: both are said.
+    const both2 = { ...mixed, diagnostics: { ...mixed.diagnostics, handbook: [{ platform: 'tiktok', source: '甲来源' }, { platform: 'instagram', source: null }],
+      posts: mixed.diagnostics.posts.map(p => ({ ...p, layer_results: [{ layer: 'hook', name: 'A', line: { like_rate: { min: 0.03 } } }] })) } };
+    expect(renderToStaticMarkup(<CoachTables coach={coachTable(both2)} />).replace(/<[^>]*>/g, '')).toContain('诊断参考线来源：甲来源；另有手册参考线（来源未记录）');
     // Two layers with the same metric: the stuck layer's line is shown.
     const both = { ...pack, diagnostics: { posts: [{ post_id: 'n1', platform: 'tiktok', rates: { like_rate: 0.04 }, stuck_layer: 'b',
       layer_results: [{ layer: 'a', name: 'A', line: { like_rate: { min: 0.03 } } }, { layer: 'b', name: 'B', line: { like_rate: { min: 0.05 } } }] }],
