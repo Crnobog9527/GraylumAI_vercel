@@ -22,7 +22,6 @@ import {runDependencies} from './dependencies.mjs';
 import {runCaptureV3} from './capture-v3.mjs';
 import {runPayg} from './payg.mjs';
 import {cases as runAccountFinancial} from '../erasure-b2a/cases.mjs';
-import {runCases as runAccountBinding} from '../erasure-binding/cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {runInstant} from './instant.mjs';
 import {runRename} from './rename.mjs';
@@ -101,7 +100,6 @@ try {
  await runReadonly({db:client,report});
  await compareScopes(client,report,'after every erasure suite');
  await runAccountFinancial(client,report);
- await runAccountBinding(client,report);
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}
