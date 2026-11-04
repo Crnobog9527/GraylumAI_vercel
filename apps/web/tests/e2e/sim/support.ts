@@ -128,8 +128,9 @@ export function watchPage(page: Page) {
   page.on('response', response => { if (response.status() >= 400) failed.push(`${response.status()} ${response.request().method()} ${path(response.url())}`); });
   // Every call to the turn endpoints, answered or not: whether the page asked for a turn at all is the first question when none opened.
   page.on('request', request => { if (request.url().includes('/api/turn')) turnCalls.push(`${at()} ${request.method()} ${path(request.url())} sent`); });
-  page.on('requestfinished', async request => {
-    if (request.url().includes('/api/turn')) turnCalls.push(`${at()} ${path(request.url())} ${(await request.response())?.status() ?? '?'}`);
+  // Synchronous: an awaited response() can be refused while the page closes, and an unhandled refusal would fail a passing test.
+  page.on('requestfinished', request => {
+    if (request.url().includes('/api/turn')) turnCalls.push(`${at()} ${path(request.url())} ${request.existingResponse()?.status() ?? '?'}`);
   });
   page.on('requestfailed', request => {
     if (request.url().includes('/api/turn')) turnCalls.push(`${at()} ${path(request.url())} failed ${request.failure()?.errorText ?? ''}`);
@@ -139,8 +140,8 @@ export function watchPage(page: Page) {
   return async function report(label: string) {
     const text = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '(no page text)');
     // The runtime page's first send needs the start page's marker and a matching ?request=: say whether either is still there.
-    const send = await page.evaluate(() => ({ markers: Object.keys(sessionStorage).filter(k => k.startsWith('opc-runtime-send:')).length,
-      request: new URL(location.href).searchParams.has('request') })).catch(() => null);
+    const send = await Promise.race([page.evaluate(() => ({ markers: Object.keys(sessionStorage).filter(k => k.startsWith('opc-runtime-send:')).length,
+      request: new URL(location.href).searchParams.has('request') })).catch(() => null), new Promise<null>(done => setTimeout(() => done(null), 5_000))]);
     console.log(`[page evidence] ${label} url=${page.url().replace(/session=[0-9a-f-]+/, 'session=…')}\n`
       + `failed requests: ${JSON.stringify(failed.slice(-15))}\nbrowser errors: ${JSON.stringify(errors.slice(-10))}\n`
       + `turn calls: ${JSON.stringify(turnCalls.slice(-15))}\nfirst-send marker: ${JSON.stringify(send)}\n`
