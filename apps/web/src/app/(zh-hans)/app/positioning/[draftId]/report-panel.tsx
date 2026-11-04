@@ -13,7 +13,7 @@ import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE,
+  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_RUNNING_NOTICE, REPORT_TITLE, REPORT_WRITING_NOTICE,
   reportActionLabel, reportAutoOpen, reportFeeText, reportUnfinished, reportView,
 } from "./report-gen";
 import { ReportExport } from "./report-export-button";
@@ -31,6 +31,7 @@ import { useVersionMarks, VersionMark } from "@/components/fusion-review/Version
 import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/chat-display/report-outline";
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
+import { TurnStepList } from "@/components/chat-display/turn-step-list";
 import { REPORT_VIEW_TEXT } from "@/components/chat-display/report-view/report-text";
 import { savedFormalEditable, savedFormalReport, savedFormalStrategy, type FormalReport } from "./saved-report";
 import { ReportBenchmarkGate } from "./report-benchmark-gate";
@@ -139,7 +140,8 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
     actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
   else if (report.live?.stopped) notices.push({ id: "report-stopping", tone: "status", busy: true, text: STOP_SAVING_NOTICE });
   else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true,
-    text: REPORT_WRITING_NOTICE,
+    // Before the first words the step list above says 正在写报告…; the notice then only carries 停止.
+    text: report.live.text.trim() ? REPORT_WRITING_NOTICE : REPORT_RUNNING_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] });
   else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true,
     text: view.notice,
@@ -179,6 +181,9 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
                 ? <SavedReportEditor key={edit.versionId} {...edit} body={savedBody} view={shown} busy={busy || working} onUnsaved={trackUnsaved} />
                 : shown;
             })()}
+          {/* The report is one model call with no tools: before its first words the one line is 正在写报告…, then the text is the progress. */}
+          {report.live && !report.live.stopped && !report.stopConfirmation && (
+            <TurnStepList steps={[]} live hasText={Boolean(report.live.text.trim())} thinkLabel={REPORT_WRITING_NOTICE}/>)}
           <ChatNoticeList className="mt-4" notices={notices} />
           {/* 导出报告: a finished report (complete or not, its notes say which) or a saved formal version. */}
           {!working && !report.live && (view?.kind === "report" && report.executionId

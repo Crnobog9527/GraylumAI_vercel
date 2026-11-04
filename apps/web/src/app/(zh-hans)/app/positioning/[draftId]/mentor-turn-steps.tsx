@@ -2,8 +2,9 @@
 import { useEffect, useState } from "react";
 import { ResearchCallList } from "@/components/research/research-call-list";
 import type { ResearchCall } from "@/components/research/research-model";
-import { TurnSteps } from "@/components/chat-display/turn-steps";
-import { REOPENED_HINT, toolCounts } from "@/components/chat-display/turn-steps-model";
+import { TurnStepList } from "@/components/chat-display/turn-step-list";
+import { REOPENED_HINT, slowHint } from "@/components/chat-display/turn-steps-model";
+import hintStyles from "@/components/chat-display/turn-steps.module.css";
 import type { LiveReply, ReplyNotice } from "./agent-turn-display";
 
 /** How long a reloaded page trusts that the server is still advancing an open turn before it asks for a check. */
@@ -20,9 +21,22 @@ export function useReopenGrace(turnId?: string | null): boolean {
   return over;
 }
 
+/** A reassurance line for a turn that takes long, or the note that a reopened turn goes on in the background. */
+function TurnHint({ reopened, quiet }: { reopened: boolean; quiet: boolean }) {
+  const [startedAt] = useState(() => Date.now());
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setElapsed(Date.now() - startedAt), 5000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+  const hint = quiet ? null : reopened ? REOPENED_HINT : slowHint(elapsed);
+  return hint ? <p className={hintStyles.hint} data-turn-hint>{hint}</p> : null;
+}
+
 /**
- * The small steps of one running mentor turn: streamed here (`live`), or still advancing on the server after a reload
- * (its `notice` is the reopened one). Always lists the turn's research calls; the steps only while it runs.
+ * The steps of one running mentor turn: streamed here (`live`), or still advancing on the server after a reload
+ * (its `notice` is the reopened one). Always lists the turn's research calls; the step list (TurnStepList) only while it runs.
+ * The stage notices (reading, organizer, saving, ...) stay in mentor-notices.
  */
 export function MentorTurnSteps({ live, reply, execution, calls, stale = false }: {
   live: LiveReply | null; reply: { text: string; notice?: ReplyNotice }; execution?: { executionId: string; state: string }; calls: readonly ResearchCall[];
@@ -38,8 +52,9 @@ export function MentorTurnSteps({ live, reply, execution, calls, stale = false }
   const reopened = !here && !live?.stopped && (noticed || (Boolean(live) && !stale && open));
   return <>
     <ResearchCallList calls={calls}/>
-    {(streaming || reopened) && <TurnSteps reopened={reopened} quiet={noticed}
-      progress={{ phase: here ? live!.phase : "mentor", hasText: Boolean(reply.text),
-        tools: toolCounts(calls.map(call => call.state)) }}/>}
+    {(streaming || reopened) && <>
+      <TurnStepList steps={here ? live!.steps ?? [] : []} live hasText={Boolean(reply.text.trim())}/>
+      <TurnHint reopened={reopened} quiet={noticed}/>
+    </>}
   </>;
 }

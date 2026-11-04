@@ -23,7 +23,7 @@ const quoted = (label?: string) => label ? `「${label}」` : '';
 /** The one line of a step. Neutral words: a step that did not work says what happens instead, not "error". */
 export function stepLine(step: ReplyStep): string {
   const { tool, state, label, detail, count } = step;
-  if (tool === 'think') return '正在思考…';
+  if (tool === 'think') return label || '正在思考…';
   if (state === 'running') {
     switch (tool) {
       case 'load_skill': return label ? `正在读取${quoted(label)}方法…` : '正在读取方法…';

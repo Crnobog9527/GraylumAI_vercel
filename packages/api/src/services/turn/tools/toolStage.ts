@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
+import { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS } from '../../research/tools/names';
 import { COACH_REVIEW_ID } from './coachReview';
 import type { StepEvent, StepKind, StepState } from '../sse';
 import type { ToolStatus } from '../../research/tools/envelope';
@@ -24,7 +24,8 @@ export function stepStart(name: string, args: Record<string, unknown>, skillName
     const asked = typeof args.name === 'string' ? args.name : '';
     return skillNames.has(asked) ? { tool: 'load_skill', label: asked } : { tool: 'load_skill' };
   }
-  if ((GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) {
+  // The positioning page's benchmark flow (keywords, discover, more candidates, fetch) is the same "searching" as the general lookups.
+  if ((GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name) || (POSITIONING_RESEARCH_TOOLS as readonly string[]).includes(name)) {
     const words = [args.query, Array.isArray(args.keywords) ? args.keywords.join(' ') : undefined, args.account]
       .find((value): value is string => typeof value === 'string' && value.trim() !== '');
     // A query that is itself a link shows only its host (a link may carry a login or a token).
@@ -36,6 +37,8 @@ export function stepStart(name: string, args: Record<string, unknown>, skillName
     // The coach review and the account's own post data (my_posts, my_posts:14|30|90) are "your data", not the library.
     return { tool: typeof args.query === 'string' && (OWN_DATA_QUERY.test(args.query) || COACH_REVIEW_ID.test(args.query)) ? 'coach_review' : 'read_source' };
   }
+  // The method's own file (the mentor's references) is part of reading the method.
+  if (name === 'read_skill_file') return { tool: 'load_skill' };
   return { tool: 'other' };
 }
 

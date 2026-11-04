@@ -16,13 +16,12 @@ import { OWN_POSTS_INSTRUCTIONS, OWN_POSTS_RESERVE } from '../agent/workspacePos
 import { loadSkillToolBytes } from '../skills/loadSkillTool';
 import { skillCatalogInstructions, type SkillCatalogEntry } from '../skills/skillCatalog';
 import type { ConfigurationRows } from '../settings/settingsRows';
-import type { RuntimeTool } from '../agent/runner';
 import { TurnStop } from '../call';
 import type { CounterStore } from '../limiter';
 import type { TurnClients } from '../db';
 import { libraryTurnReader } from './source';
 import { COACH_REVIEW_INSTRUCTIONS } from './coachReview';
-import { stepEnd, stepStart } from './toolStage';
+import { withStepEvents } from './announce';
 import type { StepEvent } from '../sse';
 import { COACH_CAPTURE_INSTRUCTIONS } from '../../publishMonitor/coach/screenshots';
 import { NO_ACCESS, sourceDescription, workspaceTurnReader, type WorkspaceAccess } from './workspace';
@@ -185,24 +184,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
         ...(sourceOffered ? { sourceDescription: description, readSource: chatReader() } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
       const skillNames: ReadonlySet<string> = new Set(allowedSkills(catalog, extra.gated).map(entry => entry.name));
-      let stepNumber = 0;
-      const tools: RuntimeTool[] = built.tools.map(tool => ({ ...tool, async execute(args, callId) {
-        // Telling the page can never change what the tool does: whatever the announcing throws is dropped.
-        const tell = (make: () => StepEvent) => { try { extra.announce?.(make()); } catch { /* display only */ } };
-        const id = String(++stepNumber);
-        let start: ReturnType<typeof stepStart> = { tool: 'other' };
-        try { start = stepStart(tool.name, args, skillNames); } catch { /* display only */ }
-        tell(() => ({ type: 'step', id, ...start, state: 'running' }));
-        let result: string;
-        try { result = await tool.execute(args, callId); }
-        catch (error) {
-          tell(() => ({ type: 'step', id, ...start, state: 'failed' }));
-          if (error instanceof TurnStop) extra.onStop(error);
-          throw error;
-        }
-        tell(() => ({ type: 'step', id, ...start, ...stepEnd(start.tool, result) }));
-        return result;
-      } }));
+      const tools = withStepEvents(built.tools, extra.announce, skillNames, extra.onStop);
       return { ...built, tools };
     },
   };

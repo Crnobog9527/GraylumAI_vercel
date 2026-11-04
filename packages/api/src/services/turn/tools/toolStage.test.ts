@@ -37,7 +37,11 @@ describe('what the page is told when a tool starts', () => {
     for (const query of ['my_posts', 'my_posts:14', 'my_posts:30', 'my_posts:90']) expect(stepStart('read_source', { query }, skills)).toEqual({ tool: 'coach_review' });
     expect(stepStart('read_source', { query: 'my_posts:7' }, skills)).toEqual({ tool: 'read_source' });
     expect(stepStart('read_source', { query: 'my_posts:30 extra' }, skills)).toEqual({ tool: 'read_source' });
-    expect(stepStart('read_skill_file', { path: 'a.md' }, skills)).toEqual({ tool: 'other' });
+    // The method's own file is part of reading the method.
+    expect(stepStart('read_skill_file', { path: 'a.md' }, skills)).toEqual({ tool: 'load_skill' });
+    // The positioning page's benchmark tools are searches too (they were "other" before).
+    for (const name of ['propose_keywords', 'benchmark_discover', 'propose_more_candidates', 'benchmark_fetch'])
+      expect(stepStart(name, { keywords: ['早起', '口播'] }, skills)).toEqual({ tool: 'research', detail: '早起 口播' });
   });
 
   it('never carries more than the kind, a Skill name, a short detail: no whole query, URL path or other argument', () => {

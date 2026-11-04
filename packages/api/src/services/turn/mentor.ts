@@ -33,6 +33,7 @@ import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions,
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
 import type { TurnEvent } from './sse';
+import { withStepEvents } from './tools/announce';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -231,7 +232,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       requestId: input.requestId, text: words, deadline: Date.now() + MENTOR_RESEARCH_MS, emit,
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
-    const tools = [...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []];
+    // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
+    const tools = withStepEvents([...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
+      emit, new Set());
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };
