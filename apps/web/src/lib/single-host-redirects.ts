@@ -27,6 +27,11 @@ export type ConfigRedirect = { source: string; destination: string; permanent: b
 /** Redirects on every host. Next.js keeps the query string; permanent ones are 308 and keep the request method. */
 export function buildPathRedirects(): ConfigRedirect[] {
   return [
+    // Two retired logged-in pages (Owner 2026-11-05): the old feature marketplace goes to the workbench one (the ?module= query
+    // is kept), the old first-week plan page to the positioning conversation. These come first so /marketplace takes one hop.
+    { source: '/marketplace', destination: '/app/workbench/marketplace', permanent: true },
+    { source: '/app/marketplace', destination: '/app/workbench/marketplace', permanent: true },
+    { source: '/app/positioning/:draftId/plan', destination: '/app/positioning/:draftId', permanent: true },
     // Logged-in pages moved under /app. The folder itself has its own rule and subpaths use ":path+": on Vercel an
     // empty ":path*" leaves a trailing slash ("/app/profile/"), which costs a second 308 to strip it.
     // A folder without a page of its own (/workbench) only moves its subpages; the folder itself answers 404.

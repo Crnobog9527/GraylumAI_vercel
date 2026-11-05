@@ -39,43 +39,12 @@
       "count": 1
     }
   },
-  "src/app/api/cron/billing-reconcile/route.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/app/api/upload/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/app/(zh-hans)/auth/callback/route.ts": {
-    "prefer-const": {
-      "count": 1
-    }
-  },
-  "src/app/(zh-hans)/login/page.tsx": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/app/(zh-hans)/app/marketplace/page.tsx": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    },
-    "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
   "src/app/(zh-hans)/app/positioning/[draftId]/page.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    },
     "react-hooks/exhaustive-deps": {
-      "count": 4
+      "count": 2
     }
   },
   "src/app/(zh-hans)/app/positioning/[draftId]/topics/page.tsx": {
@@ -93,6 +62,26 @@
       "count": 3
     }
   },
+  "src/app/(zh-hans)/auth/callback/route.ts": {
+    "prefer-const": {
+      "count": 1
+    }
+  },
+  "src/app/(zh-hans)/login/page.tsx": {
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
+  "src/app/api/cron/billing-reconcile/route.ts": {
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
+  "src/app/api/upload/route.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
   "src/components/admin/AdminGuard.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
@@ -101,16 +90,6 @@
   "src/components/layout/AppHeader.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
-    }
-  },
-  "src/components/modules/ModuleCard.tsx": {
-    "@typescript-eslint/no-unused-expressions": {
-      "count": 1
-    }
-  },
-  "src/components/modules/legacy-entry.test.tsx": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
     }
   },
   "src/components/opc/content-editor.tsx": {

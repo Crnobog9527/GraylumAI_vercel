@@ -1078,15 +1078,13 @@ async function planBrowser(
   });
   const page = await context.newPage();
   page.setDefaultTimeout(90000);
-  const path = "/app/positioning/" + f.d.draftId + "/plan";
+  const path = "/app/positioning/" + f.d.draftId + "/topics";
   await page.goto(
     process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path),
   );
   await page.getByPlaceholder("name@example.com").fill(f.email);
   await page.getByPlaceholder("输入你的密码").fill(f.password);
   await page.getByRole("button", { name: "登录", exact: true }).last().click();
-  // The legacy /plan deep link must recover the same draft in the current
-  // topic workspace; the normal route is now /topics.
   await page.waitForURL((url) => url.pathname.endsWith('/app/positioning/' + f.d.draftId + '/topics'));
   const key = "opc-plan-generation:" + f.d.draftId;
   await page.evaluate(
@@ -1254,9 +1252,9 @@ it("OPC: Stage C4 an already published draft spends nothing by waiting or refres
   const before = { plan: await planIdentity(f.actor, f.d.draftId), topic: await topicIdentity(f.actor) };
   expect(before.plan.planExecutions).toBe(0);
   expect(before.topic).toMatchObject({ binds: 0, topicExecutions: 0 });
-  // Without a local request the plan link continues to the topic workspace.
+  // planBrowser signs in on the topic workspace. Waiting and refreshing there start nothing.
   const { browser, page, key } = await planBrowser(f);
-  const topicsPath = "/app/positioning/" + f.d.draftId + "/topics";
+  const draftPath = "/app/positioning/" + f.d.draftId;
   try {
     expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
     const start = page.getByRole("button", { name: "开始选题工作对话", exact: true });
@@ -1265,45 +1263,30 @@ it("OPC: Stage C4 an already published draft spends nothing by waiting or refres
     await start.waitFor();
     // Give an automatic generation every chance to (wrongly) fire.
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    await page.goto(process.env.V3_LOCAL_APP + "/app/positioning/" + f.d.draftId + "/plan");
-    await page.waitForURL((url) => url.pathname === topicsPath);
+    // The retired /plan address is a permanent redirect (next.config) to the positioning conversation.
+    await page.goto(process.env.V3_LOCAL_APP + draftPath + "/plan");
+    await page.waitForURL((url) => url.pathname === draftPath);
     await new Promise((resolve) => setTimeout(resolve, 3000));
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before.plan);
     expect(await topicIdentity(f.actor)).toEqual(before.topic);
     expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
-    // Only the explicit start may create one request, and it is topic work.
-    await start.click();
+    // The explicit consent on the positioning page binds the topic workspace and saves the first-turn intent (opc_topic_consent);
+    // the topic workspace (use-topic-opening) then sends that saved request exactly once. Bound, it no longer offers the start button.
+    await page.getByRole("button", { name: "继续生成第一周选题", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "是否继续生成第一周选题" })
+      .getByRole("button", { name: "继续生成第一周选题", exact: true })
+      .click();
+    await page.waitForURL((url) => url.pathname === draftPath + "/topics");
+    // Only the consent creates a request: one topic execution, one binding, and it is topic work, never a plan.
     await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(1);
     expect((await topicIdentity(f.actor)).binds).toBe(1);
-    expect(await planIdentity(f.actor, f.d.draftId)).toMatchObject({ planExecutions: 0, planRuns: 0 });
-  } finally {
-    await browser.close();
-  }
-}, 300000);
-it("OPC: Stage C5 an unadmitted old-round request stays recoverable and never becomes current generation", async () => {
-  const f = await completed(3);
-  await planFixtureModel(f.moduleId);
-  const staleRequestId = randomUUID();
-  const { browser, page, key } = await planBrowser(f, {
-    envelope: planEnvelopeFor(f, { requestId: staleRequestId, sourceRoundId: randomUUID() }),
-  });
-  try {
-    await page.getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true }).waitFor();
-    const original = await page.evaluate((k) => sessionStorage.getItem(k), key);
-    expect(JSON.parse(original!).request.requestId).toBe(staleRequestId);
-    // The server's own verdict is shown; recovery stays closed and nothing is
-    // admitted under the current round.
-    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
-    expect(await page.getByRole("button", { name: "继续这条原请求", exact: true }).isDisabled()).toBe(true);
+    // The saved first turn is sent once: waiting and refreshing on the bound workspace send nothing more.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     await page.reload();
-    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
-    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBe(original);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
-      plans: 0, accounts: 0, workItems: 0,
-    });
-    expect(await page.getByRole("button", { name: "生成第一周计划", exact: true }).count()).toBe(0);
-    expect((await topicIdentity(f.actor)).binds).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect(await topicIdentity(f.actor)).toMatchObject({ binds: 1, topicExecutions: 1 });
+    expect(await planIdentity(f.actor, f.d.draftId)).toMatchObject({ planExecutions: 0, planRuns: 0 });
   } finally {
     await browser.close();
   }
@@ -1839,9 +1822,9 @@ it("OPC: published revision stays immutable while its revised round owns reach a
 it("OPC: an explicit continue keeps a retained request identity instead of overwriting an unknown outcome", async () => {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
-  // The draft is already published, so the completed state owns the explicit
-  // re-entry control this case presses.
-  const f = await completed(3);
+  // The draft is already published and its method declares topic resources (planResources), so the consent can bind the topic
+  // workspace; without them opc_topic_bind answers OPC_TOPIC_SKILL_MISSING and the page stays put.
+  const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
   const browser = await chromium.launch({
     executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -1885,21 +1868,12 @@ it("OPC: an explicit continue keeps a retained request identity instead of overw
       .getByRole("dialog", { name: "是否继续生成第一周选题" })
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
-    // a8dba69c: the continue goes on to the topic workspace and leaves the
-    // retained request for the explicit /plan recovery; it neither admits it
-    // nor creates a second identity or a topic binding.
+    // The continue binds the topic workspace and goes on to it (the old retained-plan-request branch was removed with the plan
+    // page); the workspace sends the saved first turn once. It admits no plan request.
     await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
-    const stored = JSON.parse(
-      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
-    ) as { request: { requestId: string } };
-    expect(stored.request.requestId).toBe(original.request.requestId);
+    await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(topicsBefore.topicExecutions + 1);
+    expect(await topicIdentity(f.actor)).toMatchObject({ binds: topicsBefore.binds + 1 });
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before);
-    expect(await topicIdentity(f.actor)).toEqual(topicsBefore);
-    await page.goto(process.env.V3_LOCAL_APP + draftPath + "/plan");
-    await page.getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true }).waitFor();
-    expect(
-      JSON.parse((await page.evaluate((k) => sessionStorage.getItem(k), key)) as string).request.requestId,
-    ).toBe(original.request.requestId);
   } finally {
     await browser.close();
   }

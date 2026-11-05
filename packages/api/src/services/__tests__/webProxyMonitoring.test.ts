@@ -104,13 +104,13 @@ describe('web proxy monitoring tunnel routing', () => {
     expect(response.headers.get('location')).toBeNull();
   });
 
-  it('keeps marketplace and positioning protected for unauthenticated app users', async () => {
-    const marketplaceResponse = await runProxy('https://app.graylum.com/app/marketplace');
+  it('keeps library and positioning protected for unauthenticated app users', async () => {
+    const libraryResponse = await runProxy('https://app.graylum.com/app/library');
     const chatResponse = await runProxy('https://app.graylum.com/app/positioning');
 
-    expect(marketplaceResponse.status).toBe(307);
-    expect(marketplaceResponse.headers.get('location')).toBe(
-      'https://app.graylum.com/login?redirect=%2Fapp%2Fmarketplace',
+    expect(libraryResponse.status).toBe(307);
+    expect(libraryResponse.headers.get('location')).toBe(
+      'https://app.graylum.com/login?redirect=%2Fapp%2Flibrary',
     );
     expect(chatResponse.status).toBe(307);
     expect(chatResponse.headers.get('location')).toBe(
