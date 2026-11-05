@@ -1,40 +1,43 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // The simulated-model browser tests (layer 1) run the app on `next dev`. Next's dev server restarts itself after a request once its V8 heap
-// is above 80% of the heap limit ("Server is approaching the used memory threshold, restarting..."), and every restart drops the compiled
+// is above 80% of its heap limit ("Server is approaching the used memory threshold, restarting..."), and every restart drops the compiled
 // pages: the next page load compiles again, and a journey waiting on a page (for example a login form's scripts) can run out of time while
-// that happens. The limit is Node's default (a quarter of the machine's memory, at most about 4 GB), which the later, heavier journeys
-// reach after twenty minutes of compiling routes. The server is given a larger heap, and every run now reports how often it restarted,
-// so the number is measured instead of guessed (before this, a run that passed did not say).
+// that happens. Next's own launcher gives the server half of the machine's memory as its heap limit when none is set (8 GB on the 16 GB CI
+// runner), so the limit is not left at Node's default: setting one here would only lower it. What was missing is the measurement: a run that
+// passed said nothing, and a failed run showed only the last lines of the server's log. Every run now reports how often the server
+// restarted, the heap limit it really had and the highest heap it used.
 
-/** Heap limit of the dev server in MB. The CI runner has 16 GB; the database, the browser and the simulators need about 3 GB of it. */
-export const DEV_SERVER_HEAP_MB = 6144;
-
-/** NODE_OPTIONS of the dev server: the sim preload first (its path has no spaces, run.mjs checks), then the heap limit. */
-export function devServerNodeOptions(preloadPath, heapMb = DEV_SERVER_HEAP_MB) {
-  return `--require=${preloadPath} --max-old-space-size=${heapMb}`;
+/** NODE_OPTIONS of the dev server: the sim preload only (its path has no spaces, run.mjs checks). No heap option: see above. */
+export function devServerNodeOptions(preloadPath) {
+  return `--require=${preloadPath}`;
 }
 
-/** Reads the dev server's output (any chunking) and counts its starts, its memory restarts and the largest heap limit a process reported. */
+/** Reads the dev server's output (any chunking) and counts its starts, its memory restarts, its heap limit and its peak used heap. */
 export function createMemoryWatch() {
-  let pending = '';
-  const seen = { starts: 0, restarts: 0, heapLimitMb: null };
+  // Each stream (stdout, stderr) has its own half-written line.
+  const pending = new Map();
+  const seen = { starts: 0, restarts: 0, heapLimitMb: null, peakHeapUsedMb: null };
   const read = line => {
     if (line.includes('approaching the used memory threshold')) seen.restarts += 1;
-    // Next says "Ready in …" once per start of the server (the first and after every restart). Every process the server forks also loads the
-    // preload and says its heap limit, so only the number is kept, never a count of those lines.
+    // Next says "Ready in …" once per start of the server (the first and after every restart).
     if (/Ready in \d/.test(line)) seen.starts += 1;
     const limit = /\[sim-preload\] heap_size_limit_mb=(\d+)/.exec(line);
     if (limit) seen.heapLimitMb = Math.max(seen.heapLimitMb ?? 0, Number(limit[1]));
+    const used = /\[sim-preload\] heap_used_mb=(\d+)/.exec(line);
+    if (used) seen.peakHeapUsedMb = Math.max(seen.peakHeapUsedMb ?? 0, Number(used[1]));
   };
   return {
-    feed(text) {
-      const lines = (pending + text).split('\n');
-      pending = lines.pop() ?? '';
+    feed(text, stream = 'out') {
+      const lines = ((pending.get(stream) ?? '') + text).split('\n');
+      pending.set(stream, lines.pop() ?? '');
       lines.forEach(read);
     },
     summary() {
-      if (pending) { read(pending); pending = ''; }
+      for (const [stream, rest] of pending) { if (rest) read(rest); pending.set(stream, ''); }
       return { ...seen };
     },
   };
 }
+
+/** The server's own log without the preload's measurement lines (they come every 30 seconds and would push real lines out of the tail). */
+export const withoutMeasurements = text => text.replace(/^\[sim-preload\] .*\n?/gm, '');

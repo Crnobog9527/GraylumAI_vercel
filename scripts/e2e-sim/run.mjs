@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { createSim } from './sim.mjs';
-import { createMemoryWatch, devServerNodeOptions } from './dev-server-memory.mjs';
+import { createMemoryWatch, devServerNodeOptions, withoutMeasurements } from './dev-server-memory.mjs';
 import { startStack } from './stack.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -84,8 +84,9 @@ try {
   // How often the dev server restarted itself for memory, and the heap limit it started with (printed for every run, passed or not).
   const memory = createMemoryWatch();
   for (const out of [app.stdout, app.stderr]) out.on('data', chunk => {
-    const text = stack.redact(chunk);
-    memory.feed(text);
+    const raw = stack.redact(chunk);
+    memory.feed(raw, out === app.stdout ? 'out' : 'err');
+    const text = withoutMeasurements(raw);
     for (const line of text.split('\n')) {
       if (!line.includes('web_rate_limit_backend_unavailable_denying_request')) continue;
       const kind = /"failureKind":"(\w+)"/.exec(line)?.[1] ?? 'unknown';

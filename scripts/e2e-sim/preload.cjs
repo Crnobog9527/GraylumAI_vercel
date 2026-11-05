@@ -14,5 +14,11 @@ globalThis.fetch = (input, init) => {
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) return Promise.reject(new Error('SIM_LOCAL_ONLY_NETWORK ' + url.hostname));
   return original(input, init);
 };
-// Said by every process that loads this preload (the server and what it forks), so run.mjs can report the heap limit the server really has.
-console.log('[sim-preload] heap_size_limit_mb=' + Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 1048576));
+// Measurement for run.mjs (dev-server-memory.mjs): only the Next server process says its heap limit, at start and then its used heap every
+// 30 seconds. On stderr, and not from the other processes that load this preload (`tsc --showConfig`'s stdout is parsed as JSON by Next).
+if (/start-server\.js$/.test(process.argv[1] ?? '')) {
+  const v8 = require('node:v8');
+  const mb = bytes => Math.round(bytes / 1048576);
+  console.error('[sim-preload] heap_size_limit_mb=' + mb(v8.getHeapStatistics().heap_size_limit));
+  setInterval(() => console.error('[sim-preload] heap_used_mb=' + mb(v8.getHeapStatistics().used_heap_size)), 30_000).unref();
+}
