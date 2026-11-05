@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
@@ -13,13 +13,16 @@ import {
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
 import { AuthRedirectNotice } from '@/components/auth/AuthRedirectNotice';
+import {
+  AUTH_INPUT_CLASS, AUTH_LABEL_CLASS, AUTH_LINK_CLASS, AUTH_PRIMARY_BUTTON_CLASS, AUTH_SECONDARY_BUTTON_CLASS, AuthCard, AuthDivider, AuthHead,
+  AuthLoading, AuthPanel, AuthSegment, AuthShell,
+} from '@/components/auth/AuthShell';
 import { GoogleIcon } from '@/components/auth/GoogleIcon';
 import { FORGOT_PASSWORD_PATH, PASSWORD_RESET_DONE_MESSAGE } from '@/lib/passwordRecovery';
 import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
@@ -215,305 +218,162 @@ export function LoginPageContent() {
       : resolveSiteName();
 
   return (
-    <main
-      className="min-h-screen px-4 py-8 sm:px-6 lg:px-8"
-      style={{
-        background:
-          'radial-gradient(circle at top left, rgba(255,215,0,0.18), transparent 30%), radial-gradient(circle at bottom right, rgba(251,191,36,0.16), transparent 35%), #070707',
-      }}
-    >
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl items-center justify-center">
-        <section
-          className="relative w-full overflow-hidden rounded-[32px] border px-5 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-10"
-          style={{
-            background:
-              'linear-gradient(160deg, rgba(14,14,14,0.96), rgba(8,8,8,0.92))',
-            borderColor: 'rgba(255,215,0,0.14)',
-          }}
-        >
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background:
-                'linear-gradient(135deg, rgba(255,215,0,0.09), transparent 38%), linear-gradient(320deg, rgba(255,255,255,0.04), transparent 42%)',
-            }}
-          />
+    <AuthShell siteName={siteName}>
+      <AuthCard>
+        <AuthSegment
+          value={mode}
+          options={[{ value: 'login', label: '登录' }, { value: 'signup', label: '注册' }]}
+          onChange={value => setMode(value === 'signup' ? 'signup' : 'login')}
+        />
 
-          <div className="relative space-y-8">
-            <div className="space-y-4 text-center">
-              <div className="mx-auto inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs uppercase tracking-[0.24em] text-[#f8d25c]">
-                <img
-                  src="/graylum-logo.svg"
-                  alt=""
-                  aria-hidden="true"
-                  className="h-3.5 w-3.5 rounded"
-                />
-                {siteName} Access
-              </div>
-              <div className="space-y-3">
-                <h1 className="text-4xl font-semibold leading-tight text-white sm:text-5xl">
-                  一个入口，完成登录、注册与邮箱验证收口。
-                </h1>
-                <p className="mx-auto max-w-2xl text-sm leading-7 text-[#d0d0d0] sm:text-base">
-                  Google 账户直接授权进入应用。邮箱账户必须先验证邮箱，才允许访问聊天、个人中心和受保护 API。
-                </p>
-              </div>
+        <AuthHead
+          title={mode === 'signup' ? `创建你的 ${siteName} 账户` : `登录到 ${siteName}`}
+          lead={mode === 'signup'
+            ? '邮箱注册完成后将收到验证邮件，验证通过后才可使用核心功能。'
+            : 'Google 登录无需再次验证邮箱，邮箱账户会按验证状态自动拦截。'}
+        />
+        <div className="space-y-3 text-center">
+          <AuthRedirectNotice target={redirectTarget} />
+          {mode === 'signup' && selectedPlan && (
+            <p className="rounded-xl border border-[var(--pub-line)] bg-[var(--gl-accent-gold-soft)] px-3 py-2 text-xs text-[var(--gl-accent-gold-text)]">
+              当前来自 <span className="font-semibold">{selectedPlan}</span> 套餐入口。注册后可在产品内查看该套餐对应的最新权益与购买状态。
+            </p>
+          )}
+        </div>
+
+        <div className="grid gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleGoogleLogin}
+            disabled={isBusy}
+            className={`${AUTH_SECONDARY_BUTTON_CLASS} justify-between px-5`}
+            aria-label="使用 Google 一键登录"
+          >
+            <span className="flex items-center gap-2">
+              {pendingAction === 'google' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <GoogleIcon className="h-4 w-4" />
+              )}
+              使用 Google 一键登录
+            </span>
+            <ArrowRight className="h-4 w-4 opacity-70" />
+          </Button>
+          <AuthDivider>或使用邮箱</AuthDivider>
+        </div>
+
+        <form className="space-y-4" method="post" onSubmit={handleSubmit}>
+          {mode === 'signup' && (
+            <div className="space-y-2">
+              <Label htmlFor="nickname" className={AUTH_LABEL_CLASS}>
+                昵称
+              </Label>
+              <Input
+                id="nickname"
+                value={nickname}
+                onChange={(event) => setNickname(event.target.value)}
+                placeholder="怎么称呼你"
+                autoComplete="nickname"
+                className={AUTH_INPUT_CLASS}
+              />
             </div>
+          )}
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              {heroPoints.map((item) => (
-                <div
-                  key={item}
-                  className="rounded-2xl border p-4 text-center"
-                  style={{
-                    background: 'rgba(255,255,255,0.03)',
-                    borderColor: 'rgba(255,255,255,0.06)',
-                  }}
-                >
-                  <ShieldCheck className="mx-auto mb-3 h-5 w-5 text-[#f8d25c]" aria-hidden="true" />
-                  <p className="text-sm leading-6 text-[#f4f4f4]">{item}</p>
-                </div>
-              ))}
-            </div>
-
-            <Card
-              className="overflow-hidden rounded-[28px] border"
-              style={{
-                background: 'rgba(11,11,11,0.95)',
-                borderColor: 'rgba(255,255,255,0.08)',
-                boxShadow: '0 24px 70px rgba(0,0,0,0.42)',
-              }}
-            >
-              <CardContent className="p-0">
-                <div className="space-y-6 px-5 py-6 sm:px-7 sm:py-7">
-                  <div className="flex rounded-2xl border p-1" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setMode('login')}
-                      className="flex-1 rounded-xl px-4 py-3 text-sm font-medium transition"
-                      style={{
-                        background: mode === 'login' ? 'rgba(255,215,0,0.14)' : 'transparent',
-                        color: mode === 'login' ? '#fff4c1' : '#a3a3a3',
-                      }}
-                    >
-                      登录
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMode('signup')}
-                      className="flex-1 rounded-xl px-4 py-3 text-sm font-medium transition"
-                      style={{
-                        background: mode === 'signup' ? 'rgba(255,215,0,0.14)' : 'transparent',
-                        color: mode === 'signup' ? '#fff4c1' : '#a3a3a3',
-                      }}
-                    >
-                      注册
-                    </button>
-                  </div>
-
-                  <div className="space-y-2 text-center">
-                    <h2 className="text-2xl font-semibold text-white">
-                      {mode === 'signup' ? `创建你的 ${siteName} 账户` : `登录到 ${siteName}`}
-                    </h2>
-                    <p className="text-sm leading-6 text-[#a3a3a3]">
-                      {mode === 'signup'
-                        ? '邮箱注册完成后将收到验证邮件，验证通过后才可使用核心功能。'
-                        : 'Google 登录无需再次验证邮箱，邮箱账户会按验证状态自动拦截。'}
-                    </p>
-                    <AuthRedirectNotice target={redirectTarget} />
-                    {mode === 'signup' && selectedPlan && (
-                      <p className="rounded-xl border px-3 py-2 text-xs text-[#f6dd96]" style={{ borderColor: 'rgba(255,215,0,0.16)' }}>
-                        当前来自 <span className="font-semibold">{selectedPlan}</span> 套餐入口。注册后可在产品内查看该套餐对应的最新权益与购买状态。
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleGoogleLogin}
-                      disabled={isBusy}
-                      className="h-12 justify-between rounded-2xl border-[#3a3a3a] bg-[#141414] px-4 text-white hover:bg-[#1a1a1a]"
-                      aria-label="使用 Google 一键登录"
-                    >
-                      <span className="flex items-center gap-2">
-                        {pendingAction === 'google' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <GoogleIcon className="h-4 w-4" />
-                        )}
-                        使用 Google 一键登录
-                      </span>
-                      <ArrowRight className="h-4 w-4 opacity-70" />
-                    </Button>
-                    <div className="flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-[#7d7d7d]">
-                      <div className="h-px flex-1 bg-[#2e2e2e]" />
-                      或使用邮箱
-                      <div className="h-px flex-1 bg-[#2e2e2e]" />
-                    </div>
-                  </div>
-
-                  <form className="space-y-4" method="post" onSubmit={handleSubmit}>
-                    {mode === 'signup' && (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="nickname" className="text-[#f2f2f2]">
-                            昵称
-                          </Label>
-                          <Input
-                            id="nickname"
-                            value={nickname}
-                            onChange={(event) => setNickname(event.target.value)}
-                            placeholder="怎么称呼你"
-                            autoComplete="nickname"
-                            className="h-12 rounded-2xl border-[#2d2d2d] bg-[#131313] text-white placeholder:text-[#686868]"
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-[#f2f2f2]">
-                        邮箱
-                      </Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        placeholder="name@example.com"
-                        autoComplete="email"
-                        required
-                        className="h-12 rounded-2xl border-[#2d2d2d] bg-[#131313] text-white placeholder:text-[#686868]"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <Label htmlFor="password" className="text-[#f2f2f2]">
-                          密码
-                        </Label>
-                        {mode === 'login' && (
-                          <Link href={FORGOT_PASSWORD_PATH} className="text-xs text-[#f2c94c] underline-offset-4 hover:underline">
-                            忘记密码？
-                          </Link>
-                        )}
-                      </div>
-                      <Input
-                        id="password"
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder={mode === 'signup' ? '至少 8 位密码' : '输入你的密码'}
-                        autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                        minLength={8}
-                        required
-                        className="h-12 rounded-2xl border-[#2d2d2d] bg-[#131313] text-white placeholder:text-[#686868]"
-                      />
-                    </div>
-
-                    {status && (
-                      <AuthStatusBanner
-                        status={status}
-                        resendHref={buildAuthHref(buildVerifyEmailPath(redirectTarget))}
-                        onResendClick={() => rememberPendingEmail(email)}
-                      />
-                    )}
-
-                    <Button
-                      type="submit"
-                      disabled={isBusy}
-                      className="h-12 w-full rounded-2xl bg-[#f2c94c] text-black hover:bg-[#f7d96c]"
-                    >
-                      {pendingAction === 'login' || pendingAction === 'signup' ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {submitBusyLabel}
-                        </>
-                      ) : (
-                        submitLabel
-                      )}
-                    </Button>
-                  </form>
-
-                  <div className="rounded-2xl border px-4 py-4 text-sm leading-6 text-[#afafaf]" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-                    <p>
-                      {mode === 'signup'
-                        ? '注册后系统会立即发送验证邮件。你必须点击邮件中的链接完成验证后，才能进入聊天或个人中心。'
-                        : '如果你之前通过邮箱注册但尚未验证，可以直接打开验证状态页重发邮件。'}
-                    </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-3">
-                      <Link
-                        href={buildVerifyEmailPath(redirectTarget)}
-                        onClick={() => rememberPendingEmail(email)}
-                        className="text-[#f2c94c] underline-offset-4 hover:underline"
-                      >
-                        打开验证状态页
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
-                        className="text-[#f2c94c] underline-offset-4 hover:underline"
-                      >
-                        {mode === 'signup' ? '已有账户，返回登录' : '没有账户，立即注册'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="space-y-2">
+            <Label htmlFor="email" className={AUTH_LABEL_CLASS}>
+              邮箱
+            </Label>
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="name@example.com"
+              autoComplete="email"
+              required
+              className={AUTH_INPUT_CLASS}
+            />
           </div>
-        </section>
-      </div>
-    </main>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="password" className={AUTH_LABEL_CLASS}>
+                密码
+              </Label>
+              {mode === 'login' && (
+                <Link href={FORGOT_PASSWORD_PATH} className={`text-sm ${AUTH_LINK_CLASS}`}>
+                  忘记密码？
+                </Link>
+              )}
+            </div>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder={mode === 'signup' ? '至少 8 位密码' : '输入你的密码'}
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              minLength={8}
+              required
+              className={AUTH_INPUT_CLASS}
+            />
+          </div>
+
+          {status && (
+            <AuthStatusBanner
+              status={status}
+              resendHref={buildAuthHref(buildVerifyEmailPath(redirectTarget))}
+              onResendClick={() => rememberPendingEmail(email)}
+            />
+          )}
+
+          <Button type="submit" disabled={isBusy} className={AUTH_PRIMARY_BUTTON_CLASS}>
+            {pendingAction === 'login' || pendingAction === 'signup' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {submitBusyLabel}
+              </>
+            ) : (
+              submitLabel
+            )}
+          </Button>
+        </form>
+
+        <AuthPanel>
+          <p>
+            {mode === 'signup'
+              ? '注册后系统会立即发送验证邮件。你必须点击邮件中的链接完成验证后，才能进入聊天或个人中心。'
+              : '如果你之前通过邮箱注册但尚未验证，可以直接打开验证状态页重发邮件。'}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Link
+              href={buildVerifyEmailPath(redirectTarget)}
+              onClick={() => rememberPendingEmail(email)}
+              className={AUTH_LINK_CLASS}
+            >
+              打开验证状态页
+            </Link>
+            <button
+              type="button"
+              onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
+              className={AUTH_LINK_CLASS}
+            >
+              {mode === 'signup' ? '已有账户，返回登录' : '没有账户，立即注册'}
+            </button>
+          </div>
+        </AuthPanel>
+
+        <ul className="space-y-1 text-center text-[13px] leading-6 text-[var(--pub-muted)]">
+          {heroPoints.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </AuthCard>
+    </AuthShell>
   );
 }
 
 function LoginPageFallback() {
-  const fallbackSiteName = resolveSiteName();
-
-  return (
-    <main
-      className="min-h-screen px-4 py-8 sm:px-6 lg:px-8"
-      style={{
-        background:
-          'radial-gradient(circle at top left, rgba(255,215,0,0.18), transparent 30%), radial-gradient(circle at bottom right, rgba(251,191,36,0.16), transparent 35%), #070707',
-      }}
-    >
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl items-center justify-center">
-        <Card
-          className="w-full overflow-hidden rounded-[28px] border"
-          style={{
-            background: 'rgba(11,11,11,0.95)',
-            borderColor: 'rgba(255,255,255,0.08)',
-            boxShadow: '0 24px 70px rgba(0,0,0,0.42)',
-          }}
-        >
-          <CardContent className="space-y-6 px-6 py-8 text-center sm:px-8 sm:py-10">
-            <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs uppercase tracking-[0.24em] text-[#f8d25c]">
-              <img
-                src="/graylum-logo.svg"
-                alt=""
-                aria-hidden="true"
-                className="h-3.5 w-3.5 rounded"
-              />
-              {fallbackSiteName} Access
-            </div>
-            <div className="space-y-3">
-              <h1 className="text-4xl font-semibold leading-tight text-white sm:text-5xl">
-                一个入口，完成登录、注册与邮箱验证收口。
-              </h1>
-              <p className="mx-auto max-w-xl text-sm leading-7 text-[#d0d0d0] sm:text-base">
-                正在加载认证入口。
-              </p>
-            </div>
-            <div className="flex items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-[#f2c94c]" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
-  );
+  return <AuthLoading />;
 }
