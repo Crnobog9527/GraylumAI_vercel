@@ -48,6 +48,24 @@ describe("MentorTurnSteps", () => {
     expect(html({ live, reply: { text: "已写一半" }, execution: running, stale: true })).not.toContain("data-turn-hint");
   });
 
+  // TURN-STEPS for the positioning coach: the folded line stays after the reply ended, and after a reload.
+  it("keeps the folded steps line above a reply that has ended, from the steps this page watched", () => {
+    const steps = [{ id: "method", tool: "load_skill", state: "done", label: "选定位方向" }];
+    const ended = html({ live: liveReply({ steps, text: "好", finished: true, phase: "done" }), reply: { text: "好" },
+      execution: { executionId: "e1", state: "completed" } });
+    expect(ended).toContain('data-turn-step-list="folded"');
+    expect(ended).toContain("已完成 1 个步骤");
+  });
+
+  it("shows the steps the server kept after a reload (no live reply), folded, without the research the research rows already list", () => {
+    const saved = [{ id: "method", tool: "load_skill", state: "done", label: "选定位方向" }, { id: "1", tool: "research", state: "done", count: 3 }];
+    const reloaded = html({ reply: { text: "好" }, execution: { executionId: "e1", state: "completed", steps: saved as never } });
+    expect(reloaded).toContain('data-turn-step-list="folded"');
+    expect(reloaded).toContain("已完成 2 个步骤");
+    expect(html({ reply: { text: "好" }, calls: [{ id: "c1", state: "done" }] as never,
+      execution: { executionId: "e1", state: "completed", steps: saved as never } })).toContain("已完成 1 个步骤");
+  });
+
   it("shows nothing for a finished turn", () => {
     expect(html({ execution: { executionId: "e1", state: "completed", primaryBody: "x", organizerComplete: true } as never }))
       .not.toContain("data-turn-step-list");

@@ -32,8 +32,9 @@ import { answeredText, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, typ
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
-import type { TurnEvent } from './sse';
+import type { StepEvent, TurnEvent } from './sse';
 import { METHOD_STEP_ID, withStepEvents } from './tools/announce';
+import { savedSteps } from './tools/toolStage';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -157,6 +158,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
 
   let seq = 0;
+  // The steps the reply showed (the step's method, a source read, a search; the latest state of each), kept at the close so a reload shows them
+  // again (TURN-STEPS, as a chat turn does). Every step event of this turn goes through emitStep.
+  const stepLog = new Map<string, StepEvent>();
+  const emitStep = (event: TurnEvent) => { if (event.type === 'step') stepLog.set(event.id, event); emit(event); };
   const callDeps = (q: ChatQuote) => ({ db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
     adapter: openRouterAdapter({ allowAgentTools: true, credential: q.credential, transport: deps.transport }) });
   const close = (kind: CloseKind, extra: { messages?: Array<{ role: 'user' | 'assistant'; content: string }>; delivered?: boolean;
@@ -180,7 +185,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // This step's method is read from the package before every model call, so the page is told: one `load_skill` step named by
     // the step title (never a path or id) that a later `read_skill_file` of the same turn updates in place (METHOD_STEP_ID).
     const methodName = ctx.steps.find(item => item.id === input.stepId)?.title.trim() || undefined;
-    const methodStep = (phase: 'running' | 'done' | 'failed') => { try { emit({ type: 'step', id: METHOD_STEP_ID, tool: 'load_skill', state: phase,
+    const methodStep = (phase: 'running' | 'done' | 'failed') => { try { emitStep({ type: 'step', id: METHOD_STEP_ID, tool: 'load_skill', state: phase,
       ...(methodName ? { label: methodName } : {}) }); } catch { /* display only */ } };
     methodStep('running');
     type Bound = ReturnType<typeof mentorSkillSource>;
@@ -246,7 +251,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
     // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
     const tools = withStepEvents([...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
-      emit, new Set(), undefined, methodName, METHOD_STEP_ID);
+      emitStep, new Set(), undefined, methodName, METHOD_STEP_ID);
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };
@@ -305,9 +310,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     markStage('model');
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId, ctx.roundId) }],
-      ...(organizer || researchMade ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
+      ...(organizer || researchMade || stepLog.size ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
         versions: state.versions, organizerInput: captureInput, output: organized, ...(scopeDenied ? { scopeDenied } : {}) } : {}),
-        ...(researchMade ? { research: researchMade } : {}) } } : {}) });
+        ...(researchMade ? { research: researchMade } : {}), ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) });
     markStage('close');
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
     emit({ type: 'result', turnId: opened.turnId, body: turn.body, chargedCredits: closed.chargedCredits, settlement: closed.settlement,
