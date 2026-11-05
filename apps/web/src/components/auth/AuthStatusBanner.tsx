@@ -8,10 +8,11 @@ export interface AuthStatus {
   offerResend?: boolean;
 }
 
+// Error and success use the light foundation's state colors (DESIGN.md: --gl-error / --gl-success notices).
 const TONES = {
-  error: { borderColor: 'rgba(248,113,113,0.24)', background: 'rgba(127,29,29,0.2)', color: '#fecaca' },
-  success: { borderColor: 'rgba(74,222,128,0.24)', background: 'rgba(20,83,45,0.2)', color: '#bbf7d0' },
-  info: { borderColor: 'rgba(255,215,0,0.24)', background: 'rgba(120,53,15,0.2)', color: '#fde68a' },
+  error: { borderColor: 'var(--gl-error)', background: 'var(--gl-error-bg)', color: 'var(--gl-error)' },
+  success: { borderColor: 'var(--gl-success)', background: 'var(--gl-success-bg)', color: 'var(--gl-success)' },
+  info: { borderColor: 'var(--gl-warning)', background: 'var(--gl-warning-bg)', color: 'var(--gl-warning)' },
 } as const;
 
 // onResendClick lets the page save the email it shows before the link opens /verify-email.
@@ -22,13 +23,13 @@ export function AuthStatusBanner({ status, resendHref, onResendClick }: {
 }) {
   const Icon = status.tone === 'success' ? CheckCircle2 : Mail;
   return (
-    <div className="rounded-2xl border px-4 py-3 text-sm leading-6" aria-live="polite" style={TONES[status.tone]}>
+    <div className="rounded-xl border px-4 py-3 text-sm leading-6" aria-live="polite" style={TONES[status.tone]}>
       <div className="flex items-start gap-2">
         <Icon className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           {status.message}
           {status.offerResend && resendHref && (
-            <Link href={resendHref} onClick={onResendClick} className="ml-1 text-[#f2c94c] underline underline-offset-4">
+            <Link href={resendHref} onClick={onResendClick} className="ml-1 text-[var(--pub-ink)] underline underline-offset-4">
               还没验证邮箱？重新发送验证邮件
             </Link>
           )}

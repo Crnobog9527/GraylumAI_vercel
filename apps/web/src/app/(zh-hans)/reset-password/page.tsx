@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
 import {
   AUTH_INPUT_CLASS,
+  AUTH_LABEL_CLASS,
   AUTH_LINK_CLASS,
   AUTH_PRIMARY_BUTTON_CLASS,
   AuthPageCard,
@@ -59,7 +60,7 @@ export default function ResetPasswordPage() {
       {phase.kind === 'ready' ? (
         <form className="space-y-4" method="post" onSubmit={handleSubmit}>
           <div className="space-y-2">
-            <Label htmlFor="new-password" className="text-[#f2f2f2]">
+            <Label htmlFor="new-password" className={AUTH_LABEL_CLASS}>
               新密码
             </Label>
             <Input
@@ -75,7 +76,7 @@ export default function ResetPasswordPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="confirm-password" className="text-[#f2f2f2]">
+            <Label htmlFor="confirm-password" className={AUTH_LABEL_CLASS}>
               确认新密码
             </Label>
             <Input
@@ -109,8 +110,10 @@ export default function ResetPasswordPage() {
       )}
 
       <div
-        className="flex flex-wrap items-center gap-4 rounded-2xl border px-4 py-4 text-sm text-[#afafaf]"
-        style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+        className={
+          'flex flex-wrap items-center gap-4 rounded-xl border border-[var(--pub-line)] bg-[var(--gl-surface-subtle)] px-4 py-4 text-sm '
+          + 'text-[var(--pub-body)]'
+        }
       >
         {signOutRetry && (
           <button

@@ -9,7 +9,6 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import {
   buildAuthCallbackUrl,
@@ -22,6 +21,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
 import { cn } from '@/lib/utils';
+import {
+  AUTH_INPUT_CLASS, AUTH_LINK_CLASS, AUTH_PRIMARY_BUTTON_CLASS, AUTH_SECONDARY_BUTTON_CLASS, AuthCard, AuthHead, AuthLoading, AuthPanel, AuthShell,
+} from '@/components/auth/AuthShell';
 
 type VerifyTone = 'info' | 'success' | 'error';
 
@@ -187,175 +189,126 @@ function VerifyEmailPageContent() {
     router.replace(buildAuthHref('/login'));
   };
 
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#070707] px-4">
-        <Loader2 className="h-8 w-8 animate-spin text-[#f2c94c]" />
-      </div>
-    );
-  }
+  if (checking) return <AuthLoading />;
 
+  const noticeTone = { error: 'var(--gl-error)', success: 'var(--gl-success)', info: 'var(--gl-warning)' }[message.tone];
+  const noticeBackground = { error: 'var(--gl-error-bg)', success: 'var(--gl-success-bg)', info: 'var(--gl-warning-bg)' }[message.tone];
 
   return (
-    <main className="min-h-screen bg-[#070707] px-4 py-6 sm:px-6">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-3xl items-center justify-center">
-        <Card
-          className="w-full rounded-[28px] border"
-          style={{
-            background: 'linear-gradient(180deg, rgba(16,16,16,0.96), rgba(10,10,10,0.96))',
-            borderColor: 'rgba(255,255,255,0.08)',
-          }}
+    <AuthShell>
+      <AuthCard>
+        <AuthHead
+          icon={<MailCheck className="h-7 w-7" aria-hidden="true" />}
+          title="检查你的邮箱"
+          lead="邮箱注册账户在完成验证前不可访问核心业务。验证成功后，你会自动进入原本要访问的页面。"
+        />
+
+        <AuthPanel>
+          <div className="flex items-center justify-between gap-4">
+            <span className="shrink-0 text-[var(--pub-muted)]">当前邮箱</span>
+            {emailEditable ? (
+              <Input
+                type="email"
+                autoComplete="email"
+                aria-label="注册时使用的邮箱"
+                placeholder="name@example.com"
+                value={email}
+                onChange={event => setEmail(event.target.value.trim())}
+                className={cn(AUTH_INPUT_CLASS, 'h-10 max-w-xs text-right')}
+              />
+            ) : (
+              <span className="break-all text-right text-[var(--pub-ink)]">{email || '未提供'}</span>
+            )}
+          </div>
+        </AuthPanel>
+
+        <div
+          className="rounded-xl border px-4 py-4 text-sm leading-6"
+          aria-live="polite"
+          style={{ borderColor: noticeTone, background: noticeBackground, color: noticeTone }}
         >
-          <CardContent className="space-y-6 px-6 py-7 sm:px-8">
-            <div className="space-y-4 text-center">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[rgba(242,201,76,0.12)] text-[#f2c94c]">
-                <MailCheck className="h-8 w-8" aria-hidden="true" />
-              </div>
-              <div className="space-y-2">
-                <h1 className="text-3xl font-semibold text-white">检查你的邮箱</h1>
-                <p className="mx-auto max-w-xl text-sm leading-7 text-[#b5b5b5] sm:text-base">
-                  邮箱注册账户在完成验证前不可访问核心业务。验证成功后，你会自动进入原本要访问的页面。
-                </p>
-              </div>
-            </div>
+          <div className="flex items-start gap-2">
+            {message.tone === 'success' ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <span>{message.text}</span>
+          </div>
+        </div>
 
-            <div className="rounded-2xl border px-4 py-4 text-sm text-[#f3f3f3]" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-              <div className="flex items-center justify-between gap-4">
-                <span className="shrink-0 text-[#a8a8a8]">当前邮箱</span>
-                {emailEditable ? (
-                  <Input
-                    type="email"
-                    autoComplete="email"
-                    aria-label="注册时使用的邮箱"
-                    placeholder="name@example.com"
-                    value={email}
-                    onChange={event => setEmail(event.target.value.trim())}
-                    className="h-10 max-w-xs rounded-xl border-[#333] bg-transparent text-right text-white"
-                  />
-                ) : (
-                  <span className="break-all text-right">{email || '未提供'}</span>
-                )}
-              </div>
-            </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Button
+            type="button"
+            onClick={handleRefreshStatus}
+            disabled={refreshing || signingOut}
+            className={cn(AUTH_PRIMARY_BUTTON_CLASS, 'h-12 px-4 text-[15px]')}
+          >
+            {refreshing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                检查中...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                刷新验证状态
+              </>
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleResend}
+            disabled={resending || signingOut}
+            className={AUTH_SECONDARY_BUTTON_CLASS}
+          >
+            {resending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                发送中...
+              </>
+            ) : (
+              '重新发送验证邮件'
+            )}
+          </Button>
+        </div>
 
-            <div
-              className="rounded-2xl border px-4 py-4 text-sm leading-6"
-              aria-live="polite"
-              style={{
-                borderColor:
-                  message.tone === 'error'
-                    ? 'rgba(248,113,113,0.24)'
-                    : message.tone === 'success'
-                      ? 'rgba(74,222,128,0.24)'
-                      : 'rgba(255,215,0,0.24)',
-                background:
-                  message.tone === 'error'
-                    ? 'rgba(127,29,29,0.18)'
-                    : message.tone === 'success'
-                      ? 'rgba(20,83,45,0.18)'
-                      : 'rgba(120,53,15,0.18)',
-                color:
-                  message.tone === 'error'
-                    ? '#fecaca'
-                    : message.tone === 'success'
-                      ? '#bbf7d0'
-                      : '#fde68a',
-              }}
+        <AuthPanel className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            验证成功后将进入{' '}
+            <span className="break-all font-mono text-[var(--pub-ink)]" title={redirectTarget}>
+              {displayRedirect(redirectTarget)}
+            </span>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-3 whitespace-nowrap">
+            <Link
+              href={buildAuthHref('/login')}
+              onClick={() => rememberPendingEmail(email)}
+              className={AUTH_LINK_CLASS}
             >
-              <div className="flex items-start gap-2">
-                {message.tone === 'success' ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                ) : (
-                  <MailCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                )}
-                <span>{message.text}</span>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button
-                type="button"
-                onClick={handleRefreshStatus}
-                disabled={refreshing || signingOut}
-                className="h-11 rounded-2xl bg-[#f2c94c] text-black hover:bg-[#f7d96c]"
-              >
-                {refreshing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    检查中...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4" />
-                    刷新验证状态
-                  </>
-                )}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleResend}
-                disabled={resending || signingOut}
-                className="h-11 rounded-2xl border-[#333] bg-transparent text-white hover:bg-[#171717]"
-              >
-                {resending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    发送中...
-                  </>
-                ) : (
-                  '重新发送验证邮件'
-                )}
-              </Button>
-            </div>
-
-            <div
-              className={cn(
-                'flex flex-col gap-3 rounded-2xl border px-4 py-4 text-sm text-[#b4b4b4]',
-                'sm:flex-row sm:items-center sm:justify-between',
+              返回登录页
+            </Link>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className={cn('inline-flex items-center gap-1', AUTH_LINK_CLASS)}
+            >
+              {signingOut ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <LogOut className="h-4 w-4" />
               )}
-              style={{ borderColor: 'rgba(255,255,255,0.08)' }}
-            >
-              <div className="min-w-0">
-                验证成功后将进入{' '}
-                <span className="break-all font-mono text-[#f2f2f2]" title={redirectTarget}>
-                  {displayRedirect(redirectTarget)}
-                </span>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-3 whitespace-nowrap">
-                <Link
-                  href={buildAuthHref('/login')}
-                  onClick={() => rememberPendingEmail(email)}
-                  className="text-[#f2c94c] underline-offset-4 hover:underline"
-                >
-                  返回登录页
-                </Link>
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  disabled={signingOut}
-                  className="inline-flex items-center gap-1 text-[#f2c94c] underline-offset-4 hover:underline"
-                >
-                  {signingOut ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <LogOut className="h-4 w-4" />
-                  )}
-                  退出当前会话
-                </button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
+              退出当前会话
+            </button>
+          </div>
+        </AuthPanel>
+      </AuthCard>
+    </AuthShell>
   );
 }
 
 function VerifyEmailFallback() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-[#070707] px-4">
-      <Loader2 className="h-8 w-8 animate-spin text-[#f2c94c]" />
-    </div>
-  );
+  return <AuthLoading />;
 }
