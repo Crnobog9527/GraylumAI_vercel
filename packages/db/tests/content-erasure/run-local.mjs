@@ -9,6 +9,8 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runStrategy} from './strategy.mjs';
+import {runRename} from './rename.mjs';
+import {runReadonly} from './readonly.mjs';
 import {runSettings} from './settings.mjs';
 import {runResearch} from './research.mjs';
 import {runArtifacts} from './artifacts.mjs';
@@ -56,6 +58,8 @@ try {
  await runResearch({db:client,Client,connectionString,report});
  await runSettings({db:client,Client,connectionString,report});
  await runStrategy(client,report);
+ await runRename({db:client,report});
+ await runReadonly({db:client,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

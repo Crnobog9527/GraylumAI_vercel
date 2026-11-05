@@ -2,7 +2,8 @@
 // CONTENT-CONVERSATION-DRIVEN C1-lite (0338): the results folder of an ordinary free conversation. Synthetic fixtures only.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {rpc} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
+import {erase} from '../content-erasure/cases.mjs';
 
 const REPLY = '标题：早起的人赢在哪\n开头：你有没有发现，早起三十天之后……\n结尾：明天六点见。';
 const count = async (db,where,args) =>
@@ -30,7 +31,7 @@ async function turnReply(db,f,closeKind='completed') {
 const saveTurn = (db,actor,session,turn,extra={}) => rpc(db,'runtime_session_result_save_turn',actor,session,turn,
   extra.request??randomUUID(),extra.type??'script',extra.title??null,extra.excerpt===undefined?null:extra.excerpt);
 
-export async function runCases({db,report}) {
+export async function runCases({db,Client,connectionString,report}) {
   const failures = [];
   const check = async (name,run) => {try {await run();report.checks.push(name);} catch (error) {failures.push(name+': '+(error.stack??error));}};
 
@@ -90,6 +91,59 @@ export async function runCases({db,report}) {
     assert.equal((await rpc(db,'runtime_session_result_delete',f.actor,first.familyId)).deleted,0,'repeat is a no-op');
     assert.equal(await count(db,'session_id=$1',[f.session]),0);
     assert.equal((await db.query('SELECT count(*)::int n FROM session_messages WHERE session_id=$1',[f.session])).rows[0].n,1,'the reply stays');
+  });
+
+  await check('turn erasing the conversation removes the saved results and refuses a new save', async () => {
+    const f = await freeChat(db), turn = await turnReply(db,f);
+    await saveTurn(db,f.actor,f.session,turn);
+    await saveTurn(db,f.actor,f.session,turn,{type:'copy',excerpt:'明天六点见。'});
+    assert.equal(await count(db,'session_id=$1',[f.session]),2);
+    await erase(db,f,'session',f.session);
+    assert.equal(await count(db,'session_id=$1',[f.session]),0,'conversation erasure');
+    await assert.rejects(saveTurn(db,f.actor,f.session,turn),/CONTENT_ERASED|SESSION_RESULT_NOT_FOUND|SESSION_RESULT_SOURCE/);
+  });
+
+  await check('turn account erasure deletes and counts the rows; the body proof sees them', async () => {
+    const f = await freeChat(db), turn = await turnReply(db,f);
+    await saveTurn(db,f.actor,f.session,turn);await saveTurn(db,f.actor,f.session,turn,{type:'copy',excerpt:'明天六点见。'});
+    assert.ok(Number((await db.query('SELECT account_erasure_body_remaining($1) v',[f.actor])).rows[0].v)>=2);
+    await closeAccount(db,f);
+    const counts = (await db.query('SELECT account_erasure_scrub_content($1) v',[f.actor])).rows[0].v;
+    assert.equal(counts.runtime_session_results_deleted,2);
+    assert.equal(await count(db,'actor_id=$1',[f.actor]),0);
+  });
+
+  await check('turn a save waiting on a conversation deletion is refused after it commits', async () => {
+    const f = await freeChat(db), turn = await turnReply(db,f);
+    const deleter = new Client({connectionString});await deleter.connect();
+    try {
+      await deleter.query('BEGIN');
+      await deleter.query('SELECT id FROM runtime_sessions WHERE id=$1 FOR UPDATE',[f.session]);
+      const pending = saveTurn(db,f.actor,f.session,turn);
+      await new Promise(resolve=>setTimeout(resolve,300));
+      await deleter.query('UPDATE runtime_sessions SET content_deleted_at=now() WHERE id=$1',[f.session]);
+      await deleter.query('COMMIT');
+      await assert.rejects(pending,/CONTENT_ERASED/);
+      assert.equal(await count(db,'session_id=$1',[f.session]),0);
+    } finally {await deleter.end();}
+  });
+
+  await check('turn identical saves in parallel yield one result; an edit racing a delete never revives the family', async () => {
+    const f = await freeChat(db), turn = await turnReply(db,f);
+    const request = randomUUID();
+    const clients = await Promise.all([0,1,2].map(async()=>{const c = new Client({connectionString});await c.connect();return c;}));
+    try {
+      const saved = await Promise.all(clients.map(c=>rpc(c,'runtime_session_result_save_turn',f.actor,f.session,turn,request,'copy',null,'明天六点见。')));
+      assert.equal(new Set(saved.map(r=>r.id)).size,1,'one result for three identical requests');
+      assert.equal(await count(db,'session_id=$1',[f.session]),1);
+      const family = saved[0].familyId;
+      const outcomes = await Promise.allSettled([
+        rpc(clients[0],'runtime_session_result_edit',f.actor,family,randomUUID(),1,null,'改过的稿子'),
+        rpc(clients[1],'runtime_session_result_delete',f.actor,family)]);
+      assert.equal(outcomes[1].status,'fulfilled');
+      if (outcomes[0].status==='rejected') assert.match(String(outcomes[0].reason),/SESSION_RESULT_NOT_FOUND/);
+      assert.equal(await count(db,'family_id=$1',[family]),0,'no version survives the delete');
+    } finally {await Promise.all(clients.map(c=>c.end()));}
   });
 
   await check('C1 table and functions are closed to client roles', async () => {
