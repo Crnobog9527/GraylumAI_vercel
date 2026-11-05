@@ -140,7 +140,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
 
   return (
     <Dialog open onOpenChange={value => { if (!value) onClose(); }}>
-      <DialogContent className={styles.picker}>
+      <DialogContent tone="light" className={styles.picker}>
         <DialogHeader>
           <DialogTitle>多模型对比</DialogTitle>
           <DialogDescription>

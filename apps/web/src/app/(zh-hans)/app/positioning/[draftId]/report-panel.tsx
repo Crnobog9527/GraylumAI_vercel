@@ -197,7 +197,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
         </ReportWithOutline>
       </div>
       <AlertDialog open={report.stopConfirmation} onOpenChange={open => { if (!open) report.cancelStop(); }}>
-        <AlertDialogContent>
+        <AlertDialogContent tone="light">
           <AlertDialogHeader>
             <AlertDialogTitle>确认停止报告？</AlertDialogTitle>
             <AlertDialogDescription>{reportStopChargeNotice(price)}</AlertDialogDescription>

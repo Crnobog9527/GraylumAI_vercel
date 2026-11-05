@@ -10,7 +10,7 @@
 .picker{max-width:min(520px,calc(100vw - 32px))}
 .models{display:grid;gap:6px;margin:0;padding:0;border:0}
 .model{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 10px;border:1px solid #ececec;border-radius:12px;cursor:pointer}
-.model span{flex:1;min-width:0;overflow-wrap:anywhere;font-size:14px;color:#262626}
+.model > span{flex:1;min-width:0;overflow-wrap:anywhere;font-size:14px;color:#262626}
 .model[data-disabled=true]{opacity:.55;cursor:not-allowed}
 .estimate{margin:0;font-size:13px;color:#262626}.estimate strong{font-size:15px}
 
