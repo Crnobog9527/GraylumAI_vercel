@@ -8,7 +8,7 @@ SET LOCAL lock_timeout='5s';
 --   turn_close   the whole function again, as 0507 defines it: ONE added block in the `t.kind = 'mentor'` branch: a mentor result may hold
 --                `steps` beside `research` and the organizer's keys; for a delivered completed turn it calls turn_chat_steps_apply (0507's
 --                shape check and set-once write) inside its own savepoint, so a failure there cannot change the close, the settlement or
---                the charge. Every other line is byte-for-byte 0507's. The signature and the output are unchanged; a mentor close
+--                the charge. A refusal of the shape (the function answers false) is logged as a warning for both kinds, not silent. Every other line is byte-for-byte 0507's, except the chat branch's call gets the same warning. The signature and the output are unchanged; a mentor close
 --                without `steps` behaves exactly as before.
 --
 -- Repeatable: CREATE OR REPLACE. Compatibility: old code never passes `steps` in a mentor result; the new code passing it to the old
@@ -95,7 +95,9 @@ BEGIN
       -- reload shows them again. Best effort, as for a chat turn: its own savepoint, so a failure there never touches the close or the settlement.
       IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'steps' THEN
         BEGIN
-          PERFORM public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps');
+          IF NOT public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps') THEN
+            RAISE WARNING 'turn_chat_steps_apply refused the steps of turn %', p_turn_id;
+          END IF;
         EXCEPTION WHEN OTHERS THEN
           RAISE WARNING 'turn_chat_steps_apply failed: %', SQLERRM;
         END;
@@ -125,7 +127,9 @@ BEGIN
       END IF;
       IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'steps' THEN
         BEGIN
-          PERFORM public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps');
+          IF NOT public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps') THEN
+            RAISE WARNING 'turn_chat_steps_apply refused the steps of turn %', p_turn_id;
+          END IF;
         EXCEPTION WHEN OTHERS THEN
           RAISE WARNING 'turn_chat_steps_apply failed: %', SQLERRM;
         END;

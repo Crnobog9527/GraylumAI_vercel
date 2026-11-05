@@ -82,7 +82,9 @@ BEGIN
       -- reload shows them again. Best effort, as for a chat turn: its own savepoint, so a failure there never touches the close or the settlement.
       IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'steps' THEN
         BEGIN
-          PERFORM public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps');
+          IF NOT public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps') THEN
+            RAISE WARNING 'turn_chat_steps_apply refused the steps of turn %', p_turn_id;
+          END IF;
         EXCEPTION WHEN OTHERS THEN
           RAISE WARNING 'turn_chat_steps_apply failed: %', SQLERRM;
         END;
@@ -112,7 +114,9 @@ BEGIN
       END IF;
       IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'steps' THEN
         BEGIN
-          PERFORM public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps');
+          IF NOT public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps') THEN
+            RAISE WARNING 'turn_chat_steps_apply refused the steps of turn %', p_turn_id;
+          END IF;
         EXCEPTION WHEN OTHERS THEN
           RAISE WARNING 'turn_chat_steps_apply failed: %', SQLERRM;
         END;
