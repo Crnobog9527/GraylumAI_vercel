@@ -69,8 +69,14 @@ export function AuthLoading() {
 }
 
 // Fields, buttons and links. The 8px field (white, --gl-border-control, 16px text so iOS does not zoom), the 52px pill for the one main action.
-export const AUTH_INPUT_CLASS = 'h-12 rounded-lg border-[var(--gl-border-control)] bg-white text-base text-[var(--gl-text)] placeholder:text-[var(--gl-text-placeholder)]';
+export const AUTH_INPUT_CLASS = [
+  'h-12 rounded-lg border-[var(--gl-border-control)] bg-white text-base text-[var(--gl-text)]', 'placeholder:text-[var(--gl-text-placeholder)]',
+].join(' ');
 export const AUTH_LABEL_CLASS = 'text-sm font-medium text-[var(--pub-ink)]';
-export const AUTH_PRIMARY_BUTTON_CLASS = 'h-[52px] w-full rounded-full bg-[var(--pub-ink)] px-7 text-[17px] font-medium text-white hover:bg-[var(--pub-action-hover)]';
-export const AUTH_SECONDARY_BUTTON_CLASS = 'h-12 rounded-full border-[var(--pub-line)] bg-white px-5 text-[15px] font-medium text-[var(--pub-ink)] hover:bg-[var(--gl-surface-subtle)]';
+export const AUTH_PRIMARY_BUTTON_CLASS = [
+  'h-[52px] w-full rounded-full bg-[var(--pub-ink)] px-7 text-[17px] font-medium text-white', 'hover:bg-[var(--pub-action-hover)]',
+].join(' ');
+export const AUTH_SECONDARY_BUTTON_CLASS = [
+  'h-12 rounded-full border-[var(--pub-line)] bg-white px-5 text-[15px] font-medium text-[var(--pub-ink)]', 'hover:bg-[var(--gl-surface-subtle)]',
+].join(' ');
 export const AUTH_LINK_CLASS = 'text-[var(--pub-ink)] underline underline-offset-4 hover:text-[var(--pub-action-hover)]';
