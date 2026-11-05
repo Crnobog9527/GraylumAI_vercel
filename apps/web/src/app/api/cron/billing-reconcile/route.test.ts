@@ -20,7 +20,11 @@ const mocks = vi.hoisted(() => ({
   fusionKick: vi.fn(),
   voice: vi.fn(),
   researchPrices: vi.fn(),
+  startRun: vi.fn(),
+  finishRun: vi.fn(),
 }));
+
+vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.startRun, finishScheduledJobRun: mocks.finishRun }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
 vi.mock('@repo/api/src/services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.waffoClient, getWaffoOperationsClient: mocks.waffoClient }));
@@ -106,6 +110,64 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.fusionKick.mockResolvedValue({ success: true, kicked: 0, listed: 0 });
     mocks.voice.mockResolvedValue({ success: true, settled: 0, scrubbed: 0, waiting: 0, failed: 0 });
     mocks.researchPrices.mockResolvedValue({ success: true, refreshed: [], changed: [], failed: [], expiring: [], window: 'skipped' });
+    mocks.startRun.mockResolvedValue('run-1');
+    mocks.finishRun.mockResolvedValue(undefined);
+  });
+
+  it('records every run in scheduled_job_runs: a success with counts, a failure with its reasons', async () => {
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.startRun).toHaveBeenCalledWith({ supabase: { client: 'service-role' }, jobKey: 'billing_reconcile', triggerSource: 'cron' });
+    expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ runId: 'run-1', status: 'success',
+      summary: expect.objectContaining({ success: true, researchPrices: expect.objectContaining({ success: true }) }), error: undefined }));
+    mocks.voice.mockResolvedValue({ success: false, settled: 0, scrubbed: 0, waiting: 0, failed: 2 });
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
+    expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error',
+      error: expect.stringContaining('Voice generations pending recovery: 2') }));
+  });
+
+  it('does not depend on the run record: a failing record write leaves the job result alone', async () => {
+    mocks.startRun.mockRejectedValue(new Error('db down'));
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.finishRun).not.toHaveBeenCalled();
+  });
+
+  it('lists the readiness warnings in the success log and the run summary without failing the job', async () => {
+    mocks.runBillingEngineV15ReadinessAudit.mockResolvedValue({ ...readinessSuccess, summary: { unresolvedReservations: { count: 1, oldestAgeHours: 2, accounts: 1, credits: 113 } },
+      findings: [{ code: 'billing_reservation_unresolved', severity: 'warning', message: 'Billing reservations have no observed terminal record (count=1)' }] });
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'completed', expect.any(Number), undefined,
+      expect.objectContaining({ readinessAudit: expect.objectContaining({ warnings: [expect.stringContaining('count=1')] }) }));
+    expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'success',
+      summary: expect.objectContaining({ readiness: expect.objectContaining({ warnings: 1, errors: 0, unresolvedReservations: expect.objectContaining({ count: 1 }) }) }) }));
+  });
+
+  it('gives up on a price refresh that never answers and still completes the run', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.researchPrices.mockReturnValue(new Promise(() => {}));
+      const pending = GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+      await vi.advanceTimersByTimeAsync(46_000);
+      const response = await pending;
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ researchPrices: { success: false, failed: [{ code: 'TIMEOUT' }] } });
+      expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error' }));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('gives up on a billing scan that never answers, so the price refresh and the run record still complete', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.runBillingEngineV15ReadinessAudit.mockReturnValue(new Promise(() => {}));
+      const pending = GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+      await vi.advanceTimersByTimeAsync(41_000);
+      const response = await pending;
+      expect(response.status).toBe(500);
+      expect(mocks.researchPrices).toHaveBeenCalledTimes(1);
+      expect(await response.json()).toMatchObject({ researchPrices: { success: true }, readinessAudit: { success: false } });
+      expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error',
+        summary: expect.objectContaining({ researchPrices: expect.objectContaining({ success: true }) }),
+        error: expect.stringContaining('Billing readiness audit timed out') }));
+    } finally { vi.useRealTimers(); }
   });
 
   it('refreshes research prices daily and fails the job while a price cannot be refreshed or is about to expire', async () => {
