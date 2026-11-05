@@ -33,7 +33,7 @@
 .dialog>p{margin:0 0 12px;color:#6b6b6b;font-size:12px;line-height:1.7}
 .reviewField{display:grid;gap:6px;margin-bottom:16px}
 .reviewField label{font-size:13px;font-weight:500}
-.reviewField textarea{width:100%;min-height:72px;padding:9px 11px;border:1px solid #e5e5e5;border-radius:8px;font-size:14px;line-height:1.6}
+.reviewField textarea{width:100%;min-height:72px;padding:9px 11px;border:1px solid #e5e5e5;background:#fff;color:#262626;border-radius:8px;font-size:14px;line-height:1.6}
 .reviewField .defer{display:flex;align-items:center;gap:6px;color:#666;font-size:12px;font-weight:400}
 .problem{color:#b42318;font-size:12px}
 .dialog>footer{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:8px}
