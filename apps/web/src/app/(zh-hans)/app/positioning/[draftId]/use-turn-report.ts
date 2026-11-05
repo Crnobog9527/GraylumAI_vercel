@@ -57,7 +57,7 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
     if (!reading) return;
     const timer = setInterval(() => { if (!tracker.streaming()) void refetch(); }, READ_MS);
     return () => clearInterval(timer);
-  }, [reading, refetch]);
+  }, [reading, refetch, tracker]);
   const server: ServerReport = report !== undefined ? { kind: "known", executionId: report?.requestId ?? null }
     : failed ? { kind: "failed" } : { kind: "pending" };
 
