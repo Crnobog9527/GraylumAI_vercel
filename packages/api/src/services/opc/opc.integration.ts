@@ -1822,9 +1822,9 @@ it("OPC: published revision stays immutable while its revised round owns reach a
 it("OPC: an explicit continue keeps a retained request identity instead of overwriting an unknown outcome", async () => {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
-  // The draft is already published, so the completed state owns the explicit
-  // re-entry control this case presses.
-  const f = await completed(3);
+  // The draft is already published and its method declares topic resources (planResources), so the consent can bind the topic
+  // workspace; without them opc_topic_bind answers OPC_TOPIC_SKILL_MISSING and the page stays put.
+  const f = await publishedDraft();
   await planFixtureModel(f.moduleId);
   const browser = await chromium.launch({
     executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
