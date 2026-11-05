@@ -80,10 +80,19 @@ export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state'
   return tool === 'research' || tool === 'read_source' ? { state, ...(list ? { count: list.length } : {}) } : { state };
 }
 
+/** The longest Skill name a saved step keeps (turn_chat_steps_apply refuses the whole list above it; a step title may be up to 160). */
+export const SAVED_LABEL_CHARS = 80;
+const SAVED_STEPS_BYTES = 4096;
+
 /** The steps of a closed reply as they are kept (turn_chat_steps_apply): only what the page needs to show them again. A step still running when
  *  the reply ended did not finish, so it is kept as failed; the search words (`detail`) are not kept. */
 export function savedSteps(events: Iterable<StepEvent>) {
-  return [...events].slice(0, 16).map(event => ({ id: event.id, tool: event.tool, state: event.state === 'running' ? 'failed' : event.state,
-    ...(event.label ? { label: event.label } : {}), ...(event.count !== undefined ? { count: event.count } : {}),
-    ...(event.reason ? { reason: event.reason } : {}) }));
+  const first = [...events].slice(0, 16);
+  const build = (names: boolean) => first.map(event => ({ id: event.id, tool: event.tool, state: event.state === 'running' ? 'failed' : event.state,
+    ...(names && event.label ? { label: Array.from(event.label).slice(0, SAVED_LABEL_CHARS).join('') } : {}),
+    ...(event.count !== undefined ? { count: event.count } : {}), ...(event.reason ? { reason: event.reason } : {}) }));
+  // The column holds at most 4096 bytes (turn_chat_steps_apply refuses the whole list above it): names are the only long part, so drop
+  // them before dropping the list.
+  const kept = build(true);
+  return Buffer.byteLength(JSON.stringify(kept)) > SAVED_STEPS_BYTES ? build(false) : kept;
 }

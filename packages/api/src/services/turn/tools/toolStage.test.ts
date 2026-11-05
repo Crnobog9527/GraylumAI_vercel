@@ -130,6 +130,13 @@ describe('the steps kept after a reply closed', () => {
       { id: '3', tool: 'coach_review', state: 'skipped', reason: 'no_brand' }, { id: '4', tool: 'read_source', state: 'failed' }]);
     expect(JSON.stringify(kept)).not.toContain('SECRET');
   });
+  it('cuts a Skill name the database would refuse (a step title may be 160 characters, a saved name 80) and drops names before the list when it is too big', () => {
+    const long = '步'.repeat(160);
+    expect(savedSteps([{ type: 'step', id: 'method', tool: 'load_skill', label: long, state: 'done' }])[0]!.label).toBe('步'.repeat(80));
+    const big = savedSteps(Array.from({ length: 16 }, (_, n) => ({ type: 'step' as const, id: String(n), tool: 'load_skill' as const, label: long, state: 'done' as const })));
+    expect(big).toHaveLength(16);
+    expect(big.every(step => !('label' in step))).toBe(true);
+  });
   it('keeps at most 16 steps', () => {
     const many = Array.from({ length: 20 }, (_, n) => ({ type: 'step' as const, id: String(n), tool: 'other' as const, state: 'done' as const }));
     expect(savedSteps(many)).toHaveLength(16);
