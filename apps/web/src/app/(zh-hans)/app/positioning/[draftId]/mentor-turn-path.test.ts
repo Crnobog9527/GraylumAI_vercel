@@ -16,6 +16,12 @@ describe("mentor on the turn path", () => {
     expect(history.executions.map(e => [e.executionId, e.state, e.input])).toEqual([["turn:4", "completed", "我做健身"], ["turn:5", "running", null]]);
     expect(history.activeExecution).toBe("turn:5");
   });
+  it("carries the steps a reply kept onto its execution, so a reload shows them; a reply without any carries none", () => {
+    const steps = [{ id: "method", tool: "load_skill", state: "done", label: "选定位方向" }];
+    const history = turnHistory(view([{ ...reply(2, 4), steps }, reply(4, 6)]));
+    expect(history.executions[0]!.steps).toEqual(steps);
+    expect(Object.hasOwn(history.executions[1]!, "steps")).toBe(false);
+  });
   it("binds a reply to its round; a reply saved without one still reads", () => {
     const withRound = { seq: 2, role: "assistant", turnId: 4, content: JSON.stringify({ message: "好", stepId: "s1", roundId: "r1" }) };
     expect(turnHistory(view([withRound])).turns).toEqual([{ executionId: "turn:4", stepId: "s1", roundId: "r1", questionId: null, kind: "mentor" }]);

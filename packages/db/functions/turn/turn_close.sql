@@ -78,6 +78,15 @@ BEGIN
       IF v_kind <> 'erased' AND p_kind_result ? 'research' THEN PERFORM public.research_turn_apply(p_actor_id, t, p_kind_result->'research'); END IF;
       -- V2-5: the organizer's checklist patches; only a delivered completed turn applies them (an erased one saves nothing).
       IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'organizerInput' THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+      -- TURN-STEPS: the steps the reply showed (the step's method read, a source read, a search), kept for a delivered completed turn so a
+      -- reload shows them again. Best effort, as for a chat turn: its own savepoint, so a failure there never touches the close or the settlement.
+      IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'steps' THEN
+        BEGIN
+          PERFORM public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps');
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'turn_chat_steps_apply failed: %', SQLERRM;
+        END;
+      END IF;
     ELSIF t.kind = 'report' THEN
       PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
     ELSIF t.kind = 'plan' THEN

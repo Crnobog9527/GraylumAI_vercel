@@ -244,6 +244,12 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Sk
   const frozen = (await db.query("select policy from turns where actor_id=$1 order by id desc limit 1", [f.actor])).rows[0].policy;
   expect(Object.values(frozen.models).sort()).toEqual([ORGANIZER, MENTOR].sort());
   expect(Object.keys(frozen.pricings)).toEqual(Object.keys(frozen.models));
+  // TURN-STEPS: both mentor turns (the opening one too) keep the step they showed, and a reload (the session view) reads it back on the assistant message.
+  const method = [{ id: 'method', tool: 'load_skill', state: 'done', label: 'Synthetic step 1' }];
+  const kept = (await db.query("select steps from turns where actor_id=$1 and kind='mentor' order by id", [f.actor])).rows.map(r => r.steps);
+  expect(kept).toEqual([method, method]);
+  const reloaded = (await db.query('select turn_session_view($1,$2,0) v', [f.actor, f.session])).rows[0].v;
+  expect(reloaded.messages.map((m: { role: string; steps?: unknown }) => m.role === 'assistant' ? m.steps : null)).toEqual([null, method, null, method]);
   const turns = (await db.query("select kind,close_kind,charged_credits,settlement from turns where actor_id=$1 order by id", [f.actor])).rows;
   expect(turns.map(r => [r.kind, r.close_kind, r.settlement])).toEqual([['mentor', 'completed', 'done'], ['mentor', 'completed', 'done']]);
   expect(await credits(f.actor)).toBe(1000 - turns.reduce((sum, r) => sum + r.charged_credits, 0));
