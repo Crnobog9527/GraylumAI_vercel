@@ -26,38 +26,38 @@ type BillingRecordStatusPresentation = {
 const BILLING_RECORD_STATUS_PRESENTATION: Record<BillingRecordStatus, BillingRecordStatusPresentation> = {
   pending: {
     label: '待支付',
-    background: 'rgba(245, 158, 11, 0.12)',
-    color: '#f59e0b',
+    background: 'var(--warning-bg)',
+    color: 'var(--warning)',
   },
   completed: {
     label: '已完成',
-    background: 'rgba(34, 197, 94, 0.12)',
-    color: '#4ade80',
+    background: 'var(--success-bg)',
+    color: 'var(--success)',
   },
   failed: {
     label: '支付失败',
-    background: 'rgba(239, 68, 68, 0.12)',
-    color: '#f87171',
+    background: 'var(--error-bg)',
+    color: 'var(--error)',
   },
   canceled: {
     label: '已取消',
-    background: 'rgba(148, 163, 184, 0.14)',
-    color: '#cbd5e1',
+    background: 'var(--bg-tertiary)',
+    color: 'var(--text-secondary)',
   },
   expired: {
     label: '已过期',
-    background: 'rgba(244, 63, 94, 0.12)',
-    color: '#fb7185',
+    background: 'var(--error-bg)',
+    color: 'var(--error)',
   },
   refunded: {
     label: '已退款',
-    background: 'rgba(59, 130, 246, 0.12)',
-    color: '#60a5fa',
+    background: 'var(--info-bg)',
+    color: 'var(--info)',
   },
   partially_refunded: {
     label: '部分退款',
-    background: 'rgba(168, 85, 247, 0.12)',
-    color: '#c084fc',
+    background: 'var(--info-bg)',
+    color: 'var(--info)',
   },
 };
 

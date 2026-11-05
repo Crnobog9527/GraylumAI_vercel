@@ -15,6 +15,8 @@ export function MethodMembershipSummary({ rows }: { rows: readonly MethodMembers
         style={{ borderColor: 'var(--border-primary)', background: 'var(--bg-primary)' }}>
         <span className="flex flex-wrap items-baseline gap-x-2">
           <b style={{ color: 'var(--text-primary)' }}>{view.title}</b>
+          <span className="rounded-full px-2 py-0.5 text-xs"
+            style={{ background: 'var(--gl-accent-gold-soft, rgba(255,187,23,.1))', color: 'var(--gl-accent-gold-text, #995900)' }}>当前方案</span>
           <span style={{ color: 'var(--text-tertiary)' }}>{view.method}</span>
         </span>
         <span style={{ color: 'var(--text-secondary)' }}>{view.status}</span>

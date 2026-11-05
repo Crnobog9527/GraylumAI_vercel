@@ -182,7 +182,7 @@ export const UserProfileHeader = memo(function UserProfileHeader({
                 ? 'rgba(34, 197, 94, 0.12)'
                 : 'rgba(239, 68, 68, 0.12)',
             color: profileMessage.tone === 'success' ? '#86efac' : '#fca5a5',
-            border: '1px solid rgba(255,255,255,0.06)',
+            border: '1px solid var(--border-primary)',
           }}
         >
           {profileMessage.text}
@@ -362,8 +362,8 @@ export const UsageStatsCard = memo(function UsageStatsCard({ user }: { user: Moc
                 <div
                   className="p-2 rounded-lg"
                   style={{
-                    background: 'rgba(255, 215, 0, 0.1)',
-                    border: '1px solid rgba(255, 215, 0, 0.2)'
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-primary)'
                   }}
                 >
                   <MessageCircle className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
@@ -411,7 +411,7 @@ export const QuickActionsCard = memo(function QuickActionsCard({
         >
           <div
             className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
-            style={{ background: 'rgba(255, 215, 0, 0.1)', border: '1px solid rgba(255, 215, 0, 0.2)' }}
+            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <Key className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
           </div>

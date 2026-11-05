@@ -6,6 +6,7 @@ import { AmountFactList, DocumentStatusBadge, PaymentDocumentLinks } from '@/com
 import { buildUserAmountFactRows, getPaymentChannelLabel, getTaxInclusivePaid } from '@/lib/payment-display';
 import { getBillingRecordStatusPresentation } from './billingRecordStatus';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { ProfileSection } from './ProfileSection';
 
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat('en-US', {
@@ -29,20 +30,13 @@ export default function BillingRecordsCard() {
   const { data: records = [], isLoading, isError, refetch } = trpc.payments.listBillingRecords.useQuery();
 
   return (
-    <div
-      className="mt-6 rounded-2xl p-6 md:p-8"
-      style={{
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border-primary)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-      }}
-    >
+    <ProfileSection className="mt-6 md:p-8">
       <div className="mb-6 flex items-center gap-3">
         <div
           className="rounded-lg p-2"
-          style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.25)' }}
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
         >
-          <ScrollText className="h-5 w-5 text-amber-400" />
+          <ScrollText className="h-5 w-5" style={{ color: 'var(--text-primary)' }} />
         </div>
         <div>
           <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -61,7 +55,7 @@ export default function BillingRecordsCard() {
           role="alert"
           data-testid="billing-records-error"
           className="rounded-xl border px-4 py-6 text-center text-sm"
-          style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)', color: 'var(--text-tertiary)' }}
+          style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-primary)', color: 'var(--text-tertiary)' }}
         >
           账单记录暂时读取失败，这不代表你没有订单。
           <button type="button" className="ml-2 underline" style={{ color: 'var(--color-primary)' }} onClick={() => void refetch()}>
@@ -71,7 +65,7 @@ export default function BillingRecordsCard() {
       ) : records.length === 0 ? (
         <div
           className="rounded-xl border px-4 py-6 text-center text-sm"
-          style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)', color: 'var(--text-tertiary)' }}
+          style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-primary)', color: 'var(--text-tertiary)' }}
         >
           暂无账单记录。完成购买后，这里会显示订单状态和凭证。
         </div>
@@ -84,7 +78,7 @@ export default function BillingRecordsCard() {
               <div
                 key={record.id}
                 className="rounded-xl border p-4"
-                style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)' }}
+                style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-primary)' }}
               >
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="space-y-2">
@@ -95,8 +89,8 @@ export default function BillingRecordsCard() {
                       <span
                         className="rounded-full px-2.5 py-1 text-xs font-medium"
                         style={{
-                          background: record.itemType === 'membership_plan' ? 'rgba(255,215,0,0.12)' : 'rgba(59,130,246,0.12)',
-                          color: record.itemType === 'membership_plan' ? '#facc15' : '#60a5fa',
+                          background: record.itemType === 'membership_plan' ? 'var(--bg-tertiary)' : 'var(--info-bg)',
+                          color: record.itemType === 'membership_plan' ? 'var(--text-primary)' : 'var(--info)',
                         }}
                       >
                         {record.itemType === 'membership_plan' ? '订阅账单' : '一次性支付'}
@@ -110,7 +104,7 @@ export default function BillingRecordsCard() {
                       >
                         {statusPresentation.label}
                       </span>
-                      <DocumentStatusBadge status={record.documentStatus} />
+                      <DocumentStatusBadge status={record.documentStatus} light />
                     </div>
 
                     <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -128,7 +122,7 @@ export default function BillingRecordsCard() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <PaymentDocumentLinks record={record} />
+                    <PaymentDocumentLinks record={record} light />
                   </div>
                 </div>
               </div>
@@ -136,6 +130,6 @@ export default function BillingRecordsCard() {
           })}
         </div>
       )}
-    </div>
+    </ProfileSection>
   );
 }

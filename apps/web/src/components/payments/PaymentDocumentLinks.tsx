@@ -10,8 +10,20 @@ const TONE_COLORS = {
   warning: { background: 'rgba(245,158,11,0.12)', color: '#f59e0b' },
 } as const;
 
+/** The same tones on the light profile center (the admin page keeps the dark ones above). */
+const LIGHT_TONE_COLORS = {
+  success: { background: 'var(--success-bg)', color: 'var(--success)' },
+  muted: { background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' },
+  warning: { background: 'var(--warning-bg)', color: 'var(--warning)' },
+} as const;
+const LIGHT_LINK_COLORS = {
+  invoicePdfUrl: { background: 'var(--bg-tertiary)', color: 'var(--text-primary)' },
+  hostedInvoiceUrl: { background: 'var(--info-bg)', color: 'var(--info)' },
+  receiptUrl: { background: 'var(--success-bg)', color: 'var(--success)' },
+} as const;
+
 /** Unknown and unavailable use different words and colours so "could not check" never reads as "none". */
-export function DocumentStatusBadge({ status }: { status: string | null | undefined }) {
+export function DocumentStatusBadge({ status, light = false }: { status: string | null | undefined; light?: boolean }) {
   const presentation = getDocumentStatusPresentation(status);
   return (
     <span
@@ -19,7 +31,7 @@ export function DocumentStatusBadge({ status }: { status: string | null | undefi
       data-status={status === 'available' || status === 'unavailable' ? status : 'unknown'}
       title={presentation.hint}
       className="rounded-full px-2.5 py-1 text-xs font-medium"
-      style={TONE_COLORS[presentation.tone]}
+      style={(light ? LIGHT_TONE_COLORS : TONE_COLORS)[presentation.tone]}
     >
       {presentation.label}
     </span>
@@ -35,7 +47,7 @@ const LINKS = [
 ] as const;
 
 /** Opens the payment channel's original documents; Graylum does not issue its own receipt. */
-export function PaymentDocumentLinks({ record }: { record: Links }) {
+export function PaymentDocumentLinks({ record, light = false }: { record: Links; light?: boolean }) {
   return (
     <>
       {LINKS.map(({ key, label, Icon, colors }) => record[key] ? (
@@ -45,7 +57,7 @@ export function PaymentDocumentLinks({ record }: { record: Links }) {
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-          style={colors}
+          style={light ? LIGHT_LINK_COLORS[key] : colors}
         >
           <Icon className="h-4 w-4" />
           {label}

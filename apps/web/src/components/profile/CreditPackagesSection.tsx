@@ -45,7 +45,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-primary)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+        boxShadow: 'none',
       }}
     >
       <div className="flex items-center gap-3 mb-6">

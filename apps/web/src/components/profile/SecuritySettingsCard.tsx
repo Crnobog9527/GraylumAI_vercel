@@ -105,7 +105,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
         style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-primary)',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+          boxShadow: 'none',
         }}
       >
         <h3 className="mb-6 text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -123,7 +123,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
               </div>
               <span
                 className="rounded-full px-3 py-1 text-sm"
-                style={{ background: 'rgba(255, 215, 0, 0.1)', color: 'var(--color-primary)' }}
+                style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
               >
                 {authProvider === 'google' ? 'Google 授权登录' : '邮箱密码'}
               </span>
@@ -167,7 +167,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                     }
                     style={{
                       background: 'transparent',
-                      borderColor: 'rgba(255, 215, 0, 0.3)',
+                      borderColor: 'var(--text-primary)',
                       color: 'var(--color-primary)',
                     }}
                   >
@@ -200,7 +200,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                   onClick={() => { setStatusMessage(null); setShowPasswordDialog(true); }}
                   style={{
                     background: 'transparent',
-                    borderColor: 'rgba(255, 215, 0, 0.3)',
+                    borderColor: 'var(--text-primary)',
                     color: 'var(--color-primary)',
                   }}
                 >
@@ -222,14 +222,14 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                     ? 'rgba(239, 68, 68, 0.12)'
                     : statusTone === 'success'
                       ? 'rgba(34, 197, 94, 0.12)'
-                      : 'rgba(255, 215, 0, 0.12)',
+                      : 'var(--bg-secondary)',
                 color:
                   statusTone === 'error'
                     ? '#fca5a5'
                     : statusTone === 'success'
                       ? '#86efac'
                       : 'var(--color-primary)',
-                border: '1px solid rgba(255,255,255,0.06)',
+                border: '1px solid var(--border-primary)',
               }}
             >
               {statusMessage}
