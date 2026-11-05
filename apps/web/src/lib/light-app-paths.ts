@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 // Signed-in routes whose finished page is light (WorkspaceFrame / the home page). Their first painted frame, in the server
-// HTML, must already be light. Dark routes (profile, marketplace, expert-consult, agent-first-preview, library/scan-check,
+// HTML, must already be light. Dark routes (profile, expert-consult, agent-first-preview, library/scan-check,
 // publish-monitor/connect and /publish) are deliberately not listed.
 const LIGHT_PREFIXES = ['/app/positioning', '/app/runtime', '/app/library', '/app/workbench/marketplace', '/app/workbench/search'];
 const LIGHT_EXACT = ['/app', '/app/publish-monitor'];

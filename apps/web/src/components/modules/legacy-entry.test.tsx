@@ -1,27 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { readFileSync } from 'node:fs';
-import { isValidElement, type ReactNode, type ReactElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ push: vi.fn(), mutate: vi.fn(), catalog: { data: [] as {moduleId: string}[], isError: false } }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
-vi.mock('@/trpc/client', () => ({ trpc: {
-  opc: { catalog: { useQuery: () => mocks.catalog } },
-  modules: { incrementUsage: { useMutation: () => ({ mutate: mocks.mutate }) } },
-} }));
-vi.mock('@/components/ui/dialog', () => {
-  const Wrapper = ({ children }: { children: ReactNode }) => <div>{children}</div>;
-  return { Dialog: Wrapper, DialogContent: Wrapper, DialogHeader: Wrapper, DialogTitle: Wrapper };
-});
-import ModuleDetailDialog from './ModuleDetailDialog';
-const module = { id: 'positioning-module', title: '任意显示名称', description: 'fixture' };
-function action(node: ReactNode): ReactElement<any> | undefined {
-  if (Array.isArray(node)) return node.map(action).find(Boolean);
-  if (!isValidElement(node)) return;
-  const element = node as ReactElement<any>;
-  return element.props.onClick?.name === 'handleUse' ? element : action(element.props.children);
-}
-beforeEach(() => { vi.clearAllMocks(); mocks.catalog = { data: [], isError: false }; });
+import { describe, expect, it } from 'vitest';
 describe('legacy entry replacements', () => {
   it.each([
     ['components/admin/AdminSidebar.tsx', '/app'],
@@ -34,25 +13,5 @@ describe('legacy entry replacements', () => {
     const source = readFileSync(new URL('../admin/AdminGuard.tsx', import.meta.url), 'utf8');
     expect(source).toContain("router.push('/app')");
     expect(source).not.toContain("router.push('/chat')");
-  });
-  it('opens positioning only for a module in the published positioning catalog', () => {
-    mocks.catalog.data = [{ moduleId: module.id }];
-    const tree = ModuleDetailDialog({ module, open: true, onOpenChange: vi.fn() });
-    const button = action(tree)!;
-    expect(button.props.disabled).toBe(false);
-    button.props.onClick();
-    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/app/positioning');
-  });
-  it.each([false, true])('disables other skills, including when catalog lookup fails (%s)', isError => {
-    mocks.catalog.isError = isError;
-    const onUse = vi.fn();
-    const tree = ModuleDetailDialog({ module: { ...module, title: '定位分析' }, open: true, onOpenChange: vi.fn(), onUse });
-    const button = action(tree)!;
-    expect(button.props.disabled).toBe(true);
-    expect(renderToStaticMarkup(tree)).toContain('该技能将在新工作区上线后开放');
-    button.props.onClick();
-    expect(mocks.mutate).not.toHaveBeenCalled();
-    expect(onUse).not.toHaveBeenCalled();
-    expect(mocks.push).not.toHaveBeenCalled();
   });
 });

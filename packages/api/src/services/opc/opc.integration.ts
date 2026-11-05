@@ -1078,16 +1078,14 @@ async function planBrowser(
   });
   const page = await context.newPage();
   page.setDefaultTimeout(90000);
-  const path = "/app/positioning/" + f.d.draftId + "/plan";
+  const path = "/app/positioning/" + f.d.draftId;
   await page.goto(
     process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path),
   );
   await page.getByPlaceholder("name@example.com").fill(f.email);
   await page.getByPlaceholder("输入你的密码").fill(f.password);
   await page.getByRole("button", { name: "登录", exact: true }).last().click();
-  // The legacy /plan deep link must recover the same draft in the current
-  // topic workspace; the normal route is now /topics.
-  await page.waitForURL((url) => url.pathname.endsWith('/app/positioning/' + f.d.draftId + '/topics'));
+  await page.waitForURL((url) => url.pathname.endsWith('/app/positioning/' + f.d.draftId));
   const key = "opc-plan-generation:" + f.d.draftId;
   await page.evaluate(
     ({ key, envelope, clearBuffer, buffer, draftId }) => {
@@ -1256,7 +1254,6 @@ it("OPC: Stage C4 an already published draft spends nothing by waiting or refres
   expect(before.topic).toMatchObject({ binds: 0, topicExecutions: 0 });
   // Without a local request the plan link continues to the topic workspace.
   const { browser, page, key } = await planBrowser(f);
-  const topicsPath = "/app/positioning/" + f.d.draftId + "/topics";
   try {
     expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
     const start = page.getByRole("button", { name: "开始选题工作对话", exact: true });
@@ -1265,8 +1262,9 @@ it("OPC: Stage C4 an already published draft spends nothing by waiting or refres
     await start.waitFor();
     // Give an automatic generation every chance to (wrongly) fire.
     await new Promise((resolve) => setTimeout(resolve, 3000));
+    // The retired /plan address is a permanent redirect (next.config) to the positioning conversation.
     await page.goto(process.env.V3_LOCAL_APP + "/app/positioning/" + f.d.draftId + "/plan");
-    await page.waitForURL((url) => url.pathname === topicsPath);
+    await page.waitForURL((url) => url.pathname === "/app/positioning/" + f.d.draftId);
     await new Promise((resolve) => setTimeout(resolve, 3000));
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before.plan);
     expect(await topicIdentity(f.actor)).toEqual(before.topic);
@@ -1276,34 +1274,6 @@ it("OPC: Stage C4 an already published draft spends nothing by waiting or refres
     await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(1);
     expect((await topicIdentity(f.actor)).binds).toBe(1);
     expect(await planIdentity(f.actor, f.d.draftId)).toMatchObject({ planExecutions: 0, planRuns: 0 });
-  } finally {
-    await browser.close();
-  }
-}, 300000);
-it("OPC: Stage C5 an unadmitted old-round request stays recoverable and never becomes current generation", async () => {
-  const f = await completed(3);
-  await planFixtureModel(f.moduleId);
-  const staleRequestId = randomUUID();
-  const { browser, page, key } = await planBrowser(f, {
-    envelope: planEnvelopeFor(f, { requestId: staleRequestId, sourceRoundId: randomUUID() }),
-  });
-  try {
-    await page.getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true }).waitFor();
-    const original = await page.evaluate((k) => sessionStorage.getItem(k), key);
-    expect(JSON.parse(original!).request.requestId).toBe(staleRequestId);
-    // The server's own verdict is shown; recovery stays closed and nothing is
-    // admitted under the current round.
-    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
-    expect(await page.getByRole("button", { name: "继续这条原请求", exact: true }).isDisabled()).toBe(true);
-    await page.reload();
-    await page.getByText("服务端没有这条请求的准入记录；没有开始新的生成。", { exact: true }).waitFor();
-    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBe(original);
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
-      executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
-      plans: 0, accounts: 0, workItems: 0,
-    });
-    expect(await page.getByRole("button", { name: "生成第一周计划", exact: true }).count()).toBe(0);
-    expect((await topicIdentity(f.actor)).binds).toBe(0);
   } finally {
     await browser.close();
   }
@@ -1886,7 +1856,7 @@ it("OPC: an explicit continue keeps a retained request identity instead of overw
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
     // a8dba69c: the continue goes on to the topic workspace and leaves the
-    // retained request for the explicit /plan recovery; it neither admits it
+    // retained request untouched; it neither admits it
     // nor creates a second identity or a topic binding.
     await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
     const stored = JSON.parse(
@@ -1895,11 +1865,6 @@ it("OPC: an explicit continue keeps a retained request identity instead of overw
     expect(stored.request.requestId).toBe(original.request.requestId);
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before);
     expect(await topicIdentity(f.actor)).toEqual(topicsBefore);
-    await page.goto(process.env.V3_LOCAL_APP + draftPath + "/plan");
-    await page.getByRole("heading", { name: "本机保留了一条早先的生成请求", exact: true }).waitFor();
-    expect(
-      JSON.parse((await page.evaluate((k) => sessionStorage.getItem(k), key)) as string).request.requestId,
-    ).toBe(original.request.requestId);
   } finally {
     await browser.close();
   }
