@@ -119,4 +119,5 @@
 .stepTab:hover:not(:disabled){color:#333}
 .stepTab:focus-visible{outline:2px solid #262626;outline-offset:-2px}
 .conversationPage .stepTabs{flex:none}
-@media(max-width:700px){.stepTabs{padding:0 12px}.stepTab{min-height:44px;font-size:12px}.stepTab:not([data-near]){display:none}}
+/* Phone: the full title always shows (it wraps to a second line instead of ending in an ellipsis); a tab stays at least 44px tall. */
+@media(max-width:700px){.stepTabs{padding:0 12px;align-items:stretch}.stepTab{min-height:44px;font-size:12px;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}.stepTab:not([data-near]){display:none}}
