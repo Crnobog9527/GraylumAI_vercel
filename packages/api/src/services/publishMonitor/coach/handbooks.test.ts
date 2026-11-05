@@ -163,6 +163,16 @@ describe('handbooks and reference lines for a chat review', () => {
     expect(weekly.posts_index).toBeUndefined();
   });
 
+  it('a diagnosed post in the pack carries its title and publish day, so the review can name it (D-8, 2026-11-05)', () => {
+    const data = generateDataset({ asOf: AS_OF });
+    const rows = packRowsSchema.parse(packRowsFor(data, data.accounts.find(a => a.key === 'A')!));
+    const target = rows.recent[0]!;
+    const one = [{ ...rows.diagnostics[0]!, postId: target.postId, platform: 'douyin', rates: { retain_5s: 0.05 }, reviewRunId: null, capturedOn: AS_OF, openingText: null }];
+    const pack = JSON.parse(JSON.stringify(buildPack({ rows: { ...rows, diagnostics: one }, cadence: 'weekly', businessId: simId('A'), now: NOW,
+      handbooks: new Map([['douyin', handbookOf('douyin')]]) })));
+    expect(pack.diagnostics.posts[0]).toMatchObject({ post_id: target.postId, title: target.title, posted_at: target.postedAt.slice(0, 10) });
+  });
+
   it('a chat turn reads the package once per ten minutes, and a failed or empty read is tried again at once', async () => {
     const d = database(files());
     const t0 = 1_000_000;

@@ -36,7 +36,13 @@ function diagnosticsSection(rows: PackRows, input: PackInput, period: ReturnType
     .toSorted((a, b) => b.capturedOn.localeCompare(a.capturedOn) || a.id.localeCompare(b.id));
   const fresh = [...new Map(newest.map(d => [d.postId, d] as const).reverse()).values()]
     .toSorted((a, b) => b.capturedOn.localeCompare(a.capturedOn) || a.id.localeCompare(b.id)).slice(0, 3);
-  const posts = fresh.map(d => diagnosePost(d, input.handbooks.get(d.platform) ?? null, rows.diagnostics));
+  // A diagnosis row carries no title; the review has to be able to name the post, so its title and publish day come from the post rows.
+  const known = new Map([...rows.recent, ...rows.facts].map(p => [p.postId, p] as const));
+  const posts = fresh.map(d => {
+    const post = known.get(d.postId);
+    return { ...diagnosePost(d, input.handbooks.get(d.platform) ?? null, rows.diagnostics),
+      title: post?.title == null ? null : Array.from(post.title).slice(0, 80).join(''), posted_at: post ? post.postedAt.slice(0, 10) : null };
+  });
   const pass = basicsPass(posts, input.handbooks);
   const stuck: Record<string, number> = {};
   for (const p of posts) if (p.stuck_layer) stuck[p.stuck_layer] = (stuck[p.stuck_layer] ?? 0) + 1;
