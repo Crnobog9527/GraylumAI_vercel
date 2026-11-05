@@ -121,7 +121,10 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
   it('a chosen Skill or attached document is one line for the model, or a refusal before anything opens (V2-10)', async () => {
     const setup = await prepare({ skills });
     expect(setup.selection({ moduleId: actorId })).toEqual({ note: expect.stringContaining('"Hooks"'),
-      skill: { moduleId: actorId, skillId: actorId, revisionId: catalog[0]!.revisionId } });
+      skill: { moduleId: actorId, skillId: actorId, revisionId: catalog[0]!.revisionId }, social: true });
+    // The social-media mark is only on a social-media Skill (chat.ts refuses it for an account without a confirmed positioning).
+    const plain = await prepare({ skills: async () => ({ catalog: [catalog[1]!], prepared: new Map([['Pricing', 'pricing text']]) }) });
+    expect(plain.selection({ moduleId: actorId })).not.toHaveProperty('social');
     expect(setup.selection({ moduleId: sessionId })).toEqual({ refused: 'TURN_SKILL_UNAVAILABLE' });
     expect(setup.selection({ references: [{ documentId: sessionId, version: 1 }] })).toEqual({ refused: 'TURN_REFERENCES_UNAVAILABLE' });
     expect(setup.selection({})).toEqual({ note: '' });
