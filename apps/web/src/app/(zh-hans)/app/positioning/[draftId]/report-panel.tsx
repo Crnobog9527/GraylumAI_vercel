@@ -19,6 +19,7 @@ import {
 import { ReportExport } from "./report-export-button";
 import { ReportChargeAction } from "./report-charge-confirm";
 import { useReportGen } from "./use-report-gen";
+import { useDialogFocusReturn } from "./dialog-focus-return";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
 import { reportStopChargeNotice } from "./turn-report-stop";
@@ -130,7 +131,10 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   const outline = useReportOutline(card);
   // Closing with unsaved edits asks in the same light dialog as 停止 (DESIGN.md Dialog), never the browser's confirm box.
   const [confirmClose, setConfirmClose] = useState(false);
-  const close = () => { if (!unsaved.current) onClose(); else setConfirmClose(true); };
+  const root = useRef<HTMLDivElement>(null);
+  // Cancelling (继续编辑 or Esc) returns focus to the control that had it, so the next Esc or Tab is still in the report.
+  const closeFocus = useDialogFocusReturn(() => root.current);
+  const close = () => { if (!unsaved.current) onClose(); else { closeFocus.remember(); setConfirmClose(true); } };
   const marks = useVersionMarks([markOf?.draftId]);
   const status = report.status;
   const view = status ? reportView(status) : null;
@@ -159,7 +163,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
       onClick: () => void window.open(profileTabHref("subscription"), "_blank", "noopener") }] } : {}) });
   const first = !report.executionId && !savedBody;
   return (
-    <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
+    <div ref={root} role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
       onKeyDown={event => { if (event.key === "Escape" && !report.stopConfirmation && !confirmClose) close(); }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div ref={card} className={`${resultStyles.consentCard} ${outline.chapters.length >= REPORT_OUTLINE_MIN_CHAPTERS ? "!max-w-5xl" : "!max-w-3xl"}`}>
@@ -211,7 +215,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
-        <AlertDialogContent tone="light" onKeyDown={event => event.stopPropagation()}>
+        <AlertDialogContent tone="light" onKeyDown={event => event.stopPropagation()} onCloseAutoFocus={closeFocus.onCloseAutoFocus}>
           <AlertDialogHeader>
             <AlertDialogTitle>关闭报告？</AlertDialogTitle>
             <AlertDialogDescription>{REPORT_DOC_TEXT.closeUnsaved}</AlertDialogDescription>

@@ -252,4 +252,8 @@ it("asks before closing a report with unsaved edits in the light dialog, never w
   expect(source).not.toContain("window.confirm");
   expect(source).toContain("REPORT_DOC_TEXT.closeUnsaved");
   expect(source).toMatch(/<AlertDialog open=\{confirmClose\}[\s\S]*?tone="light"[\s\S]*?继续编辑[\s\S]*?关闭，放弃修改/);
+  // Focus goes back to the control that had it (dialog-focus-return.browser.test.tsx proves the hook; this proves the panel wires it).
+  expect(source).toContain("useDialogFocusReturn(() => root.current)");
+  expect(source).toContain("closeFocus.remember(); setConfirmClose(true)");
+  expect(source).toContain("onCloseAutoFocus={closeFocus.onCloseAutoFocus}");
 });
