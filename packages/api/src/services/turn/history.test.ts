@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { historyRoom, projectHistory, trimHistory, turnSession } from './history';
+import { fitToolTurn } from './tools/capacity';
 
 const message = (seq: number, role: 'user' | 'assistant', content: string) =>
   ({ seq, role, content, contentHash: createHash('sha256').update(content).digest('hex') });
@@ -51,5 +52,41 @@ describe('the room history may take next to the tool reserve (D-6: a coach turn 
   it('without tools the room is the ceiling minus the instructions, the message and the reply slack', () => {
     expect(historyRoom(base)).toBe(150_000 - 14_000 - 100 - 8192);
     expect(historyRoom({ ...base, inputLimit: 10_000 })).toBe(0);
+  });
+});
+
+describe('history next to a real strategy read stays inside the 150 kB ceiling (D-6 review)', () => {
+  const inputLimit = 150_000, instructions = 'i'.repeat(14_000), definitionBytes = 3000, current = '帮我复盘';
+  const plan = { reserveBytes: 24_576 + 24_000 + 24_576 + 52_000, elasticBytes: 52_000 };
+  const long = Array.from({ length: 40 }, (_, i) => message(i + 1, i % 2 ? 'assistant' : 'user', `m${i + 1} ` + '字'.repeat(1500)));
+  const total = (history: ReturnType<typeof projectHistory>, extra: unknown[] = []) =>
+    Buffer.byteLength(instructions) + definitionBytes + Buffer.byteLength(JSON.stringify([...history, { role: 'user', content: current }, ...extra]));
+
+  it('the request at the start of the turn is below the ceiling minus the reply slack, whatever the history holds', () => {
+    const room = historyRoom({ inputLimit, instructionBytes: Buffer.byteLength(instructions), currentBytes: Buffer.byteLength(current),
+      tools: { plan, definitionBytes } });
+    const history = trimHistory(projectHistory(long), room);
+    expect(history.length).toBeGreaterThan(0);
+    expect(history.length).toBeLessThan(long.length);
+    expect(total(history)).toBeLessThanOrEqual(inputLimit - 8192);
+  });
+
+  it('when the strategy is really read, the oldest history goes first and the request stays within the budget the runner enforces', () => {
+    const room = historyRoom({ inputLimit, instructionBytes: Buffer.byteLength(instructions), currentBytes: Buffer.byteLength(current),
+      tools: { plan, definitionBytes } });
+    const history = trimHistory(projectHistory(long), room);
+    // The turn really reads its own posts, the strategy and a Skill: the results the reserve was kept for (24,000 + 52,000 + 24,576).
+    const results = [24_000, 52_000, 24_576].map(size => ({ type: 'function_call_result', output: 's'.repeat(size) }));
+    const items = [...history, { type: 'message', role: 'user', content: current }, ...results];
+    // chat.ts: fitToolTurn(items, instructions, history.length, inputLimit - 8192 - definitionBytes)
+    const kept = fitToolTurn(items, instructions, history.length, inputLimit - 8192 - definitionBytes);
+    expect(kept.length).toBeLessThan(items.length);
+    // This turn's own items are all kept; what goes is history, oldest first, and the kept history still starts with a user message.
+    expect(kept.slice(-4)).toEqual(items.slice(-4));
+    expect(kept.length - 4).toBeLessThan(history.length);
+    if (kept.length > 4) expect((kept[0] as { role: string }).role).toBe('user');
+    expect(Buffer.byteLength(instructions) + definitionBytes + Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(inputLimit - 8192);
+    // Without the eviction the same request would have gone over the budget.
+    expect(Buffer.byteLength(instructions) + definitionBytes + Buffer.byteLength(JSON.stringify(items))).toBeGreaterThan(inputLimit - 8192);
   });
 });
