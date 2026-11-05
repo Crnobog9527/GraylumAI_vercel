@@ -26,7 +26,7 @@ import { serverChatModel } from './agent/serverChatModel';
 import type { PricingDeps } from './admission/pricingAdmission';
 import { ceil12, modelCall, TurnStop } from './call';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients, type WorkItemTurn } from './db';
-import { projectHistory, trimHistory, turnSession } from './history';
+import { historyRoom, projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
@@ -272,6 +272,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // (charge_user=false); the platform's cost is its real one, or the upper bound when the response reported none.
     let fallback = false;
     const gate = opened.positioning;
+    // A Skill the user chose for this message is never dropped silently: an account without a confirmed positioning is not offered a social-media
+    // Skill (allowedSkills), so the chosen one could not be loaded and the reply would come without the method the user paid for. Refused here,
+    // before the positioning decision and any model call (as compare.ts does), so nothing is spent.
+    if (gate && !gate.positioned && 'social' in chosen && chosen.social) {
+      await close('failed', { refundAll: true, failureCode: 'positioning_required' });
+      return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
+    }
     // A resume asked this already: it continues under the fallback rule, which holds back a refusal either way.
     if (gate && !gate.positioned && resume) fallback = true;
     else if (gate && !gate.positioned) {
@@ -321,9 +328,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
     // The tool definitions and the room kept for tool results are part of what the history may not take (V2-6).
     const current = material + text + chosen.note + (tools?.plan.note ?? '');
-    const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192
-      - (tools ? tools.plan.reserveBytes + tools.definitionBytes : 0);
-    const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
+    const left = historyRoom({ inputLimit, instructionBytes: Buffer.byteLength(instructions), currentBytes: Buffer.byteLength(current), tools });
+    const history = trimHistory(projectHistory(opened.history), left);
     // The reply streams. Under the fallback rule nothing is sent while the text so far could still be the refusal marker, which
     // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
     let reply = '', sentChars = 0, holding = fallback;

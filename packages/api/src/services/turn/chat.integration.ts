@@ -225,6 +225,33 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: an account without a positioning gets the fallb
     .toEqual([{ failure_code: 'positioning_required', charged_credits: 0 }]);
 });
 
+it('RUNTIME: TURN-STEPS: a chosen social-media Skill is refused for an account without a positioning, before any model call, with nothing charged', async () => {
+  const f = await setup(), moduleId = randomUUID(), skillId = randomUUID(), revisionId = randomUUID();
+  const entry = (social: boolean) => ({ name: 'Storyboard', description: 'The method', moduleId, skillId, revisionId, packageId: skillId,
+    packageHash: 'b'.repeat(64), resultBytes: 10, ...(social ? { social: true as const } : {}) });
+  const send = async (social: boolean) => {
+    const events: TurnEvent[] = [], bodies: string[] = [], { admin } = countingAdmin();
+    const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); return sse('gen-chosen-' + bodies.length, ['Plain answer']); };
+    await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate },
+      newWork: { message: admit, calls: admit },
+      tools: { skills: async () => ({ catalog: [entry(social)], prepared: new Map([['Storyboard', 'method text']]) }) } },
+    { actorId: f.actor, sessionId: f.session, requestId: randomUUID(), text: 'Write a storyboard', chosen: { moduleId } }, e => { events.push(e); }));
+    return { events, bodies };
+  };
+  // The Skill the user chose cannot be loaded for this account (the catalog hides it): the turn ends at once, it does not answer without it.
+  const refused = await send(true);
+  expect(refused.events.at(-1)).toMatchObject({ type: 'error', code: 'POSITIONING_REQUIRED' });
+  expect(refused.bodies).toEqual([]);
+  expect(refused.events.some(event => event.type === 'step' || event.type === 'text')).toBe(false);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
+  expect((await db.query('select failure_code,charged_credits from turns where actor_id=$1', [f.actor])).rows)
+    .toEqual([{ failure_code: 'positioning_required', charged_credits: 0 }]);
+  // The same choice of a Skill that is not social-media is told to the model and goes on.
+  const allowed = await send(false);
+  expect(allowed.events.at(-1)).toMatchObject({ type: 'result' });
+  expect(allowed.bodies[0]).toContain('call load_skill with that name first');
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-4a: a message over the input budget is refused before anything opens or is sent', async () => {
   const f = await setup();
   const transport = vi.fn<typeof fetch>();

@@ -34,7 +34,10 @@ test('a reload shows the last conversation and the list at once, and another use
         if (Object.keys(node).some(key => key.startsWith('__reactFiber$'))) seen.__placeholderSeen = true;
     }).observe(document, { childList: true, subtree: true });
   });
-  await page.reload({ waitUntil: 'commit' });
+  // Wait for the document's own scripts (the load event), then for the saved copy: the saved copy is drawn by those scripts, and under
+  // `next dev` on a starved runner they can arrive many seconds late (CI runs showed only the empty frame for 15 s, with no request from the
+  // page yet). The 15 s below is then the time from the scripts to the content, not the time to download the dev bundles.
+  await page.reload({ waitUntil: 'load' });
   await expect(page.getByText(/测试测试/).first()).toBeVisible({ timeout: 15_000 }).catch(async error => { await evidence('held reload'); throw error; });
   await expect(replies(page).first()).toBeVisible();
   // The full interface, not a placeholder: the input box is there and can be typed into while the reads are still held.

@@ -90,7 +90,8 @@ export function extractScreenshots(reply: string): { body: string; items: Screen
 /** Added after the chat review instructions while the member can use the chat review (the block above is the only thing the chat saves). */
 export const COACH_CAPTURE_INSTRUCTIONS = '\nThe numbers you read from a screenshot are the one exception to "nothing is saved": they are kept for the weekly '
   + 'review. Always list them in the reply for the user to check (the kept copy never replaces the list), and say they are from the user\'s screenshot. '
-  + 'Match each screenshot to one post of the pack (title, opening, publish date); when it is not clear or several posts could fit, ask the user which '
+  + 'Match each screenshot to one post of the pack (posts_index, this_period, diagnostics; title, opening, publish date); '
+  + 'when it is not clear or several posts could fit, ask the user which '
   + 'one and keep nothing for it; a post that is not in the pack at all (for example one published today) cannot be kept: say so, '
   + 'still analyse its screenshot, and write no block for it. '
   + 'After all your text, only when you read numbers of a post you matched (and again, with the corrected value, when the user '
