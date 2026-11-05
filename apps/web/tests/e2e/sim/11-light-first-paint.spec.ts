@@ -25,7 +25,7 @@ test('the server HTML of every light signed-in page carries the light marker, a 
   await signIn(page, 'alice');
   const id = randomUUID();
   for (const path of ['/app', '/app/runtime', '/app/positioning', `/app/positioning/${id}`, `/app/positioning/${id}/topics`,
-    `/app/positioning/${id}/review/${randomUUID()}`, '/app/library'])
+    `/app/positioning/${id}/review/${randomUUID()}`, '/app/library', '/app/profile'])
     {
       const text = await html(page, path);
       expect(text, path).toContain(MARKER);
@@ -33,7 +33,7 @@ test('the server HTML of every light signed-in page carries the light marker, a 
       expect(text.indexOf(HEAD_SCRIPT), path).toBeGreaterThan(-1);
       expect(text.indexOf(HEAD_SCRIPT), path).toBeLessThan(text.indexOf('<body'));
     }
-  expect(await html(page, '/app/profile'), '/app/profile').not.toContain(MARKER);
+  expect(await html(page, '/app/library/scan-check'), '/app/library/scan-check').not.toContain(MARKER);
 });
 
 test('a client navigation from a light page to a dark one takes the light mark off, and back', async ({ page }) => {
@@ -44,8 +44,8 @@ test('a client navigation from a light page to a dark one takes the light mark o
   await page.goto('/app/runtime', { timeout: 180_000 });
   await expect.poll(state, { timeout: 60_000 }).toMatchObject({ mark: 'light', background: 'rgb(247, 247, 247)' });
   // Next's own router, as a link click does: the root layout stays mounted.
-  await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/profile'));
-  await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/profile', mark: null });
+  await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/library/scan-check'));
+  await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/library/scan-check', mark: null });
   expect((await state()).background).not.toBe('rgb(247, 247, 247)');
   await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/runtime'));
   await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/runtime', mark: 'light', background: 'rgb(247, 247, 247)' });
