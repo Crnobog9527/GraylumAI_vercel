@@ -128,7 +128,9 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   // The card scrolls; the chapter list beside the text follows it (Owner 2026-10-17: show the chapters on the left).
   const card = useRef<HTMLDivElement>(null);
   const outline = useReportOutline(card);
-  const close = () => { if (!unsaved.current || window.confirm(REPORT_DOC_TEXT.closeUnsaved)) onClose(); };
+  // Closing with unsaved edits asks in the same light dialog as 停止 (DESIGN.md Dialog), never the browser's confirm box.
+  const [confirmClose, setConfirmClose] = useState(false);
+  const close = () => { if (!unsaved.current) onClose(); else setConfirmClose(true); };
   const marks = useVersionMarks([markOf?.draftId]);
   const status = report.status;
   const view = status ? reportView(status) : null;
@@ -158,7 +160,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
   const first = !report.executionId && !savedBody;
   return (
     <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
-      onKeyDown={event => { if (event.key === "Escape" && !report.stopConfirmation) close(); }}
+      onKeyDown={event => { if (event.key === "Escape" && !report.stopConfirmation && !confirmClose) close(); }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div ref={card} className={`${resultStyles.consentCard} ${outline.chapters.length >= REPORT_OUTLINE_MIN_CHAPTERS ? "!max-w-5xl" : "!max-w-3xl"}`}>
         <header>
@@ -205,6 +207,18 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, b
           <AlertDialogFooter>
             <AlertDialogCancel onClick={report.cancelStop}>继续生成</AlertDialogCancel>
             <AlertDialogAction onClick={report.confirmStop}>确认停止</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
+        <AlertDialogContent tone="light" onKeyDown={event => event.stopPropagation()}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>关闭报告？</AlertDialogTitle>
+            <AlertDialogDescription>{REPORT_DOC_TEXT.closeUnsaved}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>继续编辑</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setConfirmClose(false); onClose(); }}>关闭，放弃修改</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

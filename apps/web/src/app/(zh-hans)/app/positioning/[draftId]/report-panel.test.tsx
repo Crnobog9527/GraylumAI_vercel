@@ -245,3 +245,11 @@ it("offers 导出报告 for a finished report and for a saved formal version", a
   expect(renderToStaticMarkup(<ReportDialog report={dialogReport({ executionId: null }) as never}
     savedBody={formal.report.generatedReport.body} busy={false} onClose={() => {}} onTopics={() => {}} />)).toContain("导出报告");
 });
+
+it("asks before closing a report with unsaved edits in the light dialog, never with the browser's confirm box", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./report-panel.tsx", import.meta.url), "utf8");
+  expect(source).not.toContain("window.confirm");
+  expect(source).toContain("REPORT_DOC_TEXT.closeUnsaved");
+  expect(source).toMatch(/<AlertDialog open=\{confirmClose\}[\s\S]*?tone="light"[\s\S]*?继续编辑[\s\S]*?关闭，放弃修改/);
+});
