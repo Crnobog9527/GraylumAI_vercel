@@ -28,7 +28,7 @@ export function PricingCreditPacks({ packages, plans, failed }: {
       ) : (
         <div className="grid gap-3 sm:grid-cols-3">
           {priced.map(pkg => (
-            <div key={pkg.id} className="grid gap-1 rounded-xl border p-4 text-center" style={card}>
+            <div key={pkg.id} className="grid gap-1 rounded-[var(--pub-radius-card,18px)] border p-4 text-center" style={card}>
               <b className="text-2xl" style={{ color: 'var(--text-primary)' }}>
                 {(pkg.credits + Math.max(0, pkg.bonus_credits)).toLocaleString('en-US')} 积分</b>
               <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{formatUsd(pkg.price)}</span>
@@ -43,7 +43,7 @@ export function PricingCreditPacks({ packages, plans, failed }: {
 /** Studio: intent only, no team features promised until they exist (design README conflict 6). */
 export function PricingStudio() {
   return (
-    <section data-testid="pricing-studio" className="grid gap-3 rounded-2xl border p-5 md:grid-cols-[1fr_auto] md:items-center"
+    <section data-testid="pricing-studio" className="grid gap-3 rounded-[var(--pub-radius-card,18px)] border p-5 md:grid-cols-[1fr_auto] md:items-center"
       style={card}>
       <div className="grid gap-1">
         <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.studioTitle}</h2>
@@ -60,7 +60,7 @@ export function PricingFaq() {
     <section data-testid="pricing-faq" className="grid gap-3">
       <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.faqTitle}</h2>
       {pricingFaqItems.map(item => (
-        <details key={item.question} className="rounded-xl border p-4" style={card}>
+        <details key={item.question} className="rounded-[var(--pub-radius-card,18px)] border p-4" style={card}>
           <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-primary)' }}>{item.question}</summary>
           <p className="mt-3 text-sm leading-7" style={{ color: 'var(--text-secondary)' }}>{item.answer}</p>
         </details>

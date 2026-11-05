@@ -29,7 +29,6 @@
   "apps/web/src/app/(zh-hans)/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/components/admin/AdminSidebar.tsx": {"longLines":2},
   "apps/web/src/components/admin/StatsCard.tsx": {"longLines":1},
-  "apps/web/src/components/landing/LandingHeader.tsx": {"longLines":1},
   "apps/web/src/components/landing/PublicPageHero.tsx": {"longLines":2},
   "apps/web/src/components/layout/GlobalBanner.tsx": {"longLines":1},
   "apps/web/src/components/opc/content-editor.tsx": {"longLines":9},
