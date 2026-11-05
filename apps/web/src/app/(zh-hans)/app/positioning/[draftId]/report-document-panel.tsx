@@ -118,7 +118,7 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   return <>
     {draft === null ? <ReportView className="mt-4" body={doc.body} data={doc.strategy?.data} editedFields={doc.strategy?.textEdited} />
       : <div className="mt-4 space-y-1">
-        <Textarea aria-label="报告正文" rows={18} value={draft.text} disabled={working}
+        <Textarea aria-label="报告正文" rows={18} value={draft.text} disabled={working} className="bg-white text-[#262626]"
           onChange={event => { const text = event.target.value; setDraft(old => old && { ...old, text }); }} />
         <p className="text-xs text-[var(--text-secondary)]" aria-live="polite">
           {length} / {REPORT_MAX_CHARACTERS} 字{length > REPORT_MAX_CHARACTERS ? "，超出上限，删减后才能保存" : ""}</p>

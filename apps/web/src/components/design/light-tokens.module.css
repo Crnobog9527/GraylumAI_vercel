@@ -100,6 +100,25 @@
   --border: 0 0% 90%;
   --input: 0 0% 90%;
   --ring: 0 0% 15%;
+  --destructive: 0 46% 44%;
+  --destructive-foreground: 0 0% 100%;
+  /* State and legacy aliases that ui/ and the page modules read (UI-UNIFY A0): the root values are the dark theme's. */
+  --bg-elevated: var(--gl-surface);
+  --border-secondary: var(--gl-border-control);
+  --text-disabled: var(--gl-text-placeholder);
+  --success: var(--gl-success);
+  --success-bg: var(--gl-success-bg);
+  --warning: var(--gl-warning);
+  --warning-bg: var(--gl-warning-bg);
+  --error: var(--gl-error);
+  --error-bg: var(--gl-error-bg);
+  --info: var(--gl-info);
+  --info-bg: rgba(37, 99, 168, 0.08);
+  --color-primary-10: rgba(36, 36, 36, 0.06);
+  --color-primary-20: rgba(36, 36, 36, 0.1);
+  --color-primary-30: rgba(36, 36, 36, 0.16);
+  --color-error: var(--error);
+  --border-default: var(--border-primary);
 
   color-scheme: light;
   background: var(--gl-canvas);

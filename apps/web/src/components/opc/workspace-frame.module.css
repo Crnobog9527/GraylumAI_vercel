@@ -4,9 +4,19 @@
  --color-primary:#242424;--color-secondary:#444;
  --scroll-thumb:#c4c4c4;--scroll-track:transparent;
  --primary:0 0% 13%;--primary-foreground:0 0% 100%;
+ /* The shadcn variables and the state aliases ui/ components read (UI-UNIFY A0, as light-tokens.module.css `.light`): without them a Textarea,
+    a skeleton or an outline Button inside the workbench carried the dark root values. */
+ --background:0 0% 100%;--foreground:0 0% 15%;--card:0 0% 100%;--card-foreground:0 0% 15%;--popover:0 0% 100%;--popover-foreground:0 0% 15%;
+ --secondary:0 0% 96%;--secondary-foreground:0 0% 15%;--muted:0 0% 96%;--muted-foreground:0 0% 47%;--accent:0 0% 96%;--accent-foreground:0 0% 15%;
+ --destructive:0 46% 44%;--destructive-foreground:0 0% 100%;--border:0 0% 90%;--input:0 0% 90%;--ring:0 0% 15%;
+ --bg-elevated:#fff;--border-secondary:#e5e5e5;--text-disabled:#aaa;
+ --success:#2f6a3b;--success-bg:#f1f7f2;--warning:#76592a;--warning-bg:#faf6ee;--error:#a23b3b;--error-bg:#fcf1f1;--info:#2563a8;--info-bg:rgba(37,99,168,.08);
+ --color-primary-10:rgba(36,36,36,.06);--color-primary-20:rgba(36,36,36,.1);--color-primary-30:rgba(36,36,36,.16);
+ --color-error:var(--error);--border-default:var(--border-primary);
  height:100dvh;overflow:hidden;background:#f7f7f7;color:#262626;color-scheme:light;scrollbar-color:var(--scroll-thumb) var(--scroll-track);scrollbar-width:thin;
  font:400 16px/24px var(--font-primary);
 }
+.workspace :global(.skeleton){background:#ebebeb}
 .workspace *{box-sizing:border-box;scrollbar-color:var(--scroll-thumb) var(--scroll-track);scrollbar-width:thin}
 .workspace *::-webkit-scrollbar{width:7px;height:7px}.workspace *::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:9px}.workspace *::-webkit-scrollbar-thumb:hover{background:#999}
 .workspace button,.workspace input,.workspace textarea{font:inherit}

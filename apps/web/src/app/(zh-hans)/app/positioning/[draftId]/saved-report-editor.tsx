@@ -83,7 +83,8 @@ export function SavedReportEditor({ draftId, projectId, versionId, body, view, b
     && length <= REPORT_MAX_CHARACTERS && !hasDataFence(draft);
   return <>
     {draft === null ? view : <div className="mt-4 space-y-1">
-      <Textarea aria-label="报告正文" rows={18} value={draft} disabled={working} onChange={event => change(event.target.value)} />
+      <Textarea aria-label="报告正文" rows={18} value={draft} disabled={working} className="bg-white text-[#262626]"
+        onChange={event => change(event.target.value)} />
       <p className="text-xs text-[var(--text-secondary)]" aria-live="polite">
         {length} / {REPORT_MAX_CHARACTERS} 字{length > REPORT_MAX_CHARACTERS ? "，超出上限，删减后才能定稿" : ""}</p>
       {hasDataFence(draft) && <p className="text-xs" role="alert">{REPORT_DOC_TEXT.dataFence}</p>}

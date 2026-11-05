@@ -112,6 +112,9 @@
   --warning-bg: rgba(245, 158, 11, 0.1);
   --error-bg: rgba(239, 68, 68, 0.1);
   --info-bg: rgba(59, 130, 246, 0.1);
+  /* Aliases that pages read but nothing defined (UI-UNIFY A0). */
+  --color-error: var(--error);
+  --border-default: var(--border-primary);
 
   /* Sidebar Variables (Dark Mode - GraylumAI default) */
   --sidebar-background: 0 0% 6.9%;
@@ -293,7 +296,59 @@ body {
 html[data-first-paint='light'] body,
 body:has([data-first-paint='light']) {
   background: #f7f7f7;
+  color: #262626;
   color-scheme: light;
+  /* The light values on <body> itself (UI-UNIFY A0): a page that is not inside the workbench shell (a fallback page, a read failure) and the
+     dialogs and menus that Radix portals into <body> (outside .workspace) read these instead of the dark root values. Same values as
+     .workspace (components/opc/workspace-frame.module.css) and .light (components/design/light-tokens.module.css). */
+  --bg-primary: #fff;
+  --bg-secondary: #f7f7f7;
+  --bg-tertiary: #f1f1f2;
+  --bg-elevated: #fff;
+  --text-primary: #262626;
+  --text-secondary: #666;
+  --text-tertiary: #6b6b6b;
+  --text-disabled: #aaa;
+  --border-primary: #ededed;
+  --border-secondary: #e5e5e5;
+  --color-primary: #242424;
+  --color-secondary: #444;
+  --primary: 0 0% 13%;
+  --primary-foreground: 0 0% 100%;
+  --background: 0 0% 100%;
+  --foreground: 0 0% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 15%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 15%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 15%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 47%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 15%;
+  --destructive: 0 46% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 0 0% 15%;
+  --success: #2f6a3b;
+  --success-bg: #f1f7f2;
+  --warning: #76592a;
+  --warning-bg: #faf6ee;
+  --error: #a23b3b;
+  --error-bg: #fcf1f1;
+  --info: #2563a8;
+  --info-bg: rgba(37, 99, 168, 0.08);
+  --color-primary-10: rgba(36, 36, 36, 0.06);
+  --color-primary-20: rgba(36, 36, 36, 0.1);
+  --color-primary-30: rgba(36, 36, 36, 0.16);
+  --color-error: var(--error);
+  --border-default: var(--border-primary);
+}
+html[data-first-paint='light'] .skeleton,
+body:has([data-first-paint='light']) .skeleton {
+  background: #ebebeb;
 }
 
 code,
