@@ -144,9 +144,12 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
   }
   // Sized last, against the ceiling this turn really has: a turn with usable research holds a strategy read next to everything else.
   const strategyBytes = input.source?.strategyBytes ?? 0;
+  let elasticBytes = 0;
   if (strategyBytes && available.includes('read_source')
     && used + strategyBytes <= (setup ? input.researchInputBytes ?? input.inputBytes : input.inputBytes)) {
-    used += strategyBytes; sourceRoom.strategy = true;
+    // The strategy result is large (52 kB) and read only when the question needs it. History may sit in its room until then; when
+    // the read happens fitToolTurn drops the oldest history to fit. Holding it back from history left none at all (6574, D-6).
+    used += strategyBytes; sourceRoom.strategy = true; elasticBytes = strategyBytes;
   }
   const order = (names: TurnToolName[]) => offered.filter(name => names.includes(name));
   const note = trimmed.length ? `\nTools unavailable for this reply: ${trimmed.map(t => `${t.name} (${t.reason})`).join(', ')}. `
@@ -154,7 +157,7 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
   return {
     plan: { offered, available: order(available), trimmed, note,
       paidToolUpperUsd: setup ? paidToolBounds(setup.policies, paidTools, subcalls, input.modelMultiplier) : [],
-      limits: { paidTools: setup ? paidTools : 0, freeTools }, subcalls, reserveBytes: used - input.requiredBytes,
+      limits: { paidTools: setup ? paidTools : 0, freeTools }, subcalls, reserveBytes: used - input.requiredBytes, ...(elasticBytes ? { elasticBytes } : {}),
       ...(input.source ? { readCalls, sourceRoom } : {}) },
     research: setup,
   };

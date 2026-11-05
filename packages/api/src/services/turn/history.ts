@@ -17,6 +17,16 @@ export function projectHistory(history: readonly HistoryItem[]): Item[] {
     : { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: m.content }] });
 }
 
+/**
+ * The bytes history may take: what the ceiling leaves after the instructions, the current message, the slack kept for the reply, the
+ * tool definitions and the room reserved for tool results, except the elastic part of it (a later tool read evicts the oldest history).
+ */
+export function historyRoom(input: { inputLimit: number; instructionBytes: number; currentBytes: number;
+  tools?: { plan: { reserveBytes: number; elasticBytes?: number }; definitionBytes: number } | null }): number {
+  const reserved = input.tools ? input.tools.plan.reserveBytes - (input.tools.plan.elasticBytes ?? 0) + input.tools.definitionBytes : 0;
+  return Math.max(input.inputLimit - input.instructionBytes - input.currentBytes - 8192 - reserved, 0);
+}
+
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 /** The newest items whose JSON array fits `budget` bytes; an assistant reply never starts the kept history. */
 export function trimHistory(items: readonly Item[], budget: number): Item[] {

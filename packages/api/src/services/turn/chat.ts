@@ -26,7 +26,7 @@ import { serverChatModel } from './agent/serverChatModel';
 import type { PricingDeps } from './admission/pricingAdmission';
 import { ceil12, modelCall, TurnStop } from './call';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients, type WorkItemTurn } from './db';
-import { projectHistory, trimHistory, turnSession } from './history';
+import { historyRoom, projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
@@ -321,9 +321,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // 5. History: newest that fits what the input budget leaves after the instructions and the current message.
     // The tool definitions and the room kept for tool results are part of what the history may not take (V2-6).
     const current = material + text + chosen.note + (tools?.plan.note ?? '');
-    const left = inputLimit - Buffer.byteLength(instructions) - Buffer.byteLength(current) - 8192
-      - (tools ? tools.plan.reserveBytes + tools.definitionBytes : 0);
-    const history = trimHistory(projectHistory(opened.history), Math.max(left, 0));
+    const left = historyRoom({ inputLimit, instructionBytes: Buffer.byteLength(instructions), currentBytes: Buffer.byteLength(current), tools });
+    const history = trimHistory(projectHistory(opened.history), left);
     // The reply streams. Under the fallback rule nothing is sent while the text so far could still be the refusal marker, which
     // is never shown (#900); once it cannot be, the held text goes out and the rest streams.
     let reply = '', sentChars = 0, holding = fallback;
