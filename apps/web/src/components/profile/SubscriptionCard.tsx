@@ -23,6 +23,7 @@ import { MethodCheckoutDialog, type MethodCheckoutTarget } from '@/components/pa
 import { CHECKOUT_COPY, founderSeatsLeft } from '@/components/paywall/methodCheckout';
 import { pickPaywallPlans } from '@/components/paywall/paywallPlans';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { ProfileSection } from './ProfileSection';
 export { ProfileCatalogState, CreditPackagesSection };
 
 interface MockUser {
@@ -37,11 +38,11 @@ interface CheckoutNotice {
 }
 
 const NOTICE_COLORS: Record<CheckoutNotice['tone'], [string, string]> = {
-  success: ['rgba(34, 197, 94, 0.25)', 'rgba(34, 197, 94, 0.08)'],
-  warning: ['rgba(245, 158, 11, 0.25)', 'rgba(245, 158, 11, 0.08)'],
-  cancelled: ['rgba(245, 158, 11, 0.25)', 'rgba(245, 158, 11, 0.08)'],
-  error: ['rgba(239, 68, 68, 0.25)', 'rgba(239, 68, 68, 0.08)'],
-  syncing: ['rgba(59, 130, 246, 0.25)', 'rgba(59, 130, 246, 0.08)'],
+  success: ['var(--success)', 'var(--success-bg)'],
+  warning: ['var(--warning)', 'var(--warning-bg)'],
+  cancelled: ['var(--warning)', 'var(--warning-bg)'],
+  error: ['var(--error)', 'var(--error-bg)'],
+  syncing: ['var(--info)', 'var(--info-bg)'],
 };
 
 // 根据计划配置生成默认特性列表
@@ -256,14 +257,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   })();
 
   return (
-    <div
-      className="mb-6 rounded-2xl p-6 md:p-8"
-      style={{
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border-primary)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
-      }}
-    >
+    <ProfileSection className="mb-6 md:p-8">
       <MethodCheckoutDialog target={dialogTarget} checkout={checkout} onClose={() => setTarget(null)}
         onGoldFirstDeclined={() => setFirstMonthDeclined(true)} onFounderDeclined={() => setFounderDeclined(true)}
         onFounderSoldOut={() => setFounderSoldOut(true)}
@@ -277,9 +271,9 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         <div className="flex items-center gap-3">
           <div
             className="p-2 rounded-lg"
-            style={{ background: 'rgba(255, 215, 0, 0.1)', border: '1px solid rgba(255, 215, 0, 0.2)' }}
+            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
-            <Crown className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+            <Crown className="h-5 w-5" style={{ color: 'var(--text-primary)' }} />
           </div>
           <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>会员订阅</h3>
         </div>
@@ -308,9 +302,9 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
             <button key={cycle} type="button" role="radio" aria-checked={billingCycle === cycle} onClick={() => setBillingCycle(cycle)}
               className="rounded-lg px-4 py-1.5 text-sm font-medium transition-colors duration-200"
               style={{
-                background: billingCycle === cycle ? 'rgba(255, 215, 0, 0.2)' : 'transparent',
-                color: billingCycle === cycle ? 'var(--color-primary)' : 'var(--text-tertiary)',
-                border: billingCycle === cycle ? '1px solid rgba(255, 215, 0, 0.3)' : '1px solid transparent'
+                background: billingCycle === cycle ? 'var(--color-primary)' : 'transparent',
+                color: billingCycle === cycle ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                border: billingCycle === cycle ? '1px solid var(--color-primary)' : '1px solid var(--border-secondary)'
               }}>
               {cycle === 'monthly' ? '按月' : '按年'}
             </button>
@@ -364,7 +358,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
             onSelect={() => setTarget({ planId: plan.id, cycle: billingCycle })} />;
         })}
       </div>
-    </div>
+    </ProfileSection>
   );
 });
 
@@ -395,14 +389,7 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
 
   return (
     <>
-      <div
-        className="mb-6 rounded-2xl p-6 md:p-8"
-        style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-primary)',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
-        }}
-      >
+      <ProfileSection className="mb-6 md:p-8">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>积分概览</h3>
           <Zap className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
@@ -414,11 +401,7 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
               <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>积分余额</div>
               <div
                 className="text-3xl font-bold"
-                style={{
-                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent'
-                }}
+                style={{ color: 'var(--text-primary)' }}
               >
                 {formatCreditsBalance(hasVerifiedBalance ? 'ready' : 'unavailable', credits)}
               </div>
@@ -447,7 +430,7 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
             </div>
           </div>
         </div>
-      </div>
+      </ProfileSection>
 
       {/* 积分加油包 */}
       {hasVerifiedBalance && (

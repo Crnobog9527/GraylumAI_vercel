@@ -17,20 +17,11 @@ export interface PlanConfig {
   highlight?: boolean;
 }
 
-const warm = {
-  background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(249, 115, 22, 0.14) 100%)',
-  border: '2px solid rgba(245, 158, 11, 0.45)',
-  shadow: '0 0 30px rgba(249, 115, 22, 0.16)',
-  text: 'linear-gradient(135deg, #FBBF24 0%, #FB923C 100%)',
-};
+// The recommended plan is told apart by a darker border (DESIGN.md: gold is only the current-plan tag; the recommendation tag is neutral).
+const emphasis = { border: '1px solid var(--gl-border-strong, #dcdcdc)', outline: '1px solid var(--gl-border-strong, #dcdcdc)' };
 
-function Amount({ value, highlight }: { value: string; highlight: boolean }) {
-  return (
-    <span className="text-3xl font-bold" style={{ WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-      background: highlight ? warm.text : 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)' }}>
-      {value}
-    </span>
-  );
+function Amount({ value }: { value: string; highlight?: boolean }) {
+  return <span className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>{value}</span>;
 }
 
 /** One plan on the membership page; the button opens the card checkout dialog (or is hidden while it is closed). */
@@ -54,13 +45,12 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
   return (
     <div data-testid={`profile-membership-plan-${plan.level}`} data-plan-id={plan.id} data-plan-level={plan.level}
       data-highlight-tone={highlight ? 'warm' : 'default'} className="relative rounded-xl p-5 transition-colors duration-200"
-      style={{ background: highlight ? warm.background : 'var(--bg-primary)',
-        border: highlight ? warm.border : '1px solid var(--border-primary)', boxShadow: highlight ? warm.shadow : 'none' }}>
+      style={{ background: 'var(--bg-primary)', border: highlight ? emphasis.border : '1px solid var(--border-primary)',
+        outline: highlight ? emphasis.outline : 'none' }}>
       {plan.recommended && (
         <div data-testid={`profile-membership-plan-recommended-${plan.level}`}
           className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-xs font-medium"
-          style={{ background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.24) 0%, rgba(249, 115, 22, 0.24) 100%)',
-            color: '#FBBF24', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
+          style={{ background: 'var(--gl-accent-tag, #f4efe3)', color: 'var(--gl-accent-tag-text, #7a5f2c)' }}>
           推荐
         </div>
       )}
@@ -87,7 +77,7 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
           <>
             <div className="flex items-center gap-2">
               <span className="text-sm line-through" style={{ color: 'var(--text-disabled)' }}>{formatUsd(plan.price.monthly)}/月</span>
-              <span className="rounded px-1.5 py-0.5 text-xs" style={{ background: 'rgba(34, 197, 94, 0.2)', color: 'var(--success)' }}>
+              <span className="rounded px-1.5 py-0.5 text-xs" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
                 省{Math.round((1 - price / (plan.price.monthly * 12)) * 100)}%
               </span>
             </div>
@@ -131,8 +121,7 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
 
       {action ? (
         <Button onClick={onSelect} className="h-auto min-h-10 w-full whitespace-normal px-3 py-2 text-center" disabled={action.disabled}
-          style={{ background: action.disabled ? 'var(--bg-tertiary)'
-            : 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+          style={{ background: action.disabled ? 'var(--bg-tertiary)' : 'var(--color-primary)',
           color: action.disabled ? 'var(--text-tertiary)' : 'var(--bg-primary)', cursor: action.disabled ? 'default' : 'pointer' }}>
           {action.label}
         </Button>

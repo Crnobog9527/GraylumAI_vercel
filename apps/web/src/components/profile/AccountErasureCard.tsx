@@ -19,7 +19,7 @@ import { buildErasureImpactLines, renewalUsesStripePortal, type ImpactLine } fro
 import { useAccountErasure } from '@/hooks/use-account-erasure';
 
 const TONE_COLOR: Record<ImpactLine['tone'], string> = {
-  block: '#fca5a5',
+  block: 'var(--error)',
   warn: 'var(--color-primary)',
   info: 'var(--text-secondary)',
 };
@@ -49,7 +49,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
 
   return (
     <>
-      <div className="mt-6 rounded-2xl p-6" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(239,68,68,0.35)' }}>
+      <div className="mt-6 rounded-2xl p-6" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--error)' }}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="font-medium" style={{ color: 'var(--text-primary)' }}>注销账号</div>
@@ -57,7 +57,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
               永久关闭账号并清除私有内容，确认后不能撤销。
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(true)} style={{ ...ghostStyle, color: '#fca5a5' }}>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(true)} style={{ ...ghostStyle, color: 'var(--error)' }}>
             注销账号
           </Button>
         </div>

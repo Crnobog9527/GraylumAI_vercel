@@ -85,14 +85,14 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-primary)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+        boxShadow: 'none',
       }}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
         <div className="flex items-center gap-3">
           <div
             className="p-2 rounded-lg"
-            style={{ background: 'rgba(255, 215, 0, 0.1)', border: '1px solid rgba(255, 215, 0, 0.2)' }}
+            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <TrendingDown className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
           </div>
@@ -220,7 +220,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-primary)',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+          boxShadow: 'none',
         }}
       >
         <div className="flex items-center justify-between mb-6">
@@ -278,7 +278,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-primary)',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+          boxShadow: 'none',
         }}
       >
         <div className="flex items-center justify-between mb-6">
@@ -316,7 +316,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
                 <div className="flex items-start gap-4 mb-4 md:mb-0">
                   <div
                     className="p-3 rounded-xl"
-                    style={{ background: 'rgba(255, 215, 0, 0.1)', border: '1px solid rgba(255, 215, 0, 0.2)' }}
+                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
                   >
                     <Icon className="h-5 w-5" style={{ color: typeConfig.color }} />
                   </div>

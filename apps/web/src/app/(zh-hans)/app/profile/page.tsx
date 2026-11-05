@@ -13,7 +13,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { AppHeader } from '@/components/layout/AppHeader';
+import { ProfileShell } from '@/components/profile/ProfileShell';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import ProfileSidebar from '@/components/profile/ProfileSidebar';
 import {
@@ -51,6 +51,7 @@ function ProfilePageContent() {
     // state 传 null：Next 只在非内部调用时同步 useSearchParams，传回它自己的 state 会跳过同步
     window.history.replaceState(null, '', withProfileTab(window.location.href, tab));
   }, []);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [ticketInitialView, setTicketInitialView] = useState<'list' | 'create'>('list');
 
   // tRPC queries for real data (only enabled after auth check)
@@ -119,48 +120,16 @@ function ProfilePageContent() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}><PageSkeleton rows={6} label="个人中心读取中" /></div>
+      <ProfileShell><PageSkeleton rows={6} label="个人中心读取中" /></ProfileShell>
     );
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
-      {/* 动态背景 */}
-      <div className="absolute inset-0 pointer-events-none">
-        {/* 顶部金色光晕 - 静态 */}
-        <div
-          className="absolute -top-16 left-1/3 h-[150px] w-[220px] rounded-full opacity-22 blur-[48px] md:-top-24 md:h-[240px] md:w-[420px] md:opacity-30 md:blur-[68px]"
-          style={{
-            background: 'var(--color-primary)',
-            contain: 'layout paint',
-          }}
-        />
-        {/* 左下紫色光晕 - 静态 */}
-        <div
-          className="absolute bottom-0 left-0 h-[180px] w-[180px] rounded-full opacity-14 blur-[52px] md:h-[320px] md:w-[320px] md:opacity-18 md:blur-[80px]"
-          style={{
-            background: 'rgba(139,92,246,0.5)',
-            contain: 'layout paint',
-          }}
-        />
-        {/* 网格纹理 */}
-        <div
-          className="absolute inset-0 opacity-[0.05]"
-          style={{
-            backgroundImage: 'linear-gradient(rgba(255,215,0,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,215,0,0.1) 1px, transparent 1px)',
-            backgroundSize: '50px 50px',
-            contain: 'layout paint',
-          }}
-        />
-      </div>
-
-      {/* 顶部导航 */}
-      <AppHeader />
-
+    <ProfileShell onOpenNav={() => setMenuOpen(true)}>
       {/* 全站横幅公告 */}
       <GlobalBanner banners={banners} />
 
-      <div className="container mx-auto px-4 py-8 max-w-7xl relative" style={{ zIndex: 1 }}>
+      <div className="container mx-auto px-4 py-6 md:py-8 max-w-7xl">
         {creditsStatus === 'unavailable' && (
           <div
             className="mb-6 flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -187,7 +156,7 @@ function ProfilePageContent() {
         <div className="flex flex-col md:flex-row gap-4 md:gap-8">
           {/* Mobile Sidebar Trigger */}
           <div className="md:hidden mb-4">
-            <Sheet>
+            <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
               <SheetTrigger asChild>
                 <Button
                   variant="outline"
@@ -277,14 +246,14 @@ function ProfilePageContent() {
           </div>
         </div>
       </div>
-    </div>
+    </ProfileShell>
   );
 }
 
 export default function ProfilePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}><PageSkeleton rows={6} label="个人中心读取中" /></div>
+      <ProfileShell><PageSkeleton rows={6} label="个人中心读取中" /></ProfileShell>
     }>
       <ProfilePageContent />
     </Suspense>

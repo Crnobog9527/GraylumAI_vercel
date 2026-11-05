@@ -4,7 +4,7 @@
 import { Button } from '@/components/ui/button';
 
 export const emptyStateCardStyle = {
-  borderColor: 'rgba(255,255,255,0.08)',
+  borderColor: 'var(--border-primary)',
   background: 'var(--bg-primary)',
 } as const;
 

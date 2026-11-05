@@ -45,7 +45,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-primary)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+        boxShadow: 'none',
       }}
     >
       <div className="flex items-center gap-3 mb-6">
@@ -106,7 +106,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
             {pkg.is_popular && (
               <div
                 className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
-                style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#3B82F6', border: '1px solid rgba(59, 130, 246, 0.3)' }}
+                style={{ background: 'rgba(59, 130, 246, 0.2)', color: 'var(--info)', border: '1px solid var(--info)' }}
               >
                 热门
               </div>

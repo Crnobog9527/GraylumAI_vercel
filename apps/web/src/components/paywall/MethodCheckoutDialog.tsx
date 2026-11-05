@@ -29,8 +29,7 @@ export function MethodCheckoutDialog({ target, checkout, onClose, onGoldFirstDec
 }) {
   return (
     <Dialog open={target !== null} onOpenChange={open => { if (!open && !checkout.pending) onClose(); }}>
-      <DialogContent data-testid="method-checkout-dialog" className="max-h-[90vh] max-w-md overflow-y-auto"
-        style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
+      <DialogContent tone="light" data-testid="method-checkout-dialog" className="max-h-[90vh] max-w-md overflow-y-auto">
         <DialogHeader>
           <DialogTitle style={{ color: 'var(--text-primary)' }}>{target?.title}</DialogTitle>
           <DialogDescription style={{ color: 'var(--text-tertiary)' }}>{target?.description}</DialogDescription>

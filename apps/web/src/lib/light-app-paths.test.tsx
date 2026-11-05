@@ -10,10 +10,11 @@ describe('light first paint', () => {
   it.each([
     '/app', '/app/positioning', '/app/positioning/abc', '/app/positioning/abc/topics', '/app/positioning/abc/review/r1',
     '/app/runtime', '/app/library', '/app/publish-monitor', '/app/workbench/marketplace', '/app/workbench/search', '/app/runtime/',
+    '/app/profile', '/app/profile/',
   ])('%s is light', path => expect(isLightAppPath(path)).toBe(true));
 
   it.each([
-    '/app/profile', '/app/expert-consult', '/app/library/scan-check', '/app/publish-monitor/connect',
+    '/app/expert-consult', '/app/library/scan-check', '/app/publish-monitor/connect',
     '/app/publish-monitor/publish', '/app/workbench/agent-first-preview', '/login', '/', null,
   ])('%s keeps the dark body', path => expect(isLightAppPath(path)).toBe(false));
 
@@ -56,7 +57,7 @@ describe('light first paint', () => {
     const root = { setAttribute: (name: string, value: string) => { attrs.set(name, value); }, removeAttribute: (name: string) => { attrs.delete(name); } };
     const at = (path: string | null) => { syncLightFirstPaint(root, path); return attrs.get('data-first-paint') ?? null; };
     expect(at('/app/positioning/abc')).toBe('light');
-    expect(at('/app/profile')).toBeNull();
+    expect(at('/app/expert-consult')).toBeNull();
     expect(at('/app/library')).toBe('light');
     expect(at('/app/library/scan-check')).toBeNull();
     expect(at('/app')).toBe('light');

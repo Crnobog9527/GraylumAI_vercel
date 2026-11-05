@@ -78,7 +78,7 @@ export function DataUseConsentView({ state, loading, loadFailed, retrying, onRet
         {loading && <PageSkeleton compact rows={1} label="设置读取中" />}
         {!loading && loadFailed && (
           <div className="flex flex-wrap items-center gap-2" role="alert">
-            <span style={{ color: '#fca5a5' }}>暂时无法读取你的选择，请稍后重试。</span>
+            <span style={{ color: 'var(--error)' }}>暂时无法读取你的选择，请稍后重试。</span>
             <button
               type="button"
               onClick={onRetry}
@@ -93,7 +93,7 @@ export function DataUseConsentView({ state, loading, loadFailed, retrying, onRet
         )}
         {state && <p style={{ color: granted ? 'var(--color-primary)' : 'var(--text-secondary)' }}>{consentStatusText(state)}</p>}
         {state && grantBlocked && <p style={{ color: 'var(--text-tertiary)' }}>说明正在更新，暂时不能开启。</p>}
-        {error && <p role="alert" style={{ color: '#fca5a5' }}>{error}</p>}
+        {error && <p role="alert" style={{ color: 'var(--error)' }}>{error}</p>}
       </div>
     </div>
   );

@@ -5,24 +5,27 @@
  */
 
 import type { ReactNode } from 'react';
-import LandingHeader from '@/components/landing/LandingHeader';
-import LandingFooter from '@/components/landing/LandingFooter';
+import { PublicShell } from '@/components/public-site/PublicShell';
 import { getPublicSiteSettings } from '@/lib/public-site';
 
+/**
+ * The Simplified-Chinese marketing pages (pricing, contact, accessibility) on the public shell. `tone` defaults to dark
+ * because contact and accessibility are still written for a dark canvas; pricing is on the light tone.
+ */
 export default async function MarketingShell({
   children,
-  mainClassName = 'pt-20 md:pt-24',
+  tone = 'dark',
+  mainClassName,
 }: {
   children: ReactNode;
+  tone?: 'light' | 'dark';
   mainClassName?: string;
 }) {
   const { siteName, supportEmail } = await getPublicSiteSettings();
 
   return (
-    <>
-      <LandingHeader siteName={siteName} />
-      <main className={mainClassName}>{children}</main>
-      <LandingFooter siteName={siteName} supportEmail={supportEmail} />
-    </>
+    <PublicShell locale="zh-Hans" siteName={siteName} supportEmail={supportEmail} tone={tone} mainClassName={mainClassName}>
+      {children}
+    </PublicShell>
   );
 }
