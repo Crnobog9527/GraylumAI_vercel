@@ -60,10 +60,10 @@ const statusLabels: Record<string, string> = {
 };
 
 const statusColors: Record<string, { bg: string; color: string; border: string }> = {
-  pending: { bg: 'rgba(234, 179, 8, 0.1)', color: '#EAB308', border: 'rgba(234, 179, 8, 0.3)' },
-  in_progress: { bg: 'rgba(59, 130, 246, 0.1)', color: '#3B82F6', border: 'rgba(59, 130, 246, 0.3)' },
-  resolved: { bg: 'rgba(34, 197, 94, 0.1)', color: '#22C55E', border: 'rgba(34, 197, 94, 0.3)' },
-  closed: { bg: 'rgba(107, 114, 128, 0.1)', color: '#6B7280', border: 'rgba(107, 114, 128, 0.3)' }
+  pending: { bg: 'var(--warning-bg)', color: 'var(--warning)', border: 'var(--warning)' },
+  in_progress: { bg: 'var(--info-bg)', color: 'var(--info)', border: 'var(--info)' },
+  resolved: { bg: 'var(--success-bg)', color: 'var(--success)', border: 'var(--success)' },
+  closed: { bg: 'rgba(107, 114, 128, 0.1)', color: 'var(--text-secondary)', border: 'var(--border-secondary)' }
 };
 
 const categoryMap: Record<string, string> = {
@@ -171,7 +171,7 @@ const TicketListView = memo(function TicketListView({
         <PageSkeleton compact rows={4} label="工单读取中" />
       ) : errorMessage ? (
         <div className="text-center py-12">
-          <AlertCircle className="h-12 w-12 mx-auto mb-4" style={{ color: '#EF4444' }} />
+          <AlertCircle className="h-12 w-12 mx-auto mb-4" style={{ color: 'var(--error)' }} />
           <p className="mb-2" style={{ color: 'var(--text-primary)' }}>
             工单暂时加载失败
           </p>
@@ -426,8 +426,8 @@ const TicketDetailView = memo(function TicketDetailView({
               border: '1px solid rgba(59, 130, 246, 0.2)'
             }}
           >
-            <Clock className="h-4 w-4 shrink-0" style={{ color: '#3B82F6' }} />
-            <span className="text-sm" style={{ color: '#3B82F6' }}>
+            <Clock className="h-4 w-4 shrink-0" style={{ color: 'var(--info)' }} />
+            <span className="text-sm" style={{ color: 'var(--info)' }}>
               我们会在 48 小时内回复您的问题，通常会更快。
             </span>
           </div>
@@ -457,7 +457,7 @@ const TicketDetailView = memo(function TicketDetailView({
                       className="text-xs px-2 py-0.5 rounded-full"
                       style={{
                         background: reply.is_admin_reply ? 'rgba(59, 130, 246, 0.1)' : 'rgba(255, 215, 0, 0.1)',
-                        color: reply.is_admin_reply ? '#3B82F6' : 'var(--color-primary)'
+                        color: reply.is_admin_reply ? 'var(--info)' : 'var(--color-primary)'
                       }}
                     >
                       {reply.is_admin_reply ? '客服回复' : '我的回复'}

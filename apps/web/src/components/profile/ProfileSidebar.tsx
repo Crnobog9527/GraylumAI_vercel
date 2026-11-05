@@ -50,11 +50,11 @@ const ProfileSidebar = memo(function ProfileSidebar({
 
   return (
     <div
-      className={mobile ? "w-full rounded-none p-4" : "w-56 shrink-0 hidden md:block rounded-2xl p-4 h-fit"}
-      style={{
-        background: 'var(--bg-secondary)',
+      className={mobile ? "w-full rounded-none p-4" : "w-56 shrink-0 hidden md:block p-4 h-fit"}
+      style={mobile ? undefined : {
+        background: 'var(--bg-primary)',
         border: '1px solid var(--border-primary)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+        borderRadius: 12,
       }}
     >
       <div className="mb-6">
@@ -74,11 +74,11 @@ const ProfileSidebar = memo(function ProfileSidebar({
               <button
                 key={item.id}
                 onClick={() => onTabChange(item.id)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-[background-color,border-color,color] duration-200 motion-reduce:transition-none hover:bg-[rgba(255,215,0,0.05)] hover:text-[var(--text-primary)]"
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-[background-color,border-color,color] duration-200 motion-reduce:transition-none hover:bg-[var(--gl-surface-warm,#faf9f5)] hover:text-[var(--text-primary)]"
                 style={{
-                  background: isActive ? 'rgba(255, 215, 0, 0.1)' : 'transparent',
-                  color: isActive ? 'var(--color-primary)' : 'var(--text-secondary)',
-                  border: isActive ? '1px solid rgba(255, 215, 0, 0.2)' : '1px solid transparent'
+                  background: isActive ? 'var(--gl-accent-selected, #faf4e5)' : 'transparent',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  border: '1px solid transparent'
                 }}
               >
                 <Icon className="h-4 w-4" />

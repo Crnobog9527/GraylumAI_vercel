@@ -20,7 +20,6 @@
   "apps/web/src/app/(zh-hans)/app/positioning/[draftId]/page.tsx": {"lines":875,"longLines":11},
   "apps/web/src/app/(zh-hans)/app/positioning/[draftId]/topics/page.tsx": {"lines":503,"longLines":14},
   "apps/web/src/app/(zh-hans)/app/positioning/page.tsx": {"longLines":21},
-  "apps/web/src/app/(zh-hans)/app/profile/page.tsx": {"longLines":1},
   "apps/web/src/app/(zh-hans)/app/workbench/agent-first-preview/agent-first-workspace-sample.tsx": {"lines":537,"longLines":21},
   "apps/web/src/app/(zh-hans)/app/workbench/marketplace/page.tsx": {"longLines":4},
   "apps/web/src/app/(zh-hans)/app/workbench/search/page.tsx": {"longLines":9},

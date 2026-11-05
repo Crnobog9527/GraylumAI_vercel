@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -20,7 +21,7 @@ vi.mock('@/hooks/use-credits', () => ({
   useCreditsBalance: () => ({ credits: 10, status: 'ready', isLoading: false, error: null, refetch: vi.fn() }),
 }));
 vi.mock('@/hooks/use-banner', () => ({ useBanner: () => ({ banners: [] }) }));
-vi.mock('@/components/layout/AppHeader', () => ({ AppHeader: () => null }));
+vi.mock('@/components/profile/ProfileShell', () => ({ ProfileShell: ({ children }: { children: ReactNode }) => <>{children}</> }));
 vi.mock('@/components/layout/GlobalBanner', () => ({ default: () => null }));
 vi.mock('@/components/profile/ProfileSidebar', () => ({
   default: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => {

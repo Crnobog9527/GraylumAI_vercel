@@ -9,11 +9,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 export function ProfileAvatar({ src, initial }: { src?: string | null; initial: string }) {
   return (
     <div className="relative group" title="暂不支持更换头像">
-      <Avatar className="h-20 w-20" style={{ border: '2px solid rgba(255, 215, 0, 0.3)' }}>
+      <Avatar className="h-20 w-20" style={{ border: '2px solid var(--border-secondary)' }}>
         <AvatarImage src={src ?? undefined} />
         <AvatarFallback
           className="text-2xl font-medium"
-          style={{ background: 'rgba(255, 215, 0, 0.1)', color: 'var(--color-primary)' }}
+          style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}
         >
           {initial}
         </AvatarFallback>
