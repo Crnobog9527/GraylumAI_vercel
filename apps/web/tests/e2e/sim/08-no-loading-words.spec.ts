@@ -9,7 +9,7 @@ import { resetSim, signIn } from './support';
 test.beforeEach(resetSim);
 
 const WAITING_WORDS = /正在读取|读取中|加载中|正在加载/;
-const PAGES = ['/app/profile', '/app/library', '/app/marketplace', '/app/workbench/search'];
+const PAGES = ['/app/profile', '/app/library', '/app/workbench/marketplace', '/app/workbench/search'];
 
 for (const path of PAGES) {
   test(`${path}: reads still out shows no loading words and no spinner`, async ({ page }) => {

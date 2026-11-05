@@ -36,7 +36,6 @@ const APP_TEMPLATES = [
   '/login',
   '/register',
   '/forgot-password',
-  '/app/marketplace',
   '/app/library',
   '/app/library/scan-check',
   '/app/profile',
@@ -44,7 +43,6 @@ const APP_TEMPLATES = [
   '/app/runtime',
   '/app/positioning',
   '/app/positioning/[draftId]',
-  '/app/positioning/[draftId]/plan',
   '/app/positioning/[draftId]/review/[reviewId]',
   '/app/positioning/[draftId]/topics',
   // Public content pages whose address carries a page name, not a record ID (the pages themselves are in PUBLIC_PAGES).

@@ -3,17 +3,15 @@ import { type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useMemo, use, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import { X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { createInformationAutosave, informationBaseKey, keepConflictingEdits, tabStorage, savedRead, stepView,
   type AutosaveIo, type SaveState } from "./information-autosave";
-import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { readWorkflowMentorExecution } from "./mentor-response";
 import { focusReply, mentorReplyDisplay, showsTurnState } from "./agent-turn-display";
@@ -33,11 +31,10 @@ import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRet
 import { useAutoStepRecovery, useOpeningGate } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
-import { NO_PLAN_TURN, planTurnState, readPlanTurn, runPlanTurn, usePlanTurn } from "./plan-turn-path";
-import { turnCodeNotice } from "@/app/(zh-hans)/app/runtime/turn-notices";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
+import { enterTopicWorkspace } from "./topic-consent";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
   summaryShown } from "./step-summary";
@@ -46,8 +43,7 @@ import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, 
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
 import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
-import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
-import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
+import { type Information, type StepEnvelope } from "./confirm-envelope";
 import { MentorTurnSteps } from "./mentor-turn-steps"; import { WorkspaceSkeleton } from "@/components/opc/workspace-skeleton";
 import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
@@ -57,7 +53,6 @@ export default function PositioningDraft({ params }: { params: Promise<{ draftId
 }
 function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
-  const planView = usePathname().endsWith("/plan");
   const utils = trpc.useUtils();
   const read = trpc.opc.read.useQuery({ draftId }, { retry: retryUnlessMissing });
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
@@ -80,9 +75,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     Record<string, Record<string, Information>>
   >({});
   const revise = trpc.opc.revise.useMutation();
-  const change = trpc.workbench.execute.useMutation(),
-    savePlan = trpc.opc.savePlan.useMutation(),
-    handoff = trpc.opc.handoff.useMutation();
+  const change = trpc.workbench.execute.useMutation();
   const [running, setRunning] = useState(false);
   const [resultOpen,setResultOpen]=useState(true), [highlight,setHighlight]=useState<{ stepId: string; fieldIds: string[] }>(), [reveal,setReveal]=useState(0);
   const [workInfoOpen,setWorkInfoOpen]=useState(false);
@@ -96,28 +89,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     resultBodyNode.addEventListener('scroll',save,{passive:true});
     return()=>{cancelAnimationFrame(frame);resultBodyNode.removeEventListener('scroll',save);};
   },[resultBodyNode,draftId]);
-  const [items, setItems] = useState<Item[]>([]),
-    [dirtyPlan, setDirtyPlan] = useState(false),
-    [planCandidate, setPlanCandidate] = useState<Item[] | null>(null),
-    /**
-     * The round that produced the local candidate. A candidate is only usable
-     * when it names the round on screen, so a candidate left over from an
-     * earlier round can neither be shown nor suppress a new one.
-     */
-    [planCandidateRound, setPlanCandidateRound] = useState<string | null>(null),
-    [planCandidateRequest, setPlanCandidateRequest] = useState<string | null>(
-      null,
-    ),
-    [error, setError] = useState("");
-  /**
-   * Plan generation needs the user's own choices only (platform, optional
-   * account, start date, horizon). Topics, dates, titles and briefs are the
-   * Agent's output, so no manually authored topic row is required.
-   */
-  const [planPlatform, setPlanPlatform] = useState("");
-  const [planAccount, setPlanAccount] = useState("");
-  const [planStart, setPlanStart] = useState(() => new Date().toISOString().slice(0, 10));
-  const [planDays, setPlanDays] = useState(7);
+  const [error, setError] = useState("");
   const history = turnPath.history;
   const research = useResearchCalls(read.data?.sessionId);
   const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal, stale = live.reopenGraceOver;
@@ -188,36 +160,21 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   useEffect(() => {
     // Mirror `infoEdits` before scheduling: the scheduler reads the ref.
     infoEditsRef.current = infoEdits;
-    if (planView || hydratedDraft !== draftId || composing.current || read.data?.conversationDeleted) return; // read-only: no save
+    if (hydratedDraft !== draftId || composing.current || read.data?.conversationDeleted) return; // read-only: no save
     autosave.schedule();
     return autosave.cancel;
-  }, [planView, draftId, hydratedDraft, infoEdits, read.data?.conversationDeleted]);
-  const [planRecovery, setPlanRecovery] = useState<
-    "idle" | "running" | "invalid" | "unknown" | "stale"
-  >("idle");
+  }, [draftId, hydratedDraft, infoEdits, read.data?.conversationDeleted]);
   /**
-   * The explicit "现在生成第一周选题吗？" ask, and the retained request that is
-   * waiting for that decision. Neither can start work on its own.
+   * The explicit "现在生成第一周选题吗？" ask. It cannot start work on its own.
    */
   const [consentOpen, setConsentOpen] = useState(false);
   const consentDialog = useRef<HTMLDivElement>(null);
   useEffect(() => { if (consentOpen) consentDialog.current?.focus(); }, [consentOpen]);
-  const [retainedPlan, setRetainedPlan] = useState<
-    { requestId: string; sourceRoundId: string | null } | null
-  >(null);
-  /**
-   * The server's own record for that retained request. It is what lets the page
-   * distinguish "never admitted" from "admitted, outcome unknown" truthfully
-   * instead of assuming a cancellation or a zero cost.
-   */
-  const { turn: retainedTurn, state: retainedState, recheck: recheckRetained } = usePlanTurn(read.data?.sessionId, retainedPlan?.requestId);
   /** The bound topic workspace of this draft (the consented entry target). */
   const bindTopic = trpc.opc.consentTopicWorkspace.useMutation();
-  const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = useMemo(() => turnPath.draft(read.data), [read.data, turnPath.turns]), // eslint-disable-line react-hooks/exhaustive-deps
-    snap = d?.snapshot,
-    latest = d?.plans?.[0];
+    snap = d?.snapshot;
   /** Utterances the mentor classified as non-answers in one step: never confirmed as content. */
   function nonAnswersFor(stepId: string) {
     const turns = new Map(((d?.turns ?? []) as MentorTurn[]).map(turn => [turn.executionId, turn]));
@@ -243,7 +200,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     },
   });
   const captureResolve = trpc.opc.captureResolve.useMutation(), capturePending = trpc.opc.capturePending.useMutation();
-  const updates = useCaptureResolve({ draftId, active: !planView && hydratedDraft === draftId && snap?.state === "draft" && !d?.conversationDeleted,
+  const updates = useCaptureResolve({ draftId, active: hydratedDraft === draftId && snap?.state === "draft" && !d?.conversationDeleted,
     refetch: () => read.refetch(), flush: flushInformation, setError,
     resolve: input => captureResolve.mutateAsync(input), pending: input => capturePending.mutateAsync(input) });
   // `prepareStep`/`execute`/`mentorTurn` are deliberately excluded: the Agent's own
@@ -253,9 +210,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const busy = bindTopic.isPending ||
     running || confirmation.confirming || Boolean(updates.resolving) ||
     revise.isPending ||
-    change.isPending ||
-    savePlan.isPending ||
-    handoff.isPending;
+    change.isPending;
   useEffect(() => {
     // Hydrate before persisting: initial/StrictMode effects must not overwrite
     // a saved buffer with the render's empty initial state.
@@ -284,42 +239,19 @@ function PositioningDraftContent({draftId}:{draftId:string}){
               )) ?? "",
     );
     setInfoEdits(local.infoEdits ?? {});
-    setPlanCandidate(
-      Array.isArray(local.planCandidate) ? local.planCandidate : null,
-    );
-    // A pre-upgrade buffer stored a bare candidate with no round, so it is
-    // read as unowned rather than being assumed to belong to this round.
-    setPlanCandidateRound(
-      typeof local.planCandidateSourceRoundId === "string"
-        ? local.planCandidateSourceRoundId
-        : null,
-    );
-    setPlanCandidateRequest(
-      typeof local.planCandidateRequestId === "string"
-        ? local.planCandidateRequestId
-        : null,
-    );
-    setDirtyPlan(Boolean(local.dirtyPlan));
-    setItems(local.dirtyPlan && Array.isArray(local.items) ? local.items : []);
     setHydratedDraft(draftId);
   }, [draftId]);
   useEffect(() => {
     if (hydratedDraft !== draftId) return;
     try {
-      // Merge rather than replace: the buffer also carries the candidate's
-      // round ownership and any archive an earlier action left behind.
+      // Merge rather than replace: the buffer may carry entries an earlier version of this page left behind.
       const raw = sessionStorage.getItem("opc-edit:" + draftId);
       const previous = raw ? (JSON.parse(raw) ?? {}) : {};
       sessionStorage.setItem(
         "opc-edit:" + draftId,
         JSON.stringify({
           ...previous,
-          items,
-          dirtyPlan,
           infoEdits,
-          planCandidate,
-          planCandidateSourceRoundId: planCandidateRound,
-          planCandidateRequestId: planCandidateRequest,
           activeStep,
           mentorInput,
         }),
@@ -328,30 +260,17 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       /* A malformed local buffer must not break persistence. */
     }
     const warn = (e: BeforeUnloadEvent) => {
-      if (
-        Object.keys(infoEdits).length ||
-        dirtyPlan
-      )
-        e.preventDefault();
+      if (Object.keys(infoEdits).length) e.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [
     draftId,
     hydratedDraft,
-    items,
-    dirtyPlan,
     infoEdits,
-    planCandidate,
-    planCandidateRound,
-    planCandidateRequest,
     activeStep,
     mentorInput,
   ]);
-  useEffect(() => {
-    if (hydratedDraft === draftId && !dirtyPlan && latest?.body)
-      setItems(latest.body);
-  }, [draftId, hydratedDraft, latest?.planId, dirtyPlan]);
   useEffect(() => {
     if (hydratedDraft !== draftId || activeStep || !snap) return;
     const initial =
@@ -359,25 +278,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       snap.workflow.steps[0];
     setActiveStep(initial.id);
   }, [draftId, hydratedDraft, activeStep, snap]);
-  // Legacy links expose only an existing request. Opening a link is never
-  // permission to admit another request or to replace the current topic work.
-  useEffect(() => {
-    if (!planView || hydratedDraft !== draftId || !d) return;
-    const retained = readRetainedPlan();
-    if (!retained) { router.replace(`/app/positioning/${draftId}/topics`); return; }
-    if (retained.kind === "invalid") {
-      setNotice("本机旧请求无法读取，原记录已保留；没有开始新的生成。");
-      return;
-    }
-    const request = retained.kind === "envelope" ? retained.envelope.request : retained.request;
-    if (request.draftId !== draftId) {
-      setNotice("这条本机记录属于其它定位，不能在当前工作恢复；原记录已保留。");
-      return;
-    }
-    setRetainedPlan({ requestId: request.requestId, sourceRoundId:
-      retained.kind === "envelope" ? retained.envelope.sourceRoundId :
-      retained.kind === "unconsented" ? retained.sourceRoundId : null });
-  }, [planView, hydratedDraft, draftId, d?.roundId]);
   const { attach: attachChatScroll, follow: chatFollow, onScroll: onChatScroll } = useMentorLogScroll(draftId, history.data, pendingBubble, liveReply);
   function captureInformationBase(stepId: string) {
     const key = informationBaseKey(draftId, stepId);
@@ -396,7 +296,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [openingSteps, setOpeningSteps] = useState<string[]>([]), gate = useOpeningGate(draftId);
   const [notice, setNotice] = useState(""), openingFailed = useOpeningFailureNotice(d, history.data?.executions, notice, setNotice);
   useEffect(() => {
-    if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted || !turnPath.ready) return; // read-only; path undecided
+    if (hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted || !turnPath.ready) return; // read-only; path undecided
     // A manual draft (我已有定位, R15) opens too: the mentor asks for the existing positioning first.
     if (d.snapshot.state !== "draft") return;
     const flowSteps: Step[] = d.snapshot.workflow.steps;
@@ -451,10 +351,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         setOpeningSteps([...openingInFlight.current]);
       }
     })();
-  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed, turnPath.ready, gate.asked]);
+  }, [hydratedDraft, draftId, d, history.data, activeStep, openingFailed, turnPath.ready, gate.asked]);
   const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, historyFailed: history.isError, draftId, recover: recoverPendingStep,
     steps: (d?.snapshot.workflow.steps ?? []) as Step[],
-    ready: !planView && hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
+    ready: hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -471,102 +371,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     } finally {
       setRunning(false);
     }
-  }
-  function readRetainedPlan() {
-    return readPlanEnvelope(sessionStorage.getItem(planEnvelopeKey));
-  }
-  /**
-   * The candidate is written into the local buffer synchronously, before any
-   * React state is relied on, so a reload cannot lose a candidate the user has
-   * already paid for.
-   */
-  function persistPlanCandidate(
-    candidate: Item[] | null,
-    sourceRoundId: string | null,
-    requestId: string | null,
-  ) {
-    try {
-      const raw = sessionStorage.getItem("opc-edit:" + draftId);
-      const local = raw ? (JSON.parse(raw) ?? {}) : {};
-      const next: Record<string, unknown> = {
-        ...local,
-        planCandidateSourceRoundId: candidate ? sourceRoundId : null,
-        planCandidateRequestId: candidate ? requestId : null,
-      };
-      if (candidate) next.planCandidate = candidate;
-      else delete next.planCandidate;
-      sessionStorage.setItem("opc-edit:" + draftId, JSON.stringify(next));
-    } catch {
-      /* A malformed local buffer must not block the candidate itself. */
-    }
-    setPlanCandidate(candidate);
-    setPlanCandidateRound(candidate ? sourceRoundId : null);
-    setPlanCandidateRequest(candidate ? requestId : null);
-  }
-  /**
-   * Adopting or dismissing ends the candidate: its body, its round ownership
-   * and the authorization that produced it go away together.
-   */
-  function clearPlanCandidate() {
-    persistPlanCandidate(null, null, null);
-  }
-  /**
-   * A revision starts a new round, so the previous round's candidate must stop
-   * being current immediately. Its body is archived rather than destroyed.
-   */
-  function archivePlanCandidateForRevision() {
-    try {
-      const raw = sessionStorage.getItem("opc-edit:" + draftId);
-      const local = raw ? (JSON.parse(raw) ?? {}) : {};
-      if (Array.isArray(local.planCandidate))
-        local.planCandidateArchive = {
-          roundId:
-            typeof local.planCandidateSourceRoundId === "string"
-              ? local.planCandidateSourceRoundId
-              : null,
-          body: local.planCandidate,
-        };
-      delete local.planCandidate;
-      delete local.planCandidateSourceRoundId;
-      delete local.planCandidateRequestId;
-      sessionStorage.setItem("opc-edit:" + draftId, JSON.stringify(local));
-    } catch {
-      /* The revision itself must not depend on the local buffer. */
-    }
-    setPlanCandidate(null);
-    setPlanCandidateRound(null);
-    setPlanCandidateRequest(null);
-  }
-  function releasePlanEnvelope() {
-    sessionStorage.removeItem(planEnvelopeKey);
-  }
-  /**
-   * A local record that an explicit new intent replaces is archived verbatim.
-   * Archiving is not a cancellation: whatever state that request reached on the
-   * server stays as it is, and the archived copy is only local evidence.
-   */
-  function archiveRetainedPlanRecord() {
-    const raw = sessionStorage.getItem(planEnvelopeKey);
-    if (!raw) return;
-    sessionStorage.setItem(planEnvelopeKey + ":replaced:" + Date.now(), raw);
-    sessionStorage.removeItem(planEnvelopeKey);
-    setRetainedPlan(null);
-  }
-  /**
-   * A retained request that cannot belong to the round on screen is archived
-   * verbatim, never migrated onto the new round, and never executed.
-   */
-  function archiveStalePlanEnvelope(message: string) {
-    const raw = sessionStorage.getItem(planEnvelopeKey);
-    if (raw)
-      sessionStorage.setItem(planEnvelopeKey + ":stale:" + Date.now(), raw);
-    sessionStorage.removeItem(planEnvelopeKey);
-    setPlanRecovery("stale");
-    setNotice(message);
-  }
-  /** True when the local candidate was produced by the round on screen. */
-  function candidateBelongsToCurrentRound() {
-    return Boolean(planCandidate) && planCandidateRound === d?.roundId;
   }
   function stepEnvelopeFor(
     stepId: string,
@@ -686,307 +490,29 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       setError(quiet ? "" : admissionMessage(failure) ?? RETRY_PENDING_NOTICE);
   }
   const sameInformation = (a?: Information, b?: Information) => a?.value === b?.value && a?.status === b?.status && a?.nature === b?.nature;
-  function update(index: number, key: keyof Item, value: string) {
-    setItems((old) =>
-      old.map((item, n) => (n === index ? { ...item, [key]: value } : item)),
-    );
-    setDirtyPlan(true);
-  }
   /**
-   * The confirmed positioning the plan must be generated from. Only confirmed or
-   * explicitly deferred information is included, and the payload stays inside
-   * the host's input limit.
-   */
-  function positioningSummary() {
-    if (!d) return {} as Record<string, string>;
-    const summary: Record<string, string> = {};
-    for (const step of snap.workflow.steps as Step[]) {
-      for (const field of d.information[step.id]?.schema ?? []) {
-        const answer = d.information[step.id]?.values?.[field.id];
-        if (!answer?.value?.trim()) continue;
-        if (!["confirmed", "deferred"].includes(answer.status)) continue;
-        summary[field.title] = `${answer.value.trim().slice(0, 200)}${answer.status === "deferred" ? "（用户明确暂缓，接受局限）" : ""}`;
-        if (JSON.stringify(summary).length > 5000) return summary;
-      }
-    }
-    return summary;
-  }
-  /**
-   * The user-owned choices the generation request is frozen with. Topics,
-   * dates, titles and briefs stay the Agent's output.
-   */
-  function planConstraintsInput() {
-    return JSON.stringify({
-      confirmedPositioning: positioningSummary(),
-      platforms: planPlatform.split(",").map(v => v.trim()).filter(Boolean),
-      accounts: planAccount.split(",").map(v => v.trim()).filter(Boolean),
-      startDate: planStart,
-      days: planDays,
-    });
-  }
-  /**
-   * The explicit consent that may start the first-week topic generation. It is
-   * a new topic intent. Retained requests always keep their original source;
-   * an explicit recovery never becomes authorization for a new round.
+   * The explicit consent that may start the first-week topic generation. A fresh intent enters the bound topic workspace: the
+   * server freezes the confirmed version, the pinned method revision and its declared topic resources, and refuses when the
+   * method declares none. Nothing is dispatched here — the workspace's own turn is the paid action.
    */
   async function consentPlan() {
-    if (!d) return;
-    const retained = readRetainedPlan();
-    const retainedRequest = retained?.kind === "envelope"
-      ? retained.envelope.request
-      : retained?.kind === "unconsented" || retained?.kind === "legacy"
-        ? retained.request : null;
-    if (retainedRequest?.draftId === draftId) {
-      // Recovery never changes the request's source metadata or creates a new
-      // topic intent. Across rounds it is explicit and reads the original run.
-      const sourceRoundId = retained?.kind === "envelope" ? retained.envelope.sourceRoundId
-        : retained?.kind === "unconsented" ? retained.sourceRoundId : null;
-      if (retained?.kind !== "envelope") sessionStorage.setItem(planEnvelopeKey,
-        JSON.stringify({ v: 3, sourceRoundId, consentedAt: new Date().toISOString(), request: retainedRequest }));
-      setConsentOpen(false);
-      if (planView) await run(async () => {
-        await runPlanRequest(retainedRequest, sourceRoundId);
-        setRetainedPlan(null);
-      });
-      else router.push(`/app/positioning/${draftId}/topics`);
-      return;
-    }
-    if (hasUnsavedInformation) return;
-    // A replaced local record is preserved verbatim instead of being lost.
-    if (retained) archiveRetainedPlanRecord();
-    // A fresh intent enters the bound topic workspace: the server freezes the
-    // confirmed version, the pinned method revision and its declared topic
-    // resources, and refuses when the method declares none. Nothing is
-    // dispatched here — the workspace's own turn is the paid action.
-    {
-      try {
-        // This mutation checks the displayed source under the same server lock
-        // as binding/consent. No cached read or caught conflict permits a jump.
-        const accepted = await bindTopic.mutateAsync({ draftId, sourceVersionId: d.report?.id ?? "" });
-        if (!accepted.bound || accepted.sourceVersionId !== d.report?.id)
-          throw new Error("OPC_TOPIC_SOURCE_CHANGED");
-        setConsentOpen(false);
-        router.push(`/app/positioning/${draftId}/topics`);
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : "";
-        setConsentOpen(false);
-        setNotice(message.includes("OPC_TOPIC_SOURCE_CHANGED") || message.includes("OPC_TOPIC_BOUND")
-          ? "当前定位版本与原选题工作空间来源不同，已停止进入。原对话和计划保留，请从历史入口核对原来源。"
-          : message.includes("OPC_TOPIC_SKILL_MISSING")
-            ? "当前定位方法没有声明可用的选题资源，无法开始；本次没有模型调用。"
-            : "暂时无法核实选题同意状态，请重试原入口；不会创建第二次首轮意图。");
-      }
-      return;
-    }
-  }
-  async function generatePlan() {
-    chatFollow.current = true;
-    await run(async () => {
-      await resumeInterruptedOpening();
-      if (hasUnsavedInformation) throw new Error("save information first");
-      const accountInput = planConstraintsInput();
-      // A retained request may only be replayed when it is genuinely the same
-      // intent: the user's constraints are unchanged, and the visible candidate
-      // does not already close exactly this request. A candidate that names a
-      // different request is an older fallback, so the retained request is
-      // still an unconfirmed generation and reusing it is what prevents a
-      // second request — and a second charge — for the same intent. Anything
-      // else is a new explicit authorization.
-      const retained = readRetainedPlan();
-      const retainedRequest =
-        retained?.kind === "envelope" &&
-        retained.envelope.sourceRoundId === d.roundId &&
-        retained.envelope.request.draftId === draftId
-          ? retained.envelope.request
-          : retained?.kind === "unconsented" &&
-              retained.sourceRoundId === d.roundId &&
-              retained.request.draftId === draftId
-            ? retained.request
-          : retained?.kind === "legacy" && retained.request.draftId === draftId
-            ? retained.request
-            : null;
-      const reuse =
-        retainedRequest &&
-        !(
-          candidateBelongsToCurrentRound() &&
-          planCandidateRequest !== null &&
-          planCandidateRequest === retainedRequest.requestId
-        ) &&
-        retainedRequest.input === accountInput
-          ? retainedRequest
-          : null;
-      const request: PlanRequest = reuse ?? {
-        draftId,
-        requestId: crypto.randomUUID(),
-        purpose: "plan",
-        stepId: snap.workflow.steps.at(-1).id,
-        input: accountInput,
-      };
-      const envelope: PlanEnvelope = {
-        // Clicking "生成候选" is itself an explicit user action, so the
-        // request it starts carries the consent marker from here on.
-        v: 3,
-        sourceRoundId: d.roundId,
-        consentedAt: new Date().toISOString(),
-        request,
-      };
-      // A new intent replaces the local record; the old one is archived instead
-      // of being silently overwritten.
-      if (!reuse) archiveRetainedPlanRecord();
-      sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
-      await runPlanRequest(request);
-    });
-  }
-  /**
-   * Dispatch the exact frozen request that authorizes this generation, under
-   * its own identity. A completed-but-unusable body releases the request; a
-   * timeout, a lost reply or any other unknown outcome keeps the envelope so the
-   * same request can be replayed instead of paying for a second call.
-   */
-  async function runPlanRequest(request: PlanRequest, sourceRoundId: string | null = d.roundId) {
-      // V2-12: every plan request runs as a turn; a request that already has one is read, not sent again.
-      const ids = { sessionId: read.data?.sessionId as string, moduleId: read.data?.moduleId as string };
-      const turned = await readPlanTurn(ids.sessionId, request.requestId).catch(() => null);
-      if (!turned && (planView || (sourceRoundId !== null && sourceRoundId !== d.roundId))) {
-        setNotice("原请求属于旧定位轮次，服务端尚无可恢复执行；已保留记录，没有按新定位生成。请核对后另行选择新请求。");
-        throw new Error("OPC_OLD_REQUEST_NOT_ADMITTED");
-      }
-      const candidate = await runPlanTurn(request, ids, turned).catch(cause => { setNotice(turnCodeNotice((cause as Error).message).text); throw cause; });
-      if (!candidate.valid) {
-        // This execution completed and returned a body that cannot be used as
-        // a plan. It is safe to create a new request after the user edits the
-        // inputs; timeouts and unknown execution state retain identity.
-        releasePlanEnvelope();
-        setPlanRecovery("invalid");
-        throw new Error("OPC_PLAN_RESPONSE_INVALID");
-      }
-      // The envelope is deliberately retained while the candidate waits for the
-      // user's decision: that is what lets a reload or a re-login recover the
-      // same execution instead of paying for another one.
-      persistPlanCandidate(candidate.body, candidate.sourceRoundId, request.requestId);
-      setPlanRecovery("idle");
-  }
-  async function confirmPlan() {
-    await run(async () => {
-      if (
-        !latest ||
-        dirtyPlan ||
-        hasUnsavedInformation
-      )
-        throw new Error("save edits first");
-      const accounts = Array.from(
-        new Map(
-          items.map((i) => [
-            i.platform + ":" + i.account,
-            {
-              platform: i.platform,
-              account: i.account,
-              expectedRevision:
-                list.data?.accounts?.find(
-                  (a: {
-                    platform: string;
-                    account: string;
-                    revision: number;
-                  }) => a.platform === i.platform && a.account === i.account,
-                )?.revision ?? null,
-            },
-          ]),
-        ).values(),
-      );
-      const payload = { draftId, planId: latest.planId, accounts };
-      const key = "opc-confirm:" + draftId;
-      const retained = readRetainedHandoff(sessionStorage, draftId);
-      // The retained request is replayed verbatim — same request id and its own
-      // frozen expected revisions — only for the exact business intent it was
-      // frozen with. That is what makes a lost reply idempotent, and it must
-      // not be abandoned merely because the account revisions moved on.
-      // A different plan version or platform/account set is an explicit new
-      // confirmation: it carries a new request id, and the retained request's
-      // immutable server history is neither reused nor rewritten.
-      const fixed =
-        retained && handoffIntent(retained) === handoffIntent(payload)
-          ? retained
-          : { ...payload, requestId: crypto.randomUUID() };
-      sessionStorage.setItem(key, JSON.stringify(fixed));
-      try {
-        await handoff.mutateAsync(fixed);
-      } catch (cause) {
-        // Only a provably definite rollback releases the retained request: that
-        // rejected intent can never commit, so the next click must be able to
-        // form a new one. Unknown and transport failures keep it for replay.
-        if (
-          cause instanceof Error &&
-          definiteHandoffRejections.has(cause.message)
-        ) {
-          sessionStorage.removeItem(key);
-          // Read the current plan version and account revisions so an explicit
-          // retry needs no manual browser-storage reset.
-          await Promise.all([list.refetch(), read.refetch()]);
-        }
-        throw cause;
-      }
-      sessionStorage.removeItem(key);
-    });
+    if (!d || hasUnsavedInformation) return;
+    // The server checks the displayed source under the same lock as binding/consent; no cached read permits a jump.
+    const outcome = await enterTopicWorkspace({ draftId, sourceVersionId: d.report?.id, bind: input => bindTopic.mutateAsync(input),
+      push: path => router.push(path) });
+    setConsentOpen(false);
+    if (!outcome.entered) setNotice(outcome.notice);
   }
   function retainConflictingInput(stepId: string) {
     const conflict=informationConflicts[stepId], edited=infoEditsRef.current[stepId]; if (!conflict || !edited) return;
     autosaveIo.current.setEdits(stepId, keepConflictingEdits(tabStorage, draftId, stepId, edited, conflict));
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
-  /** The server's identity/lifecycle projection for the retained request. */
-  const retainedStateData = (retainedTurn ? planTurnState(retainedTurn) : retainedTurn === null ? NO_PLAN_TURN : undefined) as
-    { admitted?: boolean; state?: string | null; hasResult?: boolean; materialRevoked?: boolean } | undefined;
   if (read.isLoading || hydratedDraft !== draftId) return <WorkspaceSkeleton area="chat" label="定位读取中" />;
   if (read.error || !d) return <main className="p-6" role="alert">
     {read.error?.data?.code==="NOT_FOUND"?"找不到这份定位，它可能已被删除。":"无法读取这份定位，请检查登录和访问权限。"}<Link href="/app/positioning">返回定位列表</Link></main>;
   if (d.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={d}/>; // Owner 2026-10-14: read-only after deletion.
-  if (planView) return <main className="mx-auto max-w-3xl space-y-4 p-6">
-    <Link href={`/app/positioning/${draftId}/topics`}>进入当前选题工作</Link>
-    <h1>旧计划请求恢复</h1>
-    {error && <ChatInlineNotice tone="error">{error}</ChatInlineNotice>}
-    <p>这里只恢复原请求及其结果，不创建新请求，不替换当前工作。</p>
-    {notice && <ChatInlineNotice tone="warning">{notice}</ChatInlineNotice>}
-    {retainedPlan && <section className="space-y-3">
-      <h2>本机保留了一条早先的生成请求</h2>
-      <p role="status">{retainedState.isLoading ? "正在核对原请求…" : retainedState.error || !retainedStateData
-        ? "暂时无法核对原请求，请稍后重试；原记录仍保留。"
-        : !retainedStateData.admitted ? "服务端没有这条请求的准入记录；没有开始新的生成。"
-        : retainedStateData.materialRevoked ? "原请求来源已撤回，不能继续恢复。"
-        : retainedStateData.hasResult ? "服务端已保存这条请求的完成结果，可以按原身份恢复读取。"
-        : "原请求结果尚未确定；继续使用原身份恢复，不会重复执行或重复扣费。"}</p>
-      {retainedState.error && <Button onClick={recheckRetained}>重新核对</Button>}
-      <Button disabled={busy || !retainedStateData?.admitted || retainedStateData.materialRevoked || Boolean(retainedState.error)} onClick={() => void run(async () => {
-        const retained = readRetainedPlan();
-        if (!retained || retained.kind === "invalid") throw new Error("OPC_REQUEST_INVALID");
-        const request = retained.kind === "envelope" ? retained.envelope.request : retained.request;
-        if (request.draftId !== draftId || request.requestId !== retainedPlan.requestId) throw new Error("OPC_REQUEST_CONFLICT");
-        try { await runPlanRequest(request, retainedPlan.sourceRoundId); }
-        catch { setNotice("这次生成的结果暂时无法确认。原请求与原始记录仍保留，请稍后按原身份恢复。"); }
-      })}>继续这条原请求</Button>
-      {planCandidate && planCandidateRequest === retainedPlan.requestId && retainedStateData?.hasResult && !retainedStateData.materialRevoked && !retainedState.error && <section>
-        <h2>{planCandidateRound !== d.roundId ? "原定位轮次的计划结果 · 已恢复" : "AI 计划候选 · 尚未替换你的编辑"}</h2>
-        <p>保留原定位来源，当前选题与编辑没有改变。</p>
-        {planCandidate.map(item => <p key={item.id}>{item.day} · {item.platform}/{item.account} · {item.title} · {item.brief}</p>)}
-      </section>}
-    </section>}
-  </main>;
   const steps: Step[] = snap.workflow.steps;
-  /**
-   * Until a candidate has been adopted and while no plan version is saved, the
-   * Agent produces the first proposal. Manual authoring stays available but
-   * must not be presented as the primary path.
-   */
-  /**
-   * Only a candidate that names the round on screen is shown as this round's
-   * candidate. A pre-upgrade candidate has no owner at all, so it stays
-   * reviewable but can never impersonate or suppress a round.
-   */
-  const shownPlanCandidate =
-    Boolean(planCandidate) &&
-    (planCandidateRound === null || planCandidateRound === d?.roundId)
-      ? planCandidate
-      : null;
-  const planNeedsCandidate = !shownPlanCandidate && !latest && !dirtyPlan;
   const firstPending = steps.findIndex((step) => !snap.steps[step.id].valid);
   /** 我已有定位 (R15): the same Agent workspace; only the wording differs. */
   const existingEntry = d.mode === "manual" && !d.accountRevision;
@@ -1094,14 +620,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   return (
     <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试':d?.runtimeMode==='production'?undefined:'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} turnBusy={turnPath.creditsBusy} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<PositioningResultPanel
       subtitle={snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'} bodyRef={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></PositioningResultPanel>}>
-    <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
+    <main className={`${resultStyles.workspaceMain} ${resultStyles.conversationPage} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <PositioningHeader
-        title={planView ? "第一周计划" : discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略"
+        title={discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略"
           : existingEntry ? "核对已有定位" : "我的定位分析"}
         status={(discussionAccount?discussionAccount.platform:'整体规划')+(snap.state==='published'?' · 已确认':' · 进行中')}
         onWorkInfo={()=>setWorkInfoOpen(true)} showExpand={!resultOpen} onExpand={()=>setResultOpen(true)}/>
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{existingEntry?'已有定位核对':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/app/positioning">新任务与账号</Link></footer></section></div>}
-      {!planView && <>
+      <>
       {d.accountRevision?.methodConflict&&<ChatInlineNotice tone="warning" alert>此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
           <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
       </ChatInlineNotice>}
@@ -1225,13 +751,13 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         })}
       </section>
       {confirmation.review && reviewDialog(confirmation.review)}
-      </>}
-      {!planView && <footer className={resultStyles.publishBar}><div>
+      </>
+      {<footer className={resultStyles.publishBar}><div>
       <InformationExport draftId={draftId} current={d}/>
-      {!planView && snap.state === "published" && (
+      {snap.state === "published" && (
         <Button
           variant="outline"
-          disabled={busy || dirtyPlan}
+          disabled={busy}
           onClick={() =>
             run(async () => {
               await revise.mutateAsync({
@@ -1239,23 +765,20 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                 requestId: crypto.randomUUID(),
                 expectedRoundId: d.roundId,
               });
-              // The revised round must not inherit the previous round's
-              // candidate, locally or in the buffer.
-              archivePlanCandidateForRevision();
             })
           }
         >
           修订定位，保留原版本
         </Button>
       )}
-      {!planView && d.accountRevision && snap.state === "draft" && nextReviewStep && <div role="status">
+      {d.accountRevision && snap.state === "draft" && nextReviewStep && <div role="status">
         <p>“{nextReviewStep.title}”还有修改的信息待确认。只需确认修改项，未修改内容沿用原确认。</p>
         <Button variant="outline" disabled={busy || hasUnsavedInformation || hasPendingConfirmation || hasPendingStepRequest}
           onClick={() => { setError(""); setActiveStep(nextReviewStep.id); }}>
           核对修改：{nextReviewStep.title}
         </Button>
       </div>}
-      {!planView && !reportPublishes(snap.workflow) && <Button
+      {!reportPublishes(snap.workflow) && <Button
         disabled={
           busy ||
           hasUnsavedInformation ||
@@ -1290,7 +813,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       >
         确认正式定位
       </Button>}
-      {!planView && snap.state === "published" && (
+      {snap.state === "published" && (
         <Button variant="outline"
           disabled={busy || hasUnsavedInformation || hasPendingStepRequest}
           onClick={() => setConsentOpen(true)}
@@ -1298,7 +821,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
-      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} moduleId={read.data.moduleId}
+      {read.data?.sessionId && <ReportEntry draftId={draftId} moduleId={read.data.moduleId}
         sessionId={read.data.sessionId} published={snap.state === "published"}
         projectId={d.projectId} roundId={d.roundId} report={d.report} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
         onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
@@ -1344,333 +867,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             </div>
           </div>
         </div>
-      )}
-      {planView && <Link className="block underline" href={`/app/positioning/${draftId}`}>返回定位与 AI 教练对话</Link>}
-      {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
-          {planView && retainedPlan && (
-            <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
-              <h3>本机保留了一条早先的生成请求</h3>
-              <p className="text-sm text-[var(--text-secondary)]" role="status">
-                请求标识 {retainedPlan.requestId.slice(0, 8)}…
-                {retainedPlan.sourceRoundId
-                  ? "（属于本机记录的这份定位）"
-                  : "（更早的一份本机记录）"}
-                。
-                {retainedState.isLoading
-                  ? "正在核对它在服务端的状态…"
-                  : retainedState.error || !retainedStateData
-                    ? "暂时无法核对它的服务端状态；它不会被自动执行。你可以稍后重试核对，或按原身份继续恢复。"
-                    : !retainedStateData.admitted
-                      ? "服务端没有这条请求的准入记录：它尚未开始，也没有产生执行、预留或费用。"
-                      : retainedStateData.materialRevoked
-                        ? "这条请求绑定的来源已撤回：服务端保留了原记录，但不能按原来源继续派发。"
-                        : retainedStateData.state === "completed"
-                          ? retainedStateData.hasResult
-                            ? "服务端已保存这条请求的完成结果，可以按原身份恢复读取，不会重新派发。"
-                            : "服务端记录这条请求已完成，但没有可读结果；继续只会按原身份核对，不会重新派发。"
-                          : retainedStateData.state === "cancelled"
-                            ? "服务端记录这条请求已取消；继续只会按原身份核对，不会重新派发。"
-                            : `服务端已记录这条请求（${retainedStateData.state ?? "状态未知"}）：结果尚未确定，继续会按原身份恢复，不会重复派发或重复扣费。`}
-              </p>
-              <div className="flex flex-wrap gap-3">{retainedState.error && <Button onClick={recheckRetained}>重新核对</Button>}
-                <Button disabled={busy} onClick={() => void consentPlan()}>
-                  继续这条原请求
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={busy || hasUnsavedInformation}
-                  onClick={() => {
-                    // A fresh generation is a separate explicit action: the old
-                    // local record is archived (its server state is untouched),
-                    // then the consent ask starts a new identity.
-                    archiveRetainedPlanRecord();
-                    setConsentOpen(true);
-                  }}
-                >
-                  重新生成（新请求）
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => {
-                    archiveRetainedPlanRecord();
-                    setNotice(
-                      "本机记录已归档保留；这条请求在服务端的状态不受影响。",
-                    );
-                  }}
-                >
-                  归档这条本机记录
-                </Button>
-              </div>
-            </div>
-          )}
-          {planView && planCandidate && planCandidateRound && planCandidateRound !== d.roundId && (
-            <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
-              <h3>原定位轮次的计划结果 · 已恢复</h3>
-              <p>这是原请求的完成结果，保留原定位来源；没有按当前定位重新生成，也不会替换当前计划。</p>
-              {planCandidate.map(item => <p key={item.id}>{item.day} · {item.platform}/{item.account} · {item.title} · {item.brief}</p>)}
-            </div>
-          )}
-      {planView && d.report?.available && <section aria-label="定位摘要" className="rounded-xl border border-[var(--border-primary)] p-4">
-        <h2 className="text-xl">已确认的定位</h2>
-        <dl className="grid gap-3 sm:grid-cols-2">{steps.flatMap(step => d.information[step.id].schema.map((field: {id:string;title:string}) =>
-          <div key={step.id+":"+field.id}><dt className="text-sm text-[var(--text-secondary)]">{field.title}</dt><dd className="whitespace-pre-wrap">{d.information[step.id].values?.[field.id]?.value || "未填写"}</dd></div>))}</dl>
-      </section>}
-      {planView && d.report?.available && (
-        <section className="space-y-4">
-          <h2 className="text-xl">第一周计划</h2>
-          <p>可编辑账号、日期和简报。确认承接不会调用模型或产生新的费用。</p>
-          {planRecovery !== "idle" && (
-            <div className="rounded-xl border border-[var(--border-primary)] p-4">
-              {planRecovery === "running" && (
-                <p role="status">
-                  正在按你刚确认的定位生成第一周计划候选，不需要你再点一次。生成完成后会显示在这里。
-                </p>
-              )}
-              {planRecovery === "unknown" && (
-                <p role="status">
-                  这次生成的结果暂时无法确认。原请求已保留，不会重复扣费；请刷新页面或重新登录，我们会用同一条请求恢复结果。
-                </p>
-              )}
-              {planRecovery === "invalid" && (
-                <p role="status">
-                  这次生成完成，但没有返回可用的计划内容，原请求已释放。请核对下方的平台、日期后手动点击生成。
-                </p>
-              )}
-              {planRecovery === "stale" && (
-                <p role="status">
-                  上一轮定位留下的生成请求已在本机归档，不会执行。请按当前定位重新生成计划候选。
-                </p>
-              )}
-            </div>
-          )}
-          {shownPlanCandidate && (
-            <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
-              <h3>AI 计划候选 · 尚未替换你的编辑</h3>
-              <p className="text-xs text-[var(--text-secondary)]">
-                以下选题、日期、标题和简报由 AI 教练生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
-              </p>
-              {shownPlanCandidate.map((i) => (
-                <p key={i.id}>
-                  {i.day} · {i.platform}/{i.account} · {i.title}
-                </p>
-              ))}
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  // Adopting is a local edit only: no model call, and it ends
-                  // both the candidate and the envelope that produced it.
-                  setItems(shownPlanCandidate);
-                  setDirtyPlan(true);
-                  clearPlanCandidate();
-                  releasePlanEnvelope();
-                }}
-              >
-                采用候选到计划工作稿
-              </Button>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  clearPlanCandidate();
-                  releasePlanEnvelope();
-                }}
-              >
-                保留原计划
-              </Button>
-            </div>
-          )}
-          <div className="overflow-x-auto"><table aria-label="第一周选题计划" className="w-full text-left">
-            <thead><tr>{["平台","具体账号","选题","日期","简报","操作"].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead>
-            <tbody>{items.map((item, index) => (
-            <tr key={item.id} className="border-t border-[var(--border-primary)]">
-              {(["platform", "account", "title", "day"] as const).map((key) => (
-                <td key={key} className="p-2">
-                  <input
-                    className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
-                    aria-label={key + " " + index}
-                    type={key === "day" ? "date" : "text"}
-                    disabled={busy}
-                    value={item[key]}
-                    onChange={(e) => update(index, key, e.target.value)}
-                  />
-                  {key === "account" && <p className="text-xs text-[var(--text-secondary)]">{list.data?.accounts?.some((a: {platform:string;account:string}) => a.platform === item.platform && a.account === item.account) ? "已有账号 · 保留原工作项" : "待承接账号 · 尚未注册或验证 · 确认后创建"}</p>}
-                </td>
-              ))}
-              <td className="p-2">
-                <Textarea aria-label="简报"
-                  className="resize-none"
-                  disabled={busy}
-                  value={item.brief}
-                  onChange={(e) => update(index, "brief", e.target.value)}
-                />
-              </td>
-              <td className="p-2"><Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  setItems((old) => old.filter((_, n) => n !== index));
-                  setDirtyPlan(true);
-                }}
-              >
-                删除选题
-              </Button></td>
-            </tr>
-          ))}</tbody></table></div>
-          <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
-            <h3>生成前只需要你的事实与选择</h3>
-            <p className="text-sm text-[var(--text-secondary)]">
-              定位已确认。下面这些是你自己的选择（可以留空由 AI 教练按已确认定位建议）；选题、日期、标题和简报由 AI 教练生成，不需要你先手动添加选题行。
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <label className="text-sm">
-                目标平台（逗号分隔，可留空）
-                <input
-                  className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
-                  aria-label="目标平台"
-                  disabled={busy}
-                  value={planPlatform}
-                  onChange={(e) => setPlanPlatform(e.target.value)}
-                  placeholder="例如 x,douyin"
-                />
-              </label>
-              <label className="text-sm">
-                具体账号（逗号分隔，可留空）
-                <input
-                  className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
-                  aria-label="具体账号"
-                  disabled={busy}
-                  value={planAccount}
-                  onChange={(e) => setPlanAccount(e.target.value)}
-                  placeholder="留空则由 AI 教练建议名称"
-                />
-              </label>
-              <label className="text-sm">
-                开始日期
-                <input
-                  className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
-                  aria-label="开始日期"
-                  type="date"
-                  disabled={busy}
-                  value={planStart}
-                  onChange={(e) => setPlanStart(e.target.value)}
-                />
-              </label>
-              <label className="text-sm">
-                天数
-                <input
-                  className="ml-2 w-20 rounded border bg-[var(--bg-secondary)] p-2"
-                  aria-label="计划天数"
-                  type="number"
-                  min={1}
-                  max={28}
-                  disabled={busy}
-                  value={planDays}
-                  onChange={(e) => setPlanDays(Math.min(28, Math.max(1, Number(e.target.value) || 7)))}
-                />
-              </label>
-            </div>
-            {planAccount.trim() === "" && (
-              <p className="text-xs text-[var(--text-secondary)]">
-                没有账号也可以生成。AI 教练建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
-              </p>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button
-              variant={planNeedsCandidate ? "default" : "outline"}
-              disabled={busy || hasUnsavedInformation}
-              onClick={generatePlan}
-            >
-              {shownPlanCandidate || latest ? "重新生成计划候选" : "生成第一周计划"}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                setItems((old) => [
-                  ...old,
-                  {
-                    id: crypto.randomUUID(),
-                    platform: "x",
-                    account: "",
-                    title: "",
-                    brief: "",
-                    day: new Date().toISOString().slice(0, 10),
-                  },
-                ]);
-                setDirtyPlan(true);
-              }}
-            >
-              添加选题
-            </Button>
-            <Button
-              variant={planNeedsCandidate ? "outline" : "default"}
-              disabled={
-                busy || hasUnsavedInformation || !dirtyPlan || !items.length
-              }
-              onClick={() =>
-                run(async () => {
-                  if (hasUnsavedInformation)
-                    throw new Error("save information first");
-                  await savePlan.mutateAsync({
-                    draftId,
-                    requestId: crypto.randomUUID(),
-                    expectedVersion: latest?.version ?? 0,
-                    sourceVersionId: d.report.id,
-                    body: items,
-                  });
-                  await read.refetch();
-                  setDirtyPlan(false);
-                })
-              }
-            >
-              保存计划版本
-            </Button>
-          </div>
-          {planNeedsCandidate && (
-            <p className="text-xs text-[var(--text-secondary)]">
-              第一周计划默认由 AI 教练先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
-            </p>
-          )}
-          {latest && !dirtyPlan && (
-            <div className="rounded-xl border border-[var(--border-primary)] p-4">
-              <h3>确认采用定位与计划第 {latest.version} 版</h3>
-              <p>
-                将为以上具体账号创建选题；已有账号将采用当前定位，原有工作项保持原版本。
-              </p>
-              <Button
-                disabled={
-                  busy || hasUnsavedInformation
-                }
-                onClick={confirmPlan}
-              >
-                确认账号与计划，创建选题
-              </Button>
-            </div>
-          )}
-        </section>
-      )}
-      {planView && d.handoffs?.length > 0 && (
-        <section>
-          <h2 className="text-xl">已承接选题</h2>
-          {d.handoffs
-            .flatMap(
-              (h: {
-                result: Array<{ workItemId: string; sessionId: string }>;
-              }) => h.result,
-            )
-            .map((i: { workItemId: string; sessionId: string }) => (
-              <div key={i.workItemId}>
-                <Link
-                  className="underline"
-                  href={"/app/runtime?session=" + i.sessionId}
-                >
-                  进入选题工作空间
-                </Link>
-              </div>
-            ))}
-        </section>
       )}
       {!chatShown && <ChatNoticeList
         notices={[error && { id: "error", tone: "error", text: error }, notice && { id: "notice", tone: "warning", text: notice }]}/>}

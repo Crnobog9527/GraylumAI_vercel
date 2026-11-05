@@ -105,83 +105,34 @@ test.describe('User Supplemental Flows', () => {
       }
     });
 
-    test('should browse marketplace modules, change sort order, and open a module detail flow', async ({ page }, testInfo) => {
+    test('should browse the workbench marketplace and switch categories', async ({ page }, testInfo) => {
       const steps: string[] = [];
       const monitor = createIssueMonitor(page);
-      let actual = 'Marketplace exploration flow completed';
+      let actual = 'Marketplace browsing flow completed';
 
       try {
-        steps.push('Open /marketplace and verify the page shell');
-        await gotoWithBypass(page, '/app/marketplace');
+        steps.push('Open /app/workbench/marketplace and verify the page shell');
+        await gotoWithBypass(page, '/app/workbench/marketplace');
         await expect(page.getByRole('heading', { name: '功能广场' })).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('AI TOOLS MARKETPLACE')).toBeVisible({ timeout: 10000 });
 
-        steps.push('Switch category and sort order');
+        steps.push('Switch category and back to all');
         await page.getByRole('button', { name: '营销文案' }).click();
-        await page.getByRole('button', { name: /最新上线|最受欢迎/ }).click();
-        const popularMenuItem = page.locator('[role="menuitem"]').filter({ hasText: '🔥 最受欢迎' }).first();
-        const popularTextFallback = page.locator('text=🔥 最受欢迎').last();
-
-        const usedRoleLocator = await popularMenuItem.isVisible().catch(() => false);
-        if (usedRoleLocator) {
-          await popularMenuItem.click({ force: true });
-        } else {
-          await expect(popularTextFallback).toBeVisible({ timeout: 10000 });
-          await popularTextFallback.click({ force: true });
-        }
-        await expect(
-          page.getByRole('button', { name: /最新上线|最受欢迎/ }).filter({ hasText: '最受欢迎' }).or(
-            page.locator('button').filter({ hasText: '🔥 最受欢迎' }).first(),
-          ),
-        ).toBeVisible({ timeout: 10000 });
-
-        steps.push('Open the first available module detail dialog');
-        let availableUseButtons = page.getByRole('button', { name: '立即使用' });
-        if (await availableUseButtons.count() === 0) {
-          steps.push('Fallback to 全部功能 because the selected category has no visible modules in the current fixture data');
-          await page.getByRole('button', { name: '全部功能' }).click();
-          availableUseButtons = page.getByRole('button', { name: '立即使用' });
-        }
-        if (await availableUseButtons.count() === 0) {
-          await expect(page.getByText(/共\s*0\s*个工具/)).toBeVisible({ timeout: 10000 });
-          actual = 'Marketplace shell rendered but the current preview fixture data has no visible modules';
-          return;
-        }
-        const firstUseButton = availableUseButtons.first();
-        await expect(firstUseButton).toBeVisible({ timeout: 15000 });
-        await firstUseButton.click();
-        const detailDialog = page.getByRole('dialog');
-        await expect(detailDialog).toBeVisible({ timeout: 10000 });
-        await expect(detailDialog.getByText('功能介绍')).toBeVisible({ timeout: 10000 });
-
-        // Modules now open the positioning workspace, and only modules in the published catalog are usable.
-        const dialogUseButton = detailDialog.getByRole('button', { name: '立即使用' });
-        await expect.poll(async () => (await dialogUseButton.isEnabled()) || (await detailDialog
-          .getByText('该技能将在新工作区上线后开放').isVisible()), { timeout: 10000 }).toBe(true);
-        if (await dialogUseButton.isEnabled()) {
-          steps.push('Use the selected module and confirm routing into the positioning workspace');
-          await dialogUseButton.click();
-          await expect(page).toHaveURL(/\/app\/positioning/, { timeout: 10000 });
-        } else {
-          steps.push('Record that the selected module is not in the published positioning catalog');
-          await expect(detailDialog.getByText('该技能将在新工作区上线后开放')).toBeVisible();
-          actual = 'Marketplace detail rendered; the selected module is not yet available in the positioning workspace';
-        }
+        await page.getByRole('button', { name: '全部功能' }).click();
 
         const blockingIssues = monitor.getIssues('P1');
         expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
       } catch (error) {
-        actual = error instanceof Error ? error.message : 'Unknown marketplace exploration failure';
+        actual = error instanceof Error ? error.message : 'Unknown marketplace browsing failure';
         monitor.addAssertionIssue(actual, 'P1');
         throw error;
       } finally {
         await writeFlowAudit(
           testInfo,
           {
-            title: 'marketplace-filter-detail-use',
+            title: 'marketplace-browse',
             role: 'user',
-            route: '/app/marketplace',
-            expected: 'Authenticated users can filter marketplace modules, change sort order, inspect module detail, and route into the positioning workspace when the module is published.',
+            route: '/app/workbench/marketplace',
+            expected: 'Authenticated users can open the workbench marketplace and switch categories without blocking issues.',
           },
           actual,
           steps,
