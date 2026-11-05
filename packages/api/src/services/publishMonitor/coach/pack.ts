@@ -48,7 +48,14 @@ function diagnosticsSection(rows: PackRows, input: PackInput, period: ReturnType
   for (const p of posts) if (p.stuck_layer) stuck[p.stuck_layer] = (stuck[p.stuck_layer] ?? 0) + 1;
   const basicsKeys = (platform: string) => (input.handbooks.get(platform)?.funnel ?? []).filter(l => l.basics).flatMap(l => l.keys);
   const tp = thisPeriod(rows, period);
-  const candidates = [...new Set([...tp.best.slice(0, 1), ...tp.worst.slice(0, 1), ...tp.too_new.slice(0, 1).map(p => p.post_id)])];
+  // Posts without a diagnosis the review may ask the user to send a screenshot for (Owner 11-04: no screenshot, no diagnosis, ask for it).
+  const diagnosed = new Set(posts.map(p => p.post_id));
+  const candidates = [...new Set([...tp.best.slice(0, 1), ...tp.worst.slice(0, 1), ...tp.too_new.slice(0, 1).map(p => p.post_id)])]
+    .filter(id => !diagnosed.has(id)).flatMap(id => {
+      const post = known.get(id);
+      return post ? [{ post_id: id, platform: post.platform, posted_at: post.postedAt.slice(0, 10),
+        title: post.title === null ? null : Array.from(post.title).slice(0, 80).join('') }] : [];
+    });
   return {
     requested: posts.length > 0, posts, basics_pass: pass, stuck_summary: stuck,
     missing_rates: [...new Set(posts.flatMap(p => basicsKeys(p.platform).filter(k => p.rates[k] === undefined)))].sort(),
@@ -56,7 +63,7 @@ function diagnosticsSection(rows: PackRows, input: PackInput, period: ReturnType
       const h = input.handbooks.get(platform);
       return { platform, calibration: h?.calibration ?? 'none', version: h?.version ?? null, source: h?.source ?? null };
     }),
-    candidates: posts.length ? [] : candidates,
+    candidates,
     rate_keys: RATE_KEYS,
   };
 }

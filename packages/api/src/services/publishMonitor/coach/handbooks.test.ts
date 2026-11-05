@@ -173,6 +173,18 @@ describe('handbooks and reference lines for a chat review', () => {
     expect(pack.diagnostics.posts[0]).toMatchObject({ post_id: target.postId, title: target.title, posted_at: target.postedAt.slice(0, 10) });
   });
 
+  it('with one diagnosed post the review still gets undiagnosed candidates (named, not the diagnosed one) to ask a screenshot for (D-8)', () => {
+    const data = generateDataset({ asOf: AS_OF });
+    const rows = packRowsSchema.parse(packRowsFor(data, data.accounts.find(a => a.key === 'A')!));
+    const target = rows.recent[0]!;
+    const one = [{ ...rows.diagnostics[0]!, postId: target.postId, platform: 'douyin', rates: { retain_5s: 0.05 }, reviewRunId: null, capturedOn: AS_OF, openingText: null }];
+    const pack = JSON.parse(JSON.stringify(buildPack({ rows: { ...rows, diagnostics: one }, cadence: 'weekly', businessId: simId('A'), now: NOW,
+      handbooks: new Map([['douyin', handbookOf('douyin')]]) })));
+    const candidates = pack.diagnostics.candidates as Array<{ post_id: string; title: string | null; posted_at: string }>;
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates.every(c => c.post_id !== target.postId && c.title !== null && /^\d{4}-\d\d-\d\d$/.test(c.posted_at))).toBe(true);
+  });
+
   it('a chat turn reads the package once per ten minutes, and a failed or empty read is tried again at once', async () => {
     const d = database(files());
     const t0 = 1_000_000;
