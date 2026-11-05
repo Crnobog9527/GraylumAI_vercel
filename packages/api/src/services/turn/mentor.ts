@@ -33,7 +33,7 @@ import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions,
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
 import type { TurnEvent } from './sse';
-import { withStepEvents } from './tools/announce';
+import { METHOD_STEP_ID, withStepEvents } from './tools/announce';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -177,10 +177,22 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const ctx = state.context;
     if (checked?.businessContext) (ctx.work as Record<string, unknown>).businessContext = checked.businessContext;
     const skillId = { moduleId: ctx.moduleId, skillId: ctx.skillId, revisionId: ctx.revisionId, packageHash: ctx.packageHash };
-    if (!await mentorSkillAvailable(admin, skillId)) throw new Error('TURN_SKILL_UNAVAILABLE');
-    const { source, binding } = mentorSkillSource(admin, { actorId: input.actorId, moduleId: ctx.moduleId, skillId: ctx.skillId,
-      revisionId: ctx.revisionId, packageHash: ctx.packageHash });
-    const skill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
+    // This step's method is read from the package before every model call, so the page is told: one `load_skill` step named by
+    // the step title (never a path or id) that a later `read_skill_file` of the same turn updates in place (METHOD_STEP_ID).
+    const methodName = ctx.steps.find(item => item.id === input.stepId)?.title.trim() || undefined;
+    const methodStep = (phase: 'running' | 'done' | 'failed') => { try { emit({ type: 'step', id: METHOD_STEP_ID, tool: 'load_skill', state: phase,
+      ...(methodName ? { label: methodName } : {}) }); } catch { /* display only */ } };
+    methodStep('running');
+    type Bound = ReturnType<typeof mentorSkillSource>;
+    let loadedSkill: Awaited<ReturnType<typeof loadMentorSkill>>, source: Bound['source'], binding: Bound['binding'];
+    try {
+      if (!await mentorSkillAvailable(admin, skillId)) throw new Error('TURN_SKILL_UNAVAILABLE');
+      ({ source, binding } = mentorSkillSource(admin, { actorId: input.actorId, moduleId: ctx.moduleId, skillId: ctx.skillId,
+        revisionId: ctx.revisionId, packageHash: ctx.packageHash }));
+      loadedSkill = await loadMentorSkill(source, binding, resourcesOf(state, input.stepId), mentor.inputLimit);
+    } catch (error) { methodStep('failed'); throw error; }
+    methodStep('done');
+    const skill = loadedSkill;
     // Everything later steps may read, prepared now: no database read between model calls.
     const prepared = await prepareMentorFiles(source, binding, Boolean(organizer));
     const answered = input.answer ? mentorAnsweredCard(opened.history, input.stepId, input.answer, opened.turnId) : undefined;
@@ -234,7 +246,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
     // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
     const tools = withStepEvents([...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
-      emit, new Set(), undefined, ctx.steps.find(item => item.id === input.stepId)?.title.trim() || undefined);
+      emit, new Set(), undefined, methodName, METHOD_STEP_ID);
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };

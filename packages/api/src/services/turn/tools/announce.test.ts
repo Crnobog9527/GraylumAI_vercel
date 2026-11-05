@@ -36,6 +36,17 @@ describe('withStepEvents', () => {
     expect(plain[0]).toEqual({ type: 'step', id: '1', tool: 'load_skill', state: 'running' });
   });
 
+  it('a skill file read reports on the method line the turn already opened (same id); other tools keep counting from 1', async () => {
+    const events: StepEvent[] = [];
+    const [read, search] = withStepEvents([tool('read_skill_file', async () => '{}'), tool('web_search', async () => '{"status":"ok"}')],
+      event => events.push(event), new Set(), undefined, '账号定位', 'method');
+    await read!.execute({ path: 'references/step-2.md' }, 'c1');
+    await search!.execute({ query: 'x' }, 'c2');
+    expect(events.map(e => [e.id, e.tool, e.state])).toEqual([['method', 'load_skill', 'running'], ['method', 'load_skill', 'done'],
+      ['1', 'research', 'running'], ['1', 'research', 'done']]);
+    expect(events[0]).toMatchObject({ label: '账号定位' });
+  });
+
   it('shows no step for the question card, and passes it through untouched', async () => {
     const events: StepEvent[] = [];
     const card = tool('ask_question', async () => 'card');
