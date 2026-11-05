@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { enforcedReservationSummary, findUnresolvedReservations, reservationFindings } from './billingReservations';
 import {
   countsAsCreditSpend,
   normalizeCreditLedgerType,
@@ -90,6 +91,8 @@ export interface BillingReadinessSummary {
   duplicateGrantGroups: number;
   refundTerminationGaps: number;
   historicalFindings: number;
+  /** Reservations with no observed settle/refund/abort_settle after the launch baseline (the ones that count). */
+  unresolvedReservations: { count: number; oldestAgeHours: number; accounts: number; credits: number };
   truncatedTables: string[];
 }
 
@@ -490,6 +493,7 @@ function emptyReadinessSummary(): BillingReadinessSummary {
     paidUnfulfilledOrders: 0,
     duplicateGrantGroups: 0,
     refundTerminationGaps: 0,
+    unresolvedReservations: { count: 0, oldestAgeHours: 0, accounts: 0, credits: 0 },
     historicalFindings: 0,
     truncatedTables: [],
   };
@@ -905,6 +909,9 @@ function isHistoricalFinding(
     ));
   }
 
+  // Reservations created before the launch baseline are summarised apart from the later ones (reservationFindings).
+  if (finding.code === 'billing_reservation_unresolved') return finding.metadata?.preBaseline === true;
+
   // Dynamic readiness findings (for example, a currently due annual grant)
   // have no trustworthy pre-baseline formation timestamp. Fail closed.
   return false;
@@ -962,21 +969,12 @@ export function buildBillingEngineV15ReadinessAudit(
   const historyComplete = rows.billingHistory !== undefined && !truncatedTables.includes('billing_history');
   const unresolvedByUser = new Map<string, BillingHistoryRow[]>();
   if (historyComplete) {
-    for (const hold of history) {
-      if (hold.operation_type !== 'pre_deduct' || !hold.id || !hold.user_id) continue;
-      const closed = history.some((entry) => entry.user_id === hold.user_id
-        && ['settle', 'refund', 'abort_settle'].includes(entry.operation_type ?? '')
-        && asRecord(entry.metadata).preDeductId === hold.id);
-      if (closed) continue;
-      unresolvedByUser.set(hold.user_id, [...(unresolvedByUser.get(hold.user_id) ?? []), hold]);
-      addFinding(findings, {
-        code: 'billing_reservation_unresolved', severity: 'error',
-        message: 'Billing reservation has no observed terminal record; preserve funds and verify outcome',
-        entityType: 'billing_history', entityId: hold.id,
-        metadata: { userId: hold.user_id, amount: hold.amount, createdAt: hold.created_at,
-          providerOutcome: 'unproven', automaticRefundAllowed: false },
-      });
+    const unresolved = findUnresolvedReservations(history);
+    for (const hold of unresolved) {
+      const list = unresolvedByUser.get(hold.user_id as string);
+      if (list) list.push(hold); else unresolvedByUser.set(hold.user_id as string, [hold]);
     }
+    findings.push(...reservationFindings(unresolved, now, options.launchBaselineAt));
   }
 
   const ledgerTotalsByUser = new Map<string, number>();
@@ -1595,6 +1593,7 @@ export function buildBillingEngineV15ReadinessAudit(
     duplicateGrantGroups: countFindings('duplicate_subscription_grant'),
     refundTerminationGaps: countFindings('refund_termination_gap'),
     historicalFindings: historicalFindings.length,
+    unresolvedReservations: enforcedReservationSummary(enforcedFindings),
     truncatedTables,
   };
 

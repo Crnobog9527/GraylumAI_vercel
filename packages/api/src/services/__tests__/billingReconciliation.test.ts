@@ -2386,3 +2386,99 @@ describe('BILL-1 acceptance repair', () => {
     expect(audit.success).toBe(false);
   });
 });
+
+// Daily-job false positives (2026-11-06): an unresolved reservation is one summarised finding; a young one (a turn in progress, a
+// paused round waiting for its 24 h refund) is a warning, the oldest being older than 48 h (or undated) is an error, one created
+// before the launch baseline is historical, and the scan is linear. Nothing here closes or refunds a reservation.
+describe('billing reservations without a terminal record', () => {
+  const baseline = new Date('2026-09-04T05:16:53Z');
+  const now = new Date('2026-09-13T12:00:00Z');
+  const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000).toISOString();
+  const hold = (id: string, user_id: string, created_at: string | null, amount = -113) =>
+    ({ id, user_id, operation_type: 'pre_deduct', amount, ...(created_at ? { created_at } : {}) });
+  const audit = (billingHistory: Array<Record<string, unknown>>) =>
+    buildBillingEngineV15ReadinessAudit(createReadinessRows({ billingHistory }), { launchBaselineAt: baseline, now });
+  // The default rows carry an unrelated annual-release finding, so what fails the audit is judged on the reservation finding alone.
+  const failsOnReservation = (result: ReturnType<typeof audit>) =>
+    result.findings.some(f => f.code === 'billing_reservation_unresolved' && f.severity === 'error');
+  const reservation = (result: ReturnType<typeof audit>) => result.findings.find(f => f.code === 'billing_reservation_unresolved');
+
+  it('reports a young reservation as a warning that does not fail the audit', () => {
+    const result = audit([hold('h1', 'u1', hoursAgo(2))]);
+    expect(reservation(result)).toMatchObject({ severity: 'warning', scope: 'launch', metadata: expect.objectContaining({ count: 1, oldestAgeHours: 2, automaticRefundAllowed: false }) });
+    expect(failsOnReservation(result)).toBe(false);
+    expect(result.summary.unresolvedReservations).toEqual({ count: 1, oldestAgeHours: 2, accounts: 1, credits: 113 });
+  });
+
+  it('turns an error when the oldest reservation is older than 48 hours, but not at exactly 48', () => {
+    expect(reservation(audit([hold('h1', 'u1', hoursAgo(48))]))?.severity).toBe('warning');
+    const old = audit([hold('h1', 'u1', hoursAgo(49))]);
+    expect(reservation(old)?.severity).toBe('error');
+    expect(failsOnReservation(old)).toBe(true);
+  });
+
+  it('compares the age in milliseconds: 48 hours and one minute is already an error', () => {
+    expect(reservation(audit([hold('h1', 'u1', new Date(now.getTime() - 48 * 3_600_000 - 60_000).toISOString())]))?.severity).toBe('error');
+  });
+
+  it('treats a creation time far in the future like an unreadable one', () => {
+    expect(reservation(audit([hold('h1', 'u1', hoursAgo(-5))]))?.severity).toBe('error');
+  });
+
+  it('checks every reservation when there is no launch baseline', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({ billingHistory: [hold('h1', 'u1', '2026-09-01T00:00:00Z')] }), { now });
+    expect(result.findings.find(f => f.code === 'billing_reservation_unresolved')).toMatchObject({ severity: 'error' });
+    expect(result.historicalFindings).toEqual([]);
+  });
+
+  it('treats a reservation with no readable creation time as old', () => {
+    expect(reservation(audit([hold('h1', 'u1', null)]))?.severity).toBe('error');
+  });
+
+  it('summarises several reservations in one finding with count, oldest age, accounts and credits', () => {
+    const result = audit([hold('h1', 'u1', hoursAgo(120), -113), hold('h2', 'u2', hoursAgo(30), -156), hold('h3', 'u2', hoursAgo(5), -50)]);
+    expect(result.findings.filter(f => f.code === 'billing_reservation_unresolved')).toHaveLength(1);
+    expect(reservation(result)).toMatchObject({
+      severity: 'error',
+      message: expect.stringContaining('count=3, oldestAgeHours=120, accounts=2, credits=319'),
+      metadata: expect.objectContaining({ count: 3, accounts: 2, credits: 319, holdIds: ['h1', 'h2', 'h3'] }),
+    });
+    expect(result.summary.unresolvedReservations).toEqual({ count: 3, oldestAgeHours: 120, accounts: 2, credits: 319 });
+  });
+
+  it('counts reservations created before the launch baseline as historical and keeps the later ones enforced', () => {
+    const result = audit([hold('old', 'u1', '2026-09-01T00:00:00Z'), hold('new', 'u2', hoursAgo(3))]);
+    expect(result.historicalFindings.find(f => f.code === 'billing_reservation_unresolved')).toMatchObject({ scope: 'historical', metadata: expect.objectContaining({ count: 1, preBaseline: true }) });
+    expect(reservation(result)).toMatchObject({ severity: 'warning', metadata: expect.objectContaining({ count: 1, preBaseline: false }) });
+    expect(failsOnReservation(result)).toBe(false);
+    expect(failsOnReservation(audit([hold('old', 'u1', '2026-09-01T00:00:00Z')]))).toBe(false);
+  });
+
+  it('still counts every reservation as unresolved evidence for the balance check', () => {
+    const rows = createReadinessRows({
+      profiles: [{ id: 'legacy', credits: 6891, created_at: '2026-05-22T10:47:23Z' }], creditTransactions: [{ user_id: 'legacy', amount: 6841 }],
+      paymentOrders: [], subscriptions: [], subscriptionCreditGrants: [], billingHistory: [hold('hold', 'legacy', hoursAgo(1), -50)],
+    });
+    const result = buildBillingEngineV15ReadinessAudit(rows, { launchBaselineAt: baseline, now });
+    expect(result.findings.find(f => f.code === 'profile_ledger_balance_mismatch')?.metadata).toMatchObject({ unresolvedPreDeductIds: ['hold'], reservationEvidenceComplete: true });
+  });
+
+  it('closes a reservation only by a record of the same user that names it', () => {
+    const closing = (user_id: string) => ({ user_id, operation_type: 'settle', metadata: { preDeductId: 'h1' } });
+    expect(reservation(audit([hold('h1', 'u1', hoursAgo(80)), closing('u2')]))).toBeDefined();
+    expect(reservation(audit([hold('h1', 'u1', hoursAgo(80)), closing('u1')]))).toBeUndefined();
+  });
+
+  it('scans a large history in linear time', () => {
+    const history: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < 40_000; i += 1) {
+      history.push(hold(`h${i}`, `u${i % 500}`, hoursAgo(100)));
+      history.push({ user_id: `u${i % 500}`, operation_type: 'settle', metadata: { preDeductId: `h${i}` } });
+    }
+    history.push(hold('open', 'u1', hoursAgo(1)));
+    const started = Date.now();
+    const result = audit(history);
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(reservation(result)).toMatchObject({ severity: 'warning', metadata: expect.objectContaining({ count: 1 }) });
+  });
+});
