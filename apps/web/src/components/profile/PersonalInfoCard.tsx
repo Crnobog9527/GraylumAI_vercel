@@ -179,9 +179,9 @@ export const UserProfileHeader = memo(function UserProfileHeader({
           style={{
             background:
               profileMessage.tone === 'success'
-                ? 'rgba(34, 197, 94, 0.12)'
-                : 'rgba(239, 68, 68, 0.12)',
-            color: profileMessage.tone === 'success' ? '#86efac' : '#fca5a5',
+                ? 'var(--success-bg)'
+                : 'var(--error-bg)',
+            color: profileMessage.tone === 'success' ? 'var(--success)' : 'var(--error)',
             border: '1px solid var(--border-primary)',
           }}
         >

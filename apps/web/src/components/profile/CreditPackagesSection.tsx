@@ -106,7 +106,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
             {pkg.is_popular && (
               <div
                 className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
-                style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#3B82F6', border: '1px solid rgba(59, 130, 246, 0.3)' }}
+                style={{ background: 'rgba(59, 130, 246, 0.2)', color: 'var(--info)', border: '1px solid var(--info)' }}
               >
                 热门
               </div>

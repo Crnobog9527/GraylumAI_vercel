@@ -219,15 +219,15 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
               style={{
                 background:
                   statusTone === 'error'
-                    ? 'rgba(239, 68, 68, 0.12)'
+                    ? 'var(--error-bg)'
                     : statusTone === 'success'
-                      ? 'rgba(34, 197, 94, 0.12)'
+                      ? 'var(--success-bg)'
                       : 'var(--bg-secondary)',
                 color:
                   statusTone === 'error'
-                    ? '#fca5a5'
+                    ? 'var(--error)'
                     : statusTone === 'success'
-                      ? '#86efac'
+                      ? 'var(--success)'
                       : 'var(--color-primary)',
                 border: '1px solid var(--border-primary)',
               }}
@@ -327,7 +327,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
               />
             </div>
             {statusTone === 'error' && statusMessage && (
-              <p className="text-sm" role="alert" style={{ color: '#fca5a5' }}>
+              <p className="text-sm" role="alert" style={{ color: 'var(--error)' }}>
                 {statusMessage}
               </p>
             )}
