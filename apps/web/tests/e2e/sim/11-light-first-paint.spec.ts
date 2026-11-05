@@ -35,3 +35,18 @@ test('the server HTML of every light signed-in page carries the light marker, a 
     }
   expect(await html(page, '/app/profile'), '/app/profile').not.toContain(MARKER);
 });
+
+test('a client navigation from a light page to a dark one takes the light mark off, and back', async ({ page }) => {
+  test.setTimeout(900_000);
+  await signIn(page, 'alice');
+  const state = () => page.evaluate(() => ({ mark: document.documentElement.getAttribute('data-first-paint'),
+    background: getComputedStyle(document.body).backgroundColor, path: location.pathname }));
+  await page.goto('/app/runtime', { timeout: 180_000 });
+  await expect.poll(state, { timeout: 60_000 }).toMatchObject({ mark: 'light', background: 'rgb(247, 247, 247)' });
+  // Next's own router, as a link click does: the root layout stays mounted.
+  await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/profile'));
+  await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/profile', mark: null });
+  expect((await state()).background).not.toBe('rgb(247, 247, 247)');
+  await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/runtime'));
+  await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/runtime', mark: 'light', background: 'rgb(247, 247, 247)' });
+});

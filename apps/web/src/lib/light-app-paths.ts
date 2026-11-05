@@ -28,3 +28,11 @@ export const LIGHT_FIRST_PAINT_SCRIPT = `(function(){var p=location.pathname;if(
   + `if(${JSON.stringify(DARK_UNDER_LIGHT)}.some(u))return;`
   + `if(${JSON.stringify(LIGHT_EXACT)}.indexOf(p)>=0||${JSON.stringify(LIGHT_PREFIXES)}.some(u))`
   + `document.documentElement.setAttribute('data-first-paint','light')})()`;
+
+/** Keeps data-first-paint on <html> in step with the path after the first paint: a client navigation from a light page to a dark one
+ *  (the root layout does not remount) must take the mark off again, or the dark page keeps the light body. */
+export function syncLightFirstPaint(root: { setAttribute(name: string, value: string): void; removeAttribute(name: string): void },
+  pathname: string | null): void {
+  if (isLightAppPath(pathname)) root.setAttribute('data-first-paint', 'light');
+  else root.removeAttribute('data-first-paint');
+}

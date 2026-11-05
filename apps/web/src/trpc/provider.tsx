@@ -21,7 +21,7 @@ import { clearPersistedCache, forgetPending, persistQueryCache, restoreQueryCach
 import { readSessionUserIdSync } from '@/lib/session-user';
 import { SignedInShell } from '@/components/opc/signed-in-shell';
 import { LightFirstPaint } from '@/components/layout/LightFirstPaint';
-import { isLightAppPath } from '@/lib/light-app-paths';
+import { isLightAppPath, syncLightFirstPaint } from '@/lib/light-app-paths';
 
 const inSignedInArea = (pathname: string | null) => pathname === '/app' || Boolean(pathname?.startsWith('/app/'));
 const noSubscription = () => () => undefined;
@@ -29,6 +29,8 @@ const noSubscription = () => () => undefined;
 export default function Provider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const signedInArea = inSignedInArea(pathname);
+  // The head script marks <html> for the first frame; a client navigation to another kind of page has to move the mark (light-app-paths.ts).
+  useEffect(() => { syncLightFirstPaint(document.documentElement, signedInArea ? pathname : null); }, [pathname, signedInArea]);
   // False while the server's HTML is being taken over, true from the first client-only render on.
   // Until then the server's HTML for these pages is the empty frame.
   const mounted = useSyncExternalStore(noSubscription, () => true, () => false);
