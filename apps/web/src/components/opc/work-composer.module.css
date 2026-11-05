@@ -37,7 +37,8 @@
 @media(max-width:700px){.attachment{max-height:34dvh}}
 /* UI-B skeleton: the `@` document picker above the box, and the inline reference chip. */
 .referenceMenu{position:absolute;left:12px;bottom:calc(100% + 6px);z-index:25;width:min(340px,calc(100vw - 24px));padding:8px;border:1px solid #ececec;border-radius:16px;background:#fff;box-shadow:0 12px 30px #0002;color:#333}
-.referenceMenu [role=listbox]{display:grid;gap:2px;max-height:min(300px,45dvh);overflow-y:auto}
+.referenceBody{max-height:min(300px,45dvh);overflow-y:auto}
+.referenceMenu [role=listbox]{display:grid;gap:2px}
 .referenceMenu button{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:0;border-radius:9px;background:#fff;color:#333;font-size:13px;text-align:left}
 .referenceMenu button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .referenceMenu button:hover,.referenceMenu button[aria-selected=true]{background:#f3f3f4}

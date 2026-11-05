@@ -49,9 +49,7 @@ export function ComposerView({
   {referenceMenu}
   <div className={styles.tools}><div className={styles.toolLeft}>
    <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'}
-    onClick={onToggleFiles}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料">
-    <button type="button" onClick={onPickFile}><FileText size={16}/> 从文件添加</button>
-    <p>{fileHint}</p></div>}</div>
+    onClick={onToggleFiles}><Plus size={19}/></button>{menu==='files'&&<FilesMenu onPickFile={onPickFile} fileHint={fileHint}/>}</div>
    {fileInput}
    <div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'}
     onClick={onToggleSkills}><Box size={18}/></button>{menu==='skills'&&skillMenu}</div>
@@ -97,6 +95,15 @@ export function ModelSlot(){
 }
 export const MODEL_SLOT_HINT='模型由系统按用途自动选择';
 
+/** The "+" menu. Like the other menus it stays inside the visible work panel (see `useMenuPlacement`). */
+function FilesMenu({onPickFile,fileHint}:{onPickFile?:()=>void;fileHint?:ReactNode}){
+ const menuRef=useRef<HTMLDivElement>(null);
+ useMenuPlacement(menuRef,menuRef,'files');
+ return <div ref={menuRef} className={styles.menu} role="dialog" aria-label="添加资料">
+  <button type="button" onClick={onPickFile}><FileText size={16}/> 从文件添加</button>
+  <p>{fileHint}</p></div>;
+}
+
 export type ReferenceChoice={id:string;label:string};
 
 /** The `@` document picker. `status` replaces the list while it loads or fails. */
@@ -105,13 +112,19 @@ export function ReferenceMenuView({status,choices,highlighted=-1,onPick,footnote
  /** The small line under the list: the per-message limit and what the AI does with the documents. */
  footnote:ReactNode;
 }){
- return <div className={styles.referenceMenu} role="dialog" aria-label="引用资料库文档">
+ // Opens above the box; where the work panel has no room above (a new conversation puts the box near its top) it opens below, and
+ // a list taller than the room scrolls inside the menu, so every candidate can be seen and clicked.
+ const menuRef=useRef<HTMLDivElement>(null),bodyRef=useRef<HTMLDivElement>(null);
+ useMenuPlacement(menuRef,bodyRef,(status?'status':'list')+':'+choices.length);
+ return <div ref={menuRef} className={styles.referenceMenu} role="dialog" aria-label="引用资料库文档">
+  <div ref={bodyRef} className={styles.referenceBody}>
   {status ?? (choices.length ? <div role="listbox" aria-label="资料库文档">{choices.map((item, index) =>
    <button type="button" role="option" key={item.id} aria-selected={index === highlighted}
     onMouseDown={event => event.preventDefault()} onClick={() => onPick?.(index)}>
     <FileText size={15}/><span>{item.label}</span>
    </button>)}</div>
    : <p>没有匹配的已就绪文档</p>)}
+  </div>
   <small>{footnote}</small>
  </div>;
 }
