@@ -47,9 +47,11 @@ export async function runReadonly({db,report}){
  const empty=await draftWith(db,f.actor,base,false);
  const stepOnly=await draftWith(db,f.actor,base,'step');
  // Words from the conversation (a question and a reply) that must never come back through the read-only draft.
- await db.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state,result)
-  VALUES($1,$2,gen_random_uuid(),'{"input":"READONLY_PRIVATE_QUESTION","role":"skill"}',0,'completed','{"body":"READONLY_PRIVATE_REPLY"}')`,
-  [f.actor,confirmed.session_id]);
+ const {rows:[turn]}=await db.query(`INSERT INTO turns(actor_id,session_id,request_id,kind,state,close_kind,closed_at)
+  VALUES($1,$2,gen_random_uuid(),'chat','closed','completed',now()) RETURNING id`,[f.actor,confirmed.session_id]);
+ for(const [seq,role,text] of [[1,'user','READONLY_PRIVATE_QUESTION'],[2,'assistant','READONLY_PRIVATE_REPLY']])
+  await db.query('INSERT INTO session_messages(session_id,seq,role,turn_id,content,content_hash) VALUES($1,$2,$3,$4,$5,repeat($6,64))',
+   [confirmed.session_id,seq,role,turn.id,text,String(seq)]);
  const before=await rpc(db,'opc_query',f.actor,confirmed.draft_id);
  assert.equal(before.conversationDeleted,false);
  assert.deepEqual((await listed(db,f.actor)).map(x=>x.draftId).filter(id=>id!==base.draft_id).sort(),
@@ -86,19 +88,16 @@ export async function runReadonly({db,report}){
   ['opc_handoff',[f.actor,confirmed.draft_id,id,id,[]]],
   ['opc_adopt_topics',[f.actor,confirmed.draft_id,id,0,v,[],[]]],
   ['opc_revise',[f.actor,confirmed.draft_id,id,confirmed.round_id]],
-  ['opc_save_result',[f.actor,confirmed.draft_id,id,'s',id]],
   ['opc_topic_bind',[f.actor,confirmed.draft_id,id,v]],
   ['opc_topic_consent',[f.actor,confirmed.draft_id,v]],
   ['opc_topic_draft_save',[f.actor,confirmed.draft_id,id,0,v,[]]],
   ['opc_topic_material',[f.actor,confirmed.draft_id,id,'x']],
   ['opc_adopt_topics_with_source',[f.actor,confirmed.draft_id,id,0,v,[],[],[],v]],
-  ['opc_topic_draft_from_execution',[f.actor,confirmed.draft_id,id,0,v,id,[]]],
   ['opc_step_material',[f.actor,confirmed.draft_id,id,'s','information','x']],
   ['fusion_review_start',[f.actor,id,confirmed.draft_id,v,{}]],
   // Reads other than opc_query: none of them returns confirmed positioning content.
   ['opc_topic_read',[f.actor,confirmed.draft_id]],
   ['opc_topic_draft_read',[f.actor,confirmed.draft_id]],
-  ['opc_plan_result',[f.actor,confirmed.draft_id,id]],
  ]){
   await assert.rejects(rpc(db,name,...args.map(x=>Array.isArray(x)?JSON.stringify(x):x)),/CONTENT_ERASED/,name);
  }

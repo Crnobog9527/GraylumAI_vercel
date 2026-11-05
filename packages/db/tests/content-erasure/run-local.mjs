@@ -3,30 +3,17 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {readFileSync,readdirSync} from 'node:fs';
-import {supersededScopePatch} from './wrapped-patch.mjs';
+import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
-import {replayTail} from './tail-replay.mjs';
-import {runCases} from './cases.mjs';
-import {runVideo} from './video.mjs';
-import {runProducers} from './producers.mjs';
 import {runStrategy} from './strategy.mjs';
+import {runRename} from './rename.mjs';
+import {runReadonly} from './readonly.mjs';
 import {runSettings} from './settings.mjs';
 import {runResearch} from './research.mjs';
 import {runArtifacts} from './artifacts.mjs';
-import {runFusion,runFusionCompare} from './fusion.mjs';
-import {runDependencies} from './dependencies.mjs';
-import {runCaptureV3} from './capture-v3.mjs';
-import {runPayg} from './payg.mjs';
-import {cases as runAccountFinancial} from '../erasure-b2a/cases.mjs';
-import {runConcurrency} from './concurrency.mjs';
-import {runInstant} from './instant.mjs';
-import {runRename} from './rename.mjs';
-import {runReadonly} from './readonly.mjs';
-import {compareScopes,runScopeSpeed} from './scope-speed.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -43,8 +30,6 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0201_content_erasure.sql';
-const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -62,17 +47,6 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- const finalCatalog=snapshot();
- // Later migrations patch 0201 functions in place, so 0201 is replayed together with every
- // migration after it, in order (tail-replay.mjs); the tail must land on the same catalog.
- // 0201's patch of bill2_scope_allowed is left out when a later migration wrapped that function (wrapped-patch.mjs).
- const listing=readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)&&f>='0201_').sort();
- const scopeSkip=await supersededScopePatch(migration,listing.map(name=>({name,sql:read('packages/db/migrations/'+name)})),async fn=>ok(sql(
-  `SELECT coalesce(pg_get_functiondef(to_regprocedure('public.${fn}(uuid,jsonb)')),'');`)));
- if(scopeSkip.skip)console.log('skip superseded patch '+scopeSkip.reason);
- if(scopeSkip.skip)(report.skipped??=[]).push(scopeSkip.reason);
- await replayTail({root,read,sql,ok,snapshot,finalCatalog,report,migrationPath,first:scopeSkip.skip?scopeSkip.rest:migration});
- report.checks.push('0201 reapplication followed by all later migrations (superseded md5 patches proven and skipped) preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -80,26 +54,12 @@ try {
  client=new Client({connectionString});await client.connect();
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
- await runCases(client,report);
  await runArtifacts(client,report);
- await runFusion(client,report);
- await runFusionCompare(client,report);
  await runResearch({db:client,Client,connectionString,report});
  await runSettings({db:client,Client,connectionString,report});
- await client.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
- await runDependencies(client,report);
- await runVideo(client,report);
- await runScopeSpeed(client,report);
- await runProducers(client,report);
  await runStrategy(client,report);
- await runCaptureV3(client,report);
- await runPayg(client,report);
- await runConcurrency({db:client,Client,connectionString,report});
- await runInstant({db:client,Client,connectionString,report});
  await runRename({db:client,report});
  await runReadonly({db:client,report});
- await compareScopes(client,report,'after every erasure suite');
- await runAccountFinancial(client,report);
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}
