@@ -1270,20 +1270,22 @@ it("OPC: Stage C4 an already published draft spends nothing by waiting or refres
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before.plan);
     expect(await topicIdentity(f.actor)).toEqual(before.topic);
     expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
-    // The explicit consent on the positioning page binds the topic workspace and enters it; it makes no model call.
+    // The explicit consent on the positioning page binds the topic workspace and saves the first-turn intent (opc_topic_consent);
+    // the topic workspace (use-topic-opening) then sends that saved request exactly once. Bound, it no longer offers the start button.
     await page.getByRole("button", { name: "继续生成第一周选题", exact: true }).click();
     await page
       .getByRole("dialog", { name: "是否继续生成第一周选题" })
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
     await page.waitForURL((url) => url.pathname === draftPath + "/topics");
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    expect(await topicIdentity(f.actor)).toMatchObject({ binds: 1, topicExecutions: 0 });
-    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before.plan);
-    // Only the explicit start may create one request, and it is topic work.
-    await page.getByRole("button", { name: "开始选题工作对话", exact: true }).click();
+    // Only the consent creates a request: one topic execution, one binding, and it is topic work, never a plan.
     await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(1);
     expect((await topicIdentity(f.actor)).binds).toBe(1);
+    // The saved first turn is sent once: waiting and refreshing on the bound workspace send nothing more.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await page.reload();
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect(await topicIdentity(f.actor)).toMatchObject({ binds: 1, topicExecutions: 1 });
     expect(await planIdentity(f.actor, f.d.draftId)).toMatchObject({ planExecutions: 0, planRuns: 0 });
   } finally {
     await browser.close();
@@ -1866,11 +1868,12 @@ it("OPC: an explicit continue keeps a retained request identity instead of overw
       .getByRole("dialog", { name: "是否继续生成第一周选题" })
       .getByRole("button", { name: "继续生成第一周选题", exact: true })
       .click();
-    // The continue binds the topic workspace and goes on to it (the old retained-plan-request branch was removed with the
-    // plan page): it admits no plan request and makes no model call.
+    // The continue binds the topic workspace and goes on to it (the old retained-plan-request branch was removed with the plan
+    // page); the workspace sends the saved first turn once. It admits no plan request.
     await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/topics"));
+    await expect.poll(async () => (await topicIdentity(f.actor)).topicExecutions, { timeout: 30000 }).toBe(topicsBefore.topicExecutions + 1);
+    expect(await topicIdentity(f.actor)).toMatchObject({ binds: topicsBefore.binds + 1 });
     expect(await planIdentity(f.actor, f.d.draftId)).toEqual(before);
-    expect(await topicIdentity(f.actor)).toMatchObject({ binds: topicsBefore.binds + 1, topicExecutions: topicsBefore.topicExecutions });
   } finally {
     await browser.close();
   }
