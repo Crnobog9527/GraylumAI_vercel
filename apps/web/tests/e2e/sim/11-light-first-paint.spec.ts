@@ -41,12 +41,13 @@ test('a client navigation from a light page to a dark one takes the light mark o
   await signIn(page, 'alice');
   const state = () => page.evaluate(() => ({ mark: document.documentElement.getAttribute('data-first-paint'),
     background: getComputedStyle(document.body).backgroundColor, path: location.pathname }));
-  await page.goto('/app/runtime', { timeout: 180_000 });
+  await page.goto('/app/library', { timeout: 180_000 });
   await expect.poll(state, { timeout: 60_000 }).toMatchObject({ mark: 'light', background: 'rgb(247, 247, 247)' });
+  // /app/library is a stable light page; /app/runtime without an id redirects to /app/positioning, which made the path check a race.
   // Next's own router, as a link click does: the root layout stays mounted.
   await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/library/scan-check'));
   await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/library/scan-check', mark: null });
   expect((await state()).background).not.toBe('rgb(247, 247, 247)');
-  await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/runtime'));
-  await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/runtime', mark: 'light', background: 'rgb(247, 247, 247)' });
+  await page.evaluate(() => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push('/app/library'));
+  await expect.poll(state, { timeout: 180_000 }).toMatchObject({ path: '/app/library', mark: 'light', background: 'rgb(247, 247, 247)' });
 });
