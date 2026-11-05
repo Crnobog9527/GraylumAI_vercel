@@ -6,7 +6,7 @@ import { runTurn } from "@/lib/turn-stream";
 import { mentorTurnEvents } from "./mentor-turn-path";
 import { reportProgressing, type ReportStatus, type ServerReport } from "./report-gen";
 import { turnReportStop, type TurnStopAnswer } from "./turn-report-stop";
-import { waitForTurnId } from "./turn-id-wait";
+import { reportTurnTracker } from "./turn-id-wait";
 
 /*
  * CORE-PATH-V2 V2-10: the report on the turn path. A report turn is known by its request id: that is the id report_document takes, so the
@@ -48,36 +48,36 @@ export function useTurnReport(on: boolean, sessionId: string, roundId: string) {
     } catch { setFailed(true); return { data: null }; }
   }, [sessionId, roundId]);
   useEffect(() => { void refetch(); }, [refetch]);
-  const status = report ? turnReportStatus(report) : null, turning = useRef(false);
+  const status = report ? turnReportStatus(report) : null, tracker = useRef(reportTurnTracker(ms => new Promise(resolve => setTimeout(resolve, ms)))).current;
   const progressing = reportProgressing(status);
   // A report being written is read until it closes; a read that failed is read again until it answers (a paid report must not wait
   // for a reload to show).
   const reading = progressing || failed;
   useEffect(() => {
     if (!reading) return;
-    const timer = setInterval(() => { if (!turning.current) void refetch(); }, READ_MS);
+    const timer = setInterval(() => { if (!tracker.streaming()) void refetch(); }, READ_MS);
     return () => clearInterval(timer);
-  }, [reading, refetch]);
+  }, [reading, refetch, tracker]);
   const server: ServerReport = report !== undefined ? { kind: "known", executionId: report?.requestId ?? null }
     : failed ? { kind: "failed" } : { kind: "pending" };
 
-  const abort = useRef<AbortController | null>(null), turnId = useRef<number | null>(null);
+  const abort = useRef<AbortController | null>(null);
   /** The report's events; its stream stays this page's until a recorded stop drops it. */
-  async function* events(body: unknown, onOpened: () => void): AsyncGenerator<AgentTurnEvent> {
+  function events(body: unknown, onOpened: () => void): AsyncGenerator<AgentTurnEvent> {
     const controller = abort.current = new AbortController();
-    turning.current = true;
-    turnId.current = null; // the id of an earlier report must not stand for this one
-    try {
-      for await (const event of mentorTurnEvents(body, (request, onEvent) => runTurn(request, onEvent, { fetch: fetcher, signal: controller.signal }))) {
-        if (event.type === "admitted") { turnId.current = Number(event.executionId.slice(5)); onOpened(); }
-        else yield event;
-      }
-    } finally { turning.current = false; }
+    // Marked now, not when the first event is pulled: a stop pressed in between must wait for this stream's turn, not name the last one.
+    tracker.begin();
+    return (async function* () {
+      try {
+        for await (const event of mentorTurnEvents(body, (request, onEvent) => runTurn(request, onEvent, { fetch: fetcher, signal: controller.signal }))) {
+          if (event.type === "admitted") { tracker.opened(Number(event.executionId.slice(5))); onOpened(); }
+          else yield event;
+        }
+      } finally { tracker.end(); }
+    })();
   }
   const stop = async (request: { stopAt?: number; confirmed?: boolean }): Promise<TurnStopAnswer> => {
-    // A stop pressed while the stream is only just open waits for its turn id; a report read after a reload already names it.
-    const id = turnId.current ?? report?.turnId ?? (turning.current
-      ? await waitForTurnId(() => turnId.current, ms => new Promise(resolve => setTimeout(resolve, ms))) : null);
+    const id = await tracker.stopTarget(report);
     if (!id) throw new Error("TURN_STOP_FAILED");
     return turnReportStop({ fetch: fetcher, dropStream: () => abort.current?.abort() })(
       { turnId: id, stopAt: request.stopAt ?? 0, ...(request.confirmed ? { confirmed: true } : {}) });
