@@ -6,6 +6,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { lightOverlayClass, lightPanelStyle, lightPortalClass, type PortalTone } from "@/components/design/light-portal"
 
 const Sheet = SheetPrimitive.Root
 
@@ -51,17 +52,18 @@ const sheetVariants = cva(
 
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> { tone?: PortalTone }
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
+>(({ side = "right", className, children, tone, style, ...props }, ref) => (
   <SheetPortal>
-    <SheetOverlay />
+    <SheetOverlay className={tone === "light" ? lightOverlayClass : undefined} />
     <SheetPrimitive.Content
       ref={ref}
-      className={cn(sheetVariants({ side }), className)}
+      className={cn(sheetVariants({ side }), tone === "light" && lightPortalClass, className)}
+      style={tone === "light" ? { ...lightPanelStyle, ...style } : style}
       {...props}
     >
       {children}
