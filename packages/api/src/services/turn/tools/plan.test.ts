@@ -64,6 +64,19 @@ describe('the tools of a turn, planned before turn_open (CORE-PATH-V2 2.5.3, 2.7
   });
 });
 
+describe('the strategy read room', () => {
+  it('is kept as elastic bytes, so history can use it until the strategy is read (D-6)', async () => {
+    const source = { strategyBytes: 52_000, posts: { bytes: 24_000, calls: 5 } };
+    const { plan } = await planTurnTools(input({ offered: ['read_source', 'load_skill', 'web_search'], source, requiredBytes: 17_000, inputBytes: 150_000 }));
+    expect(plan.sourceRoom).toEqual({ strategy: true, posts: true });
+    expect(plan.elasticBytes).toBe(52_000);
+    expect(plan.reserveBytes).toBeGreaterThanOrEqual(52_000);
+    const without = await planTurnTools(input({ offered: ['read_source', 'load_skill', 'web_search'], source: { posts: source.posts }, requiredBytes: 17_000,
+      inputBytes: 150_000 }));
+    expect(without.plan.elasticBytes).toBeUndefined();
+  });
+});
+
 describe('paid tool bounds', () => {
   it('sum to at least subcalls x the highest price, scaled up when a route multiplier exceeds the model one', () => {
     const sum = (values: string[]) => values.reduce((s, v) => s + decimal(v), 0n);
