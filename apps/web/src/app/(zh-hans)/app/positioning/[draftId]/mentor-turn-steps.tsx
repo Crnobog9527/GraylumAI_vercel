@@ -39,10 +39,10 @@ function TurnHint({ reopened, quiet }: { reopened: boolean; quiet: boolean }) {
  * (its `notice` is the reopened one). Always lists the turn's research calls; the step list (TurnStepList) only while it runs.
  * The stage notices (reading, organizer, saving, ...) stay in mentor-notices.
  */
-export function MentorTurnSteps({ live, reply, execution, calls, saved, stale = false }: {
-  live: LiveReply | null; reply: { text: string; notice?: ReplyNotice }; execution?: { executionId: string; state: string }; calls: readonly ResearchCall[];
-  /** The steps the server kept for this reply (what a reload reads back). */
-  saved?: readonly ReplyStep[] | null;
+export function MentorTurnSteps({ live, reply, execution, calls, stale = false }: {
+  live: LiveReply | null; reply: { text: string; notice?: ReplyNotice }; calls: readonly ResearchCall[];
+  /** The execution (a reply); its `steps` are what the server kept for it, read back after a reload. */
+  execution?: { executionId: string; state: string; steps?: readonly ReplyStep[] | null };
   /** The reopen grace period is over: an open organizer is no longer shown as "still in the background". */
   stale?: boolean;
 }) {
@@ -58,7 +58,8 @@ export function MentorTurnSteps({ live, reply, execution, calls, saved, stale = 
   const shownSteps = (here ? live!.steps ?? [] : []).filter(step => !(step.tool === "research" && calls.length > 0));
   const later = here && (live!.phase === "organizer" || live!.phase === "saving");
   // A reply that has ended keeps its steps above it, folded to "已完成 N 个步骤": the ones this page watched, else the ones the server kept.
-  const ended = (here && live!.steps?.length ? live!.steps : saved ?? []).filter(step => step.state !== "running" && !(step.tool === "research" && calls.length > 0));
+  const ended = (here && live!.steps?.length ? live!.steps : execution?.steps ?? [])
+    .filter(step => step.state !== "running" && !(step.tool === "research" && calls.length > 0));
   return <>
     <ResearchCallList calls={calls}/>
     {(streaming || reopened) ? <>

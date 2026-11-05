@@ -59,11 +59,11 @@ describe("MentorTurnSteps", () => {
 
   it("shows the steps the server kept after a reload (no live reply), folded, without the research the research rows already list", () => {
     const saved = [{ id: "method", tool: "load_skill", state: "done", label: "选定位方向" }, { id: "1", tool: "research", state: "done", count: 3 }];
-    const reloaded = html({ saved: saved as never, reply: { text: "好" }, execution: { executionId: "e1", state: "completed" } });
+    const reloaded = html({ reply: { text: "好" }, execution: { executionId: "e1", state: "completed", steps: saved as never } });
     expect(reloaded).toContain('data-turn-step-list="folded"');
     expect(reloaded).toContain("已完成 2 个步骤");
-    expect(html({ saved: saved as never, reply: { text: "好" }, calls: [{ id: "c1", state: "done" }] as never,
-      execution: { executionId: "e1", state: "completed" } })).toContain("已完成 1 个步骤");
+    expect(html({ reply: { text: "好" }, calls: [{ id: "c1", state: "done" }] as never,
+      execution: { executionId: "e1", state: "completed", steps: saved as never } })).toContain("已完成 1 个步骤");
   });
 
   it("shows nothing for a finished turn", () => {
