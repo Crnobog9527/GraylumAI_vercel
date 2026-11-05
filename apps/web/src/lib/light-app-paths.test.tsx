@@ -14,7 +14,7 @@ describe('light first paint', () => {
   ])('%s is light', path => expect(isLightAppPath(path)).toBe(true));
 
   it.each([
-    '/app/marketplace', '/app/expert-consult', '/app/library/scan-check', '/app/publish-monitor/connect',
+    '/app/expert-consult', '/app/library/scan-check', '/app/publish-monitor/connect',
     '/app/publish-monitor/publish', '/app/workbench/agent-first-preview', '/login', '/', null,
   ])('%s keeps the dark body', path => expect(isLightAppPath(path)).toBe(false));
 
@@ -34,7 +34,7 @@ describe('light first paint', () => {
     const paths = ['/app', '/app/', '/app/positioning', '/app/positioning/abc', '/app/positioning/abc/topics', '/app/positioning/abc/review/r1',
       '/app/positioning/', '/app/runtime', '/app/runtime/', '/app/library', '/app/library/scan-check', '/app/library/scan-check/x',
       '/app/publish-monitor', '/app/publish-monitor/connect', '/app/publish-monitor/publish', '/app/workbench/marketplace',
-      '/app/workbench/search', '/app/workbench/agent-first-preview', '/app/profile', '/app/marketplace', '/app/expert-consult',
+      '/app/workbench/search', '/app/workbench/agent-first-preview', '/app/profile', '/app/expert-consult',
       '/app/positioningx', '/login', '/', '/pricing'];
     for (const path of paths) {
       const marked: string[] = [];
