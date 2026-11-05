@@ -5,6 +5,7 @@ import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from "../../../../../../../../packages
 import { STEP_SUMMARY_PREFIX, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
 import { hostNotice, type PausedFields } from "./turn-pause";
+import type { ReplyStep } from "@/components/chat-display/turn-step-list-model";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {
@@ -231,6 +232,8 @@ export type MentorExecution = PausedFields & {
     organized?: boolean;
     billing?: { pausedReason?: string | null; cancelRequested?: boolean; closed?: boolean } | null;
     envelopeCompact?: boolean;
+    /** The steps the reply showed while it was written, read back after a reload (turn_session_view); absent for a reply from before they were kept. */
+    steps?: ReplyStep[] | null;
   };
 
 /**

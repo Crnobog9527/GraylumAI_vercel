@@ -41,7 +41,8 @@ export function turnHistory(view: TurnView): TurnHistory & { turns: MentorTurn[]
     if (reply.role !== "assistant" || reply.turnId === null) continue;
     const executionId = turnExecutionId(reply.turnId), { stepId, ...round } = placeOf(reply.content);
     const input = view.messages.find(message => message.role === "user" && message.turnId === reply.turnId)?.content ?? null;
-    executions.push({ executionId, input, body: reply.content, primaryBody: reply.content, summary: null, state: "completed", replySeq: reply.seq });
+    executions.push({ executionId, input, body: reply.content, primaryBody: reply.content, summary: null, state: "completed", replySeq: reply.seq,
+      ...(reply.steps?.length ? { steps: reply.steps } : {}) });
     if (stepId) turns.push({ executionId, stepId, ...round, questionId: null, kind: isOpeningInput(input ?? "") ? "opening" : "mentor" });
   }
   const active = view.activeTurn ? turnExecutionId(view.activeTurn.turnId) : null;
