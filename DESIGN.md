@@ -187,7 +187,7 @@ The Owner decision is only that sentence. Everything below it is specification d
 
 ### Public layer: the home page's values
 
-Put `.light` on the page root, then the public modifier (`.light.public`, to be added to `light-tokens.module.css` in the first A-tier change; this document change adds no code). The modifier overrides only the variables marked "public override" in the crosswalk below. Everything else is `--gl-*`.
+Put `.light` on the page root. The public values that differ from `--gl-*` get their own variables, named `--pub-*` (`--pub-canvas`, `--pub-ink`, `--pub-action`, `--pub-action-hover`, `--pub-body`, `--pub-muted`, `--pub-line`, `--pub-gold-text`, `--pub-radius-card`, `--pub-shadow-feature`), defined once in `light-tokens.module.css` in the first A-tier change; this document change adds no code. **No `--gl-*` variable is ever given a second value on the public layer.** Components that are shared between the layers (`ui/*`, the conversation components, the home page demos) keep reading `--gl-*` and render the same everywhere; only public-shell code reads `--pub-*`. The home page's own `--j-*` become aliases of `--pub-*` (`--j-ink: var(--pub-ink)`), so the home page does not change by one pixel.
 
 | Part | Fact (home page today) |
 | --- | --- |
@@ -211,22 +211,22 @@ Public pages follow one more rule: no literal colors or sizes in page files, use
 
 ### Crosswalk: the home page's `--j-*` against `--gl-*`
 
-Rule for conflicts: a value the Owner accepted on the home page stays as it is and becomes a "public override" of the `--gl-*` variable (the home page must not change by one pixel because of the merge). Everything else shares `--gl-*`. Signed-in pages never read an override.
+Rule for conflicts: a value the Owner accepted on the home page stays as it is and gets a `--pub-*` name; the `--gl-*` variable it resembles keeps its single value (a variable never has two meanings, because shared components and the home page's own demo components read `--gl-*` too: for example `preview-k` reads `--gl-text-secondary-aa` through `--k-secondary`). Signed-in pages never read `--pub-*`.
 
 | Home variable / value | `--gl-*` target | Conflict? | Decision and reason |
 | --- | --- | --- | --- |
-| `--j-canvas` `#fafaf9` | `--gl-canvas` (`#f7f7f7`) | yes | Public override `#fafaf9` (home is the public standard); signed-in keeps `#f7f7f7` (conversation page) |
-| `--j-ink` `#141312`; pill `#141312` | `--gl-text` (`#262626`) and `--gl-action` (`#262626`) | yes | Public override: `--gl-text` and `--gl-action` become `#141312`, `--gl-action-hover` `#33322f`; signed-in keeps `#262626` / `#3b3b3b` |
-| `--j-body` `#3d3c3a` | `--gl-text-body` (`#444`) | yes (small) | Public override `#3d3c3a`; a later merge to `#444` is an Owner-visible change on the home page, not done now |
-| `--j-muted` `#63625f` | `--gl-text-secondary-aa` (`#6b6b6b`) | yes (small) | Public override `#63625f` for footer, menu captions and drawer headings; card captions on the home page already read `--gl-text-secondary-aa` through `--k-secondary`, so both grays stay on the home page today |
-| `--j-line` `#e7e6e2` | `--gl-border` (`#ededed`) | yes (small) | Public override `#e7e6e2` |
+| `--j-canvas` `#fafaf9` | `--gl-canvas` (`#f7f7f7`) | yes | New `--pub-canvas: #fafaf9` (home is the public standard); `--gl-canvas` stays `#f7f7f7` for signed-in pages (conversation page) |
+| `--j-ink` `#141312`; pill `#141312` | `--gl-text` (`#262626`) and `--gl-action` (`#262626`) | yes | New `--pub-ink: #141312`, `--pub-action: #141312`, `--pub-action-hover: #33322f`; `--gl-text`, `--gl-action` (`#262626` / `#3b3b3b`) unchanged |
+| `--j-body` `#3d3c3a` | `--gl-text-body` (`#444`) | yes (small) | New `--pub-body: #3d3c3a`; `--gl-text-body` unchanged. A later merge to `#444` is an Owner-visible change on the home page, not done now |
+| `--j-muted` `#63625f` | `--gl-text-secondary-aa` (`#6b6b6b`) | yes (small) | New `--pub-muted: #63625f` for the footer, menu captions and drawer headings. `--gl-text-secondary-aa` keeps `#6b6b6b`: card captions on the home page read it through `--k-secondary` and must stay `#6b6b6b`, so the home page still shows both grays today (one per variable, none shared) |
+| `--j-line` `#e7e6e2` | `--gl-border` (`#ededed`) | yes (small) | New `--pub-line: #e7e6e2`; `--gl-border` unchanged |
 | `--j-gold` `#ffbb17` | `--gl-accent-gold` | no | Same value, use `--gl-accent-gold` |
-| `--j-gold-text` `#8a5a00` | `--gl-accent-gold-text` (`#995900`) | yes | Public override `#8a5a00` (slightly darker, better contrast on the `#fff4d6` tag); signed-in keeps `#995900`. Layer 1's table said `#ad6700`; the token file says `#995900`, which is correct and now written here |
+| `--j-gold-text` `#8a5a00` | `--gl-accent-gold-text` (`#995900`) | yes | New `--pub-gold-text: #8a5a00` (slightly darker, better contrast on the `#fff4d6` tag); `--gl-accent-gold-text` stays `#995900`. Layer 1's table said `#ad6700`; the token file says `#995900`, which is correct and now written here |
 | `--j-note`, `--j-note-text`, `--j-note-meta` | none | n/a | Home-only sticky notes; stay `--j-*` on the home page, not shared |
 | `--j-ease` | none | n/a | Home-only motion; stays |
 | `--j-gutter` 16px / 32px | none | n/a | Becomes the public layout rule in the table above (no variable needed) |
-| `--j-shadow`, `--j-shadow-lift` | `--gl-shadow-panel` (`0 2px 8px rgba(2,4,26,.06)`) | yes | Featured public cards only keep `--j-shadow` (public override of `--gl-shadow-panel`); ordinary cards on every layer have a border and no shadow |
-| Card radius 18px | `--gl-radius-card` (12px) | yes | Public override `--gl-radius-card: 18px`; signed-in cards keep 12px |
+| `--j-shadow`, `--j-shadow-lift` | `--gl-shadow-panel` (`0 2px 8px rgba(2,4,26,.06)`) | yes | New `--pub-shadow-feature` (= `--j-shadow`) for featured public cards only; `--gl-shadow-panel` unchanged; ordinary cards on every layer have a border and no shadow |
+| Card radius 18px | `--gl-radius-card` (12px) | yes | New `--pub-radius-card: 18px`; `--gl-radius-card` stays 12px (the home demo components read it as 12px) |
 | Popover 16px / items 10px; language menu 14px / 9px | none | n/a | Public-only menu radii as written; signed-in menus keep `--gl-shadow-menu` |
 | Pill radius 999px | `--gl-radius-pill` | no | Same |
 | Button height 52 / 40px | layer 1: 34px (44px on touch for important actions) | yes | Public pages: pill 52 / 40px; signed-in pages: 8px-radius button, 34px (44px on touch) |
