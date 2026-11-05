@@ -144,6 +144,47 @@ describe('handbooks and reference lines for a chat review', () => {
   const files = () => ({ 'handbook/douyin.yaml': JSON.stringify(handbookOf('douyin')), 'handbook/tiktok.yaml': JSON.stringify(handbookOf('tiktok')) });
   beforeEach(() => clearChatHandbookCache());
 
+  it('a chat pack lists the own posts a screenshot can be matched to even when the basics fail and only three posts are diagnosed (D-6/D-8, 2026-11-05)', () => {
+    const data = generateDataset({ asOf: AS_OF });
+    const rows = packRowsSchema.parse(packRowsFor(data, data.accounts.find(a => a.key === 'A')!));
+    const failing = rows.diagnostics.slice(0, 3).map(d => ({ ...d, platform: 'douyin', rates: { retain_5s: 0.05 }, reviewRunId: null, capturedOn: AS_OF }));
+    const handbooks = new Map([['douyin', handbookOf('douyin')]]);
+    const pack = JSON.parse(JSON.stringify(buildPack({ rows: { ...rows, diagnostics: failing }, cadence: 'chat', businessId: simId('A'), now: NOW, handbooks })));
+    expect(pack.mode).toBe('basics_only');
+    const diagnosed = new Set(pack.diagnostics.posts.map((p: { post_id: string }) => p.post_id));
+    const listed = pack.posts_index as Array<{ post_id: string; title: string | null }>;
+    // A recent post that has no diagnosis is in the list, with its title, so it can be matched.
+    const undiagnosed = rows.recent.find(p => !diagnosed.has(p.postId))!;
+    expect(listed.find(p => p.post_id === undiagnosed.postId)?.title).toBe(undiagnosed.title);
+    expect(listed.length).toBeLessThanOrEqual(30);
+    expect(JSON.stringify(pack).length).toBeLessThan(16_000);
+    // The scheduled review's pack is unchanged: no list.
+    const weekly = JSON.parse(JSON.stringify(buildPack({ rows: { ...rows, diagnostics: failing }, cadence: 'weekly', businessId: simId('A'), now: NOW, handbooks })));
+    expect(weekly.posts_index).toBeUndefined();
+  });
+
+  it('a diagnosed post in the pack carries its title and publish day, so the review can name it (D-8, 2026-11-05)', () => {
+    const data = generateDataset({ asOf: AS_OF });
+    const rows = packRowsSchema.parse(packRowsFor(data, data.accounts.find(a => a.key === 'A')!));
+    const target = rows.recent[0]!;
+    const one = [{ ...rows.diagnostics[0]!, postId: target.postId, platform: 'douyin', rates: { retain_5s: 0.05 }, reviewRunId: null, capturedOn: AS_OF, openingText: null }];
+    const pack = JSON.parse(JSON.stringify(buildPack({ rows: { ...rows, diagnostics: one }, cadence: 'weekly', businessId: simId('A'), now: NOW,
+      handbooks: new Map([['douyin', handbookOf('douyin')]]) })));
+    expect(pack.diagnostics.posts[0]).toMatchObject({ post_id: target.postId, title: target.title, posted_at: target.postedAt.slice(0, 10) });
+  });
+
+  it('with one diagnosed post the review still gets undiagnosed candidates (named, not the diagnosed one) to ask a screenshot for (D-8)', () => {
+    const data = generateDataset({ asOf: AS_OF });
+    const rows = packRowsSchema.parse(packRowsFor(data, data.accounts.find(a => a.key === 'A')!));
+    const target = rows.recent[0]!;
+    const one = [{ ...rows.diagnostics[0]!, postId: target.postId, platform: 'douyin', rates: { retain_5s: 0.05 }, reviewRunId: null, capturedOn: AS_OF, openingText: null }];
+    const pack = JSON.parse(JSON.stringify(buildPack({ rows: { ...rows, diagnostics: one }, cadence: 'weekly', businessId: simId('A'), now: NOW,
+      handbooks: new Map([['douyin', handbookOf('douyin')]]) })));
+    const candidates = pack.diagnostics.candidates as Array<{ post_id: string; title: string | null; posted_at: string }>;
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates.every(c => c.post_id !== target.postId && c.title !== null && /^\d{4}-\d\d-\d\d$/.test(c.posted_at))).toBe(true);
+  });
+
   it('a chat turn reads the package once per ten minutes, and a failed or empty read is tried again at once', async () => {
     const d = database(files());
     const t0 = 1_000_000;
