@@ -21,6 +21,7 @@ import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusB
 import { useHydrated } from '@/hooks/use-hydrated';
 import {
   AUTH_INPUT_CLASS,
+  AUTH_LABEL_CLASS,
   AUTH_LINK_CLASS,
   AUTH_PRIMARY_BUTTON_CLASS,
   AuthPageCard,
@@ -99,7 +100,7 @@ function ForgotPasswordContent() {
       {/* method="post": a native submit (before the page's scripts have taken the form over) must never put a field in the URL. */}
       <form className="space-y-4" method="post" onSubmit={handleSubmit}>
         <div className="space-y-2">
-          <Label htmlFor="email" className="text-[#f2f2f2]">
+          <Label htmlFor="email" className={AUTH_LABEL_CLASS}>
             邮箱
           </Label>
           <Input
@@ -133,8 +134,7 @@ function ForgotPasswordContent() {
       </form>
 
       <div
-        className="rounded-2xl border px-4 py-4 text-sm leading-6 text-[#afafaf]"
-        style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+        className="rounded-xl border border-[var(--pub-line)] bg-[var(--gl-surface-subtle)] px-4 py-4 text-sm leading-6 text-[var(--pub-body)]"
       >
         <p>如果你一直用 Google 登录，直接在登录页点 Google 登录即可，不需要重置密码。</p>
         <div className="mt-3">

@@ -6,7 +6,7 @@ export function AuthRedirectNotice({ target }: { target: string }) {
   if (target === '/app/profile') return null;
   const intent = buyIntentFromTarget(target);
   return (
-    <p className="rounded-xl border px-3 py-2 text-xs text-[#c8c8c8]" style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+    <p className="rounded-xl border px-3 py-2 text-xs text-[var(--pub-body)]" style={{ borderColor: 'var(--pub-line)' }}
       data-testid="auth-redirect-notice">
       {intent
         ? <>注册或登录后，直接回到「开通 <span className="font-semibold">{describeBuyIntent(intent)}</span>」的付款确认</>

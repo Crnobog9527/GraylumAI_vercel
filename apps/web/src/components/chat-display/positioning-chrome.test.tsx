@@ -40,3 +40,21 @@ it('keeps the title an h1 by default and renders it at the level a page asks for
   const css = readFileSync(new URL('../opc/positioning-result.module.css', import.meta.url), 'utf8');
   expect(css).toContain('.positionTop :is(h1,h2,:where(');
 });
+
+it('marks only the selected step and its neighbours as near, which is all a phone shows, and uses plain buttons', async () => {
+  const steps = ['a', 'b', 'c', 'd', 'e', 'f'].map(id => ({ id, title: id.toUpperCase(), valid: false }));
+  const near = (selectedId: string) => {
+    const html = renderToStaticMarkup(<PositioningStepStrip selectedId={selectedId} steps={steps}/>);
+    return [...html.matchAll(/<button[^>]*>(\d )([A-F])<\/button>/g)].filter(m => /data-near="true"/.test(m[0])).map(m => m[2]);
+  };
+  expect(near('a')).toEqual(['A', 'B']);
+  expect(near('c')).toEqual(['B', 'C', 'D']);
+  expect(near('f')).toEqual(['E', 'F']);
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../opc/positioning-result.module.css', import.meta.url), 'utf8');
+  // The phone rule hides every tab that is not near; the tabs carry no !important override of ui/Button.
+  expect(css).toMatch(/@media\(max-width:700px\)\{\.stepTabs\{[^}]*\}\.stepTab\{[^}]*\}\.stepTab:not\(\[data-near\]\)\{display:none\}\}/);
+  const tabRules = css.split('\n').filter(line => line.startsWith('.stepTab')).join('\n');
+  expect(tabRules).not.toContain('!important');
+  expect(readFileSync(new URL('./positioning-chrome.tsx', import.meta.url), 'utf8')).not.toContain('ui/button');
+});

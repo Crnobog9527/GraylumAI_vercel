@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { ReactNode, Ref } from "react";
 import { PanelRightOpen } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { DisplayHeading } from './display-heading';
 
@@ -37,24 +36,31 @@ export function PositioningHeader({ title, status, onWorkInfo, showExpand, onExp
 
 export type PositioningStepChip = { id: string; title: string; valid: boolean; disabled?: boolean };
 
-/** One button per positioning step; the selected one is filled, a confirmed one carries a check. */
+/**
+ * One tab per positioning step; the selected one is marked with a dark top line, a confirmed one carries a check. Plain buttons styled by
+ * `stepTabs` / `stepTab` (no ui/Button to override). Every tab is drawn on a wide screen; on a phone CSS keeps only the selected step and
+ * its neighbours (`data-near`), so titles are never cut to a few characters.
+ */
 export function PositioningStepStrip({ steps, selectedId, onSelect }: {
   steps: PositioningStepChip[];
   selectedId: string;
   onSelect?: (stepId: string) => void;
 }) {
+  const selected = steps.findIndex(step => step.id === selectedId);
   return (
-    <nav aria-label="定位步骤" className={resultStyles.phaseStrip} style={{gridTemplateColumns:`repeat(${steps.length},minmax(0,1fr))`}}>
+    <nav aria-label="定位步骤" className={resultStyles.stepTabs}>
       {steps.map((step, index) => (
-        <Button
+        <button
           key={step.id}
-          variant={selectedId === step.id ? "default" : "outline"}
+          type="button"
+          className={resultStyles.stepTab}
+          data-near={Math.abs(index - selected) <= 1 ? "true" : undefined}
           aria-current={selectedId === step.id ? "step" : undefined}
           disabled={step.disabled}
           onClick={() => onSelect?.(step.id)}
         >
           {step.valid ? "✓ " : `${index + 1} `}{step.title}
-        </Button>
+        </button>
       ))}
     </nav>
   );

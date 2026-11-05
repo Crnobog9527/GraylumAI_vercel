@@ -1,0 +1,82 @@
+/* The sign-in pages follow the public layer (DESIGN.md "Public-page layer" and "Which layer the entry pages follow"): the home page's canvas,
+   ink and hairline, a white 18px card, the submit button as the 52px pill. The --pub-* values are the ones DESIGN.md lists; they are set on
+   this shell only until the shared public shell owns them. min-height is 100dvh and the card sits in a safe-centering flex column, so a
+   phone keyboard that shortens the visible area leaves the card at the top and scrollable, never pushed off screen. */
+.shell {
+  --pub-canvas: #fafaf9;
+  --pub-ink: #141312;
+  --pub-action-hover: #33322f;
+  --pub-body: #3d3c3a;
+  --pub-muted: #63625f;
+  --pub-line: #e7e6e2;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--pub-canvas);
+  color: var(--pub-ink);
+  font-size: 16px;
+  line-height: 1.7;
+}
+.header { padding: 12px 16px; }
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: var(--pub-ink);
+  text-decoration: none;
+}
+.logo { width: 28px; height: 28px; border-radius: 6px; background: #262626; object-fit: contain; }
+.stage { display: flex; flex: 1; padding: 8px 16px 48px; }
+.column { width: min(100%, 480px); margin: auto; }
+.card {
+  background: #fff;
+  border: 1px solid var(--pub-line);
+  border-radius: 18px;
+  padding: 28px 22px;
+}
+.tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 14px;
+  background: var(--gl-accent-tag);
+  color: var(--gl-accent-tag-text);
+}
+.title { margin: 0; font-size: clamp(26px, 7vw, 32px); font-weight: 600; line-height: 1.15; letter-spacing: -0.03em; color: var(--pub-ink); text-wrap: balance; }
+.lead { margin: 0; font-size: 15px; line-height: 1.7; color: var(--pub-muted); }
+.panel {
+  border: 1px solid var(--pub-line);
+  border-radius: 12px;
+  background: var(--gl-surface-subtle);
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--pub-body);
+}
+.segment { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--pub-line); border-radius: 999px; background: #fff; }
+.segmentItem {
+  flex: 1;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pub-muted);
+  font-size: 14.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.segmentItem[aria-pressed='true'] { background: var(--pub-ink); color: #fff; }
+.divider { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--pub-muted); }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--pub-line); }
+@media (min-width: 768px) {
+  .header { padding: 12px 32px; }
+  .stage { padding: 16px 32px 64px; }
+  .card { padding: 36px 40px; }
+}
