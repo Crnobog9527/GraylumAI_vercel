@@ -3,27 +3,46 @@
 // local database (packages/db/tests/library/backlog-drill.mjs builds it and sets LIBRARY_DRILL_DB_PORT). Storage is
 // the local storage.objects stand-in, so the 0376 write guard is the real trigger. Each simulated 5-minute cron run
 // moves every stored time back by 5 minutes, so the guard window, the second absence look and the 24-hour clock
-// behave as they would over a day of Pro cron runs. Sizes come from LIBRARY_DRILL_SIZES (default 1000,6000).
+// behave as they would over a day of Pro cron runs. Sizes come from LIBRARY_DRILL_SIZES (default 1000,5000,12000).
 import { describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import pg from 'pg';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { cleanupLibrary } from './cleanup';
+import { cleanupLibrary, LIBRARY_CRON_BATCH } from './cleanup';
 import type { LibraryStorage } from './storage';
 
 const port = Number(process.env.LIBRARY_DRILL_DB_PORT ?? 0);
 const BUCKET = 'library-documents';
 const RUN_MINUTES = 5;
 const DAY_RUNS = 24 * 60 / RUN_MINUTES;
-// Rows per cron run: 50 is the cron's batch on staging today; LIBRARY_DRILL_BATCH=100 measures the proposed batch.
-const BATCH = Number(process.env.LIBRARY_DRILL_BATCH ?? 50);
+// Rows per cron run: what runLibraryCleanup passes, unless LIBRARY_DRILL_BATCH measures another value.
+const BATCH = Number(process.env.LIBRARY_DRILL_BATCH ?? LIBRARY_CRON_BATCH);
+// The fatal backlog alert (LIBRARY_BACKLOG_FATAL_PENDING in apps/web/src/lib/erasure-backlog-alert.ts). Below it the
+// cron alone must keep the 24-hour promise, even through an 8-hour Storage outage; above it a person steps in.
+const GATE_PENDING = 5000;
+// Parallel connections that delete at once, like many users (or one closed account) deleting together.
+const DELETERS = 8;
 
 type Faults = { down: (run: number) => boolean; rate: number };
 type Outcome = {
   documents: number; objectsGoneMinutes: number | null; releasedMinutes: number | null;
-  maxOverdue: number; runs: number; failedRows: number; slowestRunMs: number;
+  maxOverdue: number; runs: number; failedRows: number; slowestRunMs: number; deleteMs: number;
+  firstReleaseMinutes: number | null; rowsPerRun: number | null; within24h: number | null;
 };
+
+// Measured throughput: rows released per run from the first release to the last. The backlog that still clears
+// within 24 hours is what that rate releases in the runs left after the first release (guard + two absence looks).
+function throughput(released: number[]) {
+  const first = released.findIndex(n => n > 0);
+  if (first === -1) return { firstReleaseMinutes: null, rowsPerRun: null, within24h: null };
+  const last = released.length - 1 - [...released].reverse().findIndex(n => n > 0);
+  const rowsPerRun = released.reduce((sum, n) => sum + n, 0) / (last - first + 1);
+  return {
+    firstReleaseMinutes: (first + 1) * RUN_MINUTES, rowsPerRun: Math.round(rowsPerRun),
+    within24h: Math.floor((DAY_RUNS - first) * rowsPerRun),
+  };
+}
 
 // PostgREST stand-in: named arguments, service_role, { data, error } like supabase-js.
 function rpcClient(service: pg.Client) {
@@ -135,14 +154,29 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
   const queued = await admin.query(
     'SELECT count(*)::int n FROM library_upload_reservations WHERE cleanup AND NOT actor_id=ANY($1)', [actors]);
   expect(queued.rows[0].n, 'an earlier scenario left rows in the cleanup queue').toBe(0);
-  // The user deletes everything at once and every inline Storage removal fails: all objects stay for the cron.
-  for (const actor of actors) {
-    const docs = await admin.query('SELECT id FROM library_documents WHERE actor_id=$1', [actor]);
-    for (const row of docs.rows) await service.query('SELECT library_delete($1,$2)', [actor, row.id]);
-  }
+  // Everyone deletes at once over DELETERS parallel connections and every inline Storage removal fails: all objects
+  // stay for the cron. Every deletion must succeed (no lock timeout or deadlock between concurrent deleters).
+  const deleteStarted = Date.now();
+  const work = (await admin.query('SELECT actor_id,id FROM library_documents WHERE actor_id=ANY($1) ORDER BY random()',
+    [actors])).rows as { actor_id: string; id: string }[];
+  await Promise.all(Array.from({ length: DELETERS }, async () => {
+    const deleter = await connect();
+    await deleter.query('SET ROLE service_role');
+    try {
+      for (let row = work.pop(); row; row = work.pop()) {
+        const done = await deleter.query('SELECT library_delete($1,$2) v', [row.actor_id, row.id]);
+        expect(done.rows[0].v.status).toBe('deleting');
+      }
+    } finally { await deleter.end(); }
+  }));
+  const deleting = await admin.query(
+    'SELECT count(*)::int n FROM library_upload_reservations WHERE cleanup AND actor_id=ANY($1)', [actors]);
+  expect(deleting.rows[0].n, 'every concurrent deletion is queued for the cron').toBe(documents);
   const outcome: Outcome = {
     documents, objectsGoneMinutes: null, releasedMinutes: null, maxOverdue: 0, runs: 0, failedRows: 0, slowestRunMs: 0,
+    deleteMs: Date.now() - deleteStarted, firstReleaseMinutes: null, rowsPerRun: null, within24h: null,
   };
+  const released: number[] = [];
   try {
     while (clock.run < maxRuns) {
       clock.run++;
@@ -151,6 +185,7 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
       const result = await cleanupLibrary(client, { storage, limit: BATCH });
       outcome.slowestRunMs = Math.max(outcome.slowestRunMs, Date.now() - started);
       outcome.failedRows += result.failed;
+      released.push(result.released);
       const now = await scope();
       outcome.maxOverdue = Math.max(outcome.maxOverdue, now.overdue);
       const minutes = clock.run * RUN_MINUTES;
@@ -158,7 +193,7 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
       if (now.docs === 0) { outcome.releasedMinutes = minutes; break; }
     }
     outcome.runs = clock.run;
-    return outcome;
+    return { ...outcome, ...throughput(released) };
   } finally {
     // A scenario that does not drain (8000) must not leave its backlog in the queue the next scenario measures.
     await purge(admin, actors);
@@ -179,7 +214,8 @@ function report(name: string, outcome: Outcome) {
 }
 
 describe.skipIf(!port)('library cleanup backlog drill (local database)', () => {
-  const sizes = (process.env.LIBRARY_DRILL_SIZES ?? '1000,6000').split(',').map(Number);
+  const sizes = (process.env.LIBRARY_DRILL_SIZES ?? '1000,5000,12000').split(',').map(Number);
+  const outageSize = Number(process.env.LIBRARY_DRILL_OUTAGE_SIZE ?? GATE_PENDING);
   const background = Number(process.env.LIBRARY_DRILL_BACKGROUND ?? 20000);
 
   it('starts from an empty cleanup queue, so each scenario measures only its own backlog', async () => {
@@ -213,16 +249,24 @@ describe.skipIf(!port)('library cleanup backlog drill (local database)', () => {
       const outcome = await drain(actors, { down: () => false, rate: 0 });
       report(`burst ${size}`, outcome);
       expect(outcome.objectsGoneMinutes).not.toBeNull();
+      expect(outcome.failedRows).toBe(0);
       if (outcome.releasedMinutes !== null && outcome.releasedMinutes <= 24 * 60) expect(outcome.maxOverdue).toBe(0);
+      // The gate: up to the fatal alert the cron alone keeps the promise, and the bound computed from the measured
+      // rate covers that backlog (a burst far below the bound only shows the rate a small backlog needs).
+      if (size <= GATE_PENDING) {
+        expect(outcome.releasedMinutes).not.toBeNull();
+        expect(outcome.releasedMinutes!).toBeLessThanOrEqual(24 * 60);
+      }
+      if (size >= GATE_PENDING) expect(outcome.within24h!).toBeGreaterThanOrEqual(GATE_PENDING);
     }, 3_600_000);
   }
 
   it('Storage down for 8 hours, then 10% of calls fail', async () => {
     const admin = await connect();
-    const actors = await seedReady(admin, 30, 100, 185);
+    const actors = await seedReady(admin, Math.ceil(outageSize / 100), Math.min(outageSize, 100), 185);
     await admin.end();
     const outcome = await drain(actors, { down: run => run <= 8 * 60 / RUN_MINUTES, rate: 0.1 });
-    report('outage 3000', outcome);
+    report(`outage ${outageSize}`, outcome);
     expect(outcome.failedRows).toBeGreaterThan(0);
     expect(outcome.releasedMinutes).not.toBeNull();
     expect(outcome.releasedMinutes!).toBeLessThanOrEqual(24 * 60);
