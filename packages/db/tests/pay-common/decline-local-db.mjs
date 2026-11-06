@@ -28,13 +28,16 @@ try {
   }
   assert.ok(ready, 'local database startup');
   installPgCronStub(root, name, (args, input) => docker(['exec', ...args], input));
-  const sql = text => {
-    try { docker(['exec', '-i', name, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'paycommon',
-      '-v', 'ON_ERROR_STOP=1', '-c', text]); return { ok: true }; }
-    catch (error) { return { ok: false, error: String(error.stderr) }; }
+  // A migration file goes in through stdin: one command-line argument is limited to 128 KB on Linux (MAX_ARG_STRLEN) and 0505 is
+  // 149 KB, so `psql -c <file text>` failed on the CI runner (spawn E2BIG, no stderr) while it passed on macOS. Only the small server-side
+  // texts (applyServerOnly) stay on -c, because psql does not interpret meta-commands in them.
+  const run = (extra, input) => {
+    try { docker(['exec', '-i', name, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'paycommon', '-v', 'ON_ERROR_STOP=1', ...extra], input);
+      return { ok: true }; }
+    catch (error) { return { ok: false, error: String(error.stderr ?? error.message) }; }
   };
-  const report = buildFromFiles(root, { applyFile: path => sql(readFileSync(resolve(root, path), 'utf8')),
-    applyServerOnly: sql });
+  const report = buildFromFiles(root, { applyFile: path => run(['-f', '/dev/stdin'], readFileSync(resolve(root, path), 'utf8')),
+    applyServerOnly: text => run(['-c', text]) });
   assert.equal(report.failed, null, JSON.stringify(report.failed));
   console.log(JSON.stringify({ endpoint, name, steps: report.passed }));
 } catch (error) {

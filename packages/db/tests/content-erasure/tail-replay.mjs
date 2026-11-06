@@ -8,6 +8,72 @@ import {resolve} from 'node:path';
 import {supersededPatch} from './md5-chain.mjs';
 
 /**
+ * The objects migration 0505 (CORE-PATH-V2 V2-12 batch F, irreversible) dropped: the old Runtime / BILL2 path. A migration from before it that
+ * patches one of them (pg_get_functiondef of a dropped function, an ALTER of a dropped table) cannot run on the final catalog any more:
+ * its target is gone, and 0505 drops whatever it would bring back. read(path) returns the migration text.
+ */
+export const droppedByOldPathDrop = read => {
+  const text = read('packages/db/migrations/0505_core_path_v2_drop_old_path.sql'), names = new Set();
+  // DROP TABLE / TYPE / VIEW name [, name ...]: one statement drops a list (the 15 tables are one statement).
+  for (const match of text.matchAll(/\bDROP\s+(?:TABLE|TYPE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?([^;]+);/gi))
+    for (const item of match[1].split(',')) {
+      const name = item.trim().replace(/\s+CASCADE\s*$/i, '').replace(/^public\./, '').replace(/"/g, '');
+      if (/^\w+$/.test(name)) names.add(name);
+    }
+  for (const match of text.matchAll(/\bDROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?\(/gi)) names.add(match[1]);
+  return names;
+};
+
+/**
+ * The migration without the rows of its `FOR p IN SELECT * FROM (VALUES ('public.<function>(...)', anchor, replacement, marker), ...)` patch lists that
+ * target a dropped function, so the re-applied migration still runs every patch whose target exists. Returns { sql, removed } (removed: the names).
+ */
+export function withoutDroppedPatchTargets(sql, dropped) {
+  const kept = [], removed = [];
+  let skipping = false;
+  for (const line of sql.split('\n')) {
+    const row = /^ \('public\.(\w+)\(/.exec(line);
+    if (row) { skipping = dropped.has(row[1]); if (skipping) removed.push(row[1]); }
+    else if (/^ \) x\(sig,anchor,replacement,marker\)/.test(line)) {
+      skipping = false;
+      // The last kept row ended with a comma before the removed one; the list must not end with one.
+      const last = kept.findLastIndex(text => text.trim() !== '');
+      if (last >= 0 && removed.length > 0) kept[last] = kept[last].replace(/,\s*$/, '');
+    }
+    if (!skipping) kept.push(line);
+  }
+  return { sql: kept.join('\n'), removed };
+}
+
+/**
+ * Function EXECUTE rights (fnacl) are never excluded by function name. The one difference that is accepted is written out here, exactly: an
+ * overload that the replay brings back and that a refused (not replayed) migration drops again, so it exists after the replay and not in the final
+ * catalog (key -> the exact rights found after the replay). opc_work_check(uuid,uuid,boolean) was replaced by the four-argument function in 0452.
+ * Anything else, above all a function that exists in the final catalog and ends the replay with other rights (an extra PUBLIC EXECUTE), fails.
+ */
+export const ACCEPTED_LEFTOVER_ACL = {
+  'fnacl:opc_work_check(uuid,uuid,boolean)': 'postgres=X/postgres,service_role=X/postgres',
+};
+
+/**
+ * The objects whose difference between the replayed catalog (after) and the final one is explained by a refused migration, and the ones that are not.
+ * Bodies, constraints, triggers and indexes named by a refused migration may end the replay in an older state that only that migration could
+ * bring forward again; rights (fnacl) are explained only by ACCEPTED_LEFTOVER_ACL.
+ */
+export function replayDrift({ after, finalCatalog, refusedText, acceptedLeftoverAcl = ACCEPTED_LEFTOVER_ACL }) {
+  const named = (kind, name) => kind !== 'fnacl' && new RegExp('\\b' + name + '\\b').test(refusedText);
+  const differing = Object.keys({ ...after, ...finalCatalog }).filter(key => after[key] !== finalCatalog[key]);
+  const explained = differing.filter(key => {
+    const match = /^(fn|fnacl|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(key);
+    if (!match) return false;
+    return match[1] === 'fnacl'
+      ? finalCatalog[key] === undefined && acceptedLeftoverAcl[key] === after[key]
+      : named(match[1], match[2]);
+  });
+  return { explained, remaining: differing.filter(key => !explained.includes(key)) };
+}
+
+/**
  * migrationPath: the migration being re-applied; first: its SQL to replay (the file text, or the text without a block
  * proven superseded). sql(text) runs on the database, ok(result) unwraps it, snapshot() reads the object catalog.
  */
@@ -17,10 +83,13 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
   .map(name=>({name,sql:read('packages/db/migrations/'+name)}));
  // The md5 block of a patch superseded by a later md5 patch of the same function is left out only when the files prove
  // the chain and the database is at its tail; the rest of that migration still runs (md5-chain.mjs). Every skip is printed.
- const currentMd5=signature=>ok(sql(`SELECT md5(pg_get_functiondef('public.${signature}'::regprocedure));`));
+ // A function a migration patches may be gone (dropped by 0505): to_regprocedure answers NULL then, the patch is not "already at the chain end",
+ // and replaying it fails with "does not exist", which is tolerated below when the object was dropped by 0505.
+ const currentMd5=signature=>ok(sql(`SELECT md5(pg_get_functiondef(to_regprocedure('public.${signature}')));`));
  const hasMarker=(signature,marker)=>{assert.ok(!marker.includes('$md5_chain_marker$'));
-  return ok(sql(`SELECT position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef('public.${signature}'::regprocedure))>0;`))==='t';};
+  return ok(sql(`SELECT coalesce(position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef(to_regprocedure('public.${signature}')))>0,false);`))==='t';};
  report.skipped??=[];
+ const dropped=droppedByOldPathDrop(read);
  const refusedSql=[],refusedNames=[];
  for(let i=0;i<tail.length;i++){
   const superseded=await supersededPatch(tail,i,currentMd5,hasMarker);
@@ -46,12 +115,20 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
     END $stub$;`));
   const replayResult=sql(superseded.skip?superseded.rest:replay);
   // An anchored patch refuses (an error code containing PATCH, or SOURCE_MISMATCH, or 0328's own gate refusal) when a still
-  // later migration already rewrote the text it anchors on (0307 after 0338, 0328 after 0329/0330/0335, 0391 after any later rewrite of atomic_pre_deduct / bill2_payg_claim). Only those named
+  // later migration already rewrote the text it anchors on (0307 after 0338, 0328 after 0329/0330/0335, 0391 after any later rewrite of atomic_pre_deduct / bill2_payg_claim, CONTENT_ERASURE_SPEED_MISMATCH of the speed patch of content_erasure_scope after 0505 rewrote it). Only those named
   // refusals are tolerated, never for the re-applied migration
   // itself, each one is printed and recorded, and the catalog equality below must still hold.
   const refusal=replayResult.status!==0&&tail[i].name!==base
-   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
+   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH|SPEED_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
+  // A migration from before 0505 that patches an object 0505 later dropped (the old Runtime / BILL2 path) fails with "does not exist" naming it:
+  // the target is gone from the final catalog and 0505, replayed later in this tail, drops anything such a migration would bring back.
+  // The first ERROR line names the object: "function ... does not exist", "relation ...", "type ...", or a guard of the migration itself (such as
+  // OPC_ARCHIVE_FUNCTION_MISSING: opc_save_result); any identifier on it that 0505 dropped counts.
+  const gone=replayResult.status!==0&&!refusal&&tail[i].name!==base
+   ?[.../ERROR:[^\n]*/.exec(replayResult.stderr??'')?.[0].matchAll(/[a-z_][a-z_0-9]*/gi)??[]].map(token=>token[0]).filter(token=>dropped.has(token)).slice(0,1):[];
   if(refusal){const reason=tail[i].name+': anchored patch refused on the final catalog ('+refusal[1]+'), a later migration rewrote its anchor; not replayed';
+   console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
+  else if(gone.length){const reason=tail[i].name+': its patch target '+gone[0]+' was dropped by 0505 (old Runtime / BILL2 path); not replayed';
    console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
   else ok(replayResult);
  }
@@ -60,11 +137,12 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
  // Every other object must be identical, so any other drift still fails. Each excluded object is recorded.
  const after=snapshot();
  const refusedText=refusedSql.join('\n');
- const explainedKey=k=>{const name=/^(?:fn|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(k)?.[1];
-  return Boolean(name&&new RegExp('\\b'+name+'\\b').test(refusedText));};
- const explained=Object.keys({...after,...finalCatalog}).filter(k=>after[k]!==finalCatalog[k]&&explainedKey(k));
+ const {explained}=replayDrift({after,finalCatalog,refusedText});
  const expected={...finalCatalog};
  for(const k of explained){delete after[k];delete expected[k];}
  if(explained.length)report.skipped.push('not compared (named by refused replays '+refusedNames.join(', ')+'): '+explained.join(', '));
- assert.deepEqual(after,expected,'repeat '+base+' and every later migration preserves the complete final catalog');
+ // The deep-equal diff of a whole catalog is cut off by Node; name the differing objects (first 25) so a failure says which they are.
+ const drift=Object.keys({...after,...expected}).filter(k=>JSON.stringify(after[k])!==JSON.stringify(expected[k])).sort();
+ assert.equal(drift.length,0,'repeat '+base+' and every later migration preserves the complete final catalog; '+drift.length+' objects differ: '
+  +drift.slice(0,25).map(k=>k+' => '+String(after[k]??'(absent)').replace(/\s+/g,' ').slice(0,140)+' | expected '+String(expected[k]??'(absent)').replace(/\s+/g,' ').slice(0,140)).join(' ;; '));
 }

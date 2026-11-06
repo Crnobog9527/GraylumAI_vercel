@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
+import { replayTail } from '../content-erasure/tail-replay.mjs';
 export const root = resolve(import.meta.dirname, '../../../..');
 export const read = path => readFileSync(resolve(root, path), 'utf8');
 
@@ -76,7 +77,7 @@ export async function buildSnapshot() {
 // passes it always replays the files and never uses a snapshot.
 // dockerArgs / postgresArgs (CORE-PATH-V2 single-machine load run): extra `docker run` options (cpus, memory) and extra `postgres -c` settings.
 // snapshot: { image, build } from buildSnapshot(); defaults to the image the runner passed in the environment.
-export async function localDb({ beforeApply, dockerArgs = [], postgresArgs = [], snapshot = snapshotFromEnv() } = {}) {
+export async function localDb({ beforeApply, dockerArgs = [], postgresArgs = [], snapshot = snapshotFromEnv(), replayCopy = false } = {}) {
   // MAINT-P1: --local-only on a developer machine, --ci in CI (run-local-suites.mjs); never the other way round.
   const ci = process.argv[2] === '--ci';
   assert.equal(process.argv[2], ci ? '--ci' : '--local-only');
@@ -92,17 +93,38 @@ export async function localDb({ beforeApply, dockerArgs = [], postgresArgs = [],
   try {
     await startContainer(tools, { image: useSnapshot ? snapshot.image : POSTGRES_IMAGE, name, dockerArgs, postgresArgs });
     const build = useSnapshot ? snapshot.build : buildInto(tools, name, beforeApply);
+    // replayCopy: a copy of the finished build, taken before the suite's own connection exists (CREATE DATABASE ... TEMPLATE needs the template idle).
+    // A replay of old migrations (replayMigrationTail inCopy) runs there, so the objects it cannot bring forward again never reach the suite's database.
+    if (replayCopy) ok(docker(['exec', name, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'postgres', '-c', `CREATE DATABASE ${DATABASE}_replay TEMPLATE ${DATABASE}`]));
+    const rawReplay = input => docker(['exec', '-i', name, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', `${DATABASE}_replay`, '-v', 'ON_ERROR_STOP=1'], input);
     const require = createRequire(resolve(root,'package.json'));
     const {Client} = require('pg');
     const address=ok(docker(['port',name,'5432/tcp']));
     assert.match(address,/^127\.0\.0\.1:\d+$/);
     client=new Client({connectionString:`postgres://postgres@${address}/${DATABASE}`});
     await client.connect();
-    return {client,build,close,sql:input=>ok(sql(input)),address,exec:args=>ok(docker(['exec',name,...args])),fromSnapshot:useSnapshot};
+    return {client,build,close,sql:input=>ok(sql(input)),raw:sql,rawReplay,address,exec:args=>ok(docker(['exec',name,...args])),fromSnapshot:useSnapshot};
   } catch(e) {await close();throw e;}
 }
 
 export function snapshotFromEnv() {
   const image = process.env[SNAPSHOT_IMAGE_ENV];
   return image ? { image, build: JSON.parse(process.env[SNAPSHOT_BUILD_ENV] ?? 'null') } : null;
+}
+
+/**
+ * "Re-applying migration M leaves the complete catalog unchanged", on the final catalog: M is replayed together with every later migration, in
+ * order (content-erasure/tail-replay.mjs), because M alone rewrites functions that later migrations changed or dropped. Asserts inside; every
+ * migration it could not replay is recorded in report.skipped. finalCatalog: the catalog to land on (default: the catalog now, which is
+ * what a plain re-application check wants); pass the catalog taken before a rollback when the replay is the recovery from that rollback.
+ */
+export async function replayMigrationTail(db, { migrationPath, report, finalCatalog, first, inCopy = false }) {
+  const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
+  const objectSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
+  // inCopy: the copy database (localDb replayCopy: true); otherwise the suite's own database, which a recovery from a rollback needs.
+  const run = inCopy ? input => db.rawReplay(input) : input => db.raw(input);
+  const sql = input => { const result = run(input); return { status: result.status === 0 && !result.error ? 0 : 1, stdout: (result.stdout ?? '').trim(), stderr: result.stderr ?? String(result.error ?? '') }; };
+  const ok = result => { if (result.status !== 0) throw new Error(result.stderr); return result.stdout; };
+  const snapshot = () => JSON.parse(ok(sql(objectSql)));
+  await replayTail({ root, read, sql, ok, snapshot, finalCatalog: finalCatalog ?? snapshot(), report, migrationPath, first: first ?? read(migrationPath) });
 }

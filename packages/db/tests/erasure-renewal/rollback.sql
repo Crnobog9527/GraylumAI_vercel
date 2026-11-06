@@ -20,8 +20,8 @@ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_
         AND lower(s.status) IN ('active', 'trialing', 'past_due', 'incomplete', 'unpaid')),
     'pendingPayments', (SELECT count(*) FROM public.payment_orders o
       WHERE o.user_id = p_profile_id AND o.status = 'pending'),
-    'runsInFlight', (SELECT count(*) FROM public.bill2_runs r
-      WHERE r.actor_id = p_profile_id AND r.state IN ('prepared', 'dispatched', 'unknown', 'cost_pending')),
+    -- CORE-PATH-V2 V2-12 F: bill2_runs is gone; the turns still open or settling are the money in flight (as the current preview counts them).
+    'runsInFlight', (SELECT count(*) FROM public.turns t WHERE t.actor_id = p_profile_id AND (t.state <> 'closed' OR t.settlement = 'pending')),
     'closed', EXISTS (SELECT 1 FROM public.account_erasure_requests e WHERE e.profile_id = p_profile_id)
   );
 $$;

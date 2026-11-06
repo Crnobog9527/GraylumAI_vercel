@@ -4,16 +4,17 @@
 // mainland card_cn (no Stripe subscription id; card_cn order method simulated, see simulateCardCn).
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0224_erasure_renewal_any_channel.sql';
-const db = await localDb(), c = db.client;
+const db = await localDb({ replayCopy: true }), c = db.client;
 const report = { build: db.build, migration: '0224', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => assert.equal((await promise.then(() => null, e => e))?.message, expected);
-const plan = async () => v(`INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,
-  library_storage_bytes,positioning_profile_limit)
-  VALUES('Renewal fixture',$1,false,false,0,1) RETURNING id v`, ['test_' + randomUUID()]);
+// One plan, at a valid level: every subscription of this suite points at it. A plan per subscription at a made-up level would break the
+// precondition of 0314 (levels free, pro or gold, one plan each) when the recovery replay below runs 0314 again over this suite's data.
+const plan = async () => await v("SELECT id v FROM membership_plans WHERE level='pro'") ?? v(`INSERT INTO membership_plans(name,level,allow_fusion_review,
+  allow_fusion_compare,library_storage_bytes,positioning_profile_limit) VALUES('Renewal fixture','pro',false,false,0,1) RETURNING id v`);
 const profile = async () => { const a = randomUUID(); await c.query('INSERT INTO profiles(id,credits) VALUES($1,7)', [a]); return a; };
 const contract = p => ({ version: 1, item_type: 'membership_plan', item_id: p, item_updated_at: '2026-10-12T00:00:00Z',
   billing_cycle: 'monthly', currency: 'usd', unit: 'major', price: '19.99', discount: '0.00', tax_behavior: 'unspecified',
@@ -59,9 +60,13 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0224 reapplication after the full chain preserves the complete catalog');
+  // 0224's account_erasure_preview counts the runs in flight from bill2_runs (dropped by 0505, where the count became the open turns). That one
+  // subselect is the only part of 0224 that names a dropped table; the re-applied text counts turns, as the final catalog does.
+  const replayed = read(migrationPath).replace(/'runsInFlight', \(SELECT count\(\*\) FROM public\.bill2_runs r\s+WHERE r\.actor_id = p_profile_id AND r\.state IN \([^)]*\)\),/,
+    "'runsInFlight', (SELECT count(*) FROM public.turns t WHERE t.actor_id = p_profile_id AND (t.state <> 'closed' OR t.settlement = 'pending')),");
+  assert.notEqual(replayed, read(migrationPath), 'the bill2_runs count was replaced');
+  await replayMigrationTail(db, { migrationPath, report, inCopy: true, first: replayed });
+  report.checks.push('0224 reapplication with all later migrations preserves the complete catalog');
 
   for (const role of ['anon', 'authenticated']) {
     for (const f of ['account_erasure_renewing(uuid)', 'account_erasure_renewal_channels(uuid)', 'account_erasure_preview(uuid)']) {
@@ -147,8 +152,7 @@ try {
   await c.query(read('packages/db/tests/erasure-renewal/rollback.sql'));
   assert.equal((await preview(rollbackUser)).subscriptionRenewing, false, 'old rule misses Waffo (the bug)');
   assert.equal((await preview(rollbackUser)).renewalChannels, undefined);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), fixed);
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: fixed, first: replayed });
   await expectBlocked(rollbackUser, ['waffo']);
   report.checks.push('rollback restores the old definitions without data changes; reapplying 0224 restores the block');
 

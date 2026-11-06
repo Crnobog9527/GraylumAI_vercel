@@ -3,12 +3,12 @@
 // No database URL, environment secret, Redis or remote host is accepted or contacted.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 import { fixture, rpc } from '../erasure-b2a/cases.mjs';
-import { runtimeFixture, erase, preview } from '../content-erasure/cases.mjs';
+import { erase, preview } from '../content-erasure/cases.mjs';
 
 const migrationPath = 'packages/db/migrations/0227_erasure_offdb_manifest.sql';
-const db = await localDb(), c = db.client;
+const db = await localDb({ replayCopy: true }), c = db.client;
 const report = { build: db.build, migration: '0227', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const rows = async actor => (await c.query('SELECT kind,target_id,profile_id,confirmed_at,synced_at'
@@ -23,8 +23,7 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), before);
+  await replayMigrationTail(db, { migrationPath, report, inCopy: true });
   const confirmSource = await v("SELECT prosrc v FROM pg_proc WHERE oid='public.content_erasure_confirm(uuid,text,uuid,text)'::regprocedure");
   assert.equal(confirmSource.split('-- 0227 erasure manifest').length, 2, 'confirm patched exactly once');
   report.checks.push('0227 reapplication after the full chain preserves the complete catalog; confirm patched once');
@@ -53,20 +52,28 @@ try {
   ['id', 'kind', 'target_id', 'profile_id', 'confirmed_at', 'synced_at']);
   report.checks.push('RLS on; no client or service_role table access; only 3 service RPCs; definer + fixed search_path; ID-only columns');
 
-  const answer = await runtimeFixture(c, { settled: true });
-  await assert.rejects(erase(c, answer, 'answer', answer.execution, 'a'.repeat(64)), /PREVIEW_CHANGED/);
-  assert.deepEqual(await rows(answer.actor), [], 'failed confirmation records nothing');
-  assert.equal((await erase(c, answer)).status, 'deleted');
-  assert.equal((await erase(c, answer)).alreadyDeleted, true);
-  const stamp = await v('SELECT content_deleted_at v FROM runtime_executions WHERE id=$1', [answer.execution]);
-  assert.deepEqual(await rows(answer.actor), [{ kind: 'answer', target_id: answer.execution, profile_id: answer.actor,
-    confirmed_at: stamp, synced_at: null }]);
-  report.checks.push('answer deletion: exactly one row with the deletion stamp; failed and repeated confirms add none');
-
-  const session = await runtimeFixture(c, { settled: true });
-  assert.equal((await erase(c, session, 'session', session.session)).status, 'deleted');
-  assert.deepEqual((await rows(session.actor)).map(r => [r.kind, r.target_id]), [['session', session.session]],
-    'session closure marks its executions but records only the chosen session');
+  // Conversation deletion on the core path (CORE-PATH-V2 V2-12 F): a conversation with one closed turn and its two messages (the fixture of
+  // erasure-post-f), deleted through content_erasure_mark_session. It records exactly one 'session' row for the chosen conversation, stamped with the
+  // deletion time, and a repeat adds none. This replaces the old 'session' case; the old 'answer' case (one answer of a runtime execution) has no
+  // counterpart any more: on the core path a reply is a session message, deleted with its conversation.
+  const owner = (await fixture(c)).actor, chosen = randomUUID(), kept = randomUUID();
+  for (const id of [chosen, kept]) {
+    await c.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{\"note\":\"PRIVATE_START\"}')",
+      [id, owner, JSON.stringify({ kind: 'positioning_draft', probe: randomUUID() }), randomUUID()]);
+    await c.query(`WITH t AS (INSERT INTO turns(actor_id,session_id,request_id,kind,state,close_kind,closed_at,policy,reserved_credits,charged_credits,
+        absorbed_credits,settlement,delivered)
+      SELECT $1,$2,gen_random_uuid(),'chat','closed','completed',now(),'{}',6,6,0,'done',true RETURNING id)
+      INSERT INTO session_messages(session_id,seq,role,turn_id,content,content_hash)
+      SELECT $2,row_number() OVER (ORDER BY r.role)::int,r.role,t.id,'PRIVATE '||r.role,encode(sha256('x'::bytea),'hex')
+      FROM t CROSS JOIN (VALUES ('assistant'),('user')) r(role)`, [owner, id]);
+  }
+  assert.deepEqual(await rows(owner), [], 'nothing recorded before a deletion');
+  assert.equal((await v('SELECT content_erasure_mark_session($1,$2) v', [owner, chosen])).status, 'deleted');
+  const sessionStamp = await v('SELECT content_deleted_at v FROM runtime_sessions WHERE id=$1', [chosen]);
+  assert.deepEqual(await rows(owner), [{ kind: 'session', target_id: chosen, profile_id: owner, confirmed_at: sessionStamp, synced_at: null }]);
+  assert.equal((await v('SELECT content_erasure_mark_session($1,$2) v', [owner, chosen])).alreadyDeleted, true);
+  assert.equal((await rows(owner)).length, 1, 'a repeated deletion adds no row; the other conversation of the account has none');
+  report.checks.push('conversation deletion on the core path: exactly one session row with the deletion stamp for the chosen conversation; a repeat adds none');
   const artifact = await artifacts();
   const artifactPreview = await preview(c, artifact, 'artifact', artifact.project);
   assert.ok(artifactPreview.affectedExecutions >= 0);
@@ -109,12 +116,10 @@ try {
     assert.equal((await libraryDelete(blocked, blockedDoc)).status, 'deleting');
     assert.ok(await v('SELECT deleted_at v FROM library_documents WHERE id=$1', [blockedDoc]));
     assert.deepEqual(await rows(blocked), []);
-    const blockedAnswer = await runtimeFixture(c, { settled: true });
-    assert.equal((await erase(c, blockedAnswer)).status, 'deleted');
     assert.equal((await close(blocked)).created, true);
   } finally { await c.query('ROLLBACK'); }
   assert.equal(await v("SELECT count(*)::int v FROM pg_constraint WHERE conname='erasure_manifest_test_block'"), 0);
-  report.checks.push('failing outbox insert (forced CHECK) never blocks library, answer or account deletion');
+  report.checks.push('failing outbox insert (forced CHECK) never blocks library or account deletion');
 
   const old = randomUUID(), recent = randomUUID();
   await c.query("INSERT INTO erasure_manifest_outbox(kind,target_id,profile_id,confirmed_at,synced_at) VALUES"
