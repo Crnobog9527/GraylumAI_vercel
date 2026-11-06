@@ -32,7 +32,7 @@ import { useTopicOpening } from './use-topic-opening';
 import { STALE_WORKSPACE_NOTICE, topicFailureMessage, topicReplyText, topicWorkspaceStale } from './topic-notices';
 import { useTopicRestart } from './use-topic-restart';
 import { StaleWorkspaceNotice } from './stale-workspace-notice';
-import { useTopicInput } from './topic-input';
+import { useTopicInput } from './topic-input'; import { useReleaseCompleted } from './topic-pending';
 type PlanItem = {
   id: string;
   platform: string;
@@ -268,6 +268,9 @@ function TopicWorkspaceContent() {
     ready: Boolean(!stale && sessionId && turnPath.decided && view.data && !busy && !pending && workspace.data?.sourceAllowed),
     send: request => void perform({ kind: 'chat', request }) });
 
+  // In flight in this tab, or answered by a saved reply: not an unknown outcome (only that one shows the retry notice).
+  const pendingNow = useReleaseCompleted({ pending, inFlight: busy, executions: view.data?.executions, storageKey,
+    onReleased: () => { if (pending?.kind === 'chat') stored(pending.request.requestId, pending.request.input); setPending(null); } });
   const start = useTopicRestart({ draftId, stale, sessionId, ready: Boolean(turnPath.decided && view.data && !busy && !pending), bind, setError,
     current: read.data?.report?.id, bound: workspace.data, refetch: workspace.refetch, send: request => void perform({ kind: 'chat', request }) });
 
@@ -373,7 +376,7 @@ function TopicWorkspaceContent() {
   const lastReply = executions?.filter(e => e.state === 'completed').at(-1);
   const stuckAdoption = lastReplyAdoptionNotice(sessionId, lastReply, candidate?.body ?? null, adoptedItemIds);
   const tailNotices: ChatNotice[] = [
-    ...(pending ? [{ id: 'pending', tone: 'warning' as const, label: '待确认的操作', actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void perform(pending) }],
+    ...(pendingNow === 'unknown' && pending ? [{ id: 'pending', tone: 'warning' as const, label: '待确认的操作', actions: [{ label: CHAT_ACTION.retry, disabled: busy, onClick: () => void perform(pending) }],
       text: '上一项操作的结果尚未确认（完整原请求已冻结）。重试会核对原消息、保存或采纳，不新建身份。' }] : []),
     ...(busy && !lastOpen ? [{ id: 'busy', tone: 'status' as const, busy: true, text: '正在处理，请稍候…' }] : []),
     ...(notice ? [{ id: 'notice', tone: 'success' as const, text: notice }] : []),
@@ -480,9 +483,6 @@ function TopicWorkspaceContent() {
               <ChatNoticeList notices={tailNotices} />
             </section>
           </div>
-
-
-
           <footer className={composerStyles.zone}>
             <div className={composerStyles.wrap}>
               <WorkComposer references={false} maxLength={8000} value={input} onChange={updateInput}
