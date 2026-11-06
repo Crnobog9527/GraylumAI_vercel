@@ -91,7 +91,7 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
   // refusals are tolerated, never for the re-applied migration
   // itself, each one is printed and recorded, and the catalog equality below must still hold.
   const refusal=replayResult.status!==0&&tail[i].name!==base
-   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH|SPEED_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
+   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH|SPEED_MISMATCH|REQUIRES_REVIEW)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
   // A migration from before 0505 that patches an object 0505 later dropped (the old Runtime / BILL2 path) fails with "does not exist" naming it:
   // the target is gone from the final catalog and 0505, replayed later in this tail, drops anything such a migration would bring back.
   // The first ERROR line names the object: "function ... does not exist", "relation ...", "type ...", or a guard of the migration itself (such as

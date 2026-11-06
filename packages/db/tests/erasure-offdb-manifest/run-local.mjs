@@ -5,10 +5,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 import { fixture, rpc } from '../erasure-b2a/cases.mjs';
-import { runtimeFixture, erase, preview } from '../content-erasure/cases.mjs';
+import { erase, preview } from '../content-erasure/cases.mjs';
 
 const migrationPath = 'packages/db/migrations/0227_erasure_offdb_manifest.sql';
-const db = await localDb(), c = db.client;
+const db = await localDb({ replayCopy: true }), c = db.client;
 const report = { build: db.build, migration: '0227', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const rows = async actor => (await c.query('SELECT kind,target_id,profile_id,confirmed_at,synced_at'
@@ -23,7 +23,7 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before });
+  await replayMigrationTail(db, { migrationPath, report, inCopy: true });
   const confirmSource = await v("SELECT prosrc v FROM pg_proc WHERE oid='public.content_erasure_confirm(uuid,text,uuid,text)'::regprocedure");
   assert.equal(confirmSource.split('-- 0227 erasure manifest').length, 2, 'confirm patched exactly once');
   report.checks.push('0227 reapplication after the full chain preserves the complete catalog; confirm patched once');
@@ -52,20 +52,8 @@ try {
   ['id', 'kind', 'target_id', 'profile_id', 'confirmed_at', 'synced_at']);
   report.checks.push('RLS on; no client or service_role table access; only 3 service RPCs; definer + fixed search_path; ID-only columns');
 
-  const answer = await runtimeFixture(c, { settled: true });
-  await assert.rejects(erase(c, answer, 'answer', answer.execution, 'a'.repeat(64)), /PREVIEW_CHANGED/);
-  assert.deepEqual(await rows(answer.actor), [], 'failed confirmation records nothing');
-  assert.equal((await erase(c, answer)).status, 'deleted');
-  assert.equal((await erase(c, answer)).alreadyDeleted, true);
-  const stamp = await v('SELECT content_deleted_at v FROM runtime_executions WHERE id=$1', [answer.execution]);
-  assert.deepEqual(await rows(answer.actor), [{ kind: 'answer', target_id: answer.execution, profile_id: answer.actor,
-    confirmed_at: stamp, synced_at: null }]);
-  report.checks.push('answer deletion: exactly one row with the deletion stamp; failed and repeated confirms add none');
-
-  const session = await runtimeFixture(c, { settled: true });
-  assert.equal((await erase(c, session, 'session', session.session)).status, 'deleted');
-  assert.deepEqual((await rows(session.actor)).map(r => [r.kind, r.target_id]), [['session', session.session]],
-    'session closure marks its executions but records only the chosen session');
+  // Not run any more (CORE-PATH-V2 V2-12 F, 0505): the 'answer' and 'session' deletion cases, which used the old runtime executions (b2a_test.bind,
+  // runtime_executions.content_deleted_at). No new-path equivalent exists in this suite; the artifact, content, account and library deletions below stay.
   const artifact = await artifacts();
   const artifactPreview = await preview(c, artifact, 'artifact', artifact.project);
   assert.ok(artifactPreview.affectedExecutions >= 0);
@@ -108,12 +96,10 @@ try {
     assert.equal((await libraryDelete(blocked, blockedDoc)).status, 'deleting');
     assert.ok(await v('SELECT deleted_at v FROM library_documents WHERE id=$1', [blockedDoc]));
     assert.deepEqual(await rows(blocked), []);
-    const blockedAnswer = await runtimeFixture(c, { settled: true });
-    assert.equal((await erase(c, blockedAnswer)).status, 'deleted');
     assert.equal((await close(blocked)).created, true);
   } finally { await c.query('ROLLBACK'); }
   assert.equal(await v("SELECT count(*)::int v FROM pg_constraint WHERE conname='erasure_manifest_test_block'"), 0);
-  report.checks.push('failing outbox insert (forced CHECK) never blocks library, answer or account deletion');
+  report.checks.push('failing outbox insert (forced CHECK) never blocks library or account deletion');
 
   const old = randomUUID(), recent = randomUUID();
   await c.query("INSERT INTO erasure_manifest_outbox(kind,target_id,profile_id,confirmed_at,synced_at) VALUES"

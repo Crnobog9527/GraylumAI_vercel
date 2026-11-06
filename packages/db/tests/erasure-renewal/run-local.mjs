@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0224_erasure_renewal_any_channel.sql';
-const db = await localDb(), c = db.client;
+const db = await localDb({ replayCopy: true }), c = db.client;
 const report = { build: db.build, migration: '0224', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => assert.equal((await promise.then(() => null, e => e))?.message, expected);
@@ -64,7 +64,7 @@ try {
   const replayed = read(migrationPath).replace(/'runsInFlight', \(SELECT count\(\*\) FROM public\.bill2_runs r\s+WHERE r\.actor_id = p_profile_id AND r\.state IN \([^)]*\)\),/,
     "'runsInFlight', (SELECT count(*) FROM public.turns t WHERE t.actor_id = p_profile_id AND (t.state <> 'closed' OR t.settlement = 'pending')),");
   assert.notEqual(replayed, read(migrationPath), 'the bill2_runs count was replaced');
-  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before, first: replayed });
+  await replayMigrationTail(db, { migrationPath, report, inCopy: true, first: replayed });
   report.checks.push('0224 reapplication with all later migrations preserves the complete catalog');
 
   for (const role of ['anon', 'authenticated']) {

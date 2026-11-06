@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0226_log_retention_cleanup.sql';
-const db = await localDb(), c = db.client;
+const db = await localDb({ replayCopy: true }), c = db.client;
 const report = { build: db.build, migration: '0226', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const count = (table, extra = '') => v(`SELECT count(*)::int v FROM ${table} ${extra}`);
@@ -19,7 +19,7 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before });
+  await replayMigrationTail(db, { migrationPath, report, inCopy: true });
   report.checks.push('0226 reapplication with all later migrations preserves the complete catalog');
 
   for (const role of ['anon', 'authenticated']) {
@@ -42,7 +42,8 @@ try {
   await c.query(`INSERT INTO user_activity_logs(action,action_type,created_at) VALUES('fixture','credit_adjustment',now()-interval '90 days')`);
 
   const result = await cleanup();
-  assert.deepEqual(result, { applicationLogs: 2, diagnosticResults: 2, scheduledJobRuns: 4, more: false });
+  // paymentNotices: the payment-notice cleanup (PAY-NOTIFY, after 0226) reports its own count; nothing of it is due in this fixture.
+  assert.deepEqual(result, { applicationLogs: 2, diagnosticResults: 2, scheduledJobRuns: 4, paymentNotices: 0, more: false });
   for (const table of ['application_logs', 'diagnostic_results']) {
     assert.equal(await count(table, "WHERE created_at<now()-interval '29 days'"), 0, table);
     assert.equal(await count(table, "WHERE created_at>=now()-interval '29 days'"), 2, table);

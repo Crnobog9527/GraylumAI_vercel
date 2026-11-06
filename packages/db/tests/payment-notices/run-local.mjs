@@ -11,7 +11,7 @@ import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-d
 const migration = readdirSync(new URL('../../migrations/', import.meta.url)).filter(f => f.endsWith('_payment_notices.sql'));
 assert.equal(migration.length, 1);
 const migrationPath = `packages/db/migrations/${migration[0]}`;
-const db = await localDb(), c = db.client;
+const db = await localDb({ replayCopy: true }), c = db.client;
 const report = { build: db.build, migration: migration[0], checks: [] };
 const v = async (sql, args = [], client = c) => (await client.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => {
@@ -40,8 +40,8 @@ try {
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   void catalogSql;
   // Re-application on the final catalog: the migration, and 0259 (whose slot list this migration extends), each with every later migration.
-  await replayMigrationTail(db, { migrationPath, report });
-  await replayMigrationTail(db, { migrationPath: 'packages/db/migrations/0259_platform_secrets.sql', report });
+  await replayMigrationTail(db, { migrationPath, report, inCopy: true });
+  await replayMigrationTail(db, { migrationPath: 'packages/db/migrations/0259_platform_secrets.sql', report, inCopy: true });
   report.checks.push('reapplying the migration (also 0259, which it extends) with all later migrations keeps the complete catalog');
 
   for (const role of ['anon', 'authenticated', 'service_role']) {
