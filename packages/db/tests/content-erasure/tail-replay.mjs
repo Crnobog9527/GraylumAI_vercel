@@ -109,8 +109,14 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
  // Every other object must be identical, so any other drift still fails. Each excluded object is recorded.
  const after=snapshot();
  const refusedText=refusedSql.join('\n');
- const explainedKey=k=>{const name=/^(?:fn|fnacl|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(k)?.[1];
-  return Boolean(name&&new RegExp('\\b'+name+'\\b').test(refusedText));};
+ // A function's EXECUTE rights (fnacl) are explained only when a refused migration holds a GRANT or REVOKE statement for that function: its
+ // rights can differ from the final ones only because the migration that sets them was not replayed. A refused migration that merely names the
+ // function in its body explains the body (fn), never its rights, so an unexplained difference in rights still fails.
+ const explainedKey=k=>{const match=/^(fn|fnacl|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(k);
+  if(!match)return false;
+  const [,kind,name]=match;
+  return kind==='fnacl'?new RegExp('\\b(?:GRANT|REVOKE)\\b[^;]*\\b'+name+'\\b','i').test(refusedText)
+   :new RegExp('\\b'+name+'\\b').test(refusedText);};
  const explained=Object.keys({...after,...finalCatalog}).filter(k=>after[k]!==finalCatalog[k]&&explainedKey(k));
  const expected={...finalCatalog};
  for(const k of explained){delete after[k];delete expected[k];}
