@@ -3,6 +3,7 @@
 // drill (packages/api/src/services/library/backlogDrill.integration.ts) against it. Local Docker only; needs a
 // local database slot. Sizes: LIBRARY_DRILL_SIZES=1000,5000,12000 (default); LIBRARY_DRILL_OUTAGE_SIZE=5000 (default);
 // LIBRARY_DRILL_BACKGROUND=20000 live documents; LIBRARY_DRILL_BATCH defaults to the cron's LIBRARY_CRON_BATCH (100).
+// Extra arguments go to vitest, e.g. -t 'starts|seeds|burst' to run one scenario group (.github/workflows/library-backlog-drill.yml).
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -43,7 +44,7 @@ try {
     VALUES('Free','free',false,false,50000000) ON CONFLICT(level) DO NOTHING`);
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const run = spawnSync('pnpm', ['exec', 'vitest', 'run', '--config', 'vitest.integration.config.ts',
-    'src/services/library/backlogDrill.integration.ts'], {
+    'src/services/library/backlogDrill.integration.ts', ...process.argv.slice(2)], {
     cwd: resolve(root, 'packages/api'), stdio: 'inherit',
     env: { ...process.env, LIBRARY_DRILL_DB_PORT: String(port) },
   });
