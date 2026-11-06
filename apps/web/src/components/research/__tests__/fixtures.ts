@@ -63,7 +63,7 @@ export const ROWS: BenchmarkRow[] = [
 
 export const CHARGES: SearchCharge[] = [
   { callId: "b1", tool: "social_search", args: { platform: "douyin", keywords: ["职场穿搭"] }, settlement: "tool_usage", userCredits: "0.30" },
-  { callId: "b2", tool: "web_search", args: { query: "通勤穿搭 趋势" }, settlement: "tool_usage", userCredits: "1.00" },
+  { callId: "b2", tool: "web_search", args: { query: "通勤穿搭 趋势" }, settlement: "tool_usage", userCredits: "1.5999999999" },
   { callId: "b3", tool: "social_account", args: { platform: "bilibili", account: "sample_b" }, settlement: "tool_failed_charged", userCredits: "0" },
   { callId: "b4", tool: "web_fetch", args: { url: "https://example.com/article" }, settlement: "tool_unknown", userCredits: null },
   { callId: "b5", tool: "web_search", args: { query: "胶囊衣橱" }, settlement: "tool_no_usage", userCredits: null },

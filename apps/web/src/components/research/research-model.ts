@@ -44,11 +44,26 @@ export interface CallView {
   credits: string | null;
 }
 
+/**
+ * One call's credits as the page shows them: the server's decimal text rounded half up to at most 2 decimals, trailing zeros
+ * dropped ("1.5999999999" → "1.6", "0.30" → "0.3", "12" → "12"); a positive amount under 0.005 is "<0.01", zero is "0".
+ * Null for text that is not a plain decimal. Display only: what is billed is computed and stored on the server.
+ */
+export function creditAmount(value: string): string | null {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
+  if (!match) return null;
+  const fraction = match[2] ?? "";
+  // Rounded on the decimal digits, not a float, so "1.005" is 1.01; whole credits stay far below 2^53 hundredths.
+  const hundredths = Number(match[1]) * 100 + Number(fraction.padEnd(2, "0").slice(0, 2)) + (fraction.charAt(2) >= "5" ? 1 : 0);
+  if (hundredths === 0) return /[1-9]/.test(fraction) ? "<0.01" : "0";
+  const whole = Math.floor(hundredths / 100), rest = hundredths % 100;
+  return rest === 0 ? String(whole) : `${whole}.${String(rest).padStart(2, "0").replace(/0$/, "")}`;
+}
+
 /** Settled user credits of a finished call ("0.30" → "0.3 积分"); nothing for running, zero or unreadable values. */
 export function callCredits(call: Pick<ResearchCall, "state" | "credits">): string | null {
-  const value = call.credits;
-  if (call.state === "running" || typeof value !== "string" || !/^\d+(\.\d+)?$/.test(value) || Number(value) === 0) return null;
-  return `${value.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")} 积分`;
+  const amount = call.state === "running" || typeof call.credits !== "string" ? null : creditAmount(call.credits);
+  return amount === null || amount === "0" ? null : `${amount} 积分`;
 }
 
 export const DATA_KIND_LABELS: Record<ResearchCall["dataKind"], string> = {
