@@ -64,12 +64,10 @@ export async function runCases({db,Client,connectionString,report}) {
  const foreign=await fixture(db);
  await assert.rejects(read(db,{...f,actor:foreign.actor}),/REPORT_EXECUTION_REQUIRED/);
  await assert.rejects(read(db,{...f,actor:randomUUID()}),/ACTOR_DENIED|REPORT_EXECUTION_REQUIRED/);
- // V2-12 B6: an old execution is no longer a report handle, whatever it carries; only a report turn's request id is.
- const oldExecution=randomUUID();
- await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result)
-  VALUES($1,$2,$3,$4,$5,0,'completed',$6)`,[oldExecution,f.actor,f.session,randomUUID(),{reportGeneration:{version:1,projectId:f.project,roundId:f.round}},{body:original,completeness:'complete'}]);
+ // V2-12 B6: only a report turn's request id is a report handle; any other id (an old execution's, a random one) is refused for every action.
+ const unknownHandle=randomUUID();
  for(const action of ['read','save','finalize'])
-  await assert.rejects(rpc(db,'report_document',f.actor,oldExecution,action,randomUUID(),0,edited,hash(original),null),/REPORT_EXECUTION_REQUIRED/);
+  await assert.rejects(rpc(db,'report_document',f.actor,unknownHandle,action,randomUUID(),0,edited,hash(original),null),/REPORT_EXECUTION_REQUIRED/);
  const request=randomUUID();
  const saved=await save(db,f,edited,0,request);
  assert.equal(saved.revision,1);assert.equal(saved.manuallyEdited,true);assert.equal(saved.bodyHash,hash(edited));
@@ -92,7 +90,7 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal(await rpc(db,'opc_source_allowed',f.actor,result.versionId),true);
  const topic=await rpc(db,'opc_topic_consent',f.actor,f.draft,result.versionId);
  assert.equal(topic.bound,true);assert.equal(topic.sourceVersionId,result.versionId);
- assert.equal((await db.query('SELECT count(*) n FROM runtime_executions WHERE session_id=$1',[topic.sessionId])).rows[0].n,'0');
+ assert.equal((await db.query('SELECT count(*) n FROM turns WHERE session_id=$1 AND kind<>$2',[topic.sessionId,'report'])).rows[0].n,'0','the topic handoff opens no turn');
  report.checks.push('edit marker, optimistic concurrency, immutable formal body, unchanged confirmed fields, replay and OPC source compatibility');
  for(const completeness of ['length_limit','stopped',null]) {
   const t=await seed(db,completeness);
