@@ -17,10 +17,10 @@ async function account(){
  return {actor,session,docs:[]};
 }
 // A ready document with the given segments ({title,body}); its reference is doc-N in the order they are made.
-async function doc(a,filename,segments){
+async function doc(a,filename,segments,{status='ready',kind='document'}={}){
  const id=randomUUID();
  await c.query(`insert into library_documents(id,actor_id,request_id,kind,format,purpose,filename,status,original_bytes,text_bytes)
-  values($1,$2,$3,'document','md','reference',$4,'ready',10,10)`,[id,a.actor,randomUUID(),filename]);
+  values($1,$2,$3,$4,'md','reference',$5,$6,10,10)`,[id,a.actor,randomUUID(),kind,filename,status]);
  for(const [i,s] of segments.entries())
   await c.query("insert into library_document_segments(document_id,actor_id,ordinal,title,body,source) values($1,$2,$3,$4,$5,'extracted')",
    [id,a.actor,i,s.title??'',s.body]);
@@ -102,6 +102,11 @@ try{
   const best=await doc(r,'ranked-best.md',[{title:'best',body:'alpha and beta together'}]);
   const ordered=await hits(r,'alpha beta');
   assert.equal(ordered[0].documentId,best,'the segment with both words ranks first, before the 8-hit limit cuts');
+  // Among equal scores the closest title ranks first (trigram similarity), also when written last and before the 8-hit limit cuts.
+  const t=await account();
+  for(let i=0;i<9;i++)await doc(t,'near-'+i+'.md',[{title:'section '+i,body:'the word gamma appears here '+i}]);
+  const exact=await doc(t,'exact.md',[{title:'gamma',body:'the word gamma appears here too'}]);
+  assert.equal((await hits(t,'gamma'))[0].documentId,exact,'an exact title match ranks first among equal scores');
   report.checks.push('search limits: at most 8 hits, 3 per document; the best match is first before the limit applies');
  }
  // 7. Another account never finds or reads it, and the trigram indexes the search uses exist.
@@ -113,6 +118,22 @@ try{
   const names=(await c.query("select indexname from pg_indexes where indexname in ('library_segments_body_trgm','library_segments_title_trgm','library_documents_filename_trgm')")).rows.map(r=>r.indexname).sort();
   assert.deepEqual(names,['library_documents_filename_trgm','library_segments_body_trgm','library_segments_title_trgm'],'the three trigram indexes exist');
   report.checks.push('isolation: another account finds and reads nothing; the three trigram indexes (body, title, file name) exist');
+ }
+ // 8. Documents that are not ready or not text are never found or listed; the 30th reference is reachable.
+ {
+  const a=await account();
+  await doc(a,'ok.md',[{title:'ok',body:'EXCLUDE_CANARY readable'}]);
+  const failed=await doc(a,'failed.md',[{title:'bad',body:'EXCLUDE_CANARY failed upload'}],{status:'failed'});
+  await doc(a,'image.png',[{title:'pic',body:'EXCLUDE_CANARY recognised text'}],{kind:'image'});
+  assert.deepEqual((await hits(a,'EXCLUDE_CANARY')).map(h=>h.segmentTitle),['ok'],'a failed or non-text document is never found');
+  assert.deepEqual((await read(a,'library')).documents.map(d=>d.title),['ok.md'],'and never listed');
+  assert.deepEqual(await read(a,'doc-2'),{kind:'unavailable',reason:'source_deleted',ref:'doc-2'},'a failed document is not readable');
+  assert.ok(failed);
+  const b=await account();
+  for(let i=0;i<30;i++)await doc(b,'ref-'+String(i).padStart(2,'0')+'.md',[{title:'r'+i,body:'segment '+i}]);
+  assert.equal((await read(b,'doc-30/segment-1')).body,'segment 29','the 30th reference is readable');
+  assert.deepEqual(await read(b,'doc-31'),{kind:'unavailable',reason:'unknown_query'});
+  report.checks.push('not found, not listed, not readable: failed and non-text documents; the 30th reference is readable, a 31st is unknown');
  }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}
