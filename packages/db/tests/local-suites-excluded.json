@@ -1,7 +1,6 @@
 {
  "_about": "Suites run-local-suites.mjs does not run in CI. Key = <dir>/<file>, value = reason and date. The list may only shrink: remove an entry once the suite accepts --ci and passes there; a new entry needs a real reason and is a review blocker. scripts/tests/local-suites.test.mjs enforces this.",
  "suites": {
-  "agent-core-r1/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "agent-core-r9/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "analytics/run-local-0287.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "analytics/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
@@ -24,13 +23,9 @@
   "library-search/postmerge-run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "library-search/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "library/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "load-skill/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "log-retention/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "mentor-history-purpose/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "mentor-history/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "model-identity-guard/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "model-identity-redact/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "native-metadata/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "opening-grant-500/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "pay-common/decline-local-db.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "pay-common/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
@@ -39,7 +34,6 @@
   "pay-replay/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "payment-notices/reminders-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "payment-notices/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "plain-text-stream/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "platform-secrets/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "platform-secrets/run-or1-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "platform-secrets/run-or2-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
@@ -55,7 +49,6 @@
   "research-window-sync/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "runtime-settings-concurrency/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "runtime-view-perf/local-db.mjs": "not a suite: a helper module other suites import; it runs no test — 2026-11-01",
-  "runtime-view-perf/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "session-results/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "skill-i18n-hook/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "v3/local-rate-limit-case-report.mjs": "not a suite: a helper module other suites import; it runs no test — 2026-11-01",
@@ -66,9 +59,6 @@
   "v3/run-local.mjs": "not a suite: the old workbench entry; it needs --research-only or --artifacts-only and extra service images, run it through v3/run-workbench.mjs — 2026-11-01",
   "v3/run-with-local-rate-limit.mjs": "not a suite: a wrapper that runs the command given after it with a local rate limiter — 2026-11-01",
   "voice/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "work-items/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "workspace-benchmarks/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "workspace-positioning/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "workspace-posts/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25"
+  "workspace-benchmarks/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25"
  }
 }
