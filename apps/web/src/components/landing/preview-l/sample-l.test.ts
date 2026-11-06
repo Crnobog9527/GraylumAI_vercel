@@ -473,6 +473,10 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
       for (const offer of listed.filter(item => item.price !== '0')) expect(price).toContain(`$${offer.price}/月起`);
       // The Gold first month and the other plan prices stay on the pricing page (Owner 2026-10-15: no plan cards here).
       for (const hidden of ['$49', '$69', '$279', '$621']) expect(price).not.toContain(hidden);
+      // The usual ways' amounts as written (Codex B3 read them all as $0; the browser side is priceCompare.browser.test.tsx).
+      for (const row of home.compareRows) expect(price).toContain(row.price);
+      expect(price).toContain(J_PRICE_TOTAL.text);
+      expect(price).not.toMatch(/\$0(?![\d.,])/);
     }
   });
 

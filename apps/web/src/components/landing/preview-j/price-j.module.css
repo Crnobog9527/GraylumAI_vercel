@@ -56,8 +56,10 @@ h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
   .compareCost li { transition: opacity .6s var(--j-ease), translate .7s var(--j-ease); transition-delay: calc(var(--i, 0) * 180ms); }
   [data-motion='on'] .compareCost ul:not([data-play]) li { opacity: 0; translate: 0 -18px; }
   /* The total: dark while it adds up, then a line strikes it and it greys; only then our price rises. */
-  .versus .total b { transition: color .5s; }
+  .versus .total b { transition: color .5s, opacity .3s; }
   .versus:is([data-phase='wait'], [data-phase='count']) .total b { color: var(--j-ink); }
+  /* Before it adds up the figure holds its real text (CountUpJ), so it waits unseen instead of showing it and dropping to 0. */
+  [data-motion='on'] .versus[data-phase='wait'] .total b { opacity: 0; }
   .versus .total b::after { transition: scale .6s var(--j-ease); }
   .versus:is([data-phase='wait'], [data-phase='count']) .total b::after { scale: 0 1; }
   .versus .own { transition: opacity .6s var(--j-ease), scale .8s cubic-bezier(.34, 1.56, .64, 1); }
