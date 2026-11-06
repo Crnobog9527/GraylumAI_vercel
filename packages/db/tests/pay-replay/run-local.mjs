@@ -9,7 +9,7 @@ import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
-import {replayTail} from '../content-erasure/tail-replay.mjs';
+import {droppedByOldPathDrop,replayTail,withoutDroppedPatchTargets} from '../content-erasure/tail-replay.mjs';
 if (process.argv.slice(2).join(' ') !== '--local-only' || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
 const read=path=>readFileSync(resolve(root,path),'utf8');
@@ -46,7 +46,11 @@ try {
  for(const file of ['0308_pay_dispute_guard','0310_pay_dispute_wallet_refund_serialization','0335_pay_failover']){
   const migrationPath=`packages/db/migrations/${file}.sql`;
   const {sql,snapshot}=copy(file.slice(0,4));
-  await replayTail({root,read,sql,ok,snapshot,finalCatalog,report,migrationPath,first:read(migrationPath)});
+  // 0308 also patches two functions of the old BILL2 path (bill2_payg_claim, bill2_payg_compensate) that 0505 dropped; those rows are left out
+  // of its patch lists and every other patch still runs. Each removed target is recorded.
+  const {sql:first,removed}=withoutDroppedPatchTargets(read(migrationPath),droppedByOldPathDrop(read));
+  if(removed.length)report.skipped.push(file.slice(0,4)+': patch rows for functions dropped by 0505 left out of the re-applied migration: '+removed.join(', '));
+  await replayTail({root,read,sql,ok,snapshot,finalCatalog,report,migrationPath,first});
   report.checks.push(`${file.slice(0,4)} reapplication with all later migrations preserves full catalog`);
  }
  const {sql,snapshot}=copy('0298');

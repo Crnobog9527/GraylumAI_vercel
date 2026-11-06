@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
+import { replayTail } from '../content-erasure/tail-replay.mjs';
 export const root = resolve(import.meta.dirname, '../../../..');
 export const read = path => readFileSync(resolve(root, path), 'utf8');
 
@@ -98,11 +99,26 @@ export async function localDb({ beforeApply, dockerArgs = [], postgresArgs = [],
     assert.match(address,/^127\.0\.0\.1:\d+$/);
     client=new Client({connectionString:`postgres://postgres@${address}/${DATABASE}`});
     await client.connect();
-    return {client,build,close,sql:input=>ok(sql(input)),address,exec:args=>ok(docker(['exec',name,...args])),fromSnapshot:useSnapshot};
+    return {client,build,close,sql:input=>ok(sql(input)),raw:sql,address,exec:args=>ok(docker(['exec',name,...args])),fromSnapshot:useSnapshot};
   } catch(e) {await close();throw e;}
 }
 
 export function snapshotFromEnv() {
   const image = process.env[SNAPSHOT_IMAGE_ENV];
   return image ? { image, build: JSON.parse(process.env[SNAPSHOT_BUILD_ENV] ?? 'null') } : null;
+}
+
+/**
+ * "Re-applying migration M leaves the complete catalog unchanged", on the final catalog: M is replayed together with every later migration, in
+ * order (content-erasure/tail-replay.mjs), because M alone rewrites functions that later migrations changed or dropped. Asserts inside; every
+ * migration it could not replay is recorded in report.skipped. finalCatalog: the catalog to land on (default: the catalog now, which is
+ * what a plain re-application check wants); pass the catalog taken before a rollback when the replay is the recovery from that rollback.
+ */
+export async function replayMigrationTail(db, { migrationPath, report, finalCatalog }) {
+  const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
+  const objectSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
+  const sql = input => { try { return { status: 0, stdout: db.sql(input), stderr: '' }; } catch (error) { return { status: 1, stdout: '', stderr: String(error.message) }; } };
+  const ok = result => { if (result.status !== 0) throw new Error(result.stderr); return result.stdout; };
+  const snapshot = () => JSON.parse(ok(sql(objectSql)));
+  await replayTail({ root, read, sql, ok, snapshot, finalCatalog: finalCatalog ?? snapshot(), report, migrationPath, first: read(migrationPath) });
 }

@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
+import {replayTail} from '../content-erasure/tail-replay.mjs';
 import {runCases} from './cases.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
@@ -44,11 +45,11 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- ok(sql(migration));
  const finalCatalog=snapshot();
- ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0218 preserves complete catalog');
- report.checks.push('0218 applied twice after current staging; complete catalog unchanged');
+ // 0218 alone refuses on the final catalog (its md5 gate on content_erasure_scope, rewritten since) and rewrites functions later migrations changed:
+ // it is replayed together with every later migration (tail-replay.mjs).
+ await replayTail({root,read,sql,ok,snapshot,finalCatalog,report,migrationPath,first:migration});
+ report.checks.push('0218 reapplication with all later migrations preserves complete catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

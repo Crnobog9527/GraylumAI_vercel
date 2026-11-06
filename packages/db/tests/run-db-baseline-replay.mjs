@@ -17,10 +17,10 @@ import { compareSnapshots, renderSnapshots, snapshotSql, writeSnapshots } from '
 
 const args = process.argv.slice(2);
 const usage = 'Usage: node packages/db/tests/run-db-baseline-replay.mjs --local-only|--ci [--write-built]'
-  + ' [--staging <snapshot.json>] [--out <local.json>] [--after <a.sql,b.sql>] [--on-fail <SQL>] [--query <SQL>]';
+  + ' [--staging <snapshot.json>] [--out <local.json>] [--after <a.sql,b.sql>] [--on-fail <SQL>] [--query <SQL>] [--skip-repeat]';
 const ci = args[0] === '--ci';
 if (!(ci ? process.env.CI : args[0] === '--local-only' && !process.env.CI)) throw new Error(usage);
-if (ci && ['--write-built', '--staging', '--out', '--on-fail', '--query'].some(flag => args.includes(flag))) {
+if (ci && ['--write-built', '--staging', '--out', '--on-fail', '--query', '--skip-repeat'].some(flag => args.includes(flag))) {
   throw new Error('CI mode only builds and checks; it never writes files or takes diagnostics');
 }
 const option = name => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
@@ -133,8 +133,10 @@ try {
     applyFile: path => outcome(psql(read(path))),
     applyServerOnly: sql => outcome(psqlServerOnly(sql)),
     onFail: option('--on-fail') ? () => psql(option('--on-fail')).stdout.trim().split('\n') : undefined,
-    // Repeat-application check (idempotency), object by object, for every migration from REPEAT_FROM on.
-    fingerprint: () => JSON.parse(ok(psql(objectsSql()), 'Fingerprint')),
+    // Repeat-application check (idempotency), object by object, for every migration from REPEAT_FROM on. --skip-repeat (local only) leaves it out
+    // for a suite that is about something else and only needs the finished build: the repeats take about half of the run (the stricter-* suites
+    // hit their 300 s limit on the CI runner); the required CI step (--ci) always repeats.
+    ...(args.includes('--skip-repeat') ? {} : { fingerprint: () => JSON.parse(ok(psql(objectsSql()), 'Fingerprint')) }),
   }) };
   if (!report.failed) {
     const fingerprintSql = read('packages/db/tests/baseline/fingerprint.sql');

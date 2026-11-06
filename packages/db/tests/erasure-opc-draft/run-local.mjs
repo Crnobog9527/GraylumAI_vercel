@@ -2,7 +2,7 @@
 // Local-only DATA-ERASURE 0242 verification: erasure finishes for accounts with a positioning draft.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0242_erasure_opc_draft_delete.sql';
 const db = await localDb(), c = db.client;
@@ -29,9 +29,8 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const after0242 = await v(catalogSql);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), after0242);
-  report.checks.push('0242 reapplication after the full chain preserves the complete catalog');
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: after0242 });
+  report.checks.push('0242 reapplication with all later migrations preserves the complete catalog');
 
   // The bug: with the pre-0242 guard, local cleanup aborts on the draft.
   await c.query(read('packages/db/tests/erasure-opc-draft/rollback.sql'));
@@ -40,9 +39,8 @@ try {
   await c.query('SELECT account_erasure_scrub_content($1)', [broken.actor]);
   await c.query('SELECT account_erasure_scrub_runtime($1)', [broken.actor]);
   assert.match((await errorOf(c.query('SELECT account_erasure_local_cleanup($1,true)', [broken.actor])))?.message ?? '', /OPC_IMMUTABLE_DRAFT/);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), after0242);
-  report.checks.push('without 0242 local cleanup aborts with OPC_IMMUTABLE_DRAFT; rollback then reapply restores the catalog');
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: after0242 });
+  report.checks.push('without 0242 local cleanup aborts with OPC_IMMUTABLE_DRAFT; rollback then reapply (with all later migrations) restores the catalog');
 
   // Deny: an open account's draft stays undeletable, and updates stay immutable even after closure.
   const open = await draftAccount();

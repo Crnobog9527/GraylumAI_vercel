@@ -74,7 +74,7 @@ try {
   const file = resolve(temporary, 'fixture.sql');
   writeFileSync(file, fixture);
   const result = spawnSync(process.execPath, [
-    'packages/db/tests/run-db-baseline-replay.mjs', '--local-only', '--write-built', '--after', file,
+    'packages/db/tests/run-db-baseline-replay.mjs', '--local-only', '--skip-repeat', '--write-built', '--after', file,
   ], { cwd: root, encoding: 'utf8', timeout: 300000, maxBuffer: 16 * 1024 * 1024 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const report = JSON.parse(result.stdout);
@@ -84,7 +84,7 @@ try {
   assert.deepEqual(report.after[0].output, ['stricter migration: all four full-catalog comparisons passed']);
   console.log(`PASS: ${migrationFiles[0]}; regenerated built fingerprint byte-for-byte unchanged.`);
   console.log('PASS: two file-built no-ops; remove exactly 90; apply twice restores the full original catalog.');
-  console.log(`PASS: ${report.passed} build steps, ${report.repeated} repeated migrations; cleanup.`);
+  console.log(`PASS: ${report.passed} build steps; cleanup.`);
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

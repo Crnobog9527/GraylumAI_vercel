@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { testConcurrency } from './concurrency.mjs';
@@ -84,7 +85,8 @@ try {
       assert.deepEqual(snapshot(), after);
       report.checks.push('source/replay drift rejected; nonempty rollback rejected; empty rollback/reapply exact');
     }
-    writeFileSync('/private/tmp/pay-common-pr1-catalog-evidence.json', JSON.stringify({ before, after }, null, 2));
+    // The evidence file goes to the OS temp directory: /private/tmp exists on macOS only, so the Linux runner failed here (ENOENT).
+    writeFileSync(join(tmpdir(), 'pay-common-pr1-catalog-evidence.json'), JSON.stringify({ before, after }, null, 2));
   };
   let purchaseTested = false;
   const testPurchase = () => {

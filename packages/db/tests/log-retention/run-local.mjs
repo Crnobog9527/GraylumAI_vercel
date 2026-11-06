@@ -2,7 +2,7 @@
 // Local-only DATA-ERASURE 0226 verification: our own log tables keep at most 30 days (E7).
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0226_log_retention_cleanup.sql';
 const db = await localDb(), c = db.client;
@@ -19,9 +19,8 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0226 reapplication after the full chain preserves the complete catalog');
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before });
+  report.checks.push('0226 reapplication with all later migrations preserves the complete catalog');
 
   for (const role of ['anon', 'authenticated']) {
     assert.equal(await v("SELECT has_function_privilege($1,'log_retention_cleanup(integer)','execute') v", [role]), false);
@@ -113,8 +112,7 @@ try {
   for (const f of ['account_erasure_local_cleanup(uuid,boolean)', 'account_erasure_local_remaining(uuid)', 'account_erasure_log_guard()']) {
     assert.doesNotMatch(await v('SELECT pg_get_functiondef($1::regprocedure) v', [f]), /erasure_audit_details|content_erased_at/, f);
   }
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), after0226);
-  report.checks.push('rollback restores the earlier erasure and guard definitions; reapplying 0226 restores the catalog');
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: after0226 });
+  report.checks.push('rollback restores the earlier erasure and guard definitions; reapplying 0226 with all later migrations restores the catalog');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }

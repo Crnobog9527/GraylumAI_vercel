@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migration = readdirSync(new URL('../../migrations/', import.meta.url)).filter(f => f.endsWith('_payment_notices.sql'));
 assert.equal(migration.length, 1);
@@ -38,13 +38,11 @@ const FUNCTIONS = ['payment_notice_enqueue(uuid,text,text,text,jsonb)', 'payment
 try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
-  const before = await v(catalogSql);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), before);
-  await c.query(read('packages/db/migrations/0259_platform_secrets.sql'));
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('reapplying the migration (also after re-running 0259) keeps the complete catalog');
+  void catalogSql;
+  // Re-application on the final catalog: the migration, and 0259 (whose slot list this migration extends), each with every later migration.
+  await replayMigrationTail(db, { migrationPath, report });
+  await replayMigrationTail(db, { migrationPath: 'packages/db/migrations/0259_platform_secrets.sql', report });
+  report.checks.push('reapplying the migration (also 0259, which it extends) with all later migrations keeps the complete catalog');
 
   for (const role of ['anon', 'authenticated', 'service_role']) {
     for (const p of ['SELECT', 'INSERT', 'UPDATE', 'DELETE']) {

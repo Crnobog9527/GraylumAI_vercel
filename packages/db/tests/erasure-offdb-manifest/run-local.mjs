@@ -3,7 +3,7 @@
 // No database URL, environment secret, Redis or remote host is accepted or contacted.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 import { fixture, rpc } from '../erasure-b2a/cases.mjs';
 import { runtimeFixture, erase, preview } from '../content-erasure/cases.mjs';
 
@@ -23,8 +23,7 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), before);
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before });
   const confirmSource = await v("SELECT prosrc v FROM pg_proc WHERE oid='public.content_erasure_confirm(uuid,text,uuid,text)'::regprocedure");
   assert.equal(confirmSource.split('-- 0227 erasure manifest').length, 2, 'confirm patched exactly once');
   report.checks.push('0227 reapplication after the full chain preserves the complete catalog; confirm patched once');

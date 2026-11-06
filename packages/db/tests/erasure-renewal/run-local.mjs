@@ -4,7 +4,7 @@
 // mainland card_cn (no Stripe subscription id; card_cn order method simulated, see simulateCardCn).
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0224_erasure_renewal_any_channel.sql';
 const db = await localDb(), c = db.client;
@@ -59,9 +59,8 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0224 reapplication after the full chain preserves the complete catalog');
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before });
+  report.checks.push('0224 reapplication with all later migrations preserves the complete catalog');
 
   for (const role of ['anon', 'authenticated']) {
     for (const f of ['account_erasure_renewing(uuid)', 'account_erasure_renewal_channels(uuid)', 'account_erasure_preview(uuid)']) {
@@ -147,8 +146,7 @@ try {
   await c.query(read('packages/db/tests/erasure-renewal/rollback.sql'));
   assert.equal((await preview(rollbackUser)).subscriptionRenewing, false, 'old rule misses Waffo (the bug)');
   assert.equal((await preview(rollbackUser)).renewalChannels, undefined);
-  await c.query(read(migrationPath));
-  assert.deepEqual(await v(catalogSql), fixed);
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: fixed });
   await expectBlocked(rollbackUser, ['waffo']);
   report.checks.push('rollback restores the old definitions without data changes; reapplying 0224 restores the block');
 

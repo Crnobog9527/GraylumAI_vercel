@@ -8,6 +8,35 @@ import {resolve} from 'node:path';
 import {supersededPatch} from './md5-chain.mjs';
 
 /**
+ * The objects migration 0505 (CORE-PATH-V2 V2-12 batch F, irreversible) dropped: the old Runtime / BILL2 path. A migration from before it that
+ * patches one of them (pg_get_functiondef of a dropped function, an ALTER of a dropped table) cannot run on the final catalog any more:
+ * its target is gone, and 0505 drops whatever it would bring back. read(path) returns the migration text.
+ */
+export const droppedByOldPathDrop = read => new Set([...read('packages/db/migrations/0505_core_path_v2_drop_old_path.sql')
+  .matchAll(/\bDROP\s+(?:FUNCTION|TABLE|TYPE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?/gi)].map(match => match[1]));
+
+/**
+ * The migration without the rows of its `FOR p IN SELECT * FROM (VALUES ('public.<function>(...)', anchor, replacement, marker), ...)` patch lists that
+ * target a dropped function, so the re-applied migration still runs every patch whose target exists. Returns { sql, removed } (removed: the names).
+ */
+export function withoutDroppedPatchTargets(sql, dropped) {
+  const kept = [], removed = [];
+  let skipping = false;
+  for (const line of sql.split('\n')) {
+    const row = /^ \('public\.(\w+)\(/.exec(line);
+    if (row) { skipping = dropped.has(row[1]); if (skipping) removed.push(row[1]); }
+    else if (/^ \) x\(sig,anchor,replacement,marker\)/.test(line)) {
+      skipping = false;
+      // The last kept row ended with a comma before the removed one; the list must not end with one.
+      const last = kept.findLastIndex(text => text.trim() !== '');
+      if (last >= 0 && removed.length > 0) kept[last] = kept[last].replace(/,\s*$/, '');
+    }
+    if (!skipping) kept.push(line);
+  }
+  return { sql: kept.join('\n'), removed };
+}
+
+/**
  * migrationPath: the migration being re-applied; first: its SQL to replay (the file text, or the text without a block
  * proven superseded). sql(text) runs on the database, ok(result) unwraps it, snapshot() reads the object catalog.
  */
@@ -21,6 +50,7 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
  const hasMarker=(signature,marker)=>{assert.ok(!marker.includes('$md5_chain_marker$'));
   return ok(sql(`SELECT position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef('public.${signature}'::regprocedure))>0;`))==='t';};
  report.skipped??=[];
+ const dropped=droppedByOldPathDrop(read);
  const refusedSql=[],refusedNames=[];
  for(let i=0;i<tail.length;i++){
   const superseded=await supersededPatch(tail,i,currentMd5,hasMarker);
@@ -51,7 +81,12 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
   // itself, each one is printed and recorded, and the catalog equality below must still hold.
   const refusal=replayResult.status!==0&&tail[i].name!==base
    ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
+  // A migration from before 0505 that patches an object 0505 later dropped (the old Runtime / BILL2 path) fails with "does not exist" naming it:
+  // the target is gone from the final catalog and 0505, replayed later in this tail, drops anything such a migration would bring back.
+  const gone=replayResult.status!==0&&!refusal&&tail[i].name!==base?/ERROR:\s+(?:function|relation|type|table)\s+"?(?:public\.)?(\w+)/.exec(replayResult.stderr??''):null;
   if(refusal){const reason=tail[i].name+': anchored patch refused on the final catalog ('+refusal[1]+'), a later migration rewrote its anchor; not replayed';
+   console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
+  else if(gone&&dropped.has(gone[1])){const reason=tail[i].name+': its patch target '+gone[1]+' was dropped by 0505 (old Runtime / BILL2 path); not replayed';
    console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
   else ok(replayResult);
  }

@@ -112,7 +112,7 @@ try {
   const file = resolve(temporary, 'fixture.sql');
   writeFileSync(file, fixture);
   const result = spawnSync(process.execPath, [
-    'packages/db/tests/run-db-baseline-replay.mjs', '--local-only', '--after', file,
+    'packages/db/tests/run-db-baseline-replay.mjs', '--local-only', '--skip-repeat', '--after', file,
   ], { cwd: root, encoding: 'utf8', timeout: 300000, maxBuffer: 16 * 1024 * 1024 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const report = JSON.parse(result.stdout);
@@ -154,7 +154,7 @@ try {
   console.log('PASS: SELECT-only; exact 90 keys; existing/missing objects; NULL CHECK semantics;');
   console.log('duplicate groups (NULL excluded); predicate columns; definition drift; NOT VALID; count-only output.');
   console.log('PASS: migration rejects CHECK and UNIQUE violations without leaving partial objects.');
-  console.log(`PASS: file-built fingerprint unchanged; ${report.repeated} repeated migrations; cleanup.`);
+  console.log('PASS: file-built fingerprint unchanged; cleanup.');
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }
