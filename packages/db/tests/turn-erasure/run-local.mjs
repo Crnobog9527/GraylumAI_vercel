@@ -416,5 +416,44 @@ try{
   assert.ok(t);
   report.checks.push('library deletion on the turn path: no turn table holds document text; after library_delete the document is refused (doc, segment), not found by search, not listed; another account never reads it');
  }
+ // 15. The account is erased while a turn is open and nobody ever closes it (the old erasure-b2a / erasure-inflight risk: money in flight at erasure).
+ // The recovery job (turn_recovery_claim -> turn_recover) closes it: the money is settled exactly once, a second pass changes nothing, the
+ // bodies are scrubbed afterwards, and the erasure reaches closed.
+ {
+  const a=await account(1000);
+  const ledgerHolds=async x=>{const m=await money(x);assert.equal(m.credits,m.ledger,'the balance is exactly what the ledger holds: nothing left frozen or counted twice');return m;};
+  const running=await open(a);await begin(a,running.turnId);await record(a,running.turnId,1,'RECOVERY_PRIVATE_BODY');
+  // The erasure job's view while the turn is open and the account is already erased (as account_erasure_confirm leaves it).
+  await c.query("update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1",[a.actor]);
+  await c.query("insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now()-interval '1 minute')",[a.actor,randomUUID()]);
+  assert.equal((await one('select account_erasure_work_batch($1) v',[a.actor])).financialPending,1,'the open turn is money in flight');
+  // Nobody closes it: it is left by a dead instance, the recovery job finds it.
+  await c.query("update turns set updated_at=now()-interval '16 minutes' where actor_id=$1 and id=$2",[a.actor,running.turnId]);
+  const claimed=(await one('select turn_recovery_claim(50) v')).filter(item=>item.turnId===running.turnId);
+  assert.deepEqual(claimed.map(item=>[item.actorId,item.action]),[[a.actor,'interrupt']],'an erased account\'s open turn is claimed like any other');
+  const first=await one('select turn_recover($1,$2,$3) v',[a.actor,running.turnId,'interrupt']);
+  assert.equal(first.skipped,undefined,'the recovery closed it');
+  const row=async()=>(await c.query('select state,close_kind,charged_credits::int charged,settlement from turns where actor_id=$1 and id=$2',[a.actor,running.turnId])).rows[0];
+  const closed=await row();
+  assert.equal(closed.state,'closed','the turn is closed by the recovery');
+  const settled=await ledgerHolds(a);
+  assert.equal(settled.credits,1000-closed.charged,'the user is charged what the turn says it charged, once');
+  assert.equal(await one("select coalesce(sum(-amount),0)::int v from credit_transactions where user_id=$1 and reason_code='turn_spend'",[a.actor]),closed.charged,'one spend row for it');
+  // A second pass (another instance, or the settlement pass) changes nothing.
+  const again=await one('select turn_recover($1,$2,$3) v',[a.actor,running.turnId,'interrupt']);
+  assert.equal(again.skipped,true,'a closed turn is skipped');
+  assert.deepEqual(await row(),closed);
+  assert.deepEqual(await ledgerHolds(a),settled,'a second pass moves no money');
+  // The erasure goes on: no money in flight, the bodies and messages are scrubbed, the stage reaches closed.
+  assert.equal((await one('select account_erasure_work_batch($1) v',[a.actor])).financialPending,0,'nothing in flight after the recovery');
+  assert.equal((await one('select account_erasure_financial_batch(20,$1) v',[a.actor])).totalPending,0);
+  await one('select account_erasure_scrub_turns($1) v',[a.actor]);await one('select account_erasure_scrub_runtime($1) v',[a.actor]);
+  assert.equal(await one('select count(*)::int v from turn_call_raw r join turn_calls k on k.turn_id=r.turn_id and k.seq=r.seq where k.actor_id=$1',[a.actor]),0,'no response body is left');
+  assert.equal(await one("select count(*)::int v from session_messages m join runtime_sessions s on s.id=m.session_id where s.actor_id=$1 and m.content<>''",[a.actor]),0,'no message text is left');
+  assert.deepEqual(await ledgerHolds(a),settled,'the scrub moves no money either');
+  await c.query("select account_erasure_note_error($1,'BILLING_CLEAR')",[a.actor]);
+  assert.equal(await one('select stage v from account_erasure_requests where profile_id=$1',[a.actor]),'closed');
+  report.checks.push('account erased while a turn is open and never closed: the recovery job closes it, the user is charged what the turn says exactly once (a second pass moves no money), the balance equals the ledger, bodies and messages are scrubbed, nothing is left in flight and the erasure reaches closed');
+ }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

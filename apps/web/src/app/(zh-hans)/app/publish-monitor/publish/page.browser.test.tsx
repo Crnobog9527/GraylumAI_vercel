@@ -268,7 +268,8 @@ it('a saved job stays visible and refreshable while the feature is paused or the
   try {
     await ui(page.getByText('已提交，正在等平台结果')).toBeVisible();
     await page.getByRole('button', { name: '刷新状态' }).click();
-    expect(calls.some(c => c.path === 'publishMonitor.publish.refresh')).toBe(true);
+    // The click sends the refresh request a moment later: wait for it (the default 5 s of the expect), do not read the call list in the same tick.
+    await ui.poll(() => calls.some(c => c.path === 'publishMonitor.publish.refresh')).toBe(true);
     expect(await page.getByText('这个功能还没有开放').count()).toBe(0);
   } finally { await page.close(); }
 }, 30000);
