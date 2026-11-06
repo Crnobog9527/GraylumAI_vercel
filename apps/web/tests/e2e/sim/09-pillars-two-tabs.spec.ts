@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { db, resetSim, seed, signIn } from './support';
+import { db, resetSim, seed, signIn, watchPage } from './support';
 
 /**
  * PUBLISH-MONITOR block D (#1716 acceptance step 10): two tabs show the same content pillars. One adds a pillar and saves; the other,
@@ -42,9 +42,11 @@ async function brandWithPillars(actor: string) {
 const savedNames = async (business: string) => ((await db()<Array<{ pillars: Array<{ name: string }> }>>`
   select pillars from social_coach_profiles where business_id=${business}::uuid`)[0]?.pillars ?? []).map(p => p.name);
 
-async function openPillars(page: Page) {
+async function openPillars(page: Page, evidence: (label: string) => Promise<void>) {
   await page.goto('/app/publish-monitor');
-  await page.getByRole('tab', { name: '每周复盘' }).click();
+  // When the tab never shows (a CI run showed an unstyled "Graylum" and a blank page in the two tabs, with no stall of the server in that
+  // test), say what the page asked for and got: failed requests, browser errors, the page text.
+  await page.getByRole('tab', { name: '每周复盘' }).click().catch(async error => { await evidence('tab 每周复盘 never appeared'); throw error; });
   await expect(page.getByLabel('内容方向 3 名称')).toHaveValue('城市探店', { timeout: 60_000 });
 }
 
@@ -53,8 +55,9 @@ test('a save from a tab that missed another tab\'s save is refused and reads the
   const business = await brandWithPillars(carol.id);
   await signIn(page, 'carol');
   const other = await context.newPage();
-  await openPillars(page);
-  await openPillars(other);
+  const evidence = watchPage(page), evidenceOther = watchPage(other);
+  await openPillars(page, evidence);
+  await openPillars(other, evidenceOther);
 
   // Tab A adds a pillar and saves.
   await page.bringToFront();
