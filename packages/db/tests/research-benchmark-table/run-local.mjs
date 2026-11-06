@@ -6,7 +6,7 @@
 // number of benchmarks a report needs, and the choice card. The numbers themselves (qualification, metrics) are computed in Node and tested there
 // (benchmarkStore.test.ts and the research host tests). Rows are written as research_turn_apply stores them.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {localDb} from '../runtime-view-perf/local-db.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
@@ -154,6 +154,20 @@ try{
   assert.deepEqual(await counts(erased),gone,'an erased account keeps no benchmark row, fetch, card or discovery');
   assert.deepEqual(await counts(bystander),bystanderCounts,'another account is untouched');
   report.checks.push('deletion: a deleted conversation hides its table at once and its cleanup removes benchmarks, fetches, card and discoveries; an erased account keeps none; others untouched');
+ }
+ // 6. The operation ids Node chooses (stableResearchId, research/runtime/toolContext.ts) and the ones the benchmark table recomputes in SQL
+ // (research_benchmark_operation_id, research_benchmark_post_operations) are the same: if they drift, benchmark evidence no longer binds to its fetch
+ // attempt. The TS unit test (benchmarkIds.test.ts) pins the same literal on the Node side.
+ {
+  const fetch='00000000-0000-4000-8000-000000000001',attempt='00000000-0000-4000-8000-000000000002';
+  const stableId=(...parts)=>{const h=createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+   return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;};
+  assert.equal(await one('select research_benchmark_operation_id($1,$2,$3) v',[fetch,attempt,'account_profile']),'3f40c5bf-153d-4715-afd9-a006774ffa94','the literal the Node unit test pins');
+  assert.equal(await one('select research_benchmark_operation_id($1,$2,$3) v',[fetch,attempt,'account_posts']),stableId(fetch,attempt,'account_posts'));
+  assert.deepEqual(await one('select research_benchmark_post_operations($1,$2) v',[fetch,attempt]),
+   [stableId(fetch,attempt,'account_posts'),stableId(fetch,attempt,'account_posts','2'),stableId(fetch,attempt,'account_posts','3')],'pages 1 to 3, as Node names them');
+  assert.equal(await one("select research_benchmark_operation_id($1,$2,'Bad Kind') v",[fetch,attempt]),null,'a kind outside the fixed spelling has no id');
+  report.checks.push('operation ids: the SQL ids equal the Node ones (pinned literal, posts page 1 to 3), the same layout benchmarkIds.test.ts pins');
  }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}

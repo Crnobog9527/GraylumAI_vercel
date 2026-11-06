@@ -38,7 +38,6 @@
   "report-old-version/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "report-strategy-reads/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "report-visual-data/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "research-benchmarks/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "research-tools/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "research-window-sync/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "runtime-settings-concurrency/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
