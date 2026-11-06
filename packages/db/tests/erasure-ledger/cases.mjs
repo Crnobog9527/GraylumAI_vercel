@@ -130,11 +130,20 @@ export async function runCases(db,report){
   const allowed=(await db.query('SELECT has_table_privilege($1,$2,$3) ok',['service_role',table,privilege])).rows[0].ok;
   if(!allowed){await db.query(`GRANT ${privilege} ON ${table} TO service_role`);grants.push([table,privilege]);}
  }
+ // The guard runs as the writing role and calls content_erasure_ledger_owned, which no client role may execute (0201; 0505 left it as SELECT false):
+ // a direct service_role write to these tables is refused in the final catalog, and no application code does one. To still exercise the guard's own
+ // handling of a service_role write, the privilege is added in this disposable database only, and removed again.
+ const fn='public.content_erasure_ledger_owned(jsonb)';
+ const fnAllowed=(await db.query('SELECT has_function_privilege($1,$2,$3) ok',['service_role',fn,'EXECUTE'])).rows[0].ok;
+ if(!fnAllowed)await db.query(`GRANT EXECUTE ON FUNCTION ${fn} TO service_role`);
  try{
   await db.query('SET ROLE service_role');
   try{serviceLateId=await insertUsage(db,f.actor,undefined,dirty);}
   finally{await db.query('RESET ROLE');}
- }finally{for(const [table,privilege] of grants)await db.query(`REVOKE ${privilege} ON ${table} FROM service_role`);}
+ }finally{
+  if(!fnAllowed)await db.query(`REVOKE EXECUTE ON FUNCTION ${fn} FROM service_role`);
+  for(const [table,privilege] of grants)await db.query(`REVOKE ${privilege} ON ${table} FROM service_role`);
+ }
  const serviceLate=await row(db,'ai_usage_logs',serviceLateId);
  assert.deepEqual(serviceLate.metadata,safe);assert.equal(serviceLate.error_message,null);
  assert.equal(serviceLate.ip_address,null);assert.equal(serviceLate.user_agent,null);assert.ok(serviceLate.content_erased_at);
