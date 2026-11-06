@@ -46,6 +46,34 @@ export function withoutDroppedPatchTargets(sql, dropped) {
 }
 
 /**
+ * Function EXECUTE rights (fnacl) are never excluded by function name. The one difference that is accepted is written out here, exactly: an
+ * overload that the replay brings back and that a refused (not replayed) migration drops again, so it exists after the replay and not in the final
+ * catalog (key -> the exact rights found after the replay). opc_work_check(uuid,uuid,boolean) was replaced by the four-argument function in 0452.
+ * Anything else, above all a function that exists in the final catalog and ends the replay with other rights (an extra PUBLIC EXECUTE), fails.
+ */
+export const ACCEPTED_LEFTOVER_ACL = {
+  'fnacl:opc_work_check(uuid,uuid,boolean)': 'postgres=X/postgres,service_role=X/postgres',
+};
+
+/**
+ * The objects whose difference between the replayed catalog (after) and the final one is explained by a refused migration, and the ones that are not.
+ * Bodies, constraints, triggers and indexes named by a refused migration may end the replay in an older state that only that migration could
+ * bring forward again; rights (fnacl) are explained only by ACCEPTED_LEFTOVER_ACL.
+ */
+export function replayDrift({ after, finalCatalog, refusedText, acceptedLeftoverAcl = ACCEPTED_LEFTOVER_ACL }) {
+  const named = (kind, name) => kind !== 'fnacl' && new RegExp('\\b' + name + '\\b').test(refusedText);
+  const differing = Object.keys({ ...after, ...finalCatalog }).filter(key => after[key] !== finalCatalog[key]);
+  const explained = differing.filter(key => {
+    const match = /^(fn|fnacl|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(key);
+    if (!match) return false;
+    return match[1] === 'fnacl'
+      ? finalCatalog[key] === undefined && acceptedLeftoverAcl[key] === after[key]
+      : named(match[1], match[2]);
+  });
+  return { explained, remaining: differing.filter(key => !explained.includes(key)) };
+}
+
+/**
  * migrationPath: the migration being re-applied; first: its SQL to replay (the file text, or the text without a block
  * proven superseded). sql(text) runs on the database, ok(result) unwraps it, snapshot() reads the object catalog.
  */
@@ -109,15 +137,7 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
  // Every other object must be identical, so any other drift still fails. Each excluded object is recorded.
  const after=snapshot();
  const refusedText=refusedSql.join('\n');
- // A function's EXECUTE rights (fnacl) are explained only when a refused migration holds a GRANT or REVOKE statement for that function: its
- // rights can differ from the final ones only because the migration that sets them was not replayed. A refused migration that merely names the
- // function in its body explains the body (fn), never its rights, so an unexplained difference in rights still fails.
- const explainedKey=k=>{const match=/^(fn|fnacl|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(k);
-  if(!match)return false;
-  const [,kind,name]=match;
-  return kind==='fnacl'?new RegExp('\\b(?:GRANT|REVOKE)\\b[^;]*\\b'+name+'\\b','i').test(refusedText)
-   :new RegExp('\\b'+name+'\\b').test(refusedText);};
- const explained=Object.keys({...after,...finalCatalog}).filter(k=>after[k]!==finalCatalog[k]&&explainedKey(k));
+ const {explained}=replayDrift({after,finalCatalog,refusedText});
  const expected={...finalCatalog};
  for(const k of explained){delete after[k];delete expected[k];}
  if(explained.length)report.skipped.push('not compared (named by refused replays '+refusedNames.join(', ')+'): '+explained.join(', '));
