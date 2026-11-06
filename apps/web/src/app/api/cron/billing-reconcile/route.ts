@@ -20,6 +20,7 @@ import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
 import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
+import { stuckTurnScan } from '@repo/api/src/services/turn/settings/turnStuckRefund';
 import { startScheduledJobRun, finishScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { logSwallowed, swallow } from '@repo/api/src/lib/swallow';
 import { validateCronRequest } from '@/lib/cron-auth';
@@ -95,6 +96,15 @@ async function runResearchPriceRefresh(supabase: SupabaseClient) {
   } catch {
     return { success: false, refreshed: [], changed: [], failed: [{ route: '*', code: 'UNEXPECTED' }], expiring: [], window: 'skipped' as const };
   }
+}
+
+/** RECONCILE (b): turns opened 24 hours ago or more that are not closed, or closed with the user's charge still undecided, keep their
+ * credit freeze with no way out except an admin refund (the lookup of an unknown model cost may never answer); a closed turn still
+ * settling 48 hours after the close keeps its stop-loss share. Any such turn fails the job,
+ * and the scan logs the fixed code API_BILLING_TURN_UNSETTLED_OVER_24H; a scan that cannot be read fails too. */
+async function runStuckTurnScan(supabase: SupabaseClient) {
+  try { return await stuckTurnScan(supabase); }
+  catch { return { success: false, available: false, count: 0, oldestAgeHours: 0 }; }
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
@@ -192,7 +202,7 @@ export async function GET(request: Request) {
     // CORE-PATH-V2 V2-12 B10: the stale charged rounds scan, the stuck PAYG calls scan and the receipt retention are gone (old BILL2
     // tools; the old rows go with their tables in batch F).
     const [result, readinessAudit, erasureFinancial, waffo, stripeCard, fusionKick,
-      voice, researchPrices] = await Promise.all([
+      voice, researchPrices, stuckTurns] = await Promise.all([
       capStep(runDailyBillingReconciliation(supabase), SCAN_CAP_MS, timedOutDaily),
       capStep(runBillingEngineV15ReadinessAudit(supabase), SCAN_CAP_MS, timedOutReadiness),
       runErasureFinancialReconciliation(supabase),
@@ -201,10 +211,11 @@ export async function GET(request: Request) {
       runFusionKick(supabase, new URL(request.url).origin),
       runVoiceRecovery(supabase),
       runResearchPriceRefresh(supabase),
+      runStuckTurnScan(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
       && stripeCard.success && fusionKick.success
-      && voice.success && researchPrices.success;
+      && voice.success && researchPrices.success && stuckTurns.success;
 
     const failureReasons = [...new Set([...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message),
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
@@ -213,6 +224,9 @@ export async function GET(request: Request) {
 
           ...(fusionKick.success ? [] : ['Fusion review kick failed']),
           ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`]),
+          ...(stuckTurns.success ? [] : [stuckTurns.available
+            ? `Turns still unsettled after 24 hours (credits frozen, or a settlement pending): ${stuckTurns.count} (oldest ${stuckTurns.oldestAgeHours} h)`
+            : 'Stuck-turn scan unavailable']),
           ...(researchPrices.success ? [] : [`Research prices: ${researchPrices.failed.length} refresh failures, `
             + `${researchPrices.expiring.length} expiring within a day, window ${researchPrices.window}`])])];
     const readinessWarnings = readinessAudit.findings.filter((finding) => finding.severity === 'warning').map((finding) => finding.message);
@@ -230,6 +244,7 @@ export async function GET(request: Request) {
           fusionKick,
           voice,
           researchPrices,
+          stuckTurns,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -274,6 +289,7 @@ export async function GET(request: Request) {
       erasureFinancial: { success: erasureFinancial.success },
       fusionKick: { success: fusionKick.success },
       voice: { success: voice.success, failed: voice.failed },
+      stuckTurns: { success: stuckTurns.success, available: stuckTurns.available, count: stuckTurns.count, oldestAgeHours: stuckTurns.oldestAgeHours },
       researchPrices: { success: researchPrices.success, refreshed: count(researchPrices.refreshed), failed: count(researchPrices.failed),
         expiring: count(researchPrices.expiring), window: researchPrices.window },
     }, success ? undefined : failureReasons.join(' | ').slice(0, RUN_ERROR_MAX_CHARS));
@@ -292,6 +308,7 @@ export async function GET(request: Request) {
       fusionKick,
       voice,
       researchPrices,
+      stuckTurns,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

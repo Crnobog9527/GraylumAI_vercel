@@ -27,5 +27,7 @@ describe('portal tone', () => {
     const source = join(import.meta.dirname, '..', '..');
     expect(readFileSync(join(source, 'components/fusion-compare/ComparePicker.tsx'), 'utf8')).toContain('<DialogContent tone="light"');
     expect(readFileSync(join(source, 'app/(zh-hans)/app/positioning/[draftId]/report-panel.tsx'), 'utf8')).toContain('<AlertDialogContent tone="light"');
+    // UI-UNIFY A (phone check): the profile center's phone menu is a light sheet, not the dark 80% backdrop.
+    expect(readFileSync(join(source, 'app/(zh-hans)/app/profile/page.tsx'), 'utf8')).toMatch(/<SheetContent\s+tone="light"/);
   });
 });

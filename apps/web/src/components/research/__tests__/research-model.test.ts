@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   cellSourceNumbers, cellText, formatCount, formatFrequency, formatLastUpdate, formatRate, numberSources,
 } from "../benchmark-table-model";
-import { callCredits, DATA_SOURCE_NOTE, describeCall, MISSING_TEXT } from "../research-model";
+import { callCredits, creditAmount, DATA_SOURCE_NOTE, describeCall, MISSING_TEXT } from "../research-model";
 import {
   buildCandidateSubmission, buildKeywordSubmission, cardErrorText, initialKeywordDraft, keywordProblem,
 } from "../selection-card-model";
@@ -36,6 +36,31 @@ describe("describeCall", () => {
     for (const word of ["tikhub", "parallel", "firecrawl", "TikHub", "Parallel", "Firecrawl", "美元", "积分", "$"]) {
       expect(shown).not.toContain(word);
     }
+  });
+
+  it("rounds a call's high-precision credits to at most 2 decimals for display", () => {
+    expect(creditAmount("1.5999999999")).toBe("1.6");
+    expect(creditAmount("0.30")).toBe("0.3");
+    expect(creditAmount("0.004")).toBe("<0.01");
+    expect(creditAmount("12")).toBe("12");
+    expect(creditAmount("abc")).toBeNull();
+    // Rounded on the decimal text: a float would make 1.005 into 1 and 0.285 into 0.28.
+    expect(creditAmount("1.005")).toBe("1.01");
+    expect(creditAmount("0.285")).toBe("0.29");
+    expect(creditAmount("0.0049999")).toBe("<0.01");
+    expect(creditAmount("0.005")).toBe("0.01");
+    expect(creditAmount("0.05")).toBe("0.05");
+    expect(creditAmount("9.999")).toBe("10");
+    expect(creditAmount("0.000")).toBe("0");
+    for (const bad of ["", "-1", "1.", ".5", "1e3", " 1"]) expect(creditAmount(bad)).toBeNull();
+    // The step list (turn 6640's web_fetch) and the credit record's search lines use the same rounding.
+    expect(callCredits({ state: "succeeded", credits: "1.5999999999" })).toBe("1.6 积分");
+    expect(callCredits({ state: "succeeded", credits: "0.004" })).toBe("<0.01 积分");
+    expect(callCredits({ state: "succeeded", credits: "abc" })).toBeNull();
+    expect(chargeText({ callId: "x", tool: "web_fetch", args: { url: "https://example.com" }, settlement: "tool_usage",
+      userCredits: "1.5999999999" })).toBe("1.6 积分");
+    expect(chargeText({ callId: "y", tool: "web_fetch", args: {}, settlement: "tool_usage", userCredits: "0.004" })).toBe("<0.01 积分");
+    expect(chargeText({ callId: "z", tool: "web_fetch", args: {}, settlement: "tool_usage", userCredits: "abc" })).toBe("已计费");
   });
 
   it("shows the user's settled credits of a finished call only", () => {
@@ -117,7 +142,7 @@ describe("benchmark table", () => {
 
 describe("search charges and evidence", () => {
   it("shows an amount only for a paid search and says free otherwise", () => {
-    expect(CHARGES.map(chargeText)).toEqual(["0.3 积分", "1 积分", "没取到数据，不收费", "结果待核，不收费", "不收费（这次没有拿到用量记录）"]);
+    expect(CHARGES.map(chargeText)).toEqual(["0.3 积分", "1.6 积分", "没取到数据，不收费", "结果待核，不收费", "不收费（这次没有拿到用量记录）"]);
   });
 
   it("links only plain public http(s) sources", () => {

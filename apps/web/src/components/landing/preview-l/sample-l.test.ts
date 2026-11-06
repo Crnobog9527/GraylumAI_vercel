@@ -18,6 +18,7 @@ import { splitReport } from '@/lib/landing/sample-reports/report-markdown';
 import { VOICE_WALL } from '@/lib/landing/landing-copy';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData, homePageExtras } from '@/lib/landing/landing-page-data';
+import { softwareApplicationJsonLd } from '@/lib/seo/structured-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
@@ -457,6 +458,33 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(price).toContain(J_PRICE.unavailable);
     expect(price).toContain('href="/pricing"');
     expect(price).not.toContain('Graylum AI：');
+  });
+
+  it('lists in its JSON-LD only the prices its price area shows, with the promo offers on or off (Codex B3)', () => {
+    const catalog = [plan('pro', 29, 279), plan('gold', 69, 621)];
+    for (const offers of [{}, { goldFirstMonth: 49 }, { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 12 } }]) {
+      const home = buildLandingPageData(ALL_ON, catalog, offers);
+      const html = renderToStaticMarkup(withTrpc(createElement(SampleL, {
+        data: home, siteName: 'Graylum', extras: homePageExtras(ALL_ON), production: true,
+      })));
+      const price = html.slice(html.indexOf('id="pricing-title"'), html.indexOf('id="faq-title"'));
+      const listed = softwareApplicationJsonLd({ description: 'd', offers: home.offerList }).offers as { price: string }[];
+      const promo = 'goldFirstMonth' in offers;
+      // Switch on: one line under our price (Owner 2026-11-06 "A：显示"), in the pricing page's words; off: nothing new.
+      const line = 'Gold 新用户首月 $49，之后每月 $69';
+      expect(listed.map(offer => offer.price)).toEqual(promo ? ['0', '29', '49', '69'] : ['0', '29']);
+      expect(price.includes(line)).toBe(promo);
+      expect(price.includes('data-offer')).toBe(promo);
+      // Every listed price is on the page, in the line it belongs to.
+      expect(price).toContain('$29/月起');
+      for (const offer of listed.filter(item => !['0', '29'].includes(item.price))) expect(line).toContain(`$${offer.price}`);
+      // Yearly prices and the founder offer stay on the pricing page (Owner 2026-10-15: no plan cards, no founder price here).
+      for (const hidden of [...(promo ? [] : ['$49', '$69']), '$279', '$621', '$496', '创始']) expect(price).not.toContain(hidden);
+      // The usual ways' amounts as written (Codex B3 read them all as $0; the browser side is priceCompare.browser.test.tsx).
+      for (const row of home.compareRows) expect(price).toContain(row.price);
+      expect(price).toContain(J_PRICE_TOTAL.text);
+      expect(price).not.toMatch(/\$0(?![\d.,])/);
+    }
   });
 
   it('as the public home page: no sample switcher, links only to pages that exist, the support address in the footer', () => {

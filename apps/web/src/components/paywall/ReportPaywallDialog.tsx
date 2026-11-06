@@ -17,6 +17,8 @@ import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as REPORT_COPY } from './repor
 import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, type GoldScene } from './goldScenePaywallCopy';
 import { COACH_SCENE_DELIVERABLES, coachSceneCopy } from './coachScenePaywallCopy';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { cn } from '@/lib/utils';
+import { lightDialogStyle, lightOverlayClass, lightPortalClass } from '@/components/design/light-portal';
 
 /**
  * Scene 1 of the paywall design v25: a free user who confirmed every step asks for the report.
@@ -75,12 +77,15 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4">
+    // The light signed-in dialog (DESIGN.md "Dialog", the same tone as the checkout dialog): it carries its own tokens, so it is light
+    // wherever it is opened. Touch widths get 44px targets.
+    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4', lightOverlayClass)}>
       <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="report-paywall-title" tabIndex={-1}
         data-testid="report-paywall" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}
-        className="relative grid max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl border md:grid-cols-[1fr_1.15fr]"
-        style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-primary)' }}>
-        <Button variant="ghost" size="icon" aria-label="关闭" className="absolute right-2 top-2 z-10" onClick={onClose}>
+        className={cn('relative grid max-h-[94dvh] w-full max-w-5xl overflow-y-auto border md:grid-cols-[1fr_1.15fr]', lightPortalClass)}
+        style={lightDialogStyle}>
+        <Button variant="ghost" size="icon" aria-label="关闭" className="absolute right-1 top-1 z-10 h-11 w-11 sm:right-2 sm:top-2 sm:h-9 sm:w-9"
+          onClick={onClose}>
           <X className="h-4 w-4" aria-hidden="true" />
         </Button>
 
@@ -128,7 +133,7 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
               {memberLevel === 'loading' ? <PageSkeleton compact rows={2} label="会员状态读取中"/> : <>
                 <p>{memberLevel === 'pro' ? '你现在是 Pro 会员，升级到 Gold 在订阅页完成：原 Pro 到本期结束，已有积分保留。'
                   : '请到订阅页开通或升级到 Gold。'}</p>
-                <Button asChild><a href={profileTabHref('subscription')} target="_blank" rel="noopener">去订阅页升级到 Gold</a></Button>
+                <Button asChild className="h-11 sm:h-9"><a href={profileTabHref('subscription')} target="_blank" rel="noopener">去订阅页升级到 Gold</a></Button>
               </>}
             </div>
           ) : checkout.loading ? <PageSkeleton compact rows={3} label="会员方案读取中"/>
@@ -160,7 +165,7 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
                 fineprint={quote.founder ? CHECKOUT_COPY.founderRule : null}
                 notice={checkout.founderSoldOut && plan.level === 'gold' && billing === 'yearly' ? CHECKOUT_COPY.founderSoldOut : null} />
               {checkout.unpaidSubscription ? <a data-testid="report-paywall-support-ticket" href={SUPPORT_TICKET_HREF}
-                className="text-sm underline" style={{ color: 'var(--text-primary)' }}>提交工单</a> : null}
+                className="inline-flex min-h-11 items-center text-sm underline sm:min-h-0" style={{ color: 'var(--text-primary)' }}>提交工单</a> : null}
             </>
           ) : null}
 
@@ -170,7 +175,7 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
             ))}
           </ul>
           <div className="grid justify-items-center gap-1 text-center">
-            <Button variant="ghost" onClick={onClose}>{COPY.later}</Button>
+            <Button variant="ghost" className="h-11 sm:h-9" onClick={onClose}>{COPY.later}</Button>
             <small style={{ color: 'var(--text-tertiary)' }}>{COPY.laterNote}</small>
           </div>
         </section>

@@ -27,7 +27,7 @@ describe('turn cost report', () => {
   it('lists the unsettled turns content-free and refuses a malformed row', async () => {
     const turn = { turnId: 5, actorId: '00000000-0000-4000-8000-000000000001', kind: 'chat', state: 'running', settlement: null,
       closeKind: null, openedAt: '2026-11-02T00:00:00Z', updatedAt: '2026-11-02T00:01:00Z', reservedCredits: 30, chargedCredits: null,
-      failureCode: null, inFlightCalls: 1, costPendingCalls: 0 };
+      failureCode: null, inFlightCalls: 1, costPendingCalls: 0, refundEligible: false };
     expect(await unsettledTurns(db({ total: 1, turns: [turn] }))).toMatchObject({ available: true, total: 1 });
     expect(await unsettledTurns(db({ total: 1, turns: [{ ...turn, body: 'PRIVATE' }] }))).toMatchObject({ available: false });
     expect(await unsettledTurns(db(null, { code: 'XX000' }))).toMatchObject({ available: false });

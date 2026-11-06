@@ -32,25 +32,28 @@ const format = (part: Part, value: number) => {
 };
 
 /**
- * Text whose numbers "add up" once `play` turns on: each runs from 0 to its value (years stay as they are). The server
- * HTML and reduced motion show the final text; until `play`, a page with motion shows the numbers at 0.
+ * Text whose numbers "add up" once `play` turns on: each runs from 0 to its value (years stay as they are). Only while it
+ * counts are the numbers below their value: before `play` (not scrolled to yet), with reduced motion, in the server HTML and
+ * once done the text is the real one, so whatever reads the page (a screen reader, a crawler, a page-text capture) gets the
+ * real amounts. Codex B3 (staging 6a3ec003) read every home page amount as $0: the numbers used to sit at 0 until they
+ * played, and stayed there in a tab whose animation frames are held back. The timer ends the count on time without frames.
  */
 export function CountUpJ({ text, play, delay = 0, duration = 1100 }: { text: string; play: boolean; delay?: number; duration?: number }) {
   const [progress, setProgress] = useState<number | null>(null);
   useEffect(() => {
-    if (reducedMotion()) return;
-    if (!play) { setProgress(0); return; }
+    if (!play || reducedMotion()) { setProgress(null); return; }
     let frame = 0;
     let start = 0;
     const tick = (now: number) => {
       if (!start) start = now + delay;
       const t = Math.min(1, Math.max(0, (now - start) / duration));
-      setProgress(1 - (1 - t) ** 3);
+      setProgress(t >= 1 ? null : 1 - (1 - t) ** 3);
       if (t < 1) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    const done = window.setTimeout(() => { cancelAnimationFrame(frame); setProgress(null); }, delay + duration + 200);
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(done); };
   }, [play, delay, duration]);
-  if (progress === null || progress >= 1) return <>{text}</>;
+  if (progress === null) return <>{text}</>;
   return <>{parts(text).map(part => (part.value === undefined ? part.text : format(part, part.value * progress))).join('')}</>;
 }

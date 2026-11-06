@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LANDING_FAQ, faqAnswerText } from './landing-faq';
 import { LANDING_FEATURES, resolveLandingFlags, type LandingFlags } from './landing-flags';
 import { buildLandingPageData } from './landing-page-data';
-import { buildLandingPricing, landingOfferList } from './landing-pricing';
+import { buildLandingPricing, goldFirstMonthLine, landingOfferList } from './landing-pricing';
 import { allSamplesReady, sampleReady, SAMPLE_REPORTS } from './landing-samples';
 import { loadSampleReport, SAMPLE_REPORT_SLUGS } from './sample-reports';
 import { sampleReportsReady } from './sample-reports/ready';
@@ -100,11 +100,20 @@ describe('landing price cards', () => {
     expect(buildLandingPricing([plan('gold', 69, 621), plan('gold', 59, 600)]).cards).toEqual([]);
   });
 
-  it('lists the same prices for the SoftwareApplication JSON-LD', () => {
-    expect(landingOfferList(buildLandingPricing(CATALOG))).toEqual([
-      { name: '免费', price: 0 }, { name: 'Pro 月付', price: 29 }, { name: 'Pro 年付', price: 279 },
-      { name: 'Gold 月付', price: 69 }, { name: 'Gold 年付', price: 621 },
-    ]);
+  it('lists only the prices the home page shows for the SoftwareApplication JSON-LD (free, "$29/月起", the Gold first month)', () => {
+    const shown = [{ name: '免费', price: 0 }, { name: 'Pro 月付', price: 29 }];
+    expect(landingOfferList(buildLandingPricing(CATALOG))).toEqual(shown);
+    // LANDING_PROMO_OFFERS on: the home page shows "Gold 新用户首月 $49，之后每月 $69" (Owner 2026-11-06), so both are listed.
+    const promo = buildLandingPricing(CATALOG, { goldFirstMonth: 49 });
+    expect(promo.goldFirstMonth).toEqual({ first: 49, monthly: 69 });
+    expect(goldFirstMonthLine(promo.goldFirstMonth!)).toBe('Gold 新用户首月 $49，之后每月 $69');
+    expect(landingOfferList(promo)).toEqual([...shown, { name: 'Gold 新用户首月', price: 49 }, { name: 'Gold 月付', price: 69 }]);
+    // A first month that is not below the monthly price is no offer, as on the pricing page (paywallQuote).
+    for (const goldFirstMonth of [69, 80, 0, null]) {
+      expect(buildLandingPricing(CATALOG, { goldFirstMonth }).goldFirstMonth).toBeNull();
+      expect(landingOfferList(buildLandingPricing(CATALOG, { goldFirstMonth }))).toEqual(shown);
+    }
+    expect(landingOfferList(buildLandingPricing([]))).toEqual([{ name: '免费', price: 0 }]);
   });
 });
 

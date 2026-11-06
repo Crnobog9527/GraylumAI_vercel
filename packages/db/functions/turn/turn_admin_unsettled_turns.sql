@@ -19,6 +19,10 @@ AS $function$
     'settlement',p.settlement,'closeKind',p.close_kind,'openedAt',p.opened_at,'updatedAt',p.updated_at,
     'reservedCredits',p.reserved_credits,'chargedCredits',p.charged_credits,'failureCode',p.failure_code,
     'inFlightCalls',(SELECT count(*) FROM turn_calls k WHERE k.turn_id=p.id AND k.status IN ('dispatched','identified')),
-    'costPendingCalls',(SELECT count(*) FROM turn_calls k WHERE k.turn_id=p.id AND k.cost_pending))
+    'costPendingCalls',(SELECT count(*) FROM turn_calls k WHERE k.turn_id=p.id AND k.cost_pending),
+    -- The same rules as turn_admin_refund_all: a closed turn is judged from closed_at (updated_at is refreshed by recovery).
+    'refundEligible',(p.opened_at < now() - interval '24 hours' AND (
+      (p.state <> 'closed' AND p.updated_at < now() - interval '24 hours')
+      OR (p.state = 'closed' AND p.settlement = 'pending' AND (p.charged_credits IS NULL OR p.closed_at < now() - interval '48 hours')))))
     ORDER BY p.updated_at,p.id) FROM page p),'[]'::jsonb))
 $function$;

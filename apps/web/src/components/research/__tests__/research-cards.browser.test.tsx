@@ -135,6 +135,8 @@ for (const width of [1440, 375]) {
       const charges = page.getByRole("region", { name: "本次回复里的搜索" });
       await ui(charges.getByRole("listitem")).toHaveCount(5);
       await ui(charges).toContainText("0.3 积分");
+      await ui(charges).toContainText("1.6 积分");
+      await ui(charges).not.toContainText("1.5999");
       await ui(charges).toContainText("结果待核，不收费");
       const evidence = page.getByRole("region", { name: "搜索记录" });
       await ui(evidence.locator("li[class*=evidence]")).toHaveCount(3);

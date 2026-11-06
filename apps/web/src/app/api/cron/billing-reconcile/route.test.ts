@@ -22,7 +22,10 @@ const mocks = vi.hoisted(() => ({
   researchPrices: vi.fn(),
   startRun: vi.fn(),
   finishRun: vi.fn(),
+  stuckScan: vi.fn(),
 }));
+
+vi.mock('@repo/api/src/services/turn/settings/turnStuckRefund', () => ({ stuckTurnScan: mocks.stuckScan }));
 
 vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.startRun, finishScheduledJobRun: mocks.finishRun }));
 
@@ -110,6 +113,7 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.fusionKick.mockResolvedValue({ success: true, kicked: 0, listed: 0 });
     mocks.voice.mockResolvedValue({ success: true, settled: 0, scrubbed: 0, waiting: 0, failed: 0 });
     mocks.researchPrices.mockResolvedValue({ success: true, refreshed: [], changed: [], failed: [], expiring: [], window: 'skipped' });
+    mocks.stuckScan.mockResolvedValue({ success: true, available: true, count: 0, oldestAgeHours: 0 });
     mocks.startRun.mockResolvedValue('run-1');
     mocks.finishRun.mockResolvedValue(undefined);
   });
@@ -123,6 +127,25 @@ describe('/api/cron/billing-reconcile', () => {
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
     expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error',
       error: expect.stringContaining('Voice generations pending recovery: 2') }));
+  });
+
+  it('fails the job while a turn is still unsettled after 24 hours, with the count and the oldest age in the reasons', async () => {
+    mocks.stuckScan.mockResolvedValue({ success: false, available: true, count: 2, oldestAgeHours: 30 });
+    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ stuckTurns: { count: 2, oldestAgeHours: 30 } });
+    expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
+      expect.stringContaining('Turns still unsettled after 24 hours (credits frozen, or a settlement pending): 2 (oldest 30 h)'), expect.anything());
+    expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error',
+      summary: expect.objectContaining({ stuckTurns: expect.objectContaining({ count: 2, oldestAgeHours: 30 }) }) }));
+  });
+
+  it('fails the job when the stuck-turn scan cannot be read, and when it throws', async () => {
+    mocks.stuckScan.mockResolvedValue({ success: false, available: false, count: 0, oldestAgeHours: 0 });
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
+    expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number), expect.stringContaining('Stuck-turn scan unavailable'), expect.anything());
+    mocks.stuckScan.mockRejectedValue(new Error('boom'));
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
   });
 
   it('does not depend on the run record: a failing record write leaves the job result alone', async () => {

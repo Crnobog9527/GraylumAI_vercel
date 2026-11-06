@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { needsManualSettlement, TurnModelReportCard, UnsettledTurnsCard } from './TurnCostReport';
 
 const fixture = vi.hoisted(() => ({ report: undefined as unknown, unsettled: undefined as unknown, absent: undefined as unknown }));
-vi.mock('@/trpc/client', () => ({ trpc: { billingReport: {
+vi.mock('@/trpc/client', () => ({ trpc: { useUtils: () => ({ billingReport: { unsettledTurns: { invalidate: vi.fn() }, turnByModel: { invalidate: vi.fn() } } }), billingReport: {
+  refundStuckTurn: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
   turnByModel: { useQuery: () => ({ data: fixture.report, error: null }) },
   unsettledTurns: { useQuery: () => ({ data: fixture.unsettled, error: null }) },
   absentRefunds: { useQuery: () => ({ data: fixture.absent, error: null }) },
@@ -40,7 +41,7 @@ describe('turn cost report cards', () => {
   it('lists unsettled turns read-only, says when there are none, and flags an unavailable list', () => {
     fixture.unsettled = { available: true, total: 2, turns: [{ turnId: 7, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending',
       closeKind: 'completed', openedAt: 'x', updatedAt: '2026-11-02T00:00:00Z', reservedCredits: 30, chargedCredits: 5, failureCode: null,
-      inFlightCalls: 0, costPendingCalls: 1 }] };
+      inFlightCalls: 0, costPendingCalls: 1, refundEligible: false }] };
     let html = renderToStaticMarkup(<UnsettledTurnsCard />);
     expect(html).toContain('共 2 个，只列出最早的 1 个');
     expect(html).toContain('closed（completed）');
@@ -79,13 +80,23 @@ describe('turn cost report cards', () => {
     fixture.absent = { available: true, total: 0, calls: [] };
     fixture.unsettled = { available: true, total: 1, turns: [{ turnId: 2024, actorId: 'a', kind: 'mentor', state: 'closed', settlement: 'pending',
       closeKind: 'interrupted', openedAt: '2026-10-01T00:00:00Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 864, chargedCredits: null,
-      failureCode: 'turn_call_unknown', inFlightCalls: 0, costPendingCalls: 1 }] };
+      failureCode: 'turn_call_unknown', inFlightCalls: 0, costPendingCalls: 1, refundEligible: false }] };
     expect(renderToStaticMarkup(<UnsettledTurnsCard />)).toContain('需人工');
+  });
+  it('offers 按回合全额退回并关闭 only where the freeze can stay for ever (the database function checks again)', () => {
+    fixture.absent = { available: true, total: 0, calls: [] };
+    const row = (turnId: number, over: object) => ({ turnId, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending', closeKind: 'interrupted',
+      openedAt: '2026-10-01T00:00:00Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 60, chargedCredits: null, failureCode: null,
+      inFlightCalls: 0, costPendingCalls: 1, refundEligible: false, ...over });
+    fixture.unsettled = { available: true, total: 2, turns: [row(11, { refundEligible: true }), row(12, { chargedCredits: 5 }), row(13, { chargedCredits: 5, refundEligible: true })] };
+    const html = renderToStaticMarkup(<UnsettledTurnsCard />);
+    expect(html.match(/按回合全额退回并关闭/g)?.length).toBe(3); // the description and the two rows the database marks eligible (the button follows the database, never updatedAt)
+    expect(html.match(/<button/g)?.length).toBe(2);
   });
   it('keeps every table inside a horizontally scrolling box so a narrow screen scrolls instead of squeezing the columns', () => {
     fixture.unsettled = { available: true, total: 1, turns: [{ turnId: 5, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending',
       closeKind: 'interrupted', openedAt: '2026-11-03T03:50:33Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 30, chargedCredits: null,
-      failureCode: null, inFlightCalls: 0, costPendingCalls: 1 }] };
+      failureCode: null, inFlightCalls: 0, costPendingCalls: 1, refundEligible: false }] };
     fixture.absent = { available: true, total: 1, calls: [{ turnId: 2024, seq: 1, actorId: 'a', kind: 'mentor', source: 'lookup_absent',
       providerId: 'gen-1', httpStatus: 404, settledAt: '2026-11-04T04:00:00Z', openedAt: '2026-11-03T03:50:33Z', reservedCredits: 864,
       chargedCredits: 0, settlement: 'done', state: 'closed' }] };

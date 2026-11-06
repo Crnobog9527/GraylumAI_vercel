@@ -18,6 +18,7 @@ import { HERO } from '@/lib/landing/landing-copy';
 import { L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
 import { J_JURY_PAGE, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { allOn } from '@/lib/landing/landing-flags';
+import { goldFirstMonthLine } from '@/lib/landing/landing-pricing';
 import { cn } from '@/lib/utils';
 import { HeroL } from './HeroL';
 import { SamplesL } from './SamplesL';
@@ -76,7 +77,7 @@ export function SampleL({ data, siteName, extras, production = false, supportEma
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
-          after={terms} />
+          offer={data.pricing.goldFirstMonth ? goldFirstMonthLine(data.pricing.goldFirstMonth) : null} after={terms} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>
