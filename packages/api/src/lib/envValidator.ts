@@ -153,6 +153,7 @@ const envSchema = z.object({
 
   // 平台注入和测试专用
   CI: optionalString,
+  SIM_KEEP_COMPILED: optionalString, // 仅模拟浏览器测试的开发服务器使用（apps/web/next.config.ts），生产不设置
   NEXT_RUNTIME: optionalString,
   VERCEL: optionalString,
   VERCEL_ENV: optionalString,
