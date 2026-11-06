@@ -59,6 +59,7 @@ beforeAll(async () => {
         import { ReportPaywallDialog } from ${JSON.stringify(src + 'components/paywall/ReportPaywallDialog.tsx')};
         import { MethodCheckoutDialog } from ${JSON.stringify(src + 'components/paywall/MethodCheckoutDialog.tsx')};
         import { useMethodCheckout } from ${JSON.stringify(src + 'components/paywall/useMethodCheckout.ts')};
+        import { Sheet, SheetContent, SheetTitle } from ${JSON.stringify(src + 'components/ui/sheet.tsx')};
         const target = { title: '开通 Pro 会员', description: '每月 3,480 积分，可随时取消。', price: '$29 / 月', renewal: '每月自动续费 $29。',
           cta: '确认并支付 $29', details: ['每月 3,480 积分', '积分包 95 折'],
           purchase: { itemType: 'membership_plan', itemId: 'pro-plan', billingCycle: 'monthly', offer: 'standard' } };
@@ -69,6 +70,11 @@ beforeAll(async () => {
           jury: () => React.createElement(ReportPaywallDialog, { scene: 'jury', onClose() {} }),
           'compare-pro': () => React.createElement(ReportPaywallDialog, { scene: 'compare', onClose() {} }),
           checkout: () => React.createElement(Checkout),
+          // The profile center's phone menu (app/profile/page.tsx), same props.
+          sheet: () => React.createElement(Sheet, { open: true }, React.createElement(SheetContent, { tone: 'light', side: 'left',
+            className: 'w-[88vw] max-w-80 p-0 pt-6', 'data-testid': 'profile-menu',
+            style: { background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' } },
+            React.createElement(SheetTitle, null, '个人中心'))),
         };
         createRoot(document.getElementById('root')).render(React.createElement(views[window.__view]));`;
     } }],
@@ -170,6 +176,31 @@ describe('paywall dialogs are the light signed-in dialog on a phone', () => {
       } finally { await page.close(); }
     }, 30000);
   }
+
+  for (const width of [390, 360]) it(`the profile phone menu at ${width}px: light backdrop, a 44px close button where the icon was`, async () => {
+    const { page, errors } = await open('sheet', width);
+    try {
+      await browserExpect(page.getByTestId('profile-menu')).toBeVisible();
+      if (shots) await page.screenshot({ path: `${shots}/profile-menu-${width}.png` });
+      const measured = await page.evaluate(() => {
+        const sheet = document.querySelector('[data-testid="profile-menu"]')!;
+        const close = [...sheet.querySelectorAll('button')].find(button => /Close/.test(button.textContent ?? ''))!;
+        const icon = close.querySelector('svg')!.getBoundingClientRect();
+        const box = close.getBoundingClientRect();
+        const panel = sheet.getBoundingClientRect();
+        return { backdrop: getComputedStyle(sheet.previousElementSibling!).backgroundColor, width: box.width, height: box.height,
+          iconRight: panel.right - parseFloat(getComputedStyle(sheet).borderRightWidth) - icon.right,
+          iconTop: icon.top - panel.top - parseFloat(getComputedStyle(sheet).borderTopWidth) };
+      });
+      expect(measured.backdrop).toMatch(/^(rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\))$/);
+      expect(measured.width).toBeGreaterThanOrEqual(44);
+      expect(measured.height).toBeGreaterThanOrEqual(44);
+      // The 16px icon keeps its place: 16px inside the right and the top edge (right-4 top-4 before).
+      expect(Math.round(measured.iconRight)).toBe(16);
+      expect(Math.round(measured.iconTop)).toBe(16);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30000);
 
   it('the backdrop is the light one and the desktop dialog keeps its 36px controls', async () => {
     const { page, errors } = await open('report', 1280);
