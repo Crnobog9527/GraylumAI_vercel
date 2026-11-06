@@ -11,7 +11,7 @@ import { judgeVolatility, loadAllow } from '../../packages/db/tests/baseline/vol
 
 const root = resolve(import.meta.dirname, '../..');
 // Ratchets: lowering these is the point of the work; raising them needs a reviewed reason.
-const MAX_EXCLUDED_SUITES = 59;
+const MAX_EXCLUDED_SUITES = 55;
 const MAX_VOLATILITY_ALLOWED = 0;
 // erasure-run and bill-unit left with the old runs and BILL2 path (V2-12); their turn-path counterparts are turn-erasure and turn-core.
 const REQUIRED_IN_CI = ['pay-dispute', 'pay-waffo', 'pay-waffo-delivery', 'monthly-refund', 'package-refund',
