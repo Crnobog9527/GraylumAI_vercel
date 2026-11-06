@@ -74,9 +74,6 @@ export async function runCases(db,report){
 
  const credit=(await db.query('SELECT id FROM credit_transactions WHERE user_id=$1 ORDER BY id LIMIT 1',[f.actor])).rows[0].id;
  await db.query('UPDATE credit_transactions SET description=$2,metadata=$3 WHERE id=$1',[credit,CANARY,dirty]);
- // The shared fixture no longer carries the pre-deduction row of the old billing run (CORE-PATH-V2 V2-12 F removed bill2_prepare from it); billing_history and
- // its erasure scrub are still there, so this case inserts its own row.
- f.pre=(await db.query("INSERT INTO billing_history(user_id,operation_type,amount,reason,metadata) VALUES($1,'pre_deduct',-6,'synthetic pre-deduction','{}'::jsonb) RETURNING id",[f.actor])).rows[0].id;
  await db.query('UPDATE billing_history SET reason=$2,metadata=metadata||$3::jsonb WHERE id=$1',[f.pre,CANARY,dirty]);
  const conv=randomUUID(),token=randomUUID();
  await db.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'synthetic')",[conv,f.actor]);
@@ -89,21 +86,16 @@ export async function runCases(db,report){
   ['token_stats',token,['metadata','content_erased_at']],
   ['ai_usage_logs',usage,['error_message','ip_address','user_agent','metadata','content_erased_at']]];
  const before=await Promise.all(specs.map(([table,id])=>row(db,table,id)));
- // token_stats has a BEFORE INSERT/UPDATE trigger (0217, mm_token_stats_model_alias) that stores model names as aliases ('m_' and 16 hex, one per name,
- // in model_usage_aliases), so the pricing snapshot its metadata keeps carries the alias of each name; the other tables keep the name as written.
- const alias=async name=>(await db.query('SELECT model_usage_alias($1) v',[name])).rows[0].v;
- const aliasedPricing={...pricing,modelId:await alias(pricing.modelId),providerModel:await alias(pricing.providerModel)};
- const expectedSafe={...safe,pricing:aliasedPricing,usage:{...safe.usage,pricing:aliasedPricing}};
  await closeAccount(db,f);
  for(let i=0;i<specs.length;i++){
   const [table,id,cols]=specs[i];
   await db.query('SET ROLE service_role');
   let result;try{result=await scrub(db,f.actor,table);}finally{await db.query('RESET ROLE');}
-  assert.ok(result.processed>=1,table+' '+JSON.stringify(result));assert.equal(result.manualReview,0,table);assert.equal(result.remaining,0,table);
+  assert.ok(result.processed>=1);assert.equal(result.manualReview,0);assert.equal(result.remaining,0);
   const after=await row(db,table,id);
   assert.ok(after.content_erased_at);assert.doesNotMatch(JSON.stringify(after),/LEDGER_PRIVATE_CANARY/);
   assert.deepEqual(financial(after,cols),financial(before[i],cols),'amount, classifications, bindings and timestamps unchanged');
-  for(const [key,value] of Object.entries(table==='token_stats'?expectedSafe:safe))assert.deepEqual(after.metadata[key],value,table+' '+key);
+  for(const [key,value] of Object.entries(safe))assert.deepEqual(after.metadata[key],value,key);
   const repeated=await scrub(db,f.actor,table);assert.equal(repeated.processed,0);assert.equal(repeated.remaining,0);
   assert.deepEqual(await row(db,table,id),after,'replay does not alter marker or financial fields');
   await assert.rejects(db.query(`UPDATE ${table} SET content_erased_at=NULL WHERE id=$1`,[id]),/ERASURE_LEDGER_IMMUTABLE/);

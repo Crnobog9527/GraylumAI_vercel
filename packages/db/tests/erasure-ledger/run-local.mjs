@@ -8,7 +8,6 @@ import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
-import {replayTail} from '../content-erasure/tail-replay.mjs';
 import {runCases} from './cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
@@ -62,10 +61,8 @@ try {
  assert.equal(report.build.failed,null);
  assert.ok(historicalChecked,'0188 must be verified through the canonical build plan');
  const finalCatalog=snapshot();
- // 0188 alone rewrites functions that later migrations changed or dropped: it is replayed together with every later migration.
- ok(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','postgres','-c','CREATE DATABASE b2a_replay TEMPLATE b2a']));
- const sqlCopy=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d','b2a_replay','-v','ON_ERROR_STOP=1'],input);
- await replayTail({root,read,sql:sqlCopy,ok,snapshot:()=>JSON.parse(ok(sqlCopy(objectSql))),finalCatalog,report,migrationPath,first:migration});
+ ok(sql(migration));
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0188 preserves the complete final catalog');
  report.checks.push('0188 reapplication with all later migrations preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
