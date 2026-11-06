@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures';
 
-import { replies, resetSim, runRecovery, signIn, startFreeChat } from './support';
+import { armFault, replies, resetSim, runRecovery, signIn, startFreeChat } from './support';
 
 /**
  * Compiles every route the journeys use, before any of them runs, on an account no journey looks at.
@@ -20,6 +20,12 @@ test('warm-up: compile the routes the journeys use', async ({ page }) => {
   // and its voice tab, the profile, and the recovery job. Failures here are not asserted: only that every route has been compiled.
   await startFreeChat(page, '预热：说一句话。');
   await expect(replies(page).first()).toBeVisible({ timeout: 4 * 60_000 }).catch(() => undefined);
+  // A turn that fails: the first journey that does (02-failures, the 402 refusal) was the one that failed now and then (2026-11-05, twice in
+  // 47 runs, both as `turn_limit_unavailable` beside a 503 on the conversation list), and nothing before it had run a failing turn, so what
+  // that path loads on first use was compiled in the middle of that journey. The provider refuses, the turn closes, the page says so.
+  await armFault({ mode: '402' });
+  await startFreeChat(page, '预热：模拟失败。');
+  await expect(page.getByText('正在思考…')).toHaveCount(0, { timeout: 60_000 }).catch(() => undefined);
   for (const path of ['/app/library', '/app/library?tab=voice', '/app/profile', '/app/profile?tab=credits', '/app/positioning']) {
     await page.goto(path, { waitUntil: 'networkidle', timeout: 3 * 60_000 }).catch(() => undefined);
   }

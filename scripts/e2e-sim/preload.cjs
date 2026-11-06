@@ -21,4 +21,22 @@ if (/start-server\.js$/.test(process.argv[1] ?? '')) {
   const mb = bytes => Math.round(bytes / 1048576);
   console.error('[sim-preload] heap_size_limit_mb=' + mb(v8.getHeapStatistics().heap_size_limit));
   setInterval(() => console.error('[sim-preload] heap_used_mb=' + mb(v8.getHeapStatistics().used_heap_size)), 30_000).unref();
+  // Why the app's own 500 ms deadline on the rate limiter (redisRateLimiter.ts) sometimes passes while the Redis bridge saw no slow call: that
+  // deadline is measured in this process, so a stretch in which this process runs nothing (a compile, a garbage collection) counts against it.
+  // Every stall of the event loop over 250 ms and every garbage collection over 100 ms is said with the time it ended (run.mjs sums them up and
+  // sets them beside the routes compiled after the warm-up).
+  const STALL_MS = 250, TICK_MS = 50;
+  let last = Date.now();
+  setInterval(() => {
+    const now = Date.now(), late = now - last - TICK_MS;
+    last = now;
+    if (late >= STALL_MS - TICK_MS) console.error('[sim-preload] loop_stall_ms=' + (late + TICK_MS) + ' at=' + now);
+  }, TICK_MS).unref();
+  try {
+    const { PerformanceObserver } = require('node:perf_hooks');
+    new PerformanceObserver(list => {
+      for (const entry of list.getEntries())
+        if (entry.duration >= 100) console.error('[sim-preload] gc_pause_ms=' + Math.round(entry.duration) + ' at=' + Date.now());
+    }).observe({ entryTypes: ['gc'] });
+  } catch { /* no gc entries on this Node: the loop stalls are still said */ }
 }
