@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { expect, test } from './fixtures';
 
-import { armFault, replies, resetSim, runRecovery, signIn, startFreeChat } from './support';
+import { armFault, replies, resetSim, runRecovery, signIn, simCalls, startFreeChat } from './support';
 
 /**
  * Compiles every route the journeys use, before any of them runs, on an account no journey looks at.
@@ -27,7 +27,11 @@ test('warm-up: compile the routes the journeys use', async ({ page }) => {
   // that path loads on first use was compiled in the middle of that journey. The provider refuses, the turn closes, the page says so.
   await armFault({ mode: '402' });
   await startFreeChat(page, '预热：模拟失败。');
-  await expect(page.getByText('正在思考…')).toHaveCount(0, { timeout: 60_000 }).catch(() => undefined);
+  // Wait for the refusal itself (the simulator has seen the 402 call), not for a text to go away: before the first request is sent the page
+  // shows a skeleton and that text is not there yet. Then let the page settle on the closed turn.
+  await expect.poll(async () => (await simCalls()).filter(call => call.fault === '402').length, { timeout: 120_000, intervals: [500, 1000] })
+    .toBe(1).catch(() => undefined);
+  await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => undefined);
   // Also the pages that the first CI run with stall measurements (#1794) saw compile in the middle of later journeys: the signed-in home,
   // the positioning draft pages (any id compiles them), the marketplace, the publish monitor and the scan check; and, signed out, the
   // forgot-password page. (/api/turn compiled a second time in one journey: a recompile cannot be warmed.)
