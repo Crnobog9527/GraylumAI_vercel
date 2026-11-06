@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
+import {replayTail} from '../content-erasure/tail-replay.mjs';
 import {runCases} from './cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
@@ -61,8 +62,8 @@ try {
  assert.equal(report.build.failed,null);
  assert.ok(historicalChecked,'0188 must be verified through the canonical build plan');
  const finalCatalog=snapshot();
- ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0188 preserves the complete final catalog');
+ // 0188 rewrites functions that later migrations patched (and objects 0505 dropped): replay it with every later migration.
+ await replayTail({root,read,sql,ok,snapshot,finalCatalog,report,migrationPath,first:migration});
  report.checks.push('0188 reapplication with all later migrations preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
