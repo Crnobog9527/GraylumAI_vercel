@@ -161,17 +161,15 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
   };
 }
 
-/** Prices for the SoftwareApplication JSON-LD; the same numbers the cards show. */
-export function landingOfferList(pricing: LandingPricing) {
+/**
+ * Prices for the home page's SoftwareApplication JSON-LD: only what its price area shows. Structured data must match the
+ * visible page (Google's structured data policy), and the home page's price area is the comparison plus
+ * "Graylum AI：$29/月起" (Owner 2026-10-15, MASTER_PLAN section 2.1: no plan cards there), so the list is free and the Pro
+ * monthly price that line is built from (`proMonthly`, the same number PriceJ renders). The Gold first month, yearly prices
+ * and the founder offer are on the pricing page, not here, whatever LANDING_PROMO_OFFERS says.
+ */
+export function landingOfferList(pricing: Pick<LandingPricing, 'proMonthly'>) {
   const offers = [{ name: '免费', price: 0 }];
-  // The founder offer sells out between hourly rebuilds of the cached JSON-LD, so it is never listed there.
-  for (const card of pricing.cards.filter(item => item.key !== 'founder')) {
-    for (const cycle of ['monthly', 'yearly'] as const) {
-      const quote = card.quotes[cycle];
-      if (!quote) continue;
-      const label = quote.per === '/年' ? '年付' : quote.per === '/月' ? '月付' : quote.per.trim();
-      offers.push({ name: `${card.name} ${label}`, price: Number(quote.price.replace(/[$,]/g, '')) });
-    }
-  }
+  if (pricing.proMonthly !== null) offers.push({ name: 'Pro 月付', price: pricing.proMonthly });
   return offers;
 }
