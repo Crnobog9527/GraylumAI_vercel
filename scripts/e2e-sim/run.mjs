@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 
 import { createSim } from './sim.mjs';
 import { createMemoryWatch, devServerNodeOptions, withoutMeasurements } from './dev-server-memory.mjs';
+import { createStallWatch } from './dev-server-stalls.mjs';
 import { startStack } from './stack.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -62,7 +63,7 @@ try {
   copyFileSync(resolve(root, 'scripts/e2e-sim/preload.cjs'), preload);
   if (/\s/.test(preload)) throw new Error('the temporary directory path contains spaces');
   const appEnv = { ...baseEnv, ...stack.redis, NODE_ENV: 'development', NODE_OPTIONS: devServerNodeOptions(preload),
-    SIM_ORIGIN: simOrigin, NEXT_PUBLIC_SUPABASE_URL: stack.apiUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: stack.jwt('anon'),
+    SIM_ORIGIN: simOrigin, SIM_KEEP_COMPILED: '1', NEXT_PUBLIC_SUPABASE_URL: stack.apiUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: stack.jwt('anon'),
     // Session start and view procedures admit a loopback deployment through this switch (as the workbench runs do) instead of the
     // staging window; the turn path (/api/turn) does not read it.
     V3_RUNTIME_LOCAL_ENDPOINT: stack.apiUrl,
@@ -83,9 +84,11 @@ try {
   const denials = {};
   // How often the dev server restarted itself for memory, and the heap limit it started with (printed for every run, passed or not).
   const memory = createMemoryWatch();
+  const stalls = createStallWatch(() => sim.resets);
   for (const out of [app.stdout, app.stderr]) out.on('data', chunk => {
     const raw = stack.redact(chunk);
     memory.feed(raw, out === app.stdout ? 'out' : 'err');
+    stalls.feed(raw, out === app.stdout ? 'out' : 'err');
     const text = withoutMeasurements(raw);
     for (const line of text.split('\n')) {
       if (!line.includes('web_rate_limit_backend_unavailable_denying_request')) continue;
@@ -116,6 +119,9 @@ try {
   code = await exit(tests);
   console.log(`rate-limit refusals by the web proxy (503): ${JSON.stringify(denials)}`);
   console.log(`dev server memory: ${JSON.stringify(memory.summary())}`);
+  // Stalls of the server's own event loop (what the app's 500 ms rate-limit deadline is measured against), per test, and the routes that
+  // compiled after the warm-up test: see dev-server-stalls.mjs.
+  console.log(`dev server stalls: ${JSON.stringify(stalls.summary())}`);
   // What the app's Redis calls met at the shim (scripts/e2e-sim/redis-shim.mjs): errors and slow answers, with their times.
   console.log(`redis bridge: ${JSON.stringify(stack.redisStats())}`);
   if (code !== 0) console.log('--- local app log (last lines) ---\n' + appLog.slice(-80).join('')

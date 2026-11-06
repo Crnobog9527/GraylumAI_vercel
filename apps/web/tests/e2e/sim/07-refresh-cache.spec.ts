@@ -19,8 +19,14 @@ test('a reload shows the last conversation and the list at once, and another use
   await signIn(page, 'alice');
   const session = await startFreeChat(page, '用两句话说明新账号为什么要先想清楚给谁看。');
   await expect(replies(page).first()).toBeVisible({ timeout: 120_000 }).catch(async error => { await evidence('after the reply'); throw error; });
-  // The page saves a moment after a read changes; leaving the page flushes it too.
-  await page.waitForTimeout(2_500);
+  // The page saves a moment after a read changes, and a read that was still out when the reply showed would have no saved copy to show after
+  // the reload (its placeholder would then stay, with every read held). So wait for the live page to be done reading, and for what it saved to
+  // stop changing, instead of a fixed pause that a slow runner can overrun.
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  const saved = () => page.evaluate(() => JSON.stringify(Object.entries(localStorage).filter(([key]) => key.startsWith('graylum:'))));
+  let before = '';
+  await expect.poll(async () => { const now = await saved(); const same = now === before && now !== '[]'; before = now; return same; },
+    { message: 'what the page saved has stopped changing', intervals: [1000] }).toBe(true);
 
   // Hold every read to the server: whatever shows up in the first frames can only come from the saved copy.
   await page.route(HOLD, () => new Promise(() => undefined));
@@ -43,7 +49,16 @@ test('a reload shows the last conversation and the list at once, and another use
   // The full interface, not a placeholder: the input box is there and can be typed into while the reads are still held.
   await page.getByRole('textbox').first().click();
   await page.keyboard.insertText('草稿');
-  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0).catch(async error => {
+    // Which placeholder stayed, and what holds it: the next failure of this line should say it.
+    const busy = await page.evaluate(() => [...document.querySelectorAll('[aria-busy="true"]')].map(node => ({
+      label: node.getAttribute('aria-label'), testid: node.getAttribute('data-testid'),
+      path: (() => { const names: string[] = []; for (let n: Element | null = node; n && names.length < 6; n = n.parentElement) names.push(n.tagName.toLowerCase() + (n.getAttribute('data-testid') ? `[${n.getAttribute('data-testid')}]` : '')); return names.join(' < '); })(),
+    })));
+    console.log('busy placeholders after the held reload:', JSON.stringify(busy), 'saved keys:', await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('graylum:'))));
+    await evidence('held reload, still busy');
+    throw error;
+  });
   expect(await page.evaluate(() => (window as unknown as { __placeholderSeen: boolean }).__placeholderSeen), 'no placeholder in any frame').toBe(false);
   await expect(page.locator('body')).not.toContainText(WAITING_WORDS);
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('graylum:')).length)).toBeGreaterThan(0);

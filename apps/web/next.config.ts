@@ -47,6 +47,11 @@ const nextConfig: NextConfig = {
   // One root layout per language (app/(zh-hans), app/zh-tw): an address that matches no route is answered by
   // app/global-not-found.tsx, since no single layout covers it.
   experimental: { globalNotFound: true },
+  // Development server only, and only for the simulated-model browser tests (scripts/e2e-sim/run.mjs sets the switch): `next dev` drops a page it
+  // compiled once the page has been idle for a minute (and keeps only the last few), so a route warmed up at the start was compiled again in the
+  // middle of a later journey, stalling the server's event loop for seconds (first CI run with stall measurements, #1794). With the switch, the
+  // pages compiled in a run stay compiled. Not set anywhere else; a build or a deployed app never reads this option.
+  ...(process.env.SIM_KEEP_COMPILED === "1" ? { onDemandEntries: { maxInactiveAge: 6 * 60 * 60 * 1000, pagesBufferLength: 200 } } : {}),
   // Single host (E1): old addresses and, once switched on, the old hosts. The rules and why are in
   // src/lib/single-host-redirects; the host rules come first so an old host goes to www in one step.
   async redirects() {

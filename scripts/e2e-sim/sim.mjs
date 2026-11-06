@@ -60,7 +60,10 @@ export function createSim({ timings = { firstByteMs: 200, intervalMs: 15, chunks
       return json(res, 200, { armed: faults.length });
     }
     if (url.pathname === '/__sim/calls') return json(res, 200, { calls, armed: faults });
-    if (url.pathname === '/__sim/reset' && req.method === 'POST') { faults.length = 0; calls.length = 0; return json(res, 200, {}); }
+    if (url.pathname === '/__sim/reset' && req.method === 'POST') {
+      faults.length = 0; calls.length = 0; server.resets.push(Date.now());
+      return json(res, 200, {});
+    }
     // Receipts of generations this wrapper produced itself (cut streams); everything else is the stub's.
     if (req.method === 'GET' && url.pathname.endsWith('/generation') && receipts.has(url.searchParams.get('id'))) {
       const data = receipts.get(url.searchParams.get('id'));
@@ -163,6 +166,8 @@ export function createSim({ timings = { firstByteMs: 200, intervalMs: 15, chunks
     const replay = Object.assign(Readable.from([Buffer.from(raw)]), { method: req.method, url: req.url, headers: req.headers });
     return delegate(replay, res);
   });
+  // When each test started (every test begins with /__sim/reset): run.mjs ties the server's stalls and compiles to the test that was running.
+  server.resets = [];
   return server;
 }
 

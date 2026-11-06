@@ -123,3 +123,14 @@ describe('Sentry build upload opt-in', () => {
     expect(options).not.toHaveProperty('hideSourceMaps');
   });
 });
+
+describe('development server page retention (simulated-model browser tests)', () => {
+  it('keeps compiled pages only when the sim switch is set, and never in a build', async () => {
+    expect((await loadConfig())(PHASE_DEVELOPMENT_SERVER).onDemandEntries).toBeUndefined();
+    vi.stubEnv('SIM_KEEP_COMPILED', '1');
+    vi.resetModules();
+    const kept = (await loadConfig())(PHASE_DEVELOPMENT_SERVER).onDemandEntries;
+    expect(kept?.maxInactiveAge).toBeGreaterThan(60 * 60 * 1000);
+    expect(kept?.pagesBufferLength).toBeGreaterThanOrEqual(100);
+  });
+});
