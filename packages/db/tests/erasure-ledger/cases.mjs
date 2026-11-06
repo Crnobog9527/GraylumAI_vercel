@@ -1,8 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {fixture,rpc,closeAccount,call as v1Call,evidence as v1Evidence} from '../erasure-b2a/cases.mjs';
-import {createFixture,claim,receipt} from '../payg/fixture.mjs';
+import {fixture,rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 
 export const CANARY='LEDGER_PRIVATE_CANARY';
 export const scrub=(db,actor,table,limit=100,after=null)=>
@@ -74,7 +73,9 @@ export async function runCases(db,report){
 
  const credit=(await db.query('SELECT id FROM credit_transactions WHERE user_id=$1 ORDER BY id LIMIT 1',[f.actor])).rows[0].id;
  await db.query('UPDATE credit_transactions SET description=$2,metadata=$3 WHERE id=$1',[credit,CANARY,dirty]);
- await db.query('UPDATE billing_history SET reason=$2,metadata=metadata||$3::jsonb WHERE id=$1',[f.pre,CANARY,dirty]);
+ // The shared fixture no longer opens a billing run (V2-12 F), so it has no pre-deduction row: the suite writes its own billing_history row.
+ const pre=(await db.query(`INSERT INTO billing_history(user_id,operation_type,amount,reason,metadata)
+  VALUES($1,'pre_deduct',-1,$2,$3::jsonb) RETURNING id`,[f.actor,CANARY,dirty])).rows[0].id;
  const conv=randomUUID(),token=randomUUID();
  await db.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'synthetic')",[conv,f.actor]);
  await db.query(`INSERT INTO token_stats(id,user_id,conversation_id,model_used,input_tokens,output_tokens,
@@ -82,7 +83,7 @@ export async function runCases(db,report){
  const usage=await insertUsage(db,f.actor,undefined,dirty),foreign=await insertUsage(db,other.actor,undefined,dirty);
  const untouched=await row(db,'ai_usage_logs',foreign);
  const specs=[['credit_transactions',credit,['description','metadata','content_erased_at']],
-  ['billing_history',f.pre,['reason','metadata','content_erased_at']],
+  ['billing_history',pre,['reason','metadata','content_erased_at']],
   ['token_stats',token,['metadata','content_erased_at']],
   ['ai_usage_logs',usage,['error_message','ip_address','user_agent','metadata','content_erased_at']]];
  const before=await Promise.all(specs.map(([table,id])=>row(db,table,id)));
@@ -124,13 +125,9 @@ export async function runCases(db,report){
  const serviceLate=await row(db,'ai_usage_logs',serviceLateId);
  assert.deepEqual(serviceLate.metadata,safe);assert.equal(serviceLate.error_message,null);
  assert.equal(serviceLate.ip_address,null);assert.equal(serviceLate.user_agent,null);assert.ok(serviceLate.content_erased_at);
- const recovery=await fixture(db);await closeAccount(db,recovery);
- await rpc(db,'bill2_cancel',recovery.actor,recovery.run);await rpc(db,'bill2_finalize',recovery.actor,recovery.run);
- const refund=(await db.query("SELECT * FROM billing_history WHERE user_id=$1 AND operation_type='refund'",[recovery.actor])).rows;
- assert.ok(refund.length,'actual original-run refund recovery still writes its financial row');
- assert.ok(refund.every(r=>r.content_erased_at));
- assert.doesNotMatch(JSON.stringify(refund),/LEDGER_PRIVATE_CANARY/);
- report.checks.push('late updates/inserts stay scrubbed and actual BILL2 refund recovery remains operational');
+ // Not run any more (CORE-PATH-V2 V2-12 F, 0505): the actual BILL2 refund recovery after closure (bill2_cancel / bill2_finalize). No core-path
+ // equivalent exists in this suite; the late updates and inserts above are what stays checked.
+ report.checks.push('late updates/inserts stay scrubbed');
 
  const invalid=await fixture(db);
  const badId='00000000-0000-4000-8000-000000000001',goodId='00000000-0000-4000-8000-000000000002';
@@ -146,73 +143,6 @@ export async function runCases(db,report){
  await assert.rejects(insertUsage(db,invalid.actor,undefined,{refundAmount:'unknown'}),/ERASURE_LEDGER_INVALID_EVIDENCE/);
  assert.deepEqual(await row(db,'ai_usage_logs',foreign),untouched,'unrelated active account keeps original private content');
  report.checks.push('malformed financial evidence preserved for manual review; cursor avoids starvation; null retained and unknown not coerced to zero');
- await paygEvidence(db,report);
- const v1=await fixture(db),vc=await v1Call(db,v1);await closeAccount(db,v1);
- // SQL confirmation closes account access; the host separately seals the original v1 call set.
- await rpc(db,'bill2_cancel',v1.actor,v1.run);
- await rpc(db,'bill2_record',v1.actor,v1.run,vc.id,v1Evidence(vc,'0.001'));
- const terminal=await rpc(db,'bill2_finalize',v1.actor,v1.run);
- assert.equal(terminal.outcome,'cancelled');assert.equal(terminal.chargedCredits,2);
- assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[v1.actor])).rows[0].credits,98);
- const logs=(await db.query('SELECT metadata FROM ai_usage_logs WHERE bill2_run_id=$1',[v1.run])).rows;
- assert.ok(logs.length);assert.ok(logs.some(r=>r.metadata.usage?.outcome==='cancelled'||r.metadata.outcome==='cancelled'));
- const v1Rows=(await db.query('SELECT * FROM credit_transactions WHERE user_id=$1 ORDER BY id',[v1.actor])).rows;
- await rpc(db,'bill2_finalize',v1.actor,v1.run);
- assert.deepEqual((await db.query('SELECT * FROM credit_transactions WHERE user_id=$1 ORDER BY id',[v1.actor])).rows,v1Rows);
- report.checks.push('real v1 late receipt after account closure settles cancelled outcome for exactly 2 credits; replay preserves financial rows');
-}
-
-async function paygEvidence(db,report){
- for(const late of [false,true]){
-  const f=await createFixture(db),c=await claim(db,f,1,true);
-  if(late)await closeAccount(db,f);
-  await receipt(db,f,c,'0.003',{inputTokens:3000,outputTokens:0});
-  const spend=(await db.query("SELECT metadata FROM credit_transactions WHERE bill2_call_id=$1 AND reason_code='bill2_spend'",[c.id])).rows[0];
-  assert.ok(spend,'real PAYG spend exists');
-  for(const key of ['nominalCostUsd','nominalSource','theoreticalDelta','chargedDelta','platformCapCredits','platformBoundCredits']){
-   assert.ok(Object.hasOwn(spend.metadata,key),`real PAYG metadata retains ${key}`);
-  }
-  assert.equal(spend.metadata.chargedDelta,3);
-  assert.equal(Number(spend.metadata.nominalCostUsd),0.003);
-  if(!late)await rpc(db,'bill2_close',f.actor,f.run,'confirmed_failure',{
-   kind:'confirmed_delivery_failure',evidenceRef:'synthetic-proof',evidenceHash:'d'.repeat(64),body:CANARY});
-  await rpc(db,'bill2_finalize',f.actor,f.run);
-  const compensation=(await db.query("SELECT * FROM credit_transactions WHERE bill2_call_id=$1 AND reason_code='bill2_compensation'",[c.id])).rows[0];
-  if(late){
-   assert.equal(compensation,undefined,'account cancellation never invents confirmed-failure compensation');
-   assert.equal((await rpc(db,'bill2_read',f.actor,f.run)).outcome,'cancelled');
-  }else{
-   assert.ok(compensation);assert.equal(compensation.amount,3);
-   for(const key of ['originalPreDeductId','originalSpendId','requestedCompensation','actualRestore','intercepted','reason']){
-    assert.ok(Object.hasOwn(compensation.metadata,key),`real compensation retains ${key}`);
-   }
-   assert.equal(compensation.metadata.requestedCompensation,3);
-   assert.equal(compensation.metadata.reason,'confirmed_delivery_failure');
-  }
-  const before=new Map();
-  for(const table of ['credit_transactions','billing_history','token_stats','ai_usage_logs']){
-   const rows=(await db.query(`SELECT * FROM ${table} WHERE user_id=$1 ORDER BY id`,[f.actor])).rows;
-   before.set(table,rows);
-   if(!late){
-    for(const r of rows)await db.query(`UPDATE ${table} SET metadata=metadata||$2::jsonb WHERE id=$1`,[r.id,{body:CANARY}]);
-   }
-  }
-  if(!late)await closeAccount(db,f);
-  for(const [table,rows] of before){
-   const result=await scrub(db,f.actor,table);assert.equal(result.manualReview,0);assert.equal(result.remaining,0);
-   for(const r of rows){
-    const after=await row(db,table,r.id);assert.ok(after.content_erased_at);
-    const expected={...r.metadata};
-    // Legacy pre-deduction stores response:null. Response is content, never financial evidence.
-    if(Object.hasOwn(expected,'response')){assert.equal(expected.response,null);delete expected.response;}
-    assert.deepEqual(after.metadata,expected,'only response content omitted; every original financial field stays complete');
-    assert.doesNotMatch(JSON.stringify(after),/LEDGER_PRIVATE_CANARY/);
-   }
-  }
-  const balance=(await db.query('SELECT credits FROM profiles WHERE id=$1',[f.actor])).rows[0].credits;
-  assert.equal(balance,late?97:100);
-  await rpc(db,'bill2_finalize',f.actor,f.run);
-  assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[f.actor])).rows[0].credits,balance);
- }
- report.checks.push('real PAYG settlement and compensation preserve complete original metadata before/after closure, including nested usage evidence; replay never recredits');
+ // Not run any more (0505): the real v1 late receipt after closure and the PAYG settlement/compensation evidence (bill2_*), which used the dropped
+ // BILL2 functions and tables; no core-path equivalent exists in this suite.
 }
