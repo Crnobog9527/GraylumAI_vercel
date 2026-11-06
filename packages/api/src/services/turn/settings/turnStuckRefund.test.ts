@@ -29,6 +29,17 @@ describe('stuckTurnScan', () => {
 
 describe('refundStuckTurn', () => {
   const input = { actorId: 'a', turnId: 1, adminId: 'admin', requestId: 'r', reason: null };
+  it('writes the audit row after a refund (request id as the row id) and logs, but keeps the refund, when that write fails', async () => {
+    const done = { refunded: true, turnId: 1, chargedCredits: 0, reservedCredits: 60, closeKind: 'failed', settlement: 'done', stateBefore: 'running' };
+    const rpc = vi.fn(async (name: string) => name === 'turn_admin_refund_all' ? { data: done, error: null } : { data: null, error: { code: 'XX' } });
+    expect(await refundStuckTurn({ rpc } as never, { ...input, reason: 'stuck' })).toEqual(done);
+    expect(rpc).toHaveBeenLastCalledWith('turn_admin_refund_audit', expect.objectContaining({ p_request_id: 'r', p_admin_id: 'admin',
+      p_details: expect.objectContaining({ reason: 'stuck', reservedCredits: 60 }) }));
+    expect(logs.error).toHaveBeenCalledWith('billing', 'turn_admin_refund_audit_failed', { turnId: 1, code: 'XX' });
+    const refused = db({ refunded: false, reason: 'too_young', turnId: 1 });
+    await refundStuckTurn(refused, input);
+    expect((refused as unknown as { rpc: ReturnType<typeof vi.fn> }).rpc).toHaveBeenCalledTimes(1);
+  });
   it('passes the arguments through and returns the parsed outcome', async () => {
     const client = db({ refunded: false, reason: 'too_young', turnId: 1 });
     expect(await refundStuckTurn(client, input)).toEqual({ refunded: false, reason: 'too_young', turnId: 1 });

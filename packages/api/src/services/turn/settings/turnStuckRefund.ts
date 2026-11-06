@@ -62,5 +62,15 @@ export async function refundStuckTurn(
   }
   const parsed = refundResult.safeParse(data);
   if (!parsed.success) throw new StuckTurnRefundError('TURN_REFUND_FAILED');
+  if (parsed.data.refunded) {
+    // The audit row (id = the request id, so a repeat adds nothing). The refund itself is already committed: a failed audit write is
+    // logged loudly, never turned into a failed refund.
+    const done = parsed.data;
+    const audited = await supabase.rpc('turn_admin_refund_audit', { p_actor_id: input.actorId, p_turn_id: input.turnId,
+      p_admin_id: input.adminId, p_request_id: input.requestId,
+      p_details: { reason: input.reason?.slice(0, 200) ?? null, stateBefore: done.stateBefore, closeKind: done.closeKind,
+        reservedCredits: done.reservedCredits, chargedCredits: done.chargedCredits } });
+    if (audited.error) logger.error('billing', 'turn_admin_refund_audit_failed', { turnId: input.turnId, code: audited.error.code ?? 'unknown' });
+  }
   return parsed.data;
 }

@@ -14,8 +14,12 @@
 --     'admin_refund_all', as 0494 does for a call without an id; if the supplier did charge, Graylum bears it) and calls turn_close with
 --     p_refund_all (an open turn) or settles the closed turn once more with closeRefundAll (turn_close's replay branch), so the freeze
 --     returns through the existing turn_settle_holds. Same lock order as turn_close (profile, session, turn). Idempotent: a repeat or a
---     race finds the turn settled and changes nothing. Written to user_activity_logs by the same transaction (an account being erased
---     drops its audit row by the 0192 guard; the ledger rows stay). A closed REPORT keeps its own settlement rule (turn_report_settlement
+--     race finds the turn settled and changes nothing. A fusion turn (compare, jury, jury_adopt) is closed through turn_fusion_close, the
+--     entry recovery uses, so its review row ends with it and the user is not blocked by FUSION_REVIEW_ACTIVE. The audit row is written by
+--     turn_admin_refund_audit (called by the router right after a refund; the main-path closure rule leaves no room for another table in
+--     the refund function itself; an account being erased drops its audit row by the 0192 guard; the ledger rows stay).
+--   turn_admin_unsettled_turns(limit): replaced to add `refundEligible`, computed by the same rules as the refund (a closed turn from
+--     closed_at, never from updated_at, which the recovery claim refreshes), so the admin card never guesses. A closed REPORT keeps its own settlement rule (turn_report_settlement
 --     ignores refund_all): its only call was the unknown one, now zero, so the charge is what that rule gives for zero usage; the
 --     result returns the charged credits so nothing is promised that was not done.
 --   AUTOMATIC PATH FOR TOOL CALLS (staging turns 6626 and 6639): 0494's 24-hour settlement and the recovery claim were hard-coded to
@@ -59,7 +63,7 @@ CREATE OR REPLACE FUNCTION public.turn_admin_refund_all(p_actor_id uuid, p_turn_
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE t turns; s runtime_sessions; at_time timestamptz; closed jsonb; settled integer; was_state text; was_close text; reserved integer;
+DECLARE t turns; s runtime_sessions; at_time timestamptz; closed jsonb; was_state text; was_close text; reserved integer;
 BEGIN
   IF p_admin_id IS NULL OR p_request_id IS NULL OR NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_admin_id AND role = 'admin' AND status = 'active' AND is_deleted = 'false') THEN
     RAISE EXCEPTION 'TURN_ADMIN_DENIED' USING ERRCODE='42501';
@@ -101,7 +105,11 @@ BEGIN
   UPDATE turn_calls SET cost_pending = false, settled_at = at_time,
       usage = jsonb_build_object('source', 'admin_refund_all_cost_unknown', 'settledAt', at_time, 'turnOpenedAt', t.opened_at, 'adminId', p_admin_id)
     WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND call_kind IN ('tool', 'decision') AND status = 'unknown' AND cost_pending;
-  IF t.state <> 'closed' THEN
+  IF t.state <> 'closed' AND t.kind IN ('compare', 'jury', 'jury_adopt') THEN
+    -- The review (or compare) row ends with the turn, as in recovery (turn_recover): the user is not blocked by an active review.
+    closed := public.turn_fusion_close(p_actor_id, p_turn_id, 'failed', false, true, 'admin_refund_all',
+      jsonb_build_object('state', 'interrupted', 'outcome', jsonb_build_object('kind', 'admin_refund_all')));
+  ELSIF t.state <> 'closed' THEN
     closed := public.turn_close(p_actor_id, p_turn_id, 'failed', '[]'::jsonb, false, true, 'admin_refund_all', NULL);
   ELSIF t.charged_credits IS NOT NULL THEN
     closed := public.turn_close(p_actor_id, p_turn_id, t.close_kind, '[]'::jsonb, false, false, NULL, NULL);
@@ -112,13 +120,49 @@ BEGIN
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
   -- The refund must be decided now: a user's charge still undecided means an unknown model cost still holds it. Nothing is kept.
   IF t.state <> 'closed' OR t.charged_credits IS NULL THEN RAISE EXCEPTION 'TURN_REFUND_INCOMPLETE' USING ERRCODE='55000'; END IF;
-  INSERT INTO user_activity_logs(id, user_id, admin_id, action, action_type, details)
-    VALUES (p_request_id, p_actor_id, p_admin_id, 'turn_admin_refund_all', 'admin', jsonb_build_object(
-      'turnId', t.id, 'kind', t.kind, 'stateBefore', was_state, 'closeKindBefore', was_close, 'openedAt', t.opened_at,
-      'reservedCredits', reserved, 'chargedCredits', t.charged_credits, 'closeKind', t.close_kind, 'reason', left(p_reason, 200)));
   RETURN jsonb_build_object('refunded', true, 'turnId', t.id, 'chargedCredits', t.charged_credits, 'reservedCredits', reserved,
     'closeKind', t.close_kind, 'settlement', t.settlement, 'stateBefore', was_state);
 END $function$;
+
+CREATE OR REPLACE FUNCTION public.turn_admin_refund_audit(p_actor_id uuid, p_turn_id bigint, p_admin_id uuid, p_request_id uuid, p_details jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF p_admin_id IS NULL OR p_request_id IS NULL OR NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_admin_id AND role = 'admin' AND status = 'active' AND is_deleted = 'false') THEN
+    RAISE EXCEPTION 'TURN_ADMIN_DENIED' USING ERRCODE='42501';
+  END IF;
+  INSERT INTO user_activity_logs(id, user_id, admin_id, action, action_type, details)
+    VALUES (p_request_id, p_actor_id, p_admin_id, 'turn_admin_refund_all', 'admin', coalesce(p_details, '{}'::jsonb) || jsonb_build_object('turnId', p_turn_id))
+    ON CONFLICT (id) DO NOTHING;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.turn_admin_unsettled_turns(p_limit integer DEFAULT 100)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+ WITH open AS (
+  SELECT t.* FROM turns t WHERE t.state<>'closed' OR t.settlement='pending'
+ ), page AS (
+  SELECT * FROM open ORDER BY updated_at,id LIMIT LEAST(GREATEST(coalesce(p_limit,100),1),200)
+ )
+ SELECT jsonb_build_object(
+  'total',(SELECT count(*) FROM open),
+  'turns',coalesce((SELECT jsonb_agg(jsonb_build_object('turnId',p.id,'actorId',p.actor_id,'kind',p.kind,'state',p.state,
+    'settlement',p.settlement,'closeKind',p.close_kind,'openedAt',p.opened_at,'updatedAt',p.updated_at,
+    'reservedCredits',p.reserved_credits,'chargedCredits',p.charged_credits,'failureCode',p.failure_code,
+    'inFlightCalls',(SELECT count(*) FROM turn_calls k WHERE k.turn_id=p.id AND k.status IN ('dispatched','identified')),
+    'costPendingCalls',(SELECT count(*) FROM turn_calls k WHERE k.turn_id=p.id AND k.cost_pending),
+    -- The same rules as turn_admin_refund_all: a closed turn is judged from closed_at (updated_at is refreshed by recovery).
+    'refundEligible',(p.opened_at < now() - interval '24 hours' AND (
+      (p.state <> 'closed' AND p.updated_at < now() - interval '24 hours')
+      OR (p.state = 'closed' AND p.settlement = 'pending' AND (p.charged_credits IS NULL OR p.closed_at < now() - interval '48 hours')))))
+    ORDER BY p.updated_at,p.id) FROM page p),'[]'::jsonb))
+$function$;
 
 CREATE OR REPLACE FUNCTION public.turn_call_settle_no_identity(p_actor_id uuid, p_turn_id bigint, p_seq integer)
  RETURNS jsonb
@@ -260,6 +304,10 @@ GRANT EXECUTE ON FUNCTION public.turn_admin_stuck_turns() TO service_role;
 REVOKE ALL ON FUNCTION public.turn_admin_refund_all(uuid, bigint, uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.turn_admin_refund_all(uuid, bigint, uuid, uuid, text) TO service_role;
 
+REVOKE ALL ON FUNCTION public.turn_admin_refund_audit(uuid, bigint, uuid, uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.turn_admin_refund_audit(uuid, bigint, uuid, uuid, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public.turn_admin_unsettled_turns(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.turn_admin_unsettled_turns(integer) TO service_role;
 REVOKE ALL ON FUNCTION public.turn_call_settle_no_identity(uuid, bigint, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.turn_call_settle_no_identity(uuid, bigint, integer) TO service_role;
 REVOKE ALL ON FUNCTION public.turn_recovery_claim(integer) FROM PUBLIC, anon, authenticated;

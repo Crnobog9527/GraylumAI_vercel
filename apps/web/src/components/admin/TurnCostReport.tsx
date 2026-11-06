@@ -75,18 +75,6 @@ export function needsManualSettlement(
     && Number.isFinite(opened) && now - opened >= MANUAL_AFTER_MS;
 }
 
-/**
- * The turn's credit freeze can stay for ever: opened 24 hours ago or more and either still open and idle for 24 hours, or closed with the
- * user's charge still undecided (an unknown model cost holds it). The same rule as the database function turn_admin_refund_all, which checks it again.
- */
-export function refundEligible(turn: { state: string; chargedCredits: number | null; openedAt: string; updatedAt: string }, now = Date.now()) {
-  const opened = Date.parse(turn.openedAt), updated = Date.parse(turn.updatedAt);
-  if (!Number.isFinite(opened) || now - opened < MANUAL_AFTER_MS) return false;
-  // A turn still open must also have been idle for 24 hours (a jury review between two seat groups keeps writing its turn).
-  if (turn.state === 'closed') return turn.chargedCredits === null || (Number.isFinite(updated) && now - updated >= 2 * MANUAL_AFTER_MS);
-  return Number.isFinite(updated) && now - updated >= MANUAL_AFTER_MS;
-}
-
 const REFUND_REFUSALS: Record<string, string> = {
   TURN_TOO_YOUNG: '这个回合开轮不满 24 小时，不能退。', TURN_NOT_PENDING: '这个回合没有待结算的冻结，不需要退。',
   TURN_DENIED: '没有权限，或回合不存在。', TURN_ADMIN_DENIED: '没有权限。', TURN_REFUND_INCOMPLETE: '没能退完，已整体回滚，什么都没有改。请稍后再试。',
@@ -139,7 +127,7 @@ function UnsettledTurnsList() {
               {needsManualSettlement(turn) && <strong className="ml-1 text-red-600">需人工</strong>}</td><td className="text-right">{turn.reservedCredits}</td>
             <td className="text-right">{turn.inFlightCalls}</td><td className="text-right">{turn.costPendingCalls}</td>
             <td>{turn.updatedAt}</td>
-            <td>{refundEligible(turn) && <Button variant="outline" disabled={refund.isPending}
+            <td>{turn.refundEligible && <Button variant="outline" disabled={refund.isPending}
               onClick={() => confirmRefund(turn)}>按回合全额退回并关闭</Button>}
               {notes[turn.turnId] && <span role="status" className="ml-2 text-xs">{notes[turn.turnId]}</span>}</td>
           </tr>)}</tbody></table></div></>

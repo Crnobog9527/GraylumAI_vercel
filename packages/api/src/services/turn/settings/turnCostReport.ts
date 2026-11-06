@@ -19,7 +19,7 @@ const unsettled = z.object({
   turns: z.array(z.object({ turnId: z.number().int(), actorId: z.string().uuid(), kind: z.string(), state: z.string(),
     settlement: z.string().nullable(), closeKind: z.string().nullable(), openedAt: z.string(), updatedAt: z.string(),
     reservedCredits: count, chargedCredits: count.nullable(), failureCode: z.string().nullable(), inFlightCalls: count,
-    costPendingCalls: count }).strict()).max(200),
+    costPendingCalls: count, refundEligible: z.boolean() }).strict()).max(200),
 }).strict();
 // turn_admin_absent_refunds: the unknown model calls settled at zero because the provider answered "no such generation" (Owner 2026-11-03).
 // Before 0494 is applied the list has no source field: such a row is a lookup_absent one.

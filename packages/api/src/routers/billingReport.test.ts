@@ -87,7 +87,8 @@ describe('refundStuckTurn (按回合全额退回并关闭)', () => {
   it('calls the admin function with the signed-in admin, a fresh request id and the reason', async () => {
     const f = harness('admin', { data: done, error: null });
     expect(await f.caller.refundStuckTurn(input)).toEqual(done);
-    expect(f.calls).toHaveLength(1);
+    expect(f.calls).toHaveLength(2); // the refund, then its audit row
+    expect(f.calls[1]).toMatchObject({ fn: 'turn_admin_refund_audit', args: { p_admin_id: 'actor', p_actor_id: actorId } });
     expect(f.calls[0]).toMatchObject({ fn: 'turn_admin_refund_all', args: { p_actor_id: actorId, p_turn_id: 7, p_admin_id: 'actor', p_reason: 'lookup never answers' } });
     expect(f.calls[0]!.args.p_request_id).toMatch(/^[0-9a-f-]{36}$/);
   });

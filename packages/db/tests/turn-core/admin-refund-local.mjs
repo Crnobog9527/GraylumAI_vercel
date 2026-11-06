@@ -51,8 +51,13 @@ const adminAccount=async(over={})=>{const id=randomUUID();
  await c.query("insert into profiles(id,credits,role) values($1,0,'admin')",[id]);
  if(over.status)await c.query('update profiles set status=$2 where id=$1',[id,over.status]);
  return id;};
-const refund=(t,admin,{request=randomUUID(),reason='stuck lookup',client=c}={})=>
- one('select turn_admin_refund_all($1,$2,$3,$4,$5) v',[t.a.actor,t.id,admin,request,reason],client);
+const refund=async(t,admin,{request=randomUUID(),reason='stuck lookup',client=c}={})=>{
+ const out=await one('select turn_admin_refund_all($1,$2,$3,$4,$5) v',[t.a.actor,t.id,admin,request,reason],client);
+ // The router writes the audit row right after a refund (turn_admin_refund_audit); a refusal writes none.
+ if(out.refunded)await one('select turn_admin_refund_audit($1,$2,$3,$4,$5) v',
+  [t.a.actor,t.id,admin,request,JSON.stringify({reason,stateBefore:out.stateBefore,closeKind:out.closeKind,reservedCredits:out.reservedCredits,chargedCredits:out.chargedCredits})],client);
+ return out;};
+const listed=async t=>(await one('select turn_admin_unsettled_turns(200) v')).turns.find(x=>x.turnId===t.id);
 const stuck=()=>one('select turn_admin_stuck_turns() v');
 const audit=t=>one("select count(*)::int v from user_activity_logs where user_id=$1 and action='turn_admin_refund_all'",[t.a.actor]);
 const callRow=t=>c.query('select status,nominal_usd::text n,cost_pending,usage from turn_calls where turn_id=$1 and seq=$2',[t.id,t.seq]).then(r=>r.rows[0]);
@@ -168,6 +173,13 @@ try{
   assert.equal(toolRow.settlement,'pending');
   await c.query("update turn_calls set provider_id='gen-tool-stuck' where turn_id=$1 and seq=2",[to.turnId]);
   await c.query("update turns set opened_at=now()-interval '51 hours',updated_at=now()-interval '49 hours',closed_at=now()-interval '49 hours' where actor_id=$1 and id=$2",[tool.actor,to.turnId]);
+  assert.equal((await listed(tt)).refundEligible,true,'closed 49 hours ago: eligible');
+  await c.query("update turns set updated_at=now() where actor_id=$1 and id=$2",[tool.actor,to.turnId]);
+  assert.equal((await listed(tt)).refundEligible,true,'a refreshed updated_at (the recovery claim) does not hide it');
+  await c.query("update turns set closed_at=now()-interval '47 hours' where actor_id=$1 and id=$2",[tool.actor,to.turnId]);
+  assert.equal((await listed(tt)).refundEligible,false,'closed 47 hours ago: not yet');
+  assert.equal((await refund(tt,admin)).reason,'already_settled');
+  await c.query("update turns set closed_at=now()-interval '49 hours' where actor_id=$1 and id=$2",[tool.actor,to.turnId]);
   const listedBefore=await stuck();
   const balanceTool=await balance(tool),reservedTool=await reserved();
   const outTool=await refund(tt,admin);assert.equal(outTool.refunded,true,JSON.stringify(outTool));
@@ -183,6 +195,25 @@ try{
   report.checks.push('a charged turn whose tool call (with a provider id) stays pending 48 hours after the close is listed; the refund releases it (cost kept unknown, charge untouched, settlement done, one audit row, repeat changes nothing)');
   report.checks.push('a turn already settled for the user is not touched (balance, turn row and audit unchanged), also when only a tool cost is pending');
  }
+ // 5c. A jury turn (running, then paused) is closed through the review's own close (turn_fusion_close): the review row ends with it, so the
+ // user is not blocked by an active review, and the freeze returns.
+ for(const live of ['running','paused']){
+  const a=await account(),src=await one('select turn_test.topic_source($1) v',[a.actor]);
+  const o=await open(a,{kind:'jury',pol:policy({gCredits:60})});
+  const reviewId=randomUUID();
+  await c.query(`insert into fusion_reviews(id,actor_id,request_id,draft_id,project_id,source_session_id,source_version_id,version_hash,
+   materials,materials_hash,config,state,round,phase,attempt) values($1,$2,$3,$4,$5,$6,$7,'h','{}',repeat('a',64),'{"maxRounds":2,"path":"turn"}',$8,1,'review',1)`,
+   [reviewId,a.actor,randomUUID(),src.draft,src.project,src.session,src.version,live]);
+  await c.query("update turns set policy=policy||jsonb_build_object('reviewId',$3::text) where actor_id=$1 and id=$2",[a.actor,o.turnId,reviewId]);
+  if(live==='paused')await c.query("update turns set state='paused',pause_reason='awaiting_user' where actor_id=$1 and id=$2",[a.actor,o.turnId]);
+  const t={a,id:o.turnId,seq:1};await old(t);
+  const out=await refund(t,admin);assert.equal(out.refunded,true,JSON.stringify(out));
+  const review=(await c.query('select state,ended_at from fusion_reviews where id=$1',[reviewId])).rows[0];
+  assert.equal(review.state,'interrupted',live+': the review row ends with the turn');assert.ok(review.ended_at);
+  assert.equal((await turn(a,o.turnId)).state,'closed');assert.equal(await balance(a),1000);
+  assert.equal((await refund(t,admin)).reason,'already_settled');
+ }
+ report.checks.push('a jury turn (running or paused, with its review row) is closed through turn_fusion_close: the review ends (state interrupted) and the freeze returns; a repeat changes nothing');
  // 6. Only an active admin may refund; the audit id is the request id.
  {
   const t=await stuckTurn();await old(t);
@@ -199,6 +230,8 @@ try{
   for(const [role,want] of [['anon',false],['authenticated',false],['service_role',true]]){
    assert.equal(await one("select has_function_privilege($1,'public.turn_admin_refund_all(uuid,bigint,uuid,uuid,text)','EXECUTE') v",[role]),want,role);
    assert.equal(await one("select has_function_privilege($1,'public.turn_admin_stuck_turns()','EXECUTE') v",[role]),want,role);
+   assert.equal(await one("select has_function_privilege($1,'public.turn_admin_refund_audit(uuid,bigint,uuid,uuid,jsonb)','EXECUTE') v",[role]),want,role);
+   assert.equal(await one("select has_function_privilege($1,'public.turn_admin_unsettled_turns(integer)','EXECUTE') v",[role]),want,role);
   }
   report.checks.push('service role only');
  }
