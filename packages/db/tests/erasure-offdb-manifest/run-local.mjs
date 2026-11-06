@@ -52,8 +52,28 @@ try {
   ['id', 'kind', 'target_id', 'profile_id', 'confirmed_at', 'synced_at']);
   report.checks.push('RLS on; no client or service_role table access; only 3 service RPCs; definer + fixed search_path; ID-only columns');
 
-  // Not run any more (CORE-PATH-V2 V2-12 F, 0505): the 'answer' and 'session' deletion cases, which used the old runtime executions (b2a_test.bind,
-  // runtime_executions.content_deleted_at). No new-path equivalent exists in this suite; the artifact, content, account and library deletions below stay.
+  // Conversation deletion on the core path (CORE-PATH-V2 V2-12 F): a conversation with one closed turn and its two messages (the fixture of
+  // erasure-post-f), deleted through content_erasure_mark_session. It records exactly one 'session' row for the chosen conversation, stamped with the
+  // deletion time, and a repeat adds none. This replaces the old 'session' case; the old 'answer' case (one answer of a runtime execution) has no
+  // counterpart any more: on the core path a reply is a session message, deleted with its conversation.
+  const owner = (await fixture(c)).actor, chosen = randomUUID(), kept = randomUUID();
+  for (const id of [chosen, kept]) {
+    await c.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{\"note\":\"PRIVATE_START\"}')",
+      [id, owner, JSON.stringify({ kind: 'positioning_draft', probe: randomUUID() }), randomUUID()]);
+    await c.query(`WITH t AS (INSERT INTO turns(actor_id,session_id,request_id,kind,state,close_kind,closed_at,policy,reserved_credits,charged_credits,
+        absorbed_credits,settlement,delivered)
+      SELECT $1,$2,gen_random_uuid(),'chat','closed','completed',now(),'{}',6,6,0,'done',true RETURNING id)
+      INSERT INTO session_messages(session_id,seq,role,turn_id,content,content_hash)
+      SELECT $2,row_number() OVER (ORDER BY r.role)::int,r.role,t.id,'PRIVATE '||r.role,encode(sha256('x'::bytea),'hex')
+      FROM t CROSS JOIN (VALUES ('assistant'),('user')) r(role)`, [owner, id]);
+  }
+  assert.deepEqual(await rows(owner), [], 'nothing recorded before a deletion');
+  assert.equal((await v('SELECT content_erasure_mark_session($1,$2) v', [owner, chosen])).status, 'deleted');
+  const sessionStamp = await v('SELECT content_deleted_at v FROM runtime_sessions WHERE id=$1', [chosen]);
+  assert.deepEqual(await rows(owner), [{ kind: 'session', target_id: chosen, profile_id: owner, confirmed_at: sessionStamp, synced_at: null }]);
+  assert.equal((await v('SELECT content_erasure_mark_session($1,$2) v', [owner, chosen])).alreadyDeleted, true);
+  assert.equal((await rows(owner)).length, 1, 'a repeated deletion adds no row; the other conversation of the account has none');
+  report.checks.push('conversation deletion on the core path: exactly one session row with the deletion stamp for the chosen conversation; a repeat adds none');
   const artifact = await artifacts();
   const artifactPreview = await preview(c, artifact, 'artifact', artifact.project);
   assert.ok(artifactPreview.affectedExecutions >= 0);

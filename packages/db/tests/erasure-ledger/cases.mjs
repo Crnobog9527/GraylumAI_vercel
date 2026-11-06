@@ -91,7 +91,7 @@ export async function runCases(db,report){
   const [table,id,cols]=specs[i];
   await db.query('SET ROLE service_role');
   let result;try{result=await scrub(db,f.actor,table);}finally{await db.query('RESET ROLE');}
-  assert.ok(result.processed>=1);assert.equal(result.manualReview,0);assert.equal(result.remaining,0);
+  assert.ok(result.processed>=1,table+' '+JSON.stringify(result));assert.equal(result.manualReview,0,table);assert.equal(result.remaining,0,table);
   const after=await row(db,table,id);
   assert.ok(after.content_erased_at);assert.doesNotMatch(JSON.stringify(after),/LEDGER_PRIVATE_CANARY/);
   assert.deepEqual(financial(after,cols),financial(before[i],cols),'amount, classifications, bindings and timestamps unchanged');

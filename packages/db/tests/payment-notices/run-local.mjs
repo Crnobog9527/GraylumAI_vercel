@@ -44,6 +44,13 @@ try {
   await replayMigrationTail(db, { migrationPath: 'packages/db/migrations/0259_platform_secrets.sql', report, inCopy: true });
   report.checks.push('reapplying the migration (also 0259, which it extends) with all later migrations keeps the complete catalog');
 
+  // PAY-NOTIFY N2 (after this migration) made payment_notice_claim re-check live eligibility: a notice with no paid order behind it is skipped as
+  // superseded. The state machine below is tested on notices without orders, so in this disposable database only (the catalog comparison above is
+  // done) the eligibility function answers true. What eligibility itself requires (a real paid wallet order, the stages, superseded notices) is
+  // tested with real orders in payment-notices/reminders-local.mjs.
+  await c.query(`CREATE OR REPLACE FUNCTION public.payment_notice_eligible(n payment_notices) RETURNS boolean LANGUAGE sql STABLE
+    SECURITY DEFINER SET search_path=public,pg_temp AS $$ SELECT true $$`);
+
   for (const role of ['anon', 'authenticated', 'service_role']) {
     for (const p of ['SELECT', 'INSERT', 'UPDATE', 'DELETE']) {
       assert.equal(await v('SELECT has_table_privilege($1,$2,$3) v', [role, 'public.payment_notices', p]), false, `${role} ${p}`);

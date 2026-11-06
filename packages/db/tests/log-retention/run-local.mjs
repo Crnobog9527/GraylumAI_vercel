@@ -53,7 +53,7 @@ try {
   assert.equal(await count('user_activity_logs'), audit + 1, 'admin audit is not touched');
   report.checks.push('deletes rows older than 29 days (job runs included), keeps newer rows and admin audit');
 
-  assert.deepEqual(await cleanup(), { applicationLogs: 0, diagnosticResults: 0, scheduledJobRuns: 0, more: false });
+  assert.deepEqual(await cleanup(), { applicationLogs: 0, diagnosticResults: 0, scheduledJobRuns: 0, paymentNotices: 0, more: false });
   report.checks.push('repeat run is a no-op');
 
   for (let i = 0; i < 5; i++) {
