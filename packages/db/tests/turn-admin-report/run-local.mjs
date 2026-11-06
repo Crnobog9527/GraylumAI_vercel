@@ -51,7 +51,8 @@ try{
  report.checks.push('model report: calls grouped by model, the call without a cost counted unknown and not summed, the open turn counted unsettled');
  const u=await one('select turn_admin_unsettled_turns(100) v');
  assert.equal(u.total,1);assert.equal(u.turns[0].turnId,running.turnId);assert.equal(u.turns[0].inFlightCalls,1);
- assert.deepEqual(Object.keys(u.turns[0]).sort(),['actorId','chargedCredits','closeKind','costPendingCalls','failureCode','inFlightCalls','kind','openedAt','reservedCredits','settlement','state','turnId','updatedAt']);
+ assert.equal(u.turns[0].refundEligible,false,"a turn opened a moment ago is not eligible for the admin refund");
+ assert.deepEqual(Object.keys(u.turns[0]).sort(),['actorId','chargedCredits','closeKind','costPendingCalls','failureCode','inFlightCalls','kind','openedAt','refundEligible','reservedCredits','settlement','state','turnId','updatedAt']);
  // A close with the call's cost still unknown stays on the list (settling); once the cost is recorded the turn settles and leaves.
  await close(a,running.turnId);
  assert.equal((await one('select turn_admin_unsettled_turns(100) v')).total,1,'closed but its call cost is unknown: still settling');
