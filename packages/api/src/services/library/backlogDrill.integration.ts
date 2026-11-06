@@ -27,7 +27,7 @@ const DELETERS = 8;
 type Faults = { down: (run: number) => boolean; rate: number };
 type Outcome = {
   documents: number; objectsGoneMinutes: number | null; releasedMinutes: number | null;
-  maxOverdue: number; runs: number; failedRows: number; slowestRunMs: number; deleteMs: number;
+  maxOverdue: number; runs: number; failedRows: number; slowestRunMs: number; deleteMs: number; budgetLimitedRuns: number;
   firstReleaseMinutes: number | null; rowsPerRun: number | null; within24h: number | null;
 };
 
@@ -174,7 +174,7 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
   expect(deleting.rows[0].n, 'every concurrent deletion is queued for the cron').toBe(documents);
   const outcome: Outcome = {
     documents, objectsGoneMinutes: null, releasedMinutes: null, maxOverdue: 0, runs: 0, failedRows: 0, slowestRunMs: 0,
-    deleteMs: Date.now() - deleteStarted, firstReleaseMinutes: null, rowsPerRun: null, within24h: null,
+    deleteMs: Date.now() - deleteStarted, budgetLimitedRuns: 0, firstReleaseMinutes: null, rowsPerRun: null, within24h: null,
   };
   const released: number[] = [];
   try {
@@ -186,6 +186,8 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
       outcome.slowestRunMs = Math.max(outcome.slowestRunMs, Date.now() - started);
       outcome.failedRows += result.failed;
       released.push(result.released);
+      // The 35 s budget runs on wall time: a run it cut short measured this machine's load, not the batch.
+      if (result.budgetExhausted) outcome.budgetLimitedRuns++;
       const now = await scope();
       outcome.maxOverdue = Math.max(outcome.maxOverdue, now.overdue);
       const minutes = clock.run * RUN_MINUTES;
