@@ -9,8 +9,6 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
-import {runReferences} from './references.mjs';
-import {runVisibility} from './visibility.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -27,8 +25,6 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0341_voice_profiles.sql';
-const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -46,23 +42,8 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- ok(sql(migration));
- const finalCatalog=snapshot();
- ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0341 preserves complete catalog');
- report.checks.push('0341 applied twice after current staging; complete catalog unchanged');
- const references=read('packages/db/migrations/0345_voice_runtime_references.sql');
- ok(sql(references));
- const referencesCatalog=snapshot();
- ok(sql(references));
- assert.deepEqual(snapshot(),referencesCatalog,'repeat 0345 preserves complete catalog');
- report.checks.push('0345 applied twice after current staging; complete catalog unchanged');
- const visibility=read('packages/db/migrations/0352_runtime_execution_visibility.sql');
- ok(sql(visibility));
- const visibilityCatalog=snapshot();
- ok(sql(visibility));
- assert.deepEqual(snapshot(),visibilityCatalog,'repeat 0352 preserves complete catalog');
- report.checks.push('0352 applied twice after current staging; complete catalog unchanged');
+ // The old migrations 0341, 0345 and 0352 are not replayed any more: 0345 and 0352 patch objects 0505 dropped (the BILL2 runs, runtime_execution_visibility),
+ // and re-applying an old migration to the final catalog is no property of the voice functions. The cases below run on the final functions.
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -73,8 +54,6 @@ try {
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
  await client.query(read('packages/db/tests/voice/fixture.sql'));
  await runCases({db:client,Client,connectionString,report});
- await runReferences({db:client,Client,connectionString,report});
- await runVisibility({db:client,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

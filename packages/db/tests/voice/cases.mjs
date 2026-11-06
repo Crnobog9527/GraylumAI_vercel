@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {rpc,fixture,call,evidence,outcome} from '../erasure-b2a/cases.mjs';
+import {rpc} from '../erasure-b2a/cases.mjs';
 const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0]?.v;
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>{if(!String(error.message).includes(code))throw error;return true;},code);};
 const PROFILE={tone:'像跟朋友聊天',sentenceLength:'短句多',samples:['VOICE_CANARY sample']};
@@ -141,59 +141,26 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.deepEqual(await svc('voice_profile_current',randomUUID()),{enabled:true,versionId:null,version:null},'no profile row');
  report.checks.push('closed accounts are refused');
 
- // Billing receipts of a version whose source was deleted are scrubbed once the run is closed.
- const f=await fixture(db);
- const d=await doc(f.actor,'billed.md');
- const b=await begin(f.actor);
- await svc('voice_generation_bind',f.actor,b.version.id,f.run);
- await finish(f.actor,b.version.id);
- const c=await call(db,f);
- await db.query('SET ROLE service_role');
- await rpc(db,'bill2_record',f.actor,f.run,c.id,evidence(c));
- await db.query('RESET ROLE');
- await del(f.actor,d);
- assert.equal(await one(db,'SELECT count(*)::int v FROM voice_billing_scrubs WHERE run_id=$1',[f.run]),1);
- assert.equal(await svc('voice_billing_scrub',f.run),'waiting','an open run waits');
- await db.query('SET ROLE service_role');
- await rpc(db,'bill2_close',f.actor,f.run,'delivered',outcome);await rpc(db,'bill2_finalize',f.actor,f.run);
- await db.query('RESET ROLE');
- assert.equal(await svc('voice_billing_scrub',f.run),'done');
- assert.equal(await one(db,'SELECT count(*)::int v FROM voice_billing_scrubs WHERE run_id=$1',[f.run]),0);
- assert.ok(await one(db,'SELECT content_deleted_at IS NOT NULL v FROM bill2_runs WHERE id=$1',[f.run]));
- // Rotation (review P1): a scrub that keeps waiting moves behind rows not yet checked; candidates report whether a profile exists.
- const stale=await one(db,"SELECT checked_at v FROM voice_billing_scrubs WHERE run_id=$1",[f.run]).catch(()=>null);
- const candidates=await svc('voice_recovery_candidates',50);
- assert.ok(Array.isArray(candidates.generations)&&Array.isArray(candidates.scrubs));
- assert.equal(await svc('voice_run_recovery',f.run).catch(e=>e.message),'permission denied for function voice_run_recovery','binding helper is private');
+ // Not run any more (CORE-PATH-V2 V2-12 F, 0505): the scrub of a deleted source's billing receipts once its BILL2 run closed (voice_billing_scrub,
+ // voice_run_recovery, bill2_*): the run is gone, and on the core path a version deleted mid-generation voids the turn (turn-core/voice-cases.mjs).
+
+ // Editing the confirmed profile is refused while a newer result is pending (it would bury the paid result); ported from the retired 0345 cases.
  {
-  const w=await actor();const wd=await doc(w,'wait.md');const wb=await begin(w);await finish(w,wb.version.id);
-  await db.query("UPDATE voice_profile_versions SET billing_run_id=$2,billing_settled=false,updated_at=now()-interval '2 hours' WHERE id=$1",[wb.version.id,randomUUID()]);
-  const listed=async()=>(await svc('voice_recovery_candidates',50)).generations.find(g=>g.versionId===wb.version.id);
-  assert.equal((await listed()).hasProfile,true,'a saved profile counts as delivered');
-  await svc('voice_generation_finish',w,wb.version.id,null,null,false);
-  assert.equal(await listed(),undefined,'an attempt that stays unsettled moves the row to the back of the queue');
-  const failed=await begin(w);await finish(w,failed.version.id,null,'VOICE_RESULT_PENDING');
-  await db.query("UPDATE voice_profile_versions SET billing_run_id=$2,billing_settled=false,updated_at=now()-interval '2 hours' WHERE id=$1",[failed.version.id,randomUUID()]);
-  assert.equal((await svc('voice_recovery_candidates',50)).generations.find(g=>g.versionId===failed.version.id).hasProfile,false,
-   'a failed (result pending) version has no profile: never charged');
-  await db.query("INSERT INTO voice_billing_scrubs(run_id,actor_id,created_at,checked_at) VALUES($1,$2,now()-interval '3 hours',now()-interval '3 hours')",[randomUUID(),w]);
-  const scrubRun=(await db.query("SELECT run_id FROM voice_billing_scrubs WHERE actor_id=$1",[w])).rows[0].run_id;
-  assert.ok((await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun));
-  assert.equal((await db.query('SELECT outcome FROM voice_billing_scrubs WHERE run_id=$1',[scrubRun])).rows[0].outcome,'cancelled');
-  // Deleting a version that has no profile queues its run to be refunded; one with a profile settles at its cost.
-  const noProfile=await begin(w);await db.query("UPDATE voice_profile_versions SET billing_run_id=$2 WHERE id=$1",[noProfile.version.id,randomUUID()]);
-  const keptRun=(await db.query('SELECT billing_run_id r FROM voice_profile_versions WHERE id=$1',[noProfile.version.id])).rows[0].r;
-  await svc('voice_profile_delete',w,failed.version.id).catch(()=>undefined);
-  await db.query("UPDATE voice_profile_versions SET status='failed',profile=NULL WHERE id=$1",[noProfile.version.id]);
-  await svc('voice_profile_delete',w,noProfile.version.id);
-  assert.equal((await db.query('SELECT outcome FROM voice_billing_scrubs WHERE run_id=$1',[keptRun])).rows[0].outcome,'confirmed_failure');
-  await svc('voice_billing_scrub',scrubRun);
-  await db.query("UPDATE voice_billing_scrubs SET checked_at=now()-interval '3 hours' WHERE run_id=$1",[scrubRun]).catch(()=>undefined);
-  await svc('voice_scrub_touch',scrubRun);
-  assert.ok(!(await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun),'a checked scrub moves behind unchecked ones');
-  await svc('voice_profile_delete',w,failed.version.id).catch(()=>undefined);void wd;
+  const p=await actor();await doc(p,'pending-a.md');
+  const g=await begin(p);await finish(p,g.version.id);
+  const first=g.version.id;
+  await svc('voice_profile_confirm',p,first,(await state(p)).revision,JSON.stringify(PROFILE));
+  await doc(p,'pending-b.md');
+  const generating=await begin(p);
+  const s=await state(p);
+  await denied(svc('voice_profile_confirm',p,first,s.revision,JSON.stringify({...PROFILE,tone:'改一下'})),'VOICE_PENDING_RESULT');
+  // The same text is a no-op, and a failed generation no longer blocks.
+  await svc('voice_profile_confirm',p,first,s.revision,JSON.stringify(PROFILE));
+  await svc('voice_generation_finish',p,generating.version.id,null,'VOICE_FORMAT_INVALID',true);
+  const after=await svc('voice_profile_confirm',p,first,(await state(p)).revision,JSON.stringify({...PROFILE,tone:'改一下'}));
+  assert.equal(after.confirmed.profile.tone,'改一下');
+  report.checks.push('editing the confirmed profile is refused server-side while a generation is pending, and allowed again once it failed');
  }
- report.checks.push('receipts of a deleted source wait for the run to close, then are scrubbed once');
 
  // Account erasure removes every voice row.
  const e=await actor();const ed=await doc(e,'erase.md');
