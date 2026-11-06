@@ -28,19 +28,23 @@ type Faults = { down: (run: number) => boolean; rate: number };
 type Outcome = {
   documents: number; objectsGoneMinutes: number | null; releasedMinutes: number | null;
   maxOverdue: number; runs: number; failedRows: number; slowestRunMs: number; deleteMs: number; budgetLimitedRuns: number;
-  firstReleaseMinutes: number | null; rowsPerRun: number | null; within24h: number | null;
+  firstReleaseMinutes: number | null; rowsPerRun: number | null; waitMinutes: number | null; within24h: number | null;
 };
 
-// Measured throughput: rows released per run from the first release to the last. The backlog that still clears
-// within 24 hours is what that rate releases in the runs left after the first release (guard + two absence looks).
-function throughput(released: number[]) {
+// Measured throughput. Rows rotate by checked_at, and a row is released only on its second look after the upload guard
+// (the first look records the object absent), so a backlog of n drains in about wait + 2 * n / rowsPerRun runs, where
+// rowsPerRun is the measured release rate and wait is the rest (the guard, plus any Storage outage). Both come from this
+// run, so within24h is the largest backlog that, under the same conditions, still drains within 24 hours.
+function throughput(documents: number, released: number[], releasedMinutes: number | null) {
   const first = released.findIndex(n => n > 0);
-  if (first === -1) return { firstReleaseMinutes: null, rowsPerRun: null, within24h: null };
+  if (first === -1) return { firstReleaseMinutes: null, rowsPerRun: null, waitMinutes: null, within24h: null };
   const last = released.length - 1 - [...released].reverse().findIndex(n => n > 0);
   const rowsPerRun = released.reduce((sum, n) => sum + n, 0) / (last - first + 1);
+  const waitMinutes = releasedMinutes === null ? null : releasedMinutes - 2 * documents / rowsPerRun * RUN_MINUTES;
   return {
     firstReleaseMinutes: (first + 1) * RUN_MINUTES, rowsPerRun: Math.round(rowsPerRun),
-    within24h: Math.floor((DAY_RUNS - first) * rowsPerRun),
+    waitMinutes: waitMinutes === null ? null : Math.round(waitMinutes),
+    within24h: waitMinutes === null ? null : Math.floor((24 * 60 - waitMinutes) * rowsPerRun / (2 * RUN_MINUTES)),
   };
 }
 
@@ -174,7 +178,8 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
   expect(deleting.rows[0].n, 'every concurrent deletion is queued for the cron').toBe(documents);
   const outcome: Outcome = {
     documents, objectsGoneMinutes: null, releasedMinutes: null, maxOverdue: 0, runs: 0, failedRows: 0, slowestRunMs: 0,
-    deleteMs: Date.now() - deleteStarted, budgetLimitedRuns: 0, firstReleaseMinutes: null, rowsPerRun: null, within24h: null,
+    deleteMs: Date.now() - deleteStarted, budgetLimitedRuns: 0, firstReleaseMinutes: null, rowsPerRun: null,
+    waitMinutes: null, within24h: null,
   };
   const released: number[] = [];
   try {
@@ -195,7 +200,7 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
       if (now.docs === 0) { outcome.releasedMinutes = minutes; break; }
     }
     outcome.runs = clock.run;
-    return { ...outcome, ...throughput(released) };
+    return { ...outcome, ...throughput(documents, released, outcome.releasedMinutes) };
   } finally {
     // A scenario that does not drain (8000) must not leave its backlog in the queue the next scenario measures.
     await purge(admin, actors);
@@ -254,12 +259,12 @@ describe.skipIf(!port)('library cleanup backlog drill (local database)', () => {
       expect(outcome.failedRows).toBe(0);
       if (outcome.releasedMinutes !== null && outcome.releasedMinutes <= 24 * 60) expect(outcome.maxOverdue).toBe(0);
       // The gate: up to the fatal alert the cron alone keeps the promise, and the bound computed from the measured
-      // rate covers that backlog (a burst far below the bound only shows the rate a small backlog needs).
+      // rate covers that backlog.
       if (size <= GATE_PENDING) {
         expect(outcome.releasedMinutes).not.toBeNull();
         expect(outcome.releasedMinutes!).toBeLessThanOrEqual(24 * 60);
       }
-      if (size >= GATE_PENDING) expect(outcome.within24h!).toBeGreaterThanOrEqual(GATE_PENDING);
+      if (outcome.within24h !== null) expect(outcome.within24h).toBeGreaterThanOrEqual(GATE_PENDING);
     }, 3_600_000);
   }
 
@@ -273,6 +278,7 @@ describe.skipIf(!port)('library cleanup backlog drill (local database)', () => {
     expect(outcome.releasedMinutes).not.toBeNull();
     expect(outcome.releasedMinutes!).toBeLessThanOrEqual(24 * 60);
     expect(outcome.maxOverdue).toBe(0);
+    expect(outcome.within24h!).toBeGreaterThanOrEqual(GATE_PENDING);
   }, 3_600_000);
 
   it('late signed writes: refused after deletion, earlier ones removed by the cron', async () => {
