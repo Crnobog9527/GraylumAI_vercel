@@ -3,7 +3,7 @@
 // each search was, and what it cost the user. Only searches the user paid for show an amount; every other
 // settlement says plainly that it was free. Supplier names and supplier costs never appear here.
 import type { ResearchToolName } from "../../../../../packages/api/src/services/research/tools/schemas";
-import { describeRequest } from "./research-model";
+import { creditAmount, describeRequest } from "./research-model";
 import styles from "./research.module.css";
 
 /** The tool settlement sources of 0255 (`erasure_ledger_metadata`): how the user side of one call was settled. */
@@ -22,9 +22,10 @@ export interface SearchCharge {
 /** One line of outcome text per settlement. */
 export function chargeText(charge: SearchCharge): string {
   switch (charge.settlement) {
-    case "tool_usage":
-      return charge.userCredits !== null && /^\d+(\.\d+)?$/.test(charge.userCredits)
-        ? `${charge.userCredits.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")} 积分` : "已计费";
+    case "tool_usage": {
+      const amount = charge.userCredits === null ? null : creditAmount(charge.userCredits);
+      return amount === null ? "已计费" : `${amount} 积分`;
+    }
     case "tool_no_usage": return "不收费（这次没有拿到用量记录）";
     case "tool_failed":
     case "tool_failed_charged": return "没取到数据，不收费";
@@ -57,7 +58,7 @@ export function SearchCharges({ charges }: { charges: SearchCharge[] }) {
           </li>
         ))}
       </ul>
-      <p className={styles.hint}>整次回复的费用合计后统一向上取整一次，所以各项相加可能比这条记录略少。</p>
+      <p className={styles.hint}>每项按两位小数显示；整次回复的费用合计后统一向上取整一次，所以各项相加可能和这条记录略有出入。</p>
     </section>
   );
 }
