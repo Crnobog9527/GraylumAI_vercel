@@ -12,8 +12,8 @@ export function createStallWatch(resetTimes) {
   const loop = [], gc = [], compiles = [];
   let denials = 0;
   const read = (line, receivedAt) => {
-    const stall = /\[sim-preload\] loop_stall_ms=(\d+) at=(\d+)/.exec(line);
-    if (stall) loop.push({ ms: Number(stall[1]), at: Number(stall[2]) });
+    const stall = /\[sim-preload\] loop_stall_ms=(\d+) cpu_ms=(\d+) at=(\d+)/.exec(line);
+    if (stall) loop.push({ ms: Number(stall[1]), cpu: Number(stall[2]), at: Number(stall[3]) });
     const pause = /\[sim-preload\] gc_pause_ms=(\d+) at=(\d+)/.exec(line);
     if (pause) gc.push({ ms: Number(pause[1]), at: Number(pause[2]) });
     const compile = /Compiling (\S+)/.exec(line);
@@ -37,7 +37,10 @@ export function createStallWatch(resetTimes) {
           slot[kind] += 1; slot.maxMs = Math.max(slot.maxMs, ms);
         }
       return {
-        loopStalls: { count: loop.length, maxMs: Math.max(0, ...loop.map(item => item.ms)) },
+        // busy: stalls in which the process used at least 70% of the stalled time as CPU; idle: the rest (not scheduled, or waiting).
+        loopStalls: { count: loop.length, maxMs: Math.max(0, ...loop.map(item => item.ms)),
+          busy: loop.filter(item => item.cpu >= 0.7 * item.ms).length, idle: loop.filter(item => item.cpu < 0.7 * item.ms).length,
+          longest: [...loop].sort((a, b) => b.ms - a.ms).slice(0, 5).map(item => ({ test: testAt(item.at), ms: item.ms, cpuMs: item.cpu })) },
         gcPauses: { count: gc.length, maxMs: Math.max(0, ...gc.map(item => item.ms)) },
         appRateLimitDenials: denials,
         stallsByTest: byTest,

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { expect, test } from './fixtures';
 
 import { armFault, replies, resetSim, runRecovery, signIn, startFreeChat } from './support';
@@ -26,8 +28,16 @@ test('warm-up: compile the routes the journeys use', async ({ page }) => {
   await armFault({ mode: '402' });
   await startFreeChat(page, '预热：模拟失败。');
   await expect(page.getByText('正在思考…')).toHaveCount(0, { timeout: 60_000 }).catch(() => undefined);
-  for (const path of ['/app/library', '/app/library?tab=voice', '/app/profile', '/app/profile?tab=credits', '/app/positioning']) {
+  // Also the pages that the first CI run with stall measurements (#1794) saw compile in the middle of later journeys: the signed-in home,
+  // the positioning draft pages (any id compiles them), the marketplace, the publish monitor and the scan check; and, signed out, the
+  // forgot-password page. (/api/turn compiled a second time in one journey: a recompile cannot be warmed.)
+  const draft = randomUUID();
+  for (const path of ['/app/library', '/app/library?tab=voice', '/app/profile', '/app/profile?tab=credits', '/app/positioning', '/app',
+    `/app/positioning/${draft}`, `/app/positioning/${draft}/topics`, `/app/positioning/${draft}/review/${randomUUID()}`,
+    '/app/workbench/marketplace', '/app/publish-monitor', '/app/library/scan-check']) {
     await page.goto(path, { waitUntil: 'networkidle', timeout: 3 * 60_000 }).catch(() => undefined);
   }
+  await page.context().clearCookies();
+  await page.goto('/forgot-password', { waitUntil: 'networkidle', timeout: 3 * 60_000 }).catch(() => undefined);
   await runRecovery().catch(() => undefined);
 });

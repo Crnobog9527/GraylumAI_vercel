@@ -26,11 +26,14 @@ if (/start-server\.js$/.test(process.argv[1] ?? '')) {
   // Every stall of the event loop over 250 ms and every garbage collection over 100 ms is said with the time it ended (run.mjs sums them up and
   // sets them beside the routes compiled after the warm-up).
   const STALL_MS = 250, TICK_MS = 50;
-  let last = Date.now();
+  // cpu_ms is this process's own CPU time (user + system) over the stalled stretch: close to the stall means the process itself was busy
+  // (compiling, collecting garbage, working); far below it means it was not running (the machine gave its CPU to others) or was waiting.
+  const cpuMs = () => { const usage = process.cpuUsage(); return (usage.user + usage.system) / 1000; };
+  let last = Date.now(), lastCpu = cpuMs();
   setInterval(() => {
-    const now = Date.now(), late = now - last - TICK_MS;
-    last = now;
-    if (late >= STALL_MS - TICK_MS) console.error('[sim-preload] loop_stall_ms=' + (late + TICK_MS) + ' at=' + now);
+    const now = Date.now(), cpu = cpuMs(), late = now - last - TICK_MS;
+    if (late >= STALL_MS - TICK_MS) console.error('[sim-preload] loop_stall_ms=' + (late + TICK_MS) + ' cpu_ms=' + Math.round(cpu - lastCpu) + ' at=' + now);
+    last = now; lastCpu = cpu;
   }, TICK_MS).unref();
   try {
     const { PerformanceObserver } = require('node:perf_hooks');
