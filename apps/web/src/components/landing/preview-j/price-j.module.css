@@ -49,6 +49,8 @@ h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
   background: linear-gradient(100deg, transparent, rgba(255, 231, 170, .38), transparent); translate: 0 0;
 }
 .own a { white-space: nowrap; }
+/* One offer line under our price (sample L's Gold first month): body size, ink, pulled up to the figure it belongs to. */
+.own p.offer { display: block; margin-top: -8px; color: var(--j-ink); font-size: 15px; font-weight: 500; line-height: 1.5; }
 .checked { margin: 14px 0 0; color: var(--j-muted); font-size: 13px; }
 
 @media (prefers-reduced-motion: no-preference) {
