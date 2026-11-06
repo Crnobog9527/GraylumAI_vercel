@@ -142,7 +142,7 @@ describe("benchmark table", () => {
 
 describe("search charges and evidence", () => {
   it("shows an amount only for a paid search and says free otherwise", () => {
-    expect(CHARGES.map(chargeText)).toEqual(["0.3 积分", "1 积分", "没取到数据，不收费", "结果待核，不收费", "不收费（这次没有拿到用量记录）"]);
+    expect(CHARGES.map(chargeText)).toEqual(["0.3 积分", "1.6 积分", "没取到数据，不收费", "结果待核，不收费", "不收费（这次没有拿到用量记录）"]);
   });
 
   it("links only plain public http(s) sources", () => {

@@ -174,9 +174,11 @@ for (const width of [375, 1440]) {
       const rows = page.getByRole("list", { name: "搜索记录" });
       await ui(rows).toContainText("正在搜");
       await page.evaluate(event => (window as unknown as { emit: (event: unknown) => void }).emit(event),
-        { ...call, state: "succeeded", evidenceId: "ev1", credits: "0.30" });
+        { ...call, state: "succeeded", evidenceId: "ev1", credits: "1.5999999999" });
       await ui(rows).toContainText("成功");
-      await ui(rows).toContainText("扣 0.3 积分");
+      // The server's high-precision decimal is rounded for the page (turn 6640 showed "扣 1.5999999999 积分").
+      await ui(rows).toContainText("扣 1.6 积分");
+      await ui(rows).not.toContainText("1.5999");
       // The row is committed only as the turn finishes: no re-read on the call's own event, one once the turn is saved.
       await page.waitForTimeout(300);
       expect(calls.filter(item => item.path.endsWith("/research.benchmarks")).length).toBe(before);
