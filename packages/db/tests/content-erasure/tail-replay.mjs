@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Tail replay shared by the local migration suites that re-apply an old migration on the final catalog
-// (content-erasure for 0201, agent-core-r9 for 0209). The old migration rewrites functions that later migrations patched,
+// (content-erasure for 0201, erasure-ledger for 0188, pay-replay for 0308, 0310 and 0335). The old migration rewrites functions that later migrations patched,
 // so it is replayed together with every later migration, in order, and the whole catalog must come out unchanged.
 import assert from 'node:assert/strict';
 import {readdirSync} from 'node:fs';
