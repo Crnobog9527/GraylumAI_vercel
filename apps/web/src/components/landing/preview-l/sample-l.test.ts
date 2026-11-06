@@ -18,6 +18,7 @@ import { splitReport } from '@/lib/landing/sample-reports/report-markdown';
 import { VOICE_WALL } from '@/lib/landing/landing-copy';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData, homePageExtras } from '@/lib/landing/landing-page-data';
+import { softwareApplicationJsonLd } from '@/lib/seo/structured-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
@@ -457,6 +458,26 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(price).toContain(J_PRICE.unavailable);
     expect(price).toContain('href="/pricing"');
     expect(price).not.toContain('Graylum AI：');
+  });
+
+  it('lists in its JSON-LD only the prices its price area shows, with the promo offers on or off (Codex B3)', () => {
+    const catalog = [plan('pro', 29, 279), plan('gold', 69, 621)];
+    for (const offers of [{}, { goldFirstMonth: 49 }]) {
+      const home = buildLandingPageData(ALL_ON, catalog, offers);
+      const html = renderToStaticMarkup(withTrpc(createElement(SampleL, {
+        data: home, siteName: 'Graylum', extras: homePageExtras(ALL_ON), production: true,
+      })));
+      const price = html.slice(html.indexOf('id="pricing-title"'), html.indexOf('id="faq-title"'));
+      const listed = softwareApplicationJsonLd({ description: 'd', offers: home.offerList }).offers as { price: string }[];
+      expect(listed.map(offer => offer.price)).toEqual(['0', '29']);
+      for (const offer of listed.filter(item => item.price !== '0')) expect(price).toContain(`$${offer.price}/月起`);
+      // The Gold first month and the other plan prices stay on the pricing page (Owner 2026-10-15: no plan cards here).
+      for (const hidden of ['$49', '$69', '$279', '$621']) expect(price).not.toContain(hidden);
+      // The usual ways' amounts as written (Codex B3 read them all as $0; the browser side is priceCompare.browser.test.tsx).
+      for (const row of home.compareRows) expect(price).toContain(row.price);
+      expect(price).toContain(J_PRICE_TOTAL.text);
+      expect(price).not.toMatch(/\$0(?![\d.,])/);
+    }
   });
 
   it('as the public home page: no sample switcher, links only to pages that exist, the support address in the footer', () => {

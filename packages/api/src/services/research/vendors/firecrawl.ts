@@ -36,11 +36,28 @@ export function buildFirecrawlRequest(rawUrl: string): { request: VendorRequest;
 /**
  * Credits from the provider-owned top-level field only; absent or malformed → null (never 0).
  * `data.metadata` mixes in fields scraped from the target page, so a page could plant a fake
- * `creditsUsed` there; it is never trusted as a receipt. RT-7 confirms the real location.
+ * `creditsUsed` there; it is never trusted as a receipt.
  */
 export function firecrawlCredits(json: unknown): string | null {
   const value = (json as { creditsUsed?: unknown } | null)?.creditsUsed;
   return value === undefined ? null : usageUnits(value);
+}
+
+/**
+ * What one answered scrape of this adapter costs when the response names no usage: one credit. Firecrawl's scrape response has no
+ * credits field at all, at no level and in neither API version (docs.firecrawl.dev, v1 and v2 scrape pages, 2026-11-06), and the
+ * staging turns 6626 and 6639 show it: every real answer came back with `usage.units = null`, so the receipt was unpriced and the whole
+ * call settled "unknown" although the page was delivered. The request is pinned to the documented one-credit scrape (markdown only,
+ * `proxy: 'basic'`, `parsePDF: false`, no JSON extraction, no actions), so an answered scrape is one credit; the 403/404/PDF cases
+ * below are billed the same one credit, as their comments say. An official top-level `creditsUsed`, when present, still wins, and a
+ * malformed one stays unpriced (unknown), never replaced by this constant.
+ */
+export const FIRECRAWL_SCRAPE_CREDITS = '1';
+
+/** The credits of a scrape Firecrawl answered with `success: true`: the official field when present, else the documented one credit. */
+export function scrapeCredits(json: unknown): string | null {
+  const value = (json as { creditsUsed?: unknown } | null)?.creditsUsed;
+  return value === undefined ? FIRECRAWL_SCRAPE_CREDITS : usageUnits(value);
 }
 
 const defaultResolve = async (hostname: string) => (await lookup(hostname, { all: true })).map(entry => entry.address);
@@ -87,7 +104,7 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
     return { ...base, outcome: 'failed', reason: `HTTP_${answer.status}`, httpStatus: answer.status,
       supplierMayCharge: mayHaveBilled(answer.status, true), usage: { unit: 'credit', units: firecrawlCredits(answer.json) } };
   }
-  const usage = { unit: 'credit' as const, units: firecrawlCredits(answer.json) };
+  const usage = { unit: 'credit' as const, units: scrapeCredits(answer.json) };
   // Firecrawl bills target pages that answered 403/404; the user still gets no page.
   const targetStatus = count(answer.json, ['data.metadata.statusCode']);
   if (targetStatus !== undefined && targetStatus >= 400) {

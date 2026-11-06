@@ -49,7 +49,7 @@ export function websiteJsonLd(): JsonLdObject {
 export function softwareApplicationJsonLd(options: {
   description: string;
   path?: string;
-  // Prices exactly as the page's price cards show them; without it the entry says "free to start".
+  // Only prices the page itself shows (structured data must match the visible page); without it the entry says "free to start".
   offers?: { name: string; price: number }[];
 }): JsonLdObject {
   const offers = options.offers?.length
