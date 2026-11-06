@@ -78,3 +78,48 @@ describe('platform alert endpoint permissions', () => {
   });
 });
 
+
+describe('refundStuckTurn (按回合全额退回并关闭)', () => {
+  const actorId = '11111111-1111-4111-8111-111111111111';
+  const input = { actorId, turnId: 7, reason: 'lookup never answers' };
+  const done = { refunded: true, turnId: 7, chargedCredits: 0, reservedCredits: 60, closeKind: 'interrupted', settlement: 'done', stateBefore: 'closed' };
+
+  it('calls the admin function with the signed-in admin, a fresh request id and the reason', async () => {
+    const f = harness('admin', { data: done, error: null });
+    expect(await f.caller.refundStuckTurn(input)).toEqual(done);
+    expect(f.calls).toHaveLength(2); // the refund, then its audit row
+    expect(f.calls[1]).toMatchObject({ fn: 'turn_admin_refund_audit', args: { p_admin_id: 'actor', p_actor_id: actorId } });
+    expect(f.calls[0]).toMatchObject({ fn: 'turn_admin_refund_all', args: { p_actor_id: actorId, p_turn_id: 7, p_admin_id: 'actor', p_reason: 'lookup never answers' } });
+    expect(f.calls[0]!.args.p_request_id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+  it.each(['user', 'anonymous'] as const)('denies %s before anything is called', async (role) => {
+    const f = harness(role, { data: done, error: null });
+    await expect(f.caller.refundStuckTurn(input)).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+    expect(f.calls).toEqual([]);
+  });
+  it('answers an already settled turn without an error (a repeat changes nothing)', async () => {
+    const f = harness('admin', { data: { refunded: false, reason: 'already_settled', turnId: 7, chargedCredits: 0 }, error: null });
+    expect(await f.caller.refundStuckTurn(input)).toMatchObject({ refunded: false, reason: 'already_settled' });
+  });
+  it('refuses a turn younger than 24 hours and a turn with nothing pending', async () => {
+    expect(await harness('admin', { data: { refunded: false, reason: 'too_young', turnId: 7 }, error: null }).caller.refundStuckTurn(input)
+      .catch(error => error)).toMatchObject({ code: 'BAD_REQUEST', message: 'TURN_TOO_YOUNG' });
+    expect(await harness('admin', { data: { refunded: false, reason: 'not_pending', turnId: 7 }, error: null }).caller.refundStuckTurn(input)
+      .catch(error => error)).toMatchObject({ code: 'CONFLICT', message: 'TURN_NOT_PENDING' });
+  });
+  it('maps the database refusals and failures to errors, never to a success', async () => {
+    await expect(harness('admin', { data: null, error: { message: 'TURN_ADMIN_DENIED', code: '42501' } }).caller.refundStuckTurn(input))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'TURN_ADMIN_DENIED' });
+    await expect(harness('admin', { data: null, error: { message: 'TURN_DENIED', code: '42501' } }).caller.refundStuckTurn(input))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(harness('admin', { data: null, error: { message: 'TURN_REFUND_INCOMPLETE', code: '55000' } }).caller.refundStuckTurn(input))
+      .rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR', message: 'TURN_REFUND_INCOMPLETE' });
+    await expect(harness('admin', { data: { unexpected: true }, error: null }).caller.refundStuckTurn(input))
+      .rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR', message: 'TURN_REFUND_FAILED' });
+  });
+  it.each([{ turnId: 0 }, { turnId: 1.5 }, { actorId: 'not-a-uuid' }, { reason: 'x'.repeat(201) }, { extra: 1 }])('rejects the input %j', async (patch) => {
+    const f = harness('admin', { data: done, error: null });
+    await expect(f.caller.refundStuckTurn({ ...input, ...patch } as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.calls).toEqual([]);
+  });
+});

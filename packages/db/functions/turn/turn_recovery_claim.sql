@@ -66,7 +66,7 @@ BEGIN
       AND (t.recovery_lease_until IS NULL OR t.recovery_lease_until <= now())
       AND EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = t.id
         AND ((k.cost_pending AND k.provider_id IS NOT NULL AND k.call_kind = 'model')
-          OR (k.cost_pending AND k.provider_id IS NULL AND k.call_kind = 'model' AND k.status = 'unknown'
+          OR (k.cost_pending AND k.provider_id IS NULL AND k.call_kind IN ('model', 'tool', 'decision') AND k.status = 'unknown'
             AND t.opened_at <= now() - interval '24 hours')
           OR (NOT k.cost_pending AND k.settled_at > t.updated_at)))
     ORDER BY t.recovery_lease_until NULLS FIRST, t.updated_at LIMIT n
@@ -84,8 +84,9 @@ BEGIN
         'model', coalesce(t.policy->'models'->>(k.model_id::text), t.policy->>'model'),
         'pricing', coalesce(t.policy->'pricings'->(k.model_id::text), t.policy->'pricing'),
         'upperUsd', k.upper_usd::text) ORDER BY k.seq), '[]'::jsonb)
-      FROM turn_calls k JOIN turns t ON t.actor_id = l.actor_id AND t.id = k.turn_id WHERE k.turn_id = l.id AND k.cost_pending AND k.call_kind = 'model'
-        AND (k.provider_id IS NOT NULL OR (k.status = 'unknown' AND t.opened_at <= now() - interval '24 hours'))))),
+      FROM turn_calls k JOIN turns t ON t.actor_id = l.actor_id AND t.id = k.turn_id WHERE k.turn_id = l.id AND k.cost_pending
+        AND ((k.call_kind = 'model' AND (k.provider_id IS NOT NULL OR (k.status = 'unknown' AND t.opened_at <= now() - interval '24 hours')))
+          OR (k.call_kind IN ('tool', 'decision') AND k.provider_id IS NULL AND k.status = 'unknown' AND t.opened_at <= now() - interval '24 hours'))))),
     '[]'::jsonb)
   INTO settle FROM leased l;
   RETURN live || lookup || settle;

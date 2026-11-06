@@ -19,17 +19,28 @@ BEGIN
   SELECT * INTO c FROM turn_calls WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND seq = p_seq;
   IF c.turn_id IS NULL THEN RAISE EXCEPTION 'TURN_CALL_DENIED' USING ERRCODE='42501'; END IF;
   -- The same settlement again: the first outcome, nothing written.
-  IF c.status = 'rejected' AND c.usage->>'source' = 'no_identity_24h' THEN
+  IF (c.status = 'rejected' AND c.usage->>'source' = 'no_identity_24h')
+    OR (c.call_kind IN ('tool', 'decision') AND NOT c.cost_pending AND c.usage->>'source' = 'tool_no_identity_24h') THEN
     RETURN jsonb_build_object('settled', true, 'replay', true, 'turnId', p_turn_id, 'seq', p_seq);
   END IF;
   IF t.state <> 'closed' THEN RETURN jsonb_build_object('settled', false, 'reason', 'turn_open'); END IF;
-  IF c.call_kind <> 'model' OR c.status <> 'unknown' OR NOT c.cost_pending THEN
+  IF c.call_kind NOT IN ('model', 'tool', 'decision') OR c.status <> 'unknown' OR NOT c.cost_pending THEN
     RETURN jsonb_build_object('settled', false, 'reason', 'not_pending');
   END IF;
   -- A call that has an id belongs to the lookup path (turn_call_settle_absent / the receipt), never to this one.
   IF c.provider_id IS NOT NULL THEN RETURN jsonb_build_object('settled', false, 'reason', 'has_identity'); END IF;
   IF now() < t.opened_at + interval '24 hours' THEN RETURN jsonb_build_object('settled', false, 'reason', 'too_early'); END IF;
   at_time := clock_timestamp();
+  -- A tool call with no provider id (a web fetch whose supplier never answered): the user pays nothing for it (Owner 10-13: a sub-call
+  -- whose price is unknown is 0 to the user, already so at the close), and its supplier cost is NOT presumed zero for the platform: the
+  -- call stays status 'unknown' with actual_usd NULL, which the admin cost report keeps counting as an unknown actual cost, but it no
+  -- longer holds the turn's settlement, so the settle pass releases its stop-loss reservation and completes the turn.
+  IF c.call_kind IN ('tool', 'decision') THEN
+    UPDATE turn_calls SET cost_pending = false, settled_at = at_time,
+        usage = jsonb_build_object('source', 'tool_no_identity_24h', 'settledAt', at_time, 'turnOpenedAt', t.opened_at)
+      WHERE turn_id = p_turn_id AND seq = p_seq AND status = 'unknown' AND cost_pending AND provider_id IS NULL AND call_kind IN ('tool', 'decision');
+    RETURN jsonb_build_object('settled', true, 'replay', false, 'turnId', p_turn_id, 'seq', p_seq);
+  END IF;
   UPDATE turn_calls SET status = 'rejected', nominal_usd = 0, actual_usd = NULL, cost_pending = false, settled_at = at_time,
       usage = jsonb_build_object('source', 'no_identity_24h', 'settledAt', at_time, 'turnOpenedAt', t.opened_at)
     WHERE turn_id = p_turn_id AND seq = p_seq AND status = 'unknown' AND cost_pending AND provider_id IS NULL;
