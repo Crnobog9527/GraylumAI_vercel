@@ -89,6 +89,11 @@ export async function runCases(db,report){
   ['token_stats',token,['metadata','content_erased_at']],
   ['ai_usage_logs',usage,['error_message','ip_address','user_agent','metadata','content_erased_at']]];
  const before=await Promise.all(specs.map(([table,id])=>row(db,table,id)));
+ // The scrub keeps model names only as aliases (model_usage_alias: 'm_' and 16 hex, one per model name, stored in model_usage_aliases), so the pricing
+ // snapshot the metadata keeps carries the alias of each name, not the name.
+ const alias=async name=>(await db.query('SELECT model_usage_alias($1) v',[name])).rows[0].v;
+ const aliasedPricing={...pricing,modelId:await alias(pricing.modelId),providerModel:await alias(pricing.providerModel)};
+ const expectedSafe={...safe,pricing:aliasedPricing,usage:{...safe.usage,pricing:aliasedPricing}};
  await closeAccount(db,f);
  for(let i=0;i<specs.length;i++){
   const [table,id,cols]=specs[i];
@@ -98,7 +103,7 @@ export async function runCases(db,report){
   const after=await row(db,table,id);
   assert.ok(after.content_erased_at);assert.doesNotMatch(JSON.stringify(after),/LEDGER_PRIVATE_CANARY/);
   assert.deepEqual(financial(after,cols),financial(before[i],cols),'amount, classifications, bindings and timestamps unchanged');
-  for(const [key,value] of Object.entries(safe))assert.deepEqual(after.metadata[key],value,key);
+  for(const [key,value] of Object.entries(expectedSafe))assert.deepEqual(after.metadata[key],value,key);
   const repeated=await scrub(db,f.actor,table);assert.equal(repeated.processed,0);assert.equal(repeated.remaining,0);
   assert.deepEqual(await row(db,table,id),after,'replay does not alter marker or financial fields');
   await assert.rejects(db.query(`UPDATE ${table} SET content_erased_at=NULL WHERE id=$1`,[id]),/ERASURE_LEDGER_IMMUTABLE/);
