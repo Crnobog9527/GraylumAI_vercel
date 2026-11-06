@@ -35,7 +35,7 @@ export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOpt
       <div role="radiogroup" aria-label="计费周期" className="grid grid-cols-2 gap-1 rounded-lg p-1"
         style={{ background: 'var(--bg-tertiary)' }}>
         {(['monthly', 'yearly'] as const).map(cycle => (
-          <label key={cycle} className={cn('flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 py-2',
+          <label key={cycle} className={cn('flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 py-2 sm:min-h-0',
             'text-sm font-medium', cycle === 'yearly' && !yearly && 'cursor-not-allowed opacity-50')}
             style={billing === cycle ? { background: 'var(--bg-secondary)', color: 'var(--text-primary)' }
               : { color: 'var(--text-secondary)' }}>

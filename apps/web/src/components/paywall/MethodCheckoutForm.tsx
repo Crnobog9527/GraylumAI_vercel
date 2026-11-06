@@ -85,7 +85,7 @@ export function MethodCheckoutForm(props: Props) {
             const copy = methodCopy(item, checkout.entry?.purchaseChannel);
             return (
               <label key={item} data-testid={`${id}-method-${item}`}
-                className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+                className="flex min-h-11 cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm sm:min-h-0"
                 style={{ borderColor: method === item ? 'var(--text-primary)' : 'var(--border-primary)' }}>
                 <input type="radio" name={`${id}-method`} className="mt-1" value={item} checked={method === item}
                   onChange={() => setPicked(item)} />
@@ -107,7 +107,7 @@ export function MethodCheckoutForm(props: Props) {
       {fineprint ? <p className="text-xs" data-testid={`${id}-fineprint`} style={muted}>{fineprint}</p> : null}
       <p className="text-xs" data-testid={`${id}-refund`} style={muted}>{CHECKOUT_COPY.refundSummary}</p>
 
-      <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+      <label className="flex min-h-11 items-start gap-2 py-1 text-sm sm:min-h-0 sm:py-0" style={{ color: 'var(--text-secondary)' }}>
         <input type="checkbox" data-testid={`${id}-terms`} className="mt-1" checked={accepted}
           disabled={checkout.pending} onChange={event => setAcceptedVersion(event.target.checked ? termsVersion : null)} />
         <span>
@@ -132,7 +132,7 @@ export function MethodCheckoutForm(props: Props) {
           style={{ color: outcome.tone === 'error' ? 'var(--error)' : 'var(--warning)' }}>
           <p>{outcome.message}</p>
           {(outcome.goldFirstIneligible && props.onGoldFirstDeclined) || (outcome.founderIneligible && props.onFounderDeclined) ? (
-            <Button type="button" variant="outline" size="sm" className="justify-self-start" onClick={() => {
+            <Button type="button" variant="outline" size="sm" className="h-11 justify-self-start sm:h-8" onClick={() => {
               clearOutcome();
               (outcome.goldFirstIneligible ? props.onGoldFirstDeclined : props.onFounderDeclined)?.();
             }}>改按标准价购买</Button>

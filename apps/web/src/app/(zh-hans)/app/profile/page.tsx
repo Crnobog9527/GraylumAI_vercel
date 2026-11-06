@@ -172,6 +172,7 @@ function ProfilePageContent() {
                 </Button>
               </SheetTrigger>
               <SheetContent
+                tone="light"
                 side="left"
                 className="w-[88vw] max-w-80 p-0 pt-6"
                 style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}
