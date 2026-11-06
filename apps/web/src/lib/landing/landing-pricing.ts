@@ -47,6 +47,8 @@ export type LandingPricing = {
   yearlyBadgeWithoutFounder: string | null;
   founderOpen: boolean;
   proMonthly: number | null;
+  /** The Gold first month while the server offers it (LANDING_PROMO_OFFERS) and it is below the monthly price; else null. */
+  goldFirstMonth: { first: number; monthly: number } | null;
 };
 
 const CARD_TEXT = {
@@ -130,8 +132,10 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
       renewal: `每月自动续费 ${price}，可随时取消` }));
     if (usable(pro.price.yearly)) savings.push(savingPercent(pro.price.monthly, pro.price.yearly));
   }
+  let goldFirstMonth: LandingPricing['goldFirstMonth'] = null;
   if (gold) {
     const firstMonth = usable(offers.goldFirstMonth) ? offers.goldFirstMonth : null;
+    if (firstMonth !== null && firstMonth < gold.price.monthly) goldFirstMonth = { first: firstMonth, monthly: gold.price.monthly };
     cards.push(planCard('gold', gold, goldMonthly(gold, firstMonth)));
     if (usable(gold.price.yearly)) savings.push(savingPercent(gold.price.monthly, gold.price.yearly));
   }
@@ -158,18 +162,32 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
     yearlyBadgeWithoutFounder: badge(withoutFounder),
     founderOpen,
     proMonthly: pro ? pro.price.monthly : null,
+    goldFirstMonth,
   };
+}
+
+/**
+ * The home page's Gold first-month line under "Graylum AI：$29/月起" (Owner 2026-11-06 "A：显示"): the pricing page's wording
+ * (its "新用户首月" label, the first-month amount and "之后每月 $69", paywallQuote), with the server's numbers.
+ */
+export function goldFirstMonthLine(offer: NonNullable<LandingPricing['goldFirstMonth']>): string {
+  return `Gold 新用户首月 ${formatUsd(offer.first)}，之后每月 ${formatUsd(offer.monthly)}`;
 }
 
 /**
  * Prices for the home page's SoftwareApplication JSON-LD: only what its price area shows. Structured data must match the
  * visible page (Google's structured data policy), and the home page's price area is the comparison plus
  * "Graylum AI：$29/月起" (Owner 2026-10-15, MASTER_PLAN section 2.1: no plan cards there), so the list is free and the Pro
- * monthly price that line is built from (`proMonthly`, the same number PriceJ renders). The Gold first month, yearly prices
- * and the founder offer are on the pricing page, not here, whatever LANDING_PROMO_OFFERS says.
+ * monthly price that line is built from (`proMonthly`, the same number PriceJ renders). With LANDING_PROMO_OFFERS on, the
+ * Gold first-month line shows under it (Owner 2026-11-06), so its two prices are listed from the same `goldFirstMonth` the
+ * line is written from. Yearly prices and the founder offer are on the pricing page only.
  */
-export function landingOfferList(pricing: Pick<LandingPricing, 'proMonthly'>) {
+export function landingOfferList(pricing: Pick<LandingPricing, 'proMonthly' | 'goldFirstMonth'>) {
   const offers = [{ name: '免费', price: 0 }];
-  if (pricing.proMonthly !== null) offers.push({ name: 'Pro 月付', price: pricing.proMonthly });
+  if (pricing.proMonthly === null) return offers;
+  offers.push({ name: 'Pro 月付', price: pricing.proMonthly });
+  if (pricing.goldFirstMonth) {
+    offers.push({ name: 'Gold 新用户首月', price: pricing.goldFirstMonth.first }, { name: 'Gold 月付', price: pricing.goldFirstMonth.monthly });
+  }
   return offers;
 }

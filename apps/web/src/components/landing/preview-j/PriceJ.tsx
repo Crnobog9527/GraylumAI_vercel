@@ -49,9 +49,11 @@ function useSeen(threshold: number) {
  * the check-date line; `quiet` sets our price in plain ink (no gold sheen) and the full-pricing link as a text link, so
  * it does not compete with the plan cards' buttons.
  */
-export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = false, checked = true, quiet = false }: {
+export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = false, checked = true, quiet = false, offer = null }: {
   proMonthly: number | null; rows: readonly CompareRow[]; after?: ReactNode; calm?: boolean; plainTotal?: boolean; checked?: boolean;
   quiet?: boolean;
+  /** One offer line under our price (sample L: the Gold first month while the server offers it); nothing when null. */
+  offer?: string | null;
 }) {
   const [tableRef, tableSeen] = useSeen(0.2);
   const [versusRef, versusSeen] = useSeen(0.5);
@@ -98,6 +100,7 @@ export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = fal
             {proMonthly !== null ? (
               <div className={styles.own}>
                 <p><b className={styles.price}>{J_PRICE.ownPrice(formatUsd(proMonthly))}</b></p>
+                {offer ? <p className={styles.offer} data-offer="">{offer}</p> : null}
                 <Link href={PRICING_PAGE} className={quiet ? styles.moreLink : `${page.pill} ${styles.cta}`}>
                   {J_PRICE.more}<ArrowRight size={quiet ? 15 : 18} aria-hidden="true" />
                 </Link>
