@@ -50,9 +50,6 @@ AS $function$
   -- recovery should have completed it within 24 hours; it holds no user credits but is never silent.
   SELECT t.opened_at FROM turns t
   WHERE t.settlement = 'pending' AND t.state = 'closed' AND t.charged_credits IS NOT NULL AND t.closed_at < now() - interval '48 hours'
-    -- only a pending call the 24-hour settlement can complete (no provider id): an alert here means recovery itself is stuck
-    AND EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = t.id AND k.cost_pending AND k.status = 'unknown' AND k.provider_id IS NULL
-      AND k.call_kind IN ('model', 'tool', 'decision'))
  ) x
 $function$;
 
@@ -74,7 +71,10 @@ BEGIN
   IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
   SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
   -- Settled for the user already (an earlier refund, recovery, a normal close): the first outcome, nothing written.
-  IF t.state = 'closed' AND t.charged_credits IS NOT NULL THEN
+  -- Except a closed turn whose settlement is still pending 48 hours after the close (a tool or decision cost that never resolves, e.g. one
+  -- with a provider id): the user's charge is decided and stays, only the unknown supplier cost is released from the settlement.
+  IF t.state = 'closed' AND t.charged_credits IS NOT NULL
+    AND NOT (t.settlement = 'pending' AND t.closed_at < now() - interval '48 hours') THEN
     RETURN jsonb_build_object('refunded', false, 'reason', 'already_settled', 'turnId', t.id, 'chargedCredits', t.charged_credits);
   END IF;
   -- A turn still open must also have been idle for 24 hours (a jury review between two seat groups keeps writing its turn).
@@ -95,8 +95,16 @@ BEGIN
       usage = jsonb_build_object('source', 'admin_refund_all', 'settledAt', at_time, 'turnOpenedAt', t.opened_at, 'adminId', p_admin_id)
     WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND call_kind = 'model'
       AND ((status = 'unknown' AND cost_pending) OR status IN ('dispatched', 'identified'));
+  -- Tool and decision calls whose cost is still unknown (with or without a provider id): the user pays nothing for them, they stay
+  -- 'unknown' with no actual cost (never presumed free for the platform: the cost report keeps counting them) but stop holding the
+  -- turn's settlement and their stop-loss reservation.
+  UPDATE turn_calls SET cost_pending = false, settled_at = at_time,
+      usage = jsonb_build_object('source', 'admin_refund_all_cost_unknown', 'settledAt', at_time, 'turnOpenedAt', t.opened_at, 'adminId', p_admin_id)
+    WHERE actor_id = p_actor_id AND turn_id = p_turn_id AND call_kind IN ('tool', 'decision') AND status = 'unknown' AND cost_pending;
   IF t.state <> 'closed' THEN
     closed := public.turn_close(p_actor_id, p_turn_id, 'failed', '[]'::jsonb, false, true, 'admin_refund_all', NULL);
+  ELSIF t.charged_credits IS NOT NULL THEN
+    closed := public.turn_close(p_actor_id, p_turn_id, t.close_kind, '[]'::jsonb, false, false, NULL, NULL);
   ELSE
     UPDATE turns SET policy = policy || '{"closeRefundAll": true}'::jsonb WHERE actor_id = p_actor_id AND id = p_turn_id;
     closed := public.turn_close(p_actor_id, p_turn_id, t.close_kind, '[]'::jsonb, false, false, NULL, NULL);

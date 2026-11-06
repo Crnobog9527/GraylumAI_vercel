@@ -163,6 +163,24 @@ try{
    assert.equal((await refund(tt,admin)).reason,'already_settled');
   }
   assert.ok(closedTool);
+  // 5b. The same tool turn, its tool call carrying a provider id that never resolves, still pending 49 hours after the close: it is
+  // listed (the daily alert counts it) and the admin action closes it: the user's charge is untouched, the cost stays unknown.
+  assert.equal(toolRow.settlement,'pending');
+  await c.query("update turn_calls set provider_id='gen-tool-stuck' where turn_id=$1 and seq=2",[to.turnId]);
+  await c.query("update turns set opened_at=now()-interval '51 hours',updated_at=now()-interval '49 hours',closed_at=now()-interval '49 hours' where actor_id=$1 and id=$2",[tool.actor,to.turnId]);
+  const listedBefore=await stuck();
+  const balanceTool=await balance(tool),reservedTool=await reserved();
+  const outTool=await refund(tt,admin);assert.equal(outTool.refunded,true,JSON.stringify(outTool));
+  const after=await turn(tool,to.turnId);
+  assert.deepEqual([after.charged_credits,after.settlement],[toolRow.charged_credits,'done']);
+  assert.equal(await balance(tool),balanceTool,'the user pays nothing more and gets nothing back');
+  const kt=await c.query('select status,cost_pending,actual_usd,usage from turn_calls where turn_id=$1 and seq=2',[to.turnId]);
+  assert.deepEqual([kt.rows[0].status,kt.rows[0].cost_pending,kt.rows[0].actual_usd,kt.rows[0].usage.source],['unknown',false,null,'admin_refund_all_cost_unknown']);
+  assert.ok((await reserved())<reservedTool+1e-9,'the reservation is released');
+  assert.equal((await stuck()).total,listedBefore.total-1);
+  assert.equal(await audit(tt),1);
+  assert.equal((await refund(tt,admin)).reason,'already_settled');
+  report.checks.push('a charged turn whose tool call (with a provider id) stays pending 48 hours after the close is listed; the refund releases it (cost kept unknown, charge untouched, settlement done, one audit row, repeat changes nothing)');
   report.checks.push('a turn already settled for the user is not touched (balance, turn row and audit unchanged), also when only a tool cost is pending');
  }
  // 6. Only an active admin may refund; the audit id is the request id.

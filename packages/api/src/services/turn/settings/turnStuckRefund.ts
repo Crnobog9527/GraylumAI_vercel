@@ -6,7 +6,8 @@ import { logger } from '../../../lib/logger';
 /**
  * RECONCILE (b): turns whose credit freeze can stay for ever (an unknown model cost whose lookup never answers, or a turn nobody
  * closed). turn_admin_stuck_turns counts the turns opened 24 hours ago or more that are not closed (and idle for 24 hours), or closed with
- * the user's charge still undecided, or closed with the settlement still pending 48 hours after the close (the user already charged); turn_admin_refund_all is the admin action that settles them (the whole freeze returns, once, audit-logged).
+ * the user's charge still undecided, or closed with the settlement still pending 48 hours after the close (the user already charged);
+ * turn_admin_refund_all is the admin action that settles them (the whole freeze returns, or an unknown tool cost is released; once, audit-logged).
  * Both are SECURITY DEFINER functions for the service role (migration turn_admin_refund_all).
  */
 const count = z.number().int().nonnegative();

@@ -20,8 +20,5 @@ AS $function$
   -- recovery should have completed it within 24 hours; it holds no user credits but is never silent.
   SELECT t.opened_at FROM turns t
   WHERE t.settlement = 'pending' AND t.state = 'closed' AND t.charged_credits IS NOT NULL AND t.closed_at < now() - interval '48 hours'
-    -- only a pending call the 24-hour settlement can complete (no provider id): an alert here means recovery itself is stuck
-    AND EXISTS (SELECT 1 FROM turn_calls k WHERE k.turn_id = t.id AND k.cost_pending AND k.status = 'unknown' AND k.provider_id IS NULL
-      AND k.call_kind IN ('model', 'tool', 'decision'))
  ) x
 $function$;

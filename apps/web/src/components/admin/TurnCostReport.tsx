@@ -83,7 +83,8 @@ export function refundEligible(turn: { state: string; chargedCredits: number | n
   const opened = Date.parse(turn.openedAt), updated = Date.parse(turn.updatedAt);
   if (!Number.isFinite(opened) || now - opened < MANUAL_AFTER_MS) return false;
   // A turn still open must also have been idle for 24 hours (a jury review between two seat groups keeps writing its turn).
-  return turn.state === 'closed' ? turn.chargedCredits === null : Number.isFinite(updated) && now - updated >= MANUAL_AFTER_MS;
+  if (turn.state === 'closed') return turn.chargedCredits === null || (Number.isFinite(updated) && now - updated >= 2 * MANUAL_AFTER_MS);
+  return Number.isFinite(updated) && now - updated >= MANUAL_AFTER_MS;
 }
 
 const REFUND_REFUSALS: Record<string, string> = {

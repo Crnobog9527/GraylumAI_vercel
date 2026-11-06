@@ -89,6 +89,10 @@ describe('turn cost report cards', () => {
     expect(refundEligible(turn, opened + day - 1)).toBe(false);
     expect(refundEligible(turn, opened + day)).toBe(true);
     expect(refundEligible({ ...turn, chargedCredits: 5 }, opened + day)).toBe(false);
+    // Charged but still pending 48 hours after the close: the action releases the unknown supplier cost.
+    const settledAt = Date.parse(turn.updatedAt);
+    expect(refundEligible({ ...turn, chargedCredits: 5 }, settledAt + 2 * day - 1)).toBe(false);
+    expect(refundEligible({ ...turn, chargedCredits: 5 }, settledAt + 2 * day)).toBe(true);
     expect(refundEligible({ ...turn, state: 'running', updatedAt: '2026-11-03T03:50:33Z' }, opened + day)).toBe(true);
     expect(refundEligible({ ...turn, state: 'paused', chargedCredits: 3, updatedAt: '2026-11-03T03:50:33Z' }, opened + day)).toBe(true);
     // Open and written to within 24 hours (a jury review between two seat groups): not eligible.
@@ -100,8 +104,8 @@ describe('turn cost report cards', () => {
       inFlightCalls: 0, costPendingCalls: 1, ...over });
     fixture.unsettled = { available: true, total: 2, turns: [row(11, {}), row(12, { chargedCredits: 5 })] };
     const html = renderToStaticMarkup(<UnsettledTurnsCard />);
-    expect(html.match(/按回合全额退回并关闭/g)?.length).toBe(2); // the description and the one eligible row's button
-    expect(html.match(/<button/g)?.length).toBe(1);
+    expect(html.match(/按回合全额退回并关闭/g)?.length).toBe(3); // the description and the two eligible rows' buttons (row 12 charged, pending for months)
+    expect(html.match(/<button/g)?.length).toBe(2);
   });
   it('keeps every table inside a horizontally scrolling box so a narrow screen scrolls instead of squeezing the columns', () => {
     fixture.unsettled = { available: true, total: 1, turns: [{ turnId: 5, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending',
