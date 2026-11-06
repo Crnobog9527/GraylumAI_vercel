@@ -47,7 +47,8 @@ const psqlServerOnly = sql => docker(['exec', name, 'psql', '-X', '-q', '-A', '-
   '-c', sql]);
 const read = path => readFileSync(resolve(root, path), 'utf8');
 const readJson = path => JSON.parse(read(path));
-const errorLines = result => (result.stderr || '').split('\n').filter(Boolean).slice(0, 12);
+// NOTICE and LOCATION lines (verbose mode prints a LOCATION line per message) would fill the 12 lines before the ERROR they precede.
+const errorLines = result => (result.stderr || '').split('\n').filter(line => line && !/^(NOTICE|LOCATION|WARNING):/.test(line)).slice(0, 12);
 buildPlan(root); // rules for baseline and bridge files are checked before anything starts
 // Catalog fingerprint as { object key: definition } (fingerprint.sql up to its grouped output).
 const objectsSql = () => {

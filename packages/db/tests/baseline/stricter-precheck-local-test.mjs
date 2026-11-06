@@ -130,8 +130,13 @@ try {
       for (const field of fields) assert.ok(Number.isInteger(row[field]) && row[field] >= 0);
     }
   }
+  // 0204 (Waffo) retired three unique constraints and their indexes on purpose, replacing them by scoped unique indexes: of the 90 objects the
+  // precheck names, these six are absent from the final catalog, so they read as "missing" (nothing exists, nothing violates) rather than "present".
+  const retiredBy0204 = new Set(['con:payment_orders.payment_orders_stripe_checkout_session_id_key', 'idx:payment_orders.payment_orders_stripe_checkout_session_id_key',
+    'con:payment_orders.payment_orders_stripe_invoice_id_key', 'idx:payment_orders.payment_orders_stripe_invoice_id_key',
+    'con:user_subscriptions.user_subscriptions_stripe_subscription_id_key', 'idx:user_subscriptions.user_subscriptions_stripe_subscription_id_key']);
   for (const row of present) {
-    assert.equal(row.object_exists_count, 1, row.object_key);
+    assert.equal(row.object_exists_count, retiredBy0204.has(row.object_key) ? 0 : 1, row.object_key);
     for (const field of fields.slice(1)) assert.equal(row[field], 0, `${row.object_key}: ${field}`);
   }
   for (const row of missing) {

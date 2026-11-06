@@ -12,8 +12,17 @@ import {supersededPatch} from './md5-chain.mjs';
  * patches one of them (pg_get_functiondef of a dropped function, an ALTER of a dropped table) cannot run on the final catalog any more:
  * its target is gone, and 0505 drops whatever it would bring back. read(path) returns the migration text.
  */
-export const droppedByOldPathDrop = read => new Set([...read('packages/db/migrations/0505_core_path_v2_drop_old_path.sql')
-  .matchAll(/\bDROP\s+(?:FUNCTION|TABLE|TYPE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?/gi)].map(match => match[1]));
+export const droppedByOldPathDrop = read => {
+  const text = read('packages/db/migrations/0505_core_path_v2_drop_old_path.sql'), names = new Set();
+  // DROP TABLE / TYPE / VIEW name [, name ...]: one statement drops a list (the 15 tables are one statement).
+  for (const match of text.matchAll(/\bDROP\s+(?:TABLE|TYPE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+EXISTS\s+)?([^;]+);/gi))
+    for (const item of match[1].split(',')) {
+      const name = item.trim().replace(/\s+CASCADE\s*$/i, '').replace(/^public\./, '').replace(/"/g, '');
+      if (/^\w+$/.test(name)) names.add(name);
+    }
+  for (const match of text.matchAll(/\bDROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?\(/gi)) names.add(match[1]);
+  return names;
+};
 
 /**
  * The migration without the rows of its `FOR p IN SELECT * FROM (VALUES ('public.<function>(...)', anchor, replacement, marker), ...)` patch lists that
@@ -46,9 +55,11 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
   .map(name=>({name,sql:read('packages/db/migrations/'+name)}));
  // The md5 block of a patch superseded by a later md5 patch of the same function is left out only when the files prove
  // the chain and the database is at its tail; the rest of that migration still runs (md5-chain.mjs). Every skip is printed.
- const currentMd5=signature=>ok(sql(`SELECT md5(pg_get_functiondef('public.${signature}'::regprocedure));`));
+ // A function a migration patches may be gone (dropped by 0505): to_regprocedure answers NULL then, the patch is not "already at the chain end",
+ // and replaying it fails with "does not exist", which is tolerated below when the object was dropped by 0505.
+ const currentMd5=signature=>ok(sql(`SELECT md5(pg_get_functiondef(to_regprocedure('public.${signature}')));`));
  const hasMarker=(signature,marker)=>{assert.ok(!marker.includes('$md5_chain_marker$'));
-  return ok(sql(`SELECT position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef('public.${signature}'::regprocedure))>0;`))==='t';};
+  return ok(sql(`SELECT coalesce(position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef(to_regprocedure('public.${signature}')))>0,false);`))==='t';};
  report.skipped??=[];
  const dropped=droppedByOldPathDrop(read);
  const refusedSql=[],refusedNames=[];

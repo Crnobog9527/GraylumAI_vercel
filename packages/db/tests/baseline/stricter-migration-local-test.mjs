@@ -18,6 +18,16 @@ const migration = read(`packages/db/migrations/${migrationFiles[0]}`);
 const precheck = read('packages/db/tests/baseline/stricter-precheck.sql');
 const keys = [...precheck.matchAll(/'((?:con|idx):[^']+)'/g)].map(match => match[1]);
 assert.equal(new Set(keys).size, 90);
+// 0204 (Waffo) retired three unique constraints and their indexes of these 90 objects on purpose (scoped unique indexes replace them), so on the
+// final catalog re-applying 0152 recreates six objects the chain then drops again. The re-application below is therefore 0152 followed by exactly
+// those 0204 statements, as the real chain runs them; the six names come from the migration file, not from this test.
+const retired = [...read('packages/db/migrations/0204_pay_waffo_qualification.sql')
+  .matchAll(/^ALTER TABLE public\.(\w+) DROP CONSTRAINT IF EXISTS (\w+);\nDROP INDEX IF EXISTS public\.\2;$/gm)]
+  .filter(match => keys.includes(`con:${match[1]}.${match[2]}`));
+assert.equal(retired.length, 3, 'the three unique constraints 0204 retired');
+const retirement = retired.map(match => match[0]).join('\n');
+const retiredKeys = new Set(retired.flatMap(match => [`con:${match[1]}.${match[2]}`, `idx:${match[1]}.${match[2]}`]));
+const migrationAndRetirement = `${migration}\n${retirement}`;
 const quote = value => `'${value.replaceAll("'", "''")}'`;
 const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
 const catalog = `${fingerprint.slice(0, fingerprint.indexOf('-- FINAL'))}
@@ -31,7 +41,7 @@ BEGIN
     RAISE EXCEPTION 'stricter catalog mismatch: ${label}';
   END IF;
 END $test$;`;
-const remove = keys.map(key => {
+const remove = keys.filter(key => !retiredKeys.has(key)).map(key => {
   const [table, name] = key.split(':')[1].split('.');
   return key.startsWith('con:')
     ? `ALTER TABLE public.${table} DROP CONSTRAINT ${name};`
@@ -39,10 +49,10 @@ const remove = keys.map(key => {
 }).join('\n');
 const fixture = `CREATE TEMP TABLE stricter_test_snapshots(label text PRIMARY KEY, objects jsonb);
 ${capture('original')}
-${migration}
+${migrationAndRetirement}
 ${capture('no_op_once')}
 ${assertEqual('no_op_once')}
-${migration}
+${migrationAndRetirement}
 ${capture('no_op_twice')}
 ${assertEqual('no_op_twice')}
 -- Simulate exactly the controller-confirmed 90 absent catalog objects, without changing rows.
@@ -59,10 +69,10 @@ BEGIN
     RAISE EXCEPTION 'fixture did not remove exactly the expected 90 objects';
   END IF;
 END $test$;
-${migration}
+${migrationAndRetirement}
 ${capture('restored_once')}
 ${assertEqual('restored_once')}
-${migration}
+${migrationAndRetirement}
 ${capture('restored_twice')}
 ${assertEqual('restored_twice')}
 SELECT 'stricter migration: all four full-catalog comparisons passed';`;
