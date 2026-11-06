@@ -58,6 +58,25 @@ export async function workContentCases(t){
   await c.query('update opc_businesses set archived_at=now() where actor_id=$1',[w.actor]);
   assert.match(await refusal(save(w,{expected:e+2,id:r.id})),/OPC_BUSINESS_ARCHIVED/);
  }
+ // The size limit of a saved content (retired suite content-material, 0229): a body of exactly 20000 characters is saved, 20001 is refused, for a
+ // turn's reply and for a manual revision alike; a title of 160 is saved, 161 refused. Nothing is written by a refusal.
+ {
+  const w=await workspace(),count=async()=>Number(await one('select count(*) v from opc_content_versions where work_item_id=$1',[w.item]));
+  const exact=await turn(w,{text:'a'.repeat(20000)}),over=await turn(w,{text:'a'.repeat(20001)});
+  const first=await save(w,{expected:await latest(w,'script'),id:exact.id});
+  assert.equal(first.body.length,20000,'a reply of exactly 20000 characters is saved whole');
+  const before=await count();
+  assert.match(await refusal(save(w,{expected:await latest(w,'script'),id:over.id})),/OPC_CONTENT_INVALID/,'20001 characters are refused');
+  assert.equal(await count(),before,'a refusal writes nothing');
+  const e=await latest(w,'script');
+  const ok=await call('opc_content_manual_save($1,$2,$3,$4,$5,$6,$7,$8,$9)',[w.actor,w.item,randomUUID(),e,first.id,'script','final','t'.repeat(160),'b'.repeat(20000)]);
+  assert.deepEqual([ok.body.length,ok.version],[20000,e+1],'a manual revision of exactly 20000 characters with a 160-character title is saved');
+  const again=await latest(w,'script');
+  for(const [body,title] of [['b'.repeat(20001),'标题'],['b','t'.repeat(161)]])
+   assert.match(await refusal(call('opc_content_manual_save($1,$2,$3,$4,$5,$6,$7,$8,$9)',[w.actor,w.item,randomUUID(),again,first.id,'script','final',title,body])),/OPC_CONTENT_INVALID/);
+  assert.equal(await latest(w,'script'),again,'a refused manual revision writes nothing');
+  report.checks.push('content size: a reply or a manual revision of exactly 20000 characters is saved, 20001 refused (OPC_CONTENT_INVALID), a title of 160 saved and 161 refused; a refusal writes nothing');
+ }
  // A storyboard or editing saved from chat reads the source its turn froze; any other is refused.
  {
   const w=await workspace(),script=await save(w,{expected:await latest(w,'script'),id:(await turn(w)).id});
