@@ -74,6 +74,9 @@ export async function runCases(db,report){
 
  const credit=(await db.query('SELECT id FROM credit_transactions WHERE user_id=$1 ORDER BY id LIMIT 1',[f.actor])).rows[0].id;
  await db.query('UPDATE credit_transactions SET description=$2,metadata=$3 WHERE id=$1',[credit,CANARY,dirty]);
+ // The shared fixture no longer carries the pre-deduction row of the old billing run (CORE-PATH-V2 V2-12 F removed bill2_prepare from it); billing_history and
+ // its erasure scrub are still there, so this case inserts its own row.
+ f.pre=(await db.query("INSERT INTO billing_history(user_id,operation_type,amount,reason,metadata) VALUES($1,'pre_deduct',-6,'synthetic pre-deduction','{}'::jsonb) RETURNING id",[f.actor])).rows[0].id;
  await db.query('UPDATE billing_history SET reason=$2,metadata=metadata||$3::jsonb WHERE id=$1',[f.pre,CANARY,dirty]);
  const conv=randomUUID(),token=randomUUID();
  await db.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'synthetic')",[conv,f.actor]);
