@@ -109,11 +109,14 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
  // Every other object must be identical, so any other drift still fails. Each excluded object is recorded.
  const after=snapshot();
  const refusedText=refusedSql.join('\n');
- const explainedKey=k=>{const name=/^(?:fn|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(k)?.[1];
+ const explainedKey=k=>{const name=/^(?:fn|fnacl|con|trg|idx):(?:[\w]+\.)?([a-z_][a-z_0-9]*)/i.exec(k)?.[1];
   return Boolean(name&&new RegExp('\\b'+name+'\\b').test(refusedText));};
  const explained=Object.keys({...after,...finalCatalog}).filter(k=>after[k]!==finalCatalog[k]&&explainedKey(k));
  const expected={...finalCatalog};
  for(const k of explained){delete after[k];delete expected[k];}
  if(explained.length)report.skipped.push('not compared (named by refused replays '+refusedNames.join(', ')+'): '+explained.join(', '));
- assert.deepEqual(after,expected,'repeat '+base+' and every later migration preserves the complete final catalog');
+ // The deep-equal diff of a whole catalog is cut off by Node; name the differing objects (first 25) so a failure says which they are.
+ const drift=Object.keys({...after,...expected}).filter(k=>JSON.stringify(after[k])!==JSON.stringify(expected[k])).sort();
+ assert.equal(drift.length,0,'repeat '+base+' and every later migration preserves the complete final catalog; '+drift.length+' objects differ: '
+  +drift.slice(0,25).map(k=>k+' => '+String(after[k]??'(absent)').replace(/\s+/g,' ').slice(0,140)+' | expected '+String(expected[k]??'(absent)').replace(/\s+/g,' ').slice(0,140)).join(' ;; '));
 }
