@@ -85,6 +85,7 @@
     "./src/services/turn/admission/newWorkGate": "./src/services/turn/admission/newWorkGate.ts",
     "./src/services/redisRateLimiter": "./src/services/redisRateLimiter.ts",
     "./src/services/turn/settings/stopLossNotify": "./src/services/turn/settings/stopLossNotify.ts",
+    "./src/services/turn/settings/turnStuckRefund": "./src/services/turn/settings/turnStuckRefund.ts",
     "./src/services/fusion/background": "./src/services/fusion/background.ts",
     "./src/services/voice/recovery": "./src/services/voice/recovery.ts",
     "./src/services/research/priceRefresh": "./src/services/research/priceRefresh.ts",

@@ -75,15 +75,51 @@ export function needsManualSettlement(
     && Number.isFinite(opened) && now - opened >= MANUAL_AFTER_MS;
 }
 
-/** Read-only: the turns recovery has not closed or settled yet. Content-free; an operator matches them by id. */
+/**
+ * The turn's credit freeze can stay for ever: opened 24 hours ago or more and either still open and idle for 24 hours, or closed with the
+ * user's charge still undecided (an unknown model cost holds it). The same rule as the database function turn_admin_refund_all, which checks it again.
+ */
+export function refundEligible(turn: { state: string; chargedCredits: number | null; openedAt: string; updatedAt: string }, now = Date.now()) {
+  const opened = Date.parse(turn.openedAt), updated = Date.parse(turn.updatedAt);
+  if (!Number.isFinite(opened) || now - opened < MANUAL_AFTER_MS) return false;
+  // A turn still open must also have been idle for 24 hours (a jury review between two seat groups keeps writing its turn).
+  return turn.state === 'closed' ? turn.chargedCredits === null : Number.isFinite(updated) && now - updated >= MANUAL_AFTER_MS;
+}
+
+const REFUND_REFUSALS: Record<string, string> = {
+  TURN_TOO_YOUNG: '这个回合开轮不满 24 小时，不能退。', TURN_NOT_PENDING: '这个回合没有待结算的冻结，不需要退。',
+  TURN_DENIED: '没有权限，或回合不存在。', TURN_ADMIN_DENIED: '没有权限。', TURN_REFUND_INCOMPLETE: '没能退完，已整体回滚，什么都没有改。请稍后再试。',
+};
+
+/** The unsettled turns recovery has not closed or settled yet (content-free; an operator matches them by id). A turn whose freeze can stay
+ * for ever has the admin action "按回合全额退回并关闭" (idempotent, audit-logged). */
 function UnsettledTurnsList() {
   const view = trpc.billingReport.unsettledTurns.useQuery();
+  const utils = trpc.useUtils();
+  const [notes, setNotes] = useState<Record<number, string>>({});
+  const refund = trpc.billingReport.refundStuckTurn.useMutation({
+    onSuccess: (result) => {
+      setNotes((all) => ({ ...all, [result.turnId]: result.refunded ? `已退回并关闭：冻结 ${result.reservedCredits} 积分，实扣 ${result.chargedCredits} 积分。`
+        : '这个回合已经结清，没有再退。' }));
+      void utils.billingReport.unsettledTurns.invalidate();
+      void utils.billingReport.turnByModel.invalidate();
+    },
+    onError: (error, variables) => setNotes((all) => ({ ...all, [variables.turnId]: REFUND_REFUSALS[error.message] ?? '退回失败，请稍后重试。' })),
+  });
+  const confirmRefund = (turn: { turnId: number; actorId: string; reservedCredits: number }) => {
+    const question = `确认对回合 ${turn.turnId} 退回冻结并关闭？冻结 ${turn.reservedCredits} 积分，费用无法确定的调用按 0 结算后退回用户`
+      + '（报告类回合仍按报告的结算规则，完成后会显示实扣积分）；供应商如果已经扣费，由平台承担。此操作会留下审计记录，不能撤销。';
+    if (window.confirm(question)) {
+      refund.mutate({ actorId: turn.actorId, turnId: turn.turnId, reason: '管理员按回合全额退回并关闭' });
+    }
+  };
   const data = view.data;
   return <Card data-testid="unsettled-turns">
     <CardHeader>
       <CardTitle>未结清的对话回合</CardTitle>
       <CardDescription>还没关闭，或已关闭但费用没有结清的回合。系统会自动恢复和结算；
-      超过 24 小时仍查不到费用的标“需人工”，冻结不会自动释放。这里只读，用来上线后对账。</CardDescription>
+      超过 24 小时仍查不到费用的标“需人工”，冻结不会自动释放；开轮满 24 小时仍没结清用户积分的回合可以“按回合全额退回并关闭”
+      （冻结积分全部退回，每一笔都留审计记录，重复点击只退一次）。</CardDescription>
     </CardHeader>
     <CardContent className="space-y-2">
       {view.error ? <div role="alert">无法读取，请稍后重试。</div>
@@ -95,13 +131,16 @@ function UnsettledTurnsList() {
           <div className="overflow-x-auto"><table className="w-full min-w-max text-sm"><thead><tr>
             <th className="text-left">回合</th><th className="text-left">类型</th><th className="text-left">状态</th>
             <th className="text-left">结算</th><th className="text-right">冻结积分</th><th className="text-right">进行中调用</th>
-            <th className="text-right">费用待定调用</th><th className="text-left">最后更新</th>
+            <th className="text-right">费用待定调用</th><th className="text-left">最后更新</th><th className="text-left">操作</th>
           </tr></thead><tbody>{data.turns.map((turn) => <tr key={turn.turnId}>
             <td>{turn.turnId}</td><td>{turn.kind}</td><td>{turn.state}{turn.closeKind ? `（${turn.closeKind}）` : ''}</td>
             <td>{turn.settlement ?? '—'}
               {needsManualSettlement(turn) && <strong className="ml-1 text-red-600">需人工</strong>}</td><td className="text-right">{turn.reservedCredits}</td>
             <td className="text-right">{turn.inFlightCalls}</td><td className="text-right">{turn.costPendingCalls}</td>
             <td>{turn.updatedAt}</td>
+            <td>{refundEligible(turn) && <Button variant="outline" disabled={refund.isPending}
+              onClick={() => confirmRefund(turn)}>按回合全额退回并关闭</Button>}
+              {notes[turn.turnId] && <span role="status" className="ml-2 text-xs">{notes[turn.turnId]}</span>}</td>
           </tr>)}</tbody></table></div></>
         }
     </CardContent>

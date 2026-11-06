@@ -1,7 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { randomUUID } from 'node:crypto';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { router, adminProcedure } from '../trpc';
 import { absentRefundCalls, turnModelReport, unsettledTurns } from '../services/turn/settings/turnCostReport';
+import { refundStuckTurn, StuckTurnRefundError } from '../services/turn/settings/turnStuckRefund';
 
 import {
   absorbConfigSchema, absorbAckInput, readAbsorbConfig, saveAbsorbConfig,
@@ -29,4 +32,24 @@ export const billingReportRouter = router({
   unsettledTurns: adminProcedure.query(({ ctx }) => unsettledTurns(ctx.supabase)),
   // Read-only: calls settled at zero because the provider said "no such generation" (Owner 2026-11-03); each refund stays on record.
   absentRefunds: adminProcedure.query(({ ctx }) => absentRefundCalls(ctx.supabase)),
+  // RECONCILE (b): "按回合全额退回并关闭" for a turn whose freeze can stay for ever (open or undecided for 24 hours or more). Idempotent: a
+  // settled turn answers `refunded: false` and changes nothing; a younger one is refused. The database function checks the admin again.
+  refundStuckTurn: adminProcedure
+    .input(z.object({ actorId: z.string().uuid(), turnId: z.number().int().positive(), reason: z.string().trim().max(200).optional() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const result = await refundStuckTurn(ctx.supabase, { actorId: input.actorId, turnId: input.turnId, adminId: ctx.user.id,
+          requestId: randomUUID(), reason: input.reason });
+        if (!result.refunded && result.reason === 'too_young') throw new TRPCError({ code: 'BAD_REQUEST', message: 'TURN_TOO_YOUNG' });
+        if (!result.refunded && result.reason === 'not_pending') throw new TRPCError({ code: 'CONFLICT', message: 'TURN_NOT_PENDING' });
+        return result;
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        if (error instanceof StuckTurnRefundError) {
+          const denied = error.code === 'TURN_DENIED' || error.code === 'TURN_ADMIN_DENIED';
+          throw new TRPCError({ code: denied ? 'FORBIDDEN' : 'INTERNAL_SERVER_ERROR', message: error.code });
+        }
+        throw error;
+      }
+    }),
 });

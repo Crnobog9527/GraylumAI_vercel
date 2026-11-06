@@ -1,10 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { needsManualSettlement, TurnModelReportCard, UnsettledTurnsCard } from './TurnCostReport';
+import { needsManualSettlement, refundEligible, TurnModelReportCard, UnsettledTurnsCard } from './TurnCostReport';
 
 const fixture = vi.hoisted(() => ({ report: undefined as unknown, unsettled: undefined as unknown, absent: undefined as unknown }));
-vi.mock('@/trpc/client', () => ({ trpc: { billingReport: {
+vi.mock('@/trpc/client', () => ({ trpc: { useUtils: () => ({ billingReport: { unsettledTurns: { invalidate: vi.fn() }, turnByModel: { invalidate: vi.fn() } } }), billingReport: {
+  refundStuckTurn: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
   turnByModel: { useQuery: () => ({ data: fixture.report, error: null }) },
   unsettledTurns: { useQuery: () => ({ data: fixture.unsettled, error: null }) },
   absentRefunds: { useQuery: () => ({ data: fixture.absent, error: null }) },
@@ -81,6 +82,26 @@ describe('turn cost report cards', () => {
       closeKind: 'interrupted', openedAt: '2026-10-01T00:00:00Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 864, chargedCredits: null,
       failureCode: 'turn_call_unknown', inFlightCalls: 0, costPendingCalls: 1 }] };
     expect(renderToStaticMarkup(<UnsettledTurnsCard />)).toContain('需人工');
+  });
+  it('offers 按回合全额退回并关闭 only where the freeze can stay for ever (the database function checks again)', () => {
+    const day = 24 * 60 * 60 * 1000, opened = Date.parse('2026-11-03T03:50:33Z');
+    const turn = { state: 'closed', chargedCredits: null as number | null, openedAt: '2026-11-03T03:50:33Z', updatedAt: '2026-11-03T04:00:00Z' };
+    expect(refundEligible(turn, opened + day - 1)).toBe(false);
+    expect(refundEligible(turn, opened + day)).toBe(true);
+    expect(refundEligible({ ...turn, chargedCredits: 5 }, opened + day)).toBe(false);
+    expect(refundEligible({ ...turn, state: 'running', updatedAt: '2026-11-03T03:50:33Z' }, opened + day)).toBe(true);
+    expect(refundEligible({ ...turn, state: 'paused', chargedCredits: 3, updatedAt: '2026-11-03T03:50:33Z' }, opened + day)).toBe(true);
+    // Open and written to within 24 hours (a jury review between two seat groups): not eligible.
+    expect(refundEligible({ ...turn, state: 'paused', updatedAt: new Date(opened + day - 1000).toISOString() }, opened + day)).toBe(false);
+    expect(refundEligible({ ...turn, openedAt: 'x' }, opened + day)).toBe(false);
+    fixture.absent = { available: true, total: 0, calls: [] };
+    const row = (turnId: number, over: object) => ({ turnId, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending', closeKind: 'interrupted',
+      openedAt: '2026-10-01T00:00:00Z', updatedAt: '2026-11-03T04:00:00Z', reservedCredits: 60, chargedCredits: null, failureCode: null,
+      inFlightCalls: 0, costPendingCalls: 1, ...over });
+    fixture.unsettled = { available: true, total: 2, turns: [row(11, {}), row(12, { chargedCredits: 5 })] };
+    const html = renderToStaticMarkup(<UnsettledTurnsCard />);
+    expect(html.match(/按回合全额退回并关闭/g)?.length).toBe(2); // the description and the one eligible row's button
+    expect(html.match(/<button/g)?.length).toBe(1);
   });
   it('keeps every table inside a horizontally scrolling box so a narrow screen scrolls instead of squeezing the columns', () => {
     fixture.unsettled = { available: true, total: 1, turns: [{ turnId: 5, actorId: 'a', kind: 'chat', state: 'closed', settlement: 'pending',
