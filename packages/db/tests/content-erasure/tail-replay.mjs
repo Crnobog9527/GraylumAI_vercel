@@ -87,11 +87,11 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
     END $stub$;`));
   const replayResult=sql(superseded.skip?superseded.rest:replay);
   // An anchored patch refuses (an error code containing PATCH, or SOURCE_MISMATCH, or 0328's own gate refusal) when a still
-  // later migration already rewrote the text it anchors on (0307 after 0338, 0328 after 0329/0330/0335, 0391 after any later rewrite of atomic_pre_deduct / bill2_payg_claim). Only those named
+  // later migration already rewrote the text it anchors on (0307 after 0338, 0328 after 0329/0330/0335, 0391 after any later rewrite of atomic_pre_deduct / bill2_payg_claim, CONTENT_ERASURE_SPEED_MISMATCH of the speed patch of content_erasure_scope after 0505 rewrote it). Only those named
   // refusals are tolerated, never for the re-applied migration
   // itself, each one is printed and recorded, and the catalog equality below must still hold.
   const refusal=replayResult.status!==0&&tail[i].name!==base
-   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
+   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH|SPEED_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
   // A migration from before 0505 that patches an object 0505 later dropped (the old Runtime / BILL2 path) fails with "does not exist" naming it:
   // the target is gone from the final catalog and 0505, replayed later in this tail, drops anything such a migration would bring back.
   // The first ERROR line names the object: "function ... does not exist", "relation ...", "type ...", or a guard of the migration itself (such as
