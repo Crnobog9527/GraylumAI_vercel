@@ -100,11 +100,12 @@ describe('landing price cards', () => {
     expect(buildLandingPricing([plan('gold', 69, 621), plan('gold', 59, 600)]).cards).toEqual([]);
   });
 
-  it('lists the same prices for the SoftwareApplication JSON-LD', () => {
-    expect(landingOfferList(buildLandingPricing(CATALOG))).toEqual([
-      { name: '免费', price: 0 }, { name: 'Pro 月付', price: 29 }, { name: 'Pro 年付', price: 279 },
-      { name: 'Gold 月付', price: 69 }, { name: 'Gold 年付', price: 621 },
-    ]);
+  it('lists only the prices the home page shows for the SoftwareApplication JSON-LD (free and "$29/月起")', () => {
+    const shown = [{ name: '免费', price: 0 }, { name: 'Pro 月付', price: 29 }];
+    expect(landingOfferList(buildLandingPricing(CATALOG))).toEqual(shown);
+    // LANDING_PROMO_OFFERS on: the Gold first month is on the pricing page, never in the home page's structured data.
+    expect(landingOfferList(buildLandingPricing(CATALOG, { goldFirstMonth: 49 }))).toEqual(shown);
+    expect(landingOfferList(buildLandingPricing([]))).toEqual([{ name: '免费', price: 0 }]);
   });
 });
 
