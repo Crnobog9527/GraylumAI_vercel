@@ -35,6 +35,16 @@ const safe={preDeductId:'synthetic-pre',requestId:'synthetic-request',balance_be
  usage:{inputTokens:3,output_tokens:'4',prompt_tokens_details:{cached_tokens:0},
  agentKeyCost:{unit:'agentkey-credit',quoted:2,actual:'1',status:'reported'},
  pricing,usageEvidence:providerUsage,generationId:'synthetic-generation',executionId:'synthetic-execution'},pricing};
+/** The value with every modelId / providerModel replaced by its alias (public.model_usage_alias), as token_stats stores it. */
+async function aliased(db,value){
+ if(Array.isArray(value))return Promise.all(value.map(item=>aliased(db,item)));
+ if(value===null||typeof value!=='object')return value;
+ const out={};
+ for(const [key,item] of Object.entries(value))
+  out[key]=(key==='modelId'||key==='providerModel')&&typeof item==='string'
+   ?(await db.query('SELECT public.model_usage_alias($1) a',[item])).rows[0].a:await aliased(db,item);
+ return out;
+}
 const dirtyProvider={...providerUsage,body:CANARY,openRouterCost:{...providerUsage.openRouterCost,body:CANARY}};
 const dirtyPricing={...pricing,body:CANARY,rates:{...pricing.rates,body:CANARY},
  settings:{...pricing.settings,body:CANARY},pricing:{...pricing.pricing,body:CANARY}};
@@ -96,7 +106,10 @@ export async function runCases(db,report){
   const after=await row(db,table,id);
   assert.ok(after.content_erased_at);assert.doesNotMatch(JSON.stringify(after),/LEDGER_PRIVATE_CANARY/);
   assert.deepEqual(financial(after,cols),financial(before[i],cols),'amount, classifications, bindings and timestamps unchanged');
-  for(const [key,value] of Object.entries(safe))assert.deepEqual(after.metadata[key],value,key);
+  // token_stats alone carries model names in its metadata, and 0217's trigger stores them as aliases (model_usage_alias): the same projection
+  // with the names replaced, nothing else changed. The other three tables keep the original names.
+  const expected=table==='token_stats'?await aliased(db,safe):safe;
+  for(const [key,value] of Object.entries(expected))assert.deepEqual(after.metadata[key],value,key);
   const repeated=await scrub(db,f.actor,table);assert.equal(repeated.processed,0);assert.equal(repeated.remaining,0);
   assert.deepEqual(await row(db,table,id),after,'replay does not alter marker or financial fields');
   await assert.rejects(db.query(`UPDATE ${table} SET content_erased_at=NULL WHERE id=$1`,[id]),/ERASURE_LEDGER_IMMUTABLE/);
