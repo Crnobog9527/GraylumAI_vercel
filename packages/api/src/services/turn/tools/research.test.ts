@@ -5,6 +5,7 @@ import type { ResearchToolsConfig } from '../../research/vendors/config';
 import type { CounterStore } from '../limiter';
 import { NO_DATA_REASON, researchTools, type ResearchToolsInput } from './research';
 import { supplierSubcall, type SupplierDeps } from './suppliers';
+import { callFirecrawl, FIRECRAWL_ROUTE } from '../../research/vendors/firecrawl';
 import { freeSlots, ledger, policy, result } from './__tests__/fixtures';
 
 const config: ResearchToolsConfig = {
@@ -216,5 +217,43 @@ describe('refs are unique across the research calls of a turn', () => {
     const second = JSON.parse(await s.tool('social_search').execute({ platform: 'xiaohongshu', keywords: ['c'], limit: null }, 'c2'));
     const refs = [...first.items, ...second.items].map((item: { fields: { ref: string } }) => item.fields.ref);
     expect(refs).toEqual(['c1s1#1', 'c1s2#1', 'c2s1#1']);
+  });
+});
+
+describe('web_fetch on the response Firecrawl really sends (staging 2026-11-06: every fetch ended unknown)', () => {
+  // The documented scrape response: success and data, no credits field. Resolved to a public address so no DNS is used.
+  const page = { success: true, data: { markdown: '# Example Domain\n\nThis domain is for use in illustrative examples in documents.',
+    metadata: { title: 'Example Domain', language: 'en', sourceURL: 'https://example.com/', statusCode: 200 } } };
+  const firecrawlConfig: ResearchToolsConfig = { ...config, routes: [...config.routes,
+    { platform: 'web', kind: 'web_fetch', vendor: 'firecrawl', route: FIRECRAWL_ROUTE, backup: null, maxUnitsPerCall: '1' }] };
+  const fetchWith = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+  const run = (body: unknown, status = 200) => {
+    const h = ledger();
+    const outcomes: string[] = [];
+    const real: VendorCalls = { ...vendors(vi.fn()), firecrawl: (url, deps) => callFirecrawl(url, { ...deps,
+      fetchImpl: fetchWith(body, status), resolveHost: async () => ['93.184.215.14'] }) };
+    const tools = researchTools({ calls: h.deps, config: firecrawlConfig, names: ['web_fetch'], offered: ['web_fetch'], maxCalls: 3,
+      maxSubcalls: 12, suppliers: { keys: { firecrawl: 'K' }, slots: freeSlots, policies: [policy('firecrawl', FIRECRAWL_ROUTE, '0.001', '6')],
+        vendors: real },
+      accounts: { benchmark: [], currentMessage: '' }, onOutcome: (_n, outcome) => outcomes.push(outcome) });
+    return { h, outcomes, call: async () => parse(await tools[0]!.execute({ url: 'https://example.com/' }, 'c1')) };
+  };
+
+  it('delivers the page: status ok with its text, one settled receipt at one credit, billed to the user', async () => {
+    const s = run(page);
+    const out = await s.call();
+    expect(out.status).toBe('ok');
+    expect(out.items).toHaveLength(1);
+    expect(s.outcomes).toEqual(['delivered']);
+    expect(s.h.kinds()).toEqual(['begin', 'record:ok']);
+    // One credit at the frozen 0.001 per credit, at the row's multiplier of 6.
+    expect(s.h.writes[1]![1]).toMatchObject({ nominalUsd: '0.001', actualUsd: '0.001', providerId: null });
+  });
+
+  it('a Firecrawl failure that may have been billed with no price still settles unknown at 0 for the user (never presumed free)', async () => {
+    const s = run({ success: false, error: 'down' }, 503);
+    expect(await s.call()).toMatchObject({ status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN' });
+    expect(s.outcomes).toEqual(['unknown']);
+    expect(s.h.kinds()).toEqual(['begin']);
   });
 });

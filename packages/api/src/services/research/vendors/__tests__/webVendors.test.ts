@@ -2,7 +2,7 @@
 // Parallel and Firecrawl adapters against fetch doubles; response shapes follow RESEARCH-0 (#466, #465).
 import { describe, expect, it } from 'vitest';
 import { buildParallelRequest, callParallel, parallelModeFor, parallelUsage } from '../parallel';
-import { buildFirecrawlRequest, callFirecrawl, firecrawlCredits, MAX_MARKDOWN_BYTES } from '../firecrawl';
+import { buildFirecrawlRequest, callFirecrawl, firecrawlCredits, FIRECRAWL_SCRAPE_CREDITS, MAX_MARKDOWN_BYTES, scrapeCredits } from '../firecrawl';
 import { mayHaveBilled, nonPublicIp, usageUnits } from '../http';
 import { FIXED_NOW, hangingFetch, jsonFetch, type RecordedCall } from './fetchDoubles';
 
@@ -249,8 +249,59 @@ describe('callFirecrawl', () => {
     expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, blank)))).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 
-  it('keeps missing credits null on success', async () => {
+  // Until 2026-11-06 this said "keeps missing credits null on success": the response has no credits field, so every real fetch was unpriced
+  // and settled unknown. A success whose response names no credits is the documented one credit; a malformed field stays null (below).
+  it('prices a success whose response names no credits at the documented one credit', async () => {
     const result = await callFirecrawl('https://example.com/a', deps(jsonFetch(200, { success: true, data: { markdown: 'hi', metadata: {} } })));
-    expect(result).toMatchObject({ outcome: 'ok', usage: { units: null } });
+    expect(result).toMatchObject({ outcome: 'ok', usage: { units: '1' } });
+  });
+});
+
+/**
+ * Firecrawl's scrape response as its documentation shapes it (docs.firecrawl.dev v1 and v2 scrape pages, 2026-11-06): `success` and
+ * `data` with `markdown` and `metadata`, and no credits field anywhere. Staging 2026-11-05/06 (turns 6626, 6639): every real fetch was
+ * unpriced, so the call settled "unknown" with the page delivered. The other tests above carry a top-level `creditsUsed` the real API
+ * does not send.
+ */
+describe('callFirecrawl on the response the real API sends (no credits field)', () => {
+  const real = (metadata: Record<string, unknown> = {}) => ({ success: true, data: {
+    markdown: '# Example Domain\n\nThis domain is for use in illustrative examples in documents.',
+    metadata: { title: 'Example Domain', language: 'en', sourceURL: 'https://example.com/', url: 'https://example.com/', statusCode: 200,
+      contentType: 'text/html; charset=UTF-8', ...metadata } } });
+
+  it('prices the answered page at the documented one credit, so the call settles and is not unknown', async () => {
+    const result = await callFirecrawl('https://example.com/', deps(jsonFetch(200, real())));
+    expect(result).toMatchObject({ outcome: 'ok', reason: null, supplierMayCharge: true, usage: { unit: 'credit', units: '1' } });
+    expect(result.items[0]!.fields).toMatchObject({ title: 'Example Domain', language: 'en' });
+    expect(FIRECRAWL_SCRAPE_CREDITS).toBe('1');
+  });
+
+  it('an official top-level creditsUsed still wins; a malformed one stays unpriced, never replaced by the constant', async () => {
+    expect((await callFirecrawl('https://example.com/', deps(jsonFetch(200, { ...real(), creditsUsed: 2 })))).usage.units).toBe('2');
+    for (const bad of [-1, 'x', null, 1e21]) {
+      expect((await callFirecrawl('https://example.com/', deps(jsonFetch(200, { ...real(), creditsUsed: bad })))).usage.units).toBeNull();
+    }
+    expect(scrapeCredits({})).toBe('1');
+    expect(scrapeCredits({ creditsUsed: 3 })).toBe('3');
+  });
+
+  it('a credits value planted in the page metadata is never read as the receipt', async () => {
+    const result = await callFirecrawl('https://example.com/', deps(jsonFetch(200, real({ creditsUsed: 0 }))));
+    expect(result.usage.units).toBe('1');
+    expect(firecrawlCredits(real({ creditsUsed: 0 }))).toBeNull();
+  });
+
+  it('the cases Firecrawl still bills are priced at the same one credit: a target 404, a PDF body, an empty page', async () => {
+    expect(await callFirecrawl('https://example.com/x', deps(jsonFetch(200, real({ statusCode: 404 })))))
+      .toMatchObject({ outcome: 'failed', reason: 'TARGET_HTTP_404', supplierMayCharge: true, usage: { unit: 'credit', units: '1' } });
+    expect(await callFirecrawl('https://example.com/x', deps(jsonFetch(200, { success: true, data: { markdown: '%PDF-1.7 ...', metadata: {} } }))))
+      .toMatchObject({ outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', usage: { units: '1' } });
+    expect(await callFirecrawl('https://example.com/x', deps(jsonFetch(200, { success: true, data: { markdown: '  ', metadata: {} } }))))
+      .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', usage: { units: '1' } });
+  });
+
+  it('a request that failed at Firecrawl keeps no invented price: a 5xx stays unpriced, so the call stays unknown', async () => {
+    expect(await callFirecrawl('https://example.com/', deps(jsonFetch(503, { success: false, error: 'down' }))))
+      .toMatchObject({ outcome: 'failed', supplierMayCharge: true, usage: { unit: 'credit', units: null } });
   });
 });
