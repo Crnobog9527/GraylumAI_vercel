@@ -59,7 +59,12 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before });
+  // 0224's account_erasure_preview counts the runs in flight from bill2_runs (dropped by 0505, where the count became the open turns). That one
+  // subselect is the only part of 0224 that names a dropped table; the re-applied text counts turns, as the final catalog does.
+  const replayed = read(migrationPath).replace(/'runsInFlight', \(SELECT count\(\*\) FROM public\.bill2_runs r\s+WHERE r\.actor_id = p_profile_id AND r\.state IN \([^)]*\)\),/,
+    "'runsInFlight', (SELECT count(*) FROM public.turns t WHERE t.actor_id = p_profile_id AND (t.state <> 'closed' OR t.settlement = 'pending')),");
+  assert.notEqual(replayed, read(migrationPath), 'the bill2_runs count was replaced');
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: before, first: replayed });
   report.checks.push('0224 reapplication with all later migrations preserves the complete catalog');
 
   for (const role of ['anon', 'authenticated']) {
@@ -146,7 +151,7 @@ try {
   await c.query(read('packages/db/tests/erasure-renewal/rollback.sql'));
   assert.equal((await preview(rollbackUser)).subscriptionRenewing, false, 'old rule misses Waffo (the bug)');
   assert.equal((await preview(rollbackUser)).renewalChannels, undefined);
-  await replayMigrationTail(db, { migrationPath, report, finalCatalog: fixed });
+  await replayMigrationTail(db, { migrationPath, report, finalCatalog: fixed, first: replayed });
   await expectBlocked(rollbackUser, ['waffo']);
   report.checks.push('rollback restores the old definitions without data changes; reapplying 0224 restores the block');
 

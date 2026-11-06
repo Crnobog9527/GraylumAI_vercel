@@ -94,10 +94,13 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
    ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH|MAINT_P4_BASE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
   // A migration from before 0505 that patches an object 0505 later dropped (the old Runtime / BILL2 path) fails with "does not exist" naming it:
   // the target is gone from the final catalog and 0505, replayed later in this tail, drops anything such a migration would bring back.
-  const gone=replayResult.status!==0&&!refusal&&tail[i].name!==base?/ERROR:\s+(?:function|relation|type|table)\s+"?(?:public\.)?(\w+)/.exec(replayResult.stderr??''):null;
+  // The first ERROR line names the object: "function ... does not exist", "relation ...", "type ...", or a guard of the migration itself (such as
+  // OPC_ARCHIVE_FUNCTION_MISSING: opc_save_result); any identifier on it that 0505 dropped counts.
+  const gone=replayResult.status!==0&&!refusal&&tail[i].name!==base
+   ?[.../ERROR:[^\n]*/.exec(replayResult.stderr??'')?.[0].matchAll(/[a-z_][a-z_0-9]*/gi)??[]].map(token=>token[0]).filter(token=>dropped.has(token)).slice(0,1):[];
   if(refusal){const reason=tail[i].name+': anchored patch refused on the final catalog ('+refusal[1]+'), a later migration rewrote its anchor; not replayed';
    console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
-  else if(gone&&dropped.has(gone[1])){const reason=tail[i].name+': its patch target '+gone[1]+' was dropped by 0505 (old Runtime / BILL2 path); not replayed';
+  else if(gone.length){const reason=tail[i].name+': its patch target '+gone[0]+' was dropped by 0505 (old Runtime / BILL2 path); not replayed';
    console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
   else ok(replayResult);
  }

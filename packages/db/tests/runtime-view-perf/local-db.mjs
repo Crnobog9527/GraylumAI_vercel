@@ -114,11 +114,11 @@ export function snapshotFromEnv() {
  * migration it could not replay is recorded in report.skipped. finalCatalog: the catalog to land on (default: the catalog now, which is
  * what a plain re-application check wants); pass the catalog taken before a rollback when the replay is the recovery from that rollback.
  */
-export async function replayMigrationTail(db, { migrationPath, report, finalCatalog }) {
+export async function replayMigrationTail(db, { migrationPath, report, finalCatalog, first }) {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const objectSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
   const sql = input => { try { return { status: 0, stdout: db.sql(input), stderr: '' }; } catch (error) { return { status: 1, stdout: '', stderr: String(error.message) }; } };
   const ok = result => { if (result.status !== 0) throw new Error(result.stderr); return result.stdout; };
   const snapshot = () => JSON.parse(ok(sql(objectSql)));
-  await replayTail({ root, read, sql, ok, snapshot, finalCatalog: finalCatalog ?? snapshot(), report, migrationPath, first: read(migrationPath) });
+  await replayTail({ root, read, sql, ok, snapshot, finalCatalog: finalCatalog ?? snapshot(), report, migrationPath, first: first ?? read(migrationPath) });
 }
