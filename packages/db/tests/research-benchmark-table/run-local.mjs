@@ -126,5 +126,34 @@ try{
   assert.match(await refusal(offer(enough)),/RESEARCH_SHORTFALL_NOT_DUE/,'with 3 qualified benchmarks there is nothing to offer');
   report.checks.push('fallback card: due with 1-2 qualified and 2 rounds; owner-only; the choice is frozen and repeatable; generate needs 1 qualified and 2 rounds and is accepted only for the required count it was offered for');
  }
+ // 5. Deletion: the benchmark table, its fetches, the fallback card and the discoveries go with a deleted conversation, and with an erased account;
+ // nothing of another conversation or account is touched. (content_erasure_confirm / account_erasure_scrub_content delete them; no other suite asserts it.)
+ {
+  const rich=async()=>{const s=await session();await bench(s);await bench(s,{qualified:false,followers:300});await round(s);await round(s);
+   await c.query('select research_benchmark_shortfall_offer($1,$2,null,$3)',[s.actor,s.id,randomUUID()]);return s;};
+  const counts=async s=>({benchmarks:Number(await one('select count(*) v from research_benchmarks where session_id=$1',[s.id])),
+   fetches:Number(await one('select count(*) v from research_account_fetches where session_id=$1',[s.id])),
+   cards:Number(await one('select count(*) v from research_benchmark_shortfalls where session_id=$1',[s.id])),
+   discoveries:Number(await one('select count(*) v from research_discoveries where session_id=$1',[s.id]))});
+  const gone={benchmarks:0,fetches:0,cards:0,discoveries:0};
+  // The conversation: marked (hidden at once), then cleaned by the sweep.
+  const doomed=await rich(),keeper=await rich(),kept=await counts(keeper);
+  assert.deepEqual(kept,{benchmarks:2,fetches:2,cards:1,discoveries:2},'the fixture holds what a research conversation holds');
+  assert.equal((await one('select content_erasure_mark_session($1,$2) v',[doomed.actor,doomed.id])).status,'deleted');
+  assert.match(await refusal(c.query('select research_benchmark_rows($1,$2)',[doomed.actor,doomed.id])),/RESEARCH_SCOPE_DENIED/,'a deleted conversation\'s table cannot be read any more');
+  await one('select content_erasure_sweep_sessions(200,null,null) v');
+  assert.deepEqual(await counts(doomed),gone,'the cleanup removed the table, its fetches, the card and the discoveries of the deleted conversation');
+  assert.deepEqual(await counts(keeper),kept,'another conversation is untouched');
+  // The account: closed, then its content scrubbed.
+  const erased=await rich(),bystander=await rich(),bystanderCounts=await counts(bystander);
+  await c.query("update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1",[erased.actor]);
+  await c.query("insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now()-interval '1 minute')",[erased.actor,randomUUID()]);
+  const scrub=await one('select account_erasure_scrub_content($1) v',[erased.actor]);
+  assert.ok(!scrub.retry,'the scrub ran (not asked to retry)');
+  assert.equal(scrub.research_benchmarks_deleted,2,'the scrub says how many benchmark rows it deleted');
+  assert.deepEqual(await counts(erased),gone,'an erased account keeps no benchmark row, fetch, card or discovery');
+  assert.deepEqual(await counts(bystander),bystanderCounts,'another account is untouched');
+  report.checks.push('deletion: a deleted conversation hides its table at once and its cleanup removes benchmarks, fetches, card and discoveries; an erased account keeps none; others untouched');
+ }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}
