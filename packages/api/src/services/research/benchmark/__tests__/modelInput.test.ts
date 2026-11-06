@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Must-test 5 at the model boundary: no research tool accepts a benchmark number from the model. The table itself
-// (0268) is filled only from fetched evidence; packages/db/tests/research-benchmarks covers the database side.
+// (0268) is filled only from fetched evidence; packages/db/tests/research-benchmark-table covers the database side.
 import { describe, expect, it } from 'vitest';
 import { POSITIONING_RESEARCH_TOOLS, researchToolArgs } from '../../tools/schemas';
 
