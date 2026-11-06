@@ -63,7 +63,7 @@ try {
   copyFileSync(resolve(root, 'scripts/e2e-sim/preload.cjs'), preload);
   if (/\s/.test(preload)) throw new Error('the temporary directory path contains spaces');
   const appEnv = { ...baseEnv, ...stack.redis, NODE_ENV: 'development', NODE_OPTIONS: devServerNodeOptions(preload),
-    SIM_ORIGIN: simOrigin, NEXT_PUBLIC_SUPABASE_URL: stack.apiUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: stack.jwt('anon'),
+    SIM_ORIGIN: simOrigin, SIM_KEEP_COMPILED: '1', NEXT_PUBLIC_SUPABASE_URL: stack.apiUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: stack.jwt('anon'),
     // Session start and view procedures admit a loopback deployment through this switch (as the workbench runs do) instead of the
     // staging window; the turn path (/api/turn) does not read it.
     V3_RUNTIME_LOCAL_ENDPOINT: stack.apiUrl,
