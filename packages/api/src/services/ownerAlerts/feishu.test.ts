@@ -39,7 +39,7 @@ describe('sendFeishu', () => {
     const fetch = async () => answer({ code: 19021, msg: 'sign match fail or timestamp is not within one hour' });
     const failure = sendFeishu(config, 'x', { fetch: fetch as never, now });
     await expect(failure).rejects.toThrow('FEISHU_REFUSED_19021');
-    const error = await failure.catch(e => e as Error);
+    const error = await failure.then(() => new Error("resolved"), (e: unknown) => e as Error);
     expect(String(error.message)).not.toContain('test-hook');
     expect(String(error.message)).not.toContain('demo');
   });
@@ -50,7 +50,7 @@ describe('sendFeishu', () => {
     await expect(sendFeishu(config, 'x', { fetch: (async () => new Response('<html>')) as never, now }))
       .rejects.toThrow('FEISHU_UNEXPECTED_BODY');
     const down = async () => { throw new TypeError(`fetch failed ${HOOK}`); };
-    const error = await sendFeishu(config, 'x', { fetch: down as never, now }).catch(e => e as Error);
+    const error = await sendFeishu(config, 'x', { fetch: down as never, now }).then(() => new Error("resolved"), (e: unknown) => e as Error);
     expect(error.message).toBe('FEISHU_REQUEST_FAILED');
   });
 });
