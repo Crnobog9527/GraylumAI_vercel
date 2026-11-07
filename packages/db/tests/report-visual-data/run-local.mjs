@@ -25,8 +25,6 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0300_report_strategy_data.sql';
-const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -44,14 +42,8 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- ok(sql(migration));
- const finalCatalog=snapshot();
- ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0300 preserves complete catalog');
- report.checks.push('0300 applied twice after current staging; complete catalog unchanged');
- // The replay brought back 0300's report_document and report_body_complete (old executions): restore the final text (0432, 0456).
- for(const name of ['report_body_complete','report_final_data','report_final_snapshot','report_document_source','report_document_data_source','report_document'])
-  ok(sql(read(`packages/db/functions/report/${name}.sql`)));
+ // 0300 itself is not replayed any more: it declares a variable of the dropped type runtime_executions (0505), so it cannot run on the final
+ // catalog, and the functions it rewrote have been rewritten since (0432, 0456). The cases below run on the final report functions.
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

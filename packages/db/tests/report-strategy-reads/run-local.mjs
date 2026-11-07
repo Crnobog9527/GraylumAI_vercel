@@ -25,8 +25,6 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0301_report_strategy_reads.sql';
-const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -44,11 +42,8 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- ok(sql(migration));
- const finalCatalog=snapshot();
- ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat migration preserves complete catalog');
- report.checks.push('migration applied twice after current staging; complete catalog unchanged');
+ // 0301 itself is not replayed any more: it rebuilds runtime_workspace_source with a body that reads the dropped runtime_executions, and the replay
+ // would overwrite the final function (0484). The cases below run on the final functions.
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -56,13 +51,8 @@ try {
  client=new Client({connectionString});await client.connect();
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await client.query(read('packages/db/tests/workspace-positioning/fixture.sql'));
- // The pre-fix definition (0299), to show the gap this migration closes (rolled back inside the case).
- const before=read('packages/db/migrations/0299_runtime_workspace_benchmarks.sql');
- const start=before.indexOf('CREATE OR REPLACE FUNCTION runtime_workspace_source(');
- const oldDefinition=before.slice(start,before.indexOf('END $$;',start)+'END $$;'.length);
- assert.ok(start>0&&oldDefinition.includes("'positioning'"));
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
- await runCases({db:client,Client,connectionString,report,before0301:oldDefinition});
+ await runCases({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}
