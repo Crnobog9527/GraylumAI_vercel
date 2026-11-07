@@ -8,8 +8,6 @@
   "content-erasure/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "data-use-consent/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "entitlements/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "erasure-b2a/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
-  "erasure-inflight/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "erasure-ledger/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "erasure-offdb-manifest/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
   "erasure-opc-draft/run-local.mjs": "not yet verified under --ci (MAINT-P1 batch 1 wires 11 suites); add --ci support, then remove this entry — 2026-10-25",
