@@ -92,8 +92,13 @@ Owner 原话（2026-11-07，Owner 的需求简报和总控转达；"greenlam" �
 
 - 范围：付款、退款、拒付、对账、止损和平台垫付、网站报错激增等业务告警，用一两句中文大白话加后台链接，发到 Graylum 飞书群的自定义机器人（开签名校验）；告警种类、阈值和示例消息见 ALERT-FEISHU 的 PR。设计和 Shotviva T72 一致。
 - Sentry 照常收集错误给开发看，只是不再给 Owner 发邮件。
-- 取代：上线周告警邮件（Sentry 项目 graylumai-main 的邮件规则）不再作为 Owner 的告警渠道。**但要先在 staging 收到测试告警、确认飞书能用，Owner 再自己去关 Sentry 邮件**；关之前两边都发。止损邮件（Resend）在飞书验证前也照发。
-- 两个环境变量 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET` 由 Owner 自己填进 Vercel（先 staging，建库日再填正式），值不进聊天、PR 和日志。
+- 只配正式环境（Owner 2026-11-07 补充，总控转达）：
+
+  > 飞书的这个机器人只配置给生产环境，项目 staging 不要用。
+
+  staging 不设这两个变量，代码在没设时静默跳过。
+- 取代：上线周告警邮件（Sentry 项目 graylumai-main 的邮件规则）不再作为 Owner 的告警渠道。**但要先在正式站冒烟时（REL-1 第 4.1 节 K10、建库准备第 36 步）收到飞书测试告警，再收到过一两条真实告警，Owner 再自己去关 Sentry 邮件**；关之前两边都发。止损邮件（Resend）照发。
+- 两个环境变量 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET` 由 Owner 在建库日自己填进正式 Vercel（REL-1-BUILD-PREP 第 24 步、REL-1 V1），值不进聊天、PR 和日志。
 
 **2026-11-07：上线前接入 Anthropic、OpenAI 官方 API 额度（BILL-BYOK，计费改动）**
 

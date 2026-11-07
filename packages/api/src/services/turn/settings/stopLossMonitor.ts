@@ -66,7 +66,8 @@ export async function testRuntimeStopLoss(ctx: DiagnosticContext): Promise<Diagn
     // Delivery runs after the checks and never changes their result; failures stay on the alert rows.
     const notice = await deliverStopLossAlerts(ctx.supabaseAdmin);
     const noticeFailed = notice.outcome === 'not_sent';
-    // ALERT-FEISHU staging check: an admin running this check by hand also gets one Feishu test message (never the daily cron).
+    // ALERT-FEISHU smoke check (REL-1 K10): an admin running this check by hand also sends one Feishu test message (never the daily
+    // cron). Feishu is configured on production only (Owner 2026-11-07), so on staging this reports 'off'.
     const ownerAlert = ctx.runType === 'manual' ? await sendOwnerAlertTest() : undefined;
     return { ...base, status: warning || noticeFailed ? 'warning' : 'passed', latencyMs: Date.now() - start,
       message: warning ? '成本已达阈值，或供应商余额偏低/未知；详情见止损告警。'

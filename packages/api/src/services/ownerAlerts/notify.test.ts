@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDedupe, type MarkStore } from './dedupe';
 import { feishuSign } from './feishu';
 import { ERROR_SPIKE } from './kinds';
-import { notifyOwner, notifyOwnerWith, ownerAlertsEnabled, resetOwnerAlertDefaults, type NotifyDeps } from './notify';
+import { notifyOwner, notifyOwnerWith, ownerAlertsEnabled, resetOwnerAlertDefaults, sendOwnerAlertTest, type NotifyDeps } from './notify';
 import { noteServerErrorWith, type ErrorCounter } from './errorSpike';
 import { logger } from '../../lib/logger';
 
@@ -106,6 +106,26 @@ describe('notifyOwnerWith', () => {
     expect(failing).toHaveBeenCalledTimes(2);
     const thrown = deps({ feishu: { fetch: (async () => { throw new Error('ECONNRESET'); }) as never, now: () => clock.t } });
     await expect(notifyOwnerWith(thrown.deps, 'refund', refund)).resolves.toBe(false);
+  });
+
+  it('the admin test message reports off without the variables (staging), sent when they work, not_sent when Feishu refuses', async () => {
+    const env = { ...process.env };
+    delete process.env.FEISHU_ALERT_WEBHOOK_URL;
+    delete process.env.FEISHU_ALERT_SECRET;
+    resetOwnerAlertDefaults();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    expect(await sendOwnerAlertTest()).toBe('off');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    process.env = env;
+    const { deps: d, fetch } = deps();
+    resetOwnerAlertDefaults(d);
+    expect(await sendOwnerAlertTest()).toBe('sent');
+    expect(body(fetch).content.text).toMatch(/^（测试站）【测试】飞书告警已接通。/);
+    clock.t += 61_000;
+    resetOwnerAlertDefaults(deps({ feishu: { fetch: (async () => new Response(JSON.stringify({ code: 19021 }))) as never,
+      now: () => clock.t } }).deps);
+    expect(await sendOwnerAlertTest()).toBe('not_sent');
+    clock.t -= 61_000;
   });
 
   it('notifyOwner itself never throws, even when setup fails', async () => {

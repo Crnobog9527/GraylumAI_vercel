@@ -27,3 +27,10 @@ it('the daily cron run never sends the test message', async () => {
   expect(m.test).not.toHaveBeenCalled();
   expect(result.details).not.toHaveProperty('ownerAlert');
 });
+
+it('on staging, where Feishu is not configured (Owner 2026-11-07), the manual run reports off and the check still passes', async () => {
+  m.test.mockResolvedValueOnce('off' as never);
+  const result = await testRuntimeStopLoss(ctx('manual'));
+  expect(result.status).toBe('passed');
+  expect(result.details).toMatchObject({ ownerAlert: 'off' });
+});

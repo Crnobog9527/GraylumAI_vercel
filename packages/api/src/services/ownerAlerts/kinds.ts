@@ -40,7 +40,7 @@ export type OwnerAlertFacts = {
   ops_backlog: { code: string; level: 'warning' | 'error' | 'fatal' };
   /** Many server errors in a short time (what the Sentry error mail covered). */
   error_spike: { count: number; minutes: number };
-  /** A test message, sent by the controller after the Owner sets the variables (staging check plan). */
+  /** A test message: an admin runs the stop-loss diagnostic by hand (production smoke, REL-1 K10). */
   test: { note: string };
 };
 
