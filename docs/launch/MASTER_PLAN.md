@@ -82,7 +82,17 @@
 <a id="changes"></a><a id="conflicts"></a>
 ## 2. 本版的新决定和被取代的旧规则
 
-### 2.1 Owner 的新决定（2026-09-27 起，2026-11-06 更新）
+### 2.1 Owner 的新决定（2026-09-27 起，2026-11-07 更新）
+
+**2026-11-07：所有邮件统一从 `Graylum <mail@graylum.com>` 发出（取代 N5 的 `Graylum AI <no-reply@graylum.com>`）**
+
+Owner 原话（2026-11-07，A1–A9 外部设置引导窗口转达；选项里选了“统一用 mail@（推荐）”，范围包括站内付款、续费和止损通知）：
+
+> 发送邮箱地址用 mail 这个地址。
+
+- 范围：登录类邮件（注册确认、找回密码，由 Supabase SMTP 发出）和站内通知邮件（付款、续费、止损通知，由应用经 Resend 发出），发件人一律是 `Graylum <mail@graylum.com>`。
+- 落实：正式库 Supabase SMTP 发件人已由 Owner 设为 `mail@graylum.com`；应用默认发件人改为 `Graylum <mail@graylum.com>`，建库日非密钥变量 `PAYMENT_NOTICE_FROM` 也设成同一个值；冒烟 K1 / H-1 的期望发件人同步。
+- 取代：2026-10-13 付款后续四项里 N5 的发件人 `Graylum AI <no-reply@graylum.com>`；N5 的其余内容不变。
 
 **2026-11-06：落地页促销开关打开时，首页显示 Gold 首月 $49（产品决定，首页展示；创始价仍不放首页）**
 
