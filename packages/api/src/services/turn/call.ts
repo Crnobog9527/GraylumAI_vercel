@@ -10,7 +10,7 @@ import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, TurnDatabaseError, type TurnDatabase } from './db';
 import { errorCode, logSwallowed } from '../../lib/swallow';
 import { logger } from '../../lib/logger';
-import { notifyOwner } from '../ownerAlerts/notify';
+import { notifyOwner, OWNER_ALERT_TURN_BUDGET_MS } from '../ownerAlerts/notify';
 
 /*
  * CORE-PATH-V2 2.5.2: one paid model call is three writes. turn_call_begin before anything is sent (no row, no request);
@@ -128,8 +128,8 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
       await deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'no_charge_402', nominalUsd: null, actualUsd: null,
         usage: {}, providerId: rejection.providerId ?? null, payloadHash: sha256(observation.rawBody), raw: null });
       // ALERT-FEISHU: every user's AI calls fail until the account is topped up. At most every 30 minutes; awaited so the function
-      // is not frozen before the send (the call has already failed; notifyOwner never throws).
-      await notifyOwner('provider_402', { provider: 'openrouter' });
+      // is not frozen before the send, within a 2 s budget (the call has already failed; notifyOwner never throws).
+      await notifyOwner('provider_402', { provider: 'openrouter' }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS });
       throw new TurnStop('TURN_PROVIDER_402');
     }
     const evidence = openRouterEvidence(observation, call.identity, 'response');

@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { logger } from '../../lib/logger';
 import { alertOrigin, feishuConfig, isTestSite, type FeishuConfig } from './config';
-import { createDedupe, redisMarkStore, type Dedupe } from './dedupe';
-import { FeishuError, sendFeishu, type FeishuDeps } from './feishu';
+import { createDedupe, MARK_DEADLINE_MS, redisMarkStore, type Dedupe } from './dedupe';
+import { FEISHU_TIMEOUT_MS, FeishuError, sendFeishu, type FeishuDeps } from './feishu';
 import { dedupeKey, ttlSeconds, type OwnerAlertFacts, type OwnerAlertKind } from './kinds';
 import { renderAlert } from './templates';
 
@@ -25,13 +25,27 @@ export type NotifyDeps = {
 /** Condition alerts whose failed send keeps the cooldown: retrying on every new error would only add load while Feishu is down. */
 const KEEP_COOLDOWN_ON_FAILURE: ReadonlySet<OwnerAlertKind> = new Set(['error_spike']);
 
+/**
+ * budgetMs: the most this call may hold its caller, all included (the user-facing turn path passes OWNER_ALERT_TURN_BUDGET_MS).
+ * The Redis claim's time comes out of the Feishu timeout, and MARK_DEADLINE_MS is kept back for releasing the key after a failed
+ * send; too little left means no send at all (released and logged), never a longer wait. Without it: claim ≤ 0.5 s, Feishu ≤ 2 s.
+ */
+export type NotifyOptions = { budgetMs?: number };
+export const OWNER_ALERT_TURN_BUDGET_MS = 2_000;
+const MIN_SEND_MS = 300;
+
 /** true when a message went out. */
-export async function notifyOwnerWith<K extends OwnerAlertKind>(deps: NotifyDeps, kind: K, facts: OwnerAlertFacts[K]): Promise<boolean> {
+export async function notifyOwnerWith<K extends OwnerAlertKind>(deps: NotifyDeps, kind: K, facts: OwnerAlertFacts[K],
+  options: NotifyOptions = {}): Promise<boolean> {
   if (!deps.config) return false;
+  const started = deps.feishu.now();
   const key = dedupeKey(kind, facts, deps.now());
   if (!(await deps.dedupe.claim(key, ttlSeconds(kind)))) return false;
   try {
-    await sendFeishu(deps.config, renderAlert(kind, facts, deps), deps.feishu);
+    const left = options.budgetMs === undefined ? FEISHU_TIMEOUT_MS
+      : options.budgetMs - (deps.feishu.now() - started) - MARK_DEADLINE_MS;
+    if (left < MIN_SEND_MS) throw new FeishuError('OWNER_ALERT_BUDGET_EXHAUSTED');
+    await sendFeishu(deps.config, renderAlert(kind, facts, deps), deps.feishu, left);
     logger.info('system', 'owner_alert_sent', { kind, key });
     return true;
   } catch (error) {
@@ -84,9 +98,9 @@ export async function sendOwnerAlertTest(): Promise<'sent' | 'off' | 'not_sent'>
 }
 
 /** true when a message went out (false: not configured, already sent, or failed). Never throws. */
-export async function notifyOwner<K extends OwnerAlertKind>(kind: K, facts: OwnerAlertFacts[K]): Promise<boolean> {
+export async function notifyOwner<K extends OwnerAlertKind>(kind: K, facts: OwnerAlertFacts[K], options: NotifyOptions = {}): Promise<boolean> {
   try {
-    return await notifyOwnerWith(defaultNotifyDeps(), kind, facts);
+    return await notifyOwnerWith(defaultNotifyDeps(), kind, facts, options);
   } catch {
     logger.warn('system', 'owner_alert_crashed', { kind, swallowed: true });
     return false;

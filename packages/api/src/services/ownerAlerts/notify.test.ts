@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDedupe, type MarkStore } from './dedupe';
 import { feishuSign } from './feishu';
 import { ERROR_SPIKE } from './kinds';
-import { notifyOwner, notifyOwnerWith, ownerAlertsEnabled, resetOwnerAlertDefaults, sendOwnerAlertTest, type NotifyDeps } from './notify';
+import { notifyOwner, notifyOwnerWith, OWNER_ALERT_TURN_BUDGET_MS, ownerAlertsEnabled, resetOwnerAlertDefaults, sendOwnerAlertTest,
+  type NotifyDeps } from './notify';
+import { FEISHU_TIMEOUT_MS } from './feishu';
+import { MARK_DEADLINE_MS } from './dedupe';
 import { noteServerErrorWith, type ErrorCounter } from './errorSpike';
 import { logger } from '../../lib/logger';
 
@@ -126,6 +129,25 @@ describe('notifyOwnerWith', () => {
       now: () => clock.t } }).deps);
     expect(await sendOwnerAlertTest()).toBe('not_sent');
     clock.t -= 61_000;
+  });
+
+  it('on the turn path never holds the caller more than 2 s: Feishu ≤ 2 s, Redis ≤ 0.5 s, and a slow claim shortens the send', async () => {
+    expect(OWNER_ALERT_TURN_BUDGET_MS).toBe(2000);
+    expect(FEISHU_TIMEOUT_MS).toBeLessThanOrEqual(2000);
+    expect(MARK_DEADLINE_MS).toBe(500);
+    // The claim took 1.3 s: 0.2 s would be left after keeping 0.5 s for the release, so nothing is sent and the key is freed.
+    const t = { now: clock.t };
+    const store = sharedStore();
+    const slow: MarkStore = { setIfAbsent: async (...a) => { t.now += 1300; return store.setIfAbsent(...a); }, remove: store.remove };
+    const { deps: d, fetch } = deps({ feishu: { fetch: vi.fn(async () => ok()) as never, now: () => t.now } }, slow);
+    const warn = vi.spyOn(logger, 'warn');
+    expect(await notifyOwnerWith(d, 'provider_402', { provider: 'openrouter' }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS })).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(d.feishu.fetch).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('system', 'owner_alert_not_sent', expect.objectContaining({ code: 'OWNER_ALERT_BUDGET_EXHAUSTED' }));
+    // Freed: the next refusal tries again, and with a quick claim it is sent.
+    const quick = deps({}, store);
+    expect(await notifyOwnerWith(quick.deps, 'provider_402', { provider: 'openrouter' }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS })).toBe(true);
   });
 
   it('notifyOwner itself never throws, even when setup fails', async () => {

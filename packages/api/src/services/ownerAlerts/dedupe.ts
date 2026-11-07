@@ -12,7 +12,8 @@ import { redisEnvironment } from '../redisEnvironment';
  */
 export const MARK_PREFIX = 'owner-alert:';
 const MEMORY_LIMIT = 500;
-const DEADLINE_MS = 800;
+/** Each Redis call (claim or release) gives up after this; a claim that times out still sends. */
+export const MARK_DEADLINE_MS = 500;
 
 export type MarkStore = {
   setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean>;
@@ -71,7 +72,7 @@ let shared: Redis | null = null;
 export function redisMarkStore(): MarkStore {
   const redis = shared ??= (() => {
     const { url, token } = redisEnvironment(process.env);
-    return new Redis({ url, token, retry: { retries: 0 }, signal: () => AbortSignal.timeout(DEADLINE_MS) });
+    return new Redis({ url, token, retry: { retries: 0 }, signal: () => AbortSignal.timeout(MARK_DEADLINE_MS) });
   })();
   return {
     setIfAbsent: async (key, value, ttlSeconds) => await redis.set(key, value, { nx: true, ex: ttlSeconds }) === 'OK',

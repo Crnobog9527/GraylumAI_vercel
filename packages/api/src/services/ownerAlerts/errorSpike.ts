@@ -16,7 +16,7 @@ import { defaultNotifyDeps, notifyOwnerWith, type NotifyDeps } from './notify';
  */
 export type ErrorCounter = { add(minute: number, windowMinutes: number): Promise<number> };
 
-const DEADLINE_MS = 800;
+const DEADLINE_MS = 500;
 const counterKey = (minute: number) => `owner-alert-errors:${minute}`;
 
 export function errorWindowKeys(minute: number, windowMinutes: number): string[] {

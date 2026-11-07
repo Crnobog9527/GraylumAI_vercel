@@ -2,7 +2,7 @@
 import { resumeRead } from './resume';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { notifyOwner } from '../ownerAlerts/notify';
+import { notifyOwner, OWNER_ALERT_TURN_BUDGET_MS } from '../ownerAlerts/notify';
 
 /*
  * CORE-PATH-V2 (docs/launch/tasks/CORE-PATH-V2.md 2.2, 2.5.2, 3.3.2 item 5): the only database calls of a turn.
@@ -97,8 +97,11 @@ async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: 
   if (error) {
     const code = turnDatabaseCode(error.message);
     // ALERT-FEISHU: the site's daily spend reached the stop-loss limit (turn_open / turn_call_begin). Once a UTC day. Awaited, so
-    // the function is not frozen before the send (only the first refusal waits, at most about 4 s); never throws, no database work.
-    if (code === 'STOP_LOSS_REACHED') await notifyOwner('stop_loss_reached', { utcDate: new Date().toISOString().slice(0, 10) });
+    // the function is not frozen before the send, within a 2 s budget (Redis and Feishu included; a timeout gives the send up and
+    // logs it). Only the first refusal of the day per instance waits; never throws; no database work.
+    if (code === 'STOP_LOSS_REACHED') {
+      await notifyOwner('stop_loss_reached', { utcDate: new Date().toISOString().slice(0, 10) }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS });
+    }
     throw new TurnDatabaseError(code);
   }
   return schema.parse(data);

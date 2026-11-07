@@ -98,7 +98,7 @@ Owner 原话（2026-11-07，Owner 的需求简报和总控转达；"greenlam" �
 
   staging 不设这两个变量，代码在没设时静默跳过。
 - 取代：上线周告警邮件（Sentry 项目 graylumai-main 的邮件规则）不再作为 Owner 的告警渠道。**但要先在正式站冒烟时（REL-1 第 4.1 节 K10、建库准备第 36 步）收到飞书测试告警，再收到过一两条真实告警，Owner 再自己去关 Sentry 邮件**；关之前两边都发。止损邮件（Resend）照发。
-- 两个环境变量 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET` 由 Owner 在建库日自己填进正式 Vercel（REL-1-BUILD-PREP 第 24 步、REL-1 V1），值不进聊天、PR 和日志。
+- 两个环境变量 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET` 由 Owner 自己填进正式 Vercel，值不进聊天、PR 和日志。Owner 2026-11-07 已在正式项目 `graylum-ai-vercel-v1` 填好（只勾 Production，总控转达），建库日只核对名字（REL-1-BUILD-PREP 第 24 步、REL-1 V1）。
 
 **2026-11-07：上线前接入 Anthropic、OpenAI 官方 API 额度（BILL-BYOK，计费改动）**
 

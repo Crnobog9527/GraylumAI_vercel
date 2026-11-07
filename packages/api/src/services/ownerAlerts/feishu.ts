@@ -9,7 +9,8 @@ import type { FeishuConfig } from './config';
  * refuses; the body's `code` is 0 only on success (19021 bad signature or clock, 11232 rate limited, 9499 bad request).
  * Same shape as Shotviva T72 (core/alerts/feishu.ts).
  */
-export const FEISHU_TIMEOUT_MS = 3_000;
+/** A send that has not answered in 2 s is given up (and logged): an alert never holds a caller longer (controller 2026-11-08). */
+export const FEISHU_TIMEOUT_MS = 2_000;
 
 export function feishuSign(timestampSeconds: number, secret: string): string {
   return createHmac('sha256', `${timestampSeconds}\n${secret}`).update('').digest('base64');
@@ -30,14 +31,14 @@ export class FeishuError extends Error {
 
 export type FeishuDeps = { fetch: typeof fetch; now: () => number };
 
-export async function sendFeishu(config: FeishuConfig, text: string, deps: FeishuDeps): Promise<void> {
+export async function sendFeishu(config: FeishuConfig, text: string, deps: FeishuDeps, timeoutMs = FEISHU_TIMEOUT_MS): Promise<void> {
   let response: Response;
   try {
     response = await deps.fetch(config.webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(feishuBody(text, config.secret, deps.now())),
-      signal: AbortSignal.timeout(FEISHU_TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.min(timeoutMs, FEISHU_TIMEOUT_MS)),
     });
   } catch {
     throw new FeishuError('FEISHU_REQUEST_FAILED');

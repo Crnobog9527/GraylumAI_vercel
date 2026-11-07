@@ -8,7 +8,7 @@ import type { CounterStore } from './limiter';
 import { TurnDatabaseError, type TurnDatabase } from './db';
 import { logger } from '../../lib/logger';
 const owner = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock('../ownerAlerts/notify', () => ({ notifyOwner: owner }));
+vi.mock('../ownerAlerts/notify', () => ({ notifyOwner: owner, OWNER_ALERT_TURN_BUDGET_MS: 2000 }));
 
 const limits = { providerSlug: 'synthetic', contextTokens: 10000, promptUsdPerMillion: '2', completionUsdPerMillion: '10', requestUsd: '0' };
 const identity = { provider: 'openrouter' as const, account: 'test', model: 'test/model', protocol: 'openrouter-chat-v1' as const,
@@ -59,7 +59,7 @@ describe('one model call, three writes (CORE-PATH-V2 2.5.2)', () => {
       .rejects.toThrow('TURN_PROVIDER_402');
     expect(kinds(h.writes)).toEqual(['begin', 'record:no_charge_402']);
     // ALERT-FEISHU: the Owner hears the platform account is out of credit.
-    expect(owner).toHaveBeenCalledExactlyOnceWith('provider_402', { provider: 'openrouter' });
+    expect(owner).toHaveBeenCalledExactlyOnceWith('provider_402', { provider: 'openrouter' }, { budgetMs: 2000 });
   });
 
   it('a stream broken after it started keeps the provider id, sends nothing again and records no receipt', async () => {
