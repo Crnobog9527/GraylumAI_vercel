@@ -5,6 +5,7 @@ import { logger } from '../../../lib/logger';
 import { openRouterAccount } from '../../models/openRouterKey';
 import { isOpenRouterEndpoint, resolveOpenAICompatibleEndpoint } from '../../providerUtils';
 import { StagingAccessError, stagingRpcFailure } from '../settings/stagingErrors';
+import { decisionsCostUsd } from '../provider/openRouterByok';
 
 /**
  * POSITIONING-GATE (Owner 2026-10-12, Master Plan 2.1): a user without a confirmed positioning cannot get
@@ -80,7 +81,8 @@ export function decisionsRequest(text: string) {
 
 // Usage is read on its own first: a billed call whose answer is malformed still records its cost.
 const decisionsUsage = z.object({ usage: z.object({ input_tokens: z.number().optional(),
-  output_tokens: z.number().optional(), cost: z.number().optional() }) });
+  output_tokens: z.number().optional(), cost: z.number().optional(), is_byok: z.unknown().optional(),
+  cost_details: z.unknown().optional() }) });
 const decisionsAnswer = z.object({
   answers: z.object({ [QUESTION]: z.object({ type: z.literal('noul'), noul: z.number().min(0).max(1) }) }),
 });
@@ -109,10 +111,12 @@ export async function decide(apiKey: string, text: string, transport: typeof fet
       verdict = probability >= DECISIONS_BLOCK_AT ? 'block' : probability < DECISIONS_CLEAR_BELOW ? 'clear' : 'allow';
     }
   } catch { verdict = 'unavailable'; }
-  if (sent) onCost?.(typeof usage?.cost === 'number' && usage.cost >= 0 ? usage.cost : null);
+  // BILL-BYOK: a BYOK answer costs OpenRouter's fee plus the vendor's charge; without the vendor's part the cost is unknown.
+  const costUsd = decisionsCostUsd(usage);
+  if (sent) onCost?.(costUsd);
   // Graylum bears this cost; the log line is its ledger entry (no user text, no account id).
   logger.info('api', 'positioning_gate_decision', { model: DECISIONS_MODEL, verdict, probability, httpStatus,
-    costUsd: usage?.cost ?? null, inputTokens: usage?.input_tokens ?? null, outputTokens: usage?.output_tokens ?? null,
+    costUsd, byok: usage?.is_byok === true, inputTokens: usage?.input_tokens ?? null, outputTokens: usage?.output_tokens ?? null,
     totalMs: Math.round(clock() - started) });
   return verdict;
 }
