@@ -6,28 +6,24 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
-import { ANALYTICS_CONFIG, gtagScriptUrl, termlyScriptUrl } from '@/lib/analytics/config';
-import { attachTermly, consentSnapshot, serverConsentSnapshot, subscribeConsent } from '@/lib/analytics/consent';
+import { ANALYTICS_CONFIG, gtagScriptUrl } from '@/lib/analytics/config';
+import { consentSnapshot, serverConsentSnapshot, subscribeConsent } from '@/lib/analytics/consent';
 import { captureFirstTouch } from '@/lib/analytics/attribution';
 import { enterPage, syncGa } from '@/lib/analytics/ga';
 import { isSensitivePath } from '@/lib/analytics/routes';
 import { cleanVercelEvent } from '@/lib/analytics/vercel';
+import type { SiteLocale } from '@/lib/seo/site';
+import { ConsentBar } from './ConsentBar';
 import { useConsentWithdrawalSync } from './use-consent-withdrawal-sync';
 import { useSignupReporting } from './use-signup-reporting';
 
 /**
- * Consent banner and statistics for every page (ANALYTICS plan §3). Termly loads asynchronously and never
- * holds up the first paint (plan O1 option A); GA, Vercel Web Analytics and Speed Insights follow Termly's
- * live consent. Without a Termly website ID nothing loads at all. Rendered from the root layout as a client
- * component that reads nothing on the server, so public pages stay static.
+ * Consent bar and statistics for every page (ANALYTICS plan §3, ANALYTICS-CONSENT). Our own consent module decides from
+ * the region class and the visitor's choice; GA (once configured), the stored first touch and Speed Insights follow it.
+ * Vercel Web Analytics is cookieless and reports every visitor. Rendered from the root layout as a client component that
+ * reads nothing on the server, so public pages stay static; the bar never holds up the first paint.
  */
-export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
-  // Not configured: nothing renders, no hook runs and no request is made.
-  const { termlyWebsiteUuid } = ANALYTICS_CONFIG;
-  return termlyWebsiteUuid ? <ConfiguredAnalytics termlyWebsiteUuid={termlyWebsiteUuid} onVercel={onVercel} /> : null;
-}
-
-function ConfiguredAnalytics({ termlyWebsiteUuid, onVercel }: { termlyWebsiteUuid: string; onVercel: boolean }) {
+export function SiteAnalytics({ onVercel, locale }: { onVercel: boolean; locale: SiteLocale }) {
   const { gaMeasurementId, vercelCategory } = ANALYTICS_CONFIG;
   const pathname = usePathname();
   const consent = useSyncExternalStore(subscribeConsent, consentSnapshot, serverConsentSnapshot);
@@ -40,32 +36,32 @@ function ConfiguredAnalytics({ termlyWebsiteUuid, onVercel }: { termlyWebsiteUui
     if (previous.current === null) captureFirstTouch(window.location.href, document.referrer);
     previous.current = window.location.href;
     syncGa(gaMeasurementId);
-  }, [pathname, termlyWebsiteUuid, gaMeasurementId]);
+  }, [pathname, gaMeasurementId]);
 
   // Consent given, refused or withdrawn on this page.
   useEffect(() => {
-    if (!termlyWebsiteUuid) return;
     syncGa(gaMeasurementId);
     // Consent given on this page: its address is the first touch we may keep.
     if (consent.analytics) captureFirstTouch(window.location.href, document.referrer);
-  }, [consent, termlyWebsiteUuid, gaMeasurementId]);
+  }, [consent.analytics, gaMeasurementId]);
 
+  const reportable = !isSensitivePath(pathname ?? '/');
   // sign_up and the first source of an account created moments ago, once, after consent.
-  useSignupReporting(Boolean(termlyWebsiteUuid) && consent.analytics && !isSensitivePath(pathname ?? '/'));
+  useSignupReporting(consent.analytics && reportable);
 
   // Injected scripts outlive this component, so cleanVercelEvent re-checks consent and the page on every event.
-  const vercelOn = onVercel && (vercelCategory === 'essential' || consent.analytics) && !isSensitivePath(pathname ?? '/');
+  const speedInsightsOn = onVercel && reportable && (vercelCategory === 'essential' || consent.analytics);
   return (
     <>
-      <Script id="termly-consent" src={termlyScriptUrl(termlyWebsiteUuid)} strategy="afterInteractive" onLoad={attachTermly} />
-      {/* Termly manual classification (plan O1 option A): inert until Termly releases it for analytics consent. */}
-      {gaMeasurementId ? <script type="text/plain" data-categories="analytics" defer src={gtagScriptUrl(gaMeasurementId)} /> : null}
-      {vercelOn ? (
-        <>
-          <Analytics beforeSend={event => cleanVercelEvent(event, vercelCategory)} />
-          <SpeedInsights beforeSend={event => cleanVercelEvent(event, vercelCategory)} />
-        </>
+      {/* gtag.js is added only with live consent; once added, ga.ts pauses it on withdrawal (ga-disable). */}
+      {gaMeasurementId && consent.analytics ? (
+        <Script id="ga4-gtag" src={gtagScriptUrl(gaMeasurementId)} strategy="afterInteractive" />
       ) : null}
+      {onVercel && reportable ? (
+        <Analytics beforeSend={event => cleanVercelEvent(event, 'web-analytics', vercelCategory)} />
+      ) : null}
+      {speedInsightsOn ? <SpeedInsights beforeSend={event => cleanVercelEvent(event, 'speed-insights', vercelCategory)} /> : null}
+      <ConsentBar consent={consent} locale={locale} />
     </>
   );
 }

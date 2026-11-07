@@ -6,7 +6,7 @@ import { routeTemplate } from './routes';
 
 /**
  * First touch for the account's first source (ANALYTICS plan §3.2, §7 PR-3 acceptance). Kept in local storage only
- * after Termly statistics consent; cleared when consent is withdrawn; sent once at sign-up only if consent is still
+ * while statistics consent is live (consent.ts); cleared when consent is withdrawn; sent once at sign-up only if consent is still
  * live at that moment. Registered UTM values, the referrer host and the landing route template only.
  */
 const KEY = 'graylum.analytics.first-touch';
