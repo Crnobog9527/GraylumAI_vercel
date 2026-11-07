@@ -6,6 +6,7 @@ import { getWaffoOperationsClient } from '@repo/api/src/services/payments/waffoT
 
 import { paymentDeploymentMode, assertWaffoWebhookEnvironment } from '@repo/api/src/services/payments/methodCheckoutGate';
 import { afterWaffoFulfillment } from '@repo/api/src/services/payments/failoverAfterFulfillment';
+import { notifyOwner } from '@repo/api/src/services/ownerAlerts';
 
 export const runtime = 'nodejs';
 export async function POST(request: Request) {
@@ -25,5 +26,9 @@ export async function POST(request: Request) {
         { id: receipt.receiptId, merchant: receipt.merchant, mode: receipt.mode, refs: receipt.refs },
         orderId => afterWaffoFulfillment(db, orderId));
     },
+    // ALERT-FEISHU: Waffo redelivers; the Owner hears once per receipt, and at most hourly while callbacks cannot be stored.
+    onFailure: failure => failure.stage === 'processing'
+      ? notifyOwner('payment_webhook_failed', { provider: 'waffo', eventId: failure.receiptId, eventType: null, code: 'WAFFO_PROCESSING_DEFERRED' })
+      : notifyOwner('payment_webhook_unavailable', { provider: 'waffo', reason: 'storage' }),
   });
 }

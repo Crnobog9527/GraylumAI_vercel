@@ -58,7 +58,7 @@
 
 | # | 谁 | 做什么 | 怎么确认 | 详见 |
 | --- | --- | --- | --- | --- |
-| 24 | ★ Owner 做 | **密钥类变量**（只列名字）：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL`；`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`（第 2 步新端点的）、`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`；`OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`；`UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN`（正式 Redis）；`SENTRY_AUTH_TOKEN`；Waffo 正式四件（`WAFFO_MERCHANT_ID` 等，S-8 审核通过后才有） | 变量名清单读回（不读值） | V1 |
+| 24 | ★ Owner 做 | **密钥类变量**（只列名字）：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL`；`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`（第 2 步新端点的）、`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`；`OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`；`UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN`（正式 Redis）；`SENTRY_AUTH_TOKEN`；Waffo 正式四件（`WAFFO_MERCHANT_ID` 等，S-8 审核通过后才有）；飞书告警两件 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET`（ALERT-FEISHU，地址里带机器人令牌，也算密钥；**Owner 2026-11-07 已在正式 Vercel 项目 `graylum-ai-vercel-v1` 填好，只勾 Production**，建库日不用再填，只在变量名清单里核对两个名字都在；值在下一次正式部署时生效） | 变量名清单读回（不读值） | V1 |
 | 25 | ★ 批准 → 总控 | **非密钥变量**：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV`、`NEXT_PUBLIC_APP_ENV`；**`TURN_DATABASE_HOST`＝正式 Supabase 的主机名**（主路径新增：**缺了会让 `/api/turn` 全部 503**（`TURN_DATABASE_MISMATCH`），冒烟第 31 步第一项先查它）；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（今天代码仍读，V2-12 后重核）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`；`NEXT_PUBLIC_SENTRY_DSN`（缺了所有告警静默）、`SENTRY_ENVIRONMENT`、`SENTRY_ORG`、`SENTRY_PROJECT`；`PAYMENT_NOTICE_FROM=Graylum <mail@graylum.com>`（Owner 2026-11-07 定）；`NEXT_PUBLIC_COMPOSER_REFERENCES=on`；资料库 `NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION`、`NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION`、`NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION`（照 staging）；`LANDING_PROMO_OFFERS=on`（落地页显示 Gold 首月 $49 和创始价；**先做第 25a 步**，见第 4 部分问题 20）。**`PUBLISH_MONITOR_HANDBOOK_PACKAGE` 这时不设**（它要写运营教练复盘包发布后的 Skill、版本和包哈希，见第 30e1 步）；**`SITE_INDEXING` 这时不设**；**`NEXT_PUBLIC_TERMLY_WEBSITE_UUID` 不设**（ANALYTICS-CONSENT 起代码不读它，同意条按 Vercel 标出的访客国家自己判断，不需要任何变量） | 变量名清单和本行对照 | V2 |
 | 25a | ★ 批准 → 总控（staging 验收先行） | 打开 `LANDING_PROMO_OFFERS` 之前，先在 staging 把落地页开、关两种状态各验一遍（#987 的 A/B 验收：关时只显示标准价；开时显示首月和创始价，名额为 0 或读取失败时创始块整块隐藏，JSON-LD 不含创始价）；通过后才在正式变量里设 `on`，属于正式环境设置，Owner 当次批准 | #987 上 A/B 两份验收记录 | — |
 | 26 | 总控只读 | **不能设**：任何 `V3_RUNTIME_STAGING_*`、`WAFFO_TEST_*`、`E2E_*`、`LOADTEST_*`、`LANDING_PREVIEW_FEATURES`、`ANTHROPIC_API_KEY`、`OPENROUTER_API_KEY`、`PAYMENT_NOTICE_TEST_RECIPIENTS`；`EXPECTED_APP_HOST` 也不加（只有本机检查脚本读） | 名字清单里没有 | V3 |
@@ -83,7 +83,7 @@
 | 33 | ★ 批准（金额、次数、总预算） → 总控 | **冒烟**：K1 注册／开户 500／找回密码／Google 登录；K2 一次成功、一次拒绝、一次重复、回执对账；K3 定位第 1 步加一次对标；K4 @ 文档、写作 Skill、对话内研究；K5 文风；K6 Gold 评审团和对比各一次；K7 作品复盘页、运营教练复盘真实生成一次（第 30e1 步之后）、对话里说“帮我复盘”能读到已保存的复盘包（免费账号读不到）、在对话里用 + 发一张截图能读出数字（一条最多 4 张，图片不落库）、名单外平台被拒；K10 后台手动跑一次成本告警检查；K11 每日对账；K12 TikHub 价格手工刷新一次；K13 首字速度 20 次（不挡上线）。**不做 K8 真钱付款和 K9**（Owner 11-03：staging 付款链路全部测通即可，正式站不测） | 每项记录贴上线 PR | 4.1 |
 | 34 | ★ 批准（每次） | 一键发布：X、YouTube 各真实发布一次（Owner 在场授权账号） | 帖子在平台上可见，扣费 6 积分／平台 | 核心 10 ③ |
 | 35 | ★ 批准 | 打开四条付款路由（`card`、`card_cn`、`wechat_pay`、`alipay`），逐个读回；只开，不在正式站付真钱 | 结账页能建单（不付款） | S-6 |
-| 36 | 总控 + ★ Owner | **生产 Sentry 测试告警**：确认第 25 步的 `NEXT_PUBLIC_SENTRY_DSN` 已生效且 `SENTRY_ENVIRONMENT` 能分开正式和 staging；在 Sentry 正式项目对每条通知规则点"发送测试通知"，并手动触发一次"Runtime 成本与余额告警"检查（K10），确认 Owner 的邮箱／手机真的收到一条。部署访问保护还开着时做 | Owner 回复收到；结果记在上线 PR | 第 3.2 节 |
+| 36 | 总控 + ★ Owner | **生产 Sentry 测试告警**：确认第 25 步的 `NEXT_PUBLIC_SENTRY_DSN` 已生效且 `SENTRY_ENVIRONMENT` 能分开正式和 staging；在 Sentry 正式项目对每条通知规则点"发送测试通知"，并手动触发一次"Runtime 成本与余额告警"检查（K10），确认 Owner 的邮箱／手机真的收到一条；**同一次检查会往 Graylum 飞书群发一条测试告警**（ALERT-FEISHU，第 24 步的两个飞书变量），Owner 确认群里收到、链接能打开正式后台。部署访问保护还开着时做。**Sentry 给 Owner 的邮件这时先不关**：正式站飞书群收到这条测试消息、再收到过一两条真实告警之后，由 Owner 自己去关 | Owner 回复收到（邮件和飞书各一条）；结果记在上线 PR | 第 3.2 节 |
 
 ### 1.5 公开开放（冒烟和对账无误、核心 12 项 PASS、备份恢复演练已通过之后）
 
@@ -291,6 +291,7 @@ staging 7 个槽位都已填：`openrouter`、`postforme`、`postforme_webhook`�
 ### 3.3 告警值守表
 
 "谁看"：上线第一周 Sentry 通知和止损邮件都发到 Owner；Owner 收到后转给总控，总控查原因、给处理建议。
+ALERT-FEISHU 起，下表的付款、退款、拒付、止损、积压告警和网站报错激增，同时用中文发到 Graylum 飞书群（只配正式环境）；飞书在正式站验证过后，Owner 关掉 Sentry 邮件，以飞书为准。
 **总控读正式 Sentry、Vercel 日志和正式库都属于"读正式数据"，要 Owner 当次同意**（AGENTS 第 1 节），
 所以第一周建议 Owner 一次性批准"只读、只为处理下表告警"的范围（可复制句见 3.4）。处理动作里凡是写正式库、改正式配置、退款的，仍要逐次批准。
 
