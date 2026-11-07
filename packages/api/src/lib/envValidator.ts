@@ -125,6 +125,11 @@ const envSchema = z.object({
   REQUIRE_API_SIGNATURE: optionalString,
   LOG_LEVEL: optionalString,
 
+  // ALERT-FEISHU：Owner 业务告警的飞书群机器人（地址带机器人令牌，两个都是密钥）。可选：不设就不发告警；
+  // 地址格式在 ownerAlerts/config.ts 用到时才检查，填错只会关掉告警，不会让网站报错。
+  FEISHU_ALERT_WEBHOOK_URL: optionalString,
+  FEISHU_ALERT_SECRET: optionalString,
+
   // 已退役，仅用于提示（见 validateEnv）
   ANTHROPIC_API_KEY: optionalString,
 

@@ -2,7 +2,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn(), monthly: vi.fn(), ref: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn(), monthly: vi.fn(), ref: vi.fn(),
+  owner: vi.fn(async () => {}) }));
+vi.mock('../ownerAlerts', () => ({ notifyOwner: mocks.owner }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./cardPaymentLookup', () => ({ findCardOrderForPayment: mocks.find }));
 vi.mock('./stripeReferences', () => ({ findStripeReference: mocks.ref }));
@@ -247,5 +249,51 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
   it('refuses a refund object that does not match the event', async () => {
     const f = fixture([refund({ id: 're_other' })]);
     await expect(f.run({ refundId: 're_1' })).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+  });
+});
+
+describe('ALERT-FEISHU: the Owner hears about every external refund in Feishu', () => {
+  beforeEach(() => {
+    mocks.scope.mockReset().mockResolvedValue({ mode: 'live', merchant: 'fixture' });
+    mocks.find.mockReset().mockResolvedValue(match); mocks.error.mockReset(); mocks.owner.mockReset();
+    mocks.monthly.mockReset().mockResolvedValue({ handled: false }); mocks.ref.mockReset().mockResolvedValue({ order_id: 'order' });
+  });
+  const facts = (patch: Record<string, unknown>) => ({ orderId: 'order', refundId: 're_1', orderKind: 'subscription_first',
+    currency: 'usd', refundedMinor: 4900, chargedMinor: 4900, creditsTakenBack: 4900, creditsShortfall: 0, ...patch });
+
+  it('sends a recorded full refund with its amounts and credits, also when nothing else alerts', async () => {
+    const f = fixture([refund()], { state: 'refunded', duplicate: false, renewing: false, refundedMinor: 4900, chargedMinor: 4900,
+      creditsTakenBack: 4900, creditsShortfall: 0 });
+    await f.run({ refundId: 're_1' });
+    expect(f.alert).not.toHaveBeenCalled();
+    expect(mocks.owner).toHaveBeenCalledExactlyOnceWith('refund', facts({ state: 'refunded' }));
+  });
+
+  it('words the review cases as needing a person, one message per refund', async () => {
+    await fixture([refund()], { state: 'refunded', duplicate: false, renewing: true, creditsShortfall: 300 }).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenLastCalledWith('refund', expect.objectContaining({ state: 'renewing', creditsShortfall: 300 }));
+    await fixture([refund({ amount: 1000 })], { state: 'partial_review', duplicate: false, refundedMinor: 1000 }).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenLastCalledWith('refund', expect.objectContaining({ state: 'partial_review', refundedMinor: 1000 }));
+    await fixture([refund()], { state: 'pack_review', duplicate: false }).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenLastCalledWith('refund', expect.objectContaining({ state: 'pack_review' }));
+    expect(mocks.owner).toHaveBeenCalledTimes(3);
+    // A recorded-only state (not the order's end) is not a message.
+    await fixture([refund()], { state: 'recorded', duplicate: false }).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenCalledTimes(3);
+  });
+
+  it('on a replay (no amounts from the database) shows the refund amount and leaves the credits unknown, never zero', async () => {
+    await fixture([refund()], { state: 'refunded', duplicate: true, renewing: false }).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenCalledExactlyOnceWith('refund', facts({ state: 'refunded', refundedMinor: 4900, chargedMinor: null,
+      creditsTakenBack: null, creditsShortfall: null }));
+  });
+
+  it('sends the unmatched and during-monthly-refund cases too', async () => {
+    mocks.find.mockResolvedValue(null); mocks.ref.mockResolvedValue(undefined);
+    await fixture([refund()]).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenLastCalledWith('refund', expect.objectContaining({ state: 'unmatched', refundId: 're_1' }));
+    mocks.find.mockResolvedValue(match); mocks.monthly.mockResolvedValue({ handled: true });
+    await fixture([refund()]).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenLastCalledWith('refund', expect.objectContaining({ state: 'during_monthly_refund', orderId: 'order' }));
   });
 });

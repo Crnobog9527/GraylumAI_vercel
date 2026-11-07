@@ -18,6 +18,7 @@ const routeMocks = vi.hoisted(() => {
     getStripeWebhookSecret: vi.fn(() => 'whsec_test_secret'),
     logServerError: vi.fn(),
     logServerWarn: vi.fn(),
+    alertOwner: vi.fn(),
     handleCardRefund: vi.fn(),
     reconcileSubscriptionRefundFromStripeWebhook: vi.fn(),
     listInvoicePayments: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock('@/lib/server-log', () => ({
   logServerError: routeMocks.logServerError,
   logServerWarn: routeMocks.logServerWarn,
 }));
+vi.mock('@/lib/owner-alert', () => ({ alertOwnerAfterResponse: routeMocks.alertOwner }));
 
 const { POST } = await import('../../../../apps/web/src/app/api/stripe/webhook/route');
 
@@ -106,6 +108,8 @@ describe('stripe webhook route with the legacy fallback closed (ARCH-FIX F2)', (
       'billing',
       'stripe_webhook_invalid_signature',
     );
+    // ALERT-FEISHU: a wrong webhook secret stops every payment; the Owner hears (at most hourly).
+    expect(routeMocks.alertOwner).toHaveBeenCalledExactlyOnceWith('payment_webhook_unavailable', { provider: 'stripe', reason: 'signature' });
   });
 
   const legacyFulfillment = () => [routeMocks.fulfillCreditPackageOrder, routeMocks.fulfillMembershipInvoice,
@@ -158,6 +162,7 @@ describe('stripe webhook route with the legacy fallback closed (ARCH-FIX F2)', (
     legacyFulfillment().forEach(mock => expect(mock).not.toHaveBeenCalled());
     expect(routeMocks.logServerWarn).toHaveBeenCalledWith('billing', 'stripe_webhook_unclaimed', { eventType });
     expect(routeMocks.logServerError).not.toHaveBeenCalled();
+    expect(routeMocks.alertOwner).not.toHaveBeenCalled();
   });
 
   it('still returns 500 and logs when a current handler fails, so Stripe retries', async () => {
@@ -177,5 +182,8 @@ describe('stripe webhook route with the legacy fallback closed (ARCH-FIX F2)', (
       { eventType: 'refund.created', code: 'PAY_COMMON_WEBHOOK_HANDLER_FAILED' },
     );
     legacyFulfillment().forEach(mock => expect(mock).not.toHaveBeenCalled());
+    // ALERT-FEISHU: once per event, however often Stripe redelivers it (the dedupe key is the event id).
+    expect(routeMocks.alertOwner).toHaveBeenCalledExactlyOnceWith('payment_webhook_failed', { provider: 'stripe',
+      eventId: 'evt_test_refund_handler_failure', eventType: 'refund.created', code: 'PAY_COMMON_WEBHOOK_HANDLER_FAILED' });
   });
 });

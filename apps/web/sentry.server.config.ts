@@ -4,6 +4,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { scrubBreadcrumb, scrubErrorEvent, scrubTransactionEvent } from "./src/lib/sentry-scrub";
+import { countServerError } from "./src/lib/sentry-error-spike";
 
 function getSentryEnvironment() {
   return (
@@ -61,6 +62,7 @@ Sentry.init({
       console.log("[Sentry] Server event captured (not sent in dev):", event.message || event.exception?.values?.[0]?.value);
       return null;
     }
-    return scrubErrorEvent(event);
+    // ALERT-FEISHU: server error spikes go to the Owner's Feishu group (lib/sentry-error-spike.ts).
+    return countServerError(scrubErrorEvent(event));
   },
 });

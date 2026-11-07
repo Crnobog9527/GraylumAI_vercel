@@ -96,6 +96,22 @@ Owner 原话（2026-11-07，总控建议放到上线后，Owner 回复）：
 - 合规：手机号注册单独勾选「隐私政策」和「个人信息出境」；隐私政策的手机号一节由 Owner 在 Termly 里写，列入律师审阅清单。
 - 取代：总控 2026-11-07 “手机号放到上线后”的建议（不是 Owner 决定，Owner 当次改为上线前做）。
 
+**2026-11-07：给 Owner 的告警改发到 Graylum 的飞书群机器人，Sentry 邮件验证后关掉（ALERT-FEISHU）**
+
+Owner 原话（2026-11-07，Owner 的需求简报和总控转达；"greenlam" 指 Graylum）：
+
+> 我现在给 shotviva 和 greenlam 这两个项目分别创建了飞书群，相当于有两个飞书机器人。我希望把 Sentry 给开发看的错误报告关掉，然后让这两个飞书机器人，分别在这两个项目的群里给我发告警消息。
+
+- 范围：付款、退款、拒付、对账、止损和平台垫付、网站报错激增等业务告警，用一两句中文大白话加后台链接，发到 Graylum 飞书群的自定义机器人（开签名校验）；告警种类、阈值和示例消息见 ALERT-FEISHU 的 PR。设计和 Shotviva T72 一致。
+- Sentry 照常收集错误给开发看，只是不再给 Owner 发邮件。
+- 只配正式环境（Owner 2026-11-07 补充，总控转达）：
+
+  > 飞书的这个机器人只配置给生产环境，项目 staging 不要用。
+
+  staging 不设这两个变量，代码在没设时静默跳过。
+- 取代：上线周告警邮件（Sentry 项目 graylumai-main 的邮件规则）不再作为 Owner 的告警渠道。**但要先在正式站冒烟时（REL-1 第 4.1 节 K10、建库准备第 36 步）收到飞书测试告警，再收到过一两条真实告警，Owner 再自己去关 Sentry 邮件**；关之前两边都发。止损邮件（Resend）照发。
+- 两个环境变量 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET` 由 Owner 自己填进正式 Vercel，值不进聊天、PR 和日志。Owner 2026-11-07 已在正式项目 `graylum-ai-vercel-v1` 填好（只勾 Production，总控转达），建库日只核对名字（REL-1-BUILD-PREP 第 24 步、REL-1 V1）。
+
 **2026-11-07：上线前接入 Anthropic、OpenAI 官方 API 额度（BILL-BYOK，计费改动）**
 
 Owner 原话（2026-11-07，A1–A9 外部设置引导窗口转达）：

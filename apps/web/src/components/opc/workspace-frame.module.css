@@ -86,7 +86,10 @@
  .shell,.shell.withRight{height:calc(100dvh - 96px - var(--consent-bar-space, 0px));grid-template-columns:minmax(0,1fr);padding:4px}
  .shell.noNotice{height:calc(100dvh - 56px - var(--consent-bar-space, 0px))}
  .center,.right{border-radius:24px}
- .rail{display:none;position:fixed;inset:96px auto var(--consent-bar-space, 0px) 0;width:min(272px,86vw);padding:0 8px 16px;background:#fff;z-index:30;box-shadow:0 4px 20px #02041a29}
+ .rail{display:none;position:fixed;inset:96px auto var(--consent-bar-space, 0px) 0;width:min(272px,86vw);padding:0 8px 16px;background:#fff;z-index:30;box-shadow:0 4px 20px #02041a29;overflow-y:auto;overscroll-behavior:contain}
+ /* The drawer gets shorter while the consent bar shows (--consent-bar-space): the list keeps a usable height and the drawer scrolls
+    as a whole instead of squeezing the list to nothing under the fixed rows (ANALYTICS-CONSENT follow-up). */
+ .rail .history{min-height:120px}
  .navOpen>.rail{display:flex}.railMobile{display:flex;align-items:center;min-height:46px;padding:0 12px}.railMobile button{padding:0;border:0;background:none;color:#262626;font-size:16px;cursor:pointer}
  .mobileRightToggle{position:absolute;right:12px;top:12px;z-index:3;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;background:#fff;color:#444}
  .shell.withRight>.right{display:none;top:90px;bottom:5px;right:4px;width:min(380px,calc(100vw - 8px))}
