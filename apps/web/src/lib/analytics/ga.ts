@@ -1,16 +1,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
-import { analyticsAllowed, readTermlyConsent } from './consent';
+import { analyticsAllowed } from './consent';
 import { pageTitleFor, sanitizePageUrl, sanitizeReferrer } from './sanitize';
 
 /**
- * GA4 in the browser (ANALYTICS plan §3.1, O2). gtag.js is a Termly-classified tag (category analytics) that
- * Termly releases after consent; this code fills its command queue only with live consent and on a page we may
- * report. Page views are sent by this code alone (`send_page_view: false`), with the
+ * GA4 in the browser (ANALYTICS plan §3.1, O2; ANALYTICS-CONSENT). SiteAnalytics adds gtag.js only once our consent
+ * module allows statistics, in every region; this code fills its command queue only with live consent and on a page we
+ * may report. Page views are sent by this code alone (`send_page_view: false`), with the
  * cleaned address, referrer and a fixed title set globally first, so GA's own automatic events
  * (session_start, first_visit, user_engagement) carry the same cleaned values. On a sensitive page, or when
  * consent is withdrawn, Google's opt-out switch `ga-disable-<ID>` stops every request; it flips back when
- * consent returns. Google signals and ad personalisation signals stay off; no user ID is ever set.
+ * consent returns. Advertising storage, Google signals and ad personalisation signals stay off; no user ID is ever set.
  */
 type Gtag = (...args: unknown[]) => void;
 
@@ -29,10 +29,8 @@ let page: Page | null = null;
 let navigation = 0;
 let pageViewSentFor = -1;
 
-const consentFields = (advertising: boolean) => {
-  const ads = advertising ? 'granted' : 'denied';
-  return { analytics_storage: 'granted', ad_storage: ads, ad_user_data: ads, ad_personalization: ads };
-};
+// We run no advertising: ad storage stays denied even with statistics consent.
+const GRANTED = { analytics_storage: 'granted', ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied' };
 
 function load(measurementId: string) {
   window.dataLayer = window.dataLayer || [];
@@ -44,14 +42,13 @@ function load(measurementId: string) {
   window.gtag('consent', 'default', {
     analytics_storage: 'denied', ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied',
   });
-  window.gtag('consent', 'update', consentFields(readTermlyConsent().advertising));
+  window.gtag('consent', 'update', GRANTED);
   window.gtag('js', new Date());
   setPageFields();
   window.gtag('config', measurementId, {
     send_page_view: false, allow_google_signals: false, allow_ad_personalization_signals: false,
   });
-  // gtag.js itself is the Termly-classified tag rendered by SiteAnalytics; Termly releases it, and it then reads
-  // the queue above. Nothing here loads a script.
+  // gtag.js itself is rendered by SiteAnalytics once consent allows; it then reads the queue above. Nothing here loads a script.
   loadedFor = measurementId;
 }
 
@@ -71,7 +68,7 @@ export function enterPage(href: string, previous: string | null): void {
   };
 }
 
-/** Bring GA in line with the current page and Termly's live consent; sends this page's view once. */
+/** Bring GA in line with the current page and live consent; sends this page's view once. */
 export function syncGa(measurementId: string | null): void {
   if (!measurementId || typeof window === 'undefined' || !page) return;
   const reportable = analyticsAllowed() && page.location !== null;
@@ -83,7 +80,7 @@ export function syncGa(measurementId: string | null): void {
   }
   if (loadedFor !== measurementId) load(measurementId);
   else {
-    window.gtag?.('consent', 'update', consentFields(readTermlyConsent().advertising));
+    window.gtag?.('consent', 'update', GRANTED);
     setPageFields();
   }
   if (pageViewSentFor === page.navigation) return;

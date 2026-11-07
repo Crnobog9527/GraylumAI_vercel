@@ -20,11 +20,11 @@ const reportOnlyCsp = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "script-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://app.termly.io https://www.googletagmanager.com",
+  "script-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://www.googletagmanager.com",
   "style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com",
   [
     "img-src 'self' data: blob: https://*.supabase.co https://hcaptcha.com https://*.hcaptcha.com",
-    "https://*.termly.io https://*.google-analytics.com https://www.googletagmanager.com",
+    "https://*.google-analytics.com https://www.googletagmanager.com",
   ].join(" "),
   "font-src 'self'",
   "media-src 'self' blob: https://*.supabase.co",
@@ -32,8 +32,8 @@ const reportOnlyCsp = [
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
     "https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
     "https://hcaptcha.com https://*.hcaptcha.com https://vitals.vercel-insights.com",
-    // ANALYTICS: Termly consent records and GA4 collection (report-only, observed before enforcing).
-    "https://*.termly.io https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com",
+    // ANALYTICS: GA4 collection (report-only, observed before enforcing). Termly's consent script is gone (ANALYTICS-CONSENT).
+    "https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com",
   ].join(" "),
   "frame-src https://hcaptcha.com https://*.hcaptcha.com",
   // Session Replay uses a compression worker.
