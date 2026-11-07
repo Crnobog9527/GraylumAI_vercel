@@ -83,10 +83,12 @@ export async function sendOwnerAlertTest(): Promise<'sent' | 'off' | 'not_sent'>
   }
 }
 
-export async function notifyOwner<K extends OwnerAlertKind>(kind: K, facts: OwnerAlertFacts[K]): Promise<void> {
+/** true when a message went out (false: not configured, already sent, or failed). Never throws. */
+export async function notifyOwner<K extends OwnerAlertKind>(kind: K, facts: OwnerAlertFacts[K]): Promise<boolean> {
   try {
-    await notifyOwnerWith(defaultNotifyDeps(), kind, facts);
+    return await notifyOwnerWith(defaultNotifyDeps(), kind, facts);
   } catch {
     logger.warn('system', 'owner_alert_crashed', { kind, swallowed: true });
+    return false;
   }
 }

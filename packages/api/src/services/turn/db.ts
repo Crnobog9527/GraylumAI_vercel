@@ -96,9 +96,9 @@ async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: 
   const { data, error } = await client.rpc(name, args);
   if (error) {
     const code = turnDatabaseCode(error.message);
-    // ALERT-FEISHU: the site's daily spend reached the stop-loss limit (turn_open / turn_call_begin). Once a UTC day; not awaited,
-    // so the refusal is never delayed, and no database work is added.
-    if (code === 'STOP_LOSS_REACHED') void notifyOwner('stop_loss_reached', { utcDate: new Date().toISOString().slice(0, 10) });
+    // ALERT-FEISHU: the site's daily spend reached the stop-loss limit (turn_open / turn_call_begin). Once a UTC day. Awaited, so
+    // the function is not frozen before the send (only the first refusal waits, at most about 4 s); never throws, no database work.
+    if (code === 'STOP_LOSS_REACHED') await notifyOwner('stop_loss_reached', { utcDate: new Date().toISOString().slice(0, 10) });
     throw new TurnDatabaseError(code);
   }
   return schema.parse(data);

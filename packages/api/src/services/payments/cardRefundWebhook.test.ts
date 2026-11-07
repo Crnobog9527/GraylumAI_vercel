@@ -282,6 +282,12 @@ describe('ALERT-FEISHU: the Owner hears about every external refund in Feishu', 
     expect(mocks.owner).toHaveBeenCalledTimes(3);
   });
 
+  it('on a replay (no amounts from the database) shows the refund amount and leaves the credits unknown, never zero', async () => {
+    await fixture([refund()], { state: 'refunded', duplicate: true, renewing: false }).run({ refundId: 're_1' });
+    expect(mocks.owner).toHaveBeenCalledExactlyOnceWith('refund', facts({ state: 'refunded', refundedMinor: 4900, chargedMinor: null,
+      creditsTakenBack: null, creditsShortfall: null }));
+  });
+
   it('sends the unmatched and during-monthly-refund cases too', async () => {
     mocks.find.mockResolvedValue(null); mocks.ref.mockResolvedValue(undefined);
     await fixture([refund()]).run({ refundId: 're_1' });

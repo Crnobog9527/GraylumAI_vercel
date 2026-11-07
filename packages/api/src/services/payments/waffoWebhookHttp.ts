@@ -7,7 +7,7 @@ type Dependencies = {
   /** Normal-path delivery after the receipt is durable. Throwing asks the provider to redeliver. */
   process?: (receipt: Awaited<ReturnType<typeof receiveWaffoWebhook>>) => Promise<unknown>;
   /** ALERT-FEISHU: a stored receipt whose processing failed, or a callback that could not be stored. Never throws. */
-  onFailure?: (failure: { stage: 'processing'; receiptId: string } | { stage: 'storage' }) => Promise<void>;
+  onFailure?: (failure: { stage: 'processing'; receiptId: string } | { stage: 'storage' }) => Promise<unknown>;
 };
 
 /** Streaming limit applies even when Content-Length is absent or dishonest. */

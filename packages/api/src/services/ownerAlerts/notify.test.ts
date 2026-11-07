@@ -130,7 +130,7 @@ describe('notifyOwnerWith', () => {
 
   it('notifyOwner itself never throws, even when setup fails', async () => {
     resetOwnerAlertDefaults({ ...deps().deps, dedupe: { claim: () => { throw new Error('boom'); }, seen: () => false, release: async () => {} } });
-    await expect(notifyOwner('test', { note: 'x' })).resolves.toBeUndefined();
+    await expect(notifyOwner('test', { note: 'x' })).resolves.toBe(false);
   });
 });
 

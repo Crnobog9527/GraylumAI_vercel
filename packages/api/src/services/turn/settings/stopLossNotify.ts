@@ -139,13 +139,26 @@ async function readPending(db: Db, now: Date) {
   return pending.slice(0, BATCH);
 }
 
-/** ALERT-FEISHU: the same rows the mail takes this run also go to the Owner's Feishu group, once per row (keyed by its id),
- * whether or not the mail can go out. notifyOwner never throws and is skipped when Feishu is not configured. */
-async function relayToOwner(rows: Row[]) {
+/** ALERT-FEISHU: Feishu picks its own rows, independent of the mail's state: the stop-loss alert rows of the last 48 hours,
+ * newest first, each sent once (the Redis dedupe on the row id), so a mail that went out never hides a Feishu send that failed.
+ * At most MAX_MAILS_PER_RUN actual sends a run; rows already sent are skipped without counting. No read at all when Feishu is not
+ * configured; a failed read only skips this run. Never throws. */
+export const OWNER_RELAY_WINDOW_MS = 48 * 3600_000;
+const OWNER_RELAY_ROWS = 20;
+async function relayToOwner(db: Db, now: Date) {
   if (!ownerAlertsEnabled()) return;
-  for (const row of rows.slice(0, MAX_MAILS_PER_RUN)) {
-    await notifyOwner('stop_loss', { alertId: String(row.id), line: describeStopLossAlert(row) });
-  }
+  try {
+    const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
+      .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%')
+      .gte('created_at', new Date(now.getTime() - OWNER_RELAY_WINDOW_MS).toISOString())
+      .order('created_at', { ascending: false }).limit(OWNER_RELAY_ROWS);
+    if (error || !Array.isArray(data)) return;
+    let sent = 0;
+    for (const row of data as Row[]) {
+      if (sent >= MAX_MAILS_PER_RUN) break;
+      if (await notifyOwner('stop_loss', { alertId: String(row.id), line: describeStopLossAlert(row) })) sent += 1;
+    }
+  } catch { /* the mail delivery below never depends on it */ }
 }
 
 /**
@@ -157,11 +170,16 @@ async function relayToOwner(rows: Row[]) {
  */
 export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {}): Promise<StopLossNoticeOutcome> {
   const now = deps.now ?? new Date();
+  // ALERT-FEISHU: the Feishu relay runs beside the mail, so it never takes the mail's time budget.
+  const [outcome] = await Promise.all([deliverStopLossMails(db, deps, now), relayToOwner(db, now)]);
+  return outcome;
+}
+
+async function deliverStopLossMails(db: Db, deps: StopLossNoticeDeps, now: Date): Promise<StopLossNoticeOutcome> {
   let pending: Row[] = [];
   try {
     pending = await readPending(db, now);
     if (pending.length === 0) return { outcome: 'none', alerts: 0 };
-    await relayToOwner(pending);
     const env = deps.env ?? process.env;
     const config = deps.config ?? await noticeConfig(db, env);
     const to = await ownerMailbox(db);

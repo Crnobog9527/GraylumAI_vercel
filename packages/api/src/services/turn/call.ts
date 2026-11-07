@@ -127,8 +127,9 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
       // 402: the platform account could not pay; never charged (Owner item 53).
       await deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'no_charge_402', nominalUsd: null, actualUsd: null,
         usage: {}, providerId: rejection.providerId ?? null, payloadHash: sha256(observation.rawBody), raw: null });
-      // ALERT-FEISHU: every user's AI calls fail until the account is topped up. At most every 30 minutes; not awaited.
-      void notifyOwner('provider_402', { provider: 'openrouter' });
+      // ALERT-FEISHU: every user's AI calls fail until the account is topped up. At most every 30 minutes; awaited so the function
+      // is not frozen before the send (the call has already failed; notifyOwner never throws).
+      await notifyOwner('provider_402', { provider: 'openrouter' });
       throw new TurnStop('TURN_PROVIDER_402');
     }
     const evidence = openRouterEvidence(observation, call.identity, 'response');

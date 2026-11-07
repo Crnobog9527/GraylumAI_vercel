@@ -109,7 +109,8 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
       p_payment: match.paymentId, p_refund: refund.id, p_amount: refund.amount, p_currency: refund.currency,
       p_refunded_at: new Date(refund.created * 1000).toISOString() });
     if (recorded.error || !recorded.data) throw new Error('PAY_STRIPE_MP_REFUND_UNAVAILABLE', { cause: recorded.error });
-    await reportRefund(match.order.id, match.kind, { id: refund.id, currency: refund.currency }, recorded.data as RefundResult, alert);
+    await reportRefund(match.order.id, match.kind, { id: refund.id, currency: refund.currency, amount: refund.amount },
+      recorded.data as RefundResult, alert);
   }
   // Another refund of ours in the same event still goes through its approval flow on the existing path.
   return oursHandled === ours.length;
@@ -129,14 +130,16 @@ async function listChargeRefunds(stripe: RefundStripe, chargeId: string) {
 }
 
 /** Alerts follow the persisted state, also on a replay: a delivery that crashed before alerting is alerted on retry. */
-async function reportRefund(orderId: string, kind: string, refund: { id: string; currency: string }, result: RefundResult,
+async function reportRefund(orderId: string, kind: string, refund: { id: string; currency: string; amount: number }, result: RefundResult,
   alert: () => void) {
   const refundId = refund.id;
   // Stable across replays of the same refund, so repeated alerts can be told apart from new ones.
   const dedupKey = `stripe-mp-external-refund:${result.state}:${orderId}:${refundId}`;
+  // A replay (duplicate) returns no amounts or credits: the refund's own amount is shown, and unknown credits stay unknown (null),
+  // never read as zero.
   const owner = (state: RefundAlert['state']) => ownerRefund({ orderId, refundId, orderKind: kind, state, currency: refund.currency,
-    refundedMinor: num(result.refundedMinor), chargedMinor: num(result.chargedMinor), creditsTakenBack: num(result.creditsTakenBack),
-    creditsShortfall: num(result.creditsShortfall) });
+    refundedMinor: num(result.refundedMinor) ?? num(refund.amount), chargedMinor: num(result.chargedMinor),
+    creditsTakenBack: num(result.creditsTakenBack), creditsShortfall: num(result.creditsShortfall) });
   if (result.state === 'partial_review') {
     logger.error('billing', 'stripe_mp_external_refund_partial', { orderId, kind, dedupKey, replay: result.duplicate,
       action: '部分外部退款：已记账，会员和积分未改动，请人工核对' });

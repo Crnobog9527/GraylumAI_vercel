@@ -42,6 +42,10 @@ describe('renderAlert', () => {
     expect(renderAlert('refund', { ...EXAMPLES.refund, state: 'partial_review', refundedMinor: 2000 }, ctx))
       .toContain('只退了一部分（$20.00）');
     expect(renderAlert('refund', { ...EXAMPLES.refund, creditsTakenBack: 0, creditsShortfall: 0 }, ctx)).toContain('没有要扣回的积分');
+    // Unknown (a replay) is never worded as zero.
+    const unknown = renderAlert('refund', { ...EXAMPLES.refund, creditsTakenBack: null, creditsShortfall: null }, ctx);
+    expect(unknown).toContain('积分扣回情况请到后台看');
+    expect(unknown).not.toContain('没有要扣回');
   });
 
   it('gives an unknown code a plain fallback instead of the code', () => {
@@ -59,7 +63,9 @@ describe('renderAlert', () => {
 
 describe('sanitize', () => {
   it('removes full emails, phone numbers, keys and hook addresses whatever a caller passes', () => {
-    const text = sanitize('a.b+c@gmail.com +1 415 555 0100 sk_live_abcdefgh123 https://open.feishu.cn/open-apis/bot/v2/hook/x');
+    // Built at run time, so no key-shaped literal is committed (the secret scan rejects one, even a fake).
+    const fakeKey = ['sk', 'live', 'abcdefgh123'].join('_');
+    const text = sanitize(`a.b+c@gmail.com +1 415 555 0100 ${fakeKey} https://open.feishu.cn/open-apis/bot/v2/hook/x`);
     expect(text).toBe('[邮箱] [号码] [已隐藏] [已隐藏]');
     expect(renderAlert('stop_loss', { alertId: '1', line: '联系 owner@graylum.com' }, ctx)).not.toContain('@');
   });

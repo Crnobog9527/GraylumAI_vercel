@@ -18,8 +18,10 @@ export async function checkPlatformAbsorbWith(db: SupabaseClient, deps: NotifyDe
   const now = deps.now();
   if (!(await deps.dedupe.claim(`platform_absorb_check:${now.toISOString().slice(0, 13)}`, 3600))) return 0;
   const report = await read(db, now);
+  // Already-sent alerts are skipped by the dedupe and do not use up the cap, so a long report is worked through hour by hour.
   let sent = 0;
-  for (const alert of report.alerts.slice(0, ABSORB_MESSAGES_PER_RUN)) {
+  for (const alert of report.alerts) {
+    if (sent >= ABSORB_MESSAGES_PER_RUN) break;
     const facts = { model: alert.model, utcDate: alert.utcDate, usd: alert.nominalEquivalentUsd, thresholdUsd: alert.thresholdUsd };
     if (await notifyOwnerWith(deps, 'platform_absorb', facts)) sent += 1;
   }

@@ -43,6 +43,16 @@ describe('checkPlatformAbsorbWith', () => {
     expect(fetch).toHaveBeenCalledTimes(ABSORB_MESSAGES_PER_RUN);
   });
 
+  it('skips alerts already sent without using up the cap, so a long report is worked through', async () => {
+    const { deps: d, fetch } = deps();
+    clock.t += 7200_000;
+    const alerts = Array.from({ length: 8 }, (_, i) => alert(`n${i}`));
+    expect(await checkPlatformAbsorbWith({} as never, d, report(alerts))).toBe(ABSORB_MESSAGES_PER_RUN);
+    clock.t += 3600_000;
+    expect(await checkPlatformAbsorbWith({} as never, d, report(alerts))).toBe(3);
+    expect(fetch).toHaveBeenCalledTimes(8);
+  });
+
   it('does no read at all when Feishu is not configured, or the setting is off', async () => {
     const read = report([alert('m1')]);
     expect(await checkPlatformAbsorbWith({} as never, deps(null).deps, read)).toBe(0);

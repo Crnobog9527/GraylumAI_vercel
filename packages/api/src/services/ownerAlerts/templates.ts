@@ -30,7 +30,9 @@ function refundLine(f: OwnerAlertFacts['refund']): string {
   const amount = refunded ? `退了 ${refunded}${charged && charged !== refunded ? `（这笔共付 ${charged}）` : ''}` : '被退款';
   switch (f.state) {
     case 'refunded': {
-      const taken = f.creditsTakenBack ? `已自动扣回 ${f.creditsTakenBack} 积分` : '没有要扣回的积分';
+      // null: not known here (a replay); never reported as zero.
+      const taken = f.creditsTakenBack === null ? '积分扣回情况请到后台看'
+        : f.creditsTakenBack ? `已自动扣回 ${f.creditsTakenBack} 积分` : '没有要扣回的积分';
       const short = f.creditsShortfall ? `，还差 ${f.creditsShortfall} 积分没扣回（已经被用掉）` : '';
       return `【退款】${what}在 Stripe 那边${amount}（不是从后台发起的），${taken}${short}。`;
     }
