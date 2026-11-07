@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TransportObservation } from './provider/fixtureAdapter';
 import { openRouterAdapter } from './provider/openRouterAdapter';
 import { openRouterEvidence, type OpenRouterIdentity } from './provider/openRouterEvidence';
+import { withByok } from './provider/openRouterByok';
 import { nominalActualFallback, nominalCost, nominalPricing } from '../../shared/nominalPricing';
 import { logSwallowed, swallow } from '../../lib/swallow';
 import { ceil12 } from './call';
@@ -80,7 +81,9 @@ async function lookUp(deps: TurnRecoveryDeps, item: RecoveryItem, call: Recovery
   await deps.db.record({ actorId: item.actorId, turnId: item.turnId, seq: call.seq, status: 'ok',
     nominalUsd: ceil12(nominal ?? nominalActualFallback(actual, upper)), actualUsd: actual,
     // nominalSource: actual_fallback when even the lookup has no token counts (BILL_PAYG_PLAN 3A), as the reports count it.
-    usage: { ...usage, source: 'lookup', nominalSource: nominal === null ? 'actual_fallback' : 'nominal' }, providerId: call.providerId,
+    // A BYOK lookup's cost is the fee plus the vendor's charge (BILL-BYOK), as a live receipt's; the split stays in usage.
+    usage: withByok({ ...usage, source: 'lookup', nominalSource: nominal === null ? 'actual_fallback' : 'nominal' },
+      'byok' in evidence ? evidence.byok : undefined), providerId: call.providerId,
     payloadHash: evidence.sourceHash, raw: evidence.rawBody || null });
   return 'receipt';
 }
