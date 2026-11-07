@@ -77,6 +77,11 @@ describe('live receipt (call.ts)', () => {
       expect(receipt!.usage).not.toHaveProperty('byok');
     }
   });
+  it('BYOK inside the monthly allowance (fee 0): actual = the upstream charge, the user base unchanged', async () => {
+    const [receipt] = await live({ cost: 0, is_byok: true, cost_details: { upstream_inference_cost: 0.000064 } }, true);
+    expect(receipt).toMatchObject({ status: 'ok', nominalUsd: NOMINAL, actualUsd: '0.000064',
+      usage: { byok: { feeUsd: '0', upstreamUsd: '0.000064' } } });
+  });
   it('BYOK without the upstream cost: the answer is delivered, no receipt is written, the call is left for recovery', async () => {
     const records = await live({ cost: 0.0000032, is_byok: true });
     expect(records).toEqual([]);

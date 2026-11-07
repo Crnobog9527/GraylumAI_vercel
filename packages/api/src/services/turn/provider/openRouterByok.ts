@@ -3,7 +3,8 @@ import { DECIMAL_SCALE, decimal } from './decimal';
 
 /**
  * BILL-BYOK (Owner 2026-11-07): OpenRouter may serve an Anthropic or OpenAI call with the official key the Owner added in
- * OpenRouter (BYOK). OpenRouter's `cost` is then only its own BYOK fee; what the vendor charged is
+ * OpenRouter (BYOK). OpenRouter's `cost` is then only its own BYOK fee: 0 within the first 25,000 USD of list-price BYOK usage
+ * a month on pay-as-you-go, 5 % above it. A fee of 0 is a final fee, never missing cost. What the vendor charged is
  * `upstream_inference_cost` (https://openrouter.ai/docs/use-cases/usage-accounting). The platform's actual cost of the call
  * is the two together. A call that is not BYOK (is_byok false or absent, including a BYOK key OpenRouter fell back from)
  * keeps the cost exactly as reported, never adding the upstream field, which there only restates the same charge.

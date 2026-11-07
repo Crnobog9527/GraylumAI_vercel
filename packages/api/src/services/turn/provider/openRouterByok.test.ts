@@ -73,6 +73,24 @@ describe('openRouterEvidence under BYOK', () => {
   });
 });
 
+describe('BYOK inside OpenRouter\'s monthly allowance: the fee is 0', () => {
+  // Standard pay-as-you-go: no BYOK fee on the first 25,000 USD of list-price BYOK usage a month; 5 % above it.
+  it('cost 0 with the upstream amount is a final cost equal to the upstream charge, never missing cost', () => {
+    expect(openRouterEvidence(response({ cost: 0, is_byok: true, cost_details: { upstream_inference_cost: 0.01 } }), identity, 'response'))
+      .toMatchObject({ cost: '0.01', final: true, byok: { feeUsd: '0', upstreamUsd: '0.01' } });
+    expect(openRouterEvidence(lookup({ total_cost: 0, is_byok: true, upstream_inference_cost: 0.01 }), identity, 'lookup', 'gen-1'))
+      .toMatchObject({ cost: '0.01', final: true, byok: { feeUsd: '0', upstreamUsd: '0.01' } });
+  });
+  it('cost 0 without the upstream amount is missing cost, not a free call', () => {
+    expect(openRouterEvidence(response({ cost: 0, is_byok: true }), identity, 'response'))
+      .toMatchObject({ cost: null, final: false, costIssue: 'missing_cost' });
+    expect(openRouterEvidence(lookup({ total_cost: 0, is_byok: true, upstream_inference_cost: null }), identity, 'lookup', 'gen-1'))
+      .toMatchObject({ cost: null, final: false });
+    expect(decisionsCostUsd({ cost: 0, is_byok: true })).toBeNull();
+    expect(decisionsCostUsd({ cost: 0, is_byok: true, cost_details: { upstream_inference_cost: 0.002 } })).toBe(0.002);
+  });
+});
+
 describe('decisionsCostUsd (positioning check, platform-paid)', () => {
   it('fee + upstream under BYOK; the reported cost otherwise; unknown when BYOK lacks the upstream amount', () => {
     expect(decisionsCostUsd({ cost: 0.0001, is_byok: true, cost_details: { upstream_inference_cost: 0.002 } })).toBeCloseTo(0.0021, 12);

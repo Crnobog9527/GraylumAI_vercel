@@ -35,6 +35,8 @@ const identity=(a,turn,seq,id)=>one('select turn_call_identity($1,$2,$3,$4) v',[
 const tokens={inputTokens:'2000',outputTokens:'600'};
 const plain={n:'0.01',a:'0.01',usage:tokens};
 const byok={n:'0.01',a:'0.0105',usage:{...tokens,byok:{feeUsd:'0.0005',upstreamUsd:'0.01'}}};
+// Inside OpenRouter's monthly BYOK allowance (the usual case): no fee, actual = the upstream charge.
+const byokFree={n:'0.01',a:'0.01',usage:{...tokens,byok:{feeUsd:'0',upstreamUsd:'0.01'}}};
 const record=(a,turn,seq,r,{status='ok',payload=hash('p'+turn+seq),provider=null,client=c}={})=>
  one('select turn_call_record($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',
   [a.actor,turn,seq,status,r.n,r.a,JSON.stringify(r.usage),provider,payload,'{"choices":[]}'],client);
@@ -64,7 +66,10 @@ try{
  {
   const day=new Date(),from=new Date(day.getTime()-3600_000).toISOString(),to=new Date(day.getTime()+3600_000).toISOString();
   const actual=async()=>Number((await one('select turn_admin_model_report($1,$2) v',[from,to])).totals.actualUsd);
-  const reported=await actual(),x=await settled(plain),y=await settled(byok);
+  const reported=await actual(),x=await settled(plain),y=await settled(byok),z=await settled(byokFree);
+  assert.equal(await charged(z.a,z.id),await charged(x.a,x.id),'fee 0: same charge');
+  near(z.added,x.added,'fee 0: same stop-loss share');
+  assert.equal((await callRow(z.id)).a,'0.010000000000','fee 0: actual = upstream');
   assert.ok((await charged(x.a,x.id))>0);
   assert.equal(await charged(y.a,y.id),await charged(x.a,x.id),'same charge');
   assert.equal(await spends(y.a),await spends(x.a),'same ledger spend');
@@ -73,7 +78,7 @@ try{
   const row=await callRow(y.id);
   assert.deepEqual([row.status,row.n,row.a],['ok','0.010000000000','0.010500000000']);
   assert.deepEqual(row.usage.byok,{feeUsd:'0.0005',upstreamUsd:'0.01'});
-  near(await actual()-reported,0.0205,'the admin report counts the BYOK call at fee + upstream');
+  near(await actual()-reported,0.0305,'the admin report counts the BYOK call at fee + upstream');
   report.checks.push('BYOK and non-BYOK calls with the same tokens: same charge, same ledger spend, same stop-loss share; actual = fee + upstream');
  }
  // 1b. One turn, two calls: the first served by the BYOK key, the second fell back to OpenRouter's credits (gifted credits ran out).
@@ -104,6 +109,8 @@ try{
   };
   const atBound={n:'0.02',a:'0.021',usage:{...tokens,byok:{feeUsd:'0.001',upstreamUsd:'0.02'}}};
   assert.equal(await conflict(atBound),false,'fee above an upstream charge at the bound');
+  // Inside OpenRouter's monthly allowance the fee is 0: actual = upstream, judged as any call.
+  assert.equal(await conflict({n:'0.02',a:'0.02',usage:{...tokens,byok:{feeUsd:'0',upstreamUsd:'0.02'}}}),false,'fee 0 at the bound');
   assert.equal(await conflict({n:'0.02',a:'0.021',usage:tokens}),true,'no BYOK: above the bound');
   assert.equal(await conflict({n:'0.02',a:'0.0221',usage:{...tokens,byok:{feeUsd:'0.001',upstreamUsd:'0.0211'}}}),true,'upstream above the bound');
   assert.equal(await conflict({n:'0.02',a:'0.021',usage:{...tokens,byok:{feeUsd:'x',upstreamUsd:'0.02'}}}),true,'a malformed fee is not subtracted');
