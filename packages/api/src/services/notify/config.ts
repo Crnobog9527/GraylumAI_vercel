@@ -5,7 +5,7 @@ import { getPlatformSecret, PlatformSecretError } from '../platformSecrets/reade
 type Env = Record<string, string | undefined>;
 
 /** N5 (Owner 2026-10-13): sender name and address, to be reconfirmed before launch. */
-export const DEFAULT_NOTICE_FROM = 'Graylum AI <no-reply@graylum.com>';
+export const DEFAULT_NOTICE_FROM = 'Graylum <mail@graylum.com>';
 const MAILBOX = /^[^\s@<>,;]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
 
 export interface NoticeConfig {

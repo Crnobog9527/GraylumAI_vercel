@@ -291,7 +291,7 @@
 - 通过：每个订单的退款只发生一次，账目对得上，拒付后的冻结和撤回符合规则。后台“退款”页两栏显示正确。
 
 **H 注册登录（新邮箱，hCaptcha 由 Owner 点）**
-- H-1 新邮箱（收件箱由总控提供，Codex 不自建邮箱）从零注册（过 hCaptcha、邮件确认）→恰好 500 积分、一条流水；登录；找回密码邮件送达，发件人是 `Graylum AI <no-reply@graylum.com>`。
+- H-1 新邮箱（收件箱由总控提供，Codex 不自建邮箱）从零注册（过 hCaptcha、邮件确认）→恰好 500 积分、一条流水；登录；找回密码邮件送达，发件人是 `Graylum <mail@graylum.com>`。
 - H-2 Google 登录只发一次赠送。
 - 通过：赠送恰好 500、一条流水；邮件送达。
 - 自动测试对应（首帧／表单可提交时机）：`sim/06-login-hydration.spec.ts`、`sim/07-auth-forms-hydration.spec.ts`（以 CI 模拟浏览器测试为准）。
