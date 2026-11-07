@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * The statistics consent bar (ANALYTICS-CONSENT). Fixed to the bottom and laid over the page, so showing or hiding it
- * never moves the page's own content. Light foundation values (DESIGN.md): white card, 1px border, 12px radius, menu
+ * The statistics consent bar (ANALYTICS-CONSENT). Fixed to the window bottom; while it shows, the page reserves the same
+ * space at its end (use-consent-bar-space.ts), so the bar covers no button or composer. Light foundation values (DESIGN.md): white card, 1px border, 12px radius, menu
  * shadow, 13px UI text. No entrance animation.
  */
 .bar {

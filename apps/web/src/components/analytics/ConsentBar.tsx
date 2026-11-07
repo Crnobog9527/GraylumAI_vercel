@@ -9,6 +9,7 @@ import { closeConsentPreferences, denyConsent, grantConsent, type ConsentSnapsho
 import type { SiteLocale } from '@/lib/seo/site';
 import { cn } from '@/lib/utils';
 import styles from './consent-bar.module.css';
+import { useConsentBarSpace } from './use-consent-bar-space';
 
 export const CONSENT_BAR_LABEL = 'Cookie 同意';
 
@@ -38,12 +39,15 @@ const COPY = {
 /**
  * The statistics consent bar (ANALYTICS-CONSENT, Owner 2026-11-07). Shows by itself only to an opt-in-region visitor who
  * has not chosen yet; "Cookie 设置" (footer, profile) reopens it in every region with the current state and a close
- * button. Fixed over the page bottom: it never moves the page's own layout. Not a modal: the page stays usable. The two
- * choices look the same, so refusing is as easy as accepting.
+ * button. Fixed at the window bottom; while it shows, the page ends above it (useConsentBarSpace), so it covers nothing
+ * the visitor needs to click. Not a modal: the page stays usable. The two choices look the same, so refusing is as easy
+ * as accepting.
  */
 export function ConsentBar({ consent, locale }: { consent: ConsentSnapshot; locale: SiteLocale }) {
   const first = useRef<HTMLButtonElement>(null);
+  const bar = useRef<HTMLElement>(null);
   const { ready, promptOpen, reopened, gpc, analytics } = consent;
+  useConsentBarSpace(bar, ready && promptOpen);
   // Opened from "Cookie 设置": move focus into the bar so keyboard users land on the choice.
   useEffect(() => {
     if (ready && promptOpen && reopened) first.current?.focus();
@@ -52,7 +56,7 @@ export function ConsentBar({ consent, locale }: { consent: ConsentSnapshot; loca
   const copy = COPY[locale];
   const status = gpc ? copy.gpc : reopened ? (analytics ? copy.granted : copy.denied) : null;
   return (
-    <section role="region" aria-label={CONSENT_BAR_LABEL} className={cn(light.light, styles.bar)}
+    <section ref={bar} role="region" aria-label={CONSENT_BAR_LABEL} className={cn(light.light, styles.bar)}
       style={{ background: 'var(--gl-surface)' }}>
       <p className={styles.text}>
         {copy.body} <a className={styles.link} href="/cookies">{copy.policy}</a>
