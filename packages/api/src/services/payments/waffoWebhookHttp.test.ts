@@ -35,6 +35,28 @@ describe('Waffo HTTP boundary', () => {
     expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(503);
     expect(process).not.toHaveBeenCalled();
   });
+  it('ALERT-FEISHU: reports a failed delivery by receipt and a storage failure, and a throwing hook never changes the answer', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: 'receipt-1', error: null });
+    const onFailure = vi.fn(async () => {});
+    const process = vi.fn().mockRejectedValue(new Error('PAY_WAFFO_PAYMENT_NOT_VISIBLE'));
+    const deps = { config: () => config, database: () => ({ rpc }), process, onFailure };
+    expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(503);
+    expect(onFailure).toHaveBeenLastCalledWith({ stage: 'processing', receiptId: 'receipt-1' });
+    rpc.mockResolvedValue({ data: null, error: { message: 'unavailable' } });
+    expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(503);
+    expect(onFailure).toHaveBeenLastCalledWith({ stage: 'storage' });
+    rpc.mockResolvedValue({ data: 'receipt-1', error: null });
+    process.mockResolvedValue({ state: 'applied' });
+    onFailure.mockClear();
+    expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(200);
+    expect(onFailure).not.toHaveBeenCalled();
+    const throwing = { ...deps, process: vi.fn().mockRejectedValue(new Error('x')), onFailure: () => { throw new Error('hook'); } };
+    expect((await handleWaffoWebhookHttp(request(), throwing as never)).status).toBe(503);
+    // An invalid signature is the sender's problem, not ours: no alert.
+    const bad = new Request('https://test.invalid/api/waffo/webhook', { method: 'POST', body: '{}', headers: { 'x-waffo-signature': 't=1,v1=x' } });
+    expect((await handleWaffoWebhookHttp(bad, deps)).status).toBe(400);
+    expect(onFailure).not.toHaveBeenCalled();
+  });
   it('fails closed without configuration; never invokes persistence for invalid or large bodies', async () => {
     const database = vi.fn();
     expect((await handleWaffoWebhookHttp(request(), { config: () => null, database })).status).toBe(503);

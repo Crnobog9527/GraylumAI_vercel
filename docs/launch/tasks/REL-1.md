@@ -257,7 +257,7 @@
 
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
-| V1 | ★ Owner 操作（新凭证） | 换成新项目：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL`、`EXPECTED_SUPABASE_PROJECT_REF`；Stripe 三件和 P2 的新 webhook 密钥；`OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`；`GA4_API_SECRET`（可选，GA4 上线后第一周再定，不设不影响业务） | 变量名清单读回（不读值） |
+| V1 | ★ Owner 操作（新凭证） | 换成新项目：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL`、`EXPECTED_SUPABASE_PROJECT_REF`；Stripe 三件和 P2 的新 webhook 密钥；`OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`；`GA4_API_SECRET`（可选，GA4 上线后第一周再定，不设不影响业务）；飞书告警 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET`（ALERT-FEISHU，Owner 填正式群机器人的值） | 变量名清单读回（不读值） |
 | V2 | ★ Owner 批准 → 总控 | 非密钥：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV` / `NEXT_PUBLIC_APP_ENV`；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（此时 `stopNewCalls` 开着；CORE-PATH-V2 只保留一条“部署声明的数据库主机必须等于实际连接的主机”的防串库检查，这三个变量在 V2-12 之后是否还要设**未核实**，建库日按当天代码对照）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`（必须恰好是 `true`，后台付款路由此时仍关）；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`、`NEXT_PUBLIC_COMPOSER_REFERENCES=on`、资料库三个 `NEXT_PUBLIC_LIBRARY_*` 开关（值照 staging）、`PAYMENT_NOTICE_FROM=Graylum <mail@graylum.com>`、Sentry 几个变量（**`NEXT_PUBLIC_SENTRY_DSN` 必须有**，缺了所有告警静默；Sentry 正式项目要建 error/fatal 的通知规则，上线前做一次合成告警演练，见 [建库准备包](REL-1-BUILD-PREP.md) 第一天告警值守表）。**`SITE_INDEXING` 这时不设成 `public`**；`NEXT_PUBLIC_TERMLY_WEBSITE_UUID` 不设（ANALYTICS-CONSENT 起代码不读） | 变量名清单和本行对照 |
 | V3 | 总控只读核对 | **不能设**：任何 `V3_RUNTIME_STAGING_*`（设了代码拒绝）、`WAFFO_TEST_*`、`E2E_*`、`LANDING_PREVIEW_FEATURES`、`ANTHROPIC_API_KEY`、`PAYMENT_NOTICE_TEST_RECIPIENTS`、`OPENROUTER_API_KEY`（只从后台槽位读）；也**不要**把 `EXPECTED_APP_HOST` 加进 Vercel——应用运行时不读它，只有本机就绪检查脚本读，总控在本机跑检查时设成 `www.graylum.com` | 变量名清单里没有这些 |
 | V4 | ★ Owner 操作 | 删除 Vercel 正式环境里过渡期的旧后备变量和不再需要的 E2E 测试凭证（OR-2 和 T-END 已合并，前提是 B11 的槽位都已填写） | 删除后发布、Webhook、三家搜索和模型调用都正常 |
@@ -319,7 +319,7 @@
 | K7 | 作品复盘和一键发布：页面能开、导入表格、按档位显示；**不做真实对外发布** | 页面按档位显示；名单外平台返回 `PUBLISH_MONITOR_PLATFORM_NOT_OPEN` |
 | K8 | ~~真钱付款再退款~~ **已取消（Owner 2026-11-03）**：staging 付款链路全部测通，正式站不测，上线后真实用户订阅出问题再解决。原写法见 Git 历史 | 不再是通过标准 |
 | K9 | ~~拒付金额口径用真实一笔对照~~ **随 K8 取消**（它需要真钱付款）。沙盒里争议金额与订单差 1.17（订单 $29 + 税 $1.45）的原因仍是 PAY-DISPUTE-GUARD 的待说清项，不挡上线（Owner 2026-11-03） | 不再是通过标准 |
-| K10 | 邮件：付款提醒一封；后台手动运行一次"Runtime 成本与余额告警"检查 | 测试邮箱收到；止损告警进 `support_email`，标题没有 `[staging]` |
+| K10 | 邮件：付款提醒一封；后台手动运行一次"Runtime 成本与余额告警"检查（同一次运行也发飞书测试告警，ALERT-FEISHU） | 测试邮箱收到；止损告警进 `support_email`，标题没有 `[staging]`；**Graylum 飞书群收到「【测试】飞书告警已接通……」**（开头没有「（测试站）」），链接能打开正式后台，检查详情里 `ownerAlert` 是 `sent`（`off`＝V1 的两个飞书变量没生效，`not_sent`＝飞书拒收，多半是地址和签名密钥不是同一个机器人）。飞书只配在正式环境，staging 不配（Owner 2026-11-07） |
 | K11 | 每日对账 | 同日对账有成功记录，不是 BLOCKED |
 | K12 | TikHub 价格：手工刷新一次（每条最多 7 天有效，过期工具直接不可用）；之后看每日刷新任务有记录 | 价格行未过期 |
 | K13 | 首字速度：正式环境 20 次实测并记录（不挡上线） | 记录在上线 PR |

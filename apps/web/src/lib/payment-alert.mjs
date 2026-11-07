@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { captureMessage } from '@sentry/nextjs';
 import { PAYMENT_EVIDENCE_CONFLICT } from '@repo/api/src/services/payments/stripeWebhookError';
+import { alertOwnerAfterResponse } from '@/lib/owner-alert';
 
 // Keep the platform SDK at the web boundary. Shared API tests consume the narrow
 // declaration instead of importing Next's ambient types into the standalone API.
@@ -9,6 +10,8 @@ export function reportPaymentEvidenceConflict(eventType) {
     level: 'error', fingerprint: [PAYMENT_EVIDENCE_CONFLICT],
     tags: { category: 'billing', code: PAYMENT_EVIDENCE_CONFLICT, eventType },
   });
+  // ALERT-FEISHU: once a day (the refund and webhook alerts carry the details of each case).
+  alertOwnerAfterResponse('billing_review', { code: PAYMENT_EVIDENCE_CONFLICT, count: null });
 }
 
 // Fixed code and bounded reasons only: no subject IDs, provider objects or user content leave the cron.
@@ -19,6 +22,7 @@ export function reportAnnualReleaseAnomalies(anomalies) {
     level: 'error', fingerprint: [code], tags: { category: 'billing', code },
     extra: { count: anomalies.length, reasons: [...new Set(anomalies.map(item => item.reason))] },
   });
+  alertOwnerAfterResponse('billing_review', { code, count: anomalies.length });
 }
 
 // PAY-STRIPE-MP daily Stripe card backstop: fixed code, counts and bounded kinds only (no order or Stripe ids).
@@ -29,6 +33,7 @@ export function reportStripeCardReconciliation(findings) {
     level: 'error', fingerprint: [code], tags: { category: 'billing', code },
     extra: { count: findings.length, kinds: [...new Set(findings.map(item => item.kind))] },
   });
+  alertOwnerAfterResponse('billing_review', { code, count: findings.length });
 }
 
 // PAY-NOTIFY: notices that need a person (uncertain after same-run retries, retries exhausted, digest
@@ -41,4 +46,5 @@ export function reportPaymentNoticeAttention(results) {
     level: 'error', fingerprint: [code], tags: { category: 'billing', code },
     extra: { count: results.filter(item => item.attention).length, reasons: codes },
   });
+  alertOwnerAfterResponse('billing_review', { code, count: results.filter(item => item.attention).length });
 }
