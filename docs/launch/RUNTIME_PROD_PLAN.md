@@ -234,10 +234,11 @@ Redis/配置不可用拒绝新调用，不能退化成本机计数或默认放�
 OpenRouter 每日限额只覆盖经 OpenRouter 的正式模型流量；若多凭据共享该流量，
 上线前确认这些凭据每日额度之和不超过已批准的 OpenRouter 每日上限，不能将单 key 上限当成全部凭据上限。
 优先一把专用运行凭据用于这批模型，避免建立自有总预算计数器。
-首版正式调用仅使用 OpenRouter 余额结算，禁止 BYOK 路线；上线核验账户/凭据的 BYOK 配置
-及实际路由，不能因模型 ID 相同就假设未使用 BYOK。若无法保证禁用，保持新调用关闭。
-将来启用 BYOK 必须另作明确范围变更，并强制 include_byok_in_limit=true，核对其额度口径
-与真实供应商费用的差异，不能沿用当前“经 OpenRouter 的模型流量同一账单限额”结论。
+按 Owner 2026-11-07 新要求（Master Plan 2.1，BILL-BYOK）启用 BYOK：Anthropic、OpenAI 官方密钥加在 OpenRouter，
+按 API key 过滤只给指定凭据用，"Shared capacity fallback" 保持 "Use shared capacity"，额度用完自动回落到 OpenRouter 余额。
+计费和上限口径照 BILL-BYOK：用户扣费仍按冻结标价 × token；平台实际成本 = OpenRouter 手续费 + upstream_inference_cost；
+日上限和提醒线按标价计。正式凭据打开 include_byok_in_limit，核对其额度口径与真实供应商费用的差异，
+不能沿用“经 OpenRouter 的模型流量同一账单限额”结论。上线核验账户/凭据的 BYOK 配置及实际路由。
 不新增自动充值或自动提额。供应商拒绝后按原请求状态处理，不盲重试、不更换凭据绕限额。
 
 TikHub、Parallel、Firecrawl、Bright Data 等第三方搜索费用不计入 OpenRouter 限额。
@@ -324,7 +325,7 @@ OpenRouter 官方支持 key 的 USD limit、daily/weekly/monthly 重置或不重
 - 并发及失败：重复提交、双连接领取、重复/迟到回执、超时结果未知、派发前失败、
   供应商拒绝、断线刷新、继续、停止、余额恢复只补未做工作、删除/退款在途交互。
 - 限流/运维：分钟与 24 小时、Redis 超时、配置修改不重置计数、开关生效、
-  历史/停止/恢复不受新调用开关误伤；合成告警送达；BYOK 禁用、OpenRouter 模型流量限额覆盖及每家搜索供应商硬上限验证；未设上限的搜索保持关闭；不为监控发真实模型探活。
+  历史/停止/恢复不受新调用开关误伤；合成告警送达；BYOK 配置（按 BILL-BYOK）与回落、OpenRouter 模型流量限额覆盖及每家搜索供应商硬上限验证；未设上限的搜索保持关闭；不为监控发真实模型探活。
 - 容量：正式请求格式、上下文、输出和思考 token 上界明确覆盖；
   不能自动把测试窗口放宽至 32768。覆盖不足维持关闭，交主窗口处理容量前置事项。
 - 数据库：新迁移幂等、空库回放/指纹、既有合同兼容、锁序并发、权限拒绝、
@@ -372,7 +373,7 @@ OpenRouter 官方支持 key 的 USD limit、daily/weekly/monthly 重置或不重
 | Supabase | 精确追加迁移、已核对的结构差异、正式新调用默认关闭、备份和恢复 | 非生产幂等/兼容/指纹验证；不抄测试数据，不删账本 |
 | 正式准入 | 初始模型/线路、用途/格式/思考与容量、证据版本、是否强制 deny 的决定 | 没有到期日；撤销操作和恢复条件可追溯 |
 | 计费配置 | q=100、m=6、列出的模型/线路覆盖、所有用途的 typicalUsd 和版本 | 先迁移再配置，读回验证；旧 run 规则不变 |
-| OpenRouter | 专用运行凭据及绑定、经 OpenRouter 模型流量的每日 USD 上限数值、daily 重置、无固定到期、首版 BYOK 禁用 | 不自动充值/提额；只覆盖经 OpenRouter 的模型流量；不授予应用管理 key 权限 |
+| OpenRouter | 专用运行凭据及绑定、经 OpenRouter 模型流量的每日 USD 上限数值、daily 重置、无固定到期、BYOK 按 BILL-BYOK 启用并计入额度上限 | 不自动充值/提额；只覆盖经 OpenRouter 的模型流量；不授予应用管理 key 权限 |
 | 第三方搜索供应商 | TikHub、Parallel、Firecrawl、Bright Data 等逐家列明平台、账户/凭据范围、硬上限方式（预付余额或平台限额）、具体金额及额度口径 | 开放前核验硬停止能力；未设置前对应搜索调用关闭；不自动充值/提额，不新增内部预算计数器 |
 | 限流与开关 | 正式 Redis 绑定，消息/调用两组阈值，stopNewCalls 初始为 true；批准故障时停用范围 | 不改 staging 绑定；停止不阻断旧回执结算 |
 | 监控告警 | 原 diagnostics 调度频率、Sentry/日志项目与通知渠道、余额阈值、可见数据范围 | 合成告警验证；无用户内容；无需新监控服务 |
