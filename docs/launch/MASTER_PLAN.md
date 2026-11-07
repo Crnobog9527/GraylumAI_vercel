@@ -84,6 +84,16 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-11-07 更新）
 
+**2026-11-07：上线前接入 Anthropic、OpenAI 官方 API 额度（BILL-BYOK，计费改动）**
+
+Owner 原话（2026-11-07，A1–A9 外部设置引导窗口转达）：
+
+> 现在 Claude 和 ChatGPT 的订阅每个月都会送官方的 API 额度，所以你要把这两家厂商的直连计费方式一起加进去改。不用等上线，这个上线之前就要完成。
+
+- 范围：Anthropic（Claude 系列）和 OpenAI（GPT-6 Luna 整理/判断、GPT-6.1 Sol 评审）两家的调用，能用官方 API 额度时用官方额度；上线前完成，按计费改动的规矩验证（AGENTS 第 4 节：正常、重复、失败、并发，staging 实测，独立审查）。
+- 做法（总控按技术判断定，不是 Owner 原话）：先走 OpenRouter 的 BYOK（在 OpenRouter 填两家官方密钥），不新写两家直连适配器。BYOK 时 OpenRouter 的 `usage.cost` 只是手续费，结算改用返回里的上游成本 `upstream_inference_cost`（加手续费），**用户按模型官方价扣积分，跟现在一样**；省下的是 Graylum 付给 OpenRouter 的钱。每日上限和止损口径同步把 BYOK 消耗算进去。
+- 待 Owner 确认（不是已定）：两家送的额度是否能用 API 密钥在 console.anthropic.com / platform.openai.com 里使用；条款是否允许用于给自己的付费用户提供服务。两家后台要设消费上限或关闭自动充值，防止额度用完后直接扣信用卡。
+
 **2026-11-07：所有邮件统一从 `Graylum <mail@graylum.com>` 发出（取代 N5 的 `Graylum AI <no-reply@graylum.com>`）**
 
 Owner 原话（2026-11-07，A1–A9 外部设置引导窗口转达；选项里选了“统一用 mail@（推荐）”，范围包括站内付款、续费和止损通知）：
