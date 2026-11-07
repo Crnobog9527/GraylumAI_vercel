@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { swallow } from '../../../lib/swallow';
 import { acsDate, signRequest } from './aliyunSign';
 import type { SmsResult, SmsSender } from './types';
 
@@ -65,7 +66,7 @@ export function aliyunSmsSender(config: AliyunSmsConfig, deps: Deps = {}): SmsSe
           method: 'POST', headers, signal: AbortSignal.timeout(TIMEOUT_MS),
         });
         // Refusals come back as HTTP 400 with the same JSON body, so read the body either way.
-        const parsed = responseSchema.safeParse(await response.json().catch(() => null));
+        const parsed = responseSchema.safeParse(await swallow('aliyun_sms_body_unreadable', response.json(), null, { category: 'auth' }));
         if (!parsed.success) return { ok: false, reason: 'failed', providerCode: `http_${response.status}` };
         if (parsed.data.Code === 'OK') return { ok: true };
         return { ok: false, reason: rejected(parsed.data.Code) ? 'rejected' : 'failed', providerCode: parsed.data.Code };

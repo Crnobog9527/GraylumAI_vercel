@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
+import { swallow } from '../../lib/swallow';
 import { maskPhone, parseMainlandPhone } from '../../shared/mainlandPhone';
 import { classifyPhoneAuthError, limitCode, type PhoneSendCode } from './phoneErrors';
 import { phoneKey } from './phoneKey';
@@ -70,8 +71,8 @@ export async function sendPhoneCode(raw: unknown, deps: PhoneSendDeps): Promise<
   if (!error) return { ok: true };
   const outcome = classifyPhoneAuthError(error);
   if (!outcome.reachedHook) {
-    await releaseSmsSend(deps.admin, key)
-      .catch(() => logger.warn('auth', 'phone_send_release_failed', { phone: maskPhone(phone.digits) }));
+    await swallow('phone_send_release_failed', releaseSmsSend(deps.admin, key), undefined,
+      { category: 'auth', phone: maskPhone(phone.digits) });
   }
   logger.warn('auth', 'phone_send_refused', {
     phone: maskPhone(phone.digits), code: error.code ?? null, status: error.status ?? null, result: outcome.code,

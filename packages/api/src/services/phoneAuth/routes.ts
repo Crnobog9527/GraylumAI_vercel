@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createClient } from '@supabase/supabase-js';
 import { getClientIp } from '../clientIp';
+import { swallow } from '../../lib/swallow';
 import { createServiceRoleSupabaseClient } from '../stripe';
 import { sendPhoneCode, type PhoneSendResult } from './sendCode';
 import { handleSmsHook } from './smsHook';
@@ -32,7 +33,7 @@ export async function phoneSendResponse(request: Request, env: Env = process.env
   if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
     return json({ ok: false, code: 'PHONE_INVALID', status: 415 });
   }
-  const body: unknown = await request.json().catch(() => null);
+  const body: unknown = await swallow('phone_send_body_unreadable', request.json(), null, { category: 'auth' });
   const url = env.NEXT_PUBLIC_SUPABASE_URL, anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) return json({ ok: false, code: 'SMS_UNAVAILABLE', status: 503 });
   try {

@@ -185,7 +185,7 @@ describe('subscription fulfillment service-role grants migration', () => {
     );
     expect(migrationSql).toContain('GRANT DELETE ON TABLE public.profiles TO service_role;');
     expect(migrationSql).toContain('GRANT UPDATE (membership_level) ON TABLE public.profiles TO service_role;');
-    expect(trpcSource).toContain("const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level, created_at'");
+    expect(trpcSource).toContain("const PROFILE_SELECT = 'id, role, credits, status, nickname, email, phone, membership_level, created_at'");
     expect(trpcSource).toContain(".from('profiles')\n    .insert({");
     expect(trpcSource).toContain('await cleanupSafeBootstrapProfile(ctx, userId)');
     expect(trpcSource).toContain(".eq('credits', 0)");
