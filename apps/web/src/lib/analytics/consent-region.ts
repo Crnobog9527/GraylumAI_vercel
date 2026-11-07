@@ -57,27 +57,6 @@ export function formatRegionCookie({ region, test }: RegionCookie): string {
   return test ? `test-${region}` : region;
 }
 
-type Env = Record<string, string | undefined>;
-
-function isStagingAppUrl(value: string | undefined): boolean {
-  try {
-    return new URL(value ?? '').hostname.split('.').some(label => label.split('-').includes('staging'));
-  } catch {
-    return false;
-  }
-}
-
-/** The test override works only outside production: never when the app says it is production, never on a Vercel
- * production deployment unless the app says it is staging (the staging project's main deployment, whose address is
- * auth-staging.graylum.com). */
-export function regionOverrideAllowed(env: Env): boolean {
-  if (env.APP_ENV === 'production' || env.NEXT_PUBLIC_APP_ENV === 'production') return false;
-  if (env.APP_ENV === 'staging' || env.NEXT_PUBLIC_APP_ENV === 'staging') return true;
-  if (isStagingAppUrl(env.NEXT_PUBLIC_APP_URL)) return true;
-  if (env.VERCEL_ENV) return env.VERCEL_ENV !== 'production';
-  return env.NODE_ENV !== 'production';
-}
-
 /**
  * The cookie value this request should leave in the browser. `current` is the cookie it sent, `override` the query
  * parameter. Outside production a test value sticks until `auto`; in production a test value is replaced by the country.
