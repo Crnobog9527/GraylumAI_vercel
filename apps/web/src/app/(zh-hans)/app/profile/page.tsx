@@ -38,6 +38,7 @@ import { useBanner } from '@/hooks/use-banner';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import { isProfileTab, withProfileTab, type ProfileTab } from '@/lib/profile-tabs';
 import { ProfileLoadError } from '@/components/profile/ProfileLoadError';
+import { PaymentNoticeInbox } from '@/components/profile/PaymentNoticeInbox';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 function ProfilePageContent() {
@@ -94,6 +95,7 @@ function ProfilePageContent() {
     subscription_tier: (userProfile as any)?.membership_level ?? 'free',
     auth_provider: (userProfile as any)?.auth_provider ?? 'email',
     email_verified: (userProfile as any)?.email_verified ?? false,
+    phone_masked: userProfile?.phone_masked ?? '',
     created_date: userProfile?.created_at ?? new Date().toISOString(),
   }), [userProfile, credits, creditsStatus]);
 
@@ -207,6 +209,7 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'profile' && (
               <>
                 <UserProfileHeader user={effectiveUser} onUserUpdate={handleUserUpdate} />
+                <PaymentNoticeInbox />
                 <FounderProfileCard />
                 <CreditsAndSubscriptionCards
                   user={effectiveUser}
@@ -223,6 +226,7 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'subscription' && (
               <>
                 <PaymentDisputeNotice />
+                <PaymentNoticeInbox />
                 <SubscriptionCard user={effectiveUser} />
                 <BillingRecordsCard />
                 <CreditStatsCard user={effectiveUser} />

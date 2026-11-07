@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
+import { requestPhoneCode } from '@/lib/phoneAuth';
 import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
 import {
   describeErasureError, isAccountClosedError, isRenewalBlockedError, type AccountErasurePreview,
@@ -22,7 +23,8 @@ export function settledPreview(query: {
 export type ErasureStep = 'impact' | 'verify' | 'confirm' | 'done';
 const CODE_COOLDOWN_SECONDS = 60;
 
-export function useAccountErasure(options: { email?: string; usesPassword: boolean }) {
+/** `phone`: a phone account (PHONE-OTP) re-verifies with an SMS code to the number of the session, not an email code. */
+export function useAccountErasure(options: { email?: string; usesPassword: boolean; phone?: boolean }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<ErasureStep>('impact');
   const [secret, setSecret] = useState('');
@@ -66,11 +68,23 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     return captcha;
   };
 
+  const sessionPhone = async () => {
+    const { data } = await createClient().auth.getUser();
+    return data.user?.phone ? `+${data.user.phone.replace(/^\+/, '')}` : null;
+  };
+
   const sendCode = () => run(async () => {
-    if (!options.email) return setError('当前会话缺少邮箱信息，无法发送验证码。');
     if (codeSentAt && Date.now() - codeSentAt < CODE_COOLDOWN_SECONDS * 1000) {
       return setError(`验证码已发送，请 ${CODE_COOLDOWN_SECONDS} 秒后再重新发送。`);
     }
+    if (options.phone) {
+      const phone = await sessionPhone();
+      if (!phone) return setError('当前会话缺少手机号信息，无法发送验证码。');
+      const failure = await requestPhoneCode({ phone, createUser: false, captchaToken: takeCaptcha().captchaToken });
+      if (failure) return setError(failure);
+      return setCodeSentAt(Date.now());
+    }
+    if (!options.email) return setError('当前会话缺少邮箱信息，无法发送验证码。');
     const email = options.email;
     const captcha = takeCaptcha();
     const { error: sendError } = await createClient().auth.signInWithOtp({
@@ -81,6 +95,14 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
   }).catch(() => setError('请完成人机验证后重试。'));
 
   const verify = () => run(async () => {
+    if (options.phone) {
+      const phone = await sessionPhone();
+      if (!phone || !secret.trim()) return setError('请输入验证码。');
+      const { error: smsError } = await createClient().auth.verifyOtp({ phone, token: secret.trim(), type: 'sms' });
+      if (smsError) return setError('验证码无效或已过期。');
+      setSecret('');
+      return setStep('confirm');
+    }
     if (!options.email || !secret.trim()) return setError(options.usesPassword ? '请输入当前密码。' : '请输入验证码。');
     const email = options.email;
     const supabase = createClient();

@@ -24,6 +24,8 @@ import {
   AuthLoading, AuthPanel, AuthSegment, AuthShell,
 } from '@/components/auth/AuthShell';
 import { GoogleIcon } from '@/components/auth/GoogleIcon';
+import { AuthMethodTabs, PhoneSignIn, type AuthMethod } from '@/components/auth/PhoneSignIn';
+import { phoneSignInAllowed } from '@/lib/phoneAuth';
 import { FORGOT_PASSWORD_PATH, PASSWORD_RESET_DONE_MESSAGE } from '@/lib/passwordRecovery';
 import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
 import { useHydrated } from '@/hooks/use-hydrated';
@@ -63,6 +65,10 @@ export function LoginPageContent() {
   const [pendingAction, setPendingAction] = useState<'login' | 'signup' | 'google' | null>(null);
   const [redirectTarget, setRedirectTarget] = useState('/app/profile');
   const [status, setStatus] = useState<AuthStatus | null>(null);
+  // PHONE-OTP: Simplified pages only (not lang=zh-Hant / en), opened first; a notice from an email link opens the email tab.
+  const phoneAllowed = phoneSignInAllowed(searchParams.get('lang'));
+  const [method, setMethod] = useState<AuthMethod>(() => (phoneAllowed ? 'phone' : 'email'));
+  const showEmail = !phoneAllowed || method === 'email';
 
   useEffect(() => {
     const action = searchParams.get('action');
@@ -75,6 +81,7 @@ export function LoginPageContent() {
     setSelectedPlan(planParam ?? '');
     const knownEmail = restorePendingEmail(window);
     if (knownEmail) setEmail(knownEmail);
+    if (error || searchParams.get('notice') || readAuthFragment(window.location.hash)) setMethod('email');
 
     const errorMessage = loginErrorMessage(error);
     // After a verifier mismatch the email is usually already confirmed: guide, do not alarm.
@@ -228,7 +235,7 @@ export function LoginPageContent() {
 
         <AuthHead
           title={mode === 'signup' ? `创建你的 ${siteName} 账户` : `登录到 ${siteName}`}
-          lead={mode === 'signup'
+          lead={!showEmail ? '用中国大陆手机号接收验证码，新号码会自动注册。' : mode === 'signup'
             ? '邮箱注册完成后将收到验证邮件，验证通过后才可使用核心功能。'
             : 'Google 登录无需再次验证邮箱，邮箱账户会按验证状态自动拦截。'}
         />
@@ -241,6 +248,15 @@ export function LoginPageContent() {
           )}
         </div>
 
+        {phoneAllowed && <AuthMethodTabs value={method} onChange={setMethod} />}
+        {!showEmail && (
+          <div id="auth-method-phone-panel" role="tabpanel" aria-labelledby="auth-method-phone">
+            <PhoneSignIn redirectTarget={redirectTarget} submitLabel={mode === 'signup' ? '创建账户' : '登录'} ready={hydrated} />
+          </div>
+        )}
+
+        {showEmail && <div id="auth-method-email-panel" role={phoneAllowed ? 'tabpanel' : undefined}
+          aria-labelledby={phoneAllowed ? 'auth-method-email' : undefined} className="space-y-6">
         <div className="grid gap-3">
           <Button
             type="button"
@@ -369,6 +385,7 @@ export function LoginPageContent() {
             <li key={item}>{item}</li>
           ))}
         </ul>
+        </div>}
       </AuthCard>
     </AuthShell>
   );

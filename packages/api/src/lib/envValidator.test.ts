@@ -206,3 +206,16 @@ describe('fail-closed Redis configuration preflight', () => {
     expect(JSON.stringify(summary)).not.toContain('redis.example.invalid');
   });
 });
+
+describe('PHONE-OTP SMS variables', () => {
+  it('refuses the fake sender on production and needs all four Aliyun names', async () => {
+    const { smsEnvErrors } = await import('./envValidator');
+    const production = { VERCEL: '1', VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main', VERCEL_PROJECT_PRODUCTION_URL: 'www.graylum.com' };
+    expect(smsEnvErrors({ SMS_PROVIDER: 'fake', ...production })).toEqual(['正式环境不能使用 SMS_PROVIDER=fake']);
+    expect(smsEnvErrors({ SMS_PROVIDER: 'fake', VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'staging' })).toEqual([]);
+    expect(smsEnvErrors({})).toEqual([]);
+    expect(smsEnvErrors({ SMS_PROVIDER: 'aliyun', ALIYUN_SMS_ACCESS_KEY_ID: 'id', ALIYUN_SMS_SIGN_NAME: 's' })).toEqual([
+      'SMS_PROVIDER=aliyun 时必须配置 ALIYUN_SMS_ACCESS_KEY_SECRET', 'SMS_PROVIDER=aliyun 时必须配置 ALIYUN_SMS_TEMPLATE_CODE',
+    ]);
+  });
+});

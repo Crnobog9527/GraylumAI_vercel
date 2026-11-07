@@ -24,6 +24,7 @@ export const REAUTH_FAILED_MESSAGE =
 export type PasswordChangeEntry = { available: boolean; description: string };
 
 export function passwordChangeEntry(user: { email?: string; auth_provider?: string }): PasswordChangeEntry {
+  if (user.auth_provider === 'phone') return { available: false, description: '手机号账号用短信验证码登录，不需要密码。' };
   if (!user.email) return { available: false, description: '当前账号没有邮箱，无法设置或修改密码。' };
   if (user.auth_provider === 'google') {
     return { available: true, description: '验证当前密码后可以修改密码。一直用 Google 登录、还没有设置过密码的，可以通过邮件设置。' };

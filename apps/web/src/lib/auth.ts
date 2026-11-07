@@ -1,8 +1,9 @@
 import { toAppPath } from './app-paths';
 import { isSafeRelativePath } from './safe-url';
 import type { User } from '@supabase/supabase-js';
+import { parseStoredPhone } from '@repo/api/src/shared/mainlandPhone';
 
-export type AppAuthProvider = 'email' | 'google' | 'unknown';
+export type AppAuthProvider = 'email' | 'google' | 'phone' | 'unknown';
 
 export function getAuthProvider(user: User | null | undefined): AppAuthProvider {
   if (!user) return 'unknown';
@@ -20,7 +21,16 @@ export function getAuthProvider(user: User | null | undefined): AppAuthProvider 
     return 'email';
   }
 
+  if (provider === 'phone' || providers.includes('phone')) {
+    return 'phone';
+  }
+
   return user.email ? 'email' : 'unknown';
+}
+
+/** PHONE-OTP: a mainland number Supabase confirmed with an SMS code counts like a verified email (Owner 2026-11-07). */
+export function hasVerifiedPhone(user: User | null | undefined): boolean {
+  return Boolean(user?.phone && user.phone_confirmed_at && parseStoredPhone(user.phone));
 }
 
 export function isEmailVerified(user: User | null | undefined): boolean {
@@ -31,6 +41,10 @@ export function isEmailVerified(user: User | null | undefined): boolean {
   }
 
   if ('email_confirmed_at' in user && user.email_confirmed_at) {
+    return true;
+  }
+
+  if (hasVerifiedPhone(user)) {
     return true;
   }
 

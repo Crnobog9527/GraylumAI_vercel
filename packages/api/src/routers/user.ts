@@ -1,4 +1,6 @@
 import { readMembershipEntitlements } from '../services/membershipEntitlements';
+import { maskPhone } from '../shared/mainlandPhone';
+import { readPaymentNoticeInbox } from '../services/notify/inbox';
 import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -50,8 +52,14 @@ export const userRouter = router({
       reply_language_set: userProfile.reply_language !== null && userProfile.reply_language !== undefined,
       auth_provider: ctx.authProvider,
       email_verified: ctx.isEmailVerified,
+      // PHONE-OTP: the verified number, masked (138****5678); '' for accounts without one.
+      phone_masked: maskPhone(ctx.user.phone),
     };
   }),
+
+  /** PHONE-OTP: payment reminders that could not be mailed (no email on the account), for the account page. */
+  paymentNoticeInbox: protectedProcedure.query(async ({ ctx }) => (
+    ctx.hasSupabaseAdminPrivileges ? readPaymentNoticeInbox(ctx.supabaseAdmin, ctx.profileId) : [])),
 
   updateUserProfile: protectedProcedure
     .input(z.object({ nickname: z.string().trim().min(1).max(80).optional(), avatarUrl: z.string().optional() }))
