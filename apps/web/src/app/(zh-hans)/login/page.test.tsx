@@ -61,6 +61,15 @@ describe('/login phone tab', () => {
     expect(markup).toMatch(/<button[^>]*type="submit"[^>]*disabled=""[^>]*>加载中\.\.\./);
   });
 
+  it('opens the email tab for ?method=email and keeps the phone tab one click away', () => {
+    params.current = new URLSearchParams('method=email');
+    const markup = renderToStaticMarkup(createElement(LoginPageContent));
+    expect(markup).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>邮箱/);
+    expect(markup).toContain('>手机号</button>');
+    expect(markup).toContain('type="email"');
+    expect(markup).not.toContain('+86');
+  });
+
   it.each(['lang=zh-Hant', 'lang=en'])('shows no phone entry for ?%s', (query) => {
     params.current = new URLSearchParams(query);
     const markup = renderToStaticMarkup(createElement(LoginPageContent));

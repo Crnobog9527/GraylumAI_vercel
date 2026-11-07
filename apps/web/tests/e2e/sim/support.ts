@@ -57,7 +57,7 @@ export async function waitForHydratedForm(page: Page) {
 /** Signs in through the real login page. */
 export async function signIn(page: Page, role: SimRole) {
   const user = seed().users[role];
-  await page.goto('/login');
+  await page.goto('/login?method=email'); // PHONE-OTP: the Simplified page opens on the phone tab
   await waitForHydratedForm(page);
   await page.locator('#email, input[type="email"]').first().fill(user.email);
   await page.locator('#password, input[type="password"]').first().fill(user.password);

@@ -116,8 +116,8 @@ ALTER TABLE public.profiles ADD CONSTRAINT profiles_phone_mainland CHECK (phone 
 -- Clients never write it; the server copies it from the verified Auth user.
 REVOKE INSERT (phone), UPDATE (phone), REFERENCES (phone) ON TABLE public.profiles FROM PUBLIC,anon,authenticated;
 GRANT SELECT (phone), INSERT (phone), UPDATE (phone) ON TABLE public.profiles TO service_role;
--- The admin user search (admin.getAllUsers / searchUsers) filters on it.
-CREATE INDEX IF NOT EXISTS profiles_phone_idx ON public.profiles(phone) WHERE phone IS NOT NULL;
+-- No index: the admin search matches any part of the number (LIKE '%digits%'), which a b-tree cannot serve, and every
+-- extra index on profiles is one more relation each main-path turn locks (check-turn-budget.mjs).
 
 -- Reminders that could not be mailed because the account has no email address, for the account page.
 CREATE OR REPLACE FUNCTION public.payment_notice_inbox(p_user_id uuid) RETURNS jsonb

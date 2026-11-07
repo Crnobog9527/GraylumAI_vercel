@@ -48,7 +48,7 @@ it('OPC: CONFIRM_DIALOG delayed cross-tab read and editing in the complete local
   let release = () => {};
   const counts = { information: 0, transition: 0, delayedReads: 0 };
   try {
-    await page.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent(path));
+    await page.goto(process.env.V3_LOCAL_APP + '/login?method=email&redirect=' + encodeURIComponent(path));
     await page.getByPlaceholder('name@example.com').fill(email);
     await page.getByPlaceholder('输入你的密码').fill(password);
     await page.getByRole('button', { name: '登录', exact: true }).last().click();

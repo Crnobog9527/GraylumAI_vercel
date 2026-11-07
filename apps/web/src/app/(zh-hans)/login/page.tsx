@@ -65,9 +65,10 @@ export function LoginPageContent() {
   const [pendingAction, setPendingAction] = useState<'login' | 'signup' | 'google' | null>(null);
   const [redirectTarget, setRedirectTarget] = useState('/app/profile');
   const [status, setStatus] = useState<AuthStatus | null>(null);
-  // PHONE-OTP: Simplified pages only (not lang=zh-Hant / en), opened first; a notice from an email link opens the email tab.
+  // PHONE-OTP: Simplified pages only (not lang=zh-Hant / en), opened first; ?method=email (a link meant for email sign-in)
+  // or a notice from an email link opens the email tab.
   const phoneAllowed = phoneSignInAllowed(searchParams.get('lang'));
-  const [method, setMethod] = useState<AuthMethod>(() => (phoneAllowed ? 'phone' : 'email'));
+  const [method, setMethod] = useState<AuthMethod>(() => (phoneAllowed && searchParams.get('method') !== 'email' ? 'phone' : 'email'));
   const showEmail = !phoneAllowed || method === 'email';
 
   useEffect(() => {

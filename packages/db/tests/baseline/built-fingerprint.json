@@ -5185,7 +5185,6 @@
   "idx:profiles.idx_profiles_membership_level": "8f957ff683ea",
   "idx:profiles.idx_profiles_role": "767df0a73451",
   "idx:profiles.idx_profiles_status_created_at": "0954ace8ca4e",
-  "idx:profiles.profiles_phone_idx": "ee3b0bf15900",
   "idx:profiles.profiles_pkey": "b7142bbffc23",
   "idx:prompts.idx_prompts_active_sort_created_at": "129c1f3d14c1",
   "idx:prompts.idx_prompts_category_active_sort_created_at": "c1dbbd784984",
