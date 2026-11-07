@@ -81,7 +81,7 @@ async function authenticateRole(page: Page, role: E2ERole) {
     return;
   }
 
-  await gotoWithBypass(page, '/login');
+  await gotoWithBypass(page, '/login?method=email');
   await waitForLoginFormReady(page);
 
   const emailInput = page.locator('#email, input[type="email"], input[name="email"]');
@@ -95,7 +95,7 @@ async function authenticateRole(page: Page, role: E2ERole) {
 
   let authenticated = await waitForAuthenticatedNavigation(page, role);
   if (!authenticated) {
-    await gotoWithBypass(page, '/login');
+    await gotoWithBypass(page, '/login?method=email');
     await waitForLoginFormReady(page);
     await emailInput.fill(credentials.email);
     await passwordInput.fill(credentials.password);

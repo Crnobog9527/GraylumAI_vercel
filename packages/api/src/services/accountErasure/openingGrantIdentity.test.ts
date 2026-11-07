@@ -51,6 +51,21 @@ describe('opening-grant HMAC identity boundary', () => {
     missing.identities = [];
     expect(() => openingGrantDigests(missing, keys)).toThrow('IDENTITY_INVALID');
   });
+  it('PHONE-OTP: a verified mainland phone is its own identity, stable across accounts; unverified phones do not count', () => {
+    const phoneUser = (phone: string, confirmed = true, id = '00000000-0000-4000-8000-000000000001') => ({
+      id, phone, phone_confirmed_at: confirmed ? '2026-11-08T00:00:00Z' : null,
+      app_metadata: { provider: 'phone', providers: ['phone'] }, user_metadata: {},
+      identities: [{ provider: 'phone', identity_data: { sub: id, phone } }],
+    }) as unknown as User;
+    const first = openingGrantDigests(phoneUser('8613800005678'), keys);
+    expect(first.map(item => item.kind)).toEqual(['oauth']);
+    // Re-registering the same number after erasure gives a new user id but the same digest: no second grant.
+    expect(openingGrantDigests(phoneUser('8613800005678', true, '00000000-0000-4000-8000-000000000002'), keys)).toEqual(first);
+    expect(openingGrantDigests(phoneUser('8613900005678'), keys)).not.toEqual(first);
+    expect(JSON.stringify(first)).not.toContain('13800005678');
+    expect(() => openingGrantDigests(phoneUser('8613800005678', false), keys)).toThrow('IDENTITY_MISSING');
+    expect(() => openingGrantDigests(phoneUser('14155550100'), keys)).toThrow('IDENTITY_MISSING');
+  });
   it('rotation retains the exact old-version digest and adds a distinct new digest', () => {
     const old = openingGrantDigests(user('a@example.test'), keys);
     const next = openingGrantDigests(user('a@example.test'), rotated);

@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js';
+import { parseStoredPhone } from '../shared/mainlandPhone';
 
-export type ApiAuthProvider = 'email' | 'google' | 'unknown';
+export type ApiAuthProvider = 'email' | 'google' | 'phone' | 'unknown';
 
 export function getAuthProvider(user: User | null | undefined): ApiAuthProvider {
   if (!user) return 'unknown';
@@ -18,9 +19,20 @@ export function getAuthProvider(user: User | null | undefined): ApiAuthProvider 
     return 'email';
   }
 
+  if (provider === 'phone' || providers.includes('phone')) {
+    return 'phone';
+  }
+
   return user.email ? 'email' : 'unknown';
 }
 
+/** PHONE-OTP: a mainland number Supabase confirmed with an SMS code, in stored digits (8613800005678); null otherwise. */
+export function verifiedPhoneDigits(user: User | null | undefined): string | null {
+  if (!user?.phone || !user.phone_confirmed_at) return null;
+  return parseStoredPhone(user.phone)?.digits ?? null;
+}
+
+/** A verified email, a Google sign-in, or (PHONE-OTP, Owner 2026-11-07) a verified mainland phone number. */
 export function isEmailVerified(user: User | null | undefined): boolean {
   if (!user) return false;
 
@@ -29,6 +41,10 @@ export function isEmailVerified(user: User | null | undefined): boolean {
   }
 
   if ('email_confirmed_at' in user && user.email_confirmed_at) {
+    return true;
+  }
+
+  if (verifiedPhoneDigits(user)) {
     return true;
   }
 

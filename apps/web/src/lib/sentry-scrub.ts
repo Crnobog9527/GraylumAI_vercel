@@ -43,6 +43,8 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility',
   'jury',
   // The landing samples' local edit mode (/api/dev/owner-edits; answers 404 outside a local dev server).
   'dev', 'owner-edits',
+  // PHONE-OTP: /api/auth/phone/send and the Supabase Send SMS hook /api/auth/sms-hook.
+  'phone', 'send', 'sms-hook',
   '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
 

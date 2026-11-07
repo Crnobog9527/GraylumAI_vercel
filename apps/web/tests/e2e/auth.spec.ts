@@ -12,14 +12,14 @@ import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 test.describe('Authentication', () => {
   test.describe('Login Page', () => {
     test('should display login form', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
       await expect(page.locator('#email, input[type="email"], input[name="email"]')).toBeVisible();
       await expect(page.locator('#password, input[type="password"], input[name="password"]')).toBeVisible();
       await expect(page.locator('form').getByRole('button', { name: /^登录$|^Login$/i })).toBeVisible();
     });
 
     test('should show error for invalid credentials', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
       await page.fill(
         '#email, input[type="email"], input[name="email"]',
         `invalid-${Date.now()}@example.com`,
@@ -74,7 +74,7 @@ test.describe('Authentication', () => {
     });
 
     test('should preserve selected plan context on the signup login flow', async ({ page }) => {
-      await gotoWithBypass(page, '/login?action=signup&plan=黄金会员');
+      await gotoWithBypass(page, '/login?action=signup&plan=黄金会员&method=email');
       await expect(page.getByRole('button', { name: '注册', exact: true })).toBeVisible();
       await expect(page.getByText('当前来自 黄金会员 套餐入口')).toBeVisible({ timeout: 10000 });
     });
@@ -89,7 +89,7 @@ test.describe('Authentication', () => {
 
     try {
       steps.push('Open a protected route with query parameters while unauthenticated');
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
       await clearBrowserAuthState(page);
       await gotoWithBypass(page, '/app/profile?tab=security');
 
@@ -98,6 +98,8 @@ test.describe('Authentication', () => {
       await expect(page.getByText('/app/profile?tab=security')).toBeVisible({ timeout: 10000 });
 
       steps.push('Authenticate with the normal E2E user');
+      // PHONE-OTP: the Simplified login page opens on the phone tab; this redirect keeps its address, so switch to email.
+      await page.getByRole('tab', { name: '邮箱', exact: true }).click();
       await page.fill('#email, input[type="email"], input[name="email"]', getCredentials('user').email);
       await page.fill('#password, input[type="password"], input[name="password"]', getCredentials('user').password);
       await page.locator('form').getByRole('button', { name: /^登录$|^Login$/i }).click();

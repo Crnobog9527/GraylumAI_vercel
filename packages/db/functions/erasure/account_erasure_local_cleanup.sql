@@ -49,6 +49,7 @@ BEGIN
  END IF;
  -- No amount, balance, membership, status or original primary key is changed.
  UPDATE profiles SET email=NULL,nickname=NULL,avatar_url=NULL,last_ip=NULL,last_login_at=NULL,signup_attribution=NULL /* ANALYTICS signup attribution */
+  ,phone=NULL /* PHONE-OTP verified phone */
   WHERE id=p_profile_id;
  UPDATE account_erasure_requests SET profile_scrubbed_at=coalesce(profile_scrubbed_at,clock_timestamp())
   WHERE profile_id=p_profile_id;

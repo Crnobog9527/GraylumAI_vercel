@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { openingGrantKeyringIsValid } from './openingGrantKeyring';
 import { logger } from './logger';
+import { mayUseFakeSms } from '../services/phoneAuth/sms/productionGuard';
 
 // ============================================
 // 环境变量 Schema
@@ -95,6 +96,16 @@ const envSchema = z.object({
     .string()
     .regex(/^whsec_/, 'STRIPE_WEBHOOK_SECRET 必须以 whsec_ 开头')
     .optional(),
+
+  // PHONE-OTP (Owner 2026-11-07): mainland phone sign-in. All optional, so the site runs without them; the SMS routes
+  // answer 503 and log which name is missing. fake on staging/previews, aliyun on production (fake is refused there).
+  SMS_PROVIDER: z.enum(['fake', 'aliyun']).optional(),
+  SEND_SMS_HOOK_SECRET: z.string().regex(/^(v1,)?whsec_[A-Za-z0-9+/=]+$/, 'SEND_SMS_HOOK_SECRET 必须是 Supabase 显示的 v1,whsec_… 格式')
+    .optional(),
+  ALIYUN_SMS_ACCESS_KEY_ID: optionalString,
+  ALIYUN_SMS_ACCESS_KEY_SECRET: optionalString,
+  ALIYUN_SMS_SIGN_NAME: optionalString,
+  ALIYUN_SMS_TEMPLATE_CODE: optionalString,
 
   SENTRY_AUTH_TOKEN: rejectDuplicatedEnvPrefix('SENTRY_AUTH_TOKEN')
     .regex(/^sntrys_/, 'SENTRY_AUTH_TOKEN 必须以 sntrys_ 开头')
@@ -203,6 +214,15 @@ export function validateRedisEnvForBuild(): void {
   }
 }
 
+/** PHONE-OTP: the fake SMS sender never on the production site, and the aliyun one only with all four of its names. */
+export function smsEnvErrors(env: Record<string, string | undefined>): string[] {
+  const provider = env.SMS_PROVIDER?.trim();
+  if (provider === 'fake' && !mayUseFakeSms(env)) return ['正式环境不能使用 SMS_PROVIDER=fake'];
+  if (provider !== 'aliyun') return [];
+  return ['ALIYUN_SMS_ACCESS_KEY_ID', 'ALIYUN_SMS_ACCESS_KEY_SECRET', 'ALIYUN_SMS_SIGN_NAME', 'ALIYUN_SMS_TEMPLATE_CODE']
+    .filter(name => !env[name]?.trim()).map(name => `SMS_PROVIDER=aliyun 时必须配置 ${name}`);
+}
+
 // ============================================
 // 验证结果类型
 // ============================================
@@ -298,6 +318,8 @@ export function validateEnv(): ValidationResult {
       errors.push('启用 Stripe 时必须配置 SUPABASE_SERVICE_ROLE_KEY');
     }
   }
+
+  errors.push(...smsEnvErrors(process.env));
 
   // 3. 安全检查
   // 检查是否有明文密码在环境变量名中

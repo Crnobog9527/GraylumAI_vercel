@@ -31,7 +31,8 @@ const ghostStyle = { background: 'transparent', borderColor: 'var(--border-prima
 
 export function AccountErasureCard({ user }: { user: { email?: string; auth_provider?: string } }) {
   const usesPassword = (user.auth_provider ?? 'email') === 'email';
-  const erasure = useAccountErasure({ email: user.email, usesPassword });
+  const phone = user.auth_provider === 'phone';
+  const erasure = useAccountErasure({ email: user.email, usesPassword, phone });
   const [acknowledged, setAcknowledged] = useState(false);
   const preview = erasure.preview;
   const lines = preview ? buildErasureImpactLines(preview) : [];
@@ -71,7 +72,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
             </DialogTitle>
             <DialogDescription style={{ color: 'var(--text-secondary)' }}>
               {erasure.step === 'impact' && '请先确认注销会带来的影响。'}
-              {erasure.step === 'verify' && (usesPassword ? '请输入当前密码验证身份。' : '我们会向你的邮箱发送验证码。')}
+              {erasure.step === 'verify' && (usesPassword ? '请输入当前密码验证身份。' : phone ? '我们会向你的手机号发送短信验证码。' : '我们会向你的邮箱发送验证码。')}
               {erasure.step === 'confirm' && '这是最后一步，确认后立即生效。'}
               {erasure.step === 'done' && '账号已关闭，你已退出登录。'}
             </DialogDescription>
@@ -101,7 +102,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
                 </Button>
               )}
               <Label htmlFor="erasure-secret" style={{ color: 'var(--text-primary)' }}>
-                {usesPassword ? '当前密码' : '邮箱验证码'}
+                {usesPassword ? '当前密码' : phone ? '短信验证码' : '邮箱验证码'}
               </Label>
               <Input
                 id="erasure-secret"

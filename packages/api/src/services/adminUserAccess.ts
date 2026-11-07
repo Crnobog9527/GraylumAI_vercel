@@ -6,9 +6,9 @@ import { logger } from '../lib/logger';
 // last_login_at / last_ip have no writer and are not granted to service_role; responses mark them
 // as unrecorded so the admin UI never presents a null as "never logged in".
 export const ADMIN_PROFILE_COLUMNS =
-  'id, email, nickname, avatar_url, role, status, membership_level, credits, is_deleted, created_at';
+  'id, email, phone, nickname, avatar_url, role, status, membership_level, credits, is_deleted, created_at';
 export const ADMIN_PROFILE_LIST_COLUMNS =
-  'id, email, nickname, avatar_url, role, status, membership_level, credits, created_at';
+  'id, email, phone, nickname, avatar_url, role, status, membership_level, credits, created_at';
 // Single literals keep supabase-js row typing (a concatenated string types rows as errors).
 export const ADMIN_TRANSACTION_COLUMNS =
   'id, user_id, amount, type, description, balance_before, balance_after, ledger_type, reason_code, source_type, created_at';
@@ -50,4 +50,18 @@ export async function recordAdminActivity(
     code,
   });
   return false;
+}
+
+/**
+ * The admin user search (getAllUsers, searchUsers): email or nickname as before, and (PHONE-OTP) the verified phone,
+ * stored as 86 + 11 digits, matched on the digits typed when there are at least 4 ("138 0000", "+86 138…", "5678").
+ * Characters PostgREST reads as filter syntax are dropped from the text part.
+ */
+export function adminUserSearchFilter(search: string): string {
+  const text = search.replace(/[,()*%\\]/g, ' ').trim();
+  const parts = [`email.ilike.%${text}%`, `nickname.ilike.%${text}%`];
+  let digits = search.replace(/\D/g, '');
+  if (/^(00)?86\d{11}$/.test(digits)) digits = digits.replace(/^(00)?86/, '');
+  if (digits.length >= 4) parts.push(`phone.like.%${digits}%`);
+  return parts.join(',');
 }

@@ -50,6 +50,7 @@ vi.mock('@/components/profile/PersonalInfoCard', () => ({
 vi.mock('@/components/founder/FounderProfileCard', () => ({ FounderProfileCard: () => null }));
 vi.mock('@/components/profile/SubscriptionCard', () => ({ SubscriptionCard: () => <p>subscription-card</p>, CreditStatsCard: () => null }));
 vi.mock('@/components/profile/BillingRecordsCard', () => ({ default: () => null }));
+vi.mock('@/components/profile/PaymentNoticeInbox', () => ({ PaymentNoticeInbox: () => null }));
 vi.mock('@/components/profile/CreditRecordsCard', () => ({ CreditRecordsCard: () => null }));
 vi.mock('@/components/profile/SecuritySettingsCard', () => ({ SecuritySettingsCard: () => <p>security-card</p> }));
 vi.mock('@/components/profile/AccountErasureCard', () => ({ AccountErasureCard: () => <p>account-erasure-card</p> }));

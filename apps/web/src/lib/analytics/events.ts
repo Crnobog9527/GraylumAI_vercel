@@ -14,14 +14,23 @@ const SIGNUP_WINDOW_MS = 30 * 60 * 1000;
 export type SignUpUser = {
   created_at?: string | null;
   email_confirmed_at?: string | null;
+  /** PHONE-OTP: a phone account completes sign-up when Supabase confirms its number. */
+  phone_confirmed_at?: string | null;
   app_metadata?: { provider?: unknown } | null;
 };
 
-/** Sign-up completed in the last 30 minutes: email verified, or the first Google sign-in. */
+/** `sign_up`'s method: google, phone (PHONE-OTP, Owner 2026-11-07) or email. */
+export function signUpMethod(user: SignUpUser): 'google' | 'phone' | 'email' {
+  const provider = user.app_metadata?.provider;
+  return provider === 'google' ? 'google' : provider === 'phone' ? 'phone' : 'email';
+}
+
+/** Sign-up completed in the last 30 minutes: email or phone verified, or the first Google sign-in. */
 export function isFreshSignUp(user: SignUpUser | null | undefined, verified: boolean, now = Date.now()): boolean {
   if (!user || !verified || !user.created_at) return false;
-  const google = user.app_metadata?.provider === 'google';
-  const completed = Date.parse((google ? user.created_at : user.email_confirmed_at) ?? '');
+  const method = signUpMethod(user);
+  const completedAt = method === 'google' ? user.created_at : method === 'phone' ? user.phone_confirmed_at : user.email_confirmed_at;
+  const completed = Date.parse(completedAt ?? '');
   return Number.isFinite(completed) && now - completed <= SIGNUP_WINDOW_MS && completed - now <= 60_000;
 }
 
@@ -29,7 +38,7 @@ export function isFreshSignUp(user: SignUpUser | null | undefined, verified: boo
 export function reportSignUpIfNew(user: SignUpUser | null | undefined, verified: boolean, now = Date.now()): boolean {
   if (!user || !isFreshSignUp(user, verified, now)) return false;
   const createdAt = user.created_at!;
-  const method = user.app_metadata?.provider === 'google' ? 'google' : 'email';
+  const method = signUpMethod(user);
   // Only the account's creation time is kept, to skip a repeat on the next page; written after consent only.
   try {
     if (window.localStorage.getItem(SIGNUP_KEY) === createdAt) return false;

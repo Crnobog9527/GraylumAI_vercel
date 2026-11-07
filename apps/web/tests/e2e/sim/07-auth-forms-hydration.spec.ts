@@ -49,11 +49,11 @@ async function expectNothingSubmittable(page: Page, field: string) {
 test('login: the submit button is off until the scripts have taken the form over, a native submit leaks nothing, then it signs in', async ({ page }) => {
   const user = seed().users.bob;
   const release = await holdScripts(page);
-  await page.goto('/login', { waitUntil: 'commit' });
+  await page.goto('/login?method=email', { waitUntil: 'commit' });
   await expectNothingSubmittable(page, 'input[type="password"]');
 
   release();
-  await page.goto('/login');
+  await page.goto('/login?method=email');
   await waitForHydratedForm(page);
   const submit = page.locator('button[type="submit"]').first();
   await expect(submit).toBeEnabled();
@@ -66,7 +66,7 @@ test('login: the submit button is off until the scripts have taken the form over
 
 test('sign-up and forgot-password: the same gap is closed', async ({ page }) => {
   const release = await holdScripts(page);
-  await page.goto('/login?action=signup', { waitUntil: 'commit' });
+  await page.goto('/login?action=signup&method=email', { waitUntil: 'commit' });
   await expectNothingSubmittable(page, 'input[type="password"]');
   await page.goto('/forgot-password', { waitUntil: 'commit' });
   await expectNothingSubmittable(page, 'input[type="email"]');
