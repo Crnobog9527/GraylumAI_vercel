@@ -76,6 +76,24 @@ try{
   near(await actual()-reported,0.0205,'the admin report counts the BYOK call at fee + upstream');
   report.checks.push('BYOK and non-BYOK calls with the same tokens: same charge, same ledger spend, same stop-loss share; actual = fee + upstream');
  }
+ // 1b. One turn, two calls: the first served by the BYOK key, the second fell back to OpenRouter's credits (gifted credits ran out).
+ // Each receipt keeps its own platform cost; the user's charge equals a turn with the same two calls and no BYOK.
+ {
+  const two=async(first,second)=>{
+   const a=await account(),o=await open(a),before=await spent();
+   await begin(a,o.turnId,1);await record(a,o.turnId,1,first);
+   await begin(a,o.turnId,2);await record(a,o.turnId,2,second);
+   await close(a,o.turnId);
+   return {a,id:o.turnId,added:await spent()-before};
+  };
+  const mixed=await two(byok,plain),reference=await two(plain,plain);
+  assert.equal(await charged(mixed.a,mixed.id),await charged(reference.a,reference.id),'same charge');
+  near(mixed.added,reference.added,'same stop-loss share');
+  const [first,second]=[await callRow(mixed.id,1),await callRow(mixed.id,2)];
+  assert.deepEqual([first.a,second.a],['0.010500000000','0.010000000000']);
+  assert.deepEqual([Boolean(first.usage.byok),Boolean(second.usage.byok)],[true,false]);
+  report.checks.push('one turn with a BYOK call and a fallen-back call: each call keeps its own platform cost, the charge is unchanged');
+ }
  // 2. An unusable BYOK call (charged by the provider, delivers nothing): the user pays 0, the stop-loss counts its whole cost.
  {
   const u=await settled(byok,'unusable');

@@ -81,6 +81,19 @@ describe('live receipt (call.ts)', () => {
     const records = await live({ cost: 0.0000032, is_byok: true });
     expect(records).toEqual([]);
   });
+  it('one turn, two calls: one served by the BYOK key, the next fell back to OpenRouter credits; each keeps its own cost', async () => {
+    // The vendor's gifted credits ran out (OpenAI 429 credit_balance_exhausted) between the two calls of the same turn.
+    const h = harness(), bodies = [completion(BYOK), completion(FELL_BACK).replace('"gen-1"', '"gen-2"')];
+    const transport = vi.fn(async () => new Response(bodies.shift()!));
+    const adapter = openRouterAdapter({ credential: async () => 'KEY', transport });
+    await modelCall({ ...h.deps, adapter }, call, request(false));
+    await modelCall({ ...h.deps, adapter }, call, request(false));
+    expect(h.records).toHaveLength(2);
+    expect(h.records[0]).toMatchObject({ seq: 1, providerId: 'gen-1', nominalUsd: NOMINAL, actualUsd: '0.0000672',
+      usage: { byok: { feeUsd: '0.0000032', upstreamUsd: '0.000064' } } });
+    expect(h.records[1]).toMatchObject({ seq: 2, providerId: 'gen-2', nominalUsd: NOMINAL, actualUsd: '0.000064' });
+    expect(h.records[1]!.usage).not.toHaveProperty('byok');
+  });
   it('the same BYOK response twice writes the identical receipt (turn_call_record treats the repeat as a no-op)', async () => {
     const [first] = await live(BYOK), [second] = await live(BYOK);
     expect(second).toEqual(first);
