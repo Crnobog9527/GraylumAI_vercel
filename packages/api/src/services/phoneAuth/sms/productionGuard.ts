@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { isProductionSite } from '../../notify/config';
+import { isProductionSite } from '../../../shared/productionSite';
 
 type Env = Record<string, string | undefined>;
 

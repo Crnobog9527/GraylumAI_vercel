@@ -54,6 +54,13 @@ export const REQUIRED_ALWAYS = [
   'NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION',
   'NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION',
   'NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION',
+  // PHONE-OTP (Owner 2026-11-07): mainland phone sign-in (steps 1, 24, 25).
+  'SMS_PROVIDER',
+  'SEND_SMS_HOOK_SECRET',
+  'ALIYUN_SMS_ACCESS_KEY_ID',
+  'ALIYUN_SMS_ACCESS_KEY_SECRET',
+  'ALIYUN_SMS_SIGN_NAME',
+  'ALIYUN_SMS_TEMPLATE_CODE',
 ];
 
 // Step 26: must never exist on the production project. A trailing "*" is a prefix.
