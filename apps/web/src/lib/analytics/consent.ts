@@ -109,6 +109,9 @@ function ensureLoaded(): void {
   loaded = true;
   const region = parseRegionCookie(readCookie(REGION_COOKIE))?.region ?? 'optin';
   snapshot = compute(region, readStoredChoice(), readGpc());
+  // Not allowed on this load (GPC, an earlier refusal, an opt-in visitor who has not accepted): GA cookies left from an
+  // earlier consent go too, since a visitor with GPC has no button that would remove them.
+  if (!snapshot.analytics) expireAnalyticsCookies();
   try { window.addEventListener?.('storage', onStorage); } catch { /* no events: this tab only */ }
 }
 

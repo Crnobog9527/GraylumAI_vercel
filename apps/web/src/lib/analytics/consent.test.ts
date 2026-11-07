@@ -92,6 +92,21 @@ describe('statistics consent (ANALYTICS-CONSENT)', () => {
     expect(analyticsAllowed()).toBe(false);
   });
 
+  it('GPC on a later visit removes GA cookies left from an earlier consent, at once on load', () => {
+    browser({ region: 'optout', choice: 'granted', globalPrivacyControl: true });
+    cookies.push('_ga=GA1.1.123.456', '_ga_TEST123=GS1.1');
+    expect(analyticsAllowed()).toBe(false);
+    expect(written).toContain('_ga=; Max-Age=0; path=/');
+    expect(written).toContain('_ga_TEST123=; Max-Age=0; path=/; domain=.graylum.com');
+  });
+
+  it('an allowed load leaves GA cookies alone', () => {
+    browser({ region: 'optout' });
+    cookies.push('_ga=GA1.1.123.456');
+    expect(analyticsAllowed()).toBe(true);
+    expect(written).toEqual([]);
+  });
+
   it('withdrawal stops statistics at once, tells subscribers and removes GA cookies', () => {
     browser({ region: 'optout' });
     cookies.push('_ga=GA1.1.123.456', '_ga_TEST123=GS1.1');

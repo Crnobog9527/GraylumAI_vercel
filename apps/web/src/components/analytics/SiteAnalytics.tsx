@@ -13,22 +13,21 @@ import { enterPage, syncGa } from '@/lib/analytics/ga';
 import { isSensitivePath } from '@/lib/analytics/routes';
 import { cleanVercelEvent } from '@/lib/analytics/vercel';
 import type { SiteLocale } from '@/lib/seo/site';
+import { AccountConsentSync } from './AccountConsentSync';
 import { ConsentBar } from './ConsentBar';
-import { useConsentWithdrawalSync } from './use-consent-withdrawal-sync';
-import { useSignupReporting } from './use-signup-reporting';
 
 /**
  * Consent bar and statistics for every page (ANALYTICS plan §3, ANALYTICS-CONSENT). Our own consent module decides from
  * the region class and the visitor's choice; GA (once configured), the stored first touch and Speed Insights follow it.
  * Vercel Web Analytics is cookieless and reports every visitor. Rendered from the root layout as a client component that
- * reads nothing on the server, so public pages stay static; the bar never holds up the first paint.
+ * reads nothing on the server, so public pages stay static; the bar never holds up the first paint. The bar and the
+ * scripts need no tRPC; only AccountConsentSync does.
  */
 export function SiteAnalytics({ onVercel, locale }: { onVercel: boolean; locale: SiteLocale }) {
   const { gaMeasurementId, vercelCategory } = ANALYTICS_CONFIG;
   const pathname = usePathname();
   const consent = useSyncExternalStore(subscribeConsent, consentSnapshot, serverConsentSnapshot);
   const previous = useRef<string | null>(null);
-  useConsentWithdrawalSync(consent, true);
 
   // A new address: record it (cleaned) and report it if consent allows.
   useEffect(() => {
@@ -46,8 +45,6 @@ export function SiteAnalytics({ onVercel, locale }: { onVercel: boolean; locale:
   }, [consent.analytics, gaMeasurementId]);
 
   const reportable = !isSensitivePath(pathname ?? '/');
-  // sign_up and the first source of an account created moments ago, once, after consent.
-  useSignupReporting(consent.analytics && reportable);
 
   // Injected scripts outlive this component, so cleanVercelEvent re-checks consent and the page on every event.
   const speedInsightsOn = onVercel && reportable && (vercelCategory === 'essential' || consent.analytics);
@@ -62,6 +59,8 @@ export function SiteAnalytics({ onVercel, locale }: { onVercel: boolean; locale:
       ) : null}
       {speedInsightsOn ? <SpeedInsights beforeSend={event => cleanVercelEvent(event, 'speed-insights', vercelCategory)} /> : null}
       <ConsentBar consent={consent} locale={locale} />
+      {/* Withdrawal notice and sign-up reporting: the only parts that call our server (tRPC). */}
+      <AccountConsentSync consent={consent} reportable={reportable} />
     </>
   );
 }
