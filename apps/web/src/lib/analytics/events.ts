@@ -5,8 +5,8 @@ import { readGaCheckoutIds, sendGaEvent, type GaCheckoutIds } from './ga';
 
 /**
  * The browser key events (ANALYTICS plan §3.1). Parameters are limited to the ones listed in the plan: never
- * an email, a name, a user or order ID. Each call is a no-op unless GA is configured, Termly reports statistics
- * consent right now and the current page is reportable. Purchase success is reported by the server instead.
+ * an email, a name, a user or order ID. Each call is a no-op unless GA is configured, the consent module allows
+ * statistics right now and the current page is reportable. Purchase success is reported by the server instead.
  */
 const SIGNUP_KEY = 'graylum.analytics.signup';
 const SIGNUP_WINDOW_MS = 30 * 60 * 1000;

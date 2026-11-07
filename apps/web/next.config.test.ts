@@ -45,7 +45,7 @@ describe('security response headers', () => {
     expect(csp).toContain('https://*.ingest.sentry.io');
     expect(csp).toContain("font-src 'self'");
     expect(csp).toContain("worker-src 'self' blob:");
-    expect(csp).toContain('https://app.termly.io');
+    expect(csp).not.toContain('termly.io');
     expect(csp).toContain('https://*.google-analytics.com');
     expect(rules.find(rule => rule.source.startsWith('/fonts/misans/'))?.headers).toEqual([
       { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },

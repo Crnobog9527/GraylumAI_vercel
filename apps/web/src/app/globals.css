@@ -289,6 +289,9 @@ body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: var(--font-primary);
+  /* While the statistics consent bar shows, the page ends above it, so nothing at the bottom is covered (ANALYTICS-CONSENT,
+     components/analytics/use-consent-bar-space.ts). The full-height signed-in frames subtract the same space. */
+  padding-bottom: var(--consent-bar-space, 0px);
 }
 
 /* Light signed-in routes (lib/light-app-paths.ts): the head script sets data-first-paint on <html> before the first paint; trpc/provider.tsx

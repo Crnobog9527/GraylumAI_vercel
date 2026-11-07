@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { PRICE_COMPARE } from '@/lib/landing/landing-copy';
-import { J_FOOTER, J_NAV, J_PENDING_PAGES } from '@/lib/landing/landing-copy-j-chrome';
+import { J_COOKIE_SETTINGS_HREF, J_FOOTER, J_NAV, J_PENDING_PAGES } from '@/lib/landing/landing-copy-j-chrome';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { ONE_LINE_DEFINITION } from '@/lib/seo/site';
 import { PriceJ } from './PriceJ';
@@ -49,7 +49,10 @@ describe('style sample J, round six (Owner 2026-10-15)', () => {
     const html = renderToStaticMarkup(createElement(SiteFooterJ));
     for (const column of J_FOOTER.columns) {
       expect(html).toContain(`<p>${column.title}</p>`);
-      for (const link of column.links) expect(html).toContain(`href="${link.href}"`);
+      for (const link of column.links) {
+        // "Cookie 设置" is the button that reopens the consent bar (ANALYTICS-CONSENT), not a link.
+        expect(html).toContain(link.href === J_COOKIE_SETTINGS_HREF ? `>${link.label}</button>` : `href="${link.href}"`);
+      }
     }
     expect(html).toContain(ONE_LINE_DEFINITION['zh-Hans']);
     expect(html).toContain('© 2026 Grayscale Luminary LLC');

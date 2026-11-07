@@ -1,5 +1,5 @@
 /* The empty frame of the signed-in pages, drawn by the server and by the browser's first render alike: no data, no words but the name. */
-.frame{height:100dvh;display:flex;flex-direction:column;background:#f7f7f7;color:#262626}
+.frame{height:calc(100dvh - var(--consent-bar-space, 0px));display:flex;flex-direction:column;background:#f7f7f7;color:#262626}
 .top{height:60px;flex:none;display:flex;align-items:center;padding:0 26px;background:#fff;border-bottom:1px solid #ededed;font-size:20px;font-weight:600;letter-spacing:-.03em}
 .body{flex:1;min-height:0;display:grid;grid-template-columns:264px minmax(0,1fr);gap:8px;padding:6px 8px 6px 0}
 .main{display:flex;flex-direction:column;justify-content:flex-end;min-width:0;padding:16px;border-radius:12px;background:#fff}
