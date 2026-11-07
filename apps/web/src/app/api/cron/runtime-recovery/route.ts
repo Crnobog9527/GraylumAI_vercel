@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { runTurnRecovery } from '@repo/api/src/services/turn/recovery';
 import { deliverStopLossAlerts } from '@repo/api/src/services/turn/settings/stopLossNotify';
+import { checkPlatformAbsorb } from '@repo/api/src/services/ownerAlerts/platformAbsorb';
 import { startScheduledJobRun, finishScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { logSwallowed, swallow } from '@repo/api/src/lib/swallow';
 import { validateCronRequest } from '@/lib/cron-auth';
@@ -35,8 +36,9 @@ export async function GET(request: Request) {
   const db = createClient(url, key);
   // RUNTIME-PROD slice C: mail new stop-loss alerts first, bounded to leave the recovery its own budget
   // (route limit 60s = this cap + recovery 45s). It never throws and does not affect recovery status;
-  // delivery failures are kept on the alert rows.
-  await Promise.race([deliverStopLossAlerts(db), new Promise(resolve => setTimeout(resolve, STOP_LOSS_DELIVERY_CAP_MS))]);
+  // delivery failures are kept on the alert rows. ALERT-FEISHU: the hourly platform-absorb check shares the same cap.
+  await Promise.race([Promise.all([deliverStopLossAlerts(db), checkPlatformAbsorb(db)]),
+    new Promise(resolve => setTimeout(resolve, STOP_LOSS_DELIVERY_CAP_MS))]);
   // Line D1: every run leaves counts in scheduled_job_runs. A failed record never blocks the recovery itself.
   const runId = await capped('runtime_recovery_run_record_start_failed',
     startScheduledJobRun({ supabase: db, jobKey: RUNTIME_RECOVERY_JOB_KEY, triggerSource: 'cron' }));

@@ -71,6 +71,18 @@ export function ownerAlertsEnabled(): boolean {
   try { return defaultNotifyDeps().config !== null; } catch { return false; }
 }
 
+/** The admin's test message (diagnostics, run by hand): 'off' when the variables are not set here, else whether it went out. */
+export async function sendOwnerAlertTest(): Promise<'sent' | 'off' | 'not_sent'> {
+  try {
+    const deps = defaultNotifyDeps();
+    if (!deps.config) return 'off';
+    const note = '这是后台「诊断 → Runtime 成本与余额告警」手动运行时发的测试消息，收到就说明这个环境的两个变量配好了。';
+    return await notifyOwnerWith(deps, 'test', { note }) ? 'sent' : 'not_sent';
+  } catch {
+    return 'not_sent';
+  }
+}
+
 export async function notifyOwner<K extends OwnerAlertKind>(kind: K, facts: OwnerAlertFacts[K]): Promise<void> {
   try {
     await notifyOwnerWith(defaultNotifyDeps(), kind, facts);

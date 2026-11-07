@@ -74,7 +74,8 @@ const REVIEWS: Record<string, Rendered> = {
 
 function billingReview(f: OwnerAlertFacts['billing_review']): Rendered {
   const known = REVIEWS[f.code] ?? { line: '一项付款检查需要人工处理，请到后台看一下。', path: '/admin/finance' };
-  return { line: `【付款要核对】${known.line}${f.count ? `（共 ${f.count} 条）` : ''}`, path: known.path };
+  const line = f.count ? known.line.replace(/。$/, `（共 ${f.count} 条）。`) : known.line;
+  return { line: `【付款要核对】${line}`, path: known.path };
 }
 
 const BACKLOGS: Record<string, Rendered> = {
@@ -104,7 +105,7 @@ const RENDERERS: Renderers = {
   refund: f => ({ line: refundLine(f), path: '/admin/refunds' }),
   dispute: f => ({ line: disputeLine(f), path: '/admin/refunds' }),
   billing_review: billingReview,
-  stop_loss: f => ({ line: `【成本止损】${f.line}`, path: '/admin/settings' }),
+  stop_loss: f => ({ line: `【成本止损】${f.line.replace(/[。.]?$/, '。')}`, path: '/admin/settings' }),
   stop_loss_reached: f => ({
     line: `【成本止损】今天（${f.utcDate} UTC）全站花费到了每日上限，新的付费对话会被拒绝，直到明天 UTC 零点。`
       + '要调整上限请到「系统设置 → 成本止损」。',

@@ -5,6 +5,7 @@ import { logger } from '../../../lib/logger';
 import { isProductionSite, noticeConfig, normalizeMailbox, type NoticeConfigResult } from '../../notify/config';
 import { resendTransport, type NoticeTransport } from '../../notify/resend';
 import { noticeLayout } from '../../notify/templates';
+import { notifyOwner, ownerAlertsEnabled } from '../../ownerAlerts/notify';
 
 /**
  * RUNTIME-PROD slice C: mails new stop-loss alerts to the Owner. The alert rows written by
@@ -138,6 +139,15 @@ async function readPending(db: Db, now: Date) {
   return pending.slice(0, BATCH);
 }
 
+/** ALERT-FEISHU: the same rows the mail takes this run also go to the Owner's Feishu group, once per row (keyed by its id),
+ * whether or not the mail can go out. notifyOwner never throws and is skipped when Feishu is not configured. */
+async function relayToOwner(rows: Row[]) {
+  if (!ownerAlertsEnabled()) return;
+  for (const row of rows.slice(0, MAX_MAILS_PER_RUN)) {
+    await notifyOwner('stop_loss', { alertId: String(row.id), line: describeStopLossAlert(row) });
+  }
+}
+
 /**
  * Mails every alert that has not been delivered, one mail per alert. The Resend
  * idempotency key is the alert id plus a hash of the whole envelope, so a retry repeats the same request and a
@@ -151,6 +161,7 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
   try {
     pending = await readPending(db, now);
     if (pending.length === 0) return { outcome: 'none', alerts: 0 };
+    await relayToOwner(pending);
     const env = deps.env ?? process.env;
     const config = deps.config ?? await noticeConfig(db, env);
     const to = await ownerMailbox(db);

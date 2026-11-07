@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { captureMessage } from '@sentry/nextjs';
+import { alertOwnerAfterResponse } from '@/lib/owner-alert';
 
 // PUBLISH-MONITOR plan §9 item 25: Post for Me cleanup stopped after 50 attempts and needs a person ("外部待处理" on
 // /admin/publish-monitor/cleanup). Raised on every run while any remain, so Sentry keeps one issue for the fixed code.
@@ -17,6 +18,8 @@ export function reportPublishMonitorQuota(usage: { configured: boolean; limit?: 
     level: level === 'full' ? 'fatal' : 'warning', fingerprint: [code], tags: { category: 'publish_monitor', code },
     extra: { limit: usage.limit, used: usage.used, reserved: usage.reserved },
   });
+  // ALERT-FEISHU: once per level every six hours while it holds.
+  alertOwnerAfterResponse('ops_backlog', { code, level: level === 'full' ? 'fatal' : 'warning' });
 }
 
 export function reportPublishMonitorStuck(stuck: { connections: number; requests: number } | null) {
@@ -26,4 +29,5 @@ export function reportPublishMonitorStuck(stuck: { connections: number; requests
     level: 'error', fingerprint: [code], tags: { category: 'publish_monitor', code },
     extra: { connections: stuck.connections, requests: stuck.requests, page: '/admin/publish-monitor/cleanup' },
   });
+  alertOwnerAfterResponse('ops_backlog', { code, level: 'error' });
 }

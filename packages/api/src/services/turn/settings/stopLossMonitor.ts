@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DiagnosticContext, DiagnosticTestResult } from '../../diagnostics';
 import { readStopLoss, usdThreshold } from './stopLossSettings';
 import { deliverStopLossAlerts } from './stopLossNotify';
+import { sendOwnerAlertTest } from '../../ownerAlerts/notify';
 
 export const providerBalanceInput = z.object({
   provider: z.enum(['openrouter', 'tikhub', 'parallel', 'firecrawl', 'brightdata']),
@@ -65,10 +66,12 @@ export async function testRuntimeStopLoss(ctx: DiagnosticContext): Promise<Diagn
     // Delivery runs after the checks and never changes their result; failures stay on the alert rows.
     const notice = await deliverStopLossAlerts(ctx.supabaseAdmin);
     const noticeFailed = notice.outcome === 'not_sent';
+    // ALERT-FEISHU staging check: an admin running this check by hand also gets one Feishu test message (never the daily cron).
+    const ownerAlert = ctx.runType === 'manual' ? await sendOwnerAlertTest() : undefined;
     return { ...base, status: warning || noticeFailed ? 'warning' : 'passed', latencyMs: Date.now() - start,
       message: warning ? '成本已达阈值，或供应商余额偏低/未知；详情见止损告警。'
         : noticeFailed ? '止损告警邮件没有发出，详情见止损告警。' : '成本检查已完成。',
-      details: { usage: data, balances, externalNotifications: 'email', notice } };
+      details: { usage: data, balances, externalNotifications: 'email+feishu', notice, ...(ownerAlert ? { ownerAlert } : {}) } };
   } catch {
     return { ...base, status: 'error', latencyMs: Date.now() - start, message: 'RUNTIME_STOP_LOSS_MONITOR_UNAVAILABLE' };
   }

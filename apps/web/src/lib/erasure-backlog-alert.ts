@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { captureMessage, flush } from '@sentry/nextjs';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { alertOwnerAfterResponse } from '@/lib/owner-alert';
 
 // DATA-ERASURE: the privacy policy promises deletion within 24 hours. These alerts fire while there is still time to
 // act, from the crons that do the work (every 5 minutes), so Sentry keeps one issue per code until the backlog clears.
@@ -26,6 +27,8 @@ function raise(code: string, level: Level, extra: Record<string, number | string
   captureMessage(code, { level, fingerprint: [code], tags: { category: 'data_erasure', code }, extra });
   // A fixed line in the function log shows the alert fired even before Sentry is checked.
   console.warn(`[erasure-alert] ${code} ${level}`);
+  // ALERT-FEISHU: the Owner hears once per code and level every six hours while the backlog lasts.
+  alertOwnerAfterResponse('ops_backlog', { code, level });
 }
 const ageMs = (iso: string | null, now: number) => (iso ? now - Date.parse(iso) : 0);
 

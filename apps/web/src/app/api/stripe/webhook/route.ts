@@ -14,6 +14,7 @@ import { handleCardSubscriptionInvoice, handleCardSubscriptionState } from '@rep
 import { handleCardRefund, handlePaymentDispute } from '@repo/api/src/services/payments/cardRefundWebhook';
 import { reportPaymentDispute } from '@/lib/payment-dispute-alert.mjs';
 import { logServerError, logServerWarn } from '@/lib/server-log';
+import { alertOwnerAfterResponse } from '@/lib/owner-alert';
 
 export const runtime = 'nodejs';
 
@@ -76,6 +77,8 @@ export async function POST(request: Request) {
     event = getStripeClient().webhooks.constructEvent(rawBody, signature, getStripeWebhookSecret());
   } catch {
     logServerError('billing', 'stripe_webhook_invalid_signature');
+    // ALERT-FEISHU: a wrong STRIPE_WEBHOOK_SECRET stops every payment; at most one message an hour, also against noise.
+    alertOwnerAfterResponse('payment_webhook_unavailable', { provider: 'stripe', reason: 'signature' });
     return new Response('Invalid webhook signature', { status: 400 });
   }
 
@@ -86,6 +89,8 @@ export async function POST(request: Request) {
   } catch (error) {
     const code = stripeWebhookErrorCode(error);
     logServerError('billing', 'stripe_webhook_handler_failed', { eventType: event.type, code });
+    // ALERT-FEISHU: Stripe redelivers the event for days; the Owner hears once per event.
+    alertOwnerAfterResponse('payment_webhook_failed', { provider: 'stripe', eventId: event.id, eventType: event.type, code });
     if (code === PAYMENT_EVIDENCE_CONFLICT) {
       // This error is caught here, so Next's uncaught request-error hook does not report it.
       // Emit only a fixed message and structural tags; never send the payment payload.

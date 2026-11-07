@@ -4,6 +4,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { scrubBreadcrumb, scrubErrorEvent, scrubTransactionEvent } from "./src/lib/sentry-scrub";
+import { noteServerError } from "@repo/api/src/services/ownerAlerts/errorSpike";
 
 function getSentryEnvironment() {
   return (
@@ -61,6 +62,10 @@ Sentry.init({
       console.log("[Sentry] Server event captured (not sent in dev):", event.message || event.exception?.values?.[0]?.value);
       return null;
     }
-    return scrubErrorEvent(event);
+    const scrubbed = scrubErrorEvent(event);
+    // ALERT-FEISHU: count every server error or fatal event that will be sent; many in a short time tell the Owner in Feishu
+    // (what the Sentry error mail covered). Warnings are not counted. noteServerError never throws.
+    if (!scrubbed || (scrubbed.level && scrubbed.level !== "error" && scrubbed.level !== "fatal")) return scrubbed;
+    return noteServerError().then(() => scrubbed);
   },
 });

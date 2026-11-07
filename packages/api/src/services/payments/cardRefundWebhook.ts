@@ -11,13 +11,20 @@ import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { refreshStripeTestClockOrder } from './stripeTestClock';
 import { closeRefundedTestClockOrder } from './stripeTestClockClose';
 import { logger } from '../../lib/logger';
+import { notifyOwner, type OwnerAlertFacts } from '../ownerAlerts';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
 
 type RefundStripe = Pick<Stripe, 'refunds' | 'charges' | 'invoicePayments' | 'paymentIntents' | 'invoices' | 'subscriptions'
   | 'accounts' | 'balance'>;
 type RefundResult = { state: 'refunded' | 'recorded' | 'partial_review' | 'pack_review'; duplicate: boolean; renewing?: boolean;
-  creditsShortfall?: number; packageId?: string; packCredits?: number; balance?: number };
+  creditsShortfall?: number; packageId?: string; packCredits?: number; balance?: number;
+  creditsTakenBack?: number; refundedMinor?: number; chargedMinor?: number };
+type RefundAlert = OwnerAlertFacts['refund'];
+const num = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null;
+/** ALERT-FEISHU: the Owner's Feishu message for an external refund; never throws, sent once per refund and state. */
+const ownerRefund = (facts: Pick<RefundAlert, 'orderId' | 'refundId' | 'state'> & Partial<RefundAlert>) => notifyOwner('refund', {
+  orderKind: '', refundedMinor: null, chargedMinor: null, currency: null, creditsTakenBack: null, creditsShortfall: null, ...facts });
 
 /** Refund events (charge.refunded, refund.*, charge.refund.updated) of PAY-STRIPE-MP card orders. A refund we did not
  * approve is an external refund fact (Link support, Stripe after 48 hours, a Dashboard refund): each succeeded refund
@@ -68,6 +75,8 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
       logger.error('billing', 'stripe_mp_external_refund_during_monthly_refund', { orderId: match.order.id,
         refundIds: movingCash.map(refund => refund.id), action: '月付退款进行中又收到外部退款：已按这笔扣款的退款总额记为冲突，请人工核对' });
       alert();
+      await ownerRefund({ orderId: match.order.id, refundId: movingCash.map(refund => refund.id).sort().join(','), orderKind: match.kind,
+        state: 'during_monthly_refund' });
       return oursHandled === ours.length;
     }
   }
@@ -87,6 +96,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
       logger.error('billing', 'stripe_mp_refund_unmatched', { refundIds, dedupKey: `stripe-mp-refund-unmatched:${refundIds.join(',')}`,
         action: '外部退款找不到任何本地订单：请人工核对这笔付款属于哪个订单，并处理会员和积分' });
       alert();
+      await ownerRefund({ orderId: 'unmatched', refundId: refundIds.join(','), state: 'unmatched' });
       return true;
     }
     return false;
@@ -99,7 +109,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
       p_payment: match.paymentId, p_refund: refund.id, p_amount: refund.amount, p_currency: refund.currency,
       p_refunded_at: new Date(refund.created * 1000).toISOString() });
     if (recorded.error || !recorded.data) throw new Error('PAY_STRIPE_MP_REFUND_UNAVAILABLE', { cause: recorded.error });
-    reportRefund(match.order.id, match.kind, refund.id, recorded.data as RefundResult, alert);
+    await reportRefund(match.order.id, match.kind, { id: refund.id, currency: refund.currency }, recorded.data as RefundResult, alert);
   }
   // Another refund of ours in the same event still goes through its approval flow on the existing path.
   return oursHandled === ours.length;
@@ -119,13 +129,19 @@ async function listChargeRefunds(stripe: RefundStripe, chargeId: string) {
 }
 
 /** Alerts follow the persisted state, also on a replay: a delivery that crashed before alerting is alerted on retry. */
-function reportRefund(orderId: string, kind: string, refundId: string, result: RefundResult, alert: () => void) {
+async function reportRefund(orderId: string, kind: string, refund: { id: string; currency: string }, result: RefundResult,
+  alert: () => void) {
+  const refundId = refund.id;
   // Stable across replays of the same refund, so repeated alerts can be told apart from new ones.
   const dedupKey = `stripe-mp-external-refund:${result.state}:${orderId}:${refundId}`;
+  const owner = (state: RefundAlert['state']) => ownerRefund({ orderId, refundId, orderKind: kind, state, currency: refund.currency,
+    refundedMinor: num(result.refundedMinor), chargedMinor: num(result.chargedMinor), creditsTakenBack: num(result.creditsTakenBack),
+    creditsShortfall: num(result.creditsShortfall) });
   if (result.state === 'partial_review') {
     logger.error('billing', 'stripe_mp_external_refund_partial', { orderId, kind, dedupKey, replay: result.duplicate,
       action: '部分外部退款：已记账，会员和积分未改动，请人工核对' });
     alert();
+    await owner('partial_review');
     return;
   }
   if (result.state === 'pack_review') {
@@ -133,6 +149,7 @@ function reportRefund(orderId: string, kind: string, refundId: string, result: R
     logger.error('billing', 'stripe_mp_external_refund_pack', { orderId, dedupKey, replay: result.duplicate, packageId: result.packageId,
       packCredits: result.packCredits, balance: result.balance, action: '积分包已被外部全额退款：请按积分包积分和当前余额人工决定收回多少' });
     alert();
+    await owner('pack_review');
     return;
   }
   if (result.state !== 'refunded') return;
@@ -143,6 +160,8 @@ function reportRefund(orderId: string, kind: string, refundId: string, result: R
       action: '该订阅仍在续费，请确认是否需要停续费' });
     alert();
   }
+  // One message per refund: a renewing subscription is the more urgent wording of the same refund.
+  await owner(result.renewing ? 'renewing' : 'refunded');
 }
 
 /** Whether any local order references this PaymentIntent, or an invoice it paid (the references the legacy refund path
