@@ -43,7 +43,8 @@ export async function sendFeishu(config: FeishuConfig, text: string, deps: Feish
     throw new FeishuError('FEISHU_REQUEST_FAILED');
   }
   if (!response.ok) throw new FeishuError(`FEISHU_HTTP_${response.status}`);
-  const answer = await response.json().catch(() => null) as { code?: unknown } | null;
+  let answer: { code?: unknown } | null = null;
+  try { answer = await response.json() as { code?: unknown } | null; } catch { /* not JSON: refused below */ }
   if (!answer || typeof answer.code !== 'number') throw new FeishuError('FEISHU_UNEXPECTED_BODY');
   if (answer.code !== 0) throw new FeishuError(`FEISHU_REFUSED_${answer.code}`);
 }

@@ -5,6 +5,8 @@ import { deliverStopLossAlerts, describeStopLossAlert, MAX_MAILS_PER_RUN, STOP_L
 
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 vi.mock('../../../lib/logger', () => ({ logger: log }));
+const owner = vi.hoisted(() => ({ notifyOwner: vi.fn(async () => {}), ownerAlertsEnabled: vi.fn(() => true) }));
+vi.mock('../../ownerAlerts/notify', () => owner);
 
 const now = new Date('2026-10-23T12:00:00Z');
 const withRecipients = (allowed: ReadonlySet<string> | null): NoticeConfigResult => ({ ok: true, config: {
@@ -45,7 +47,7 @@ function fixture(rows: Row[], mailbox: unknown = 'owner@example.test', opts: { r
   return { db: db as never, updates, filters };
 }
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => { vi.clearAllMocks(); owner.ownerAlertsEnabled.mockReturnValue(true); });
 
 it('mails each undelivered alert once under its own key and marks only those sent', async () => {
   const f = fixture([site('a'), site('b', { state: 'sent', attempts: 1 }), site('c', { state: 'pending', attempts: 2 })]);
@@ -215,4 +217,23 @@ it('describes alerts from whitelisted aggregate fields only', () => {
   expect(describeStopLossAlert({ test_id: 'runtime_stop_loss_userDailyUsd',
     details: { thresholdUsd: '<script>', utcDate: '2026-10-23' } })).toBe('有用户达到每人每日上限 未知（只记汇总，不记录是哪位用户）（统计日 2026-10-23 UTC）');
   expect(describeStopLossAlert({ test_id: 'runtime_stop_loss_other', details: null })).toBe('其他止损告警，请到后台查看。');
+});
+
+it('ALERT-FEISHU: relays the same undelivered rows to Feishu, worded like the admin list, even when mail cannot go out', async () => {
+  const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_1' }));
+  await deliverStopLossAlerts(fixture([site('a'), site('b', { state: 'sent', attempts: 1 })]).db, { config, transport, env: {}, now });
+  expect(owner.notifyOwner).toHaveBeenCalledExactlyOnceWith('stop_loss', { alertId: 'a', line: describeStopLossAlert(site('a')) });
+  owner.notifyOwner.mockClear();
+  const unconfigured = await deliverStopLossAlerts(fixture([site('c')]).db,
+    { config: { ok: false, code: 'PAYMENT_NOTICE_NOT_CONFIGURED' }, transport, env: {}, now });
+  expect(unconfigured.outcome).toBe('not_sent');
+  expect(owner.notifyOwner).toHaveBeenCalledExactlyOnceWith('stop_loss', expect.objectContaining({ alertId: 'c' }));
+  owner.notifyOwner.mockClear();
+  // At most MAX_MAILS_PER_RUN a run, and nothing at all when Feishu is not configured.
+  await deliverStopLossAlerts(fixture(['1', '2', '3', '4', '5'].map(id => site(id))).db, { config, transport, env: {}, now });
+  expect(owner.notifyOwner).toHaveBeenCalledTimes(MAX_MAILS_PER_RUN);
+  owner.notifyOwner.mockClear();
+  owner.ownerAlertsEnabled.mockReturnValue(false);
+  await deliverStopLossAlerts(fixture([site('d')]).db, { config, transport, env: {}, now });
+  expect(owner.notifyOwner).not.toHaveBeenCalled();
 });

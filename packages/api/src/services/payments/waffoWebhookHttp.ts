@@ -12,6 +12,10 @@ type Dependencies = {
 
 /** Streaming limit applies even when Content-Length is absent or dishonest. */
 export async function handleWaffoWebhookHttp(request: Request, deps: Dependencies) {
+  // The alert hook never changes the answer, even if it throws.
+  const failed = async (failure: Parameters<NonNullable<Dependencies['onFailure']>>[0]) => {
+    try { await deps.onFailure?.(failure); } catch { /* the hook never changes the answer */ }
+  };
   const config = deps.config();
   if (!config) return new Response('Webhook unavailable', { status: 503 });
   const signature = request.headers.get('x-waffo-signature');
@@ -37,7 +41,7 @@ export async function handleWaffoWebhookHttp(request: Request, deps: Dependencie
     if (deps.process) {
       try { await deps.process(receipt); }
       catch {
-        await deps.onFailure?.({ stage: 'processing', receiptId: String(receipt.receiptId) });
+        await failed({ stage: 'processing', receiptId: String(receipt.receiptId) });
         return new Response('Webhook processing deferred', { status: 503 });
       }
     }
@@ -48,7 +52,7 @@ export async function handleWaffoWebhookHttp(request: Request, deps: Dependencie
       return new Response('Invalid webhook', { status: 400 });
     }
     // Database/configuration failures remain retryable. Never log raw payload or key material.
-    await deps.onFailure?.({ stage: 'storage' });
+    await failed({ stage: 'storage' });
     return new Response('Webhook unavailable', { status: 503 });
   }
 }

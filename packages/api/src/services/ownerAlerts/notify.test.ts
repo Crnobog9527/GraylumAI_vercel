@@ -25,7 +25,7 @@ function sharedStore() {
 const clock = { t: Date.parse('2026-11-08T10:00:00Z') };
 
 function deps(over: Partial<NotifyDeps> = {}, store = sharedStore()) {
-  const fetch = vi.fn(async (_url: string, _init: RequestInit) => ok());
+  const fetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => ok());
   const value: NotifyDeps = {
     config: { webhookUrl: HOOK, secret: 'demo' },
     dedupe: createDedupe(() => store, () => clock.t),
