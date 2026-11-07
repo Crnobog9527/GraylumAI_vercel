@@ -31,6 +31,16 @@ describe('test override', () => {
     expect(regionOverrideAllowed({ VERCEL_ENV: 'preview', NODE_ENV: 'production' })).toBe(true);
     expect(regionOverrideAllowed({ APP_ENV: 'staging', VERCEL_ENV: 'production', NODE_ENV: 'production' })).toBe(true);
     expect(regionOverrideAllowed({ NODE_ENV: 'development' })).toBe(true);
+    // The staging project's main deployment is a Vercel production deployment; its address says staging.
+    expect(regionOverrideAllowed({ VERCEL_ENV: 'production', NODE_ENV: 'production', NEXT_PUBLIC_APP_URL: 'https://auth-staging.graylum.com' }))
+      .toBe(true);
+  });
+
+  it('the production address never allows it, also without APP_ENV', () => {
+    expect(regionOverrideAllowed({ VERCEL_ENV: 'production', NODE_ENV: 'production', NEXT_PUBLIC_APP_URL: 'https://www.graylum.com' }))
+      .toBe(false);
+    expect(regionOverrideAllowed({ APP_ENV: 'production', NEXT_PUBLIC_APP_URL: 'https://auth-staging.graylum.com' })).toBe(false);
+    expect(regionOverrideAllowed({ VERCEL_ENV: 'production', NEXT_PUBLIC_APP_URL: 'https://notstaging.example.com' })).toBe(false);
   });
 
   it('pins the class until auto, and production ignores it and replaces a pinned value', () => {
@@ -79,6 +89,7 @@ describe('the proxy leaves the class on the response', () => {
       .cookies.get('gl_consent_region')?.value).toBe('test-optin');
     vi.stubEnv('APP_ENV', 'production');
     vi.stubEnv('VERCEL_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://www.graylum.com');
     expect(run('https://www.graylum.com/landing?consent_region=optin', { 'x-vercel-ip-country': 'US', cookie: 'gl_consent_region=test-optin' })
       .cookies.get('gl_consent_region')?.value).toBe('optout');
   });
