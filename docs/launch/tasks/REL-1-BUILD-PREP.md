@@ -25,7 +25,7 @@
 | # | 谁 | 做什么 | 怎么确认 | 详见 |
 | --- | --- | --- | --- | --- |
 | 1 | ★ Owner 做 | **Supabase 正式项目 Auth**：SMTP 接 Resend（发件 `Graylum <mail@graylum.com>`，Owner 2026-11-07 定）；Google OAuth 客户端加新项目回调；hCaptcha 密钥；Site URL＝`https://www.graylum.com`，Redirect URLs 允许 `https://www.graylum.com/**`；邮箱确认开；邮件模板和密码强度照总控给的 staging 对照清单 | 冒烟 K1 真实走一遍 | P1 |
-| 2 | ★ Owner 做 | **Stripe 正式 webhook**：端点 `https://www.graylum.com/api/stripe/webhook`，事件选"所有事件"；重试第 1、3、6 天后取消；账单描述、条款链接；Stripe Tax 门槛监控；门户关"切换套餐"；开通 WeChat Pay、Alipay | 端点详情读回 | P2 |
+| 2 | ★ Owner 做 | **Stripe 正式 webhook**：端点 `https://www.graylum.com/api/stripe/webhook`，事件选"所有事件"；重试第 1、3、5 天后取消（Stripe 后台没有第 6 天选项，2026-11-07 实际设为第 1、3、5 天）；账单描述、条款链接；Stripe Tax 门槛监控；门户关"切换套餐"；开通 WeChat Pay、Alipay | 端点详情读回 | P2 |
 | 3 | ★ Owner 做 | **Stripe 正式商品目录**：受限密钥 → `scripts/stripe-mp-live-catalog.mjs plan` → `apply` → 再 `plan` 全部 exists → `sql`、`sql-packs` 输出**只交总控审核、不进仓库** → 删受限密钥 | 第二次 `plan` 没有 MISMATCH | 3.6 S1–S5 |
 | 4 | ★ Owner 做 | **Post for Me 正式项目**：正式**独占**项目（不和 staging 共用）；Webhook 指向 `https://www.graylum.com/api/postforme/webhook`（账号变化、发布结果事件）；在项目里 **Enable 全部 9 个平台**（10-13 实测时 Facebook、Pinterest 没开，没开的平台拿不到授权链接）；记下套餐条数和续期时间（第 15 步要填） | 项目里只有正式账号；9 个平台都是 Enabled | P3 |
 | 5 | ★ Owner 做 | **花费上限**：OpenRouter 正式密钥每日美元上限、不自动充值、禁 BYOK；TikHub、Parallel、Firecrawl 各自硬上限 | 各家后台读回 | P4 |
