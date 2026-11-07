@@ -141,22 +141,25 @@ async function readPending(db: Db, now: Date) {
 
 /** ALERT-FEISHU: Feishu picks its own rows, independent of the mail's state: the stop-loss alert rows of the last 48 hours,
  * newest first, each sent once (the Redis dedupe on the row id), so a mail that went out never hides a Feishu send that failed.
- * At most MAX_MAILS_PER_RUN actual sends a run; rows already sent are skipped without counting. No read at all when Feishu is not
+ * At most MAX_MAILS_PER_RUN actual sends a run; rows already sent are skipped without counting. It pages like readPending (PAGE
+ * rows, at most MAX_PAGES pages), so a backlog longer than one page is worked through run by run. No read at all when Feishu is not
  * configured; a failed read only skips this run. Never throws. */
 export const OWNER_RELAY_WINDOW_MS = 48 * 3600_000;
-const OWNER_RELAY_ROWS = 20;
 async function relayToOwner(db: Db, now: Date) {
   if (!ownerAlertsEnabled()) return;
   try {
-    const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
-      .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%')
-      .gte('created_at', new Date(now.getTime() - OWNER_RELAY_WINDOW_MS).toISOString())
-      .order('created_at', { ascending: false }).limit(OWNER_RELAY_ROWS);
-    if (error || !Array.isArray(data)) return;
+    const since = new Date(now.getTime() - OWNER_RELAY_WINDOW_MS).toISOString();
     let sent = 0;
-    for (const row of data as Row[]) {
-      if (sent >= MAX_MAILS_PER_RUN) break;
-      if (await notifyOwner('stop_loss', { alertId: String(row.id), line: describeStopLossAlert(row) })) sent += 1;
+    for (let page = 0; page < MAX_PAGES && sent < MAX_MAILS_PER_RUN; page += 1) {
+      const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
+        .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%').gte('created_at', since)
+        .order('created_at', { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
+      if (error || !Array.isArray(data)) return;
+      for (const row of data as Row[]) {
+        if (sent >= MAX_MAILS_PER_RUN) break;
+        if (await notifyOwner('stop_loss', { alertId: String(row.id), line: describeStopLossAlert(row) })) sent += 1;
+      }
+      if (data.length < PAGE) return;
     }
   } catch { /* the mail delivery below never depends on it */ }
 }

@@ -39,7 +39,6 @@ function fixture(rows: Row[], mailbox: unknown = 'owner@example.test', opts: { r
         order() { return q; },
         range: async (from: number, to: number) => opts.readError ? { data: null, error: { code: 'x' } }
           : { data: rows.slice(from, to + 1), error: null },
-        limit: async (n: number) => opts.readError ? { data: null, error: { code: 'x' } } : { data: rows.slice(0, n), error: null },
         update(value: Record<string, unknown>) { patch = value; return q; },
       };
       return q;
@@ -237,6 +236,13 @@ it('ALERT-FEISHU: Feishu picks its own recent rows, whatever the mail state, and
   await deliverStopLossAlerts(fixture(['1', '2', '3', '4', '5', '6', '7'].map(id => site(id))).db, { config, transport, env: {}, now });
   expect(owner.notifyOwner.mock.calls.map(c => (c[1] as { alertId: string }).alertId)).toEqual(['1', '2', '3', '4', '5', '6']);
   expect(MAX_MAILS_PER_RUN).toBe(3);
+  owner.notifyOwner.mockReset().mockResolvedValue(true);
+  // A backlog past the first page (250 rows, the first 120 already sent): the relay pages on and sends rows 121 to 123.
+  owner.notifyOwner.mockImplementation(async (_kind, facts) => Number((facts as { alertId: string }).alertId) > 120);
+  await deliverStopLossAlerts(fixture(Array.from({ length: 250 }, (_, i) => site(String(i + 1)))).db, { config, transport, env: {}, now });
+  const tried = owner.notifyOwner.mock.calls.map(c => (c[1] as { alertId: string }).alertId);
+  expect(tried.length).toBe(123);
+  expect(tried.slice(-3)).toEqual(['121', '122', '123']);
   owner.notifyOwner.mockReset().mockResolvedValue(true);
   // Nothing at all (no read) when Feishu is not configured; a failed read never touches the mail result.
   owner.ownerAlertsEnabled.mockReturnValue(false);
