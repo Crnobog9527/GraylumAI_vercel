@@ -51,8 +51,9 @@ const DAY = 24 * HOUR;
 /** Stripe redelivers for up to three days; a little more, so a late redelivery is still one message. */
 const EVENT_TTL = 4 * DAY;
 
-/** Error-spike rule (ALERT-FEISHU): at least ERROR_SPIKE.count server errors in ERROR_SPIKE.minutes, then quiet for an hour. */
-export const ERROR_SPIKE = { count: 20, minutes: 10, cooldownSeconds: HOUR } as const;
+/** Error-spike rule (ALERT-FEISHU, controller 2026-11-08): at least ERROR_SPIKE.count server errors in ERROR_SPIKE.minutes, then
+ * quiet for an hour. Set low for launch traffic; there is no measured baseline yet, so revisit after the first week. */
+export const ERROR_SPIKE = { count: 10, minutes: 10, cooldownSeconds: HOUR } as const;
 
 const hour = (now: Date) => now.toISOString().slice(0, 13);
 const day = (now: Date) => now.toISOString().slice(0, 10);
