@@ -79,7 +79,16 @@
 - 脚本从本站 `/_vercel/insights/script.js` 加载。第 4 节只测了大陆能从 `vercel.com` 下载同款脚本（20/20），**没有测我们自己的域名和数据上报**；PR-2 验收要用大陆真实网络访问 preview 页面，确认报表里收到这次访问。
 - 自定义事件（Pro 才有）：升级 Pro 后再加 `sign_up` 等同名事件，供大陆对照；升级前只看访问量和来源。
 
-### 3.4 Termly
+### 3.4 统计同意（ANALYTICS-CONSENT，2026-11-07 起取代下面的 Termly 做法）
+
+- Owner 2026-11-07 决定（Master Plan 第 2.1 节）：同意条自己做，Termly 只留托管政策页。代码在 `apps/web/src/lib/analytics/consent.ts`（同意状态）、`consent-region.ts`（地区类别）、`consent-region-proxy.ts`（proxy 写地区 Cookie）和 `components/analytics/ConsentBar.tsx`（底部同意条）。
+- 地区：proxy 按 Vercel 的 `x-vercel-ip-country` 判断，欧盟/EEA、英国（含皇家属地和直布罗陀）、瑞士 = 先同意地区，其余 = 默认允许地区；国家不明按先同意。类别写进第一方 Cookie `gl_consent_region`（只有 `optin`/`optout`），页面脚本读取，不多发请求，公开页仍静态。非正式环境可用 `?consent_region=optin|optout|auto` 测试覆盖，正式环境忽略。
+- 规则：默认允许地区不弹窗、直接统计；先同意地区显示底部同意条（“接受”“仅必要”，两个按钮同样醒目），点“接受”前不统计；选择存在浏览器 localStorage；GPC 信号在所有地区都算拒绝；页脚和个人中心的“Cookie 设置”在所有地区重新打开同意条；拒绝或撤回立即停止 GA、Speed Insights 和首次来源记录，并删除 GA 的 Cookie。
+- Vercel Web Analytics 不用 Cookie，对所有访客上报；Speed Insights 照旧跟随同意；GA4 只在同意后由我们加载 gtag.js，广告存储始终 denied。
+- PostHog（ANALYTICS-POSTHOG）用 `bindConsentedTool({ optIn, optOut })` 接同一个同意状态。
+- 下面是 2026-10-13 的 Termly 做法，只作历史记录。
+
+### 3.4a Termly（已被上一节取代）
 
 - **地区规则**（在 Termly 后台配置，Owner 操作）：欧盟/欧洲经济区/英国/瑞士 = 同意前不放行统计和广告；美国 = 默认放行、页脚和弹窗提供“不要出售或分享我的个人信息”入口，并尊重浏览器的 GPC 信号；其他地区按 Termly 默认。**Termly 是否自动识别 GPC 公开资料里没查到，开账号后要在后台确认**（第 9 节 O4）。
 - **Google Consent Mode v2**：在 Termly 后台打开；页面在加载 GA 之前先写一段默认值（欧洲地区 `analytics_storage`、`ad_storage`、`ad_user_data`、`ad_personalization` 默认 denied），Termly 拿到同意后更新。

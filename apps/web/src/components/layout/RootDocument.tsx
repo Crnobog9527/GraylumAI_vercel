@@ -56,8 +56,8 @@ export function RootDocument({ locale, children }: { locale: SiteLocale; childre
         <MiSansFont />
         <Provider>
           {children}
-          {/* Termly consent, GA4 and Vercel statistics; loads nothing until configured (ANALYTICS plan §3). */}
-          <SiteAnalytics onVercel={onVercel} />
+          {/* Statistics consent bar, GA4 and Vercel statistics (ANALYTICS plan §3, ANALYTICS-CONSENT). */}
+          <SiteAnalytics onVercel={onVercel} locale={locale} />
           {/* CHAT-LANGUAGE: a sign-up from the Traditional Chinese pages starts its AI replies in Traditional Chinese. */}
           <EntryReplyLanguage />
         </Provider>

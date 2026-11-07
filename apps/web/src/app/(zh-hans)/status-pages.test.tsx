@@ -8,6 +8,8 @@ vi.mock('@/components/misans-font', () => ({ MiSansFont: () => null }));
 vi.mock('@/trpc/provider', () => ({ default: ({ children }: { children: ReactNode }) => children }));
 vi.mock('@/components/ui/sonner', () => ({ Toaster: () => null }));
 vi.mock('@/hooks/use-entry-reply-language', () => ({ EntryReplyLanguage: () => null }));
+// The account-side statistics sync talks to our server through tRPC, which this render has no provider for.
+vi.mock('@/components/analytics/AccountConsentSync', () => ({ AccountConsentSync: () => null }));
 vi.mock('@/lib/public-site', () => ({ getPublicSiteSettings: vi.fn() }));
 
 import RouteError from './error';

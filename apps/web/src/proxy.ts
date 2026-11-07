@@ -10,6 +10,7 @@ import { isPublicPathname } from '@/lib/public-paths';
 import { BUY_INTENT_PATH, buyIntentPath, parseBuyIntent } from '@/lib/buyIntent';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 import { withEntryLanguage } from '@/lib/entry-language-server';
+import { withConsentRegion } from '@/lib/analytics/consent-region-proxy';
 
 const SENTRY_TUNNEL_PATH = '/monitoring';
 
@@ -261,7 +262,12 @@ async function isMaintenanceModeEnabled(
   }
 }
 
+// ANALYTICS-CONSENT: every response leaves the visitor's statistics region class for the page (consent-region-proxy.ts).
 export async function proxy(request: NextRequest) {
+  return withConsentRegion(request, await routeRequest(request));
+}
+
+async function routeRequest(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
   const hostname = request.nextUrl.hostname || request.headers.get('host') || '';
   const normalizedHostname = normalizeHostname(hostname);
