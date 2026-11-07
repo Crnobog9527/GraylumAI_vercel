@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { createDedupe, MARK_PREFIX, type MarkStore } from './dedupe';
+import { createDedupe, LOST_MEMO_SECONDS, MARK_PREFIX, type MarkStore } from './dedupe';
 
 /** A shared store, as Redis is shared between instances; expiry follows the fake clock. */
 function memoryStore(clock: { t: number }) {
@@ -52,6 +52,23 @@ describe('createDedupe', () => {
     await dedupe.release('k');
     expect(store.marks.size).toBe(0);
     expect(await dedupe.claim('k', 60)).toBe(true);
+  });
+
+  it('an instance that lost the race competes again soon, so a retry after the owner released the key is not lost', async () => {
+    const clock = { t: 0 };
+    const store = memoryStore(clock);
+    const a = createDedupe(() => store, () => clock.t);
+    const b = createDedupe(() => store, () => clock.t);
+    expect(await a.claim('refund:ch_1', 4 * 86400)).toBe(true);
+    expect(await b.claim('refund:ch_1', 4 * 86400)).toBe(false);
+    await a.release('refund:ch_1');
+    clock.t = (LOST_MEMO_SECONDS - 1) * 1000;
+    expect(await b.claim('refund:ch_1', 4 * 86400)).toBe(false);
+    clock.t = LOST_MEMO_SECONDS * 1000;
+    expect(await b.claim('refund:ch_1', 4 * 86400)).toBe(true);
+    // While the owner's mark stands, the loser keeps losing (one Redis call a minute at most).
+    clock.t += LOST_MEMO_SECONDS * 1000;
+    expect(await a.claim('refund:ch_1', 4 * 86400)).toBe(false);
   });
 
   it('still sends when Redis is down or missing, but not twice from the same instance', async () => {

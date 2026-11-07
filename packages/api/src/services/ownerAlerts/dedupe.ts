@@ -12,6 +12,9 @@ import { redisEnvironment } from '../redisEnvironment';
  */
 export const MARK_PREFIX = 'owner-alert:';
 const MEMORY_LIMIT = 500;
+/** An instance that lost the Redis race remembers that only briefly: if the owner's send fails and frees the key, a retry that lands
+ * here must be able to compete again (a full-TTL memo here would turn one failed send into a missed refund alert). */
+export const LOST_MEMO_SECONDS = 60;
 /** Each Redis call (claim or release) gives up after this; a claim that times out still sends. */
 export const MARK_DEADLINE_MS = 500;
 
@@ -52,7 +55,9 @@ export function createDedupe(store: () => MarkStore | null, now: () => number = 
       try {
         marks = store();
         if (!marks) return true;
-        return await marks.setIfAbsent(`${MARK_PREFIX}${key}`, new Date(now()).toISOString(), ttlSeconds);
+        const won = await marks.setIfAbsent(`${MARK_PREFIX}${key}`, new Date(now()).toISOString(), ttlSeconds);
+        if (!won) remember(key, Math.min(ttlSeconds, LOST_MEMO_SECONDS));
+        return won;
       } catch {
         return true;
       }
