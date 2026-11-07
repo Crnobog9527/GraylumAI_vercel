@@ -89,7 +89,7 @@ export async function runCases({db,Client,report}) {
  // Revoking the positioning draft hides its benchmark table too.
  await db.query('UPDATE bill2_drafts SET revoked=true WHERE id=$1',[main.draft]);
  assert.equal((await read(db,a,sid,main.draftSession)).kind,'unavailable');
- assert.ok(!(await kinds(db,a,sid)).includes('benchmarks'));
+ assert.ok(!(await index(db,a,sid)).entries.some(e=>e.kind==='benchmarks'&&e.id===main.draftSession),'its benchmark table is not listed (the other conversations\' tables still are)');
  report.checks.push('a revoked positioning lists neither the positioning nor its benchmark table');
 
  // (Not run any more, 0505: copies of the table inside old executions' tool calls, their scope, erasure and the write guards on them.)
