@@ -94,6 +94,21 @@ try{
   assert.deepEqual([Boolean(first.usage.byok),Boolean(second.usage.byok)],[true,false]);
   report.checks.push('one turn with a BYOK call and a fallen-back call: each call keeps its own platform cost, the charge is unchanged');
  }
+ // 1c. The frozen bound prices the vendor's charge: a BYOK fee on top of an answer at the bound does not block the model
+ // (budget_conflict, 9999); the same total without BYOK, or a vendor charge above the bound, still does.
+ {
+  const conflict=async r=>{
+   const a=await account(),o=await open(a);
+   await begin(a,o.turnId,1);await record(a,o.turnId,1,r);
+   return one('select budget_conflict v from turn_calls where turn_id=$1 and seq=1',[o.turnId]);
+  };
+  const atBound={n:'0.02',a:'0.021',usage:{...tokens,byok:{feeUsd:'0.001',upstreamUsd:'0.02'}}};
+  assert.equal(await conflict(atBound),false,'fee above an upstream charge at the bound');
+  assert.equal(await conflict({n:'0.02',a:'0.021',usage:tokens}),true,'no BYOK: above the bound');
+  assert.equal(await conflict({n:'0.02',a:'0.0221',usage:{...tokens,byok:{feeUsd:'0.001',upstreamUsd:'0.0211'}}}),true,'upstream above the bound');
+  assert.equal(await conflict({n:'0.02',a:'0.021',usage:{...tokens,byok:{feeUsd:'x',upstreamUsd:'0.02'}}}),true,'a malformed fee is not subtracted');
+  report.checks.push('budget_conflict compares the bound with the vendor charge: a BYOK fee alone never blocks the model');
+ }
  // 2. An unusable BYOK call (charged by the provider, delivers nothing): the user pays 0, the stop-loss counts its whole cost.
  {
   const u=await settled(byok,'unusable');
