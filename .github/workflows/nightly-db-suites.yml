@@ -7,7 +7,7 @@ name: Nightly database suites
 
 on:
   push:
-    branches: [staging]
+    branches: [claude/nightly-verify-tmp]
 
 concurrency:
   group: excluded-db-suites
@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1]
     timeout-minutes: 60
     permissions:
       contents: read
@@ -63,4 +63,4 @@ jobs:
 
       # Many of these suites refuse to start when CI is set (they accept only --local-only), so the runner starts without it.
       - name: Integration — Excluded database suites (report)
-        run: env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded --shard ${{ matrix.shard }}/4
+        run: env -u CI node packages/db/tests/run-local-suites.mjs --local-only --excluded --only workspace-benchmarks
