@@ -5,6 +5,8 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { rpc, closeAccount } from '../erasure-b2a/cases.mjs';
+import { recordLibraryProof } from '../erasure-completion/library-proof.mjs';
 
 const migration = readdirSync(new URL('../../migrations/', import.meta.url)).find(name => name.endsWith('_phone_otp_sms_sends.sql'));
 assert.ok(migration, 'the PHONE-OTP migration exists');
@@ -106,7 +108,18 @@ try {
   assert.equal(Number(await v('SELECT account_erasure_local_remaining($1) v', [user])), before + 1);
   const cleanup = await v("SELECT pg_get_functiondef('account_erasure_local_cleanup(uuid,boolean)'::regprocedure) v");
   assert.match(cleanup, /UPDATE profiles SET email=NULL,nickname=NULL[^;]*,phone=NULL/);
-  report.checks.push('profiles.phone takes 86 + 11 digits only; erasure counts it as remaining and clears it with the other fields');
+  // The real erasure path: close the account, then run the executor's local cleanup; another account's number stays.
+  const erased = await v('SELECT ws_test.actor() v'), kept = await v('SELECT ws_test.actor() v');
+  await c.query("UPDATE profiles SET phone='8613900005678' WHERE id=$1", [erased]);
+  await c.query("UPDATE profiles SET phone='8613700005678' WHERE id=$1", [kept]);
+  await closeAccount(c, { actor: erased });
+  await recordLibraryProof(c, { actor: erased });
+  for (let i = 0; i < 5 && await v('SELECT phone v FROM profiles WHERE id=$1', [erased]) !== null; i++) {
+    await rpc(c, 'account_erasure_local_cleanup', erased, true);
+  }
+  assert.equal(await v('SELECT phone v FROM profiles WHERE id=$1', [erased]), null);
+  assert.equal(await v('SELECT phone v FROM profiles WHERE id=$1', [kept]), '8613700005678');
+  report.checks.push('profiles.phone takes 86 + 11 digits only; erasure counts it as remaining and the executor cleanup clears it (another account keeps its own)');
 
   // In-app reminders: own skipped no-recipient rows of the last 14 days, newest first.
   const other = await v('SELECT ws_test.actor() v');

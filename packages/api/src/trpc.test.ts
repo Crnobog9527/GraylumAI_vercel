@@ -517,7 +517,7 @@ describe('protectedProcedure profile bootstrap', () => {
       identities: [{ provider: 'phone', identity_data: { sub: user.id, phone: '8613800005678' } }], user_metadata: {},
     };
     const { isEmailVerified } = await import('./lib/auth');
-    expect(isEmailVerified(phoneUser as any)).toBe(true);
+    expect(isEmailVerified(phoneUser as unknown as User)).toBe(true);
     await expect(callProtectedProcedure(supabaseMocks, { userOverride: phoneUser, isEmailVerified: true }))
       .resolves.toMatchObject({ profileId: user.id });
     await expect(callProtectedProcedure(supabaseMocks, { userOverride: phoneUser, isEmailVerified: true }))

@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
-import { requestPhoneCode } from '@/lib/phoneAuth';
+import { sendPhoneReauthCode, verifyPhoneReauth } from '@/lib/phoneReauth';
 import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
 import {
   describeErasureError, isAccountClosedError, isRenewalBlockedError, type AccountErasurePreview,
@@ -68,21 +68,13 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     return captcha;
   };
 
-  const sessionPhone = async () => {
-    const { data } = await createClient().auth.getUser();
-    return data.user?.phone ? `+${data.user.phone.replace(/^\+/, '')}` : null;
-  };
-
   const sendCode = () => run(async () => {
     if (codeSentAt && Date.now() - codeSentAt < CODE_COOLDOWN_SECONDS * 1000) {
       return setError(`验证码已发送，请 ${CODE_COOLDOWN_SECONDS} 秒后再重新发送。`);
     }
     if (options.phone) {
-      const phone = await sessionPhone();
-      if (!phone) return setError('当前会话缺少手机号信息，无法发送验证码。');
-      const failure = await requestPhoneCode({ phone, createUser: false, captchaToken: takeCaptcha().captchaToken });
-      if (failure) return setError(failure);
-      return setCodeSentAt(Date.now());
+      const failure = await sendPhoneReauthCode(createClient(), takeCaptcha().captchaToken);
+      return failure ? setError(failure) : setCodeSentAt(Date.now());
     }
     if (!options.email) return setError('当前会话缺少邮箱信息，无法发送验证码。');
     const email = options.email;
@@ -96,10 +88,8 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
 
   const verify = () => run(async () => {
     if (options.phone) {
-      const phone = await sessionPhone();
-      if (!phone || !secret.trim()) return setError('请输入验证码。');
-      const { error: smsError } = await createClient().auth.verifyOtp({ phone, token: secret.trim(), type: 'sms' });
-      if (smsError) return setError('验证码无效或已过期。');
+      const failure = await verifyPhoneReauth(createClient(), secret);
+      if (failure) return setError(failure);
       setSecret('');
       return setStep('confirm');
     }

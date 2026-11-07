@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- PHONE-OTP (Owner 2026-11-07, Master Plan 2.1 "手机号上线前做"): mainland China (+86) phone sign-in through Supabase
--- phone OTP and the "Send SMS" Auth Hook (apps/web/src/app/api/auth/sms-hook). Number assigned by the controller.
+-- phone OTP and the "Send SMS" Auth Hook (apps/web/src/app/api/auth/sms-hook). Number 0511 assigned by the controller.
 --   * sms_sends: one row per code the site asked Supabase to send. The send route writes it (with the visitor's IP, which
 --     the hook payload does not carry) before signInWithOtp; the hook marks it sent before handing the code to the SMS
 --     provider. A hook call without a fresh unsent row is refused, so calling the Auth API directly cannot skip the limits.
