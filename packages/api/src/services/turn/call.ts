@@ -5,6 +5,7 @@ import { consumeOpenRouterNotStarted } from './provider/openRouterAdapter';
 import { openRouterEvidence } from './provider/openRouterEvidence';
 import { openRouterRejection } from './provider/openRouterRejection';
 import { nominalCost, type NominalPricing } from '../../shared/nominalPricing';
+import { withByok } from './provider/openRouterByok';
 import { acquireSlot, ProviderBusyError, type CounterStore } from './limiter';
 import { tombstoned, TurnDatabaseError, type TurnDatabase } from './db';
 import { errorCode, logSwallowed } from '../../lib/swallow';
@@ -150,7 +151,9 @@ export async function modelCall(deps: CallDeps, call: ModelCall, body: string, o
     }
     const nominal = ceil12(nominalUsd);
     // The usage row keeps the token counts; the completion itself is the raw body, stored once.
-    const receiptUsage = Object.fromEntries(Object.entries(usage).filter(([key]) => key !== 'sdkResponse'));
+    // actual_usd is the platform's whole cost (a BYOK call's fee plus the vendor's charge, BILL-BYOK); the split stays in usage.
+    const receiptUsage = withByok(Object.fromEntries(Object.entries(usage).filter(([key]) => key !== 'sdkResponse')),
+      'byok' in evidence ? evidence.byok : undefined);
     const recorded = await deps.db.record({ actorId: deps.actorId, turnId: deps.turnId, seq, status: 'ok', nominalUsd: nominal,
       actualUsd: evidence.cost, usage: receiptUsage, providerId: evidence.providerId ?? null,
       payloadHash: evidence.sourceHash, raw: evidence.rawBody || null });

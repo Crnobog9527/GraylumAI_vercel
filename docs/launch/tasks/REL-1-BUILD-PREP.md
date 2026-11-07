@@ -28,7 +28,7 @@
 | 2 | ★ Owner 做 | **Stripe 正式 webhook**：端点 `https://www.graylum.com/api/stripe/webhook`，事件选"所有事件"；重试第 1、3、6 天后取消；账单描述、条款链接；Stripe Tax 门槛监控；门户关"切换套餐"；开通 WeChat Pay、Alipay | 端点详情读回 | P2 |
 | 3 | ★ Owner 做 | **Stripe 正式商品目录**：受限密钥 → `scripts/stripe-mp-live-catalog.mjs plan` → `apply` → 再 `plan` 全部 exists → `sql`、`sql-packs` 输出**只交总控审核、不进仓库** → 删受限密钥 | 第二次 `plan` 没有 MISMATCH | 3.6 S1–S5 |
 | 4 | ★ Owner 做 | **Post for Me 正式项目**：正式**独占**项目（不和 staging 共用）；Webhook 指向 `https://www.graylum.com/api/postforme/webhook`（账号变化、发布结果事件）；在项目里 **Enable 全部 9 个平台**（10-13 实测时 Facebook、Pinterest 没开，没开的平台拿不到授权链接）；记下套餐条数和续期时间（第 15 步要填） | 项目里只有正式账号；9 个平台都是 Enabled | P3 |
-| 5 | ★ Owner 做 | **花费上限**：OpenRouter 正式密钥每日美元上限、不自动充值、禁 BYOK；TikHub、Parallel、Firecrawl 各自硬上限 | 各家后台读回 | P4 |
+| 5 | ★ Owner 做 | **花费上限**：OpenRouter 正式密钥每日美元上限、不自动充值；BYOK 按 Owner 11-07 新要求启用，计费和上限口径照 BILL-BYOK（#1815）；TikHub、Parallel、Firecrawl 各自硬上限 | 各家后台读回 | P4 |
 | 6 | ★ Owner 做 | 拿到正式 hCaptcha sitekey（Termly 网站编号不再需要：ANALYTICS-CONSENT 起不加载 Termly 同意脚本）；生成正式专用的 `OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`（不复用 staging） | 第 24、25 步变量名清单里有 | P5 |
 | 7 | ★ Owner 做 | Vercel 正式项目打开 Web Analytics 和 Speed Insights（问题 15，第一次正式部署之前，否则统计脚本 404）；日志和备份保留期 ≤30 天：正式 Sentry、Vercel、Resend、`Graylum_main` 每日备份和 PITR | 各后台读回 | P6 |
 | 8 | ★ 批准 | **正式库连接池数字**（E4）：Owner 定 PostgREST 连接池大小。它决定第 17 步的 `poolSize`／`p` 和日限，**必须先于设置每日花费上限和 `core_path_v2`**。建库日 Owner 操作（需 Owner 生成的 Supabase 管理令牌，放本机密钥文件，不进仓库、日志或 PR） | 读回 | E4、3.0a |

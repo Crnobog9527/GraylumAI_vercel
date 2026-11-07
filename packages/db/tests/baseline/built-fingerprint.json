@@ -3949,7 +3949,7 @@
   "fn:turn_admin_unsettled_turns(integer)": "1f53c6be1353",
   "fn:turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "89de7745166a",
   "fn:turn_call_identity(uuid,bigint,integer,text)": "40ec987e5d70",
-  "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "695c0bd42275",
+  "fn:turn_call_record(uuid,bigint,integer,text,numeric,numeric,jsonb,text,text,text)": "35a2087b7bcd",
   "fn:turn_call_settle_absent(uuid,bigint,integer,text,integer,text)": "f14ff941fc03",
   "fn:turn_call_settle_no_identity(uuid,bigint,integer)": "179261d44341",
   "fn:turn_call_spent_usd(text,numeric,numeric)": "5d8a4767f2ec",

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_RECEIPT_BYTE_LIMIT} from './responseCapacity';
 import {gunzipSync} from 'node:zlib';
 import { decimal, parseExactJson } from './decimal';
+import {openRouterCostFields,resolveOpenRouterCost} from './openRouterByok';
 import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT,SOURCE_STREAM_TOOLS,offeredStreamTools} from './openRouterStream';
 import type { TransportObservation } from './fixtureAdapter';
 import {AGENT_STREAM_TOOLS} from '../agent/agentTools';
@@ -154,8 +155,6 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
    &&/^\d{8}$/.test(data.model.slice(identity.model.length+1)));
   if((expectedProviderId && expectedProviderId!==base.providerId) || !sameModel)
     return mismatch();
-  const usage=data.usage as Record<string,unknown>|undefined;
-  const cost=source==='lookup'?data.total_cost:usage?.cost;
   const choices=data.choices as Array<{finish_reason?:unknown}>|undefined;
   // A generation we cancelled (stream rejected or stopped) has no finish reason but a final cost.
   const finish=source==='lookup'?data.finish_reason??(data.cancelled===true?'stop':null)
@@ -166,10 +165,11 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
   // waits for an official lookup. Diagnostics do not establish zero cost.
   const tokens=canonicalUsage(data,source);
   const responseUsage=source==='response'?{...tokens,sdkResponse}:Object.keys(tokens).length?tokens:null;
-  if(typeof cost!=='string')return {...base,usage:responseUsage,costIssue:'missing_cost'};
-  let exactCost:string;
-  try { exactCost=officialCost(cost); } catch{return {...base,usage:responseUsage,costIssue:'invalid_cost'};}
-  return {...base,cost:exactCost,final:true,usage:responseUsage};
+  // BILL-BYOK: a BYOK call's cost is OpenRouter's fee plus the vendor's upstream charge; without the upstream part it is missing.
+  const cost=resolveOpenRouterCost(openRouterCostFields(data,source),officialCost);
+  if(cost.kind==='missing')return {...base,usage:responseUsage,costIssue:'missing_cost'};
+  if(cost.kind==='invalid')return {...base,usage:responseUsage,costIssue:'invalid_cost'};
+  return {...base,cost:cost.cost,final:true,usage:responseUsage,...(cost.byok?{byok:cost.byok}:{})};
 }
 
 /** Bound the durable receipt, not the accepted SSE stream. Extreme entropy may
