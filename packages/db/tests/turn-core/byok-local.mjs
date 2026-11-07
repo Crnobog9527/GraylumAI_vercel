@@ -95,7 +95,7 @@ try{
   report.checks.push('one turn with a BYOK call and a fallen-back call: each call keeps its own platform cost, the charge is unchanged');
  }
  // 1c. The frozen bound prices the vendor's charge: a BYOK fee on top of an answer at the bound does not block the model
- // (budget_conflict, 9999); the same total without BYOK, or a vendor charge above the bound, still does.
+ // (budget_conflict, 0510); the same total without BYOK, or a vendor charge above the bound, still does.
  {
   const conflict=async r=>{
    const a=await account(),o=await open(a);
