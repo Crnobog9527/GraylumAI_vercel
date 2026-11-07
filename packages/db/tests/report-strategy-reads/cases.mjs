@@ -27,7 +27,7 @@ async function finalize(db,version,data=stored()) {
  } finally {await db.query('SET session_replication_role=origin');}
 }
 
-export async function runCases({db,report,before0301}) {
+export async function runCases({db,report}) {
  const a=await one(db,'SELECT ws_test.actor() v');
  const sid=await one(db,'SELECT ws_test.free_session($1) v',[a]);
  const main=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[a,'Tea studio','POSITIONING_CANARY_A']);
@@ -35,14 +35,7 @@ export async function runCases({db,report,before0301}) {
  assert.equal(Object.hasOwn(plain,'strategyReport'),false,'a positioning without strategy data is listed as before');
  await finalize(db,main.version);
 
- await db.query('BEGIN');
- try {
-  await db.query(before0301);
-  const old=await index(db,a,sid);
-  assert.equal(Object.hasOwn(old.entries[0],'strategyReport'),false);
-  assert.equal((await read(db,a,sid,'strategy_report:'+main.business)).kind,'unavailable');
-  report.checks.push('before fix (0299): the finalized strategy data is not listed or readable');
- } finally {await db.query('ROLLBACK');}
+ // (The old "before the fix (0299)" demonstration is not run any more: it applied 0299's function text, which reads the dropped runtime tables.)
 
  const listed=await index(db,a,sid);
  assert.deepEqual(listed.entries[0].strategyReport.id,'strategy_report:'+main.business);
@@ -59,21 +52,20 @@ export async function runCases({db,report,before0301}) {
  report.checks.push('index + one read: confirmed fields and both strategy groups, with edit marks and reading rules');
 
  // The 0299 benchmarks entry stays as it is (rank 1, after the positionings).
- const execution=randomUUID();
- await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
-  VALUES($1,$2,$3,$4,'{}',0,'completed')`,[execution,a,main.draftSession,randomUUID()]);
- const fetch=await one(db,`INSERT INTO research_account_fetches(actor_id,session_id,platform,account,state,account_key)
-  VALUES($1,$2,'tiktok','bench_a','failed',encode(sha256(convert_to('bench_a','utf8')),'hex')) RETURNING id v`,[a,main.draftSession]);
- await db.query(`INSERT INTO research_benchmarks(fetch_id,actor_id,session_id,execution_id,platform,account,followers,posts_analyzed,
-  qualified,excluded,refs,operation_ids,missing,fetched_at) VALUES($1,$2,$3,$4,'tiktok','bench_a',null,0,false,'NO_POSTS','{}','{}','{}',now())`,
- [fetch,a,main.draftSession,execution]);
+ // The turn that fetched the account (a benchmark row is visible only with its turn: 0465).
+ const benchTurn=await one(db,"SELECT 7000 + (random()*1000)::int v");
+ const fetch=await one(db,`INSERT INTO research_account_fetches(actor_id,session_id,platform,account,state,account_key,turn_actor_id,turn_id,last_success_turn_id)
+  VALUES($1,$2,'tiktok','bench_a','succeeded',encode(sha256(convert_to('bench_a','utf8')),'hex'),$1,$3,$3) RETURNING id v`,[a,main.draftSession,benchTurn]);
+ await db.query(`INSERT INTO research_benchmarks(fetch_id,actor_id,session_id,turn_actor_id,turn_id,platform,account,followers,posts_analyzed,
+  qualified,excluded,refs,operation_ids,missing,fetched_at) VALUES($1,$2,$3,$2,$4,'tiktok','bench_a',null,0,false,'NO_POSTS','{}','{}','{}',now())`,
+ [fetch,a,main.draftSession,benchTurn]);
  assert.deepEqual(await kinds(db,a,sid),['positioning','benchmarks']);
  assert.ok((await read(db,a,sid,main.draftSession)).body.includes('bench_a'));
  // Review P1 (#1129): 0301 rebuilt the function and must keep 0299's producer provenance (content erasure matches on it).
  const benchEntry=(await index(db,a,sid)).entries.find(e=>e.kind==="benchmarks");
- assert.deepEqual(benchEntry.producedBy,[{executionId:execution}],'the index entry names the answers it copied');
+ assert.deepEqual(benchEntry.producedBy,[{turnId:benchTurn}],'the index entry names the turns its rows came from');
  const readBack=await read(db,a,sid,main.draftSession);
- assert.deepEqual(readBack.producedBy,[{executionId:execution}],'a read names the answers its rows came from');
+ assert.deepEqual(readBack.producedBy,[{turnId:benchTurn}],'a read names the turns its rows came from');
  assert.equal(readBack.identity.producedBy,undefined,'the stored identity keeps only the stable keys');
  report.checks.push('the benchmarks entry of 0299 is still listed after the positioning and readable');
 
