@@ -180,7 +180,7 @@
 | Stripe 正式 | 已开通 Managed Payments；续费、卡到期、扣款失败提醒由 Stripe 发（我方不再发卡类续费提醒） | 总控记录；Master Plan 第 2.1 节 2026-10-19 |
 | OpenRouter | 账号已关闭"允许用于训练" | 总控记录 |
 | 钱包税务核实 | 已完成，Owner 同意打开钱包年付 | Master Plan 第 2.1 节 |
-| 条款正文、客服邮箱 | `/privacy`、`/terms`、`/cookies`、`/refund-policy` 已上线为公开页面；客服邮箱已有；Termly 已配好 | [#1184](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1184) |
+| 条款正文、客服邮箱 | `/privacy`、`/terms`、`/cookies`、`/refund-policy` 已上线为公开页面；客服邮箱已有；条款正文用 Termly 生成；统计同意改为自有同意条（ANALYTICS-CONSENT，Owner 2026-11-07） | [#1184](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1184) |
 | 正式模型调用、付款入口代码闸门（旧 R1、R7） | 已合并：正式准入和库标记（0291）；付款入口闸门 [#1093](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1093)；银行卡和钱包按账户模式走、四类退款、钱包一次性会员退款（0296、0297、0298） | 迁移合集 [#1129](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1129) |
 | 单主机 `/app`（旧 E1 代码） | 已合并：应用并入 www、登录后页面放 `/app`、旧主机一次 308 到 `/app` | [#1206](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1206)、[#1225](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1225) |
 | 明文模型密钥列、环境变量后备（旧 B4、T-END） | 已合并：删除 `ai_models.api_key`（0323）、结束环境变量后备 | [#1208](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1208) |
@@ -216,7 +216,7 @@
 | P2 | ★ Owner 操作 | Stripe 正式：建 webhook 端点 `https://www.graylum.com/api/stripe/webhook`，**事件选"所有事件"**（Owner 2026-10-21 同意；代码对没处理的事件直接返回成功）；新端点的签名密钥由 Owner 填进 Vercel，之后不轮换。重试改为第 1、3、6 天、失败后取消；账单描述、客服邮箱、条款和隐私链接；开 Stripe Tax 门槛监控；客户门户关闭"切换套餐"；开通 WeChat Pay、Alipay | 端点详情显示"所有事件"；后台设置读回 |
 | P3 | ★ Owner 操作 | Post for Me：订阅正式环境**独占**的项目（每月至少 10 美元，不与 staging 共用）。Owner 2026-10-26 的话是“Post for Me 正式已订阅”；项目是否独占、Webhook 是否已指向 www、项目里是否只有正式环境的账号，**未核实**，由 Owner 在后台确认；Webhook 指向 `https://www.graylum.com/api/postforme/webhook`，订阅账号变化和发布结果事件 | 项目里只有正式环境的账号 |
 | P4 | ★ Owner 操作 | 花费上限（Owner 自己设，总控不定金额）：OpenRouter 正式专用密钥的每日美元上限、不自动充值；BYOK 按 Owner 11-07 新要求启用，计费和上限口径照 BILL-BYOK（#1815）；TikHub、Parallel、Firecrawl 各自硬上限；止损金额（每用户每日、全站每日、全站告警线、供应商余额告警线）在建库后由 Owner 在后台"成本止损"页填。**金额是空的时候不会发任何告警**。真正挡住花费的每日上限和连接池数字在 `core_path_v2`（第 3.0a 节、B12） | 各家后台读回；建库后后台读回 `runtime_stop_loss` 和 `core_path_v2` |
-| P5 | ★ Owner 操作 | 取得正式站的 hCaptcha sitekey（域名 `www.graylum.com`）、Termly 网站编号；生成正式专用的 `OPENING_GRANT_HMAC_KEYS`（不复用 staging）、`CRON_SECRET`（没有它所有定时任务返回 503） | 3.3 节变量清单里有这些变量名 |
+| P5 | ★ Owner 操作 | 取得正式站的 hCaptcha sitekey（域名 `www.graylum.com`）（Termly 网站编号不再需要，ANALYTICS-CONSENT）；生成正式专用的 `OPENING_GRANT_HMAC_KEYS`（不复用 staging）、`CRON_SECRET`（没有它所有定时任务返回 503） | 3.3 节变量清单里有这些变量名 |
 | P6 | ★ Owner 操作 | 正式 Sentry、Vercel、Resend 的日志保留期 ≤30 天；`Graylum_main` 的每日备份和 PITR 保留期 ≤30 天（隐私政策承诺；删除清单在 Redis 里保留 35 天，备份保留期更长会让已删内容在恢复后复活） | 各后台读回，记进上线记录 |
 | P7 | ★ Owner 操作 | 隐私条款补写：素材经 Post for Me 处理、发布期间是公开链接、失败素材约一天后由对方清理；Parallel 未书面确认零保留前按"可能用于训练"写（条款文字由 Owner 用第三方工具生成，AI 不写） | Owner 确认 |
 | P8 | ★ Owner 操作 | Stripe 正式商品目录（第 3.6 节 S1–S5），在建库日之前跑完 `plan`、`apply`；`sql`、`sql-packs` 的输出只交总控审核 | 再跑一次 `plan` 全部 exists、没有 MISMATCH |
@@ -258,7 +258,7 @@
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
 | V1 | ★ Owner 操作（新凭证） | 换成新项目：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL`、`EXPECTED_SUPABASE_PROJECT_REF`；Stripe 三件和 P2 的新 webhook 密钥；`OPENING_GRANT_HMAC_KEYS`、`CRON_SECRET`；`GA4_API_SECRET`（可选，GA4 上线后第一周再定，不设不影响业务） | 变量名清单读回（不读值） |
-| V2 | ★ Owner 批准 → 总控 | 非密钥：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV` / `NEXT_PUBLIC_APP_ENV`；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（此时 `stopNewCalls` 开着；CORE-PATH-V2 只保留一条“部署声明的数据库主机必须等于实际连接的主机”的防串库检查，这三个变量在 V2-12 之后是否还要设**未核实**，建库日按当天代码对照）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`（必须恰好是 `true`，后台付款路由此时仍关）；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`、`NEXT_PUBLIC_TERMLY_WEBSITE_UUID`、`NEXT_PUBLIC_COMPOSER_REFERENCES=on`、资料库三个 `NEXT_PUBLIC_LIBRARY_*` 开关（值照 staging）、`PAYMENT_NOTICE_FROM=Graylum <mail@graylum.com>`、Sentry 几个变量（**`NEXT_PUBLIC_SENTRY_DSN` 必须有**，缺了所有告警静默；Sentry 正式项目要建 error/fatal 的通知规则，上线前做一次合成告警演练，见 [建库准备包](REL-1-BUILD-PREP.md) 第一天告警值守表）。**`SITE_INDEXING` 这时不设成 `public`** | 变量名清单和本行对照 |
+| V2 | ★ Owner 批准 → 总控 | 非密钥：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`＝`https://www.graylum.com`；`APP_ENV` / `NEXT_PUBLIC_APP_ENV`；`V3_RUNTIME_PRODUCTION_PROJECT_ID`、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`、`V3_RUNTIME_PRODUCTION_ENABLED=true`（此时 `stopNewCalls` 开着；CORE-PATH-V2 只保留一条“部署声明的数据库主机必须等于实际连接的主机”的防串库检查，这三个变量在 V2-12 之后是否还要设**未核实**，建库日按当天代码对照）；`STRIPE_CARD_RECONCILIATION_MODE=live`；`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true`（必须恰好是 `true`，后台付款路由此时仍关）；`NEXT_PUBLIC_HCAPTCHA_SITEKEY`、`NEXT_PUBLIC_COMPOSER_REFERENCES=on`、资料库三个 `NEXT_PUBLIC_LIBRARY_*` 开关（值照 staging）、`PAYMENT_NOTICE_FROM=Graylum <mail@graylum.com>`、Sentry 几个变量（**`NEXT_PUBLIC_SENTRY_DSN` 必须有**，缺了所有告警静默；Sentry 正式项目要建 error/fatal 的通知规则，上线前做一次合成告警演练，见 [建库准备包](REL-1-BUILD-PREP.md) 第一天告警值守表）。**`SITE_INDEXING` 这时不设成 `public`**；`NEXT_PUBLIC_TERMLY_WEBSITE_UUID` 不设（ANALYTICS-CONSENT 起代码不读） | 变量名清单和本行对照 |
 | V3 | 总控只读核对 | **不能设**：任何 `V3_RUNTIME_STAGING_*`（设了代码拒绝）、`WAFFO_TEST_*`、`E2E_*`、`LANDING_PREVIEW_FEATURES`、`ANTHROPIC_API_KEY`、`PAYMENT_NOTICE_TEST_RECIPIENTS`、`OPENROUTER_API_KEY`（只从后台槽位读）；也**不要**把 `EXPECTED_APP_HOST` 加进 Vercel——应用运行时不读它，只有本机就绪检查脚本读，总控在本机跑检查时设成 `www.graylum.com` | 变量名清单里没有这些 |
 | V4 | ★ Owner 操作 | 删除 Vercel 正式环境里过渡期的旧后备变量和不再需要的 E2E 测试凭证（OR-2 和 T-END 已合并，前提是 B11 的槽位都已填写） | 删除后发布、Webhook、三家搜索和模型调用都正常 |
 | M1 | ★ Owner 批准 → 总控 | 把冻结版本从 staging 合并到 `main`（**合并前就要拿到批准**，合并会自动触发正式部署）；Dependency Audit 在 `main` 的 CI 上通过，不新增豁免 | CI 全绿；部署连的是新库；站点仍暂停 |
@@ -352,7 +352,7 @@
 | 事项 | 依据 |
 | --- | --- |
 | 首字速度：用正式环境实测数据做第一件优化（20 次至少 18 次 ≤3 秒；回复结束到整理结果 20 次至少 18 次 ≤10 秒） | 第 2.1 节 2026-10-23（晚） |
-| ANALYTICS-POSTHOG：接入 PostHog（美国区），跟随 Termly 同意状态，注销同步删除 | 第 2.1 节 2026-10-21 |
+| ANALYTICS-POSTHOG：接入 PostHog（美国区），跟随我们自己的统计同意状态（ANALYTICS-CONSENT 的 `bindConsentedTool`），注销同步删除 | 第 2.1 节 2026-10-21 |
 | GA4 方案再定 | 第 2.1 节 2026-10-23（晚） |
 | MOBILE-UX：先出方案给 Owner 定稿，属上线后第一批 | 第 2.1 节 2026-10-23 |
 | 上线日起 7 天，总控可以只读正式 Sentry 和 Vercel 日志（出事时查原因）；正式数据库仍不读不写；上线前仍不访问正式环境 | 第 2.1 节 2026-10-26（删除每日签到；正式告警邮箱） |
@@ -454,7 +454,7 @@
 | C6 Parallel 书面确认、G4 隐私条款 | 保留 → P7 |
 | C8 Post for Me 独占项目 | 保留 → P3（Owner 10-26 说已订阅，独占和 Webhook 未核实） |
 | C9 向 Post for Me 询问 | 两项已有答复（可以嵌入付费产品；超量不自动升级、要手动升级）；多平台计数未核实 → 第 1.2 节第 10 项 |
-| C10 统计 | Termly 已配好；GA4 上线后第一周再定 → V1、第 5 节 |
+| C10 统计 | 统计同意按地区处理、自有同意条（ANALYTICS-CONSENT）；GA4 上线后第一周再定 → V1、第 5 节 |
 | C11 E2E 凭证 | 保留 → V4 |
 | C12 Firecrawl 零保留 | 保留 → 第 7 节 E3 |
 | D1 MP 开通、D8 钱包税务、D10 条款正文、D11 客服邮箱 | **已完成** → 第 3.0 节 |

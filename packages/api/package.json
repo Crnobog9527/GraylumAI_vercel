@@ -59,6 +59,7 @@
     "./src/shared/modelReasoning": "./src/shared/modelReasoning.ts",
     "./src/shared/modelPricing": "./src/shared/modelPricing.ts",
     "./src/shared/reportData": "./src/shared/reportData.ts",
+    "./src/shared/productionSite": "./src/shared/productionSite.ts",
     "./src/shared/replyLanguage": "./src/shared/replyLanguage.ts",
     "./src/shared/reportDataSpec": "./src/shared/reportDataSpec.ts",
     "./src/shared/reportDataSample": "./src/shared/reportDataSample.ts",

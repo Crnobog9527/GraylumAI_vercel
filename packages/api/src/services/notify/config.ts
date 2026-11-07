@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPlatformSecret, PlatformSecretError } from '../platformSecrets/reader';
+import { isProductionSite } from '../../shared/productionSite';
 
 type Env = Record<string, string | undefined>;
 
@@ -21,15 +22,11 @@ export type NoticeConfigResult =
   | { ok: false; code: 'PAYMENT_NOTICE_NOT_CONFIGURED' | 'PAYMENT_NOTICE_TEST_RECIPIENTS_MISSING' };
 
 /**
- * Only the approved production project may mail any user: a production deployment of `main` whose
- * production domain is one of ours. Anything else (staging, previews, local runs, a rebound or unknown
- * project) fails closed to the test list in PAYMENT_NOTICE_TEST_RECIPIENTS (PAY-NOTIFY §7 privacy).
+ * Only the approved production project may mail any user (isProductionSite, shared/productionSite.ts). Anything else
+ * (staging, previews, local runs, a rebound or unknown project) fails closed to the test list in
+ * PAYMENT_NOTICE_TEST_RECIPIENTS (PAY-NOTIFY §7 privacy).
  */
-const PRODUCTION_URLS: ReadonlySet<string> = new Set(['www.graylum.com', 'app.graylum.com']);
-export function isProductionSite(env: Env) {
-  return env.VERCEL === '1' && env.VERCEL_ENV === 'production' && env.VERCEL_GIT_COMMIT_REF === 'main'
-    && PRODUCTION_URLS.has(env.VERCEL_PROJECT_PRODUCTION_URL ?? '');
-}
+export { isProductionSite };
 
 export function normalizeMailbox(value: string | null | undefined) {
   const trimmed = value?.trim().toLowerCase() ?? '';
