@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
+import { adminUserContact } from '@/lib/adminUserContact';
 import {
   Search, Coins, Plus, Minus, User, Shield, Crown, Ban,
   CheckCircle, XCircle, Clock, MessageSquare, History,
@@ -36,12 +37,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead,
+  TableHeader, TableRow,
 } from "@/components/ui/table";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
@@ -57,7 +54,7 @@ type UserRole = 'user' | 'admin';
 
 interface User {
   id: string;
-  email: string;
+  email: string | null; phone?: string | null;
   nickname: string | null;
   avatar_url: string | null;
   role: UserRole;
@@ -265,7 +262,7 @@ export default function AdminUsersPage() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
                 <Input
                   data-testid="admin-users-search"
-                  placeholder="邮箱或昵称..."
+                  placeholder="邮箱、昵称或手机号..."
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
@@ -382,7 +379,7 @@ export default function AdminUsersPage() {
                           <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
                             {user.nickname || '未设置昵称'}
                           </p>
-                          <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{user.email}</p>
+                          <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{adminUserContact(user)}</p>
                         </div>
                       </div>
                     </TableCell>
@@ -600,7 +597,7 @@ export default function AdminUsersPage() {
                   <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
                     {selectedUser.nickname || '未设置昵称'}
                   </p>
-                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{selectedUser.email}</p>
+                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{adminUserContact(selectedUser)}</p>
                   <p className="text-sm mt-1 text-amber-400">当前余额: {selectedUser.credits || 0}</p>
                 </div>
               </div>
@@ -706,7 +703,7 @@ export default function AdminUsersPage() {
                       <div className="flex items-center gap-2 mt-1">
                         <Mail className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
                         <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                          {userDetails.profile.email}
+                          {adminUserContact(userDetails.profile)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 mt-2 flex-wrap">

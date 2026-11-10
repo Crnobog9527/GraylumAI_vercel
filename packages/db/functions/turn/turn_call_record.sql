@@ -35,8 +35,12 @@ BEGIN
         usage = coalesce(p_usage, '{}'::jsonb), provider_id = coalesce(c.provider_id, p_provider_id),
         payload_hash = p_payload_hash, settled_at = clock_timestamp(), cost_pending = false,
         -- Above the frozen bound: the estimate failed (price or metering); the model is blocked for new calls (turn_call_begin).
+        -- BILL-BYOK: the bound prices the vendor's charge; a BYOK call's OpenRouter fee (usage.byok.feeUsd) is on top of it.
         budget_conflict = c.call_kind = 'model' AND p_status = 'ok'
-          AND (coalesce(p_actual_usd, 0) > c.upper_usd OR coalesce(p_nominal_usd, 0) > c.upper_usd)
+          AND (coalesce(p_actual_usd, 0) - least(coalesce(p_actual_usd, 0), CASE WHEN jsonb_typeof(p_usage->'byok'->'feeUsd') = 'string'
+                AND (p_usage->'byok'->>'feeUsd') ~ '^[0-9]{1,12}(\.[0-9]{1,12})?$' THEN (p_usage->'byok'->>'feeUsd')::numeric ELSE 0 END)
+                > c.upper_usd
+            OR coalesce(p_nominal_usd, 0) > c.upper_usd)
       WHERE turn_id = p_turn_id AND seq = p_seq;
     -- The billing fields are kept; the response text is not stored once the conversation is deleted or the account is being
     -- erased (a late receipt would otherwise bring user content back after the erasure scrub). Race-free with the scrub: it runs

@@ -84,7 +84,7 @@ test.describe('Security', () => {
     test.skip(!hasAuthRuntime, 'Login/register XSS checks require a live Supabase runtime');
 
     test('should escape script tags in user input display', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // Attempt XSS via email field
       const xssPayload = '<script>alert("xss")</script>';
@@ -148,7 +148,7 @@ test.describe('Security', () => {
     test.skip(!hasAuthRuntime, 'Authentication checks require a live Supabase runtime');
 
     test('should protect positioning workspace from unauthenticated access', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
       await clearBrowserAuthState(page);
 
       // Try to access protected route
@@ -159,7 +159,7 @@ test.describe('Security', () => {
     });
 
     test('should protect profile page from unauthenticated access', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
       await clearBrowserAuthState(page);
 
       await gotoWithBypass(page, '/app/profile');
@@ -169,7 +169,7 @@ test.describe('Security', () => {
     });
 
     test('should not expose session tokens in URL', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // Check URL doesn't contain sensitive tokens
       const url = page.url();
@@ -179,7 +179,7 @@ test.describe('Security', () => {
     });
 
     test('should use secure password input', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // Password field should be type="password"
       const passwordInput = page.locator('input[name="password"], input[type="password"]');
@@ -187,7 +187,7 @@ test.describe('Security', () => {
     });
 
     test('should not autocomplete sensitive fields', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // Password field should have autocomplete="new-password" or "current-password" or "off"
       const passwordInput = page.locator('input[name="password"], input[type="password"]');
@@ -238,7 +238,7 @@ test.describe('Security', () => {
     test.skip(!hasAuthRuntime, 'Login validation checks require a live Supabase runtime');
 
     test('should validate email format on login', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // Enter invalid email
       await page.fill('input[type="email"], input[name="email"]', 'not-an-email');
@@ -257,7 +257,7 @@ test.describe('Security', () => {
     });
 
     test('should handle SQL injection attempts safely', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // SQL injection attempt
       const sqlPayload = "admin'--";
@@ -274,7 +274,7 @@ test.describe('Security', () => {
     });
 
     test('should limit input length in forms', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // Try extremely long input
       const longInput = 'a'.repeat(10000);
@@ -344,7 +344,7 @@ test.describe('Security', () => {
   // ============================================
   test.describe('Cookie Security', () => {
     test('should set secure cookies on HTTPS', async ({ page, context }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
 
       // Get cookies
       const cookies = await context.cookies();
@@ -396,7 +396,7 @@ test.describe('Security', () => {
     test.skip(!hasAuthRuntime, 'Rate limiting checks require a live Supabase runtime');
 
     test('should show appropriate message when rate limited', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
+      await gotoWithBypass(page, '/login?method=email');
       await waitForLoginFormReady(page);
 
       // Rapidly submit login attempts

@@ -53,6 +53,8 @@ function createProxyRequest(url: string, method = 'GET'): unknown {
     nextUrl,
     url: nextUrl.toString(),
     cookies: {
+      // NextRequest's cookie reader: the proxy reads the consent region cookie (ANALYTICS-CONSENT).
+      get: vi.fn(() => undefined),
       getAll: vi.fn(() => []),
       set: mockCookieSet,
     },

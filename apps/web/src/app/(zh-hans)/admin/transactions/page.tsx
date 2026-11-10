@@ -12,13 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { adminUserContact } from '@/lib/adminUserContact';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   Tabs,
@@ -59,7 +55,7 @@ interface Transaction {
 
 interface UserProfile {
   id: string;
-  email: string;
+  email: string | null; phone?: string | null;
   nickname: string | null;
   avatar_url?: string | null;
 }
@@ -420,7 +416,7 @@ export default function AdminTransactionsPage() {
                               {user.nickname || '未设置昵称'}
                             </p>
                             <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                              {user.email}
+                              {adminUserContact(user)}
                             </p>
                           </div>
                         </button>

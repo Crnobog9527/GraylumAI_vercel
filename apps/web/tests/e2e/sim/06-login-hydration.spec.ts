@@ -15,7 +15,7 @@ test('the sign-in waits for the page scripts to take over the form, however late
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   await page.route(url => url.pathname.startsWith('/_next/static/') && url.pathname.endsWith('.js'), async route => { await held; await route.continue(); });
-  await page.goto('/login', { waitUntil: 'commit' });
+  await page.goto('/login?method=email', { waitUntil: 'commit' });
   // The server-rendered form is there, but nothing has taken it over (what is typed into it now would be overwritten when it is).
   await expect(page.locator('input[type="email"]').first()).toBeVisible();
   let settled = false;

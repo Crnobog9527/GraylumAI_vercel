@@ -7,7 +7,7 @@ export { expect } from '@playwright/test';
 /**
  * The journeys' `test`: when a test fails, every page it opened (also in contexts it made itself) reports what it showed, the failed
  * requests, the browser's errors and its calls to the turn endpoints to the job log, and attaches a screenshot (uploaded by CI on
- * failure). Local simulated data only.
+ * failure). Local simulated data only. Every context starts with statistics consent already given (no consent bar).
  */
 export const test = base.extend<{ evidence: void }>({
   evidence: [async ({ browser, context }, provide, testInfo) => {
@@ -19,7 +19,16 @@ export const test = base.extend<{ evidence: void }>({
       if (throttle > 1) void page.context().newCDPSession(page).then(cdp => cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle }))
         .catch(() => undefined);
     };
-    const watch = (target: BrowserContext) => { target.pages().forEach(add); target.on('page', add); };
+    const watch = (target: BrowserContext) => {
+      // The local app has no visitor country, so it counts as an opt-in region and shows the consent bar over the page bottom
+      // (ANALYTICS-CONSENT). The journeys run as a visitor who already accepted, like a visitor outside Europe.
+      void target.addInitScript(() => {
+        try { localStorage.setItem('graylum.analytics.consent', JSON.stringify({ choice: 'granted', at: new Date().toISOString() })); }
+        catch { /* storage unavailable */ }
+      });
+      target.pages().forEach(add);
+      target.on('page', add);
+    };
     watch(context);
     const newContext = browser.newContext.bind(browser);
     browser.newContext = async (...args) => { const made = await newContext(...args); watch(made); return made; };

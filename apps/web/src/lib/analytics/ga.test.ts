@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enterPage, readGaCheckoutIds, resetGaForTests, sendGaEvent, syncGa } from './ga';
 
+// The live consent answer (consent.ts is tested on its own in consent.test.ts).
+const consent = vi.hoisted(() => ({ analytics: false }));
+vi.mock('./consent', () => ({ analyticsAllowed: () => consent.analytics }));
+
 const ID = 'G-TEST123';
 const ORIGIN = 'https://auth-staging.graylum.com';
-type Fake = { dataLayer?: unknown[]; Termly?: unknown; [key: string]: unknown };
+type Fake = { dataLayer?: unknown[]; [key: string]: unknown };
 
 let win: Fake;
 let appended: { src: string }[];
-let consent = { analytics: false, advertising: false };
 
 /** dataLayer entries as plain arrays (gtag pushes `arguments` objects). */
 const calls = () => (win.dataLayer ?? []).map(entry => Array.from(entry as ArrayLike<unknown>));
@@ -15,9 +18,9 @@ const events = (name: string) => calls().filter(call => call[0] === 'event' && c
 
 beforeEach(() => {
   resetGaForTests();
-  consent = { analytics: false, advertising: false };
+  consent.analytics = false;
   appended = [];
-  win = { Termly: { getConsentState: () => consent } };
+  win = {};
   vi.stubGlobal('window', win);
   vi.stubGlobal('document', {
     referrer: 'https://chatgpt.com/c/private-thread',
@@ -28,7 +31,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('GA in the browser', () => {
-  it('loads nothing and sends nothing without Termly consent', () => {
+  it('loads nothing and sends nothing without consent', () => {
     enterPage(`${ORIGIN}/landing`, null);
     syncGa(ID);
     expect(win.dataLayer).toBeUndefined();
@@ -122,8 +125,8 @@ describe('GA in the browser', () => {
     });
   });
 
-  it('grants ad storage only with advertising consent', () => {
-    consent = { analytics: true, advertising: false };
+  it('never grants ad storage, also with statistics consent (we run no advertising)', () => {
+    consent.analytics = true;
     enterPage(`${ORIGIN}/landing`, null);
     syncGa(ID);
     const update = calls().find(call => call[0] === 'consent' && call[1] === 'update');

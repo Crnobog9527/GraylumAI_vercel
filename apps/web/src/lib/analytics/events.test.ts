@@ -49,6 +49,19 @@ describe('reportSignUpIfNew', () => {
   });
 });
 
+describe('reportSignUpIfNew for phone accounts (PHONE-OTP)', () => {
+  it('reports method phone once the number was confirmed in the last 30 minutes', () => {
+    const phone = { created_at: '2026-10-17T09:58:00Z', phone_confirmed_at: '2026-10-17T09:58:30Z', app_metadata: { provider: 'phone' } };
+    expect(reportSignUpIfNew(phone, true, NOW)).toBe(true);
+    expect(send).toHaveBeenCalledWith('G-TEST123', 'sign_up', { method: 'phone' });
+    send.mockClear();
+    expect(reportSignUpIfNew({ ...phone, created_at: '2026-10-17T09:00:00Z', phone_confirmed_at: '2026-10-17T09:00:30Z' }, true, NOW))
+      .toBe(false);
+    expect(reportSignUpIfNew({ ...phone, created_at: '2026-10-17T09:59:00Z', phone_confirmed_at: null }, true, NOW)).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('reportBeginCheckout', () => {
   it('sends only currency, the pre-tax value and the catalog item ID', () => {
     reportBeginCheckout('plan-gold', 49);

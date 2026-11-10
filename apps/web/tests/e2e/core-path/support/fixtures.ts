@@ -57,11 +57,11 @@ export const test = base.extend<Fixtures>({
       const context = await browser.newContext({ storageState: statePathFor(role) });
       contexts.push(context);
       const page = await context.newPage();
-      // The cookie-consent banner (Termly, region "Cookie Consent Prompt") covers the lower left of every page and swallows
-      // clicks there; "Decline" does not stick between page loads and calls analytics.withdrawConsent in the middle of a journey.
-      // Taking the banner out of the page whenever it shows up changes nothing the journeys test.
-      await page.addLocatorHandler(page.getByRole('region', { name: 'Cookie Consent Prompt' }), async banner => {
-        await banner.evaluate(node => node.remove());
+      // The statistics consent bar (ANALYTICS-CONSENT, region "Cookie 同意") shows only to a visitor from an opt-in region and
+      // covers the bottom of the page; "仅必要" calls analytics.withdrawConsent in the middle of a journey. Hiding the bar whenever it
+      // shows up changes nothing the journeys test (it is React's node, so it is hidden, not removed).
+      await page.addLocatorHandler(page.getByRole('region', { name: 'Cookie 同意' }), async bar => {
+        await bar.evaluate(node => { (node as HTMLElement).style.display = 'none'; });
       });
       return { page, context };
     });

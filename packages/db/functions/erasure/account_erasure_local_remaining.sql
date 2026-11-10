@@ -19,5 +19,6 @@ AS $function$
  +(SELECT count(*) FROM user_checkins WHERE user_id=p_profile_id)
  +(SELECT count(*) FROM ticket_upload_intents WHERE profile_id=p_profile_id)
  +(SELECT count(*) FROM profiles WHERE id=p_profile_id AND
-   (email IS NOT NULL OR nickname IS NOT NULL OR avatar_url IS NOT NULL OR last_ip IS NOT NULL OR last_login_at IS NOT NULL));
+   (email IS NOT NULL OR phone IS NOT NULL OR nickname IS NOT NULL OR avatar_url IS NOT NULL OR last_ip IS NOT NULL
+    OR last_login_at IS NOT NULL));
 $function$;

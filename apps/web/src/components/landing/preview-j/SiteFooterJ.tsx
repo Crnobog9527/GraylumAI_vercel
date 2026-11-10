@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import { ConsentPreferenceLinks } from '@/components/analytics/ConsentPreferenceLinks';
-import { ANALYTICS_CONFIG } from '@/lib/analytics/config';
 import { J_COOKIE_SETTINGS_HREF, J_FOOTER, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { LanguageMenuJ } from './LanguageMenuJ';
 import styles from './chrome-j.module.css';
@@ -14,12 +13,11 @@ import page from './j.module.css';
  */
 export function SiteFooterJ({ onlyBuilt = false, supportEmail }: { onlyBuilt?: boolean; supportEmail?: string | null } = {}) {
   // The production home page links only pages that exist (linkReady); an emptied column goes.
-  // With Termly in place, its own two entries (change or withdraw consent; do not sell or share) take the static
-  // cookie link's place, as the public site's footer has them (ANALYTICS plan section 3.4).
-  const termly = Boolean(ANALYTICS_CONFIG.termlyWebsiteUuid);
+  // "Cookie 设置" is a button that reopens the statistics consent bar (ANALYTICS-CONSENT), in the static link's place, as
+  // the public site's footer has it.
   const columns = J_FOOTER.columns.map(column => {
     const consent = column.links.some(link => link.href === J_COOKIE_SETTINGS_HREF);
-    const links = column.links.filter(link => (!onlyBuilt || linkReady(link.href)) && !(termly && link.href === J_COOKIE_SETTINGS_HREF));
+    const links = column.links.filter(link => (!onlyBuilt || linkReady(link.href)) && link.href !== J_COOKIE_SETTINGS_HREF);
     return { ...column, links, consent };
   }).filter(column => column.links.length > 0 || column.consent);
   return (
