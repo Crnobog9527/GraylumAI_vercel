@@ -1,11 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), notice: vi.fn(), start: vi.fn(), finish: vi.fn(), turns: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), notice: vi.fn(), start: vi.fn(), finish: vi.fn(), turns: vi.fn(),
+  absorb: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/turn/settings/stopLossNotify', () => ({ deliverStopLossAlerts: mocks.notice }));
 vi.mock('@repo/api/src/services/turn/recovery', () => ({ runTurnRecovery: mocks.turns }));
+vi.mock('@repo/api/src/services/ownerAlerts/platformAbsorb', () => ({ checkPlatformAbsorb: mocks.absorb }));
 vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start, finishScheduledJobRun: mocks.finish }));
 import { GET } from './route';
 const TURNS = { claimed: 2, interrupted: 1, expired: 1, settled: 0, pending: 0, skipped: 0, lookups: 0, lateReceipts: 0, failed: 0 };
@@ -19,12 +21,14 @@ beforeEach(() => {
   mocks.start.mockResolvedValue('run-1');
   mocks.finish.mockResolvedValue(undefined);
   mocks.turns.mockResolvedValue(TURNS);
+  mocks.absorb.mockResolvedValue(undefined);
 });
 it('denies unauthenticated cron before inventory or provider work', async () => {
   mocks.auth.mockReturnValue(new Response('Unauthorized', { status: 401 }));
   expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(401);
   expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.turns).not.toHaveBeenCalled();
   expect(mocks.notice).not.toHaveBeenCalled();
+  expect(mocks.absorb).not.toHaveBeenCalled();
 });
 it('runs the bounded recovery through the existing authenticated cron entry', async () => {
   const response = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery?actorId=ignored'));
@@ -32,6 +36,8 @@ it('runs the bounded recovery through the existing authenticated cron entry', as
   expect(mocks.auth).toHaveBeenCalledWith(expect.any(Request), 'runtime-recovery');
   expect(mocks.turns).toHaveBeenCalledWith({ synthetic: true }, expect.any(Number));
   expect(await response.json()).toEqual({ success: true, turns: TURNS });
+  // ALERT-FEISHU: the hourly platform-absorb check rides on this cron, inside the stop-loss delivery cap.
+  expect(mocks.absorb).toHaveBeenCalledWith({ synthetic: true });
 });
 it('reports sanitized failure without raw provider or database content', async () => {
   mocks.turns.mockRejectedValue(new Error('synthetic private diagnostic'));

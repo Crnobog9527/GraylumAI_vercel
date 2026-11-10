@@ -22,6 +22,7 @@ function runtime(includeHistory = false) {
     'services/turn/provider/openRouterStream', 'services/turn/provider/openRouterPolicy',
     'services/turn/provider/openRouterEvidence', 'services/turn/provider/decimal', 'services/turn/provider/responseCapacity',
     'services/turn/admission/paygPolicy', 'services/turn/provider/imageInput', 'shared/nominalPricing',
+    'services/turn/provider/openRouterByok',
   ].map(path =>
     [new URL(path, root).href, new URL(path + '.ts', root).href]));
   const hook = registerHooks({resolve(specifier, context, next) {

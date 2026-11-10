@@ -32,7 +32,8 @@ interface MockUser {
   email?: string;
   email_verified?: boolean;
   created_date?: string;
-  auth_provider?: 'email' | 'google' | 'unknown';
+  auth_provider?: 'email' | 'google' | 'phone' | 'unknown';
+  phone_masked?: string;
 }
 
 export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }: { user: MockUser }) {
@@ -125,11 +126,11 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                 className="rounded-full px-3 py-1 text-sm"
                 style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
               >
-                {authProvider === 'google' ? 'Google 授权登录' : '邮箱密码'}
+                {authProvider === 'google' ? 'Google 授权登录' : authProvider === 'phone' ? '手机号验证码' : '邮箱密码'}
               </span>
             </div>
             <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              {user?.email}
+              {user?.email || user?.phone_masked}
             </div>
           </div>
 
@@ -140,7 +141,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                  邮箱验证
+                  {authProvider === 'phone' ? '手机号验证' : '邮箱验证'}
                 </div>
                 <div className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
                   {user?.email_verified

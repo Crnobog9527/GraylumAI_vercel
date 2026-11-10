@@ -84,6 +84,44 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-11-07 更新）
 
+**2026-11-07：上线前做中国大陆手机号验证码登录（PHONE-OTP，取代总控“上线后再做”的建议）**
+
+Owner 原话（2026-11-07，总控建议放到上线后，Owner 回复）：
+
+> 手机号上线前做
+
+- 范围：照 Shotviva 已上线的 T63 移植（Owner 的需求说明在 Shotviva 仓库外的本机文件，要点抄在 PHONE-OTP 的 PR 里）。只在简体中文（`(zh-hans)`）登录/注册页加「手机号」页签，默认打开，和邮箱、Google 并存；繁体（`/zh-tw`）不加。只收 +86，流程是隐形 hCaptcha → 6 位验证码（5 分钟有效）→ 直接注册或登录，不设密码。验证码由 Supabase 手机号 OTP 生成和校验，短信经 Supabase「Send SMS」Hook 交给我们自己的接口，接口校验签名后调阿里云 `SendSmsVerifyCode`（模板参数 `code`、`min`），不调用 `CheckSmsVerifyCode`。
+- 防刷：同一号码 60 秒 1 条、每天 5 条，同一 IP 每天 20 条，超了 Hook 直接拒绝，不调阿里云；只存号码的哈希；验证码明文不进代码、日志、Sentry 和告警。
+- 手机号验证过等同邮箱验证过，按现有的身份规则领开户赠送（不放宽）；埋点 `signup.method` 加 `phone`。手机号账号可以没有邮箱：结账由支付页自己收邮箱，账号页显示打码号码，后台能显示和搜索手机号；v1 不做绑定邮箱和换号；付款提醒邮件发不出去时记为跳过并在站内显示。
+- 合规：手机号注册单独勾选「隐私政策」和「个人信息出境」；隐私政策的手机号一节由 Owner 在 Termly 里写，列入律师审阅清单。
+- 取代：总控 2026-11-07 “手机号放到上线后”的建议（不是 Owner 决定，Owner 当次改为上线前做）。
+
+**2026-11-07：给 Owner 的告警改发到 Graylum 的飞书群机器人，Sentry 邮件验证后关掉（ALERT-FEISHU）**
+
+Owner 原话（2026-11-07，Owner 的需求简报和总控转达；"greenlam" 指 Graylum）：
+
+> 我现在给 shotviva 和 greenlam 这两个项目分别创建了飞书群，相当于有两个飞书机器人。我希望把 Sentry 给开发看的错误报告关掉，然后让这两个飞书机器人，分别在这两个项目的群里给我发告警消息。
+
+- 范围：付款、退款、拒付、对账、止损和平台垫付、网站报错激增等业务告警，用一两句中文大白话加后台链接，发到 Graylum 飞书群的自定义机器人（开签名校验）；告警种类、阈值和示例消息见 ALERT-FEISHU 的 PR。设计和 Shotviva T72 一致。
+- Sentry 照常收集错误给开发看，只是不再给 Owner 发邮件。
+- 只配正式环境（Owner 2026-11-07 补充，总控转达）：
+
+  > 飞书的这个机器人只配置给生产环境，项目 staging 不要用。
+
+  staging 不设这两个变量，代码在没设时静默跳过。
+- 取代：上线周告警邮件（Sentry 项目 graylumai-main 的邮件规则）不再作为 Owner 的告警渠道。**但要先在正式站冒烟时（REL-1 第 4.1 节 K10、建库准备第 36 步）收到飞书测试告警，再收到过一两条真实告警，Owner 再自己去关 Sentry 邮件**；关之前两边都发。止损邮件（Resend）照发。
+- 两个环境变量 `FEISHU_ALERT_WEBHOOK_URL`、`FEISHU_ALERT_SECRET` 由 Owner 自己填进正式 Vercel，值不进聊天、PR 和日志。Owner 2026-11-07 已在正式项目 `graylum-ai-vercel-v1` 填好（只勾 Production，总控转达），建库日只核对名字（REL-1-BUILD-PREP 第 24 步、REL-1 V1）。
+
+**2026-11-07：上线前接入 Anthropic、OpenAI 官方 API 额度（BILL-BYOK，计费改动）**
+
+Owner 原话（2026-11-07，A1–A9 外部设置引导窗口转达）：
+
+> 现在 Claude 和 ChatGPT 的订阅每个月都会送官方的 API 额度，所以你要把这两家厂商的直连计费方式一起加进去改。不用等上线，这个上线之前就要完成。
+
+- 范围：Anthropic（Claude 系列）和 OpenAI（GPT-6 Luna 整理/判断、GPT-6.1 Sol 评审）两家的调用，能用官方 API 额度时用官方额度；上线前完成，按计费改动的规矩验证（AGENTS 第 4 节：正常、重复、失败、并发，staging 实测，独立审查）。
+- 做法（总控按技术判断定，不是 Owner 原话）：先走 OpenRouter 的 BYOK（在 OpenRouter 填两家官方密钥），不新写两家直连适配器。BYOK 时 OpenRouter 的 `usage.cost` 只是手续费，结算改用返回里的上游成本 `upstream_inference_cost`（加手续费），**用户按模型官方价扣积分，跟现在一样**；省下的是 Graylum 付给 OpenRouter 的钱。每日上限和止损口径同步把 BYOK 消耗算进去。
+- 待 Owner 确认（不是已定）：两家送的额度是否能用 API 密钥在 console.anthropic.com / platform.openai.com 里使用；条款是否允许用于给自己的付费用户提供服务。两家后台要设消费上限或关闭自动充值，防止额度用完后直接扣信用卡。
+
 **2026-11-07：所有邮件统一从 `Graylum <mail@graylum.com>` 发出（取代 N5 的 `Graylum AI <no-reply@graylum.com>`）**
 
 Owner 原话（2026-11-07，A1–A9 外部设置引导窗口转达；选项里选了“统一用 mail@（推荐）”，范围包括站内付款、续费和止损通知）：

@@ -23,7 +23,7 @@ const PLANNED = {
   samples: '/landing/samples',
   blog: '/blog',
   refund: '/refund',
-  /** Cookie settings open Termly's preference window once Termly is in (Owner 2026-10-13); until then, the policy. */
+  /** Marks the footer's "Cookie 设置": SiteFooterJ puts the consent bar's button there (ANALYTICS-CONSENT). */
   cookies: '/privacy#cookies',
 } as const;
 
@@ -99,13 +99,13 @@ export const J_FOOTER = {
 export const J_PENDING_PAGES = [PLANNED.samples, PLANNED.cookies] as const;
 /** The jury's public page (Owner 2026-10-18: the home page's "看评审团怎么工作" leads here). */
 export const J_JURY_PAGE = PLANNED.jury;
-/** Where the footer's "Cookie 设置" points until Termly's own buttons replace it (SiteFooterJ). */
+/** The footer entry SiteFooterJ replaces with the button that reopens the consent bar. */
 export const J_COOKIE_SETTINGS_HREF = PLANNED.cookies;
 
 /**
  * Whether a header or footer link leads to a page that exists. The production home page (sample L on /landing, Owner
  * 2026-10-17) links only those; a link comes back by itself once its page is built and taken off J_PENDING_PAGES.
- * Cookie settings point into the privacy page, which exists, until Termly's button replaces them.
+ * The cookie settings entry counts as ready: the footer shows it as the consent bar's button.
  */
 export function linkReady(href: string) {
   return href === PLANNED.cookies || !(J_PENDING_PAGES as readonly string[]).includes(href);

@@ -51,7 +51,7 @@ for (const role of CORE_ROLES) {
     }
     const { email, password } = credentialsFor(role);
     setup.skip(!email || !password, `No ${role} session: set CORE_E2E_STATE_DIR or CORE_E2E_${role.toUpperCase()}_EMAIL/_PASSWORD`);
-    await gotoWithBypass(page, '/login');
+    await gotoWithBypass(page, '/login?method=email');
     await waitForLoginFormReady(page);
     await page.locator('#email, input[type="email"], input[name="email"]').fill(email);
     await page.locator('#password, input[type="password"], input[name="password"]').fill(password);

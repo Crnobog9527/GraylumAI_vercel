@@ -5,6 +5,8 @@ import { deliverStopLossAlerts, describeStopLossAlert, MAX_MAILS_PER_RUN, STOP_L
 
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 vi.mock('../../../lib/logger', () => ({ logger: log }));
+const owner = vi.hoisted(() => ({ notifyOwner: vi.fn<(kind: string, facts: unknown) => Promise<boolean>>(async () => true), ownerAlertsEnabled: vi.fn(() => true) }));
+vi.mock('../../ownerAlerts/notify', () => owner);
 
 const now = new Date('2026-10-23T12:00:00Z');
 const withRecipients = (allowed: ReadonlySet<string> | null): NoticeConfigResult => ({ ok: true, config: {
@@ -45,7 +47,7 @@ function fixture(rows: Row[], mailbox: unknown = 'owner@example.test', opts: { r
   return { db: db as never, updates, filters };
 }
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => { vi.clearAllMocks(); owner.ownerAlertsEnabled.mockReturnValue(true); owner.notifyOwner.mockResolvedValue(true); });
 
 it('mails each undelivered alert once under its own key and marks only those sent', async () => {
   const f = fixture([site('a'), site('b', { state: 'sent', attempts: 1 }), site('c', { state: 'pending', attempts: 2 })]);
@@ -215,4 +217,40 @@ it('describes alerts from whitelisted aggregate fields only', () => {
   expect(describeStopLossAlert({ test_id: 'runtime_stop_loss_userDailyUsd',
     details: { thresholdUsd: '<script>', utcDate: '2026-10-23' } })).toBe('有用户达到每人每日上限 未知（只记汇总，不记录是哪位用户）（统计日 2026-10-23 UTC）');
   expect(describeStopLossAlert({ test_id: 'runtime_stop_loss_other', details: null })).toBe('其他止损告警，请到后台查看。');
+});
+
+it('ALERT-FEISHU: Feishu picks its own recent rows, whatever the mail state, and only actual sends use up the cap', async () => {
+  const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_1' }));
+  // A row the mail already delivered still goes to Feishu (its Feishu send may have failed earlier).
+  await deliverStopLossAlerts(fixture([site('a', { state: 'sent', attempts: 1 })]).db, { config, transport, env: {}, now });
+  expect(owner.notifyOwner).toHaveBeenCalledExactlyOnceWith('stop_loss', { alertId: 'a', line: describeStopLossAlert(site('a')) });
+  owner.notifyOwner.mockClear();
+  // Mail not configured: Feishu still goes out.
+  const unconfigured = await deliverStopLossAlerts(fixture([site('c')]).db,
+    { config: { ok: false, code: 'PAYMENT_NOTICE_NOT_CONFIGURED' }, transport, env: {}, now });
+  expect(unconfigured.outcome).toBe('not_sent');
+  expect(owner.notifyOwner).toHaveBeenCalledExactlyOnceWith('stop_loss', expect.objectContaining({ alertId: 'c' }));
+  owner.notifyOwner.mockClear();
+  // Already-sent rows (notifyOwner false) do not count: rows 4 to 6 are the three sends.
+  owner.notifyOwner.mockImplementation(async (_kind, facts) => Number((facts as { alertId: string }).alertId) > 3);
+  await deliverStopLossAlerts(fixture(['1', '2', '3', '4', '5', '6', '7'].map(id => site(id))).db, { config, transport, env: {}, now });
+  expect(owner.notifyOwner.mock.calls.map(c => (c[1] as { alertId: string }).alertId)).toEqual(['1', '2', '3', '4', '5', '6']);
+  expect(MAX_MAILS_PER_RUN).toBe(3);
+  owner.notifyOwner.mockReset().mockResolvedValue(true);
+  // A backlog past the first page (250 rows, the first 120 already sent): the relay pages on and sends rows 121 to 123.
+  owner.notifyOwner.mockImplementation(async (_kind, facts) => Number((facts as { alertId: string }).alertId) > 120);
+  await deliverStopLossAlerts(fixture(Array.from({ length: 250 }, (_, i) => site(String(i + 1)))).db, { config, transport, env: {}, now });
+  const tried = owner.notifyOwner.mock.calls.map(c => (c[1] as { alertId: string }).alertId);
+  expect(tried.length).toBe(123);
+  expect(tried.slice(-3)).toEqual(['121', '122', '123']);
+  owner.notifyOwner.mockReset().mockResolvedValue(true);
+  // Nothing at all (no read) when Feishu is not configured; a failed read never touches the mail result.
+  owner.ownerAlertsEnabled.mockReturnValue(false);
+  await deliverStopLossAlerts(fixture([site('d')]).db, { config, transport, env: {}, now });
+  expect(owner.notifyOwner).not.toHaveBeenCalled();
+  owner.ownerAlertsEnabled.mockReturnValue(true);
+  const broken = await deliverStopLossAlerts(fixture([site('e')], 'owner@example.test', { readError: true }).db,
+    { config, transport, env: {}, now });
+  expect(broken.outcome).toBe('not_sent');
+  expect(owner.notifyOwner).not.toHaveBeenCalled();
 });

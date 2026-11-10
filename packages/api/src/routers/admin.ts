@@ -29,7 +29,7 @@ import {
 } from '../services/membershipEligibility';
 import {
   ADMIN_ACTIVITY_COLUMNS, ADMIN_ACTIVITY_WITH_PROFILES, ADMIN_PROFILE_COLUMNS, ADMIN_PROFILE_LIST_COLUMNS,
-  ADMIN_TRANSACTION_COLUMNS, recordAdminActivity, withUnrecordedLoginFields,
+  ADMIN_TRANSACTION_COLUMNS, adminUserSearchFilter, recordAdminActivity, withUnrecordedLoginFields,
 } from '../services/adminUserAccess';
 const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other']);
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
@@ -574,7 +574,7 @@ export const adminRouter = router({
 
       // Apply search filter if provided
       if (input.search) {
-        query = query.or(`email.ilike.%${input.search}%,nickname.ilike.%${input.search}%`);
+        query = query.or(adminUserSearchFilter(input.search));
       }
 
       // Apply status filter
@@ -625,9 +625,9 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('profiles')
-        .select('id, email, nickname, avatar_url')
+        .select('id, email, phone, nickname, avatar_url')
         .eq('is_deleted', false)
-        .or(`email.ilike.%${input.query}%,nickname.ilike.%${input.query}%`)
+        .or(adminUserSearchFilter(input.query))
         .order('created_at', { ascending: false })
         .limit(input.limit);
 

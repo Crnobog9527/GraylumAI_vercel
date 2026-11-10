@@ -20,7 +20,9 @@ export interface MockUser {
   email?: string;
   nickname?: string;
   full_name?: string;
-  auth_provider?: 'email' | 'google' | 'unknown';
+  auth_provider?: 'email' | 'google' | 'phone' | 'unknown';
+  /** PHONE-OTP: the verified number, masked (138****5678); '' for accounts without one. */
+  phone_masked?: string;
   avatar_url?: string;
   credits?: number;
   total_credits_used?: number;
@@ -160,7 +162,7 @@ export const UserProfileHeader = memo(function UserProfileHeader({
                 </>
               )}
             </div>
-            <p className="text-sm mb-2" style={{ color: 'var(--text-tertiary)' }}>{user?.email}</p>
+            <p className="text-sm mb-2" style={{ color: 'var(--text-tertiary)' }}>{user?.email || user?.phone_masked}</p>
             <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--text-tertiary)' }}>
               <span>注册时间：{registerDate}</span>
               <div className="flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>

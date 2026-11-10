@@ -7,6 +7,7 @@ import { logger } from './lib/logger';
 import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/turn/settings/budget';
 import { openingGrantDigests } from './services/accountErasure/openingGrantIdentity';
+import { profileIdentityUpdate, profileInsertPhone } from './lib/profileIdentity';
 import { procedureRateLimit } from './middleware/procedureRateLimit';
 export {createRuntimeBudget,withRuntimeBudget};
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
@@ -16,7 +17,7 @@ type ProfileBootstrapFailureReason =
   | 'opening_grant_failed'
   | 'service_role_unavailable';
 
-const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level, created_at';
+const PROFILE_SELECT = 'id, role, credits, status, nickname, email, phone, membership_level, created_at';
 const PROFILE_BOOTSTRAP_RECOVERY_CUTOFF_MS = Date.parse('2026-06-25T00:00:00.000Z');
 
 function deriveProfileNickname(user: User): string {
@@ -283,7 +284,7 @@ async function ensureProfile(ctx: ApiContext) {
   const userScopedSupabase = ctx.supabaseAuth ?? ctx.supabase;
   const userId = ctx.user.id;
   const derivedNickname = deriveProfileNickname(ctx.user);
-  const normalizedEmail = ctx.user.email ?? null;
+  const normalizedEmail = ctx.user.email || null; // Phone accounts carry an empty string.
 
   let { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
 
@@ -307,13 +308,12 @@ async function ensureProfile(ctx: ApiContext) {
     await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, profile, normalizedEmail);
 
     const shouldBackfillNickname = !profile.nickname?.trim();
-    const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
 
-    // Users may write only nickname (0144); email is synced from the auth user via service_role.
+    const identityUpdate = profileIdentityUpdate(profile, ctx.user); // Users write only nickname (0144); email/phone sync via service_role.
     const nicknameSync = shouldBackfillNickname
       ? await userScopedSupabase.from('profiles').update({ nickname: derivedNickname }).eq('id', userId) : null;
-    const emailSync = shouldSyncEmail && ctx.hasSupabaseAdminPrivileges
-      ? await ctx.supabaseAdmin.from('profiles').update({ email: normalizedEmail }).eq('id', userId) : null;
+    const emailSync = identityUpdate && ctx.hasSupabaseAdminPrivileges
+      ? await ctx.supabaseAdmin.from('profiles').update(identityUpdate).eq('id', userId) : null;
     if (nicknameSync?.error || emailSync?.error) {
       logger.warn('auth', 'profile_sync_failed', { nickname: !!nicknameSync?.error, email: !!emailSync?.error });
     }
@@ -347,7 +347,7 @@ async function ensureProfile(ctx: ApiContext) {
     .from('profiles')
     .insert({
       id: userId,
-      email: normalizedEmail,
+      email: normalizedEmail, ...profileInsertPhone(ctx.user),
       nickname: derivedNickname,
       role: 'user',
       status: 'active',

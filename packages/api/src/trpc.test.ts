@@ -509,6 +509,27 @@ describe('protectedProcedure profile bootstrap', () => {
     expect(supabaseMocks.creditTransactions).toHaveLength(1);
   });
 
+  it('PHONE-OTP: bootstraps a phone-only account like a verified email one, with its phone and the phone grant identity', async () => {
+    const supabaseMocks = createProfilesSupabase();
+    const phoneUser = {
+      ...user, email: '', email_confirmed_at: null, phone: '8613800005678', phone_confirmed_at: '2026-11-08T00:00:00.000Z',
+      app_metadata: { provider: 'phone', providers: ['phone'] },
+      identities: [{ provider: 'phone', identity_data: { sub: user.id, phone: '8613800005678' } }], user_metadata: {},
+    };
+    const { isEmailVerified } = await import('./lib/auth');
+    expect(isEmailVerified(phoneUser as unknown as User)).toBe(true);
+    await expect(callProtectedProcedure(supabaseMocks, { userOverride: phoneUser, isEmailVerified: true }))
+      .resolves.toMatchObject({ profileId: user.id });
+    await expect(callProtectedProcedure(supabaseMocks, { userOverride: phoneUser, isEmailVerified: true }))
+      .resolves.toMatchObject({ profileId: user.id });
+    expect(supabaseMocks.profileInserts).toEqual([expect.objectContaining({ id: user.id, email: null, phone: '8613800005678' })]);
+    const digests = openingGrantDigests(phoneUser as unknown as User);
+    expect(digests.map(digest => digest.kind)).toEqual(['oauth']);
+    expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('opening_grant_claim', { p_profile_id: user.id, p_digests: digests });
+    expect(supabaseMocks.creditTransactions).toHaveLength(1);
+  });
+
   it('does not issue another opening grant when the profile already exists', async () => {
     const supabaseMocks = createProfilesSupabase({
       existingProfile: {

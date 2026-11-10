@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { openingGrantKeyringIsValid } from './openingGrantKeyring';
 import { logger } from './logger';
+import { mayUseFakeSms } from '../services/phoneAuth/sms/productionGuard';
 
 // ============================================
 // 环境变量 Schema
@@ -96,6 +97,16 @@ const envSchema = z.object({
     .regex(/^whsec_/, 'STRIPE_WEBHOOK_SECRET 必须以 whsec_ 开头')
     .optional(),
 
+  // PHONE-OTP (Owner 2026-11-07): mainland phone sign-in. All optional, so the site runs without them; the SMS routes
+  // answer 503 and log which name is missing. fake on staging/previews, aliyun on production (fake is refused there).
+  SMS_PROVIDER: z.enum(['fake', 'aliyun']).optional(),
+  SEND_SMS_HOOK_SECRET: z.string().regex(/^(v1,)?whsec_[A-Za-z0-9+/=]+$/, 'SEND_SMS_HOOK_SECRET 必须是 Supabase 显示的 v1,whsec_… 格式')
+    .optional(),
+  ALIYUN_SMS_ACCESS_KEY_ID: optionalString,
+  ALIYUN_SMS_ACCESS_KEY_SECRET: optionalString,
+  ALIYUN_SMS_SIGN_NAME: optionalString,
+  ALIYUN_SMS_TEMPLATE_CODE: optionalString,
+
   SENTRY_AUTH_TOKEN: rejectDuplicatedEnvPrefix('SENTRY_AUTH_TOKEN')
     .regex(/^sntrys_/, 'SENTRY_AUTH_TOKEN 必须以 sntrys_ 开头')
     .optional(),
@@ -113,6 +124,11 @@ const envSchema = z.object({
   API_SIGNATURE_SECRET: z.string().min(1).optional(),
   REQUIRE_API_SIGNATURE: optionalString,
   LOG_LEVEL: optionalString,
+
+  // ALERT-FEISHU：Owner 业务告警的飞书群机器人（地址带机器人令牌，两个都是密钥）。可选：不设就不发告警；
+  // 地址格式在 ownerAlerts/config.ts 用到时才检查，填错只会关掉告警，不会让网站报错。
+  FEISHU_ALERT_WEBHOOK_URL: optionalString,
+  FEISHU_ALERT_SECRET: optionalString,
 
   // 已退役，仅用于提示（见 validateEnv）
   ANTHROPIC_API_KEY: optionalString,
@@ -148,7 +164,6 @@ const envSchema = z.object({
   NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION: optionalString,
   NEXT_PUBLIC_GA4_MEASUREMENT_ID: optionalString,
   NEXT_PUBLIC_HCAPTCHA_SITEKEY: optionalString,
-  NEXT_PUBLIC_TERMLY_WEBSITE_UUID: optionalString,
   NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: optionalString,
 
   // 平台注入和测试专用
@@ -197,6 +212,15 @@ export function validateRedisEnvForBuild(): void {
     // Never include submitted values (including malformed credentials) in build logs.
     throw new Error(`Redis deployment configuration missing or invalid: ${fields.join(', ')}`);
   }
+}
+
+/** PHONE-OTP: the fake SMS sender never on the production site, and the aliyun one only with all four of its names. */
+export function smsEnvErrors(env: Record<string, string | undefined>): string[] {
+  const provider = env.SMS_PROVIDER?.trim();
+  if (provider === 'fake' && !mayUseFakeSms(env)) return ['正式环境不能使用 SMS_PROVIDER=fake'];
+  if (provider !== 'aliyun') return [];
+  return ['ALIYUN_SMS_ACCESS_KEY_ID', 'ALIYUN_SMS_ACCESS_KEY_SECRET', 'ALIYUN_SMS_SIGN_NAME', 'ALIYUN_SMS_TEMPLATE_CODE']
+    .filter(name => !env[name]?.trim()).map(name => `SMS_PROVIDER=aliyun 时必须配置 ${name}`);
 }
 
 // ============================================
@@ -294,6 +318,8 @@ export function validateEnv(): ValidationResult {
       errors.push('启用 Stripe 时必须配置 SUPABASE_SERVICE_ROLE_KEY');
     }
   }
+
+  errors.push(...smsEnvErrors(process.env));
 
   // 3. 安全检查
   // 检查是否有明文密码在环境变量名中

@@ -46,7 +46,7 @@ it('OPC: UI_COVERAGE long card scroll and mobile edit in complete local page', a
   const page = await context.newPage(); page.setDefaultTimeout(60000);
   const path = '/app/positioning/' + draft.draftId, read = () => service.read(draft.draftId);
   try {
-    await page.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent(path));
+    await page.goto(process.env.V3_LOCAL_APP + '/login?method=email&redirect=' + encodeURIComponent(path));
     await page.getByPlaceholder('name@example.com').fill(email);
     await page.getByPlaceholder('输入你的密码').fill(password);
     await page.getByRole('button', { name: '登录', exact: true }).last().click();

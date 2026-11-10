@@ -6,10 +6,16 @@ type Dependencies = {
   database: () => Parameters<typeof receiveWaffoWebhook>[0]['db'];
   /** Normal-path delivery after the receipt is durable. Throwing asks the provider to redeliver. */
   process?: (receipt: Awaited<ReturnType<typeof receiveWaffoWebhook>>) => Promise<unknown>;
+  /** ALERT-FEISHU: a stored receipt whose processing failed, or a callback that could not be stored. Never throws. */
+  onFailure?: (failure: { stage: 'processing'; receiptId: string } | { stage: 'storage' }) => Promise<unknown>;
 };
 
 /** Streaming limit applies even when Content-Length is absent or dishonest. */
 export async function handleWaffoWebhookHttp(request: Request, deps: Dependencies) {
+  // The alert hook never changes the answer, even if it throws.
+  const failed = async (failure: Parameters<NonNullable<Dependencies['onFailure']>>[0]) => {
+    try { await deps.onFailure?.(failure); } catch { /* the hook never changes the answer */ }
+  };
   const config = deps.config();
   if (!config) return new Response('Webhook unavailable', { status: 503 });
   const signature = request.headers.get('x-waffo-signature');
@@ -34,7 +40,10 @@ export async function handleWaffoWebhookHttp(request: Request, deps: Dependencie
     const receipt = await receiveWaffoWebhook({ ...config, signature, body: Buffer.concat(parts), db: deps.database() });
     if (deps.process) {
       try { await deps.process(receipt); }
-      catch { return new Response('Webhook processing deferred', { status: 503 }); }
+      catch {
+        await failed({ stage: 'processing', receiptId: String(receipt.receiptId) });
+        return new Response('Webhook processing deferred', { status: 503 });
+      }
     }
     return Response.json({ received: true });
   } catch (error) {
@@ -43,6 +52,7 @@ export async function handleWaffoWebhookHttp(request: Request, deps: Dependencie
       return new Response('Invalid webhook', { status: 400 });
     }
     // Database/configuration failures remain retryable. Never log raw payload or key material.
+    await failed({ stage: 'storage' });
     return new Response('Webhook unavailable', { status: 503 });
   }
 }

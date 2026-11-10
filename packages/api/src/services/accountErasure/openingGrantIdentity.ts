@@ -2,6 +2,7 @@
 import { createHmac } from 'node:crypto';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { readOpeningGrantKeyring } from '../../lib/openingGrantKeyring';
+import { verifiedPhoneDigits } from '../../lib/auth';
 
 export type OpeningGrantDigest = { kind: 'email' | 'oauth'; key_version: string; digest: string };
 
@@ -24,8 +25,12 @@ export function openingGrantDigests(user: User, value?: string): OpeningGrantDig
     const email = normalizeOpeningGrantEmail(user.email);
     if (email) identities.push({ kind: 'email', parts: [email] });
   }
+  // PHONE-OTP: a verified mainland number is an identity of its own, kept in the existing 'oauth' kind under the fixed
+  // issuer 'phone' (no OAuth issuer is a bare word), so the grant and Waffo SQL checks are unchanged.
+  const phone = verifiedPhoneDigits(user);
+  if (phone) identities.push({ kind: 'oauth', parts: ['phone', phone] });
   for (const identity of user.identities ?? []) {
-    if (identity.provider === 'email') continue;
+    if (identity.provider === 'email' || identity.provider === 'phone') continue;
     const data = identity.identity_data ?? {};
     const subject = data.sub;
     // Google is the repository's current OAuth provider. Its verified provider namespace
