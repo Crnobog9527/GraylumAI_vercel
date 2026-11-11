@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
 import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
-import { buildErasureImpactLines, renewalUsesStripePortal, type ImpactLine } from '@/lib/account-erasure';
+import { buildErasureImpactLines, erasureBlocked, renewalUsesStripePortal, type ImpactLine } from '@/lib/account-erasure';
 import { useAccountErasure } from '@/hooks/use-account-erasure';
 
 const TONE_COLOR: Record<ImpactLine['tone'], string> = {
@@ -38,7 +38,8 @@ export function AccountErasureCard({ user }: { user: { id?: string; email?: stri
   const [acknowledged, setAcknowledged] = useState(false);
   const preview = erasure.preview;
   const lines = preview ? buildErasureImpactLines(preview) : [];
-  const blocked = Boolean(preview?.subscriptionRenewing);
+  // A renewing subscription or a refund request still being handled stops the user here, before verification.
+  const blocked = preview ? erasureBlocked(preview) : false;
 
   const onOpenChange = (next: boolean) => {
     if (erasure.busy) return;
@@ -132,7 +133,7 @@ export function AccountErasureCard({ user }: { user: { id?: string; email?: stri
             {erasure.step !== 'done' && (
               <Button variant="outline" disabled={erasure.busy} onClick={() => onOpenChange(false)} style={ghostStyle}>取消</Button>
             )}
-            {erasure.step === 'impact' && blocked && preview && renewalUsesStripePortal(preview) && (
+            {erasure.step === 'impact' && preview?.subscriptionRenewing && renewalUsesStripePortal(preview) && (
               <Button disabled={erasure.busy} onClick={erasure.openPortal} style={dangerStyle}>管理订阅 / 取消续费</Button>
             )}
             {/* Until the facts arrive nothing may suggest the user can go on: renewal could still block. */}

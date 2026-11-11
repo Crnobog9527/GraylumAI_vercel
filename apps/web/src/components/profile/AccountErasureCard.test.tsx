@@ -45,6 +45,18 @@ describe('AccountErasureCard impact step', () => {
     expect(html).not.toContain('>继续<');
   });
 
+  it('blocks with the refund line and no "继续" while a refund request is being handled', () => {
+    const html = render({ ...facts, refundRequestOpen: true });
+    expect(html).toContain('你有一笔退款申请在处理中，处理完成后才能注销。');
+    expect(html).not.toContain('>继续<');
+    expect(html).not.toContain('管理订阅 / 取消续费');
+  });
+
+  it('offers "继续" when the refund field is absent (before migration 0512) or false', () => {
+    expect(render({ ...facts, refundRequestOpen: false })).toContain('>继续<');
+    expect(render({ ...facts })).toContain('>继续<');
+  });
+
   it('shows neither "继续" nor a spinner button when the preview failed', () => {
     const html = render(undefined, { previewLoading: false, previewFailed: true });
     expect(html).toContain('暂时无法读取注销影响');
