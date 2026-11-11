@@ -129,6 +129,8 @@ export const UserProfileHeader = memo(function UserProfileHeader({
                     }}
                   />
                   <button
+                    type="button"
+                    aria-label="保存昵称"
                     onClick={handleSaveNickname}
                     disabled={savingNickname || !nickname.trim()}
                     className="p-1.5 rounded-lg transition-colors"
@@ -137,6 +139,8 @@ export const UserProfileHeader = memo(function UserProfileHeader({
                     {savingNickname ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                   </button>
                   <button
+                    type="button"
+                    aria-label="取消修改昵称"
                     onClick={handleCancelNickname}
                     className="p-1.5 rounded-lg transition-colors"
                     style={{ background: 'var(--error-bg)', color: 'var(--error)' }}
