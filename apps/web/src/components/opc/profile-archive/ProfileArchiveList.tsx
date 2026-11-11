@@ -4,7 +4,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
-import { PROFILE_ARCHIVE_TEXT as T, profileName, splitProfiles, type ProfileDraft, type ProfileRow } from './profile-archive';
+import {
+  PROFILE_ARCHIVE_TEXT as T, profileName, resumableDraftId, splitProfiles, type ProfileDraft, type ProfileRow,
+} from './profile-archive';
 import { useProfileBusinesses } from './profile-archive-api';
 
 /**
@@ -20,6 +22,8 @@ export function ProfileArchiveList({ limitReached = false }: { limitReached?: bo
   const [notice, setNotice] = useState<{ text: string; tone: 'status' | 'alert' } | null>(null);
   const { active, archived } = splitProfiles(profiles.businesses, (drafts.data?.drafts ?? []) as ProfileDraft[]);
   const limit = entitlements.data?.positioningProfileLimit;
+  // Under the limit notice the first way out is the positioning that already exists (走查 26): the user asked to start one.
+  const resume = limitReached ? resumableDraftId(active) : null;
 
   async function confirmArchive() {
     if (!confirming || archive.isPending) return;
@@ -48,6 +52,7 @@ export function ProfileArchiveList({ limitReached = false }: { limitReached?: bo
       {typeof limit === 'number' && <span className="text-xs text-[var(--text-secondary)]">{T.usage(active.length, limit)}</span>}
     </header>
     {limitReached && <p className="text-xs text-[var(--text-secondary)]">{T.limitHint}</p>}
+    {resume && <Button asChild size="sm"><Link href={`/app/positioning/${resume}`}>{T.resume}</Link></Button>}
     {!active.length && !archived.length && <p className="text-xs text-[var(--text-secondary)]">{T.empty}</p>}
     {active.length > 0 && <ul className="divide-y divide-[var(--border-primary)] rounded-lg border border-[var(--border-primary)]">
       {active.map(row => <li key={row.businessId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">

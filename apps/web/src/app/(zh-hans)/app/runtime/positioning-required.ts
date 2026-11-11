@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { startEntryHref, type StartMode } from '@/app/(zh-hans)/app/positioning/start-entry';
-import { splitProfiles, type ProfileBusiness } from '@/components/opc/profile-archive/profile-archive';
+import { resumableDraftId, splitProfiles, type ProfileBusiness } from '@/components/opc/profile-archive/profile-archive';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 
 /** The guide card's two entries (POSITIONING-GATE step 3); the same one-click starts as the home page. */
@@ -19,20 +19,30 @@ export function positioningEntryHref(mode: StartMode, intent: string = crypto.ra
  * known yet. Only a user without a confirmed positioning sees the card, so any profile of theirs that is not archived is one
  * still under way. A failed read counts as none: the two ordinary entries are always valid.
  */
-export type ExistingPositioning = { state: 'checking' } | { state: 'none' } | { state: 'draft'; draftId: string };
-export function existingPositioning(businesses: readonly ProfileBusiness[] | undefined, failed: boolean): ExistingPositioning {
+export type ExistingPositioning = { state: 'checking' } | { state: 'none' }
+  /** `full`: the profile allowance is used, so importing another positioning would be refused too. */
+  | { state: 'draft'; draftId: string; full?: boolean };
+/**
+ * `limit` is the plan's profile allowance (`user.getEntitlements`): a number, 'reading' while it is being read, or null when
+ * it could not be read (then nothing is hidden: the import entry is offered as before).
+ */
+export function existingPositioning(businesses: readonly ProfileBusiness[] | undefined, failed: boolean,
+  limit: number | 'reading' | null = null): ExistingPositioning {
   if (failed) return { state: 'none' };
   if (!businesses) return { state: 'checking' };
-  // The server lists profiles oldest first; the newest one that can still be worked on is the one to go back to.
-  const draftId = splitProfiles(businesses, undefined).active.map(row => row.draftId).filter(Boolean).at(-1);
-  return draftId ? { state: 'draft', draftId } : { state: 'none' };
+  const { active } = splitProfiles(businesses, undefined);
+  const draftId = resumableDraftId(active);
+  if (!draftId) return { state: 'none' };
+  if (limit === 'reading') return { state: 'checking' };
+  return { state: 'draft', draftId, full: typeof limit === 'number' && active.length >= limit };
 }
 
 /**
  * The guide card for a user without a confirmed positioning (admission refusal, refused execution, refreshed turn).
  * The text stays the fixed notice string, so the tail and the turn de-duplicate to one card; it says nothing was charged.
  * The buttons follow `existing`: 继续我的定位 opens the positioning under way; while that is being read the card shows its
- * text alone, so a button never changes under the pointer.
+ * text alone, so a button never changes under the pointer. With the allowance used, 导入已有定位 is left out: it would start
+ * another profile and be refused (controller 2026-11-12); below the allowance it stays.
  */
 export function positioningRequiredNotice(id: string,
   navigate: (href: string) => void = href => window.location.assign(href),
@@ -42,7 +52,8 @@ export function positioningRequiredNotice(id: string,
     id, tone: 'warning', label: POSITIONING_CARD_LABEL, text: POSITIONING_REQUIRED_NOTICE,
     actions: existing.state === 'checking' ? []
       : existing.state === 'draft'
-        ? [{ label: POSITIONING_ACTIONS.resume, onClick: () => navigate('/app/positioning/' + existing.draftId) }, entry('manual')]
+        ? [{ label: POSITIONING_ACTIONS.resume, onClick: () => navigate('/app/positioning/' + existing.draftId) },
+          ...(existing.full ? [] : [entry('manual')])]
         : [entry('mentor'), entry('manual')],
   };
 }

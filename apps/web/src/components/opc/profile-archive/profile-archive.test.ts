@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { isDraftArchived, isProfileArchivedError, PROFILE_ARCHIVE_TEXT, profileName, splitProfiles } from './profile-archive';
+import {
+  isDraftArchived, isProfileArchivedError, PROFILE_ARCHIVE_TEXT, profileName, resumableDraftId, splitProfiles,
+} from './profile-archive';
 import { gateAdmissionNotice } from '@/lib/runtime-gate-notice';
 
 const businesses = [
@@ -57,5 +59,18 @@ describe('profile archive helpers', () => {
     expect(PROFILE_ARCHIVE_TEXT.confirmBody).toContain('不能再继续对话或生成报告');
     expect(PROFILE_ARCHIVE_TEXT.confirmBody).toContain('释放 1 个名额');
     expect(PROFILE_ARCHIVE_TEXT.confirmBody).toContain('不能恢复');
+  });
+});
+
+// 走查 26: where "继续已有的定位" goes.
+describe('the positioning to go back to', () => {
+  const row = (businessId: string, draftId: string | null) => ({ businessId, isArchived: false, draftId });
+  it('is the newest profile that has a draft (the server lists them oldest first)', () => {
+    expect(resumableDraftId([row('a', 'd-a'), row('b', 'd-b')])).toBe('d-b');
+    expect(resumableDraftId([row('a', 'd-a'), row('b', null)])).toBe('d-a');
+  });
+  it('is nothing when no profile has a draft', () => {
+    expect(resumableDraftId([row('a', null)])).toBeNull();
+    expect(resumableDraftId([])).toBeNull();
   });
 });
