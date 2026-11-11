@@ -1492,7 +1492,7 @@ export const paymentsRouter = router({
           'payment_status',
           'fulfilled_at',
           'created_at',
-          'metadata', 'qualification_state', 'purchase_closed_at', 'method_review_reason',
+          'metadata', 'qualification_state', 'purchase_closed_at', 'method_review_reason', 'method_checkout_expires_at',
           'source_order_id', 'method_transition', 'offer_kind', 'purchase_action',
         ].join(','))
         .eq('user_id', ctx.profileId)

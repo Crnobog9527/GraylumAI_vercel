@@ -110,6 +110,16 @@ export function checkoutMethods(entry: MethodMembershipEntry | null | undefined,
 }
 
 /** Only an https Stripe-hosted checkout page may receive the user; anything else is not followed. */
+/** Renewals that append to a one-time term (wallet renewal; founder renewal, Owner 2026-10-21 "规则不变") are paid one
+ * time: WeChat Pay or Alipay, or a card while new purchases route to Waffo (one-time there). A Stripe card would open a
+ * self-renewing subscription counted from the payment day (deep review 2026-11-11 item 6). Admission refuses it too. */
+export function renewalMethods(methods: readonly CheckoutMethod[], purchase: Pick<MethodPurchase, 'transition'> | null,
+  channel?: 'stripe' | 'waffo') {
+  const appended = purchase?.transition === 'wallet_renewal' || purchase?.transition === 'founder_renewal';
+  if (!appended || channel === 'waffo') return [...methods];
+  return methods.filter(method => method === 'wechat_pay' || method === 'alipay');
+}
+
 export function isStripeCheckoutUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   try {
