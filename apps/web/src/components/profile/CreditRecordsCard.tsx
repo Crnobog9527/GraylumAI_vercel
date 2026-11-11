@@ -10,6 +10,7 @@ import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   countsAsCreditSpend,
+  creditRecordNote,
   getCreditLedgerLabel,
   normalizeCreditLedgerType,
   type CreditLedgerType,
@@ -323,9 +324,11 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
                     <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
                       {typeLabels[ledgerType] || getCreditLedgerLabel(tx)}
                     </div>
-                    <div className="text-xs max-w-md truncate" style={{ color: 'var(--text-tertiary)' }}>
-                      {tx.description || '-'}
-                    </div>
+                    {creditRecordNote(tx.description) && (
+                      <div className="text-xs max-w-md truncate" style={{ color: 'var(--text-tertiary)' }}>
+                        {creditRecordNote(tx.description)}
+                      </div>
+                    )}
                     {ledgerType === 'spend' && <TransactionSearchCharges transactionId={tx.id} />}
                   </div>
                 </div>

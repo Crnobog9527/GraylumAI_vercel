@@ -22,7 +22,7 @@ describe('unavailable balance surface wiring', () => {
     const subscriptionSource = readSource('../profile/SubscriptionCard.tsx');
 
     expect(overviewSource).toContain('hasVerifiedBalance &&');
-    expect(overviewSource).toContain('购买加油包');
+    expect(overviewSource).toContain('购买积分包');
     expect(subscriptionSource).toContain('hasVerifiedBalance &&');
     expect(subscriptionSource).toContain('<CreditPackagesSection');
   });

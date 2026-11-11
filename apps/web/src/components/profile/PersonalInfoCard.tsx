@@ -257,7 +257,7 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
             }}
           >
             <Plus className="h-4 w-4" />
-            购买加油包
+            购买积分包
           </Button>
         )}
       </div>
