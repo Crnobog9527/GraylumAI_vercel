@@ -68,11 +68,17 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(html).not.toContain('data-plan=');
   });
 
-  it('keeps only the first screen\'s text, centred, with no picture beside it (round four)', () => {
+  // Owner 2026-11-11 (MASTER_PLAN 2.1, #1867): the first screen carries the product's conversation window again, under the
+  // text, in place of round four's text-only first screen. Round four's three-step picture stays gone.
+  it('keeps the first screen\'s text first and centred, with the product window under it and no three-step picture', () => {
     const html = render();
     const hero = html.slice(html.indexOf('id="hero-title"'), html.indexOf('id="voice-title"'));
     for (const text of [L_HERO_FLOW.youSay.text, L_HERO_FLOW.youGet.text]) expect(hero).not.toContain(text);
     expect(hero).not.toContain('<figure');
+    // `hero` starts inside the title; the button's note closes the text block, and the window comes after it, once.
+    expect(hero.indexOf(escape(data.heroNote))).toBeGreaterThan(0);
+    expect(hero.indexOf(escape(data.heroNote))).toBeLessThan(hero.indexOf('data-region="首屏产品窗口"'));
+    expect(hero.split('data-region="首屏产品窗口"')).toHaveLength(2);
   });
 
   it('shows every voice, unfolded, each with its region and never a guessed country', () => {
