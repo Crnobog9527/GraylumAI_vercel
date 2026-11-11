@@ -15,9 +15,9 @@ import {readAdmissionConfiguration} from '../services/turn/admission/admissionCo
 import {readCoreConfig} from '../services/turn/chat';
 import {realContract} from '../services/turn/settings/realHost';
 import {realHostMode} from '../services/turn/settings/productionEnvironment';
-import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
-import { discoverSkills } from '../services/skills/loader';
-import { asRequiredLevel, lockedForTier, type RequiredMemberLevel } from '../services/skills/memberOnly';
+import { userVisibleModules } from '../services/skills/databaseSource';
+import { listChoiceSkills } from '../services/skills/choiceSkills';
+import { asRequiredLevel } from '../services/skills/memberOnly';
 import { readOwnDataTier } from '../services/membershipEntitlements';
 import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/turn/settings/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
@@ -73,37 +73,38 @@ export const runtimeRouter=router({
  // Saved reports stay discoverable whatever the switch or membership is now.
  choices:procedure.input(z.object({sessionId:z.string().uuid().optional()}).optional()).query(async({ctx,input})=>{
   let work=false;let workModuleId:string|null=null;let workRevisionId:string|null=null;
-  if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error){const item=(listing.data.accounts??[]).flatMap((a:{items:Array<{sessionId:string;workItemId:string;moduleId?:string;methodRevisionId?:string}>})=>a.items).find((i:{sessionId:string})=>i.sessionId===input.sessionId);work=Boolean(item);if(item){workModuleId=item.moduleId??null;workRevisionId=item.methodRevisionId??null;}}}
-
   // Loopback advertises the curated ordinary model. Free-chat skills must use
   // that same model, excluding fault/organizer fixtures without name matching.
   const modelQuery=ctx.supabaseAdmin!.from('ai_models').select('id,name,model_id,max_tokens,config').eq('is_active','true');
-  const models=await (ctx.real?modelQuery.in('id',ctx.real.callPolicies.map(q=>q.modelId)):modelQuery.eq('provider','fixture').eq('name','Runtime local'));
+  // The work-item lookup, the models and the visible modules do not depend on each other: asked together, checked in the old order.
+  const [listing,models,visible]=await Promise.all([
+   input?.sessionId?ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id}):null,
+   ctx.real?modelQuery.in('id',ctx.real.callPolicies.map(q=>q.modelId)):modelQuery.eq('provider','fixture').eq('name','Runtime local'),
+   userVisibleModules(ctx.userScopedSupabase,{limit:64}),
+  ]);
+  if(listing&&!listing.error){
+   type WorkRow={sessionId:string;workItemId:string;moduleId?:string;methodRevisionId?:string};
+   const item=(listing.data.accounts??[]).flatMap((a:{items:WorkRow[]})=>a.items).find((i:WorkRow)=>i.sessionId===input!.sessionId);
+   work=Boolean(item);if(item){workModuleId=item.moduleId??null;workRevisionId=item.methodRevisionId??null;}
+  }
   if(models.error)throw new Error('RUNTIME_MODELS_UNAVAILABLE');
-  const visible=await userVisibleModules(ctx.userScopedSupabase,{limit:64});
   if(visible.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   // Respect the narrow public column grant; private metadata is fetched only
   // for visible modules and the loader independently rechecks current access.
-  const modules=visible.data.length?await ctx.supabaseAdmin!.from('modules').select('id,skill_id,title,model_id,required_member_level').in('id',visible.data.map(m=>m.id)).eq('active',true):{data:[],error:null};
+  const modules=visible.data.length?await ctx.supabaseAdmin!.from('modules').select('id,skill_id,title,model_id,required_member_level')
+   .in('id',visible.data.map(m=>m.id)).eq('active',true):{data:[],error:null};
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
-  const skills:Array<{moduleId:string;revisionId:string;name:string;requiredMemberLevel:RequiredMemberLevel|null;locked:boolean}>=[];
   // MEMBER-ONLY-MODULES: a Skill limited to members is listed to everyone and marked locked for a plan below it (the page then shows the
   // paywall instead of choosing it); the plan is read only when some listed module has a requirement, and an unreadable plan locks nothing (lockedForTier).
   const tierNeeded=modules.data.some(m=>asRequiredLevel(m.required_member_level));
   const tier=tierNeeded?await swallow('runtime_choices_tier_unavailable',readOwnDataTier(ctx.supabaseAdmin!,ctx.user.id),null):null;
-  for(const m of modules.data){if(!m.skill_id||(ctx.real&&!ctx.real.callPolicies.some(q=>q.modelId===m.model_id)))continue;try{
-   // AC-0c: reuse this request's user-scoped (RLS) read above, never the service-role row.
-   const userVisibleModule=visible.data.find(v=>v.id===m.id);
-   const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id,userVisibleModule,...(m.id===workModuleId&&workRevisionId?{revisionId:workRevisionId}:{})});
-   const descriptors=await source.list();
-   const list=await discoverSkills(source);
-   for(const s of list.filter(()=>ctx.real||work||models.data.some(model=>model.id===m.model_id))){
-    const descriptor=descriptors.find(d=>d.revisionId===s.public.revisionId);
-    if(!descriptor||Object.keys(descriptor.tasks).length)continue;
-    const requiredMemberLevel=asRequiredLevel(m.required_member_level);
-    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:m.title,requiredMemberLevel,locked:lockedForTier(tier,requiredMemberLevel)});
-   }
-  }catch{/* unavailable packages are not advertised as runnable */}}
+  // AC-0c: the sources reuse this request's user-scoped (RLS) read above, never the service-role row. One identity check for
+  // the request and a few modules at a time (services/skills/choiceSkills.ts); the list and its order are as before.
+  const real=ctx.real;
+  const skills=await listChoiceSkills({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,visible:visible.data,modules:modules.data,
+   runnable:m=>!real||real.callPolicies.some(q=>q.modelId===m.model_id),
+   listed:m=>Boolean(real)||work||models.data.some(model=>model.id===m.model_id),
+   pin:workModuleId&&workRevisionId?{moduleId:workModuleId,revisionId:workRevisionId}:null,tier});
   // Staging hides models a free-chat turn is certain to be refused with; the administrator's default comes first.
   // DB-PERF PR-3: one settings read for the whole list instead of one per offered model.
   const choiceSettings=readModelChoiceSettings(ctx.supabaseAdmin!);
