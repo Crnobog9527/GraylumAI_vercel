@@ -39,6 +39,8 @@ const APP_TEMPLATES = [
   '/app/library',
   '/app/library/scan-check',
   '/app/profile',
+  // PUBLISH-SCHEDULE: the schedule page; its address carries no key or record ID (the week is chosen on the page).
+  '/app/publish-schedule',
   '/app/expert-consult',
   '/app/runtime',
   '/app/positioning',
