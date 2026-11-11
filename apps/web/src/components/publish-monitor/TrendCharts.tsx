@@ -20,6 +20,8 @@ export type TrendWeek = { start: string; end: string; posts: number | null; view
 export type TrendSeries = { connectionId: string; platform: string; businessName: string | null; connectedOn: string;
   weeks: TrendWeek[]; gaps: Partial<Record<'followers' | 'views' | 'engagement', SummaryGap>> };
 
+/** The weekly numbers change once a day; half a minute covers the page's own early read without hiding a refresh. */
+export const TREND_FRESH_MS = 30_000;
 const KPI_GAP: Record<SummaryGap, string> = { not_provided: '平台不提供', accumulating: '数据积累中' };
 /** "10-27" for a week ending 2026-10-27: short enough for a 360px screen. */
 const weekLabel = (week: { end: string }) => week.end.slice(5);
@@ -29,7 +31,9 @@ const motionAllowed = () => typeof window !== 'undefined' && typeof window.match
   && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function TrendCharts({ gold, onOpenTab }: { gold: boolean; onOpenTab?: (tab: 'accounts' | 'import') => void }) {
-  const trend = trpc.publishMonitor.trend.useQuery(undefined, { retry: false });
+  // The page asks for this read when it opens (DataReviewView.tsx); within TREND_FRESH_MS the tab takes that answer
+  // instead of asking again.
+  const trend = trpc.publishMonitor.trend.useQuery(undefined, { retry: false, staleTime: TREND_FRESH_MS });
   const [picked, setPicked] = useState<string | null>(null);
   const all = (trend.data?.series ?? []) as TrendSeries[];
   // A picked account that was disconnected since falls back to the first one.

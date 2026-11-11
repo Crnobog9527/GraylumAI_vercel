@@ -50,11 +50,11 @@ beforeAll(async () => {
         if (id !== entry) return;
         return `import React from 'react'; import {createRoot} from 'react-dom/client';
           import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-          import {httpLink} from '@trpc/client'; import {trpc} from ${file('../../trpc/client.ts')};
+          import {httpBatchLink} from '@trpc/client'; import {trpc} from ${file('../../trpc/client.ts')};
           import frame from ${file('../opc/workspace-frame.module.css')};
           import {DataReviewView} from ${file('./DataReviewView.tsx')};
           const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
-          const client=trpc.createClient({links:[httpLink({url:'http://review.test/api/trpc'})]});
+          const client=trpc.createClient({links:[httpBatchLink({url:'http://review.test/api/trpc'})]});
           const h=React.createElement;
           createRoot(document.getElementById('root')).render(h(trpc.Provider,{client,queryClient},
             h(QueryClientProvider,{client:queryClient},h('div',{className:frame.workspace},
@@ -75,22 +75,32 @@ afterAll(async () => { await browser?.close(); }, 30000);
 /** The tick texts of every vertical axis (recharts 3 draws them in their own layer, beside the axis group). */
 const Y_TICKS = '.recharts-yAxis-tick-labels text';
 
-async function open(width: number, height: number, reducedMotion: 'reduce' | 'no-preference' = 'no-preference') {
+type Sent = { paths: string[]; at: number };
+async function open(width: number, height: number, reducedMotion: 'reduce' | 'no-preference' = 'no-preference', firstReadsTakeMs = 0) {
   const page = await browser.newPage({ viewport: { width, height }, reducedMotion });
   const errors: string[] = [];
+  // Every tRPC request in the order it left the page, and when the page's first reads were answered.
+  const sent: Sent[] = [];
+  const answered: { firstReads: number | null } = { firstReads: null };
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: '<body style="margin:0"><div id="root"></div></body>' });
-    const data = ANSWERS[url.pathname.replace('/api/trpc/', '')] ?? {};
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data } }) });
+    const paths = url.pathname.replace('/api/trpc/', '').split(',');
+    sent.push({ paths, at: Date.now() });
+    const first = paths.includes('publishMonitor.data');
+    if (first && firstReadsTakeMs) await new Promise(resolve => setTimeout(resolve, firstReadsTakeMs));
+    // Batched like the app: one answer per read, in the order asked.
+    const body = paths.map(path => ({ result: { data: ANSWERS[path] ?? {} } }));
+    if (first) answered.firstReads = Date.now();
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
   await page.goto('http://review.test/');
   await page.addStyleTag({ content: css });
   await page.addScriptTag({ content: code });
   await ui(page.getByRole('tab', { name: '数据趋势' })).toBeVisible({ timeout: 10000 });
   await ui(page.locator(Y_TICKS).first()).toBeVisible({ timeout: 10000 });
-  return { page, errors };
+  return { page, errors, sent, answered };
 }
 
 const top = (page: Page) => page.locator('figure').last().evaluate(node => Math.round(node.getBoundingClientRect().top));
@@ -132,6 +142,22 @@ it('fits a 360px screen: the tab bar and the account switch scroll sideways insi
     // With reduced motion nothing is left mid-animation: the cards are fully shown at once.
     const opacity = await page.locator('figure').first().evaluate(node => getComputedStyle(node).opacity);
     expect(opacity).toBe('1');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('asks for the trend data with the first reads, in a request of its own, not after they are answered', async () => {
+  // 2026-11-11 (PERF): the trend read left only after the first reads came back, one round trip late. Here the first
+  // reads take 600 ms to answer; the trend read must already have left by then, and must not sit in their request.
+  const { page, sent, answered, errors } = await open(1280, 720, 'reduce', 600);
+  try {
+    const trend = sent.filter(request => request.paths.includes('publishMonitor.trend'));
+    expect(trend).toHaveLength(1);
+    expect(trend[0]!.paths).toEqual(['publishMonitor.trend']);
+    // The first reads did travel together, so "a request of its own" above is not an accident of the test setup.
+    expect(sent.find(request => request.paths.includes('publishMonitor.data'))!.paths).toContain('publishMonitor.connections');
+    expect(answered.firstReads).not.toBeNull();
+    expect(trend[0]!.at).toBeLessThan(answered.firstReads!);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
