@@ -76,6 +76,12 @@ BEGIN
           AND fulfilled_at IS NOT NULL)
         OR pay_waffo_founder_deadline(prior.id) IS NULL OR now()>pay_waffo_founder_deadline(prior.id)
         OR (prior.auto_renew AND old_sub.status<>'canceled') THEN RAISE EXCEPTION 'PAY_WAFFO_FOUNDER_EXPIRED'; END IF;
+      -- 9999 (deep review item 6; Owner 2026-10-21 "创始会员续买规则不变": one-time, appended to the paid term): a one-time
+      -- founder renews only by a one-time method. A Stripe card here would open a self-renewing subscription counted from
+      -- today. Same method rule as wallet_renewal: wallets, or a card while new purchases route to Waffo (one-time there).
+      IF prior.auto_renew IS DISTINCT FROM true AND NOT (p_method IN ('wechat_pay','alipay') OR p_method IN ('card','card_cn') AND
+        (SELECT coalesce(value->>'newPurchaseChannel','stripe')='waffo' FROM system_settings WHERE key='payment_method_routes')) THEN
+        RAISE EXCEPTION 'PAY_WAFFO_TRANSITION_DENIED'; END IF;
     END IF;
   ELSIF p_prior IS NOT NULL OR p_offer='founder_renewal' THEN RAISE EXCEPTION 'PAY_WAFFO_TRANSITION_DENIED'; END IF;
   -- Any unresolved method/provider blocks switching; returning a new identity would risk a second charge.
