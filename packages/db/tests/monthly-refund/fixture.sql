@@ -45,9 +45,9 @@ BEGIN
  RETURN jsonb_build_object('actor',a,'user',u,'order',o,'subscription',s,'grant',g,'ticket',t,'terms',terms);
 END $$;
 
--- Migration 9999 (Owner 2026-11-11): account_erasure_confirm refuses while a refund request is being handled, so an
+-- Migration 0512 (Owner 2026-11-11): account_erasure_confirm refuses while a refund request is being handled, so an
 -- account cannot start erasure in the middle of a refund any more. These cases still prove what the refund and erasure
--- functions do if such an account exists (closed before 9999, or by any path that skips the check): the same two writes
+-- functions do if such an account exists (closed before 0512, or by any path that skips the check): the same two writes
 -- as account_erasure_confirm, without its preconditions. Test fixture only.
 CREATE FUNCTION monthly_test.close_unguarded(p_user uuid) RETURNS uuid LANGUAGE plpgsql AS $$
 DECLARE r uuid:=gen_random_uuid();

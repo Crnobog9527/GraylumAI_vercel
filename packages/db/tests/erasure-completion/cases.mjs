@@ -111,8 +111,8 @@ export async function runCases(db,report){
   {name:'pending frozen checkout evidence',metadata:{},extra:{checkout,status:'pending'},pending:true},
   {name:'malformed financial metadata',metadata:{grantedCredits:{body:'PRIVATE'},body:'PRIVATE'},extra:{},pending:false},
  ]){
-  // 9999 (Owner 2026-11-11): a pending refund refuses erasure, so that order is written after the closure (as for an
-  // account closed before 9999); the other orders keep their place before it.
+  // 0512 (Owner 2026-11-11): a pending refund refuses erasure, so that order is written after the closure (as for an
+  // account closed before 0512); the other orders keep their place before it.
   const f=await fresh(db);
   let id,rid;
   if(test.extra.refund){

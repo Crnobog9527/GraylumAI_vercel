@@ -186,7 +186,7 @@ describe('account erasure preview', () => {
       pendingPayments: 0, runsInFlight: 1, closed: false,
     };
     const admin = { rpc: vi.fn().mockResolvedValue({ data: facts, error: null }) };
-    // A database before 0224 sends no renewalChannels, one before 9999 no refundRequestOpen: they parse as none.
+    // A database before 0224 sends no renewalChannels, one before 0512 no refundRequestOpen: they parse as none.
     await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER))
       .resolves.toEqual({ ...facts, renewalChannels: [], refundRequestOpen: false });
     admin.rpc.mockResolvedValueOnce({ data: { ...facts, refundRequestOpen: true }, error: null });

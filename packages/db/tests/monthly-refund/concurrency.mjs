@@ -33,10 +33,10 @@ export async function runConcurrency({db,Client,connectionString,report}) {
   // Closure wins the same profile lock; approved financial identity must remain pending.
   const closed=await make();
   await db.query("update user_subscriptions set cancel_at_period_end='true' where id=$1",[closed.f.subscription]);
-  // 9999 (Owner 2026-11-11): an approved refund is a request being handled, so the account cannot start erasure.
+  // 0512 (Owner 2026-11-11): an approved refund is a request being handled, so the account cannot start erasure.
   await assert.rejects(db.query('select account_erasure_confirm($1,$2)',[closed.f.user,randomUUID()]),/ACCOUNT_ERASURE_REFUND_PENDING/);
   assert.equal((await db.query('select count(*)::int n from account_erasure_requests where profile_id=$1',[closed.f.user])).rows[0].n,0);
-  // An account already closed (before 9999) still cannot claim it, and the approval keeps its identity.
+  // An account already closed (before 0512) still cannot claim it, and the approval keeps its identity.
   await db.query('select monthly_test.close_unguarded($1)',[closed.f.user]);
   await assert.rejects(()=>claim(other,closed.f,closed.i),/SCOPE_OR_STATE/);
   const kept=(await db.query('select refund_approval from payment_orders where id=$1',[closed.f.order])).rows[0].refund_approval;

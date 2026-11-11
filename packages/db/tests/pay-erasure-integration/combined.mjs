@@ -26,7 +26,7 @@ export async function runCombined(input){
   }else{
    profileId=randomUUID();await db.query('insert into profiles(id,credits) values($1,37)',[profileId]);
   }
-  // 9999 (Owner 2026-11-11): a refund being handled refuses erasure; the cash cases then use an account already closed.
+  // 0512 (Owner 2026-11-11): a refund being handled refuses erasure; the cash cases then use an account already closed.
   if(monthly)await assert.rejects(db.query('select account_erasure_confirm($1,$2)',[profileId,randomUUID()]),/ACCOUNT_ERASURE_REFUND_PENDING/);
   const closed=monthly?{requestId:(await db.query('select monthly_test.close_unguarded($1) r',[profileId])).rows[0].r}
    :(await db.query('select account_erasure_confirm($1,$2) v',[profileId,randomUUID()])).rows[0].v;

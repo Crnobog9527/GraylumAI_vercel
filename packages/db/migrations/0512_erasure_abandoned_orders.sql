@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- ERASURE-ABANDONED (deep review 2026-11-11, items 1 and 12). Placeholder number 9999: the controller assigns the real one.
+-- ERASURE-ABANDONED (deep review 2026-11-11, items 1 and 12). Number 0512 assigned by the controller.
 --   1. A buyer who left a checkout could never finish account erasure. Release (pay_waffo_close_card_checkout,
 --      pay_waffo_abort_before_dispatch, pay_waffo_observe_qualification, pay_waffo_close_uncreated) sets
 --      qualification_state='released' and purchase_closed_at but keeps status 'pending' with no close reason, and
@@ -53,7 +53,7 @@ AS $function$
  OR (j->>'status' IN ('failed','expired') AND j->>'purchase_closed_at' IS NOT NULL
   AND j->>'purchase_close_reason' IN ('stripe_checkout_expired','stripe_checkout_never_created',
    'stripe_checkout_not_prepared','stripe_upgrade_rejected','stripe_upgrade_not_applied'))
- -- ERASURE-ABANDONED (9999): a new-path checkout the buyer left. Release keeps status 'pending' and writes no close reason;
+ -- ERASURE-ABANDONED (0512): a new-path checkout the buyer left. Release keeps status 'pending' and writes no close reason;
  -- the provider has confirmed nothing can be paid (closed or expired session, never sent, verified absent), so it is final.
  -- A late payment still lands on the order as cash evidence for review, as for any released order.
  OR (j->>'qualification_state'='released' AND j->>'purchase_closed_at' IS NOT NULL AND j->>'payment_status'='unpaid'
@@ -74,13 +74,13 @@ AS $function$
       SELECT max(s.current_period_end) FROM public.user_subscriptions s
       WHERE s.user_id = p_profile_id
         AND lower(s.status) IN ('active', 'trialing', 'past_due', 'incomplete', 'unpaid', 'paused')),
-    -- A released checkout (9999) still reads status 'pending' but is final: the same test as the financial proof.
+    -- A released checkout (0512) still reads status 'pending' but is final: the same test as the financial proof.
     'pendingPayments', (SELECT count(*) FROM public.payment_orders o
       WHERE o.user_id = p_profile_id AND o.status = 'pending' AND NOT public.erasure_payment_terminal(to_jsonb(o))),
     -- CORE-PATH-V2 V2-12 F: the core-path turns still open or settling are the only money in flight.
     'runsInFlight', (SELECT count(*) FROM public.turns t WHERE t.actor_id = p_profile_id AND (t.state <> 'closed' OR t.settlement = 'pending')),
     'closed', EXISTS (SELECT 1 FROM public.account_erasure_requests e WHERE e.profile_id = p_profile_id),
-    -- 9999 (item 13): erasure cannot start while a refund request is being handled.
+    -- 0512 (item 13): erasure cannot start while a refund request is being handled.
     'refundRequestOpen', public.account_erasure_refund_open(p_profile_id)
   );
 $function$;
@@ -100,7 +100,7 @@ BEGIN
     SELECT actor_id, id, state FROM turns
     WHERE ((state IN ('running','stopping') AND updated_at < now() - interval '15 minutes')
         OR (state = 'paused' AND (updated_at < now() - interval '24 hours'
-          -- 9999: an account being erased will never top up; its paused turn expires now, not after 24 hours.
+          -- 0512: an account being erased will never top up; its paused turn expires now, not after 24 hours.
           OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = turns.actor_id AND p.is_deleted = 'true'))))
       AND (recovery_lease_until IS NULL OR recovery_lease_until <= now())
     ORDER BY updated_at LIMIT p_limit
@@ -200,7 +200,7 @@ BEGIN
     -- receipts settle, an unknown cost keeps its share of the freeze for the settlement pass.
     ending := CASE WHEN t.state = 'stopping' THEN 'stopped' ELSE 'interrupted' END;
   ELSIF p_action = 'expire' AND t.state = 'paused' AND (t.updated_at < now() - interval '24 hours'
-    -- 9999: as in turn_recovery_claim, the paused turn of an account being erased expires at once.
+    -- 0512: as in turn_recovery_claim, the paused turn of an account being erased expires at once.
     OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = p_actor_id AND p.is_deleted = 'true')) THEN
     -- Owner 10-25/10-27: a paused turn that delivered nothing for 24 hours is refunded in full (expired, not delivered: D = 0);
     -- refund_all stays false so a jury is charged by its own rule in turn_user_charge (V2-7b).
@@ -259,7 +259,7 @@ BEGIN
   IF public.account_erasure_renewing(p_profile_id) THEN
     RAISE EXCEPTION 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING' USING ERRCODE = 'P0001';
   END IF;
-  -- 9999 (Owner 2026-11-11): a refund request being handled keeps the account open; its ticket must survive.
+  -- 0512 (Owner 2026-11-11): a refund request being handled keeps the account open; its ticket must survive.
   IF public.account_erasure_refund_open(p_profile_id) THEN
     RAISE EXCEPTION 'ACCOUNT_ERASURE_REFUND_PENDING' USING ERRCODE = 'P0001';
   END IF;

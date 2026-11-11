@@ -42,7 +42,7 @@ describe('buildErasureImpactLines', () => {
     expect(buildErasureImpactLines(open)[0]).toEqual({ tone: 'block', text: '你有一笔退款申请在处理中，处理完成后才能注销。' });
     expect(erasureBlocked(open)).toBe(true);
     expect(erasureBlocked({ ...base, refundRequestOpen: false })).toBe(false);
-    // A server without the field (before migration 9999) is read as no request.
+    // A server without the field (before migration 0512) is read as no request.
     expect(erasureBlocked(base)).toBe(false);
     expect(erasureBlocked({ ...base, subscriptionRenewing: true })).toBe(true);
   });

@@ -22,7 +22,7 @@ const previewSchema = z.object({
   pendingPayments: z.number(),
   runsInFlight: z.number(),
   closed: z.boolean(),
-  // Migration 9999 (Owner 2026-11-11): a refund request being handled blocks erasure; absent before it, read as false.
+  // Migration 0512 (Owner 2026-11-11): a refund request being handled blocks erasure; absent before it, read as false.
   refundRequestOpen: z.boolean().default(false),
 });
 export type AccountErasurePreview = z.infer<typeof previewSchema>;

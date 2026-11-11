@@ -25,7 +25,7 @@ BEGIN
     -- receipts settle, an unknown cost keeps its share of the freeze for the settlement pass.
     ending := CASE WHEN t.state = 'stopping' THEN 'stopped' ELSE 'interrupted' END;
   ELSIF p_action = 'expire' AND t.state = 'paused' AND (t.updated_at < now() - interval '24 hours'
-    -- 9999: as in turn_recovery_claim, the paused turn of an account being erased expires at once.
+    -- 0512: as in turn_recovery_claim, the paused turn of an account being erased expires at once.
     OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = p_actor_id AND p.is_deleted = 'true')) THEN
     -- Owner 10-25/10-27: a paused turn that delivered nothing for 24 hours is refunded in full (expired, not delivered: D = 0);
     -- refund_all stays false so a jury is charged by its own rule in turn_user_charge (V2-7b).

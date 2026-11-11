@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
-/** Deep review 2026-11-11 item 1 (migration 9999): a buyer who left a checkout could never finish account erasure. Release
+/** Deep review 2026-11-11 item 1 (migration 0512): a buyer who left a checkout could never finish account erasure. Release
  * keeps status 'pending', and erasure_payment_terminal only knew the old path's failed/expired orders, so the financial
  * proof counted the order as money in flight forever and the auth identity was never deleted. Released, closed, unpaid
  * orders are final now; an open checkout and a released order that was paid late still hold the erasure. */

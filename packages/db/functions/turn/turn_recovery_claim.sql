@@ -17,7 +17,7 @@ BEGIN
     SELECT actor_id, id, state FROM turns
     WHERE ((state IN ('running','stopping') AND updated_at < now() - interval '15 minutes')
         OR (state = 'paused' AND (updated_at < now() - interval '24 hours'
-          -- 9999: an account being erased will never top up; its paused turn expires now, not after 24 hours.
+          -- 0512: an account being erased will never top up; its paused turn expires now, not after 24 hours.
           OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = turns.actor_id AND p.is_deleted = 'true'))))
       AND (recovery_lease_until IS NULL OR recovery_lease_until <= now())
     ORDER BY updated_at LIMIT p_limit

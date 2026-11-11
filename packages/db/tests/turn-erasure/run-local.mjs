@@ -456,7 +456,7 @@ try{
   assert.equal(await one('select stage v from account_erasure_requests where profile_id=$1',[a.actor]),'closed');
   report.checks.push('account erased while a turn is open and never closed: the recovery job closes it, the user is charged what the turn says exactly once (a second pass moves no money), the balance equals the ledger, bodies and messages are scrubbed, nothing is left in flight and the erasure reaches closed');
  }
- // 16. Deep review item 12 (9999): a turn paused for credits whose account is then erased expires at once, not after 24 hours,
+ // 16. Deep review item 12 (0512): a turn paused for credits whose account is then erased expires at once, not after 24 hours,
  // so it no longer holds the erasure (and its 12- and 20-hour alerts). A live account's paused turn still waits the 24 hours.
  {
   const pausedTurn=async()=>{
