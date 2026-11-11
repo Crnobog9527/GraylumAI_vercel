@@ -26,6 +26,10 @@ END $$;`;
 // PR-3a refresh migration (file name; number assigned by the controller).
 export const REFRESH_MIGRATION = '0272_publish_monitor_refresh.sql';
 
+// PUBLISH-SCHEDULE migration (found by name: it is numbered by the controller when it is applied).
+export const scheduleMigrationPath = () => `packages/db/migrations/${readdirSync(resolve(import.meta.dirname, '../../migrations'))
+  .filter(file => /^\d{4}_publish_monitor_schedule\.sql$/.test(file)).sort().at(-1)}`;
+
 // Every later publish-monitor migration after `from`, in order, so a reapplication check replays the chain
 // that really redefines its functions (MAINT-P1: the hand-written list had gone stale once CI ran this suite).
 // Also the cross-domain migration that rewrote the publish-job refusals to PT409 (its name is not publish_monitor_*), and the turn

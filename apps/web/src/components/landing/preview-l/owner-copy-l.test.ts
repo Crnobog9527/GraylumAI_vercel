@@ -19,7 +19,8 @@ describe('the Owner\'s edits of 2026-10-18 (edit mode), carried into sample L on
   });
 
   it('keeps the Owner\'s line breaks in the words and shows them on the page', () => {
-    expect(L_LATER.two.lede.split('\n')).toEqual(['定位定下来以后，每周在同一个对话里：', '先选题，再定标题和封面，然后找资料、按你的写作风格写稿、出分镜。']);
+    // Owner 2026-11-11 ("文字也太多了"): step two's two lines under its title are one sentence now.
+    expect(L_LATER.two.lede).toBe('定位定下来以后，每周在同一个对话里做内容。');
     expect(L_NOTE_ANSWERS.p5).toContain('排好。\n打开');
     expect(read('l.module.css')).toMatch(/white-space: pre-line/);
     expect(read('SampleL.tsx')).toContain('own.lines');

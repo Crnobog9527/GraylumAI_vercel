@@ -21,6 +21,7 @@ vi.mock('@/hooks/use-credits', () => ({
   useCreditsBalance: () => ({ credits: 10, status: 'ready', isLoading: false, error: null, refetch: vi.fn() }),
 }));
 vi.mock('@/hooks/use-banner', () => ({ useBanner: () => ({ banners: [] }) }));
+vi.mock('@/hooks/use-profile-prefetch', () => ({ useProfilePrefetch: () => undefined }));
 vi.mock('@/components/profile/ProfileShell', () => ({ ProfileShell: ({ children }: { children: ReactNode }) => <>{children}</> }));
 vi.mock('@/components/layout/GlobalBanner', () => ({ default: () => null }));
 vi.mock('@/components/profile/ProfileSidebar', () => ({

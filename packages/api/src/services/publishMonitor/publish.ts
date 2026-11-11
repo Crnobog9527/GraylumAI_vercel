@@ -44,16 +44,22 @@ export const publishInput = z.object({
   // a replay returns the existing job whatever the price is now.
   maxHoldCredits: z.number().int().min(0).max(1_000_000),
   media: z.array(media).max(MAX_MEDIA_ITEMS),
+  // PUBLISH-SCHEDULE: an ISO 8601 instant with offset; Post for Me publishes then (15 minutes to 30 days ahead,
+  // checked by the database). Absent publishes now.
+  scheduledAt: z.string().datetime({ offset: true }).optional(),
 }).strict();
 export type PublishInput = z.infer<typeof publishInput>;
 
 const targetView = z.object({ connectionId: uuid, platform: z.string(), status: z.enum(['pending', 'published', 'failed']),
   url: z.string().nullable().optional() }).strict();
 export const jobView = z.object({
-  id: uuid, state: z.enum(['claimed', 'dispatching', 'unknown', 'completed', 'failed', 'released']),
+  id: uuid, state: z.enum(['claimed', 'dispatching', 'scheduled', 'unknown', 'completed', 'failed', 'released']),
   businessId: uuid.nullable(), workItemId: uuid.nullable(), targets: z.array(targetView),
   holdCredits: z.number().int().nullable(), chargedCredits: z.number().int().nullable(), manualReview: z.boolean(),
   errorCode: z.string().nullable(), createdAt: z.string(), updatedAt: z.string(),
+  // PUBLISH-SCHEDULE fields (optional so a view from before the migration still parses).
+  scheduledAt: z.string().nullable().optional(), dispatchedAt: z.string().nullable().optional(),
+  captionPreview: z.string().nullable().optional(), cancelReason: z.string().nullable().optional(),
 }).passthrough();
 export type PublishJob = z.infer<typeof jobView>;
 
@@ -61,17 +67,24 @@ export type PublishErrorCode = 'PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH' | 'PUBLISH
   | 'PUBLISH_MONITOR_WORK_ITEM_INVALID' | 'PUBLISH_MONITOR_QUOTA_EXHAUSTED' | 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED'
   | 'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED' | 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS' | 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS'
   | 'PUBLISH_MONITOR_JOB_NOT_FOUND' | 'PUBLISH_MONITOR_ACCOUNT_CLOSED' | 'PUBLISH_MONITOR_PROVIDER_BUSY'
-  | 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' | 'PUBLISH_MONITOR_PRICE_CHANGED' | 'PUBLISH_MONITOR_UNAVAILABLE';
+  | 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' | 'PUBLISH_MONITOR_PRICE_CHANGED' | 'PUBLISH_MONITOR_UNAVAILABLE'
+  | ScheduleErrorCode;
+/** PUBLISH-SCHEDULE refusals (database codes, plus PROVIDER_CHANGED when Post for Me no longer has the post as sent). */
+export type ScheduleErrorCode = 'PUBLISH_SCHEDULE_TIME_INVALID' | 'PUBLISH_SCHEDULE_NOT_SCHEDULED'
+  | 'PUBLISH_SCHEDULE_CANCELLING' | 'PUBLISH_SCHEDULE_BUSY' | 'PUBLISH_SCHEDULE_CHANGED' | 'PUBLISH_SCHEDULE_LOCKED'
+  | 'PUBLISH_SCHEDULE_PROVIDER_CHANGED';
 const KNOWN: PublishErrorCode[] = ['PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH', 'PUBLISH_MONITOR_TARGET_INVALID',
   'PUBLISH_MONITOR_WORK_ITEM_INVALID', 'PUBLISH_MONITOR_QUOTA_EXHAUSTED', 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED',
   'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED', 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS', 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS',
-  'PUBLISH_MONITOR_JOB_NOT_FOUND', 'PUBLISH_MONITOR_ACCOUNT_CLOSED'];
+  'PUBLISH_MONITOR_JOB_NOT_FOUND', 'PUBLISH_MONITOR_ACCOUNT_CLOSED', 'PUBLISH_SCHEDULE_TIME_INVALID',
+  'PUBLISH_SCHEDULE_NOT_SCHEDULED', 'PUBLISH_SCHEDULE_CANCELLING', 'PUBLISH_SCHEDULE_BUSY', 'PUBLISH_SCHEDULE_CHANGED',
+  'PUBLISH_SCHEDULE_LOCKED'];
 
 export class PublishError extends Error {
   constructor(readonly code: PublishErrorCode, readonly retryAfterSeconds?: number) { super(code); }
 }
 
-async function rpc<T>(db: Rpc, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
+export async function rpc<T>(db: Rpc, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
   const result = await db.rpc(name, args);
   if (result.error) {
     const known = KNOWN.find(code => result.error?.message?.includes(code));
@@ -90,10 +103,14 @@ export function publishFingerprint(input: PublishInput): string {
     // The cover is part of the request only when chosen, so fingerprints of requests without one stay unchanged.
     media: input.media.map(item => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
       ...(item.thumbnailTimestampMs === undefined ? {} : { thumbnailTimestampMs: item.thumbnailTimestampMs }) })),
+    // Same rule for the scheduled time (normalized to the UTC instant, so offsets of one moment are one request).
+    ...(input.scheduledAt === undefined ? {} : { scheduledAt: new Date(input.scheduledAt).toISOString() }),
   });
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
+const PREPARE_REFUSALS = new Set<PublishErrorCode>(['PUBLISH_SCHEDULE_TIME_INVALID', 'PUBLISH_MONITOR_QUOTA_EXHAUSTED',
+  'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED']);
 const claimed = jobView.and(z.object({ replayed: z.boolean(), quotaAlert: z.boolean().optional() }).passthrough());
 const dispatched = jobView.and(z.object({ dispatch: z.boolean(),
   providerAccountIds: z.array(providerId).optional() }).passthrough());
@@ -168,6 +185,16 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
     await releaseProven(db, job.id, 'PUBLISH_MONITOR_PRICE_CHANGED', pacing);
     throw new PublishError('PUBLISH_MONITOR_PRICE_CHANGED');
   }
+  // The scheduled time, caption preview (schedule view) and media count go in before anything is sent.
+  const scheduledAt = input.scheduledAt === undefined ? null : new Date(input.scheduledAt).toISOString();
+  try {
+    await rpc(db, 'publish_monitor_schedule_prepare', { a: profileId, p_job: job.id, p_scheduled_at: scheduledAt,
+      p_preview: Array.from(input.caption.normalize('NFC')).slice(0, 40).join(''), p_media_count: input.media.length }, jobView);
+  } catch (error) {
+    // Nothing was sent: a time or billing period the database refuses returns the hold and slots at once.
+    if (error instanceof PublishError && PREPARE_REFUSALS.has(error.code)) await releaseProven(db, job.id, error.code, pacing);
+    throw error;
+  }
   const ids = await targetAccountIds(db, profileId, job.id);
   const observed = await observeTargets(deps, ids, pacing);
   // The slot for the create call is taken before the job is marked as possibly sent.
@@ -180,7 +207,8 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
   try {
     created = await createPost(deps, { externalId: job.id, caption: input.caption,
       socialAccountIds: ready.providerAccountIds,
-      media: input.media.map(item => ({ url: item.mediaUrl, thumbnailTimestampMs: item.thumbnailTimestampMs })) });
+      media: input.media.map(item => ({ url: item.mediaUrl, thumbnailTimestampMs: item.thumbnailTimestampMs })),
+      ...(scheduledAt ? { scheduledAt } : {}) });
   } catch {
     // createPost only throws while checking its input, before any request: provably not sent, so release now.
     return releaseProven(db, job.id, 'PUBLISH_MONITOR_REQUEST_INVALID', pacing);
@@ -191,6 +219,11 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
   if (created.kind === 'unknown') {
     logger.warn('api', 'publish_monitor_publish_unknown', { jobId: job.id, reason: created.reason });
     return rpc(db, 'publish_monitor_publish_unknown', { p_job: job.id, p_code: 'PUBLISH_MONITOR_RESULT_UNKNOWN' }, jobView);
+  }
+  // A scheduled create that Post for Me did not report as already sending waits for its time; the cron step reads the
+  // post before the time and moves it on if it was in fact sent.
+  if (scheduledAt && created.status !== 'processing' && created.status !== 'processed') {
+    return rpc(db, 'publish_monitor_schedule_accepted', { p_job: job.id, p_provider_post_id: created.providerPostId }, jobView);
   }
   return rpc(db, 'publish_monitor_publish_record', { p_job: job.id, p_provider_post_id: created.providerPostId,
     p_results: {} }, jobView);
@@ -235,7 +268,13 @@ async function checkWithProvider(db: Rpc, deps: ClientDeps, jobId: string, provi
     if (found.kind === 'rate_limited') return { learned: false, busy: true, code: 'PUBLISH_MONITOR_PROVIDER_BUSY', job: null };
     if (found.kind !== 'ok') return { learned: false, busy: false, code: 'PUBLISH_MONITOR_CHECK_FAILED', job: null };
     if (!found.value) return { learned: false, busy: false, code: 'PUBLISH_MONITOR_NOT_FOUND_YET', job: null };
-    postId = found.value;
+    postId = found.value.id;
+    // A scheduled post found after an unknown create: it now waits for its time (PUBLISH-SCHEDULE).
+    if (found.value.status === 'scheduled') {
+      const accepted = await rpc(db, 'publish_monitor_schedule_accepted', { p_job: jobId, p_provider_post_id: postId },
+        jobView.and(z.object({ accepted: z.boolean() }).passthrough()));
+      if (accepted.accepted) return { learned: true, busy: false, code: 'PUBLISH_SCHEDULE_ACCEPTED', job: accepted };
+    }
   }
   const rows = await listPostResults(deps, postId);
   if (rows.kind === 'rate_limited') return { learned: false, busy: true, code: 'PUBLISH_MONITOR_PROVIDER_BUSY', job: null };
