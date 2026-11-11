@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 import { POSTGREST_IMAGE } from '../v3/images.mjs';
 import { refusalsMigration } from './migration.mjs';
+import { scheduleMigrationPath } from '../publish-monitor/fixtures.mjs';
 
 const migration = refusalsMigration();
 const run = (args, input) => spawnSync('docker', args, { input, encoding: 'utf8', cwd: root,
@@ -180,6 +181,8 @@ try {
   // The replayed migration leaves content_erasure_confirm out (batch F owns it), so put the live definition back from before the test copies.
   await c.query(definitions.get('content_erasure_confirm'));
   await c.query(migration); await c.query(migration);
+  // PUBLISH-SCHEDULE redefines publish_monitor_publish_record after 0504: replay it too, as the live chain does.
+  await c.query(read(scheduleMigrationPath()));
   assert.deepEqual(await grants(), before);
   for (const [fn, text] of definitions) assert.equal(await v(`SELECT pg_get_functiondef(p.oid) v FROM pg_proc p
     JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=$1`, [fn]), text, fn);

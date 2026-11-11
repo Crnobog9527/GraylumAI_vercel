@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // The readiness audit's check for billing reservations (pre_deduct records in billing_history) that have no observed terminal
 // record (settle, refund, abort_settle). Split out of billingReconciliation.ts. It only reports: nothing here releases funds.
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BillingReadinessFinding } from './billingReconciliation';
 import type { BillingHistoryRow } from './billingReadinessRows';
 
@@ -23,7 +24,26 @@ const RESERVATION_ERROR_AGE_HOURS = 48;
 const RESERVATION_HOLD_IDS_SHOWN = 50;
 const FUTURE_TOLERANCE_MS = 3_600_000;
 
-function summarizeReservations(holds: BillingHistoryRow[], nowMs: number) {
+/**
+ * PUBLISH-SCHEDULE: the holds of scheduled publishes (hold id -> scheduled time in ms). A scheduled publish holds its
+ * credits from confirmation until Post for Me sends it (up to 30 days), so its hold is "in flight" until the scheduled
+ * time and ages from then. Any failure to read returns no entries: every hold then ages from its creation (more findings,
+ * never fewer).
+ */
+export async function readScheduledHolds(supabase: Pick<SupabaseClient, 'rpc'>): Promise<Map<string, number>> {
+  const holds = new Map<string, number>();
+  try {
+    const { data, error } = await supabase.rpc('publish_monitor_schedule_holds');
+    if (error || !Array.isArray(data)) return holds;
+    for (const entry of data as Array<Record<string, unknown>>) {
+      const at = typeof entry?.scheduledAt === 'string' ? Date.parse(entry.scheduledAt) : NaN;
+      if (typeof entry?.preDeductId === 'string' && Number.isFinite(at)) holds.set(entry.preDeductId, at);
+    }
+  } catch { holds.clear(); }
+  return holds;
+}
+
+function summarizeReservations(holds: BillingHistoryRow[], nowMs: number, scheduled: Map<string, number>) {
   const accounts = new Set<string>();
   let credits = 0;
   // A hold without a readable creation time cannot be shown young: it counts as the oldest.
@@ -32,7 +52,11 @@ function summarizeReservations(holds: BillingHistoryRow[], nowMs: number) {
   for (const hold of holds) {
     accounts.add(hold.user_id as string);
     credits += Math.abs(toInteger(hold.amount));
-    const createdMs = getCreatedAtMs(hold);
+    const createdAt = getCreatedAtMs(hold);
+    const scheduledAt = hold.id ? scheduled.get(hold.id) : undefined;
+    // A scheduled publish's hold is in flight until its time and ages from then (a time still ahead counts as now).
+    const createdMs = createdAt === null || scheduledAt === undefined ? createdAt
+      : Math.max(createdAt, Math.min(scheduledAt, nowMs));
     // An unreadable creation time, or one more than an hour in the future (a skewed clock), cannot show the hold young.
     if (createdMs === null || createdMs > nowMs + FUTURE_TOLERANCE_MS) timeUnknown = true;
     else if (oldestMs === null || createdMs < oldestMs) oldestMs = createdMs;
@@ -49,6 +73,7 @@ export function reservationFindings(
   holds: BillingHistoryRow[],
   now: Date,
   launchBaselineAt: Date | undefined,
+  scheduledHolds: Map<string, number> = new Map(),
 ): BillingReadinessFinding[] {
   if (holds.length === 0) return [];
   const baselineMs = launchBaselineAt?.getTime() ?? null;
@@ -62,7 +87,7 @@ export function reservationFindings(
     { holds: holds.filter((hold) => !beforeSet.has(hold)), preBaseline: false },
   ];
   return groups.filter((group) => group.holds.length > 0).map(({ holds: group, preBaseline }) => {
-    const summary = summarizeReservations(group, now.getTime());
+    const summary = summarizeReservations(group, now.getTime(), scheduledHolds);
     const old = summary.timeUnknown || summary.olderThanLimit;
     return {
       code: 'billing_reservation_unresolved',

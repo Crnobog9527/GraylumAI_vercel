@@ -26,11 +26,16 @@ const PUBLISH_FORBIDDEN = new Set(['PUBLISH_MONITOR_TARGET_INVALID', 'PUBLISH_MO
 const PUBLISH_PRECONDITION = new Set(['PUBLISH_MONITOR_QUOTA_EXHAUSTED', 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED',
   'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED', 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS', 'PUBLISH_MONITOR_PRICE_CHANGED']);
 
+// PUBLISH-SCHEDULE: the post changed since the page read it, or it is too close to its time; the page reloads.
+const SCHEDULE_CONFLICT = new Set(['PUBLISH_SCHEDULE_NOT_SCHEDULED', 'PUBLISH_SCHEDULE_CANCELLING', 'PUBLISH_SCHEDULE_BUSY',
+  'PUBLISH_SCHEDULE_CHANGED', 'PUBLISH_SCHEDULE_LOCKED', 'PUBLISH_SCHEDULE_PROVIDER_CHANGED']);
+
 function publishToTrpc(cause: PublishError): TRPCError {
   if (cause.code === 'PUBLISH_MONITOR_PROVIDER_BUSY') return new RateLimitError('rate_limited', cause.retryAfterSeconds ?? 60);
   if (cause.code === 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS') return new RateLimitError('rate_limited', 3600);
   const code = cause.code === 'PUBLISH_MONITOR_JOB_NOT_FOUND' ? 'NOT_FOUND'
-    : cause.code === 'PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH' ? 'CONFLICT'
+    : cause.code === 'PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH' || SCHEDULE_CONFLICT.has(cause.code) ? 'CONFLICT'
+      : cause.code === 'PUBLISH_SCHEDULE_TIME_INVALID' ? 'BAD_REQUEST'
       : PUBLISH_FORBIDDEN.has(cause.code) ? 'FORBIDDEN'
         : PUBLISH_PRECONDITION.has(cause.code) ? 'PRECONDITION_FAILED' : 'INTERNAL_SERVER_ERROR';
   return new TRPCError({ code, message: cause.code, cause });

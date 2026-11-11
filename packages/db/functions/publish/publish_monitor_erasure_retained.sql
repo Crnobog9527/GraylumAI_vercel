@@ -11,7 +11,7 @@ AS $function$
  SELECT CASE t
   WHEN 'social_connections' THEN j->>'provider_account_id' IS NOT NULL
   -- Open jobs hold frozen credits and publish slots: kept until publishing releases or settles them (plan §9 item 17).
-  WHEN 'social_publish_jobs' THEN j->>'state' IN ('claimed','dispatching','unknown')
+  WHEN 'social_publish_jobs' THEN j->>'state' IN ('claimed','dispatching','scheduled','unknown')
   WHEN 'social_connect_requests' THEN j->>'state' IN ('awaiting_callback','pending_confirm') OR j->>'cleaned_at' IS NULL
    OR (j->>'created_at')::timestamptz>clock_timestamp()-interval '30 days'
   ELSE false END
