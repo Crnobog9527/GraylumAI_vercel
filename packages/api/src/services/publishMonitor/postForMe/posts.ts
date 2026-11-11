@@ -13,17 +13,31 @@ const JOB_ID = z.string().uuid();
 // Plan §6: only these synchronous answers prove the post was not created. 408/409/429 and 5xx may have been accepted.
 const DEFINITE_REJECTIONS = new Set([400, 401, 403, 404, 422]);
 
+/** An ISO 8601 instant with offset, sent to the provider in UTC (its API takes UTC only). */
+export function utcInstant(value: string): string {
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms) || !/(Z|[+-]\d{2}:\d{2})$/.test(value)) throw new Error('POSTFORME_SCHEDULED_AT_INVALID');
+  return new Date(ms).toISOString();
+}
+
 export type CreatePostInput = {
   externalId: string; caption: string; socialAccountIds: string[];
   media: Array<{ url: string; thumbnailTimestampMs?: number }>;
+  /** PUBLISH-SCHEDULE: Post for Me publishes at this UTC time instead of now. */
+  scheduledAt?: string;
 };
+/** Post for Me post states (OpenAPI SocialPostDto.status). */
+export type ProviderPostStatus = 'draft' | 'scheduled' | 'processing' | 'processed';
+const STATUS = z.enum(['draft', 'scheduled', 'processing', 'processed']);
 
 export type CreateOutcome =
-  | { kind: 'created'; providerPostId: string }
+  | { kind: 'created'; providerPostId: string; status: ProviderPostStatus | null }
   | { kind: 'rejected'; status: number }
   | { kind: 'unknown'; reason: string };
 
-const postShape = z.object({ id: z.string().regex(ID), external_id: z.string().nullable().optional() }).passthrough();
+const postShape = z.object({ id: z.string().regex(ID), external_id: z.string().nullable().optional(),
+  status: z.string().max(32).optional() }).passthrough();
+const statusOf = (raw: string | undefined): ProviderPostStatus | null => STATUS.safeParse(raw).data ?? null;
 
 /**
  * The caller must already hold a shared limiter slot (taken before the job is marked as dispatching), so a busy
@@ -43,22 +57,23 @@ export async function createPost(deps: ClientDeps, input: CreatePostInput): Prom
   });
   const result = await exchange({ method: 'POST', path: '/social-posts', body: {
     caption: input.caption, social_accounts: input.socialAccountIds, external_id: input.externalId,
-    ...(media.length > 0 ? { media } : {}),
+    ...(media.length > 0 ? { media } : {}), ...(input.scheduledAt ? { scheduled_at: utcInstant(input.scheduledAt) } : {}),
   } }, deps.apiKey, deps);
   if (result.kind === 'unknown') return { kind: 'unknown', reason: result.reason };
   if (DEFINITE_REJECTIONS.has(result.status)) return { kind: 'rejected', status: result.status };
   if (result.kind === 'response' && result.status >= 200 && result.status < 300) {
     const parsed = postShape.safeParse(result.json);
     if (parsed.success && (parsed.data.external_id ?? input.externalId) === input.externalId) {
-      return { kind: 'created', providerPostId: parsed.data.id };
+      return { kind: 'created', providerPostId: parsed.data.id, status: statusOf(parsed.data.status) };
     }
     return { kind: 'unknown', reason: 'RESPONSE_SHAPE' };
   }
   return { kind: 'unknown', reason: result.kind === 'unreadable' ? result.reason : `HTTP_${result.status}` };
 }
 
+export type FoundPost = { id: string; status: ProviderPostStatus | null };
 /** The provider post created for one job, found by its external_id (the job id); null when none exists yet. */
-export async function findPostByExternalId(deps: ClientDeps, externalId: string): Promise<Outcome<string | null>> {
+export async function findPostByExternalId(deps: ClientDeps, externalId: string): Promise<Outcome<FoundPost | null>> {
   JOB_ID.parse(externalId);
   const query = new URLSearchParams({ external_id: externalId, limit: '2', offset: '0' });
   const found = await call(deps, { method: 'GET', path: `/social-posts?${query}` }, json => {
@@ -67,9 +82,9 @@ export async function findPostByExternalId(deps: ClientDeps, externalId: string)
     const matching = parsed.data.data.filter(post => post.external_id === externalId);
     // Two posts for one job would mean it was sent twice: refuse to guess which one to settle.
     if (matching.length > 1) return null;
-    return { id: matching[0]?.id ?? null };
+    return { post: matching[0] ? { id: matching[0].id, status: statusOf(matching[0].status) } : null };
   });
-  return found.kind === 'ok' ? { kind: 'ok', value: found.value.id } : found;
+  return found.kind === 'ok' ? { kind: 'ok', value: found.value.post } : found;
 }
 
 export type PostResult = { socialAccountId: string; success: boolean; url: string | null };

@@ -58,7 +58,7 @@ describe('Post for Me Vault reader', () => {
       externalId: '11111111-1111-4111-8111-111111111111', caption: 'synthetic publish',
       socialAccountIds: ['spc_1'], media: [],
     });
-    expect(outcome).toEqual({ kind: 'created', providerPostId: 'sp_1' });
+    expect(outcome).toEqual({ kind: 'created', providerPostId: 'sp_1', status: null });
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(fetchImpl.mock.calls[0]?.[1].headers).toMatchObject({ Authorization: `Bearer ${KEY}` });
   });

@@ -46,6 +46,11 @@ BEGIN
  ELSIF j.state='dispatching' THEN
   UPDATE social_publish_jobs SET state='unknown',next_check_at=clock_timestamp()+interval '2 minutes',
    updated_at=clock_timestamp() WHERE id=j.id RETURNING * INTO j;
+ ELSIF j.state='scheduled' AND j.results<>'{}'::jsonb THEN
+  -- It was sent: from now on it is reconciled like a dispatched job, counting the 24 hours from the scheduled time.
+  UPDATE social_publish_jobs SET state='unknown',dispatched_at=LEAST(j.scheduled_at,clock_timestamp()),
+   next_check_at=clock_timestamp()+interval '2 minutes',check_attempts=0,updated_at=clock_timestamp()
+  WHERE id=j.id RETURNING * INTO j;
  END IF;
  RETURN publish_monitor_publish_view(j);
 END $function$;

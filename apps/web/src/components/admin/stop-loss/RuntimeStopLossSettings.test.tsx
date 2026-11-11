@@ -193,7 +193,7 @@ it('shows friendly errors for a failed toggle and a forbidden read', async () =>
   } finally { await forbidden.page.close(); }
 }, 20000);
 
-it('shows empty limits as not blocking, saves the full config and reads it back', async () => {
+it('says what the limits really do (alert only / not in effect), saves the full config and reads it back', async () => {
   const { page, errors } = await open({ usage: { utcDate: '2026-10-11', userUsd: '0', siteUsd: '3.456789', reservedUsd: '0.5' } });
   try {
     const usage = page.getByTestId('stop-loss-usage');
@@ -201,7 +201,14 @@ it('shows empty limits as not blocking, saves the full config and reads it back'
     // A reservation is shown apart and never counted as spent.
     await browserExpect(usage).toContainText('另有预占（还没花出去，按调用上限暂扣）：$0.5');
     await browserExpect(usage).toContainText('不计入上面的实际成本');
-    await browserExpect(usage).toContainText('全站每日上限：未设置，不拦截。');
+    await browserExpect(usage).toContainText('全站每日上限：未设置，不告警。');
+    await browserExpect(usage).toContainText('每位用户每日上限：未设置');
+    await browserExpect(usage).toContainText('目前不生效');
+    // Neither daily limit refuses a call on the current path: the page must not promise it (deep review 2026-11-11, finding 11).
+    await browserExpect(page.getByText('只告警，不拒绝调用', { exact: false })).toBeVisible();
+    await browserExpect(page.getByText('目前不生效：现在的对话不按单个用户的美元成本拦截', { exact: false })).toBeVisible();
+    await browserExpect(page.getByText('真正会拒绝新调用的全站每日上限是系统配置 core_path_v2 里的 stopLoss.limitUsd', { exact: false })).toBeVisible();
+    await browserExpect(page.locator('section[aria-labelledby="stop-loss-limits-title"]').getByText('被拒绝', { exact: false })).toHaveCount(0);
     await browserExpect(page.getByText('设置来源：默认（全部未设置）')).toBeVisible();
     const save = page.getByRole('button', { name: '保存止损设置' });
     await browserExpect(save).toBeDisabled();
@@ -209,9 +216,12 @@ it('shows empty limits as not blocking, saves the full config and reads it back'
     await site.fill('-3');
     await browserExpect(page.getByText('请填写不带符号的金额', { exact: false })).toBeVisible();
     await browserExpect(save).toBeDisabled();
+    await site.fill('0');
+    await browserExpect(page.getByText('全站每日上限填 0，每日检查每次都会记一条“已达到”的告警；它不会拒绝任何调用。')).toBeVisible();
     await site.fill('3');
+    // The per-user limit is not in effect, so a 0 there warns about nothing.
     await page.getByLabel('每位用户每日上限（美元）').fill('0');
-    await browserExpect(page.getByText('上限填 0 会让对应范围当天的新计费调用全部被拒绝', { exact: false })).toBeVisible();
+    await browserExpect(page.getByText('全站每日上限填 0', { exact: false })).toHaveCount(0);
     await page.getByLabel('每位用户每日上限（美元）').fill('0.5');
     await page.getByLabel('通知渠道备注').fill('  运营群  ');
     await save.click();

@@ -2573,121 +2573,80 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     );
   });
 
-  it('reduces user detail stats to shared datasets plus one planned message count', async () => {
-    const adminQueries: string[] = [];
-    const selectOptions: Array<{ table: string; count?: string; head?: boolean }> = [];
-
-    const adminSupabase = {
+  /** An admin client for getUserDetails: the profile, the ticket count, the activity log, and the two usage functions. */
+  function userDetailsClient(answers: { usage?: unknown; credits?: unknown; rpcError?: string; ticketCount?: number | null } = {}) {
+    const tables: string[] = [];
+    const selects: Array<{ table: string; columns?: string; count?: string; head?: boolean }> = [];
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      rpc(name: string, args: Record<string, unknown>) {
+        rpcCalls.push({ name, args });
+        if (answers.rpcError === name) return Promise.resolve({ data: null, error: { code: '57014', message: 'private detail' } });
+        if (name === 'usage_stats_for_user') return Promise.resolve({ data: answers.usage ?? { conversations: 2, messages: 12, usageDays: 3 }, error: null });
+        if (name === 'usage_credit_summary_for_user') {
+          return Promise.resolve({ data: answers.credits
+            ?? { totalEarned: 500, totalSpent: 50, transactionCount: 9, byType: {}, byLedgerType: {} }, error: null });
+        }
+        throw new Error(`Unexpected admin function ${name}`);
+      },
       from(table: string) {
-        adminQueries.push(table);
-
-        const state: {
-          table: string;
-          eqValue?: string;
-          inValues?: string[];
-        } = { table };
-
+        tables.push(table);
         const execute = async () => {
-          switch (state.table) {
-            case 'profiles':
-              return {
-                data: {
-                  id: 'user-1',
-                  email: 'user@example.com',
-                  nickname: 'User',
-                },
-                error: null,
-              };
-            case 'conversations':
-              return {
-                data: [{ id: 'c1' }, { id: 'c2' }],
-                error: null,
-              };
-            case 'credit_transactions':
-              return {
-                data: [{ amount: -20 }, { amount: -30 }],
-                error: null,
-              };
-            case 'tickets':
-              return {
-                data: [{ id: 't1' }],
-                error: null,
-              };
-            case 'messages':
-              return {
-                data: null,
-                error: null,
-                count: 12,
-              };
-            case 'user_activity_logs':
-              return {
-                data: [{ id: 'log-1', action: 'role_change' }],
-                error: null,
-              };
-            default:
-              throw new Error(`Unexpected admin table ${state.table}`);
+          switch (table) {
+            case 'profiles': return { data: { id: 'user-1', email: 'user@example.com', nickname: 'User' }, error: null };
+            case 'tickets': return { data: null, error: null, count: answers.ticketCount === undefined ? 1 : answers.ticketCount };
+            case 'user_activity_logs': return { data: [{ id: 'log-1', action: 'role_change' }], error: null };
+            // conversations, messages and credit_transactions are not read row by row any more.
+            default: throw new Error(`Unexpected admin table ${table}`);
           }
         };
-
         const builder = {
-          select(_columns?: string, options?: { count?: string; head?: boolean }) {
-            selectOptions.push({ table: state.table, count: options?.count, head: options?.head });
+          select(columns?: string, options?: { count?: string; head?: boolean }) {
+            selects.push({ table, columns, count: options?.count, head: options?.head });
             return builder;
           },
-          eq(_field: string, value: string) {
-            state.eqValue = value;
-            return builder;
-          },
-          in(_field: string, values: string[]) {
-            state.inValues = values;
-            return builder;
-          },
-          order() {
-            return builder;
-          },
-          limit() {
-            return builder;
-          },
-          single() {
-            return execute();
-          },
+          eq() { return builder; },
+          order() { return builder; },
+          limit() { return builder; },
+          single() { return execute(); },
           then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
             return execute().then(onFulfilled, onRejected);
           },
-          catch(onRejected: (reason: unknown) => unknown) {
-            return execute().catch(onRejected);
-          },
-          finally(onFinally: () => void) {
-            return execute().finally(onFinally);
-          },
         };
-
         return builder;
       },
     };
+    return { client, tables, selects, rpcCalls };
+  }
+  const USER = '11111111-1111-4111-8111-111111111111';
 
-    const caller = createAdminCaller(adminSupabase);
-    const result = await caller.getUserDetails({ userId: '11111111-1111-4111-8111-111111111111' });
+  it('reads user detail stats from the per-turn core and the ledger functions, counted in the database', async () => {
+    const f = userDetailsClient();
+    const result = await createAdminCaller(f.client).getUserDetails({ userId: USER });
 
-    expect(result.stats).toMatchObject({
-      totalConversations: 2,
-      totalMessages: 12,
-      totalCreditsSpent: 50,
-      totalTickets: 1,
-    });
+    expect(result.stats).toEqual({ totalConversations: 2, totalMessages: 12, totalCreditsSpent: 50, totalTickets: 1 });
     expect(result.recentActivity).toEqual([{ id: 'log-1', action: 'role_change' }]);
-    expect(selectOptions.find((option) => option.table === 'messages')).toMatchObject({
-      count: 'planned',
-      head: true,
-    });
-    expect(adminQueries).toEqual([
-      'profiles',
-      'conversations',
-      'credit_transactions',
-      'tickets',
-      'user_activity_logs',
-      'messages',
-    ]);
+    // The account the page shows, all time; never the administrator's own id.
+    expect(f.rpcCalls).toEqual(expect.arrayContaining([
+      { name: 'usage_stats_for_user', args: { p_user_id: USER } },
+      { name: 'usage_credit_summary_for_user', args: { p_user_id: USER, p_from: null } },
+    ]));
+    expect(f.rpcCalls).toHaveLength(2);
+    // Tickets are counted, not read; the retired chat tables and the ledger rows are not read at all.
+    expect(f.selects.find(select => select.table === 'tickets')).toMatchObject({ count: 'exact', head: true });
+    expect(f.tables).toEqual(['profiles', 'tickets', 'user_activity_logs']);
+  });
+
+  it.each([
+    ['the usage function fails', { rpcError: 'usage_stats_for_user' }],
+    ['the credit summary fails', { rpcError: 'usage_credit_summary_for_user' }],
+    ['the usage answer is malformed', { usage: { conversations: '2' } }],
+    ['the ticket count is missing', { ticketCount: null }],
+  ])('fails the user details instead of showing zeros when %s', async (_name, answers) => {
+    const f = userDetailsClient(answers);
+    const error = await createAdminCaller(f.client).getUserDetails({ userId: USER }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject<Partial<TRPCError>>({ code: 'INTERNAL_SERVER_ERROR', message: '读取用户详情失败，请稍后重试' });
+    expect(JSON.stringify(error)).not.toContain('private detail');
   });
 
   it('aggregates feature module page bootstrap data in one endpoint', async () => {

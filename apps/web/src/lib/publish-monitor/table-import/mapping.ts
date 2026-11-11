@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {
-  MANUAL_METRICS, MAX_METRIC_VALUE, publicHttpsUrl, type ManualMetric, type ManualRow,
-} from '@repo/api/src/services/publishMonitor/manualImport';
+// Only what the browser needs: the plain limits and the link rule, neither of which brings zod. The row type is a type
+// import, so nothing of the server's import service reaches the page (browser-imports.test.ts).
+import { MANUAL_METRICS, MAX_METRIC_VALUE, type ManualMetric } from '@repo/api/src/shared/publishMonitorManual';
+import { publicHttpsUrl } from '@repo/api/src/services/publishMonitor/postForMe/http';
+import type { ManualRow } from '@repo/api/src/services/publishMonitor/manualImport';
 import type { Grid } from './table';
 
 /**
