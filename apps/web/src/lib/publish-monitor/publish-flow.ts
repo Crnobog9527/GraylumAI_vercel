@@ -63,6 +63,7 @@ const MESSAGES: Record<string, string> = {
   PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED: '发布通道暂时繁忙，稍后自动恢复。这次没有扣积分。',
   PUBLISH_MONITOR_PRICE_NOT_CONFIGURED: '一键发布暂时不可用，请稍后再试。这次没有扣积分。',
   PUBLISH_MONITOR_INSUFFICIENT_CREDITS: '积分不够这次发布，请先充值再发。这次没有扣积分。',
+  PUBLISH_SCHEDULE_TIME_INVALID: '发布时间不能用：最早 15 分钟以后，最远 30 天以内。这次没有扣积分。',
   PUBLISH_MONITOR_TOO_MANY_REJECTIONS: '最近几次发布都被平台拒绝了，请一小时后再试，或检查素材和文案是否符合平台要求。',
   PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH: '这是一次新的发布，请重新提交。',
   PUBLISH_MONITOR_TARGET_INVALID: '选中的账号不能发布（可能已断开或没有授权发布），请刷新页面后重选。',
@@ -86,12 +87,14 @@ export function publishErrorMessage(code: string | null | undefined, httpCode?: 
   return '发布暂时没有完成，请稍后重试。';
 }
 
-export type JobState = 'claimed' | 'dispatching' | 'unknown' | 'completed' | 'failed' | 'released';
+export type JobState = 'claimed' | 'dispatching' | 'scheduled' | 'unknown' | 'completed' | 'failed' | 'released';
 export const JOB_OPEN = (state: JobState) => state === 'claimed' || state === 'dispatching' || state === 'unknown';
 
 export function jobSummary(state: JobState, manualReview: boolean): string {
   if (manualReview) return '结果还没确认，已转人工核对。积分暂时冻结，确认没发出会退回；不会重复发。';
   if (state === 'claimed' || state === 'dispatching') return '正在发布……';
+  // PUBLISH-SCHEDULE: waiting for its time (not re-read every 15 seconds; the schedule page shows what happens next).
+  if (state === 'scheduled') return '已排期，会在设定时间发出。积分暂时冻结，只按发布成功的平台扣；不会重复发。';
   if (state === 'unknown') return '已提交，正在等平台结果。积分暂时冻结，只按发布成功的平台扣；不会重复发。';
   if (state === 'completed') return '发布完成。只按发布成功的平台扣了积分。';
   if (state === 'failed') return '这次没有发布成功，积分已全部退回。可以重新提交（素材会重新上传）。';
