@@ -8,7 +8,7 @@ import { FIELDS, buildRows, suggestMapping, type Field, type Mapping } from '@/l
 import { TableImportError, parseTable, type Grid } from '@/lib/publish-monitor/table-import/table';
 import type { Brand } from './brands';
 import styles from './data-review.module.css';
-import { dataErrorMessage, errorCode, metricLabel, platformName } from './labels';
+import { dataErrorMessage, errorCode, formatDay, metricLabel, platformName } from './labels';
 
 /**
  * PUBLISH-MONITOR PR-7 (plan §4.3, §9 item 6): import numbers from a platform's exported table. The file is read in
@@ -157,7 +157,9 @@ export function RowPreview({ rows }: { rows: ReturnType<typeof buildRows>['rows'
         <tbody>
           {rows.map((row, i) => (
             <tr key={i}><td className="max-w-[240px] truncate">{row.titleExcerpt || row.postKey}</td>
-              <td>{row.postedAt ? row.postedAt.slice(0, 10) : '未提供'}</td>
+              {/* The day as the user's table shows it: a date without a zone was read in local time (mapping.ts), so it is
+                  shown in local time too. Cutting the stored UTC text showed the day before, east of Greenwich. */}
+              <td>{formatDay(row.postedAt)}</td>
               {metrics.map(key => {
                 const value = (row.metrics as Record<string, number | undefined>)[key];
                 return <td key={key}>{value === undefined ? '—' : value.toLocaleString('zh-CN')}</td>;
