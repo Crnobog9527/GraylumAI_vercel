@@ -40,8 +40,12 @@ async function expectNothingSubmittable(page: Page, field: string) {
   await page.waitForTimeout(1_500);
   expect(path(page), 'a click and Enter go nowhere').toBe(start);
   // The worst case: the form is submitted natively anyway. What was typed must not reach the address.
+  // The submit's navigation has not happened yet when evaluate() returns, and the page it leaves finished loading long ago, so
+  // waiting for a load state returned at once: the address was then read too early, and the caller's next goto() collided with
+  // this navigation (CI 2026-11-12: "net::ERR_ABORTED" at goto('/forgot-password')). Wait for the navigation itself to land.
+  const landed = page.waitForEvent('framenavigated', frame => frame === page.mainFrame());
   await page.evaluate(() => document.querySelector('form')?.submit());
-  await page.waitForLoadState('domcontentloaded');
+  await landed;
   expect(page.url(), 'what was typed is not in the address').not.toContain(SECRET);
   expect(new URL(page.url()).search, 'the query string is what it was: nothing was added').toBe(startSearch);
 }
