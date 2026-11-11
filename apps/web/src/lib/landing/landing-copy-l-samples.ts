@@ -23,6 +23,8 @@ export const L_SAMPLES_REDO = {
   reportBody: '完整报告',
   /** Round nine (V1): under every overview, the one way into the whole report (a dialog of its own). */
   fullReportOpen: '查看完整报告',
+  /** The region's address on the page, for step one's "查看样例报告" (Owner 2026-11-11). */
+  anchor: 'samples',
   loading: '正在加载完整报告…',
   close: '关闭',
   /**

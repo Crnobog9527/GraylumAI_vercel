@@ -39,7 +39,7 @@ export function SamplesL() {
   const overview = SAMPLE_OVERVIEWS[chosen.slug];
   const pick = (next: string) => { setSlug(next); if (viewer.current) viewer.current.scrollTop = 0; };
   return (
-    <section aria-labelledby="samples-title" className={k.section} data-zone="takeover" data-region="样例报告">
+    <section id={COPY.anchor} aria-labelledby="samples-title" className={k.section} data-zone="takeover" data-region="样例报告">
       <div className={k.wrap}>
         <div className={own.head}>
           <h2 id="samples-title" className={k.lead}>{COPY.title}</h2>
