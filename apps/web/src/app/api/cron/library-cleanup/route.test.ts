@@ -1,11 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks=vi.hoisted(()=>({auth:vi.fn(),create:vi.fn(),cleanup:vi.fn(),backlog:vi.fn(),flush:vi.fn()}));
+const mocks=vi.hoisted(()=>({auth:vi.fn(),create:vi.fn(),cleanup:vi.fn(),backlog:vi.fn(),flush:vi.fn(),heartbeat:vi.fn()}));
 vi.mock('@/lib/cron-auth',()=>({validateCronRequest:mocks.auth}));
 vi.mock('@supabase/supabase-js',()=>({createClient:mocks.create}));
 vi.mock('@repo/api/src/services/library/cleanup',()=>({runLibraryCleanup:mocks.cleanup}));
 vi.mock('@/lib/erasure-backlog-alert',()=>({checkLibraryBacklog:mocks.backlog,flushAlerts:mocks.flush}));
+vi.mock('@/lib/recovery-heartbeat-alert',()=>({checkRecoveryHeartbeat:mocks.heartbeat}));
 import { GET } from './route';
 afterEach(()=>vi.unstubAllEnvs());
 beforeEach(()=>{
@@ -54,4 +55,12 @@ it('checks the deletion backlog before cleanup on every run, and flushes alerts 
  mocks.cleanup.mockRejectedValue(new Error('private'));
  expect((await GET(new Request('https://synthetic.test/api/cron/library-cleanup'))).status).toBe(500);
  expect(mocks.backlog).toHaveBeenCalledTimes(2);expect(mocks.flush).toHaveBeenCalledTimes(2);
+});
+it('watches the every-minute recovery job from this cron, before cleanup, also when cleanup then fails',async()=>{
+ await GET(new Request('https://synthetic.test/api/cron/library-cleanup'));
+ expect(mocks.heartbeat).toHaveBeenCalledWith({synthetic:true});
+ expect(mocks.heartbeat.mock.invocationCallOrder[0]).toBeLessThan(mocks.cleanup.mock.invocationCallOrder[0]);
+ mocks.cleanup.mockRejectedValue(new Error('private'));
+ await GET(new Request('https://synthetic.test/api/cron/library-cleanup'));
+ expect(mocks.heartbeat).toHaveBeenCalledTimes(2);expect(mocks.flush).toHaveBeenCalledTimes(2);
 });
