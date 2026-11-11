@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomUUID } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
-import { withReportFlag } from './reportFlag';
+import { withFrozenRound, withReportFlag } from './reportFlag';
 
 const projectId = randomUUID(), roundId = randomUUID();
 const manifest = { resources: ['SKILL.md'], sections: ['Secret section'], maxCharacters: 12000 };
@@ -34,4 +34,17 @@ it('leaves a read without a snapshot untouched and makes no extra call', async (
   const noIds = { snapshot: { workflow: { id: 'w' } } };
   expect(await withReportFlag(noIds, rpc)).toBe(noIds);
   expect(rpc).not.toHaveBeenCalled();
+});
+
+it('hands back the frozen round it read, so the same lookup can serve the module', async () => {
+  const round = { moduleId: 'm', workflow: { reportGeneration: manifest } };
+  const rpc = vi.fn(async () => round);
+  const result = await withFrozenRound(draft(), rpc);
+  expect(result).toMatchObject({ round, projectId, roundId });
+  expect(result.draft.snapshot.workflow.reportGeneration).toBe(true);
+  expect(rpc).toHaveBeenCalledTimes(1);
+  // Without a snapshot to look up there is no round and no query.
+  const empty = { draftId: 'd', snapshot: null };
+  expect(await withFrozenRound(empty, rpc)).toEqual({ draft: empty });
+  expect(rpc).toHaveBeenCalledTimes(1);
 });

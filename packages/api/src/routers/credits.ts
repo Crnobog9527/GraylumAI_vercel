@@ -3,11 +3,8 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeServiceUnavailableError } from '../lib/publicError';
 import { logger } from '../lib/logger';
-import {
-  countsAsCreditSpend,
-  normalizeCreditLedgerType,
-  normalizeCreditTransactionRow,
-} from '../services/creditLedger';
+import { normalizeCreditTransactionRow } from '../services/creditLedger';
+import { readCreditSummary, utcMonthStart, UsageStatsReadError } from '../services/usageStats';
 import {
   CREDIT_BALANCE_UNAVAILABLE_MESSAGE,
   classifyCreditBalanceFailure,
@@ -191,79 +188,28 @@ export const creditsRouter = router({
     .query(async ({ ctx, input }) => {
       const { period } = input;
 
-      // 计算时间范围
+      // 时间范围。'month' 是本自然月（UTC），和个人中心其他"本月消耗"同一口径（Owner 2026-10-25：只给用户看实际扣费）；
+      // 之前这里是最近 30 天，同一页上两个"本月消耗"对不上。
       const now = new Date();
-      let startDate: Date | null = null;
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const yearAgo = new Date(now);
+      yearAgo.setUTCFullYear(now.getUTCFullYear() - 1);
+      const startDate = period === 'day' ? new Date(now.getTime() - DAY_MS)
+        : period === 'week' ? new Date(now.getTime() - 7 * DAY_MS)
+        : period === 'month' ? utcMonthStart(now)
+        : period === 'year' ? yearAgo
+        : null;
 
-      switch (period) {
-        case 'day':
-          startDate = new Date(now.setDate(now.getDate() - 1));
-          break;
-        case 'week':
-          startDate = new Date(now.setDate(now.getDate() - 7));
-          break;
-        case 'month':
-          startDate = new Date(now.setMonth(now.getMonth() - 1));
-          break;
-        case 'year':
-          startDate = new Date(now.setFullYear(now.getFullYear() - 1));
-          break;
-        case 'all':
-          startDate = null;
-          break;
-      }
-
-      // 获取交易统计
-      let query = ctx.supabase
-        .from('credit_transactions')
-        .select('*')
-        .eq('user_id', ctx.profileId);
-
-      if (startDate) {
-        query = query.gte('created_at', startDate.toISOString());
-      }
-
-      const { data: transactions, error } = await query;
-
-      // 查询失败时报错，不返回全 0 冒充真实汇总
-      if (error) {
+      // 在数据库里求和（usage_credit_summary_for_user）：不分页读流水会在行数上限处被截断，合计就偏小。
+      // 读不到时报错，不返回全 0 冒充真实汇总。
+      try {
+        if (!ctx.hasSupabaseAdminPrivileges) throw new UsageStatsReadError(null);
+        return await readCreditSummary(ctx.supabaseAdmin, ctx.profileId, startDate);
+      } catch (error) {
         logger.error('billing', 'credits_summary_query_failed', {
-          code: error.code,
+          code: error instanceof UsageStatsReadError ? error.code : null,
         });
         throw createSafeServiceUnavailableError(error, '积分汇总暂时无法读取，请稍后重试');
       }
-
-      // 计算统计数据
-      const summary = {
-        totalEarned: 0,
-        totalSpent: 0,
-        transactionCount: transactions?.length ?? 0,
-        byType: {} as Record<string, { count: number; amount: number }>,
-        byLedgerType: {} as Record<string, { count: number; amount: number }>,
-      };
-
-      transactions?.forEach((txn) => {
-        const ledgerType = normalizeCreditLedgerType(txn);
-        if (ledgerType === 'grant' && txn.amount > 0) {
-          summary.totalEarned += txn.amount;
-        }
-        if (countsAsCreditSpend(txn)) {
-          summary.totalSpent += Math.abs(txn.amount);
-        }
-
-        if (!summary.byType[txn.type]) {
-          summary.byType[txn.type] = { count: 0, amount: 0 };
-        }
-        summary.byType[txn.type].count += 1;
-        summary.byType[txn.type].amount += txn.amount;
-
-        if (!summary.byLedgerType[ledgerType]) {
-          summary.byLedgerType[ledgerType] = { count: 0, amount: 0 };
-        }
-        summary.byLedgerType[ledgerType].count += 1;
-        summary.byLedgerType[ledgerType].amount += txn.amount;
-      });
-
-      return summary;
     }),
 });
