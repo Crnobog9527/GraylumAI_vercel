@@ -84,8 +84,11 @@ it('keeps 发布排期 and 数据复盘 unavailable by default and shows them av
   for (const name of ['发布排期', '数据复盘']) expect(launched).toContain(name);
 });
 
-it('links 数据复盘 to the data review page once its switch is on, leaving 发布排期 unavailable', () => {
+it('links 数据复盘 and 发布排期 to their pages once the switch is on (PUBLISH-SCHEDULE)', () => {
   const html = renderToStaticMarkup(<RailView area="review" returnParam="?returnTo=%2Fapp" dataReview><span/></RailView>);
   expect(html).toMatch(/<a aria-current="page" href="\/app\/publish-monitor\?returnTo=%2Fapp"><img[^>]*chart-bar[^>]*\/>数据复盘<\/a>/);
-  expect(html.match(/<small>待接入<\/small>/g)).toHaveLength(1);
+  expect(html).toMatch(/<a href="\/app\/publish-schedule\?returnTo=%2Fapp"><img[^>]*calendar-blank[^>]*\/>发布排期<\/a>/);
+  expect(html).not.toContain('待接入');
+  const schedule = renderToStaticMarkup(<RailView area="schedule" dataReview><span/></RailView>);
+  expect(schedule).toMatch(/<a aria-current="page" href="\/app\/publish-schedule"><img[^>]*calendar-blank[^>]*\/>发布排期<\/a>/);
 });

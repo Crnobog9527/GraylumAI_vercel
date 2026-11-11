@@ -26,15 +26,17 @@ export function estimateCacheSavings(rows: CacheCostRow[], models: ModelPriceRow
   return picoToUsd(estimatePico);
 }
 
+/** `requests`: how many requests the rows stand for, when a row is a group of them (default: one request per row). */
 export function buildPerformanceCostStats(
   rows: RecordedCostRow[],
   days: number,
   estimatedCacheSavings: number | null,
+  requests: number = rows.length,
 ) {
   const totalPico = sumUsdPico(rows.map((row) => row.total_cost_usd));
   return {
     totalCost: picoToUsd(totalPico),
-    avgCostPerRequest: rows.length ? picoToUsd(divRoundPico(totalPico, BigInt(rows.length))) : 0,
+    avgCostPerRequest: requests ? picoToUsd(divRoundPico(totalPico, BigInt(requests))) : 0,
     cacheSavings: estimatedCacheSavings,
     estimatedMonthly: picoToUsd(divRoundPico(totalPico * 30n, BigInt(days))),
   };

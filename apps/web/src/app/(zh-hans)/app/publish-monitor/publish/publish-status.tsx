@@ -1,10 +1,12 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import Link from 'next/link';
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { JOB_OPEN, jobSummary, platformName, publishErrorMessage, type JobState } from '@/lib/publish-monitor/publish-flow';
 import { trpc } from '@/trpc/client';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { dateTimeLabel, zoneLabel } from '@/lib/publish-schedule/schedule-view';
 import styles from './publish.module.css';
 
 /**
@@ -25,11 +27,15 @@ export function PublishStatus({ jobId, onRetry, onDone }: { jobId: string; onRet
   const data = job.data;
   const state = data.state as JobState;
   const open = JOB_OPEN(state);
+  const scheduledAt = typeof data.scheduledAt === 'string' ? data.scheduledAt : null;
   const retryable = state === 'failed' || state === 'released'
     || (state === 'completed' && data.targets.some(t => t.status === 'failed'));
   return (
     <section aria-label="发布结果" className={styles.card}>
       <p role="status" className={styles.statusLine}>{jobSummary(state, data.manualReview)}</p>
+      {state === 'scheduled' && scheduledAt && <p className={styles.hint}>
+        发布时间：{dateTimeLabel(scheduledAt)}（{zoneLabel()}）。发布前 10 分钟之前可以在<Link
+          href="/app/publish-schedule">发布排期</Link>里改期或取消。</p>}
       <ul className={styles.results}>
         {data.targets.map(target => (
           <li key={target.connectionId} className={styles.result}>
@@ -46,7 +52,7 @@ export function PublishStatus({ jobId, onRetry, onDone }: { jobId: string; onRet
       </ul>
       <div className={styles.stack}>
         {data.chargedCredits !== null && <p className={styles.hint}>本次扣除 {data.chargedCredits} 积分。</p>}
-        {data.chargedCredits === null && data.holdCredits !== null && open && (
+        {data.chargedCredits === null && data.holdCredits !== null && (open || state === 'scheduled') && (
           <p className={styles.hint}>暂时冻结 {data.holdCredits} 积分，结果确定后只按成功的平台扣，其余退回。</p>
         )}
         {refresh.error && <p role="alert" className={styles.error}>

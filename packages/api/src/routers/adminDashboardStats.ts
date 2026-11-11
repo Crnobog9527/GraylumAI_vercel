@@ -1,6 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { adminProcedure } from '../trpc';
-import { logAdminEndpointMetric } from './adminShared';
+import { readAdminActivity, readAdminDashboardStats } from '../services/adminActivity';
+import { createAdminOperationError, logAdminEndpointMetric } from './adminShared';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Part of the admin router (merged in ./admin.ts): the procedure paths stay `admin.<name>`.
 export const adminDashboardProcedures = {
@@ -10,36 +13,16 @@ export const adminDashboardProcedures = {
    */
   getStatistics: adminProcedure.query(async ({ ctx }) => {
     const startedAt = Date.now();
-    // Calculate date ranges
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const weekStart = new Date(now.getTime() - 7 * DAY_MS);
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-    // Fetch all statistics in parallel for better performance
-    const [
-      profilesAggregateResult,
-      ticketsResult,
-      recentUsersResult,
-      conversationsTotal,
-      recentConversationsResult,
-      transactionsResult,
-      modelsResult,
-      creditTransactionsResult,
-      topUsersResult,
-    ] = await Promise.all([
-      // Aggregate user counts and credits from one shared dataset
-      ctx.supabase
-        .from('profiles')
-        .select('id, created_at, credits')
-        .eq('is_deleted', false),
-
-      // Tickets by status
-      ctx.supabase
-        .from('tickets')
-        .select('status')
-        .eq('is_deleted', false),
-
+    // Users, tickets and the ledger are counted in the database (admin_dashboard_stats) and conversations come from the per-turn
+    // core (turn_admin_activity): an unpaged read is cut at the row cap, and the retired chat tables get no new rows.
+    const [dashboard, activity, recentUsersResult, modelsResult, topUsersResult] = await Promise.all([
+      readAdminDashboardStats(ctx.supabase, todayStart, weekStart, monthStart),
+      readAdminActivity(ctx.supabase, weekStart, new Date(now.getTime() + 60_000)),
       // Recent users (last 10)
       ctx.supabase
         .from('profiles')
@@ -47,126 +30,52 @@ export const adminDashboardProcedures = {
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .limit(10),
-
-      // Total conversations
-      ctx.supabase
-        .from('conversations')
-        .select('id', { count: 'planned', head: true })
-        .eq('is_deleted', false),
-
-      // Recent conversations for today/week rollups
-      ctx.supabase
-        .from('conversations')
-        .select('created_at')
-        .eq('is_deleted', false)
-        .gte('created_at', weekStart),
-
-      // Recent transactions for trends (last 7 days)
-      ctx.supabase
-        .from('credit_transactions')
-        .select('amount, type, created_at')
-        .gte('created_at', weekStart)
-        .order('created_at', { ascending: true }),
-
-      // Active models with usage
+      // Active models
       ctx.supabase
         .from('ai_models')
         .select('id, name, model_id, is_active')
         .eq('is_active', 'true'),
-
-      // Credit transactions summary
-      ctx.supabase.from('credit_transactions').select('type, amount'),
-
-      // Top users by credits spent (from transactions)
+      // Top users by credits held
       ctx.supabase
         .from('profiles')
         .select('id, email, nickname, avatar_url, credits')
         .eq('is_deleted', false)
         .order('credits', { ascending: false })
         .limit(5),
-    ]);
-
-    const profiles = profilesAggregateResult.data ?? [];
-    const totalCredits = profiles.reduce((sum, user) => sum + (user.credits ?? 0), 0);
-    const userStats = {
-      total: profiles.length,
-      today: 0,
-      thisWeek: 0,
-      thisMonth: 0,
-    };
-
-    for (const profile of profiles) {
-      if (profile.created_at >= todayStart) {
-        userStats.today += 1;
-      }
-      if (profile.created_at >= weekStart) {
-        userStats.thisWeek += 1;
-      }
-      if (profile.created_at >= monthStart) {
-        userStats.thisMonth += 1;
-      }
+    ]).catch((error: unknown) => { throw createAdminOperationError('读取后台统计', error); });
+    for (const result of [recentUsersResult, modelsResult, topUsersResult]) {
+      if (result.error) throw createAdminOperationError('读取后台统计', result.error);
     }
 
-    const recentConversations = recentConversationsResult.data ?? [];
+    const today = todayStart.toISOString().slice(0, 10);
     const conversationStats = {
-      total: conversationsTotal.count ?? 0,
-      today: 0,
-      thisWeek: recentConversations.length,
+      total: activity.conversations.total,
+      today: activity.conversations.days.reduce((sum, row) => sum + (row.date === today ? row.count : 0), 0),
+      thisWeek: activity.conversations.days.reduce((sum, row) => sum + row.count, 0),
     };
+    const ticketStats = dashboard.tickets;
 
-    for (const conversation of recentConversations) {
-      if (conversation.created_at >= todayStart) {
-        conversationStats.today += 1;
-      }
-    }
-
-    // Calculate ticket statistics
-    const ticketStats = {
-      total: ticketsResult.data?.length ?? 0,
-      open: ticketsResult.data?.filter(t => t.status === 'open').length ?? 0,
-      inProgress: ticketsResult.data?.filter(t => t.status === 'in_progress').length ?? 0,
-      closed: ticketsResult.data?.filter(t => t.status === 'closed').length ?? 0,
-    };
-
-    // Calculate credit transactions stats
+    // Spend is credits actually charged (ledger_type spend): the per-turn core writes them as type 'consumption', never 'deduction'.
+    const typeAmount = (type: string) => dashboard.ledger.byType[type]?.amount ?? 0;
     const transactionStats = {
-      totalDeductions: 0,
-      totalAdditions: 0,
-      totalCheckins: 0,
-      totalPurchases: 0,
-      totalRefunds: 0,
+      totalDeductions: dashboard.ledger.spent,
+      totalAdditions: typeAmount('addition'),
+      totalCheckins: typeAmount('checkin'),
+      totalPurchases: typeAmount('purchase'),
+      totalRefunds: typeAmount('refund'),
     };
-    creditTransactionsResult.data?.forEach((t: { type: string; amount: number }) => {
-      if (t.type === 'deduction') transactionStats.totalDeductions += Math.abs(t.amount);
-      else if (t.type === 'addition') transactionStats.totalAdditions += t.amount;
-      else if (t.type === 'checkin') transactionStats.totalCheckins += t.amount;
-      else if (t.type === 'purchase') transactionStats.totalPurchases += t.amount;
-      else if (t.type === 'refund') transactionStats.totalRefunds += t.amount;
-    });
 
-    // Generate trend data for last 7 days
+    // Trend of the last 7 days: credits granted and credits actually spent per UTC day.
+    const ledgerDays = new Map(dashboard.ledger.days.map((row) => [row.date, row]));
     const trendData = [];
     for (let i = 6; i >= 0; i--) {
-      const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const date = new Date(now.getTime() - i * DAY_MS);
       const dateStr = date.toISOString().split('T')[0];
-      const dayTransactions = transactionsResult.data?.filter((t: { created_at: string }) =>
-        t.created_at.startsWith(dateStr)
-      ) ?? [];
-
-      const additions = dayTransactions
-        .filter((t: { type: string }) =>
-          t.type === 'addition' || t.type === 'purchase' || t.type === 'refund' || t.type === 'checkin'
-        )
-        .reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
-      const deductions = dayTransactions
-        .filter((t: { type: string }) => t.type === 'deduction')
-        .reduce((sum: number, t: { amount: number }) => sum + Math.abs(t.amount), 0);
-
       trendData.push({
         date: dateStr,
         day: date.toLocaleDateString('zh-CN', { weekday: 'short' }),
-        additions,
-        deductions,
+        additions: ledgerDays.get(dateStr)?.granted ?? 0,
+        deductions: ledgerDays.get(dateStr)?.spent ?? 0,
       });
     }
 
@@ -176,17 +85,17 @@ export const adminDashboardProcedures = {
 
     const result = {
       users: {
-        total: userStats.total,
-        today: userStats.today,
-        thisWeek: userStats.thisWeek,
-        thisMonth: userStats.thisMonth,
+        total: dashboard.users.total,
+        today: dashboard.users.today,
+        thisWeek: dashboard.users.week,
+        thisMonth: dashboard.users.month,
         recentUsers: recentUsersResult.data ?? [],
         topUsers: topUsersResult.data ?? [],
       },
       conversations: conversationStats,
       tickets: ticketStats,
       credits: {
-        totalInSystem: totalCredits,
+        totalInSystem: dashboard.users.credits,
         transactions: transactionStats,
       },
       models: {
@@ -198,8 +107,8 @@ export const adminDashboardProcedures = {
     };
 
     logAdminEndpointMetric('admin.getStatistics', startedAt, {
-      queryCount: 9,
-      countStrategy: 'planned',
+      queryCount: 5,
+      countStrategy: 'database',
       userCount: result.users.total,
       conversationTotal: result.conversations.total,
     });

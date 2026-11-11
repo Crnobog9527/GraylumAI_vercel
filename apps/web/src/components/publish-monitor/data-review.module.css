@@ -747,6 +747,154 @@
   list-style: none;
 }
 
+/*
+ * Weekly reviews: the reviews are the reading column; the settings sit beside them on a wide screen and fold away
+ * above them on a narrow one (the fold is CSS only: a wide screen never hides them).
+ */
+.lead a {
+  color: var(--pm-text);
+  text-decoration: underline;
+}
+.reviewLayout {
+  display: grid;
+  gap: 12px;
+}
+.reviewLayout[data-settings='true'] {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  align-items: start;
+  gap: 16px;
+}
+.reviewMain {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.reviewSide {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+.reviewSideTitle {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.reviewSideTitle button {
+  display: none;
+}
+.reviewSideBody {
+  display: grid;
+  gap: 8px;
+}
+.switchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.review {
+  min-width: 0;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.review > .error {
+  padding: 0 16px 12px;
+}
+.reviewWait {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+.reviewHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 12px 16px;
+}
+.reviewHead h3 {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.reviewHead > span {
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+.page .reviewHead button,
+.page .reviewSideTitle button {
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pm-text);
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.page .reviewHead button {
+  display: inline-flex;
+}
+.reviewHead button svg,
+.reviewSideTitle button svg {
+  flex: none;
+  color: var(--pm-secondary);
+  transition: transform 150ms ease;
+}
+.review[data-open='true'] .reviewHead button svg,
+.reviewSide[data-open='true'] .reviewSideTitle button svg {
+  transform: rotate(180deg);
+}
+.reviewHead button:focus-visible,
+.reviewSideTitle button:focus-visible {
+  outline: 2px solid var(--pm-text);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.reviewBody {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 4px 16px 16px;
+  border-top: 1px solid var(--pm-border);
+  animation: pm-fade 150ms ease both;
+}
+/* The written part reads like a message of the conversation: 15px, line height 1.75, a comfortable measure. */
+.reviewText {
+  max-width: 44em;
+  padding-top: 10px;
+  color: #444;
+  font-size: 15px;
+  line-height: 1.75;
+}
+.reviewData {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+}
+.reviewData:empty {
+  display: none;
+}
+.reviewData th {
+  color: var(--pm-secondary);
+  white-space: nowrap;
+}
+.reviewWeeks {
+  margin: 0;
+  padding: 0;
+  color: var(--pm-secondary);
+  font-size: 12px;
+  list-style: none;
+}
+
 /* Empty, upgrade and failure states: one sentence and what to do next. */
 .state {
   display: flex;
@@ -897,6 +1045,39 @@
   }
 }
 
+/* Below 1360px the reading column would be too narrow for a review's tables next to the settings. */
+@media (max-width: 1359px) {
+  .reviewLayout[data-settings='true'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  /* Narrow: the settings come first, folded to one row unless opened. */
+  .reviewSide {
+    position: static;
+    order: -1;
+    padding: 10px 14px;
+    border: 1px solid var(--pm-border);
+    border-radius: 12px;
+  }
+  .reviewSideTitle {
+    margin: 0;
+  }
+  .reviewSideTitle span {
+    display: none;
+  }
+  .page .reviewSideTitle button {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 28px;
+  }
+  .reviewSide[data-open='false'] .reviewSideBody {
+    display: none;
+  }
+  .reviewSide[data-open='true'] .reviewSideBody {
+    margin-top: 10px;
+  }
+}
 @media (max-width: 900px) {
   .kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1043,7 +1224,12 @@
     transition: none;
   }
   .postRow,
-  .drop {
+  .drop,
+  .reviewHead button svg,
+  .reviewSideTitle button svg {
     transition: none;
+  }
+  .reviewBody {
+    animation: none;
   }
 }

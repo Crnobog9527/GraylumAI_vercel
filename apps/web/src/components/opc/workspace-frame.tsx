@@ -42,7 +42,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  turnBusy?:boolean;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
  /** Changes to a new number when the page wants the right panel shown, also on a phone (where it is an overlay). */
  revealRight?:number;
- activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start'|'review';notice?:string;
+ activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start'|'review'|'schedule';notice?:string;
 }){
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false);
  // Reveal before the next animation frame, when the checklist requests field focus.
