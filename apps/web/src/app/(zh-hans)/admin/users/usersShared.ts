@@ -49,6 +49,7 @@ export const membershipConfig: Record<MembershipLevel, { label: string; color: s
 
 export const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
-// One name, two meanings, as page.tsx had it: the lucide icon (a value) and the row type above. Exported together so
-// the moved code that says `<User />` and `(user: User)` reads the same.
-export { User };
+// In this file `User` is two things, as it was in page.tsx: the lucide icon (a value, used above) and the row type.
+// Only the type leaves the file, under its own name: a plain `export { User }` type-checks, but the production build
+// treats it as a type and drops the icon ("Export User doesn't exist in target module").
+export type { User as AdminUser };

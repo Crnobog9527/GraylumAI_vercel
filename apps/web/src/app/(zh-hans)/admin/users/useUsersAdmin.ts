@@ -5,7 +5,9 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { toast } from '@/components/ui/sonner';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import { User, type UserStatus, type MembershipLevel, type UserRole } from './usersShared';
+import type { AdminUser, UserStatus, MembershipLevel, UserRole } from './usersShared';
+
+type User = AdminUser; // the name the moved code uses
 
 // 用户管理后台页的全部状态、查询、请求和操作。从 page.tsx 原样搬出：页面只负责加载/出错状态和摆放各块界面。
 export function useUsersAdmin() {

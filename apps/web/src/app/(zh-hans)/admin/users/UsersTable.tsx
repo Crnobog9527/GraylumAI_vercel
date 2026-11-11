@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { Coins, Shield, Crown, Ban, CheckCircle, XCircle, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { Coins, User, Shield, Crown, Ban, CheckCircle, XCircle, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -12,8 +12,14 @@ import { adminUserContact } from '@/lib/adminUserContact';
 import { RoleBadge } from '@/components/ui/status-badge';
 import { TableEmptyState } from '@/components/ui/empty-state';
 import { formatLastLogin } from './lastLogin';
-import { User, statusConfig, membershipConfig, PAGE_SIZE_OPTIONS, type UserStatus, type MembershipLevel, type UserRole } from './usersShared';
+import {
+  statusConfig, membershipConfig, PAGE_SIZE_OPTIONS,
+  type AdminUser, type UserStatus, type MembershipLevel, type UserRole,
+} from './usersShared';
 import type { UsersAdmin } from './useUsersAdmin';
+
+// As in page.tsx, `User` is both the lucide icon (imported above) and the row type (this alias).
+type User = AdminUser;
 
 // 用户列表和分页。从 page.tsx 原样搬出。
 export function UsersTable({ admin }: { admin: UsersAdmin }) {
