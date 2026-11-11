@@ -66,18 +66,30 @@ describe('pricing plans', () => {
   });
 
   // Owner 2026-11-12 (walkthrough items 10 and 30): the jury and the model comparison are on the pricing page, by each plan's switch.
-  it('names the jury and the model comparison only while a plan carries them, and marks which plan does', () => {
+  // Each row needs both: the tool's site-wide switch on (fusionReviewEnabled / fusionCompareEnabled, the same on every plan) and a plan
+  // that carries it. A catalog that does not send the site-wide switch counts as off.
+  it('names the jury and the model comparison only while the site-wide switch is on and a plan carries them, and marks which plan does', () => {
     const cells = (html: string, label: string) => html.match(new RegExp(`<tr[^>]*><td[^>]*>${label}</td>(.*?)</tr>`))?.[1]?.match(/aria-label="(有|没有)"/g);
-    const none = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS }));
-    expect(text(none)).not.toMatch(/评审团|多模型对比/);
-    const goldOnly = PLANS.map(item => ({ ...item, allowFusionReview: item.level === 'gold', allowFusionCompare: item.level === 'gold' }));
-    const html = renderToStaticMarkup(createElement(PricingPlans, { plans: goldOnly, links: LINKS }));
+    const render = (plans: unknown[]) => renderToStaticMarkup(createElement(PricingPlans, { plans: plans as never, links: LINKS }));
+    const gold = (site: { review?: boolean; compare?: boolean }) => PLANS.map(item => ({ ...item,
+      allowFusionReview: item.level === 'gold', allowFusionCompare: item.level === 'gold',
+      ...(site.review === undefined ? {} : { fusionReviewEnabled: site.review }), ...(site.compare === undefined ? {} : { fusionCompareEnabled: site.compare }) }));
+    expect(text(render(PLANS))).not.toMatch(/评审团|多模型对比/);
+    const html = render(gold({ review: true, compare: true }));
     expect(cells(html, '多模型专家评审团（审阅运营策略报告）')).toEqual(['aria-label="没有"', 'aria-label="有"']);
     expect(cells(html, '多模型对比')).toEqual(['aria-label="没有"', 'aria-label="有"']);
-    const reviewOnly = PLANS.map(item => ({ ...item, allowFusionReview: item.level === 'gold', allowFusionCompare: false }));
-    const one = renderToStaticMarkup(createElement(PricingPlans, { plans: reviewOnly, links: LINKS }));
-    expect(text(one)).toContain('多模型专家评审团');
-    expect(text(one)).not.toContain('多模型对比');
+    // Site-wide switch off: the row is gone although Gold carries the tool.
+    const reviewOff = text(render(gold({ review: false, compare: true })));
+    expect(reviewOff).not.toContain('评审团');
+    expect(reviewOff).toContain('多模型对比');
+    const compareOff = text(render(gold({ review: true, compare: false })));
+    expect(compareOff).toContain('多模型专家评审团');
+    expect(compareOff).not.toContain('多模型对比');
+    // An older catalog answer without the site-wide switches: off.
+    expect(text(render(gold({})))).not.toMatch(/评审团|多模型对比/);
+    // Switch on, but no plan carries the tool: nothing to compare.
+    const none = PLANS.map(item => ({ ...item, allowFusionReview: false, allowFusionCompare: false, fusionReviewEnabled: true, fusionCompareEnabled: true }));
+    expect(text(render(none))).not.toMatch(/评审团|多模型对比/);
   });
 
   it('shows how many positioning profiles each plan allows, from the catalog, and nothing while the catalog does not say', () => {

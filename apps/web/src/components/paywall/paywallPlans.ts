@@ -21,9 +21,21 @@ export type PaywallPlanSource = {
   /** The plan's own entitlement switches (admin-set, `membership_plans.allow_fusion_*`); absent in an older answer. */
   allowFusionReview?: boolean;
   allowFusionCompare?: boolean;
+  /** The two site-wide switches (`fusion_settings` review / compare), the same on every plan; absent or unreadable counts as off. */
+  fusionReviewEnabled?: boolean;
+  fusionCompareEnabled?: boolean;
   /** How many positioning profiles the plan allows (`membership_plans.positioning_profile_limit`); absent until the catalog returns it. */
   positioningProfileLimit?: number;
 };
+
+/**
+ * Whether the comparison names a Gold tool: its site-wide switch is on (on every plan in the table; a missing field is off)
+ * and at least one plan on sale carries it. MASTER_PLAN §2.1 (Owner 2026-11-12): "评审团和多模型对比，Gold 专属，跟随后台开关显示".
+ */
+export function fusionRowShown(plans: readonly PaywallPlanSource[], tool: 'review' | 'compare') {
+  const [site, plan] = tool === 'review' ? ['fusionReviewEnabled', 'allowFusionReview'] as const : ['fusionCompareEnabled', 'allowFusionCompare'] as const;
+  return plans.length > 0 && plans.every(item => item[site] === true) && plans.some(item => item[plan] === true);
+}
 
 /** "3 个" for a plan's positioning-profile limit, or null when the catalog did not send a usable number. */
 export function profileLimitLabel(plan: Pick<PaywallPlanSource, 'positioningProfileLimit'> | undefined) {
