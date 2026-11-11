@@ -153,7 +153,18 @@ export async function walletMembershipCases({ admin, service, connect }) {
   await bind(founder);
   const founderPaid = (await pay(service, founder)).v;
   await assert.rejects(() => renew(founderUser, 'wechat_pay', gold, 'monthly', founderPaid.subscriptionId), /TRANSITION_DENIED/);
+  // 9999 (deep review item 6): a one-time founder never renews into a Stripe card subscription; no order is created.
+  const ordersOf = async user => (await one(admin, 'SELECT count(*)::int n FROM payment_orders WHERE user_id=$1', [user])).n;
+  const beforeCard = await ordersOf(founderUser);
+  for (const cardMethod of ['card', 'card_cn']) {
+    await assert.rejects(() => buy(founderUser, cardMethod, gold, 'yearly', 'founder_renewal', founderPaid.subscriptionId, 'founder_renewal'),
+      /PAY_WAFFO_TRANSITION_DENIED/, `${cardMethod} cannot renew a one-time founder`);
+  }
+  assert.equal(await ordersOf(founderUser), beforeCard);
   const founderNext = await buy(founderUser, 'wechat_pay', gold, 'yearly', 'founder_renewal', founderPaid.subscriptionId, 'founder_renewal');
+  // A repeat with the same method returns the same open order (duplicate click), never a second one.
+  assert.equal((await buy(founderUser, 'wechat_pay', gold, 'yearly', 'founder_renewal', founderPaid.subscriptionId, 'founder_renewal')).id,
+    founderNext.id);
   assert.equal(founderNext.amount_total, 49600, 'existing founder renewal price is unchanged');
   await bind(founderNext);
   const founderEnd = (await one(admin, 'SELECT entitlement_end FROM payment_orders WHERE id=$1', [founder.id])).entitlement_end;
@@ -248,7 +259,7 @@ export async function walletMembershipCases({ admin, service, connect }) {
   assert.equal((await pay(service, failed)).v.state, 'review', 'a late payment remains review, never silently delivered');
   await assert.rejects(close, /NOT_TERMINAL_UNPAID/, 'a delayed failure cannot overwrite paid evidence');
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'", [{ ...original, version: version + 1 }]);
-  return ['wallet-both-methods-upgrade', 'wallet-upgrade-replay-concurrent-once', 'wallet-original-credits-preserved',
+  return ['founder-renewal-one-time-method-only', 'founder-renewal-duplicate-same-order', 'wallet-both-methods-upgrade', 'wallet-upgrade-replay-concurrent-once', 'wallet-original-credits-preserved',
     'wallet-same-level-annual-change-appends', 'wallet-advance-monthly-appends', 'wallet-renewal-replay-concurrency-once',
     'wallet-renewal-chained-source-no-overlap', 'wallet-renewal-no-early-credits', 'wallet-renewal-due-cron-monthly-yearly-once',
     'wallet-renewal-cards-cross-user-tier-change-denied', 'wallet-renewal-founder-unchanged',
