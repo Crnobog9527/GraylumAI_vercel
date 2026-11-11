@@ -26,7 +26,10 @@ export async function runCombined(input){
   }else{
    profileId=randomUUID();await db.query('insert into profiles(id,credits) values($1,37)',[profileId]);
   }
-  const closed=(await db.query('select account_erasure_confirm($1,$2) v',[profileId,randomUUID()])).rows[0].v;
+  // 9999 (Owner 2026-11-11): a refund being handled refuses erasure; the cash cases then use an account already closed.
+  if(monthly)await assert.rejects(db.query('select account_erasure_confirm($1,$2)',[profileId,randomUUID()]),/ACCOUNT_ERASURE_REFUND_PENDING/);
+  const closed=monthly?{requestId:(await db.query('select monthly_test.close_unguarded($1) r',[profileId])).rows[0].r}
+   :(await db.query('select account_erasure_confirm($1,$2) v',[profileId,randomUUID()])).rows[0].v;
   const hash=createHash('sha256').update('synthetic-progress:'+profileId).digest('hex');
   const issue=await rpc('account_erasure_progress_issue',{p_profile_id:profileId,p_request_id:closed.requestId,p_token_hash:hash});
   assert.deepEqual(issue.data,{issued:true});
