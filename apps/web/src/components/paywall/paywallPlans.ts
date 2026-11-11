@@ -18,6 +18,9 @@ export type PaywallPlanSource = {
   credits: { monthly: number; monthlyBonus: number };
   discount: number;
   checkoutReady: { monthly: boolean; yearly: boolean };
+  /** The plan's own entitlement switches (admin-set, `membership_plans.allow_fusion_*`); absent in an older answer. */
+  allowFusionReview?: boolean;
+  allowFusionCompare?: boolean;
 };
 
 export type PaywallPlan = PaywallPlanSource & { level: PaywallLevel };

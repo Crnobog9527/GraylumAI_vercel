@@ -1,18 +1,23 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { faqItems } from '@/lib/landing-content';
+import { LANDING_FEATURES } from '@/lib/landing/landing-flags';
 
 /**
  * Copy of the public pricing page (PAYWALL design v25 scene 5, MASTER_PLAN §2.1 items 50–51).
  * Rules: prices only from the server catalog; no predicted credit cost, no model names, no 7-day
  * refund on cards (only in the FAQ), founder price and first month only from the server's public offers,
- * no features the backend does not have (studio team features, Fusion, profile limits).
+ * no features the backend does not have (studio team features). The jury and the model comparison are rows of the
+ * comparison table, by each plan's entitlement switch (Owner 2026-11-12); the profile count waits for the public catalog.
  */
 export const PRICING_COPY = {
   title: '选一个适合你的方案',
   lede: '注册就能免费开始做定位；需要完整的运营策略报告、更多积分时，再开通会员。',
   freeName: '免费',
   freeFit: '先试试，看 Graylum 能不能帮到你',
-  freePoints: ['免费试用，可以开始做定位', '已确认的信息免费保留、可以导出', '生成完整运营策略报告需要开通会员'],
+  // Owner 2026-11-12: the free tier says sign-up credits are given, without a number (no public read returns the amount
+  // yet). Like the landing page, it says so only while the sign-up grant is a fact (LANDING_FEATURES.signupGrant).
+  freePoints: [LANDING_FEATURES.signupGrant.show ? '注册送积分，可以免费试用，开始做定位' : '免费试用，可以开始做定位',
+    '已确认的信息免费保留、可以导出', '生成完整运营策略报告需要开通会员'],
   freeCta: '免费注册',
   memberCta: '开通会员',
   contactCta: '联系我们',

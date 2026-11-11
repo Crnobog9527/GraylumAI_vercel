@@ -65,6 +65,28 @@ describe('pricing plans', () => {
     featuresMock.mockReturnValue({ data: undefined });
   });
 
+  // Owner 2026-11-12 (walkthrough items 10 and 30): the jury and the model comparison are on the pricing page, by each plan's switch.
+  it('names the jury and the model comparison only while a plan carries them, and marks which plan does', () => {
+    const cells = (html: string, label: string) => html.match(new RegExp(`<tr[^>]*><td[^>]*>${label}</td>(.*?)</tr>`))?.[1]?.match(/aria-label="(有|没有)"/g);
+    const none = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS }));
+    expect(text(none)).not.toMatch(/评审团|多模型对比/);
+    const goldOnly = PLANS.map(item => ({ ...item, allowFusionReview: item.level === 'gold', allowFusionCompare: item.level === 'gold' }));
+    const html = renderToStaticMarkup(createElement(PricingPlans, { plans: goldOnly, links: LINKS }));
+    expect(cells(html, '多模型专家评审团（审阅运营策略报告）')).toEqual(['aria-label="没有"', 'aria-label="有"']);
+    expect(cells(html, '多模型对比')).toEqual(['aria-label="没有"', 'aria-label="有"']);
+    const reviewOnly = PLANS.map(item => ({ ...item, allowFusionReview: item.level === 'gold', allowFusionCompare: false }));
+    const one = renderToStaticMarkup(createElement(PricingPlans, { plans: reviewOnly, links: LINKS }));
+    expect(text(one)).toContain('多模型专家评审团');
+    expect(text(one)).not.toContain('多模型对比');
+  });
+
+  it('the free tier says sign-up credits are given, without a number', () => {
+    const html = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS }));
+    const free = html.match(/data-testid="pricing-plan-free".*?<\/section>/)?.[0] ?? '';
+    expect(text(free)).toContain('注册送积分，可以免费试用，开始做定位');
+    expect(text(free)).not.toMatch(/\d+ ?积分/);
+  });
+
   it('states the tax rule next to member prices without any tax amount', () => {
     const html = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS }));
     expect(html).toContain('国际银行卡付款税另计，结账时按所在地计算；中国大陆银行卡订阅不另收税。');
