@@ -114,7 +114,7 @@ export const createTRPCContext = async (opts: {
 
 const t = initTRPC.context<typeof createTRPCContext>().create({ errorFormatter: rateLimitErrorFormatter });
 
-export const router = t.router;
+export const { router, mergeRouters } = t;
 export const publicProcedure = t.procedure;
 
 function getOpeningGrantIdempotencyKey(userId: string) {
