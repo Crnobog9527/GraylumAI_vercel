@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { creditRecordNote } from './creditLedgerPresentation';
@@ -31,11 +32,36 @@ describe('creditRecordNote', () => {
     expect(creditRecordNote('toString')).toBe('toString');
   });
 
-  it('no English internal description written by the database functions reaches the page untranslated', () => {
-    const sql = ['turn/turn_settle_credits.sql', 'turn/turn_open.sql', 'turn/turn_call_begin.sql', 'other/opening_grant_remember.sql']
-      .map(name => readFileSync(fileURLToPath(new URL(`../../../../../packages/db/functions/${name}`, import.meta.url)), 'utf8')).join('\n');
-    const written = [...new Set([...sql.matchAll(/'((?:AI turn|Opening grant)[^']*)'/g)].map(match => match[1]!))];
-    expect(written.length).toBeGreaterThanOrEqual(3);
+  // The validation of #1892 on staging found older records still in English: "AI call consumption", "Confirmed failure compensation".
+  it('shows the older billing descriptions in Chinese too', () => {
+    expect(creditRecordNote('AI call consumption')).toBe('');
+    expect(creditRecordNote('AI run consumption')).toBe('');
+    expect(creditRecordNote('Confirmed failure compensation')).toBe('调用失败，积分已退回');
+    expect(creditRecordNote('Web search / social data lookup')).toBe('联网搜索和社媒数据查询');
+    expect(creditRecordNote('Positioning report')).toBe('运营策略报告');
+    expect(creditRecordNote('Paid credit package')).toBe('购买积分包');
+  });
+
+  it('names a refund or a dispute without its internal ids', () => {
+    expect(creditRecordNote('Stripe refund credit clawback [order:ord_1 refund:re_1 shortfall:0]')).toBe('订单退款');
+    expect(creditRecordNote('Stripe subscription refund credit clawback [subscription:sub_1 refund:re_1 grants:1]')).toBe('会员退款');
+    expect(creditRecordNote('Approved package refund')).toBe('积分包退款');
+    expect(creditRecordNote('Failed cash refund credit restoration')).toBe('退款没有成功，积分已恢复');
+    expect(creditRecordNote('Payment dispute hold')).toBe('付款争议处理中，积分暂时冻结');
+    expect(creditRecordNote('Payment dispute hold withdrawn')).toBe('付款争议已解除，冻结的积分已恢复');
+  });
+
+  // Every description the database has ever written beside a ledger type, in the functions and in all migrations (old rows keep
+  // old texts): none may reach the page in English. A new English description added to the database turns this red.
+  it('no English description written by the database, now or in any earlier migration, reaches the page untranslated', () => {
+    const root = fileURLToPath(new URL('../../../../../packages/db/', import.meta.url));
+    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
+      entry.isDirectory() ? files(join(dir, entry.name)) : entry.name.endsWith('.sql') ? [join(dir, entry.name)] : []);
+    const sql = [...files(join(root, 'functions')), ...files(join(root, 'migrations'))].map(file => readFileSync(file, 'utf8')).join('\n');
+    const beside = /'(?:consumption|adjustment|addition|deduction|purchase|refund|bonus|grant|usage|membership)',\s*'([A-Za-z][^'\n]*\s[^'\n]*)'/g;
+    const named = /'((?:AI (?:turn|call|run)|Opening grant|Web search|Research (?:cancelled|provider)|Stripe (?:subscription )?refund credit clawback)[^'\n]*)'/g;
+    const written = [...new Set([...sql.matchAll(beside), ...sql.matchAll(named)].map(match => match[1]!))];
+    expect(written.length).toBeGreaterThanOrEqual(30);
     for (const text of written) expect(creditRecordNote(text), text).not.toMatch(/[A-Za-z]{3}/);
   });
 });

@@ -145,20 +145,67 @@ export function getCreditLedgerLabel(row: CreditLedgerPresentationInput): string
 }
 
 /**
- * The database writes a few record descriptions in internal English (turn_settle_credits.sql, opening_grant_remember.sql).
- * What the user reads instead (walkthrough 2026-11-11, item 6); '' means no second line, because the record's own label
- * ("AI 使用消耗") already says it. Any other description is shown as written.
+ * The database writes its record descriptions in internal English (the turn, billing, research, payment, refund and dispute
+ * functions under packages/db, and the older migrations whose rows are still in users' records). What the user reads
+ * instead (walkthrough 2026-11-11, item 6; the validation of #1892 found the older ones). '' means no second line: the
+ * record's own label ("AI 使用消耗") already says it. A refund or dispute note names what happened and no more; the amount
+ * and the label beside it carry the rest. Any description not listed here is shown as written.
  */
 const INTERNAL_RECORD_NOTES: Record<string, string> = {
+  // An ordinary AI spend, under its several historical names.
   'AI turn': '',
   'AI turn freeze': '',
   'AI turn freeze top-up': '',
+  'AI call consumption': '',
+  'AI run consumption': '',
+  // A spend that can be named.
+  'Skill model call': '技能调用',
+  'Workbench AI generation': '内容生成',
+  'Workbench generation': '内容生成',
+  'Workbench web search': '联网搜索',
+  'Web search / social data lookup': '联网搜索和社媒数据查询',
+  'Positioning report': '运营策略报告',
+  'Expert review': '多模型专家评审团',
+  // Held before a call and given back after it (the records page leaves most of these out).
+  'Call reservation': '调用前预留',
+  'Call reservation release': '预留退回',
+  'Run reservation': '调用前预留',
+  'Run reservation release': '预留退回',
+  'Report hold': '运营策略报告预留',
+  'Report hold release': '运营策略报告预留退回',
+  'Expert review hold': '评审团预留',
+  'Expert review hold release': '评审团预留退回',
+  'Skill call not dispatched': '调用没有发出',
+  'Workbench generation not dispatched': '调用没有发出',
+  'Research cancelled before dispatch': '搜索在发出前已取消',
+  'Research provider returned a terminal error': '搜索服务出错',
+  // Given back, or not.
+  'Confirmed failure compensation': '调用失败，积分已退回',
   'AI turn freeze not returned (subscription refunded or ended)': '冻结的积分没有退回（订阅已退款或已结束）',
+  // Credits arriving.
   'Opening grant for new user profile bootstrap': '新用户赠送',
   'Opening grant already claimed by this identity': '新用户赠送已经领过',
+  'Paid credit package': '购买积分包',
+  'Membership paid period': '会员积分',
+  // Refunds and payment disputes.
+  'Approved package refund': '积分包退款',
+  'External card refund': '银行卡退款',
+  'Refunded credit pack settled': '积分包退款',
+  'Refunded credit pack settled (returned reservation)': '积分包退款',
+  'Refunded dispute reservation return': '争议订单退款',
+  'Failed cash refund credit restoration': '退款没有成功，积分已恢复',
+  'Payment dispute hold': '付款争议处理中，积分暂时冻结',
+  'Payment dispute hold withdrawn': '付款争议已解除，冻结的积分已恢复',
+  'Payment dispute in-flight adjustment': '付款争议期间的调整',
 };
+/** Descriptions that end in internal ids ("… [order:… refund:…]"): matched by how they begin; the longer beginning first. */
+const INTERNAL_RECORD_NOTE_PREFIXES: ReadonlyArray<readonly [string, string]> = [
+  ['Stripe subscription refund credit clawback', '会员退款'],
+  ['Stripe refund credit clawback', '订单退款'],
+];
 
 export function creditRecordNote(description: string | null | undefined): string {
   const text = (description ?? '').trim();
-  return Object.hasOwn(INTERNAL_RECORD_NOTES, text) ? INTERNAL_RECORD_NOTES[text]! : text;
+  if (Object.hasOwn(INTERNAL_RECORD_NOTES, text)) return INTERNAL_RECORD_NOTES[text]!;
+  return INTERNAL_RECORD_NOTE_PREFIXES.find(([start]) => text.startsWith(start))?.[1] ?? text;
 }
