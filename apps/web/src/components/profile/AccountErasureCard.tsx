@@ -29,10 +29,12 @@ const inputStyle = { background: 'var(--bg-primary)', borderColor: 'var(--border
 const dangerStyle = { background: '#dc2626', color: '#fff' };
 const ghostStyle = { background: 'transparent', borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' };
 
-export function AccountErasureCard({ user }: { user: { email?: string; auth_provider?: string } }) {
+export function AccountErasureCard({ user }: { user: { id?: string; email?: string; auth_provider?: string } }) {
   const usesPassword = (user.auth_provider ?? 'email') === 'email';
   const phone = user.auth_provider === 'phone';
-  const erasure = useAccountErasure({ email: user.email, usesPassword, phone });
+  // Google (and any other account without a password or phone) re-verifies by signing in with Google again.
+  const oauth = !usesPassword && !phone;
+  const erasure = useAccountErasure({ email: user.email, usesPassword, phone, userId: user.id });
   const [acknowledged, setAcknowledged] = useState(false);
   const preview = erasure.preview;
   const lines = preview ? buildErasureImpactLines(preview) : [];
@@ -72,7 +74,8 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
             </DialogTitle>
             <DialogDescription style={{ color: 'var(--text-secondary)' }}>
               {erasure.step === 'impact' && '请先确认注销会带来的影响。'}
-              {erasure.step === 'verify' && (usesPassword ? '请输入当前密码验证身份。' : phone ? '我们会向你的手机号发送短信验证码。' : '我们会向你的邮箱发送验证码。')}
+              {erasure.step === 'verify' && (usesPassword ? '请输入当前密码验证身份。' : phone ? '我们会向你的手机号发送短信验证码。'
+                : '需要用 Google 重新登录一次来确认是你本人，完成后会回到这里的最后一步。')}
               {erasure.step === 'confirm' && '这是最后一步，确认后立即生效。'}
               {erasure.step === 'done' && '账号已关闭，你已退出登录。'}
             </DialogDescription>
@@ -88,7 +91,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
             </div>
           )}
 
-          {erasure.step === 'verify' && (
+          {erasure.step === 'verify' && !oauth && (
             <div className="space-y-3 py-2">
               <DialogCaptcha
                 key={erasure.captchaKey}
@@ -96,13 +99,13 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
                 onExpired={erasure.captchaExpired}
                 onUnavailable={erasure.captchaUnavailable}
               />
-              {!usesPassword && (
+              {phone && (
                 <Button variant="outline" size="sm" disabled={erasure.busy} onClick={erasure.sendCode} style={ghostStyle}>
                   {erasure.codeSent ? '重新发送验证码' : '发送验证码'}
                 </Button>
               )}
               <Label htmlFor="erasure-secret" style={{ color: 'var(--text-primary)' }}>
-                {usesPassword ? '当前密码' : phone ? '短信验证码' : '邮箱验证码'}
+                {usesPassword ? '当前密码' : '短信验证码'}
               </Label>
               <Input
                 id="erasure-secret"
@@ -143,8 +146,14 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
                 继续
               </Button>
             )}
-            {erasure.step === 'verify' && (
+            {erasure.step === 'verify' && !oauth && (
               <Button disabled={erasure.busy} onClick={erasure.verify} style={dangerStyle}>验证身份</Button>
+            )}
+            {erasure.step === 'verify' && oauth && (
+              <Button disabled={erasure.busy} onClick={erasure.reauthWithGoogle} style={dangerStyle}>
+                {erasure.busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                用 Google 重新验证
+              </Button>
             )}
             {erasure.step === 'confirm' && (
               <Button disabled={!acknowledged || erasure.busy} onClick={erasure.confirm} style={dangerStyle}>
