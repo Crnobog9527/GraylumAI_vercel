@@ -312,7 +312,16 @@ jobs:
           key: secretless-next-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.build-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/*/package.json', 'packages/*/package.json', 'apps/*/tsconfig*.json', 'packages/tsconfig/*.json', 'apps/web/next.config.*', 'apps/web/postcss.config.*', 'turbo.json') }}-${{ steps.cache-scope.outputs.workflow }}-${{ steps.cache-scope.outputs.ref }}
 
       - name: Install Playwright browser
-        run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium
+        # Temporary (Owner 2026-11-12): since 2026-11-11 13:47 UTC the runners cannot resolve the Ubuntu apt mirrors, so
+        # `--with-deps` fails before any test runs. Install the system libraries when apt works; otherwise warn and rely on
+        # the libraries already on the runner image. Every test still runs; a missing library makes the browser fail to start.
+        # Revert to `playwright install --with-deps --only-shell chromium` once apt resolves again.
+        run: |
+          cd apps/web
+          if ! timeout 300 pnpm exec playwright install-deps chromium; then
+            echo "::warning title=Playwright system libraries not installed::apt could not reach the Ubuntu mirrors; using the libraries already on the runner image (temporary, Owner 2026-11-12)"
+          fi
+          pnpm exec playwright install --only-shell chromium
 
       - name: Run web unit and component tests
         env:
@@ -418,7 +427,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
-        run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium
+        # Temporary (Owner 2026-11-12): since 2026-11-11 13:47 UTC the runners cannot resolve the Ubuntu apt mirrors, so
+        # `--with-deps` fails before any test runs. Install the system libraries when apt works; otherwise warn and rely on
+        # the libraries already on the runner image. Every test still runs; a missing library makes the browser fail to start.
+        # Revert to `playwright install --with-deps --only-shell chromium` once apt resolves again.
+        run: |
+          cd apps/web
+          if ! timeout 300 pnpm exec playwright install-deps chromium; then
+            echo "::warning title=Playwright system libraries not installed::apt could not reach the Ubuntu mirrors; using the libraries already on the runner image (temporary, Owner 2026-11-12)"
+          fi
+          pnpm exec playwright install --only-shell chromium
 
       - name: Simulated-model browser tests
         run: node scripts/e2e-sim/run.mjs
