@@ -5,7 +5,7 @@ import type { z } from 'zod';
 import type { beginInput } from './content';
 import { checkRateLimitAsync } from '../../middleware/securityChecks';
 import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest';
-import { cleanupLibrary } from './cleanup';
+import { sweepLibrary } from './cleanup';
 import { libraryRpc } from './rpc';
 import type { LibraryStorage } from './storage';
 
@@ -21,7 +21,7 @@ export function extractedUpload(client: SupabaseClient, actorId: string, storage
   const discard = async (id: string) => {
     await libraryRpc(client, 'library_delete', { a: actorId, did: id, unfinished_only: true });
     scheduleErasureManifestSync(client);
-    await cleanupLibrary(client, { actorId, documentId: id, limit: 1, storage });
+    await sweepLibrary(client, { actorId, documentId: id, limit: 1, storage });
   };
   const original = async (path: string) => {
     const file = await storage.inspect(path, false);
@@ -46,7 +46,7 @@ export function extractedUpload(client: SupabaseClient, actorId: string, storage
   return {
     async begin(input: Omit<z.infer<typeof beginInput>, 'contentType'>) {
       await checkRateLimitAsync(actorId, 'api');
-      await cleanupLibrary(client, { actorId, limit: 4, budgetMs: 5000, storage });
+      await sweepLibrary(client, { actorId, limit: 4, budgetMs: 5000, storage });
       const started = Date.now();
       const grant = await libraryRpc<Grant>(client, 'library_upload_begin', {
         a: actorId, r: input.requestId, n: input.filename, f: config.format, p: input.purpose, declared: input.bytes,

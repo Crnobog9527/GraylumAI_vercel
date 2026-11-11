@@ -11,9 +11,13 @@ type Reservation = {
   actor_id: string; document_id: string; original_path: string; text_path: string | null;
   cleanup: boolean; closed: boolean; status: string; original_guard_until: string; text_guard_until: string | null;
 };
-export async function cleanupLibrary(client: SupabaseClient, options: {
-  actorId?: string; documentId?: string; limit?: number; storage?: LibraryStorage; budgetMs?: number;
-} = {}) {
+type SweepOptions = { actorId?: string; documentId?: string; limit?: number; storage?: LibraryStorage; budgetMs?: number };
+
+/**
+ * One pass over the deletions waiting for cleanup: the work itself, without the backlog count. Upload and delete requests
+ * sweep a few rows on the way and never look at the count, so they call this and save the count's round trip.
+ */
+export async function sweepLibrary(client: SupabaseClient, options: SweepOptions = {}) {
   const storage = options.storage ?? libraryStorage(client);
   const started = Date.now();
   const rows = await libraryRpc<Reservation[]>(client, 'library_cleanup_candidates', {
@@ -51,10 +55,16 @@ export async function cleanupLibrary(client: SupabaseClient, options: {
       })) released++;
     } catch { failed++; }
   }
+  return { checked, released, failed, budgetExhausted: checked < rows.length };
+}
+
+/** The same pass followed by the backlog count, for the callers that report or act on it (the cron, account erasure). */
+export async function cleanupLibrary(client: SupabaseClient, options: SweepOptions = {}) {
+  const { checked, released, failed, budgetExhausted } = await sweepLibrary(client, options);
   const backlog = await libraryRpc<{ pending: number; overdue: number; oldestDeletedAt: string | null }>(
     client, 'library_cleanup_backlog', { a: options.actorId ?? null },
   );
-  return { checked, released, failed, ...backlog, budgetExhausted: checked < rows.length };
+  return { checked, released, failed, ...backlog, budgetExhausted };
 }
 
 /** Batch ownership lookup means retained/claimed objects never consume one network round trip each.

@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const mocks = vi.hoisted(() => ({ storage: vi.fn() }));
 vi.mock('../scheduledJobRuns', () => ({ startScheduledJobRun: vi.fn(async () => 'run-1'), finishScheduledJobRun: vi.fn() }));
 vi.mock('./storage', () => ({ libraryStorage: mocks.storage }));
-import { cleanupLibrary, LIBRARY_CRON_BATCH, runLibraryCleanup } from './cleanup';
+import { cleanupLibrary, LIBRARY_CRON_BATCH, runLibraryCleanup, sweepLibrary } from './cleanup';
 import type { LibraryStorage } from './storage';
 
 const a = '11111111-1111-4111-8111-111111111111';
@@ -54,4 +54,18 @@ it('other callers keep their own smaller batches', async () => {
   await cleanupLibrary(client(), { storage });
   expect(rpc).toHaveBeenLastCalledWith('library_cleanup_backlog', { a: null });
   expect(rpc).toHaveBeenCalledWith('library_cleanup_candidates', { a: null, n: 50, did: null });
+});
+
+it('a sweep does the same pass without the backlog count; the cron and erasure callers still get the count', async () => {
+  const swept = await sweepLibrary(client(), { actorId: a, limit: 4, budgetMs: 5000, storage });
+  expect(swept).toEqual({ checked: 4, released: 4, failed: 0, budgetExhausted: false });
+  expect(rpc.mock.calls.filter(call => call[0] === 'library_cleanup_observe')).toHaveLength(4);
+  expect(rpc.mock.calls.some(call => call[0] === 'library_cleanup_backlog')).toBe(false);
+  rpc.mockClear();
+  const counted = await cleanupLibrary(client(), { actorId: a, limit: 4, budgetMs: 5000, storage });
+  expect(counted).toEqual({ checked: 4, released: 4, failed: 0, budgetExhausted: false, pending: 0, overdue: 0, oldestDeletedAt: null });
+  expect(rpc).toHaveBeenLastCalledWith('library_cleanup_backlog', { a });
+  rpc.mockClear();
+  await runLibraryCleanup(client());
+  expect(rpc.mock.calls.filter(call => call[0] === 'library_cleanup_backlog')).toHaveLength(1);
 });
