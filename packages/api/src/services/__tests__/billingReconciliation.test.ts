@@ -6,6 +6,7 @@ import {
   runDailyBillingReconciliation,
   runBillingEngineV15ReadinessAudit,
 } from '../billingReconciliation';
+import { readScheduledHolds } from '../billingReservations';
 
 function createMockSupabase(data: {
   tokenStats?: Array<Record<string, unknown>>;
@@ -2419,6 +2420,39 @@ describe('billing reservations without a terminal record', () => {
 
   it('compares the age in milliseconds: 48 hours and one minute is already an error', () => {
     expect(reservation(audit([hold('h1', 'u1', new Date(now.getTime() - 48 * 3_600_000 - 60_000).toISOString())]))?.severity).toBe('error');
+  });
+
+  // PUBLISH-SCHEDULE: a scheduled publish holds its credits from confirmation until its scheduled time.
+  const scheduledAudit = (billingHistory: Array<Record<string, unknown>>, scheduled: Array<[string, number]>) =>
+    buildBillingEngineV15ReadinessAudit(createReadinessRows({ billingHistory, scheduledHolds: new Map(scheduled) }),
+      { launchBaselineAt: baseline, now });
+  const hoursFromNow = (hours: number) => now.getTime() + hours * 3_600_000;
+
+  it('ages a scheduled publish hold from its scheduled time: a 5-day-old hold for a post due tomorrow is no error', () => {
+    const result = scheduledAudit([hold('h1', 'u1', hoursAgo(120))], [['h1', hoursFromNow(24)]]);
+    expect(reservation(result)).toMatchObject({ severity: 'warning', metadata: expect.objectContaining({ oldestAgeHours: 0 }) });
+    expect(failsOnReservation(result)).toBe(false);
+  });
+
+  it('still reports an ordinary hold older than 48 hours next to scheduled ones', () => {
+    const result = scheduledAudit([hold('h1', 'u1', hoursAgo(120)), hold('h2', 'u2', hoursAgo(49))], [['h1', hoursFromNow(24)]]);
+    expect(reservation(result)).toMatchObject({ severity: 'error', metadata: expect.objectContaining({ oldestAgeHours: 49 }) });
+  });
+
+  it('reports a scheduled publish hold once its scheduled time is more than 48 hours past', () => {
+    expect(reservation(scheduledAudit([hold('h1', 'u1', hoursAgo(120))], [['h1', now.getTime() - 47 * 3_600_000]]))?.severity)
+      .toBe('warning');
+    expect(reservation(scheduledAudit([hold('h1', 'u1', hoursAgo(120))], [['h1', now.getTime() - 49 * 3_600_000]]))?.severity)
+      .toBe('error');
+  });
+
+  it('reads the scheduled holds from the database; anything unreadable leaves every hold aged from its creation', async () => {
+    const rpc = (result: unknown) => ({ rpc: async () => result }) as never;
+    expect(await readScheduledHolds(rpc({ data: [{ preDeductId: 'h1', scheduledAt: '2026-09-14T12:00:00Z' },
+      { preDeductId: 'h2', scheduledAt: 'nope' }, { scheduledAt: '2026-09-14T12:00:00Z' }], error: null })))
+      .toEqual(new Map([['h1', Date.parse('2026-09-14T12:00:00Z')]]));
+    expect(await readScheduledHolds(rpc({ data: null, error: { message: 'x' } }))).toEqual(new Map());
+    expect(await readScheduledHolds({ rpc: async () => { throw new Error('down'); } } as never)).toEqual(new Map());
   });
 
   it('treats a creation time far in the future like an unreadable one', () => {

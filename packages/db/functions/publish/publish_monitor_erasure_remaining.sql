@@ -16,7 +16,7 @@ AS $function$
  +(SELECT count(*) FROM social_connections WHERE actor_id=a AND provider_account_id IS NOT NULL
    AND (status<>'deleting' OR business_id IS NOT NULL))
  +(SELECT count(*) FROM social_publish_jobs WHERE actor_id=a
-   AND (state NOT IN ('claimed','dispatching','unknown') OR business_id IS NOT NULL))
+   AND (state NOT IN ('claimed','dispatching','scheduled','unknown') OR business_id IS NOT NULL OR caption_preview IS NOT NULL))
  +(SELECT count(*) FROM social_connect_requests WHERE actor_id=a
    AND (business_id IS NOT NULL OR target_account_project_id IS NOT NULL
     OR NOT (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL

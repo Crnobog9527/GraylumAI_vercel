@@ -70,6 +70,27 @@ describe('data review page access follows the server', () => {
     expect(text(html)).toContain('作品数据');
     expect(text(html)).not.toContain('作品数据（近');
   });
+  it('while the first read runs, draws the tab bar inert and a wordless skeleton (no jump when the data arrives)', () => {
+    state.data = { isPending: true };
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(html).toContain('data-testid="trend-skeleton"');
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).not.toContain('role="tab"');
+    expect(text(html)).not.toMatch(/读取中|加载/);
+  });
+  it('a read failure is announced and offers a retry', () => {
+    state.data = failed('PUBLISH_MONITOR_UNAVAILABLE');
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(html).toContain('role="alert"');
+    expect(text(html)).toContain('暂时读不到，请稍后重试。');
+    expect(text(html)).toContain('重试');
+  });
+  it('a member sees the five tabs and the size of the data window', () => {
+    state.data = ok({ windowDays: 90, connections: [], posts: [] });
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(html.match(/role="tab"/g)).toHaveLength(5);
+    expect(text(html)).toContain('近 90 天数据');
+  });
 });
 
 describe('posts', () => {

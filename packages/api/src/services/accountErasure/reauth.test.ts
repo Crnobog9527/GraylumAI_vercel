@@ -24,3 +24,28 @@ describe('account erasure re-authentication with an SMS code', () => {
     expect(() => assertRecentAuthTime(null, NOW)).toThrow('ACCOUNT_ERASURE_REAUTH_REQUIRED');
   });
 });
+
+// Deep review 11-11 item 3: a Google account re-verifies by signing in with Google again (amr method "oauth").
+describe('account erasure re-authentication with a fresh Google sign-in', () => {
+  it('allows a Google sign-in from a minute ago, even when the session also carries an old one', async () => {
+    const time = await readVerifiedAuthTime({ authClient: client({ sub: USER, amr: [
+      { method: 'oauth', timestamp: NOW / 1000 - 3 * 3600 }, { method: 'oauth', timestamp: NOW / 1000 - 60 },
+    ] }) as never, userId: USER });
+    expect(() => assertRecentAuthTime(time, NOW)).not.toThrow();
+  });
+
+  it('denies a session whose only Google sign-in is older than ten minutes', async () => {
+    const time = await readVerifiedAuthTime({ authClient: client({ sub: USER, amr: [{ method: 'oauth', timestamp: NOW / 1000 - 3 * 3600 }] }) as never,
+      userId: USER });
+    expect(() => assertRecentAuthTime(time, NOW)).toThrow('ACCOUNT_ERASURE_REAUTH_REQUIRED');
+  });
+
+  it('allows a Google sign-in at nine minutes and denies it just past ten minutes', async () => {
+    const at = (ageSeconds: number) => readVerifiedAuthTime({
+      authClient: client({ sub: USER, amr: [{ method: 'oauth', timestamp: NOW / 1000 - ageSeconds }] }) as never, userId: USER });
+    const nine = await at(9 * 60);
+    expect(() => assertRecentAuthTime(nine, NOW)).not.toThrow();
+    const tenAndASecond = await at(10 * 60 + 1);
+    expect(() => assertRecentAuthTime(tenAndASecond, NOW)).toThrow('ACCOUNT_ERASURE_REAUTH_REQUIRED');
+  });
+});

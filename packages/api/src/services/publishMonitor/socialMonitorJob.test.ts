@@ -56,7 +56,7 @@ describe('publish-monitor daily job', () => {
     const off = db('true');
     const report = await runSocialMonitorJob(off.db, deps(), Date.now() + 60_000, windowFor);
     expect(off.calls).toEqual(['publish_monitor_snapshot_prune', 'publish_monitor_billed_prune', 'publish_monitor_publish_reconcile_claim',
-      'publish_monitor_billed_orphans',
+      'publish_monitor_schedule_claim', 'publish_monitor_billed_orphans',
       'publish_monitor_provider_work_claim', 'publish_monitor_cleanup_claim', 'publish_monitor_orphan_classify',
       'publish_monitor_stuck_list']);
     expect([report.sweepDeleteEnabled, report.refresh, report.failures, report.stuck])
@@ -68,7 +68,7 @@ describe('publish-monitor daily job', () => {
     const on = db(undefined, [], true);
     const report = await runSocialMonitorJob(on.db, deps(), Date.now() + 60_000, windowFor);
     expect(on.calls).toEqual(['publish_monitor_snapshot_prune', 'publish_monitor_billed_prune', 'publish_monitor_publish_reconcile_claim',
-      'publish_monitor_billed_orphans',
+      'publish_monitor_schedule_claim', 'publish_monitor_billed_orphans',
       'publish_monitor_provider_work_claim', 'publish_monitor_cleanup_claim', 'publish_monitor_refresh_claim',
       'publish_monitor_settle_facts', 'publish_monitor_orphan_classify', 'publish_monitor_stuck_list']);
     expect(report.refresh).toEqual({ claimed: 0, outcomes: {} });

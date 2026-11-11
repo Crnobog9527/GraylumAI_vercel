@@ -1,22 +1,28 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useMemo } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import * as Tabs from '@radix-ui/react-tabs';
+import { Sparkles } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { accountIndex, brandsFromLibrary } from './brands';
 import { ConnectionsPanel, type Connection, type RefreshState } from './ConnectionsPanel';
+import styles from './data-review.module.css';
 import { dataErrorMessage, errorCode } from './labels';
 import { ManualImport } from './ManualImport';
 import { PostsPanel, type Post } from './PostsPanel';
 import { ReviewPanel } from './ReviewPanel';
+import { StateBlock } from './StateBlock';
 import { TrendCharts, TrendSkeleton } from './TrendCharts';
+
+const TABS = [['trend', '数据趋势'], ['posts', '作品数据'], ['accounts', '账号'], ['review', '每周复盘'], ['import', '表格导入']] as const;
+type TabId = typeof TABS[number][0];
 
 /**
  * PUBLISH-MONITOR PR-7: "数据复盘" — connected accounts, the user's own post data, table import and weekly reviews.
  * Access follows the server: the admin switch (off → "还没有开放"), the plan's data window (free → upgrade note,
  * Pro 30 days, Gold 90 days plus benchmarks and the automatic review). Nothing here decides access by itself.
+ * The page follows the library page's layout (head, underlined tabs, one scrolling body) and owns its scrolling.
  */
 export function DataReviewView() {
   const utils = trpc.useUtils();
@@ -26,6 +32,7 @@ export function DataReviewView() {
   const brands = useMemo(() => brandsFromLibrary(library.data), [library.data]);
   const refresh = useMemo(() => new Map<string, RefreshState>((data.data?.connections ?? []).map(c => [c.id, c])),
     [data.data]);
+  const [tab, setTab] = useState<TabId>('trend');
 
   const blocked = errorCode(connections.error) ?? errorCode(data.error);
   // The account list comes from the library query, so adding a brand account refreshes it too.
@@ -34,13 +41,15 @@ export function DataReviewView() {
     void utils.opc.library.invalidate(); void utils.publishMonitor.trend.invalidate();
   };
 
-  if (connections.isPending || data.isPending) return <Shell><TrendSkeleton /></Shell>;
+  if (connections.isPending || data.isPending) return <Shell loading><TrendSkeleton /></Shell>;
   if (blocked === 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED') return <Shell><Upgrade /></Shell>;
   if (blocked || !connections.data || !data.data) {
+    const closed = blocked === 'PUBLISH_MONITOR_DISABLED';
     return (
       <Shell>
-        <p role="alert" className="text-sm">{dataErrorMessage(blocked)}</p>
-        {blocked !== 'PUBLISH_MONITOR_DISABLED' && <Button variant="outline" onClick={changed}>重试</Button>}
+        <StateBlock tone={closed ? 'plain' : 'error'} title={closed ? '还没有开放' : '暂时读不到'} text={dataErrorMessage(blocked)}>
+          {!closed && <button type="button" className={styles.button} onClick={changed}>重试</button>}
+        </StateBlock>
       </Shell>
     );
   }
@@ -50,51 +59,64 @@ export function DataReviewView() {
   const accountOfConnection = new Map((connections.data as Connection[])
     .flatMap(c => (c.accountProjectId && accounts.get(c.accountProjectId) ? [[c.id, accounts.get(c.accountProjectId)!] as const] : [])));
   return (
-    <Shell>
-      {library.error && <p role="alert" className="text-sm">读不到你的品牌账号列表，连接和导入暂时不能选账号。</p>}
-      <Tabs defaultValue="trend">
-        {/* Five tabs are wider than a 390px phone: the bar scrolls sideways instead of widening the page. */}
-        <TabsList className="max-w-full justify-start overflow-x-auto">
-          <TabsTrigger value="trend">数据趋势</TabsTrigger>
-          <TabsTrigger value="posts">作品数据</TabsTrigger>
-          <TabsTrigger value="accounts">账号</TabsTrigger>
-          <TabsTrigger value="review">每周复盘</TabsTrigger>
-          <TabsTrigger value="import">表格导入</TabsTrigger>
-        </TabsList>
-        <TabsContent value="trend" className="pt-4"><TrendCharts gold={gold} /></TabsContent>
-        <TabsContent value="posts" className="pt-4">
-          <PostsPanel windowDays={windowDays} posts={data.data.posts as Post[]} connections={data.data.connections}
-            accountOf={id => accountOfConnection.get(id)} onLinked={changed} />
-        </TabsContent>
-        <TabsContent value="accounts" className="pt-4">
-          <ConnectionsPanel brands={brands} connections={connections.data as Connection[]} refresh={refresh} gold={gold}
-            onChanged={changed} />
-        </TabsContent>
-        <TabsContent value="review" className="pt-4"><ReviewPanel gold={gold} /></TabsContent>
-        <TabsContent value="import" className="pt-4"><ManualImport brands={brands} onImported={changed} /></TabsContent>
-      </Tabs>
+    <Shell meta={`近 ${windowDays} 天数据`}>
+      <Tabs.Root className={styles.tabsRoot} value={tab} onValueChange={value => setTab(value as TabId)}>
+        {/* Five tabs are wider than a 360px phone: the bar scrolls sideways instead of widening the page. */}
+        <Tabs.List className={styles.tabs} aria-label="数据复盘的内容">
+          {TABS.map(([id, label]) => <Tabs.Trigger key={id} value={id} className={styles.tab}>{label}</Tabs.Trigger>)}
+        </Tabs.List>
+        <div className={styles.body}>
+          {library.error && <p role="alert" className={styles.lead}>读不到你的品牌账号列表，连接和导入暂时不能选账号。</p>}
+          <Tabs.Content value="trend" className={styles.panel}><TrendCharts gold={gold} onOpenTab={setTab} /></Tabs.Content>
+          <Tabs.Content value="posts" className={styles.panel}>
+            <PostsPanel windowDays={windowDays} posts={data.data.posts as Post[]} connections={data.data.connections}
+              accountOf={id => accountOfConnection.get(id)} onLinked={changed} />
+          </Tabs.Content>
+          <Tabs.Content value="accounts" className={styles.panel}>
+            <ConnectionsPanel brands={brands} connections={connections.data as Connection[]} refresh={refresh} gold={gold}
+              onChanged={changed} />
+          </Tabs.Content>
+          <Tabs.Content value="review" className={styles.panel}><ReviewPanel gold={gold} /></Tabs.Content>
+          <Tabs.Content value="import" className={styles.panel}><ManualImport brands={brands} onImported={changed} /></Tabs.Content>
+        </div>
+      </Tabs.Root>
     </Shell>
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+/**
+ * The page frame. Without tabs (not open, upgrade, failure) the children sit in the scrolling body. While the first
+ * read runs the tab bar is already drawn (inert) with a line where the tab's lead text will be, so the page does not
+ * jump when the data arrives.
+ */
+function Shell({ meta, loading = false, children }: { meta?: string; loading?: boolean; children: ReactNode }) {
   return (
-    <main className="mx-auto w-full max-w-5xl space-y-4 px-4 py-6">
-      <header className="space-y-1">
-        <h1 className="text-lg font-semibold">数据复盘</h1>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          连接你自己的社媒账号，看作品数据，让 AI 告诉你哪些内容有效、下周怎么调整。</p>
+    <main className={styles.page}>
+      <header className={styles.head}>
+        <h1>数据复盘</h1>
+        {meta && <span>{meta}</span>}
       </header>
-      {children}
+      <p className={styles.intro}>连接你自己的社媒账号，看作品数据，让 AI 告诉你哪些内容有效、下周怎么调整。</p>
+      {loading && (
+        <div className={styles.tabs} aria-hidden="true">
+          {TABS.map(([id, label]) => <span key={id} className={styles.tab} data-state={id === 'trend' ? 'active' : undefined}>{label}</span>)}
+        </div>
+      )}
+      {meta ? children : (
+        <div className={styles.body}>
+          {loading && <div className={`${styles.sk} ${styles.skLine}`} />}
+          {children}
+        </div>
+      )}
     </main>
   );
 }
 
 function Upgrade() {
   return (
-    <div className="space-y-2 rounded-lg border p-4 text-sm" style={{ borderColor: 'var(--border-primary)' }}>
-      <p>{dataErrorMessage('PUBLISH_MONITOR_ENTITLEMENT_REQUIRED')}</p>
-      <Link className="underline" href="/app/profile?tab=subscription">查看会员</Link>
-    </div>
+    <StateBlock icon={<Sparkles size={20} aria-hidden />} tag="会员功能" title="数据复盘需要会员"
+      text={dataErrorMessage('PUBLISH_MONITOR_ENTITLEMENT_REQUIRED')}>
+      <Link className={styles.button} href="/app/profile?tab=subscription">查看会员</Link>
+    </StateBlock>
   );
 }
