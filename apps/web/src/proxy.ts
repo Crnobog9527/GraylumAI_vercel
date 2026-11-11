@@ -417,6 +417,6 @@ export const config = {
      * - favicon.ico (favicon file)
      * - image files, except under api/: an API path ending in .png is still an API call and keeps its admission checks
      */
-    '/((?!_next/static|_next/image|fonts/misans/|fonts/noto-sans-cjk-display/|favicon.ico|robots\\.txt$|sitemap\\.xml$|(?!api(?:/|$)).*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/(?:static|image)|fonts/(?:misans|noto-sans-cjk-display)/|favicon.ico|robots\\.txt$|sitemap\\.xml$|(?!api/).*\\.(?:svg|png|jpe?g|gif|webp)$).*)',
   ],
 };

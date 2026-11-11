@@ -60,7 +60,8 @@ describe('public sitemap', () => {
 describe('image file names (deep review 11-11 item 8)', () => {
   it('serves real image files directly', () => {
     for (const url of ['/graylum-logo.png', '/graylum-logo.svg', '/og/home.png', '/opc-reference/a/b.webp', '/apix.png',
-      '/api.png', '/landing/hero.jpg']) {
+      '/api.png', '/landing/hero.jpg', '/landing/hero.jpeg', '/_next/static/chunks/a.js',
+      '/_next/image?url=%2Fog%2Fhome.png&w=640&q=75']) {
       expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
     }
   });
