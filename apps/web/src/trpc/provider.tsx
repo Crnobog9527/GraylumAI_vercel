@@ -1,7 +1,6 @@
 'use client';
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import React, { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { usePathname } from 'next/navigation';
 import { trpc } from '@/trpc/client';
@@ -11,7 +10,7 @@ import { useUnauthorizedRecovery } from '@/hooks/use-unauthorized-recovery';
 import { UnauthorizedNotice } from '@/components/auth/UnauthorizedNotice';
 import { createSessionRefresher } from '@/lib/session-refresh';
 import { sessionRefreshLink } from '@/trpc/session-refresh-link';
-import { trpcLinkKind } from '@/trpc/link-routing';
+import { transportLink } from '@/trpc/transport-link';
 import { TRPC_MAX_BATCH_CALLS } from '@/lib/trpcBatchLimit';
 import { toast } from 'sonner';
 import { isProfileArchivedError, PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
@@ -186,11 +185,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       refreshSession: () => supabase.auth.refreshSession(),
       onToken: token => { accessTokenRef.current = token; sessionPromiseRef.current = Promise.resolve(token); },
     });
-    return trpc.createClient({ links: [sessionRefreshLink(session), splitLink({
-      condition: op => trpcLinkKind(op.path) === 'single',
-      true: httpLink(options),
-      false: httpBatchLink(options),
-    })] });
+    return trpc.createClient({ links: [sessionRefreshLink(session), transportLink(options)] });
   });
 
   return (
