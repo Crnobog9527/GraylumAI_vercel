@@ -120,10 +120,17 @@ const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.0000
 // The runtime rate limits and pause (newWorkGate) are Redis-backed; here a stub that admits, or refuses as a case needs.
 const admit = async () => ({ ok: true as const });
 type NewWork = ChatDeps['newWork'];
+type RpcAnswer = PromiseLike<{ data: unknown; error: unknown }>;
+/** A turn's turn_close calls in the test's hands: `send` passes the call on to the database. */
+type OnClose = (args: Record<string, unknown>, send: () => RpcAnswer) => RpcAnswer;
+const LOST: Awaited<RpcAnswer> = { data: null, error: { message: 'TypeError: fetch failed' } };
 async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier;
-  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; images?: string[]; requestId?: string; slots?: CounterStore }) {
+  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; images?: string[]; requestId?: string; slots?: CounterStore; onClose?: OnClose }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots: input.slots ?? slots, transport: input.transport,
+  const direct = turnClients(admin), { onClose } = input;
+  const clients = onClose ? { ...direct, write: { rpc: (name: string, args: Record<string, unknown>) => name === 'turn_close'
+    ? onClose(args, () => direct.write.rpc(name, args)) : direct.write.rpc(name, args) } as unknown as typeof direct.write } : direct;
+  await withCatalogRequest(() => runChatTurn({ admin, clients, slots: input.slots ?? slots, transport: input.transport,
     gate: { classify: input.gate ?? allowGate }, newWork: input.newWork ?? { message: admit, calls: admit } },
   { actorId: input.actor, sessionId: input.session, requestId: input.requestId ?? randomUUID(), text: input.text,
     ...(input.images ? { images: input.images } : {}) }, e => { events.push(e); input.onEvent?.(e); }));
@@ -175,21 +182,73 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in 
   expect(posts).toBe(2);
 });
 
-it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken after it started keeps the provider id and the freeze, sends once and is never refunded as zero', async () => {
+// Owner 2026-11-11 and the review of #1860: the part of a cut-off reply the user was shown is saved and the turn closes as delivered,
+// charged by its receipt once the cost is known. Before, nothing was saved and (under the 11-11 rule) nothing would have been
+// charged: a slow model asked for a very long answer was a free answer every time.
+// One frame per read, then the connection is lost: an error raised with frames still queued would drop them unread.
+const brokenAfter = (id: string, frames: string[]): typeof fetch => async () => {
+  let sent = 0;
+  return new Response(new ReadableStream({ pull(controller) {
+    if (sent < frames.length) controller.enqueue(new TextEncoder().encode(frames[sent++]!));
+    else controller.error(new Error('connection lost'));
+  } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
+};
+const modelCalls = async (actor: string) => (await db.query(`select c.seq,c.status,c.cost_pending,c.provider_id from turn_calls c
+  join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model' order by c.seq`, [actor])).rows;
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken after text was shown keeps the provider id and the freeze, saves the shown part and is charged by its receipt, once', async () => {
   const f = await setup();
   let posts = 0;
-  const transport: typeof fetch = async () => { posts++; return new Response(new ReadableStream({ start(controller) {
-    controller.enqueue(new TextEncoder().encode(textFrame('gen-broken', 'Half an ans'))); controller.error(new Error('connection lost'));
-  } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-broken' } }); };
+  const broken = brokenAfter('gen-broken', [textFrame('gen-broken', 'Half an ans'), textFrame('gen-broken', 'wer \ud83d')]);
+  const transport: typeof fetch = async (...args) => { posts++; return broken(...args); };
   const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
-  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+  expect(out.events.map(e => e.type), JSON.stringify(out.events)).toEqual(['opened', 'text', 'text', 'error']);
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REPLY_CUT' });
   expect(posts).toBe(1);
-  const call = (await db.query("select c.status,c.cost_pending,c.provider_id from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model'", [f.actor])).rows;
-  expect(call).toEqual([{ status: 'unknown', cost_pending: true, provider_id: 'gen-broken' }]);
-  const t = (await db.query('select close_kind,settlement,charged_credits,reserved_credits from turns where actor_id=$1', [f.actor])).rows[0];
-  expect(t).toMatchObject({ close_kind: 'interrupted', settlement: 'pending', charged_credits: null });
+  const calls = await modelCalls(f.actor);
+  expect(calls).toEqual([{ seq: calls[0]!.seq, status: 'unknown', cost_pending: true, provider_id: 'gen-broken' }]);
+  const t = (await db.query('select id,close_kind,settlement,charged_credits,reserved_credits,delivered,failure_code from turns where actor_id=$1', [f.actor])).rows[0];
+  // Delivered: what was shown is the saved answer (without the half emoji the cut left). The cost is not known yet, so the freeze stays.
+  expect(t).toMatchObject({ close_kind: 'completed', settlement: 'pending', charged_credits: null, delivered: true, failure_code: 'turn_reply_cut' });
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - t.reserved_credits);
+  expect((await db.query('select role,content from session_messages where session_id=$1 order by seq', [f.session])).rows)
+    .toEqual([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Half an answer' }]);
+  // The receipt recovery finds: charged what it says, once; settling again changes nothing.
+  const admin = countingAdmin().admin, turnId = Number(t.id);
+  expect((await admin.rpc('turn_call_record', { p_actor_id: f.actor, p_turn_id: turnId, p_seq: calls[0]!.seq, p_status: 'ok', p_nominal_usd: '0.000003',
+    p_actual_usd: '0.000003', p_usage: {}, p_provider_id: 'gen-broken', p_payload_hash: 'c'.repeat(64), p_raw: null })).error).toBeNull();
+  const settle = { p_actor_id: f.actor, p_turn_id: turnId, p_action: 'settle' };
+  const both = await Promise.all([admin.rpc('turn_recover', settle), countingAdmin().admin.rpc('turn_recover', settle)]);
+  expect(both.map(r => r.error)).toEqual([null, null]);
+  expect(both.map(r => Boolean((r.data as { skipped?: boolean }).skipped)).sort()).toEqual([false, true]);
+  const settled = (await db.query('select close_kind,settlement,charged_credits,delivered from turns where actor_id=$1', [f.actor])).rows[0];
+  expect(settled).toMatchObject({ close_kind: 'completed', settlement: 'done', delivered: true });
+  expect(settled.charged_credits).toBeGreaterThan(0);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - settled.charged_credits);
+  expect((await admin.rpc('turn_recover', settle)).data).toMatchObject({ skipped: true });
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - settled.charged_credits);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken before any text was shown saves nothing, keeps the freeze for recovery and is then charged nothing', async () => {
+  const f = await setup();
+  // The role frame carries no text: the user was shown nothing.
+  const transport = brokenAfter('gen-empty', [frame('gen-empty', { choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })]);
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
+  expect(out.events.map(e => e.type), JSON.stringify(out.events)).toEqual(['opened', 'error']);
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+  const calls = await modelCalls(f.actor);
+  expect(calls).toEqual([{ seq: calls[0]!.seq, status: 'unknown', cost_pending: true, provider_id: 'gen-empty' }]);
+  const t = (await db.query('select id,close_kind,settlement,charged_credits,reserved_credits,delivered from turns where actor_id=$1', [f.actor])).rows[0];
+  expect(t).toMatchObject({ close_kind: 'interrupted', settlement: 'pending', charged_credits: null, delivered: false });
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - t.reserved_credits);
   expect((await db.query('select count(*)::int n from session_messages where session_id=$1', [f.session])).rows[0].n).toBe(0);
+  // Owner 2026-11-11: nothing was shown or saved, so the receipt recovery finds is Graylum's; the whole freeze returns.
+  const admin = countingAdmin().admin, turnId = Number(t.id);
+  expect((await admin.rpc('turn_call_record', { p_actor_id: f.actor, p_turn_id: turnId, p_seq: calls[0]!.seq, p_status: 'ok', p_nominal_usd: '0.000003',
+    p_actual_usd: '0.000003', p_usage: {}, p_provider_id: 'gen-empty', p_payload_hash: 'c'.repeat(64), p_raw: null })).error).toBeNull();
+  expect((await admin.rpc('turn_recover', { p_actor_id: f.actor, p_turn_id: turnId, p_action: 'settle' })).data)
+    .toMatchObject({ closeKind: 'interrupted', chargedCredits: 0, settlement: 'done' });
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-4a: the client gets text before the provider response ends', async () => {
@@ -595,4 +654,108 @@ it('RUNTIME: PUBLISH-MONITOR B2: a failed screenshot turn charges nothing and ke
     .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
   expect(await imageTraces(url)).toEqual([]);
+});
+
+/*
+ * Deep review 2026-11-11, findings 2 and 9. Owner 2026-11-11: a turn whose answer was not saved does not charge the user; Graylum
+ * bears the cost, on record. Finding 2: a NUL or half an emoji in the message made the closing write fail every time (jsonb refuses
+ * both), so a request could be built to be answered for free as often as its sender liked; text is now cleaned at both ends.
+ */
+const turnRow = async (actor: string) => (await db.query(
+  `select id,state,close_kind,settlement,charged_credits,absorbed_credits,reserved_credits,delivered,failure_code
+   from turns where actor_id=$1`, [actor])).rows[0];
+const balance = async (actor: string) => (await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits as number;
+const savedMessages = async (session: string) =>
+  (await db.query('select role,content from session_messages where session_id=$1 order by seq', [session])).rows;
+const ledgerRows = async (actor: string) =>
+  (await db.query('select count(*)::int n from credit_transactions where user_id=$1', [actor])).rows[0].n as number;
+const closeArgs = (actor: string, turnId: number, kind: string, refundAll = false) => ({ p_actor_id: actor, p_turn_id: turnId,
+  p_close_kind: kind, p_messages: [], p_delivered: false, p_refund_all: refundAll, p_failure_code: 'test_close', p_kind_result: null });
+const answer: typeof fetch = async () => sse('gen-close-' + randomUUID(), ['Synthetic ', 'answer']);
+const unsaved = () => vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+it('RUNTIME: CORE-PATH-V2 close: a message with a NUL and half an emoji is answered, saved cleaned and charged once', async () => {
+  const f = await setup();
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hel\0lo \ud83d', transport: answer });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result, JSON.stringify(out.events)).toMatchObject({ type: 'result', body: 'Synthetic answer', settlement: 'done' });
+  expect(result.chargedCredits).toBeGreaterThan(0);
+  expect(await savedMessages(f.session)).toEqual([{ role: 'user', content: 'Hello �' }, { role: 'assistant', content: 'Synthetic answer' }]);
+  expect(await turnRow(f.actor)).toMatchObject({ close_kind: 'completed', settlement: 'done', charged_credits: result.chargedCredits, delivered: true });
+  expect(await balance(f.actor)).toBe(1000 - result.chargedCredits!);
+});
+
+it('RUNTIME: CORE-PATH-V2 close: a closing write that fails after the whole answer refunds the turn once, keeps the cost on record and is logged', async () => {
+  const f = await setup(), closes: unknown[] = [], logged = unsaved();
+  try {
+    const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport: answer,
+      onClose: async (args, send) => { closes.push(args.p_close_kind); return args.p_close_kind === 'completed' ? LOST : send(); } });
+    // The whole answer reached the user, then the error.
+    expect(out.events.map(e => e.type), JSON.stringify(out.events)).toEqual(['opened', 'text', 'text', 'error']);
+    expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' });
+    expect(closes).toEqual(['completed', 'failed']);
+    const t = await turnRow(f.actor);
+    expect(t).toMatchObject({ state: 'closed', close_kind: 'failed', settlement: 'done', charged_credits: 0, delivered: false,
+      failure_code: 'turn_database_unavailable' });
+    // Nothing was saved, so the user pays nothing; the receipt keeps its cost and Graylum bears it.
+    expect(await balance(f.actor)).toBe(1000);
+    expect(await savedMessages(f.session)).toEqual([]);
+    expect(t.absorbed_credits).toBeGreaterThan(0);
+    expect((await db.query("select status,actual_usd::float8 a from turn_calls where turn_id=$1 and call_kind='model'", [t.id])).rows)
+      .toEqual([{ status: 'ok', a: 0.000003 }]);
+    expect(logged).toHaveBeenCalledWith('ai', 'turn_answer_unsaved', { kind: 'chat', turnId: Number(t.id), code: 'TURN_DATABASE_UNAVAILABLE' });
+    // Repeated: a later close finds the turn settled and changes nothing (no second refund, no new ledger row).
+    const before = await ledgerRows(f.actor);
+    const again = await countingAdmin().admin.rpc('turn_close', closeArgs(f.actor, Number(t.id), 'failed', true));
+    expect(again.error).toBeNull();
+    expect(again.data).toMatchObject({ replay: true, closeKind: 'failed', chargedCredits: 0 });
+    expect(await balance(f.actor)).toBe(1000);
+    expect(await ledgerRows(f.actor)).toBe(before);
+  } finally { logged.mockRestore(); }
+});
+
+it('RUNTIME: CORE-PATH-V2 close: a closing write that committed but whose answer was lost is kept: saved and charged once, never refunded', async () => {
+  const f = await setup(), closes: unknown[] = [], logged = unsaved();
+  try {
+    const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport: answer,
+      onClose: async (args, send) => { closes.push(args.p_close_kind); const done = await send(); return args.p_close_kind === 'completed' ? LOST : done; } });
+    expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' });
+    expect(closes).toEqual(['completed', 'failed']);
+    const t = await turnRow(f.actor);
+    // The first close stands: the refund close found the turn closed and wrote nothing.
+    expect(t).toMatchObject({ state: 'closed', close_kind: 'completed', settlement: 'done', delivered: true, failure_code: null });
+    expect(t.charged_credits).toBeGreaterThan(0);
+    expect(await balance(f.actor)).toBe(1000 - t.charged_credits);
+    expect(await savedMessages(f.session)).toEqual([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Synthetic answer' }]);
+  } finally { logged.mockRestore(); }
+});
+
+it('RUNTIME: CORE-PATH-V2 close: a turn left open (both closes lost) is ended by recovery with nothing charged, once, also by two recoveries at once', async () => {
+  const f = await setup(), logged = unsaved();
+  try {
+    const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport: answer, onClose: async () => LOST });
+    expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' });
+  } finally { logged.mockRestore(); }
+  const open = await turnRow(f.actor);
+  // Nothing refunded, nothing charged yet: the turn is still running with its freeze, as the platform stopping the function leaves it.
+  expect(open).toMatchObject({ state: 'running', close_kind: null, charged_credits: null });
+  expect(await balance(f.actor)).toBe(1000 - open.reserved_credits);
+  // The recovery job ends a turn nobody wrote for 15 minutes. Two instances at once: one closes it, the other finds it closed.
+  await db.query("update turns set updated_at=now()-interval '16 minutes' where actor_id=$1 and id=$2", [f.actor, open.id]);
+  const recover = { p_actor_id: f.actor, p_turn_id: Number(open.id), p_action: 'interrupt' };
+  const both = await Promise.all([countingAdmin().admin.rpc('turn_recover', recover), countingAdmin().admin.rpc('turn_recover', recover)]);
+  expect(both.map(r => r.error)).toEqual([null, null]);
+  expect(both.map(r => Boolean((r.data as { skipped?: boolean }).skipped)).sort()).toEqual([false, true]);
+  const t = await turnRow(f.actor);
+  // Owner 2026-11-11: interrupted, no answer saved: the user pays nothing although the receipt is final; the cost is Graylum's.
+  expect(t).toMatchObject({ state: 'closed', close_kind: 'interrupted', settlement: 'done', charged_credits: 0, delivered: false });
+  expect(t.absorbed_credits).toBeGreaterThan(0);
+  expect(await balance(f.actor)).toBe(1000);
+  expect(await savedMessages(f.session)).toEqual([]);
+  // The freeze came back exactly once.
+  const before = await ledgerRows(f.actor);
+  const again = await countingAdmin().admin.rpc('turn_close', closeArgs(f.actor, Number(open.id), 'interrupted'));
+  expect(again.data).toMatchObject({ replay: true, closeKind: 'interrupted', chargedCredits: 0 });
+  expect(await balance(f.actor)).toBe(1000);
+  expect(await ledgerRows(f.actor)).toBe(before);
 });

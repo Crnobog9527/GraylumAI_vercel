@@ -96,9 +96,9 @@ export const UserProfileHeader = memo(function UserProfileHeader({
 
   return (
     <div
-      className="rounded-2xl p-6 mb-6"
+      className="rounded-xl p-6 mb-6"
       style={{
-        background: 'var(--bg-secondary)',
+        background: 'var(--gl-surface, #fff)',
         border: '1px solid var(--border-primary)',
         contain: 'layout paint',
       }}
@@ -129,17 +129,21 @@ export const UserProfileHeader = memo(function UserProfileHeader({
                     }}
                   />
                   <button
+                    type="button"
+                    aria-label="保存昵称"
                     onClick={handleSaveNickname}
                     disabled={savingNickname || !nickname.trim()}
                     className="p-1.5 rounded-lg transition-colors"
-                    style={{ background: 'rgba(34, 197, 94, 0.1)', color: 'var(--success)' }}
+                    style={{ background: 'var(--success-bg)', color: 'var(--success)' }}
                   >
                     {savingNickname ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                   </button>
                   <button
+                    type="button"
+                    aria-label="取消修改昵称"
                     onClick={handleCancelNickname}
                     className="p-1.5 rounded-lg transition-colors"
-                    style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--error)' }}
+                    style={{ background: 'var(--error-bg)', color: 'var(--error)' }}
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -220,9 +224,9 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
       {/* Credits Card */}
       <div
-        className="rounded-2xl p-6 flex flex-col"
+        className="rounded-xl p-6 flex flex-col"
         style={{
-          background: 'var(--bg-secondary)',
+          background: 'var(--gl-surface, #fff)',
           border: '1px solid var(--border-primary)',
           contain: 'layout paint',
         }}
@@ -234,9 +238,7 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
         <div
           className="text-4xl font-bold mb-2"
           style={{
-            background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent'
+            color: 'var(--text-primary)',
           }}
         >
           {formatCreditsBalance(hasVerifiedBalance ? 'ready' : 'unavailable', credits)}
@@ -250,21 +252,21 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
             onClick={() => onNavigateToSubscription?.()}
             className="w-full gap-2"
             style={{
-              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-              color: 'var(--bg-primary)',
+              background: 'var(--gl-action, #262626)',
+              color: 'var(--gl-action-text, #fff)',
             }}
           >
             <Plus className="h-4 w-4" />
-            购买加油包
+            购买积分包
           </Button>
         )}
       </div>
 
       {/* Subscription Card */}
       <div
-        className="rounded-2xl p-6 flex flex-col"
+        className="rounded-xl p-6 flex flex-col"
         style={{
-          background: 'var(--bg-secondary)',
+          background: 'var(--gl-surface, #fff)',
           border: '1px solid var(--border-primary)',
           contain: 'layout paint',
         }}
@@ -283,8 +285,8 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
           onClick={() => onNavigateToSubscription?.()}
           className="w-full gap-2"
           style={{
-            background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-            color: 'var(--bg-primary)',
+            background: 'var(--gl-action, #262626)',
+            color: 'var(--gl-action-text, #fff)',
           }}
         >
           {isFreeTier ? (
@@ -321,9 +323,9 @@ export const UsageStatsCard = memo(function UsageStatsCard({ user }: { user: Moc
 
   return (
     <div
-      className="rounded-2xl p-6 mb-6"
+      className="rounded-xl p-6 mb-6"
       style={{
-        background: 'var(--bg-secondary)',
+        background: 'var(--gl-surface, #fff)',
         border: '1px solid var(--border-primary)',
         contain: 'layout paint',
       }}
@@ -337,9 +339,7 @@ export const UsageStatsCard = memo(function UsageStatsCard({ user }: { user: Moc
             <div
               className="text-2xl font-bold"
               style={{
-                background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent'
+                color: 'var(--text-primary)',
               }}
             >
               {stat.value}
@@ -393,9 +393,9 @@ export const QuickActionsCard = memo(function QuickActionsCard({
 }) {
   return (
     <div
-      className="rounded-2xl p-6"
+      className="rounded-xl p-6"
       style={{
-        background: 'var(--bg-secondary)',
+        background: 'var(--gl-surface, #fff)',
         border: '1px solid var(--border-primary)',
         contain: 'layout paint',
       }}
@@ -404,7 +404,7 @@ export const QuickActionsCard = memo(function QuickActionsCard({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* 账户安全 */}
         <div
-          className="p-4 rounded-xl cursor-pointer transition-[border-color,box-shadow,transform] duration-200 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
+          className="p-4 rounded-xl cursor-pointer transition-[border-color,background-color] duration-200 motion-reduce:transition-none"
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border-primary)'
@@ -427,7 +427,7 @@ export const QuickActionsCard = memo(function QuickActionsCard({
 
         {/* 提交工单 */}
         <div
-          className="p-4 rounded-xl cursor-pointer transition-[border-color,box-shadow,transform] duration-200 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
+          className="p-4 rounded-xl cursor-pointer transition-[border-color,background-color] duration-200 motion-reduce:transition-none"
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border-primary)'
@@ -436,9 +436,9 @@ export const QuickActionsCard = memo(function QuickActionsCard({
         >
           <div
             className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
-            style={{ background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)' }}
+            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
-            <Headphones className="h-5 w-5" style={{ color: 'rgba(139, 92, 246, 1)' }} />
+            <Headphones className="h-5 w-5" style={{ color: 'var(--text-primary)' }} />
           </div>
           <h4 className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>提交工单</h4>
           <p className="text-sm mb-3 min-h-[40px]" style={{ color: 'var(--text-tertiary)' }}>遇到问题？我们随时为您提供帮助</p>

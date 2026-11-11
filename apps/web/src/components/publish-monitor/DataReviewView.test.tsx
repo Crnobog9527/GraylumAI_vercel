@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -9,7 +11,7 @@ const state = vi.hoisted(() => ({
 const mutation = vi.hoisted(() => () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null,
   data: undefined }));
 vi.mock('@/trpc/client', () => ({ trpc: {
-  useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() }, trend: { invalidate: vi.fn() },
+  useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() }, trend: { invalidate: vi.fn(), prefetch: vi.fn() },
     settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() }, pillars: { invalidate: vi.fn() } } } }),
   opc: { library: { useQuery: () => state.library } },
   publishMonitor: {
@@ -26,10 +28,10 @@ vi.mock('@/trpc/client', () => ({ trpc: {
       savePillars: { useMutation: () => ({ mutate: () => {}, isPending: false }) } },
   },
 } }));
-import { DataReviewView } from './DataReviewView';
+import { DataReviewView, tabFromSearch } from './DataReviewView';
 import { PostsPanel, type Post } from './PostsPanel';
 import { ReviewPanel } from './ReviewPanel';
-import { ConnectionsPanel, blockingProjectIds, type Connection } from './ConnectionsPanel';
+import { ConnectionsPanel, blockingProjectIds, stateTone, type Connection } from './ConnectionsPanel';
 
 const ok = (data: unknown) => ({ isPending: false, isSuccess: true, data, error: null });
 const failed = (message: string) => ({ isPending: false, isSuccess: false, data: undefined, error: { message, data: {} } });
@@ -78,6 +80,15 @@ describe('data review page access follows the server', () => {
     expect(html).not.toContain('role="tab"');
     expect(text(html)).not.toMatch(/读取中|加载/);
   });
+  // Walkthrough 2026-11-11, item 30: a visitor without the plan saw the five tab names for a few seconds, then the upgrade notice.
+  it('while the first read runs, the five tab names are placeholders (sized by the text, not painted) and none is marked current', () => {
+    state.data = { isPending: true };
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(html.match(/data-tab-placeholder/g)).toHaveLength(5);
+    expect(html).not.toContain('data-state="active"');
+    const css = readFileSync(fileURLToPath(new URL('./data-review.module.css', import.meta.url)), 'utf8');
+    expect(css).toMatch(/\.skTab \{[^}]*color: transparent;/);
+  });
   it('a read failure is announced and offers a retry', () => {
     state.data = failed('PUBLISH_MONITOR_UNAVAILABLE');
     const html = renderToStaticMarkup(<DataReviewView />);
@@ -90,6 +101,12 @@ describe('data review page access follows the server', () => {
     const html = renderToStaticMarkup(<DataReviewView />);
     expect(html.match(/role="tab"/g)).toHaveLength(5);
     expect(text(html)).toContain('近 90 天数据');
+  });
+  it('opens the tab named in the address, and the trend tab for anything else', () => {
+    expect(tabFromSearch('?tab=accounts')).toBe('accounts');
+    expect(tabFromSearch('?returnTo=%2Fapp&tab=import')).toBe('import');
+    expect(tabFromSearch('?tab=admin')).toBe('trend');
+    expect(tabFromSearch('')).toBe('trend');
   });
 });
 
@@ -104,6 +121,25 @@ describe('posts', () => {
     expect(t).toContain('未提供');
     expect(t).toContain('未取到');
     expect(t).toContain('从连接那天开始记录');
+  });
+});
+
+describe('posts on one list for every width', () => {
+  it('names every number by its own label (the phone card and a screen reader have no header row), and marks a gap as a gap', () => {
+    const html = renderToStaticMarkup(<PostsPanel windowDays={30} posts={[post()]} connections={[{ id: 'c1', platform: 'x' }]}
+      accountOf={() => undefined} onLinked={() => {}} />);
+    expect(html).toContain('<dt>播放/浏览</dt><dd data-missing="false">30</dd>');
+    expect(html).toContain('<dt>分享</dt><dd data-missing="true">平台不提供</dd>');
+    // A real 0 is a number, not a gap.
+    expect(html).toContain('<dt>点赞</dt><dd data-missing="false">0</dd>');
+    expect(html).not.toContain('<table');
+  });
+  it('with no post in the window says so and offers the two ways on', () => {
+    const t = text(renderToStaticMarkup(<PostsPanel windowDays={30} posts={[]} connections={[]} accountOf={() => undefined}
+      onLinked={() => {}} onOpenTab={() => {}} />));
+    expect(t).toContain('这个时间范围里还没有读到作品');
+    expect(t).toContain('看账号状态');
+    expect(t).toContain('用表格导入');
   });
 });
 
@@ -146,6 +182,25 @@ describe('accounts', () => {
     expect(render([own({ platform: 'bluesky', consentPublish: true })])).not.toContain('允许一键发布');
     expect(render([own({ source: 'tikhub', platform: 'douyin' })])).not.toContain('允许一键发布');
     expect(render([own({ status: 'reauth_required' })])).not.toContain('允许一键发布');
+  });
+  it('colours the state line by what the user has to do: act, keep an eye on it, or nothing', () => {
+    const none = undefined;
+    const delayed = { id: 'c1', refreshError: null, delayed: true, manualRefreshAt: null, refreshState: null };
+    expect(stateTone(own({}), none)).toBe('ok');
+    expect(stateTone(own({}), delayed)).toBe('warning');
+    expect(stateTone(own({ postCount: 0 }), none)).toBe('warning');
+    expect(stateTone(own({}), { ...delayed, delayed: false, refreshError: 'x' })).toBe('error');
+    expect(stateTone(own({ status: 'reauth_required' }), none)).toBe('error');
+    // A public-data or manual account with no posts yet is not asked to re-authorize.
+    expect(stateTone(own({ source: 'tikhub', platform: 'douyin', postCount: 0 }), none)).toBe('ok');
+  });
+  it('with no account yet says what can be connected and offers to connect or import', () => {
+    const t = text(renderToStaticMarkup(<ConnectionsPanel brands={[]} connections={[]} refresh={new Map()} gold={false}
+      onChanged={() => {}} onOpenTab={() => {}} />));
+    expect(t).toContain('还没有连接账号');
+    expect(t).toContain('海外 9 个平台授权后读取你自己作品的数据');
+    expect(t).toContain('连接账号');
+    expect(t).toContain('用表格导入');
   });
   it('shows benchmark accounts only to Gold', () => {
     expect(render([])).not.toContain('对标账号（Gold）');

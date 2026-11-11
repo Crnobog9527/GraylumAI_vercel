@@ -42,11 +42,20 @@ async function brandWithPillars(actor: string) {
 const savedNames = async (business: string) => ((await db()<Array<{ pillars: Array<{ name: string }> }>>`
   select pillars from social_coach_profiles where business_id=${business}::uuid`)[0]?.pillars ?? []).map(p => p.name);
 
+/** Below 1360px the review settings (with the pillars) are folded above the reviews until opened; this window is 1280px wide. */
+async function unfoldSettings(page: Page) {
+  const fold = page.getByRole('button', { name: '复盘设置' });
+  await expect(fold).toBeVisible({ timeout: 60_000 });
+  if (await fold.getAttribute('aria-expanded') !== 'true') await fold.click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+}
+
 async function openPillars(page: Page, evidence: (label: string) => Promise<void>) {
   await page.goto('/app/publish-monitor');
   // When the tab never shows (a CI run showed an unstyled "Graylum" and a blank page in the two tabs, with no stall of the server in that
   // test), say what the page asked for and got: failed requests, browser errors, the page text.
   await page.getByRole('tab', { name: '每周复盘' }).click().catch(async error => { await evidence('tab 每周复盘 never appeared'); throw error; });
+  await unfoldSettings(page);
   await expect(page.getByLabel('内容方向 3 名称')).toHaveValue('城市探店', { timeout: 60_000 });
 }
 
@@ -83,5 +92,6 @@ test('a save from a tab that missed another tab\'s save is refused and reads the
   // After a reload both tabs show the list tab A saved.
   await other.reload();
   await other.getByRole('tab', { name: '每周复盘' }).click();
+  await unfoldSettings(other);
   await expect(other.getByLabel('内容方向 4 名称')).toHaveValue('冲突验收临时', { timeout: 60_000 });
 });

@@ -105,7 +105,8 @@ export async function holdCases(t){
   assert.equal(pending.settlement,'pending');assert.equal(await settles(u),0,'nothing settles before the cost is known');
   await record(u,k.turnId,2);
   const late=await close(u,k.turnId,'interrupted',{messages:[],delivered:false});
-  assert.equal(late.chargedCredits,12);assert.equal(await settles(u),2);assert.equal(await balance(u),988);
+  // Owner 2026-11-11: the turn was cut off, so its two receipts (12 credits) are not charged; both freezes still settle once and return.
+  assert.equal(late.chargedCredits,0);assert.equal(await settles(u),2);assert.equal(await balance(u),1000);
  }
  // A paused turn with a top-up, resumed: its freezes return, what it owes is carried and settled once.
  {

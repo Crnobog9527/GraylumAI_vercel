@@ -41,9 +41,9 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
 
   return (
     <div
-      className="mt-6 rounded-2xl p-6 md:p-8"
+      className="mt-6 rounded-xl p-6 md:p-8"
       style={{
-        background: 'var(--bg-secondary)',
+        background: 'var(--gl-surface, #fff)',
         border: '1px solid var(--border-primary)',
         boxShadow: 'none',
       }}
@@ -51,11 +51,11 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
       <div className="flex items-center gap-3 mb-6">
         <div
           className="p-2 rounded-lg"
-          style={{ background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)' }}
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
         >
-          <Package className="h-5 w-5" style={{ color: 'rgba(139, 92, 246, 1)' }} />
+          <Package className="h-5 w-5" style={{ color: 'var(--text-primary)' }} />
         </div>
-        <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>积分加油包</h3>
+        <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>积分包</h3>
       </div>
       {entitlement.status === 'error' && (
         <div data-testid="profile-credit-packages-entitlement-error" role="alert"
@@ -99,14 +99,14 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
             className="relative rounded-xl p-4 text-center transition-colors duration-200"
             style={{
               background: 'var(--bg-primary)',
-              border: pkg.is_popular ? '2px solid rgba(59, 130, 246, 0.5)' : '1px solid var(--border-primary)',
-              boxShadow: pkg.is_popular ? '0 0 20px rgba(59, 130, 246, 0.2)' : 'none'
+              border: pkg.is_popular ? '1px solid var(--gl-border-strong, #dcdcdc)' : '1px solid var(--border-primary)',
+              boxShadow: 'none'
             }}
           >
             {pkg.is_popular && (
               <div
                 className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
-                style={{ background: 'rgba(59, 130, 246, 0.2)', color: 'var(--info)', border: '1px solid var(--info)' }}
+                style={{ background: 'var(--gl-accent-tag, #f4efe3)', color: 'var(--gl-accent-tag-text, #7a5f2c)' }}
               >
                 热门
               </div>
@@ -116,9 +116,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
               <span
                 className="text-2xl font-bold"
                 style={{
-                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent'
+                  color: 'var(--text-primary)',
                 }}
               >
                 {pkg.credits.toLocaleString()}
@@ -143,8 +141,8 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
               disabled={buy.disabled}
               className="w-full gap-2"
               style={{
-                background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                color: 'var(--bg-primary)'
+                background: 'var(--gl-action, #262626)',
+                color: 'var(--gl-action-text, #fff)',
               }}
             >
               {buy.label}

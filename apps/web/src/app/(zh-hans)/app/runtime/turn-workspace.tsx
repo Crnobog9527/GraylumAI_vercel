@@ -24,7 +24,8 @@ import {
 import {
   COMPOSER_REFERENCES_ENABLED, referenceRequest, referencesNamedIn, type LibraryReference,
 } from '@/components/opc/composer-references';
-import { positioningRequiredNotice } from './positioning-required';
+import { existingPositioning, positioningRequiredNotice } from './positioning-required';
+import { useProfileBusinesses } from '@/components/opc/profile-archive/profile-archive-api';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from './turn-notices';
 import { workRowsOf } from './turn-work-rows';
@@ -127,7 +128,11 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
 
   const workRows = useMemo(() => workRowsOf(chat.view?.calls ?? []), [chat.view?.calls]);
   const paused = chat.paused && !chat.sending;
-  const notices = chat.notice?.text === POSITIONING_REQUIRED_NOTICE ? [positioningRequiredNotice('turn-positioning')]
+  // The guide card's first button depends on whether a positioning is already under way: read only once the card shows.
+  const gated = chat.notice?.text === POSITIONING_REQUIRED_NOTICE;
+  const profiles = useProfileBusinesses(gated);
+  const notices = gated
+    ? [positioningRequiredNotice('turn-positioning', undefined, existingPositioning(profiles.businesses, Boolean(profiles.error)))]
     : chat.notice && !paused ? [{ id: 'turn-notice', tone: 'warning' as const, text: chat.notice.text }]
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
       actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];

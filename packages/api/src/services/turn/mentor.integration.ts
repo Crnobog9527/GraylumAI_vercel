@@ -31,6 +31,7 @@ import { RUNTIME_PAYG_SETTING } from './quote';
 import { MENTOR, ORGANIZER, organized, prose, tiktokVendors, toolCall } from './__tests__/mentorSynthetic';
 import { runTurnRecovery } from './recovery';
 import type { TurnEvent } from './sse';
+import { logger } from '../../lib/logger';
 
 // The draft is started through the old service (it is not part of a turn); its rate limiter is not under test here.
 vi.mock('./admission/newWorkGate', async importOriginal => ({
@@ -163,11 +164,16 @@ function transport(reply: Reply) {
 // The runtime rate limits and pause (newWorkGate) are Redis-backed; here a stub that admits, or refuses as a case needs.
 const admit = async () => ({ ok: true as const });
 type NewWork = MentorDeps['newWork'];
+type RpcAnswer = PromiseLike<{ data: unknown; error: unknown }>;
+/** A turn's turn_close calls in the test's hands: `send` passes the call on to the database. */
+type OnClose = (args: Record<string, unknown>, send: () => RpcAnswer) => RpcAnswer;
 async function turn(f: Awaited<ReturnType<typeof setup>>, input: { text: string; transport: typeof fetch; moduleId?: string;
   organizeAfter?: boolean; newWork?: NewWork; answer?: { sourceSeq: number; optionIndex?: number }; research?: MentorDeps['research'];
-  researchRefreshId?: string; afterPrepare?: () => Promise<void>; resumeOf?: number }) {
+  researchRefreshId?: string; afterPrepare?: () => Promise<void>; resumeOf?: number; onClose?: OnClose }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  const clients = turnClients(admin);
+  const direct = turnClients(admin), { onClose } = input;
+  const clients = onClose ? { ...direct, write: { rpc: (name: string, args: Record<string, unknown>) => name === 'turn_close'
+    ? onClose(args, () => direct.write.rpc(name, args)) : direct.write.rpc(name, args) } as unknown as typeof direct.write } : direct;
   let hook = input.afterPrepare;
   const read = hook ? { rpc: async (name: string, args: unknown) => {
     const result = await clients.read.rpc(name, args as never);
@@ -1039,4 +1045,61 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a turn that closed after this read makes it sta
   expect(out.calls.filter(path => path.includes('mentor_turn_prepare')).length).toBe(2);
   const rows = (await db.query(`select c.status from turn_calls c join turns t on t.id=c.turn_id where t.actor_id=$1 and c.call_kind='tool' and c.status='ok'`, [f.actor])).rows;
   expect(rows.length).toBe(1);
+});
+
+// Deep review 2026-11-11, findings 2 and 9 (Owner 2026-11-11), as for a free chat (chat.integration.ts): a turn whose reply was not
+// saved does not charge the user.
+it('RUNTIME: CORE-PATH-V2 close: a mentor reply whose closing write fails is refunded in full, writes no checklist and is logged', async () => {
+  const f = await setup(), closes: unknown[] = [];
+  const credits = async () => (await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits as number;
+  const before = await credits();
+  const open = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Sell coffee to students'))
+    : prose('gen-open-' + n, 'Welcome. What is your goal?'));
+  const logged = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+  try {
+    const out = await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: open.fn, onClose: async (args, send) => {
+      closes.push(args.p_close_kind);
+      return args.p_close_kind === 'completed' ? { data: null, error: { message: 'TypeError: fetch failed' } } : send();
+    } });
+    expect(out.events.some(e => e.type === 'text'), JSON.stringify(out.events)).toBe(true);
+    expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' });
+    expect(closes).toEqual(['completed', 'failed']);
+    const t = (await db.query(`select id,close_kind,settlement,charged_credits,absorbed_credits,delivered,failure_code from turns
+      where actor_id=$1 order by id desc limit 1`, [f.actor])).rows[0];
+    expect(t).toMatchObject({ close_kind: 'failed', settlement: 'done', charged_credits: 0, delivered: false, failure_code: 'turn_database_unavailable' });
+    expect(t.absorbed_credits).toBeGreaterThan(0);
+    expect(await credits()).toBe(before);
+    expect((await db.query('select count(*)::int n from session_messages where session_id=$1 and visible', [f.session])).rows[0].n).toBe(0);
+    expect(logged).toHaveBeenCalledWith('ai', 'turn_answer_unsaved', { kind: 'mentor', turnId: Number(t.id), code: 'TURN_DATABASE_UNAVAILABLE' });
+  } finally { logged.mockRestore(); }
+});
+
+// Review of #1860 (Owner 2026-11-11: what was saved and delivered is charged by its receipts). A mentor reply cut off after text was
+// shown: the shown prose is saved in the reply's own envelope, without a card and without a checklist write, and the turn closes as
+// delivered; the freeze waits for the cut call's cost as any unknown cost does.
+it('RUNTIME: CORE-PATH-V2 close: a mentor reply cut off after text was shown saves the shown part, without a card or a checklist write', async () => {
+  const f = await setup();
+  // The frame is read first, then the connection is lost (an error raised with the frame still queued would drop it unread).
+  const cut: typeof fetch = async () => {
+    let sent = false;
+    return new Response(new ReadableStream({ pull(controller) {
+      if (sent) return controller.error(new Error('connection lost'));
+      sent = true;
+      controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify({ id: 'gen-cut', object: 'chat.completion.chunk', created: 1, model: MENTOR,
+        choices: [{ index: 0, delta: { role: 'assistant', content: 'Welcome. Your goal is ' }, finish_reason: null }] }) + '\n\n'));
+    } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-cut' } });
+  };
+  const out = await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: cut });
+  expect(out.events.some(e => e.type === 'text'), JSON.stringify(out.events)).toBe(true);
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REPLY_CUT' });
+  const t = (await db.query(`select id,close_kind,settlement,charged_credits,delivered,failure_code from turns
+    where actor_id=$1 order by id desc limit 1`, [f.actor])).rows[0];
+  expect(t).toMatchObject({ close_kind: 'completed', settlement: 'pending', charged_credits: null, delivered: true, failure_code: 'turn_reply_cut' });
+  const saved = (await db.query(`select role,content from session_messages where session_id=$1 and turn_id=$2 and visible order by seq`,
+    [f.session, t.id])).rows;
+  expect(saved.map(m => m.role)).toEqual(['user', 'assistant']);
+  expect(JSON.parse(saved[1]!.content)).toMatchObject({ format: 'agent-turn.v1', message: 'Welcome. Your goal is', card: null, stepId: 'step-0' });
+  // One model call, left unknown with its provider id for the recovery lookup; the organizer was never called.
+  expect((await db.query(`select status,cost_pending,provider_id from turn_calls where turn_id=$1 and call_kind='model' order by seq`, [t.id])).rows)
+    .toEqual([{ status: 'unknown', cost_pending: true, provider_id: 'gen-cut' }]);
 });

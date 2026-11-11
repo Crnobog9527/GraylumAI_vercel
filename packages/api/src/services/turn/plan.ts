@@ -18,7 +18,7 @@ import { runRuntime } from './agent/runner';
 import { rowFor } from './settings/settingsRows';
 import { swallow } from '../../lib/swallow';
 import { modelCall, TurnStop } from './call';
-import { CLOSES, GATE_CODES, HISTORY_ITEMS, readCoreConfig, type ChatDeps } from './chat';
+import { CLOSES, GATE_CODES, HISTORY_ITEMS, noteUnsavedAnswer, readCoreConfig, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import { projectMentorHistory } from './mentorPrompt';
@@ -108,7 +108,7 @@ export async function runPlanTurn(deps: ChatDeps, input: PlanInput, emit: (event
     db.close({ actorId: input.actorId, turnId, kind, messages: [], delivered: extra.body !== undefined, refundAll: extra.refundAll,
       failureCode: extra.failureCode ?? null, ...(extra.body === undefined ? {} : { kindResult: { body: extra.body, roundId } }) });
 
-  let text = '', stopped: TurnStop | undefined, seq = 0;
+  let text = '', stopped: TurnStop | undefined, seq = 0, answered = false;
   try {
     const context = planContext.parse(opened.kindContext);
     roundId = context.roundId;
@@ -151,6 +151,8 @@ export async function runPlanTurn(deps: ChatDeps, input: PlanInput, emit: (event
     });
     // 5. Close: charged by usage, whatever the body is (the read judges it). A tombstone found here saves nothing.
     const body = output || text;
+    // The whole answer has been streamed; only the closing write can still fail (noteUnsavedAnswer).
+    answered = true;
     const closed = await close('completed', { body });
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId });
     emit({ type: 'result', turnId, body, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
@@ -158,6 +160,7 @@ export async function runPlanTurn(deps: ChatDeps, input: PlanInput, emit: (event
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     // Nothing delivered: the user pays nothing; an unknown outcome waits for recovery. A failed close is left to recovery too.
     const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
+    if (answered) noteUnsavedAnswer('plan', turnId, code);
     await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
       { category: 'ai' });
     emit({ type: 'error', code, turnId });
