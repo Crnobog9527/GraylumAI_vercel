@@ -467,7 +467,8 @@ try{
    const plans=[];
    for(const sql of [
     `select actor_id,id from turns where ((state in ('running','stopping') and updated_at<now()-interval '15 minutes')
-      or (state='paused' and updated_at<now()-interval '24 hours'))
+      or (state='paused' and (updated_at<now()-interval '24 hours'
+        or exists (select 1 from profiles p where p.id=turns.actor_id and p.is_deleted='true'))))
       and (recovery_lease_until is null or recovery_lease_until<=now()) order by updated_at limit 50 for update skip locked`,
     `select t.actor_id,t.id from turns t where t.settlement='pending' and t.state='closed'
       and (t.recovery_lease_until is null or t.recovery_lease_until<=now())

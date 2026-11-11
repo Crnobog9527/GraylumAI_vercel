@@ -60,6 +60,9 @@ it('mails each undelivered alert once under its own key and marks only those sen
   expect(mails[0]!.to).toBe('owner@example.test');
   expect(mails[0]!.subject).toContain('[staging]');
   expect(mails[0]!.text).toContain('全站每日上限已达到');
+  // This limit only alerts on the current path; the mail must not say calls were refused (deep review 2026-11-11, finding 11).
+  expect(mails[0]!.text).toContain('只告警，没有拒绝调用');
+  expect(mails[0]!.text).not.toContain('已被拒绝');
   expect(mails[0]!.text).toContain('$20.5');
   expect(f.updates.map(u => u.id)).toEqual(['a', 'c']);
   expect(f.updates[1]!.details).toMatchObject({ dedupeKey: '2026-10-23:siteDailyUsd:c', notify: { state: 'sent', attempts: 3 } });

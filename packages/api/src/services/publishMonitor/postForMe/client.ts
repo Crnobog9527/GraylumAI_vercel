@@ -73,8 +73,8 @@ export async function call<T>(deps: ClientDeps, request: Parameters<typeof excha
   parse: (json: unknown) => T | null): Promise<Outcome<T>> {
   const slot = await deps.limiter.acquire();
   if (!slot.ok) return { kind: 'rate_limited', retryAfterSeconds: slot.retryAfterSeconds, sent: false };
-  // Creating a consent link changes nothing the user relies on; account removal/disconnect does.
-  const write = request.method === 'DELETE' || request.path.endsWith('/disconnect');
+  // Creating a consent link changes nothing the user relies on; account removal/disconnect and post updates do.
+  const write = request.method === 'DELETE' || request.method === 'PUT' || request.path.endsWith('/disconnect');
   return classify(await exchange(request, deps.apiKey, deps), parse, write);
 }
 

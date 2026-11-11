@@ -56,6 +56,16 @@ describe('renderAlert', () => {
     expect(renderAlert('ops_backlog', { code: 'X', level: 'fatal' }, ctx)).toMatch(/^【紧急】/);
   });
 
+  it('says in plain words that the recovery job stopped or keeps failing, and what that means for users', () => {
+    const stale = renderAlert('ops_backlog', { code: 'RUNTIME_RECOVERY_RUN_STALE', level: 'error' }, ctx);
+    expect(stale).toMatch(/^【后台积压】/);
+    expect(stale).toContain('超过 10 分钟没有运行');
+    expect(stale).toContain('冻结积分');
+    const failing = renderAlert('ops_backlog', { code: 'RUNTIME_RECOVERY_RUN_FAILING', level: 'error' }, ctx);
+    expect(failing).toContain('连续 3 次没有成功');
+    for (const text of [stale, failing]) expect(text).toContain('/admin/finance');
+  });
+
   it('marks every site but production', () => {
     expect(renderAlert('test', EXAMPLES.test, { origin: 'https://staging.graylum.com', testSite: true }))
       .toMatch(/^（测试站）【测试】.*\n去后台看：https:\/\/staging\.graylum\.com\/admin$/);

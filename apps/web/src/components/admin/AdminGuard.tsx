@@ -34,8 +34,8 @@ export default function AdminGuard({ children }: AdminGuardProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const currentPage = getAdminPageMeta(pathname);
 
-  // Use a simple admin check query
-  const { data: stats, isLoading, error } = trpc.admin.getStatistics.useQuery(undefined, {
+  // The role check alone: admin.access reads no data (the dashboard's own statistics are loaded by the dashboard page).
+  const { isLoading, error } = trpc.admin.access.useQuery(undefined, {
     retry: false, // Don't retry on FORBIDDEN errors
   });
 

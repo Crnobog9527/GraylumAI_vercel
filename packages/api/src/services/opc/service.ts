@@ -7,7 +7,6 @@ import { opcInformation } from "./information";
 export { opcInformation } from "./information";
 import { z } from "zod";
 import {dataFoundationService} from "./dataFoundation";
-import { DatabaseReadError } from "../../lib/databaseReadError";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
 import { workbenchService } from "../artifacts/workbench";
@@ -19,8 +18,14 @@ const uuid = z.string().uuid();
 import {opcTopicBind, startWithPositioningProfileLimit} from './start';
 import {isPositioningWorkflow} from './positioningWorkflow';
 export {opcStart, opcTopicBind} from './start';
-export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy) {
-  async function rpc(name: string, args: Record<string, unknown>, actorId?: string) {
+/**
+ * `verifiedActorId`: the signed-in account the tRPC procedure has already verified for this request (login and verified
+ * email, protectedProcedure). With it no query asks the session again: one draft read used to verify the same session three
+ * more times. Without it (scripts and tests that build the service from the clients alone) every query verifies the session.
+ */
+export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, verifiedActorId?: string) {
+  const sessionActor = async () => verifiedActorId ?? (await user.auth.getUser()).data.user?.id;
+  async function rpc(name: string, args: Record<string, unknown>, actorId: string | undefined = verifiedActorId) {
     const a = actorId ? null : await user.auth.getUser();
     if (!actorId && (a?.error || !a?.data.user || !isEmailVerified(a.data.user)))
       throw new Error("OPC_AUTH_REQUIRED");
@@ -62,15 +67,14 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     workResults: (sessionId: string) =>
       rpc("opc_work_results", { p_session_id: uuid.parse(sessionId) }),
     catalog: async () => {
-      const catalog = await workbenchService(user, admin).catalog();
-      const a = (await user.auth.getUser()).data.user!.id;
-      const raw = await admin.rpc("artifact_query", {
-        p_actor_id: a,
-        p_action: "catalog",
+      // The positioning rule reads workflow fields the parsed registrations drop, so it runs on the rows of the same catalog
+      // read (the catalog used to be queried a second time for them).
+      let rows: Array<{ id?: unknown; workflow?: unknown }> = [];
+      const catalog = await workbenchService(user, admin, verifiedActorId).catalog(undefined, (raw) => {
+        if (Array.isArray(raw)) rows = raw;
       });
-      if (raw.error) throw new DatabaseReadError("OPC_UNAVAILABLE", raw.error.code);
       return catalog.filter((c) =>
-        raw.data.some((r: any) => r.id === c.id && isPositioningWorkflow(r.workflow)),
+        rows.some((r) => r.id === c.id && isPositioningWorkflow(r.workflow)),
       );
     },
     list: () => rpc("opc_query", {}),
@@ -90,7 +94,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       const v = opcTopicBind.omit({ requestId: true }).parse(value);
       return rpc("opc_topic_consent", { p_draft_id: v.draftId, p_source_version_id: v.sourceVersionId });
     },
-    read: async (draftId: string) => ({...await draftReadWithModule(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc, user, admin),
+    read: async (draftId: string) => ({...await draftReadWithModule(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc, sessionActor, admin),
       runtimeMode:real?(real.mode==="production"?"production":"staging_test"):"isolated"}),
     start: (value: unknown) => startWithPositioningProfileLimit(value,user,admin,rpc),
     topicDraftRead: (draftId: string) => rpc("opc_topic_draft_read", { p_draft_id: uuid.parse(draftId) }),

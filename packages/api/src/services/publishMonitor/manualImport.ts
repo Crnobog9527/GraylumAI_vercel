@@ -2,6 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { publicHttpsUrl } from './postForMe/http';
+import { MANUAL_METRICS, MAX_METRIC_VALUE, MAX_ROWS_PER_CALL, type ManualMetric } from '../../shared/publishMonitorManual';
 
 /** The server's link rule, shared with the browser-side row builder so a bad link is reported per row. */
 export { publicHttpsUrl };
@@ -14,13 +15,8 @@ export { publicHttpsUrl };
  */
 type Rpc = Pick<SupabaseClient, 'rpc'>;
 
-/** Metrics a manual row may carry: counts, plus completion rate as a percentage (0-100). Blank means absent. */
-export const MANUAL_METRICS = ['views', 'impressions', 'reach', 'likes', 'comments', 'shares', 'saves',
-  'followers_gained', 'profile_visits', 'completion_rate'] as const;
-export type ManualMetric = (typeof MANUAL_METRICS)[number];
-export const MAX_ROWS_PER_CALL = 200;
-/** Largest metric value accepted (an accidental extra digit beyond this is refused). */
-export const MAX_METRIC_VALUE = 1e12;
+// The plain limits live in shared/publishMonitorManual.ts so the browser can read them without this file's zod rules.
+export { MANUAL_METRICS, MAX_METRIC_VALUE, MAX_ROWS_PER_CALL, type ManualMetric };
 
 const metricValue = z.number().finite().nonnegative().max(MAX_METRIC_VALUE);
 const metrics = z.partialRecord(z.enum(MANUAL_METRICS), metricValue)

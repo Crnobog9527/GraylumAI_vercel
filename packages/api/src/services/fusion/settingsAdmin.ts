@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { mapBounded } from '../../lib/mapBounded';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
 import { admissionDeadline } from '../turn/admission/admissionLimits';
@@ -96,11 +97,17 @@ const NOT_ELIGIBLE = new Set(['FUSION_MODEL_UNAVAILABLE', 'FUSION_MODEL_SEARCH_D
   // No per-call billing profile entry for this purpose and output size: an ordinary-only model, not an outage.
   'RUNTIME_PAYG_PROFILE_REQUIRED']);
 
+/** Models checked at the same time (each check is a few reads): the list is as before, in the same order. */
+const MODELS_AT_ONCE = 3;
+
 /** The models an administrator can pick for the panel (FUSION-REVIEW PR-5): the window's models, each checked by the
- * same admission a save of an enabled panel uses, for the reviewer and the summary purpose separately. Read-only. */
+ * same admission a save of an enabled panel uses, for the reviewer and the summary purpose separately. Read-only.
+ * `only: 'compare'` (the user's compare picker) checks the compare purpose alone: the picker never used the other two
+ * answers, and they were two more admissions per model on every open. `settings`: the caller's own read, not read again. */
 export async function fusionModelOptions(db: SupabaseClient, actorId: string, env: Record<string, string | undefined> = process.env,
-  given?: StagingPolicy): Promise<{ models: Array<{ id: string; name: string; review: boolean; summary: boolean; compare: boolean }> }> {
-  const settings = await readFusionSettings(db);
+  given?: StagingPolicy, options: { only?: 'compare'; settings?: Awaited<ReturnType<typeof readFusionSettings>> } = {},
+): Promise<{ models: Array<{ id: string; name: string; review: boolean; summary: boolean; compare: boolean }> }> {
+  const settings = options.settings ?? await readFusionSettings(db);
   const window = given ?? await adminWindow(db, actorId, env);
   const rows = await db.from('ai_models').select(FUSION_MODEL_COLUMNS).in('id', window.callPolicies.map(policy => policy.modelId));
   if (rows.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
@@ -118,12 +125,12 @@ export async function fusionModelOptions(db: SupabaseClient, actorId: string, en
       throw new Error('FUSION_SETTINGS_UNAVAILABLE');
     }
   };
-  const models = [];
-  for (const row of (rows.data ?? []) as Array<FusionModelRow & { name?: string }>) {
-    const review = await admits(row, 'fusion_review', settings.review.opinionOutputTokens);
-    const summary = await admits(row, 'fusion_summary', settings.review.summaryOutputTokens);
+  const compareOnly = options.only === 'compare';
+  const checked = await mapBounded((rows.data ?? []) as Array<FusionModelRow & { name?: string }>, MODELS_AT_ONCE, async (row) => {
+    const review = compareOnly ? false : await admits(row, 'fusion_review', settings.review.opinionOutputTokens);
+    const summary = compareOnly ? false : await admits(row, 'fusion_summary', settings.review.summaryOutputTokens);
     const compare = await admits(row, 'fusion_compare', settings.compare.answerOutputTokens);
-    if (review || summary || compare) models.push({ id: row.id, name: row.name ?? row.model_id, review, summary, compare });
-  }
-  return { models };
+    return { id: row.id, name: row.name ?? row.model_id, review, summary, compare };
+  });
+  return { models: checked.filter(model => model.review || model.summary || model.compare) };
 }

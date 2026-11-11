@@ -110,6 +110,8 @@ export type BillingReadinessRows = {
   subscriptions: SubscriptionRow[];
   membershipPlans?: MembershipPlanRow[];
   truncatedTables?: string[];
+  /** PUBLISH-SCHEDULE: hold id -> scheduled time (ms) of scheduled publishes; their age counts from that time. */
+  scheduledHolds?: Map<string, number>;
 };
 
 /**

@@ -39,7 +39,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     if (!local) real = await loadStagingPolicy(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
-  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real), stagingPolicy: real } });
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, real, ctx.user.id), stagingPolicy: real } });
   if (!result.ok && !isOpcRefusal(result.error.cause)) throw stagingProcedureError(result.error, path);
   return result;
 });
@@ -66,7 +66,7 @@ const readAccess = (keepRefusals: boolean) => protectedProcedure.use(async ({ ct
     if (!local) await assertStagingReadAccess(ctx.supabaseAdmin, ctx.user.id, process.env);
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
-  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin), stagingRead: !local } });
+  const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin, undefined, ctx.user.id), stagingRead: !local } });
   if (!result.ok && !keepRefusals && type === 'query' && isOpcReadDenial(result.error.cause))
     throw new TRPCError({ code: 'NOT_FOUND', message: 'OPC_NOT_FOUND' });
   if (!result.ok && !(keepRefusals && isOpcRefusal(result.error.cause))) throw stagingProcedureError(result.error, path);

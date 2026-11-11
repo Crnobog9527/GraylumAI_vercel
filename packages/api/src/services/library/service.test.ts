@@ -69,6 +69,14 @@ describe('library service boundaries',()=>{
     expect(storage.absent).toHaveBeenCalledTimes(2);
     expect(rpc).toHaveBeenCalledWith('library_cleanup_observe',{a,did:id,absent:true});
   });
+  it('deleting a document cleans its file up on the way without asking for the backlog count',async()=>{
+    await expect(libraryService(client,a,storage).remove(id)).resolves.toEqual({status:'deleting'});
+    // The same cleanup pass as before: the row is touched and observed absent...
+    expect(rpc).toHaveBeenCalledWith('library_cleanup_candidates',{a,n:1,did:id});
+    expect(rpc).toHaveBeenCalledWith('library_cleanup_observe',{a,did:id,absent:true});
+    // ...but nobody reads the count on this path, so it is not asked for (the cron and account erasure still are).
+    expect(rpc.mock.calls.some(c=>c[0]==='library_cleanup_backlog')).toBe(false);
+  });
   it('duplicate request cannot mint another upload token',async()=>{
     rpc.mockImplementation(async(name:string)=>({data:name==='library_cleanup_candidates'?[]:
       {documentId:id,status:'uploading',dispatch:false}}));

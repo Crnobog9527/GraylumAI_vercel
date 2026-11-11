@@ -34,6 +34,10 @@ BEGIN
   IF public.account_erasure_renewing(p_profile_id) THEN
     RAISE EXCEPTION 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING' USING ERRCODE = 'P0001';
   END IF;
+  -- 0512 (Owner 2026-11-11): a refund request being handled keeps the account open; its ticket must survive.
+  IF public.account_erasure_refund_open(p_profile_id) THEN
+    RAISE EXCEPTION 'ACCOUNT_ERASURE_REFUND_PENDING' USING ERRCODE = 'P0001';
+  END IF;
   UPDATE public.profiles SET status = 'deleted', is_deleted = 'true', deleted_at = clock_timestamp()
   WHERE id = p_profile_id;
   INSERT INTO public.account_erasure_requests(profile_id, request_id)

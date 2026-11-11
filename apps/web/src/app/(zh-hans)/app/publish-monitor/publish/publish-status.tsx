@@ -1,9 +1,11 @@
 'use client';
-
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { JOB_OPEN, jobSummary, platformName, publishErrorMessage, type JobState } from '@/lib/publish-monitor/publish-flow';
 import { trpc } from '@/trpc/client';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import styles from './publish.module.css';
 
 /**
  * One publish job, read from the server only (never a media link). An open job is re-read every 15 seconds from our
@@ -18,7 +20,7 @@ export function PublishStatus({ jobId, onRetry, onDone }: { jobId: string; onRet
   const refresh = trpc.publishMonitor.publish.refresh.useMutation({ onSuccess: () => job.refetch() });
   if (job.isLoading) return <PageSkeleton compact rows={2} label="发布状态读取中" />;
   if (job.error || !job.data) {
-    return <p role="alert" className="text-sm">{publishErrorMessage(job.error?.message, job.error?.data?.code)}</p>;
+    return <p role="alert" className={styles.error}>{publishErrorMessage(job.error?.message, job.error?.data?.code)}</p>;
   }
   const data = job.data;
   const state = data.state as JobState;
@@ -26,33 +28,38 @@ export function PublishStatus({ jobId, onRetry, onDone }: { jobId: string; onRet
   const retryable = state === 'failed' || state === 'released'
     || (state === 'completed' && data.targets.some(t => t.status === 'failed'));
   return (
-    <section aria-label="发布结果" className="space-y-3">
-      <p role="status" className="text-sm">{jobSummary(state, data.manualReview)}</p>
-      <ul className="space-y-1 text-sm">
+    <section aria-label="发布结果" className={styles.card}>
+      <p role="status" className={styles.statusLine}>{jobSummary(state, data.manualReview)}</p>
+      <ul className={styles.results}>
         {data.targets.map(target => (
-          <li key={target.connectionId} className="flex items-center gap-2">
-            <span className="w-28">{platformName(target.platform)}</span>
-            <span>{TARGET_LABEL[target.status]}</span>
+          <li key={target.connectionId} className={styles.result}>
+            <span className={styles.tile} aria-hidden>{platformName(target.platform).slice(0, 1).toUpperCase()}</span>
+            <strong>{platformName(target.platform)}</strong>
             {target.status === 'published' && target.url && (
-              <a className="underline" href={target.url} target="_blank" rel="noopener noreferrer">查看帖子</a>
+              <a href={target.url} target="_blank" rel="noopener noreferrer">查看帖子</a>
             )}
+            <span className={styles.badge} data-status={target.status}>
+              {target.status === 'published' ? <Check size={12} aria-hidden /> : target.status === 'failed' ? <X size={12} aria-hidden /> : null}
+              {TARGET_LABEL[target.status]}</span>
           </li>
         ))}
       </ul>
-      {data.chargedCredits !== null && <p className="text-sm text-[var(--text-secondary)]">本次扣除 {data.chargedCredits} 积分。</p>}
-      {data.chargedCredits === null && data.holdCredits !== null && open && (
-        <p className="text-sm text-[var(--text-secondary)]">暂时冻结 {data.holdCredits} 积分，结果确定后只按成功的平台扣，其余退回。</p>
-      )}
-      {refresh.error && <p role="alert" className="text-sm text-[var(--color-error)]">
-        {publishErrorMessage(refresh.error.message, refresh.error.data?.code)}</p>}
-      <div className="flex flex-wrap gap-2">
-        {open && <Button variant="outline" disabled={refresh.isPending}
-          onClick={() => refresh.mutate({ jobId })}>{refresh.isPending ? '正在查询……' : '刷新状态'}</Button>}
-        {retryable && <Button onClick={() => onRetry(state === 'completed'
-          ? data.targets.filter(t => t.status === 'failed').map(t => t.connectionId)
-          : data.targets.map(t => t.connectionId))}>
-          {state === 'completed' ? '重发失败的平台（会重新上传素材）' : '重新发布（会重新上传素材）'}</Button>}
-        {!open && <Button variant="outline" onClick={onDone}>完成</Button>}
+      <div className={styles.stack}>
+        {data.chargedCredits !== null && <p className={styles.hint}>本次扣除 {data.chargedCredits} 积分。</p>}
+        {data.chargedCredits === null && data.holdCredits !== null && open && (
+          <p className={styles.hint}>暂时冻结 {data.holdCredits} 积分，结果确定后只按成功的平台扣，其余退回。</p>
+        )}
+        {refresh.error && <p role="alert" className={styles.error}>
+          {publishErrorMessage(refresh.error.message, refresh.error.data?.code)}</p>}
+        <div className={styles.rowActions}>
+          {open && <Button variant="outline" disabled={refresh.isPending}
+            onClick={() => refresh.mutate({ jobId })}>{refresh.isPending ? '正在查询……' : '刷新状态'}</Button>}
+          {retryable && <Button onClick={() => onRetry(state === 'completed'
+            ? data.targets.filter(t => t.status === 'failed').map(t => t.connectionId)
+            : data.targets.map(t => t.connectionId))}>
+            {state === 'completed' ? '重发失败的平台（会重新上传素材）' : '重新发布（会重新上传素材）'}</Button>}
+          {!open && <Button variant="outline" onClick={onDone}>完成</Button>}
+        </div>
       </div>
     </section>
   );
