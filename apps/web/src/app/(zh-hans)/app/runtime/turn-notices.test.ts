@@ -32,6 +32,12 @@ describe('turn notices', () => {
     expect(notice.text).toContain('积分已退回');
     expect(notice.text).not.toContain('TURN_MODEL_METERING_BLOCKED');
   });
+  // The composer only shows Auto (Owner 2026-10-03): the user cannot switch models, so the notice must not tell them to.
+  it('tells a user stopped by a held model to try again later, never to pick another model', () => {
+    const { text } = turnCodeNotice('TURN_MODEL_METERING_BLOCKED');
+    expect(text).toBe('这个模型暂时停用，这一轮没有完成，积分已退回。请稍后再试。');
+    expect(text).not.toContain('换一个模型');
+  });
   it('says a round paused for credits can be continued and is refunded after 24 hours', () => {
     expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS')).toMatchObject({ kept: false, text: expect.stringContaining('点继续') });
     expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS').text).toContain('24 小时');
