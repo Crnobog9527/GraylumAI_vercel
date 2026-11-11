@@ -32,6 +32,11 @@ const ANSWERS: Record<string, unknown> = {
     latest: { capturedOn: '2026-11-10', missingFields: ['shares'],
       metrics: { views: 12_000 + index, impressions: 90_000, reach: 40_000, likes: 300, comments: 20, saves: 15, followers_gained: 4 } } })) },
   'publishMonitor.trend': { windowDays: 90, series: [series('c1', 'douyin'), series('c2', 'youtube')] },
+  'publishMonitor.features': { ownData: true, weeklyReview: true, publish: false },
+  'publishMonitor.review.list': [{ id: 'r1', periodStart: '2026-11-03T00:00:00Z', status: 'completed', body: '这一周的复盘正文。',
+    tables: null, notice: null, cadence: 'weekly', businessName: '测试品牌' }],
+  'publishMonitor.review.pillars': [{ businessId: 'b1', businessName: '测试品牌', source: 'user',
+    pillars: [{ key: 'k1', name: '读书笔记' }, { key: 'k2', name: '城市探店' }] }],
 };
 
 beforeAll(async () => {
@@ -189,3 +194,31 @@ it('posts read as a table on a desktop and as cards on a phone, from the same li
     expect(phone.errors).toEqual([]);
   } finally { await phone.page.close(); }
 }, 45000);
+
+it('weekly reviews: the settings sit beside the reading on a wide screen and fold away above it on a narrower one', async () => {
+  const wide = await open(1600, 800, 'reduce');
+  try {
+    await wide.page.getByRole('tab', { name: '每周复盘' }).click();
+    await ui(wide.page.getByText('这一周的复盘正文。')).toBeVisible();
+    // Wide: the pillars are there without a click, to the right of the review.
+    const pillar = wide.page.getByLabel('内容方向 1 名称');
+    await ui(pillar).toBeVisible();
+    await ui(wide.page.getByRole('button', { name: '复盘设置' })).toBeHidden();
+    const [reviewBox, pillarBox] = [await wide.page.getByText('这一周的复盘正文。').boundingBox(), await pillar.boundingBox()];
+    expect(pillarBox!.x).toBeGreaterThan(reviewBox!.x + reviewBox!.width);
+  } finally { await wide.page.close(); }
+  for (const [width, height] of [[1280, 720], [360, 780]] as const) {
+    const narrow = await open(width, height, 'reduce');
+    try {
+      await narrow.page.getByRole('tab', { name: '每周复盘' }).click();
+      await ui(narrow.page.getByText('这一周的复盘正文。')).toBeVisible();
+      const fold = narrow.page.getByRole('button', { name: '复盘设置' });
+      await ui(fold).toHaveAttribute('aria-expanded', 'false');
+      await ui(narrow.page.getByLabel('内容方向 1 名称')).toBeHidden();
+      await fold.click();
+      await ui(narrow.page.getByLabel('内容方向 1 名称')).toBeVisible();
+      expect(await pageWidth(narrow.page)).toBe(width);
+      expect(narrow.errors).toEqual([]);
+    } finally { await narrow.page.close(); }
+  }
+}, 60000);

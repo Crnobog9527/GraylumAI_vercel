@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { trpc } from '@/trpc/client';
+import styles from './data-review.module.css';
 import { errorCode } from './labels';
 
 /**
@@ -39,10 +40,10 @@ export function PillarSettings() {
   // A user without the review (or while it is off) gets FORBIDDEN: the setting is simply not shown, like the review list's gate.
   if (pillars.error || pillars.data?.length === 0) return null;
   return (
-    <section className="space-y-3 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }} aria-labelledby="pm-pillars">
-      <div className="space-y-1">
-        <h3 id="pm-pillars" className="text-sm font-semibold">内容方向</h3>
-        <p className="text-xs" style={muted}>复盘按这些方向给作品归类、比较成绩。最多 {PILLARS_MAX} 个；改名不影响已归类的作品，
+    <section className={`${styles.card} ${styles.cardStack}`} aria-labelledby="pm-pillars">
+      <div className={styles.cardStack}>
+        <h4 id="pm-pillars" className={styles.subTitle}>内容方向</h4>
+        <p className={styles.hint}>复盘按这些方向给作品归类、比较成绩。最多 {PILLARS_MAX} 个；改名不影响已归类的作品，
           删除后这个方向下的作品会回到“未分类”。名称用标题里真会出现的词（例如“读书笔记”），至少 2 个字，复盘才能按标题自动归类。</p>
       </div>
       {pillars.isPending ? <PillarSkeleton />
@@ -54,8 +55,7 @@ export function PillarSettings() {
 function PillarSkeleton() {
   return (
     <div aria-busy="true" data-testid="pillar-skeleton" className="space-y-2">
-      {['w-48', 'w-full', 'w-full'].map((w, i) => (
-        <div key={i} className={`h-8 ${w} animate-pulse rounded`} style={{ background: 'var(--border-primary)' }} />))}
+      {['12rem', '100%', '100%'].map((width, i) => <div key={i} className={styles.sk} style={{ width, height: 32 }} />)}
     </div>
   );
 }
@@ -117,9 +117,9 @@ function BrandPillars({ brand }: { brand: Brand }) {
           onClick={() => { setRows(saved.map((r, uid) => ({ ...r, uid }))); save.reset(); }}>
           撤销</Button>}
       </div>
-      {dirty && problem && <p className="text-xs" style={{ color: 'var(--color-error)' }}>{problem}</p>}
+      {dirty && problem && <p className={styles.error}>{problem}</p>}
       {dirty && removed.length > 0 && <p className="text-xs" style={muted}>保存后，“{removed.join('”“')}”下的作品会回到“未分类”。</p>}
-      {save.error && <p role="alert" className="text-xs" style={{ color: 'var(--color-error)' }}>
+      {save.error && <p role="alert" className={styles.error}>
         {(code && SAVE_ERRORS[code]) || '保存失败，请稍后再试。'}</p>}
     </div>
   );
