@@ -1,0 +1,529 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The "数据复盘" page on the signed-in baseline (DESIGN.md "Light foundation"): the values are the conversation
+ * workbench's, written out here because the workbench keeps its own scoped variables. Layout follows the library
+ * page: a head row, underlined tabs, then one scrolling body. The page is the scroll owner: the workbench's center
+ * panel clips whatever is taller than it.
+ */
+.page {
+  --pm-text: #262626;
+  --pm-strong: #333;
+  --pm-secondary: #6b6b6b;
+  --pm-border: #ededed;
+  --pm-border-control: #e5e5e5;
+  --pm-subtle: #fafafa;
+  --pm-muted: #f4f4f5;
+  --pm-gold: #ffbb17;
+  --pm-tag: #f4efe3;
+  --pm-tag-text: #7a5f2c;
+  --pm-success: #2f6a3b;
+  --pm-success-bg: #f1f7f2;
+  --pm-warning: #76592a;
+  --pm-warning-bg: #faf6ee;
+  --pm-error: #a23b3b;
+  --pm-error-bg: #fcf1f1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: #fff;
+  color: var(--pm-text);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 14px 24px 0;
+}
+.head h1 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.head span {
+  color: var(--pm-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.intro {
+  flex: none;
+  margin: 0;
+  padding: 4px 24px 0;
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+
+.tabsRoot {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  margin: 10px 24px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--pm-border);
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+/* `.page` in front: the workbench resets `font` on every button, and these sizes must win over that reset. */
+.page .tab {
+  flex: none;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--pm-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.page .tab:hover {
+  color: var(--pm-text);
+}
+.page .tab[data-state='active'] {
+  border-bottom-color: var(--pm-text);
+  color: var(--pm-text);
+  font-weight: 600;
+}
+/* Inside the scrolling tab bar an outer ring is clipped, so the focus mark is drawn inwards. */
+.page .tab:focus-visible {
+  outline: 2px solid var(--pm-text);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 24px 40px;
+}
+.panel {
+  max-width: 1120px;
+  animation: pm-fade 150ms ease both;
+}
+.panel:focus-visible {
+  outline: none;
+}
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.lead {
+  margin: 0 0 14px;
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Account switch: one account at a time, platforms are never mixed. */
+.chips {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chips::-webkit-scrollbar {
+  display: none;
+}
+.page .chip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pm-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.page .chip:hover {
+  background: var(--pm-subtle);
+  color: var(--pm-text);
+}
+.page .chip[aria-pressed='true'] {
+  background: var(--pm-muted);
+  color: var(--pm-text);
+  font-weight: 600;
+}
+.page .chip:focus-visible {
+  outline: 2px solid var(--pm-text);
+  outline-offset: -2px;
+}
+
+.accountHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin: 0 0 10px;
+}
+.accountHead h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.accountHead span {
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.kpi {
+  min-width: 0;
+  min-height: 108px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.kpi dt {
+  overflow: hidden;
+  color: var(--pm-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kpi dd {
+  margin: 0;
+}
+.kpiValue {
+  display: block;
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 36px;
+}
+.kpiValue[data-empty='true'] {
+  color: var(--pm-secondary);
+  font-weight: 400;
+}
+.kpiNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  color: var(--pm-secondary);
+  font-size: 11px;
+  line-height: 18px;
+}
+.delta {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--pm-muted);
+  color: var(--pm-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.delta[data-direction='up'] {
+  background: var(--pm-success-bg);
+  color: var(--pm-success);
+}
+.delta[data-direction='down'] {
+  background: var(--pm-warning-bg);
+  color: var(--pm-warning);
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.chartCard {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px 10px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.chartCard figcaption {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.chartBox {
+  width: 100%;
+  min-width: 0;
+  height: 176px;
+}
+.gap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 176px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+  color: var(--pm-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+.notes {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+  color: var(--pm-secondary);
+  font-size: 12px;
+  list-style: none;
+}
+
+/* Empty, upgrade and failure states: one sentence and what to do next. */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 1120px;
+  padding: 44px 20px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: var(--pm-subtle);
+  text-align: center;
+}
+.stateIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--pm-strong);
+}
+.state h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.state p {
+  max-width: 34em;
+  margin: 0;
+  color: var(--pm-secondary);
+  font-size: 13px;
+}
+.state[data-tone='error'] .stateIcon {
+  border-color: var(--pm-error-bg);
+  background: var(--pm-error-bg);
+  color: var(--pm-error);
+}
+.stateTag {
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--pm-tag);
+  color: var(--pm-tag-text);
+  font-size: 11px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.page .button,
+.page .buttonQuiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 6px 16px;
+  border: 1px solid var(--pm-text);
+  border-radius: 8px;
+  background: var(--pm-text);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.page .button:hover {
+  border-color: #3b3b3b;
+  background: #3b3b3b;
+}
+.page .buttonQuiet {
+  border-color: var(--pm-border-control);
+  background: #fff;
+  color: var(--pm-text);
+}
+.page .buttonQuiet:hover {
+  border-color: #dcdcdc;
+  background: var(--pm-subtle);
+}
+.page .button:focus-visible,
+.page .buttonQuiet:focus-visible {
+  outline: 2px solid var(--pm-text);
+  outline-offset: 2px;
+}
+
+/* Loading: the shape of what follows, in the same sizes, so nothing moves when the data arrives. */
+.sk {
+  border-radius: 8px;
+  background: #ebebeb;
+  animation: pm-pulse 1.4s ease-in-out infinite;
+}
+.skLine {
+  width: min(520px, 80%);
+  height: 19px;
+  margin-bottom: 14px;
+}
+/* The inert tab bar drawn while the first read runs. */
+.page span.tab {
+  cursor: default;
+}
+.skKpi {
+  height: 108px;
+  border-radius: 12px;
+}
+.skChart {
+  height: 232px;
+  border-radius: 12px;
+}
+
+.rise {
+  animation: pm-rise 200ms ease both;
+}
+.rise:nth-child(2) {
+  animation-delay: 40ms;
+}
+.rise:nth-child(3) {
+  animation-delay: 80ms;
+}
+.rise:nth-child(4) {
+  animation-delay: 120ms;
+}
+
+@keyframes pm-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pm-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (max-width: 900px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .head {
+    padding: 12px 16px 0;
+  }
+  .intro {
+    padding: 4px 16px 0;
+  }
+  .tabs {
+    margin: 8px 16px 0;
+  }
+  /* 10px sides: on a 360px screen the fifth tab then shows its first character, which says the bar scrolls. */
+  .page .tab {
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+  .body {
+    padding: 14px 16px 32px;
+  }
+  .kpis,
+  .charts {
+    gap: 8px;
+  }
+  .charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kpi {
+    min-height: 116px;
+    padding: 12px;
+  }
+  .kpiValue {
+    font-size: 22px;
+    line-height: 32px;
+  }
+  .chartCard {
+    padding: 12px 12px 8px;
+  }
+  .page .chip {
+    min-height: 36px;
+  }
+  .page .button,
+  .page .buttonQuiet {
+    min-height: 44px;
+  }
+  .state {
+    padding: 32px 16px;
+  }
+  .skKpi {
+    height: 116px;
+  }
+  .skChart {
+    height: 228px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .rise,
+  .sk {
+    animation: none;
+  }
+  .page .tab,
+  .page .chip,
+  .page .button,
+  .page .buttonQuiet {
+    transition: none;
+  }
+}
