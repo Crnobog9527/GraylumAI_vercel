@@ -46,3 +46,43 @@ describe('draftReadResponse', () => {
     expect(response).toMatchObject({ conversationDeleted: true, turns: [], plans: [], handoffs: [], report: null });
   });
 });
+
+describe('draftReadWithModule', () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const live = (ids: { projectId: string; roundId: string }) => ({ draftId: 'd', ...ids, sessionId: 's',
+    snapshot: { projectId: id(2), roundId: id(3), state: 'draft', workflow: { id: 'w', steps: [] }, steps: {} }, information: {} });
+  const noActor = async () => { throw new Error('the session is not asked when the frozen round already answered'); };
+  const noAdmin = { rpc: () => { throw new Error('no second lookup'); } };
+
+  it('takes the module from the frozen-round lookup of the report flag: one query, not two', async () => {
+    const { draftReadWithModule } = await import('./readonlyDraft');
+    const calls: Array<Record<string, unknown>> = [];
+    const rpc = async (_name: string, args: Record<string, unknown>) => { calls.push(args); return { moduleId: id(20), workflow: { reportGeneration: null } }; };
+    const response = await draftReadWithModule(live({ projectId: id(2), roundId: id(3) }), rpc, noActor, noAdmin);
+    expect(response).toMatchObject({ moduleId: id(20), snapshot: { workflow: { reportGeneration: false } } });
+    expect(calls).toEqual([{ p_action: 'resolve', p_project_id: id(2), p_round_id: id(3) }]);
+  });
+
+  it('answers no module when the frozen round names none', async () => {
+    const { draftReadWithModule } = await import('./readonlyDraft');
+    const response = await draftReadWithModule(live({ projectId: id(2), roundId: id(3) }), async () => ({ workflow: {} }), noActor, noAdmin);
+    expect(response.moduleId).toBeNull();
+  });
+
+  it('looks the module up by the read\'s own ids when they are not the snapshot\'s', async () => {
+    const { draftReadWithModule } = await import('./readonlyDraft');
+    const lookups: Array<Record<string, unknown>> = [];
+    const admin = { rpc: async (_name: string, args: Record<string, unknown>) => { lookups.push(args); return { data: { moduleId: id(21) } }; } };
+    const response = await draftReadWithModule(live({ projectId: id(5), roundId: id(6) }), async () => ({ moduleId: id(20) }), async () => id(9), admin);
+    expect(response.moduleId).toBe(id(21));
+    expect(lookups).toEqual([{ p_actor_id: id(9), p_action: 'resolve', p_project_id: id(5), p_round_id: id(6) }]);
+  });
+
+  it('fails the read when the frozen round cannot be read, and has no module for a deleted conversation', async () => {
+    const { draftReadWithModule } = await import('./readonlyDraft');
+    await expect(draftReadWithModule(live({ projectId: id(2), roundId: id(3) }), async () => { throw new Error('statement timeout'); }, noActor, noAdmin))
+      .rejects.toThrow('statement timeout');
+    const deleted = await draftReadWithModule(full, async () => { throw new Error('no other read for a read-only draft'); }, noActor, noAdmin);
+    expect(deleted).toMatchObject({ conversationDeleted: true, moduleId: null });
+  });
+});

@@ -10,6 +10,7 @@ import { createTRPCContext,createRuntimeBudget,withRuntimeBudget } from '@repo/a
 export const maxDuration = 300;
 import { logServerError } from '@/lib/server-log';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
+import { TRPC_MAX_BATCH_CALLS, trpcCallCount } from '@/lib/trpcBatchLimit';
 import {
   isTrpcRequestAllowedDuringMaintenance,
   parseTrpcProcedurePaths,
@@ -65,6 +66,11 @@ async function readMaintenanceMode(budgetFetch:typeof fetch): Promise<{ value: b
 }
 
 const handler = async (req: NextRequest) => {
+  // The proxy refuses larger batches too; this holds when a request reaches the route without it (deep review 11-11 item 8).
+  const url = new URL(req.url);
+  if (trpcCallCount(url.pathname, url.searchParams) > TRPC_MAX_BATCH_CALLS) {
+    return Response.json({ error: 'Bad Request', message: `一次最多 ${TRPC_MAX_BATCH_CALLS} 个请求` }, { status: 400 });
+  }
   // Before authentication/maintenance: batched procedures share this deadline.
   const runtimeBudget=createRuntimeBudget();
   try {

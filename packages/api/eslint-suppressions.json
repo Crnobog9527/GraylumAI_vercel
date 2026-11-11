@@ -294,11 +294,6 @@
       "count": 2
     }
   },
-  "src/services/opc/service.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
   "src/services/providerUsage.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
