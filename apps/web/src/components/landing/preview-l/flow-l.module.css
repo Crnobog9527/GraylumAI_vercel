@@ -1,0 +1,82 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Region 3's modules (Owner 2026-11-11): each stage of 第一步/第二步/第三步 is a module of its own, a short title, one
+ * line and a short picture that plays by itself in a loop. Side by side on a computer, one under another on a phone;
+ * the page scrolls freely past them. A picture's height is fixed, so nothing on the page moves while it plays.
+ */
+.step { padding: clamp(48px, 6vw, 80px) 0 8px; }
+.step[data-first] { padding-top: 24px; }
+.title { margin: 0; font-size: clamp(24px, 2.6vw, 34px); font-weight: 600; letter-spacing: -.02em; }
+.lede { margin: 10px 0 0; max-width: 42em; text-wrap: balance; color: var(--j-body); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.7; }
+.grid { display: grid; gap: 36px 20px; margin: 26px 0 0; padding: 0; list-style: none; }
+@media (min-width: 860px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: auto auto auto; }
+  .grid[data-count='3'] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* A row's titles, lines and pictures line up, also when one line wraps and its neighbour does not. */
+  @supports (grid-template-rows: subgrid) { .module { grid-row: span 3; grid-template-rows: subgrid; } }
+}
+.module { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; color: var(--j-ink); font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+.number { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #f0efeb; font-size: 13px; }
+.line { margin: 0; color: var(--j-body); font-size: 15.5px; line-height: 1.65; }
+
+/* The picture: the product's own components, as an example (inert). Its size never depends on what it shows. */
+.picture {
+  position: relative; height: 400px; margin-top: 8px; overflow: hidden; border: 1px solid var(--j-line); border-radius: 18px;
+  background: #fff; box-shadow: var(--j-shadow-lift); color: #262626; font-size: 14px; contain: layout paint; container-type: inline-size;
+}
+@media (max-width: 859px) { .picture { height: 380px; } }
+/* Each round comes in softly; a round that starts while the module is off screen is not seen starting. */
+@media (prefers-reduced-motion: no-preference) { .round { animation: roundIn .35s cubic-bezier(.16, 1, .3, 1) both; } }
+@keyframes roundIn { from { opacity: 0; } to { opacity: 1; } }
+
+/*
+ * What a picture holds starts at its top; once it is taller than the picture its newest part stays in view and the
+ * oldest leaves at the top, like a conversation. It is laid out from the top throughout, so what is already there
+ * never changes place in the layout as more arrives; a taller holder is only moved up by a transform, by exactly what
+ * does not fit (the picture's height less its own). No script measures or scrolls anything, and the browser counts no
+ * layout shift (a transform is not one). A browser without container units keeps the top in view.
+ */
+.feed { position: absolute; inset: 0; overflow: hidden; container-type: size; }
+.feed > div { display: grid; align-content: start; gap: 10px; padding: 16px 16px 14px; transform: translateY(min(0px, 100cqh - 100%)); }
+.feed[data-anchor='top'] > div { transform: none; }
+.feed[data-anchor='top']::before { content: none; }
+/* A wide table in a narrow picture is drawn smaller rather than cut off. */
+@container (max-width: 760px) { .table { zoom: .72; } }
+@container (max-width: 420px) { .table { zoom: .8; } }
+.feed::before { content: ''; position: absolute; z-index: 1; inset: 0 0 auto; height: 16px; background: linear-gradient(#fff, #fff0); pointer-events: none; }
+.feed[data-tone='sheet'], .feed[data-tone='sheet']::before { background-color: #f7f7f5; }
+.feed[data-tone='sheet']::before { background-image: linear-gradient(#f7f7f5, #f7f7f500); }
+/* The product's own messages keep their look; only their side margins give way to the picture's width. */
+.feed [data-message-role] { margin-inline: 0; }
+.feed [data-message-role='user'] { margin-left: 28px; }
+/* The work conversation's one turn keeps its look; the room the product leaves around a turn on a whole page gives way. */
+.work > div { width: 100%; padding: 0; }
+.work article { margin-bottom: 0; }
+.work article > p:first-child { margin-bottom: 18px; }
+.work article > div > div:first-child { margin-bottom: 10px; }
+.arrive { animation: arriveIn .32s cubic-bezier(.16, 1, .3, 1) both; }
+@media (prefers-reduced-motion: reduce) { .arrive { animation: none; } }
+@keyframes arriveIn { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+
+/* 了解你: the conversation, and beside it (under it where the picture is narrow) the checklist it fills. */
+.split { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.split > :first-child { position: relative; min-height: 0; }
+.aside { min-width: 0; max-height: 190px; padding: 0 14px; overflow: hidden; border-top: 1px solid #eee; background: #fafaf8; }
+@container (min-width: 540px) {
+  .split { grid-template-columns: minmax(0, 1fr) 232px; grid-template-rows: minmax(0, 1fr); }
+  .aside { max-height: none; border-top: 0; border-left: 1px solid #eee; }
+}
+
+/* 生成完整运营策略报告: the report being written above the workbench's own footer, whose button starts it. */
+.report { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.report > :first-child { position: relative; min-height: 0; }
+.report footer button[data-on] { box-shadow: 0 0 0 3px rgba(255, 187, 23, .45); }
+.reportHead { margin: 0; font-size: 16px; font-weight: 500; }
+
+/* Step two's storyboard, short: which shot, how it is framed, what it shows, how long. */
+.shots { width: 100%; border-collapse: collapse; font-size: 13px; }
+.shots th, .shots td { padding: 5px 8px; border-bottom: 1px solid #ececea; text-align: left; }
+.shots thead th { color: #6b6b6b; font-weight: 500; }
+.shots td:last-child, .shots th:last-child { text-align: right; white-space: nowrap; }
+.total { margin: 0; color: #6b6b6b; font-size: 13px; }
