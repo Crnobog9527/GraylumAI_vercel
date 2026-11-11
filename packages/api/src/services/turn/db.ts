@@ -3,6 +3,7 @@ import { resumeRead } from './resume';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyOwner, OWNER_ALERT_TURN_BUDGET_MS } from '../ownerAlerts/notify';
+import { storable } from './storableText';
 
 /*
  * CORE-PATH-V2 (docs/launch/tasks/CORE-PATH-V2.md 2.2, 2.5.2, 3.3.2 item 5): the only database calls of a turn.
@@ -93,7 +94,9 @@ export function turnDatabaseCode(message: string | undefined, known: RegExp = KN
   return known.exec(message ?? '')?.[1] ?? (/\bPRE_DEDUCT_[A-Z_]+\b/.test(message ?? '') ? CREDIT_ACCOUNT_REVIEW : 'TURN_DATABASE_UNAVAILABLE');
 }
 async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
-  const { data, error } = await client.rpc(name, args);
+  // Every turn write goes through here: text PostgreSQL would refuse (a NUL, half an emoji from a supplier's result or a model's
+  // escaped output) is cleaned, never the reason a receipt or a close fails (storableText.ts).
+  const { data, error } = await client.rpc(name, storable(args));
   if (error) {
     const code = turnDatabaseCode(error.message);
     // ALERT-FEISHU: the site's daily spend reached the stop-loss limit (turn_open / turn_call_begin). Once a UTC day. Awaited, so

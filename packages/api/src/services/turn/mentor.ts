@@ -21,7 +21,7 @@ import { researchContextFrom, withResearchContext } from './research/researchHos
 import { skillFileToolBytes } from './skills/skillFile';
 import type { PricingDeps } from './admission/pricingAdmission';
 import { modelCall, TurnStop } from './call';
-import { CLOSES, GATE_CODES, type ChatDeps } from './chat';
+import { CLOSES, GATE_CODES, noteUnsavedAnswer, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
@@ -35,6 +35,8 @@ import type { ChatQuote } from './quote';
 import type { StepEvent, TurnEvent } from './sse';
 import { METHOD_STEP_ID, withStepEvents } from './tools/announce';
 import { savedSteps } from './tools/toolStage';
+import { createRuntimeBudget } from './settings/budget';
+import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -74,6 +76,9 @@ const callPolicy = (q: ChatQuote) => ({ modelId: q.modelId, provider: 'openroute
 
 export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients);
+  // The time this request has (settings/budget.ts): a model call never runs past it, so the turn ends here and not by the platform
+  // stopping the function (which could save nothing of what the user was shown).
+  const budget = createRuntimeBudget();
   // The kind of turn: an opening, a step summary, a checklist-updated event, an answer to a card, or the user's words (V2-5b).
   let kind;
   try { kind = mentorTurnInput(input); } catch { return emit({ type: 'error', code: 'TURN_REQUEST_INVALID' }); }
@@ -163,12 +168,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
   const stepLog = new Map<string, StepEvent>();
   const emitStep = (event: TurnEvent) => { if (event.type === 'step') stepLog.set(event.id, event); emit(event); };
   const callDeps = (q: ChatQuote) => ({ db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
-    adapter: openRouterAdapter({ allowAgentTools: true, credential: q.credential, transport: deps.transport }) });
+    adapter: openRouterAdapter({ allowAgentTools: true, credential: q.credential, transport: deps.transport, budget }) });
   const close = (kind: CloseKind, extra: { messages?: Array<{ role: 'user' | 'assistant'; content: string }>; delivered?: boolean;
     refundAll?: boolean; failureCode?: string; kindResult?: Record<string, unknown> } = {}) =>
     db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
       refundAll: extra.refundAll, failureCode: extra.failureCode ?? null, kindResult: extra.kindResult });
-  let stopped: TurnStop | undefined;
+  let stopped: TurnStop | undefined, replyStreamed = false;
+  // Saves what the user was shown of a reply that was cut off (shownReply.ts); null when nothing was shown.
+  let saveShown: (() => Promise<Awaited<ReturnType<typeof close>> | null>) | undefined;
   const keep = (error: unknown) => { if (error instanceof TurnStop) stopped = error; throw error; };
   // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
   const callGate = async () => {
@@ -258,6 +265,16 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 
     // 5. The mentor's reply (and its continuation after one Skill file). A choice card ends the turn.
     let text = '', toolCalled = false, cardMessage: string | null | undefined;
+    saveShown = async () => {
+      // The prose of the call that was cut, in the reply's own envelope; no card (the user never saw one) and no checklist write
+      // (the organizer never read this reply). What the turn's research found is saved as on any other close.
+      const shown = shownSoFar(text), made = benchmark?.journal();
+      return shown ? close('completed', { delivered: true, failureCode: REPLY_CUT_FAILURE,
+        messages: [{ role: 'user', content: words },
+          { role: 'assistant', content: mentorReplyBody(agentTurnResult(shown, shown, false).body, input.stepId, ctx.roundId) }],
+        ...(made || stepLog.size ? { kindResult: { ...(made ? { research: made } : {}),
+          ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) }) : null;
+    };
     const output = await runRuntime({
       model: mentor.model, instructions: system.instructions, input: userMessage, session: turnSession(history),
       maxOutputTokens: mentor.outputLimit, maxTurns: opening ? 1 : benchmark ? 3 : 2, reasoning: mentor.reasoning, tools, stream: true,
@@ -308,6 +325,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const scopeDenied = rechecked !== null && !rechecked.allowed;
     const researchMade = benchmark?.journal();
     markStage('model');
+    // From here the reply has been streamed in full; only the closing write can still fail (noteUnsavedAnswer).
+    replyStreamed = true;
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId, ctx.roundId) }],
       ...(organizer || researchMade || stepLog.size ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
@@ -325,9 +344,18 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) } }),
     false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
+      // The reply's call broke off after the user was shown part of it: that part is saved and the turn closes as delivered
+      // (shownReply.ts). A save that fails falls through to the close below.
+      if (code === 'TURN_CALL_UNKNOWN' && saveShown) {
+        const kept = await swallow('turn_reply_cut_save_failed', saveShown(), null, { category: 'ai' });
+        if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? 'TURN_TOMBSTONED' : REPLY_CUT, turnId: opened.turnId });
+      }
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
+      if (replyStreamed) noteUnsavedAnswer('mentor', opened.turnId, code);
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
-      // What the turn's research already paid for is kept even when the reply failed.
+      // What the turn's research found is saved even when the reply failed, also when the turn is refunded in full or closes
+      // interrupted (neither charges the user): the supplier is already paid (Graylum bears it, Owner 2026-10-12 and 2026-11-11),
+      // and a retry then does not search, or pay the supplier, again.
       const made = benchmark?.journal();
       await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase(),
         ...(made ? { kindResult: { research: made } } : {}) }), undefined,

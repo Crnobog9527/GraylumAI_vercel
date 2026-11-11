@@ -24,3 +24,19 @@ it('ALERT-FEISHU: a stop-loss refusal tells the Owner once a day, other refusals
   await expect(db.open(open)).rejects.toThrow('TURN_SESSION_BUSY');
   expect(owner).toHaveBeenCalledTimes(1);
 });
+
+// Deep review 2026-11-11, finding 2: a NUL or half an emoji in a message made turn_close fail (jsonb refuses both) after the whole
+// answer had been streamed. Every turn write now sends text PostgreSQL accepts.
+it('every turn write is cleaned of what PostgreSQL refuses: a NUL, a lone surrogate', async () => {
+  const rpc = vi.fn(async (...call: unknown[]) => { void call; return { data: { turnId: 1, closeKind: 'completed', chargedCredits: 1,
+    absorbedCredits: 0, settlement: 'done', replay: false }, error: null }; });
+  const db = turnDatabase({ write: { rpc }, read: { rpc } } as never);
+  await db.close({ actorId: 'a', turnId: 1, kind: 'completed', delivered: true, failureCode: null,
+    messages: [{ role: 'user', content: 'hi\0 \ud83d' }, { role: 'assistant', content: 'ok 😀' }],
+    kindResult: { research: { cards: [{ title: 'cut \ude00title\0' }] } } });
+  const [name, args] = rpc.mock.calls[0] as unknown as [string, Record<string, unknown>];
+  expect(name).toBe('turn_close');
+  expect(args.p_messages).toEqual([{ role: 'user', content: 'hi \ufffd' }, { role: 'assistant', content: 'ok 😀' }]);
+  expect(args.p_kind_result).toEqual({ research: { cards: [{ title: 'cut \ufffdtitle' }] } });
+  expect(JSON.stringify(args)).not.toMatch(/\\u0000|\\ud83d(?!\\ude00)|(?<!\\ud83d)\\ude00/i);
+});

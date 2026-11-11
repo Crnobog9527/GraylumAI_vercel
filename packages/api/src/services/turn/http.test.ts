@@ -66,6 +66,17 @@ describe('POST /api/turn entry (CORE-PATH-V2 2.2, 2.8)', () => {
     expect(body).not.toContain('relation');
   });
 
+  // Deep review 2026-11-11, finding 2: cleaned, not refused (the user cannot see either character), before the request is checked.
+  it('cleans a NUL and half an emoji out of the message before the turn sees it; a message of nothing else is refused', async () => {
+    run.mockResolvedValue(undefined);
+    await (await handleTurnRequest(post({ ...valid, text: 'Hel\0lo \ud83d' }), deps())).text();
+    expect(run.mock.calls[0]![1]).toMatchObject({ text: 'Hello \ufffd' });
+    run.mockClear();
+    const res = await handleTurnRequest(post({ ...valid, text: ' \0\0 ' }), deps());
+    expect([res.status, (await res.json()).error]).toEqual([400, 'TURN_REQUEST_INVALID']);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('carries what the composer chose for the message, and refuses a malformed reference (V2-10)', async () => {
     run.mockResolvedValue(undefined);
     const documentId = '00000000-0000-4000-8000-000000000009', moduleId = '00000000-0000-4000-8000-000000000008';

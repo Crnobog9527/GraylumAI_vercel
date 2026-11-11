@@ -12,6 +12,7 @@ import { runMentorTurn } from './mentor';
 import { runResumedTurn } from './resumeTurn';
 import { mentorAnswer } from './mentorInput';
 import { planTurnRequest, runPlanTurn } from './plan';
+import { storable } from './storableText';
 import { eventStream, type StreamEvent } from './sse';
 import { markStage, reportStages, withStageTimer } from './stageTiming';
 import { swallow } from '../../lib/swallow';
@@ -96,7 +97,8 @@ function stream(run: (emit: (event: StreamEvent) => void) => Promise<void>, onCa
 
 export async function handleTurnRequest(request: Request, deps: TurnHttpDeps): Promise<Response> {
   let input;
-  try { input = turnRequest.parse(await request.json()); } catch { return json(400, 'TURN_REQUEST_INVALID'); }
+  // Cleaned before it is checked: a NUL or half an emoji in any text of the request (storableText.ts).
+  try { input = turnRequest.parse(storable(await request.json())); } catch { return json(400, 'TURN_REQUEST_INVALID'); }
   return withStageTimer(input.kind, () => answerTurn(request, deps, input));
 }
 

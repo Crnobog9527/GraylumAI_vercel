@@ -6,6 +6,7 @@ import { runPlanTurn, type PlanInput } from './plan';
 import { handlePlanRead, parsePlan } from './planHttp';
 import type { ReportHttpDeps } from './reportHttp';
 import type { TurnEvent } from './sse';
+import { logger } from '../../lib/logger';
 
 /*
  * CORE-PATH-V2 V2-10b, Node side of kind=plan with the database, the catalog and the provider faked (the database rules are
@@ -40,7 +41,9 @@ const context = { draftId: uuid(5), projectId: uuid(6), roundId: uuid(3), module
   packageHash: 'b'.repeat(64), resources: ['plan.md'], work: { roundId: uuid(3), steps: { s: { body: 'CONFIRMED' } } } };
 const PLAN = JSON.stringify([{ id: uuid(9), platform: 'tiktok', account: 'me', title: 'T', brief: 'B', day: '2026-11-02' }]);
 
-function harness(over: { open?: () => unknown; openError?: string; source?: unknown; gate?: { message?: unknown; calls?: unknown } } = {}) {
+function harness(over: { open?: () => unknown; openError?: string; source?: unknown; gate?: { message?: unknown; calls?: unknown };
+  /** A turn_close the database refuses (its error text), by the arguments it was called with. */
+  closeError?: (args: Record<string, unknown>) => string | undefined } = {}) {
   const rpc: Array<[string, Record<string, unknown>]> = [];
   const respond = async (name: string, args: Record<string, unknown>) => {
     rpc.push([name, args]);
@@ -48,6 +51,8 @@ function harness(over: { open?: () => unknown; openError?: string; source?: unkn
     if (name === 'turn_open' && over.openError) return { data: null, error: { code: 'P0001', message: over.openError, details: null } };
     if (name === 'turn_open') return { data: over.open?.() ?? { turnId: 9, state: 'running', replay: false, reservedCredits: 30,
       reservedUsd: 0.3, history: [{ seq: 1, role: 'user', content: 'earlier', contentHash: 'a'.repeat(64) }], kindContext: context }, error: null };
+    const refused = name === 'turn_close' ? over.closeError?.(args) : undefined;
+    if (refused) return { data: null, error: { code: 'P0001', message: refused, details: null } };
     if (name === 'turn_close') return { data: { turnId: 9, closeKind: args.p_close_kind, chargedCredits: args.p_delivered ? 7 : 0,
       absorbedCredits: 0, settlement: 'done', replay: false }, error: null };
     return { data: null, error: { message: 'unexpected ' + name } };
@@ -146,6 +151,41 @@ describe('kind=plan on the turn core (CORE-PATH-V2 V2-10b)', () => {
     await runPlanTurn(l.deps, input, l.emit);
     expect(h.call).not.toHaveBeenCalled();
     expect(l.args('turn_close')).toMatchObject({ p_close_kind: 'failed', p_refund_all: true });
+  });
+
+  // CHAT_NATIVE_OUTPUT_PLAN 4.2: a plan is one JSON document, so a call cut off part-way saves nothing of it (never a broken document).
+  it('a plan cut off part-way saves nothing and closes interrupted, whatever was streamed', async () => {
+    const t = harness(); h.call.mockResolvedValue('{}');
+    h.runtime.mockImplementation(async (o: Run) => { o.onText('[{"id":"half'); throw new TurnStop('TURN_CALL_UNKNOWN'); });
+    await runPlanTurn(t.deps, input, t.emit);
+    const closes = t.rpc.filter(([name]) => name === 'turn_close').map(([, args]) => args);
+    expect(closes).toHaveLength(1);
+    expect(closes[0]).toMatchObject({ p_close_kind: 'interrupted', p_delivered: false, p_kind_result: null });
+    expect(t.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+  });
+
+  // Deep review 2026-11-11, findings 2 and 9 (Owner 2026-11-11: a turn whose answer was not saved does not charge the user). The
+  // turn is refunded like any failure that saved nothing, and it is an error in the log: it must stay rare.
+  it('a closing write that fails after the whole plan was streamed refunds the turn and is logged as an error', async () => {
+    const logged = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    try {
+      const t = harness({ closeError: args => args.p_close_kind === 'completed' ? 'connection reset' : undefined }); runs(PLAN);
+      await runPlanTurn(t.deps, input, t.emit);
+      const closes = t.rpc.filter(([name]) => name === 'turn_close').map(([, args]) => args);
+      expect(closes).toHaveLength(2);
+      expect(closes[0]).toMatchObject({ p_close_kind: 'completed', p_delivered: true });
+      expect(closes[1]).toMatchObject({ p_close_kind: 'failed', p_refund_all: true, p_delivered: false,
+        p_failure_code: 'turn_database_unavailable', p_kind_result: null });
+      expect(t.events.map(e => e.type)).toEqual(['opened', 'text', 'error']);
+      expect(t.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE', turnId: 9 });
+      expect(logged).toHaveBeenCalledExactlyOnceWith('ai', 'turn_answer_unsaved', { kind: 'plan', turnId: 9, code: 'TURN_DATABASE_UNAVAILABLE' });
+      // A failure before the answer was complete is an ordinary failed turn: refunded, not this error.
+      logged.mockClear();
+      const early = harness(); h.runtime.mockRejectedValue(new Error('boom'));
+      await runPlanTurn(early.deps, input, early.emit);
+      expect(early.args('turn_close')).toMatchObject({ p_close_kind: 'failed', p_refund_all: true });
+      expect(logged).not.toHaveBeenCalledWith('ai', 'turn_answer_unsaved', expect.anything());
+    } finally { logged.mockRestore(); }
   });
 });
 
