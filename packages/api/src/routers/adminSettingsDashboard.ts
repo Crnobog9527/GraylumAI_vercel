@@ -4,7 +4,7 @@ import { entitlementRowShape } from '../services/membershipEntitlementConfig';
 import { adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { hydrateStripeCatalogPrices } from '../services/payments/stripeCatalog';
-import { createAdminOperationError, assertValidAdminRows } from './adminShared';
+import { createAdminOperationError, assertValidAdminRows, systemSettingsTable } from './adminShared';
 
 const adminSettingsMembershipPlanRowSchema = z.object({
   ...entitlementRowShape,
@@ -23,7 +23,7 @@ export const adminSettingsDashboardProcedures = {
   getSettingsDashboard: adminProcedure
     .query(async ({ ctx }) => {
       const [systemSettingsResult, membershipPlansResult] = await Promise.all([
-        ctx.supabase.from('system_settings').select('key, value'),
+        systemSettingsTable(ctx.supabase).select('key, value'),
         ctx.supabase
           .from('membership_plans')
           .select('*')

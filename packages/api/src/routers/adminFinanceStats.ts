@@ -8,7 +8,7 @@ import { readAllReportRows } from '../services/reportRows';
 import { buildFinanceUsdOverview, buildFinanceTransactionStats } from '../services/financeReport';
 import { picoToUsd, usdToPico } from '../services/reportUsd';
 import { describeBillingUnitSettings } from '../services/billingUnit';
-import { adminDateStringSchema, createAdminOperationError, assertValidAdminRows } from './adminShared';
+import { adminDateStringSchema, createAdminOperationError, assertValidAdminRows, systemSettingsTable } from './adminShared';
 
 const adminFiniteNumericValueSchema = z.union([
   z.number().finite(),
@@ -308,8 +308,7 @@ export const adminFinanceProcedures = {
         'billing history',
       );
 
-      const { data: settings, error: settingsError } = await readAllReportRows((from, to) => ctx.supabase
-        .from('system_settings')
+      const { data: settings, error: settingsError } = await readAllReportRows((from, to) => systemSettingsTable(ctx.supabase)
         .select('*')
         .in('key', [
           'new_user_credits',

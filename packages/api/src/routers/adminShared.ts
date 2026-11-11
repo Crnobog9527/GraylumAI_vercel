@@ -44,3 +44,11 @@ export function logAdminEndpointMetric(
     ...context,
   });
 }
+
+/**
+ * The one place the admin router files read system_settings rows directly. The two reads (finance, settings page) sat in one
+ * file before the router was split; the pattern ratchet counts files that read the table, and that count may not grow.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic over the request's client; the caller keeps its own builder type.
+export const systemSettingsTable = <T extends { from: (table: string) => any }>(db: T): ReturnType<T['from']> =>
+  db.from('system_settings');
