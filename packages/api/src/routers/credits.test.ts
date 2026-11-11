@@ -270,70 +270,54 @@ describe('creditsRouter permissions', () => {
     });
   });
 
-  it('summarizes monthly spend with credit ledger v2 semantics', async () => {
-    const supabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createProfileSupabase('user').from(table);
-        }
-        return createCreditTransactionsSupabase([
-          { id: 'txn-grant', amount: 100, type: 'purchase', ledger_type: 'grant', counts_as_spend: false },
-          { id: 'txn-spend', amount: -40, type: 'deduction', ledger_type: 'spend', counts_as_spend: true },
-          { id: 'txn-refund-clawback', amount: -25, type: 'deduction', ledger_type: 'refund_clawback', counts_as_spend: false },
-          { id: 'txn-adjustment', amount: -5, type: 'deduction', ledger_type: 'adjustment', counts_as_spend: false },
-          {
-            id: 'txn-positive-admin-adjustment',
-            amount: 25,
-            type: 'addition',
-            description: '[Admin] manual top-up',
-            idempotency_key: 'admin_adjustment:admin-1:user-1:request-1',
-          },
-          { id: 'txn-legacy-spend', amount: -10, type: 'deduction', description: 'AI 对话消费' },
-          {
-            id: 'txn-legacy-refund-clawback',
-            amount: -50,
-            type: 'deduction',
-            description: 'Stripe refund credit clawback [refund:re_legacy]',
-            idempotency_key: 'stripe_refund:re_legacy',
-          },
-        ]).from(table);
-      },
+  const summaryRow = {
+    totalEarned: 100,
+    totalSpent: 50,
+    transactionCount: 7,
+    byType: { purchase: { count: 1, amount: 100 }, consumption: { count: 2, amount: -50 } },
+    byLedgerType: { grant: { count: 1, amount: 100 }, spend: { count: 2, amount: -50 } },
+  };
+  function summaryAdmin(result: { data: unknown; error: unknown }, calls: Array<{ name: string; args: Record<string, unknown> }> = []) {
+    return {
+      from(table: string) { throw new Error(`the summary must not read ${table} row by row`); },
+      rpc(name: string, args: Record<string, unknown>) { calls.push({ name, args }); return Promise.resolve(result); },
     };
-    const caller = createCreditsCaller({ role: 'user', supabase });
+  }
 
-    await expect(caller.getCreditsSummary({ period: 'month' })).resolves.toMatchObject({
-      totalEarned: 100,
-      totalSpent: 50,
-      transactionCount: 7,
-      byLedgerType: {
-        grant: { count: 1, amount: 100 },
-        spend: { count: 2, amount: -50 },
-        refund_clawback: { count: 2, amount: -75 },
-        adjustment: { count: 2, amount: 20 },
-      },
-    });
+  it('returns the totals summed in the database, for the calendar month in UTC', async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const caller = createCreditsCaller({ role: 'user', supabaseAdmin: summaryAdmin({ data: summaryRow, error: null }, calls) });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-18T09:30:00.000Z'));
+    try {
+      await expect(caller.getCreditsSummary({ period: 'month' })).resolves.toEqual(summaryRow);
+      await expect(caller.getCreditsSummary({ period: 'all' })).resolves.toEqual(summaryRow);
+      await caller.getCreditsSummary({ period: 'week' });
+      await caller.getCreditsSummary({ period: 'year' });
+    } finally {
+      vi.useRealTimers();
+    }
+    // The signed-in account's own id, never an id from the request; "month" is not the last 30 days.
+    expect(calls).toEqual([
+      { name: 'usage_credit_summary_for_user', args: { p_user_id: 'user-1', p_from: '2026-11-01T00:00:00.000Z' } },
+      { name: 'usage_credit_summary_for_user', args: { p_user_id: 'user-1', p_from: null } },
+      { name: 'usage_credit_summary_for_user', args: { p_user_id: 'user-1', p_from: '2026-11-11T09:30:00.000Z' } },
+      { name: 'usage_credit_summary_for_user', args: { p_user_id: 'user-1', p_from: '2025-11-18T09:30:00.000Z' } },
+    ]);
   });
 
-  it('reports the summary as unavailable instead of fabricated zeros when the ledger read fails', async () => {
+  it.each([
+    ['the database read fails', { data: null, error: { code: '57014', message: 'private timeout detail for user@example.com' } }, '57014'],
+    ['the result is not a summary', { data: { totalSpent: 'many' }, error: null }, null],
+  ])('reports the summary as unavailable instead of fabricated zeros when %s', async (_name, result, code) => {
     const logSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
-    const supabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createProfileSupabase('user').from(table);
-        }
-        return createCreditTransactionsSupabase([], {
-          code: '57014',
-          message: 'private timeout detail for user@example.com',
-        }).from(table);
-      },
-    };
-    const caller = createCreditsCaller({ role: 'user', supabase });
+    const caller = createCreditsCaller({ role: 'user', supabaseAdmin: summaryAdmin(result) });
 
     await expect(caller.getCreditsSummary({ period: 'month' })).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'SERVICE_UNAVAILABLE',
       message: '积分汇总暂时无法读取，请稍后重试',
     });
-    expect(logSpy).toHaveBeenCalledWith('billing', 'credits_summary_query_failed', { code: '57014' });
+    expect(logSpy).toHaveBeenCalledWith('billing', 'credits_summary_query_failed', { code });
     expect(JSON.stringify(logSpy.mock.calls)).not.toContain('user@example.com');
     logSpy.mockRestore();
   });
