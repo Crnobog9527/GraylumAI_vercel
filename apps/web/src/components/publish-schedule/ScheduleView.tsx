@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
-import { platformName } from '@/lib/publish-monitor/publish-flow';
+// The data review's name table: it also covers the TikHub platforms (抖音, 小红书) a job can list.
+import { platformName } from '@/components/publish-monitor/labels';
 import {
   changeable, dayLabel, entriesOn, entryStatus, hasOpenEntries, sameLocalDay, scheduleErrorMessage, timeLabel, weekDays,
   weekRange, weekStart, zoneLabel, type ScheduleEntry,
