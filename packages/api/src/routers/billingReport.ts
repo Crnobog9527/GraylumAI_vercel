@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { router, adminProcedure } from '../trpc';
 import { absentRefundCalls, turnModelReport, unsettledTurns } from '../services/turn/settings/turnCostReport';
 import { refundStuckTurn, StuckTurnRefundError } from '../services/turn/settings/turnStuckRefund';
+import { meteringBlocks, MeteringReviewError, reviewMeteringBlock } from '../services/turn/settings/meteringBlocks';
 
 import {
   absorbConfigSchema, absorbAckInput, readAbsorbConfig, saveAbsorbConfig,
@@ -48,6 +49,21 @@ export const billingReportRouter = router({
         if (error instanceof StuckTurnRefundError) {
           const denied = error.code === 'TURN_DENIED' || error.code === 'TURN_ADMIN_DENIED';
           throw new TRPCError({ code: denied ? 'FORBIDDEN' : 'INTERNAL_SERVER_ERROR', message: error.code });
+        }
+        throw error;
+      }
+    }),
+  // Metering block (finding 10): the models off for every user since a receipt went above its frozen bound (read-only), and the action
+  // "已核对价格，恢复调用" that lets one through again. Idempotent; the database function checks the admin again and writes the audit row.
+  meteringBlocks: adminProcedure.query(({ ctx }) => meteringBlocks(ctx.supabase)),
+  reviewMeteringBlock: adminProcedure
+    .input(z.object({ modelId: z.string().uuid() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await reviewMeteringBlock(ctx.supabase, { modelId: input.modelId, adminId: ctx.user.id, requestId: randomUUID() });
+      } catch (error) {
+        if (error instanceof MeteringReviewError) {
+          throw new TRPCError({ code: error.code === 'TURN_ADMIN_DENIED' ? 'FORBIDDEN' : 'INTERNAL_SERVER_ERROR', message: error.code });
         }
         throw error;
       }

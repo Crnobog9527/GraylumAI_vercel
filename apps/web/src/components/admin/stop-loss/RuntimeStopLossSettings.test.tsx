@@ -26,6 +26,7 @@ const mock = `
     if (name==='stopLossStatus') return {config:s.stopLoss,revision:s.revision,source:s.source,usage:s.usage,basis:'closed_turn_known_usd',
       timezone:'UTC',externalNotifications:'email'};
     if (name==='stopLossAlerts') return {alerts:s.alerts,limit:100};
+    if (name==='meteringBlocks') return s.meteringBlocks ?? {available:true,blocks:[]};
   };
   const cache = {};
   function query(name){
@@ -53,13 +54,31 @@ const mock = `
     }};
   }
   export const trpc = {
-    useUtils: () => ({runtimeRateLimits:{
+    useUtils: () => ({billingReport:{meteringBlocks:{invalidate:async()=>{delete cache.meteringBlocks;notify()}}},runtimeRateLimits:{
       get:{setData:(_,v)=>{cache.get=typeof v==='function'?v(cache.get):v;notify()},
         invalidate:async()=>{delete cache.get;notify()}},
       stopLossStatus:{invalidate:async()=>{delete cache.stopLossStatus;notify()}},
       stopLossConfig:{invalidate:async()=>{if(!window.refetchFail)delete cache.stopLossConfig;notify()},
         setData:(_,v)=>{cache.stopLossConfig=v;notify()}},
     }}),
+    // The metering-block card: the review empties the server's list for that model, as the database function does.
+    billingReport: {
+      meteringBlocks:query('meteringBlocks'),
+      reviewMeteringBlock:{useMutation:options=>{
+        const [isPending,setPending]=useState(false);
+        return {isPending,mutate:input=>{
+          window.calls.push(['reviewMeteringBlock',input]);setPending(true);
+          const failure=fail('reviewMeteringBlock');
+          Promise.resolve().then(()=>{
+            setPending(false);
+            if (failure) return options.onError(failure,input);
+            const s=window.server,held=s.meteringBlocks.blocks.filter(b=>b.modelId===input.modelId);
+            s.meteringBlocks={available:true,blocks:s.meteringBlocks.blocks.filter(b=>b.modelId!==input.modelId)};
+            options.onSuccess({modelId:input.modelId,reviewed:held.reduce((n,b)=>n+b.calls,0)});
+          });
+        }};
+      }},
+    },
     runtimeRateLimits: {
       get:query('get'), stopLossConfig:query('stopLossConfig'), stopLossStatus:query('stopLossStatus'), stopLossAlerts:query('stopLossAlerts'),
       // Mirrors the dedicated endpoint: only the flag changes; window.readBack can override the result.
@@ -363,4 +382,52 @@ it('lists alerts as aggregates, shows the empty state, and fits a 375px screen',
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
+}, 20000);
+
+// Deep review 2026-11-11, finding 10: a model blocked by an over-bound receipt had no way back in the admin.
+it('lists a model held by a metering block and lets it through only after the admin confirms', async () => {
+  const model = '00000000-0000-4000-8000-000000000020';
+  const { page, errors } = await open({ meteringBlocks: { available: true, blocks: [{ modelId: model, model: 'Sonnet 5.5', calls: 2,
+    firstAt: '2026-11-11T01:00:00+00:00', lastAt: '2026-11-11T02:00:00+00:00', turnId: 7, upperUsd: '0.020000000000',
+    nominalUsd: '0.010000000000', actualUsd: '0.050000000000' }] } });
+  try {
+    const card = page.getByTestId('metering-blocks');
+    await browserExpect(card).toContainText('Sonnet 5.5');
+    await browserExpect(card).toContainText('$0.05');
+    // Dismissed: nothing is sent and the model stays listed.
+    page.once('dialog', dialog => { void dialog.dismiss(); });
+    await card.getByRole('button', { name: '已核对价格，恢复调用' }).click();
+    expect((await calls(page)).filter(c => c[0] === 'reviewMeteringBlock')).toEqual([]);
+    await browserExpect(card).toContainText('Sonnet 5.5');
+    // Confirmed: one request for that model; the list is read again and the note says what was done.
+    let question = '';
+    page.once('dialog', dialog => { question = dialog.message(); void dialog.accept(); });
+    await card.getByRole('button', { name: '已核对价格，恢复调用' }).click();
+    await browserExpect(card).toContainText('当前没有被暂停的模型');
+    await browserExpect(card).toContainText('已恢复调用（核对了 2 条超上限的调用记录）。');
+    expect(question).toContain('确认恢复模型「Sonnet 5.5」的调用？');
+    expect(question).toContain('不改任何价格、扣费和结算');
+    expect((await calls(page)).filter(c => c[0] === 'reviewMeteringBlock')).toEqual([['reviewMeteringBlock', { modelId: model }]]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('a review that fails says the model is still held; a list that cannot be read is never shown as none', async () => {
+  const model = '00000000-0000-4000-8000-000000000021';
+  const { page, errors } = await open({ meteringBlocks: { available: true, blocks: [{ modelId: model, model: null, calls: 1,
+    firstAt: null, lastAt: null, turnId: 9, upperUsd: '0.02', nominalUsd: null, actualUsd: '0.03' }] } },
+  { reviewMeteringBlock: { message: 'TURN_METERING_REVIEW_FAILED' } });
+  try {
+    const card = page.getByTestId('metering-blocks');
+    page.once('dialog', dialog => { void dialog.accept(); });
+    await card.getByRole('button', { name: '已核对价格，恢复调用' }).click();
+    await browserExpect(card).toContainText('恢复失败，模型仍然暂停。请稍后重试。');
+    await browserExpect(card).toContainText(model);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+  const other = await open({ meteringBlocks: { available: false } });
+  try {
+    await browserExpect(other.page.getByTestId('metering-blocks')).toContainText('列表暂不可用');
+    await browserExpect(other.page.getByTestId('metering-blocks').getByText('当前没有被暂停的模型')).toHaveCount(0);
+  } finally { await other.page.close(); }
 }, 20000);
