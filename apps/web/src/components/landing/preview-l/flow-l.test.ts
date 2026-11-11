@@ -90,6 +90,12 @@ describe('region 3 as modules that loop by themselves (Owner 2026-11-11)', () =>
     expect(css).toMatch(/@media \(max-width: 859px\) \{ \.picture \{ height: 380px; \} \}/);
     // What it holds is laid out inside it, out of the page's flow.
     expect(css).toMatch(/\.feed \{ position: absolute; inset: 0;/);
+    // What no longer fits is moved by a transform, never by layout, and a table being written keeps its columns where
+    // they are (measured 2026-11-11: with columns sized by the text typed so far, the two modules with tables alone
+    // made the region's layout shift 0.07 to 0.10; with fixed columns the whole region is under 0.02).
+    expect(css).toMatch(/\.feed > div \{[^}]*transform: translateY\(min\(0px, 100cqh - 100%\)\);/);
+    expect(css).toMatch(/\.work\.work table \{[^}]*table-layout: fixed;/);
+    expect(css).toMatch(/\.work \.shots th:last-child \{ width: [\d.]+em; \}/);
     // One under another on a phone, side by side from 860px.
     expect(css).toMatch(/@media \(min-width: 860px\) \{\s*\.grid \{ grid-template-columns: repeat\(2,/);
   });
