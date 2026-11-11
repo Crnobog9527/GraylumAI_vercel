@@ -995,9 +995,18 @@
   height: 19px;
   margin-bottom: 14px;
 }
-/* The inert tab bar drawn while the first read runs. */
+/* The place of the tab bar while the first read runs: grey bars exactly as wide as the labels (the label text sizes the
+   bar and is not painted), so nothing moves when the real tabs or the upgrade notice arrive. */
 .page span.tab {
   cursor: default;
+}
+.skTab {
+  border-radius: 4px;
+  background: #ebebeb;
+  color: transparent;
+  font-style: normal;
+  user-select: none;
+  animation: pm-pulse 1.4s ease-in-out infinite;
 }
 .skKpi {
   height: 108px;
@@ -1214,7 +1223,8 @@
 @media (prefers-reduced-motion: reduce) {
   .panel,
   .rise,
-  .sk {
+  .sk,
+  .skTab {
     animation: none;
   }
   .page .tab,
