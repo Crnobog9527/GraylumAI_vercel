@@ -19,6 +19,14 @@ import { TREND_FRESH_MS, TrendCharts, TrendSkeleton } from './TrendCharts';
 const TABS = [['trend', '数据趋势'], ['posts', '作品数据'], ['accounts', '账号'], ['review', '每周复盘'], ['import', '表格导入']] as const;
 type TabId = typeof TABS[number][0];
 /**
+ * The tab named in the address (`?tab=accounts`), for links from other pages such as one-click publishing's "去连接账号".
+ * Read once when the page opens; the page is drawn in the browser only (the server sends the empty frame).
+ */
+export function tabFromSearch(search: string): TabId {
+  const named = new URLSearchParams(search).get('tab');
+  return TABS.find(([id]) => id === named)?.[0] ?? 'trend';
+}
+/**
  * How long after the page's first reads the trend read is sent. tRPC puts reads made at the same moment into one
  * request, and that request answers only when its slowest read is done; a few milliseconds later the trend read
  * travels on its own, at the same time as the first reads, without holding them up.
@@ -39,7 +47,7 @@ export function DataReviewView() {
   const brands = useMemo(() => brandsFromLibrary(library.data), [library.data]);
   const refresh = useMemo(() => new Map<string, RefreshState>((data.data?.connections ?? []).map(c => [c.id, c])),
     [data.data]);
-  const [tab, setTab] = useState<TabId>('trend');
+  const [tab, setTab] = useState<TabId>(() => (typeof window === 'undefined' ? 'trend' : tabFromSearch(window.location.search)));
   // The page opens on the trend tab, but that tab is only drawn once the first reads are back. Its data and its drawing
   // code are asked for now, not after that (PERF 2026-11-11: the trend read was a second wave, one round trip later).
   // An account without access gets one refused read here; the tab's own read (same key) then finds the answer waiting.
@@ -86,11 +94,11 @@ export function DataReviewView() {
           <Tabs.Content value="trend" className={styles.panel}><TrendCharts gold={gold} onOpenTab={setTab} /></Tabs.Content>
           <Tabs.Content value="posts" className={styles.panel}>
             <PostsPanel windowDays={windowDays} posts={data.data.posts as Post[]} connections={data.data.connections}
-              accountOf={id => accountOfConnection.get(id)} onLinked={changed} />
+              accountOf={id => accountOfConnection.get(id)} onLinked={changed} onOpenTab={setTab} />
           </Tabs.Content>
           <Tabs.Content value="accounts" className={styles.panel}>
             <ConnectionsPanel brands={brands} connections={connections.data as Connection[]} refresh={refresh} gold={gold}
-              onChanged={changed} />
+              onChanged={changed} onOpenTab={setTab} />
           </Tabs.Content>
           <Tabs.Content value="review" className={styles.panel}><ReviewPanel gold={gold} /></Tabs.Content>
           <Tabs.Content value="import" className={styles.panel}><ManualImport brands={brands} onImported={changed} /></Tabs.Content>

@@ -25,7 +25,12 @@ const series = (connectionId: string, platform: string) => ({ connectionId, plat
 const ANSWERS: Record<string, unknown> = {
   'opc.library': { businesses: [] },
   'publishMonitor.connections': [],
-  'publishMonitor.data': { windowDays: 90, connections: [], posts: [] },
+  'publishMonitor.data': { windowDays: 90, connections: [{ id: 'c1', platform: 'douyin' }], posts: [0, 1, 2].map(index => ({
+    id: `p${index}`, connectionId: 'c1', source: 'tikhub', url: `https://example.com/p/${index}`, postedAt: '2026-11-03T08:00:00Z',
+    postedAtSource: 'provider', firstSeenAt: '2026-11-04T00:00:00Z', workItemId: null,
+    titleExcerpt: '一个很长很长的作品标题用来确认它在手机上会换行而不是把页面撑宽'.repeat(index + 1),
+    latest: { capturedOn: '2026-11-10', missingFields: ['shares'],
+      metrics: { views: 12_000 + index, impressions: 90_000, reach: 40_000, likes: 300, comments: 20, saves: 15, followers_gained: 4 } } })) },
   'publishMonitor.trend': { windowDays: 90, series: [series('c1', 'douyin'), series('c2', 'youtube')] },
 };
 
@@ -161,3 +166,26 @@ it('asks for the trend data with the first reads, in a request of its own, not a
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('posts read as a table on a desktop and as cards on a phone, from the same list, without a sideways scroll on the phone', async () => {
+  const wide = await open(1280, 720, 'reduce');
+  try {
+    await wide.page.getByRole('tab', { name: '作品数据' }).click();
+    const label = wide.page.locator('dl dt').first();
+    await ui(wide.page.getByText('发布日期', { exact: true })).toBeVisible();
+    await ui(label).toBeHidden();
+    expect(wide.errors).toEqual([]);
+  } finally { await wide.page.close(); }
+  const phone = await open(360, 780, 'reduce');
+  try {
+    await phone.page.getByRole('tab', { name: '作品数据' }).click();
+    // Eight numbers per post: on a phone each sits under its own label, and the column header row is gone.
+    await ui(phone.page.locator('dl dt').first()).toBeVisible();
+    await ui(phone.page.getByText('发布日期', { exact: true })).toBeHidden();
+    await ui(phone.page.getByText('平台不提供').first()).toBeVisible();
+    expect(await pageWidth(phone.page)).toBe(360);
+    const widest = await phone.page.locator('main li').evaluateAll(nodes => Math.max(...nodes.map(node => node.getBoundingClientRect().right)));
+    expect(widest).toBeLessThanOrEqual(360);
+    expect(phone.errors).toEqual([]);
+  } finally { await phone.page.close(); }
+}, 45000);

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { trpc } from '@/trpc/client';
+import styles from './data-review.module.css';
 import { dataErrorMessage, errorCode, platformName } from './labels';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
@@ -51,35 +52,32 @@ export function AddAccountForm({ onAdded }: { onAdded: (projectId: string) => vo
   const [platform, setPlatform] = useState<string>(''), [account, setAccount] = useState('');
   const add = trpc.publishMonitor.addAccount.useMutation();
   if (profiles.isLoading) return <PageSkeleton compact rows={2} label="定位档案读取中" />;
-  if (profiles.error) return <p role="alert" className="text-sm" style={{ color: 'var(--color-error)' }}>
-    暂时读不到你的定位档案，请稍后重试。</p>;
-  if (brands.length === 0) return <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+  if (profiles.error) return <p role="alert" className={styles.error}>暂时读不到你的定位档案，请稍后重试。</p>;
+  if (brands.length === 0) return <p className={styles.quietNote}>
     还没有已确认定位的定位档案。先去"定位"完成并确认一个定位，这里才能添加账号。</p>;
   const chosen = businessId || (brands.length === 1 ? brands[0]!.businessId : '');
   const ready = Boolean(chosen && platform && account.trim());
   return (
-    <fieldset className="space-y-2 rounded-md border p-3 text-sm" style={{ borderColor: 'var(--border-primary)' }}>
-      <legend className="px-1 font-medium">添加品牌账号</legend>
-      <p style={{ color: 'var(--text-secondary)' }}>账号会挂在你已经确认过定位的档案下，一个平台一个账号。添加后就能连接它。</p>
+    <fieldset className={`${styles.fieldset} ${styles.formStack}`}>
+      <legend>添加品牌账号</legend>
+      <p className={styles.hint}>账号会挂在你已经确认过定位的档案下，一个平台一个账号。添加后就能连接它。</p>
       {brands.length > 1 && (
-        <select className="w-full rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--border-primary)' }}
-          value={businessId} onChange={event => setBusinessId(event.target.value)} aria-label="定位档案">
+        <select className={styles.select} value={businessId} onChange={event => setBusinessId(event.target.value)} aria-label="定位档案">
           <option value="">选择定位档案</option>
           {brands.map(brand => <option key={brand.businessId} value={brand.businessId}>{labels.get(brand.businessId)}</option>)}
         </select>
       )}
-      <select className="w-full rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--border-primary)' }}
-        value={platform} onChange={event => setPlatform(event.target.value)} aria-label="平台">
+      <select className={styles.select} value={platform} onChange={event => setPlatform(event.target.value)} aria-label="平台">
         <option value="">选择平台</option>
         {ADD_PLATFORMS.map(code => <option key={code} value={code}>{platformName(code)}</option>)}
       </select>
       <Input aria-label="账号名" placeholder="账号名，例如 your_handle（小写字母、数字和 . _ : -）" maxLength={128} value={account}
         onChange={event => setAccount(event.target.value)} />
-      {add.error && <p role="alert" style={{ color: 'var(--color-error)' }}>{dataErrorMessage(errorCode(add.error))}</p>}
-      <Button disabled={!ready || add.isPending} onClick={() => add.mutate({ businessId: chosen,
+      {add.error && <p role="alert" className={styles.error}>{dataErrorMessage(errorCode(add.error))}</p>}
+      <div><Button disabled={!ready || add.isPending} onClick={() => add.mutate({ businessId: chosen,
         platform: platform as typeof ADD_PLATFORMS[number], account: account.trim() }, {
         onSuccess: result => { setAccount(''); onAdded(result.accountProjectId); } })}>
-        {add.isPending ? '添加中…' : '添加账号'}</Button>
+        {add.isPending ? '添加中…' : '添加账号'}</Button></div>
     </fieldset>
   );
 }
