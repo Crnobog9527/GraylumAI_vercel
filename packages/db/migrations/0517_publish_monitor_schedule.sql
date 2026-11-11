@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- PUBLISH-SCHEDULE PR-1 (Owner 2026-11-11, Master Plan 2.1: the publish schedule must be complete before launch; plan in
--- docs/launch/tasks/PUBLISH-SCHEDULE.md). Placeholder number 9999: the controller assigns the real number before applying.
+-- docs/launch/tasks/PUBLISH-SCHEDULE.md). Number 0517 assigned by the controller.
 --
 -- A scheduled publish is a one-click publish job whose provider post carries scheduled_at (Post for Me publishes it at
 -- that time). It reuses social_publish_jobs, the hold, the slots, the result recording and the reconciliation:

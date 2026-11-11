@@ -8,7 +8,7 @@ import { deleteScheduledPost, getScheduledPost, moveScheduledPost, type Schedule
 import { jobView, PublishError, rpc, type PublishJob } from './publish';
 
 /**
- * PUBLISH-SCHEDULE (migration 9999_publish_monitor_schedule): the schedule view, the user's cancel and reschedule, and
+ * PUBLISH-SCHEDULE (migration 0517_publish_monitor_schedule): the schedule view, the user's cancel and reschedule, and
  * the cron step that checks each scheduled post before its time. The database owns every decision (lease, lock window,
  * time range, slots, credits); this layer talks to Post for Me. Post for Me sends due posts every 2 minutes and its
  * update re-creates the post, so nothing is changed from 10 minutes before the time (the database refuses it too).

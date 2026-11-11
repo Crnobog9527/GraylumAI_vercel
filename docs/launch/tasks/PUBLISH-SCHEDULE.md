@@ -30,7 +30,7 @@
 
 ## 3. 数据：复用 `social_publish_jobs`
 
-迁移 `NNNN_publish_monitor_schedule.sql`（编号由总控分配）：
+迁移 `0517_publish_monitor_schedule.sql`（编号由总控分配）：
 
 - 新列：`scheduled_at`（UTC）、`caption_preview`（正文前 40 个字，只给日历显示）、`media_count`、`preflight_at`、`cancel_reason`。
 - 新状态 `scheduled`：Post for Me 已接受、等时间。流程：`claimed →（schedule_prepare 写入时间）→ dispatching → scheduled →`
@@ -47,7 +47,7 @@
   **不收费**（记为 `PUBLISH_SCHEDULE_SENT_AFTER_CANCEL`，单次损失在 5 美元线以内）。
 - 例外：用户自己在锁定期内断开账号或撤回发布授权（`PUBLISH_SCHEDULE_TARGET_CHANGED`）后帖子仍发出的，照常按成功的平台扣费。
   这一条用户可以反复触发，不适用 5 美元损失线（AGENTS 第 5 节；#1852 审查）。
-- 冻结来自订阅积分、而订阅积分在取消前已停止发放（到期或退款）的，退回时这部分不回到余额（沿用 `bill2_legacy_refund` 的拦截），
+- 冻结来自订阅积分、而订阅积分在取消前已停止发放（退款或终止发放）的，退回时这部分不回到余额（沿用 `bill2_legacy_refund` 的拦截），
   过期的积分不会因为取消排期而重新可用。
 - 结果未知沿用一键发布的核对：按发出时间算 24 小时内多次查，仍不明转人工。
 - 每日计费审计（`billingReservations.ts`）把超过 48 小时未结算的冻结报为错误。排期帖子的冻结从**排定时间**开始算
