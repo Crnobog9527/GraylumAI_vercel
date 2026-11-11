@@ -42,8 +42,9 @@ const FAILED: Record<string, string> = {
   TURN_TOMBSTONED: '这个对话已删除，本轮回复没有保存。',
   TURN_PROVIDER_402: '模型服务暂时不可用，本轮已全额退回积分。',
   TURN_PROVIDER_BUSY: '模型服务繁忙，本轮已全额退回积分。请稍后再试。',
-  // The model is held for a price check (one receipt went above its frozen bound); nothing was sent for this call.
-  TURN_MODEL_METERING_BLOCKED: '这个模型暂时停用，这一轮没有完成，积分已退回。请换一个模型，或稍后再试。',
+  // The model is held for a price check (one receipt went above its frozen bound); nothing was sent for this call. It does not say
+  // "pick another model": the system chooses the model (the composer only shows Auto), so that is advice the user cannot follow.
+  TURN_MODEL_METERING_BLOCKED: '这个模型暂时停用，这一轮没有完成，积分已退回。请稍后再试。',
   TURN_PAUSED_FOR_CREDITS: TURN_PAUSED_NOTICE,
   // A turn with a screenshot cannot pause (the image is kept nowhere to send again): it ends refunded instead.
   TURN_IMAGE_CREDITS_LOW: '积分不足，带截图的这一轮没有完成，已全额退回积分。充值后请重新附上截图发送。',
