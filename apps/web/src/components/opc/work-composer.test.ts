@@ -2,7 +2,7 @@
 import { expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { attachedText, ModelSlot, MODEL_SLOT_HINT, sendKeepingFocus } from "./work-composer";
+import { attachedText, fileHintText, ModelSlot, MODEL_SLOT_HINT, sendKeepingFocus } from "./work-composer";
 
 it("sends first, then returns the caret to the message box", () => {
   const order: string[] = [];
@@ -31,4 +31,21 @@ it("UI-MODEL: shows Auto as plain text that cannot be switched", () => {
   expect(html).toContain(MODEL_SLOT_HINT);
   // No control: nothing to click, focus or open (Owner 2026-10-03, plan §2.1 item 50).
   expect(html).not.toMatch(/<(button|select|input|a)\b|tabindex|role=|aria-expanded/);
+});
+
+// Walkthrough 2026-11-11, items 5 and 29: the two "添加资料" menus named different formats without saying why, and nothing
+// told the user that `@` picks a file already in the library.
+it("the free conversation's file hint says the file is saved to the library and that @ picks files already there", () => {
+  const hint = fileHintText(true);
+  expect(hint).toContain("文件会存进你的资料库，并作为引用加入本条消息。");
+  expect(hint).toContain("输入 @，引用资料库里已有的文件");
+});
+
+it("the positioning and topic conversations' file hint says the text is not saved and the library is not read there", () => {
+  const hint = fileHintText(false);
+  expect(hint).toContain("支持 TXT、Markdown、CSV、JSON、日志。");
+  expect(hint).toContain("内容只加入这一条消息，不会存进资料库");
+  expect(hint).toContain("定位和选题对话不读取资料库里的文件");
+  expect(hint).toContain("“新对话”");
+  expect(hint).not.toContain("文件会存进你的资料库");
 });
