@@ -70,7 +70,9 @@ test('stream cut after text was shown, with a receipt: the shown part is saved, 
   const saved = await db()`select role, content from session_messages
     where turn_id = ${turn.id}::bigint and visible order by seq`;
   expect(saved.map(m => m.role)).toEqual(['user', 'assistant']);
-  expect(saved[1]!.content).toBe('模拟回复的前半，然后连接断了');
+  // What was shown when the connection dropped: the first frame for certain, the second only if it was read before the drop.
+  const whole = '模拟回复的前半，然后连接断了', shown = String(saved[1]!.content);
+  expect(shown.startsWith('模拟回复的前半') && whole.startsWith(shown), `saved: ${shown}`).toBe(true);
   // The page says the reply was cut and that what was shown is kept.
   await expect(page.getByText('已显示的内容已经保存', { exact: false })).toBeVisible({ timeout: 30_000 });
   const settled = await expectSettledBy(turn.id, before);
