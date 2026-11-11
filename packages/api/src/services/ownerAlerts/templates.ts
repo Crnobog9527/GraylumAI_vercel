@@ -90,6 +90,10 @@ const BACKLOGS: Record<string, Rendered> = {
   PUBLISH_MONITOR_QUOTA_FULL: { line: 'Post for Me 本月的发布次数用完了，新的一键发布已暂停。', path: '/admin/publish-monitor' },
   PUBLISH_MONITOR_CLEANUP_STUCK: { line: 'Post for Me 有账号连接清理试了很多次都没成功，需要人工处理。',
     path: '/admin/publish-monitor/cleanup' },
+  RUNTIME_RECOVERY_RUN_STALE: { line: '每分钟跑一次的"对话收尾"任务超过 10 分钟没有运行了。它停着的时候，中断的对话不会自动结清，'
+    + '该退给用户的冻结积分退不回去，请尽快看一下。', path: '/admin/finance' },
+  RUNTIME_RECOVERY_RUN_FAILING: { line: '每分钟跑一次的"对话收尾"任务连续 3 次没有成功。中断的对话可能没有结清，'
+    + '该退给用户的冻结积分可能还没退，请尽快看一下。', path: '/admin/finance' },
 };
 
 const RENDERERS: Renderers = {
