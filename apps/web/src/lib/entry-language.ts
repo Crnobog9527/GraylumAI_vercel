@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
-import { entryLocaleHint, REPLY_LOCALE_LABELS, type ReplyLocale } from '@repo/api/src/shared/replyLanguage';
+import { entryLocaleHint, REPLY_LOCALE_LABELS, type ReplyLocale } from '@repo/api/src/shared/replyLocales';
 
 /**
  * CHAT-LANGUAGE (Owner 2026-10-25): a public page's login and sign-up links carry the page's language (`lang` on the login
