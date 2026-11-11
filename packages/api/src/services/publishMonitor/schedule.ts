@@ -2,6 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
+import { swallow } from '../../lib/swallow';
 import type { ClientDeps } from './postForMe/client';
 import { deleteScheduledPost, getScheduledPost, moveScheduledPost, type ScheduledPost } from './postForMe/scheduledPosts';
 import { jobView, PublishError, rpc, type PublishJob } from './publish';
@@ -145,7 +146,7 @@ export async function runScheduleChecks(db: Rpc, deps: ClientDeps, allowed: Publ
   const report: ScheduleReport = { processed: 0, cancelled: 0, moved: 0, started: 0, checked: 0, deferred: 0 };
   const plans = new Map<string, Promise<boolean | null>>();
   const allowedOnce = (actorId: string) => {
-    if (!plans.has(actorId)) plans.set(actorId, allowed(actorId).catch(() => null));
+    if (!plans.has(actorId)) plans.set(actorId, swallow('publish_schedule_plan_unreadable', allowed(actorId), null));
     return plans.get(actorId)!;
   };
   for (let batch = 0; batch < MAX_BATCHES && now() < until; batch += 1) {
