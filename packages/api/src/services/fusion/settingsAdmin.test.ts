@@ -97,6 +97,37 @@ describe('Fusion model choices', () => {
   });
 });
 
+describe('Fusion model choices for the compare picker', () => {
+  const window = { callPolicies: models.map(model => ({ modelId: model.id })), expiresAt: '2030-01-01T00:00:00Z' };
+  it('checks the compare purpose alone: one admission per model, not three', async () => {
+    skill.refuse = new Map([[`${id(2)}:fusion_compare`, 'FUSION_PAYG_REQUIRED']]); skill.admitKeys = [];
+    const result = await fusionModelOptions(db, id(7), {}, window as never, { only: 'compare' });
+    expect(skill.admitKeys).toHaveLength(5);
+    // The same models in the same order as the full check gives for compare; the other two purposes are not answered.
+    expect(result.models).toEqual([id(1), id(3), id(4), id(5)].map(modelId => (
+      { id: modelId, name: `模型 ${Number(modelId.slice(-2))}`, review: false, summary: false, compare: true })));
+    const full = await fusionModelOptions(db, id(7), {}, window as never);
+    expect(full.models.filter(model => model.compare).map(model => model.id)).toEqual(result.models.map(model => model.id));
+    skill.refuse = new Map();
+  });
+  it('is not failed by a purpose it does not use, and still fails closed on an outage of the compare check', async () => {
+    skill.refuse = new Map([[`${id(1)}:fusion_review`, 'database exploded']]);
+    await expect(fusionModelOptions(db, id(7), {}, window as never, { only: 'compare' })).resolves.toMatchObject({ models: expect.any(Array) });
+    skill.refuse = new Map([[`${id(4)}:fusion_compare`, 'database exploded']]);
+    await expect(fusionModelOptions(db, id(7), {}, window as never, { only: 'compare' })).rejects.toThrow('FUSION_SETTINGS_UNAVAILABLE');
+    skill.refuse = new Map();
+  });
+  it('uses the settings its caller already read', async () => {
+    skill.limits = new Map(); skill.refuse = new Map();
+    const settings = { ...DEFAULT_FUSION_SETTINGS, compare: { ...DEFAULT_FUSION_SETTINGS.compare, answerOutputTokens: 777 } };
+    // A model clamped to another limit is not offered: the limit compared is the caller's, not a second read's.
+    skill.limits = new Map(models.map(model => [`${model.id}:fusion_compare`, model.id === id(2) ? 777 : 4096]));
+    const result = await fusionModelOptions(db, id(7), {}, window as never, { only: 'compare', settings });
+    expect(result.models.map(model => model.id)).toEqual([id(2)]);
+    skill.limits = new Map();
+  });
+});
+
 describe('Fusion compare save (FUSION-COMPARE §3.3)', () => {
   const compareOn = { ...enabled, review: DEFAULT_FUSION_SETTINGS.review, compare: { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true,
     allowedModelIds: [id(1), id(2), id(3)], defaultModelIds: [id(1), id(2)], minModels: 2, maxBudgetUsd: '2' } };

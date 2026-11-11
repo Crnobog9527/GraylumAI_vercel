@@ -13,15 +13,21 @@ import { fusionModelOptions } from './settingsAdmin';
  * host policy, quote, reasoning profile, output capacity) is left out by the same live eligibility check a save uses, so the
  * defaults are never a selection that the first estimate would refuse. */
 export async function compareOptions(admin: SupabaseClient, actorId: string, env: Record<string, string | undefined> = process.env) {
-  const settings = (await readFusionSettings(admin)).compare;
+  const allSettings = await readFusionSettings(admin);
+  const settings = allSettings.compare;
   const off = { enabled: false as const };
   if (!settings.enabled) return { ...off, reason: 'disabled' as const };
   const entitlements = await readMembershipEntitlements(admin, actorId);
   if (!entitlements.allowFusionCompare) return { ...off, reason: 'plan' as const };
-  const rows = await admin.from('ai_models').select('id,name,model_id,is_active').in('id', settings.allowedModelIds);
+  // The allowed models and the host window do not depend on each other: asked together.
+  const [rows, window] = await Promise.all([
+    admin.from('ai_models').select('id,name,model_id,is_active').in('id', settings.allowedModelIds),
+    loadStagingPolicy(admin as unknown as BillingRpc, actorId, env).catch(() => { throw new Error('FUSION_SETTINGS_UNAVAILABLE'); }),
+  ]);
   if (rows.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
-  const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env).catch(() => { throw new Error('FUSION_SETTINGS_UNAVAILABLE'); });
-  const runnable = new Set((await fusionModelOptions(admin, actorId, env, window)).models.filter(model => model.compare).map(model => model.id));
+  // Only the compare purpose is checked (the picker never used the review and summary answers), with the settings read above.
+  const options = await fusionModelOptions(admin, actorId, env, window, { only: 'compare', settings: allSettings });
+  const runnable = new Set(options.models.filter(model => model.compare).map(model => model.id));
   const byId = new Map((rows.data ?? []).filter(row => row.is_active === 'true' && runnable.has(row.id as string)).map(row => [row.id as string, row]));
   const listed = settings.allowedModelIds.map(id => byId.get(id)).filter((row): row is NonNullable<typeof row> => Boolean(row))
     .map(row => ({ id: row.id as string, name: String(row.name ?? row.model_id) }));
