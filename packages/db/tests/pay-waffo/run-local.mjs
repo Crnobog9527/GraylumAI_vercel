@@ -19,6 +19,7 @@ import { stripeMpFulfillCases } from './stripe-mp-fulfill.mjs';
 import { stripeMpRenewalCases } from './stripe-mp-renewal.mjs';
 import { membershipExpiryStripeCases } from './membership-expiry-stripe.mjs';
 import { staleSubscriptionCases } from './stale-subscription.mjs';
+import { erasureAbandonedCases } from './erasure-abandoned.mjs';
 import { stripeMpExternalRefundCases } from './stripe-mp-external-refund.mjs';
 import { stripeMpUpgradeCases } from './stripe-mp-upgrade.mjs';
 import { stripeMpPackRefundCases } from './stripe-mp-pack-refund.mjs';
@@ -144,6 +145,7 @@ try {
   cases.push(...await stripeMpRenewalCases({admin,service,connect}));
   cases.push(...await membershipExpiryStripeCases({admin,service}));
   cases.push(...await staleSubscriptionCases({admin,service,connect}));
+  cases.push(...await erasureAbandonedCases({admin,service}));
   cases.push(...await stripeMpExternalRefundCases({admin,service,connect}));
   cases.push(...await stripeMpUpgradeCases({admin,service,connect}));
   cases.push(...await stripeMpPackRefundCases({admin,service}));

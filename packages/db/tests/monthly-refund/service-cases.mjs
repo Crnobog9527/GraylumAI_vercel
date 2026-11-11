@@ -57,7 +57,9 @@ export async function runService({db,service,webhook,report}) {
   }
   if(failure==='closed') {
    const original=(await db.query('select refund_approval from payment_orders where id=$1',[f.order])).rows[0].refund_approval;
-   await db.query('select account_erasure_confirm($1,gen_random_uuid())',[f.user]);
+   // 0512 (Owner 2026-11-11): a refund under review keeps the account open; one already closed is checked below.
+   await assert.rejects(db.query('select account_erasure_confirm($1,gen_random_uuid())',[f.user]),/ACCOUNT_ERASURE_REFUND_PENDING/);
+   await db.query('select monthly_test.close_unguarded($1)',[f.user]);
    for(const table of ['payment_orders','user_subscriptions','subscription_credit_grants']){
     await db.query('select account_erasure_scrub_payment($1,$2)',[f.user,table]);
    }
