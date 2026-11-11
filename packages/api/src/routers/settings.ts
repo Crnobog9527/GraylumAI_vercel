@@ -1,6 +1,6 @@
 import { setPaymentFailover, assertNoFailoverChange } from './paymentFailover';
 import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethodRoutes, newPurchaseChannel } from '../services/payments/methodRouting';
-import { FUSION_SETTINGS_KEY } from '../services/fusion/settings';
+import { FUSION_SETTINGS_KEY, readFusionSwitches } from '../services/fusion/settings';
 import { validateCompareLimit } from '../services/fusion/compareLimit';
 import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
 import { validatePaygAdminSetting } from '../services/adminSettings';
@@ -465,12 +465,12 @@ export const settingsRouter = router({
         kind: 'membership_plan', ids: plans.map(plan => plan.id) }), new Map<string, string>()) : new Map<string, string>();
     const emergencyReady = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
       ? await swallow('waffo_readiness_read_failed', loadWaffoMembershipReadiness(ctx.supabaseAdmin, plans.map(plan => plan.id)), undefined) : undefined;
+    // Site-wide switches, the same on every plan: only these two booleans of fusion_settings are public (off when unreadable).
+    const fusion = await readFusionSwitches(ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null);
     return plans.map(plan => ({
-      id: plan.id,
-      name: plan.name,
-      level: plan.level,
-      allowFusionReview: plan.allow_fusion_review,
-      allowFusionCompare: plan.allow_fusion_compare,
+      id: plan.id, name: plan.name, level: plan.level,
+      allowFusionReview: plan.allow_fusion_review, fusionReviewEnabled: fusion.review,
+      allowFusionCompare: plan.allow_fusion_compare, fusionCompareEnabled: fusion.compare,
       libraryStorageBytes: plan.library_storage_bytes, positioningProfileLimit: plan.positioning_profile_limit,
       price: {
         monthly: (plan.monthly_price ?? 0) / 100, // 从分转换为美元
@@ -486,8 +486,7 @@ export const settingsRouter = router({
       discount: plan.package_discount ? (100 - plan.package_discount) / 100 : 0,
       features: Array.isArray(plan.features) ? plan.features : [],
       // 使用 level 判断推荐：gold 为推荐/高亮
-      recommended: plan.level === 'gold',
-      highlight: plan.level === 'gold',
+      recommended: plan.level === 'gold', highlight: plan.level === 'gold',
       paymentChannel: emergencyReady ? 'waffo' : emergencyReady === null ? 'stripe' : null,
       checkoutReady: {
         monthly: plan.level !== 'free' && plan.monthly_price > 0 && (emergencyReady === null

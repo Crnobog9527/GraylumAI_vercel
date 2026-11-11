@@ -11,6 +11,7 @@ vi.mock('../services/payments/waffoTestOperationsClient', () => ({
 }));
 import { getStripeClient } from '../services/stripe';
 import { getPublicReadClient, settingsRouter } from './settings';
+import { DEFAULT_FUSION_SETTINGS } from '../services/fusion/settings';
 import { validateReportPrice } from '../services/report/fees';
 import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/reader';
 
@@ -714,7 +715,8 @@ describe('public catalog availability', () => {
     expect(plans.map(item => [item.level, item.positioningProfileLimit])).toEqual([['free', 1], ['pro', 3], ['gold', 6]]);
     for (const item of plans) {
       expect(Object.keys(item).sort()).toEqual(['allowFusionCompare', 'allowFusionReview', 'checkoutReady', 'credits', 'discount', 'features',
-        'highlight', 'id', 'level', 'libraryStorageBytes', 'name', 'paymentChannel', 'positioningProfileLimit', 'price', 'recommended']);
+        'fusionCompareEnabled', 'fusionReviewEnabled', 'highlight', 'id', 'level', 'libraryStorageBytes', 'name', 'paymentChannel',
+        'positioningProfileLimit', 'price', 'recommended']);
       expect(JSON.stringify(item)).not.toMatch(/price_secret|someone|internal_note/);
     }
   });
@@ -723,6 +725,78 @@ describe('public catalog availability', () => {
     const caller = createPublicCatalogCaller('membership_plans',
       Promise.resolve({ data: [{ ...validMembershipPlan, positioning_profile_limit: limit }], error: null }));
     await expect(caller.getMembershipPlans()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  });
+
+  // Master Plan §2.1: the pricing page and the paywall show the jury and the multi-model compare "跟随后台开关". The plan list
+  // (a public read) says whether each is on: two booleans read from fusion_settings on the server, nothing else of that row.
+  describe('the jury and compare switches on the public plan list', () => {
+    const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const reviewOn = { ...DEFAULT_FUSION_SETTINGS.review, enabled: true, reviewerModelIds: [uuid(1), uuid(2), uuid(3)],
+      summaryModelId: uuid(4), maxBudgetUsd: '3', skillId: uuid(5) };
+    const compareOn = { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true, allowedModelIds: [uuid(6), uuid(7)],
+      defaultModelIds: [uuid(6), uuid(7)], minModels: 2, maxBudgetUsd: '2' };
+    /** The plan list with `fusion` as what the server-side client reads for fusion_settings (other settings: no row). */
+    const plansWith = (fusion: { data: unknown; error: unknown } | Error, privileged: boolean | 'missing' = true) => {
+      const keys: string[] = [];
+      const rows = { select() { return rows; }, eq() { return rows; }, in() { return rows; },
+        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve) };
+      const caller = settingsRouter.createCaller({
+        supabase: {},
+        supabasePublic: { from: () => createQueryBuilder(Promise.resolve({ data: [
+          { ...validMembershipPlan, level: 'free', name: 'Free', id: '123e4567-e89b-42d3-a456-426614174121' },
+          { ...validMembershipPlan, level: 'gold', name: 'Gold', id: '123e4567-e89b-42d3-a456-426614174122' }], error: null })) },
+        supabaseAdmin: privileged === 'missing' ? null : { from(table: string) {
+          if (table !== 'system_settings') return rows;
+          let key = '';
+          return { select() { return this; }, eq(_field: string, value: string) { key = value; return this; },
+            maybeSingle: async () => {
+              keys.push(key);
+              if (key !== 'fusion_settings') return { data: null, error: null };
+              if (fusion instanceof Error) throw fusion;
+              return fusion;
+            } };
+        } },
+        hasSupabaseAdminPrivileges: privileged === true,
+      } as unknown as Parameters<typeof settingsRouter.createCaller>[0]);
+      return { keys, plans: caller.getMembershipPlans() };
+    };
+    const switches = async (plans: ReturnType<typeof plansWith>['plans']) =>
+      (await plans).map(plan => [plan.level, plan.fusionReviewEnabled, plan.fusionCompareEnabled]);
+    const row = (value: unknown) => ({ data: { value }, error: null });
+    const everyPlan = (review: boolean, compare: boolean) => [['free', review, compare], ['gold', review, compare]];
+
+    it('carries both switches on every plan, as the administrator has them', async () => {
+      const both = { ...DEFAULT_FUSION_SETTINGS, review: reviewOn, compare: compareOn };
+      expect(await switches(plansWith(row(both)).plans)).toEqual(everyPlan(true, true));
+      expect(await switches(plansWith(row({ ...DEFAULT_FUSION_SETTINGS, review: reviewOn })).plans)).toEqual(everyPlan(true, false));
+      expect(await switches(plansWith(row({ ...DEFAULT_FUSION_SETTINGS, compare: compareOn })).plans)).toEqual(everyPlan(false, true));
+      expect(await switches(plansWith(row(DEFAULT_FUSION_SETTINGS)).plans)).toEqual(everyPlan(false, false));
+    });
+
+    it.each([
+      ['no row', { data: null, error: null }],
+      ['a read error', { data: null, error: { code: '57014' } }],
+      ['a thrown read', new Error('connection refused')],
+      ['a row that is not a configuration', row({ review: { enabled: true }, compare: { enabled: true } })],
+      ['unparsable text', row('{not json')],
+    ])('says both are off for %s, and still lists the plans', async (_name, fusion) => {
+      expect(await switches(plansWith(fusion as never).plans)).toEqual(everyPlan(false, false));
+    });
+
+    it('says both are off, without reading the row, when the server has no privileged client', async () => {
+      for (const privileged of [false, 'missing'] as const) {
+        const asked = plansWith(row({ ...DEFAULT_FUSION_SETTINGS, review: reviewOn, compare: compareOn }), privileged);
+        expect(await switches(asked.plans)).toEqual(everyPlan(false, false));
+        expect(asked.keys).not.toContain('fusion_settings');
+      }
+    });
+
+    it('lets nothing else of fusion_settings through: no model, Skill, budget or price', async () => {
+      const plans = await plansWith(row({ ...DEFAULT_FUSION_SETTINGS, review: reviewOn, compare: compareOn })).plans;
+      const text = JSON.stringify(plans);
+      for (const secret of [uuid(1), uuid(4), uuid(5), uuid(6), 'maxBudgetUsd', 'fixedPriceCredits', 'reviewerModelIds', 'allowedModelIds',
+        'breaker']) expect(text).not.toContain(secret);
+    });
   });
 
   it('returns [] only for a successful catalog with no active membership plans', async () => {

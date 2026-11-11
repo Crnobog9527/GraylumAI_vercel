@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { DEFAULT_FUSION_SETTINGS, fusionSettings, readFusionSettings } from './settings';
+import { DEFAULT_FUSION_SETTINGS, fusionSettings, readFusionSettings, readFusionSwitches } from './settings';
 import { PURPOSE_OUTPUT_CAP } from '../turn/settings/purposeBudgets';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -105,3 +105,34 @@ describe('Fusion compare settings (FUSION-COMPARE §3.3)', () => {
   });
 });
 
+// What a public page may know of this row (Master Plan §2.1: the pricing page and the paywall show the jury and the compare
+// "跟随后台开关"): two booleans and nothing else, and off whenever the row cannot be trusted.
+describe('the two public switches', () => {
+  const compareOn = { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true, allowedModelIds: [id(1), id(2), id(3)],
+    defaultModelIds: [id(1), id(2)], minModels: 2, maxBudgetUsd: '2' };
+
+  it('says which of the two are on, as the stored row has them', async () => {
+    expect(await readFusionSwitches(db(enabled))).toEqual({ review: true, compare: false });
+    expect(await readFusionSwitches(db({ ...DEFAULT_FUSION_SETTINGS, compare: compareOn }))).toEqual({ review: false, compare: true });
+    expect(await readFusionSwitches(db({ ...enabled, compare: compareOn }))).toEqual({ review: true, compare: true });
+    expect(await readFusionSwitches(db(JSON.stringify({ ...enabled, compare: compareOn })))).toEqual({ review: true, compare: true });
+  });
+
+  it('is off for both when there is no row, no database client, a failed read or a row that is not a valid configuration', async () => {
+    const off = { review: false, compare: false };
+    expect(await readFusionSwitches(db(undefined))).toEqual(off);
+    expect(await readFusionSwitches(null)).toEqual(off);
+    expect(await readFusionSwitches(undefined)).toEqual(off);
+    expect(await readFusionSwitches(db(enabled, { code: '57014' }))).toEqual(off);
+    expect(await readFusionSwitches(db('{not json'))).toEqual(off);
+    // "enabled" on a row the features themselves would refuse to run on is not "on"
+    expect(await readFusionSwitches(db({ version: 1, review: { enabled: true }, compare: { enabled: true } }))).toEqual(off);
+    expect(await readFusionSwitches(db({ ...enabled, review: { ...enabled.review, enabled: 'true' } }))).toEqual(off);
+    const throwing = { from() { throw new Error('connection refused'); } } as unknown as SupabaseClient;
+    expect(await readFusionSwitches(throwing)).toEqual(off);
+  });
+
+  it('answers with exactly the two booleans', async () => {
+    expect(Object.keys(await readFusionSwitches(db({ ...enabled, compare: compareOn }))).sort()).toEqual(['compare', 'review']);
+  });
+});
