@@ -55,6 +55,7 @@ const PUBLIC_PRICING_ENTRY_PATHS = [
 const RATE_LIMITED_PATHS = [
   '/api/trpc',
   '/api/upload', // Ticket attachment uploads (ARCH-FIX A1).
+  '/api/auth/phone/send', // SMS code requests; the route adds a tighter per-IP attempt limit (deep review 11-11 item 7).
 ];
 
 export function normalizeHostname(hostname: string): string {
