@@ -153,7 +153,7 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
             <div className={styles.steps}>
               <p className={styles.hint}>
                 这个品牌还没有可以一键发布的账号：先在账号连接页连接海外平台账号；只显示已经开放一键发布的平台。</p>
-              <div className={styles.rowActions}><Link className={styles.linkQuiet} href="/app/publish-monitor">去连接账号</Link></div>
+              <div className={styles.rowActions}><Link className={styles.linkQuiet} href="/app/publish-monitor?tab=accounts">去连接账号</Link></div>
             </div>
           ) : (
             <ul className={styles.accounts}>
@@ -171,7 +171,7 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
                   {!target.ready && (authorizeHere(target.platform) && target.accountProjectId
                     ? <Button size="sm" variant="outline" disabled={busy} onClick={() => authorize(target)}>授权发布</Button>
                     : <span className={styles.accountNote}>还没授权发布：到<Link
-                      href="/app/publish-monitor">数据复盘</Link>的“我的账号”里，在这个账号旁点“允许一键发布”。</span>)}
+                      href="/app/publish-monitor?tab=accounts">数据复盘</Link>的“我的账号”里，在这个账号旁点“允许一键发布”。</span>)}
                 </li>
               ))}
             </ul>

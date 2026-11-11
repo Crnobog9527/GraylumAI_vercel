@@ -145,7 +145,7 @@ function Workbench({ source }: { source: Source }) {
             <span className={styles.stateIcon}><Link2 size={20} aria-hidden /></span>
             <h2>还没有可以一键发布的账号</h2>
             <p>你还没有可以一键发布的账号：先在"数据复盘"页连接海外平台账号；只显示已经开放一键发布的平台。</p>
-            <div className={styles.actions}><Link className={styles.linkPrimary} href="/app/publish-monitor">去连接账号</Link></div>
+            <div className={styles.actions}><Link className={styles.linkPrimary} href="/app/publish-monitor?tab=accounts">去连接账号</Link></div>
           </div>
         ) : (
           <>
