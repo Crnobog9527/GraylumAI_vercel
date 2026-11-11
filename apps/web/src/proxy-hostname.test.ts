@@ -56,3 +56,20 @@ describe('public sitemap', () => {
     }
   });
 });
+
+describe('image file names (deep review 11-11 item 8)', () => {
+  it('serves real image files directly', () => {
+    for (const url of ['/graylum-logo.png', '/graylum-logo.svg', '/og/home.png', '/opc-reference/a/b.webp', '/apix.png',
+      '/api.png', '/landing/hero.jpg']) {
+      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
+    }
+  });
+
+  it('keeps every API path in the proxy whatever its suffix', () => {
+    const batch = `/api/trpc/${Array.from({ length: 300 }, () => 'settings.getSystemSettings').join(',')},x.png?batch=1`;
+    for (const url of [batch, '/api/trpc/x.png', '/api/trpc/a,b,x.svg?batch=1', '/api/trpc/x.jpeg', '/api/trpc/x.gif',
+      '/api/trpc/x.webp', '/api/trpc/x.jpg', '/api/upload/x.png', '/api/auth/phone/send/x.png', '/api/x.png']) {
+      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
+    }
+  });
+});

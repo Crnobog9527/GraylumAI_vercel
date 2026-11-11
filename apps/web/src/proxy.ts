@@ -415,7 +415,8 @@ export const config = {
      * - fonts/noto-sans-cjk-display/ (style sample D's heading font and its license notice only)
      * - robots.txt, sitemap.xml (exact public crawler files)
      * - favicon.ico (favicon file)
+     * - image files, except under api/: an API path ending in .png is still an API call and keeps its admission checks
      */
-    '/((?!_next/static|_next/image|fonts/misans/|fonts/noto-sans-cjk-display/|favicon.ico|robots\\.txt$|sitemap\\.xml$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|fonts/misans/|fonts/noto-sans-cjk-display/|favicon.ico|robots\\.txt$|sitemap\\.xml$|(?!api(?:/|$)).*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
