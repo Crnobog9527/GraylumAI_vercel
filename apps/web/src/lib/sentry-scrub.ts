@@ -165,6 +165,9 @@ const ALERT_COUNTS: Readonly<Record<string, readonly string[]>> = {
   PUBLISH_MONITOR_QUOTA_FULL: ['limit', 'used', 'reserved'],
   // The conversation page's first send was not asked for in time (runtime/first-send-watch.ts): four 0/1 flags and two durations.
   RUNTIME_FIRST_SEND_STALLED: ['hasInput', 'hasView', 'notBusy', 'markerMatches', 'pageAgeMs', 'waitedMs'],
+  // The every-minute recovery job stopped running, or its last runs all failed (recovery-heartbeat-alert.ts): one integer each.
+  RUNTIME_RECOVERY_RUN_STALE: ['minutesSinceLastRun'],
+  RUNTIME_RECOVERY_RUN_FAILING: ['failingRuns'],
 };
 // ENV_VALIDATION_FAILED (instrumentation.ts) may keep the names of the misconfigured environment variables (never values).
 const ALERT_VARIABLE_CODE = 'ENV_VALIDATION_FAILED';
