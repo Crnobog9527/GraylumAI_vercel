@@ -11,7 +11,8 @@
 --                near the time could publish twice). A cron step checks each job (schedule_claim): 40 minutes before
 --                the time the targets, the account and the membership; on a cancel request it deletes the provider post.
 --   cancel_reason a cancellation was decided (user, target changed, account closed, membership ended). If the post goes
---                out anyway (decided inside the lock window), nothing is charged (publish_close).
+--                out anyway (decided inside the lock window), nothing is charged (publish_close), except after the user's
+--                own disconnect or revoked consent (TARGET_CHANGED), which is charged like any sent post.
 -- Slots are reserved in the Post for Me billing period of the scheduled time (publish_monitor_quota_period_at), because
 -- the provider counts a post when it is sent. Credits are held at claim as today and settle on the per-target results.
 -- caption_preview (at most 40 characters of the caption) is kept for the schedule view; erasure clears it.
@@ -109,17 +110,19 @@ RETURNS jsonb LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   'cancelReason',j.cancel_reason)
 $$;
 
--- A job with cancel_reason is not charged even if its post went out (the decision came inside the lock window).
+-- A job with cancel_reason is not charged even if its post went out (the decision came inside the lock window), except
+-- when the reason is the user's own disconnect or revoked consent (TARGET_CHANGED): the user can do that inside the lock
+-- window at will, so a post that goes out anyway is charged for its successful targets like any other (review of #1852).
 CREATE OR REPLACE FUNCTION public.publish_monitor_publish_close(j social_publish_jobs,successes integer,final_state text,code text)
 RETURNS social_publish_jobs LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
-DECLARE charged integer:=CASE WHEN successes>0 AND j.cancel_reason IS NULL THEN publish_monitor_publish_credits(j.price,successes)
- ELSE 0 END;
+DECLARE waived boolean:=j.cancel_reason IS NOT NULL AND j.cancel_reason<>'PUBLISH_SCHEDULE_TARGET_CHANGED';
+ charged integer:=CASE WHEN successes>0 AND NOT waived THEN publish_monitor_publish_credits(j.price,successes) ELSE 0 END;
 BEGIN
  IF j.pre_deduct_id IS NOT NULL THEN
   IF charged>0 THEN
    PERFORM atomic_settle(j.actor_id,j.pre_deduct_id,LEAST(charged,j.hold_credits),
     jsonb_build_object('source','publish_monitor','publishJobId',j.id,'successfulTargets',successes),NULL);
-  ELSE PERFORM atomic_refund(j.actor_id,j.pre_deduct_id,CASE WHEN j.cancel_reason IS NOT NULL
+  ELSE PERFORM atomic_refund(j.actor_id,j.pre_deduct_id,CASE WHEN j.cancel_reason IS NOT NULL AND successes=0
    THEN '定时发布已取消，冻结退回' ELSE '一键发布未成功，冻结退回' END); END IF;
  END IF;
  IF j.quota_period_start IS NOT NULL THEN
@@ -129,7 +132,7 @@ BEGIN
  -- An erased user's job has no brand left: once it is settled nothing of it needs to remain (plan §7 step 2).
  IF j.business_id IS NULL THEN DELETE FROM social_publish_jobs WHERE id=j.id; j.state:=final_state; RETURN j; END IF;
  UPDATE social_publish_jobs SET state=final_state,reserved_slots=0,charged_credits=CASE WHEN charged>0 THEN LEAST(charged,
-  j.hold_credits) END,error_code=coalesce(code,CASE WHEN successes>0 AND j.cancel_reason IS NOT NULL
+  j.hold_credits) END,error_code=coalesce(code,CASE WHEN successes>0 AND waived
    THEN 'PUBLISH_SCHEDULE_SENT_AFTER_CANCEL' END,error_code),lease=NULL,lease_until=NULL,next_check_at=NULL,
   updated_at=clock_timestamp() WHERE id=j.id RETURNING * INTO j;
  RETURN j;

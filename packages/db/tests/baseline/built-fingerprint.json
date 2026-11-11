@@ -3775,7 +3775,7 @@
   "fn:publish_monitor_publish_check_info(uuid,uuid)": "24489c09aa6b",
   "fn:publish_monitor_publish_check_later(uuid,uuid,text)": "4762fc7cc440",
   "fn:publish_monitor_publish_claim(uuid,text,text,uuid,uuid,uuid[])": "9613d1826881",
-  "fn:publish_monitor_publish_close(social_publish_jobs,integer,text,text)": "d056c826488a",
+  "fn:publish_monitor_publish_close(social_publish_jobs,integer,text,text)": "927847bbabbe",
   "fn:publish_monitor_publish_credits(jsonb,integer)": "47c35a4c7452",
   "fn:publish_monitor_publish_dispatch(uuid,uuid,jsonb)": "028146b6eebb",
   "fn:publish_monitor_publish_job(uuid,uuid)": "3140d69eac7e",
