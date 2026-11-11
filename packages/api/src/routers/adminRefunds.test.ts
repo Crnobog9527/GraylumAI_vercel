@@ -15,6 +15,9 @@ vi.mock('../services/payments/refundDispatch', () => ({
   dispatchOrderRefund: (_db: unknown, _order: string, stripe: (provider: unknown) => unknown) => stripe({}),
 }));
 vi.mock('../services/stripe', () => ({ getStripeClient: () => ({}) }));
+const packReview = vi.hoisted(() => ({ listHeldPackRefunds: vi.fn(async () => []),
+  settleHeldPackRefund: vi.fn(async () => ({ decision: 'kept', duplicate: false, creditsTakenBack: 0, creditsShortfall: 0 })) }));
+vi.mock('../services/payments/packRefundReview', () => packReview);
 import { router } from '../trpc';
 import { adminRefundProcedures } from './adminRefunds';
 const testRouter = router(adminRefundProcedures);
@@ -48,6 +51,21 @@ describe('refund admin permission boundary', () => {
     await expect(c.rejectPackageRefund({ orderId: actor, ticketId: actor, reason: 'ineligible' })).rejects.toThrow();
     await expect(c.reconcilePackageRefund({ orderId: actor })).rejects.toThrow();
     for (const fn of Object.values(actions)) expect(fn).not.toHaveBeenCalled();
+  });
+  it('item 14: lists and settles held pack refunds for an admin only, with the server identity', async () => {
+    await caller('admin').listPackRefundReviews();
+    await caller('admin').settlePackRefundReview({ orderId: actor, decision: 'clawback' });
+    expect(packReview.settleHeldPackRefund).toHaveBeenCalledWith({}, actor, { orderId: actor, decision: 'clawback' });
+    for (const role of ['user', 'anonymous']) {
+      const c = caller(role, role !== 'anonymous');
+      await expect(c.listPackRefundReviews()).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+      await expect(c.settlePackRefundReview({ orderId: actor, decision: 'kept' })).rejects.toThrow();
+    }
+    expect(packReview.listHeldPackRefunds).toHaveBeenCalledTimes(1);
+    expect(packReview.settleHeldPackRefund).toHaveBeenCalledTimes(1);
+    await expect(caller('admin').settlePackRefundReview({ orderId: actor, decision: 'some' as 'kept' })).rejects.toThrow();
+    await expect(caller('admin').settlePackRefundReview({ orderId: actor, decision: 'kept', actorId: actor } as never)).rejects.toThrow();
+    expect(packReview.settleHeldPackRefund).toHaveBeenCalledTimes(1);
   });
   it('rejects client cash and approval evidence injection', async () => {
     await expect(caller('admin').previewPackageRefund({ ...request, netMinor: 1 } as typeof request)).rejects.toThrow();

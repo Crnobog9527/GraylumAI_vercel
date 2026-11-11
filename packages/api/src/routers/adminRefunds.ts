@@ -13,6 +13,7 @@ import {
 } from '../services/payments/packageRefund';
 
 import { dispatchOrderRefund } from '../services/payments/refundDispatch';
+import { listHeldPackRefunds, settleHeldPackRefund } from '../services/payments/packRefundReview';
 import { resolveTicketNumber, ticketNumberInput } from '../services/payments/ticketReference';
 import { previewWaffoRefund, decideWaffoRefund, executeWaffoRefund, reconcileWaffoRefund }
   from '../services/payments/waffoRefund';
@@ -70,6 +71,10 @@ const refundProcedures = {
     safe(() => dispatchOrderRefund(ctx.supabaseAdmin, input.orderId,
       provider => executePackageRefund(ctx.supabaseAdmin, provider, ctx.profileId, input),
       provider => executeWaffoRefund(ctx.supabaseAdmin, provider, ctx.profileId, input)))),
+  // Deep review item 14: externally refunded packs held for a person; the settlement re-checks admin and hold itself.
+  listPackRefundReviews: adminProcedure.query(({ ctx }) => listHeldPackRefunds(ctx.supabaseAdmin)),
+  settlePackRefundReview: adminProcedure.input(z.object({ orderId: z.string().uuid(), decision: z.enum(['clawback', 'kept']) }).strict())
+    .mutation(({ ctx, input }) => settleHeldPackRefund(ctx.supabaseAdmin, ctx.profileId, input)),
   reconcilePackageRefund: adminProcedure.input(z.object({ orderId: z.string().uuid() }).strict())
     .mutation(({ ctx, input }) => safe(() => dispatchOrderRefund(ctx.supabaseAdmin, input.orderId,
       provider => reconcilePackageRefund(ctx.supabaseAdmin, provider, ctx.profileId, input.orderId),
