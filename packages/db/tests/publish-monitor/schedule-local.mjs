@@ -15,7 +15,7 @@ const entry = ['publish_monitor_schedule_prepare(uuid,uuid,timestamp with time z
   'publish_monitor_schedule_list(uuid,timestamp with time zone,timestamp with time zone)',
   'publish_monitor_schedule_begin(uuid,uuid,text,timestamp with time zone,timestamp with time zone,integer)',
   'publish_monitor_schedule_claim(integer,integer)',
-  'publish_monitor_schedule_finish(uuid,uuid,text,timestamp with time zone,text)'];
+  'publish_monitor_schedule_finish(uuid,uuid,text,timestamp with time zone,text)', 'publish_monitor_schedule_holds()'];
 const internal = ['publish_monitor_quota_period_at(timestamp with time zone)',
   'publish_monitor_schedule_move_slots(social_publish_jobs,timestamp with time zone,boolean)'];
 const db = await localDb(), c = db.client;
@@ -136,6 +136,9 @@ try {
   assert.equal(await credits(u.a), 88, 'a refused time returns the hold');
   const other = await member();
   await code(prepare(other, s1.id, row1.scheduled_at), 'PUBLISH_MONITOR_JOB_NOT_FOUND');
+  const holds = await svc('SELECT publish_monitor_schedule_holds() v');
+  assert.deepEqual(holds.filter(h => h.preDeductId === row1.pre_deduct_id).map(h => Date.parse(h.scheduledAt)),
+    [row1.scheduled_at.getTime()], 'the billing audit sees the scheduled time of the hold');
   report.checks.push('normal: the job waits as scheduled with the hold taken at claim; replays answer, other values and '
     + 'other users are refused; times under 15 minutes or over 30 days are refused and released');
 

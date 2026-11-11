@@ -532,11 +532,23 @@ BEGIN
  RETURN publish_monitor_publish_view(j);
 END $$;
 
+-- The holds of scheduled publishes for the daily billing readiness audit (billingReservations.ts): a hold taken at
+-- confirmation is in flight until the scheduled time, so the audit ages it from that time, not from its creation.
+-- Sent but unsettled jobs (dispatching, unknown) keep their scheduled time, so they are reported 48 hours after it.
+CREATE OR REPLACE FUNCTION public.publish_monitor_schedule_holds()
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT coalesce(jsonb_agg(jsonb_build_object('preDeductId',pre_deduct_id,'scheduledAt',scheduled_at)
+  ORDER BY scheduled_at,id),'[]'::jsonb)
+ FROM social_publish_jobs
+ WHERE scheduled_at IS NOT NULL AND pre_deduct_id IS NOT NULL AND state IN ('dispatching','scheduled','unknown')
+$$;
+
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_quota_period_at','publish_monitor_schedule_move_slots',
    'publish_monitor_schedule_prepare','publish_monitor_schedule_accepted','publish_monitor_schedule_list',
-   'publish_monitor_schedule_begin','publish_monitor_schedule_claim','publish_monitor_schedule_finish') LOOP
+   'publish_monitor_schedule_begin','publish_monitor_schedule_claim','publish_monitor_schedule_finish',
+   'publish_monitor_schedule_holds') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   -- Helpers stay internal; only the entry points are callable by the server.
   IF split_part(f::text,'(',1) NOT IN ('publish_monitor_quota_period_at','publish_monitor_schedule_move_slots') THEN

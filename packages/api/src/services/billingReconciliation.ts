@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { enforcedReservationSummary, findUnresolvedReservations, reservationFindings } from './billingReservations';
+import { enforcedReservationSummary, findUnresolvedReservations, readScheduledHolds, reservationFindings } from './billingReservations';
 import {
   countsAsCreditSpend,
   normalizeCreditLedgerType,
@@ -974,7 +974,7 @@ export function buildBillingEngineV15ReadinessAudit(
       const list = unresolvedByUser.get(hold.user_id as string);
       if (list) list.push(hold); else unresolvedByUser.set(hold.user_id as string, [hold]);
     }
-    findings.push(...reservationFindings(unresolved, now, options.launchBaselineAt));
+    findings.push(...reservationFindings(unresolved, now, options.launchBaselineAt, rows.scheduledHolds));
   }
 
   const ledgerTotalsByUser = new Map<string, number>();
@@ -1638,6 +1638,7 @@ export async function runBillingEngineV15ReadinessAudit(
     subscriptionsResult,
     membershipPlansResult,
     billingHistoryResult,
+    scheduledHolds,
   ] = await Promise.all([
     readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits, created_at', rowLimit),
     readLimitedRows<CreditTransactionRow>(
@@ -1664,14 +1665,10 @@ export async function runBillingEngineV15ReadinessAudit(
       'id, user_id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key, metadata, created_at, updated_at',
       rowLimit,
     ),
-    readLimitedRows<MembershipPlanRow>(
-      supabase,
-      'membership_plans',
-      'id, yearly_credits',
-      rowLimit,
-    ),
+    readLimitedRows<MembershipPlanRow>(supabase, 'membership_plans', 'id, yearly_credits', rowLimit),
     readLimitedRows<BillingHistoryRow>(supabase, 'billing_history',
       'id, user_id, operation_type, amount, metadata, created_at', rowLimit),
+    readScheduledHolds(supabase),
   ]);
 
   const truncatedTables = [
@@ -1692,7 +1689,7 @@ export async function runBillingEngineV15ReadinessAudit(
     subscriptionCreditGrants: subscriptionCreditGrantsResult.rows,
     subscriptions: subscriptionsResult.rows,
     membershipPlans: membershipPlansResult.rows,
-    truncatedTables,
+    truncatedTables, scheduledHolds,
   }, {
     ...options,
     rowLimit,

@@ -7,13 +7,15 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_publish_close(j social_publish
  LANGUAGE plpgsql
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE charged integer:=CASE WHEN successes>0 THEN publish_monitor_publish_credits(j.price,successes) ELSE 0 END;
+DECLARE charged integer:=CASE WHEN successes>0 AND j.cancel_reason IS NULL THEN publish_monitor_publish_credits(j.price,successes)
+ ELSE 0 END;
 BEGIN
  IF j.pre_deduct_id IS NOT NULL THEN
   IF charged>0 THEN
    PERFORM atomic_settle(j.actor_id,j.pre_deduct_id,LEAST(charged,j.hold_credits),
     jsonb_build_object('source','publish_monitor','publishJobId',j.id,'successfulTargets',successes),NULL);
-  ELSE PERFORM atomic_refund(j.actor_id,j.pre_deduct_id,'一键发布未成功，冻结退回'); END IF;
+  ELSE PERFORM atomic_refund(j.actor_id,j.pre_deduct_id,CASE WHEN j.cancel_reason IS NOT NULL
+   THEN '定时发布已取消，冻结退回' ELSE '一键发布未成功，冻结退回' END); END IF;
  END IF;
  IF j.quota_period_start IS NOT NULL THEN
   UPDATE social_publish_quota_periods SET reserved=GREATEST(reserved-j.reserved_slots,0),used=used+successes
@@ -22,7 +24,8 @@ BEGIN
  -- An erased user's job has no brand left: once it is settled nothing of it needs to remain (plan §7 step 2).
  IF j.business_id IS NULL THEN DELETE FROM social_publish_jobs WHERE id=j.id; j.state:=final_state; RETURN j; END IF;
  UPDATE social_publish_jobs SET state=final_state,reserved_slots=0,charged_credits=CASE WHEN charged>0 THEN LEAST(charged,
-  j.hold_credits) END,error_code=coalesce(code,error_code),lease=NULL,lease_until=NULL,next_check_at=NULL,
+  j.hold_credits) END,error_code=coalesce(code,CASE WHEN successes>0 AND j.cancel_reason IS NOT NULL
+   THEN 'PUBLISH_SCHEDULE_SENT_AFTER_CANCEL' END,error_code),lease=NULL,lease_until=NULL,next_check_at=NULL,
   updated_at=clock_timestamp() WHERE id=j.id RETURNING * INTO j;
  RETURN j;
 END $function$;

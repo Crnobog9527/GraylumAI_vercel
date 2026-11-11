@@ -14,7 +14,8 @@ BEGIN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  WITH candidates AS (
   SELECT c.id,c.updated_at,c.status,c.provider_tokens_cleared,c.provider_disconnect_pending,
-   EXISTS(SELECT 1 FROM social_publish_jobs j WHERE j.actor_id=c.actor_id AND j.state IN ('claimed','dispatching','unknown')
+   EXISTS(SELECT 1 FROM social_publish_jobs j WHERE j.actor_id=c.actor_id
+    AND j.state IN ('claimed','dispatching','scheduled','unknown')
     AND j.targets @> jsonb_build_array(jsonb_build_object('connectionId',c.id::text))) AS publishes_open
   FROM social_connections c
   WHERE c.source='postforme' AND (c.status='deleting' OR c.provider_disconnect_pending) AND c.deletion_attempts<50

@@ -14,5 +14,7 @@ AS $function$
     'url',j.results->(t->>'connectionId')->>'url') ORDER BY t->>'platform'),'[]'::jsonb)
    FROM jsonb_array_elements(j.targets) t),
   'holdCredits',j.hold_credits,'chargedCredits',j.charged_credits,'manualReview',j.manual_review,
-  'errorCode',j.error_code,'createdAt',j.created_at,'updatedAt',j.updated_at)
+  'errorCode',j.error_code,'createdAt',j.created_at,'updatedAt',j.updated_at,
+  'scheduledAt',j.scheduled_at,'dispatchedAt',j.dispatched_at,'captionPreview',j.caption_preview,
+  'cancelReason',j.cancel_reason)
 $function$;
