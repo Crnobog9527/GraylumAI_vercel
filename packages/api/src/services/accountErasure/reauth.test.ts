@@ -39,4 +39,13 @@ describe('account erasure re-authentication with a fresh Google sign-in', () => 
       userId: USER });
     expect(() => assertRecentAuthTime(time, NOW)).toThrow('ACCOUNT_ERASURE_REAUTH_REQUIRED');
   });
+
+  it('allows a Google sign-in at nine minutes and denies it just past ten minutes', async () => {
+    const at = (ageSeconds: number) => readVerifiedAuthTime({
+      authClient: client({ sub: USER, amr: [{ method: 'oauth', timestamp: NOW / 1000 - ageSeconds }] }) as never, userId: USER });
+    const nine = await at(9 * 60);
+    expect(() => assertRecentAuthTime(nine, NOW)).not.toThrow();
+    const tenAndASecond = await at(10 * 60 + 1);
+    expect(() => assertRecentAuthTime(tenAndASecond, NOW)).toThrow('ACCOUNT_ERASURE_REAUTH_REQUIRED');
+  });
 });
