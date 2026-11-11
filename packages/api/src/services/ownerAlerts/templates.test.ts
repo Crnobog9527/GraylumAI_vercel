@@ -7,6 +7,7 @@ import { money, renderAlert, sanitize } from './templates';
 const EXAMPLES: { [K in OwnerAlertKind]: OwnerAlertFacts[K] } = {
   payment_webhook_failed: { provider: 'stripe', eventId: 'evt_1', eventType: 'invoice.paid', code: 'PAY_STRIPE_MP_RENEWAL_UNAVAILABLE' },
   payment_webhook_unavailable: { provider: 'stripe', reason: 'signature' },
+  payment_webhook_unclaimed: { provider: 'stripe', eventId: 'evt_1', eventType: 'customer.subscription.deleted' },
   refund: { orderId: '6f1c2a9e-1111-4c3b-9d1e-000000000000', refundId: 're_1', orderKind: 'subscription_first', state: 'refunded',
     refundedMinor: 6900, chargedMinor: 6900, currency: 'usd', creditsTakenBack: 5200, creditsShortfall: 1700 },
   dispute: { code: 'PAY_DISPUTE_OPENED', disputeId: 'd-1', dueBy: '2026-11-20T23:59:59Z' },

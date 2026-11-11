@@ -92,8 +92,9 @@ export async function staleSubscriptionCases({ admin, service, connect }) {
     const end = new Date(Date.now() - 5 * 86400000);
     await admin.query(`INSERT INTO user_subscriptions(id,user_id,membership_plan_id,billing_cycle,status,current_period_start,
       current_period_end,cancel_at_period_end,stripe_subscription_id,stripe_customer_id,payment_channel,payment_mode,
-      merchant_namespace) VALUES($1,$2,$3,'monthly','active',$4,$5,'true',$6,$7,'stripe','test','fixture')`,
-    [sub, user, pro, addUtcMonths(end, -1), end, external, `cus_legacy_${sub.slice(0, 8)}`]);
+      merchant_namespace,contract_snapshot) SELECT $1,$2,$3,'monthly','active',$4,$5,'true',$6,$7,'stripe','test','fixture',
+      contract_snapshot FROM user_subscriptions WHERE id=$8`,
+    [sub, user, pro, addUtcMonths(end, -1), end, external, `cus_legacy_${sub.slice(0, 8)}`, renewed]);
     await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,subscription_id)
       VALUES('stripe','fixture','test','subscription',$1,$2)`, [external, sub]);
     return { user, sub, external, start: addUtcMonths(end, -1) };

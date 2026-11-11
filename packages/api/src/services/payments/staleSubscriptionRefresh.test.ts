@@ -5,7 +5,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const mocks = vi.hoisted(() => ({ card: vi.fn(), legacy: vi.fn() }));
 vi.mock('./cardSubscriptionWebhook', () => ({ handleCardSubscriptionState: mocks.card }));
 vi.mock('../stripeFulfillment', () => ({ syncSubscriptionState: mocks.legacy }));
-import { reconcileStaleSubscriptions, refreshBuyerStaleSubscriptions, STALE_AFTER_MS } from './staleSubscriptionRefresh';
+import {
+  BUYER_REFRESH_TIMEOUT_MS, reconcileStaleSubscriptions, refreshBuyerStaleSubscriptions, STALE_AFTER_MS,
+} from './staleSubscriptionRefresh';
 
 const scope = { merchant: 'fixture', mode: 'test' } as const;
 const now = Date.parse('2026-11-11T04:00:00.000Z');
@@ -94,6 +96,16 @@ describe('PAY-STALE-SUB: subscriptions Stripe has ended but that still read as r
       { kind: 'repair_failed', object: 'subscription', externalId: 'c', code: 'PAY_COMMON_MAPPING_READ_FAILED' },
     ]);
     expect(mocks.legacy).not.toHaveBeenCalled();
+  });
+
+  it('the purchase path waits at most the timeout for Stripe, then keeps the refusal', async () => {
+    const f = fixture([mp('a')]);
+    mocks.card.mockImplementation(() => new Promise(() => {}));
+    const started = Date.now();
+    await expect(refreshBuyerStaleSubscriptions(f.db, f.stripe, scope, 'u1', now, 20)).resolves.toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(BUYER_REFRESH_TIMEOUT_MS).toBeGreaterThanOrEqual(2000);
+    expect(BUYER_REFRESH_TIMEOUT_MS).toBeLessThanOrEqual(3000);
   });
 
   it('an unclaimed card subscription is a finding, never silently skipped', async () => {

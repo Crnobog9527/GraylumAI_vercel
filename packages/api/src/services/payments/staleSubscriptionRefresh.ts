@@ -62,10 +62,10 @@ export async function refreshStaleSubscription(db: SupabaseClient, stripe: Strip
   return now.status !== row.status || String(now.cancel_at_period_end) !== String(row.cancel_at_period_end);
 }
 
-/** Purchase path: called only after admission refused a buyer as an existing member. Best effort: a Stripe or
- * database failure keeps the refusal (logged), never opens a purchase. True when any subscription changed. */
-export async function refreshBuyerStaleSubscriptions(db: SupabaseClient, stripe: Stripe, scope: StripeScope, userId: string,
-  now = Date.now()) {
+/** How long the purchase path waits for the refresh (controller 2026-11-11: 2-3 seconds, so the purchase page never hangs). */
+export const BUYER_REFRESH_TIMEOUT_MS = 2500;
+
+async function refreshBuyerRows(db: SupabaseClient, stripe: Stripe, scope: StripeScope, userId: string, now: number) {
   const rows = await staleQuery(db, scope, now).eq('user_id', userId).order('id').limit(20);
   if (rows.error || !Array.isArray(rows.data)) {
     logSwallowed('stale_subscription_buyer_read_failed', rows.error, { category: 'billing' });
@@ -78,6 +78,26 @@ export async function refreshBuyerStaleSubscriptions(db: SupabaseClient, stripe:
     }
   }
   return changed;
+}
+
+/** Purchase path: called only after admission refused a buyer as an existing member. Best effort: a Stripe or
+ * database failure, or no answer within `timeoutMs`, keeps the refusal (logged), never opens a purchase. A refresh
+ * still running at the timeout may finish on its own; it is idempotent and the daily scan repeats it. True when any
+ * subscription changed in time. */
+export async function refreshBuyerStaleSubscriptions(db: SupabaseClient, stripe: Stripe, scope: StripeScope, userId: string,
+  now = Date.now(), timeoutMs = BUYER_REFRESH_TIMEOUT_MS) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>(resolve => {
+    timer = setTimeout(() => {
+      logSwallowed('stale_subscription_buyer_refresh_timeout', new Error('PAY_STALE_SUB_REFRESH_TIMEOUT'), { category: 'billing' });
+      resolve(false);
+    }, timeoutMs);
+  });
+  const work = refreshBuyerRows(db, stripe, scope, userId, now).catch((error: unknown) => {
+    logSwallowed('stale_subscription_buyer_refresh_failed', error, { category: 'billing' });
+    return false;
+  });
+  try { return await Promise.race([work, timeout]); } finally { clearTimeout(timer); }
 }
 
 /** Daily backstop (billing-reconcile): every stale subscription of this Stripe account, in id order a page at a time
