@@ -18,6 +18,8 @@ import { ProfileArchiveList } from '@/components/opc/profile-archive/ProfileArch
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { READ_RETRY } from '@/trpc/read-retry';
 import { OperationsCards } from './operations-cards';
+import { StrategyCards } from './strategy-cards';
+import { TopicsEmpty } from './topics-empty';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:StartMode;businessId:string|null;businessName?:string};
 type StartAccount={projectId:string;platform:string;account:string;businessName:string;strategyDraftId?:string|null;sourceVersionId?:string|null;pendingStrategyDraftId?:string|null;sourceVersion?:number;displayName?:string;profile?:Record<string,{value?:string;label?:string;status?:string}>|null;items:Array<{workItemId:string;sessionId:string;title:string}>};
 const startOperationKey="opc-start-operation";
@@ -112,11 +114,15 @@ export default function PositioningHome() {
     // new one may be created from the current published round.
     return strategy&&(strategy.state==='published'||(strategy.currentVersion??0)>0)?[{...account,strategyState:strategy.state}]:[];
   });
+  // Known only once both reads answered: no account has a confirmed positioning. Unknown (loading, failed) is not "none".
+  const noPositioning=library.isSuccess&&list.isSuccess&&!library.error&&!list.error&&!topicAccounts.length;
+  const toolsOpen=publishTools.data?.ownData===true;
   function chooseTopics(){setIntent('topics');setShowSource(true);if(!startInput.trim()){const value='请基于当前账号定位，帮我策划下一批选题。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
   function choosePosition(){setMethodDialog(true);setIntent('position');setShowSource(false);if(!startInput.trim()){const value='我想梳理一个账号的定位，请从需要确认的问题开始。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
   // The profile allowance is used (OPC_PROFILE_LIMIT): the ways out, the same on the one-click start screen and on this page.
-  // The list offers 继续已有的定位 and archiving; the link is the upgrade.
-  const limitWaysOut=error===PROFILE_ARCHIVE_TEXT.limitReached&&<><ProfileArchiveList limitReached/><Link href="/pricing">查看会员方案 →</Link></>;
+  // The list offers 继续已有的定位 and archiving; the link is the upgrade, on the signed-in membership page (not the public pricing page).
+  const limitWaysOut=error===PROFILE_ARCHIVE_TEXT.limitReached&&<><ProfileArchiveList limitReached/>
+    <Link href="/app/profile?tab=subscription">查看会员方案 →</Link></>;
   if(directEntry)return <WorkspaceFrame area="start"><main className={styles.page}><section className={styles.selection} aria-label="正在进入定位流程"><h1>{START_TEXT[directEntry].title}</h1>{start.isPending&&<p role="status">正在建立定位草稿…</p>}<QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>{catalog.isSuccess&&!catalog.data?.length&&<p>当前没有已发布的定位方法。</p>}{error&&<p role="alert">{error}</p>}{limitWaysOut}{error&&pendingStart&&<Button disabled={start.isPending} onClick={()=>void runStart(pendingStart)}>恢复上次开始请求</Button>}<Link href="/app/positioning" onClick={()=>setDirectEntry(null)}>返回对话入口</Link></section></main></WorkspaceFrame>;
   return (
     <WorkspaceFrame area="start"><main className={styles.page}><header className={styles.startTop}><strong>我的增长工作</strong>{workReturn&&<Link href={workReturn}>返回当前工作 →</Link>}</header><div className={styles.content}>
@@ -124,7 +130,9 @@ export default function PositioningHome() {
       <section className={styles.actions} aria-label="选择新任务">
         <button aria-pressed={intent==='topics'} onClick={chooseTopics}><Sparkles size={15}/>做一批新选题</button>
         <button aria-pressed={intent==='position'} onClick={choosePosition}><Target size={15}/>梳理账号定位</button>
-        <button disabled><ChartNoAxesColumnIncreasing size={15}/>数据复盘</button><button disabled><CalendarDays size={15}/>发布排期</button>
+        {toolsOpen?<><Link prefetch={false} href="/app/publish-monitor"><ChartNoAxesColumnIncreasing size={15}/>数据复盘</Link>
+          <Link prefetch={false} href="/app/publish-schedule"><CalendarDays size={15}/>发布排期</Link></>
+          :<><button disabled><ChartNoAxesColumnIncreasing size={15}/>数据复盘</button><button disabled><CalendarDays size={15}/>发布排期</button></>}
       </section>
       <CompareButton resolveSession={free.ensureSession} question={startInput}
         disabled={free.busy||!compareSkill.ready}
@@ -139,14 +147,16 @@ export default function PositioningHome() {
       {/* UI-B: topic and positioning work cannot read referenced documents; the text carries over without them. */}
       {intent&&free.references.length>0&&<p role="note">
         选题、内容和账号定位流程不会读取 @ 引用的文档，带过去的只是文件名文字。要让 AI 读文档，请直接发送，开始一段对话。</p>}
-      {showSource&&intent==='topics'&&<section className={styles.selection} aria-label="选择任务来源"><h2>选择账号的定位策略</h2><p>查看账号与来源后进入对应选题对话；此步不会自动采用选题或生成内容。</p>{topicAccounts.filter(a=>!sourceAccount||a.projectId===sourceAccount).map(a=><Link key={a.projectId} href={'/app/positioning/'+a.strategyDraftId+'/topics'} onClick={()=>{if(startInput.trim())localStorage.setItem('opc-topic-input:'+a.strategyDraftId,startInput);}}>{a.platform} · {a.account}<small>{a.businessName}{a.strategyState==='published'?' · 定位已确认':' · 定位修订中；可继续已绑定工作'}</small></Link>)}{library.isSuccess&&list.isSuccess&&!library.error&&!list.error&&!topicAccounts.length&&<p>还没有可用于选题的已确认策略账号。请先梳理定位。</p>}</section>}
+      {showSource&&intent==='topics'&&(noPositioning
+        ?<section className={styles.selection} aria-label="选择任务来源"><h2>先完成定位，再做选题</h2>
+          <TopicsEmpty onStart={choosePosition}/></section>
+        :<section className={styles.selection} aria-label="选择任务来源"><h2>选择账号的定位策略</h2><p>查看账号与来源后进入对应选题对话；此步不会自动采用选题或生成内容。</p>{topicAccounts.filter(a=>!sourceAccount||a.projectId===sourceAccount).map(a=><Link key={a.projectId} href={'/app/positioning/'+a.strategyDraftId+'/topics'} onClick={()=>{if(startInput.trim())localStorage.setItem('opc-topic-input:'+a.strategyDraftId,startInput);}}>{a.platform} · {a.account}<small>{a.businessName}{a.strategyState==='published'?' · 定位已确认':' · 定位修订中；可继续已绑定工作'}</small></Link>)}</section>)}
       <section className={styles.discovery}><div className={styles.discoveryHead}><div className={styles.recommendTabs}>{([['all','为你推荐'],['strategy','策略'],['writing','写作'],['operations','运营']] as const).map(([id,label])=><button key={id} aria-pressed={recommendation===id} onClick={()=>setRecommendation(id)}>{label}</button>)}</div><Link href="/app/workbench/marketplace">浏览全部 →</Link></div><div className={styles.discoverGrid}>
-        {(recommendation==='all'||recommendation==='strategy')&&<><button onClick={chooseTopics}><span className={`${styles.moduleVisual} ${styles.artTopics}`}><span className={styles.big}>让好想法<br/>接着发生。</span><span className={styles.mini}>IDEAS, INTO STORIES.</span></span><strong>做一批新选题</strong><small>选定规划，找到值得写的方向</small></button><button onClick={choosePosition}><span className={`${styles.moduleVisual} ${styles.artPosition}`}><span className={styles.targetRings}/><b>找到<br/>你的坐标</b></span><strong>找到你的内容定位</strong><small>定位分析，明确受众与价值</small></button></>}
+        {(recommendation==='all'||recommendation==='strategy')&&<StrategyCards startHere={noPositioning} onTopics={chooseTopics} onPosition={choosePosition}/>}
         {(recommendation==='all'||recommendation==='writing')&&<><button onClick={()=>{setIntent('content');setShowSource(true);}}><span className={`${styles.moduleVisual} ${styles.artDraft}`}><span className={styles.big}>从一句，<br/>到一篇。</span><span className={styles.lines}><i/><i/><i/></span></span><strong>从选题写到成稿</strong><small>内容创作，把思路写清楚</small></button><Link href="/app/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artRewrite}`}><span className={styles.wordPaper}><b>长文</b><small>ORIGINAL</small></span><span>→</span><span className={styles.wordPaper}><b>短句</b><small>RECRAFTED</small></span></span><strong>换个平台，继续表达</strong><small>跨平台改编，保留内容的核心</small></Link><Link href="/app/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artTitle}`}><span className={styles.big}>值得<br/>被看见。</span><span className={styles.underline}/></span><strong>推敲一个好标题</strong><small>内容创作，标题讨论快捷起点</small></Link><Link href="/app/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artOpening}`}><span className={styles.quote}>“</span><b>从一个真实<br/>的瞬间开始。</b></span><strong>让开头更具体</strong><small>内容创作，开头修改快捷起点</small></Link></>}
-        {(recommendation==='all'||recommendation==='operations')&&<OperationsCards open={publishTools.data?.ownData===true}/>}
+        {(recommendation==='all'||recommendation==='operations')&&<OperationsCards open={toolsOpen}/>}
       </div></section>
       {showSource&&intent==='content'&&<section className={styles.selection} aria-label="选择任务来源"><h2>选择已有内容工作</h2><p>只进入你选择的原工作；浏览列表不会生成或保存稿件。</p>{accounts.flatMap(a=>a.items.map(item=><Link key={item.workItemId} href={'/app/runtime?session='+item.sessionId}>{item.title}<small>{a.platform} · {a.account}</small></Link>))}{library.isSuccess&&!library.error&&!accounts.some(a=>a.items.length)&&<p>当前没有已采用的内容工作。先在选题对话中明确采用一条选题。</p>}</section>}
-      <p role="status" className={styles.mode}>运行环境和模型模式请以进入具体工作后的提示为准。</p>
       <QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>
       <QueryNotice error={library.error||list.error} loading={library.isPending||list.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),list.refetch()])}/>
       {pendingStart&&!start.isPending&&<section className={styles.selection} aria-label="待恢复的开始请求"><p>上次开始定位的结果尚未确认。先恢复同一请求，避免把草稿绑定到另一个业务。</p><Button onClick={()=>runStart(pendingStart)}>恢复上次开始请求</Button></section>}

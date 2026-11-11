@@ -92,7 +92,8 @@ async function expectWaysOut(page: Page) {
   await browserExpect(page.getByRole('alert').filter({ hasText: PROFILE_ARCHIVE_TEXT.limitReached })).toBeVisible();
   await browserExpect(page.getByRole('link', { name: '继续已有的定位' })).toHaveAttribute('href', `/app/positioning/${DRAFT}`);
   await browserExpect(page.getByRole('button', { name: '归档' })).toBeVisible();
-  await browserExpect(page.getByRole('link', { name: '查看会员方案 →' })).toHaveAttribute('href', '/pricing');
+  // The signed-in membership page, not the public pricing page (walkthrough 2026-11-11, item 11).
+  await browserExpect(page.getByRole('link', { name: '查看会员方案 →' })).toHaveAttribute('href', '/app/profile?tab=subscription');
   await browserExpect(page.getByText('已用 1/1 个名额')).toBeVisible();
 }
 
@@ -117,6 +118,23 @@ it('a start from this page that is refused shows the same ways out', async () =>
     await page.getByRole('dialog', { name: '梳理账号定位' }).getByRole('button', { name: '我已有定位' }).click();
     await expectWaysOut(page);
     expect(await page.evaluate('window.starts')).toEqual([expect.objectContaining({ mode: 'manual' })]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+// Walkthrough 2026-11-11 items 4 and 8, on the same page with the same stand-ins: this user has one unfinished positioning and none
+// confirmed (the library has no account).
+it('a user without a confirmed positioning sees the positioning card first, marked, and the topics notice leads back into the unfinished one', async () => {
+  const { page, errors } = await open('');
+  try {
+    const cards = page.locator('button', { has: page.locator('strong') });
+    await browserExpect(cards.first()).toContainText('找到你的内容定位');
+    await browserExpect(cards.first()).toContainText('从这里开始');
+    await page.getByRole('button', { name: '做一批新选题' }).first().click();
+    await browserExpect(page.getByText('选题要等定位三步都确认后才能做。')).toBeVisible();
+    await browserExpect(page.getByRole('link', { name: '继续定位' })).toHaveAttribute('href', `/app/positioning/${DRAFT}`);
+    await browserExpect(page.getByText('策略账号')).toHaveCount(0);
+    await browserExpect(page.getByText('运行环境和模型模式')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

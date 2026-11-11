@@ -35,6 +35,7 @@ it('the start page asks the rail\'s own question (same read, same options) and h
   const read = 'trpc.publishMonitor.features.useQuery(undefined,{staleTime:300_000,...READ_RETRY})';
   expect(page).toContain(read);
   expect(frame).toContain(read);
-  expect(page).toContain('<OperationsCards open={publishTools.data?.ownData===true}/>');
+  expect(page).toContain('const toolsOpen=publishTools.data?.ownData===true;');
+  expect(page).toContain('<OperationsCards open={toolsOpen}/>');
   expect(page).not.toContain('待接入');
 });
