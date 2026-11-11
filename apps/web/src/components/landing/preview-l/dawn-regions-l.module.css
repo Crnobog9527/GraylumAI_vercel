@@ -127,7 +127,9 @@
   --j-ink: #141312; --j-body: #3d3c3a; --j-muted: #63625f; --j-line: #e7e6e2; --j-gold-text: #8a5a00;
   margin-inline: 0; border-radius: 0; background: none; color: var(--j-ink);
 }
-.regions.regions [id='compare-title'] { max-width: none; font-size: clamp(32px, 4.8vw, 68px); line-height: 1.08; letter-spacing: -.04em; text-align: center; }
+/* The title is centred but keeps the region's own sizes: while the region holds the screen (ScenariosL), its title is set
+   small on purpose so that the tabs, the question and both windows fit in one screen. */
+.regions.regions [id='compare-title'] { max-width: none; text-align: center; }
 .regions [data-region='对比区'] div:has(> [role='tablist']) { justify-content: center; }
 .regions [data-region='对比区'] [role='tablist'] { justify-content: center; }
 .regions [data-region='对比区'] [role='tab'][aria-selected='true'] { background: var(--j-ink); color: #fff; }
