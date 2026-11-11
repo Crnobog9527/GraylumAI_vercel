@@ -8,6 +8,7 @@ import { connectErrorMessage } from '@/lib/publish-monitor-messages';
 import { trpc } from '@/trpc/client';
 import { AddAccountForm } from './AddAccountForm';
 import type { Brand, BrandAccount } from './brands';
+import styles from './data-review.module.css';
 import { COMBINED_AUTH_PLATFORMS, connectRoute, dataErrorMessage, errorCode, platformName } from './labels';
 
 /**
@@ -38,11 +39,10 @@ export function ConnectForm({ brands, connected, initialProjectId = '', initialP
   const [addOpen, setAddOpen] = useState(false);
   const account = accounts.find(a => a.projectId === projectId) ?? null;
   return (
-    <div className="space-y-3 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>
-      <label className="block space-y-1 text-sm">
-        <span className="font-medium">选择要连接的品牌账号</span>
-        <select className="w-full rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--border-primary)' }}
-          value={projectId} onChange={event => setProjectId(event.target.value)} aria-label="品牌账号">
+    <div className={`${styles.card} ${styles.formStack}`}>
+      <label className={styles.field}>
+        <span>选择要连接的品牌账号</span>
+        <select className={styles.select} value={projectId} onChange={event => setProjectId(event.target.value)} aria-label="品牌账号">
           <option value="">请选择</option>
           {brands.map(brand => (
             <optgroup key={brand.businessId} label={brand.name}>
@@ -59,7 +59,7 @@ export function ConnectForm({ brands, connected, initialProjectId = '', initialP
       </label>
       {(addOpen || accounts.length === 0) ? <AddAccountForm
         onAdded={id => { setAddOpen(false); setProjectId(id); onAccountAdded?.(); }} />
-        : <button type="button" className="text-sm underline" onClick={() => setAddOpen(true)}>没有想要的账号？添加品牌账号</button>}
+        : <div><button type="button" className={styles.textButton} onClick={() => setAddOpen(true)}>没有想要的账号？添加品牌账号</button></div>}
       {account && connectRoute(account.platform) === 'postforme' && <PostForMeStart key={account.projectId} account={account}
         initialPublish={initialPublish && account.projectId === initialProjectId} />}
       {account && connectRoute(account.platform) === 'profile_link'
@@ -87,38 +87,38 @@ function PostForMeStart({ account, initialPublish }: { account: BrandAccount; in
     }
   }
   return (
-    <div className="space-y-2 text-sm">
-      <p style={{ color: 'var(--text-secondary)' }}>
+    <div className={styles.formStack}>
+      <p className={styles.hint}>
         接下来会跳到授权页（页面上显示的是连接服务 Post for Me 的名字）。
         {publish ? '会请求读取作品数据和发布权限；之后每次发布都要你在发布页确认，我们不会自己发。'
           : '只请求读取作品数据，不会发布任何内容。'}授权后回到 Graylum 确认要连接哪个账号。</p>
-      <label className="flex items-center gap-2">
+      <label className={styles.check}>
         <Checkbox checked={publish} onCheckedChange={value => setPublish(value === true)} disabled={busy} />
         同时允许一键发布（需要 Pro 或 Gold 会员；以后也可以在这里补授权）
       </label>
-      {combined && !publish && <p role="note" className="rounded-md p-2" style={{ background: 'var(--bg-secondary)' }}>
+      {combined && !publish && <p role="note" className={styles.quietNote}>
         {platformName(account.platform)} 不能只授权读取：这一步也会授予发布能力，但在你单独同意之前，我们不会发布任何内容。</p>}
       {account.platform === 'instagram' && (
-        <fieldset className="space-y-1">
+        <fieldset className={styles.radios}>
           <legend>Instagram 账号的登录方式（只支持专业账号：商家或创作者）</legend>
-          <label className="mr-4"><input type="radio" name="ig" checked={connectionType === 'instagram'}
+          <label><input type="radio" name="ig" checked={connectionType === 'instagram'}
             onChange={() => setConnectionType('instagram')} /> 用 Instagram 登录</label>
           <label><input type="radio" name="ig" checked={connectionType === 'facebook'}
             onChange={() => setConnectionType('facebook')} /> 通过关联的 Facebook 主页登录</label>
         </fieldset>
       )}
-      {account.platform === 'linkedin' && <p style={{ color: 'var(--text-secondary)' }}>
+      {account.platform === 'linkedin' && <p className={styles.hint}>
         LinkedIn 只有公司主页能读到作品数据，个人主页读不到。</p>}
       {bluesky && (
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className={styles.twoFields}>
           <Input aria-label="Bluesky 账号" placeholder="账号，例如 name.bsky.social" value={handle}
             onChange={event => setHandle(event.target.value)} maxLength={253} />
           <Input aria-label="Bluesky 应用密码" placeholder="应用密码（在 Bluesky 设置里生成）" value={appPassword}
             onChange={event => setAppPassword(event.target.value)} maxLength={19} type="password" autoComplete="off" />
         </div>
       )}
-      {error && <p role="alert" style={{ color: 'var(--color-error)' }}>{error}</p>}
-      <Button disabled={busy || (bluesky && (!handle.trim() || !appPassword.trim()))} onClick={start}>去授权</Button>
+      {error && <p role="alert" className={styles.error}>{error}</p>}
+      <div><Button disabled={busy || (bluesky && (!handle.trim() || !appPassword.trim()))} onClick={start}>去授权</Button></div>
     </div>
   );
 }
@@ -127,20 +127,20 @@ function ProfileLinkConnect({ account, onConnected }: { account: BrandAccount; o
   const [link, setLink] = useState(''), [autoTrack, setAutoTrack] = useState(false);
   const connect = trpc.publishMonitor.connectTikhub.useMutation();
   return (
-    <div className="space-y-2 text-sm">
-      <p style={{ color: 'var(--text-secondary)' }}>
+    <div className={styles.formStack}>
+      <p className={styles.hint}>
         粘贴你在{platformName(account.platform)}的个人主页链接。我们读取的是公开数据，不需要授权；每次读取按实际费用扣积分。</p>
       <Input aria-label="主页链接" placeholder="https://" value={link} maxLength={2048}
         onChange={event => setLink(event.target.value)} />
-      <label className="flex items-center gap-2">
+      <label className={styles.check}>
         <Checkbox checked={autoTrack} onCheckedChange={value => setAutoTrack(value === true)} />
         每天自动更新作品数据（每次读取按实际费用扣积分；不勾选就不会读取，以后可以断开后重新连接再勾选）
       </label>
-      {connect.error && <p role="alert" style={{ color: 'var(--color-error)' }}>{dataErrorMessage(errorCode(connect.error))}</p>}
-      {connect.data && <p role="status">已连接，作品数据会在下次更新后出现。</p>}
-      <Button disabled={!link.trim() || connect.isPending}
+      {connect.error && <p role="alert" className={styles.error}>{dataErrorMessage(errorCode(connect.error))}</p>}
+      {connect.data && <p role="status" className={styles.done}>已连接，作品数据会在下次更新后出现。</p>}
+      <div><Button disabled={!link.trim() || connect.isPending}
         onClick={() => connect.mutate({ accountProjectId: account.projectId, profileLink: link.trim(), autoTrack },
-          { onSuccess: onConnected })}>连接</Button>
+          { onSuccess: onConnected })}>连接</Button></div>
     </div>
   );
 }
