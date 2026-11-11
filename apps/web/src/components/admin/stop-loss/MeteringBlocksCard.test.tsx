@@ -30,6 +30,21 @@ describe('the admin card of models held by a metering block', () => {
     expect(html).toContain('未知');
   });
 
+  // Staging check of #1854 (2026-11-12): the column showed the database's own text, "2026-11-05T05:31:14.58843+00:00".
+  it('shows when the first over-bound call was in the page\'s date format, never the raw stored timestamp', () => {
+    fixture.error = null;
+    fixture.blocks = { available: true, blocks: [{ ...block, firstAt: '2026-11-05T05:31:14.58843+00:00' }, { ...block, modelId: 'other', firstAt: null }] };
+    const html = renderToStaticMarkup(<MeteringBlocksCard />);
+    // The same format as the alert list and the balance record on this page (stopLossFormat.formatTime), in the viewer's time zone.
+    const shown = new Date('2026-11-05T05:31:14.58843+00:00').toLocaleString('zh-CN', { hour12: false });
+    // Day, hour and minute depend on the machine's time zone (some are half an hour off); the shape and the seconds do not.
+    expect(shown).toMatch(/^2026\/11\/\d{1,2} \d{2}:\d{2}:14$/);
+    expect(html).toContain(`<td>${shown}</td>`);
+    expect(html).not.toContain('T05:31:14'); expect(html).not.toContain('+00:00'); expect(html).not.toContain('58843');
+    // A time that is missing is a dash, not "Invalid Date".
+    expect(html).toContain('<td>—</td>'); expect(html).not.toContain('Invalid');
+  });
+
   it('says when no model is held, and never shows "none" for a list it could not read', () => {
     fixture.error = null; fixture.blocks = { available: true, blocks: [] };
     let html = renderToStaticMarkup(<MeteringBlocksCard />);
