@@ -72,13 +72,20 @@ const resolvedSchema = z.object({
   revisionId: uuid,
   workflow: workflowSchema,
 });
+/**
+ * `verifiedActorId`: the signed-in account a tRPC procedure has already verified for this request (login and verified
+ * email, protectedProcedure). With it the session is not asked again before every query; without it (scripts, tests and
+ * callers that hold only the clients) the session is verified here.
+ */
 export function workbenchService(
   userClient: SupabaseClient,
   privateClient: SupabaseClient | null,
+  verifiedActorId?: string,
 ) {
   async function actor() {
     if (typeof window !== "undefined" || !privateClient)
       throw new Error("ARTIFACT_UNAVAILABLE");
+    if (verifiedActorId) return verifiedActorId;
     const auth = await userClient.auth.getUser();
     if (auth.error || !auth.data.user || !isEmailVerified(auth.data.user))
       throw new Error("ARTIFACT_DENIED");
@@ -101,7 +108,8 @@ export function workbenchService(
       );
     return data;
   }
-  const catalog = async (moduleId?:string) => {
+  /** `onRaw` receives the rows as the database answered them: the parsed registrations drop workflow fields a caller may need. */
+  const catalog = async (moduleId?:string, onRaw?:(rows:unknown)=>void) => {
     let raw:unknown;
     if(moduleId){
       const actorId=await actor();
@@ -109,6 +117,7 @@ export function workbenchService(
       if(result.error)throw new DatabaseReadError(result.error.code==='42501'?'ARTIFACT_DENIED':'ARTIFACT_UNAVAILABLE',result.error.code);
       raw=result.data;
     } else raw=await query('catalog');
+    onRaw?.(raw);
     const registrations = registrationSchema
       .array()
       .parse(raw);
@@ -138,8 +147,8 @@ export function workbenchService(
     });
   }
   return {
-    async catalog(moduleId?:string) {
-      return (await catalog(moduleId)).map((r) => ({
+    async catalog(moduleId?:string, onRaw?:(rows:unknown)=>void) {
+      return (await catalog(moduleId, onRaw)).map((r) => ({
         id: r.id,
         label: r.label,
         moduleId: r.moduleId,
