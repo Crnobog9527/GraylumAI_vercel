@@ -1073,3 +1073,33 @@ it('RUNTIME: CORE-PATH-V2 close: a mentor reply whose closing write fails is ref
     expect(logged).toHaveBeenCalledWith('ai', 'turn_answer_unsaved', { kind: 'mentor', turnId: Number(t.id), code: 'TURN_DATABASE_UNAVAILABLE' });
   } finally { logged.mockRestore(); }
 });
+
+// Review of #1860 (Owner 2026-11-11: what was saved and delivered is charged by its receipts). A mentor reply cut off after text was
+// shown: the shown prose is saved in the reply's own envelope, without a card and without a checklist write, and the turn closes as
+// delivered; the freeze waits for the cut call's cost as any unknown cost does.
+it('RUNTIME: CORE-PATH-V2 close: a mentor reply cut off after text was shown saves the shown part, without a card or a checklist write', async () => {
+  const f = await setup();
+  // The frame is read first, then the connection is lost (an error raised with the frame still queued would drop it unread).
+  const cut: typeof fetch = async () => {
+    let sent = false;
+    return new Response(new ReadableStream({ pull(controller) {
+      if (sent) return controller.error(new Error('connection lost'));
+      sent = true;
+      controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify({ id: 'gen-cut', object: 'chat.completion.chunk', created: 1, model: MENTOR,
+        choices: [{ index: 0, delta: { role: 'assistant', content: 'Welcome. Your goal is ' }, finish_reason: null }] }) + '\n\n'));
+    } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-cut' } });
+  };
+  const out = await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: cut });
+  expect(out.events.some(e => e.type === 'text'), JSON.stringify(out.events)).toBe(true);
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REPLY_CUT' });
+  const t = (await db.query(`select id,close_kind,settlement,charged_credits,delivered,failure_code from turns
+    where actor_id=$1 order by id desc limit 1`, [f.actor])).rows[0];
+  expect(t).toMatchObject({ close_kind: 'completed', settlement: 'pending', charged_credits: null, delivered: true, failure_code: 'turn_reply_cut' });
+  const saved = (await db.query(`select role,content from session_messages where session_id=$1 and turn_id=$2 and visible order by seq`,
+    [f.session, t.id])).rows;
+  expect(saved.map(m => m.role)).toEqual(['user', 'assistant']);
+  expect(JSON.parse(saved[1]!.content)).toMatchObject({ format: 'agent-turn.v1', message: 'Welcome. Your goal is', card: null, stepId: 'step-0' });
+  // One model call, left unknown with its provider id for the recovery lookup; the organizer was never called.
+  expect((await db.query(`select status,cost_pending,provider_id from turn_calls where turn_id=$1 and call_kind='model' order by seq`, [t.id])).rows)
+    .toEqual([{ status: 'unknown', cost_pending: true, provider_id: 'gen-cut' }]);
+});

@@ -153,6 +153,17 @@ describe('kind=plan on the turn core (CORE-PATH-V2 V2-10b)', () => {
     expect(l.args('turn_close')).toMatchObject({ p_close_kind: 'failed', p_refund_all: true });
   });
 
+  // CHAT_NATIVE_OUTPUT_PLAN 4.2: a plan is one JSON document, so a call cut off part-way saves nothing of it (never a broken document).
+  it('a plan cut off part-way saves nothing and closes interrupted, whatever was streamed', async () => {
+    const t = harness(); h.call.mockResolvedValue('{}');
+    h.runtime.mockImplementation(async (o: Run) => { o.onText('[{"id":"half'); throw new TurnStop('TURN_CALL_UNKNOWN'); });
+    await runPlanTurn(t.deps, input, t.emit);
+    const closes = t.rpc.filter(([name]) => name === 'turn_close').map(([, args]) => args);
+    expect(closes).toHaveLength(1);
+    expect(closes[0]).toMatchObject({ p_close_kind: 'interrupted', p_delivered: false, p_kind_result: null });
+    expect(t.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+  });
+
   // Deep review 2026-11-11, findings 2 and 9 (Owner 2026-11-11: a turn whose answer was not saved does not charge the user). The
   // turn is refunded like any failure that saved nothing, and it is an error in the log: it must stay rare.
   it('a closing write that fails after the whole plan was streamed refunds the turn and is logged as an error', async () => {

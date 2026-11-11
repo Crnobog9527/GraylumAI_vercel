@@ -37,6 +37,12 @@ describe('turn notices', () => {
     expect(notice.text).toContain('退回');
     expect(notice.text).not.toContain('以记录为准');
   });
+  it('says a reply cut off after part was shown is saved and charged by its usage', () => {
+    const notice = turnCodeNotice('TURN_REPLY_CUT');
+    expect(notice).toMatchObject({ kept: false, text: expect.stringContaining('已显示的内容已经保存') });
+    expect(notice.text).toContain('按实际用量扣积分');
+    expect(notice.text).not.toContain('不扣积分');
+  });
   it('names every trimmed tool, grouped by why (never a silent drop)', () => {
     expect(trimmedToolNotices({ available: ['read_source'], trimmed: [{ name: 'web_search', reason: 'capacity' },
       { name: 'web_fetch', reason: 'capacity' }, { name: 'social_search', reason: 'disabled' }] }))

@@ -161,6 +161,31 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     expect(u.args('turn_close')).toMatchObject({ p_close_kind: 'interrupted', p_delivered: false });
   });
 
+  // Review of #1860 (Owner 2026-11-11: what was saved and delivered is charged by its receipts): the shown part of a cut-off reply is
+  // saved, so a slow model asked for a very long answer is not a free answer.
+  it('a call that breaks off after text was shown saves the shown part as the reply and closes delivered; with nothing shown it closes interrupted', async () => {
+    const t = harness(); h.call.mockResolvedValue('{}');
+    h.runtime.mockImplementation(async (o: Run) => { o.onText('写到一半的选题 '); o.onText('\ud83d'); throw new TurnStop('TURN_CALL_UNKNOWN'); });
+    await runTopicTurn(t.deps, input, t.emit);
+    const closes = t.rpc.filter(([name]) => name === 'turn_close').map(([, args]) => args);
+    expect(closes).toHaveLength(1);
+    expect(closes[0]).toMatchObject({ p_close_kind: 'completed', p_delivered: true, p_failure_code: 'turn_reply_cut',
+      p_messages: [{ role: 'user', content: input.text }, { role: 'assistant', content: '写到一半的选题' }] });
+    expect(closes[0]!.p_refund_all).not.toBe(true);
+    expect(t.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REPLY_CUT', turnId: 9 });
+    // Nothing shown: nothing saved, interrupted (turn_user_charge then charges nothing).
+    const none = harness(); h.runtime.mockRejectedValue(new TurnStop('TURN_CALL_UNKNOWN'));
+    await runTopicTurn(none.deps, input, none.emit);
+    expect(none.args('turn_close')).toMatchObject({ p_close_kind: 'interrupted', p_delivered: false, p_messages: [] });
+    expect(none.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+    // The save itself refused: the turn still closes, interrupted, never left without a close.
+    const lost = harness({ closeError: args => args.p_close_kind === 'completed' ? 'connection reset' : undefined });
+    h.runtime.mockImplementation(async (o: Run) => { o.onText('shown'); throw new TurnStop('TURN_CALL_UNKNOWN'); });
+    await runTopicTurn(lost.deps, input, lost.emit);
+    expect(lost.rpc.filter(([name]) => name === 'turn_close').map(([, args]) => args.p_close_kind)).toEqual(['completed', 'interrupted']);
+    expect(lost.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+  });
+
   // Deep review 2026-11-11, findings 2 and 9 (Owner 2026-11-11: a turn whose answer was not saved does not charge the user).
   it('a closing write that fails after the whole reply was streamed refunds the turn and is logged as an error', async () => {
     const logged = vi.spyOn(logger, 'error').mockImplementation(() => undefined);

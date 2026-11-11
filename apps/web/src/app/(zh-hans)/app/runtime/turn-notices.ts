@@ -47,6 +47,8 @@ const FAILED: Record<string, string> = {
   TURN_IMAGE_CREDITS_LOW: '积分不足，带截图的这一轮没有完成，已全额退回积分。充值后请重新附上截图发送。',
   // Owner 2026-11-11: a turn cut off saved no answer and charges nothing; its freeze returns once the provider cost is known.
   TURN_CALL_UNKNOWN: '模型回复中断，这一轮没有完成，不扣积分；已冻结的积分核对后会退回。',
+  // The call broke off after part of the reply was shown: that part is saved as the answer and the turn is charged by its usage.
+  TURN_REPLY_CUT: '模型回复中途中断，已显示的内容已经保存；这一轮按实际用量扣积分，核对后以积分记录为准。',
 };
 const GENERIC = '这条消息没有完成。请刷新后查看结果，不要重复发送相同内容。';
 

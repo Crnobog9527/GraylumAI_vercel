@@ -182,21 +182,73 @@ it('RUNTIME: CORE-PATH-V2 V2-4a: a free-chat turn opens, streams, calls once in 
   expect(posts).toBe(2);
 });
 
-it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken after it started keeps the provider id and the freeze, sends once and is never refunded as zero', async () => {
+// Owner 2026-11-11 and the review of #1860: the part of a cut-off reply the user was shown is saved and the turn closes as delivered,
+// charged by its receipt once the cost is known. Before, nothing was saved and (under the 11-11 rule) nothing would have been
+// charged: a slow model asked for a very long answer was a free answer every time.
+// One frame per read, then the connection is lost: an error raised with frames still queued would drop them unread.
+const brokenAfter = (id: string, frames: string[]): typeof fetch => async () => {
+  let sent = 0;
+  return new Response(new ReadableStream({ pull(controller) {
+    if (sent < frames.length) controller.enqueue(new TextEncoder().encode(frames[sent++]!));
+    else controller.error(new Error('connection lost'));
+  } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': id } });
+};
+const modelCalls = async (actor: string) => (await db.query(`select c.seq,c.status,c.cost_pending,c.provider_id from turn_calls c
+  join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model' order by c.seq`, [actor])).rows;
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken after text was shown keeps the provider id and the freeze, saves the shown part and is charged by its receipt, once', async () => {
   const f = await setup();
   let posts = 0;
-  const transport: typeof fetch = async () => { posts++; return new Response(new ReadableStream({ start(controller) {
-    controller.enqueue(new TextEncoder().encode(textFrame('gen-broken', 'Half an ans'))); controller.error(new Error('connection lost'));
-  } }), { headers: { 'content-type': 'text/event-stream', 'x-generation-id': 'gen-broken' } }); };
+  const broken = brokenAfter('gen-broken', [textFrame('gen-broken', 'Half an ans'), textFrame('gen-broken', 'wer \ud83d')]);
+  const transport: typeof fetch = async (...args) => { posts++; return broken(...args); };
   const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
-  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+  expect(out.events.map(e => e.type), JSON.stringify(out.events)).toEqual(['opened', 'text', 'text', 'error']);
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REPLY_CUT' });
   expect(posts).toBe(1);
-  const call = (await db.query("select c.status,c.cost_pending,c.provider_id from turn_calls c join turns t on t.id=c.turn_id and t.actor_id=c.actor_id where t.actor_id=$1 and c.call_kind='model'", [f.actor])).rows;
-  expect(call).toEqual([{ status: 'unknown', cost_pending: true, provider_id: 'gen-broken' }]);
-  const t = (await db.query('select close_kind,settlement,charged_credits,reserved_credits from turns where actor_id=$1', [f.actor])).rows[0];
-  expect(t).toMatchObject({ close_kind: 'interrupted', settlement: 'pending', charged_credits: null });
+  const calls = await modelCalls(f.actor);
+  expect(calls).toEqual([{ seq: calls[0]!.seq, status: 'unknown', cost_pending: true, provider_id: 'gen-broken' }]);
+  const t = (await db.query('select id,close_kind,settlement,charged_credits,reserved_credits,delivered,failure_code from turns where actor_id=$1', [f.actor])).rows[0];
+  // Delivered: what was shown is the saved answer (without the half emoji the cut left). The cost is not known yet, so the freeze stays.
+  expect(t).toMatchObject({ close_kind: 'completed', settlement: 'pending', charged_credits: null, delivered: true, failure_code: 'turn_reply_cut' });
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - t.reserved_credits);
+  expect((await db.query('select role,content from session_messages where session_id=$1 order by seq', [f.session])).rows)
+    .toEqual([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Half an answer' }]);
+  // The receipt recovery finds: charged what it says, once; settling again changes nothing.
+  const admin = countingAdmin().admin, turnId = Number(t.id);
+  expect((await admin.rpc('turn_call_record', { p_actor_id: f.actor, p_turn_id: turnId, p_seq: calls[0]!.seq, p_status: 'ok', p_nominal_usd: '0.000003',
+    p_actual_usd: '0.000003', p_usage: {}, p_provider_id: 'gen-broken', p_payload_hash: 'c'.repeat(64), p_raw: null })).error).toBeNull();
+  const settle = { p_actor_id: f.actor, p_turn_id: turnId, p_action: 'settle' };
+  const both = await Promise.all([admin.rpc('turn_recover', settle), countingAdmin().admin.rpc('turn_recover', settle)]);
+  expect(both.map(r => r.error)).toEqual([null, null]);
+  expect(both.map(r => Boolean((r.data as { skipped?: boolean }).skipped)).sort()).toEqual([false, true]);
+  const settled = (await db.query('select close_kind,settlement,charged_credits,delivered from turns where actor_id=$1', [f.actor])).rows[0];
+  expect(settled).toMatchObject({ close_kind: 'completed', settlement: 'done', delivered: true });
+  expect(settled.charged_credits).toBeGreaterThan(0);
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - settled.charged_credits);
+  expect((await admin.rpc('turn_recover', settle)).data).toMatchObject({ skipped: true });
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - settled.charged_credits);
+});
+
+it('RUNTIME: CORE-PATH-V2 V2-4a: a response broken before any text was shown saves nothing, keeps the freeze for recovery and is then charged nothing', async () => {
+  const f = await setup();
+  // The role frame carries no text: the user was shown nothing.
+  const transport = brokenAfter('gen-empty', [frame('gen-empty', { choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })]);
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport });
+  expect(out.events.map(e => e.type), JSON.stringify(out.events)).toEqual(['opened', 'error']);
+  expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_CALL_UNKNOWN' });
+  const calls = await modelCalls(f.actor);
+  expect(calls).toEqual([{ seq: calls[0]!.seq, status: 'unknown', cost_pending: true, provider_id: 'gen-empty' }]);
+  const t = (await db.query('select id,close_kind,settlement,charged_credits,reserved_credits,delivered from turns where actor_id=$1', [f.actor])).rows[0];
+  expect(t).toMatchObject({ close_kind: 'interrupted', settlement: 'pending', charged_credits: null, delivered: false });
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - t.reserved_credits);
   expect((await db.query('select count(*)::int n from session_messages where session_id=$1', [f.session])).rows[0].n).toBe(0);
+  // Owner 2026-11-11: nothing was shown or saved, so the receipt recovery finds is Graylum's; the whole freeze returns.
+  const admin = countingAdmin().admin, turnId = Number(t.id);
+  expect((await admin.rpc('turn_call_record', { p_actor_id: f.actor, p_turn_id: turnId, p_seq: calls[0]!.seq, p_status: 'ok', p_nominal_usd: '0.000003',
+    p_actual_usd: '0.000003', p_usage: {}, p_provider_id: 'gen-empty', p_payload_hash: 'c'.repeat(64), p_raw: null })).error).toBeNull();
+  expect((await admin.rpc('turn_recover', { p_actor_id: f.actor, p_turn_id: turnId, p_action: 'settle' })).data)
+    .toMatchObject({ closeKind: 'interrupted', chargedCredits: 0, settlement: 'done' });
+  expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-4a: the client gets text before the provider response ends', async () => {

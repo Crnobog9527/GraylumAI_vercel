@@ -16,6 +16,7 @@ import { RESEARCH_THRESHOLDS_KEY } from './research/researchAdmission';
 import { runRuntime } from './agent/runner';
 import { rowFor } from './settings/settingsRows';
 import { swallow } from '../../lib/swallow';
+import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
 import { modelCall, TurnStop } from './call';
 import { CLOSES, GATE_CODES, HISTORY_ITEMS, noteUnsavedAnswer, readCoreConfig, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
@@ -153,6 +154,14 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
     emit({ type: 'result', turnId, body: reply, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
   } catch (error) {
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
+    // The call broke off after the user was shown part of the reply: that part is saved and the turn closes as delivered
+    // (shownReply.ts). A save that fails falls through to the close below.
+    const shown = code === 'TURN_CALL_UNKNOWN' ? shownSoFar(text) : '';
+    if (shown) {
+      const kept = await swallow('turn_reply_cut_save_failed', close('completed', { reply: shown, failureCode: REPLY_CUT_FAILURE }), null,
+        { category: 'ai' });
+      if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? 'TURN_TOMBSTONED' : REPLY_CUT, turnId });
+    }
     const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
     if (answered) noteUnsavedAnswer('topic', turnId, code);
     await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,

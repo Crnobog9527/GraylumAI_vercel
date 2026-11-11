@@ -37,6 +37,8 @@ import { markStage, noteStageTurn } from './stageTiming';
 import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
 import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { savedSteps } from './tools/toolStage';
+import { createRuntimeBudget } from './settings/budget';
+import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 import { chatImages, imageMark, withImages } from './chatImage';
@@ -140,6 +142,9 @@ async function quoteTurn(deps: ChatDeps, from: { admin: SupabaseClient; configur
 
 export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event: TurnEvent) => void): Promise<void> {
   const { admin } = deps, db = turnDatabase(deps.clients), started = Date.now();
+  // The time this request has (settings/budget.ts): a model call never runs past it, so a turn ends here, in its own request, and
+  // not by the platform stopping the function (which could save nothing of what the user was shown).
+  const budget = createRuntimeBudget();
   // The images are checked before anything is read or frozen: JPEGs within LIB-2d's limits (the route's own allowance is checked again
   // after the quote). The model sees, and the conversation keeps, the text marked with imageMark(n); the images are in no row.
   const images = input.images === undefined ? null : chatImages(input.images);
@@ -270,7 +275,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   let seq = 0;
   const callDeps = { db, slots: deps.slots, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq,
     // allowWorkspaceRead: the free-chat request shape, which may carry a history cache marker (PROMPT-CACHE-ALL).
-    adapter: openRouterAdapter({ allowWorkspaceRead: true, credential: quote.credential, transport: deps.transport }) };
+    adapter: openRouterAdapter({ allowWorkspaceRead: true, credential: quote.credential, transport: deps.transport, budget }) };
   const close = (kind: CloseKind, extra: { messages?: Array<{ role: 'user' | 'assistant'; content: string }>; delivered?: boolean;
     refundAll?: boolean; failureCode?: string; kindResult?: unknown } = {}) =>
     db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
@@ -279,6 +284,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   let stopped: TurnStop | undefined;
   // The whole answer has been streamed; what can still fail is the closing write (noteUnsavedAnswer).
   let answered = false;
+  // Saves what the user was shown of a reply that was cut off (shownReply.ts); null when nothing was shown.
+  let saveShown: (() => Promise<Awaited<ReturnType<typeof close>> | null>) | undefined;
   try {
     // What was read before the open still stands: a delete before it shows here, one after it finds this turn and waits.
     if (work && !(await db.workVerify({ actorId: input.actorId, turnId: opened.turnId }))) throw new TurnStop('TURN_WORK_SOURCE_ERASED');
@@ -349,6 +356,13 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     let reply = '', sentChars = 0, holding = fallback;
     // The steps the reply showed (one per tool call, the latest state of each), kept after the close so a reload shows them again.
     const stepLog = new Map<string, StepEvent>();
+    saveShown = async () => {
+      // Only what went out: nothing held back as a possible refusal marker, nothing of a hidden block.
+      const shown = shownSoFar(reply.slice(0, sentChars));
+      return shown ? close('completed', { delivered: true, failureCode: REPLY_CUT_FAILURE,
+        messages: [{ role: 'user', content: text }, { role: 'assistant', content: shown }],
+        ...(stepLog.size ? { kindResult: { steps: savedSteps(stepLog.values()) } } : {}) }) : null;
+    };
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
         callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q },
@@ -421,6 +435,12 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       turnId: opened.turnId, input: { kind: 'chat', text: input.text, ...(input.chosen ? { chosen: input.chosen } : {}),
         ...(input.workItem ? { workItem: true, workRequest } : {}) } }), false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
+      // The call broke off after the user was shown part of the reply: that part is saved and the turn closes as delivered, charged
+      // by its receipts once the call's cost is known (shownReply.ts). A save that fails falls through to the close below.
+      if (code === 'TURN_CALL_UNKNOWN' && saveShown) {
+        const kept = await swallow('turn_reply_cut_save_failed', saveShown(), null, { category: 'ai' });
+        if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? 'TURN_TOMBSTONED' : REPLY_CUT, turnId: opened.turnId });
+      }
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };

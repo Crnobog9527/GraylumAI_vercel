@@ -137,5 +137,29 @@ try{
   assert.equal(await charge(a,o.turnId,'interrupted'),6,'an interrupted compare still pays for a column whose answer was saved as usable');
   report.checks.push('only an interrupted, undelivered close answers 0; completed, failed, refunded and expired closes and a compare column saved as usable are as before');
  }
+ // 6. The shown part of a cut-off reply was saved (shownReply.ts): the turn closes completed and delivered while the cut call's cost
+ // is still unknown. The freeze waits; the receipt recovery finds is charged, once, also by two settlement passes at once.
+ {
+  const a=await account(),o=await open(a);
+  await begin(a,o.turnId,1);await identity(a,o.turnId,1);
+  const saved=await one("select turn_close($1,$2,'completed',$3,true,false,'turn_reply_cut') v",[a.actor,o.turnId,
+   JSON.stringify([{role:'user',content:'Hello'},{role:'assistant',content:'Half an answer'}])]);
+  assert.deepEqual([saved.closeKind,saved.chargedCredits,saved.settlement],['completed',null,'pending']);
+  assert.equal(await balance(a),940,'the freeze stays while the cut call cost is unknown');
+  assert.deepEqual((await c.query('select role,content from session_messages where session_id=$1 order by seq',[a.session])).rows,
+   [{role:'user',content:'Hello'},{role:'assistant',content:'Half an answer'}]);
+  await record(a,o.turnId,1);
+  const p1=await peer(),p2=await peer();
+  try{
+   const passes=await Promise.all([recover(a,o.turnId,'settle',p1),recover(a,o.turnId,'settle',p2)]);
+   assert.deepEqual(passes.map(r=>Boolean(r.skipped)).sort(),[false,true]);
+  }finally{await p1.end();await p2.end();}
+  const t=await turn(a,o.turnId);
+  assert.deepEqual([t.close_kind,t.charged_credits,t.absorbed_credits,t.settlement,t.delivered],['completed',6,0,'done',true]);
+  assert.equal(await balance(a),994);assert.equal(await spends(a),6);
+  assert.equal((await recover(a,o.turnId,'settle')).skipped,true);assert.equal(await balance(a),994);
+  // The same turn with nothing shown is the interrupted one of case 3: nothing charged.
+  report.checks.push('a turn that saved the shown part of a cut-off reply is delivered: charged by the late receipt (6), once; the same call with nothing shown charges nothing');
+ }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}
