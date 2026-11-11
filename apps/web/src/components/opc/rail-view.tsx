@@ -2,6 +2,7 @@
 import type { CSSProperties, KeyboardEvent, ReactNode, Ref, SyntheticEvent } from 'react';
 import Link from 'next/link';
 import { ChevronDown, Ellipsis, Grid2X2, Pencil, Pin, Sparkles, X } from 'lucide-react';
+import { HoverPrefetchLink } from './hover-prefetch-link';
 import styles from './workspace-frame.module.css';
 
 /**
@@ -40,6 +41,8 @@ export function AnnouncementBar({ notice, returnParam = '', onClose }: { notice?
  * as available, like the other items, without "待接入": the landing page draws the product as launched (Owner
  * 2026-10-17); the product itself keeps them unavailable until publishing and the data review ship. `dataReview`
  * (PUBLISH-MONITOR PR-7) makes 数据复盘 a real link once the admin switch is on, and 发布排期 too (PUBLISH-SCHEDULE).
+ * These fixed entries fetch their page ahead while the pointer rests on them (HoverPrefetchLink, SITE-SPEED); every other
+ * link of the shell, the rows of the lists included, fetches on the click (#1392).
  */
 export function RailView({ area, returnParam = '', onCloseMobile, launched = false, dataReview = false, children }: {
   area: RailArea; returnParam?: string; onCloseMobile?: () => void; launched?: boolean; dataReview?: boolean;
@@ -47,25 +50,25 @@ export function RailView({ area, returnParam = '', onCloseMobile, launched = fal
 }) {
   return <aside className={styles.rail} aria-label="工作区导航">
     <div className={styles.railMobile}><button aria-label="关闭导航" onClick={onCloseMobile}>关闭工作列表</button></div>
-    <Link prefetch={false} className={styles.newConversation} href="/app/positioning">
-      <img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</Link>
+    <HoverPrefetchLink className={styles.newConversation} href="/app/positioning">
+      <img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</HoverPrefetchLink>
     <nav className={styles.railNav} aria-label="工作区功能">
-      <Link prefetch={false} href={'/app/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}>
-        <img className={styles.navIcon} src="/opc-reference/squares-four.svg" alt=""/>功能广场</Link>
-      <Link prefetch={false} href={'/app/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}>
-        <img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</Link>
-      <Link prefetch={false} href={'/app/library'+returnParam} aria-current={area==='library'?'page':undefined}>
-        <img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</Link>
+      <HoverPrefetchLink href={'/app/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}>
+        <img className={styles.navIcon} src="/opc-reference/squares-four.svg" alt=""/>功能广场</HoverPrefetchLink>
+      <HoverPrefetchLink href={'/app/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}>
+        <img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</HoverPrefetchLink>
+      <HoverPrefetchLink href={'/app/library'+returnParam} aria-current={area==='library'?'page':undefined}>
+        <img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</HoverPrefetchLink>
       {launched ? <>
         {/* Shown as available, like the other items, but not controls: there is nothing to open yet (no href, not focusable). */}
         <a><img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期</a>
         <a><img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘</a>
       </> : <>
-        {dataReview ? <Link prefetch={false} href={'/app/publish-schedule'+returnParam} aria-current={area==='schedule'?'page':undefined}>
-          <img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期</Link> : <button disabled>
+        {dataReview ? <HoverPrefetchLink href={'/app/publish-schedule'+returnParam} aria-current={area==='schedule'?'page':undefined}>
+          <img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期</HoverPrefetchLink> : <button disabled>
           <img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期 <small>待接入</small></button>}
-        {dataReview ? <Link prefetch={false} href={'/app/publish-monitor'+returnParam} aria-current={area==='review'?'page':undefined}>
-          <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘</Link> : <button disabled>
+        {dataReview ? <HoverPrefetchLink href={'/app/publish-monitor'+returnParam} aria-current={area==='review'?'page':undefined}>
+          <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘</HoverPrefetchLink> : <button disabled>
           <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘 <small>待接入</small></button>}
       </>}
     </nav>

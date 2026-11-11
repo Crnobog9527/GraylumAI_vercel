@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Plus, AlertCircle, Inbox, Archive, Loader2 } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -13,7 +13,9 @@ export const TicketListView = memo(function TicketListView({
   errorMessage,
   onRetry,
   onSelectTicket,
-  onCreateNew
+  onCreateNew,
+  activeTab,
+  onTabChange: setActiveTab
 }: {
   tickets: Ticket[];
   isLoading: boolean;
@@ -21,9 +23,10 @@ export const TicketListView = memo(function TicketListView({
   onRetry: () => void;
   onSelectTicket: (ticket: Ticket) => void;
   onCreateNew: () => void;
+  /** 现有工单 or 已关闭. Owned by TicketsPanel so it survives opening a ticket and coming back. */
+  activeTab: 'active' | 'closed';
+  onTabChange: (tab: 'active' | 'closed') => void;
 }) {
-  const [activeTab, setActiveTab] = useState<'active' | 'closed'>('active');
-
   const activeTickets = tickets.filter(t => t.status !== 'closed');
   const closedTickets = tickets.filter(t => t.status === 'closed');
   const displayTickets = activeTab === 'active' ? activeTickets : closedTickets;
@@ -149,13 +152,13 @@ export const TicketListView = memo(function TicketListView({
                 key={ticket.id}
                 data-testid="ticket-list-item"
                 onClick={() => onSelectTicket(ticket)}
+                // The border is a class, not an inline style (an inline border would override the hover colour), and both
+                // colours are `!` (important): globals.css sets `* { border-color }` outside any @layer, which beats every
+                // border-colour utility, so without it neither the list colour nor the hover colour applies.
                 className={'p-4 rounded-xl cursor-pointer transition-[border-color,transform,box-shadow] duration-200 '
-                  + 'motion-reduce:transition-none hover:translate-x-1 hover:border-[rgba(255,215,0,0.3)] '
-                  + 'hover:shadow-[0_8px_24px_rgba(0,0,0,0.18)]'}
-                style={{
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border-primary)'
-                }}
+                  + 'motion-reduce:transition-none border border-[var(--border-primary)]! hover:translate-x-1 '
+                  + 'hover:border-[rgba(255,215,0,0.3)]! hover:shadow-[0_8px_24px_rgba(0,0,0,0.18)]'}
+                style={{ background: 'var(--bg-primary)' }}
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">

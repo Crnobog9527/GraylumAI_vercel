@@ -55,7 +55,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
         >
           <Package className="h-5 w-5" style={{ color: 'var(--text-primary)' }} />
         </div>
-        <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>积分加油包</h3>
+        <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>积分包</h3>
       </div>
       {entitlement.status === 'error' && (
         <div data-testid="profile-credit-packages-entitlement-error" role="alert"

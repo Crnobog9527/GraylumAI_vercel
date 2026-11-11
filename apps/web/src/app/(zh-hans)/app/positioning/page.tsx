@@ -17,6 +17,7 @@ import { grantOpeningIntent } from './[draftId]/opening-intent';
 import { ProfileArchiveList } from '@/components/opc/profile-archive/ProfileArchiveList';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { READ_RETRY } from '@/trpc/read-retry';
+import { OperationsCards } from './operations-cards';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:StartMode;businessId:string|null;businessName?:string};
 type StartAccount={projectId:string;platform:string;account:string;businessName:string;strategyDraftId?:string|null;sourceVersionId?:string|null;pendingStrategyDraftId?:string|null;sourceVersion?:number;displayName?:string;profile?:Record<string,{value?:string;label?:string;status?:string}>|null;items:Array<{workItemId:string;sessionId:string;title:string}>};
 const startOperationKey="opc-start-operation";
@@ -45,6 +46,8 @@ export default function PositioningHome() {
   const catalog = trpc.opc.catalog.useQuery(undefined,READ_RETRY),
     list = trpc.opc.list.useQuery(undefined,READ_RETRY),
     library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),
+    // The same read, with the same options, as the frame's rail (workspace-frame.tsx): one request, one answer for both.
+    publishTools = trpc.publishMonitor.features.useQuery(undefined,{staleTime:300_000,...READ_RETRY}),
     start = trpc.opc.start.useMutation();
   const [methodDialog,setMethodDialog]=useState(false),
     [showSource,setShowSource]=useState(false),
@@ -137,7 +140,7 @@ export default function PositioningHome() {
       <section className={styles.discovery}><div className={styles.discoveryHead}><div className={styles.recommendTabs}>{([['all','为你推荐'],['strategy','策略'],['writing','写作'],['operations','运营']] as const).map(([id,label])=><button key={id} aria-pressed={recommendation===id} onClick={()=>setRecommendation(id)}>{label}</button>)}</div><Link href="/app/workbench/marketplace">浏览全部 →</Link></div><div className={styles.discoverGrid}>
         {(recommendation==='all'||recommendation==='strategy')&&<><button onClick={chooseTopics}><span className={`${styles.moduleVisual} ${styles.artTopics}`}><span className={styles.big}>让好想法<br/>接着发生。</span><span className={styles.mini}>IDEAS, INTO STORIES.</span></span><strong>做一批新选题</strong><small>选定规划，找到值得写的方向</small></button><button onClick={choosePosition}><span className={`${styles.moduleVisual} ${styles.artPosition}`}><span className={styles.targetRings}/><b>找到<br/>你的坐标</b></span><strong>找到你的内容定位</strong><small>定位分析，明确受众与价值</small></button></>}
         {(recommendation==='all'||recommendation==='writing')&&<><button onClick={()=>{setIntent('content');setShowSource(true);}}><span className={`${styles.moduleVisual} ${styles.artDraft}`}><span className={styles.big}>从一句，<br/>到一篇。</span><span className={styles.lines}><i/><i/><i/></span></span><strong>从选题写到成稿</strong><small>内容创作，把思路写清楚</small></button><Link href="/app/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artRewrite}`}><span className={styles.wordPaper}><b>长文</b><small>ORIGINAL</small></span><span>→</span><span className={styles.wordPaper}><b>短句</b><small>RECRAFTED</small></span></span><strong>换个平台，继续表达</strong><small>跨平台改编，保留内容的核心</small></Link><Link href="/app/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artTitle}`}><span className={styles.big}>值得<br/>被看见。</span><span className={styles.underline}/></span><strong>推敲一个好标题</strong><small>内容创作，标题讨论快捷起点</small></Link><Link href="/app/workbench/marketplace"><span className={`${styles.moduleVisual} ${styles.artOpening}`}><span className={styles.quote}>“</span><b>从一个真实<br/>的瞬间开始。</b></span><strong>让开头更具体</strong><small>内容创作，开头修改快捷起点</small></Link></>}
-        {(recommendation==='all'||recommendation==='operations')&&<><button disabled aria-label="发布排期，待接入"><span className={`${styles.moduleVisual} ${styles.artSchedule}`}><span className={styles.calendarArt}>WEEK<span className={styles.week}>{Array.from({length:12},(_,index)=><i key={index}/>)}</span></span><b>有序<br/>发生</b></span><strong>发布排期</strong><small>待接入，安排内容节奏</small></button><button disabled aria-label="数据复盘，待接入"><span className={`${styles.moduleVisual} ${styles.artReview}`}><span className={styles.bars}><i/><i/><i/><i/></span><b>回看，<br/>再向前。</b></span><strong>数据复盘</strong><small>待接入，从实际表现出发</small></button></>}
+        {(recommendation==='all'||recommendation==='operations')&&<OperationsCards open={publishTools.data?.ownData===true}/>}
       </div></section>
       {showSource&&intent==='content'&&<section className={styles.selection} aria-label="选择任务来源"><h2>选择已有内容工作</h2><p>只进入你选择的原工作；浏览列表不会生成或保存稿件。</p>{accounts.flatMap(a=>a.items.map(item=><Link key={item.workItemId} href={'/app/runtime?session='+item.sessionId}>{item.title}<small>{a.platform} · {a.account}</small></Link>))}{library.isSuccess&&!library.error&&!accounts.some(a=>a.items.length)&&<p>当前没有已采用的内容工作。先在选题对话中明确采用一条选题。</p>}</section>}
       <p role="status" className={styles.mode}>运行环境和模型模式请以进入具体工作后的提示为准。</p>

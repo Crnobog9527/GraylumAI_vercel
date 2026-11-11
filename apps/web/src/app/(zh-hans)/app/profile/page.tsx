@@ -244,11 +244,13 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'security' && <AccountErasureCard user={effectiveUser} />}
 
             {userProfile && activeTab === 'tickets' && (
+              // No key here. It used to be keyed on the view the panel reports, so opening a ticket ('detail') remounted
+              // the panel, which dropped the chosen ticket and showed the list again. The panel is only mounted on this
+              // tab, so `initialView` (where to open it next time: the list, or the form after 联系客服) is all it needs.
               <TicketsPanel
                 user={effectiveUser}
-                key={`${activeTab}-${ticketInitialView}`}
                 initialView={ticketInitialView}
-                onViewChange={(v) => setTicketInitialView(v as 'list' | 'create')}
+                onViewChange={(view) => setTicketInitialView(view === 'create' ? 'create' : 'list')}
               />
             )}
           </div>
