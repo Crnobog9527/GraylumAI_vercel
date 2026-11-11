@@ -3,7 +3,7 @@
 // unrelated cards replaced. The bug this guards (2026-01-15 to 2026-11-12): the page keyed the panel on the view the
 // panel reported, so opening a ticket remounted the panel and dropped the user back on the list. Neither half shows it
 // alone, which is why the page's static-markup test (TicketsPanel mocked away) never could.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as browserExpect, type Browser, type Page } from '@playwright/test';
@@ -11,6 +11,8 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 
 let browser: Browser;
 let code: string;
+/** The app's real stylesheet (globals.css through the project's own Tailwind setup), for the one case that is about the cascade. */
+let appCss: string;
 const entry = fileURLToPath(new URL('./__profile_tickets_fixture__.js', import.meta.url));
 const nothing = (...names: string[]) => names.map(name => `export const ${name} = () => null;`).join('\n');
 const STUBS: Record<string, string> = {
@@ -93,6 +95,12 @@ beforeAll(async () => {
   });
   const output = Array.isArray(bundle) ? bundle[0].output : bundle.output;
   code = output.find((item: { type: string }) => item.type === 'chunk').code;
+  // postcss is not a dependency of this package; it comes with the Tailwind plugin the app builds its CSS with.
+  const tailwindPath = require.resolve('@tailwindcss/postcss');
+  const postcss = createRequire(tailwindPath)('postcss') as (plugins: unknown[]) =>
+    { process(css: string, options: { from: string }): Promise<{ css: string }> };
+  const globals = fileURLToPath(new URL('../../../globals.css', import.meta.url));
+  appCss = (await postcss([require(tailwindPath)()]).process(readFileSync(globals, 'utf8'), { from: globals })).css;
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
 }, 60000);
@@ -187,12 +195,26 @@ it('创建工单 opens the form, both from the list and from the profile tab; a 
   } finally { await page.close(); }
 }, 30000);
 
-it('a card carries no inline border, so its hover border colour can apply', async () => {
+// The hover colour is a matter of the cascade, so this case loads the real stylesheet. Two things used to beat it: the card's own
+// inline border (#1886 moved it to a class), and globals.css, whose `* { border-color }` is in no @layer and therefore wins over
+// every border-colour utility (they are all in @layer utilities). Only an !important utility gets past that rule.
+it('a card has the list border at rest and the pale gold one under the pointer, with the app stylesheet loaded', async () => {
   const { page } = await open('?tab=tickets');
   try {
+    await page.addStyleTag({ content: appCss });
     const card = cards(page).first();
-    await browserExpect(card).toHaveClass(/hover:border-\[rgba\(255,215,0,0\.3\)\]/);
+    const border = () => card.evaluate(element => getComputedStyle(element).borderTopColor);
+    // what `var(--border-primary)` is in this theme, read from the page rather than written here
+    const resting = await page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('i'));
+      probe.style.color = 'var(--border-primary)';
+      const colour = getComputedStyle(probe).color; probe.remove(); return colour;
+    });
     expect(await card.evaluate(element => (element as HTMLElement).style.border)).toBe('');
-    expect(await card.evaluate(element => (element as HTMLElement).style.borderColor)).toBe('');
+    await browserExpect.poll(border).toBe(resting); // the card's border colour is a 200 ms transition
+    await card.hover();
+    await browserExpect.poll(border).toBe('rgba(255, 215, 0, 0.3)');
+    await page.mouse.move(0, 0);
+    await browserExpect.poll(border).toBe(resting);
   } finally { await page.close(); }
 }, 30000);
