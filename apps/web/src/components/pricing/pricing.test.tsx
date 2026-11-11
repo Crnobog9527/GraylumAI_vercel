@@ -80,6 +80,21 @@ describe('pricing plans', () => {
     expect(text(one)).not.toContain('多模型对比');
   });
 
+  it('shows how many positioning profiles each plan allows, from the catalog, and nothing while the catalog does not say', () => {
+    const before = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS }));
+    expect(text(before)).not.toContain('定位档案');
+    const limits: Record<string, number> = { free: 1, pro: 3, gold: 6 };
+    const withLimits = PLANS.map(item => ({ ...item, positioningProfileLimit: limits[item.level] }));
+    const html = renderToStaticMarkup(createElement(PricingPlans, { plans: withLimits, links: LINKS }));
+    const row = html.match(/<tr[^>]*><td[^>]*>定位档案数量<\/td>(.*?)<\/tr>/)?.[1] ?? '';
+    expect(text(row).replace(/\s+/g, ' ').trim()).toBe('3 个 6 个');
+    const free = html.match(/data-testid="pricing-plan-free".*?<\/section>/)?.[0] ?? '';
+    expect(text(free)).toContain('1 个定位档案');
+    // One plan without a usable number: no row, rather than a half-filled one.
+    const partial = withLimits.map(item => (item.level === 'gold' ? { ...item, positioningProfileLimit: 0 } : item));
+    expect(text(renderToStaticMarkup(createElement(PricingPlans, { plans: partial, links: LINKS })))).not.toContain('定位档案数量');
+  });
+
   it('the free tier says sign-up credits are given, without a number', () => {
     const html = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS }));
     const free = html.match(/data-testid="pricing-plan-free".*?<\/section>/)?.[0] ?? '';

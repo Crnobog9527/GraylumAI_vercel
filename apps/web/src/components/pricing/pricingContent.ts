@@ -7,7 +7,7 @@ import { LANDING_FEATURES } from '@/lib/landing/landing-flags';
  * Rules: prices only from the server catalog; no predicted credit cost, no model names, no 7-day
  * refund on cards (only in the FAQ), founder price and first month only from the server's public offers,
  * no features the backend does not have (studio team features). The jury and the model comparison are rows of the
- * comparison table, by each plan's entitlement switch (Owner 2026-11-12); the profile count waits for the public catalog.
+ * comparison table, by each plan's entitlement switch (Owner 2026-11-12); profile counts are the catalog's own numbers.
  */
 export const PRICING_COPY = {
   title: '选一个适合你的方案',
