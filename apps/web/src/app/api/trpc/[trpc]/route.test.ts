@@ -107,3 +107,25 @@ it('logs every tRPC 503 with the rejecting layer and no private error text',asyn
  });
  expect(JSON.stringify(mocks.log.mock.calls)).not.toContain('PRIVATE');
 });
+
+it('refuses a batch over the cap before any login or database read, whatever the last name ends with', async () => {
+ const calls=Array.from({length:11},()=>'settings.getSystemSettings').join(',');
+ for(const url of [`http://localhost/api/trpc/${calls}?batch=1`,`http://localhost/api/trpc/${calls},x.png?batch=1`]){
+  const res=await POST({url,headers:new Headers(),cookies:{getAll:()=>[]}} as unknown as NextRequest);
+  expect(res.status).toBe(400);
+ }
+ expect(mocks.auth).not.toHaveBeenCalled();
+ expect(mocks.admin).not.toHaveBeenCalled();
+ expect(mocks.handle).not.toHaveBeenCalled();
+});
+
+it('lets a full batch of ten through to tRPC', async () => {
+ vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY','SYNTHETIC');
+ mocks.auth.mockReturnValue({auth:{getUser:async()=>({data:{user:null}})}});
+ mocks.admin.mockReturnValue({from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{value:false},error:null})})})})});
+ mocks.handle.mockResolvedValue(new Response('ok'));
+ const calls=Array.from({length:10},()=>'settings.getSystemSettings').join(',');
+ const res=await POST({url:`http://localhost/api/trpc/${calls}?batch=1`,headers:new Headers(),cookies:{getAll:()=>[]}} as unknown as NextRequest);
+ expect(await res.text()).toBe('ok');
+ expect(mocks.handle).toHaveBeenCalledTimes(1);
+});
