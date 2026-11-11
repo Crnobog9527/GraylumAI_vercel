@@ -111,7 +111,15 @@ export async function runCases(db,report){
   {name:'pending frozen checkout evidence',metadata:{},extra:{checkout,status:'pending'},pending:true},
   {name:'malformed financial metadata',metadata:{grantedCredits:{body:'PRIVATE'},body:'PRIVATE'},extra:{},pending:false},
  ]){
-  const f=await fresh(db),id=await order(db,f,test.metadata,test.extra),rid=await close(db,f);
+  // 0512 (Owner 2026-11-11): a pending refund refuses erasure, so that order is written after the closure (as for an
+  // account closed before 0512); the other orders keep their place before it.
+  const f=await fresh(db);
+  let id,rid;
+  if(test.extra.refund){
+   const blocked=await fresh(db);await order(db,blocked,{},{refund});
+   await assert.rejects(close(db,blocked),/ACCOUNT_ERASURE_REFUND_PENDING/,test.name);
+   rid=await close(db,f);id=await order(db,f,test.metadata,test.extra);
+  }else{id=await order(db,f,test.metadata,test.extra);rid=await close(db,f);}
   await rpc(db,'account_erasure_scrub_payment',f.actor,'payment_orders',100,null);
   const result=await cleanup(db,f);
   assert.ok(result.manualReview>0,test.name);
