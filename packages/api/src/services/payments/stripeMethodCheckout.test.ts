@@ -2,8 +2,10 @@
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), prepare: vi.fn(), build: vi.fn(), dispatch: vi.fn(), settle: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), prepare: vi.fn(), build: vi.fn(), dispatch: vi.fn(), settle: vi.fn(),
+  stale: vi.fn() }));
 vi.mock('./methodOrderSettle', () => ({ settleBuyerOrders: mocks.settle }));
+vi.mock('./staleSubscriptionRefresh', () => ({ refreshBuyerStaleSubscriptions: mocks.stale }));
 vi.mock('./methodPurchase', () => ({ prepareMethodPurchase: mocks.prepare }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./stripeCheckoutIntent', () => ({ buildStripeCheckoutRequest: mocks.build, dispatchStripeCheckoutIntent: mocks.dispatch }));
@@ -53,6 +55,7 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     mocks.build.mockReturnValue({ proposed: true });
     mocks.dispatch.mockResolvedValue({ id: 'cs_1', status: 'open', url: 'https://checkout.stripe.com/c/pay/test' });
     mocks.settle.mockResolvedValue(false);
+    mocks.stale.mockResolvedValue(false);
   });
   it('applies the plan\'s current first-month coupon; MP only for the international card', async () => {
     for (const method of ['card', 'card_cn'] as const) {
@@ -243,6 +246,29 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     mocks.settle.mockClear();
     await expect(createStripeCardCheckout(fixture('card').input)).rejects.toThrow('PAY_WAFFO_FOUNDER_SOLD_OUT');
     expect(mocks.settle).not.toHaveBeenCalled();
+  });
+  it('PAY-STALE-SUB: a member refusal re-reads ended subscriptions at Stripe once, then admission runs again', async () => {
+    const member = new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED');
+    const f = fixture('card');
+    mocks.prepare.mockRejectedValueOnce(member);
+    mocks.stale.mockResolvedValueOnce(true);
+    await expect(createStripeCardCheckout(f.input)).resolves.toMatchObject({ state: 'open' });
+    expect(mocks.stale).toHaveBeenCalledWith(f.input.db, f.input.stripe, { merchant: 'fixture', mode: 'test' }, id);
+    expect(mocks.prepare).toHaveBeenCalledTimes(2);
+    // A genuinely live subscription (Stripe still renews it, nothing changed): the refusal stands, admission runs once.
+    mocks.prepare.mockReset().mockRejectedValue(member);
+    await expect(createStripeCardCheckout(fixture('card').input)).rejects.toBe(member);
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    // Still a member after the refresh: the second refusal is returned, never a third attempt.
+    mocks.prepare.mockReset().mockRejectedValue(member);
+    mocks.stale.mockResolvedValueOnce(true);
+    await expect(createStripeCardCheckout(fixture('card').input)).rejects.toBe(member);
+    expect(mocks.prepare).toHaveBeenCalledTimes(2);
+    // Other refusals never read Stripe.
+    mocks.prepare.mockReset().mockRejectedValue(new MethodPurchaseRejected('PAY_WAFFO_FOUNDER_SOLD_OUT'));
+    mocks.stale.mockClear();
+    await expect(createStripeCardCheckout(fixture('card').input)).rejects.toThrow('PAY_WAFFO_FOUNDER_SOLD_OUT');
+    expect(mocks.stale).not.toHaveBeenCalled();
   });
   it('#961: a failure after admission and before the claim releases the order instead of blocking other plans', async () => {
     const f = fixture('card');

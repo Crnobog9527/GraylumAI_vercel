@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const mocks = vi.hoisted(() => ({ scope: vi.fn(), ref: vi.fn(), recover: vi.fn(), invoice: vi.fn(), refund: vi.fn(),
-  stripeId: vi.fn(), stop: vi.fn(), settle: vi.fn(), disputeRepair: vi.fn(), disputeRefundRepair: vi.fn() }));
+  stripeId: vi.fn(), stop: vi.fn(), settle: vi.fn(), disputeRepair: vi.fn(), disputeRefundRepair: vi.fn(), stale: vi.fn() }));
+vi.mock('./staleSubscriptionRefresh', () => ({ reconcileStaleSubscriptions: mocks.stale }));
 vi.mock('./methodOrderSettle', () => ({ settleOpenMethodOrders: mocks.settle }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./stripeReferences', () => ({ findStripeReference: mocks.ref }));
@@ -58,9 +59,23 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     for (const mock of [mocks.recover, mocks.invoice, mocks.refund, mocks.stop]) mock.mockReset();
     mocks.settle.mockReset().mockResolvedValue({ checked: 0, repaired: 0, complete: true, findings: [] });
+    mocks.stale.mockReset().mockResolvedValue({ checked: 0, repaired: 0, complete: true, findings: [] });
     mocks.disputeRepair.mockReset().mockResolvedValue({ checked: 0, failed: 0, complete: true });
     mocks.disputeRefundRepair.mockReset().mockResolvedValue({ checked: 0, failed: 0, complete: true });
     mocks.stripeId.mockReset().mockImplementation(async (_db: unknown, _scope: unknown, local: string) => `sub_${local}`);
+  });
+  it('PAY-STALE-SUB: applies subscriptions Stripe has ended and keeps one it cannot apply as a finding', async () => {
+    mocks.stale.mockResolvedValueOnce({ checked: 2, repaired: 1, complete: true,
+      findings: [{ kind: 'repair_failed', object: 'subscription', externalId: 'legacy', code: 'PAY_COMMON_SUBSCRIPTION_RECEIPT_MISMATCH' }] });
+    const f = fixture();
+    const result = await f.run();
+    expect(mocks.stale).toHaveBeenCalledWith(f.db, f.stripe, { mode: 'test', merchant: 'fixture' },
+      expect.objectContaining({ maxPages: 10, now: now.getTime() }));
+    expect(result).toMatchObject({ success: false, repaired: 1, findings: [{ kind: 'repair_failed', object: 'subscription',
+      externalId: 'legacy' }] });
+    mocks.stale.mockResolvedValueOnce({ checked: 1, repaired: 0, complete: false,
+      findings: [{ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' }] });
+    expect(await fixture().run()).toMatchObject({ complete: false });
   });
   it('retries a requested stop Stripe has not confirmed (an upgrade-replaced Pro) and reports one that still fails', async () => {
     mocks.stop.mockImplementation(async (_db: unknown, _stripe: unknown, _merchant: string, local: string) => {
