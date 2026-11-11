@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- WALLET-PACK-EXTERNAL-REFUND (deep review 2026-11-11, item 5). Number 0515 assigned by the controller.
+-- WALLET-PACK-EXTERNAL-REFUND (deep review 2026-11-11, item 5). Number 0522 assigned by the controller.
 -- A WeChat Pay / Alipay credit pack refunded outside Graylum (Stripe Dashboard, Stripe or Link support) went to the old
 -- refund reconciliation, which reads metadata.grantedCredits (new-path orders never write it), took 0, marked the order
 -- "refunded, recovered", held nothing and raised no alert; the manual settlement then refused it as not held.
@@ -32,7 +32,7 @@ BEGIN
  SELECT * INTO o FROM payment_orders WHERE id=p_order FOR UPDATE;
  IF o.id IS NULL OR owner.id IS NULL OR o.payment_channel IS DISTINCT FROM 'stripe' OR NOT pay_method_mode_allowed(o.payment_channel,o.payment_mode)
   OR o.merchant_namespace IS DISTINCT FROM p_merchant OR NOT (o.payment_method IN ('card','card_cn')
-   -- 0515 (deep review item 5): every wallet credit pack, not only one under a dispute (PAY-D1). Before, an undisputed
+   -- 0522 (deep review item 5): every wallet credit pack, not only one under a dispute (PAY-D1). Before, an undisputed
    -- wallet pack fell to the old path, which read no grantedCredits, took nothing, kept no hold and sent no alert.
    OR o.item_type IN ('membership_plan','credit_package') AND o.payment_method IN ('wechat_pay','alipay'))
   OR coalesce(p_refund,'') !~ '^(re|pyr)_[A-Za-z0-9_]{1,160}$' OR p_amount IS NULL OR p_amount<=0
