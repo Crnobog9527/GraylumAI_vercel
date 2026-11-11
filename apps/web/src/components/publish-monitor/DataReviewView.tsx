@@ -110,8 +110,9 @@ export function DataReviewView() {
 
 /**
  * The page frame. Without tabs (not open, upgrade, failure) the children sit in the scrolling body. While the first
- * read runs the tab bar is already drawn (inert) with a line where the tab's lead text will be, so the page does not
- * jump when the data arrives.
+ * read runs the tab bar's place is held by five grey bars the size of the labels (the labels themselves are not shown),
+ * with a line where the tab's lead text will be, so the page does not jump when the data arrives. A visitor without
+ * the plan gets the upgrade notice next and never sees five tabs first (walkthrough 2026-11-11, item 30).
  */
 function Shell({ meta, loading = false, children }: { meta?: string; loading?: boolean; children: ReactNode }) {
   return (
@@ -123,7 +124,7 @@ function Shell({ meta, loading = false, children }: { meta?: string; loading?: b
       <p className={styles.intro}>连接你自己的社媒账号，看作品数据，让 AI 告诉你哪些内容有效、下周怎么调整。</p>
       {loading && (
         <div className={styles.tabs} aria-hidden="true">
-          {TABS.map(([id, label]) => <span key={id} className={styles.tab} data-state={id === 'trend' ? 'active' : undefined}>{label}</span>)}
+          {TABS.map(([id, label]) => <span key={id} className={styles.tab}><i className={styles.skTab} data-tab-placeholder>{label}</i></span>)}
         </div>
       )}
       {meta ? children : (
