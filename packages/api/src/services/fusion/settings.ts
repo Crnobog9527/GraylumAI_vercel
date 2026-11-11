@@ -121,6 +121,19 @@ export async function readFusionSettings(db: SupabaseClient): Promise<FusionSett
   return parsed.data;
 }
 
+/**
+ * The two switches a public page may know (Master Plan §2.1: "评审团和多模型对比（Gold 专属，跟随后台开关显示）"): whether
+ * the jury and the multi-model compare are on. Nothing else of the row leaves this function. Off whenever the row cannot be
+ * read or is not a valid configuration (the features refuse to run on such a row too), and off without a database client.
+ */
+export async function readFusionSwitches(db: SupabaseClient | null | undefined): Promise<{ review: boolean; compare: boolean }> {
+  if (!db) return { review: false, compare: false };
+  try {
+    const settings = await readFusionSettings(db);
+    return { review: settings.review.enabled === true, compare: settings.compare.enabled === true };
+  } catch { return { review: false, compare: false }; }
+}
+
 /** Only what the D3 floor needs: the compare minimum and the default tick count, read leniently. D3 must stay changeable
  * when the rest of the row is invalid (it would otherwise be impossible to repair), so nothing here is strict-parsed. */
 export async function readCompareFloor(db: SupabaseClient): Promise<{ minModels: number; defaultCount: number }> {
