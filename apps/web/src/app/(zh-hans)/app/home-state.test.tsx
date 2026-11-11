@@ -51,9 +51,15 @@ it('renders the six static steps with labelled parts and no catalog dependency',
 it('does not claim a membership level or placeholder name when the profile read fails',()=>{
  state.profile={data:undefined,isError:true};
  const html=renderToStaticMarkup(<HomePage/>);
- expect(html).toContain('账户信息读取失败');expect(html).not.toContain('普通会员');expect(html).not.toContain('会员账户');expect(html).not.toContain('欢迎回来，用户');
+ expect(html).toContain('账户信息读取失败');expect(html).not.toContain('免费版');expect(html).not.toContain('会员账户');expect(html).not.toContain('你好，用户');
 });
 it('shows the real name and membership when the profile is read',()=>{
  const html=renderToStaticMarkup(<HomePage/>);
- expect(html).toContain('欢迎回来，Fixture');expect(html).toContain('普通会员');
+ expect(html).toContain('你好，Fixture');expect(html).not.toContain('欢迎回来');expect(html).toContain('免费版');
+});
+// Walkthrough 2026-11-11, items 8 and 14.
+it('greets without claiming a return visit, and shows a phone account without a name by its last four digits',()=>{
+ state.profile={data:{nickname:'user-0a1b2c3d',membership_level:'free',phone_masked:'138****5678'},isError:false};
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).toContain('你好，手机尾号 5678');expect(html).not.toContain('user-0a1b2c3d');expect(html).not.toContain('欢迎回来');
 });
