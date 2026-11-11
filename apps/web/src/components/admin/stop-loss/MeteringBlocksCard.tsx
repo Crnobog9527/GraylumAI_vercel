@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
-import { STOP_LOSS_QUERY_OPTIONS } from './stopLossFormat';
+import { STOP_LOSS_QUERY_OPTIONS, formatTime } from './stopLossFormat';
 
 /** "0.300000000000" -> "$0.3": the exact stored amount without its padding zeros; a missing cost is said, never shown as 0. */
 export function exactUsd(value: string | null) {
@@ -55,7 +55,7 @@ export function MeteringBlocksCard() {
         <th className="text-left">超得最多的一次（回合）</th><th className="text-right">冻结上限</th>
         <th className="text-right">名义费用</th><th className="text-right">实际费用</th><th className="text-left">操作</th>
       </tr></thead><tbody>{data.blocks.map((block) => <tr key={block.modelId}>
-        <td>{block.model ?? block.modelId}</td><td className="text-right">{block.calls}</td><td>{block.firstAt ?? '—'}</td>
+        <td>{block.model ?? block.modelId}</td><td className="text-right">{block.calls}</td><td>{formatTime(block.firstAt)}</td>
         <td>{block.turnId}</td><td className="text-right">{exactUsd(block.upperUsd)}</td>
         <td className="text-right">{exactUsd(block.nominalUsd)}</td><td className="text-right">{exactUsd(block.actualUsd)}</td>
         <td><Button variant="outline" disabled={review.isPending} onClick={() => confirmReview(block)}>已核对价格，恢复调用</Button>
