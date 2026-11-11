@@ -21,8 +21,10 @@ import styles from './steps-l.module.css';
  * the page scrolls freely past them. This replaces round eight's scroll-driven stage (U1, 2026-10-18) and with it the
  * progress bar and the "看过了，跳过这段" button of step one. Server HTML and reduced motion: every picture finished, still.
  */
-export function StepsL({ flags, juryHref }: {
+export function StepsL({ flags, juryHref, samplesHref }: {
   flags: LandingFlags;
+  /** Where the report module's "查看样例报告" leads: the sample reports on this page, null while they do not show. */
+  samplesHref?: string | null;
   /** The jury's link (JuryModuleL): null on the public home page until a public jury page exists. */
   juryHref?: string | null;
 }) {
@@ -33,7 +35,8 @@ export function StepsL({ flags, juryHref }: {
       <div className={k.wrap}>
         <FlowStepL id="step-one-title" title={L_STEPS.one.title} first>
           {stages.map((stage, index) => (
-            <FlowModuleL key={stage.label} number={index + 1} name={stage.label} line={stage.note} picture={STEP_ONE_PICTURES[stage.moment]} />
+            <FlowModuleL key={stage.label} number={index + 1} name={stage.label} line={stage.note} picture={STEP_ONE_PICTURES[stage.moment]}
+              link={stage.samples && samplesHref ? { href: samplesHref, label: L_STEPS.samplesLink } : undefined} />
           ))}
         </FlowStepL>
         {/* Round twelve: the jury hangs under step one, its last beat. */}

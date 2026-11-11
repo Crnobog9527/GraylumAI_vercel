@@ -19,6 +19,10 @@
 .name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; color: var(--j-ink); font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
 .number { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #f0efeb; font-size: 13px; }
 .line { margin: 0; color: var(--j-body); font-size: 15.5px; line-height: 1.65; }
+/* The one link a module's line may end on: to another part of this page. */
+.more { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; color: var(--j-ink); font-weight: 500; white-space: nowrap; text-decoration: underline; text-underline-offset: 4px; }
+.more:hover { text-decoration-thickness: 2px; }
+.more:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; border-radius: 4px; }
 
 /* The picture: the product's own components, as an example (inert). Its size never depends on what it shows. */
 .picture {

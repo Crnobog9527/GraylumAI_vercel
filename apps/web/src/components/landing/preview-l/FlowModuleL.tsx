@@ -2,6 +2,7 @@
 'use client';
 
 import { useRef, type ReactNode } from 'react';
+import { ArrowRight } from 'lucide-react';
 import { AsDemo } from '@/components/chat-display/display-heading';
 import { cn } from '@/lib/utils';
 import { DemoTag } from './DemoTag';
@@ -14,15 +15,21 @@ export type FlowPicture = { totalMs: number; draw: (ms: number | null) => ReactN
 /**
  * One module of region 3 (Owner 2026-11-11): its number and name, one line, and the picture, which plays by itself in a
  * loop while on screen (use-loop-l.ts) and is still, finished, in the server's HTML and under reduced motion. The
- * picture is an example of the product's own components, so it is inert and its headings are plain elements.
+ * picture is an example of the product's own components, so it is inert and its headings are plain elements. A module
+ * may end its line with one link to somewhere else on the page (`link`): the picture itself, looping, carries none.
  */
-export function FlowModuleL({ number, name, line, picture }: { number: number; name: string; line: string; picture: FlowPicture }) {
+export function FlowModuleL({ number, name, line, picture, link }: {
+  number: number; name: string; line: string; picture: FlowPicture; link?: { href: string; label: string };
+}) {
   const frame = useRef<HTMLDivElement>(null);
   const { ms, round } = useLoop(frame, picture.totalMs);
   return (
     <li className={styles.module} data-region="流程模块">
       <h4 className={styles.name}><span className={styles.number} aria-hidden="true">{number}</span>{name}<DemoTag /></h4>
-      <p className={styles.line}>{line}</p>
+      <p className={styles.line}>
+        {line}
+        {link ? <a href={link.href} className={styles.more}>{link.label}<ArrowRight size={14} aria-hidden="true" /></a> : null}
+      </p>
       <div ref={frame} className={styles.picture} inert>
         <div key={round} className={styles.round}><AsDemo>{picture.draw(ms)}</AsDemo></div>
       </div>

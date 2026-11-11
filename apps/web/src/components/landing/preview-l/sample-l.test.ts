@@ -118,6 +118,18 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     }
     // Nothing holds the scroll any more: no held stage, no progress bar, no "看过了，跳过这段" in step one.
     for (const gone of ['role="progressbar"', L_STEPS.skip, 'position:sticky', '为什么不是正确的废话', 'AB 测试']) expect(steps).not.toContain(gone);
+    // The report module ends its line on "查看样例报告" (Owner 2026-11-11), a link to the sample reports on this page,
+    // outside the picture (which is inert), once; the address it names exists; without the samples there is no link.
+    expect(steps.match(/查看样例报告/g)).toHaveLength(1);
+    const link = steps.indexOf(`<a href="#${L_SAMPLES_REDO.anchor}"`);
+    const report = steps.indexOf(escape(L_STEPS.one.stages[3].note));
+    expect(link).toBeGreaterThan(report);
+    expect(link).toBeLessThan(steps.indexOf(' inert=""', report));
+    expect(html).toContain(`<section id="${L_SAMPLES_REDO.anchor}" aria-labelledby="samples-title"`);
+    for (const [, id] of html.matchAll(/href="#([^"]+)"/g)) expect(html, id).toContain(`id="${id}"`);
+    const without = render(ALL_ON, false);
+    expect(without).not.toContain(L_STEPS.samplesLink);
+    expect(without).not.toContain(`href="#${L_SAMPLES_REDO.anchor}"`);
     // The pictures are examples: inert, and none of their titles is a heading of the page.
     expect(steps).not.toMatch(/<h[12][^>]*>(?:我的定位分析|完整运营策略报告)/);
     expect(steps.match(/ inert=""/g)?.length).toBe(L_STEPS.one.stages.length);
