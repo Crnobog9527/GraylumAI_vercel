@@ -21,6 +21,8 @@ const PROCEDURES = [
   'approveMonthlyRefund', 'decidePackageRefund', 'executeMonthlyRefund', 'executePackageRefund', 'getMonthlyRefundStatus',
   'getPackageRefundStatus', 'previewPackageRefund', 'previewSubscriptionRefund', 'quoteMonthlyRefund', 'reconcilePackageRefund',
   'rejectMonthlyRefund', 'rejectPackageRefund', 'resolveRefundTicket',
+  // Deep review item 14: externally refunded packs held for a person (list, settle).
+  'listPackRefundReviews', 'settlePackRefundReview',
   'approveSubscriptionRefund', 'executeSubscriptionRefund', 'getSubscriptionRefundStatus', 'quoteSubscriptionRefund',
   'rejectSubscriptionRefund',
   'createMembershipPlan', 'deleteMembershipPlan', 'updateMembershipPlan',
