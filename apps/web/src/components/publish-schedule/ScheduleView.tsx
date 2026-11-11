@@ -17,6 +17,15 @@ import { ScheduleChangeDialog } from './ScheduleChangeDialog';
  * reschedule and cancel until 10 minutes before the time. Everything shown comes from the server (no media links; the
  * caption preview only). Scheduling itself starts from the one-click publish page.
  */
+/**
+ * Where "继续定位" goes: the user's first positioning that is not confirmed yet, else the start of a positioning (the
+ * workspace frame already reads the same list, so this adds no request).
+ */
+export function positioningHref(drafts: Array<{ draftId: string; state?: string }> | undefined): string {
+  const open = (drafts ?? []).find(draft => draft.state !== 'published');
+  return open ? `/app/positioning/${open.draftId}` : '/app/positioning';
+}
+
 const TONE: Record<string, string> = { waiting: 'var(--text-primary)', working: 'var(--text-secondary)',
   done: 'var(--color-success, var(--text-primary))', partial: 'var(--color-warning, var(--text-primary))',
   failed: 'var(--color-error)', cancelled: 'var(--text-secondary)' };
@@ -30,6 +39,8 @@ export function ScheduleView() {
   const list = trpc.publishMonitor.schedule.list.useQuery(range, { retry: false,
     refetchInterval: query => (hasOpenEntries((query.state.data ?? []) as ScheduleEntry[], Date.now()) ? 30_000 : false) });
   const entries = (list.data ?? []) as ScheduleEntry[];
+  const drafts = trpc.opc.list.useQuery(undefined, { retry: false });
+  const empty = !list.isPending && !list.error && entries.length === 0;
   const days = weekDays(start);
   const today = new Date();
   const refresh = () => { void utils.publishMonitor.schedule.list.invalidate(); };
@@ -47,9 +58,13 @@ export function ScheduleView() {
         <Button variant="outline" onClick={() => setOffset(o => o + 1)}>下一周</Button>
         <span className="text-sm" aria-live="polite">{dayLabel(days[0]!)} – {dayLabel(days[6]!)}</span>
       </nav>
-      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+      {empty ? <section aria-label="还没有排期" className="space-y-2 rounded-lg border p-4">
+        <p className="text-sm">先完成定位、写好第一篇，就能在这里排期。</p>
+        <Button asChild><Link href={positioningHref((drafts.data as { drafts?: Array<{ draftId: string; state?: string }> } | undefined)
+          ?.drafts)}>继续定位</Link></Button>
+      </section> : <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
         要排新的帖子，请在资料库里打开一条内容，选"一键发布"后选择发布时间。已排期的帖子不会跟着内容的修改变化；要改内容，请取消后重新排期。
-        <Link className="ml-1 underline" href="/app/library">去资料库</Link></p>
+        <Link className="ml-1 underline" href="/app/library">去资料库</Link></p>}
       {list.isPending ? <PageSkeleton compact rows={4} label="发布排期读取中" />
         : list.error ? <div className="space-y-2">
           <p role="alert" className="text-sm">{scheduleErrorMessage(list.error.message, list.error.data?.code)}</p>
