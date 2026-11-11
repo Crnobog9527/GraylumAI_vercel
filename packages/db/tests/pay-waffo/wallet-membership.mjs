@@ -153,7 +153,7 @@ export async function walletMembershipCases({ admin, service, connect }) {
   await bind(founder);
   const founderPaid = (await pay(service, founder)).v;
   await assert.rejects(() => renew(founderUser, 'wechat_pay', gold, 'monthly', founderPaid.subscriptionId), /TRANSITION_DENIED/);
-  // 0514 (deep review item 6): a one-time founder never renews into a Stripe card subscription; no order is created.
+  // 0521 (deep review item 6): a one-time founder never renews into a Stripe card subscription; no order is created.
   const ordersOf = async user => (await one(admin, 'SELECT count(*)::int n FROM payment_orders WHERE user_id=$1', [user])).n;
   const beforeCard = await ordersOf(founderUser);
   for (const cardMethod of ['card', 'card_cn']) {

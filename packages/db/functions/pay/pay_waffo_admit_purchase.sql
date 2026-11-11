@@ -76,7 +76,7 @@ BEGIN
           AND fulfilled_at IS NOT NULL)
         OR pay_waffo_founder_deadline(prior.id) IS NULL OR now()>pay_waffo_founder_deadline(prior.id)
         OR (prior.auto_renew AND old_sub.status<>'canceled') THEN RAISE EXCEPTION 'PAY_WAFFO_FOUNDER_EXPIRED'; END IF;
-      -- 0514 (deep review item 6; Owner 2026-10-21 "创始会员续买规则不变": one-time, appended to the paid term): a one-time
+      -- 0521 (deep review item 6; Owner 2026-10-21 "创始会员续买规则不变": one-time, appended to the paid term): a one-time
       -- founder renews only by a one-time method. A Stripe card here would open a self-renewing subscription counted from
       -- today. Same method rule as wallet_renewal: wallets, or a card while new purchases route to Waffo (one-time there).
       IF prior.auto_renew IS DISTINCT FROM true AND NOT (p_method IN ('wechat_pay','alipay') OR p_method IN ('card','card_cn') AND
