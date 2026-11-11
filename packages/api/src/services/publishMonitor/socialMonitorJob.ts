@@ -8,6 +8,8 @@ import { PUBLISH_MONITOR_SWITCH } from './foundation';
 import { cleanupAttempts, runProviderWork, sweepOrphans, type RunReport, type SweepReport } from './providerCleanup';
 import { pruneSnapshots, runRefresh, type RefreshReport, type WindowLookup } from './refresh';
 import { readStuckCleanup } from './stuckCleanup';
+import { runScheduleChecks, type PublishAllowed, type ScheduleReport } from './schedule';
+import { readMembershipEntitlements } from '../membershipEntitlements';
 import { closeOrphanRuns, runTikhubRefresh, type TikhubEntitlementLookup, type TikhubReport } from './tikhubRefresh';
 
 // The cron route reads the owner's data window from the server-side entitlement.
@@ -28,12 +30,17 @@ type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
 export const ORPHAN_SWEEP_DELETE_SWITCH = 'publish_monitor_orphan_sweep_delete';
 
 export type SocialMonitorReport = {
-  publishes: ReconcileReport | null; providerWork: RunReport | null; attempts: RunReport | null; sweep: SweepReport | null;
+  publishes: ReconcileReport | null; schedules: ScheduleReport | null; providerWork: RunReport | null; attempts: RunReport | null; sweep: SweepReport | null;
   sweepDeleteEnabled: boolean; pruned: number | null; refresh: RefreshReport | null; tikhub: TikhubReport | null;
   reviews: Awaited<ReturnType<typeof runWeeklyReviews>> | null; facts: number | null;
   billedRunsClosed: number | null; billedPruned: number | null; postForMe: boolean; failures: string[];
   /** Plan §9 item 25: Post for Me cleanup that stopped after 50 attempts (counts only; the route raises the alert). */
   stuck: { connections: number; requests: number } | null;
+};
+
+/** The server-side plan check for the pre-send check of scheduled posts; null when it cannot be read. */
+export const publishAllowed = (db: Db): PublishAllowed => async actorId => {
+  try { return (await readMembershipEntitlements(db as SupabaseClient, actorId)).allowPublish; } catch { return null; }
 };
 
 const SETTLE_BATCH = 500, SETTLE_BATCHES = 10;
@@ -89,7 +96,7 @@ async function pruneBilledReads(db: Db): Promise<number> {
  */
 export async function runSocialMonitorJob(db: Db, client: ClientDeps | null, until: number, windowFor: WindowLookup,
   now: () => number = Date.now, tikhub?: TikhubStep, reviews?: ReviewStep): Promise<SocialMonitorReport> {
-  const report: SocialMonitorReport = { publishes: null, providerWork: null, attempts: null, sweep: null,
+  const report: SocialMonitorReport = { publishes: null, schedules: null, providerWork: null, attempts: null, sweep: null,
     sweepDeleteEnabled: false, pruned: null, refresh: null, tikhub: null, billedRunsClosed: null, billedPruned: null,
     postForMe: client !== null, reviews: null, facts: null, failures: [], stuck: null };
   try { report.pruned = await pruneSnapshots(db, until, now); } catch { report.failures.push('prune'); }
@@ -97,6 +104,11 @@ export async function runSocialMonitorJob(db: Db, client: ClientDeps | null, unt
   try {
     report.publishes = await reconcilePublishes(db, client, until, now);
   } catch { report.failures.push('publishes'); }
+  // PUBLISH-SCHEDULE: scheduled posts that must be cancelled, checked before their time, or handed to reconciliation.
+  if (client && now() < until) {
+    try { report.schedules = await runScheduleChecks(db, client, publishAllowed(db), until, now); }
+    catch { report.failures.push('schedules'); }
+  }
   try { report.billedRunsClosed = await closeOrphanRuns(db as SupabaseClient); } catch { report.failures.push('billed_runs'); }
   if (client) {
     try { report.providerWork = await runProviderWork(db, client, until, now); } catch { report.failures.push('provider_work'); }

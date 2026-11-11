@@ -42,7 +42,7 @@ function retryAfter(response: Response): number | null {
 }
 
 /** One request, never retried here. The API key is passed in and never logged or returned. */
-export async function exchange(request: { method: 'GET' | 'POST' | 'DELETE'; path: string; body?: unknown },
+export async function exchange(request: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; body?: unknown },
   apiKey: string, deps: { fetchImpl?: FetchImpl; timeoutMs?: number } = {}): Promise<PostForMeExchange> {
   if (!request.path.startsWith('/') || request.path.includes('..') || request.path.includes('//')) {
     throw new Error('POSTFORME_PATH_INVALID');

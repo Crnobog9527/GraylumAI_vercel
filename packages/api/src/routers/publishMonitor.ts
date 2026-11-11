@@ -21,6 +21,7 @@ import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import { publishMonitorAdminRouter } from './publishMonitorAdmin';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 import { publishMonitorPublishRouter } from './publishMonitorPublish';
+import { publishMonitorScheduleRouter } from './publishMonitorSchedule';
 import { guarded as safe } from './publishMonitorGuard';
 
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
@@ -102,4 +103,5 @@ export const publishMonitorRouter = router({
   })),
   connect: publishMonitorConnectRouter,
   publish: publishMonitorPublishRouter,
+  schedule: publishMonitorScheduleRouter,
 });

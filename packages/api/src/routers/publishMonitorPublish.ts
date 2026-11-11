@@ -29,9 +29,9 @@ const uploadInput = z.object({ disclosureAccepted: z.literal(true), count: z.num
   idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/).optional() }).strict();
 const jobInput = z.object({ jobId: uuid }).strict();
 // Each step reads from the site-wide Post for Me budget; one user gets a small allowance per step (5 per 5 minutes).
-const limitStep = (step: string, profileId: string) => checkRateLimitOrThrow(`publish-monitor-${step}:${profileId}`, 'auth');
+export const limitStep = (step: string, profileId: string) => checkRateLimitOrThrow(`publish-monitor-${step}:${profileId}`, 'auth');
 
-async function requirePublishEntitlement(ctx: { supabaseAdmin: Parameters<typeof readMembershipEntitlements>[0];
+export async function requirePublishEntitlement(ctx: { supabaseAdmin: Parameters<typeof readMembershipEntitlements>[0];
   profileId: string }) {
   const entitlements = await readMembershipEntitlements(ctx.supabaseAdmin, ctx.profileId);
   if (!entitlements.allowPublish) throw new TRPCError({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
