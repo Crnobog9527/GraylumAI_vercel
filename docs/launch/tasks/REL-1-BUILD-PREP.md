@@ -312,11 +312,12 @@ ALERT-FEISHU 起，下表的付款、退款、拒付、止损、积压告警和�
 | 11 | `API_SYSTEM_CRON_JOB` | error · Sentry | 每日对账任一子项失败（账务不一致、卡住的扣费轮次、成本未知、评审团、文风、报告费、**TikHub 价格刷新失败或 1 天内到期**、收据清理等） | 每天 | 当天；账务不一致 **30 分钟** | 多个定时任务共用这个码，要看正式 Vercel 日志里是哪一项 |
 | 12 | `API_BILLING_RESEARCH_PRICE_REFRESH` | error · Sentry | TikHub 价格刷新失败或 1 天内到期（到期后研究工具自动停） | 每天 | 4 小时 | 后台刷新价格（K12） |
 | 13 | `API_API_RUNTIME_*RECOVERY*_FAILED` | error · Sentry | 每分钟的自动结算/退款恢复有一条失败 | 最多每分钟一次 | **30 分钟**（可能该退没退） | 查未结算的调用 |
+| 13a | `RUNTIME_RECOVERY_RUN_STALE`、`RUNTIME_RECOVERY_RUN_FAILING` | error · Sentry + 飞书（每个代码 6 小时最多一条） | 每分钟的恢复任务超过 10 分钟没有新的运行记录 / 最近 3 次跑完的都没成功。由每 5 分钟的资料库清理任务检查（`recovery-heartbeat-alert.ts`） | 每 5 分钟（Sentry）；飞书 6 小时一条 | **30 分钟**（中断的回合不结清，冻结的积分退不回去） | 看 Vercel 定时任务 `/api/cron/runtime-recovery` 的调用记录和日志；后台财务页“未结清回合” |
 | 14 | `API_SECURITY_*RATE_LIMIT*_UNAVAILABLE_DENYING_REQUEST` | error · Sentry | Redis 不可用，按设计拒绝用户请求 | **每个请求一次**，会刷屏 | **30 分钟**（全站不能用） | 查 Upstash 状态 |
 | 15 | `ENV_VALIDATION_FAILED` | error · Sentry | 新实例启动时必填变量缺失 | 每个新实例一次 | 4 小时 | 按变量名补 Vercel 变量（重新部署才生效） |
 | 16 | 其他 `API_*` error、页面未捕获异常 | error · Sentry | 用户请求路径上的数据库、密钥、供应商失败等 | 每次 | 突增时 4 小时；零星的当天看 | 看 Sentry 堆栈和次数 |
 
-**不会自己响、要人去看的**：注销、资料库清理、评审团恢复、分钟恢复这几个定时任务**整体失败返回 500 时不发 Sentry**；
+**不会自己响、要人去看的**：注销、资料库清理、评审团恢复这几个定时任务**整体失败返回 500 时不发 Sentry**（分钟恢复任务停跑或连续失败已有告警，见 13a）；
 积压查询本身失败只写日志；Stripe 回调的一般失败只写日志；后台"平台承担"提醒只在页面上显示。
 所以第一周每天固定看一次：Vercel 定时任务调用记录（有没有连续 500/503）、后台"成本止损"、后台"平台承担"、Sentry 当天新 issue。
 

@@ -55,6 +55,7 @@ const PUBLIC_PRICING_ENTRY_PATHS = [
 const RATE_LIMITED_PATHS = [
   '/api/trpc',
   '/api/upload', // Ticket attachment uploads (ARCH-FIX A1).
+  '/api/auth/phone/send', // SMS code requests; the route adds a tighter per-IP attempt limit (deep review 11-11 item 7).
 ];
 
 export function normalizeHostname(hostname: string): string {
@@ -415,7 +416,8 @@ export const config = {
      * - fonts/noto-sans-cjk-display/ (style sample D's heading font and its license notice only)
      * - robots.txt, sitemap.xml (exact public crawler files)
      * - favicon.ico (favicon file)
+     * - image files, except under api/: an API path ending in .png is still an API call and keeps its admission checks
      */
-    '/((?!_next/static|_next/image|fonts/misans/|fonts/noto-sans-cjk-display/|favicon.ico|robots\\.txt$|sitemap\\.xml$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/(?:static|image)|fonts/(?:misans|noto-sans-cjk-display)/|favicon.ico|robots\\.txt$|sitemap\\.xml$|(?!api/).*\\.(?:svg|png|jpe?g|gif|webp)$).*)',
   ],
 };

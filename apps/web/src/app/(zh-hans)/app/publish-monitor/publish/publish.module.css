@@ -1,0 +1,720 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * One-click publishing and the account confirmation page on the signed-in baseline (DESIGN.md "Light foundation"):
+ * both sit in the workbench frame like the data review page. The values are the conversation workbench's, written
+ * out here because the workbench keeps its own scoped variables. The page is the scroll owner: the workbench's
+ * center panel clips whatever is taller than it.
+ */
+.page {
+  --pb-text: #262626;
+  --pb-strong: #333;
+  --pb-secondary: #6b6b6b;
+  --pb-border: #ededed;
+  --pb-border-control: #e5e5e5;
+  --pb-subtle: #fafafa;
+  --pb-muted: #f4f4f5;
+  --pb-tag: #f4efe3;
+  --pb-tag-text: #7a5f2c;
+  --pb-success: #2f6a3b;
+  --pb-success-bg: #f1f7f2;
+  --pb-warning: #76592a;
+  --pb-warning-bg: #faf6ee;
+  --pb-error: #a23b3b;
+  --pb-error-bg: #fcf1f1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: #fff;
+  color: var(--pb-text);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 14px 24px 0;
+}
+.head h1 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.back {
+  color: var(--pb-secondary);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.back:hover {
+  color: var(--pb-text);
+  text-decoration: underline;
+}
+.intro {
+  flex: none;
+  margin: 0;
+  padding: 4px 24px 12px;
+  border-bottom: 1px solid var(--pb-border);
+  color: var(--pb-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 24px 40px;
+}
+.column {
+  display: grid;
+  gap: 12px;
+  max-width: 980px;
+  animation: pb-fade 150ms ease both;
+}
+.narrow {
+  max-width: 620px;
+}
+
+/* The form: the three steps on the left, the summary with the one primary action on the right. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: start;
+  gap: 16px;
+}
+.steps {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--pb-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.stepNumber {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--pb-muted);
+  color: var(--pb-strong);
+  font-size: 11px;
+  font-weight: 500;
+}
+.tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--pb-tag);
+  color: var(--pb-tag-text);
+  font-size: 11px;
+  font-weight: 400;
+}
+.hint {
+  margin: 0;
+  color: var(--pb-secondary);
+  font-size: 12px;
+}
+.hint a,
+.note a {
+  color: inherit;
+  text-decoration: underline;
+}
+.error {
+  margin: 0;
+  color: var(--pb-error);
+  font-size: 13px;
+}
+
+/* Step 1: the accounts. */
+.accounts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid var(--pb-border-control);
+  border-radius: 8px;
+  font-size: 13px;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.account[data-selected='true'] {
+  border-color: var(--pb-text);
+  background: var(--pb-subtle);
+}
+.account[data-ready='false'] {
+  background: var(--pb-subtle);
+}
+.account label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.account[data-ready='false'] label {
+  color: var(--pb-secondary);
+  cursor: default;
+}
+.tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--pb-text);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.accountNote {
+  flex-basis: 100%;
+  color: var(--pb-secondary);
+  font-size: 12px;
+}
+
+/* Step 2: files. The real file input stays in the page (and keeps its label) under the drop area. */
+.drop {
+  position: relative;
+  display: block;
+  padding: 18px 16px;
+  border: 1px dashed #dcdcdc;
+  border-radius: 8px;
+  background: var(--pb-subtle);
+  color: var(--pb-secondary);
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.drop strong {
+  color: var(--pb-text);
+  font-weight: 500;
+  text-decoration: underline;
+}
+.drop small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+.drop:hover,
+.drop[data-over='true'] {
+  border-color: var(--pb-text);
+  background: #fff;
+}
+.drop:focus-within {
+  outline: 2px solid var(--pb-text);
+  outline-offset: 2px;
+}
+.drop[data-disabled='true'] {
+  border-color: var(--pb-border);
+  color: #aaa;
+  cursor: default;
+}
+.drop[data-disabled='true'] strong {
+  color: inherit;
+  text-decoration: none;
+}
+.drop input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: inherit;
+}
+.files {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.fileRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--pb-border);
+  border-radius: 8px;
+}
+.fileRow img,
+.fileRow video {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border-radius: 6px;
+  background: #111;
+  object-fit: cover;
+}
+.fileMeta {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+.fileMeta p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fileMeta p + p,
+.cover {
+  color: var(--pb-secondary);
+}
+.cover {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.cover input {
+  display: block;
+  width: 100%;
+  max-width: 160px;
+  accent-color: var(--pb-text);
+}
+.page .cover button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.page .remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pb-secondary);
+  cursor: pointer;
+}
+.page .remove:hover:not(:disabled) {
+  background: var(--pb-muted);
+  color: var(--pb-text);
+}
+
+/* Step 3: the caption. A field is white with the control border (DESIGN.md "Base components"). */
+.page .caption {
+  border-color: var(--pb-border-control);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.count {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--pb-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.count[data-over='true'] span:last-child {
+  color: var(--pb-error);
+}
+.stack {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* A notice the user must read before going on (an unconfirmed earlier publish). */
+.note {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--pb-warning-bg);
+  color: var(--pb-warning);
+  font-size: 13px;
+}
+.note p {
+  margin: 0;
+}
+.page .linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The summary and the one primary action. */
+.summary {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--pb-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.summary h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.summary dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+.summary dt {
+  color: var(--pb-secondary);
+  font-size: 12px;
+}
+.summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.hold {
+  margin: 0;
+  color: var(--pb-secondary);
+  font-size: 12px;
+}
+.page .primary {
+  width: 100%;
+  min-height: 40px;
+}
+
+/* Fields this page draws itself. */
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.field span {
+  font-weight: 500;
+}
+.select {
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--pb-border-control);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pb-text);
+  font: inherit;
+}
+.select:focus-visible {
+  outline: 2px solid var(--pb-text);
+  outline-offset: 1px;
+}
+
+/* Empty, finished and failure states: what is the case, then what to do next. */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 40px 20px;
+  border: 1px solid var(--pb-border);
+  border-radius: 12px;
+  background: var(--pb-subtle);
+  text-align: center;
+}
+.state h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.state p {
+  max-width: 36em;
+  margin: 0;
+  color: var(--pb-secondary);
+  font-size: 13px;
+}
+.stateIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  border: 1px solid var(--pb-border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--pb-strong);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.linkPrimary,
+.linkQuiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 6px 16px;
+  border: 1px solid var(--pb-text);
+  border-radius: 8px;
+  background: var(--pb-text);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.linkPrimary:hover {
+  border-color: #3b3b3b;
+  background: #3b3b3b;
+}
+.linkQuiet {
+  border-color: var(--pb-border-control);
+  background: #fff;
+  color: var(--pb-text);
+}
+.linkQuiet:hover {
+  border-color: #dcdcdc;
+  background: var(--pb-subtle);
+}
+.linkPrimary:focus-visible,
+.linkQuiet:focus-visible {
+  outline: 2px solid var(--pb-text);
+  outline-offset: 2px;
+}
+
+/* The result of one publish: a row per platform. */
+.results {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 0;
+  border-top: 1px solid var(--pb-border);
+  font-size: 13px;
+}
+.result:first-child {
+  border-top: 0;
+}
+.result strong {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+.result a {
+  color: var(--pb-text);
+  text-decoration: underline;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--pb-muted);
+  color: var(--pb-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.badge[data-status='published'] {
+  background: var(--pb-success-bg);
+  color: var(--pb-success);
+}
+.badge[data-status='failed'] {
+  background: var(--pb-error-bg);
+  color: var(--pb-error);
+}
+.badge[data-status='pending']::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+  animation: pb-pulse 1.4s ease-in-out infinite;
+}
+.statusLine {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+/* The confirmation page's account choices. */
+.choices {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.choices legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--pb-border-control);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.choice:has(input:checked) {
+  border-color: var(--pb-text);
+  background: var(--pb-subtle);
+}
+.choice:has(input:disabled) {
+  color: var(--pb-secondary);
+  cursor: default;
+}
+.choice input {
+  accent-color: var(--pb-text);
+}
+.choice small {
+  color: var(--pb-secondary);
+  font-size: 12px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+@keyframes pb-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pb-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (max-width: 860px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* On a narrow screen the summary becomes the bar under the form: the action stays in reach while the form scrolls. */
+  .body:has(.summary) {
+    padding-bottom: 0;
+  }
+  .summary {
+    position: sticky;
+    top: auto;
+    bottom: 0;
+    margin: 4px -24px 0;
+    padding: 10px 24px 14px;
+    border: 0;
+    border-top: 1px solid var(--pb-border);
+    border-radius: 0;
+    gap: 6px;
+  }
+  .summary h2,
+  .summary dl {
+    display: none;
+  }
+  .hold {
+    text-align: center;
+  }
+}
+@media (max-width: 700px) {
+  .head {
+    padding: 12px 16px 0;
+  }
+  .intro {
+    padding: 4px 16px 10px;
+  }
+  .body {
+    padding: 14px 16px 32px;
+  }
+  .summary {
+    margin: 4px -16px 0;
+    padding: 10px 16px 14px;
+  }
+  .card {
+    padding: 14px 12px;
+  }
+  .accounts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .page .primary {
+    min-height: 44px;
+  }
+  .linkPrimary,
+  .linkQuiet {
+    min-height: 44px;
+  }
+  .state {
+    padding: 32px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .column,
+  .badge[data-status='pending']::before {
+    animation: none;
+  }
+  .account,
+  .drop,
+  .linkPrimary,
+  .linkQuiet {
+    transition: none;
+  }
+}

@@ -61,7 +61,7 @@ export function describeStopLossAlert(row: Pick<Row, 'test_id' | 'details'>) {
   const when = day ? `（统计日 ${day} UTC）` : '';
   switch (row.test_id) {
     case 'runtime_stop_loss_siteDailyUsd':
-      return `全站每日上限已达到，新的计费调用已被拒绝：当天实际 ${usd(text(d, 'actualUsd'))}，上限 ${usd(text(d, 'thresholdUsd'))}${when}`;
+      return `全站每日上限已达到（只告警，没有拒绝调用）：当天实际 ${usd(text(d, 'actualUsd'))}，上限 ${usd(text(d, 'thresholdUsd'))}${when}`;
     case 'runtime_stop_loss_siteAlertUsd':
       return `全站成本提醒线已达到：当天实际 ${usd(text(d, 'actualUsd'))}，提醒线 ${usd(text(d, 'thresholdUsd'))}${when}`;
     case 'runtime_stop_loss_userDailyUsd':

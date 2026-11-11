@@ -2,7 +2,7 @@
 'use client';
 
 import { Languages } from 'lucide-react';
-import { REPLY_LOCALE_LABELS, REPLY_LOCALES, replyLocale } from '@repo/api/src/shared/replyLanguage';
+import { isReplyLocale, REPLY_LOCALE_LABELS, REPLY_LOCALES } from '@repo/api/src/shared/replyLocales';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -31,8 +31,7 @@ export function LanguageSwitch({ className }: { className?: string }) {
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>语言</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={shown} onValueChange={value => {
-          const parsed = replyLocale.safeParse(value);
-          if (parsed.success) choose(parsed.data);
+          if (isReplyLocale(value)) choose(value);
         }}>
           {REPLY_LOCALES.map(locale => (
             <DropdownMenuRadioItem key={locale} value={locale} disabled={saving}>{REPLY_LOCALE_LABELS[locale]}</DropdownMenuRadioItem>

@@ -9,7 +9,14 @@ export type AccountErasurePreview = {
   pendingPayments: number;
   runsInFlight: number;
   closed: boolean;
+  /** A refund request still being handled (Owner 2026-11-11): erasure cannot start until it is done. */
+  refundRequestOpen?: boolean;
 };
+
+/** Facts that stop the user before verification: a renewing subscription, or a refund request being handled. */
+export function erasureBlocked(preview: AccountErasurePreview): boolean {
+  return preview.subscriptionRenewing || preview.refundRequestOpen === true;
+}
 
 /** Only legacy Stripe subscriptions can be stopped in the Stripe portal; older APIs send no channels. */
 export function renewalUsesStripePortal(preview: AccountErasurePreview): boolean {
@@ -42,6 +49,9 @@ export function buildErasureImpactLines(preview: AccountErasurePreview): ImpactL
   if (preview.subscriptionRenewing && needsSupportToStop(preview)) {
     lines.push({ tone: 'block', text: '你有银行卡自动续费，目前需联系客服停止续费后，才能申请注销。' });
   }
+  if (preview.refundRequestOpen) {
+    lines.push({ tone: 'block', text: '你有一笔退款申请在处理中，处理完成后才能注销。' });
+  }
   lines.push({ tone: 'warn', text: '确认后账号立即关闭，不能再登录或使用，也不能撤销；没有冷静期和回收站。' });
   lines.push({ tone: 'warn', text: `剩余 ${preview.credits} 积分将作废，不能再使用。` });
   if (preview.subscriptionActiveUntil) {
@@ -67,6 +77,7 @@ const ERROR_TEXT: Array<[string, string]> = [
   ['ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING', '你有自动续费的订阅，请先取消自动续费再申请注销。'],
   ['ACCOUNT_ERASURE_ADMIN_DENIED', '管理员账号需先取消管理员权限才能注销。'],
   ['ACCOUNT_ERASURE_STATUS_DENIED', '当前账号状态不能申请注销，请联系客服。'],
+  ['ACCOUNT_ERASURE_REFUND_PENDING', '你有一笔退款申请在处理中，处理完成后才能注销。'],
   ['ACCOUNT_CLOSED', '账号已注销。'],
 ];
 
