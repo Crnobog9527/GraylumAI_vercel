@@ -230,7 +230,8 @@ try {
   assert.equal((await period(periodEnd)).reserved, 2);
   report.checks.push('reschedule: same or too-near times are refused; a move takes its slots to the new billing period');
 
-  // A cancellation decided too late (target disconnected inside the lock window): sent anyway, charged nothing.
+  // The user's own disconnect inside the lock window cannot stop the post; it is charged like any sent post (otherwise
+  // disconnecting before each post would publish for free, again and again: review of #1852).
   const z = await member();
   const s5 = await scheduled(z);
   await svc('SELECT publish_monitor_disconnect($1,$2) v', [z.a, z.connections[1].id]);
@@ -239,12 +240,58 @@ try {
   await finish(s5.id, marked.lease, 'mark', s5.at, 'PUBLISH_SCHEDULE_TARGET_CHANGED');
   await hook(s5.post, z.connections[0].provider, true);
   await hook(s5.post, z.connections[1].provider, true);
-  const free = await job(s5.id);
-  assert.deepEqual([free.state, free.charged_credits, free.error_code], ['completed', null, 'PUBLISH_SCHEDULE_SENT_AFTER_CANCEL']);
-  assert.equal(await credits(z.a), 100, 'a post sent after a cancellation is not charged');
-  assert.equal(await v("SELECT count(*)::int v FROM billing_history WHERE user_id=$1 AND operation_type='settle'", [z.a]), 0);
+  const charged = await job(s5.id);
+  assert.deepEqual([charged.state, charged.charged_credits, charged.error_code], ['completed', 12, null]);
+  assert.equal(await credits(z.a), 88, 'a post sent after the user disconnected is charged for its successful targets');
   report.checks.push('a target disconnected before the time is noticed by the cron claim; if the post goes out anyway it '
-    + 'is completed without any charge');
+    + 'is charged for its successful targets (no free post by disconnecting)');
+
+  // A cancellation the user cannot trigger at will (membership ended), decided inside the lock window: sent, not charged.
+  const zz = await member();
+  const s5b = await scheduled(zz);
+  await c.query('UPDATE social_publish_jobs SET next_check_at=clock_timestamp() WHERE id=$1', [s5b.id]);
+  const due5b = (await claimDue()).find(i => i.jobId === s5b.id);
+  await finish(s5b.id, due5b.lease, 'mark', s5b.at, 'PUBLISH_SCHEDULE_MEMBERSHIP_ENDED');
+  await hook(s5b.post, zz.connections[0].provider, true);
+  await hook(s5b.post, zz.connections[1].provider, true);
+  const free = await job(s5b.id);
+  assert.deepEqual([free.state, free.charged_credits, free.error_code], ['completed', null, 'PUBLISH_SCHEDULE_SENT_AFTER_CANCEL']);
+  assert.equal(await credits(zz.a), 100, 'a post sent after a cancellation the user could not cause is not charged');
+  assert.equal(await v("SELECT count(*)::int v FROM billing_history WHERE user_id=$1 AND operation_type='settle'", [zz.a]), 0);
+  report.checks.push('a post sent after a cancellation decided too late (membership ended) is completed without any charge');
+
+  // A hold taken from a subscription period whose credit release then ends (the period is over or the subscription was
+  // refunded): cancelling returns nothing of the period's credits, so expired credits never become spendable again.
+  const sub = await member(0);
+  const grant = randomUUID(), stripeSub = `sub_${randomUUID()}`, invoice = `in_${randomUUID()}`;
+  const dayMs = 24 * 3600e3;
+  await c.query(`UPDATE profiles SET credits=100 WHERE id=$1`, [sub.a]);
+  await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,
+    balance_before,balance_after) VALUES($1,100,'addition','grant','opening_grant','system',$2,0,100)`, [sub.a, `opening_grant:${sub.a}`]);
+  await c.query(`INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+    VALUES($1,'Local fixture','pro',true,true,500000000) ON CONFLICT(level) DO NOTHING`, [randomUUID()]);
+  const plan = await v("SELECT id v FROM membership_plans WHERE level='pro'");
+  const subStart = new Date(Date.now() - dayMs).toISOString(), subEnd = new Date(Date.now() + dayMs).toISOString();
+  await c.query(`INSERT INTO user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,
+    current_period_end,status) VALUES($1,$2,$3,'monthly',$4,$5,'active')`, [sub.a, stripeSub, plan, subStart, subEnd]);
+  await c.query(`INSERT INTO subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,
+    grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,consumed_amount,idempotency_key)
+    VALUES($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,100,0,$9)`,
+  [grant, sub.a, stripeSub, plan, `invoice:${invoice}`, subStart, subEnd, invoice, `grant:${invoice}`]);
+  const s9 = await scheduled(sub, 60 * 24 * 3);
+  const holdRow = await job(s9.id);
+  assert.equal(await v("SELECT metadata->>'chargedGrantId' v FROM billing_history WHERE id=$1", [holdRow.pre_deduct_id]), grant,
+    'the hold came from the subscription period');
+  assert.equal(await credits(sub.a), 88);
+  await c.query('UPDATE user_subscriptions SET credit_release_terminated_at=clock_timestamp() WHERE stripe_subscription_id=$1',
+    [stripeSub]);
+  const cancelSub = await begin(sub, s9.id, 'cancel', s9.at);
+  assert.equal((await finish(s9.id, cancelSub.lease, 'cancelled')).state, 'released');
+  assert.equal(await credits(sub.a), 88, 'the period\'s credits held across the end of its release are not returned');
+  assert.equal(await v("SELECT (metadata->>'refundInterceptedRestoration')::int v FROM billing_history WHERE user_id=$1 "
+    + "AND operation_type='refund' AND metadata->>'preDeductId'=$2", [sub.a, String(holdRow.pre_deduct_id)]), 12);
+  report.checks.push('a hold from a subscription period whose release ended before the cancel returns none of that period\'s '
+    + 'credits (expired credits never come back spendable)');
 
   // Failure: sent and failed on every platform -> full refund; the backoff reaches manual review a day after the time.
   const f = await member();
