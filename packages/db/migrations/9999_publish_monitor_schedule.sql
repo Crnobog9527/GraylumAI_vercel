@@ -420,12 +420,14 @@ BEGIN
  END IF;
  IF j.lease IS NOT NULL AND j.lease_until>clock_timestamp() THEN
   RAISE EXCEPTION 'PUBLISH_SCHEDULE_BUSY' USING ERRCODE='PT409'; END IF;
- IF j.scheduled_at<>p_expected_at THEN RAISE EXCEPTION 'PUBLISH_SCHEDULE_CHANGED' USING ERRCODE='PT409'; END IF;
+ -- Pages and the server carry times in milliseconds.
+ IF date_trunc('milliseconds',j.scheduled_at)<>date_trunc('milliseconds',p_expected_at) THEN
+  RAISE EXCEPTION 'PUBLISH_SCHEDULE_CHANGED' USING ERRCODE='PT409'; END IF;
  IF clock_timestamp()>=j.scheduled_at-interval '10 minutes' THEN
   RAISE EXCEPTION 'PUBLISH_SCHEDULE_LOCKED' USING ERRCODE='PT409'; END IF;
  IF p_action='reschedule' THEN
   IF p_new_at<clock_timestamp()+interval '15 minutes' OR p_new_at>clock_timestamp()+interval '30 days'
-   OR p_new_at=j.scheduled_at THEN
+   OR date_trunc('milliseconds',p_new_at)=date_trunc('milliseconds',j.scheduled_at) THEN
    RAISE EXCEPTION 'PUBLISH_SCHEDULE_TIME_INVALID' USING ERRCODE='22023'; END IF;
   SELECT * INTO q FROM publish_monitor_quota_period_at(p_new_at);
   IF q.p_start<>j.quota_period_start THEN

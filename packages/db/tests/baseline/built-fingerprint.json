@@ -3817,7 +3817,7 @@
   "fn:publish_monitor_review_wipe_sources()": "96c22bcfa318",
   "fn:publish_monitor_reviews(uuid)": "0ede0b0b84b7",
   "fn:publish_monitor_schedule_accepted(uuid,text)": "42ae4f16db79",
-  "fn:publish_monitor_schedule_begin(uuid,uuid,text,timestamp with time zone,timestamp with time zone,integer)": "7332fb4ed6c5",
+  "fn:publish_monitor_schedule_begin(uuid,uuid,text,timestamp with time zone,timestamp with time zone,integer)": "9fb54bcf3e2d",
   "fn:publish_monitor_schedule_claim(integer,integer)": "a8563262f400",
   "fn:publish_monitor_schedule_finish(uuid,uuid,text,timestamp with time zone,text)": "528848650728",
   "fn:publish_monitor_schedule_holds()": "9f6dcfe79736",
