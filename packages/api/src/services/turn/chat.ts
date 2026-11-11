@@ -32,6 +32,7 @@ import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import type { StepEvent, TurnEvent } from './sse';
 import { swallow } from '../../lib/swallow';
+import { logger } from '../../lib/logger';
 import { markStage, noteStageTurn } from './stageTiming';
 import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
 import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
@@ -100,6 +101,17 @@ export const CLOSES: Record<string, { kind: CloseKind; refundAll: boolean }> = {
   TURN_LIMIT_UNAVAILABLE: { kind: 'failed', refundAll: true },
   TURN_USAGE_CONFIGURATION_REQUIRED: { kind: 'failed', refundAll: true },
 };
+/**
+ * The whole answer of a turn was streamed and its closing write then failed, so the turn saved nothing. It is closed like any
+ * other failure that saved nothing: failed, refunded in full (Owner 2026-11-11: a turn whose answer was not saved does not
+ * charge the user, Graylum bears the cost; this replaces, for this case, the 2026-10-12 "not refunded on the spot").
+ * It must stay rare: a request that could make its own closing write fail would be free every time (deep review 2026-11-11,
+ * finding 2, closed by storableText.ts at both ends of a turn). So every one is an error in the log, by fixed codes only, and a
+ * burst of them reaches the Owner through the error-spike alert.
+ */
+export function noteUnsavedAnswer(kind: string, turnId: number, code: string): void {
+  logger.error('ai', 'turn_answer_unsaved', { kind, turnId, code });
+}
 /** A refusal of the new-work gate as a turn code: the administrator's pause, a minute or day limit, or limits unavailable. */
 export const GATE_CODES = { paused: 'TURN_NEW_CALLS_PAUSED', call_limited: 'TURN_RATE_LIMITED', limit_unavailable: 'TURN_LIMIT_UNAVAILABLE',
   usage_configuration_required: 'TURN_USAGE_CONFIGURATION_REQUIRED' } as const;
@@ -265,6 +277,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       refundAll: extra.refundAll, failureCode: extra.failureCode ?? null, ...(extra.kindResult ? { kindResult: extra.kindResult } : {}) });
   // The model SDK wraps what the exchange throws; the stop that ended the call is kept here and wins over the wrapper.
   let stopped: TurnStop | undefined;
+  // The whole answer has been streamed; what can still fail is the closing write (noteUnsavedAnswer).
+  let answered = false;
   try {
     // What was read before the open still stands: a delete before it shows here, one after it finds this turn and waits.
     if (work && !(await db.workVerify({ actorId: input.actorId, turnId: opened.turnId }))) throw new TurnStop('TURN_WORK_SOURCE_ERASED');
@@ -385,6 +399,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
     }
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
+    answered = true;
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }],
       ...(captured?.items.length || stepLog.size ? { kindResult: { ...(captured?.items.length ? { coachScreenshots: captured.items } : {}),
@@ -409,6 +424,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
+      if (answered) noteUnsavedAnswer('chat', opened.turnId, code);
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
       await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
         { category: 'ai' });

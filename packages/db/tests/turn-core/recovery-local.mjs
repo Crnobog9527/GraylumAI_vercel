@@ -78,10 +78,11 @@ try{
   }finally{await p1.end();await p2.end();}
   for(const t of turns){
    assert.deepEqual(await turn(t.a,t.id).then(r=>[r.state,r.close_kind,r.charged_credits,r.settlement,r.recovery_lease_until]),
-    ['closed','interrupted',6,'done',null]);
-   assert.equal(await balance(t.a),994);assert.equal(await spends(t.a),6);
+    ['closed','interrupted',0,'done',null]);
+   // Owner 2026-11-11: a turn recovery had to end saved no answer, so its receipt (6 credits) is not charged; the freeze is back.
+   assert.equal(await balance(t.a),1000);assert.equal(await spends(t.a),0);
   }
-  report.checks.push('two concurrent instances: claims disjoint (SKIP LOCKED, lease), both recovering every turn closes each once (D=6, one spend row)');
+  report.checks.push('two concurrent instances: claims disjoint (SKIP LOCKED, lease), both recovering every turn closes each once (nothing charged, the freeze back once)');
  }
  // 2. Due rules and repeated runs: 15 minutes running, 24 hours paused; a repeated recover and a repeated claim do nothing.
  {
@@ -135,10 +136,11 @@ try{
   assert.equal((await claim()).find(i=>i.turnId===o.turnId),undefined,'not looked up again within the lease');
   await record(a,o.turnId,1);
   const settled=await recover(a,o.turnId,'settle');
-  assert.deepEqual([settled.closeKind,settled.chargedCredits,settled.settlement],['interrupted',6,'done']);
-  assert.equal(await balance(a),994);
+  // Owner 2026-11-11: interrupted, no answer saved: the late receipt is Graylum's (absorbed), the whole freeze returns.
+  assert.deepEqual([settled.closeKind,settled.chargedCredits,settled.absorbedCredits,settled.settlement],['interrupted',0,6,'done']);
+  assert.equal(await balance(a),1000);
   assert.equal((await recover(a,o.turnId,'settle')).skipped,true);
-  assert.equal(await spends(a),6);
+  assert.equal(await spends(a),0);
   await c.query("update turns set recovery_lease_until=null where id=$1",[o.turnId]);
   assert.equal((await claim()).find(i=>i.turnId===o.turnId),undefined,'settled turns are never claimed');
   // A late receipt written by the API before any lookup: claimed with nothing to look up, settled.
@@ -150,7 +152,7 @@ try{
   await c.query("update turns set recovery_lease_until=null where id=$1",[ob.turnId]);
   const late=(await claim()).find(i=>i.turnId===ob.turnId);
   assert.equal(late?.action,'settle');assert.deepEqual(late.calls,[]);
-  assert.equal((await recover(b,ob.turnId,'settle')).chargedCredits,6);
+  assert.equal((await recover(b,ob.turnId,'settle')).chargedCredits,0);
   // No provider id, or an unknown third-party tool: nothing to look up, never claimed, never presumed free.
   const d=await account(),od=await open(d);
   await begin(d,od.turnId,1);await close(d,od.turnId,'interrupted');
@@ -160,7 +162,7 @@ try{
   const left=ids(await claim());
   assert.ok(!left.includes(od.turnId)&&!left.includes(oe.turnId));
   assert.equal(await balance(d),940);assert.equal(await balance(e),994);
-  report.checks.push('late receipt: interrupted with unknown model cost -> claimed for settlement with its provider id -> receipt -> settled once (D=6); an API-written late receipt settles; no provider id / unknown tool stays pending, never presumed free');
+  report.checks.push('late receipt: interrupted with unknown model cost -> claimed for settlement with its provider id -> receipt -> settled once (nothing charged, Owner 2026-11-11); an API-written late receipt settles; no provider id / unknown tool stays pending, never presumed free');
  }
  // 4. Every kind is recovered (aligned with V2-7b): a jury left running or paused between groups closes here; a report its
  // user was stopping closes as stopped.

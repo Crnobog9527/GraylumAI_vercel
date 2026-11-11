@@ -123,14 +123,16 @@ try{
   assert.equal((await absent({...k,seq:1,provider:'gen-1'})).reason,'not_pending');
   report.checks.push('only 404 qualifies (200/401/408/429/5xx/null refused); wrong provider id, call, account refused; an open turn or an already receipted call is not settled');
  }
- // 5. The call is settled at zero; what the turn's other calls cost the user is still charged.
+ // 5. The call is settled at zero; the turn's other receipt keeps its cost.
+ // Owner 2026-11-11 (migration turn_interrupted_no_charge): the turn was cut off and saved no answer, so the known receipt is not
+ // charged either (before: D=6); its cost stays on the receipt and is Graylum's.
  {
   const t=await unknownTurn({known:true});await old(t);
   assert.equal((await absent(t)).settled,true);
   const settled=await recover(t.a,t.id,'settle');
-  assert.deepEqual([settled.chargedCredits,settled.settlement],[6,'done']);
-  assert.equal(await balance(t.a),994);assert.equal(await spends(t.a),6);
-  report.checks.push('a turn with a known receipt and an absent call: only the known call is charged (D=6), the rest of the freeze returns');
+  assert.deepEqual([settled.chargedCredits,settled.absorbedCredits,settled.settlement],[0,6,'done']);
+  assert.equal(await balance(t.a),1000);assert.equal(await spends(t.a),0);
+  report.checks.push('an interrupted turn with a known receipt and an absent call: nothing is charged (the known receipt is absorbed, 6 credits), the whole freeze returns');
  }
  // 6. Two instances at once, settlement and the settle pass: one effect.
  {

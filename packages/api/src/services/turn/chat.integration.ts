@@ -120,10 +120,17 @@ const allowGate: PositioningClassifier = async ({ onCost }) => { onCost?.(0.0000
 // The runtime rate limits and pause (newWorkGate) are Redis-backed; here a stub that admits, or refuses as a case needs.
 const admit = async () => ({ ok: true as const });
 type NewWork = ChatDeps['newWork'];
+type RpcAnswer = PromiseLike<{ data: unknown; error: unknown }>;
+/** A turn's turn_close calls in the test's hands: `send` passes the call on to the database. */
+type OnClose = (args: Record<string, unknown>, send: () => RpcAnswer) => RpcAnswer;
+const LOST: Awaited<RpcAnswer> = { data: null, error: { message: 'TypeError: fetch failed' } };
 async function turn(input: { actor: string; session: string; text: string; transport: typeof fetch; gate?: PositioningClassifier;
-  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; images?: string[]; requestId?: string; slots?: CounterStore }) {
+  onEvent?: (event: TurnEvent) => void; newWork?: NewWork; images?: string[]; requestId?: string; slots?: CounterStore; onClose?: OnClose }) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
-  await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots: input.slots ?? slots, transport: input.transport,
+  const direct = turnClients(admin), { onClose } = input;
+  const clients = onClose ? { ...direct, write: { rpc: (name: string, args: Record<string, unknown>) => name === 'turn_close'
+    ? onClose(args, () => direct.write.rpc(name, args)) : direct.write.rpc(name, args) } as unknown as typeof direct.write } : direct;
+  await withCatalogRequest(() => runChatTurn({ admin, clients, slots: input.slots ?? slots, transport: input.transport,
     gate: { classify: input.gate ?? allowGate }, newWork: input.newWork ?? { message: admit, calls: admit } },
   { actorId: input.actor, sessionId: input.session, requestId: input.requestId ?? randomUUID(), text: input.text,
     ...(input.images ? { images: input.images } : {}) }, e => { events.push(e); input.onEvent?.(e); }));
@@ -595,4 +602,108 @@ it('RUNTIME: PUBLISH-MONITOR B2: a failed screenshot turn charges nothing and ke
     .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
   expect(await imageTraces(url)).toEqual([]);
+});
+
+/*
+ * Deep review 2026-11-11, findings 2 and 9. Owner 2026-11-11: a turn whose answer was not saved does not charge the user; Graylum
+ * bears the cost, on record. Finding 2: a NUL or half an emoji in the message made the closing write fail every time (jsonb refuses
+ * both), so a request could be built to be answered for free as often as its sender liked; text is now cleaned at both ends.
+ */
+const turnRow = async (actor: string) => (await db.query(
+  `select id,state,close_kind,settlement,charged_credits,absorbed_credits,reserved_credits,delivered,failure_code
+   from turns where actor_id=$1`, [actor])).rows[0];
+const balance = async (actor: string) => (await db.query('select credits from profiles where id=$1', [actor])).rows[0].credits as number;
+const savedMessages = async (session: string) =>
+  (await db.query('select role,content from session_messages where session_id=$1 order by seq', [session])).rows;
+const ledgerRows = async (actor: string) =>
+  (await db.query('select count(*)::int n from credit_transactions where user_id=$1', [actor])).rows[0].n as number;
+const closeArgs = (actor: string, turnId: number, kind: string, refundAll = false) => ({ p_actor_id: actor, p_turn_id: turnId,
+  p_close_kind: kind, p_messages: [], p_delivered: false, p_refund_all: refundAll, p_failure_code: 'test_close', p_kind_result: null });
+const answer: typeof fetch = async () => sse('gen-close-' + randomUUID(), ['Synthetic ', 'answer']);
+const unsaved = () => vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+it('RUNTIME: CORE-PATH-V2 close: a message with a NUL and half an emoji is answered, saved cleaned and charged once', async () => {
+  const f = await setup();
+  const out = await turn({ actor: f.actor, session: f.session, text: 'Hel\0lo \ud83d', transport: answer });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result, JSON.stringify(out.events)).toMatchObject({ type: 'result', body: 'Synthetic answer', settlement: 'done' });
+  expect(result.chargedCredits).toBeGreaterThan(0);
+  expect(await savedMessages(f.session)).toEqual([{ role: 'user', content: 'Hello �' }, { role: 'assistant', content: 'Synthetic answer' }]);
+  expect(await turnRow(f.actor)).toMatchObject({ close_kind: 'completed', settlement: 'done', charged_credits: result.chargedCredits, delivered: true });
+  expect(await balance(f.actor)).toBe(1000 - result.chargedCredits!);
+});
+
+it('RUNTIME: CORE-PATH-V2 close: a closing write that fails after the whole answer refunds the turn once, keeps the cost on record and is logged', async () => {
+  const f = await setup(), closes: unknown[] = [], logged = unsaved();
+  try {
+    const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport: answer,
+      onClose: async (args, send) => { closes.push(args.p_close_kind); return args.p_close_kind === 'completed' ? LOST : send(); } });
+    // The whole answer reached the user, then the error.
+    expect(out.events.map(e => e.type), JSON.stringify(out.events)).toEqual(['opened', 'text', 'text', 'error']);
+    expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' });
+    expect(closes).toEqual(['completed', 'failed']);
+    const t = await turnRow(f.actor);
+    expect(t).toMatchObject({ state: 'closed', close_kind: 'failed', settlement: 'done', charged_credits: 0, delivered: false,
+      failure_code: 'turn_database_unavailable' });
+    // Nothing was saved, so the user pays nothing; the receipt keeps its cost and Graylum bears it.
+    expect(await balance(f.actor)).toBe(1000);
+    expect(await savedMessages(f.session)).toEqual([]);
+    expect(t.absorbed_credits).toBeGreaterThan(0);
+    expect((await db.query("select status,actual_usd::float8 a from turn_calls where turn_id=$1 and call_kind='model'", [t.id])).rows)
+      .toEqual([{ status: 'ok', a: 0.000003 }]);
+    expect(logged).toHaveBeenCalledWith('ai', 'turn_answer_unsaved', { kind: 'chat', turnId: Number(t.id), code: 'TURN_DATABASE_UNAVAILABLE' });
+    // Repeated: a later close finds the turn settled and changes nothing (no second refund, no new ledger row).
+    const before = await ledgerRows(f.actor);
+    const again = await countingAdmin().admin.rpc('turn_close', closeArgs(f.actor, Number(t.id), 'failed', true));
+    expect(again.error).toBeNull();
+    expect(again.data).toMatchObject({ replay: true, closeKind: 'failed', chargedCredits: 0 });
+    expect(await balance(f.actor)).toBe(1000);
+    expect(await ledgerRows(f.actor)).toBe(before);
+  } finally { logged.mockRestore(); }
+});
+
+it('RUNTIME: CORE-PATH-V2 close: a closing write that committed but whose answer was lost is kept: saved and charged once, never refunded', async () => {
+  const f = await setup(), closes: unknown[] = [], logged = unsaved();
+  try {
+    const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport: answer,
+      onClose: async (args, send) => { closes.push(args.p_close_kind); const done = await send(); return args.p_close_kind === 'completed' ? LOST : done; } });
+    expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' });
+    expect(closes).toEqual(['completed', 'failed']);
+    const t = await turnRow(f.actor);
+    // The first close stands: the refund close found the turn closed and wrote nothing.
+    expect(t).toMatchObject({ state: 'closed', close_kind: 'completed', settlement: 'done', delivered: true, failure_code: null });
+    expect(t.charged_credits).toBeGreaterThan(0);
+    expect(await balance(f.actor)).toBe(1000 - t.charged_credits);
+    expect(await savedMessages(f.session)).toEqual([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Synthetic answer' }]);
+  } finally { logged.mockRestore(); }
+});
+
+it('RUNTIME: CORE-PATH-V2 close: a turn left open (both closes lost) is ended by recovery with nothing charged, once, also by two recoveries at once', async () => {
+  const f = await setup(), logged = unsaved();
+  try {
+    const out = await turn({ actor: f.actor, session: f.session, text: 'Hello', transport: answer, onClose: async () => LOST });
+    expect(out.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' });
+  } finally { logged.mockRestore(); }
+  const open = await turnRow(f.actor);
+  // Nothing refunded, nothing charged yet: the turn is still running with its freeze, as the platform stopping the function leaves it.
+  expect(open).toMatchObject({ state: 'running', close_kind: null, charged_credits: null });
+  expect(await balance(f.actor)).toBe(1000 - open.reserved_credits);
+  // The recovery job ends a turn nobody wrote for 15 minutes. Two instances at once: one closes it, the other finds it closed.
+  await db.query("update turns set updated_at=now()-interval '16 minutes' where actor_id=$1 and id=$2", [f.actor, open.id]);
+  const recover = { p_actor_id: f.actor, p_turn_id: Number(open.id), p_action: 'interrupt' };
+  const both = await Promise.all([countingAdmin().admin.rpc('turn_recover', recover), countingAdmin().admin.rpc('turn_recover', recover)]);
+  expect(both.map(r => r.error)).toEqual([null, null]);
+  expect(both.map(r => Boolean((r.data as { skipped?: boolean }).skipped)).sort()).toEqual([false, true]);
+  const t = await turnRow(f.actor);
+  // Owner 2026-11-11: interrupted, no answer saved: the user pays nothing although the receipt is final; the cost is Graylum's.
+  expect(t).toMatchObject({ state: 'closed', close_kind: 'interrupted', settlement: 'done', charged_credits: 0, delivered: false });
+  expect(t.absorbed_credits).toBeGreaterThan(0);
+  expect(await balance(f.actor)).toBe(1000);
+  expect(await savedMessages(f.session)).toEqual([]);
+  // The freeze came back exactly once.
+  const before = await ledgerRows(f.actor);
+  const again = await countingAdmin().admin.rpc('turn_close', closeArgs(f.actor, Number(open.id), 'interrupted'));
+  expect(again.data).toMatchObject({ replay: true, closeKind: 'interrupted', chargedCredits: 0 });
+  expect(await balance(f.actor)).toBe(1000);
+  expect(await ledgerRows(f.actor)).toBe(before);
 });

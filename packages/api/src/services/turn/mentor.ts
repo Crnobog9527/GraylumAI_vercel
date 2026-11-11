@@ -21,7 +21,7 @@ import { researchContextFrom, withResearchContext } from './research/researchHos
 import { skillFileToolBytes } from './skills/skillFile';
 import type { PricingDeps } from './admission/pricingAdmission';
 import { modelCall, TurnStop } from './call';
-import { CLOSES, GATE_CODES, type ChatDeps } from './chat';
+import { CLOSES, GATE_CODES, noteUnsavedAnswer, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
@@ -168,7 +168,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     refundAll?: boolean; failureCode?: string; kindResult?: Record<string, unknown> } = {}) =>
     db.close({ actorId: input.actorId, turnId: opened.turnId, kind, messages: extra.messages ?? [], delivered: extra.delivered ?? false,
       refundAll: extra.refundAll, failureCode: extra.failureCode ?? null, kindResult: extra.kindResult });
-  let stopped: TurnStop | undefined;
+  let stopped: TurnStop | undefined, replyStreamed = false;
   const keep = (error: unknown) => { if (error instanceof TurnStop) stopped = error; throw error; };
   // The pause and the call limits again before each paid call (the old path's call gate): nothing is written or sent.
   const callGate = async () => {
@@ -308,6 +308,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const scopeDenied = rechecked !== null && !rechecked.allowed;
     const researchMade = benchmark?.journal();
     markStage('model');
+    // From here the reply has been streamed in full; only the closing write can still fail (noteUnsavedAnswer).
+    replyStreamed = true;
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: words }, { role: 'assistant', content: mentorReplyBody(turn.body, input.stepId, ctx.roundId) }],
       ...(organizer || researchMade || stepLog.size ? { kindResult: { ...(organizer ? { roundId: ctx.roundId, revisionId: ctx.revisionId,
@@ -326,8 +328,11 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     false, { category: 'ai' });
     if (code !== 'TURN_PAUSED_FOR_CREDITS') {
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
+      if (replyStreamed) noteUnsavedAnswer('mentor', opened.turnId, code);
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
-      // What the turn's research already paid for is kept even when the reply failed.
+      // What the turn's research found is saved even when the reply failed, also when the turn is refunded in full or closes
+      // interrupted (neither charges the user): the supplier is already paid (Graylum bears it, Owner 2026-10-12 and 2026-11-11),
+      // and a retry then does not search, or pay the supplier, again.
       const made = benchmark?.journal();
       await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase(),
         ...(made ? { kindResult: { research: made } } : {}) }), undefined,

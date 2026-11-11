@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TurnStop } from './call';
 import type { ChatDeps } from './chat';
 import type { TurnEvent } from './sse';
+import { logger } from '../../lib/logger';
 import { runTopicTurn, type TopicInput } from './topic';
 import { handleTopicTurn, type TopicHttpDeps } from './topicHttp';
 
@@ -35,7 +36,9 @@ const quote = { pricing: { version: 'nominal-v1' }, modelId: uuid(20), model: 'a
 const workspace = { sessionId: uuid(3), moduleId: uuid(4), skillId: uuid(5), revisionId: uuid(6), packageHash: 'b'.repeat(64),
   resources: ['plan.md'], sourceVersionId: uuid(7), material: { sessionId: uuid(3), revision: 1, hash: 'f', content: { material: 'CONFIRMED' } } };
 
-function harness(over: { source?: { data?: unknown; error?: { message: string } }; openError?: string; open?: () => unknown; gate?: { message?: unknown; calls?: unknown } } = {}) {
+function harness(over: { source?: { data?: unknown; error?: { message: string } }; openError?: string; open?: () => unknown; gate?: { message?: unknown; calls?: unknown };
+  /** A turn_close the database refuses (its error text), by the arguments it was called with. */
+  closeError?: (args: Record<string, unknown>) => string | undefined } = {}) {
   const rpc: Array<[string, Record<string, unknown>]> = [];
   const respond = async (name: string, args: Record<string, unknown>) => {
     rpc.push([name, args]);
@@ -43,6 +46,8 @@ function harness(over: { source?: { data?: unknown; error?: { message: string } 
     if (name === 'turn_open' && over.openError) return { data: null, error: { code: 'P0001', message: over.openError, details: null } };
     if (name === 'turn_open') return { data: over.open?.() ?? { turnId: 9, state: 'running', replay: false, reservedCredits: 30, reservedUsd: 0.3,
       history: [], positioning: { positioned: true, refusals24h: 0 } }, error: null };
+    const refused = name === 'turn_close' ? over.closeError?.(args) : undefined;
+    if (refused) return { data: null, error: { code: 'P0001', message: refused, details: null } };
     if (name === 'turn_close') return { data: { turnId: 9, closeKind: args.p_close_kind, chargedCredits: args.p_delivered ? 7 : 0,
       absorbedCredits: 0, settlement: 'done', replay: false }, error: null };
     return { data: null, error: { message: 'unexpected ' + name } };
@@ -51,7 +56,7 @@ function harness(over: { source?: { data?: unknown; error?: { message: string } 
   const deps = { admin: {}, clients: { write: client, read: client }, slots: {},
     newWork: { message: async () => over.gate?.message ?? { ok: true }, calls: async () => over.gate?.calls ?? { ok: true } } } as unknown as ChatDeps;
   const events: TurnEvent[] = [];
-  return { deps, events, emit: (e: TurnEvent) => events.push(e), names: () => rpc.map(([n]) => n), args: (name: string) => rpc.find(([n]) => n === name)![1] };
+  return { rpc, deps, events, emit: (e: TurnEvent) => events.push(e), names: () => rpc.map(([n]) => n), args: (name: string) => rpc.find(([n]) => n === name)![1] };
 }
 type Run = { exchange: (s: number, b: string) => Promise<string>; onText: (d: string) => void; instructions: string; input: string; tools: unknown[]; maxTurns: number };
 const runs = (text: string) => { h.call.mockResolvedValue('{}'); h.runtime.mockImplementation(async (o: Run) => { await o.exchange(1, '{}'); o.onText(text); return text; }); };
@@ -154,6 +159,22 @@ describe('a topic turn on kind=chat (CORE-PATH-V2 V2-10b)', () => {
     const u = harness(); h.runtime.mockRejectedValue(new TurnStop('TURN_CALL_UNKNOWN'));
     await runTopicTurn(u.deps, input, u.emit);
     expect(u.args('turn_close')).toMatchObject({ p_close_kind: 'interrupted', p_delivered: false });
+  });
+
+  // Deep review 2026-11-11, findings 2 and 9 (Owner 2026-11-11: a turn whose answer was not saved does not charge the user).
+  it('a closing write that fails after the whole reply was streamed refunds the turn and is logged as an error', async () => {
+    const logged = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    try {
+      const t = harness({ closeError: args => args.p_close_kind === 'completed' ? 'connection reset' : undefined }); runs('TOPICS');
+      await runTopicTurn(t.deps, input, t.emit);
+      const closes = t.rpc.filter(([name]) => name === 'turn_close').map(([, args]) => args);
+      expect(closes).toHaveLength(2);
+      expect(closes[0]).toMatchObject({ p_close_kind: 'completed', p_delivered: true });
+      expect(closes[1]).toMatchObject({ p_close_kind: 'failed', p_refund_all: true, p_delivered: false, p_messages: [],
+        p_failure_code: 'turn_database_unavailable' });
+      expect(t.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE', turnId: 9 });
+      expect(logged).toHaveBeenCalledExactlyOnceWith('ai', 'turn_answer_unsaved', { kind: 'topic', turnId: 9, code: 'TURN_DATABASE_UNAVAILABLE' });
+    } finally { logged.mockRestore(); }
   });
 });
 

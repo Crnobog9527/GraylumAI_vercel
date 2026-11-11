@@ -30,6 +30,13 @@ describe('turn notices', () => {
     expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS')).toMatchObject({ kept: false, text: expect.stringContaining('点继续') });
     expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS').text).toContain('24 小时');
   });
+  // Owner 2026-11-11: a turn that was cut off saved no answer and charges nothing.
+  it('says an interrupted reply is not charged and its frozen credits come back', () => {
+    const notice = turnCodeNotice('TURN_CALL_UNKNOWN');
+    expect(notice).toMatchObject({ kept: false, text: expect.stringContaining('不扣积分') });
+    expect(notice.text).toContain('退回');
+    expect(notice.text).not.toContain('以记录为准');
+  });
   it('names every trimmed tool, grouped by why (never a silent drop)', () => {
     expect(trimmedToolNotices({ available: ['read_source'], trimmed: [{ name: 'web_search', reason: 'capacity' },
       { name: 'web_fetch', reason: 'capacity' }, { name: 'social_search', reason: 'disabled' }] }))

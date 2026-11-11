@@ -4010,7 +4010,7 @@
   "fn:turn_settle_holds(uuid,turns,integer)": "13220202a6f1",
   "fn:turn_stop(uuid,bigint,boolean,integer)": "0d2aa4bf0602",
   "fn:turn_tombstones(uuid,uuid,jsonb)": "794b9d808628",
-  "fn:turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)": "e8a7e76a290e",
+  "fn:turn_user_charge(uuid,bigint,text,boolean,boolean,integer,integer,integer,timestamp with time zone)": "4a508f9e21bf",
   "fn:turn_voice_apply(turns,text,jsonb)": "120783c85f0e",
   "fn:turn_voice_context(uuid,jsonb)": "5a5f1ee7b6f8",
   "fn:turn_voice_revoked(uuid,jsonb)": "6cc811254721",

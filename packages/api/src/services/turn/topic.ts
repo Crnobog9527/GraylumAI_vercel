@@ -17,7 +17,7 @@ import { runRuntime } from './agent/runner';
 import { rowFor } from './settings/settingsRows';
 import { swallow } from '../../lib/swallow';
 import { modelCall, TurnStop } from './call';
-import { CLOSES, GATE_CODES, HISTORY_ITEMS, readCoreConfig, type ChatDeps } from './chat';
+import { CLOSES, GATE_CODES, HISTORY_ITEMS, noteUnsavedAnswer, readCoreConfig, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind } from './db';
 import { projectHistory, trimHistory, turnSession } from './history';
 import { startThresholdCredits, turnPolicy } from './policy';
@@ -98,7 +98,7 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
       failureCode: extra.failureCode ?? null, messages: extra.reply === undefined ? []
         : [{ role: 'user', content: input.text }, { role: 'assistant', content: extra.reply }] });
 
-  let text = '', stopped: TurnStop | undefined, seq = 0;
+  let text = '', stopped: TurnStop | undefined, seq = 0, answered = false;
   try {
     // 3b. The open set the conversation's active turn, which a re-bind to a newer positioning refuses to pass: read the workspace once more,
     // on the write client, and give the turn up if the positioning was re-bound between the first read and the open (nothing was sent).
@@ -146,12 +146,15 @@ export async function runTopicTurn(deps: ChatDeps, input: TopicInput, emit: (eve
       },
     });
     const reply = output || text;
+    // The whole answer has been streamed; only the closing write can still fail (noteUnsavedAnswer).
+    answered = true;
     const closed = await close('completed', { reply });
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId });
     emit({ type: 'result', turnId, body: reply, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
   } catch (error) {
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
+    if (answered) noteUnsavedAnswer('topic', turnId, code);
     await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
       { category: 'ai' });
     emit({ type: 'error', code, turnId });

@@ -7,7 +7,8 @@ import { armFault, db, expectNothingFrozen, lastTurnId, ledger, resetSim, runRec
 /**
  * Injected provider failures on a free-chat turn. Whatever happens, the turn must end closed and settled under the existing rules
  * (CORE-PATH-V2 2.5): a 402 refusal charges nothing; a broken or silent stream keeps the freeze until the recovery job finds the
- * provider's receipt (charge what it says, never more than was frozen) or learns there is none (refund, #1667); never twice.
+ * provider's receipt or learns there is none (#1667), and then returns it in full, once: a turn cut off saved no answer, so the user
+ * pays nothing for it whatever the receipt says (Owner 2026-11-11); the cost stays on the receipt and is Graylum's.
  */
 test.beforeEach(resetSim);
 
@@ -59,11 +60,19 @@ test('402 from the provider: refused before generation, nothing charged, nothing
   await expectNothingFrozen(seed().users.bob.id);
 });
 
-test('stream cut after ~0.5 s with a receipt: frozen until recovery, then charged what the receipt says, once', async ({ page }) => {
+// Owner 2026-11-11 (deep review finding 9): before, this turn was charged what the receipt said although no answer was saved.
+test('stream cut after ~0.5 s with a receipt: frozen until recovery, then nothing charged; the cost stays on the receipt, once', async ({ page }) => {
+  const bob = seed().users.bob;
   const { turn, before } = await failedTurn(page, { mode: 'cut' });
   expect(turn.close_kind).toBe('interrupted');
   const settled = await expectSettledBy(turn.id, before);
-  expect(settled.charged ?? 0, 'the provider billed the cut generation').toBeGreaterThan(0);
+  expect(settled.charged ?? 0, 'no answer was saved, so the user pays nothing').toBe(0);
+  expect((await ledger(bob.id)).credits).toBe(before);
+  // The provider did bill the cut generation: the receipt keeps that cost (Graylum bears it, on record).
+  const receipts = await db()`select status, actual_usd::float8 as actual from turn_calls
+    where actor_id = ${bob.id}::uuid and turn_id = ${turn.id}::bigint and call_kind = 'model'`;
+  expect(receipts.map(r => r.status)).toEqual(['ok']);
+  expect(Number(receipts[0]!.actual), 'the provider cost stays recorded').toBeGreaterThan(0);
 });
 
 /**
