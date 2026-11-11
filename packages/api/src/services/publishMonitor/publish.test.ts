@@ -50,6 +50,7 @@ function database(results: Record<string, unknown[]>) {
 }
 const fresh = () => ({
   publish_monitor_publish_claim: [{ ...view('claimed'), replayed: false, quotaAlert: false }],
+  publish_monitor_schedule_prepare: [view('claimed')],
   publish_monitor_publish_targets: [{ providerAccountIds: ['spc_x', 'spc_y'] }],
   publish_monitor_publish_dispatch: [{ ...view('dispatching'), dispatch: true, providerAccountIds: ['spc_x', 'spc_y'] }],
   publish_monitor_publish_record: [view('unknown')],
@@ -102,17 +103,19 @@ describe('submit publish (simulated provider)', () => {
     const warn = vi.spyOn(logger, 'warn');
     const job = await submitPublish(d.db, p.deps, USER, input);
     expect(job.state).toBe('unknown');
-    expect(d.names()).toEqual(['publish_monitor_publish_claim', 'publish_monitor_publish_targets',
-      'publish_monitor_publish_dispatch', 'publish_monitor_publish_record']);
-    expect(d.calls[2]![1]).toEqual({ a: USER, p_job: JOB, p_observed: {
+    expect(d.names()).toEqual(['publish_monitor_publish_claim', 'publish_monitor_schedule_prepare',
+      'publish_monitor_publish_targets', 'publish_monitor_publish_dispatch', 'publish_monitor_publish_record']);
+    expect(d.calls[1]![1]).toEqual({ a: USER, p_job: JOB, p_scheduled_at: null, p_preview: 'Hello', p_media_count: 1 });
+    expect(d.calls[3]![1]).toEqual({ a: USER, p_job: JOB, p_observed: {
       spc_x: { ownerRef: MINE, connected: true }, spc_y: { ownerRef: MINE, connected: true } } });
     expect(p.calls.map(c => c.line)).toEqual(['GET /social-accounts/spc_x', 'GET /social-accounts/spc_y', 'POST /social-posts']);
     expect(p.calls[2]!.body).toEqual({ caption: 'Hello', social_accounts: ['spc_x', 'spc_y'], external_id: JOB,
       media: [{ url: MEDIA }] });
-    expect(d.calls[3]![1]).toEqual({ p_job: JOB, p_provider_post_id: 'sp_1', p_results: {} });
-    // Neither the database nor the logs ever see the media link or the caption.
+    expect(d.calls[4]![1]).toEqual({ p_job: JOB, p_provider_post_id: 'sp_1', p_results: {} });
+    // Neither the database nor the logs ever see the media link; the database gets only the schedule-view preview
+    // (at most 40 characters, PUBLISH-SCHEDULE), never the caption otherwise.
     expect(JSON.stringify(d.calls)).not.toContain('secret-file');
-    expect(JSON.stringify(d.calls)).not.toContain('Hello');
+    expect(JSON.stringify(d.calls.filter(c => c[0] !== 'publish_monitor_schedule_prepare'))).not.toContain('Hello');
     expect(JSON.stringify([...info.mock.calls, ...warn.mock.calls])).not.toContain('secret-file');
     info.mockRestore();
     warn.mockRestore();
@@ -158,7 +161,7 @@ describe('submit publish (simulated provider)', () => {
     const d = database({ ...fresh(), publish_monitor_publish_dispatch: [{ ...view('released'), dispatch: false }] });
     const p = provider([json(404, {}), account('spc_y', 'c'.repeat(32))]);
     expect((await submitPublish(d.db, p.deps, USER, input)).state).toBe('released');
-    expect(d.calls[2]![1]).toMatchObject({ p_observed: { spc_x: { ownerRef: null, connected: false },
+    expect(d.calls[3]![1]).toMatchObject({ p_observed: { spc_x: { ownerRef: null, connected: false },
       spc_y: { ownerRef: 'c'.repeat(32), connected: true } } });
     expect(p.calls.map(c => c.line)).not.toContain('POST /social-posts');
   });
