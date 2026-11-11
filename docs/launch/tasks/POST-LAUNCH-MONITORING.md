@@ -44,6 +44,8 @@ Owner 2026-11-03（总控转述）：每日真实模型检查只做到上线；�
 
 ## 4. 小改动清单（每项一个小 PR，都不新增服务）
 
+> 2026-11-11（CODE-HEALTH，总控批复）：上线前只做 S9（分钟恢复任务停跑和连续失败），已实现：`apps/web/src/lib/recovery-heartbeat-alert.ts`，由 `library-cleanup` 任务每 5 分钟检查，发 Sentry 并经已有的 `ops_backlog` 发飞书；整数键已登记进 `sentry-scrub.ts`。对应下表 M1、M3b 里 S9 的部分和 M4 里这两个代码。其余（M2、M3a、M3b 的 S7/S8、M5、M6）仍是上线后。
+
 | # | 改动 | 位置 | 复用 | 迁移 |
 | --- | --- | --- | --- | --- |
 | M1 | `runtime-recovery` 任务连续失败时发 `RUNTIME_RECOVERY_RUN_FAILING`（S9 的失败部分） | `apps/web/src/app/api/cron/runtime-recovery/route.ts`，新增一个小告警模块 | `erasure-backlog-alert.ts` 的写法；`scheduled_job_runs` 连续失败读法 | 无 |

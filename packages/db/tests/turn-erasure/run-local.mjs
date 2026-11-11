@@ -47,6 +47,7 @@ const cleanup=(a,session=a.session)=>one("select content_erasure_confirm($1,'ses
 const content=async session=>(await c.query(`select count(*) filter (where visible)::int visible,count(*) filter (where content<>'')::int text,
   count(*)::int total from session_messages where session_id=$1`,[session])).rows[0];
 const raws=session=>one('select count(*)::int v from turn_call_raw r join turns t on t.id=r.turn_id where t.session_id=$1',[session]);
+const turn_state=async t=>(await c.query('select state from turns where actor_id=$1 and id=$2',[t.a.actor,t.id])).rows[0];
 const money=async a=>(await c.query(`select (select credits from profiles where id=$1) credits,
   (select sum(amount)::int from credit_transactions where user_id=$1) ledger,(select count(*)::int from credit_transactions where user_id=$1) rows,
   (select json_agg(json_build_object('id',id,'charged',charged_credits,'absorbed',absorbed_credits,'kind',close_kind) order by id) from turns where actor_id=$1) turns,
@@ -454,6 +455,43 @@ try{
   await c.query("select account_erasure_note_error($1,'BILLING_CLEAR')",[a.actor]);
   assert.equal(await one('select stage v from account_erasure_requests where profile_id=$1',[a.actor]),'closed');
   report.checks.push('account erased while a turn is open and never closed: the recovery job closes it, the user is charged what the turn says exactly once (a second pass moves no money), the balance equals the ledger, bodies and messages are scrubbed, nothing is left in flight and the erasure reaches closed');
+ }
+ // 16. Deep review item 12 (0512): a turn paused for credits whose account is then erased expires at once, not after 24 hours,
+ // so it no longer holds the erasure (and its 12- and 20-hour alerts). A live account's paused turn still waits the 24 hours.
+ {
+  const pausedTurn=async()=>{
+   const a=await account(30);
+   const o=await open(a,{pol:policy({gCredits:60,minCredits:30,uModelCredits:20})});
+   const call=(seq,upper)=>one('select turn_call_begin($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',
+    [a.actor,o.turnId,seq,'model',randomUUID(),null,null,hash('r'+o.turnId+seq),upper,6]);
+   await call(1,0.02);
+   await one("select turn_call_record($1,$2,1,'ok',0.02,0.02,'{}',null,$3,'PAUSED_PRIVATE_BODY') v",[a.actor,o.turnId,hash('p'+o.turnId)]);
+   assert.equal((await call(2,0.04)).paused,true,'the second call pauses the turn for credits');
+   return {a,id:o.turnId};
+  };
+  const claimedFor=async t=>(await one('select turn_recovery_claim(50) v')).filter(item=>item.turnId===t.id).map(item=>item.action);
+  const live=await pausedTurn(),gone=await pausedTurn();
+  assert.deepEqual(await claimedFor(live),[],'a live account\'s paused turn waits the 24 hours');
+  assert.equal((await one('select turn_recover($1,$2,$3) v',[live.a.actor,live.id,'expire'])).skipped,true);
+  await c.query("update profiles set status='deleted',is_deleted='true',deleted_at=now() where id=$1",[gone.a.actor]);
+  await c.query("insert into account_erasure_requests(profile_id,request_id,confirmed_at) values($1,$2,now())",[gone.a.actor,randomUUID()]);
+  assert.equal((await one('select account_erasure_work_batch($1) v',[gone.a.actor])).financialPending,1,'the paused turn is in flight');
+  assert.deepEqual(await claimedFor(gone),['expire'],'claimed at once once the account is erased');
+  // Two instances recover it together: one closes it, the other is skipped; the whole freeze comes back (expired, undelivered).
+  const [p1,p2]=[await peer(),await peer()];
+  let results;
+  try{results=await Promise.all([p1,p2].map(p=>one('select turn_recover($1,$2,$3) v',[gone.a.actor,gone.id,'expire'],p)));}
+  finally{await p1.end();await p2.end();}
+  assert.equal(results.filter(r=>!r.skipped).length,1,'exactly one close');
+  const done=results.find(r=>!r.skipped);
+  assert.deepEqual([done.closeKind,done.chargedCredits,done.settlement],['expired',0,'done']);
+  const m=await money(gone.a);
+  assert.equal(m.credits,30);assert.equal(m.credits,m.ledger,'nothing left frozen');
+  assert.equal((await one('select turn_recover($1,$2,$3) v',[gone.a.actor,gone.id,'expire'])).skipped,true,'a repeat changes nothing');
+  assert.deepEqual(await money(gone.a),m);
+  assert.equal((await one('select account_erasure_work_batch($1) v',[gone.a.actor])).financialPending,0,'nothing in flight any more');
+  assert.equal((await turn_state(live)).state,'paused','the live account is untouched');
+  report.checks.push('item 12: an erased account\'s paused turn is claimed and expired at once (full refund, one close under two instances, repeat no-op), its erasure has nothing in flight; a live account\'s paused turn still waits 24 hours');
  }
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}
