@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- FOUNDER-RENEWAL-ONE-TIME (deep review 2026-11-11, item 6). Placeholder number 9999: the controller assigns the real one.
+-- FOUNDER-RENEWAL-ONE-TIME (deep review 2026-11-11, item 6). Number 0514 assigned by the controller.
 -- A Gold founder who bought by WeChat Pay or Alipay sees "续买创始会员一年"; the dialog defaulted to the card, whose
 -- admission (recurring := Stripe card membership) opened an auto-renewing subscription counted from the payment day, while
 -- the page promised a one-time payment appended to the current term (Owner 2026-10-21: founder renewal rules unchanged).
@@ -88,7 +88,7 @@ BEGIN
           AND fulfilled_at IS NOT NULL)
         OR pay_waffo_founder_deadline(prior.id) IS NULL OR now()>pay_waffo_founder_deadline(prior.id)
         OR (prior.auto_renew AND old_sub.status<>'canceled') THEN RAISE EXCEPTION 'PAY_WAFFO_FOUNDER_EXPIRED'; END IF;
-      -- 9999 (deep review item 6; Owner 2026-10-21 "创始会员续买规则不变": one-time, appended to the paid term): a one-time
+      -- 0514 (deep review item 6; Owner 2026-10-21 "创始会员续买规则不变": one-time, appended to the paid term): a one-time
       -- founder renews only by a one-time method. A Stripe card here would open a self-renewing subscription counted from
       -- today. Same method rule as wallet_renewal: wallets, or a card while new purchases route to Waffo (one-time there).
       IF prior.auto_renew IS DISTINCT FROM true AND NOT (p_method IN ('wechat_pay','alipay') OR p_method IN ('card','card_cn') AND
