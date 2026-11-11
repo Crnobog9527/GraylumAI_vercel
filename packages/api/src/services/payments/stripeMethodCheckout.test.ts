@@ -87,8 +87,28 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     expect(mocks.build).toHaveBeenCalledWith(expect.objectContaining({ testClockCustomerId: customerId,
       card: expect.objectContaining({ testClockCustomerId: customerId, managedPayments: method === 'card' }) }));
   });
+  // The guard refuses a clock more than 300 seconds from now (stripeMethodCheckout.ts). The fixtures stay well away from that
+  // line on both sides: frozen_time is rounded down to a whole second and the run itself takes milliseconds, so an offset of
+  // 301 could land at 300 or below and pass (CI flake on #1856, 2026-11-11). The 300-second line itself is unchanged.
+  it.each(['card', 'card_cn'] as const)('accepts a %s test clock well inside the 5-minute alignment on both sides', async method => {
+    for (const offset of [-240, 240]) {
+      allowTestClockStaging();
+      const f = fixture(method);
+      const customerId = 'cus_clockcustomer123';
+      const retrieve = vi.fn().mockResolvedValue({ id: customerId, object: 'customer', livemode: false,
+        metadata: { graylum_user_id: id }, test_clock: 'clock_fixture' });
+      const clock = { id: 'clock_fixture', object: 'test_helpers.test_clock', livemode: false, status: 'ready',
+        frozen_time: Math.floor(Date.now() / 1000) + offset };
+      const checkoutInput = { ...f.input, stripeTestClockCustomerId: customerId,
+        stripe: { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue(clock) } } } as unknown as Stripe };
+      f.rpc.mockResolvedValue({ data: { dispatch: true, request: { providerRequest: { expires_at: 9999999999,
+        discounts: [{ coupon: 'coupon_first' }], customer: customerId } } }, error: null });
+      await expect(createStripeCardCheckout(checkoutInput)).resolves.toMatchObject({ state: 'open' });
+      expect(mocks.prepare).toHaveBeenCalled();
+    }
+  });
   it.each(['card', 'card_cn'] as const)('preserves the first-checkout alignment guard for %s', async method => {
-    for (const offset of [-301, 301, 31 * 86400]) {
+    for (const offset of [-360, 360, 31 * 86400]) {
     allowTestClockStaging();
     const f = fixture(method);
     const customerId = 'cus_clockcustomer123';
