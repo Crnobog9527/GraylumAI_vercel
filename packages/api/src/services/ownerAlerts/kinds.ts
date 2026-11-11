@@ -17,6 +17,8 @@ export type OwnerAlertFacts = {
   payment_webhook_failed: { provider: PaymentProvider; eventId: string; eventType: string | null; code: string };
   /** Callbacks are reaching us but cannot be checked or stored (bad signature, store down): nothing gets through. */
   payment_webhook_unavailable: { provider: PaymentProvider; reason: 'signature' | 'storage' };
+  /** PAY-STALE-SUB: a subscription change no handler claimed. It was acknowledged, so the provider never sends it again. */
+  payment_webhook_unclaimed: { provider: PaymentProvider; eventId: string; eventType: string };
   /** A Stripe card refund we did not start (Link, Dashboard), as recorded by pay_stripe_mp_record_external_refund. */
   refund: {
     orderId: string; refundId: string; orderKind: string;
@@ -63,6 +65,7 @@ type Rule<K extends OwnerAlertKind> = { key: (facts: OwnerAlertFacts[K], now: Da
 export const RULES: { [K in OwnerAlertKind]: Rule<K> } = {
   payment_webhook_failed: { key: f => `${f.provider}:${f.eventId}`, ttlSeconds: EVENT_TTL },
   payment_webhook_unavailable: { key: f => `${f.provider}:${f.reason}`, ttlSeconds: HOUR },
+  payment_webhook_unclaimed: { key: f => `${f.provider}:${f.eventId}`, ttlSeconds: EVENT_TTL },
   // The state is part of the key: a refund that first needs review and is later recorded is two facts.
   refund: { key: f => `${f.state}:${f.orderId}:${f.refundId}`, ttlSeconds: EVENT_TTL },
   dispute: { key: f => `${f.code}:${f.disputeId}`, ttlSeconds: 30 * DAY },

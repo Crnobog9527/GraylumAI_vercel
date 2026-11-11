@@ -12,6 +12,7 @@ import { handleCardRefund } from './cardRefundWebhook';
 import { cardStripeSubscription } from './cardUpgrade';
 import { stopRenewalAfterReview } from './cardSubscriptionStop';
 import { settleOpenMethodOrders, type OpenOrderFinding } from './methodOrderSettle';
+import { reconcileStaleSubscriptions } from './staleSubscriptionRefresh';
 import type { StripeScope } from './purchaseFacts';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
@@ -201,6 +202,16 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       complete = false;
       findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' });
     }
+  }
+
+  // 4b. PAY-STALE-SUB: subscriptions still renewing here a day past their period end (final event lost, or a legacy
+  //     subscription whose events are no longer handled) are re-read at Stripe and applied, so they stop blocking
+  //     a new purchase once Stripe has ended them. One Stripe still renews is left as it is.
+  if (!outOfTime) {
+    const stale = await reconcileStaleSubscriptions(db, stripe, scope, { deadline, maxPages, now: options.now?.getTime() });
+    checked += stale.checked; repaired += stale.repaired; complete &&= stale.complete;
+    findings.push(...stale.findings);
+    outOfTime = Date.now() > deadline;
   }
 
   // 5. Unpaid orders still open (#961): scan 1 only reads paid sessions, so a session that expired without its webhook,

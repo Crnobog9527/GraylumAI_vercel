@@ -162,7 +162,13 @@ describe('stripe webhook route with the legacy fallback closed (ARCH-FIX F2)', (
     legacyFulfillment().forEach(mock => expect(mock).not.toHaveBeenCalled());
     expect(routeMocks.logServerWarn).toHaveBeenCalledWith('billing', 'stripe_webhook_unclaimed', { eventType });
     expect(routeMocks.logServerError).not.toHaveBeenCalled();
-    expect(routeMocks.alertOwner).not.toHaveBeenCalled();
+    // PAY-STALE-SUB: an unclaimed subscription change reaches the Owner once per event; other unclaimed events do not.
+    if (eventType.startsWith('customer.subscription.')) {
+      expect(routeMocks.alertOwner).toHaveBeenCalledExactlyOnceWith('payment_webhook_unclaimed',
+        { provider: 'stripe', eventId: `evt_test_${eventType.replaceAll('.', '_')}`, eventType });
+    } else {
+      expect(routeMocks.alertOwner).not.toHaveBeenCalled();
+    }
   });
 
   it('still returns 500 and logs when a current handler fails, so Stripe retries', async () => {
