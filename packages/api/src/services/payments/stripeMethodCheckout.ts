@@ -9,6 +9,7 @@ import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent, type StripeCardCheckout } from './stripeCheckoutIntent';
 import { observeUpgradePrior } from './cardUpgrade';
 import { settleBuyerOrders } from './methodOrderSettle';
+import { refreshBuyerStaleSubscriptions } from './staleSubscriptionRefresh';
 import { stripeTestClockRuntimeOpen, readStripeTestClock } from './stripeTestClock';
 import { swallow } from '../../lib/swallow';
 
@@ -80,6 +81,12 @@ export async function createStripeMethodCheckout(input: Input) {
   const order = await prepare().catch(async (error: unknown) => {
     // #961: another plan's order that can no longer be paid (session expired without its webhook, or failed before
     // its claim) is closed once Stripe confirms it; admission then runs once more. Anything else keeps the refusal.
+    // PAY-STALE-SUB: a subscription Stripe has already ended, whose final event was lost, still reads as a membership;
+    // it is re-read at Stripe and applied, then admission runs once more. One Stripe still renews keeps the refusal.
+    if (error instanceof Error && error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED') {
+      if (!await refreshBuyerStaleSubscriptions(db, stripe, scope, userId)) throw error;
+      return prepare();
+    }
     if (!(error instanceof Error) || error.message !== 'PAY_WAFFO_PURCHASE_PENDING') throw error;
     if (!await swallow('stripe_method_settle_buyer_orders_failed', settleBuyerOrders(db, stripe, scope, userId), false, { category: 'billing' })) throw error;
     return prepare();

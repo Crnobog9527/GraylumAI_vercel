@@ -61,6 +61,11 @@ export async function handleStripeWebhookEvent(
   // (10-12) exist only as staging test data; production starts from a new database. An event no current handler claims
   // changes no credits: it is logged and acknowledged so Stripe stops retrying. stripeFulfillment.ts stays for other callers.
   logServerWarn('billing', 'stripe_webhook_unclaimed', { eventType: event.type });
+  // PAY-STALE-SUB: an unclaimed subscription change (e.g. the final cancellation) is gone once acknowledged; the Owner hears
+  // once per event. The daily reconciliation re-reads such a subscription at Stripe if it still reads as renewing.
+  if (event.type.startsWith('customer.subscription.')) {
+    alertOwnerAfterResponse('payment_webhook_unclaimed', { provider: 'stripe', eventId: event.id, eventType: event.type });
+  }
 }
 
 export async function POST(request: Request) {

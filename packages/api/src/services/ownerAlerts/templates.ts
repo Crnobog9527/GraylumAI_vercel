@@ -98,6 +98,12 @@ const RENDERERS: Renderers = {
       + '如果一直失败，用户付的钱可能没到账，请到后台订单页看看。',
     path: '/admin/orders',
   }),
+  payment_webhook_unclaimed: f => ({
+    line: `【订阅通知没人处理】${provider(f.provider)} 发来一条会员订阅的变化通知（例如到期取消），系统找不到对应的订阅，`
+      + `已经确认收到但什么都没改，${provider(f.provider)} 不会再发。请到后台订单页核对这个用户的会员状态；每日对账也会再按 `
+      + `${provider(f.provider)} 的状态核对一次。`,
+    path: '/admin/orders',
+  }),
   payment_webhook_unavailable: f => ({
     line: f.reason === 'signature'
       ? `【付款回调出错】${provider(f.provider)} 发来的通知签名对不上，付款都不会自动到账。请检查 Vercel 里的回调密钥是不是这个环境的。`
