@@ -79,7 +79,10 @@ beforeAll(async () => {
     resolve: { alias: { '@': fileURLToPath(new URL('../../../../', import.meta.url)) } },
     plugins: [{ name: 'profile-tickets-fixture', enforce: 'pre', resolveId(id: string) {
       if (id === entry) return id;
-      if (id in STUBS) return `\0stub:${id}`;
+      // '@/x' reaches here either as written or already turned into an absolute path by the alias
+      const path = id.replace(/\.(tsx?|jsx?)$/, '');
+      const key = Object.keys(STUBS).find(name => name === id || (name.startsWith('@/') && path.endsWith(name.slice(1))));
+      if (key) return `\0stub:${key}`;
     }, load(id: string) {
       if (id.startsWith('\0stub:')) return STUBS[id.slice(6)];
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';

@@ -19,6 +19,9 @@ export default function TicketsPanel({
 }) {
   const [view, setView] = useState<'list' | 'detail' | 'create'>(initialView);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  // Which half of the list is showing. It lives here, not in the list, because the list is unmounted while a ticket
+  // or the form is open: coming back has to land on the half the user left.
+  const [listTab, setListTab] = useState<'active' | 'closed'>('active');
 
   // 从 API 获取工单列表
   const { data: ticketsData, isLoading, error, refetch } = trpc.ticket.getTickets.useQuery();
@@ -66,6 +69,7 @@ export default function TicketsPanel({
 
   const handleCreateSuccess = async () => {
     await refetch();
+    setListTab('active'); // a new ticket is an open one: show the half it is in
     changeView('list');
   };
 
@@ -100,6 +104,8 @@ export default function TicketsPanel({
       }}
       onSelectTicket={handleSelectTicket}
       onCreateNew={handleCreateNew}
+      activeTab={listTab}
+      onTabChange={setListTab}
     />
   );
 }
